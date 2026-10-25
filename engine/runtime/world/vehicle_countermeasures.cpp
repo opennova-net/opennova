@@ -21,12 +21,12 @@ void VehicleSystem::release_flares(Entity &vehicle) {
 	const VehicleTraits *vt = traits.get(vehicle.item_id);
 	if (vt == nullptr || vt->flare_points.empty()) {
 		world_.round_sim.fire_source(world_, &vehicle,
-				{ to_fixed(vehicle.position.x), to_fixed(vehicle.position.y),
-						to_fixed(vehicle.position.z) },
+				{ vehicle.position.x.q16, vehicle.position.y.q16,
+						vehicle.position.z.q16 },
 				vehicle.veh.yaw_seeded ? vehicle.veh.yaw_bam
-									   : bam_heading_from_mission_yaw_deg(vehicle.yaw),
+									   : vehicle.heading,
 				vehicle.veh.yaw_seeded ? vehicle.veh.air_pitch_bam
-									   : bam_from_degrees_wrapped(vehicle.pitch),
+									   : vehicle.pitch_bam,
 				uint8_t(ammo));
 		return;
 	}

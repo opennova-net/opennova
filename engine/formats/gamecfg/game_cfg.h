@@ -245,6 +245,14 @@ struct GameCfg {
 	int32_t contest = 0;           // +0x4B0
 	int32_t flag_return_time = 0;  // +0x41C: read `mp_flagreturntime`, written `flagreturntime`
 	int32_t flag_reset_time = 0;   // +0x420: read `mp_flagresettime`; never written
+	// The join screen's choice: two block words no cfg row names, so a read's
+	// defaults zero them (Config_SetDefaults' memset) and no read or save
+	// touches them. The pre.mnu commit writes them and every join's ClientAuth
+	// sends them as JSR / JSPP (inmatch::GameConfigBlock::commit_join_choice).
+	// [orig: g_GameConfigState unknownHostOption_428 / unknownHostText_42C;
+	//  Config_SetDefaults @0x54D030 - the memset @0x54D039..0x54D046]
+	int32_t join_spectate = 0;           // +0x428
+	std::string join_spectator_password; // +0x42C, an unbounded copy
 	int32_t ping = 0;              // +0x4B8
 	int32_t sendplayerlist = 0;    // +0x4BC
 	int32_t rememberlogin = 0;     // +0x4D4
@@ -441,6 +449,26 @@ std::string format_fixed(double value, int precision);
 // [orig: String_ParseResolutionDimensions @0x51E6D0, from Config_ParseSettingsLine
 //  @0x551303 into outWidth @0x2550718 / outHeight]
 bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_t &height);
+
+// Format_ResolutionString: "%ux%u" of `width` and `height` (each read unsigned), kept to
+// `max_len` - 1 characters (the strncpy of `max_len` bytes and the terminator at `max_len` - 1);
+// "" for a `max_len` below 1. The first launch's video test writes the desktop sample into
+// video_res with it (max_len 32).
+// [orig: Format_ResolutionString @0x51E670 - the `maxLen >= 1` test @0x51E68F, sprintf "%ux%u"
+//  called @0x51E6A5, strncpy @0x51E6B1, the terminator @0x51E6B9]
+std::string format_resolution_string(int32_t width, int32_t height, int max_len);
+
+// The display mode's width and height as the block holds them (+0x60 / +0x64): the defaults'
+// primary desktop size, replaced by a video_res that parses. The boot then opens the renderer at
+// that mode and writes back the mode it set, the same one when the device opens (no fallback in a
+// port with no Direct3D device).
+// [orig: Config_SetDefaults @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into
+//  outWidth @0x54D0F6, SM_CYSCREEN @0x54D0FB into outHeight @0x54D10A; Config_ParseSettingsLine
+//  @0x54F740 - String_ParseResolutionDimensions called @0x551303; Game_InitSubsystems @0x4A6CD0 -
+//  Renderer_SetDisplayModeWithFallback called @0x4A722A, VideoConfig_GetResolution called
+//  @0x4A724B]
+void display_size(const GameCfg &cfg, int32_t desktop_width, int32_t desktop_height, int32_t &width,
+		int32_t &height);
 
 // activesrvr.txt: the directory-lock marker the host-file path writes in the
 // working directory before it hosts and Game_Run deletes at every orderly exit.

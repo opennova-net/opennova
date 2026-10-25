@@ -37,6 +37,7 @@ namespace godot {
 
 class Camera3D;
 class Image;
+class LoadTimeline;
 class ObjectData;
 class RenderingServer;
 class ResourceRoot;
@@ -202,6 +203,12 @@ public:
   // Runtime frame. Reads exact detail patch keys/distances from the wired
   // Terrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
+  // An instrument: the timeline a post-load frame's foliage_view span is open on (GameWorld sets
+  // it around this frame's render_frame, null otherwise); the main view's parts nest under that
+  // span: "visuals" (the instance nodes' first build), "materials", "compile" (the frame
+  // compiler's cells and draw list), "meshes" (the model meshes' refresh), "apply" (the draw
+  // list onto the instances), "masks" (the MODEL masks' publish).
+  void set_part_timeline(LoadTimeline *p_timeline) { part_timeline_ = p_timeline; }
 
   // The weapon Inset pass's own foliage frame, compiled after the main frame
   // and after the Inset's own collect: its detail cells from its own terrain
@@ -216,6 +223,21 @@ public:
   // The Inset stopped rendering: hide and unbind its draws and mask frame.
   void release_inset_frame();
   bool is_inset_frame_live() const { return inset_live_; }
+
+  // A water mirror's MODEL masks (view 0 the main scene's mirror, 1 the weapon
+  // Inset's): its reflected subscene's BySide waves update and draw the MODEL
+  // tiles around the persons its own collect listed, from the view it draws
+  // from, with no detail blanket (the reflection context collects no detail
+  // foliage); engine inmatch/occlusion_collect.h MirrorViewLists carries the
+  // witness. Compiled on the shared placement caches ahead of the scene's own
+  // frame (the mirror prerenders first), drawn on that mirror's own bit.
+  void render_mirror_frame(int p_view, const Transform3D &p_eye,
+                           const PackedVector3Array &p_anchors, int64_t p_time_ms);
+  // The mirror stopped rendering: hide and unbind its draws.
+  void release_mirror_frame(int p_view);
+  bool is_mirror_frame_live(int p_view) const {
+    return p_view >= 0 && p_view <= 1 && mirror_live_[p_view];
+  }
 
   void reset();
   // The foliage cells whose instances read a ground or map texel `p_rect` changed (an editor's sculpt or paint,
@@ -263,6 +285,14 @@ public:
 	void republish_globals() { mask_pass_.republish_globals(); }
 	static void publish_absent() { FoliageMaskPass::publish_absent(); }
 	static int64_t get_global_writes() { return FoliageMaskPass::get_global_writes(); }
+	// The MODEL masks' device shader, created with the foliage's vertex shaders as the
+	// foliage's definitions load (engine terrain/terrain_load_legs.h loads_foliage_definitions
+	// carries the witness, D-NET-NEW-LF-13).
+	void create_mask_device() { mask_pass_.create_device(); }
+	// The detail tiers' and the silhouette tier's shaders and their per-slot materials, created
+	// with the foliage's vertex shaders as the definitions load, not in the first frame that
+	// draws foliage (the same witness, D-NET-NEW-LF-19).
+	void create_tier_shaders() { _ensure_visuals(); }
 
 protected:
   static void _bind_methods();
@@ -434,6 +464,9 @@ private:
   };
   DrawSet main_set_;
   DrawSet inset_set_;
+  // The water mirrors' MODEL masks: [0] on MIRROR_VIEW, [1] on INSET_MIRROR_VIEW.
+  DrawSet mirror_set_[2];
+  bool mirror_live_[2] = {false, false};
   // An Inset frame compiled since the Inset opened (release_inset_frame).
   bool inset_live_ = false;
   // The material inputs last written (texture RIDs): _update_materials
@@ -449,6 +482,9 @@ private:
   bool material_inputs_written_ = false;
 
   FrameStats frame_stats_{};
+  LoadTimeline *part_timeline_ = nullptr;
+  void _part(const char *p_name);
+  void _part_end();
   int64_t backend_server_writes() const;
   int64_t total_frame_calls_ = 0;
 

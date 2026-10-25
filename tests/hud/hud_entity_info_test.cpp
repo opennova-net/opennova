@@ -174,7 +174,6 @@ void test_view_effects() {
 	v.screen_flash_red_alpha = 32;
 	v.screen_flash_revive = 5;
 	v.screen_flash_revive_channel = 1;
-	v.hud_overlays_suppressed = true;
 	v.hud_keep_crosshair_while_aimed = true;
 	const hud::HudEntityInfo info = hud::local_player_entity_info(100, 100, &v, nullptr, nullptr);
 	expect(info.binoculars_view_active && info.binocular_range == 250,
@@ -183,7 +182,6 @@ void test_view_effects() {
 	expect(info.flash_white == 64 && info.flash_red == 32 && info.flash_revive == 5 &&
 					info.flash_revive_channel == 1,
 			"the damage-feedback quads");
-	expect(info.overlays_suppressed, "the white flash's early return");
 	expect(info.keep_crosshair_while_aimed, "the Inset keep-up predicate");
 }
 

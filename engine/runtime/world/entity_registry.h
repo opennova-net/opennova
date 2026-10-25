@@ -32,6 +32,31 @@ struct Area {
     // (mission::zone_box_flat): no zone parameter resolves to it [orig: the
     // load-time resolvers' box tests @0x453093/@0x45317e].
     bool flat = false;
+    // The record's own X/Y words as authored (x_min, x_max, y_min, y_max, not
+    // normalized), which the player-AWOL probe compares the position words
+    // against [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40 - @0x439D69..0x439D85].
+    std::array<int32_t, 4> record_xy_q16{};
+    // The trigger tests' Z words: the record's z_min / z_max when it constrains
+    // Z, else 0xC0000000 / 0x40000000 [orig: Entity_IsBmsRefInTriggerBounds
+    // @0x43E510 - `test byte [eax+1Ch], 2` @0x43E531, the defaults
+    // @0x43E553..0x43E55B]; and the record's raw Z words the WAC 3D test reads
+    // [orig: WacCmd_SsnArea3D @0x4F0F60 - @0x4F1000..0x4F100E].
+    std::array<int32_t, 2> trigger_z_q16{};
+    std::array<int32_t, 2> record_z_q16{};
+
+    // The position words against the record's X/Y words, signed inclusive
+    // (D-NET-507). [orig: WacCmd_SsnArea @0x4F1020 - @0x4F10A6..0x4F10BD]
+    bool xy_contains(const EntityPosition &p) const {
+        return p.x.q16 >= record_xy_q16[0] && p.x.q16 <= record_xy_q16[1] &&
+               p.y.q16 >= record_xy_q16[2] && p.y.q16 <= record_xy_q16[3];
+    }
+    // The trigger tests' box: the X/Y words and the trigger Z words, signed
+    // inclusive. [orig: Entity_IsBmsRefInTriggerBounds @0x43E510 - the compares
+    //  @0x43E596..0x43E5C1; EventTrigger_AnySatchelInArea @0x547160 -
+    //  @0x5471F3..0x547215]
+    bool trigger_contains(const EntityPosition &p) const {
+        return xy_contains(p) && p.z.q16 >= trigger_z_q16[0] && p.z.q16 <= trigger_z_q16[1];
+    }
 };
 
 // The seven default script groups, in their fixed slots 0..6: the names the
@@ -44,8 +69,11 @@ inline constexpr const char *kDefaultScriptGroupNames[kDefaultScriptGroupCount] 
     "emptygroup", "humans", "blueplayers", "redplayers", "ai", "blueai", "redai"
 };
 
+// A Location box (BMS bounding box type 5), each axis normalized to min / max
+// words [orig: Mission_LoadBMSFile @0x40FCC3].
 struct LocationVolume {
-    Aabb bounds;
+    int32_t min_q16[3] = {0, 0, 0};
+    int32_t max_q16[3] = {0, 0, 0};
     int32_t id = 0;
 };
 
@@ -68,8 +96,11 @@ public:
 
     void configure_pool(int pool, size_t capacity);
 
-    EntityHandle spawn(int pool, const Entity &seed); // kInvalid if pool full
-    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed); // first free >= first_slot
+    // Pool_AllocEntry's includeInUse argument: 0 passes over a destroyed row (D-NET-485).
+    enum class Reuse : uint8_t { Destroyed, Fresh };
+    EntityHandle spawn(int pool, const Entity &seed, Reuse reuse = Reuse::Destroyed); // kInvalid if pool full
+    EntityHandle spawn_from(int pool, size_t first_slot, const Entity &seed,
+                            Reuse reuse = Reuse::Destroyed); // first free >= first_slot
     // Allocate exactly the packed pool/slot identity supplied by the wire.
     // Unlike spawn_from, this never falls through to a later free slot. Retail
     // load handlers select Pool_GetEntryUnchecked(pool, slot) and memset that
@@ -77,10 +108,30 @@ public:
     EntityHandle spawn_at(EntityHandle h, const Entity &seed);
     void despawn(EntityHandle h);
     bool despawn(EntityLifetime lifetime);
+    // Clear a free row's +0x219 (destroyed) byte, so an includeInUse-0 caller
+    // may take it again (D-NET-485). A live row is left alone.
+    // [orig: HeliLift_UpdateSlotState @0x451730 - `mov [reg+219h], bl` after
+    //  each clone's Entity_Destroy]
+    void clear_destroyed(EntityHandle h);
     Entity *get(EntityHandle h);
     const Entity *get(EntityHandle h) const;
     Entity *get(EntityLifetime lifetime);
     const Entity *get(EntityLifetime lifetime) const;
+    // Row h's storage, live or not (null past the pool's capacity): the entity
+    // an AI slot belongs to. Stable until configure_pool or restore_from
+    // replaces the pool.
+    Entity *row_storage(EntityHandle h);
+    // A free row whose last occupant left through the destroy, as that occupant
+    // left it; null for a live row, a row no spawn has taken since the pool was
+    // cleared, or one past the capacity. The destroy zeroes the row's first
+    // 0x2B4 bytes and stores its sentinels after them, so the words past the
+    // memset are this occupant's and the zeroed ones read as the sentinels or 0
+    // (replication::build_destroyed_row_full_entity_spawn). A spawn into the row
+    // and the pool's clear end it; HeliLift's +0x219 clear (clear_destroyed)
+    // leaves it.
+    // [orig: Entity_Destroy @0x43E810 - memset(entity, 0, 0x2B4) @0x43EA70, the
+    //  stores @0x43EA75..0x43EA92; Pool_Clear @0x442060]
+    const Entity *destroyed_row(EntityHandle h) const;
 
     // Restore authored/runtime-visible registry state without rewinding the
     // host-only lifetime serial. Collision and skeletal caches use that serial
@@ -100,16 +151,22 @@ public:
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
+    // `record_xy_q16`: the record's X/Y words; absent, the bounds' words.
+    // `trigger_z_q16` / `record_z_q16`: the trigger Z words and the raw record Z
+    // words; absent, the bounds' / script bounds' words.
     int register_area(std::string name, const Aabb &bounds, bool active = true,
                       int32_t zone_id = -1, std::optional<Aabb> script_bounds = {},
-                      bool flat = false);
+                      bool flat = false,
+                      std::optional<std::array<int32_t, 4>> record_xy_q16 = {},
+                      std::optional<std::array<int32_t, 2>> trigger_z_q16 = {},
+                      std::optional<std::array<int32_t, 2>> record_z_q16 = {});
     // The load-time id -> index resolve [orig: the @0x453000/@0x453100 scan over
     // record[0]]; -1 when no record carries the id.
     int area_index_by_zone_id(int32_t zone_id) const;
     const Area *area(int id) const;
     void clear_script_tables();
-    void register_location(const Aabb &bounds, int32_t id);
-    int32_t location_at(const Vec3 &position) const;
+    void register_location(const LocationVolume &location);
+    int32_t location_at(const EntityPosition &position) const;
 
     int intern_group(std::string_view name); // WAC named group, separate from BMS command groups
     static int default_script_group_index(std::string_view name);
@@ -145,9 +202,10 @@ public:
     // @0x44228B; the player body's push 1 @0x43C3DF, the class callbacks'
     // clones (sections, dismemberment) in Entity_CloneFromTemplateByType
     // @0x4398BD / @0x439939 / @0x439962, the deployable's
-    // Entity_CloneFromTemplateToPool1 @0x439840].
-    // An includeInUse-0 caller also passes over a destroyed row and grows the
-    // count, where ours reuses the row (D-NET-485). spawn_at stands for a
+    // Entity_CloneFromTemplateToPool1 @0x439830 (the push 1 @0x439840)].
+    // An includeInUse-0 caller (Reuse::Fresh) also passes over a destroyed row
+    // (+0x219, which Entity_Destroy sets and the next occupant's write clears)
+    // and grows the count (D-NET-485). spawn_at stands for a
     // slotted load [orig: Pool_UpdateMaxUsed @0x441F40,
     // Pool_UpdateMaxUsedFromSlotId @0x442100]. A despawn never lowers it.
     size_t pool_used(int pool) const {
@@ -182,6 +240,12 @@ private:
     struct Pool {
         std::vector<Entity> slots;
         std::vector<char> used; // char (not bool) for stable addressing
+        // entity+0x219: set by a despawn [orig: Entity_Destroy - `mov byte ptr
+        // [esi+219h], 1` @0x43EA7F], cleared by the next occupant's spawn.
+        std::vector<char> destroyed;
+        // The row holds Entity_Destroy's tail (destroyed_row): set by a despawn,
+        // cleared by the next occupant's spawn.
+        std::vector<char> freed_by_destroy;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };

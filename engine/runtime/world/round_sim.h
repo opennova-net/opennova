@@ -1,6 +1,6 @@
 // The authoritative round simulation — server-side flight, impact, damage, and death
 // detection for every fired round. [orig: the 512-slot round array @ 0xB7E1A8 (128 groups
-// x 4 sub-slots x 780 B, active-flag bytes @ 0xB7DFA0), ticked by
+// x 4 sub-slots x 780 B, active-flag bytes g_RoundPoolActive @ 0xB7DFA0), ticked by
 // Weapon_UpdateAllProjectiles @ 0x4EC020 -> Projectile_UpdatePhysics @ 0x4E9D70 from
 // Entity_UpdateAllEntities; spawned SYNCHRONOUSLY at fire time by RoundData_SpawnRound
 // @ 0x4EC0D0 (called inline from RoundData_AddRound @ 0x4FDB40 — the ring is only the
@@ -45,8 +45,9 @@
 //  * spawn-time Weapon_CalcRandomSpreadOffset and recoil follow the recovered
 //    player/rules/stance gates. Impact-energy armor-density loss and shell-eject
 //    physics remain outside this model.
-//  * kztype Knife(1)/Medic(3) raycast leaves and item-placing ammo (`hasitem`) do not
-//    spawn a sim round.
+//  * past the allocation every round flies: a zero velocity, a Knife(1)/Medic(3)
+//    kztype outside instantkillzone and a `hasitem` ammo take the ballistic default
+//    like any other.
 #pragma once
 
 #include <array>
@@ -60,6 +61,8 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/impact_damage.h>
+#include <runtime/world/physics_class_table.h>
+#include <runtime/world/projectile_target_ring.h>
 #include <runtime/world/tracer_trails.h>
 
 namespace opennova::terrain {
@@ -77,6 +80,8 @@ class CollisionWorld;
 class World;
 
 struct AmmoTableEntry; // world/ammo_table.h
+struct AiEntity;       // world/ai.h
+struct AiSlot;         // world/ai.h
 // Shared by live flight and the retail ballistic scope-table solver.
 // [orig: Entity_ApplyDragAndBounceForce @0x4e5ec0, the (proj, 1, 0) flight
 //  call @0x4eaa64]
@@ -213,7 +218,7 @@ struct RoundSpawnParams {
     // 0xFF is only the truly-unresolvable-source arm.
     // [orig: the sourceEntity team copy @0x4ec705; the !sourceEntity arm @0x4ec721]
     uint8_t shooter_team = 0xFF;
-    Vec3 origin;                      // fire origin, mission units
+    EntityPosition origin;            // the fire origin's words (D-NET-507)
     int32_t dir_yaw_bam = 0;          // wire fire direction (engine-frame BAM32, §5.16)
     int32_t dir_pitch_bam = 0;
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
@@ -272,8 +277,12 @@ struct LiveRound {
     // potentially between two rendered frames during fixed-tick catch-up; a
     // slot index alone would teleport an old owned effect onto the new round.
     uint64_t presentation_generation = 0;
-    Vec3 pos;            // mission units
-    Vec3 vel;            // mission units per TICK [orig: velocity = ammo speed / 62]
+    // The round entity's Position (+4/+8/+0xC) and velocity (+152/+156/+160)
+    // words, 16.16 per tick; every motor store is word arithmetic (D-NET-507).
+    // [orig: Projectile_UpdatePhysics @0x4E9D70 - the position commit
+    //  @0x4EAA3F..0x4EAA45, the velocity reads @0x4EA0DC..0x4EA0E8]
+    EntityPosition pos;
+    EntityPosition vel;
     // round+680: (ammo weight in grains << 16) / 250. Kept on the round so
     // copied/dud rounds retain the original mass [orig: @0x4ec6b7].
     int32_t mass_q16 = 0;
@@ -313,10 +322,19 @@ struct LiveRound {
     // @ 0x4ec79b -> Entity_InitFromItemDef]. The class/motor binding survives
     // a non-tracer cadence shot; only its separate visible-model pointer clears.
     int32_t item_type_id = 0;
+    // The round's +0x20 def word: set when the TrcrID leg bound the item through
+    // Entity_InitFromItemDef; the NoTracers leg stores item 0 and the no-TrcrID
+    // leg item 1, each with no def [orig: RoundData_SpawnRound @0x4EC7B4..0x4EC7B7,
+    //  @0x4EC7AE, @0x4EC7C1..0x4EC7CB; Entity_InitFromItemDef @0x49E577].
+    bool has_item_def = false;
     // Class bindings resolved from the item's ai_function/move_function tags
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
     ThrowClass motor{};
     ThrowClass think{};
+    // The item's physics row, whose update the +452 word holds (def+0x158), the null row's
+    // Entity_UpdateNullClass included [orig: Entity_InitFromItemDef @0x49E550
+    // (@0x49E586..0x49E58C); g_EntityClassPhysicsTable @0x82ABC8].
+    PhysicsClass move_row = PhysicsClass::Null;
     // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors follow
     // it through the parent's own (live − savedLivePose) delta channel —
     // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
@@ -329,6 +347,11 @@ struct LiveRound {
     // @0x447981..0x44799B, @0x447B9B..0x447BA5]. motor reads kNone then, and
     // this bit marks the follow.
     bool rest_follows_parent = false;
+    // The rest leg's null +452 (an unparented round), stored on every peer ahead
+    // of the authority test; a model init over a copy of the round reads it
+    // [orig: satchel @0x448A10, claymore @0x44799B; Entity_InitFromModel
+    //  @0x40E0DC].
+    bool update_nulled = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
@@ -356,13 +379,105 @@ struct LiveRound {
     // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
     bool indoors_word = false;
     bool indoors_flags = false;
+    // Two more bits of that +0x114 copy of the ammo flags: noage (0x4000), which
+    // a non-authority charge rest and a joiner's S2C 0x59 match clear, and
+    // Priority (0x800000), which keeps an occupied slot from the allocator's
+    // eviction [orig: RoundData_SpawnRound @0x4EC615; the pellet fans @0x4EBAF9 /
+    // @0x4EBDC6; the clears @0x448C1A / @0x447B9B / @0x546883;
+    // CEntityManager_AllocateSlot @0x4EAB4E].
+    bool noage = false;
+    bool priority = false;
+    // A flare's heat word (+0x1A4): its TrcrID item's heatsig from the flare init,
+    // decayed by its motor each tick [orig: the aflr row's init callback AflrClass_InitFromDef @0x4434B0 (the
+    // store @0x4434EA), the gflr row's GflrClass_InitFromDef @0x443510 (@0x443554); Entity_UpdateShellBounce
+    // @0x443DF0 (@0x443E6E..0x443EA7)].
+    uint16_t heat_sig = 0;
+    // Its ProjectileTargetRing record (+0x29C), -1 for none [orig: Entity_UpdateShellBounce
+    // @0x443E5F..0x443E7B; Projectile_ReleaseEffects @0x4E8280 (@0x4E82D1..0x4E82F2)].
+    int32_t target_ring_slot = -1;
 };
+
+// A client's S2C 0x59 record as its found leg reads it: the friendly and enemy
+// item words (2, 3), the owner's wire handle (word 1) and the parent (word 5),
+// the World entity it names on this client.
+// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - @0x5467A5..0x5467D1]
+struct DeployedRoundQuery {
+    int32_t friendly_item = 0;
+    int32_t enemy_item = 0;
+    uint16_t owner_handle = 0xFFFF;
+    EntityHandle parent;
+    uint64_t parent_spawn_id = 0;
+};
+// The found leg's verdict and the device's words from its copy: any match
+// skips the not-found leg's init, and a match with a def is copied whole into
+// the device, the last in slot order winning; the copy's model init ORs the
+// matrix-built bit when the copied round's +452 was null.
+// [orig: @0x5468C1 (the flag), its test @0x546995; the def test @0x546853 /
+//  @0x546864, the copy @0x546871, Entity_InitFromModel @0x546873 ->
+//  @0x40E0DC..0x40E105]
+struct DeployedRoundCopy {
+    bool matched = false;
+    bool copied = false;
+    int32_t item_id = 0;    // the round's +0x1C
+    uint8_t team = 0xFF;    // its +0x162
+    uint32_t flags = 0;     // its Flags (the Indoors bit), the init's matrix-built bit
+    bool noage = false;     // its +0x114 noage bit
+};
+
+// Whether the round's +452 motor is bound (its TrcrID item's move row, or a guided
+// family's): the ballistic tail then skips its gravity and drag. ThrowClass{} is kNone;
+// the rokt row's motor is the one-shot latch (rocket_motor_tick).
+// [orig: Projectile_UpdatePhysics @0x4E9D70 (the tail's test @0x4EAA34..0x4EAA4C); the
+//  rokt row @0x82AD18 -> Entity_UpdateRocketFlag @0x443DD0]
+inline bool round_class_motor_bound(const LiveRound &round) {
+    return round.guided_family != GuidedFamily::None || round.motor != ThrowClass{} ||
+           round.move_row == PhysicsClass::Rokt;
+}
+
+// The rokt row's motor: the round's +0x2BA word (GuidedFlightState::phase, which the
+// Guided serializer sends) goes 0 -> 1 at its first call and stays. Retail calls it from
+// both legs' motor call.
+// [orig: the rokt motor Entity_UpdateRocketFlag @0x443DD0 (the test @0x443DD4, the store
+//  @0x443DDE); Projectile_UpdatePhysics @0x4E9D70 (the useownmove call @0x4E9F1E, the
+//  ballistic call @0x4EA06A..0x4EA085); Entity_SerializeGuidedMissileState @0x447C50
+//  (the +0x2BA read @0x447D9F)]
+inline void rocket_motor_tick(LiveRound &round) {
+    if (round.guided.phase == 0) round.guided.phase = 1;
+}
+
+// The heat-seeker arm of the shared target query (world/local_player_targeting.cpp), as
+// Entity_SpawnWeaponEffect runs it for all three of its callers (the player's lock, the
+// Stinger's launch, its in-flight acquisition): the pool legs and the projectile target
+// ring's leg (their context flags 0x662 carry 0x200), so the winner is an entity or a
+// round, or on a joiner a decoded remote person (the pool-0 leg walks the persons its
+// client built, World::wire_person). `query_slot` is the query entity's AI slot (+0x68; null for the missile round),
+// whose 0x200 bit the head exit reads for a team-0 query; `attacker_occupant` is the query
+// entity's +368, which the MP air-flare roll reads.
+// [orig: Entity_SpawnWeaponEffect @0x545840 (the flags @0x54591B, the Entity_FindTargets call @0x545925)]
+TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &body,
+        const AiSlot *query_slot, const AmmoTableEntry &ammo, const Entity *attacker_occupant);
+// A round held as a target (TargetRef::round): its Health word (+0x11E: its TrcrID item's
+// hp, which Entity_InitFromItemDef stores; 0 for any other round, the allocation's memset)
+// and its fire origin (its Position: no TARGET userpoint resolves on a round's def). Its
+// release clears neither word, so a released round reads as it last stood until its slot
+// is spawned again. [orig: Entity_InitFromItemDef @0x49E550 (@0x49E5C0);
+//  CEntityManager_AllocateSlot @0x4EAAD0 (the memset); Projectile_ReleaseEffects
+//  @0x4E8280 (@0x4E82C2..0x4E831E); Entity_ComputeWeaponFireOrigin @0x43B4B0
+//  (@0x43B54F / @0x43B619)]
+int32_t round_target_health(const World &world, int32_t slot);
+void round_target_origin(const World &world, int32_t slot, int32_t out[3]);
+// A decoded remote person held as a target (TargetRef::wire_person): its fire origin,
+// Entity_ComputeWeaponFireOrigin over the pool-0 entity retail's client built for it (a person
+// def's phased CameraOffset point); false when no row holds the handle.
+// [orig: Entity_ComputeWeaponFireOrigin @0x43B4B0 (@0x43B4C0..0x43B523, @0x43B54F)]
+bool wire_person_target_origin(const World &world, uint16_t wire_handle, int32_t out[3]);
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
 // cadence (@0x4ec79b..0x4ec7b7), but clears the round+0x30 visible-model
-// pointer when this particular shot is not a tracer (@0x4ec900).
+// pointer when this particular shot is not a tracer (@0x4ec900); a round with
+// no def (item 0 or 1) never took a model (@0x4ec7c8).
 inline int32_t round_visible_item_id(const LiveRound &round) {
-    return round.tracer ? round.item_type_id : 0;
+    return round.tracer && round.has_item_def ? round.item_type_id : 0;
 }
 
 // A death the damage pass detected this tick — drained by the host session, which owns
@@ -385,36 +500,21 @@ struct RoundDeath {
     // for the host's classifier. The revive window is suppressed by either
     // 0x400 or 0x800.
     uint32_t event_flags = 0;
-    // True only for a death raised at one of the five damage-pass lethal edges
-    // that call Score_ProcessKillEvent (the kill accounting: the single-player
-    // tallies and the unit-score event). Scripted, drowning, carry-limit and
-    // admin deaths never reach it. [orig: Score_ProcessKillEvent @0x4FD400,
-    // callers Entity_MovementCollisionResolver @0x4B39E2,
-    // Entity_ApplyVehicleCollisionDamage @0x4E6773, Entity_ApplyWeaponDamage
-    // @0x4E6BFE / @0x4E6FB4, Projectile_ProcessDamageOnTarget @0x4E8133]
-    bool kill_event = false;
     // Raised by an org1 body's own death edge: the death transaction (0x13 +
-    // scoring against lastAttacker) without the damage-time SP tally. A
-    // damage-time record for such a body only feeds that tally; its edge
-    // raises the transaction. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
+    // scoring against lastAttacker), the damage site having run the SP tally.
+    // A damage-time record for such a body raises no transaction; its edge
+    // does. [orig: Entity_UpdateInfantryAI @0x4B9D4D ->
     // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
-    // @0x4FD400 is called only from the damage paths]
+    // @0x4FD400 is called only from the damage paths, at their sites]
     bool motor_edge = false;
-    // Queued for a player body's death edge ahead of the entity pass that runs
-    // it (the C2S 0x41's Health 0): the tick tests the edge's predicate at its
-    // head, so a body another transaction killed meanwhile (the team change's
-    // inline death) dies once, and routes the record after the receive pump's
-    // spectator converts unless the body is hidden or dead by then. [orig:
-    // Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
-    // Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
-    bool player_edge = false;
-    // Queued for a player body's death edge in the same frame's entity update
-    // (the flag reset's Health -1): every tick drain holds it, and the host
-    // routes it after that frame's S2C flush, where retail's entity update
-    // follows the tick's send pump, ahead of the next receive pump
-    // (Server_RouteFrameTailEdges). [orig: Game_ProcessMainFrame -- the
-    // Server_TickUpdate call @0x5266B6, Entity_UpdateAllEntities @0x52674B]
-    bool frame_tail_edge = false;
+    // Nonzero for the record of a transaction the entity update ran inline (a
+    // player body's death edge, the explosion queue's medic arm: the host
+    // session's IEntityUpdateTransactions): the record keeps the place in the
+    // queue where the host releases the sends the transaction staged, which
+    // retail's update queued after that frame's send pump.
+    // [orig: Game_ProcessMainFrame -- the send pump @0x51E487 inside the
+    //  Server_TickUpdate call @0x5266B6, then Entity_UpdateAllEntities @0x52674B]
+    uint32_t staged_sends = 0;
 };
 
 // A medic-kit hit on a same-team person the kill-zone pass admitted this tick,
@@ -516,7 +616,7 @@ struct RoundHit {
 // stood when the record was written.
 struct HitRecord {
     bool has_round = false;       // +0x40 non-null
-    Vec3 round_pos;               // the round's +0x04..+0x0C
+    EntityPosition round_pos;     // the round's +0x04..+0x0C words
     FixedVec3 round_vel_q16;      // the round's +0x98..+0xA0
     int32_t round_yaw_bam = 0;    // +0x0C..+0x14 (hitRecord[3..5])
     int32_t round_pitch_bam = 0;
@@ -671,6 +771,12 @@ public:
     int debug_trail_next = 0;  // ring cursor (next write slot)
     int debug_trail_count = 0; // valid entries, saturates at the cap
 
+    // The flare rounds' target ring (world/projectile_target_ring.h).
+    ProjectileTargetRing target_ring;
+    // A round's release: its ring record freed, then the slot.
+    // [orig: Projectile_ReleaseEffects @0x4E8280 (@0x4E82E3..0x4E82F2)]
+    void retire_round(LiveRound &round);
+
     // The tracer trail channels — appended per round tick, drained per pool tick,
     // styled and drawn by the host present pass (world/tracer_trails.h witness map).
     TracerTrailPool trails;
@@ -704,6 +810,9 @@ public:
         int32_t pos[3] = {};      // entity+4..+0xC, 16.16
         uint32_t flags = 0;       // entity+0x24, the row's Flags word
         bool is_local = false;    // the handle is the local player's own
+        // The person's ride link (+0x170) names the local player (a joiner's
+        // decoded row keeps its own, D-NET-196) [orig: @0x4465DB..0x4465F5].
+        bool ride_link_is_local = false;
     };
     std::function<bool(uint16_t wire_handle, WireActor &out)> wire_actor_provider;
     // A joiner's wire-built persons as the damage pass sees them: the role
@@ -714,8 +823,6 @@ public:
     //  client-built pool-0 entity; world/wire_person_hit.h]
     std::function<bool(uint16_t wire_handle,
             const std::function<void(WirePersonBody &)> &visit)> wire_person_body;
-    struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
-    std::vector<GuidedUpdate> guided_updates;
     void init_guided(World &, LiveRound &, const AmmoTableEntry &);
     void tick_guided(World &, LiveRound &, const AmmoTableEntry &, bool authority);
     void present_fire(World &world, const RoundSpawnParams &params);
@@ -761,6 +868,36 @@ public:
     // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the 0xFFFF test @0x4EAAD7,
     //  the counter @0x4EAAE8..0x4EAB04, the store @0x4EABD5]
     uint16_t allocate_round_id(uint16_t sequence_word);
+    // The pool's one allocation (world/round_pool.cpp): the id above, then the
+    // slot after the cursor, a live round there released unless its Priority bit
+    // holds it (the walk then moves on), the slot zeroed and stamped with the id.
+    // It never fails. The cursor starts at 0, so a process's first round takes
+    // slot 1, and no reset moves it.
+    // [orig: CEntityManager_AllocateSlot @0x4EAAD0 - the cursor g_RoundPoolCursor
+    //  @0x4EAADB / @0x4EAB1C..0x4EAB37, the Priority test @0x4EAB4E, the release
+    //  @0x4EAB70, the wrap @0x4EAB8E, @0x4EABB2, the memset @0x4EABC8, the id
+    //  @0x4EABD5]
+    int allocate_slot(World &world, uint16_t sequence_word);
+    // The pool's two process words, which a rebuilt kernel takes from the one it
+    // replaces (MissionKernel::carry_across_load_from): only the allocator writes
+    // them, and the mission start's memsets end at the activity bytes, short of both.
+    // [orig: g_RoundPoolCursor @0xB7E1A0 and g_RoundIdCounter @0xB7E1A4, written only
+    //  by CEntityManager_AllocateSlot @0x4EAAD0; Projectile_InitDragTable @0x4E78D0
+    //  (the activity bytes' memset of 0x200 from g_RoundPoolActive @0x4E7911..0x4E791C)]
+    void carry_process_words_from(const RoundSim &previous) noexcept {
+        round_id_counter_ = previous.round_id_counter_;
+        slot_cursor_ = previous.slot_cursor_;
+    }
+    // A client's S2C 0x59 found leg (world/round_pool.cpp): every slot in slot
+    // order, freed ones included (a release keeps a round's words), whose +0x1C
+    // is the friendly item (any owner), or the enemy item with the record's
+    // owner, takes the parent, a zero +0x2A8, loses noage and keeps one tick of
+    // life; DeployedRoundCopy is the device's copy.
+    // [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the walk
+    //  @0x54680B..0x54698F, the predicate @0x546828..0x546840, +0x28
+    //  @0x546857, +0x2A8 @0x54685A, the noage clear @0x546883, +0x2AC = 1
+    //  @0x546892; Projectile_ReleaseEffects @0x4E8280 (@0x4E8317 / @0x4E831E)]
+    DeployedRoundCopy match_deployed_item(const DeployedRoundQuery &query);
     // The word a fire hands the pool when it carries no id of its own, so the pool
     // mints a fresh one from its one counter: the host's own fire, an AI gunner's
     // and a joiner's own. [orig: word_B7C670's .data 0xFFFF and the resets ahead of
@@ -791,7 +928,8 @@ public:
 
 private:
     uint64_t next_presentation_generation_ = 1;
-    uint32_t round_id_counter_ = 0; // [orig: dword_B7E1A4]
+    uint32_t round_id_counter_ = 0; // [orig: g_RoundIdCounter @0xB7E1A4]
+    int slot_cursor_ = 0;           // [orig: g_RoundPoolCursor @0xB7E1A0]
     uint16_t last_allocated_round_id_ = 0;
     bool spawn_allocated_ = false; // the last spawn allocated an id
     // Retail advances tracer cadence on each remote shooter's weapon slot. A
@@ -803,7 +941,7 @@ private:
 // Queue a round's kill zone at its stop: the raw push, ungated; each caller
 // applies its producer's gates [orig: WeaponEffect_PushExplosionQueueEntry
 // @ 0x4E83C0]. Shared with the throwable motors (world/throwables.cpp).
-void detonate_round(World &world, const LiveRound &round, const Vec3 &at,
+void detonate_round(World &world, const LiveRound &round, const EntityPosition &at,
                     const AmmoTableEntry &ammo);
 
 // The live occupant count of a vehicle and the occupant damage reduction the

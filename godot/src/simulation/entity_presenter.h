@@ -9,6 +9,7 @@
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -183,6 +184,30 @@ public:
 			int64_t p_layout_revision);
 	void present_wire_rows_view(PresentRowsView p_snap, int p_stride,
 			int64_t p_layout_revision);
+	// The wire walk's parts, timed (an instrument with no behaviour: MissionRoot takes it in
+	// place of present_wire_rows_view while the frame-stats board captures, for the F3 wire
+	// rows and the --verbose SessionLeg line). Nanoseconds per part; the rows' walk total
+	// beside them, whose remainder past the parts is the walk's own loop.
+	enum WireProfilePart {
+		WIRE_PROFILE_PLAN = 0,
+		WIRE_PROFILE_POSE,
+		WIRE_PROFILE_CTRL,
+		WIRE_PROFILE_BODY,
+		WIRE_PROFILE_WEAPON,
+		WIRE_PROFILE_SOUNDS,
+		WIRE_PROFILE_HELD,
+		WIRE_PROFILE_VIEWS,
+		WIRE_PROFILE_CULLED,
+		WIRE_PROFILE_PART_COUNT,
+	};
+	struct WireProfile {
+		int64_t ns[WIRE_PROFILE_PART_COUNT] = {};
+		int64_t walk_ns = 0;
+		int64_t rows = 0;
+		int64_t cold_plans = 0;
+	};
+	WireProfile profile_present_wire_rows_view(PresentRowsView p_snap, int p_stride,
+			int64_t p_layout_revision);
 
 	// The occlusion frame's render-gate verdict for one wire row (the
 	// collector gate the placed rows get by bms id). A culled row's node
@@ -198,6 +223,14 @@ public:
 	// object/object_model.h).
 	void set_render_culled_inset(int p_handle, bool p_culled);
 	void set_wire_inset_view(bool p_active);
+	// A water mirror's own collector verdicts for the wire rows (view 0 the
+	// main scene's mirror, 1 the weapon Inset's), live while that mirror
+	// renders: the reflected subscene draws its own collect's lists, so a row
+	// a mirror draws runs its legs and the body, its held gun and its overlays
+	// take that mirror's verdict (drawn by an ObjectModel twin where it
+	// differs, object/object_model.h).
+	void set_render_culled_mirror(int p_view, int p_handle, bool p_culled);
+	void set_wire_mirror_view(int p_view, bool p_active);
 
 	// Cold rows the budget deferred on the last presented frame.
 	int pending_spawn_count() const { return pending_spawn_count_; }
@@ -287,8 +320,9 @@ public:
 	// mission container, nullable) hosts the tracer geometry, the throwable
 	// models and the node-less husk grafts; `item_db` names the husk/round
 	// graphics; `resource_root` resolves the scar strips. `audio` (nullable)
-	// gates the fire/destruction sound legs — the dedicated-host tri-state: no
-	// audio, no sounds, the effect legs still run; `fx` (nullable) the effect
+	// gates the fire/destruction sound legs: no audio, no sounds, the effect
+	// legs still run (a dedicated host binds no pass at all, MissionRoot's
+	// session step presents nothing there); `fx` (nullable) the effect
 	// legs; `lights` (nullable) the MF_Light muzzle glow and the death flash;
 	// `environment` (nullable) the scar fog cull + terrain light; `anchors`
 	// (nullable) the owner-anchor registry the wreck/piece/move effect groups
@@ -307,6 +341,9 @@ public:
 	Vector3 listener_position() const { return listener_position_; }
 	// The four passes in drive order, once per ticked present frame.
 	void present_passes();
+	// The fire pass's tracer ribbons, once per drawn scene frame after the frame
+	// placed its views (FirePresenter::draw_frame_tracers).
+	void draw_frame_tracers();
 	// present_passes() timed per pass (PassProfileSlot, microseconds) for the
 	// stats board.
 	PackedInt64Array profile_present_passes();
@@ -336,7 +373,25 @@ public:
 	Ref<ScarPresentStats> get_scar_present_stats() const;
 	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
+	// The load's forced frame's warm of the wire walk's cold spawns (GameWorld::
+	// build_person_pipeline_warm): one model per visual identity (type word, character id) among
+	// the snapshot's rows the walk would build a node for, under `p_parent`, so their meshes,
+	// materials and rigs are made and their pipelines compile in that frame instead of the
+	// first revealed one. The caller frees them past the frame; nothing here is registered.
+	// Appends each built model's graphic to `r_graphics` and returns the count.
+	int warm_wire_spawn_pipelines(const PackedFloat32Array &p_snap, int p_stride, Node3D *p_parent,
+			PackedStringArray &r_graphics);
 	Ref<ArrayMesh> fire_ribbon_mesh() const;
+	// The water mirrors' cameras the fire pass builds each mirror's tracer
+	// ribbons against (FirePresenter::set_mirror_cameras), mirror `p_mirror`'s
+	// ribbon vertices of this drawn frame (0 the main scene's mirror, 1 the
+	// Inset's), the shadings of the batches this frame's mirror ribbons submit
+	// in overlay slot `p_slot` (FirePresenter::append_mirror_ribbons into a
+	// throwaway frame) and the weapon Inset scene's ribbons.
+	void set_tracer_mirror_cameras(Camera3D *p_mirror, Camera3D *p_inset_mirror);
+	PackedVector3Array fire_mirror_ribbon_vertices(int p_mirror) const;
+	PackedInt32Array fire_mirror_ribbon_shadings(int p_slot);
+	Ref<ArrayMesh> fire_inset_ribbon_mesh() const;
 	// The owned "Scars" child (the device read seam: its ScarWorld mesh).
 	ScarPresenter *scar_presenter() const;
 	// The data legs (the present_snapshot precedent): production
@@ -356,11 +411,18 @@ public:
 	// The weapon Inset pass's own piece draws (OcclusionFrame::apply_inset_frame).
 	void present_death_piece_draws_inset(
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	void present_death_piece_draws_mirror(int p_view,
+			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	// A death-piece slot's model (null when none) — the draw leg's read seam.
 	ObjectModel *death_piece_model(int p_slot) const;
 	// The frame's NVG laser beams into the overlay tail (FirePresenter::
 	// append_nvg_laser_beams over Simulation::nvg_laser_sources).
 	int append_nvg_laser_beams(Simulation *p_sim, const NvgLaserView &p_view,
+			SceneOverlaySubmission &r_submission);
+	// Each rendering water mirror's tracer ribbons of this drawn frame into its
+	// own overlay slot under the reflected scene's pass fog
+	// (FirePresenter::append_mirror_ribbons).
+	int append_mirror_tracer_ribbons(const opennova::renderer::SceneOverlayFog &p_pass_fog,
 			SceneOverlaySubmission &r_submission);
 	// The data leg: one candidate row through the same beam path into a
 	// throwaway frame; returns the batches it drew in the view's slot
@@ -695,6 +757,8 @@ private:
 	HashMap<int32_t, bool> wire_render_culled_;
 	HashMap<int32_t, bool> wire_render_culled_inset_;
 	bool wire_inset_view_ = false;
+	HashMap<int32_t, bool> wire_render_culled_mirror_[2];
+	bool wire_mirror_view_[2] = { false, false };
 	HashMap<int32_t, int32_t> wire_held_weapon_adm_;
 	HashMap<int32_t, ObjectID> wire_held_weapon_ids_;
 	// Placed person rows holding a third-person gun: handle -> the placed walk
@@ -722,6 +786,11 @@ private:
 	HashMap<int32_t, Ref<PersonOverlayModels>> person_overlays_;
 	HashMap<int32_t, LightingContext> lighting_contexts_;
 	int pending_spawn_count_ = 0;
+	// The cold walk's instrument (--verbose): the new rows' first presents timed apart.
+	bool wire_profile_first_presents_ = false;
+	uint64_t wire_first_present_usec_ = 0;
+	// The parts' instrument (profile_present_wire_rows_view): set for that one walk.
+	WireProfile *wire_profile_ = nullptr;
 	int64_t last_present_logic_tick_ = -1;
 	int64_t stat_spawned_ = 0;
 	int64_t stat_unresolved_ = 0;

@@ -3,15 +3,60 @@
 #include <base/io/bam.h>
 #include <algorithm>
 #include <cmath>
+#include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
 #include <runtime/world/world.h>
 
 namespace opennova::world {
+// The S2C 0x49 echo of an authority reload refills the addressed entity only when
+// it is the local player or carries a def other than a person's (WeaponFsmInputs::
+// reload_refills). The request reaches the host's dispatcher only through the
+// authority's own client connection, which only a playing authority (single
+// player, a listen host: is_mp_session_peer) creates; on a dedicated host the
+// queue sends nothing, no echo comes and the walk's RELOAD refills nothing.
+// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 (@0x42C0F8, @0x42C103,
+//  @0x42C109); CNapiNetwork_QueueReliableMessage @0x4C4FA0 (the null connection
+//  @0x4C4FA6..0x4C4FA8); CNapiGameSession_CreateSession @0x4C97C0 (is_authority
+//  and is_mp_session_peer @0x4C9B6A..0x4C9B76, the client connection's store
+//  @0x4C9BA6)]
+bool reload_echo_refills(const World &world, const Entity &addressed) {
+    if (!world.rules.mp_session_peer) return false;
+    return addressed.handle == world.cached.local_player ||
+           (addressed.has_item_def && addressed.item_type != 3);
+}
+
+// A reload the walk began on the authority queues its C2S 0x25 into the host's own
+// dispatcher: a UseGun gunner's addresses the gun (an EWeap, so 0xFFFF), any other
+// row's itself with the slot's combo (D-NET-336).
+// [orig: WeaponAction_Reload @0x5430B6..0x543108 (the authority gate @0x5430D9,
+//  parentSlot 3 @0x5430EA..0x5430FF); NetPacket_SendReloadRequest
+//  @0x43296C..0x432974]
+void queue_walk_reload(World &world, const Entity &addressed,
+                              const WeaponTableEntry &weapon) {
+    WeaponReloadRequest request;
+    request.entity_handle = addressed.handle.packed;
+    request.reload_param = addressed.has_item_def &&
+            (addressed.item_attrib & kItemAttribEweap) != 0
+            ? uint16_t(0xFFFF)
+            : static_cast<uint16_t>(static_cast<uint16_t>(weapon.category) * 65u +
+                                    static_cast<uint16_t>(weapon.rank));
+    world.out.weapon_reloads.push_back(request);
+}
+
 void weapon_fire_environment_inputs(const World &world, const Entity &owner,
                                     WeaponFsmInputs &inputs) {
     // [orig: WeaponSlot_CanFire @0x541bfa..0x541c39]
-    inputs.head_submerged = io::bam_add(to_fixed(owner.position.z), owner.eye_offset_z) <
+    inputs.head_submerged = io::bam_add(owner.position.z.q16, owner.eye_offset_z) <
             world.env.water_z;
     inputs.drowning = ((owner.flags | owner.engine_flags) & 0x8000u) != 0;
+    // The heat window's water gate: the walked entity's BODY Z against the water
+    // word, not the drowning bit and not the eye: `Position.Z >
+    // g_EnvWaterHeightFixed` keeps the window, at or below (with no Underwater def
+    // flag) clears it. Every walked row takes it, and the word is compared raw: a
+    // map with no water authored keeps it 0 [orig: WeaponAction_ProcessFrame
+    // @0x540E60 (the entity @0x540E9B, the compare @0x541004..0x54100D, the
+    // Underwater flag @0x54100F..0x54101C); Environment_InitDefaults @0x57C010
+    // (@0x57C011..0x57C01E)].
+    inputs.submerged = owner.position.z.q16 <= world.env.water_z;
     inputs.ignore_ammo_cost = world.rules.ignore_weapon_ammo_cost;
     // The outer loop's catch-up flag the fire-loop emitter reads
     // [orig: dword_24E0E80 @0x5412a7; Game_MainLoop @0x52ba32..0x52ba3a].
@@ -76,23 +121,32 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
                               bool replay_client_action) {
     if (replay_client_action || (weapon.flags & 0x200) != 0 ||
             ((owner.flags | owner.engine_flags) & 0x100u) == 0) return 0;
+    // The carrier's live Position and Yaw / Pitch / Roll words against its
+    // savedLivePose (+0x80..+0x94), each a dword compare (D-NET-NEW-L6-2: the
+    // degree mirrors shifted up never equal a stamped word).
+    // [orig: Server_ClientFiredRound @0x50C379..0x50C3D4]
     const Entity *carrier = world.registry.get(owner.ground_target);
-    if (carrier != nullptr && carrier->saved_live_valid &&
-            (to_fixed(carrier->position.x) != carrier->saved_live_pos[0] ||
-             to_fixed(carrier->position.y) != carrier->saved_live_pos[1] ||
-             to_fixed(carrier->position.z) != carrier->saved_live_pos[2] ||
-             static_cast<int32_t>(uint32_t(carrier->yaw) << 16) != carrier->saved_live_yaw ||
-             static_cast<int32_t>(uint32_t(carrier->pitch) << 16) != carrier->saved_live_pitch ||
-             static_cast<int32_t>(uint32_t(carrier->roll) << 16) != carrier->saved_live_roll)) return 0;
-    const int32_t dx = io::bam_sub(to_fixed(owner.position.x), origin.x);
-    const int32_t dy = io::bam_sub(to_fixed(owner.position.y), origin.y);
-    const int32_t dz = io::bam_sub(to_fixed(owner.position.z), origin.z);
+    if (carrier != nullptr && carrier->saved_live_valid) {
+        int32_t live[3];
+        int32_t yaw = 0, pitch = 0, roll = 0;
+        carrier_pose_fixed(*carrier, live, yaw, pitch, roll);
+        if (live[0] != carrier->saved_live_pos[0] || live[1] != carrier->saved_live_pos[1] ||
+                live[2] != carrier->saved_live_pos[2] || roll != carrier->saved_live_roll ||
+                yaw != carrier->saved_live_yaw || pitch != carrier->saved_live_pitch)
+            return 0;
+    }
+    const int32_t dx = io::bam_sub(owner.position.x.q16, origin.x);
+    const int32_t dy = io::bam_sub(owner.position.y.q16, origin.y);
+    const int32_t dz = io::bam_sub(owner.position.z.q16, origin.z);
     int32_t limit = 0x20000;
     double squared = double(dx) * dx + double(dy) * dy;
     if (owner.mount_type == SeatType::Gunner) {
         squared += double(dz) * dz;
         const Entity *mount = world.registry.get(owner.mount_target);
-        limit = mount != nullptr ? to_fixed(2.0f * mount->bound_radius) : 0x30000;
+        // The mount's bound word doubled by a wrapping add (D-NET-507).
+        // [orig: Server_ClientFiredRound - `mov edi, [ecx]; add edi, edi` @0x50C43A..0x50C43C]
+        limit = mount != nullptr ? io::bam_add(mount->bound_radius.q16, mount->bound_radius.q16)
+                                 : 0x30000;
         // A gunner on an attached, parent-routed mountable gun
         // (Entity_IsMountableGun: itemdef && type != 1 && attrib & 0x20; the
         // attachment flag +0x326 & 2; the MountSlot+0x5E redirect bit at
@@ -106,7 +160,7 @@ int weapon_fire_origin_status(const World &world, const Entity &owner,
             const Entity *parent = world.registry.get(mount->ground_target);
             if (parent != nullptr && parent->has_item_def && parent->item_type == 1 &&
                     (parent->item_attrib & 0x20u) != 0)
-                limit = to_fixed(2.0f * parent->bound_radius);
+                limit = io::bam_add(parent->bound_radius.q16, parent->bound_radius.q16); // @0x50C473..0x50C475
         }
     }
     const int32_t distance = static_cast<int32_t>(std::min(std::sqrt(squared), 2147418112.0));

@@ -915,7 +915,7 @@ void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, u
 			StartExit{ report.exit_code, report.oom, report.reason });
 	if (!lobby_live_) {
 		// NovaWorld's cause, not the server's: with no lobby live opennova-serve
-		// gives up on the gate (retail's 30 s probe). Placed again, no restart
+		// gives up on the gate (retail's 20 s dedicated wait). Placed again, no restart
 		// counted; it waits for a lobby in provisioning.
 		replace(db, s, now_ms, reason + " while no lobby instance was live");
 		return;

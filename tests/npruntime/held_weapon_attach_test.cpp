@@ -161,7 +161,7 @@ int main() {
 	if (!expect(def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0, "items.def parses"))
 		return 1;
 	const DefItemDef *def = mission::find_item_def(
-			items, mission::visual_item_id_for_runtime_type(kPlayerRuntimeType, items));
+			items, mission::visual_item_id_for_runtime_type(kPlayerRuntimeType));
 	assets::AssetStore models{&index};
 
 	const Threedi3di3 *body = def != nullptr ? models.model(def->graphic).get() : nullptr;

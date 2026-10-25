@@ -29,14 +29,14 @@ int32_t capture_zone_max_coverage(const World &world, const Entity &entity) {
     for (size_t i = 0; i < world.registry.pool_capacity(3); ++i) {
         const Entity *e = world.registry.get(EntityHandle::make(3, static_cast<int>(i)));
         if (!e || !e->has_item_def || e->item_id != def::DEF_TYPE_KOTH_CENTRE || e->team != 0) continue;
-        const int32_t radius = to_fixed(e->bound_radius);
+        const int32_t radius = e->bound_radius.q16;
         if (radius <= 0) continue;
         const auto abs_delta = [](int32_t a, int32_t b) {
             const int32_t delta = static_cast<int32_t>(uint32_t(a) - uint32_t(b));
             return delta < 0 ? static_cast<int32_t>(0u - uint32_t(delta)) : delta;
         };
-        const int64_t x = abs_delta(to_fixed(e->position.x), to_fixed(entity.position.x));
-        const int64_t y = abs_delta(to_fixed(e->position.y), to_fixed(entity.position.y));
+        const int64_t x = abs_delta(e->position.x.q16, entity.position.x.q16);
+        const int64_t y = abs_delta(e->position.y.q16, entity.position.y.q16);
         if (x > radius || y > radius) continue;
         const int32_t squared = static_cast<int32_t>(((x*x + 0x8000) >> 16) + ((y*y + 0x8000) >> 16));
         // x87's invalid sqrt -> integer-indefinite -> SHL 8 is zero. Preserve
@@ -120,10 +120,16 @@ std::string radio_call_key(const World &world, const Entity &speaker, int event,
     return key;
 }
 
+const std::string *voice_macro_text(const World &world, const std::string &key) {
+    const rtxt::Entry *entry = rtxt::find_with_override(
+            world.tables.text_override, world.tables.voice_macros, "macrotext", key);
+    return entry != nullptr ? &entry->text : nullptr;
+}
+
 // [orig: NapiNPClientMsg_HandleEntityDeath @0x430C50; VMacros_GetMacroText @0x5B7170]
 std::string radio_call_text(const World &world, const std::string &key,
         const std::string &name, const std::string *location) {
-    const auto *entry = world.tables.voice_macros.find_in_section("macrotext", key);
-    return name + (location ? ":[" + *location + "]: " : ": ") + (entry ? entry->text : key);
+    const std::string *text = voice_macro_text(world, key);
+    return name + (location ? ":[" + *location + "]: " : ": ") + (text ? *text : key);
 }
 } // namespace opennova::world

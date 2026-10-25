@@ -289,7 +289,11 @@ struct LightFlickerInputs {
 	const int32_t *amp_ring = nullptr;
 	size_t amp_ring_size = 0;
 	uint8_t ring_index = 0;
-	uint32_t time_ms = 0;  // waveform styles' clock (eval_light_runtime)
+	// The waveform styles' clock (eval_light_runtime): GetTickCount's DWORD, the
+	// embedder's one clock [orig: RgbGen_EvaluateColor @0x5B23D0 reads
+	// g_RenderRgbGenTickMs @0x28E07B0 (@0x5B246D), which Render_SubmitEntity stores
+	// from its GetTickCount call @0x5DAD85 (@0x5DADA9)].
+	uint32_t time_ms = 0;
 };
 
 struct LightSceneReport {

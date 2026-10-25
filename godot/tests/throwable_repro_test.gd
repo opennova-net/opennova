@@ -44,6 +44,12 @@ func before_each() -> void:
 	assert_eq(_sim.load_ammo_table(_root, "ammo.def"), OK)
 	_db = WeaponDatabase.new()
 	assert_eq(_db.load_from_resource_root(_root, "weapon.def"), OK)
+	# The weapon walk pumps only a pool-0 row whose ItemTypeIndex is set, the local
+	# player's included: the body takes its items.def row (D-NET-NEW-L7-6)
+	# [orig: WeaponAction_ProcessAllEntities @0x542690 (@0x5426B9)].
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
+	_sim.resolve_item_traits(item_db)
 
 
 func after_each() -> void:
@@ -64,10 +70,11 @@ func _rebake(weapon_name: String) -> void:
 	_sim.rebake_local_player_weapon(_db.get_weapon(idx), {})
 
 
-# Step + drain like the shells: a switch event installs the def, and the rebuilt
-# viewmodel installs the SAME def again ~a frame later (the FP model resolve —
-# GameWorld's local-player weapon setup). The re-install racing the FSM is the
-# regression surface this file exists for.
+# Step + drain like the shells: a switch event the sim's commit did not mount installs
+# the def (one it mounted is the viewmodel's alone), and the rebuilt viewmodel
+# installs the SAME def again ~a frame later (the FP model resolve, GameWorld's
+# local-player weapon setup). The re-install racing the FSM is the regression
+# surface this file exists for.
 func _step_and_pump(ticks: int) -> Array[String]:
 	var switched: Array[String] = []
 	for _i in ticks:
@@ -81,7 +88,8 @@ func _step_and_pump(ticks: int) -> Array[String]:
 			var name := (ev as PlayerWeaponEvent).switch_to_weapon
 			if not name.is_empty():
 				switched.append(name)
-				_install(name)
+				if not (ev as PlayerWeaponEvent).installed:
+					_install(name)
 				_reinstall_pending = name
 				_reinstall_ticks = 2
 	return switched
@@ -161,7 +169,9 @@ func test_reinstall_during_holster_preserves_the_switch() -> void:
 	assert_eq(_sim.get_local_player_weapon_name(), "WPN_GRENADEHE")
 
 
-# A PowerThrow press inside the queued draw-in is refused (the fireable gate),
+# A PowerThrow throw released inside the draw-in is refused (the FSM takes no fire
+# request in SWITCHTO; a press while the draw is only queued, the current action
+# still IDLE, starts a windup as retail's WeaponSlot_CanFireInCurrentState lets it),
 # and no charge byte leaks onto a later shot's wire slot_byte.
 func test_windup_during_draw_leaves_no_stale_charge() -> void:
 	_boot_kit(KIT_M4_GRENADE)

@@ -57,7 +57,7 @@ enum class FileKind {
 	CharAttrDefs,   // charattr.def
 	PowerupDefs,    // powerup.def
 	OtherDefs,      // any other .def
-	StringTableCoo, // .coo (the NovaWorld UI string table)
+	StringTableCoo, // .coo (the menu browser's NovaWorld cookie jar, nw_cdata.coo)
 	NovaWorldScreen, // .mnx (a NovaWorld screen's markup; retail ships it loose, a packed set holds it)
 	Video,          // .bik
 	PlayerSave,     // .sav

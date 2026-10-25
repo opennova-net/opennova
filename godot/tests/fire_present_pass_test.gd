@@ -280,6 +280,303 @@ func test_tracer_rung_follows_the_eye_water_side() -> void:
 	presenter.teardown()
 
 
+const MAIN_VIEW_NO_REFLECTION := 1 << 27
+const INSET_VIEW := 1 << 21
+# The overlay tail's mirror ribbon slots and the ribbon combines
+# (engine runtime/renderer/scene_overlay.h SceneOverlaySlot, SceneOverlayShading).
+const SLOT_MIRROR_TRACER_RIBBONS := 13
+const SLOT_INSET_MIRROR_TRACER_RIBBONS := 14
+const SHADING_RIBBON_STOCK := 6
+const SHADING_RIBBON_SMOKE := 7
+
+
+# A water mirror's rig: a camera in its own target, posed at `xform`; the
+# mirror renders while its target's update mode is not DISABLED. Its frame is
+# the scene view's (the main mirror's node-side frame is its source's,
+# env/water.h), so its projection is the scene camera's.
+func _mirror_camera(xform: Transform3D, update_mode: int) -> Camera3D:
+	var target := SubViewport.new()
+	var frame := get_viewport().get_visible_rect().size
+	target.size = Vector2i(maxi(int(frame.x), 1), maxi(int(frame.y), 1))
+	target.render_target_update_mode = update_mode
+	add_child_autofree(target)
+	var camera := Camera3D.new()
+	target.add_child(camera)
+	camera.global_transform = xform
+	return camera
+
+
+# The up-preserved proper mirror of `xform` about the water plane at `height`
+# (engine environment/water_mirror.h build_water_mirror_view, at or above it):
+# each basis column reflected, the reflected up negated, the eye reflected.
+func _proper_mirror(xform: Transform3D, height: float) -> Transform3D:
+	var b := xform.basis
+	var mirrored := Basis(Vector3(b.x.x, -b.x.y, b.x.z), Vector3(-b.y.x, b.y.y, -b.y.z),
+			Vector3(b.z.x, -b.z.y, b.z.z))
+	var o := xform.origin
+	return Transform3D(mirrored, Vector3(o.x, 2.0 * height - o.y, o.z))
+
+
+func _vertices(mesh: ArrayMesh) -> PackedVector3Array:
+	return mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+
+
+# The first drawn pair's side direction: the strip writes P + rs, then P - rs.
+func _side_of(verts: PackedVector3Array) -> Vector3:
+	return (verts[0] - verts[1]).normalized()
+
+
+func _first_side(mesh: ArrayMesh) -> Vector3:
+	return _side_of(_vertices(mesh))
+
+
+# Each water mirror's reflected subscene runs the tracer pool's main pass under
+# the mirror's own view: the main scene rebuilds the viewport block from the
+# mirrored camera right ahead of the subscene, and the ribbon build reads that
+# block's eye and view direction. So a mirror's ribbons face the mirror's eye
+# (the mirrored one above the water, the live one below it), while the scene
+# views keep theirs, byte for byte. A segment along a view's x axis takes its
+# side along that view's up: the pitched scene camera's and its mirror's differ.
+# The mirrors' ribbons draw in their own overlay passes, so no mesh carries them.
+# [orig: CEffectChannel_RenderRibbon @0x5DB8A0; Render_MainScene @0x5C1240 -
+# the Viewport_BuildProjectionMatrix call @0x5C170B; Water_RenderReflectedWorldScene
+# @0x5C8510 - the CEffectEmitterPool_RenderMainPass call @0x5C85F6]
+func test_a_mirror_builds_its_ribbons_against_its_own_eye() -> void:
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var camera := _ribbon_camera(container)
+	camera.look_at(Vector3.ZERO, Vector3.UP)
+	var presenter := _make_presenter(audio, container)
+	var rows := PackedFloat32Array([
+		1.0, 1.0, 4.0,  # stdred, age 1, count 4, along +X
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.0,
+		4.0, 1.0, 0.0, 1.0,
+		6.0, 1.0, 0.0, 1.0,
+	])
+
+	# The main view's ribbons ride the bit only the beauty camera admits; the
+	# mirrors' draw in their overlay passes, so no mirror mesh exists.
+	assert_eq((container.get_node("FireTracers") as MeshInstance3D).layers,
+			MAIN_VIEW_NO_REFLECTION, "the main view's ribbons: no other view admits the bit")
+	assert_null(container.get_node_or_null("FireTracersMirror"),
+			"the main scene's mirror draws its ribbons in its overlay pass")
+	assert_null(container.get_node_or_null("FireTracersInsetMirror"),
+			"and so does the weapon Inset's mirror")
+
+	presenter.draw_tracer_rows(rows)
+	var mesh: ArrayMesh = presenter.fire_ribbon_mesh()
+	assert_eq(mesh.get_surface_count(), 1)
+	if mesh.get_surface_count() != 1:
+		presenter.teardown()
+		return
+	var main_before := _vertices(mesh)
+	assert_eq(presenter.fire_mirror_ribbon_vertices(0).size(), 0,
+			"no mirror camera: no mirror ribbons")
+
+	var mirror := _mirror_camera(_proper_mirror(camera.global_transform, 0.0),
+			SubViewport.UPDATE_ALWAYS)
+	var inset_mirror := _mirror_camera(_proper_mirror(camera.global_transform, 0.0),
+			SubViewport.UPDATE_DISABLED)
+	presenter.set_tracer_mirror_cameras(mirror, inset_mirror)
+	presenter.draw_tracer_rows(rows)
+
+	assert_eq(_vertices(mesh), main_before, "the scene views' ribbons are unchanged")
+	var main_side := _first_side(mesh)
+	assert_gt(absf(main_side.dot(camera.global_transform.basis.y)), 0.999,
+			"the scene ribbon's side is the scene camera's up")
+	var mirror_verts := presenter.fire_mirror_ribbon_vertices(0)
+	assert_eq(mirror_verts.size(), main_before.size(), "the rendering mirror builds its ribbons")
+	if mirror_verts.size() == main_before.size():
+		var mirror_side := _side_of(mirror_verts)
+		assert_gt(absf(mirror_side.dot(mirror.global_transform.basis.y)), 0.999,
+				"the mirror ribbon's side is the mirror camera's up")
+		assert_lt(absf(mirror_side.dot(main_side)), 0.9,
+				"so it faces the mirrored eye, not the scene's")
+	assert_eq(presenter.fire_mirror_ribbon_vertices(1).size(), 0,
+			"a mirror that does not render builds nothing")
+
+	# Below the water the mirror draws from the live eye: the same ribbons.
+	mirror.global_transform = camera.global_transform
+	inset_mirror.get_viewport().render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	inset_mirror.global_transform = camera.global_transform
+	presenter.draw_tracer_rows(rows)
+	assert_eq(_vertices(mesh), main_before)
+	assert_eq(presenter.fire_mirror_ribbon_vertices(0), main_before,
+			"below the water the mirror's ribbons are the live eye's")
+	assert_eq(presenter.fire_mirror_ribbon_vertices(1), main_before,
+			"the Inset's mirror renders: it builds its own")
+	presenter.teardown()
+
+
+# Retail's reflected subscene draws its two particle passes, then the tracer pool's
+# main pass under the mirror's own view, then its coronas, so each mirror's ribbons
+# reach that mirror's overlay pass (the pass its particle pair precede) in the slot
+# the pass draws first (engine runtime/renderer/scene_overlay.h kMirrorOverlayOrder,
+# kInsetMirrorOverlayOrder), one batch per channel in pool order, each on its
+# material's combine: the stock styles on the device's slot 6 (ONE / ONE,
+# untextured), the smoke styles on pool+0x3004 (smoktest.pcx twice, SRCALPHA /
+# INVSRCALPHA). The main view's and the Inset scene's meshes keep their surfaces.
+# [orig: Water_RenderReflectedWorldScene @0x5C8510 - the EffectWorld_RenderParticlePass
+# calls @0x5C85DB / @0x5C85E5, the CEffectEmitterPool_RenderMainPass call @0x5C85F6,
+# the EffectWorld_RenderLightCoronas call @0x5C85FD; CEffectChannel_Init @0x5DB130 -
+# the CD3DDevice_GetRenderStateByIndex(6) call @0x5DB1D6; CEffectEmitterPool_CreateShaders
+# @0x5DC8F0 - the GfxShader_Create2TexDesc call @0x5DC9A9]
+func test_a_mirror_submits_its_ribbons_to_its_overlay_pass() -> void:
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var camera := _ribbon_camera(container)
+	camera.look_at(Vector3.ZERO, Vector3.UP)
+	var presenter := _make_presenter(audio, container)
+	var rows := PackedFloat32Array([
+		1.0, 1.0, 4.0,  # stdred: the stock material
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.0,
+		4.0, 1.0, 0.0, 1.0,
+		6.0, 1.0, 0.0, 1.0,
+		3.0, 1.0, 3.0,  # rocket: the smoke material
+		0.0, 2.0, 0.0, 1.0,
+		2.0, 2.0, 0.0, 1.02,
+		4.0, 2.0, 0.0, 0.98,
+	])
+	var mirror := _mirror_camera(_proper_mirror(camera.global_transform, 0.0),
+			SubViewport.UPDATE_ALWAYS)
+	var inset_mirror := _mirror_camera(_proper_mirror(camera.global_transform, 0.0),
+			SubViewport.UPDATE_DISABLED)
+	presenter.set_tracer_mirror_cameras(mirror, inset_mirror)
+	presenter.draw_tracer_rows(rows)
+
+	assert_eq(presenter.fire_mirror_ribbon_shadings(SLOT_MIRROR_TRACER_RIBBONS),
+			PackedInt32Array([SHADING_RIBBON_STOCK, SHADING_RIBBON_SMOKE]),
+			"the main mirror's channels, in pool order, on their own combines")
+	assert_eq(presenter.fire_mirror_ribbon_shadings(SLOT_INSET_MIRROR_TRACER_RIBBONS).size(), 0,
+			"the Inset's mirror does not render: nothing in its slot")
+	assert_eq(presenter.fire_ribbon_mesh().get_surface_count(), 2,
+			"the main view's ribbons stay its mesh's")
+
+	(inset_mirror.get_viewport() as SubViewport).render_target_update_mode = \
+			SubViewport.UPDATE_ALWAYS
+	presenter.draw_tracer_rows(rows)
+	assert_eq(presenter.fire_mirror_ribbon_shadings(SLOT_INSET_MIRROR_TRACER_RIBBONS),
+			PackedInt32Array([SHADING_RIBBON_STOCK, SHADING_RIBBON_SMOKE]),
+			"the Inset's mirror submits its own, in its own slot")
+
+	# No rows: every mirror's ribbons are gone with the frame's.
+	presenter.draw_tracer_rows(PackedFloat32Array())
+	assert_eq(presenter.fire_mirror_ribbon_shadings(SLOT_MIRROR_TRACER_RIBBONS).size(), 0)
+	assert_eq(presenter.fire_mirror_ribbon_shadings(SLOT_INSET_MIRROR_TRACER_RIBBONS).size(), 0)
+	presenter.teardown()
+
+
+# The weapon Inset's scene runs the world scene, the tracer pool's passes among it,
+# under the Inset's own block and the projection of its own field, so its ribbons face
+# the Inset's eye and take the minimum width its field gives: far off, a zoomed Inset's
+# ribbons are as much narrower as its field's cotangent is larger, while the main
+# view's stay its own. The Inset's camera is the effect world's second scene camera.
+# [orig: Render_WeaponInsetScene @0x5C9740 - the calls @0x5C99CB, @0x5C9DAE, @0x5C9DE9;
+# CEffectChannel_RenderRibbon @0x5DB8A0 - the minimum width @0x5DC0D6..0x5DC0F7]
+func test_the_inset_scene_builds_its_ribbons_against_its_own_view() -> void:
+	var audio := MissionAudio.create(null, null)
+	autofree(audio)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var camera := _ribbon_camera(container)
+	camera.look_at(Vector3(0, 1, -300), Vector3.UP)
+	var effects := EffectWorld.new()
+	add_child_autofree(effects)
+	var presenter := EntityPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup_passes(container, null, null, audio, effects, null, null, null)
+	# A far stdred trail along the views' x axis: the minimum width rules there.
+	var rows := PackedFloat32Array([
+		1.0, 1.0, 4.0,
+		0.0, 1.0, -300.0, 1.0,
+		2.0, 1.0, -300.0, 1.0,
+		4.0, 1.0, -300.0, 1.0,
+		6.0, 1.0, -300.0, 1.0,
+	])
+	assert_eq((container.get_node("FireTracersInset") as MeshInstance3D).layers, INSET_VIEW,
+			"the Inset's ribbons ride the bit only its camera admits")
+
+	presenter.draw_tracer_rows(rows)
+	var mesh: ArrayMesh = presenter.fire_ribbon_mesh()
+	assert_eq(mesh.get_surface_count(), 1)
+	if mesh.get_surface_count() != 1:
+		presenter.teardown()
+		return
+	var main_before := _vertices(mesh)
+	assert_eq(presenter.fire_inset_ribbon_mesh().get_surface_count(), 0,
+			"no Inset pass: no Inset ribbons")
+
+	# The Inset pass: a zoomed view from the same eye.
+	var inset := _mirror_camera(camera.global_transform, SubViewport.UPDATE_ALWAYS)
+	inset.fov = 10.0
+	effects.set_second_scene_camera(inset)
+	presenter.draw_tracer_rows(rows)
+	assert_eq(_vertices(mesh), main_before, "the main view's ribbons are unchanged")
+	var inset_mesh: ArrayMesh = presenter.fire_inset_ribbon_mesh()
+	assert_eq(inset_mesh.get_surface_count(), 1, "the rendering Inset builds its ribbons")
+	if inset_mesh.get_surface_count() == 1:
+		var main_verts := _vertices(mesh)
+		var inset_verts := _vertices(inset_mesh)
+		var main_width := (main_verts[0] - main_verts[1]).length()
+		var inset_width := (inset_verts[0] - inset_verts[1]).length()
+		var main_scale := camera.get_camera_projection().x.x
+		var inset_scale := inset.get_camera_projection().x.x
+		assert_gt(inset_scale, main_scale * 2.0, "the zoomed field's cotangent is larger")
+		assert_almost_eq(inset_width * inset_scale, main_width * main_scale,
+				main_width * main_scale * 1e-3, "each ribbon takes its own field's minimum width")
+		assert_gt(absf(_first_side(inset_mesh).dot(inset.global_transform.basis.y)), 0.999,
+				"and faces the Inset's eye")
+
+	effects.set_second_scene_camera(null)
+	presenter.draw_tracer_rows(rows)
+	assert_eq(presenter.fire_inset_ribbon_mesh().get_surface_count(), 0,
+			"the Inset pass closed: no Inset ribbons")
+	presenter.teardown()
+
+
+# Retail builds the tracer pool's ribbons at each drawn frame's scene pass, from the view
+# block that frame rebuilt just ahead of it and the clock read at the draw, so ours build
+# in the frame's particles leg, after the frame placed its views, from the sim's live
+# trails (GameWorld::render_particle_frame -> EntityPresenter.draw_frame_tracers); the
+# ticked present no longer builds them against the camera the frame has not placed yet.
+# [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - the Viewport_BuildProjectionMatrix call
+# @0x5CA5D2, the Terrain_RenderWorldScene call @0x5CA8EC]
+func test_the_ribbons_build_in_the_drawn_frame_not_the_ticked_present() -> void:
+	var world := WorldFixture.boot_minimal(self)
+	var runtime := world.get_runtime()
+	assert_not_null(runtime)
+	if runtime == null:
+		return
+	runtime.pause()
+	var presenter := runtime.get_entity_presenter()
+	var camera := Camera3D.new()
+	presenter.add_child(camera)
+	camera.position = Vector3(0, 5, 10)
+	camera.current = true
+	var mesh: ArrayMesh = presenter.fire_ribbon_mesh()
+	assert_not_null(mesh, "the loaded world hosts the ribbon geometry")
+	if mesh == null:
+		return
+	presenter.draw_tracer_rows(PackedFloat32Array([
+		1.0, 1.0, 3.0,
+		0.0, 1.0, 0.0, 1.0,
+		2.0, 1.0, 0.0, 1.0,
+		4.0, 1.0, 0.0, 1.0,
+	]))
+	assert_eq(mesh.get_surface_count(), 1, "the data leg built a ribbon")
+	presenter.present_passes()
+	assert_eq(mesh.get_surface_count(), 1, "the ticked present builds no ribbons")
+	presenter.draw_frame_tracers()
+	assert_eq(mesh.get_surface_count(), 0,
+			"the frame's build takes the sim's live trails: the minimal mission has none")
+
+
 # The tracer pool's distortion ribbons (the styles with a +0x828 word: the
 # rocket, the AT4, the sniper) publish into the effect world's FrameFX drawer
 # and draw in the type-0 row with slot 2 = 256B (retail

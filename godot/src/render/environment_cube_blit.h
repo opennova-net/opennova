@@ -6,7 +6,10 @@
 #include <mutex>
 #include <string>
 
+#include <godot_cpp/classes/compositor_effect.hpp>
+#include <godot_cpp/classes/render_data.hpp>
 #include <godot_cpp/classes/rendering_device.hpp>
+#include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -24,10 +27,10 @@ namespace godot {
 // to the CPU and no Image or Cubemap resource exists; the cube RID is
 // published through a TextureCubemapRD by the capture node.
 //
-// Threads: set_request runs on the main thread with no request in flight
-// (completed_requests() == the caller's request count); publish and release
-// run on the render thread through RenderingServer::call_on_render_thread.
-// The counters are the only state read across threads.
+// Threads: arm, publish_armed, publish and release run on the render thread
+// (arm and the fallback publish through RenderingServer::call_on_render_thread,
+// publish_armed also from EnvironmentCubeCompositorEffect's callback inside a
+// frame's draw). The counters are the only state read across threads.
 class EnvironmentCubeBlit {
 public:
 	static constexpr int kFaceCount =
@@ -60,7 +63,17 @@ public:
 	EnvironmentCubeBlit(const EnvironmentCubeBlit &) = delete;
 	EnvironmentCubeBlit &operator=(const EnvironmentCubeBlit &) = delete;
 
-	void set_request(const Request &p_request);
+	// Render thread: the shader, the cubemap with its layer framebuffers and
+	// the pipeline on p_rd, ahead of the first publish (whose own creates then
+	// find them); a refusal latches as a publish's does.
+	void create_device(RenderingDevice *p_rd);
+	// Render thread: the copy the next publish_armed draws, armed by the
+	// frame whose draw renders its faces.
+	void arm(const Request &p_request);
+	// Render thread: draws the armed copy once (false with none armed): the
+	// beauty view's pre-opaque pass of the frame that rendered the faces, or
+	// the capture's next advance when no such view drew.
+	bool publish_armed();
 	// Render thread: resolves the request's device textures, lazily creates
 	// the shader, pipeline, cube and per-layer framebuffers, and draws the six
 	// faces. Completes the request either way; a shader/pipeline failure is
@@ -110,10 +123,41 @@ private:
 
 	mutable std::mutex failure_mutex_;
 	std::string failure_;
+	std::atomic<std::uint64_t> armed_requests_{0};
 	std::atomic<std::uint64_t> completed_requests_{0};
 	std::atomic<std::uint64_t> published_cubes_{0};
 	std::atomic<bool> last_request_ok_{false};
 	std::atomic<bool> device_failed_{false};
+};
+
+// The PRE_OPAQUE compositor effect EnvironmentCubeCapture installs on its
+// WorldEnvironment's compositor, the chain the beauty view draws with: the
+// frame that renders the six faces copies them into the cube here, past the
+// faces (SubViewports Godot draws ahead of the beauty view: under the plain
+// view's viewport, and made ahead of the stretched view's target) and ahead
+// of the scene's opaque pass, as retail renders the faces ahead of the scene's
+// draws in the frame that samples them (docs/render/render-lighting-re.md,
+// CubeEnvironment). The water mirror draws with a compositor of its own, ahead
+// of the faces, as retail's reflection prerender precedes its cube update.
+class EnvironmentCubeCompositorEffect : public CompositorEffect {
+	GDCLASS(EnvironmentCubeCompositorEffect, CompositorEffect)
+
+public:
+	EnvironmentCubeCompositorEffect();
+	// Main thread: the blit the callback copies through; null detaches it
+	// (the owner then drains the render thread before freeing the blit).
+	void set_blit(EnvironmentCubeBlit *p_blit) {
+		blit_.store(p_blit, std::memory_order_release);
+	}
+
+	void _render_callback(int32_t p_effect_callback_type,
+			RenderData *p_render_data) override;
+
+protected:
+	static void _bind_methods();
+
+private:
+	std::atomic<EnvironmentCubeBlit *> blit_{nullptr};
 };
 
 } // namespace godot

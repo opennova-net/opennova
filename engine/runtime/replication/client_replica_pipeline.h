@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <variant>
 
@@ -14,17 +15,24 @@
 
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova {
 struct TitleIdentity; // net/title/title_identity.h
 }
 
+namespace opennova::inmatch {
+class CharacterRegistry; // runtime/inmatch/character_registry.h
+} // namespace opennova::inmatch
+
 namespace opennova::world {
 class IRootMotionSource;
+class AnimVariantRings;
 struct WeaponTable;
 struct LiveRound;
 struct HitRecord;
+struct DeployedRoundCopy;
 } // namespace opennova::world
 
 namespace opennova::terrain {
@@ -49,6 +57,16 @@ struct EntityDeathEvent {
     // the 0x26 kill, 1 (the silent death) for the 0x4E join-window kill
     // [orig: @0x42EC78 (0x26) / @0x4318b5 (0x4E)].
     int32_t kill_flags = 0;
+};
+// A dead player record, in receive order with the 0x13s around it: its anim byte lands on
+// the body the record names. The replica rows fold it in the decode; the effect pass hands
+// the client's own body its share (world::player_body_dead_record), after any 0x13 the same
+// receive carried ahead of it.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead arms @0x4C100B..0x4C1027 /
+//  @0x4C10F1..0x4C10FB, the byte @0x4C0F23]
+struct PlayerDeadRecord {
+    uint16_t entity_handle = 0xFFFF;
+    int16_t anim_state_id = 0;
 };
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
@@ -99,7 +117,7 @@ struct DialogLineCommand {
 };
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
+        PlayerDeadRecord, EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
         LightningTimerCommand, DoorRowUpdate, DialogLineCommand, HudDetailBlankCommand>;
 
 class ClientReplicaPipeline {
@@ -124,10 +142,31 @@ public:
 	// role) so frames_applied / seen_this_frame stay coherent.
 	void apply(uint8_t tag, const std::vector<uint8_t> &body);
 
-	// Advance the remote lean integrator one body tick (called once per client
-	// frame). [orig: decay @0x4b5c97, then the ramp @0x4b7dbf/@0x4b7dd6]
-	void tick_lean();
-	void tick_arms_dip();
+	// The remote lean integrator, one body tick per client frame in retail's two
+	// halves: the decay at the body pass's head, the held keys' ramp at its end,
+	// so the pass's eye (tick_remote_motion) reads the decayed, unramped lean.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the decay @0x4B5C97, the
+	//  eye @0x4B699F..0x4B6BAB, the ramp @0x4B7DBF / @0x4B7DD6]
+	// The decay and the arms dip (with the torso roll) take the walk's own-body
+	// split (tick_remote_motion's self_handle): a row the walk will park (every
+	// pool-0 row and those after) takes them in its own visit, ahead of it, in
+	// tick_remote_motion_through_self or tick_remote_motion_after_self, as retail
+	// runs them inside each body's own update (D-NET-196).
+	// The exits both organic body updates take ahead of their per-tick legs
+	// (client_replica_body_ticks.cpp): Flags bit 0 and no animation channel end the update
+	// ahead of its dual update; the starved chase ends it after the channel and the chase's
+	// count. A leg ahead of the row's visit asks body_update_ends_ahead (the progress as the
+	// chase will test it), a leg after the visit body_update_ended (the visit's latch).
+	static bool body_update_exits_ahead_of_channel(const ClientEntityState &es);
+	static bool body_update_ends_ahead(const ClientEntityState &es);
+	static bool body_update_ended(const ClientEntityState &es);
+	void tick_lean_decay(uint16_t self_handle = 0xFFFFu);
+	void lean_decay_row(ClientEntityState &es);
+	// Every visited row's ramp (a row the walk parked ramps after its visit).
+	void tick_lean_ramp();
+	void lean_ramp_row(ClientEntityState &es);
+	void tick_arms_dip(uint16_t self_handle = 0xFFFFu);
+	void arms_dip_row(ClientEntityState &es);
 	// Wire handles whose compact record was dropped because its carrier could
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the
 	// embedding runtime drains and sends them once per frame.
@@ -158,6 +197,12 @@ public:
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.
     void set_round_receiver(std::function<void(const ClientRoundEvent &)> receiver) { round_receiver_ = std::move(receiver); }
+    // The S2C 0x59 found leg over the embedder's round pool
+    // (world::RoundSim::match_deployed_item), run where the record lands; true
+    // when a slot matched. Unset, no slot matches.
+    using DeployedRoundWalk =
+            std::function<bool(const DeployedItemSpawn &, world::DeployedRoundCopy &)>;
+    void set_deployed_round_walk(DeployedRoundWalk walk) { deployed_round_walk_ = std::move(walk); }
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -203,6 +248,18 @@ public:
 		                              // sites read/write it as they do
 		                              // ent->flags on a registry row
 		uint16_t out_ground = 0xFFFF; // ground-probe hit (wire handle)
+		// The row's savedLivePose (+0x80..+0x88): its mover's entry stamp
+		// (net_saved_live_pose), which the resolver's skip test, plane gating and
+		// victim delta read [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C;
+		// Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E].
+		int32_t saved_live_pos[3] = {};
+		bool has_saved_live = false;
+		// The row's CameraOffset (+0x6C..+0x74) as its mover stored it, the resolver's
+		// eye point [orig: Entity_MovementCollisionResolver @0x4B2EE2..0x4B2EFB]: a
+		// player row's (eye_offset, the body update's non-local arm); none for an
+		// NPC row, whose eye the resolver derives (the org1 restamp at a rest lean).
+		int32_t eye_offset[3] = {};
+		bool has_eye = false;
 	};
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
@@ -227,6 +284,24 @@ public:
 	void set_replica_death_traits_resolver(ReplicaDeathTraitsResolver resolver) {
 		replica_death_traits_resolver_ = std::move(resolver);
 	}
+	// A player record's def re-pick: the embedder answers the wire type of the
+	// items row its class's camouflage item binds at the mission climate (the
+	// row ItemList_FindIndexByTypeId finds, the first row for a miss), or false
+	// where none binds (no charattr / items tables installed; the client's own
+	// record, which picks by its local body's class word, with no body or def).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the climate pick
+	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D]
+	using ReplicaPlayerCammoResolver =
+			std::function<bool(uint16_t handle, uint8_t player_class, uint16_t &type_id)>;
+	void set_replica_player_cammo_resolver(ReplicaPlayerCammoResolver resolver) {
+		replica_player_cammo_resolver_ = std::move(resolver);
+	}
+	// A def re-pick's row: the wire type of the items row it bound, and the record class that
+	// type classifies as (a player record's re-pick, the mission start's reload).
+	void retype_row(ClientEntityState &es, uint16_t type_id) const {
+		es.type_id = type_id;
+		es.cls = classify(type_id);
+	}
 	// The embedder's global hit record, which the 0x13's class callback reads
 	// [orig: g_ProjectileHitRecord @0xB7C620 via Projectile_GetHitRecord
 	// @0x4E7000]. No resolver, or a null record, reads as one with no round.
@@ -241,6 +316,15 @@ public:
 	void set_replica_kill_section_store(ReplicaKillSectionStore store) {
 		replica_kill_section_store_ = std::move(store);
 	}
+	// Each row the client's Entity_Destroy takes (erase_entity_tree, the root and each member
+	// its refNum walk destroys), told to the embedder at the destroy's reference clears: the
+	// joiner's HUD target cursor lets go of a decoded remote person's row
+	// (world::LocalPlayer::note_wire_entity_destroyed) [orig: Entity_Destroy @0x43E810 -
+	// `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the clear @0x43E8A4].
+	using ReplicaDestroyObserver = std::function<void(uint16_t handle)>;
+	void set_replica_destroy_observer(ReplicaDestroyObserver observer) {
+		replica_destroy_observer_ = std::move(observer);
+	}
 	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
 	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
 	// @0x4b4e39 / @0x4b9f36]; `release` marks an org1 corpse destroyed this
@@ -253,6 +337,14 @@ public:
 		bool release = false;
 	};
 	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
+	// The organic rows whose respawn arm ran in this receive, by wire handle in record order: the
+	// arm's reset releases the row's +0x1CC group inside the decode, ahead of the frame's entity
+	// update, so the embedder stops each one at the receive's point and a hit emitter the update
+	// spawns on the row survives (D-NET-NEW-L5-60). [orig: NetPacket_SerializePlayerState
+	// @0x4C09C0 - Entity_ResetToSpawnState called @0x4C113C; NetPacket_SerializeInfantryEntityState
+	// @0x4C0320 - the call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - the release
+	// @0x4B97CB..0x4B97F5]
+	std::vector<uint16_t> drain_respawn_releases();
 	// A sound-profile slot one replica body's mover leg played this tick, at
 	// the body's position when it played, with the identity the embedder
 	// resolves it through: the row's items.def type and, for a player, its
@@ -291,14 +383,41 @@ public:
 	void set_carrier_pose_provider(CarrierPoseProvider provider) {
 		carrier_pose_provider_ = std::move(provider);
 	}
-
-	// Mission water plane for the replica water/float channel (16.16;
-	// has_water false = no water in this world). Fed per pump by the
-	// embedder from the env state [orig: g_EnvWaterHeightFixed @ 0x26C6454].
-	void set_water_z(int32_t z, bool has_water) {
-		water_z_ = z;
-		has_water_ = has_water;
+	// The pool-0 walk runs a person row's bound move function, its +0x1C4 (the def's
+	// move_function row): org1 and org2 are the chases below; the ewep row's update runs through
+	// this seam over the row's words (the embedder's World holds the ground and the occupant),
+	// which returns true when the update destroyed the row (its stale-ground leg), the row then
+	// leaving after the walk; every other row runs nothing here (the null row skipped whole,
+	// org0's and chld's bare returns, and the item rows ours does not run over a person).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk's +0x1C4 call @0x4C2472;
+	//  NapiNPClientMsg_0x00C @0x42E730 / NapiNPClientMsg_FullEntitySpawn @0x433780 - def+0x158
+	//  into +0x1C4; Entity_UpdateTransformAndTurret @0x440CA0]
+	using PersonEwepMover = std::function<bool(ClientEntityState &row)>;
+	void set_person_ewep_mover(PersonEwepMover mover) { person_ewep_mover_ = std::move(mover); }
+	// The bound move row of a person row's type, by the def's move_function; none without a
+	// catalog entry (the row keeps its class's chase).
+	std::optional<world::PhysicsClass> person_move_row(uint16_t type_id) const;
+	// Whether the walk runs a decoded person row's bound move row in place of the org chases (a
+	// pool-0 Player / Infantry row other than the joiner's own whose row is neither org1 nor org2).
+	bool person_takes_item_row(const ClientEntityState &es, uint16_t self_handle) const;
+	// The ride link's ground words: the embedder's entity at a ground handle,
+	// its occupant (+0x170) and its own ground entity (+0x28) as wire
+	// handles (0xFFFF for none); false where it has no entity there. A remote
+	// person on a joiner is a decoded row, so the occupant's team is read from
+	// the rows. [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 -
+	//  @0x4B5EA9..0x4B5EF1]
+	using GroundOccupantProvider =
+			std::function<bool(uint16_t ground, uint16_t &occupant, uint16_t &ground_of_ground)>;
+	void set_ground_occupant_provider(GroundOccupantProvider provider) {
+		ground_occupant_provider_ = std::move(provider);
 	}
+
+	// Mission water plane for the replica water/float channel (16.16), compared
+	// raw: retail keeps no dry sentinel (the word is 0 with no water authored).
+	// Fed per pump by the embedder from the env state [orig:
+	// g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults @0x57C010,
+	// the memset @0x57C011..0x57C01E].
+	void set_water_z(int32_t z) { water_z_ = z; }
 
 	// The per-class between-update mover, one call per 62.5 Hz logic tick after
 	// the recv fold (retail order: Client_ProcessNetworkFrame first, entity
@@ -315,10 +434,120 @@ public:
 	//    all four families landed) and skipped here; the row-side chase remains
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
+	// With the own-body split on (a joiner, whose own body serves its rings in the
+	// World's entity pass), the walk visits the pool-1 rows and parks every pool-0
+	// row (and the higher pools'), in two halves:
+	// - the rows through the own row's slot, which tick_remote_motion_through_self
+	//   visits from the World's entity pass, after its proximity build and ahead of
+	//   its pool-0 walk (the embedder's World::before_pool0_walk);
+	// - the rest, which tick_remote_motion_after_self visits once that walk ran the
+	//   own body.
+	// Each parked row takes its lean decay and arms dip ahead of its visit and its
+	// selection and lean ramp after it. Until its visit, the World tick's readers of a
+	// parked row (the round pass's guided inputs, wire actor and person body, the bone
+	// raycast's pose) see it as its last tick left it, as retail's pool-1 walk and
+	// projectile pass see every pool-0 body. after_self first finishes a middle half
+	// the embedder never ran, and a parked half left over finishes at the next tick's
+	// head.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+	//  Weapon_UpdateAllProjectiles call @0x4C223A, the proximity build @0x4C240A, the
+	//  pool-0 walk @0x4C2426..0x4C2472]
 	void tick_remote_motion(uint16_t self_handle);
-	// Every armed player row's secondary channel for one tick (the advance,
-	// then the 16-tick selection keyed on `tick`), the own row excepted.
-	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
+	void tick_remote_motion_through_self();
+	void tick_remote_motion_after_self();
+	// The look of each org1 row this tick's visit reached it on (rm_look_due). A live seated
+	// row's seat branch: the Yaw chases the aim heading (+0x2EC) a quarter of the way, the step
+	// clamped to +-0x2000000, the Pitch the aim pitch (+0x2D0) an eighth, then the Yaw is held
+	// within 90 degrees of the seat's body heading (+0x8C) unless the carrier's config is 3, 4,
+	// 5 or 7. A free-standing row's on-foot form (world::infantry_on_foot_look) after its body
+	// chase, with the aim flag (+0x360) clear: a client stores only 0 there. Retail walks pool 1
+	// (a gun's ai-fn tether and its class update's window store) before the pool-0 body, and the
+	// body's recoil block precedes both branches, so the embedder calls this leg after its gun
+	// channels and tick_recoil (a joiner: after tick_replica_emplaced_channels and
+	// tick_remote_recoil). The body chase adds the same step to the Yaw as the recoil's
+	// half-step does, so running the chase in the walk and the look here keeps retail's words.
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the recoil @0x4BE7FD..0x4BE84B, the body chase
+	//  @0x4BE8FD..0x4BE931, the free-standing look @0x4BEB18..0x4BEBE7, the seat bone
+	//  @0x4BED72 (+0x8C @0x4BEDB3), the seated look @0x4BEF57..0x4BEF97, the clamp
+	//  @0x4BEF9A..0x4BEFED, the aim flag's client-reachable stores @0x4B9E30 / @0x4BA100 /
+	//  @0x4BA319; Entity_ResetToSpawnState @0x4B9610 - @0x4B96B6; NapiNPClientMsg_0x00C
+	//  @0x42E730 - the memset @0x42E7E9..0x42E7F1; Entity_AttachToBoneAndUpdateTransform
+	//  @0x5463D0 (+0x8C @0x546620); Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk
+	//  @0x4C2158..0x4C21E9 ahead of the pool-0 walk @0x4C2426..0x4C2472]
+	void tick_org1_looks();
+	void set_self_body_split(bool on) { self_body_split_ = on; }
+	// The pool-1 interleave (a joiner, whose World walks pool 1 by slot): the walk parks
+	// every pool-1 row too, and each takes its visit at its own slot of the World's pool-1
+	// walk (the embedder's World::pool1_slot_leg calls visit_pool1_row), interleaved with
+	// the World's movers in slot order. A compact-carried pool-1 row (a hull on a deck)
+	// follows its carrier as it stands at the head of its own visit. A pool-1 row the
+	// World's walk never reached the embedder visits as the walk ends
+	// (unvisited_pool1_rows); one still parked then visits ahead of the parked pool-0 rows
+	// (tick_remote_motion_through_self, or after_self where that never ran) (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+	//  Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9;
+	//  Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 mover @0x4B8E41..0x4B8E53]
+	void set_pool1_interleave(bool on) { pool1_interleave_ = on; }
+	// One parked pool-1 row's visit; the row, or null where the handle names no row the
+	// walk parked (a World mover's row returns too: the World's mover moved it, its
+	// visit returns at the mover test). A second call for the same row this tick is null.
+	ClientEntityState *visit_pool1_row(uint16_t handle);
+	// The parked pool-1 rows no slot leg has visited yet (slots past the World's pool-1
+	// capacity), in walk order: the embedder visits them as the walk ends.
+	std::vector<uint16_t> unvisited_pool1_rows() const;
+	// The walk's order key (pool 1, pool 0, then the higher pools, each by slot) and
+	// the split's line: the own row's key when the walk parks the rows past it,
+	// else no line (UINT32_MAX).
+	static uint32_t remote_walk_key(uint16_t handle);
+	uint32_t remote_walk_split_key(uint16_t self_handle) const;
+	// The first key the walk parks: pool 0's slot 0 under the split, else none
+	// (UINT32_MAX).
+	uint32_t remote_walk_park_key(uint16_t self_handle) const;
+
+	// The S2C 0x70 table and its received flag. Retail's are process globals that
+	// no session or mission start touches (their writers are the 0x70 handler and
+	// the vehicle screen's first open), so the embedder hands in its process-lived
+	// store (inmatch::ClientProcessState); null keeps this pipeline's own.
+	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0 -- stores @0x429ACE /
+	//  @0x429AE7 / @0x56425D; the table 0xA81BC0 and its count 0xA821B8 --
+	//  @0x429AC8 / @0x429AE2]
+	void use_vehicle_spawn_store(ClientVehicleSpawnAvailability *store) {
+		vehicle_spawn_store_ = store;
+	}
+	ClientVehicleSpawnAvailability &vehicle_spawn_availability() {
+		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
+	}
+	const ClientVehicleSpawnAvailability &vehicle_spawn_availability() const {
+		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
+	}
+	// The replica's tick clock, g_CurrentTick's stand-in: the leg re-plant
+	// window, the radio age, the 16-tick weapon pass and the stale-carrier
+	// sweep's 0x7F phase read it. Retail's main frame steps the word whether or
+	// not its entity update runs (the pre-round and round-gate frames step it
+	// too) and the mission start zeroes it, so the embedder steps it on a main
+	// frame whose entity update is skipped (step_frame_tick), the entity update
+	// steps it itself (tick_remote_motion), and the mission start's end zeroes
+	// it (zero_frame_tick).
+	// [orig: Game_StartMission @0x524360 (`mov g_CurrentTick, ebx` @0x525B9F);
+	//  Game_ProcessMainFrame @0x5263F0 (the pause test @0x5265A0, `add
+	//  g_CurrentTick, ebx` @0x5265B4, the entity gates @0x52672C..0x526742,
+	//  Entity_UpdateAllEntities(g_CurrentTick) @0x526744..0x52674B);
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (curTick @0x4B413E);
+	//  Entity_UpdateTransformAndTurret @0x440CA0 (the read @0x440D37)]
+	uint32_t frame_tick() const { return frame_tick_; }
+	void step_frame_tick() { ++frame_tick_; }
+	void zero_frame_tick() { frame_tick_ = 0; }
+	// An armed player row's secondary channel, the own row excepted: the advance
+	// runs at the head of that row's visit in the body walk, ahead of its
+	// primary, as the dual update runs the secondary first (its ring serves
+	// precede the primary's); the 16-tick selection keyed on `tick` follows the
+	// pass for every row. [orig: AnimMap_UpdateDualChannels @0x40B8C0, the
+	// secondary @0x40B908 before the primary @0x40B94E; the selection
+	// @0x4b5d71..0x4b5ea3]
+	void advance_row_weapon_channel(ClientEntityState &es, uint16_t self_handle);
+	// Every visited row's selection (a row the walk parked waits for its visit).
+	void select_row_weapon_channels(uint16_t self_handle, uint32_t tick);
+	void select_row_weapon_channel(ClientEntityState &es, uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
 	// ordinary library-only tick_remote_motion path calls this as its final
@@ -327,10 +556,11 @@ public:
 	// poses back into ClientState. Keeping this phase explicit prevents pool
 	// iteration order from leaving an earlier child one mover tick behind a
 	// later carrier.
-	// tick_sweep is true only from the per-tick mover call: it advances the
-	// pure-client 128-tick stale-carrier sweep (C2S 0x0F for carrier + child,
-	// local child destroy pending authority re-spawn) — record applies must
-	// not double-run the cadence [orig: the @0x440d41..0x440e2f sweep].
+	// tick_sweep is true only from the per-tick mover call: it runs the
+	// pure-client stale-carrier sweep on the mover tick's 0x7F phase (C2S 0x0F
+	// for carrier + child, local child destroy pending authority re-spawn) --
+	// record applies must not run it [orig: Entity_UpdateTransformAndTurret
+	// @0x440CA0, the sweep @0x440D2A..0x440E2F].
 	void refresh_carried_entities(bool tick_sweep = false);
 
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
@@ -350,11 +580,11 @@ public:
 	void apply_team_assign(uint16_t handle, uint8_t team);
 	// A player's identity pair (Flags & 0x100 rows): the NetId word the
 	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
-	// 0x50 and 0x51 rebind them. An id the character registry does not hold
-	// stays raw here; the presentation resolves it to the per-side default the
-	// same way it resolves a 0x0C record's.
+	// 0x50 and 0x51 rebind them. An id the installed character registry does not
+	// hold becomes the first combo of the row's Team side (resolve_player_net_id,
+	// D-NET-NEW-L2-27).
 	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
-	//  (NetId), the MinimapSlot_HasEntity fallback @0x431b4d..0x431b77, the
+	//  (NetId), the CAvatarDefs_HasPackedId fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
 	void apply_player_identity(uint16_t handle, uint16_t net_id, uint8_t anim_slot);
 	// S2C 0x51: one entry of the host's team-change list (the C2S 0x29
@@ -392,6 +622,7 @@ public:
 	// S2C 0x35 powerup weapon grants, in receive order; the joiner role
 	// applies the ones naming its own player (inmatch/joiner_role.cpp).
 	std::vector<WeaponPickupNotice> drain_weapon_pickups();
+	std::size_t pending_weapon_pickup_count() const { return pending_weapon_pickups_.size(); }
 	std::vector<ClientEffectCommand> drain_effect_commands();
 	void post_chat_line(ClientChatLine line) {
 		line.feed_order = next_feed_order_++;
@@ -432,6 +663,17 @@ public:
 	// feed the destroy's refNum walk (erase_entity_tree). Without a catalog a
 	// row has no def and the walk never runs. Null clears both.
 	void set_item_catalog(std::shared_ptr<const ItemReplicationCatalog> catalog);
+	// A row's def as the client's handlers read it (entity+0x20): its wire
+	// type's catalog profile, or null without a catalog or a definition.
+	const ItemReplicationProfile *item_def(uint16_t type_id) const;
+	// Install the embedder's character registry (its mounted Avatars.def, retail's
+	// g_AvatarDefs, which exists before any join): a player row's NetId the table
+	// lacks is restamped as the client's handlers restamp it
+	// (resolve_player_net_id). The embedder keeps it alive; null (no table
+	// mounted) passes every id through.
+	void set_character_registry(const inmatch::CharacterRegistry *registry) {
+		characters_ = registry;
+	}
 
 	// Inject the embedder's .adm root-motion source (JOINER role): armed rows
 	// (rm_adm_id >= 0, stamped by the embedder) advance their own AnimMap
@@ -442,6 +684,14 @@ public:
 	void set_root_motion_source(world::IRootMotionSource *source) {
 		root_motion_ = source;
 	}
+	// The joiner World's per-.adm variant-ring heads (world::AiSystem::anim_rings):
+	// every body of an .adm serves its channels' re-inits and loop wraps from the
+	// one table, the client's own World body and every decoded row alike
+	// [orig: AnimMap_LinkEntity @0x40BA10 links each body's slots to the entry's
+	// one table (slot+0x48 = &entry+0x44 @0x40BA77); AnimMap_UpdateEntity
+	// @0x40B737..0x40B778; AnimMap_AdvanceToNextAnim @0x40BDF0]. Null = every row
+	// plays entry 0 (the lib-only embedders).
+	void set_anim_variant_rings(world::AnimVariantRings *rings) { anim_rings_ = rings; }
 	// The joiner's weapon table: the held record's special_hold the player
 	// rows' secondary selection reads by the wire ADM index. Null = kind 0.
 	void set_weapon_table(const world::WeaponTable *weapons) { weapon_table_ = weapons; }
@@ -458,6 +708,86 @@ public:
 	void set_remote_motion_terrain(
 			const terrain::TerrainHeightField *terrain) {
 		remote_motion_terrain_ = terrain;
+	}
+
+	// The player body's slope conform on a replica row (row_body_conform): one
+	// ground column at the row's position offset by (dx, dy), 0x4000 up and
+	// 0x20000 down, through the row's candidate models as its movement resolve
+	// reads them, and the def's attrib word by wire type. With no probe the
+	// column is the terrain's alone (the world pass's terrain-only fallback);
+	// with no attrib resolver the attrib reads 0.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the probes @0x4B6E41 /
+	//  @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 -> Entity_RaycastGroundHeight @0x4142C0;
+	//  the def attrib test @0x4B6D99]
+	struct ReplicaGroundColumn {
+		uint16_t row_handle = 0xFFFF;
+		uint16_t type_id = 0;
+		int32_t pos[3] = {};
+		int32_t dx = 0, dy = 0;
+		uint32_t entity_flags = 0; // the row's retail-Flags mirror (rm_entity_flags)
+		int32_t source_bound_radius_q16 = 0; // the row's bound (its candidate slice's range)
+	};
+	using ReplicaGroundProbe = std::function<int32_t(const ReplicaGroundColumn &)>;
+	void set_replica_ground_probe(ReplicaGroundProbe probe) {
+		replica_ground_probe_ = std::move(probe);
+	}
+	using ReplicaDefAttribResolver = std::function<uint32_t(uint16_t type_id)>;
+	void set_replica_def_attrib_resolver(ReplicaDefAttribResolver resolver) {
+		replica_def_attrib_resolver_ = std::move(resolver);
+	}
+	// The def's second attrib word (ItemDef+0x58), by wire type: an org1 deck ride reads its
+	// parent's IsTurret bit (0x1000) [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr
+	// [eax+58h], 1000h` @0x4BA823].
+	void set_replica_def_attrib2_resolver(ReplicaDefAttribResolver resolver) {
+		replica_def_attrib2_resolver_ = std::move(resolver);
+	}
+	// A person row's channel (its .adm registry id, rm_adm_id), by wire type: -1 for a type with
+	// no usable model map, below -1 while the sources are unarmed. The 0x18 registers the
+	// spawned body's channel in its handler, so the update after it runs with one
+	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - AnimMap_RegisterEntity @0x40BB60
+	//  called @0x433DAA]; JoinerRole::resolve_row_adm_ids stamps every other row.
+	using ReplicaAdmResolver = std::function<int(uint16_t type_id)>;
+	void set_replica_adm_resolver(ReplicaAdmResolver resolver) {
+		replica_adm_resolver_ = std::move(resolver);
+	}
+	// Whether a ground entity (a wire handle) is a vehicle (def type 1) in its crash state (its
+	// +0x2EC byte): a player row on a ladder or under a canopy standing on one keeps its Yaw
+	// unclamped [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_IsVehicle
+	// @0x402BB0 called @0x4B4AE9, `cmp byte ptr [edi+2ECh], 0` @0x4B4AF2].
+	using ReplicaGroundCrashedResolver = std::function<bool(uint16_t ground)>;
+	void set_replica_ground_crashed_resolver(ReplicaGroundCrashedResolver resolver) {
+		replica_ground_crashed_resolver_ = std::move(resolver);
+	}
+	// A seated row's seat type (+0x168: 1 sitex, 2 ctrlx, 3 UseGun, 5 drvrx), the
+	// type of the carrier's seat whose bone the record names, which the attach
+	// stamps from the carrier model's userpoint; 0 for none. The embedder answers
+	// it by the carrier's wire type and the bone [orig: NetPacket_SerializePlayerState
+	// @0x4C09C0 - the Entity_TryAttachOrDetach call @0x4C1317].
+	using ReplicaSeatTypeResolver =
+			std::function<uint8_t(uint16_t carrier_type_id, uint8_t bone)>;
+	void set_replica_seat_type_resolver(ReplicaSeatTypeResolver resolver) {
+		replica_seat_type_resolver_ = std::move(resolver);
+	}
+	// A seated row's seat carry: the frame of the carrier's seat bone the record
+	// names, which a seated body's pass writes into its body heading (+0x8C), Roll
+	// and savedLivePitch (+0x90) each tick. The embedder resolves it over its own
+	// carrier and seat table; false = no frame (the row keeps its words).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - Entity_GetBoneTransformAndOrientation
+	//  @0x4B6510, +0x8C @0x4B654E, Roll @0x4B6572, +0x90 @0x4B6575]
+	// The carrier def's mount config (+0x86C) rides along, filled whenever the carrier's
+	// seat table resolves, the frame found or not: org1's seated look clamp reads it
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BEF9A..0x4BEFC3].
+	struct ReplicaSeatFrame {
+		int32_t heading = 0;
+		int32_t pitch = 0;
+		int32_t roll = 0;
+		bool mount_config_valid = false;
+		int32_t mount_config = 0;
+	};
+	using ReplicaSeatFrameResolver = std::function<bool(
+			uint16_t carrier_handle, uint16_t carrier_type_id, uint8_t bone, ReplicaSeatFrame &out)>;
+	void set_replica_seat_frame_resolver(ReplicaSeatFrameResolver resolver) {
+		replica_seat_frame_resolver_ = std::move(resolver);
 	}
 
 	// The phase-3 0x0A objective block has no on-wire discriminator. apply()
@@ -500,6 +830,12 @@ public:
 	// fold tells its own slot's notice from another's [orig:
 	// NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
 	void set_local_player_slot(uint8_t slot) { local_player_slot_ = slot; }
+	// The local body's in-place destroy (its ewep update's stale-ground leg, which a joiner's
+	// role sees as the body's own C2S 0x0F): the destroy's tail stores 0xFF in its slot byte,
+	// which local_body_slot reads until a record of the body's handle rebuilds it.
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the body's 0x0F @0x440E29, Entity_Destroy
+	//  @0x440E2F; Entity_Destroy @0x43E810 - +0x154 = 0xFF @0x43EA78]
+	void mark_local_body_destroyed() { local_body_slot_ = 0xFF; }
 
 	// The death screen's spectate writers over the replica rows
 	// (client_replica_spectate.cpp): the local player's own wire handle the
@@ -527,10 +863,10 @@ public:
 	static constexpr int kSpectateActionPrevTarget = 502;
 	bool spectate_action(int code);
 
-	// The local player's roster slot (entity+0x154, which the host stamps
-	// from the slot id S2C 0x04 byte 17 carries): the slot
-	// set_local_player_slot latched, whether or not its entity is bound.
-	int local_roster_slot() const;
+	// The local body's slot byte (g_LocalPlayerEntity+0x154), which the squad folds, the
+	// command map's walks and sends, the join send's sound and the stat fill read
+	// (client_replica_squad.cpp).
+	int local_body_slot() const;
 private:
 	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].
 	void spectate_on_entity_removed(uint16_t handle);
@@ -539,10 +875,13 @@ private:
 	std::vector<uint16_t> carrier_repair_requests_;
 	std::vector<uint16_t> death_edges_;
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
+	std::vector<uint16_t> respawn_releases_;
 	std::vector<ReplicaSlotSound> slot_sounds_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
+	ReplicaPlayerCammoResolver replica_player_cammo_resolver_;
 	ReplicaHitRecordResolver replica_hit_record_resolver_;
 	ReplicaKillSectionStore replica_kill_section_store_;
+	ReplicaDestroyObserver replica_destroy_observer_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
@@ -596,11 +935,21 @@ private:
 	// Whether a pool-0 handle is a player entity (the Flags 0x100 class bit):
 	// a decoded Player row, or the entity a bound roster slot drives.
 	bool is_player_entity(uint16_t handle) const;
+	// A player row's NetId as the client's handlers store it (client_replica_lifecycle.cpp).
+	uint16_t resolve_player_net_id(uint16_t net_id, uint8_t team) const;
 	void apply_formatted_game_text(const std::vector<uint8_t> &body); // 0x32 (join/leave lines)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
+	// A seated player row's body pass (client_replica_motion.cpp): its primary
+	// channel, the seat carry (from `seat`, its resolved seat frame, or none), a
+	// passenger's lean keys and the mounted eye.
+	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat);
+	// One row's whole visit in tick_remote_motion's walk, and the walk's corpse
+	// erase (client_replica_motion.cpp).
+	void visit_remote_row(ClientEntityState &es, uint16_t self_handle, uint32_t rm_key);
+	void erase_expired_remote_rows();
 	void erase_entity_tree(uint16_t root_handle);
 	// Entity_DropCarriedObject over a person carrier's row: the carried flag
 	// leaves it and keeps the carrier's pose for the drop the client runs
@@ -628,27 +977,79 @@ private:
 
 	ClientState state_;
 	world::IRootMotionSource *root_motion_ = nullptr;
+	world::AnimVariantRings *anim_rings_ = nullptr;
 	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
-	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
+	uint32_t frame_tick_ = 0; // g_CurrentTick's stand-in (frame_tick())
+	ClientVehicleSpawnAvailability own_vehicle_spawn_;             // use_vehicle_spawn_store
+	ClientVehicleSpawnAvailability *vehicle_spawn_store_ = nullptr;
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
 	std::vector<ReplicaPeerSphere> contact_peer_scratch_;
+	// tick_remote_motion's walk order over state_.entities (reused capacity).
+	std::vector<size_t> walk_order_scratch_;
+	// A parked row: its handle and its index in state_.entities when parked, re-checked
+	// against the handle at its visit (a row the walk's first half erased moved).
+	struct ParkedRow {
+		uint16_t handle = 0;
+		size_t index = 0;
+	};
+	// The parked row's entry now: at its index while that still holds it, else by handle.
+	ClientEntityState *parked_row(const ParkedRow &parked);
+	// The own-body split (set_self_body_split): the rows the walk parked through the
+	// own row's slot (middle_rows_) and past it (parked_rows_), each in walk order,
+	// and the tick they wait in.
+	bool self_body_split_ = false;
+	std::vector<ParkedRow> middle_rows_;
+	std::vector<ParkedRow> parked_rows_;
+	uint16_t parked_self_ = 0xFFFFu;
+	uint32_t parked_tick_ = 0;
+	// The pool-1 interleave (set_pool1_interleave): the pool-1 rows the walk parked, in
+	// walk order, and by slot (the handle's low twelve bits) each one's index in
+	// state_.entities when parked plus one, 0 once visited (re-checked against its handle
+	// at its visit), with the count still parked: a slot's own entry, as the World's walk
+	// reaches each slot (D-NET-NEW-LF-26).
+	bool pool1_interleave_ = false;
+	std::vector<uint16_t> pool1_rows_;
+	std::vector<size_t> pool1_parked_;
+	size_t pool1_parked_count_ = 0;
+	// The pool-1 rows the World's walk never reached, ahead of the parked pool-0 rows.
+	void finish_pool1_rows();
+	// The walk's expired corpses (handle, the def names a decay), erased after
+	// each half's visits.
+	std::vector<std::pair<uint16_t, bool>> remote_motion_expired_;
+	// One parked half's visits (tick_remote_motion_through_self / _after_self).
+	void visit_parked_rows(std::vector<ParkedRow> &rows);
+	// A compact-carried row that follows its carrier between records: a resolved
+	// seat-local sample on a carrier, except a world-mover vehicle, which the
+	// embedding sim predicts (its row publishes the mirrored pose).
+	static bool follows_carrier_seat(const ClientEntityState &child);
+	bool deck_ride_yaw_adds(const ClientEntityState &row) const;
+	// One such row's follow: its pose from its carrier row's live pose and its
+	// seat-local sample; a carrier row that is gone invalidates the sample.
+	static void follow_carrier_seat(ClientEntityState &child, const ClientEntityState *carrier);
 	ReplicaBoundRadiusResolver replica_bound_radius_resolver_;
+	ReplicaGroundProbe replica_ground_probe_;
+	ReplicaDefAttribResolver replica_def_attrib_resolver_;
+	ReplicaDefAttribResolver replica_def_attrib2_resolver_;
+	ReplicaAdmResolver replica_adm_resolver_;
+	ReplicaGroundCrashedResolver replica_ground_crashed_resolver_;
+	ReplicaSeatTypeResolver replica_seat_type_resolver_;
+	ReplicaSeatFrameResolver replica_seat_frame_resolver_;
 	CarrierPoseProvider carrier_pose_provider_;
+	PersonEwepMover person_ewep_mover_;
+	GroundOccupantProvider ground_occupant_provider_;
 	int32_t water_z_ = 0;
-	bool has_water_ = false;
 	ItemClassResolver item_resolver_;                    // items.def table (authoritative)
 	std::shared_ptr<const ItemReplicationCatalog> item_catalog_; // the items.def def facts
-	// A row's def as the destroy reads it (entity+0x20): its wire type's
-	// catalog profile, or null without a catalog or a definition.
-	const ItemReplicationProfile *item_def(uint16_t type_id) const;
-	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
+	const inmatch::CharacterRegistry *characters_ = nullptr; // the embedder's Avatars.def
+	std::function<EntityClass(uint16_t)> resolver_;     // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
     GuidedRoundResolver guided_round_resolver_;
     std::function<void(const ClientRoundEvent &)> round_receiver_;
+    DeployedRoundWalk deployed_round_walk_;
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<ClientGameText> pending_game_texts_;
@@ -672,6 +1073,9 @@ private:
 	uint16_t spectate_local_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
 	uint8_t local_player_slot_ = 0;
+	// The local body's slot byte as its last record or its in-place destroy stored it; -1 while
+	// no record of the viewer's handle has landed (local_body_slot reads the latched slot).
+	int16_t local_body_slot_ = -1;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is
 	// zero. Retail also has unrelated process-global consumers that this decoded

@@ -271,6 +271,24 @@ void test_kill_event_adds_the_victim_score() {
     CHECK(dm->match.team_stats(1)[MatchStats::kUnitScore] == 0);
 }
 
+// The kill accounting returns off the authority: a peer that reaches a lethal
+// edge (the projectile site's gate, which tests no authority of its own) scores
+// nothing, the authority scores the victim's word. [orig: Score_ProcessKillEvent
+//  @0x4FD400 - `cmp g_NapiNPCtx.is_authority, 0` @0x4FD412, ahead of the event-12
+//  call @0x4FD438; Projectile_ProcessDamageOnTarget @0x4E80F7..0x4E8133]
+void test_kill_event_scores_on_the_authority_alone() {
+    auto world = make_world(gt::kTeamDeathmatch);
+    const EntityHandle ace = player(*world, 0, 1);
+    const EntityHandle rifleman = npc(*world, 2);
+    world->registry.get(rifleman)->item_score = 25;
+    world->ai.is_authority = false;
+    world->match.process_kill_event(*world, ace, rifleman);
+    CHECK(world->match.player(ace)->stats[MatchStats::kUnitScore] == 0);
+    world->ai.is_authority = true;
+    world->match.process_kill_event(*world, ace, rifleman);
+    CHECK(world->match.player(ace)->stats[MatchStats::kUnitScore] == 25);
+}
+
 // Scorer event 1: one shot plus the FIRE value per accepted round, with the
 // team-mode mirror; a spectator's round scores nothing.
 // [orig: Server_ClientFiredRound @0x50BAA0 (the event-1 call @0x50C727);
@@ -395,8 +413,12 @@ void test_points_share_with_the_link() {
     CHECK(world->registry.get(hull)->primary_occupant == driver);
 }
 
-// The round clock keeps counting after the round ends (no round-over latch),
-// in the gameplay phase only. [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
+// The round clock is the main frame's step, not the server tick's match
+// service: it keeps counting after the round ends (no round-over latch), and
+// holds while the pre-round countdown runs and under the epilog screen
+// (D-NET-NEW-L1-55). [orig: Game_ProcessMainFrame - g_EpilogScreenActive
+// @0x5265EA, g_PreRoundDelayTimer @0x5265F2, `jle` @0x526600, the `sub`
+// @0x526602, ahead of the Server_TickUpdate call @0x5266B6]
 void test_round_clock_runs_through_the_linger() {
     MatchRules timed = rules(gt::kTeamDeathmatch);
     timed.game_time_minutes = 1;
@@ -405,20 +427,35 @@ void test_round_clock_runs_through_the_linger() {
     world->match.configure(timed);
     world->rules.mp_session = true;
     player(*world, 0, 1);
+    CHECK(world->match.remaining_ticks() == 3720);
+    // The server tick's match service steps no clock.
     world->match.advance_tick(*world);
+    CHECK(world->match.remaining_ticks() == 3720);
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3719);
     world->process_round_end(1);
-    const int32_t at_end = world->match.remaining_ticks();
     for (int tick = 0; tick < 10; ++tick)
-        world->match.advance_tick(*world);
-    CHECK(world->match.remaining_ticks() == at_end - 10);
-    world->match.advance_tick(*world, TickPhase::PreRound);
-    CHECK(world->match.remaining_ticks() == at_end - 10);
+        world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->preround_delay_seconds = 1;
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->preround_delay_seconds = 0;
+    world->epilog.screen_active = true;
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 3709);
+    world->epilog.screen_active = false;
+    world->match.set_remaining_ticks(0);
+    world->match.step_round_clock(*world);
+    CHECK(world->match.remaining_ticks() == 0);
 }
 
 // The pre-board winner pass is a team-game pass (the team bit), refuses a
-// spectator slot, and leaves non-team games to the post-board award.
+// spectator slot, and leaves non-team games to the post-board award. A row the
+// pass skips keeps the add's field 35 of 1.
 // [orig: Server_ProcessRoundEnd @0x516536..0x51658C (the team bit @0x516541);
-// GameEvent_ProcessScoring @0x52F6E5]
+// GameEvent_ProcessScoring @0x52F6E5; CPlayerStats_InitWeaponTracking +0x8C = 1
+// @0x52C047]
 void test_team_winner_pass_needs_the_team_bit() {
     {
         auto world = make_world(gt::kTeamDeathmatch);
@@ -427,7 +464,7 @@ void test_team_winner_pass_needs_the_team_bit() {
         world->match.set_player_spectator(watcher, true);
         world->process_round_end(1);
         CHECK(world->match.player(blue)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(world->match.player(watcher)->stats[MatchStats::kRoundMarker] == 0);
+        CHECK(world->match.player(watcher)->stats[MatchStats::kRoundMarker] == 1);
     }
     {
         // Every DM Player is team 1; a team-1 result marks only the top score.
@@ -437,7 +474,7 @@ void test_team_winner_pass_needs_the_team_bit() {
         world->match.record_death(*world, bee, ace);
         world->process_round_end(1);
         CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 2);
-        CHECK(world->match.player(bee)->stats[MatchStats::kRoundMarker] == 0);
+        CHECK(world->match.player(bee)->stats[MatchStats::kRoundMarker] == 1);
     }
 }
 
@@ -550,7 +587,7 @@ void test_winner_award_needs_a_score_table() {
     world->process_round_end(0);
     CHECK(!world->match.result().draw);
     CHECK(world->match.result().players[0].identity.entity == ace);
-    CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 0);
+    CHECK(world->match.player(ace)->stats[MatchStats::kRoundMarker] == 1); // the add's seed
 }
 
 // Scorer event 5: MEDICHEAL (RecordEvent 7, value 6) on the medic and its
@@ -639,9 +676,10 @@ void test_dfx2_round_win_multiplier() {
         world->match.configure(r);
         const EntityHandle blue = player(*world, 0, 1);
         const EntityHandle red = player(*world, 1, 2);
-        // The spawn's seed (server_spawn.cpp), as every live slot has it.
-        world->match.player(blue)->stats[MatchStats::kRoundMarker] = 1;
-        world->match.player(red)->stats[MatchStats::kRoundMarker] = 1;
+        // The add's seed (Match::upsert_player), as every live slot has it
+        // [orig: CPlayerStats_InitWeaponTracking +0x8C = 1 @0x52C047].
+        CHECK(world->match.player(blue)->stats[MatchStats::kRoundMarker] == 1);
+        CHECK(world->match.player(red)->stats[MatchStats::kRoundMarker] == 1);
         world->match.record_death(*world, red, blue); // blue 10 points, red -2
         CHECK(world->match.computed_score(*world->match.player(blue), true) == 10);
         world->process_round_end(1);
@@ -701,6 +739,7 @@ int main() {
     test_npc_person_victims_score_their_killer();
     test_non_player_killer_credits_its_link();
     test_kill_event_adds_the_victim_score();
+    test_kill_event_scores_on_the_authority_alone();
     test_shot_scores_fire();
     test_enemy_player_kill_bonuses();
     test_revive_scores_medicsave();

@@ -12,6 +12,9 @@ class HudInsetScope : public Control {
 	SubViewport *target_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	opennova::hud::InsetScopeGeometry geometry_;
+	// The view block the pass leaves (the Inset's compose without its slot
+	// offsets), stamped as the camera is.
+	Transform3D view_block_;
 	bool active_ = false;
 	int aspect_mode_ = 0;
 
@@ -34,6 +37,9 @@ public:
 	// (scope down, no valid ring geometry, or hidden in tree): the view the
 	// world's particle renderer compiles its second scene pair for.
 	Camera3D *get_active_render_camera() const;
+	// The view block of the last update: the pose the Inset pass's water
+	// mirror reflects (world/local_player_view.h inset_view_block).
+	Transform3D get_view_block_transform() const { return view_block_; }
 	Rect2 get_render_bounds() const;
 	void _draw() override;
 };

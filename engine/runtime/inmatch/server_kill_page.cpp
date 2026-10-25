@@ -132,7 +132,8 @@ std::vector<ProtocolMessage> Server_HandleKillPageRequest(const NapiNPServerCtx 
 	const uint32_t window_max = read(4);
 	const uint16_t start = static_cast<uint16_t>(read(2));
 	std::vector<uint8_t> page = Server_CollectKillPage(*world,
-			world->match.outcome().ended, window_min, window_max, start);
+			ctx->net_spawn_suspended != 0 || world->match.outcome().ended, window_min,
+			window_max, start);
 	if (page.empty() || !is_in_match(conn)) return replies;
 	replies.push_back(make_protocol_message(s2c::KILL_BY_SLOT, std::move(page)));
 	return replies;

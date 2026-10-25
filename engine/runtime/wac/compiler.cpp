@@ -211,6 +211,7 @@ public:
 		// script may consume an FX handle already held in a mission variable.
 		if (env_.effects) prog_.effect_names = env_.effects->interned_names();
 		if (env_.sounds) prog_.sound_names = env_.sounds->names();
+		for (const Declaration &d : declarations_) prog_.declarations.push_back({d.name, d.type});
 		return std::move(prog_);
 	}
 
@@ -626,7 +627,7 @@ private:
 			if (f.params_pending != 0) {
 				// A refused token takes the scratch dword and feeds the next
 				// slot. [orig: @0x4F3A71..0x4F3AFD, the scratch @0x4F3AE2, the
-				// jump back to loc_4F3990 @0x4F3AED]
+				// jump back to 0x4F3990 @0x4F3AED]
 				--f.params_pending;
 				int out_type = 0;
 				const std::optional<Operand> param =
@@ -1254,7 +1255,9 @@ private:
 			// lookup; the leg never answers NULL. The port binds the net id
 			// when the VM first meets its world, and the embedder's registry
 			// answers the "Unknown SSN" question the pooled handle answered.
-			// The 10000 player alias (mission::kPlayerSsn) is EntityCommands::resolve_ssn's
+			// The registry's record-SSN lookup holds no player: a player's SSN is its DcbId,
+			// 10000 + its slot (world::entity_dcb_id, which EntityCommands::resolve_ssn keys
+			// when the VM binds), so 10000 (mission::kPlayerSsn) stays exempt here as the
 			// authoring seam, not a retail lookup. [orig: @0x4F2E97..0x4F2EED
 			// -> EntityPool_FindByNetId @0x4F0A20, the 16-bit key @0x4F0A3A]
 			const int32_t net = crt_atol(s + p) & 0xFFFF;

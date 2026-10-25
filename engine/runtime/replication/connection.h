@@ -11,7 +11,7 @@
 namespace opennova::replication {
 
 // The witnessed transport mode a connection carries [orig: CGameSession_SetConnectionMode
-// @0x4c49f0 -> g_NapiNPCtx.transport_mode +0x50; CNapiNetwork_SetTransportMode @0x4c8750
+// @0x4c49f0 -> g_NapiNPCtx.network_type +0x50; CNapiNetwork_SetTransportMode @0x4c8750
 // opens a socket only for 2/3/4 — mode 1 is in-process]. A connection's mode IS the
 // original's mode, not an invented type (ADR 0011).
 enum class TransportMode : uint8_t {
@@ -117,13 +117,15 @@ struct Connection {
 	uint8_t uplink_frame_rate = 0;
 	uint8_t uplink_cpu_percent = 0;
 
-	// Per-connection round-event watermark: the newest world.out.rounds sequence already swept
-	// into this connection's 0x0A tag-2 stream [orig: playerSlot+97544, stamped = stat_id after
-	// each Server_BuildRoundEventListForPlayer @0x4ffee0 sweep; its non-zero gate skips the walk
-	// until the player is armed]. Armed on the first in-match emit at the CURRENT ring sequence,
-	// so a joiner never receives the pre-join round backlog. (D-NET-152)
+	// Per-connection round-event watermark: the frame clock of the newest rounds already swept
+	// into this connection's 0x0A tag-2 stream; 0 sends none. The join (and any entry into game
+	// state 10 or slot state 6) arms it at the frame clock less one, leaving either state
+	// disarms it, and each walk stamps the clock (select_round_events). (D-NET-152)
+	// [orig: playerSlot+97544 - CNetPlayer_SetGameState @0x4C422D (enter 10) / @0x4C4135
+	//  (leave 10), PlayerSlot_SetState @0x5100B2 (enter 6) / @0x510056 (leave 6),
+	//  Server_OnPlayerJoin @0x51A74C; Server_BuildRoundEventListForPlayer @0x4FFEE8 (the gate),
+	//  @0x5001A8..0x5001AE (the stamp)]
 	uint32_t round_watermark = 0;
-	bool round_watermark_armed = false;
 
 	// RESPAWN-PENDING / undeployed — the reimpl of the player slot's stateByte bit4
 	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones,
@@ -224,15 +226,6 @@ struct Connection {
 	// [orig: playerSlot+460 in Server_UpdatePlayerBreathTimers @0x50D770;
 	// GameEvent_PlayerDeath @0x5172EC..0x51732A]
 	uint32_t underwater_breath_samples = 0;
-
-	// The authority tick of the last completed deployment. Validity is explicit
-	// because tick zero is a real stamp and unsigned subtraction preserves the
-	// original counter's wrap behavior. A death within 620 ticks forces the
-	// +360/+364 hold to three seconds even when the configured timeout is larger.
-	// [orig: playerSlot+96456 read @0x516edc; deployment stamp in the
-	// Server_DeployPlayer path @0x517740]
-	uint32_t last_deploy_tick = 0;
-	bool last_deploy_tick_valid = false;
 };
 
 } // namespace opennova::replication

@@ -6,8 +6,10 @@
 // packed handle (pool<<12 | slot) — 4-bit pool index, 12-bit slot.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 #include <runtime/world/weapon_fsm.h>
@@ -92,6 +94,46 @@ struct EntityHandle {
     bool operator!=(const EntityHandle &o) const { return packed != o.packed; }
 };
 
+// A target as retail's target pointers hold one (an AiSlot's +0xC, a guided round's
+// +0x2D4): an entity, or a round of the projectile array (RoundSim::rounds' slot), which
+// the heat-seeker query's 0x200 leg returns. The rounds lie outside g_PoolList, so the
+// wire's pool walk finds no pool for one and writes 0xFFFF: a round's `entity` is
+// kInvalid, whose word is that 0xFFFF.
+// [orig: Entity_FindTargets @0x53A610 (the ring leg's candidate @0x53AD8E);
+//  NetPacket_SerializeRoundEvent @0x504820 (the walk's miss @0x504886);
+//  Entity_SerializeGuidedMissileState @0x447C50 (@0x447CD2, @0x447D81, @0x447FD7)]
+struct TargetRef {
+    EntityHandle entity;
+    int32_t round = -1; // a RoundSim::rounds slot; -1: none
+    // A joiner's decoded remote person by its wire handle (World::wire_person), the pool-0
+    // entity retail's client built for it; 0xFFFF: none.
+    uint16_t wire_person = 0xFFFF;
+
+    constexpr TargetRef() = default;
+    constexpr TargetRef(EntityHandle h) : entity(h) {}
+    static constexpr TargetRef of_round(int32_t slot) {
+        TargetRef t;
+        t.round = slot;
+        return t;
+    }
+    static constexpr TargetRef of_wire_person(uint16_t wire_handle) {
+        TargetRef t;
+        t.wire_person = wire_handle;
+        return t;
+    }
+    constexpr bool valid() const { return entity.valid() || round >= 0 || wire_person != 0xFFFF; }
+    // The word a pool walk of the target finds, pool << 12 | slot: a decoded person's slot is
+    // its wire handle; a round lies in no pool (0xFFFF), as does no target.
+    // [orig: NetPacket_WriteEntityPositionUpdate @0x42A610 - the walk @0x42A713..0x42A745]
+    constexpr uint16_t pool_word() const {
+        return wire_person != 0xFFFF ? wire_person : entity.packed;
+    }
+    bool operator==(const TargetRef &o) const {
+        return entity == o.entity && round == o.round && wire_person == o.wire_person;
+    }
+    bool operator!=(const TargetRef &o) const { return !(*this == o); }
+};
+
 // Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
 // pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
@@ -152,6 +194,13 @@ struct Seat {
     std::string source_name;     // original seat/userpoint name (`sitex00`, `drvrx01`, `UseGun`)
     Vec3 seat_local;            // seat offset from the vehicle origin (mission space, Z-up)
     int16_t yaw_offset = 0;     // the seat userpoint's authored facing vs the vehicle yaw, degrees
+    // The seat userpoint's own 16.16 words, as the model's bone record holds them: the
+    // position (bone+0..+8) and the direction (bone+12..+20) the seat bone pose
+    // transforms (seat_bone_pose_on_carrier_matrix). [orig:
+    // Entity_GetBoneTransformAndOrientation @0x4B0C50 - the position @0x4B0D29..0x4B0D42,
+    // the direction @0x4B0D5A..0x4B0D64]
+    int32_t bone_point[3] = {};
+    int32_t bone_direction[3] = {};
     // An items.def addeweap* anchor is not a mount-facing convention. Retail
     // builds the child entity's complete orientation from this userpoint's
     // authored direction and live owning bone every update. The flag keeps
@@ -334,8 +383,43 @@ struct VehicleTrailState {
 	uint16_t effect_state[2] = {};
 };
 
+// The weapon slot an entity's EquippedSlot (+0x118) or its saved slot (+0x308)
+// names: none, a slot of the player's own table (its combo, and the def the slot
+// held when named), or a carrier's MountSlot (a gun's +0x2B4, a vehicle's +0x474).
+// The local player's pair lives in LocalPlayer (WeaponInventory's equipped and
+// selected combos, LocalPlayerWeapon's borrowed slot); these carry every other
+// entity's, the host's record of a remote player's among them.
+// [orig: entity+0x118 / +0x308; Entity_AttachToUseGunSlot @0x546C42..0x546C4E;
+//  Entity_AttachToVehicleSlot @0x494867..0x494898; Entity_DetachFromVehicle
+//  @0x435671..0x435696; Server_ClientFiredRound @0x50C1D4..0x50C28D;
+//  NapiNPServerMsg_HandlePlayerLoadout @0x515F52..0x515F8A]
+struct WeaponSlotRef {
+	enum Kind : uint8_t { kNone, kPersonal, kMount };
+	Kind kind = kNone;
+	uint16_t combo = 0;   // kPersonal: the slot's combo
+	uint8_t adm = 0xFF;   // kPersonal: the def that slot held
+	EntityHandle mount{}; // kMount: the carrier whose slot is named
+	bool names_mount(EntityHandle carrier) const { return kind == kMount && mount == carrier; }
+	bool operator==(const WeaponSlotRef &o) const {
+		return kind == o.kind && combo == o.combo && adm == o.adm && mount == o.mount;
+	}
+};
+
+// One slot of a player's own weapon table on the host: the def the slot holds and
+// the MountSlot's state (its action FSM and the clip, +0x10). A remote player's
+// table is the player record's 780 rows of 100 bytes at +0x1D0, indexed by the combo
+// category * 65 + rank; its EquippedSlot names a row by that combo. The local
+// player's table is its WeaponInventory. [orig: Server_ClientFiredRound - the row
+// @0x50C27F..0x50C282; NapiNPServerMsg_HandlePlayerLoadout @0x515F5B;
+// Server_InitAllPlayerEntitiesForRound @0x516AA0 (the reload @0x516BFC..0x516C0E)]
+struct PersonalWeaponSlot : WeaponSlotState {
+	uint8_t adm_index = 0; // the def the row holds [orig: slot+0x20]
+	PersonalWeaponSlot() = default;
+	PersonalWeaponSlot(uint8_t adm, int32_t rounds) : adm_index(adm) { clip = rounds; }
+};
+
 // The lndm entity overlay. Zero-filled, unauthored slots still participate.
-// [orig: Entity_InitHardpoints @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
+// [orig: Minefield_InitEntity @ 0x4417D0; Entity_LandmineThink @ 0x441A40]
 struct MinefieldState {
     static constexpr int kSlots = 14;
     bool initialized = false;
@@ -360,6 +444,13 @@ struct Entity {
     bool door_initialized = false;
     bool door_event = false;
     bool door_motion = false;
+    // The ele0 row's mover (def+0x158) and its lift +0x1A8 on an item (the sum of its steps).
+    // Its other words are the ones the spawn writes: the state +0x29C (0 lowering, 1 stopped,
+    // 2 raising) veh.speed, the previous state +0x2A0 script_next_ssn, the vertical step +0xA0
+    // veh.slide_z. [orig: Entity_UpdateFallAndLandState @0x4A20E0; g_EntityClassPhysicsTable
+    //  @0x82ABC8 (the ele0 row @0x82ABEC)]
+    bool elevator_motion = false;
+    int32_t elevator_lift = 0;
     uint32_t door_touch_mask = 0;
     char door_open_sound[25] = {};
     char door_close_sound[25] = {};
@@ -402,6 +493,12 @@ struct Entity {
     bool has_item_def = false; // retail entity+0x20 ItemDef pointer is non-null
 	bool render_sway = false;
 	uint8_t item_type = 0; // raw ItemDef+0x5C type (1 vehicle, 3 person)
+	// The def's mass word (ItemDef+0x908, raw atol, the allocator's 5 when the
+	// def authors none), stamped by the item-traits sweep for every def: the
+	// vehicle contact pass compares it whatever the candidate's def type.
+	// [orig: ItemDef_ParsePhysicsProperty store @0x49DC76;
+	//  Entity_CheckCollisionState @0x462E94 / @0x462E9A / @0x462EE8]
+	int32_t def_mass = 0;
 	// Whether the live graphic model carries the +0xE0 portal/occlusion pointer
     // used by Entity_ClassifyForMinimap for ordinary Building entries. Kept as
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di
@@ -411,6 +508,35 @@ struct Entity {
     // the persistent map bank draws only model-bearing slots.
     // [orig: MapOverlay_RenderAllByLayer @0x5BE6C4..0x5BE6C9]
     bool has_graphic_model = false;
+    // That model's userpoint count (the model +0xBC; 0 with no model): the
+    // entry admission refuses a carrier whose model holds none.
+    // [orig: Entity_CanEnterVehicle @0x435480 (@0x43549C..0x4354A3)]
+    uint32_t graphic_model_userpoints = 0;
+    // That model's collision object count (the CMDL header's, its collision block's
+    // +0x68; 0 with no model or no block): a one-object model on a def without the
+    // EWeap bit takes BoneCallback_Simple as a vehicle's does, so its seat bone is the
+    // userpoint through the carrier's own matrix (vehicle_mount.cpp).
+    // [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (the second arm
+    //  @0x43A060..0x43A070 -> BoneCallback_Simple @0x43A072);
+    //  Threedi_BuildCollisionModelFromChunks @0x5B3BF0 (the +0x68 store @0x5B3D3C)]
+    uint32_t graphic_model_collision_objects = 0;
+    // That model's first "boat" userpoint, else its first "helo" one: the
+    // model-space position words (16.16) a vehicle bay's C2S 0x40 spawns its
+    // deployable at, through the bay's placement; invalid with neither (or no
+    // model), where the spawn rises 2.0 over the bay instead.
+    // [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0 (the two
+    //  ModelGPM_FindUserpointByName calls @0x51C63D / @0x51C654 on +0x30)]
+    bool deploy_point_valid = false;
+    int32_t deploy_point[3] = {};
+    // That model's first "psp" userpoint (the player spawn point, an LFP's interior
+    // floor spot): the model-space position words (16.16) a deploy onto this entity,
+    // or the objective Co-op no-pick arm's spawn entity, places the player at
+    // through the entity's euler placement; invalid with none (or no model), where
+    // the placement rises 1.0 over the entity instead (D-NET-NEW-L1-39).
+    // [orig: Server_PositionPlayerForSpawn @0x50CF60 - ModelGPM_FindUserpointByName
+    //  (+0x30, aPsp @0x7CF9C4) called @0x50CFEE / @0x50D533]
+    bool spawn_point_valid = false;
+    int32_t spawn_point[3] = {};
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).
@@ -469,10 +595,29 @@ struct Entity {
 
     uint16_t facial_slot = 0; // entity+440, GRM slot index | 0x8000
     bool facial_checked = false; // model initialization attempted for this allocation
-    Vec3 position;            // mission space (Z-up)
-    int16_t yaw = 0;
-    int16_t pitch = 0;
-    int16_t roll = 0;
+    // Mission space (Z-up): entity+4/+8/+0xC, the 16.16 words retail keeps
+    // (geom.h EntityPosition; D-NET-507).
+    EntityPosition position;
+    // The Yaw word (entity+0x10): the engine-frame BAM32 heading retail keeps
+    // per entity, the one store every reader reads. A placed row holds its
+    // spawn angle, ((90 - yaw) << 16) / 360 << 16 with the low half zero
+    // (world::spawn_angle_bam); a mover stores its live word. A reader that
+    // wants mission degrees converts it (mission_yaw_deg_from_bam_heading)
+    // (D-NET-NEW-L6-2). [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66;
+    //  Entity_ResetToSpawnState @0x4B9610 - the read @0x4B964A] Every placement
+    // stores it; a bare seed starts at mission yaw 0's word, the facing the
+    // whole-degree field this replaced defaulted to. A row retail builds from a
+    // memset and never places keeps word 0, and its port stores 0 (the user
+    // waypoint, a player spawn with no start marker).
+    int32_t heading = 0x40000000;
+    // The Pitch and Roll words (entity+0x14 / +0x18), BAM32 like the Yaw word:
+    // a placed row holds the spawn angle of the record's degrees,
+    // ((deg << 16) / 360) << 16 with the low half zero (world::spawn_angle_bam);
+    // a mover stores its live words; every reader reads them, a reader that
+    // wants degrees converts (D-NET-NEW-L6-3). [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - @0x40EB69..0x40EB86 (Pitch), @0x40EB89..0x40EBA6 (Roll)]
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
     // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16): the
     // stance-driven eye above the entity origin, restamped each body tick.
     // NPCs take the capsule extent tilted by lean (lateral = delta*sin(lean)*
@@ -501,7 +646,7 @@ struct Entity {
     uint32_t flags = 0;
     // Spawn-point backup of position, written by world::entity_reset_to_spawn_state
     // [orig: Entity_ResetToSpawnState backs Position into pad9[124/128/132]].
-    Vec3 spawn_position;
+    EntityPosition spawn_position;
 
     uint8_t team = 0;
     // GamePlayerEntity.playerClass (entity+0x294) — the soldier class 5..9. The joiner's client
@@ -520,16 +665,6 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
-    // A user waypoint's exact 16.16 x / y (entity+4 / +8): the dwords
-    // Waypoint_CreateForPlayer stores from its arguments, compares in its
-    // duplicate wipe and the share writes back out. `position` mirrors them
-    // as floats, which drop the low bits past 256 units. Zero on every other
-    // entity (world/user_waypoints.h).
-    // [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d (the stores),
-    //  @0x4dfdba / @0x4dfdc6 (the wipe's compares);
-    //  NetPacket_WriteTypeNameAndPosition @0x42b1bc / @0x42b1cd (the share)]
-    int32_t waypoint_x_q16 = 0;
-    int32_t waypoint_y_q16 = 0;
     // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
     // copied as two dwords for an AIData def and never rewritten; the 0x0D
     // record's AI trailer streams it. The port's .aip resolver reads its own
@@ -622,7 +757,9 @@ struct Entity {
     int32_t uniform_scale_q16 = 0;
     bool alive = true;
     // Retail entity+0x124 damage-disabled/respawn state: 0 damageable, 620
-    // join-pending countdown, -1 dead. Projectile damage gates on nonzero.
+    // join-pending / spawn-protection countdown, -1 a spectator or observer
+    // (the death stores nothing here, D-NET-NEW-L6-4). Projectile damage gates
+    // on nonzero.
     int32_t damage_state = 0;
     // The pending death-anim selection (GamePlayerEntity +0x2C0 deathAnimStateId):
     // written at DAMAGE time by the kill (RoundSim bullet selection [orig:
@@ -701,11 +838,12 @@ struct Entity {
     uint8_t player_slot_id = 0;
     uint8_t radio_request = 0; // entity+885 [orig: @0x430C50]
     uint8_t radio_request_seconds = 0; // entity+886
-    // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
-    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol). 0 = unassigned
-    // (the encoder falls back to its D-NET-137 shim). Non-players serialize Entity::net_id
-    // (the WAC SSN space) there instead. [orig: Server_PlayerAdd @0x51cbc0 slot+440 ->
-    // entity+0x15C; NapiNetConfig_LoadFromConnTags @0x4c7260 jsp[56]/jsp[58]]
+    // The wire NetId (entity+0x15C). A player's is the minimap/character-slot id, picked per
+    // assigned team from the joiner's CI0/CI1 join vars (low u16 of the atol); 0 = unassigned
+    // (the encoder falls back to its D-NET-137 shim). Every other row keeps the 0 the BMS
+    // spawn's memset left (D-NET-512); the SSN is Entity::net_id (+0x7C).
+    // [orig: Server_PlayerAdd @0x51cbc0 slot+440 -> entity+0x15C; NapiNetConfig_LoadFromConnTags
+    //  @0x4c7260 jsp[56]/jsp[58]; Entity_SpawnFromBMSRecord @0x40E9F0 - memset @0x40EA27]
     uint16_t minimap_net_id = 0;
     // MoveOrder bit layout (the reconstructed word = net_move_input | net_stance_bits << 8;
     // [orig: Player_PackInputStateToEntity @0x4df68f-0x4df741; stance reads
@@ -748,7 +886,11 @@ struct Entity {
     // AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). Spawn default 44 (idle2)
     // [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
     uint8_t net_anim_state = 44;
-    uint8_t net_anim_pending = 0;
+    // The pending word is the whole +0x2B8 dword: the emit tests the dword and sends its low
+    // byte, and a person body on the rokt row sets its high word (+0x2BA) alone.
+    // [orig: `cmp dword ptr [edi+2B8h], 0` @0x4C0CC7, `mov cl, [edi+2B8h]` @0x4C0CD6;
+    //  Entity_UpdateRocketFlag @0x443DD0 - the +0x2BA store @0x443DDE]
+    int32_t net_anim_pending = 0;
     uint8_t net_anim_phase = 0;
     // Analog control axes (entity+0x130..+0x132, the extended-uplink off-21..23 bytes):
     // joystick steering/throttle. The vehicle motor consumes the CONTROLLING occupant's
@@ -766,41 +908,64 @@ struct Entity {
 	// to the WPN_M4AUTO table index [orig: PlayerClass_InitEntity @0x4B1116 resolves by name].
 	// (D-NET-143)
 	uint8_t equipped_adm_index = 0xFF;
-    // UseGun temporarily replaces EquippedSlot with the parent's embedded slot.
-    // Preserve the personal AdmDef byte. Detach restores it for a player-classified
-    // occupant and clears the equipped byte for an NPC.
-    // [orig: Entity_AttachToUseGunSlot @0x546c42; Entity_DetachFromVehicle
-    //  restore @0x435671-0x435687, NPC clear @0x435694-0x4356aa]
-    uint8_t pre_use_gun_equipped_adm_index = 0xFF;
+	// The ammo-def word (entity+0x160) the C2S 0x06 writer reads off its shooter, whose low
+	// byte rides off32. Its writers: the player class init's 3, an EWeap row's slot init (its
+	// def's word), a non-player's detach (0) and the host's store of a client's byte. No
+	// weapon switch or grant writes it, so a player's body sends 3 whatever it carries (every
+	// retail joiner's 0x03, D-WPN-8).
+	// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - the read @0x42C01A, the shooter
+	//  @0x42C047 -> NetPacket_WriteEntityPositionUpdate's byte @0x42A7DA; PlayerClass_InitEntity
+	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitInfantryBoneData's
+	//  attrib-0x20 leg @0x49016D..0x49017B; Entity_DetachFromVehicle @0x4356A3;
+	//  Server_ClientFiredRound @0x50BD48]
+	int16_t ammo_def_word = 0;
+    // The occupant's seat borrows its carrier's embedded slot (a UseGun seat, an EWeap
+    // carrier's ctrlx). Neither attach writes the AdmDef byte (+0x2B0): the local
+    // player's switch completion stamps it, a remote player's uplink and fire carry
+    // it, an NPC's mounted fire request copies the carrier's; the detach zeroes it
+    // for a non-player alone (NEW-L7-3).
+    // [orig: Entity_AttachToUseGunSlot @0x546B80 and Entity_AttachToVehicleSlot
+    //  @0x4946D0 (no +0x2B0 store); Entity_DetachFromVehicle @0x4355F0 (the
+    //  non-player's zero @0x43569C); WeaponAction_SwitchFrom @0x543496;
+    //  WeaponAction_SwitchRank @0x54355A]
     bool use_gun_slot_swapped = false;
+    // EquippedSlot (+0x118) and the saved slot (+0x308) of any entity but the local
+    // player (WeaponSlotRef above). The attaches that borrow a carrier's slot point
+    // the first at it and save the second; a seat-2/3 detach points the first back
+    // at the second; the weapon walk pumps the first, a borrowed one on foot too.
+    WeaponSlotRef equipped_slot;
+    WeaponSlotRef selected_slot;
+    // A remote player's own weapon table on the host, by combo (PersonalWeaponSlot
+    // above): seeded by the loadout rebuilds and the powerup grants; a combo with no
+    // row holds no weapon, and the C2S 0x06 refuses it; the C2S 0x25 relay refills
+    // it. Empty for every other entity (D-NET-152, D-NET-336).
+    std::map<uint16_t, PersonalWeaponSlot> weapon_slots;
     bool hidden = false;
 
     // --- destruction state (world/destruction.h; world-wac-ai-re §24) ---
     // Bound-sphere radius (entity+0 boundRadius), host-stamped from the placed
     // model's collision bounds (0 = unstamped; the damage sweeps substitute the
     // organic stand-in radius). Feeds the blast range tests and the kz fallback
-    // radius. [orig: entity+0, read throughout the explosion sweep @ 0x4ead80]
-    float bound_radius = 0.0f;
+    // radius. The 16.16 word retail keeps (D-NET-507): the float view reads it,
+    // a float store truncates; the wire and the integer compares read .q16.
+    // [orig: entity+0, read throughout the explosion sweep @ 0x4ead80;
+    //  Entity_SpawnFromBMSRecord stores `wp << 16` / 0x8000 @0x40F213..0x40F221]
+    PositionWord bound_radius;
     // Kill-credit attacker (entity+0x178 lastAttacker): stamped by the damage
     // paths. WAC ammo2ssn also overwrites this word with its target (0x4F25D4).
     // The explosion sweep only fills an EMPTY slot with its resolved
     // attacker [orig: @ 0x4eb319/@ 0x4eb593; the dead-attacker chain walk
     // @ 0x4eae95..0x4eaece].
     EntityHandle last_attacker;
-    // The blast center a queued explosion stamped before this entity died — the
-    // section-debris launch origin (entity+0x80 savedLivePose reuse; only
-    // destructible-class entities receive it) [orig: @ 0x4eb553-0x4eb569].
-    Vec3 death_blast_center;
-    // Per-intact-model glass userpoint one-shot state. Retail marks the exact
-    // point broken before rolling its four presentation effects; the dynamic
-    // bit bank keeps the state entity-local when one item type has many placed
-    // instances. [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-    std::vector<uint64_t> broken_glass_point_bits;
     // The death tick (entity+0x1AC, first write wins) [orig:
     // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
     uint32_t death_tick = 0;
     // Squib callback/motor aliases of entity+0x270/+0x2A0..+0x30C.
     int32_t script_next_ssn = 0;
+    // entity+0x280: a type-0x7FC (2044) row's location index, the running count of the
+    // load's 2044 spawns in its pool order (D-NET-517). [orig: Entity_SpawnFromBMSRecord
+    //  @0x40E9F0 - g_LocationNameCount @0x40F188..0x40F18F, its increment @0x40F20C]
+    int16_t location_index = 0;
     struct SquibState {
         bool motor = false;
         int32_t ammo_index = 0; // signed word +0x160 (presentation)
@@ -838,6 +1003,15 @@ struct Entity {
     // recomputed on every def resolve. The draw alone: each row's collision
     // column is BoneCallback_Simple @0x4E2600.
     bool death_section_pivot = false;
+    // The chel row's rotor / aux section draws: the def's byte run
+    // +0x890..+0x897 (rotor_parts tokens 1..4 at +0x890 / +0x891 / +0x894 /
+    // +0x895, aux_parts tokens 1 / 2 at +0x896 / +0x897), which the render
+    // tag's chel world callback hides by the rotor speed and the airborne
+    // flag (item_hidden_sections). All zero under any other render tag;
+    // recomputed on every def resolve.
+    // [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+    //  @0x48F3BE..0x48F469)]
+    std::array<uint8_t, 8> chel_section_bytes{};
     // The bldg draw: the render tag's bldg bone row, whose world callback
     // translates whatever it draws by the negated graphic-model COBJ origin of
     // the section byte +0x2C1 names (a section clone's own; 0 draws in place)
@@ -902,7 +1076,9 @@ struct Entity {
     //  @0x54274A]
     uint8_t powerup_weapon = 0;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
-    // the matching ordinal bone from person collision and presentation.
+    // the matching ordinal bone from person collision and presentation. A
+    // building's or vehicle's broken glass sets it too, but no other row's
+    // draw reads it (item_hidden_sections), so the pane stays drawn.
     // Distinct from spawned_piece_mask at +0x138.
     uint32_t section_mask = 0;
     // Host-local marker for the pool-0 corpse clone created by the person
@@ -951,7 +1127,7 @@ struct Entity {
     // carrier's refNum); the refNum the addeweap spawner hands a carrier that
     // had none does not, and the destroy's list removal clears it.
     // [orig: Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45 (the join);
-    //  Entity_SpawnWeaponOverlays @0x40F389 (the carrier's refNum, occupied
+    //  Entity_SpawnAddEWeapChildren @0x40F389 (the carrier's refNum, occupied
     //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
     //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
     bool ref_group_member = false;
@@ -1004,6 +1180,16 @@ struct Entity {
     // Seats this entity OFFERS as a vehicle/emplacement (mirrors vehicle[400..] + model[605..]).
     // Empty for plain entities; an emplaced gun seeds one Gunner seat.
     std::vector<Seat> seats;
+    // The typed userpoints (sitex / ctrlx / drvrx / UseGun by name) the ten-slot
+    // table above does not hold: sitex rows past the scan's end, the ctrlx / drvrx
+    // and UseGun rows a later one replaced, any typed row after the ninth sitex.
+    // Each still types its bone for the attach process, which parents a rider
+    // there: a sitex one with no seat handle, the others in slot 8 / 9. The rows
+    // carry retail_slot 0xFF and never an occupant.
+    // [orig: Entity_GetBoneSlotType @0x434ED0; EntityDef_LoadModelsAndCallbacks
+    //  @0x439F50 (the table walk @0x43A47B..0x43A5CD); Entity_AttachToVehicleSlot
+    //  @0x4946D0 (@0x4946F3..0x494706 -> @0x494752)]
+    std::vector<Seat> off_table_seats;
     // "armory*" userpoint locals of an Armory-attrib item (items.def attrib 0x80000) —
     // the floating armory-label anchors and the armory leg of the nearest scan. Non-empty
     // ONLY for armory sources (the host feeds points only when the attrib is set, matching
@@ -1015,6 +1201,15 @@ struct Entity {
     // Empty for non-emplacements. [orig: ItemDef+0x54B primaryWeapon; label consumer
     // HUD_DrawVehicleSeatAndArmoryLabels @0x5a351d via Entity_GetWeaponSlots slot0]
     std::string primary_weapon;
+    // The def's four addeweap slots' 1-based userpoint indexes into its model (0 where a slot's
+    // userpoint is not found or the slot is not authored): the table a child on this entity
+    // reads its anchor byte (+0x319) from by its slot byte (+0x214, sub_type). Retail keeps it
+    // on the def; every entity of the def carries the same copy here.
+    // [orig: Entity_InitFromModel @0x40DC30 - the names def+0x1C3 + 16 * i @0x40DE30..0x40DE42,
+    //  ModelGPM_FindUserpointByName @0x40DE46, the 1-based index into def+0x214 + i
+    //  @0x40DE52..0x40DE70, 0 @0x40DE7C; read by Entity_UpdateTransformAndTurret
+    //  @0x440CEF..0x440CFD and Entity_GetMountSlotBoneIndex @0x546680]
+    std::array<uint8_t, 4> def_slot_userpoints{};
     // Child entity created from its parent's items.def addeweap* slot. All
     // variants share the parent/userpoint carry relation; G/C remain explicit
     // metadata (G flag bit 2, C flag bit 1 in retail) for their distinct
@@ -1068,7 +1263,21 @@ struct Entity {
     // [orig: render-class row 'ewep' @0x82CFA0 -> HUD_CacheWeaponSlotInfo
     //  @0x440930, installed by BoneCallback_LookupByTag @0x4E32ED..0x4E3306]
     bool emplaced_ctrl_publisher = false; // items.def render_function ewep
+    // A joiner's carrier whose UseGun seat a remote person holds: retail's
+    // joiner holds that rider as an entity attached to the seat, and its body
+    // update's seat call runs the writer on this carrier every tick
+    // (usegun_rider_writes_carrier). Ours keeps a remote person replica-only,
+    // so the joiner's replica gun channel stamps the fact here each frame
+    // (inmatch::tick_replica_emplaced_channels). Never set on an authority.
+    // [orig: Entity_UpdateInfantryPlayerBody seat type 3 @0x4B63A5, the call
+    //  @0x4B63C7; Entity_AttachToBoneAndUpdateTransform @0x546517..0x546518]
+    bool replica_usegun_rider = false;
     uint8_t emplaced_spin_ticks = 0; // entity+0x31B
+    // The tank-command leg's last call tick (entity+0x31C): zero from the spawn's clear,
+    // re-stamped by each call (world::emplaced_command_call).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the read @0x441305, the store
+    //  @0x441310]
+    uint32_t emplaced_command_stamp = 0;
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
     int16_t emplaced_gun_pitch_word = 0; // entity+0x324
@@ -1145,6 +1354,17 @@ struct Entity {
     // Entity_BuildProximityList @ 0x4b406b / movement collision resolver
     // @ 0x4b36f0 from g_BlinkHitSlot0..3 @ 0xB57C74]
     uint32_t blink_hits[4] = {};
+    // Bit 0x4000 (ammo `noage`) of the +0x114 word. A round's spawn stores its
+    // ammo's flags word there, and the conversion's memcpy carries that word
+    // into the placed pool-1 device before it clears the ROUND's bit, so a
+    // device thrown from a noage ammo (the shipped satchel, claymore, AV_Mine)
+    // keeps it. Every candidate-slice build then skips that device as a
+    // dynamic candidate. Nothing else sets the bit on a pool-1 entity.
+    // [orig: RoundData_SpawnRound @0x4EC0D0 - the store @0x4EC615;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0 - the copy @0x5455D6, the
+    //  round's clear @0x5455E2; Entity_BuildProximityListsFromPools @0x4B8EB0 -
+    //  the tests @0x4B8FCA / @0x4B920A]
+    bool ammo_word_noage = false;
     int16_t music_location = 0; // itemDef+434; containing-building WAC location
 
     // Render-occlusion three-ray latch countdown (entity+342): while nonzero the
@@ -1191,9 +1411,10 @@ struct Entity {
 
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
-    // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +
-    // target word [orig: NetPacket_SerializeRoundEvent @0x50485a]. (D-NET-152)
-    EntityHandle last_fire_target;      // kInvalid = no target claimed
+    // read LIVE at 0x0A tag-2 serialize time — a set target adds the wire 0x40 flag +
+    // target word, a round's word 0xFFFF [orig: NetPacket_SerializeRoundEvent @0x50485a;
+    // the flag @0x5048BF..0x5048C1]. (D-NET-152, D-NET-64)
+    TargetRef last_fire_target;         // !valid() = no target claimed
 
     // Medic drag link: self identifies the backward-walking dragger; a corpse
     // references its dragger. Serial prevents a recycled pool slot inheriting it.
@@ -1214,8 +1435,15 @@ struct Entity {
     // (current - saved) as the carrier's per-tick delta [orig: the org2 self
     // stamp @0x4b4190; the ride reads @0x4b530b../@0x4ba47f..]. Kept in the
     // ride's units (16.16 position / BAM32 attitude) so rider deltas are
-    // exact. Never-stamped entities (statics, pre-first-tick rows) read as
-    // zero delta via saved_live_valid.
+    // exact. It is the ONE savedLivePose store (D-NET-507): the model init
+    // takes the Position words for every promoted row, the death transforms,
+    // the teleports and the falling death stamp it, the pool-1 blast sweep
+    // stores a tree's blast center in it, and the dying vehicle's still-test,
+    // the organic AI init's aim basis and the section debris read it [orig:
+    // Entity_InitFromModel @0x40E14B..0x40E169; Entity_UpdateDeathTransforms
+    // @0x494684; Projectile_ProcessExplosionQueue @0x4EB555..0x4EB569]. A row
+    // ours never stored (a runtime row before its first stamp) reads as zero
+    // delta via saved_live_valid.
     int32_t saved_live_pos[3] = {};
     int32_t saved_live_yaw = 0;
     int32_t saved_live_pitch = 0;
@@ -1227,10 +1455,10 @@ struct Entity {
     // AI/physics component (`vehicleData` = *(entity+100)); the slot comments name the
     // original homes. [orig: Entity_UpdateVehiclePhysics @0x48af00]
     struct VehicleMotorState {
-        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10). Entity::yaw
-                                      // (mission deg) mirrors (90 - bam/deg) each motor tick —
+        int32_t yaw_bam = 0;          // 32-bit engine-frame heading (entity+0x10); the motor
+                                      // stores it into Entity::heading each motor tick —
                                       // steering accumulates sub-degree BAM deltas.
-        bool yaw_seeded = false;      // yaw_bam initialized from Entity::yaw on first tick
+        bool yaw_seeded = false;      // yaw_bam initialized from Entity::heading on first tick
 		// Spawn-relative pose (+0x24C), support (+0x264), and team (+0x165).
 		// [orig: Game_StartMission @0x526003..0x52606B]
 		int32_t spawn_pose[6] = {};
@@ -1280,12 +1508,20 @@ struct Entity {
 		bool tumble_hard_latched = false;
 		bool tumble_med_latched = false;
 		uint32_t sound_anchor_until_tick = 0; // keep residual lanes attached after claimant loss
-        bool grounded = true;         // wheel contact / +0x2F2 [orig: BYTE2(entity->aiRef0) reuse];
-                                      // vehicles spawn RESTING (contact resolved at init),
-                                      // so the default is grounded — the first motor tick
-                                      // re-derives it from the terrain clamp. The same byte
-                                      // gates the tracked extend loop's pre-gate and is
-                                      // cleared by Entity_RespawnVehicle @0x45FFFD.
+        // Wheel contact, +0x2F2 [orig: BYTE2(entity->aiRef0) reuse]. Every vehicle spawn
+        // holds 0: a mission placement's slot is zeroed by the mission reset and the record
+        // spawn writes none of +0x2EC..+0x2FC; the runtime spawns zero a 0x550-byte template
+        // and clone it into pool 1; the respawn writes 0. Each contact solve re-derives it
+        // after the speed pipeline has read it, so a fresh vehicle's first tick takes the
+        // coast-brake test (@0x48C195..0x48C1C2) on the spawn's 0.
+        // [orig: Mission_ResetBmsState @0x40DB80 (the Pool_Clear @0x442060 call @0x40DBC7);
+        //  Entity_SpawnFromBMSRecord @0x40E9F0 (the memset @0x40EA27);
+        //  Entity_SpawnHelicopter @0x4521A0 (the memset @0x4521DA, Entity_CloneFromTemplateWithAI
+        //  @0x4397C0 called @0x4522E1); Entity_SpawnDeployable @0x51C2B0 (@0x51C2EA,
+        //  Entity_CloneFromTemplateToPool1 @0x439830 called @0x51C3FE);
+        //  Entity_RespawnVehicle @0x45FF40 (@0x45FFFD); Entity_UpdateVehiclePhysics
+        //  @0x48AF00 (the read @0x48C195, the tracked solve's call @0x48D0B1)]
+        bool grounded = false;
 
         // --- Joiner-side vehicle prediction (net-re §5.38e, D-NET-196). The
         // wire record apply stages these and the family client mover chases +

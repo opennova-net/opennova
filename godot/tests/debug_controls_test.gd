@@ -410,11 +410,15 @@ func test_confirmation_and_authority_are_distinct_gates() -> void:
 	assert_false(_controls.get_state(&"local_spectator", true).writable,
 			"a joiner cannot use tooling to manufacture spectator authority")
 	assert_true(_controls.get_state(&"apply_local_pose", true).writable,
-			"the joiner's own pose write is not host-only")
+			"the own-L pose write is not host-only")
 	assert_false(_controls.get_state(&"apply_local_pose").writable,
 			"it still wants the per-call confirmation")
-	assert_eq(int(_controls.invoke(&"apply_local_pose", [0.0, 0.0, 0.0], true).error),
-			ERR_UNAVAILABLE, "the engine answers: this session holds no joiner L")
+	var home := _sim.get_local_player_position()
+	# Godot (x, y up, z) -> mission (x, -z, y): the player's own spot. The row reaches the
+	# engine on any role; the engine writes it on the session's own L (none: refused).
+	assert_eq(int(_controls.invoke(&"apply_local_pose", [home.x, -home.z, home.y], true).error),
+			OK if _sim.has_local_player() else ERR_UNAVAILABLE,
+			"the engine writes the pose on this session's own L, any role")
 	_host.authority = true
 
 	assert_true(_controls.get_state(&"net_joiner_diagnostics").writable,

@@ -72,14 +72,29 @@ inline uint32_t make_session_app_id(uint32_t tick_count, int rand_value) {
 }
 // The stage-retransmit cadence of the connect legs: the enumerator re-announces the 0x41 every
 // 3000 ms and the connecting NP connection re-sends its 0x42 join on the same interval while
-// its connect deadline runs; the gate probe worker repeats the probe every 3000 ms for 30000 ms.
+// its connect deadline runs.
 // [orig: CNapiGameSession_InitTransportConnection @0x4c9f9d (announce_interval_ms = 3000);
-//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629570..0x629595 (the join re-send);
-//  CNapiGateManager_Init @0x633f90 stores @0x634052 (3000) / @0x63405c (30000);
-//  CNapiGateManager_ProbeThreadProc @0x6339e0 @0x633a5e (deadline) / @0x633a70 (retry)]
+//  CNapiNPConnection_PumpStateMachine @0x6292e0 case 3 @0x629570..0x629595 (the join re-send)]
 constexpr uint32_t SESSION_CONNECT_RETRANSMIT_MS = 3000u;
-constexpr uint32_t SESSION_GATE_PROBE_RETRY_MS = 3000u;
-constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 30000u;
+// The gate probe worker's cadence: every fresh probe sets the context's send interval to 2000 ms
+// and its deadline to 10000 ms before the worker starts, over the 3000 / 30000 the context's
+// creation stored, so the worker sends at 0 and then whenever more than 2000 ms passed since the
+// last send, and stops once more than 10000 ms passed since its start: five probes in 10 s.
+// [orig: CNapiGateManager_WaitForConnect @0x4CE6B0 - the interval +0x104 = 0x7D0 @0x4CE7B4, the
+//  deadline +0x108 = 0x2710 @0x4CE7C6 (dfx2.exe @0x4CE840: @0x4CE944, @0x4CE956), over
+//  CNapiGateManager_Init @0x633F90's stores @0x634052 / @0x63405C;
+//  CNapiGateManager_ProbeThreadProc @0x6339E0 - the deadline test @0x633A58 (`ja` @0x633A5E), the
+//  interval test @0x633A6A (`jbe` @0x633A70), the last send's stamp @0x633B11]
+constexpr uint32_t SESSION_GATE_PROBE_RETRY_MS = 2000u;   // 0x7D0
+constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 10000u; // 0x2710
+// The dedicated host's gate wait: the command-line host polls the gate response while the gate
+// state is 1 and stops the gate service once more than 20000 ms passed since the probe started,
+// past the worker's own 10 s, so a gate that never answers ends its hosting at 20 s.
+// [orig: Game_HostMultiplayerSession @0x4A65A0 - CNapiGateManager_WaitForGateResponse (the call
+//  @0x4A66B6); CNapiGateManager_WaitForGateResponse @0x4D1510 - the stamp @0x4D152B, the 0x4E20
+//  compare @0x4D1541 (jbe @0x4D1546), CNapiGateManager_StopGateService (the call @0x4D154A),
+//  -1 (`or eax,-1` @0x4D1551, the retn @0x4D1555)]
+constexpr uint32_t SESSION_DEDICATED_GATE_WAIT_MS = 20000u; // 0x4E20
 // The periodic-update GLSVSS poll: once the NP connection is established (conn_state 5) and the
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
 // per 1000 ms. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44e3]
@@ -107,15 +122,30 @@ constexpr uint32_t SESSION_JOIN_TIMEOUT_MS = 20000u;           // conn+0x5B4
 // [orig: Server_TickUpdate @0x51d7e0 @0x51d91d..0x51d948]
 constexpr uint32_t SESSION_HOST_INFO_REFRESH_TICKS = 0x744u;
 
-// The six-slot cookie-key ring behind the Host list's "PCIDKey": every refresh advances the
-// index (wrapping at 6), mints ((rand() + GetTickCount()) & 0xFFFFFF) + 0x1000000 into that
-// slot and caps the population count at 6. PCIDKey is the CURRENT slot's key.
-// [orig: CSessionIdRing_AdvanceAndGenerate @0x4dbb80; the PCIDKey reader
-//  Lobby_UpdateServerInfo @0x4ff1ab (`keys[keys[6]]`)]
+// The six-slot cookie-key ring behind the Host list's "PCIDKey" (one per process in retail,
+// g_NapiCookieKeyTable; the in-match host's NapiNPServerCtx::cookie_key_table in ours): the round
+// init starts it (init: every slot, the index and the count zeroed, then slot 0 minted and the
+// count 1), every server-info refresh advances the index (wrapping at 6), mints
+// ((rand() + GetTickCount()) & 0xFFFFFF) + 0x1000000 into that slot and caps the population count
+// at 6. PCIDKey is the CURRENT slot's key; the joiners' CD cookies decrypt under the populated
+// slots.
+// [orig: CSessionIdRing_Init @0x4DBC20 - the zeroes @0x4DBC25..0x4DBC3A, GetTickCount
+//  @0x4DBC3D, rand @0x4DBC45, the mask and bias @0x4DBC4F..0x4DBC55, the store @0x4DBC5B, the
+//  count @0x4DBC5E..0x4DBC69; CSessionIdRing_AdvanceAndGenerate @0x4dbb80 - the index
+//  @0x4DBB83..0x4DBB8F, GetTickCount @0x4DBB97, rand @0x4DBB9F, the store @0x4DBBB5; the PCIDKey
+//  reader Lobby_UpdateServerInfo @0x4FE8C0 (`keys[keys[6]]` @0x4FF191..0x4FF196)]
 struct SessionIdRing {
 	std::array<uint32_t, 6> keys{};
 	uint32_t index = 0;
 	uint32_t count = 0;
+	uint32_t init(uint32_t tick_count, int rand_value) {
+		keys.fill(0u);
+		index = 0;
+		count = 0;
+		keys[index] = ((static_cast<uint32_t>(rand_value) + tick_count) & 0xFFFFFFu) + 0x1000000u;
+		if (count < 6) ++count;
+		return count;
+	}
 	uint32_t advance(uint32_t tick_count, int rand_value) {
 		if (++index >= 6) index = 0;
 		keys[index] = ((static_cast<uint32_t>(rand_value) + tick_count) & 0xFFFFFFu) + 0x1000000u;
@@ -166,6 +196,14 @@ inline constexpr char NWEC_PLAY_TIMEOUT[] = "NWEC02";
 inline constexpr char NWEC_PLAY_CANCELLED[] = "NWEC03";
 inline constexpr char NWEC_PLAY_START_FAILED[] = "NWEC59";
 inline constexpr char NWEC_WRONG_SESSION_STATE[] = "NWEC49";
+// The play leg's map over the session's nonzero MsgCode word (dword_B60110, session+0x130):
+// 3000 -> NWEC04, 3001..3006 -> NWEC05..NWEC10, 200 -> NWEC11, 203 -> NWEC12, 1009 -> NWEC14,
+// any other code NWEC13 (signed compares: a negative code is NWEC13 too). A zero word maps
+// nothing (connect_or_host.h's play_leg_exit_tag keeps the leg's tag).
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the word @0x4D55F7, `cmp eax,0BB8h / jg`
+//  @0x4D5604..0x4D5609, 3000 @0x4D560B, 200 @0x4D560D, 203 @0x4D5614, 1009 @0x4D5619, the
+//  3001..3006 switch @0x4D564C..0x4D5656, NWEC13 @0x4D569F]
+std::string novaworld_play_error_tag(int msg_code);
 // The start-hosting leg: gate info not OK (NWEC50), SendHostRequest failed (NWEC51), the 60 s
 // poll timeout (NWEC52), and the rejection map over the ServerHostResult MsgCode stored at
 // session+304: 0x3E9 -> NWEC53, 0x3EC -> NWEC54, 0x3ED -> NWEC55, 0x3F0 -> NWEC56,
@@ -315,13 +353,13 @@ NapiMessage make_client_host_update(const std::vector<ClientVar> &host, bool wri
 // slot index), PlayerName, PlayerIpAndPort ("a.b.c.d:port" of the player's game endpoint),
 // PlayerPCID, PlayerTeam and PlayerType, in that order. Fired only while the session is in
 // state 6 (hosting established). [orig: CNapiGameSession_SendPlayerAdded @0x4cfec0; the
-//  state-6 wrapper CNapiGameSession_OnPlayerChat @0x4d0e20 (a Kong misnomer)]
+//  state-6 wrapper CNapiGameSession_SendPlayerAddedIfHosting @0x4d0e20]
 NapiMessage make_client_host_player_added(int player_number, const std::string &player_name,
                                           const std::string &ip_and_port,
                                           const std::string &pcid, const std::string &team,
                                           const std::string &type);
 // ClientHostPlayerRemoved: PlayerNumber only. [orig: CNapiGameSession_SendPlayerRemoved
-//  @0x4d01a0; the state-6 wrapper @0x4d0e40]
+//  @0x4d01a0; the state-6 wrapper CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40]
 NapiMessage make_client_host_player_removed(int player_number);
 
 // ClientPlayerEnterRequest: the HOST's admission statement for a player entering its game —

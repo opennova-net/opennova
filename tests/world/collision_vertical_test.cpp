@@ -4,6 +4,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -60,7 +61,7 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     Entity building;
     building.kind = EntityKind::Building;
     building.position = {10, 10, 0};
-    building.yaw = 90;
+    building.heading = placed_heading_bam(90);
     building.alive = true;
     const auto obstacle = world->registry.spawn(2, building);
     collision.assign_entity(obstacle, collision.add_model(ceiling_model(nx, ny, nz)));
@@ -177,7 +178,7 @@ struct MotorRig {
         Entity building;
         building.kind = EntityKind::Building;
         building.position = {10, 10, 0};
-        building.yaw = 90;
+        building.heading = placed_heading_bam(90);
         building.alive = true;
         const auto obstacle = w->registry.spawn(2, building);
         collision.assign_entity(obstacle, collision.add_model(ceiling_model(nx, ny, nz, slab_z)));
@@ -206,9 +207,9 @@ struct MotorRig {
         body->inf.is_local_player = player;
         body->inf.anim_state = anim_state::kIdle;
         body->inf.anim_prev = anim_state::kIdle;
-        body->pos[0] = fp(10);
-        body->pos[1] = fp(10);
-        body->pos[2] = start_z;
+        body->self->position.x.q16 = fp(10);
+        body->self->position.y.q16 = fp(10);
+        body->self->position.z.q16 = start_z;
         body->health = 100;
     }
     Entity &entity() { return *w->registry.get(body_h); }
@@ -246,7 +247,7 @@ void test_player_jump_into_ceiling_through_motor() {
     rig.tick(7);
     CHECK(rig.collision.dbg_last_contact.valid());
     CHECK(rig.body->inf.vel[2] == -167); // the head bonk on the contact tick
-    CHECK(rig.body->pos[2] < 29632);     // pushed back out of the slab
+    CHECK(rig.body->self->position.z.q16 < 29632);     // pushed back out of the slab
     rig.tick(8);
     CHECK(rig.body->inf.vel[2] == -167 - 208); // plain gravity from there
     CHECK(rig.in_air() == kEntityFlagInAir);
@@ -255,7 +256,7 @@ void test_player_jump_into_ceiling_through_motor() {
     while (rig.body->inf.airborne && t < 60) rig.tick(t++);
     CHECK(!rig.body->inf.airborne);
     CHECK(rig.in_air() == 0);
-    CHECK(rig.body->pos[2] == 0);
+    CHECK(rig.body->self->position.z.q16 == 0);
 }
 
 // The org1 fall edge writes the same word [orig: Entity_UpdateInfantryAI
@@ -307,7 +308,7 @@ void test_player_fall_landing_tick_defers_the_held_jump() {
         ++t;
     }
     CHECK(landing_tick != 0);
-    CHECK(rig.body->pos[2] == 0);
+    CHECK(rig.body->self->position.z.q16 == 0);
     CHECK(rig.body->inf.vel[2] == 0);
     CHECK(rig.body->inf.jump_cooldown == 0);
     CHECK(!rig.body->inf.airborne);

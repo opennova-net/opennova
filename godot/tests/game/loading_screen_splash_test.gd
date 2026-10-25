@@ -75,6 +75,7 @@ func test_raised_splash_carries_the_glyph_shader() -> void:
 	assert_not_null(shaded, "the screen's draws run the glyph shader")
 	if shaded != null:
 		assert_eq(shaded.shader.code, HudPos.glyph_shader_code())
+		assert_eq(shaded.shader, HudPos.glyph_shader(), "the one glyph program every menu draws through")
 
 
 # --- raise / degrade -----------------------------------------------------------

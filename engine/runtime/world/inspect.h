@@ -73,9 +73,9 @@ struct WorldDetail {
 	int32_t zone_control = 0;
 	int32_t zone_chain_index = -1;
 	Vec3 mission_position{};
-	// The registry row's authored/promoted orientation, Entity::yaw/pitch/roll:
-	// whole mission degrees in an int16 (every writer rounds
-	// normalize_mission_yaw_deg), NOT the AI card's BAM32 heading.
+	// The registry row's orientation: the Yaw word as whole mission degrees
+	// (mission_yaw_whole_deg) and the Pitch / Roll words in whole degrees, NOT the AI card's
+	// BAM32 heading.
 	int32_t yaw = 0;
 	int32_t pitch = 0;
 	int32_t roll = 0;
@@ -191,8 +191,8 @@ struct AiDetail {
 	bool primary_occupant = false;
 	int32_t veh_family = -1;
 	bool player_control = false;
-	int32_t vp = 0; // legacy rounded entity pitch (degrees)
-	int32_t vr = 0; // legacy rounded entity roll (degrees)
+	int32_t vp = 0; // the entity's Pitch word in rounded degrees
+	int32_t vr = 0; // the entity's Roll word in rounded degrees
 	int32_t mspd = 0;
 	int32_t wc[6] = {}; // four corners plus the tank's two middle channels
 	int32_t pose_bam[3] = {}; // motor yaw/pitch/roll, full precision

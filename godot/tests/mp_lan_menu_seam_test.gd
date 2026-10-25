@@ -8,6 +8,24 @@ extends GutTest
 # reports). The live two-machine flow (real discovery + a second client spawning)
 # is the manual smoke; this is the unit.
 
+var _run_dir := ""
+
+
+# The host screen shows the process's cfg block (GameCfgStore) and its START
+# writes the block back and saves it (D-NET-335): every test runs over a fresh
+# block in a working directory of its own.
+func before_each() -> void:
+	_run_dir = OS.get_cache_dir().path_join("opennova_mp_lan_menu_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	GameCfgStore.reset()
+
+
+func after_each() -> void:
+	GameCfgStore.reset()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_run_dir)
+
 
 
 # A REAL LanSession (typed seam) whose discovery feed is driven by hand: the
@@ -181,8 +199,9 @@ func test_start_game_defaults() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var driver := _make_host_driver()
-	# The retail config defaults copy the Menu/UNTITLED gametext into the
-	# session name before the host screen is populated from the config.
+	# The host screen shows the cfg block, whose defaults copy the Menu/UNTITLED
+	# text into the session name (its "!Untitled" fallback with no gametext
+	# loaded into the block).
 	var previous_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	var gametext := RtxtStringFile.new()
 	gametext.add_entry("UNTITLED", "!Untitled", gametext.add_section("Menu"), Vector2i.ZERO)
@@ -190,7 +209,7 @@ func test_start_game_defaults() -> void:
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	Strings.register_table(Strings.TABLE_GAMETEXT, previous_gametext)
 	assert_eq(driver.get_widget_text(driver.widget_id("GAME_NAME")), "!Untitled",
-			"the populate seeds GAME_NAME from the Menu/UNTITLED gametext")
+			"the populate seeds GAME_NAME from the block's game_name")
 	assert_eq(driver.get_widget_text(driver.widget_id("MAX_PLAYERS")),
 			str(HostSessionOptions.new().max_players),
 			"the populate seeds MAX_PLAYERS from the engine's host-screen cap")
@@ -357,9 +376,9 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_false(config.game_type_auto,
 		"explicit callers stay pinned until a producer opts into mission derivation")
 	var options := config.to_session_options()
-	assert_eq(options.class_allow_mask, 0x03FF,
-			"ordinary host requests carry retail's all-ten-classes default")
-	assert_eq(options.respawn_time, 30)
+	assert_eq(options.class_availability, PackedInt32Array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+			"ordinary host requests carry retail's all-ALWAYS class words (Config_SetDefaults)")
+	assert_eq(options.round_time_limit_minutes, 30)
 	assert_eq(options.time_limit_minutes, 10)
 	assert_eq(options.replay_enabled, 1)
 	assert_eq(options.max_team_lives, 100)
@@ -382,8 +401,9 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_eq(options.start_delay, 0)
 	assert_eq(options.destroy_buildings, 0)
 	assert_eq(options.death_messages, 1)
-	config.class_allow_mask = 1 << 6
-	assert_eq(config.to_session_options().class_allow_mask, 1 << 6,
+	config.class_availability = PackedInt32Array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0])
+	assert_eq(config.to_session_options().class_availability,
+			PackedInt32Array([0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
 			"the typed host request forwards a map-specific Soldier Class policy")
 
 
@@ -443,7 +463,7 @@ func test_host_rule_controls_reach_native_session_configuration() -> void:
 	assert_eq(options.custom_text, "Squad night")
 	assert_eq(options.start_delay, 7)
 	assert_eq(options.respawn_timeout, 8)
-	assert_eq(options.respawn_time, 45, "TIME feeds the round-time global")
+	assert_eq(options.round_time_limit_minutes, 45, "TIME feeds the round-time global")
 	assert_eq(options.time_limit_minutes, 0x2222222)
 	assert_eq(options.score_limit, 65000)
 	assert_eq(options.max_score, 65000)
@@ -507,6 +527,10 @@ func test_lan_join_emits_selected_server() -> void:
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
 	# A single-click selection relays the row index through the driver's aggregate signal.
 	driver.select_row(lan_list, 0)
+	# The hand-published row has no session record behind it, so a session would refuse
+	# its join (test_a_row_with_no_listed_session_refuses_the_join): the session-less
+	# companion joins the row as listed, which pins the row's decode.
+	mp.set_lan_session(null)
 	_press(driver, "LAN_JOINGAME")
 	assert_signal_emitted(mp, "lan_join_requested")
 	var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
@@ -577,12 +601,50 @@ func test_appended_lan_row_keeps_the_selection() -> void:
 	_publish(session, [alpha, bravo, charlie])
 	assert_eq(driver.item_count(lan_list), 3, "the new host is appended")
 	assert_eq(driver.selected_row(lan_list), 1, "the highlighted row stays selected")
+	# Hand-published rows have no session records: the session-less companion joins the
+	# row as listed.
+	mp.set_lan_session(null)
 	_press(driver, "LAN_JOINGAME")
 	assert_signal_emitted(mp, "lan_join_requested",
 		"JOIN still joins the row the player selected after a host was appended")
 	if get_signal_emit_count(mp, "lan_join_requested") > 0:
 		var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
 		assert_eq(target.host_ip, "192.168.1.11", "the selected row, not the new one")
+
+
+# A join from a row takes the session's listed session at the row's index; a row whose
+# index names none (here a session whose browse holds no record) is refused before
+# anything is sent: no join request, the gameerr CVUNABLETOCREATE text instead (engine:
+# net/npwire/lan_discovery.h join_session; ctest lan_discovery). The press hands the frame
+# to the join machine: the live search's pump stops, and its socket stays open for the
+# refusal's state 9, which tears it down (engine: LanDiscoveryBrowser::stop carries the
+# witness; spectator_join_prompt_test pins the teardown).
+func test_a_row_with_no_listed_session_refuses_the_join() -> void:
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var session := LanSession.new()
+	autofree(session)
+	mp.set_lan_session(session)
+	assert_eq(session.start_browsing("127.0.0.1", 32787, 32787), OK, "a live search")
+	_publish(session, [LanServerRow.make("gone", "192.168.1.10", 32768)])
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	driver.select_row(lan_list, 0)
+	assert_null(session.get_join_row(0), "the browse holds no listed session")
+	_press(driver, "LAN_JOINGAME")
+	assert_signal_not_emitted(mp, "lan_join_requested", "the refused join dials nothing")
+	assert_signal_emitted(mp, "lan_join_refused")
+	if get_signal_emit_count(mp, "lan_join_refused") > 0:
+		var text: String = get_signal_parameters(mp, "lan_join_refused")[0]
+		assert_eq(text, Strings.lookup(Strings.TABLE_GAMEERR, "MP Errors", "CVUNABLETOCREATE"),
+				"the refusal reads gameerr's CVUNABLETOCREATE")
+	assert_false(session.is_browsing(), "the press stops the LAN screen's search")
+	var pump: UdpPump = session.take_transport()
+	assert_not_null(pump, "the search's socket stays for the join machine's state 9")
+	if pump != null:
+		assert_true(pump.is_open(), "nothing closed it at the press")
+		pump.close()
 
 
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:

@@ -69,6 +69,33 @@ func test_env_interpolation_and_export_round_trip() -> void:
 	assert_eq(reloaded.get_tod_keyframes().size(), env.get_tod_keyframes().size(), "TOD keyframes should survive export.")
 
 
+func test_a_mission_environment_loads_its_sky_maps_at_the_mission_textures_stage() -> void:
+	# The mission's environment load leaves the cloud layers for the mission textures stage, the
+	# full arm's (a dedicated host's loads none), and that stage loads them only with advanced
+	# clouds (D-NET-NEW-L3-34; EnvFile::load_mission_sky_maps carries the witness).
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/env")), OK)
+	var reference := EnvFile.new()
+	assert_eq(reference.load_from_resource_root(root, "synth_full.env"), OK)
+	assert_not_null(reference.get_sky_map1_tex(), "the fixture's sky map resolves through the root")
+	var env := EnvFile.new()
+	assert_true(env.load_mission_environment(root, "", "synth_full.env", null))
+	assert_eq(env.get_advanced_clouds(), 1)
+	assert_null(env.get_sky_map1_tex(), "the environment's load leaves the sky maps")
+	assert_null(env.get_sky_map2_tex())
+	env.load_mission_sky_maps()
+	assert_eq(env.get_sky_map1_tex() != null, reference.get_sky_map1_tex() != null,
+			"the stage loads the cloud layers")
+	assert_eq(env.get_sky_map2_tex() != null, reference.get_sky_map2_tex() != null)
+	env.load_mission_sky_maps(true)
+	assert_null(env.get_sky_map1_tex(), "a dedicated host's reduced arm loads no cloud layer")
+	assert_null(env.get_sky_map2_tex())
+	env.set_advanced_clouds(0)
+	env.load_mission_sky_maps()
+	assert_null(env.get_sky_map1_tex(), "the flat dome's environment loads no cloud layer")
+	assert_null(env.get_sky_map2_tex())
+
+
 func test_set_sky_map_reresolves_cached_texture() -> void:
 	var env := _load_full_00()
 	var before := env.get_sky_map1_tex()

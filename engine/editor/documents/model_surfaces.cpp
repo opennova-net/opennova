@@ -71,7 +71,10 @@ ModelSurfaceWords model_surface_words(int64_t poly_type) {
 	case 15:
 		// [orig: Projectile_HandleEntityImpact @ 0x4e9390, the section break @ 0x4e964f..0x4e9684;
 		// docs/world/world-wac-ai-re.md §15.8]
-		also("On a building the hit breaks the face's section (the pane goes) with the glass smash sound.");
+		// The broken section stays drawn: only the person bone walk hides one [orig:
+		// Entity_BuildBoneTransformMatrices @ 0x4B1290 (the test @ 0x4B1F1D)].
+		also("On a building the hit breaks the face's section with the glass smash sound.");
+		also("The pane stays drawn.");
 		break;
 	case 17:
 		// [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0: material 17 skipped for ammo flagged

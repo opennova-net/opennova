@@ -71,6 +71,24 @@ struct InsetOcclusionView {
 	std::vector<int32_t> culled_wire_last;
 };
 
+// One water mirror's collect (Simulation::run_mirror_occlusion; the main scene's
+// mirror and the weapon Inset's): the lists its reflected subscene draws (engine
+// inmatch/occlusion_collect.h MirrorViewLists) as changes against what the shell
+// last applied, in the main view's forms, its MODEL-tier anchors and the death
+// pieces of the subscene's own collect.
+struct MirrorOcclusionView {
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	PackedVector3Array foliage_mask_anchors;
+	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
+	PackedInt64Array building_changes;
+	PackedInt32Array culled_changes;
+	PackedInt32Array culled_wire_changes;
+	std::unordered_map<uint32_t, int64_t> building_last;
+	std::vector<int32_t> culled_last;
+	std::vector<int32_t> culled_wire_last;
+};
+
 struct SimulationPresentState {
 	// --- the present snapshot ---------------------------------------------------
 	// Exact identity/order of the most recently returned PF_* buffer. Dynamic
@@ -110,6 +128,8 @@ struct SimulationPresentState {
 	mutable std::shared_ptr<SimulationPresentSnapshot> snapshot;
 	// The last snapshot's build time and row count (the F3 counters).
 	mutable uint64_t last_snapshot_us = 0;
+	// Its organic rows' body columns (PresentRowsContext::body_us), within last_snapshot_us.
+	mutable uint64_t last_snapshot_body_us = 0;
 	mutable int last_entity_count = 0;
 	// get_hud_minimap_snapshot cache: the retained banks bump
 	// ClientMinimapState::revision, and every other input — entity resolves,
@@ -170,6 +190,9 @@ struct SimulationPresentState {
 	uint64_t last_occlusion_probe_us = 0;
 	// The weapon Inset view's collect and its applied baselines.
 	InsetOcclusionView inset_occlusion;
+	// The water mirrors' collects and their applied baselines: [0] the main
+	// scene's mirror, [1] the weapon Inset's (Simulation::MirrorView).
+	MirrorOcclusionView mirror_occlusion[2];
 };
 
 } // namespace godot

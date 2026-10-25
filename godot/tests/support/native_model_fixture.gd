@@ -70,12 +70,13 @@ static func write_native_model(dir: String, name: String, bytes: PackedByteArray
 
 ## Drain the local player's weapon-switch events and apply each one whose
 ## weapon the test's definition table knows (the emplaced .50 keeps its
-## mounted flag).
+## mounted flag), as the presenter does: a switch the sim's own commit already
+## mounted (installed) is the viewmodel's alone.
 static func apply_weapon_switch_events(sim: Simulation,
 		defs_by_name: Dictionary) -> void:
 	for value: PlayerWeaponEvent in sim.drain_local_player_weapon_events():
 		var name := value.switch_to_weapon
-		if name.is_empty() or not defs_by_name.has(name):
+		if name.is_empty() or value.installed or not defs_by_name.has(name):
 			continue
 		sim.set_local_player_weapon(
 				defs_by_name[name], {}, name == "WPN_EMPLCD50NA")

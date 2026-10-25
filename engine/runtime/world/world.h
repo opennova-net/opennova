@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <runtime/world/mission_diagnostics.h>
 #include <string>
@@ -21,6 +22,7 @@
 #include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
+#include <base/io/tick_rate.h> // host_milliseconds_for_logic_tick (authority_tick_count_ms's seam)
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
@@ -41,11 +43,13 @@
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
 #include <runtime/world/entity_registry.h>
+#include <runtime/world/entity_update_transactions.h>
 #include <runtime/world/system.h>
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/rotor_wash.h>
 #include <runtime/world/zone_system.h>
 #include <runtime/world/trigger_relations.h>
+#include <runtime/world/body_trace.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/water_cross.h>
 #include <runtime/world/fire_sound.h>
@@ -78,6 +82,7 @@ struct TerrainHeightField;
 }
 
 namespace opennova::audio { class SoundSetIndex; }
+namespace opennova::def { struct DefWeaponsFile; }
 namespace opennova::dbf { struct File; }
 namespace opennova::lwf { struct File; }
 namespace opennova::rtxt { struct File; }
@@ -86,6 +91,7 @@ namespace opennova::world {
 
 class CollisionWorld;
 class LocalPlayer;
+struct LoadoutWeaponNameList;
 struct WeaponInventory;
 
 // One sound-profile slot fire (footstep, foley, landing, death scream),
@@ -139,6 +145,10 @@ struct EnvState {
     // load; the infantry footstep water pick and the landing legs read it
     // sim-side. [orig: g_EnvWaterHeightFixed @ 0x26C6454]
     int32_t water_z = 0;
+    // The mission's time-of-day class (env::Config::time_of_day_enum), host-fed from the
+    // environment load; the NovaWorld listing's TimeOfDay reads it. [orig: g_EnvTimeOfDayEnum
+    // @ 0x24D2364]
+    int32_t time_of_day_enum = 0;
     int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
     int32_t sky_speed = 0;
     int32_t rain = 0;
@@ -203,6 +213,13 @@ struct CachedFrameState {
     // [orig: Game_ProcessMainFrame -- `cmp is_mp_session_peer` @0x52670B,
     //  `cmp g_DeathScreenActive,0` @0x526713]
     bool peer_death_screen = false;
+    // The local client's copy of the pre-round byte (g_ClientPreRoundTimer),
+    // which the entity-update gate reads: its one writer is the client's 0x0A
+    // handler, so a host that also plays stamps its own client's copy each frame
+    // and a dedicated host, which receives no 0x0A, keeps 0.
+    // [orig: g_ClientPreRoundTimer @0xA85B64 -- the store NapiNPClientMsg_0x00A
+    //  @0x430064, the gate's read Game_ProcessMainFrame @0x52672C]
+    uint32_t client_preround_timer = 0;
 };
 
 // Mutable engine values exposed to mission scripts through retail's named-value
@@ -435,9 +452,37 @@ struct ScriptState {
     int32_t heli_lift_active_count = 0;
 };
 
-// The Player items.def template, cached for host/late-join entities allocated
-// after the mission-wide trait sweep.
+// The class-table row a player body's bound items.def row names by its ai_function, the row
+// giving the body its class init (def+0x148, which the spawn calls) and its class event
+// callback (def+0x138, copied into entity+0x1C8: the player-body update's think, the damage
+// sites): "plyr" the player class, "org0" / "org1" the organic class, every other row an item
+// class (the null row also for an empty tag and a name no row carries, the walk's row-0
+// default), whose event body is the item row's (PlayerTemplate::item_event_class)
+// (world::player_body_class_from_tag).
+// [orig: g_EntityClassEventCallbackTable @0x813000 (24-byte rows: the name, the event +0x138,
+//  the init +0x148, +0x14C, the serializer +0x164); EntityDef_LookupClassCallbacks @0x407DC0 -
+//  the stricmp call @0x407DD8, the row-0 default @0x407DEE..0x407E1E; EntityDef_InitAllCallbacks
+//  @0x4A5A70 ("Null" for an empty tag @0x4A5AAE)]
+enum class PlayerBodyClass : uint8_t { kPlayer, kOrganic, kItem };
+
+// An item row's class init (def+0x148, its ai_function row's +0xC word) that a body bound to the
+// row runs at its spawn (player_body_class_init): the arty, aflr and gflr rows'. The rokt and hlfr
+// rows' init (RoktClass_InitFromDef @0x443410, a memset of +0x2B8..+0x30B) zeroes words that are
+// all still 0 at a body's spawn, so it is not one. [orig: g_EntityClassEventCallbackTable
+//  @0x813000 - the rokt / hlfr rows @0x8132B8 / @0x8132E8 (init @0x8132C4 / @0x8132F4), arty
+//  @0x813318 (@0x813324), aflr @0x813330 (@0x81333C), gflr @0x813348 (@0x813354);
+//  EntityDef_LookupClassCallbacks @0x407DC0 - @0x407E33..0x407E36]
+enum class ItemClassInit : uint8_t { kNone, kArty, kAirFlare, kGroundFlare };
+
+// One items.def row's spawn traits: a player spawn binds its class's camouflage
+// row from MissionTables::item_rows (the sweep's copy of g_ItemDefs); a World
+// whose sweep never ran (a native harness) spawns from MissionTables::player.
 struct PlayerTemplate {
+    // The row's type id (items.def id less 100000, def+0x50), the type word the
+    // 0x0C / 0x0A records carry for a body bound to it [orig:
+    //  NetPacket_SerializeEntityStatesToBuffer `movzx edi, word ptr [eax+50h]` @0x5031DD].
+    // The harness seed's is the stock class-8 desert row's, 0x14B9.
+    int32_t type_id = 0x14B9;
     // Cached Player ItemDef presence and traits. The default true covers native harnesses that
     // seed the built-in Player directly; resolve_item_traits overwrites it with the database's
     // actual presence so a malformed/missing Player definition is not invented for late spawns.
@@ -473,6 +518,27 @@ struct PlayerTemplate {
     // stamps live entities directly) [orig: Entity_InitFromModel @0x40e136].
     int32_t radar_sig = 0;
     int32_t heat_sig = 0;
+    // The row's class (its ai_function's class-table row); the harness seed's is the stock
+    // player rows' "plyr". An item class row's event body (item_death_class_from_tag).
+    PlayerBodyClass body_class = PlayerBodyClass::kPlayer;
+    ItemDeathClass item_event_class = ItemDeathClass::kNull;
+    // Whether the row's network callback (def+0x164, its ai_function row's) is the guided
+    // record's serializer: the rokt, stng, hlfr, jvln and arty rows' alone.
+    // [orig: g_EntityClassEventCallbackTable @0x813000 - the +0x14 word Entity_SerializeGuidedMissileState
+    //  @0x447C50 in the rows @0x8132B8..0x813318; EntityDef_LookupClassCallbacks @0x407DC0]
+    bool guided_record = false;
+    // The row's item class init a body bound to the row runs (player_body_class_init).
+    ItemClassInit class_init = ItemClassInit::kNone;
+    // A satchel, claymore or AV mine row's device think, which a body bound to it runs as
+    // its class event (ThrowableSim::think_device_row_body); kNone for every other row.
+    ThrowClass device_think = ThrowClass::kNone;
+    // The physics row the row's move_function binds (def+0x158), the update a body bound
+    // to it runs from the entity update's pool walks (world::body_move_row); the harness
+    // seed's is the stock player rows' org2.
+    // [orig: EntityDef_InitAllCallbacks @0x4A5A70 - EntityDef_LookupPhysicsCallback called
+    //  @0x4A5B41; Entity_SpawnFromAnimSlotProperty @0x43C390 - `mov edx, [edi+158h]`
+    //  @0x43C440, the +0x1C4 store @0x43C453]
+    PhysicsClass move_row = PhysicsClass::Org2;
 };
 
 // The per-mission tables the embedder feeds once (the def files, the terrain
@@ -483,6 +549,10 @@ struct MissionTables {
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
+    // The weapon.def parse that table was built from (the kernel's, non-owning; null in a
+    // world with no parse): the local player's mounts read its row by name
+    // (local_weapon_install_by_name), a switch's commit among them.
+    const def::DefWeaponsFile *weapon_defs = nullptr;
     // The ammo.def ballistics/damage table (empty until the host feeds it —
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_AmmoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
@@ -516,6 +586,10 @@ struct MissionTables {
     const dbf::File *dialog_bank = nullptr;
     const lwf::File *dialog_sounds = nullptr;
     const rtxt::File *mission_text = nullptr;
+    // g_TextOverrideTable: the expansion's text-override table every section
+    // lookup searches first (null for none) [orig: TextResource_FindEntryBySectionAndKey
+    // @0x75D27B].
+    const rtxt::File *text_override = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
@@ -552,7 +626,32 @@ struct MissionTables {
     // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
     // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
     terrain::SurfaceTypeMap surface_map;
+    // The seed a World without items rows spawns its players from (a native
+    // harness), and the stock class-8 desert row (105305) the joiner-side
+    // readers with no body row read.
     PlayerTemplate player;
+    // Every items.def row's spawn traits, in load order (g_ItemDefs), stamped by
+    // the traits sweep: the rows ItemList_FindIndexByTypeId walks for a player's
+    // camouflage item (index 0, the first row, for a type no row carries).
+    // [orig: ItemList_FindIndexByTypeId @0x49E100 - the walk @0x49E117..0x49E12F,
+    //  0 @0x49E12F / @0x49E131]
+    std::vector<PlayerTemplate> item_rows;
+    // g_BmsClimate: the mission header's camouflage selector (header +0x84):
+    // 1 jungle, 2 arctic, any other desert, by which the player spawn picks its
+    // class's camouflage property. [orig: Entity_SpawnFromAnimSlotProperty
+    //  @0x43C399..0x43C3BE]
+    int32_t bms_climate = 0;
+    // CharAttr_GetCammoTypeId's answers per class row ((class - 1) & 0xF) for
+    // properties 10 (JUNGLE_CAMMO), 11 (DESERT_CAMMO) and 12 (ARCTIC_CAMMO), 0
+    // for an inactive row: the installer's copy of this peer's charattr table
+    // (inmatch::install_class_attribute_flags), with whether that table read a
+    // charattr.def (a World whose peer read none, a native harness or a
+    // synthetic pack, spawns its players from the seed; retail's boot reads a
+    // missing file as the zeroed table, see D-NET-348).
+    // [orig: CharAttr_GetCammoTypeId @0x4127B0 - inactive @0x4127C5,
+    //  10/11/12 @0x4127D2..0x4127DC]
+    std::array<std::array<int32_t, 3>, 16> class_cammo_type_ids{};
+    bool class_cammo_installed = false;
     // The mission header's attribute flags, stamped by the host at mission load
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn), the
     // objective Co-op mission start out of a session adding 0x40. Read by the
@@ -622,7 +721,38 @@ struct SessionRules {
     //  WeaponAction_ProcessFrame @0x5412a7, Entity_UpdateInfantryPlayerBody
     //  @0x4b5229]
     bool last_tick_of_batch = true;
-    bool ignore_weapon_ammo_cost = false; // dword_24C1930 bit 0x100
+    // The update's head already ran under the pause word: the resuming update,
+    // whose HUD counters stepped as paused ahead of its input frame, so
+    // begin_tick steps them no more. The session stamps it per tick; a bare
+    // kernel keeps false (inmatch::Session::run_updates carries the witness).
+    // [orig: Game_ProcessMainFrame @0x5263F0 (Game_TickHudFrameCounters @0x5265D5
+    //  ahead of Input_ProcessFrame @0x52661D)]
+    bool update_head_stepped = false;
+    // The single-player pause word as the session holds it (its Paused state): the
+    // action rows' head drops every row whose flags carry bit 0 while it is set
+    // (inmatch::Role::action_head_admits). The session stamps it at each state
+    // change. [orig: dword_A87050; Input_HandleActionBinding @0x49AD40 (`test ecx,
+    //  ecx` @0x49ADDD, `cmp dword_A87050, 0` @0x49ADE1)]
+    bool pause_word = false;
+    // The local cheat word's 0x100 bit (g_DebugCheatFlags), the infinite-ammo cheat: every
+    // ammo pool read returns its class's carry cap (weapon_seat_pool, through the seat
+    // entity_ammo_seat builds) and a clipless weapon's per-shot cost test is skipped. The
+    // cheat row 114's input action 121 toggles it (inmatch::Role::dispatch_record), out of a
+    // session only; a fresh mission's world starts clear, as Game_StartMission's store of the
+    // word leaves it.
+    // [orig: Cheat_ToggleInfiniteAmmo @0x4DC9C0 - `xor g_DebugCheatFlags, 100h` @0x4DC9C5;
+    //  Entity_GetScoreValueBySlotType @0x5406E0 - the test @0x5406E3, g_AmmoClassMaxCarry
+    //  @0x5406F4; WeaponSlot_CanFire @0x541BA0 - the test @0x541CCF; Game_StartMission
+    //  @0x525B25]
+    bool ignore_weapon_ammo_cost = false;
+    // The local cheat word's 0x400 bit, the frame-rate overlay: HUD_DrawGameplayOverlays
+    // draws "FR %2i  MN %2i MX %2i CPU %d" while it is up. The Debug
+    // row 118's action 74 toggles it, in a session or out of one (its flags are 0); a fresh
+    // mission's world starts clear.
+    // [orig: Input_HandleActionBinding @0x49AD40 - case 74 `xor g_DebugCheatFlags, 400h`
+    //  @0x49B937; HUD_DrawGameplayOverlays - the test @0x5BDEB5, HUD_DrawFrameRateOverlay
+    //  @0x5BAE20 called @0x5BDEC2; Game_StartMission @0x525B25]
+    bool frame_rate_overlay = false;
     bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
     // The player profile's auto-reload word as the mission start's session copy
     // leaves it (profile::session_input): one process global the weapon action
@@ -656,15 +786,15 @@ struct SessionRules {
     // g_RulesFlags @0x24D1E34 = mpattrib]. Hosts stamp it from their config's
     // mpattrib value, joiners from the S2C 0x64 fixed block's +44 word.
     bool no_friendly_fire = false;
-    // The host's allowSniperScopeZoom option as the SESSION sees it (byte_A821F0):
-    // the class-6 sniper lock on a Primary def's scope zoom (its floor becomes
-    // scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes
-    // it outside a session, stamps the serving host's config value on the
-    // authority and, on a joiner, bit 16 of the S2C 0x08 flags dword (the bit
-    // server_initial_state.cpp emits from the option); offline it stays 0, which
-    // locks snipers at max. Hosts stamp it from GameConfig::allow_sniper_scope_zoom
-    // (HostRole::apply_rule_words), joiners from their session-config bitflags
-    // (JoinerRole's frame); the slot fills read sniper_zoom_fill below.
+    // The host's allowSniperScopeZoom option as the SESSION sees it
+    // (g_SessionAllowSniperScopeZoom): the class-6 sniper lock on a Primary def's scope zoom (its
+    // floor becomes scope_max_mag) reads it at the zoom step and the mount clamp. Retail zeroes it
+    // outside a session, stamps the serving host's config value on the authority and, on a joiner,
+    // bit 16 of the S2C 0x08 flags dword (the bit server_initial_state.cpp emits from the option);
+    // offline it stays 0, which locks snipers at max. Hosts stamp it from
+    // GameConfig::allow_sniper_scope_zoom (HostRole::apply_rule_words), joiners from their
+    // session-config bitflags after each fold and on the load's fresh world
+    // (JoinerRole::mirror_session_zoom_rule); the slot fills read sniper_zoom_fill below.
     // [orig: Game_ApplySessionSettingsToGlobals @0x552284 (the reset) / @0x5522b9
     //  (the authority stamp); NapiNPClientMsg_HandleSessionConfig @0x428392;
     //  readers Player_AdjustWeaponElevation @0x4dbe36, Player_MountWeaponSlot
@@ -674,7 +804,8 @@ struct SessionRules {
     // rule above in a session on a peer, else the config's own allowSniperScopeZoom
     // (a dedicated host's, single player's game.cfg). [orig: WeaponSlot_InitFromDef
     //  @0x53EF07..0x53EF25 - is_in_session @0x53EF07, is_mp_session_peer @0x53EF0F,
-    //  byte_A821F0 @0x53EF17, g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
+    //  g_SessionAllowSniperScopeZoom @0x53EF17,
+    //  g_GameConfigState.allowSniperScopeZoom_5EC @0x53EF1F]
     bool sniper_zoom_fill = false;
     // Multiplayer blast damage to Building ItemDefs is disabled unless the
     // host's `destroybuild` rule is nonzero. Offline/SP ignores the option.
@@ -692,12 +823,13 @@ struct SessionRules {
 	//  @0x551D80..0x551D91; Config_SetDefaults @0x54D352); AI_TickState_VehicleDead
 	//  @0x467EE9, Entity_UpdateVehicleAIMovement @0x461246]
 	bool vehicle_respawns = true;
-    // The local debug/cheat word's 0x800 bit (dword_24C1930): the SM feed's
+    // The local debug/cheat word's 0x800 bit (g_DebugCheatFlags): the SM feed's
     // class-0 player leg skips the LOCAL player and the weapon validator
     // rejects every Player target while it is up [orig: `test
-    // dword_24C1930,800h` @0x467141, @0x53A46E]. Input action 123 toggles it
-    // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
-    // carries it. Defaults clear.
+    // g_DebugCheatFlags,800h` @0x467141, @0x53A46E]. The cheat row's input
+    // action 123 toggles it (@0x4E07A4; inmatch::Role::dispatch_record), out
+    // of a session only, and Game_StartMission zeroes it (@0x525B25): a fresh
+    // mission's world starts clear. No net wire carries it.
     bool ai_rules_skip_local_player = false;
     // The difficulty word: outside a session the local player's health
     // ceiling doubles at -1 and halves at 1 (max_health_with_difficulty,
@@ -728,6 +860,32 @@ constexpr int32_t mission_start_difficulty(uint32_t game_type) {
 // [orig: Server_BroadcastEntityActionPacket @0x5080d0; its producers
 //  HUD_ShowObjectiveNotification @0x5ba2e0 (the call @0x5ba3df) and
 //  GameMsg_AddChatLineAndRelay @0x5ba170 (the call @0x5ba1c3)]
+// A reload the authority's weapon walk began on a row other than the local
+// player's: the C2S 0x25 body WeaponAction_Reload queues into the host's own
+// dispatcher, which broadcasts it as S2C 0x49. A UseGun gunner addresses its
+// gun (whose EWeap def sends 0xFFFF), any other row itself with its slot's
+// category * 65 + rank. [orig: WeaponAction_Reload @0x5430B6..0x543108;
+//  NetPacket_SendReloadRequest @0x432930 (@0x43296C..0x432974,
+//  CNapiNetwork_QueueReliableMessage @0x4329B7)]
+struct WeaponReloadRequest {
+	uint16_t entity_handle = 0xFFFF;
+	uint16_t reload_param = 0;
+};
+
+// One CHAT-ring line by its game-text key (WorldOutbox::hud_chat_lines); `system_ring`
+// posts it to the SYSTEM ring instead (Chat_AddMessageChannel2's, the cheat toggle's line).
+// `text`: with no key, the line as it is (a literal or a line the sim formatted); with a
+// key, the key's text with `text` as its $A token (hud::chat_format_player_tokens), as the
+// scope-scale toast's [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x31's
+// Chat_FormatPlayerTokens @0x4E05E9].
+struct HudChatLine {
+    const char *section = "";
+    const char *key = "";
+    uint32_t argb = 0;
+    bool system_ring = false;
+    std::string text;
+};
+
 struct HudRelay {
     uint8_t kind = 0;
     int32_t slot = 0;
@@ -791,22 +949,62 @@ struct HudFrameCounters {
     }
 };
 
+// A designator round's mark: a DesignateTarget ammo spawns no round, and the
+// authority registers its firer's mode-1 designation at the spawn point
+// instead, with the firing weapon's life (+0x458) and radius (+0x454).
+// [orig: RoundData_SpawnRound @0x4EC249..0x4EC270 -> EntityTracker_RegisterOrUpdate
+//  @0x511580 (firer, point, ticks, radius, mode 1)]
+struct DesignationMark {
+    EntityHandle firer;
+    int32_t point[3] = {}; // Q16
+    int32_t ticks = 0;
+    int32_t radius_units = 0;
+};
+
+// A co-op dialog line the presentation plays (a non-authority's S2C 0x28): the dialog by its
+// name, the line's index and the local player's class, the clip's locale.
+// [orig: NapiNPClientMsg_0x028 @0x425B40 -> Dialog_PlayByNameAndSlot @0x44E3F0, the class
+//  @0x425B88..0x425B94]
+struct DialogLineOrder {
+    std::string dialog_name;
+    int32_t line = 0;
+    int32_t player_class = 0;
+};
+
 // What the sim produced this tick for someone else to drain: the wire (entity
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
 // an outbox back; the drains clear them.
 struct WorldOutbox {
     // Preserve the callback's send order across 0x21 explosions, 0x26 state,
-    // and 0x12 removal. The host drains this once, excluding its loopback.
+    // 0x12 removal, the guided motors' 0x44s and the placed devices' 0x59s.
+    // The host drains this once, excluding its loopback.
     // [orig: Entity_HandleDeathEvent @ 0x4070F0; Entity_HandleDeathOnAuthority @ 0x407CC0;
-    // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
+    // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270;
+    // Entity_SendEffectPacket @0x445C40; Entity_UpdateSatchelPhysics's 0x59 @0x448BD5]
     using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent,
-            DoorRowEvent>;
+            DoorRowEvent, GuidedUpdateEvent, DeviceSpawnEvent>;
     std::vector<EntityNetworkEvent> entity_events;
     // A client's door section requests (C2S 0x1A, doors.cpp carries the
     // witness); the joiner role drains them into its send queue. The authority
     // never fills it.
     std::vector<DoorRowEvent> door_requests;
+    // A client's local body's seat-leave requests (C2S 0x27, the target's wire
+    // handle) the plyr class callback raised (infantry_death.cpp carries the
+    // witness); the joiner role drains them into its send queue. The authority
+    // never fills it.
+    std::vector<uint16_t> detach_requests;
+    // The local player's C2S 0x1D stance requests the sim raised past the input
+    // dispatcher's stance rows, by action id, in raise order: the mount request's crouch
+    // (0xA9) for a ForceCrouch def (player_weapon.cpp mount_queue_switch_out carries the
+    // witness). The role queues each on its own client connection as the stance key's
+    // (Role::flush_stance_requests); a role with no client connection drops them.
+    std::vector<uint16_t> stance_requests;
+    // A client's C2S 0x0F entity requests the movers raised, in raise order, by World handle
+    // (the ewep mover's stale-ground pair, ai_system.cpp carries the witness); the joiner role
+    // drains them into its carrier-repair queue, its own body L by its wire handle. The
+    // authority never fills it.
+    std::vector<EntityHandle> entity_info_requests;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);
@@ -816,6 +1014,10 @@ struct WorldOutbox {
     // the host tick lands a remote picker's on its connection's slot table and
     // fans S2C 0x35 for each.
     std::vector<PowerupWeaponGrant> powerup_weapon_grants;
+    // The weapon walk's authority reloads for rows other than the local player's
+    // (WeaponReloadRequest above); a listen host relays them through its own
+    // client like its player's (D-NET-336).
+    std::vector<WeaponReloadRequest> weapon_reloads;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_RoundRing @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
@@ -846,11 +1048,49 @@ struct WorldOutbox {
 	EffectLog effects;
     std::vector<ScriptEffectEvent> script_effects;
     std::vector<ScriptSoundEvent> script_sounds;
+    // The CHAT-ring lines the sim posts by their game-text key, in the order raised; the
+    // HUD owner resolves each in its section (a miss reads "") and posts it in its colour for
+    // the 930 ticks every such site passes (Chat_AddMessageChannel1; the ewep tank-command
+    // leg, world::emplaced_command_call, carries the witness).
+    std::vector<HudChatLine> hud_chat_lines;
+    // An audio channel shutdown is owed: every audio channel falls silent and
+    // the ambient channel handles drop, so the mix takes its channels anew. The
+    // embedder's audio device takes and clears it. Three setters: the pause
+    // row once it has raised the single-player pause word (the session's
+    // pausing update; the gate word is the pause word itself, flipped @0x49B52D),
+    // the LOSE cine's start (World::process_round_end) and the LOSE epilog's
+    // build step (EpilogCine::update_lose). The fourth caller, the in-game
+    // options screen's open out of a session, is the embedder's own menu leg
+    // (GameWorld::shutdown_audio_channels) [orig: Input_HandleActionBinding
+    // @0x49AD40 - case 25, `cmp dword_A87050, 0; jz` @0x49B543..0x49B54A, the
+    // Audio_ShutdownChannelsAndDeviceTable call @0x49B550; UI_OptionsScreenInit
+    // @0x554800 - the call @0x554DE4 behind !is_in_session;
+    // Audio_ShutdownChannelsAndDeviceTable @0x527790 - AudioChannel_InitAll
+    // @0x7671B0 (silence on all 26 channels), the handle table zeroed
+    // @0x527797..0x5277BA].
+    bool audio_channels_shutdown = false;
+    // A round end out of a session stops the dialog channel's playing line (the
+    // channel the last loaded line holds) ahead of its Dialog_ResetAll; the
+    // embedder's audio device takes and clears it [orig: Server_ProcessRoundEnd
+    // @0x5164F0 - the session gate @0x516942..0x516948, the 0 argument @0x51694A,
+    // the DialogAudio_PlayNextChunkOrStop call @0x51694B; DialogAudio_PlayNextChunkOrStop
+    // @0x44E320 - a 0 argument jumps to AudioChannel_ResetByHandle on
+    // g_DialogAudioChannelHandle @0x44E32A..0x44E362].
+    bool dialog_line_stop = false;
+    // The lose cine's edit fade scales the main loop's frame-time smoothing
+    // history (g_FrameTimeSmoothedFp4) at its start and its finish, in call
+    // order; the in-match session applies each to its bank after the tick
+    // (world::TickAccumulator::scale_smoothing_history carries the witness)
+    // and clears the list. Neither the presentation nor the wire reads it.
+    std::vector<float> frame_time_scales;
     uint64_t next_script_effect_order = 0;
     // The WAC commands the VM replicated this tick (registry flags 0x18) for
     // the server tick to send as S2C 0x23; script_remote_command.h carries the
     // witness. Cleared by the drain; a client-side World never fills it.
     std::vector<ScriptRemoteCommand> script_remote_commands;
+    // The designator rounds' marks for the host's designation table and its
+    // S2C 0x1E notice; the host tick drains them.
+    std::vector<DesignationMark> designation_marks;
     // The impact-scar rings (world-wac-ai-re §24.9): 128 per-entity rings + the
     // terrain ring, written by the round stop and cleared on death. Presentation
     // state — the shell compiles it into quads each frame; it is NOT part of the
@@ -863,6 +1103,8 @@ struct WorldOutbox {
     // present layer drains into positional one-shots.
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
+    // The co-op dialog lines to play, drained by the presentation.
+    std::vector<DialogLineOrder> dialog_lines;
     // The weather tick's thunder one-shots (weather_state.h carries the
     // cites); the presentation owner drains them per frame.
     std::vector<WeatherSoundEvent> weather_sounds;
@@ -875,9 +1117,9 @@ struct WorldOutbox {
 
     // The presentation half dropped undrawn, for a host with no presenter
     // (opennova-serve): everything a presenter drains each frame -- the tips,
-    // the HUD blank, the destruction, vehicle, script and effect queues, the
-    // pending scorches, the sound queues and the fire sounds' ready list --
-    // so nothing accumulates over a long run. The wire half (the entity
+    // the HUD blank, the audio stops, the destruction, vehicle, script and
+    // effect queues, the pending scorches, the sound queues and the fire
+    // sounds' ready list -- so nothing accumulates over a long run. The wire half (the entity
     // events, the relays, the grants, the round ring, the water crossings,
     // the replicated WAC commands) stays for the host tick's own drain; the
     // scar rings and the fire-sound countdown slots are fixed-size state, not
@@ -885,14 +1127,18 @@ struct WorldOutbox {
     void discard_presentation() {
         tip_events.clear();
         hud_detail_blank = false;
+        audio_channels_shutdown = false;
+        dialog_line_stop = false;
         destruction.clear();
         vehicle_effects.clear();
         effects.clear();
         script_effects.clear();
         script_sounds.clear();
+        hud_chat_lines.clear();
         terrain_scorches.clear_pending();
         slot_sounds.clear();
         sound_emitters.clear();
+        dialog_lines.clear();
         weather_sounds.clear();
         (void)fire_sounds.drain();
     }
@@ -908,6 +1154,30 @@ public:
     virtual void update_entity_idle_timers(World &world) = 0;
 };
 
+// The host session's sends inside the script pass. Retail queues each record
+// the pass raises at its call (NapiNPServer_SendFiltered queues on the
+// connection there and then), so a record a later call raises follows every
+// send an earlier call made, a round end's 0x61 / 0x1D included: the WAC VM's
+// 0x23 goes ahead of its own local call, each WAC command's and each BMS
+// action's records go out at that call, and a Win's round end announces at its
+// latch. Server_TickUpdate installs one around its script pass; a world
+// without a host session has none.
+// [orig: WacScript_ExecuteBytecode @0x4F58B0 (SendFiltered(0x23) @0x4F5E74 /
+//  @0x4F5ED1 ahead of the call switch @0x4F5EF6); EventTrigger_UpdateEntry
+//  @0x454C30 (one EventAction_Dispatch per action, the calls @0x454CA6 /
+//  @0x454D0E); WacAction_Win @0x4ED4A0 (the Server_ProcessRoundEnd call
+//  @0x4ED4A5); NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage
+//  @0x628640]
+class IScriptPassSends {
+public:
+    virtual ~IScriptPassSends() = default;
+    // Send every record the pass raised since the last call.
+    virtual void send_raised(World &world) = 0;
+    // A round end latched inside the pass: what the pass raised before the
+    // latch, then the round end's own sends.
+    virtual void send_round_end(World &world) = 0;
+};
+
 // The authority's per-player weapon tables for a REMOTE player: retail's
 // player-slot block behind Entity_ValidatePtr, its 780-slot table at +0x1D0,
 // its class pools at +0x15A58 and its shared clips at +0x15C58. The host
@@ -921,6 +1191,13 @@ public:
     // A copy of `player`'s tables; false when no session slot holds it.
     virtual bool remote_weapon_tables(const World &world, EntityHandle player,
                                       WeaponInventory &out) const = 0;
+    // The two ammo words a slot of `player`'s own table reads: the pool of
+    // `ammo_class` (+0x15A58) and the loaded rounds of `bucket` (+0x15C58), each 0
+    // outside its table; false when no session slot holds it.
+    // [orig: Entity_GetScoreValueBySlotType @0x5406E0 (the validated player's pools
+    //  @0x5407B3); WeaponSlot_GetSharedLoadedRounds @0x5405F0 (its buckets @0x540657)]
+    virtual bool remote_ammo(const World &world, EntityHandle player, int32_t ammo_class,
+                             int32_t bucket, int32_t &pool, int32_t &loaded) const = 0;
 };
 
 // Server_TickUpdate's every-32 legs, inside the one script admission, between
@@ -964,6 +1241,9 @@ public:
     // Non-owning local state, bound by the mission kernel for synchronous
     // deployment resets; bare authoritative worlds need no local view.
     LocalPlayer *local_player_state = nullptr;
+    // The process's loadout name list (g_LoadoutWeaponNameList, weapon_inventory.h), bound by
+    // the role that runs the world; null reads the image's initializer.
+    LoadoutWeaponNameList *loadout_weapon_names = nullptr;
     EntityCommands commands;
     // The AI/motor system: every brain plus the organic bodies. Owned here so
     // the command layer, the sims, the wire and the tools reach brains without
@@ -974,7 +1254,13 @@ public:
     // kernel between WAC and BMS; the host session installs the idle timers.
     ServerIdleLegs server_idle_legs;
     IEntityIdleTimers *entity_idle_timers = nullptr;
+    // The script pass's sends (IScriptPassSends above), installed by the host
+    // session around run_script_pass.
+    IScriptPassSends *script_pass_sends = nullptr;
     IRemoteWeaponTables *remote_weapon_tables = nullptr;
+    // The authority's inline transactions (entity_update_transactions.h): armed
+    // by the host session around its tick's entity pass (Server_TickUpdate).
+    IEntityUpdateTransactions *entity_update_transactions = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
@@ -1043,6 +1329,12 @@ public:
     // drained by the host session. [orig: RoundData_SpawnRound @0x4ec0d0 inline from
     // RoundData_AddRound; Weapon_UpdateAllProjectiles @0x4ec020; §5.60]
     RoundSim round_sim;
+    // The authority's count of deployed players (g_ServerNumPlayers @0xC8FC54): every
+    // joined slot whose body is not hidden, recounted each periodic second by the host's
+    // server tick; never written on a client or in single player. The heat seekers' flare
+    // roll reads it [orig: Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), called
+    // from Server_TickUpdate @0x51D7E0 (@0x51DF8C); Weapon_GetFlareDeflectChance @0x5382A0].
+    int32_t server_num_players = 0;
 
     // The explosion queue + AoE damage, the death-piece pool, the per-item death
     // traits, and the destruction presentation events (world/destruction.h;
@@ -1052,6 +1344,11 @@ public:
     // `destruction` (present) and feeds `item_death_traits` (item-traits sweep).
     ExplosionSim explosions;
 
+    // The body readout (an instrument, no behaviour; body_trace.h, the body_trace probe):
+    // the watched handles and their per-tick, ground-probe, force and blast records. Not
+    // part of the snapshot.
+    BodyTrace body_trace;
+
     // Placed throwable devices + class bindings (world-wac-ai-re §27).
     ThrowableSim throwables;
     MinefieldSystem minefields;
@@ -1059,6 +1356,13 @@ public:
     FacialSystem facials;
     TeammateOperations teammates;
     int32_t vehicle_ai_spawn_phase = 0; // [orig: dword_B21F80]
+    // The record spawn's think-clock stagger: every record spawn, the load's
+    // records and the addeweap children alike (a deployable's children too),
+    // takes this counter modulo 60 into its +0x2AC clock and steps it by 11.
+    // The mission reset each load runs first zeroes it (promote_mission).
+    // [orig: g_BmsSpawnPhaseCounter @0xA77638 - Entity_SpawnFromBMSRecord
+    //  @0x40EC8C..0x40ECB8; Mission_ResetBmsState @0x40DB80 (the zero @0x40DBD1)]
+    uint32_t bms_spawn_phase_counter = 0;
     IItemPieceSpawner *item_piece_spawner = nullptr; // non-owning mission asset factory
     ITeammateSpawner *teammate_spawner = nullptr; // non-owning mission asset factory
     DeathPieceSim death_pieces;
@@ -1110,6 +1414,79 @@ public:
     // it. [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
+    // The embedder's leg at the entity update's proximity build, ahead of the World's
+    // own tables: a joiner rebuilds its decoded rows' collision proxies there, after the
+    // pool-1 walk and the projectile pass, so those read the table the previous update
+    // built, as retail's do (D-NET-196). Empty on every other peer. [orig:
+    // Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+    // Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+    // call @0x4C240A]
+    std::function<void()> before_proximity_build;
+    // The embedder's leg between the entity update's proximity build and its pool-0
+    // walk: a joiner's replica pool-0 rows through its own body's slot take their
+    // updates there, so the own body's update re-reads them moved (D-NET-196). Empty
+    // on every other peer. [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity
+    // build @0x4C240A, the pool-0 walk @0x4C2426..0x4C2472]
+    std::function<void()> before_pool0_walk;
+    // The embedder's leg at each pool-1 slot of the walk, its handle the slot's: a
+    // joiner's decoded pool-1 row takes its visit there, at its own slot in slot order
+    // (D-NET-196). update_pool1_slot calls it as the slot's +0x1C4 legs end (the vehicle
+    // mover, which returns at once for a traitless row, the ewep class update, the item
+    // callbacks, the drop motion), so a chased hull's chase runs at its mover's position
+    // and a World mover's pose, or an ewep or genx row's class update, reaches its row
+    // right after it; a slot the registry holds no row at calls it in the walk. Empty on
+    // every other peer. [orig:
+    // Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+    // Entity_UpdatePool1Slot calls @0x4C21B9 / @0x4C21D0 / @0x4C21E0 / @0x4C21E9;
+    // Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C4 mover @0x4B8E41..0x4B8E53]
+    std::function<void(EntityHandle)> pool1_slot_leg;
+    // A slot's destroyed mark (+0x219) by its wire handle: retail's shared destroy zeroes a
+    // slot and marks it, and a record that rewrites the slot clears the mark with its memset.
+    // A joiner's decoded rows keep the marks (replication::ClientState::destroyed_marks) and
+    // its role binds this to read them; empty on every other peer, where no reader runs (the
+    // readers run off the authority only). [orig: Entity_Destroy @0x43E810 - the memset
+    // @0x43EA70, the mark @0x43EA7F; read by Entity_UpdateTransformAndTurret @0x440D2A]
+    std::function<bool(uint16_t wire_handle)> destroyed_mark;
+    // A decoded remote person's entity words, by its wire handle: retail's client built the
+    // person as its own pool-0 entity, and its readers take these words of it. The HUD target
+    // cursor's (HudTargetCursor::wire_person): the team byte the crosshair's and the inset's team
+    // compares read, the def type the crosshair's bracket test reads. The heat query's pool-0
+    // leg (guided_heat_target), which walks the client's pool-0 slots and so these persons: the
+    // walk's words and the fire origin's. The def words come from the items row the record's
+    // type word names (item_index_by_type_id: no row is index 0, no def). A joiner's role binds
+    // both hooks over its replica rows (false: no row holds the handle); both are empty on
+    // every other peer, whose pool-0 persons are registry entities.
+    // [orig: NapiNPClientMsg_0x00C @0x42E730 - ItemList_FindIndexByTypeId's index @0x42E84A,
+    //  the team @0x42E979; HUD_DrawCrosshair @0x592640 - the team read @0x592692, the def type
+    //  @0x592CE8..0x592CF3; Render_WeaponInsetScene @0x5C9740 - the team read @0x5C9F84;
+    //  Entity_FindTargets @0x53A610 - the pool-0 walk @0x53A6E7..0x53A8A3]
+    struct WirePerson {
+        uint16_t type_id = 0;  // the record's type word (+0x1C's ItemList_FindIndexByTypeId key)
+        uint8_t team = 0;      // +0x162, 0 while none decoded
+        uint8_t byte_154 = 0;  // +0x154, the record's slot byte
+        uint32_t flags = 0;    // +0x24: the spawn's word and the client's own latches on it
+        bool health_zero = false; // Health (+0x11E) zeroed by a death record
+        // g_CurrentTick less +0x1AC, the death edge's stamp (0 until an edge): a dead body
+        // stays a target for 16 ticks [orig: Entity_UpdateInfantryPlayerBody @0x4B4CC1 /
+        //  @0x4B4CCC; Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F].
+        int32_t death_age = 0;
+        int32_t pos[3] = {};   // Position (+4..+0xC)
+        int32_t eye[3] = {};   // CameraOffset (+0x6C..+0x74)
+        // The seat mount (+0x16C), a pool-1 handle (0xFFFF none): the LOS walk's target parent.
+        uint16_t seat_parent = 0xFFFF;
+    };
+    std::function<bool(uint16_t wire_handle, WirePerson &out)> wire_person;
+    // The decoded pool-0 rows other than the local player's own, by handle (pool-0 slot)
+    // ascending: the slots the client's pool-0 walks visit.
+    std::function<void(std::vector<uint16_t> &handles)> wire_person_handles;
+    // The authority's GetTickCount: the process clock its host binds (HostConfig::clock_ms, at
+    // the session start and at each next mission's bind); empty is the deterministic logic-tick
+    // seam (authority_tick_count_ms). The 0x26 sender's entity+560 stamp reads it, and so do
+    // the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes as its C2S 0x28 kill-page window, so a
+    // load or a held start counts on both sides of the window (D-NET-NEW-L8-28).
+    // [orig: Server_SendEntityStatePacket @0x509D70 - GetTickCount, stored to entity+0x230
+    //  @0x509D7A]
+    std::function<uint32_t()> tick_count_ms;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
@@ -1134,17 +1511,21 @@ public:
     }
     // Game_ProcessMainFrame's gate over the whole entity update. On the
     // authority an empty world (no human, a started WAC clock) holds still,
-    // unless a playing host's own player is on the death screen; in a session
-    // the ended round holds every peer still (the round-over latch the round
-    // end raises). The pre-round byte half is the PreRound tick phase.
+    // unless a playing host's own player is on the death screen; the local
+    // client's copy of the pre-round byte holds every peer (the authority's own
+    // pre-round timer is no part of it); in a session the ended round holds
+    // every peer still (the round-over latch the round end raises). A joiner's
+    // PreRound tick phase is its copy of the byte (run_entity_pass).
     // [orig: Game_ProcessMainFrame @0x526703..0x526742 -- `cmp is_authority`
     //  @0x526703, the humans/ticks tests @0x52671C..0x52672A, `cmp
-    //  is_in_session` @0x526734, `cmp g_SpawnSuccessGate` @0x52673C;
-    //  the latch writer Server_ProcessRoundEnd @0x5168E4]
+    //  g_ClientPreRoundTimer` @0x52672C, `cmp is_in_session` @0x526734, `cmp
+    //  g_RoundOver` @0x52673C; the latch writer Server_ProcessRoundEnd
+    //  @0x5168E4]
     bool entity_update_admitted(bool is_authority) const {
         if (is_authority && !cached.peer_death_screen && cached.humans == 0 &&
                 cached.wac_ticks != 0)
             return false;
+        if (cached.client_preround_timer != 0) return false;
         return !(rules.mp_session && match.outcome().ended);
     }
     // The SP end screen is up: the round end's SP tail started the cine, and
@@ -1202,7 +1583,7 @@ public:
     // The frame's pending-sound pass, ahead of the script and entity halves:
     // the fire-sound countdown, then the incoming-lock tone drain.
     // [orig: Sound_TickPendingSlots @0x529310 (the slot walk, then the
-    //  dword_B764C0 drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
+    //  g_LockOnMeToneTicks drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
     //  @0x526697]
     void tick_pending_sound_slots();
     TickContext begin_tick(bool is_authority, TickPhase phase);
@@ -1246,6 +1627,11 @@ public:
     // producers — the WAC win/lose handlers, the BMS Blue/Red/GreenWin actions, and
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
+    // A script call's records go out at the call while the host session's
+    // script pass runs (IScriptPassSends); a no-op otherwise.
+    void send_script_pass_records() {
+        if (script_pass_sends != nullptr) script_pass_sends->send_raised(*this);
+    }
 
     // The round-over RESTART key's world half (hud::hud_round_over_key took
     // it): the end screen comes down and the mission exits for the SP
@@ -1321,6 +1707,7 @@ public:
         FacialSystem facials;
         TeammateOperations teammates;
         int32_t vehicle_ai_spawn_phase = 0;
+        uint32_t bms_spawn_phase_counter = 0;
         Match match;
         // The SP score block and the subgoal masks at play start: a restart
         // lands on the post-census, post-memset block and the post-PreMission
@@ -1368,5 +1755,19 @@ void count_mission_units(World &world);
 // [orig: Score_CountMissionSubgoalsAndUnits @0x509dc2..0x509dd1 scanning byte_A7628C — the header
 //  win-condition text ids; dword_C8468C]
 int32_t count_defined_subgoals(const World &world);
+
+// The authority's GetTickCount: the bound process clock (World::tick_count_ms), else the
+// deterministic seam over the logic tick a clockless test runs on (D-NET-NEW-L8-28).
+inline uint32_t authority_tick_count_ms(const World &world) {
+    return world.tick_count_ms ? world.tick_count_ms()
+                               : io::host_milliseconds_for_logic_tick(world.logic_tick);
+}
+
+// The same on a path that carries the host's own tick (the session dispatch): the bound
+// process clock, else the seam over `host_tick` (D-NET-NEW-L8-29).
+inline uint32_t authority_tick_count_ms(const World *world, uint32_t host_tick) {
+    return world != nullptr && world->tick_count_ms ? world->tick_count_ms()
+                                                    : io::host_milliseconds_for_logic_tick(host_tick);
+}
 
 } // namespace opennova::world

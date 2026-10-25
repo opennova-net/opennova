@@ -1,6 +1,7 @@
 #include "material_texture.h"
 
 #include <base/io/strutil.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -115,6 +116,28 @@ uint8_t material_texture_runtime_type(uint8_t authored_type) {
 			authored_type > 18)
 		return 0;
 	return authored_type;
+}
+
+// [orig: Material_ConvertDefinition @0x5B0428..0x5B0453]
+uint8_t material_texture_runtime_slot(uint8_t authored_slot) {
+	if (authored_slot == 1 || authored_slot == 2) return authored_slot;
+	if (authored_slot >= 3 && authored_slot <= 7) return static_cast<uint8_t>(authored_slot + 5);
+	return 0;
+}
+
+// [orig: CEffectDef_ResolveSubobjectMaterials @0x5B25C0 (@0x5B25DC); Material_ResolveEffectSubobjectsAndShader
+//  @0x5B1870 (@0x5B1890)]
+std::vector<MaterialResolveRow> material_resolve_rows(const threedi::Threedi3di3 &model) {
+	std::vector<MaterialResolveRow> rows;
+	for (uint32_t m = 0; m < model.material_count; ++m) {
+		const threedi::ThreediMaterial &material = model.materials[m];
+		const uint32_t count = std::min<uint32_t>(material.texture_count,
+				static_cast<uint32_t>(sizeof(material.textures) / sizeof(material.textures[0])));
+		for (uint32_t r = 0; r < count; ++r) {
+			if (material_texture_runtime_slot(material.textures[r].slot) != 0) rows.push_back({m, r});
+		}
+	}
+	return rows;
 }
 
 // [orig: Material_LoadStageTexture @0x5B16F0; dedicated cases @0x5B179A (6),

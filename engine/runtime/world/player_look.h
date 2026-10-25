@@ -1,9 +1,13 @@
-// The mouse-look pipeline: integer pixel deltas -> entity Yaw/Pitch (BAM32), the
-// faithful port of the engine's per-frame mouse pump + axis-binding apply.
+// The mouse-look pipeline: the cursor offset -> the main frame's pump
+// (MouseAxisPump: four times the offset spread over the frame's updates, each
+// summed with the previous share) -> the axis words -> entity Yaw/Pitch (BAM32),
+// the faithful port of the engine's per-frame mouse pump + axis-binding apply.
 //
-// [orig: Input_ProcessMouseAxisBindings @ 0x499680 — deltas are center-lock cursor
-//  PIXELS per frame (Input_PumpAndCenterCursor @ 0x7616e0 pins the cursor at 320,240
-//  and reads the offset); sensitivity = setting << 11 (profile +0x590, default 128
+// [orig: Input_ProcessMouseAxisBindings @ 0x499680: the deltas it scales are the
+//  pump's per-update sums (g_MouseState.deltaX / deltaY as Game_ProcessMainFrame
+//  rewrites them, MouseAxisPump below), over the center-lock cursor offset
+//  (Input_PumpAndCenterCursor @ 0x7616D0 pins the cursor at 320,240 and reads the
+//  offset); sensitivity = setting << 11 (profile +0x590, default 128
 //  @ PlayerProfile_InitDefaults 0x54bbc0, clamped [1, 0x1FF] by the 'mousescale'
 //  adjust @ 0x49b18b); the scoped reduction divides by the current zoom
 //  (Player_GetClampedWeaponElevation @ 0x4dc6b0 = slot zoom clamped to the def's
@@ -35,6 +39,11 @@ constexpr int32_t kLookPitchProneMax = 0x1C71C700;    // +40 deg while prone
 struct PlayerLookSettings {
     int32_t sensitivity = kMouseSensitivityDefault; // [orig: g_MouseSensitivity]
     bool invert_y = false; // flipmouse [orig: g_MouseInvertY; default OFF = push-forward looks up]
+    // The scopescale row's word: the session copy seeds it (profile::SessionInput::scope_scale),
+    // the row steps it, and nothing else reads it (its toast shows it).
+    // [orig: g_ScopeScale @0x24D2080 (static 0) - its accesses Input_HandleActionBinding_0
+    //  @0x4E0580 / @0x4E0594 / @0x4E05AE and Game_ApplySessionSettingsToGlobals @0x551630]
+    int32_t scope_scale = 0;
 };
 
 // The flipmouse row (catalog 79, dispatch 9): the LIVE Y invert flips. The
@@ -58,17 +67,175 @@ void player_look_flip_mouse(PlayerLookSettings &s);
 //  Input_TryDispatchBindingByWeaponType @0x499180..0x4991a4]
 int32_t player_look_mouse_scale(PlayerLookSettings &s, int32_t param_value, bool negative);
 
+// The scopescale row (catalog 74, dispatch 49, the troop class callback's case) on the
+// session's word: a nonzero `param_value` (a typed `scopescale <n>`) sets it outright, else it
+// steps by 16, down when the record carries the sign bit, then clamps: 512 and above to 511,
+// 128 and below to 128. Returns the new word, which the STRMISC_SCOPESCALE toast shows as $A.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 49: the param @0x4E0574, the sign
+//  @0x4E0578, +16 @0x4E0587, -16 @0x4E058C, the store @0x4E0594, `cmp eax, 200h; jl`
+//  @0x4E058F..0x4E0599 -> 1FFh @0x4E059B, `cmp eax, 80h; jg` @0x4E05A2..0x4E05A7 -> 80h
+//  @0x4E05A9, the store @0x4E05AE]
+int32_t player_look_scope_scale(PlayerLookSettings &s, int32_t param_value, bool negative);
+
 struct PlayerLookDelta { int32_t yaw = 0, pitch = 0; };
 // Shared scaling before human-view or AbsorbPitch bounds are applied.
 PlayerLookDelta player_look_delta(const PlayerLookSettings &, int32_t dx_px,
                                  int32_t dy_px, int32_t scoped_zoom);
 
-// One frame of mouse pixels onto the look angles. `dx_px`/`dy_px` are cursor pixels
-// in screen sense (+x right, +y down — the raw center-lock offset). `scoped_zoom` is
+// One update's mouse axis words onto the look angles. `dx_px`/`dy_px` are in screen
+// sense (+x right, +y down): the pump's sum for the update. `scoped_zoom` is
 // the current zoom magnification when the scoped sensitivity reduction applies
 // (> 1 divides), else 0 or 1. `prone` selects the +40 deg up-clamp.
 void player_look_apply(int32_t &yaw_bam, int32_t &pitch_bam, const PlayerLookSettings &s,
                        int32_t dx_px, int32_t dy_px, int32_t scoped_zoom, bool prone);
+
+// The main frame's mouse pump, between the cursor and the axis bindings: the
+// drain's first update reads the cursor's offset since its last centering,
+// takes four times it and spreads that over the updates the drain runs (the
+// share (n / 2 + 4 * offset) / n on each, the remainder 4 * offset - share *
+// (n - 1) on the last), and every update hands the axis bindings its share
+// plus the previous update's, a two-tap sum: one cursor pixel feeds the axis
+// scale eight times over two updates. A menu screen up at the first update
+// zeroes the frame's shares. Retail's words are process words that only the
+// main frame writes, never reset; ours live with the session (Session::
+// mouse_pump_), so a new mission's first update starts from zero where retail's
+// would carry the last frame's shares. Every stock mission end passes a menu
+// screen whose first update zeroes them, a disconnect's exit being the one path
+// without one.
+// [orig: Game_ProcessMainFrame @0x5263F0 -- the first update's read (the
+//  g_MainLoopFirstUpdate test @0x52640E, the Input_PumpAndCenterCursor call
+//  @0x526458), the menu's zeroes @0x52642F..0x52644D, the share and the
+//  remainder @0x52645D..0x5264A9 (the divisor g_MainLoopUpdatesDue; x's share
+//  @0x526481, its remainder @0x526491), the last update's remainder
+//  @0x5264B3..0x5264D4 (dword_24E0E80), the share @0x5264DB, the two-tap sum
+//  into g_MouseState.deltaX / deltaY @0x5264E6..0x526508, which
+//  Input_ProcessMouseAxisBindings @0x499680 scales (the read @0x4996BE;
+//  player_look_delta); Input_PumpAndCenterCursor @0x7616D0]
+struct MouseAxisPump {
+	int32_t share[2] = {};     // g_MouseUpdateShareX / Y: this update's
+	int32_t remainder[2] = {}; // g_MouseLastShareX / Y: the last update's
+	int32_t previous[2] = {};  // g_MousePrevShareX / Y: the two-tap's other half
+	// One update's axis input (x, y) into `axis`; `cursor` is read on the
+	// first update only. `updates_due` >= 1.
+	void step(bool first_update, bool last_update, int32_t updates_due, bool menu_open,
+			const int32_t (&cursor)[2], int32_t (&axis)[2]);
+};
+
+// The cursor's re-centre point, in the window's client pixels. Every update under
+// no menu screen puts the cursor there at its head, and nothing moves it as a menu
+// screen opens or runs: the open only clips it, and the head under a menu pumps the
+// messages and zeroes the shares without a re-centre. So a menu screen's free cursor
+// starts there, where the shell puts it as it frees the captured cursor for a game
+// screen.
+// [orig: Input_PumpAndCenterCursor @0x7616D0 (SetCursorPos(client + (0x140, 0xF0)) @0x761706);
+//  Game_ProcessMainFrame @0x5263F0 (the menu test @0x52642F, the menu head
+//  @0x526438..0x526453, the Input_PumpAndCenterCursor call @0x526458); UI_OpenMenuScreen
+//  @0x54E520 (its one cursor call, ClipCursor @0x54E5CF); SetCursorPos's other callers
+//  Input_CenterCursorToClientMidpoint @0x761660 (@0x7616BB) and Input_CenterCursor
+//  @0x416950 (@0x416996)]
+inline constexpr int32_t kCursorCentreX = 0x140;
+inline constexpr int32_t kCursorCentreY = 0xF0;
+
+// The close of a pass-through screen (death.mnu's DEATH, stat.mnu's STAT): their
+// activation raises the menu input pass-through, and only their deactivation, which
+// the next screen's open dispatches, or the death screen's LEAVE MISSION button
+// (HIDDEN_BACK, which shows its exit confirmation) clears it; the confirmation's NO
+// raises it again. The close navigates nowhere, so the flag holds through it, and a
+// death screen closed with its confirmation up runs no pass-through frame (the shell
+// tracks the word on its deploy screen). The update that closes the screen
+// re-centres the cursor the menu left free, which writes the axis words as the
+// cursor's client offset from the centre, then runs the pass-through input frame,
+// whose axis read takes that offset whole (no share, no two-tap, no 4x): one
+// update's axis input of (x - 0x140, y - 0xF0), which the look rows' head admits or
+// drops as any axis input. `client_x` / `client_y` are the cursor's client-area
+// position at the close; the next update's head pump re-centres again and
+// overwrites the words, so only that one update reads it.
+// [orig: UI_ProcessMenuScreenFrame @0x54E650 (the UI_CloseMenuScreen call @0x54E659, the
+//  g_MenuInputPassThrough test @0x54E686, the Input_ProcessFrame call @0x54E695;
+//  its caller under a menu screen Game_ProcessMainFrame @0x5263F0, the call
+//  @0x52667B); UI_CloseMenuScreen @0x54E5E0 (UIScene_ReturnToHistoryScreen(menu, 0)
+//  @0x54E635, the Input_ResetAllState tail @0x54E63F); UIScene_ReturnToHistoryScreen
+//  @0x63DFA0 (no navigation without pop_extra); Input_ResetAllState @0x497ED0 (the
+//  jump @0x497F22); Input_PumpAndCenterCursor @0x7616D0 (the offset @0x761718..0x76172A);
+//  Input_ProcessMouseAxisBindings @0x499680 (the read @0x4996BE); the raises
+//  DeathScreen_UpdateUI @0x553150 (@0x55316E), the activate's call @0x54EFD8, and
+//  StatScreen_ShowCallback @0x562840 (@0x562877 / @0x5628D6); the clears
+//  DeathScreen_OnDeactivate @0x553510 (UI_DispatchScreenEvent @0x54E6A0's event 6,
+//  @0x54F29B), StatScreen_OnDeactivate @0x562120 (@0x54F267) and DeathScreen_OnHiddenBack
+//  @0x553660 (@0x55366C; registered on HIDDEN_BACK @0x5546AE); the raise
+//  DeathScreen_OnConfirmNo @0x553680 (@0x55368C; registered on CONFIRM_NO @0x554654), both
+//  on the click event 0x3000001; CUIScene_SelectNodeByName @0x63B6B0 (the deactivate of the
+//  current screen @0x63B787, from UI_OpenMenuScreen @0x54E520's call @0x54E599); the
+//  death screen's close request Render_ProcessMainSceneFrame @0x5CA0F0
+//  (Game_CloseInGameScreens @0x5CAC9C)]
+//
+// The keys under a pass-through screen (the shell's deploy screen, death.mnu's
+// DEATH, and its end-round screen, stat.mnu's STAT). A key-down reaches the key
+// ring and, through the open menu's keyboard hook, the screen's hotkey scan at once:
+// with no edit focused, the first registered row whose widget is visible up its
+// chain marks that widget pressed. The update's menu pass then clicks it (the click
+// event 0x3000001, its ACTION rows and its callback) ahead of the pass-through test,
+// so a click that clears the word (DEATH's LEAVE MISSION) leaves the ring to no input
+// frame, and one that raises it (the confirmation's NO) lets that update's input
+// frame take it. Nothing resets the ring in between, so the keys pressed under the
+// confirmation wait for the first input frame after the NO, a mouse NO's included,
+// and a screen's close drops them with the rest of the input. The input frame under
+// the word is the whole frame, every row meeting the action head's gates (the dead
+// operand, the deploy overlay, the round-over and pause words) and the death screen's
+// binding scan, the mouse-button rows too (the axis pass has no menu test). Its
+// keyboard pass reads the ring in order: an open chat line takes each key; else the
+// special-key chain runs its inline legs (the quit dialog's keys, the page keys) and
+// its deploy leg queues the pick (input event 12), and a key it leaves goes to the
+// binding scan, which queues the Escape key's escape row (event 18). The event drain
+// then dispatches the queue in order, and a case that resets the input (case 12's
+// Input_ResetAllState, case 18's Player_ResetLocalInput past its local-entity test)
+// memsets the queue, so the first such event ends the drain: a deploy key pressed
+// under the confirmation sends its pick after the NO, ahead of an Escape NO's own
+// event, which the pick's reset drops, and the stale Escape of a LEAVE MISSION by key
+// runs the Escape action once after a NO by mouse. The Escape action resets the input
+// and walks the HUD close chain, and with a menu screen open never opens the
+// in-game menu; STAT opens through the same screen open as DEATH, so Escape there
+// never opens it either. So Escape on DEATH is LEAVE MISSION once the shroud is
+// revealed, the confirmation's NO while it is up, and before the reveal (the shroud
+// hides LEAVE MISSION) the action alone. The confirmation's YES (Return) closes the
+// in-game screens, then runs input action 3, the exit. STAT's show raises the word
+// for the whole screen: no stat.mnu callback touches it (its exit confirmation's
+// HIDDEN_BACK and CONFIRM_NO carry their authored actions alone), and its deactivate
+// clears it. A USE press under either screen opens no armory: the screen open
+// refuses while a menu screen is up.
+// [orig: Input_HandleKeyPress @0x760C90 (Input_QueueKeyEvent @0x760CC2, the
+//  callbacks @0x760CEC); UI_OpenMenuScreen @0x54E520 (the open-screen word's test
+//  @0x54E52C; UI_GameMenuKeyCallback @0x54B920, registered through Input_SetKeyCallback
+//  @0x761030, the call @0x54E564); UI_DispatchKeyboardEventToChildren @0x63AD10 (the
+//  focus test @0x63ADE5, CWnd_IsVisibleInHierarchy @0x63AE04, CWnd_SetHotkeyPressed
+//  @0x63AE2A); CWnd_ProcessMouseEvent @0x647A00 (the pressed word @0x647B20 / @0x647B5F,
+//  the click @0x647D15); UI_ProcessMenuScreenFrame @0x54E650 (CUIScene_EndFrame
+//  @0x54E668, the pass-through test @0x54E686, Input_ProcessFrame @0x54E695);
+//  DeathScreen_OnHiddenBack @0x553660 and DeathScreen_OnConfirmNo @0x553680 (the word
+//  alone); Input_ProcessFrame @0x49D520 (Input_ProcessPlayerFrame @0x49D58B, the event
+//  drain @0x49D599..0x49D5E7); Input_ProcessPlayerFrame @0x49D4C0 (the keyboard pass
+//  @0x49D4C6, Input_ProcessMouseAxisBindings @0x49D4D8); Input_ProcessMouseAxisBindings
+//  @0x499680 (its gate @0x499683..0x4996B1, the button rows @0x499A49..0x499A86);
+//  Input_ProcessKeyboardEvents @0x49D1F0 (the ring read Input_DequeueKeyEvent @0x49D2D2,
+//  the capture test @0x49D2E3 and Chat_HandleInputChar @0x49D498, Input_HandleSpecialKeys
+//  @0x49D2FB, the binding scan's queue @0x49D42F / @0x49D488); Input_HandleSpecialKeys
+//  @0x49C5C0 (the quit dialog @0x49C5E6, the deploy keys' Input_QueueEvent(12)
+//  @0x49C658 / @0x49CA14 / @0x49CA73, the help and briefing pages @0x49CA9E);
+//  Input_HandleActionBinding @0x49AD40 (the head @0x49AD8D..0x49AE23; case 12's
+//  Input_ResetAllState @0x49B042; case 18's Player_ResetLocalInput @0x49B234, the
+//  UI_IsMenuScreenOpen gate @0x49B39E..0x49B3A5); Input_ResetAllState @0x497ED0
+//  (Input_ResetKeyQueue @0x497ED0, the event queue's memset @0x497EE6);
+//  UI_CloseMenuScreen @0x54E5E0 (Input_ResetAllState @0x54E63F); DeathScreen_OnConfirmYes
+//  @0x553530 (Game_CloseInGameScreens @0x55353A, Input_HandleActionBinding(3) @0x553549;
+//  registered on CONFIRM_YES @0x554647); UI_ProcessEndRoundScreenTransition @0x5B8600
+//  (UI_OpenMenuScreen("stat.mnu", "STAT") @0x5B863B); StatScreen_ShowCallback @0x562840
+//  (UI_SetMenuInputPassThrough(1) @0x562877 / @0x5628D6); StatScreen_OnDeactivate
+//  @0x562120; HUD_CacheStatPanelValues @0x5627A0 (STAT's control callbacks, the tabs
+//  and CONFIRM_YES only, @0x5627B9..0x562818)]
+inline void pass_through_close_axis(int32_t client_x, int32_t client_y, int32_t (&axis)[2]) {
+	axis[0] = client_x - kCursorCentreX;
+	axis[1] = client_y - kCursorCentreY;
+}
 
 // Held look/turn keys advance 0x1FFFFFF BAM per tick and clamp relative to
 // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090]

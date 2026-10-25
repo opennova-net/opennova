@@ -15,6 +15,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h> // org1_owns_death_transaction
+#include <runtime/world/player_spawn.h> // player_item_row (a player body's row class)
 #include <runtime/world/vehicle_attach.h>
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
@@ -37,24 +38,41 @@ static_assert(TriggerRelations::kSingles == mission::kRelationSsnRows,
 // NapiNPServer_SendFiltered(..., 0x23, ...) @0x4f5e74 / @0x4f5ed1].
 // ----------------------------------------------------------------------------
 
-// Script SSN -> entity handle. Mission scripts (WAC SSN* commands + BMS Single
-// triggers/actions) address the players as SSN 10000 + player slot. The JO
-// player spawn [orig: Entity_SpawnFromAnimSlotProperty @0x43c390] leaves
-// DcbId@0x7C zero, and the player class init then stamps it with 10000 + the
-// slot byte [orig: PlayerClass_InitEntity @0x4b1149..0x4b1173], the key
-// EntityPool_FindByNetId matches (low 16 bits; pools 0..3, no netId gate).
-// Our player entities carry net_id 0 (the wire is handle-based), so the
-// mission::kPlayerSsn alias below maps SSN 10000 to the local player in their
-// place; MP joiner SSNs (10001+) wait on the net track.
-// [orig: EntityPool_FindByNetId @0x4f0a20]
+namespace {
+
+// Whether `entity`'s DcbId (+0x7C) is `ssn`, the full-word compare every script SSN walk but
+// EntityPool_FindByNetId's makes. Mission scripts (WAC SSN* commands, BMS Single triggers and
+// actions) name the players as 10000 + their slot: the player spawn copies the slot byte to +0x154
+// ahead of the class init, and the plyr row's init stamps 10000 + it into the DcbId; an organic or
+// item row's init writes none, so its body keeps the spawn memset's 0 (D-NET-348). Our player
+// bodies keep the record SSN word (Entity::net_id) at 0, so the key is world::entity_dcb_id: every
+// player body's, the local one's and each joiner's alike, and every other row's record SSN.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, the +0x154 copy
+//  @0x43C418, the init call @0x43C4FE; PlayerClass_InitEntity @0x4B1060 - the slot byte + 10000
+//  @0x4B1149..0x4B1155, the DcbId store @0x4B1173; Entity_InitOrganicAI @0x4BFCC0 (no +0x7C
+//  store); e.g. Entity_IsBmsRefInTriggerBounds @0x43E510 - `cmp [ecx+7Ch], ebp` @0x43E591]
+bool dcb_id_is(const World &world, const Entity &entity, int32_t ssn) {
+    return entity_dcb_id(world, entity) == ssn;
+}
+
+} // namespace
+
+// The first row over pools 0..3, in pool and slot order, whose DcbId's low 16 bits are the SSN.
+// No SSN-0 guard, like the retail lookup this ports; resolve_ssn_in_pools012 below is the OTHER
+// retail walk (SSN-0 gate, pools 0..2) and the two differ on purpose.
+// [orig: EntityPool_FindByNetId @0x4f0a20 - the 16-bit key @0x4f0a3a, the +0x7C read @0x4f0a81
+//  masked @0x4f0a84 and compared @0x4f0a8c, the pool mask 0xF @0x4f0a5f]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
-    if (ssn == mission::kPlayerSsn && world_.cached.local_player.valid())
-        return world_.cached.local_player;
-    // No SSN-0 guard and pools 0..3, like the retail lookup this mirrors;
-    // resolve_ssn_in_pools012 below is the OTHER retail walk (dcb != 0 gate,
-    // pools 0..2) and the two differ on purpose. [orig: EntityPool_FindByNetId
-    // @0x4f0a20 — mask 0xF, no netId gate]
-    return world_.registry.find_by_net_id(ssn);
+    for (int pool = 0; pool < 4; ++pool) {
+        const size_t capacity = world_.registry.pool_capacity(pool);
+        for (size_t slot = 0; slot < capacity; ++slot) {
+            const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
+            const Entity *entity = world_.registry.get(handle);
+            if (entity != nullptr && static_cast<uint16_t>(entity_dcb_id(world_, *entity)) == ssn)
+                return handle;
+        }
+    }
+    return EntityHandle{};
 }
 
 EntityHandle EntityCommands::resolve_target(EntityTarget target) const {
@@ -62,12 +80,13 @@ EntityHandle EntityCommands::resolve_target(EntityTarget target) const {
 }
 
 bool EntityCommands::set_ssn_target_selector(int32_t ssn, AiTargetSelector field, int32_t value) {
-    // [orig: 0x43DA50/+334, 0x43DAC0/+332, 0x43D970/+338, 0x43D9E0/+336]
+    // [orig: 0x43DA50/+334, 0x43DAC0/+332, 0x43D970/+338, 0x43D9E0/+336; the DcbId compares
+    //  e.g. Entity_SetAlertByBmsRef @0x43DA50 - @0x43DA79 / @0x43DAA9]
     if (ssn == 0) return false;
     for (int pool = 0; pool <= 1; ++pool) {
         for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
             Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
-            if (entity == nullptr || entity->net_id != ssn) continue;
+            if (entity == nullptr || !dcb_id_is(world_, *entity, ssn)) continue;
             entity->target_selectors.set(field, value);
             return true;
         }
@@ -163,7 +182,7 @@ bool EntityCommands::order_boarding(EntityTarget source_ssn, EntityTarget target
     return true;
 }
 
-// The player bodies' death transaction stand-in (an org1 body's own edge
+// The death transaction of an organic with no live motor (a body's own edge
 // raises its own), defined with the group kill below.
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h);
 
@@ -176,9 +195,9 @@ bool script_kill_crosses_edge(const Entity &e) {
     return e.health > 0 && ((e.flags | e.engine_flags) & kEntityFlagDead) == 0;
 }
 
-// Edge stand-in (organic death transaction) after a script health write, until
-// the org1/org2 death edge owns it: a living organic the write took to zero or
-// below crosses the edge once; the written health word is kept.
+// The organic death after a script health write: a living organic the write
+// took to zero or below crosses the edge once (its own edge's, or the stand-in
+// for an organic with no live motor); the written health word is kept.
 // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550]
 void script_health_edge_stand_in(World &world, Entity &e, bool crosses_edge) {
     if (e.kind != EntityKind::Organic || !crosses_edge || e.health > 0) return;
@@ -222,52 +241,7 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
-        const uint32_t flags = e.flags | e.engine_flags;
-        if ((flags & kEntityFlagPlayer) == 0) {
-            // org0/org1: the phase-1 arm puts the victim and its trigger group
-            // on red alert, then runs the round legs while the record holds a
-            // round. The phase-4 arm zeroes the health word and, while the
-            // record holds a round, restages the death clip from it.
-            // [orig: OrganicClass_HandleEvent @0x4073BF..0x4073EA, the round
-            //  test @0x40740D; phase-4 arm @0x40733F..0x4073B1]
-            if (phase == 4) {
-                e.health = 0;
-                if (record.has_round)
-                    e.death_anim_state = hit_record_death_anim_state(
-                            record, bam_heading_from_mission_yaw_deg(e.yaw));
-                return;
-            }
-            if (phase != 1) return;
-            if (AiEntity *ae = world.ai.for_handle(e.handle))
-                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
-            world.script.relations.group(e.group_id).alert = TriggerRelations::kAlertRed;
-            if (record.has_round) person_class_round_legs(world, e, record);
-            return;
-        }
-        // plyr: a body already flagged dead returns at once. Phase 1 with a
-        // recorded round runs the round legs (its network kill scorer only
-        // reaches GameEvent_ProcessScoring case 2, which the port does not
-        // model, live hits included); with none the scorer returns at once.
-        // The health tail then stages the default death clip when none is
-        // staged, and a mounted body leaves its seat on the authority; every
-        // event re-arms the think cadence.
-        // [orig: Entity_HandleDamageAndTriggerZones @0x40772A (dead return),
-        //  the round test @0x4078D8..0x4078DA, legs @0x407777..0x407A7C;
-        //  Score_ProcessNetworkKillEvent @0x4FD49B..0x4FD49D (null round);
-        //  GameEvent_ProcessScoring case 2 @0x52FC22; tail @0x407AC5..0x407AE7
-        //  (Entity_ComputeAnimSlotIndex(e, 0, 0, 1)), @0x407AED..0x407B20
-        //  (Entity_DetachFromVehicleIfServer), @0x407B5E]
-        if ((flags & kEntityFlagDead) != 0 || phase != 1) return;
-        if (record.has_round) person_class_round_legs(world, e, record);
-        if (retail_signed_i16(e.health) <= 0) {
-            if (e.death_anim_state == 0)
-                e.death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
-            if (world.ai.is_authority && e.mounted) world.commands.dismount(e.handle);
-        }
-        // The callback's shared tail: the waypoint visits between the two
-        // think re-arms. [orig: @0x407B64..0x407C6B]
-        player_body_waypoint_visits(world, e);
-        e.spawn_phase = 64;
+        person_class_event(world, e, phase, flags);
         return;
     }
     if (e.is_ai_capable) {
@@ -281,6 +255,78 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     destruction_notify_item_damage(world, e, phase,
             {record.section, record.damage, record.round_yaw_bam,
              record.round_pitch_bam, record.round_roll_bam, flags});
+}
+
+// See the infantry.h contract.
+void organic_class_event(World &world, Entity &body, int event) {
+    const HitRecord &record = world.round_sim.hit_record;
+    if (event == 1) {
+        if (((body.flags | body.engine_flags) & kEntityFlagPlayer) == 0) {
+            if (AiEntity *ae = world.ai.for_handle(body.handle))
+                ae->slot.bytes()[AiSlot::kAlertByte] = 2;
+            world.script.relations.group(body.group_id).alert = TriggerRelations::kAlertRed;
+        }
+        if (record.has_round) person_class_round_legs(world, body, record);
+        return;
+    }
+    if (event == 4) {
+        body.health = 0;
+        if (record.has_round)
+            body.death_anim_state = hit_record_death_anim_state(record, body.heading);
+        return;
+    }
+    body.spawn_phase = 62;
+}
+
+// See the infantry.h contract.
+void person_class_event(World &world, Entity &body, int event, int32_t flags) {
+    if (((body.flags | body.engine_flags) & kEntityFlagPlayer) != 0)
+        player_body_row_event(world, body, event, flags);
+    else
+        organic_class_event(world, body, event);
+}
+
+// See the infantry.h contract.
+PlayerBodyClass person_hit_row_class(const World &world, const Entity &body, bool person) {
+    if (!person || ((body.flags | body.engine_flags) & kEntityFlagPlayer) == 0)
+        return PlayerBodyClass::kOrganic;
+    return player_item_row(world, body).body_class;
+}
+
+// See the infantry.h contract.
+void player_body_row_event(World &world, Entity &body, int event, int32_t flags) {
+    const PlayerTemplate &row = player_item_row(world, body);
+    switch (row.body_class) {
+    case PlayerBodyClass::kOrganic:
+        organic_class_event(world, body, event);
+        return;
+    case PlayerBodyClass::kItem: {
+        // A satchel, claymore or AV mine row: the device's think over the body.
+        // [orig: schl @0x813150 -> Entity_SatchelThink @0x443670, clym @0x813168 ->
+        //  Entity_ClaymoreThink @0x4438C0, vmne @0x813180 -> Entity_AVMineThink @0x443BB0]
+        if (row.device_think != ThrowClass::kNone) {
+            world.throwables.think_device_row_body(world, body, row.device_think, event);
+            return;
+        }
+        // The item row's body over the player body. Its +0x2AC word is the body's think
+        // countdown (Entity::spawn_phase), which the item bodies write as class_think_ticks.
+        // An item body reads the hit record's section, damage and angles.
+        // [orig: entity+0x1C8 = def+0x138 @0x43C530..0x43C536; the think's +0x2AC test
+        //  Entity_UpdateInfantryPlayerBody @0x4B4BC9]
+        const HitRecord &record = world.round_sim.hit_record;
+        const EntityHandle handle = body.handle; // the barrel's dead arm removes the body
+        body.class_think_ticks = body.spawn_phase;
+        run_item_class_event(world, body, row.item_event_class,
+                world.tables.item_death_traits.get(body.item_id), event,
+                {record.section, record.damage, record.round_yaw_bam, record.round_pitch_bam,
+                 record.round_roll_bam, flags});
+        if (Entity *still = world.registry.get(handle)) still->spawn_phase = still->class_think_ticks;
+        return;
+    }
+    case PlayerBodyClass::kPlayer:
+        player_body_class_event(world, body, event);
+        return;
+    }
 }
 
 bool EntityCommands::kill_ssn(EntityTarget ssn) {
@@ -304,8 +350,8 @@ bool EntityCommands::kill_ssn(EntityTarget ssn) {
         world_.round_sim.hit_record.owner = {};
     }
     hit_record_class_event(world_, *e, pool == 3 ? 4 : 1);
-    // The organic death transaction: an org1 body's own edge raises it, the
-    // player bodies take this stand-in for theirs
+    // The organic death transaction: the body's own edge raises it (an organic
+    // with no live motor takes the stand-in)
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
@@ -327,8 +373,8 @@ bool EntityCommands::wac_kill_ssn(EntityTarget ssn) {
     e->last_attacker = {};
     if (e->item_type == 3) e->death_anim_state = 0;
     hit_record_class_event(world_, *e, 1);
-    // The organic death transaction: an org1 body's own edge raises it, the
-    // player bodies take this stand-in for theirs
+    // The organic death transaction: the body's own edge raises it (an organic
+    // with no live motor takes the stand-in)
     // [orig: @0x4B9D4D / @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
     if (e->kind == EntityKind::Organic && crosses_edge)
         raise_scripted_death(world_, *e, e->handle);
@@ -380,6 +426,7 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     for (EntityHandle occupant : occupants) world_.vehicles.detach(occupant);
     world_.ai.release(h);
     if (world_.collision) world_.collision->remove_entity_instance(h);
+    world_.vehicles.release_despawned_slot_owner(h);
     world_.registry.despawn(h);
     return true;
 }
@@ -470,7 +517,7 @@ bool EntityCommands::remove_bms_ref(int32_t ssn) {
     // SSN 0 and a non-authority peer do nothing; otherwise the first row
     // carrying the SSN, walking pools 0..3 in slot order, goes through the
     // notifying removal. An SSN past 16 bits matches no DcbId we carry.
-    // [orig: Entity_FindByParentAndDispatch @0x43e210 — SSN 0 @0x43e214,
+    // [orig: Entity_RemoveByDcbId @0x43e210 — SSN 0 @0x43e214,
     //  the authority gate @0x43e21c, the pool scans @0x43e249/@0x43e279/
     //  @0x43e2a9/@0x43e2d9 tail-jumping to Server_RemoveEntityAndNotify]
     if (ssn <= 0 || ssn > 0xFFFF || !world_.rules.logic_authority) return false;
@@ -494,11 +541,6 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     Entity *e = world_.registry.get(h);
     if (!e) return false;
     e->position = mission_pos;
-    if (AiEntity *a = world_.ai.for_handle(h)) {
-        a->pos[0] = static_cast<int32_t>(mission_pos.x * 65536.0f);
-        a->pos[1] = static_cast<int32_t>(mission_pos.y * 65536.0f);
-        a->pos[2] = static_cast<int32_t>(mission_pos.z * 65536.0f);
-    }
     return true;
 }
 
@@ -617,6 +659,17 @@ bool EntityCommands::kill_player(EntityHandle victim, EntityHandle killer) {
     Entity *e = world_.registry.get(victim);
     if (e == nullptr || (e->flags & kEntityFlagPlayer) == 0) return false;
     e->health = 0;
+    // A killer's lethal hit stamps its shooter into +0x178, and the plyr class
+    // callback's health tail stages the default death selection when none is
+    // staged; the body's death edge keeps a staged death's +0x178, which its
+    // transaction credits. [orig: Projectile_ProcessDamageOnTarget @0x4E81F3;
+    // Entity_HandleDamageAndTriggerZones @0x407AC5..0x407AE7; the edge's
+    // +0x178 clear for an unstaged death @0x4B4C72..0x4B4C8D]
+    if (killer.valid()) {
+        e->last_attacker = killer;
+        if (e->death_anim_state == 0)
+            e->death_anim_state = compute_death_anim_state(0, 0, death_cause::kBullet);
+    }
     RoundDeath d;
     d.victim = victim;
     d.victim_handle = victim.packed;
@@ -771,7 +824,7 @@ bool EntityCommands::set_ssn_waypoint(EntityTarget ssn, int32_t wp) {
 }
 
 int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t node) {
-    // Pool 0: the first slot holder whose net id matches takes the order and
+    // Pool 0: the first slot holder whose DcbId (dcb_id_is) matches takes the order and
     // ENDS the walk — detach, the think cooldown and carrier word reset, the
     // brain copy, and no budget seed. [orig: Entity_SetWaypointForTeam
     //  @0x43DD2C..0x43DDCF — match @0x43DD2C, slot gate @0x43DD31, detach
@@ -779,7 +832,7 @@ int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t no
     //  @0x43DDCF (and @0x43DDA2 without a brain)]
     Entity *first = nullptr;
     world_.registry.for_each_in_pool(0, [&](const Entity &candidate) {
-        if (first != nullptr || static_cast<int32_t>(candidate.net_id) != ssn) return;
+        if (first != nullptr || !dcb_id_is(world_, candidate, ssn)) return;
         if (world_.ai.for_handle(candidate.handle) == nullptr) return;
         first = world_.registry.get(candidate.handle);
     });
@@ -796,7 +849,7 @@ int EntityCommands::redirect_ssn_to_waypoint(int32_t ssn, int32_t wp, int32_t no
     // resets. [orig: @0x43DDD0..0x43DE89 — match @0x43DDED, slot gate @0x43DDF2]
     std::vector<EntityHandle> members;
     world_.registry.for_each_in_pool(1, [&](const Entity &candidate) {
-        if (static_cast<int32_t>(candidate.net_id) == ssn &&
+        if (dcb_id_is(world_, candidate, ssn) &&
                 world_.ai.for_handle(candidate.handle) != nullptr)
             members.push_back(candidate.handle);
     });
@@ -878,11 +931,7 @@ bool EntityCommands::raise_local_player() {
     // unchecked null-player dereference for headless/script-only worlds.
     Entity *e = world_.registry.get(world_.cached.local_player);
     if (e == nullptr) return false;
-    AiEntity *body = world_.ai.for_handle(e->handle);
-    const int32_t z = body != nullptr ? body->pos[2] : to_fixed(e->position.z);
-    const int32_t raised = static_cast<int32_t>(uint32_t(z) + 0x1F40000u);
-    if (body != nullptr) body->pos[2] = raised;
-    e->position.z = static_cast<float>(from_fixed(raised));
+    e->position.z.q16 = static_cast<int32_t>(uint32_t(e->position.z.q16) + 0x1F40000u);
     return true;
 }
 
@@ -911,22 +960,14 @@ bool EntityCommands::teleport_local_to_ssn(EntityTarget ssn) {
     const Entity *target = world_.registry.get(resolve_target(ssn));
     Entity *player = world_.registry.get(world_.cached.local_player);
     if (target == nullptr || player == nullptr) return false;
-    const AiEntity *target_body = world_.ai.for_handle(target->handle);
-    const int32_t pos[3] = {
-        target_body != nullptr ? target_body->pos[0] : to_fixed(target->position.x),
-        target_body != nullptr ? target_body->pos[1] : to_fixed(target->position.y),
-        target_body != nullptr ? target_body->pos[2] : to_fixed(target->position.z)};
+    const int32_t pos[3] = {target->position.x.q16, target->position.y.q16,
+                            target->position.z.q16};
     player->health = 20000;
-    player->position = {float(from_fixed(pos[0])), float(from_fixed(pos[1])),
-                        float(from_fixed(pos[2]))};
+    player->position.set_q16({pos[0], pos[1], pos[2]});
     std::copy_n(pos, 3, player->saved_live_pos);
     player->mount_toggle_fallback = target->handle;
     player->ground_target = target->handle;
-    if (AiEntity *body = world_.ai.for_handle(player->handle)) {
-        body->health = 20000;
-        std::copy_n(pos, 3, body->pos);
-        std::copy_n(pos, 3, body->net_saved_live_pose);
-    }
+    if (AiEntity *body = world_.ai.for_handle(player->handle)) body->health = 20000;
     if (world_.collision != nullptr)
         world_.collision->refresh_entity_proximity(world_, *player);
     return true;
@@ -972,7 +1013,7 @@ bool EntityCommands::set_ssn_held(EntityTarget ssn, bool held) {
 
 bool EntityCommands::set_ssn_disabled(EntityTarget ssn, bool disabled) {
     // Flags bit 28: the vehicle motors' driver-input gate reads it together
-    // with the dead bit (vehicle_motor.cpp's `veh.flags & 0x10000002`).
+    // with the dead bit (vehicle_motor.h's vehicle_hull_parked).
     // [orig: WacCmd_DisableSsn @0x4F7690 — ItemTypeIndex gate @0x4F76D7,
     //  `or Flags,10000000h` @0x4F76DD; WacCmd_EnableSsn @0x4F76F0 — `and
     //  Flags,0EFFFFFFFh` @0x4F773D]
@@ -1042,11 +1083,10 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
-            // The SP listen-host model retains its existing script-player
-            // alias: its socketless local body carries net_id 0 (D-NET-112).
-            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
-                    handle == world_.cached.local_player && entity->net_id == 0;
-            if ((entity->net_id == ssn || local_alias) && area->bounds.contains(entity->position))
+            // The DcbId compare, a player body's included [orig: `cmp [ecx+7Ch], ebp`
+            // @0x43E591 (pool 0) / @0x43E5EB (pool 1)]; the position words against the
+            // record's words (D-NET-507) [orig: @0x43E596..0x43E5C1].
+            if (dcb_id_is(world_, *entity, ssn) && area->trigger_contains(entity->position))
                 return true;
         }
     }
@@ -1063,7 +1103,9 @@ bool EntityCommands::group_in_area(int32_t group, int area_id) const {
             const Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || static_cast<int16_t>(entity->group_id) != group) continue;
             if (pool == 0 && ((entity->flags | entity->engine_flags) & 1u) != 0) continue;
-            if (area->bounds.contains(entity->position)) return true;
+            // The position words against the record's words (D-NET-507) [orig: the
+            // box @0x43C752..0x43C77A, the compares @0x43C7C2..0x43C7E8].
+            if (area->trigger_contains(entity->position)) return true;
         }
     }
     return false;
@@ -1079,11 +1121,13 @@ bool EntityCommands::ssn_in_script_area(EntityTarget target, int32_t zone_id,
     const int index = world_.registry.area_index_by_zone_id(zone_id);
     const Area *area = index < 128 ? world_.registry.area(index) : nullptr;
     if (area == nullptr) return false;
-    const Aabb &b = area->script_bounds;
-    const Vec3 &p = entity->position;
-    return p.x >= b.min.x && p.x <= b.max.x &&
-           p.y >= b.min.y && p.y <= b.max.y &&
-           (!three_dimensional || (p.z >= b.min.z && p.z <= b.max.z));
+    // The position words against the record's X/Y words and, in 3D, its raw Z
+    // words, signed inclusive (D-NET-507). [orig: WacCmd_SsnArea @0x4F1020 -
+    //  @0x4F10A6..0x4F10BD; WacCmd_SsnArea3D @0x4F0F60 - @0x4F0FE6..0x4F100E]
+    const EntityPosition &p = entity->position;
+    return area->xy_contains(p) &&
+           (!three_dimensional ||
+            (p.z.q16 >= area->record_z_q16[0] && p.z.q16 <= area->record_z_q16[1]));
 }
 
 bool EntityCommands::ssn_at_location(EntityTarget target, int32_t location) const {
@@ -1125,8 +1169,11 @@ bool EntityCommands::local_player_out_of_bounds() const {
         if (!a) break;
         if (!a->active) continue;
         any_active = true;
-        if (p->position.x >= a->bounds.min.x && p->position.x <= a->bounds.max.x &&
-            p->position.y >= a->bounds.min.y && p->position.y <= a->bounds.max.y)
+        // The position words against the record's own words, signed compares
+        // [orig: @0x439D69..0x439D85].
+        const std::array<int32_t, 4> &xy = a->record_xy_q16;
+        if (p->position.x.q16 >= xy[0] && p->position.x.q16 <= xy[1] &&
+            p->position.y.q16 >= xy[2] && p->position.y.q16 <= xy[3])
             return false;
     }
     return any_active;
@@ -1158,13 +1205,9 @@ bool EntityCommands::bms_ref_alive(int32_t ssn) const {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
-            // The SP listen-host model's socketless local body carries net_id
-            // 0 where retail stamps the player's DcbId 10000 + slot; the same
-            // D-NET-112 alias ssn_in_area applies.
-            // [orig: PlayerClass_InitEntity @0x4b1155..0x4b1173]
-            const bool local_alias = !world_.rules.mp_session && ssn == mission::kPlayerSsn &&
-                    handle == world_.cached.local_player && entity->net_id == 0;
-            if (static_cast<int32_t>(entity->net_id) != ssn && !local_alias) continue;
+            // The DcbId compare, a player body's 10000 + slot included [orig: `cmp
+            // [ecx+7Ch], edx` @0x43e669 / @0x43e699 / @0x43e6c9].
+            if (!dcb_id_is(world_, *entity, ssn)) continue;
             return ((entity->flags | entity->engine_flags) & kEntityFlagDead) == 0;
         }
     }
@@ -1281,8 +1324,8 @@ int32_t script_position_distance(const int32_t a[3], const int32_t b[3]) {
 }
 
 int32_t script_entity_distance(const Entity &a, const Entity &b) {
-    const int32_t pa[3] = {to_fixed(a.position.x), to_fixed(a.position.y), to_fixed(a.position.z)};
-    const int32_t pb[3] = {to_fixed(b.position.x), to_fixed(b.position.y), to_fixed(b.position.z)};
+    const int32_t pa[3] = {a.position.x.q16, a.position.y.q16, a.position.z.q16};
+    const int32_t pb[3] = {b.position.x.q16, b.position.y.q16, b.position.z.q16};
     return script_position_distance(pa, pb);
 }
 
@@ -1320,9 +1363,9 @@ namespace {
 // entity[127..129] @0x4f1880..0x4f18c5 (sub 45) / @0x4f1728..0x4f176f
 // (sub 44); the center writer Entity_InitFromModel @0x40df1e..0x40e018]
 void los_offset_point(const Entity &e, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(uint32_t(to_fixed(e.position.x)) + uint32_t(to_fixed(e.bbox_center.x)));
-    out[1] = static_cast<int32_t>(uint32_t(to_fixed(e.position.y)) + uint32_t(to_fixed(e.bbox_center.y)));
-    out[2] = static_cast<int32_t>(uint32_t(to_fixed(e.position.z)) + uint32_t(to_fixed(e.bbox_center.z)));
+    out[0] = static_cast<int32_t>(uint32_t(e.position.x.q16) + uint32_t(to_fixed(e.bbox_center.x)));
+    out[1] = static_cast<int32_t>(uint32_t(e.position.y.q16) + uint32_t(to_fixed(e.bbox_center.y)));
+    out[2] = static_cast<int32_t>(uint32_t(e.position.z.q16) + uint32_t(to_fixed(e.bbox_center.z)));
 }
 
 // The script LOS pair's ray. An authored range of at most 20 u takes the
@@ -1404,13 +1447,13 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
     // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
     // -(2^31/pi); the sign folds out under the cdq-abs below, but the
     // truncation is load-bearing (llround here would drift 1 BAM32 LSB on
-    // half of all bearings). [orig: fpatan -> fmul dbl_7C57B8
+    // half of all bearings). [orig: fpatan -> fmul g_NegBamPerRadian
     // (-683565275.5764316) -> _ftol2_sse @0x4f195f-0x4f196f]
     const int32_t bearing_neg = static_cast<int32_t>(
             std::atan2(fdy, fdx) * -683565275.5764316);
     const int32_t heading = a->veh.yaw_seeded
             ? a->veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(a->yaw));
+            : a->heading;
     // diff = wrap32(-yaw - trunc(atan2 * -(2^31/pi))) [orig: neg ecx; sub
     // ecx, eax @0x4f1977-0x4f1979] == wrap32(bearing - yaw); |.| equalizes.
     const int32_t diff = static_cast<int32_t>(
@@ -1431,16 +1474,17 @@ bool EntityCommands::ssn_sees_within(EntityTarget ssn, EntityTarget target_ssn,
 // which both edges zero before the send, so every edge-driven death ships 0 there
 // (the retail capture's `killerSource=0` on its scripted kills).
 //
-// An org1 (NPC) victim takes that path in the port too: its own motor death edge
-// raises the transaction from the zeroed health against lastAttacker, and the
-// script records nothing (no damage-time kill tally either: the script kill
-// never reaches Score_ProcessKillEvent). The player bodies (org2) still take
-// their transaction from this record.
+// Both organic motors take that path in the port too: an org1 (NPC) body's own
+// motor death edge, or a player (org2) body's, raises the transaction from the
+// zeroed health against lastAttacker, and the script records nothing (no
+// damage-time kill tally either: the script kill never reaches
+// Score_ProcessKillEvent). Only an organic with no live motor takes its
+// transaction from this record.
 // [orig: Entity_UpdateInfantryAI edge @0x4B9D4D / Entity_UpdateInfantryPlayerBody
 //  edge @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550 -> NetPacket_BuildDeathNotifyPayload
 //  @0x5036E0 (the +0x2C0 word @0x503733), send_mask 0x90]
 static void raise_scripted_death(World &world, Entity &e, EntityHandle h) {
-    if (org1_owns_death_transaction(world, h)) {
+    if (org1_owns_death_transaction(world, h) || org2_owns_death_transaction(world, h)) {
         e.alive = false;
         e.health = 0;
         return;
@@ -1484,9 +1528,9 @@ int EntityCommands::kill_group(int group) {
             world_.round_sim.hit_record.damage = 0;
             world_.round_sim.hit_record.owner = {};
             hit_record_class_event(world_, *e, 1);
-            // The organic death transaction: an org1 body's own edge raises
-            // it, the player bodies take this stand-in; only the living cross
-            // it, so a group killed twice notifies once [orig: @0x4B9D4D /
+            // The organic death transaction: the body's own edge raises it
+            // (an organic with no live motor takes the stand-in); only the
+            // living cross it, so a group killed twice notifies once [orig: @0x4B9D4D /
             // @0x4B4CEA -> Entity_CheckAndProcessDeath @0x51B550].
             if (e->kind == EntityKind::Organic && crosses_edge)
                 raise_scripted_death(world_, *e, h);
@@ -1578,24 +1622,22 @@ namespace {
 // The single-target SSN walk the team and group commands share: first
 // matching row in pool order 0,1,2, no item gate; SSN 0 never matches
 // [orig: the dcb gate + pools-0,1,2 walks — Entity_FindByDCBAndSetFlag
-// @0x43db30, Entity_SetNetIdByParentRef @0x43d6c0]. The single teleport walks
-// with its item gate inside (resolve_teleport_target below). Our local-player
-// rows deliberately carry net_id 0 (the wire is handle-based), so the
-// resolve_ssn sentinel mapping runs first.
+// @0x43db30, Entity_SetCommandGroupByDcbId @0x43d6c0]. The single teleport walks
+// with its item gate inside (resolve_teleport_target below). The key is the
+// row's DcbId, every player body's 10000 + its slot included (dcb_id_is)
+// [orig: `cmp [ecx+7Ch], edx` @0x43db59 / @0x43db89 / @0x43dbb9, @0x43d6e9 /
+//  @0x43d719 / @0x43d749].
 EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // The dcb != 0 gate and the 0..2 pool set are this walk's own; the
-    // net-id lookup EntityCommands::resolve_ssn wraps has neither.
+    // lookup EntityCommands::resolve_ssn ports has neither.
     if (ssn == 0) return EntityHandle{};
-    if (ssn == mission::kPlayerSsn &&
-        world.cached.local_player.valid())
-        return world.cached.local_player;
     for (int pool : {0, 1, 2}) {
         const size_t capacity = world.registry.pool_capacity(pool);
         for (size_t slot = 0; slot < capacity; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
-            if (entity != nullptr && entity->net_id == ssn) return handle;
+            if (entity != nullptr && dcb_id_is(world, *entity, ssn)) return handle;
         }
     }
     return EntityHandle{};
@@ -1604,17 +1646,13 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
 // The single teleport's own target walk: pools 0, 1, 2 in order, the first
 // row holding an ItemTypeIndex whose DcbId matches. The gate sits inside the
 // walk, so a gated row carrying the SSN is passed over for a later match, in
-// the same pool or the next. SSN 0 and the local-player alias follow
-// resolve_ssn_in_pools012 (our player rows carry net_id 0).
+// the same pool or the next. SSN 0 and the DcbId key (a player body's
+// included) follow resolve_ssn_in_pools012.
 // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 — pool 0 @0x43E005 (the
 //  +0x1C gate @0x43E02D, the DcbId compare @0x43E033), pool 1 @0x43E0BB
 //  (@0x43E0DD / @0x43E0E3), pool 2 @0x43E161 (@0x43E180 / @0x43E186)]
 EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
     if (ssn == 0) return EntityHandle{};
-    if (ssn == mission::kPlayerSsn) {
-        const Entity *local = world.registry.get(world.cached.local_player);
-        if (local != nullptr && local->item_type_index != 0) return local->handle;
-    }
     for (int pool : {0, 1, 2}) {
         const size_t capacity = world.registry.pool_capacity(pool);
         for (size_t slot = 0; slot < capacity; ++slot) {
@@ -1622,7 +1660,7 @@ EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
             if (entity == nullptr || entity->item_type_index == 0) continue;
-            if (entity->net_id == ssn) return handle;
+            if (dcb_id_is(world, *entity, ssn)) return handle;
         }
     }
     return EntityHandle{};
@@ -1643,23 +1681,26 @@ const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
 }
 
 // The split-pose translation of retail's teleport stores: retail writes the
-// ONE entity pose the motor reads (Position/Yaw + savedLivePose + the body
-// pose [orig: @0x43e05f..0x43e096]); our AI row carries its own fixed-point
-// mirror of that pose, so a teleport must land there too or the next motor
-// tick snaps back. net_saved_live_pose is retail's savedLivePose.
-void sync_teleported_ai(World &world, const Entity &entity) {
+// ONE entity pose the motor reads (Position / Yaw [orig: @0x43e038..0x43e059]);
+// our AI row carries its own heading/pitch working copies, so a teleport must
+// land there too or the next motor tick snaps back.
+void sync_teleported_ai(World &world, Entity &entity) {
     AiEntity *ae = world.ai.for_handle(entity.handle);
     if (ae == nullptr) return;
-    ae->pos[0] = to_fixed(entity.position.x);
-    ae->pos[1] = to_fixed(entity.position.y);
-    ae->pos[2] = to_fixed(entity.position.z);
-    ae->heading = bam_heading_from_mission_yaw_deg(
-            static_cast<double>(entity.yaw));
-    ae->pitch = bam_from_degrees_wrapped(static_cast<double>(entity.pitch));
-    ae->roll = bam_from_degrees_wrapped(static_cast<double>(entity.roll));
-    ae->net_saved_live_pose[0] = ae->pos[0];
-    ae->net_saved_live_pose[1] = ae->pos[1];
-    ae->net_saved_live_pose[2] = ae->pos[2];
+    ae->heading = entity.heading;
+    ae->pitch = entity.pitch_bam;
+    ae->roll = entity.roll_bam;
+}
+
+// savedLivePose (+0x80..+0x94) takes a pose's words whole: Position, then the
+// Yaw / Pitch / Roll words, the one store (D-NET-507).
+void stamp_pose_words(Entity &entity, const Entity &pose) {
+    const auto words = pose.position.words();
+    std::copy_n(words.data(), 3, entity.saved_live_pos);
+    entity.saved_live_yaw = pose.heading;
+    entity.saved_live_pitch = pose.pitch_bam;
+    entity.saved_live_roll = pose.roll_bam;
+    entity.saved_live_valid = true;
 }
 
 // The per-member pose copy the two teleport actions share. Flag tree per
@@ -1674,11 +1715,17 @@ void sync_teleported_ai(World &world, const Entity &entity) {
 void copy_marker_pose(World &world, Entity &entity, const Entity &marker,
                       bool single_action) {
     entity.position = marker.position;
-    entity.yaw = marker.yaw;
-    entity.pitch = marker.pitch;
-    entity.roll = marker.roll;
+    entity.heading = marker.heading;
+    entity.pitch_bam = marker.pitch_bam;
+    entity.roll_bam = marker.roll_bam;
     if (single_action || entity.handle.pool() != 0)
         entity.engine_flags &= ~kEntityFlagMatrixBuilt;
+    // The single action also stores the marker's whole pose into savedLivePose
+    // for every pool, ahead of the pool-0 reset; the group action stores none.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 - pool 0
+    //  @0x43E05F..0x43E096, pool 1 @0x43E10F..0x43E144, pool 2
+    //  @0x43E1B2..0x43E1E7; Entity_TeleportTeamToSpawn @0x43D390 (no store)]
+    if (single_action) stamp_pose_words(entity, marker);
     if (single_action && entity.handle.pool() == 0 &&
         ((marker.flags | marker.engine_flags) & kEntityFlagParachute) != 0) {
         entity.flags |= kEntityFlagParachute;
@@ -1813,7 +1860,7 @@ int EntityCommands::teleport_group_to_marker(int group,
     const Entity *marker = find_teleport_marker(world_, marker_wp_number);
     if (marker == nullptr) return 0;
     const Entity marker_copy = *marker;
-    int changed = 0;
+    std::vector<EntityHandle> members;
     static constexpr int pools[] = {0, 1, 2};
     for (int pool : pools) {
         const size_t capacity = world_.registry.pool_capacity(pool);
@@ -1824,12 +1871,24 @@ int EntityCommands::teleport_group_to_marker(int group,
                 static_cast<int>(entity->group_id) != group)
                 continue;
             copy_marker_pose(world_, *entity, marker_copy, false);
-            ++changed;
+            members.push_back(entity->handle);
         }
     }
-    if (changed != 0 && world_.collision != nullptr)
-        world_.collision->refresh_after_registry_change(world_);
-    return changed;
+    // Once the marker matched, members or none: the statics, the pool-0 / pool-1 tables and
+    // every slice, then each member's own list, pools 0, 1, 2 in order (the same gated walk;
+    // a pool-0 member's reset already ran its own tail).
+    // [orig: Entity_TeleportTeamToSpawn @0x43D390 - Entity_BuildProximityLists_Pool2 called
+    //  @0x43D4F8, Entity_BuildProximityLists_Pool01 @0x43D4FD,
+    //  Entity_BuildProximityListsFromPools @0x43D502, Entity_BuildProximityList @0x43D53D /
+    //  @0x43D57D / @0x43D5BD]
+    if (CollisionWorld *collision = world_.collision) {
+        collision->rebuild_statics(world_);
+        collision->rebuild_pool01(world_);
+        collision->rebuild_candidate_slices(world_);
+        for (const EntityHandle member : members)
+            collision->refresh_blink(world_, *world_.registry.get(member));
+    }
+    return static_cast<int>(members.size());
 }
 
 bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_number) {
@@ -1840,6 +1899,9 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     const Entity *found = find_teleport_marker(world_, marker_wp_number);
     if (found == nullptr) return false;
     Entity &marker = *world_.registry.get(found->handle);
+    // The marker's own pose into its savedLivePose, whole [orig: WacCmd_TeleSsn
+    //  @0x4F7E00 - +0x80..+0x94 @0x4F7EAC..0x4F7ED9, ahead of the reset @0x4F7F07].
+    stamp_pose_words(marker, marker);
     sync_teleported_ai(world_, marker);
     if (AiEntity *body = world_.ai.for_handle(marker.handle)) {
         body->inf.body_heading = body->heading;
@@ -1850,8 +1912,18 @@ bool EntityCommands::wac_teleport_ssn(EntityTarget source, int32_t marker_wp_num
     } else {
         marker.flags &= ~kEntityFlagMatrixBuilt;
         marker.engine_flags &= ~kEntityFlagMatrixBuilt;
-        if (world_.collision != nullptr)
-            world_.collision->refresh_after_registry_change(world_);
+        // The statics for a decoration (2) or a building (5) marker alone, then the pool-0 /
+        // pool-1 tables, every slice and the marker's own list.
+        // [orig: WacCmd_TeleSsn @0x4F7E00 - the def type tests @0x4F7F34 / @0x4F7F39,
+        //  Entity_BuildProximityLists_Pool2 called @0x4F7F3E, Entity_BuildProximityLists_Pool01
+        //  @0x4F7F43, Entity_BuildProximityListsFromPools @0x4F7F48,
+        //  Entity_BuildProximityList @0x4F7F4E]
+        if (CollisionWorld *collision = world_.collision) {
+            if (marker.item_type == 2 || marker.item_type == kItemDefTypeBuilding)
+                collision->rebuild_statics(world_);
+            collision->rebuild_pool01(world_);
+            collision->refresh_entity_proximity(world_, marker);
+        }
     }
     return true;
 }
@@ -1871,7 +1943,7 @@ bool EntityCommands::set_ssn_team(uint16_t ssn, int32_t team) {
 }
 
 bool EntityCommands::set_ssn_group(uint16_t ssn, int32_t group) {
-    // [orig: Entity_SetNetIdByParentRef @0x43D6C0] First DcbId match walking
+    // [orig: Entity_SetCommandGroupByDcbId @0x43D6C0] First DcbId match walking
     // pools 0,1,2 in order (no item gate; the commandGroup word is entity+284
     // @0x43d6f4). The relmat mirror + recount are our derived-cache upkeep.
     const EntityHandle handle = resolve_ssn_in_pools012(world_, ssn);
@@ -1896,8 +1968,17 @@ bool EntityCommands::teleport_ssn_to_marker(uint16_t ssn,
     Entity *entity = world_.registry.get(resolve_teleport_target(world_, ssn));
     if (entity == nullptr) return false;
     copy_marker_pose(world_, *entity, marker_copy, true);
-    if (world_.collision != nullptr)
-        world_.collision->refresh_after_registry_change(world_);
+    // The target pool's own tail, no pool-0 / pool-1 table published: a pool-0 target's
+    // reset ran its tail and the action returns; a pool-1 target builds every slice and
+    // its own list; a pool-2 target rebuilds the statics first.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 - Entity_ResetToSpawnState called
+    //  @0x43E0AF, the return @0x43E0BA; Entity_BuildProximityListsFromPools @0x43E14F,
+    //  Entity_BuildProximityList @0x43E155; Entity_BuildProximityLists_Pool2 @0x43E1F2,
+    //  Entity_BuildProximityListsFromPools @0x43E1F7, Entity_BuildProximityList @0x43E1FD]
+    if (world_.collision != nullptr && entity->handle.pool() != 0) {
+        if (entity->handle.pool() == 2) world_.collision->rebuild_statics(world_);
+        world_.collision->refresh_entity_proximity(world_, *entity);
+    }
     return true;
 }
 bool EntityCommands::group_alive(int group) const {
@@ -2110,7 +2191,8 @@ void apply_ai_controller_command(World &world, Entity &entity, AiEntity &ae, int
                 bool preserve = false;
                 for (size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
                     const Entity *target = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
-                    if (target == nullptr || target->net_id != p2) continue;
+                    // The DcbId compare [orig: Entity_FindByNetId @0x4655B0 - @0x4655E0].
+                    if (target == nullptr || !dcb_id_is(world, *target, p2)) continue;
                     preserve = ((target->flags | target->engine_flags) & 2) == 0;
                     break;
                 }
@@ -2406,8 +2488,8 @@ int EntityCommands::apply_area_ai_command(int team, int sub_type, int32_t p1, in
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
         if (entity == nullptr || static_cast<int8_t>(entity->team) != team) continue;
-        const int32_t x = to_fixed(entity->position.x);
-        const int32_t y = to_fixed(entity->position.y);
+        const int32_t x = entity->position.x.q16;
+        const int32_t y = entity->position.y.q16;
         if (x < p1 || x > p3 || y < p4 || y > reserved1) continue;
         if (apply_row_ai_command(world_, handle, sub_type, p2, p3, p4)) ++n;
     }

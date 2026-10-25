@@ -48,6 +48,16 @@ var _font_large: FontFile = null
 var _progress := 0        # exact real-stage checkpoint
 var _last_drawn_progress := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
+# The instrument's device memory at the last present (--verbose only): the slow-present
+# line names what the load made on the device between two presents.
+var _present_texture_bytes := -1
+var _present_buffer_bytes := -1
+# The instrument's tally of the presents this screen made (--verbose only): their count, their
+# summed and their longest wall, printed when the screen leaves the tree, so a load's wall can be
+# told from its presents' share of it.
+var _presents := 0
+var _presents_usec := 0
+var _present_max_usec := 0
 var _layout_viewport: Viewport = null
 var _layout_base_size := Vector2.ZERO
 var _presented_size := Vector2i.ZERO
@@ -152,15 +162,32 @@ func set_progress(percent: int) -> void:
 func present(force := false) -> void:
 	if _texture == null:
 		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
-	var now := Time.get_ticks_msec()
+	# The process's one clock (GetTickCount), read now: the screen presents inside a
+	# blocking load, past the frame's sample. The elapsed time is the DWORD difference
+	# read signed, as retail compares it (engine runtime/hud/loading_screen.h
+	# loading_present_due carries the witness).
+	var now := GameWorld.tick_count_ms()
+	var elapsed := (now - _last_present_ms) & 0xFFFFFFFF
+	if elapsed >= 0x80000000:
+		elapsed -= 0x100000000
 	# The shared native due rule (interval elapsed or a real checkpoint changed)
 	# lives in engine/runtime/hud/loading_screen.h.
-	var due := HudPos.loading_present_due(now - _last_present_ms,
-			_last_drawn_progress != _progress)
+	var due := HudPos.loading_present_due(elapsed, _last_drawn_progress != _progress)
 	if not (force or due):
 		return
 	_last_present_ms = now
 	_last_drawn_progress = _progress
+	var present_start := Time.get_ticks_usec()
+	_present_now(now)
+	var present_usec := Time.get_ticks_usec() - present_start
+	_presents += 1
+	_presents_usec += present_usec
+	_present_max_usec = maxi(_present_max_usec, present_usec)
+
+
+## The present itself (present() decided it is due): the window's events, the fit and the bar,
+## then the forced draw of the screen's viewport chain alone.
+func _present_now(now: int) -> void:
 	# The original pumps window messages and presents mid-load; process_events
 	# + force_draw are the shell-side equivalents so the OS window stays live
 	# and the screen refreshes while the load blocks the main loop
@@ -182,7 +209,185 @@ func present(force := false) -> void:
 		_sync_bar_fill()
 	queue_redraw()
 	if is_inside_tree() and not GameRuntimeRoot.is_headless():
+		# A present draws the screen and its bar alone, no world pass (engine
+		# runtime/hud/loading_screen.h carries the witness): the world under the
+		# opaque layer is this viewport's 3D, and every offscreen target (the
+		# environment cube's faces, the water mirrors, the Inset) is held for the
+		# forced draw, so only the screen's own viewport chain draws.
+		var viewport := get_viewport()
+		var world_was_off := viewport.disable_3d
+		viewport.disable_3d = true
+		var held := hold_offscreen_targets(get_tree().root, viewport)
+		if OS.is_stdout_verbose():
+			# The instrument's GPU reads: the root's and the screen viewport's draws are
+			# timed from the load's first present.
+			RenderingServer.viewport_set_measure_render_time(get_tree().root.get_viewport_rid(), true)
+			RenderingServer.viewport_set_measure_render_time(viewport.get_viewport_rid(), true)
+		var texture_bytes := -1
+		var buffer_bytes := -1
+		var compiles_before := []
+		if OS.is_stdout_verbose():
+			texture_bytes = RenderingServer.get_rendering_info(
+					RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
+			buffer_bytes = RenderingServer.get_rendering_info(
+					RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
+			compiles_before = _pipeline_compiles()
+		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
+		_note_slow_present(Time.get_ticks_usec() - draw_start, now, viewport, held,
+				texture_bytes, buffer_bytes, compiles_before)
+		if OS.is_stdout_verbose():
+			# The next frame's recording opens with this mark, so the slow-present line's
+			# GPU marks of that frame start at its first recorded command.
+			var device := RenderingServer.get_rendering_device()
+			if device != null:
+				device.capture_timestamp("LoadingScreen past a present")
+		_present_texture_bytes = texture_bytes
+		_present_buffer_bytes = buffer_bytes
+		release_offscreen_targets(held)
+		viewport.disable_3d = world_was_off
+
+
+## The offscreen targets a present holds: every SubViewport under `tree_root` but
+## the screen's own viewport and the viewports that contain it (the debug view's
+## GameViewport carries the screen), each the RenderingServer would draw (its
+## server-side update mode, not the node property an UPDATE_ONCE keeps after its
+## draw), set to UPDATE_DISABLED. Returns [rid, mode, name, size] rows for
+## release_offscreen_targets, which puts each server mode back as it stood, so a
+## capture still pending (UPDATE_ONCE) draws with the next world frame (engine
+## runtime/hud/loading_screen.h carries the witness: no other target renders).
+static func hold_offscreen_targets(tree_root: Node, screen_viewport: Viewport) -> Array:
+	var held := []
+	if tree_root == null:
+		return held
+	for node in tree_root.find_children("*", "SubViewport", true, false):
+		var target := node as SubViewport
+		if target == screen_viewport or (screen_viewport != null and target.is_ancestor_of(screen_viewport)):
+			continue
+		var rid := target.get_viewport_rid()
+		var mode := RenderingServer.viewport_get_update_mode(rid)
+		if mode == RenderingServer.VIEWPORT_UPDATE_DISABLED:
+			continue
+		RenderingServer.viewport_set_update_mode(rid, RenderingServer.VIEWPORT_UPDATE_DISABLED)
+		held.append([rid, mode, target.name, target.size])
+	return held
+
+
+## Put back each target hold_offscreen_targets held, at its server mode.
+static func release_offscreen_targets(held: Array) -> void:
+	for row in held:
+		RenderingServer.viewport_set_update_mode(row[0], row[1])
+
+
+## An instrument (--verbose only): a present whose forced draw ran 50 ms or more names
+## its split (the forced draw's frame setup, the scene and canvas updates ahead of the
+## draws), the measured draws of the frame drawn before it, the offscreen targets it
+## held, the texture and buffer memory the load made on the device since the previous
+## present, and what the forced draw drew on the screen viewport: its canvas draw calls
+## and items, each canvas layer with visible canvas items there, and the pipelines the
+## forced draw compiled. The device keeps a ring of frames: a forced draw ends by waiting
+## on the fence of the frame its next slot last held and reading that frame's GPU and
+## CPU timestamps, so the measured draws (and the wall past the draw's own recording) are
+## the frame drawn before this present (in a load, the load's one forced world frame when
+## it ran since the previous present), never the present's own.
+func _note_slow_present(draw_usec: int, present_start_ms: int, screen_viewport: Viewport,
+		held: Array, texture_bytes: int, buffer_bytes: int, compiles_before: Array) -> void:
+	if draw_usec < 50000 or not OS.is_stdout_verbose():
+		return
+	var held_names := PackedStringArray()
+	for row in held:
+		held_names.append("%s %dx%d mode %d" % [row[2], row[3].x, row[3].y, row[1]])
+	var root_rid := get_tree().root.get_viewport_rid()
+	var screen_rid := screen_viewport.get_viewport_rid()
+	print_verbose("LoadingScreen: present at %d%%: %d ms, force_draw %d ms (frame setup %.1f ms); the frame drawn before it (the timestamps a forced draw reads): the root gpu %.1f ms cpu %.1f ms, the screen viewport %s gpu %.1f ms cpu %.1f ms; the targets held: [%s]" % [
+			_progress, GameWorld.tick_count_ms() - present_start_ms, draw_usec / 1000,
+			RenderingServer.get_frame_setup_time_cpu(),
+			RenderingServer.viewport_get_measured_render_time_gpu(root_rid),
+			RenderingServer.viewport_get_measured_render_time_cpu(root_rid),
+			screen_viewport.name,
+			RenderingServer.viewport_get_measured_render_time_gpu(screen_rid),
+			RenderingServer.viewport_get_measured_render_time_cpu(screen_rid),
+			", ".join(held_names)])
+	if _present_texture_bytes >= 0 and texture_bytes >= 0:
+		print_verbose("LoadingScreen: since the previous present: textures %+d MB, buffers %+d MB" % [
+				(texture_bytes - _present_texture_bytes) >> 20,
+				(buffer_bytes - _present_buffer_bytes) >> 20])
+	if texture_bytes >= 0:
+		# The device frees a frame's released objects once that frame's fence is waited
+		# (rendering_device.cpp _begin_frame -> _free_pending_resources), inside the forced
+		# draw: a drop here is the objects the frame drawn before it released.
+		print_verbose("LoadingScreen: across the forced draw: textures %+.1f MB, buffers %+.1f MB" % [
+				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED)
+						- texture_bytes) / 1048576.0,
+				(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED)
+						- buffer_bytes) / 1048576.0])
+	var layers := {}
+	for node in screen_viewport.find_children("*", "CanvasItem", true, false):
+		var item := node as CanvasItem
+		if item.get_viewport() != screen_viewport or not item.is_visible_in_tree():
+			continue
+		var layer := item.get_canvas_layer_node()
+		if layer != null and not layer.visible:
+			continue
+		var key := "(canvas)" if layer == null else "%s %d" % [layer.name, layer.layer]
+		layers[key] = int(layers.get(key, 0)) + 1
+	var layer_rows := PackedStringArray()
+	for key in layers:
+		layer_rows.append("%s items %d" % [key, layers[key]])
+	var compiles := _pipeline_compiles()
+	var compiled := PackedStringArray()
+	for i in range(mini(compiles.size(), compiles_before.size())):
+		compiled.append(str(compiles[i] - compiles_before[i]))
+	print_verbose("LoadingScreen: the forced draw on %s: canvas %d draws over %d items; the visible layers [%s]; pipelines compiled (canvas, mesh, surface, draw, specialization) [%s]" % [
+			screen_viewport.name,
+			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
+					RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME),
+			RenderingServer.viewport_get_render_info(screen_viewport.get_viewport_rid(),
+					RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS,
+					RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME),
+			", ".join(layer_rows), ", ".join(compiled)])
+	_note_frame_marks()
+
+
+## The slow-present instrument's GPU split of the frame drawn before the present: every
+## RenderingDevice timestamp that frame recorded (the previous present's closing mark, the
+## mission load's "load <span>" marks, LoadTimeline.set_gpu_marks, and the measured
+## viewports' vp_ pairs), each as its GPU and CPU offset from the first, then the GPU
+## span: a span near the force_draw's wall is that frame's GPU work, and the gap ahead of
+## a mark is the work recorded since the mark before it.
+func _note_frame_marks() -> void:
+	var device := RenderingServer.get_rendering_device()
+	if device == null:
+		return
+	var count := device.get_captured_timestamps_count()
+	if count == 0:
+		return
+	var gpu_base := device.get_captured_timestamp_gpu_time(0)
+	var cpu_base := device.get_captured_timestamp_cpu_time(0)
+	var marks := PackedStringArray()
+	for i in count:
+		# GPU times are nanoseconds, CPU times microseconds.
+		marks.append("%s +%.1f (cpu +%.1f)" % [device.get_captured_timestamp_name(i),
+				(device.get_captured_timestamp_gpu_time(i) - gpu_base) / 1000000.0,
+				(device.get_captured_timestamp_cpu_time(i) - cpu_base) / 1000.0])
+	print_verbose("LoadingScreen: the frame drawn before it (frame %d), its GPU marks (ms from the first): GPU span %.1f ms over %d mark(s): [%s]" % [
+			device.get_captured_timestamps_frame(),
+			(device.get_captured_timestamp_gpu_time(count - 1) - gpu_base) / 1000000.0, count,
+			", ".join(marks)])
+
+
+## The process's pipeline compilations so far, by kind (canvas, mesh, surface, draw,
+## specialization), for the slow-present instrument.
+static func _pipeline_compiles() -> Array:
+	var counts := []
+	for info in [RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_CANVAS,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_MESH,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SURFACE,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW,
+			RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION]:
+		counts.append(RenderingServer.get_rendering_info(info))
+	return counts
 
 
 ## Give a newly mounted Control one complete SceneTree frame to receive layout
@@ -280,6 +485,9 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if _presents > 0 and OS.is_stdout_verbose():
+		print_verbose("LoadingScreen: %d present(s), %d ms (the longest %d ms)" % [
+				_presents, _presents_usec / 1000, _present_max_usec / 1000])
 	if _layout_viewport != null and _layout_viewport.size_changed.is_connected(
 			_fit_to_viewport):
 		_layout_viewport.size_changed.disconnect(_fit_to_viewport)
@@ -392,10 +600,9 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 	# the glyph shader's flagged runs; every other draw keeps texel x colour
 	# (docs/interface/loading-screen-re.md D-LOADSCR-10).
 	if material == null:
-		var glyph_shader := Shader.new()
-		glyph_shader.code = HudPos.glyph_shader_code()
+		# The one process-wide glyph program (HudPos.glyph_shader), every menu's too.
 		var glyph_material := ShaderMaterial.new()
-		glyph_material.shader = glyph_shader
+		glyph_material.shader = HudPos.glyph_shader()
 		material = glyph_material
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
 	_splash_state = SplashState.ACTIVE
@@ -466,7 +673,7 @@ func _process(_delta: float) -> void:
 # The 512 ms two-phase pulse the continue line rides
 # [orig: GetTickCount() & 0x200 selects the color @ 0x5209b0-0x5209be].
 func _splash_blink_phase() -> bool:
-	return (Time.get_ticks_msec() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+	return (GameWorld.tick_count_ms() & HudPos.SPLASH_BLINK_MASK_MS) != 0
 
 
 func _splash_exit_edge() -> void:

@@ -121,6 +121,9 @@ signal game_reloaded()
 # to the live bindings and the running session, then saves the profile
 # (docs/playerinfo/player-sav-re.md "The controls words").
 signal ingame_controls_accepted()
+# A screen the driver shows (its activation): main_game runs the main menu's
+# (STARTUP's) transport reset off it.
+signal screen_activated(screen_name: String)
 
 
 var _driver: MenuDriver
@@ -182,9 +185,10 @@ func _process(delta: float) -> void:
 func update_menu_frame(delta: float = 0.0) -> void:
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
-	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse).
-	if _driver != null and is_visible_in_tree():
-		_driver.pump_mouse()
+	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
+	# running mission the game loop's frame runs it instead (pump_screen_pass).
+	if not _in_game:
+		pump_screen_pass()
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
@@ -194,6 +198,26 @@ func update_menu_frame(delta: float = 0.0) -> void:
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
 	_consume_expansion_reload_request()
+
+
+## The screen pass's mouse pump: hover, the click and the window sounds of the
+## mouse as the events left it. The menu mode's update runs it once a frame; over
+## a running mission the game loop's frame runs it at its head, ahead of the
+## frame's net frame and tick, so an in-game screen's click (the INGAME
+## CONFIRM_YES's input action 3, a joiner's goodbye) runs before that frame's
+## session sends anything (MainGame._process).
+## retail: Game_ProcessMainFrame @ 0x5263f0 - UI_ProcessMenuScreenFrame @ 0x54e650 (the call
+## @ 0x52667b) -> CUIScene_EndFrame @ 0x63e600 (the call @ 0x54e668) ->
+## CWnd_ProcessMouseEvent @ 0x647a00, ahead of
+## Client_ProcessNetworkFrame @ 0x526692; Menu_UpdateFrame @ 0x5528a0 in the menus.
+func pump_screen_pass() -> void:
+	if _driver != null and is_visible_in_tree():
+		_driver.pump_mouse()
+
+
+## Whether the shell is the in-game overlay over a kept-loaded mission.
+func is_in_game() -> bool:
+	return _in_game
 
 
 ## MainGame installs its process-lifetime owner before setup; standalone shells
@@ -487,6 +511,7 @@ func _refresh_underlay() -> void:
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
+	screen_activated.emit(screen_name)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.
@@ -640,7 +665,7 @@ func _consume_expansion_reload_request() -> void:
 # clears the root, so the previous game is mounted again to recover.
 # [orig: Game_ReloadExpansionAndMods @ 0x552710 — the archives closed and
 #  reopened @ 0x552770..0x552798; Menu_TeardownShellAndCloseBinkVideos
-#  @ 0x54e430 destroys the menu scene (dword_2551104 @ 0x54e4a3) and
+#  @ 0x54e430 destroys the menu scene (g_MenuDestroyOnTeardown @ 0x54e4a3) and
 #  Menu_InitShellResources @ 0x552500 makes it anew: main.mnu @ 0x552656, its
 #  start screen @ 0x552668]
 func _mount_expansion(name: String) -> void:
@@ -648,6 +673,13 @@ func _mount_expansion(name: String) -> void:
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
+	# The menu's teardown saves its cookie jar to nw_cdata.coo (MainGame makes
+	# the menu's jar anew from it after the reload; NovaWorldClient.save_cookie_jar)
+	# and forgets the kept NovaWorld gate response: the next NovaWorld entry
+	# probes the gate again (D-NET-706; the witness is the engine's
+	# NwuLobbySession::GateMemory::forget).
+	NovaWorldClient.save_cookie_jar()
+	NovaWorldClient.forget_gate_response()
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
 	# "Expansions" item 1): the root mounts from cleared, not as the join's
@@ -742,6 +774,9 @@ func _on_url_requested(url: String, external: bool) -> void:
 	var target := url
 	if not (target.begins_with("http://") or target.begins_with("https://")):
 		target = "https://" + target
+	# The external browser's open saves the menu's cookie jar first
+	# (NovaWorldClient.save_cookie_jar; engine MenuBrowserState).
+	NovaWorldClient.save_cookie_jar()
 	OS.shell_open(target)
 
 

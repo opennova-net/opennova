@@ -11,8 +11,10 @@
 #include <runtime/world/world.h>
 #include <runtime/world/zone_capture.h>
 #include <runtime/world/zone_chain.h>
+#include <runtime/world/angle.h>
 
 #include <cstdio>
+#include <memory>
 
 using namespace opennova::world;
 
@@ -70,7 +72,7 @@ EntityHandle spawn_zone(World &w, uint8_t zone_no, uint8_t team, Vec3 pos) {
     e.kind = EntityKind::Item; // the ASH_I5A 1359 zone objects ride pool 1 (items)
     e.item_id = 1359;
     e.position = pos;
-    e.yaw = 90; // mission yaw 90 -> identity collision placement
+    e.heading = placed_heading_bam(90); // mission yaw 90 -> identity collision placement
     e.team = team;
     e.zone_number = zone_no;
     e.is_capture_trigger = true; // ItemDefAttrib 0x20000 "ChangeTeam"
@@ -520,7 +522,7 @@ EntityHandle spawn_unnumbered_zone(World &w, uint8_t team, Vec3 pos) {
     zone.kind = EntityKind::Item;
     zone.item_id = 1359;
     zone.position = pos;
-    zone.yaw = 90; // identity collision placement
+    zone.heading = placed_heading_bam(90); // identity collision placement
     zone.team = team;
     zone.zone_radius = 70;
     zone.zone_number = 0;
@@ -896,8 +898,24 @@ void test_refused_touch_is_recorded_for_the_host() {
     CHECK(events_of<ZoneCaptureEvents::Flip>(ev2).size() == 1);
 }
 
+// The sweep's state test is the hidden bit alone (D-NET-433): a zone whose
+// alive latch is clear still registers; a hidden zone (Flags bit 0) does not.
+// [orig: ZoneSlotChain_BuildFromMission @0x4A2E89..0x4A2E8D / @0x4A2ECD..0x4A2ED1]
+void test_the_sweep_reads_the_hidden_bit_alone() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(1, 8);
+    const EntityHandle unlatched = spawn_zone(*w, 1, 1, {0.0f, 0.0f, 0.0f});
+    const EntityHandle hidden = spawn_zone(*w, 2, 2, {10.0f, 0.0f, 0.0f});
+    w->registry.get(unlatched)->alive = false;
+    w->registry.get(hidden)->flags |= kEntityFlagCarried;
+    w->zones.build_chain_from_mission();
+    CHECK(w->zones.chain.zones.size() == 1);
+    CHECK(!w->zones.chain.zones.empty() && w->zones.chain.zones[0] == unlatched);
+}
+
 int main() {
     test_build_and_masks();
+    test_the_sweep_reads_the_hidden_bit_alone();
     test_frontier_rule();
     test_owned_zone_mask_and_latch();
     test_capture_progression();

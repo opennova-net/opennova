@@ -198,6 +198,23 @@ func test_fresh_profile_seeds_the_video_test_words_once() -> void:
 	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
 
 
+# The video test's desktop is retail's GetSystemMetrics sample in its DPI-unaware process: on
+# Windows the engine's read, which answers with no window (a headless run's display server has no
+# screen); elsewhere the display server's primary screen stands in.
+# [orig: Game_RunVideoTestDialog @0x53EC10 - GetSystemMetrics(0) called @0x53ECD8, (1) @0x53ECE2]
+func test_the_video_tests_desktop_is_the_dpi_unaware_sample() -> void:
+	var desktop := PlayerOptions.desktop_size()
+	assert_eq(desktop, GameConfigBlock.primary_desktop_size(), "the binding's sample")
+	if OS.get_name() == "Windows":
+		assert_true(desktop.x > 0 and desktop.y > 0, "the system metrics answer with no window")
+	else:
+		assert_eq(
+			desktop,
+			DisplayServer.screen_get_size(DisplayServer.SCREEN_PRIMARY),
+			"off Windows the display server's primary screen stands in"
+		)
+
+
 func test_object_detail_lives_and_clamps_as_the_cfg_word() -> void:
 	# game.cfg's object_polydetail: the video test's capable-device rung 2 on a
 	# fresh profile; the load clamps a saved word into 0..3 (the engine's

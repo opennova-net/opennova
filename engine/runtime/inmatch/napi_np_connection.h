@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,17 +17,27 @@
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
 #include <net/novaworld/join_identity.h> // JoinCookiePairs / JoinAccount (the CD cookie and its account fields)
+#include <net/novaworld/gate_metrics.h> // GateServerTick / GateMetricsPlayer (the slot's METPROTOCOL clocks)
 #include <net/novacrypto/cdkey.h> // cdkey::WireKeys (the JOIN's CD-key ids, DFX2-13)
 
 namespace opennova::inmatch {
 
-// dcb (ConnectionId) reservation on a LAN listen server. The host's loopback client consumes
-// ConnectionId 0/1; the host's own PLAYER is dcb 2; remote joiners are assigned from 3 up. A
-// 0x14B9 organic with entity+0x78 == 0 is the dedicated-server reservation, which makes a joining
-// client keep no player entity for that slot and flood C2S 0x0F → 0xC9 disconnect — so the host
-// player MUST carry a non-zero dcb. Wire-proven by the golden host_and_join_lan.pcapng (host player
-// eFlags=2, first joiner 3, AI 0). [orig: NapiNP_GetLocalConnectionId @0x4c6d40; Server_PlayerAdd
-// @0x51cbc0 writes entity+0x78 = conn->connection_id; net-re §5.2a/§5.2b]
+// The dcbs (ConnectionIds) a FRESH process's first listen host assigns, the golden
+// host_and_join_lan.pcapng's (host player eFlags=2, first joiner 3, AI 0): its own client takes
+// the protocol's connection index 1, its self-join's server-side twin 2, whose id the own client
+// latches from the twin's 0x82 MI and the host's own player carries at entity+0x78, and its first
+// joiner's node 3. The runtime assigns every dcb from the process's connection counter
+// (next_connection_index, D-NET-713), which every connection the process creates steps, a LAN
+// browse's and a join's included, so a process that browsed, joined or hosted before numbers
+// higher. These name the fresh process's values for fixtures and oracles; no runtime path reads
+// them. A 0x14B9 organic with entity+0x78 == 0 is the dedicated-server reservation (a joining
+// client keeps no player entity for that slot and floods C2S 0x0F → 0xC9 disconnect); the
+// counter never yields 0 (its 0 -> 1 wrap).
+// [orig: CNapiNPConnection_Create @0x62ACB0 - the step @0x62B282..0x62B296;
+//  CNapiNPConnection_OnStateChange @0x626060 - connection_id from it @0x626199..0x62619C;
+//  NapiNP_HandleServerJoinResponse @0x629840 - the own client's connection_id = MI @0x629D50;
+//  NapiNP_GetLocalConnectionId @0x4c6d40; Server_PlayerAdd @0x51cbc0 writes entity+0x78 =
+//  conn->connection_id; net-re §5.2a/§5.2b]
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 
@@ -39,7 +50,7 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 //  cb_client_3); CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
 //  (cb_server_5 / cb_client_2); the callbacks CNapiNetwork_Init installs
 //  @0x4ca948..0x4ca9cd: NapiNPServer_OnResendListCallback @0x4c62a0 and Network_LogOutgoingPacketError raise
-//  flag 1, @0x4c4681 and Network_LogIncomingPacketError flag 2]
+//  flag 1, @0x4C4680 and Network_LogIncomingPacketError flag 2]
 inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
 inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
 
@@ -80,7 +91,7 @@ inline SessionSequencing make_jo_game_session_sequencing(
 //       -> InitRound          [Server_InitNewRoundState          @0x51c8e0]
 //       -> PendingSpawn       [CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0]
 //       -> PlayerAdded        [Server_BuildPlayerInfoAndAdd @0x51d560 -> Server_PlayerAdd @0x51cbc0]
-//       -> SendingInitial     [Server_SendInitialGameStateToPlayer @0x51bba0]
+//       -> SendingInitial     [Server_SendPlayerSlotStateFrame @0x51bba0]
 //       -> Spawned            (spawn_remote_player binds owned_entity)
 //       -> InMatch            (per-frame 0x0A out / 0x0C in)
 //       -> Goodbye       0x46 [Nwu_HandleClientGoodbye @0x624250]
@@ -111,22 +122,58 @@ enum class GameAdmissionStage : uint8_t {
 	Complete = 0,
 	AwaitJoinRequest,
 	AwaitFormPost,
+	// The C2S 0x01 under the NovaWorld join-ticket gate: NetPlayer state 3, no probe yet; the
+	// service's enter result sends it (Server_ApplyPlayerEnterResult).
+	// [orig: NapiNPServerMsg_HandleJoinRequest @0x512FA2..0x512FA6 (state 3, return)]
+	AwaitPlayEnter,
 	AwaitPaddingEcho,
 	Rejected,
 };
 
+// The player slot's state word (+0x20): where the slot is between its add and its join. The add
+// leaves it Added; the joiner's C2S 0x09 (sent once its mission load completes) starts the
+// player-sync track, whose tail parks it for the C2S 0x0A; the 0x0A starts the world stream,
+// whose end parks it for the C2S 0x0B; the 0x0B's join enters Joined, the state the per-frame
+// 0x0A, the 0x80 send mask (with RoundOver) and the per-player maintenance walk test. The map
+// change returns a slot in states 2..7 to Added. Leaving Joined zeroes the slot's round-event
+// watermark (+97544) at every writer.
+// [orig: CNapiServer_ProcessPendingPlayerSpawns - PlayerSlot_SetState(slot, 1) @0x4C9123;
+//  NapiNPServerMsg_HandlePlayerSyncRequest @0x513200 - 2 @0x513249; Server_SendPlayerSlotStateFrame
+//  @0x51BBA0 - the track switch @0x51BBB4..0x51BBBB, 3 @0x51C134, 5 @0x51BEF3;
+//  NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260 - 4 @0x5132B1; Server_OnPlayerJoin
+//  @0x51A680 - 6 @0x51A712, 7 @0x51AA5C; Server_DisconnectAndResetAllPlayerSlots @0x516160 -
+//  1 @0x5161FD..0x5163AA; NapiNPServer_SendFiltered 0x80 @0x4C8948..0x4C8953]
+// The listen host's own client's goodbye after input action 3 (CIDEMIS), waiting for the manager
+// receive that moves it from the loopback FIFO to the server's queue: the next tick's receive
+// pump (an action after the frame's exit test: the admin's GOTO MENUSTATE), or the mission
+// teardown's pump (an action inside the frame's input pass). The server-side twin's teardown
+// (the host player's removal) runs there. (D-NET-NEW-L8-21)
+// [orig: CNapiNPManager_SendTo @0x61EC20 (the address-0 arm @0x61EC59, the FIFO write @0x61ECC6);
+//  Game_ProcessMainFrame @0x5263F0 - the frame head's CNapiNetwork_PumpManagerReceive call
+//  @0x526528, the admin pump @0x5268F1; Game_TeardownMission @0x522350 - the pump @0x522588]
+enum class OwnGoodbye : uint8_t {
+	None = 0,
+	NextReceivePump,
+	TeardownPump,
+};
+
+enum class PlayerSlotState : uint8_t {
+	Free = 0,              // the add's row memset [orig: Server_PlayerAdd @0x51CD06]
+	Added = 1,             // the add's, awaiting the C2S 0x09
+	PlayerSync = 2,        // the player-sync track (0x2C, 0x08, the 0x2A rows, the tail)
+	AwaitWorldRequest = 3, // the track's tail ran; awaiting the C2S 0x0A
+	WorldStream = 4,       // the world stream (0x10, 0x0D, 0x0C, 0x20, 0x45, 0x7E, 0x1A)
+	AwaitJoin = 5,         // the world stream ended with its 0x1A; awaiting the C2S 0x0B
+	Joined = 6,            // the join ran: in game
+	RoundOver = 7,         // joined into a finished round
+};
+
 // The §5.2a initial-state burst cursor for one connection — Server_SendInitialGameStateToPlayer's
-// per-player phase counters, folded onto the connection node like P2 folded PeerState. After P3 this
-// is the SINGLE authority for the connection's spawn-gate progress (the F3 / PeerSpawned latches read
-// entity_batch_count / spawned here, no longer the game_runtime GameSessionState).
-// [orig: the playerSlot+0x20 sync-state + playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
+// per-player phase counters, folded onto the connection node like P2 folded PeerState. The slot's
+// own state word is NapiNPConnection::slot_state; this carries the producer's cursors and the
+// F3 / PeerSpawned latches (entity_batch_count / spawned).
+// [orig: playerSlot+89878/89882/89884 phase counters; net-re §5.2a]
 struct InitialStateBurst {
-	uint8_t  sync_state = 0;            // [playerSlot+0x20] 0 idle / 2 player-sync / 3 WAIT for the
-	                                    // client's C2S 0x0A spawn-menu request / 4 world-stream / 5 done.
-	                                    // State 3 is the load gate: the player-sync tail parks here
-	                                    // [orig: @0x51c134] and ONLY NapiNPServerMsg_HandlePlayerSpawnRequest
-	                                    // @0x513260 (C2S 0x0A) advances 3 -> 4 — the world stream never
-	                                    // races a client that hasn't asked for it (D-NET-150).
 	// The player-sync tags, one per subphase, and the world-stream phases
 	// (server_initial_state.cpp walks both) [orig: playerSlot+89878/+89882].
 	enum PlayerSyncSubphase : uint16_t {
@@ -135,11 +182,7 @@ struct InitialStateBurst {
 		kSyncSessionConfig = 9,
 		kSyncChatHistoryFirst = 10,
 		kSyncChatHistoryLast = 15,
-		kSyncNoop = 16,
-		kSyncBmsHeader = 17,
-		kSyncWeaponRestrictions = 18,
-		kSyncClassAllowMask = 19,
-		kSyncDisconnectUnlock = 20,
+		kSyncTail = 16, // one call sends the whole tail (0x1C, 0x0B, 0x66, 0x76, 0x11)
 	};
 	enum WorldStreamPhase : uint8_t {
 		kStreamInit = 0,
@@ -150,22 +193,18 @@ struct InitialStateBurst {
 		kStreamTerrainTiles = 5,
 		kStreamMissionText = 6,
 		kStreamWaitForGameStartAck = 7,
-		kStreamGameStartBundle = 8,
 	};
-	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..20 (one tag each; see server_initial_state)
+	uint16_t player_sync_subphase = kSyncMissionMapNames;  // [playerSlot+89878] 8..16 (see server_initial_state)
 	uint8_t  world_stream_phase = kStreamInit;    // [playerSlot+89882] 0 phase-0 init [orig: @0x51bc1a case 0], 1=0x10 .. 7=0x1A
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
-	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The
-	                                    // game-start bundle (phase 8) waits for the 0x0B, not
-	                                    // this (D-NET-678).
+	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The join
+	                                    // runs on the 0x0B, not this (D-NET-678).
 	                                    // Golden: 0x1A (end of world-stream, f316) -> client sends
 	                                    // 0x2F + 0x0B (f317) -> server replies 0x5A + game-start
 	                                    // (f318).
-	// (the prior loadout_wait_ticks fallback counter was removed — the phase-8 wait has NO
-	//  timeout: the golden host emits nothing in-match until the joiner's 0x2F, D-NET-145)
-	bool     spawned = false;           // set with game_state==9 (the PeerSpawned source)
+	bool     spawned = false;           // set by the join (the in-match latch, the PeerSpawned source)
 };
 
 // The joiner's pose cached from its pre-spawn C2S 0x0C uplink — the host's fallback spawn/pose
@@ -204,40 +243,6 @@ struct CharacterJoinVars {
 	uint8_t team_request = 0;       // TR -> jsp[60] (retail clamp: != 0xFF && >= 2 -> 0xFF)
 	uint8_t char_class[2] = {0, 0}; // CTA / CTB -> jsp[61] / jsp[62]
 	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
-};
-
-// The stock-Avatars.def FRESH-PROFILE character vars — what a retail client with
-// no saved selection uploads, and what the listen host's own local player carries
-// before the shell installs the mounted profile: each side's first AvatarDefs entry
-// of the matching alignment, packed {nat=0,div=0,combo=1,good}=0x0200 and
-// {nat=7,div=0,combo=1,evil}=0x8207, class 8 (rifleman) on both sides, the two
-// selected heads' voice/avatar bytes 1/10, and no side request (TR 0xFF).
-// [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 -> EntitySlot_LookupAndPackEntry
-//  @0x57ad40; the avatar byte via Avatars_ResolveSelectionIndex (ex sub_57AE60) @0x57ae60; wire: retail join f=199140 (the
-//  captured VCB=4 is a saved profile override, not the fresh default)]
-inline CharacterJoinVars retail_fresh_profile_character_vars() {
-	CharacterJoinVars vars;
-	vars.char_id[0] = 0x0200;
-	vars.char_id[1] = 0x8207;
-	vars.team_request = 0xFF;
-	vars.char_class[0] = 8;
-	vars.char_class[1] = 8;
-	vars.avatar[0] = 1;
-	vars.avatar[1] = 10;
-	return vars;
-}
-
-// Host-side fire state for ONE of this player's weapon slots — the clip the C2S 0x06 fire
-// pipeline checks + decrements and the C2S 0x25 reload relay refills. Keyed (in the map
-// below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B
-// weapon-slot array playerSlot+464, index roundSlotIndex = adm[4] + 65*adm[0]
-// (Server_ClientFiredRound @0x50c0d7); the u16 clip = slot+16 (WeaponSlot_CanFire
-// @0x541ba0 reads it, Weapon_ConsumeAmmo @0x540850 decrements it, WeaponSlot_ReloadAmmo
-// @0x541720 refills it)]. The shared ammo pools (adm+220 belt / adm+216 ammo-point
-// classes) and the +96472 fire-rate stamp are deferred — D-NET-152 tails.
-struct WeaponSlotState {
-	uint8_t adm_index = 0; // the weapon bound to this combo [orig: slot+32 adm ptr]
-	int16_t clip = 0;      // rounds left in the magazine [orig: slot+16]
 };
 
 // Per-connection state for the reactive gameplay-message reply handlers (the §5.1 handshake /
@@ -282,11 +287,6 @@ struct SessionReplyState {
 	//  Server_PositionPlayerForSpawn @0x50D60A..0x50D655]
 	bool revive_pose_valid = false;
 	int32_t revive_pos[3] = {0, 0, 0};
-	// A C2S 0x51 spectator-respawn request the dispatcher admitted; the host
-	// tick performs the conversion (it needs the owning context).
-	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
-	bool spectator_convert_pending = false;
-	int16_t spectator_convert_killer = -1;
 	// The convert's hold latch: set when its request named no target (0xFFFF),
 	// read and cleared by the deploy leg the convert runs, which then places
 	// nothing (Server_PositionDeployingPlayer). [orig: slot+0x188D9 -
@@ -342,13 +342,12 @@ struct SessionReplyState {
 	//  g_SpawnLoadoutBuffer @0x51D12A]
 	LoadoutSubmit loadout_buffer;
 	bool loadout_buffer_set = false;
-	bool mission_status_received = false; // an accepted 0x0B (Server_HandlePlayerJoinRequest)
-	// Retail's join completion is three packet boundaries, not one semantic
+	// Retail's admission completion is two packet boundaries, not one semantic
 	// bag. The C2S 0x02 handler emits admission metadata; a later pending-spawn
-	// pump replays settings + 0x04; the first 0x37 response then carries 0x64 +
-	// the initial 0x16 beside any queued 0x75. Keeping independent latches
-	// prevents a serializer refactor from moving 0x04 or 0x16 earlier (the retail
-	// client resets its team between the first two packets).
+	// pump replays settings + 0x04. Keeping independent latches prevents a
+	// serializer refactor from moving 0x04 earlier (the retail client resets its
+	// team between the two packets). The joiner's first 0x16 is the scoreboard
+	// clock's, whatever its join leg (D-NET-504).
 	bool admission_metadata_pushed = false;
 	bool spawn_metadata_pushed = false;
 	// A pending player the spawn pump HELD (capacity or team balance) is re-sent
@@ -356,29 +355,24 @@ struct SessionReplyState {
 	// last send stamp); the pump stages the nag, tick_connections frames it.
 	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8F7A..0x4C8FD1]
 	bool admission_hold_nag_pending = false;
+	// The staged 0x03's body, written when the pump stages it: a held (listed) node's place
+	// and the list's count, a failed add's (unlinked) [0] (spawn_queue_record, D-NET-NEW-L1-38).
+	// [orig: NetPacket_WriteSpawnQueueRecord called @0x4C8FAA (the hold) / @0x4C9016 (the
+	//  unlink's, ahead of the add)]
+	std::vector<uint8_t> admission_hold_nag_body;
 	uint32_t admission_hold_nag_host_ms = 0;
 	bool admission_hold_nag_host_ms_valid = false;
 	uint32_t admission_completed_tick = 0;
-	bool roster_pushed = false;
-	uint32_t roster_completed_tick = 0;
-	// Roster versioning (D-NET-155): roster_counted marks this connection's spawn as
-	// tallied into NapiNPProtocol.roster_generation; roster_seen_gen is the last roster
-	// version 0x16-pushed to this client — stale => re-push (covers the own-spawn grow,
-	// golden 0x16 31→39 just before deploy, AND every later join/leave; the old
-	// one-shot-per-connection re-push left existing clients' player lists stale when a
-	// later joiner arrived — the v29 stuck HUD count).
-	bool roster_counted = false;
-	uint32_t roster_seen_gen = 0;
 	// Retail's 0x30/0x31 integrity family rides the global scoreboard countdown,
 	// so it has no per-connection epoch/serial. Network quality retains its own
 	// independently witnessed global clock.
 	// Per-player maintenance state [orig: Server_UpdateAllActivePlayerSlots
-	// @0x518820]. Eligible active player slots (including the listen host) accrue
-	// the 1,860-tick age after the quartet check; hidden/deploy-pending pauses
-	// (never resets) that age. Thus
-	// the first quartet is observed on call 1,861. Once mature, its 744-tick
-	// countdown continues through death/deploy presentation state.
-	uint32_t control_live_ticks = 0;
+	// @0x518820]. The quartet's age is the slot's play ticks (slot+0x184,
+	// world::MatchPlayer::play_ticks). The join's network reset seeds the
+	// 744-tick countdown (PlayerSlot_ResetNetworkState @0x4F9FD0, @0x4FA021), so
+	// the first quartet comes 744 gated calls after the age gate opens
+	// (D-NET-532). Once mature, its countdown continues through death/deploy
+	// presentation state.
 	uint32_t control_request_countdown = 0;
 	uint32_t charattr_unanswered_count = 0;
 	uint32_t time_sync_unanswered_count = 0;
@@ -491,6 +485,16 @@ struct NapiNPConnection {
 	// [orig +0x18] ConnectionId / dcb — the join-order id a player record is matched by [orig:
 	// NapiNP_GetLocalConnectionId @0x4c6d40; Player_FindLocalPlayerEntity @0x4e0090 numeric match].
 	uint32_t connection_id = 0;
+	// The net player's identity an orphaned row's +0x1C pointer holds (OrphanedPlayerRow): drawn
+	// from the context's counter at the connection's first orphaned row, 0 until then. Unlike
+	// connection_id, which a C2S 0x48 re-stamps, nothing rewrites it, as nothing rewrites a
+	// row's +0x1C [orig: Server_PlayerAdd @0x51CBC0 - +0x1C @0x51CD4E].
+	uint32_t net_player_serial = 0;
+	// The row's add stamp (+0x170B0): the host clock at the remote add, the auto-balance's
+	// time-in-server key; a re-add's fresh row takes its own, its orphaned row keeps the first
+	// [orig: Server_PlayerAdd @0x51CBC0 - GetTickCount stored @0x51CD95;
+	//  Server_AutoBalanceTeams @0x4FCC30 - the key `sub ecx, [esi+170B0h]` @0x4FCC82].
+	uint32_t row_added_host_ms = 0;
 
 	// The PER-PLAYER tick seed shipped as S2C 0x61 and stamped into this player's slot as the
 	// fire-freshness floor. Retail re-rolls it as `((rand() & 0xFE) + 1) << 16` on join,
@@ -506,8 +510,30 @@ struct NapiNPConnection {
 	// accepted shot; disarming retains it and opens the short receive grace.
 	// [orig: PlayerSlot_IsActive @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
 	uint32_t fire_tick_floor = 0;     // playerSlot+96472
-	uint32_t fire_disarmed_at = 0;   // playerSlot+96460 (host logic tick)
+	// The server frame clock (world.out.rounds.frame_clock, g_ServerFrameClock) at the
+	// last disarm; the arm zeroes it. [orig: Server_SendRandomSeedToPlayer @0x51022A /
+	//  @0x510237, the arm's zero @0x5101B9; Server_ProcessRoundEnd @0x516746 / @0x516753]
+	uint32_t fire_disarmed_at = 0;   // playerSlot+96460
+	// The server frame clock at the last arm (join, deploy, revive): the death's 620-frame
+	// recent-spawn test reads it. Its only writer is the arm; a fresh row's 0 stands until
+	// the first one. [orig: Server_SendRandomSeedToPlayer @0x5101A9 / @0x5101B3;
+	//  GameEvent_PlayerDeath @0x516E9F..0x516EB4]
+	uint32_t seed_armed_clock = 0;   // playerSlot+96456
+	// The slot's live age (+0x184, world::MatchPlayer::play_ticks) across a mission change:
+	// the slot keeps it (no mission-change or mission-start store touches it), while ours
+	// builds each mission's Match row fresh, so the map change's slot reset keeps the old
+	// row's age here and the round init's re-add restores it. [orig: no +0x184 store in
+	//  Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432,
+	//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9 or
+	//  Server_InitAllPlayerEntitiesForRound @0x516AA0; Server_OnPlayerJoin re-arms only the
+	//  744 countdown (PlayerSlot_ResetNetworkState called @0x51A72B)]
+	uint32_t kept_play_ticks = 0;
 	bool fire_tick_mode = false;    // playerSlot+96480
+	// The C2S 0x34 keepalive's high-water: the seed's roll sets it to the seed, the
+	// disarm and the round end clear it, and the 0x34 handler raises it; no other
+	// reader. [orig: NapiNPServerMsg_UpdateAck @0x5024B0 (the store @0x502503);
+	//  Server_SendRandomSeedToPlayer @0x5101DD / @0x510244; Server_ProcessRoundEnd @0x51675F]
+	uint32_t keepalive_ack_high_water = 0; // playerSlot+96476
 
 
 	// [orig: CNapiNPConnection_Create @0x62ACB0 direction mirroring, §6.5] 1 = server-side
@@ -519,6 +545,8 @@ struct NapiNPConnection {
 
 	// Where this node is in its lifecycle (above).
 	ConnectionPhase phase = ConnectionPhase::New;
+	// The player slot's state word (+0x20, PlayerSlotState above).
+	PlayerSlotState slot_state = PlayerSlotState::Free;
 
 	// The byte transport + the pool-0 entity this connection drives + the per-connection send
 	// filter, modeled by replication::Connection (TransportMode, owned_entity, send_mask). The
@@ -550,18 +578,23 @@ struct NapiNPConnection {
 	//  0x0A @0x51E3D6..0x51E450), then the Entity_UpdateAllEntities call @0x52674B]
 	std::vector<uint8_t> staged_frame_update;
 	bool frame_update_staged = false;
-	// Hold routed guidance until the frame that can carry its fire descriptor.
-	std::vector<std::vector<uint8_t>> pending_guidance;
 	// The configured period is known when the node is allocated, but +0x648 is
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
 	bool s2c_send_holdoff_dictated = false;
-	// Host tick of this connection's most recent built session packet — the
-	// per-connection last-build clock (+0x640) both send-interval legs read.
-	// Zero = not yet armed; the first per-tick read arms it without sending.
+	// The host clock (host_clock_ms, GetTickCount's) at this connection's most recent built
+	// session packet: the per-connection last-build stamp (+0x640) both send-interval legs
+	// read. Zero = not yet armed; the first per-tick read arms it without sending.
 	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 reads +0x640;
 	//  BuildOutgoingPackets stamps it @0x628605]
-	uint32_t last_session_send_tick = 0;
+	// The word beside it, +0x63C, is a write-only stamp, not modeled: every send wrapper sets it
+	// to GetTickCount after a good SendTo, and nothing reads it.
+	// [orig: CNapiNPConnection_SendSessionPacket @0x61F041, CNapiNPConnection_SendPing
+	//  @0x61F269, CNapiNPConnection_SendDisconnectPacket @0x61F563,
+	//  CNapiNPConnection_SendSessionInit @0x621314, CNapiNPConnection_SendMissingSeqList
+	//  @0x62377A; CNapiNPConnection_Create's zero @0x62AFE7; CNapiNPConnection_OnStateChange
+	//  @0x626166; the displacement in no other instruction]
+	uint32_t last_session_send_ms = 0;
 	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
 	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
 	// cleared by any packet built at a boundary (D-NET-233).
@@ -583,6 +616,14 @@ struct NapiNPConnection {
 	// [orig: NapiNetConfig_LoadFromConnTags @0x4c7260 (JSR -> ci1, JSPP);
 	// the entry+55 latch in NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
 	ClientGameEnvironment join_environment;
+	// The ClientAuth strings the METPROTOCOL player reports print (VERSIONSTRING, COUNTRYCODE, CNT,
+	// LNG, TZB), stored with the tag list at the 0x42, and the slot's two phase clocks: PLAYER's
+	// (+0x17D20) and PLAYERMISSION's (+0x18294) (runtime/inmatch/gate_metrics_reports.h,
+	// D-NET-NEW-L9-22). [orig: NapiNetConfig_LoadFromConnTags @0x4C7260; Server_PlayerAdd
+	//  @0x51CD1B / @0x51CD26]
+	GateMetricsPlayer gate_player;
+	GateServerTick gate_tick;
+	GateServerTick gate_mission_tick;
 	uint8_t join_spectator_request = 0;
 	std::string join_spectator_password;
 	std::string join_password; // ClientAuth JSP, shared side/squad credential (not numeric FID)
@@ -591,8 +632,13 @@ struct NapiNPConnection {
 	// (server_join_check.h, DFX2-13). [orig: NapiNPPlayer +724 / +728, written by
 	// NapiNPServer_HandlePlayerJoinMessage @0x512b95 / @0x512bce]
 	cdkey::WireKeys cd_keys;
-	// The team restored when the portable player-slot spectator bit is cleared.
-	uint8_t spectator_restore_team = 1;
+	// The slot's restore byte (+100568): the team the spectator convert saves,
+	// 0 on a fresh row (the add's row memset, the slot table's allocation),
+	// which the A-and-D swap and the next mission start read.
+	// [orig: Server_PlayerAdd's memset of the 0x188E8-byte row @0x51CD06;
+	//  Server_AllocatePlayerSlotTable @0x51C1CB; Server_ConvertPlayerToSpectator
+	//  @0x519E5B]
+	uint8_t spectator_restore_team = 0;
 	std::string client_scrk;       // ClientAuth.scrk — decrypts inbound 0x43
 	std::string server_scrk;       // our SCRK — encrypts outbound 0x83, echoed in ServerAuth
 	uint32_t client_ck = 0;        // ClientAuth.ck -> session_id on our S2C
@@ -610,16 +656,23 @@ struct NapiNPConnection {
 	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
 	// connection. Only a completed semantic message may reach host dispatch.
 	ProtocolReassemblyState c2s_reassembly{};
-	// The host-clock millisecond at which the 0x42 join was accepted: the
-	// validation-phase deadline base (netPlayer+0xA4) that reaps a peer which
-	// keeps talking but never completes its admission.
-	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4] @0x4C8B8A]
+	// The ticket wait's deadline base (netPlayer+0xA4): the host's GetTickCount
+	// (host_tick_count_ms) at its latest game-state change, state 3's at the C2S
+	// 0x01, then state 4's at the enter request (D-NET-NEW-L8-34).
+	// [orig: CNetPlayer_SetGameState @0x4C4060 - GetTickCount @0x4C408A, +0xA4
+	//  @0x4C4156; CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 reads [esi+0xA4]
+	//  @0x4C8B8A / @0x4C8CB3]
 	uint32_t join_validated_host_ms = 0;
 	// The C2S 0x00 JOIN's CD identity blob as [name][value] pairs: the joiner's
 	// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies. Empty on LAN.
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 "CD" -> the cookie
 	//  buffer; KeyValueBuffer_FindValue @0x4C2A30 walks it by key]
 	JoinCookiePairs join_identity_pairs;
+	// The JOIN carried a CD of some length (retail's cookie buffer is non-null): the
+	// validator's code-23 test, apart from whether any pair parses.
+	// [orig: CNetPlayer_SetCookieBuffer @0x4C6060 keeps none below length 1
+	//  @0x4C608E..0x4C6095; Server_ValidatePlayerJoinRequest @0x5125F2..0x512605]
+	bool join_cookie_present = false;
 	// The NovaWorld account fields of this player's net config: a remote joiner's
 	// decrypted PCID / SQUADINFO cookies (load_join_account_from_cookie), the
 	// host's own loopback its login PCID. Read by the 0x7A / 0x7B PCID, the 0x46
@@ -628,11 +681,33 @@ struct NapiNPConnection {
 	//  NapiNPMsg_0x7B_BuildPayload @0x5077ac, NetPacket_SerializePlayerSync0x46
 	//  @0x506070 / @0x506257, CNapiGameSession_SendPlayerAdded @0x4d006c]
 	JoinAccount account;
+	// The player slot's squad key (+0x188DC): the id of the squad registry node
+	// the remote add filed for its account (server_squad_registry.h), 0 for none.
+	// The map change's slot reset keeps it; the disconnect clears it.
+	// [orig: Server_PlayerAdd @0x51CDE0 / @0x51CE2E; Server_HandlePlayerDisconnect
+	//  @0x51B7FD; Server_DisconnectAndResetAllPlayerSlots @0x5163B2..0x516432
+	//  (no +0x188DC store)]
+	int32_t squad_key = 0;
+	// A squad's first slot's own S2C 0x6A {1}, which retail's add sends it between
+	// the add's send-state reset (the settings updates) and the spawn pump's 0x05:
+	// the pump's metadata carries it there (build_spawn_pump_metadata).
+	// [orig: Server_PlayerAdd - CNetPlayer_ResetSendState @0x51CD6A / @0x51CD6F, the
+	//  0x6A @0x51CEEF; CNapiServer_ProcessPendingPlayerSpawns - the add @0x4C903A, the
+	//  0x05 @0x4C909D]
+	std::vector<uint8_t> squad_roster_add_staged;
+	// The S2C 0x6A bodies a later add (or a leave) sent this slot while its own
+	// spawn pump block was still unsent: retail's pump sends an added slot's
+	// whole 0x03 / 0x05 / 0x04 / 0x7B block and restarts its walk before the
+	// next add's 0x6A reaches it, so the pump's metadata carries them after its
+	// 0x7B (build_spawn_pump_metadata).
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4C8DC0 - the 0x7B
+	//  @0x4C9111, goto LABEL_5 @0x4C9128 ahead of the next add @0x4C903A]
+	std::vector<std::vector<uint8_t>> squad_roster_after_pump;
 	// The node's reject-pending byte: a later joiner's PCID matched this
 	// remote connection's, so the next S2C 0x79 boundary kicks it
 	// (Server_KickDuplicatePcids). Nothing clears it; the kick destroys the node.
 	// [orig: NapiNPPlayer+0x4D - its one writer Server_ValidatePlayerJoinRequest
-	//  @0x5127F3, its one reader CNapiServer_DisconnectPendingSpawnBans @0x4C92F5]
+	//  @0x5127F3, its one reader CNapiServer_KickDuplicatePcids @0x4C9290 (@0x4C92F5)]
 	bool duplicate_pcid_kick_pending = false;
 	// NetPlayer game state 3: the C2S 0x01 met the join-ticket gate
 	// (join_tickets_required), so the timeout watchdog validates this joiner;
@@ -644,11 +719,12 @@ struct NapiNPConnection {
 	bool join_ticket_validation = false;
 	// NetPlayer game state 4 (the NovaWorld ticket wait): the
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
-	// success (state 6), and the spawn pump holds the player until then. The
-	// deadline base stays join_validated_host_ms.
+	// success (state 6), which sends the probe. A C2S 0x02 (game state 7) leaves
+	// the wait: it clears this and join_ticket_validation (complete_admission).
+	// The request restamps join_validated_host_ms.
 	// [orig: CNetPlayer_SetGameState(player, 4) @0x4C8BCA;
 	//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 — state-4 gate
-	//  @0x4D1B3E, SetGameState(6) @0x4D1C11]
+	//  @0x4D1B40, CNetPlayer_SetGameState(6) called @0x4D1C11]
 	bool player_enter_requested = false;
 	bool player_enter_admitted = false;
 	bool player_enter_pending() const { return player_enter_requested && !player_enter_admitted; }
@@ -656,6 +732,13 @@ struct NapiNPConnection {
 	// (session_keys.rtt_ms; stored when the peer answers our MS without WR).
 	// [orig: Nwu_HandlePing @0x623C9B]
 	uint32_t session_ping_rtt_ms = 0;
+	// The host clock at the 0x42's accept (its state change), the last IN-ORDER admitted session
+	// packet or ping (conn+0x5E8): the reap measures its clock minus this stamp (D-NET-256).
+	// [orig: CNapiNPConnection_OnStateChange @0x626060 - `mov [esi+5E8h], ebp` @0x62612F (called
+	//  from NapiNPProtocol_HandleClientJoin @0x62C2D7); CNapiNPConnection_ParseMessages @0x625D54;
+	//  Nwu_HandlePing @0x623C56; CNapiNPConnection_PumpStateMachine @0x6292E0 - `sub esi,
+	//  [ebp+5E8h]` @0x62935C]
+	uint32_t receive_stamp_ms = 0;
 	uint32_t receive_inactive_ms = 0;     // elapsed since the last IN-ORDER admitted session packet
 	                                     // (a zero-message keepalive counts; duplicates, futures,
 	                                     // resend lists and every other opcode do not) — retail's
@@ -682,24 +765,35 @@ struct NapiNPConnection {
 	// the node — the 0x86 burst then the player teardown — instead of tearing down inline.
 	// [orig: CNapiNPConnection_RequestDisconnect @0x61e107 -> NapiNPProtocol_Pump @0x62a6fd]
 	bool pending_disconnect = false;
+	// The listen host's own client node only: where its queued goodbye is taken (OwnGoodbye).
+	OwnGoodbye own_goodbye = OwnGoodbye::None;
 	uint32_t peer_acked_seq = 0;   // highest hdr.ack_count the peer has echoed = the last of OUR 0x83
-	                               // seqs it confirmed. Drives the initial-state backlog throttle: the
-	                               // original stalls both burst tracks while the connection's
-	                               // outstanding-message count (conn+0x768) >= 20 [orig: the
-	                               // NapiNPMessageQueueState field read at 0x51bf1b / 0x51bc04] — the
-	                               // client-paced backpressure that stretches the world stream across a
-	                               // cold client's mission build (D-NET-150). Our structural stand-in
-	                               // counts unconfirmed outbound datagrams (next_outbound_seq-1 minus
-	                               // this); exact retail inc/dec sites pending an IDA pass.
+	                               // seqs it confirmed (the retransmitted 0x42's settings re-send reads
+	                               // it). The initial-state backlog gate counts messages instead
+	                               // (seq.retained_outbound_message_count, server_initial_state.cpp).
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 	GameAdmissionStage admission_stage = GameAdmissionStage::Complete;
 	uint32_t admission_padding_x = 0; // S2C 0x02 challenge prefix the C2S echo must preserve
 	uint32_t admission_padding_y = 0;
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18) UNIFIES onto connection_id above
-	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches. LAN latches the
-	// host-assigned id after admission 0x02; a later 0x48 echo may restamp it (NovaWorld supplies it).
+	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches: the create's
+	// index, latched as seen at admission 0x02; nothing on the host reads the joiner's 0x48
+	// (D-NET-NEW-L1-36).
 	bool self_id_seen = false;             // true only once player admission has completed
+	// The spawn pump took the node off its pending list, ahead of its add: it walks it again
+	// only once a repeated C2S 0x02 lists it again, whether the add succeeded or failed
+	// (D-NET-715; the re-add, D-NET-NEW-L1-24). The list's members: self_id_seen and not this.
+	// [orig: CNapiServer_ProcessPendingPlayerSpawns - the pending test (net player +0x18)
+	//  @0x4C8E68..0x4C8E6C, NapiNode_UnlinkFromList @0x4C8FF6 (cleared @0x4C6054);
+	//  NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (lists while unlisted @0x4C7E65)]
+	bool spawn_queue_unlinked = false;
+	// The node's place on that list: each listing appends it at the tail, so its key is one
+	// past the largest a listed node holds; its 0x03 counts the listed nodes with a smaller key
+	// ahead of it (list_on_spawn_queue, spawn_queue_record; D-NET-NEW-L1-38).
+	// [orig: NapiNPPlayer_MoveNodeToEntityList @0x4C7E60 (the tail append @0x4C7EB6..0x4C7EE2);
+	//  NapiNode_CountToHead @0x4C5FE0]
+	uint32_t spawn_queue_order = 0;
 	bool world_stream_announced = false;   // F3 edge-latch (PeerEnteredWorldStreaming fires once)
 	bool spawned_announced = false;        // edge-latch (PeerSpawned fires once)
 
@@ -789,27 +883,6 @@ struct NapiNPConnection {
 	//  @0x51E3BB..0x51E3C8 / @0x51E40D]
 	static constexpr size_t kAmmoDamageClassBytes = 0x15ED8 - 0x15E58;
 	std::array<uint8_t, kAmmoDamageClassBytes> ammo_damage_classes{};
-
-	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
-	// by the loadout grant's rebuild (the kit and its sub-variants) and the powerup grants; a
-	// combo with no row holds no weapon, and the 0x06 refuses it. Refilled by the 0x25 relay.
-	// (D-NET-152)
-	std::map<uint16_t, WeaponSlotState> weapon_slots;
-
-	// This player's entity EquippedSlot (entity+0x118) as the host points it: the personal
-	// slot of the last accepted network fire's combo or the borrowed mount slot it fired
-	// through, else the 0x2F loadout's submitted slot unless that slot holds no def or a
-	// NoSelect one, else none. The C2S 0x0C weapon echo moves only entity+0x2B0, so the slot can name a weapon
-	// the player no longer holds — exactly what the remote held-weapon draw gate's ammo leg
-	// then reads. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d;
-	//  NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a; Entity_CanFireWeapon
-	//  @0x4dcb30]
-	struct EquippedSlotRef {
-		enum Kind : uint8_t { kNone, kPersonal, kMount } kind = kNone;
-		uint16_t combo = 0;          // kPersonal: the weapon_slots row
-		world::EntityHandle mount{}; // kMount: the mount whose inline slot was borrowed
-	};
-	EquippedSlotRef equipped_slot;
 };
 
 // Store `event` as the connection's disconnect record only while none is latched — retail's
@@ -858,8 +931,30 @@ inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
 // unbound/freed/lifetime-stale owner before the writer can mutate or emit.
 // [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate; recipient entity eye reads
 // @0x517BF5..0x517C13; the outer filtered fan is NapiNPServer_SendFiltered @0x4C87E0]
+// The punt leg: retail's fans still pass SendFiltered's connection gate after a punt (+0x24 == 1,
+// which the punt writes no part of), and the queue drops them: the punt's description sets the
+// connection's sent byte +0x70D (+0x28, set at the connection's state-1 entry, holds while it
+// lives), and every later message to it returns from the queue unqueued. Dropping at the fan sends
+// the same nothing (V-L8-s4's 652 item).
+// [orig: NapiNPServer_SendFiltered @0x4C87E0 - the +0x24 test @0x4C8874..0x4C8878;
+//  NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640 - the +0x70D
+//  test @0x62864D..0x628654; CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 (the call @0x4C800C)
+//  -> CNapiNPConnection_SendDescriptionOnce @0x629750 - the +0x28 test @0x62975C, the store
+//  @0x629772; CNapiNPConnection_OnStateChange @0x626060 (+0x28 = 1 @0x626172);
+//  CNapiNPConnection_TeardownActiveConnection @0x6253C0 (+0x28 = 0 @0x625535)]
 inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
+}
+
+// The player slot's state word read as in match (6, or 7 once the round ends): from the
+// initial-state burst's end until the teardown erases the row. A punt writes no slot byte (the
+// punt fills the connection's disconnect event alone), so a reader of the slot itself keeps
+// reading a punted slot as in match until Server_HandlePlayerDisconnect's row memset; the
+// connection's erase stands for that memset here. is_in_match's punt leg is the send fans' gate.
+// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 (no slot write);
+//  Server_HandlePlayerDisconnect @0x51B87D (the row memset)]
+inline bool slot_in_match(const NapiNPConnection &conn) {
+	return conn.burst.spawned;
 }
 
 // The player slot's active byte (+4): its player was added. Server_PlayerAdd
@@ -894,5 +989,78 @@ inline bool slot_is_local(const NapiNPConnection &conn) {
 inline bool active_player_recipient(const NapiNPConnection &conn) {
 	return is_in_match(conn) && conn.link.transport != nullptr;
 }
+
+// A server a mission exit's error arm left unstopped. The post-mission router's error arms
+// skip the session's destroy, so the protocol keeps its server-side nodes, host_running set,
+// past the socket's close until the next session reset's StopServer, which gates on
+// host_running alone, stops them (stop_unstopped_server, napi_np_protocol.h). The process
+// holds it (ClientProcessState). In between, the LAN browse's and a join's protocol pumps step
+// the held nodes over their socket (napi_np_protocol.h pump_unstopped_server: the queue pass,
+// the queued sends, the send intervals, the receive-timeout reap), and a joiner's datagram
+// any socket of the process reads reaches its node's socket leg (napi_np_protocol.h
+// receive_unstopped_server) (D-NET-NEW-L1-26).
+// [orig: PostMenu_RouteMissionExit @0x568460 - the error arms' loc_5686DA, no FullDestroy;
+//  CNapiGameSession_ResetActiveSession @0x4C8A70 - StopServer called @0x4C8AA1 whatever
+//  +0x68 holds, +0x68 cleared @0x4C8AC0; NapiNPProtocol_StopServer @0x62A820 - host_running
+//  @0x62A85F..0x62A869;
+//  CNapiGameSession_InitTransportConnection's NapiNPProtocol_Pump(-1) @0x4CA14B,
+//  CNapiNetwork_PumpTransportAndProtocol's @0x4C6E3D, CNapiNetwork_PumpAndCheckState's
+//  @0x4C6EA2]
+// One held node: the connection (its keys, sequence and ack state, latched record, names,
+// receive stamp, send clocks and holdoff) and its queue as the exit left it: the packets
+// framed before the exit, then the messages its connection had not yet built (the
+// teardown's 0x25s among them), which its next build sends.
+struct UnstoppedNode {
+	NapiNPConnection conn;
+	std::vector<std::vector<uint8_t>> staged; // framed, not yet sent (they own lower sequences)
+	std::vector<ProtocolMessage> queued;      // not yet built, in queue order
+};
+// One datagram a held node's socket leg queued for the protocol pump's queue pass: a 0x43 or a
+// 0x46 whose key the leg matched, its source, opcode and NWU-decrypted body.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - the queue @0x626C8C (pool_client, proto
+//  +0x22C); Nwu_HandleDisconnect @0x623CE0 - the type-1 queue @0x624125]
+struct UnstoppedPacket {
+	PeerAddr from;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+};
+struct UnstoppedServer {
+	bool running = false;
+	std::vector<UnstoppedNode> nodes; // the server-side nodes, in list order
+	std::string session_name;         // the protocol's (+0x288), HOST STOPPED's
+	std::string protocol_name;        // the protocol's (+0xDC), the manager's PROTOCOL line's
+	// The protocol's identity (the hello's NVS / PN / PG / PV1 gate), its start stamp (+0x53C,
+	// the host clock's: the 0x81's UT while host_running holds) and the 0x81's protocol words as
+	// the exit left them (identity, HK, SN, SF, P1 / P2, MP, SUS1 / SUS2): a 0x41 from any source
+	// reaches the held protocol's hello handler (receive_unstopped_server).
+	const TitleIdentity *identity = nullptr;
+	uint32_t host_start_tick = 0;
+	ServerHello hello;
+	// A listen host's own client connection (+0xE60, type 2), held with its twin (the first node,
+	// at address 0) when the exit was not the own leave: the next browse's or join's connection
+	// create destroys it (release_unstopped_own_client), else the next reset, ahead of the stop's
+	// walk. Its sends and its twin's go to the manager's loopback, never the socket.
+	std::optional<NapiNPConnection> own_client;
+	// The protocol's server-opcode queue (+0x22C, unbounded), which only a pump with flag bit 0
+	// drains: the LAN browse's and a join attempt's Pump(-1), never the joined match's flags 26.
+	std::vector<UnstoppedPacket> queue;
+	// The words a queued 0x42 meets, as the exit left them (receive_unstopped_server,
+	// pump_unstopped_server): the protocol's server password (its PW test) and its
+	// new-connection refusal byte (+0x1F7), the connection template a created node copies (the
+	// configured packet ceiling its field 13); the server context's join lock, its address
+	// bans and its capacity (max_players, plus the lineup queue's size while it is open), which
+	// the validate callback reads. The protocol's host key is the 0x81's (`hello.hk`).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - PW against +log_buffer @0x62BE18, +0x1F7
+	//  @0x62BE8F, the template copies @0x62BFC9 / @0x62BFE3; CNapiNetwork_ValidateJoinRequest
+	//  @0x4C61B0 - g_ServerJoinLocked @0x4C61CA, g_BannedIdList @0x4C6217, the cap
+	//  @0x4C6220..0x4C623F]
+	std::string server_password;
+	bool reject_new_connections = false;
+	CsConfig node_template{};
+	bool join_locked = false;
+	std::vector<uint32_t> banned_addresses;
+	int32_t join_capacity = 0;
+	bool lineup_queue_open = false;
+};
 
 } // namespace opennova::inmatch

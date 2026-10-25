@@ -34,6 +34,10 @@ const DEV_TOOLS_KEY := KEY_INSERT
 # with the retail-configurable binding rows (huddetail's default; hudcolor's is
 # Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
+# The cheat row 117's dispatch code: its record reaches the shell's arm past the engine's
+# gates, out of a session with a local player (engine inmatch::Role::dispatch_record carries
+# the witness), and toggles the WEAPON screen (_toggle_weapon_screen).
+const WEAPON_SCREEN_CODE := 40
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -43,8 +47,8 @@ const PICK_KEY := KEY_F6
 # as ARMORY: the world (and therefore the session socket) keeps ticking, only the
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by g_ClientDeployHold and the input legs gate on
-# g_SpawnSuccessGate — so this state is what makes the spawn list clickable.
-enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP }
+# g_RoundOver — so this state is what makes the spawn list clickable.
+enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP, VEHICLE }
 
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
@@ -76,18 +80,27 @@ var _frame_stats := FrameStats.new()
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
+# The probes holding the FrameStats board for their runs (hold_frame_stats).
+var _frame_stats_holds := 0
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
 var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
+# The in-world vehicle screen (vehicle.mnu VEHICLE) over the engine's VehicleMenu.
+var _vehicle_menu_presenter: VehicleMenuPresenter
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _command_map_presenter: CommandMapPresenter  # the commander map (cmap.mnu CMAP)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
+# The input frame's keyboard pass over the device's key queue: every key-down
+# waits there for the next input frame (KeyboardPass). Over the player
+# presenter's queue once the presenter exists (its input router owns it).
+var _keys := KeyboardPass.new()
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload the profile only when the mounted game/expansion changes
 var _intro_tail_run := false  # the first menu start's profile save ran
+var _menu_browser_made := false  # the first menu entry made the menu browser (its cookie jar)
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
 # The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
@@ -98,6 +111,11 @@ var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart'
 var _sp_restart_loader := Callable()
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
+# The enumerate-and-join's abort while its join screen is up (begin_join_enumerate),
+# and the choice's (begin_join_choice).
+var _join_enumerate_abort := Callable()
+# The choice's commit while its panels are up (begin_join_choice).
+var _join_choice_committed := Callable()
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
@@ -121,6 +139,11 @@ func _init() -> void:
 	_render_stats.setup(_frame_stats)
 	_frame_phase_sampler.setup(_frame_stats)
 	add_child(_frame_phase_sampler)
+	# Under --verbose the heavy frames print where they went (an instrument).
+	if OS.is_stdout_verbose():
+		var slow_frames := SlowFrameReport.new()
+		slow_frames.setup(_frame_stats, _frame_stats_read_elsewhere, _post_load_frames_open)
+		add_child(slow_frames)
 	_dev_tools = DevTools.new()
 	_dev_tools.name = "DevTools"
 	_dev_tools.set_frame_stats(_frame_stats)
@@ -133,19 +156,23 @@ func _init() -> void:
 	add_child(_join_screen)
 	_join_screen.cancelled.connect(_on_join_screen_cancelled)
 	_join_screen.game_starting.connect(_on_join_game_starting)
+	_join_screen.choice_committed.connect(_on_join_choice_committed)
 
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
-	# update() applied the device-global audio once already; only the running
-	# Simulation's view settings are this listener's to push.
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	_player_options.apply_view(sim)
+	# update() applied the device-global audio once already. The aspect mode
+	# never reaches a running mission: the view and the HUD take it at the next
+	# mission start (_on_world_loaded), as retail's projection takes only the
+	# session copy its start applies (PlayerOptions.apply carries the witness).
 	# The world copies the object detail at its next mission start; the
 	# texture filter reaches the model effects at once and the terrain's
 	# device filter at the next mission start.
 	if _world != null:
 		_world.set_object_polydetail(state.object_polydetail)
 		_world.set_texfilter_level(state.texfilter_level)
+		# The aspect mode each mission start selects for the local view (the
+		# stretched target made and held there, GameWorld.set_aspect_mode).
+		_world.set_aspect_mode(state.aspect_mode)
 		# The particle density, the texture compression and the terrain
 		# texture detail reach the next mission the world starts (its session
 		# copies, D-RMAT-24, D-RMAT-20).
@@ -156,12 +183,15 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
 		_hud_presenter.set_crosshair_spread_enabled(state.crosshair_spread)
-		_hud_presenter.set_aspect_mode(state.aspect_mode)
 		_hud_presenter.set_tip_options(state.keyboard_tips, state.gameplay_tips)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		# Every path that ends the process names itself in the log, since the
+		# SceneTree's quit prints nothing (D-NET-310: a joiner's process ended with
+		# no log line).
+		push_warning("MainGame: the window's close request ends the process")
 		request_quit()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		# The window procedure clears the key state on gaining and on losing the
@@ -194,7 +224,6 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 			presenter.teardown()
 	if _world != null:
 		_world.cancel_join_preload()
-		_world.cancel_join_admission()
 		# The F3 windows' Simulation dies with the runtime unload frees.
 		_dev_tools.set_simulation(null)
 		_world.unload()
@@ -275,12 +304,17 @@ func _ready() -> void:
 		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
 		get_tree().quit(2)
 		return
+	# The command line's init forces Num Lock on, saving its state for the exit
+	# (engine controls::kVkNumLock carries the witness, D-NET-563).
+	LocalPlayerPresenter.start_process_num_lock()
 	# The start's read of game.cfg (GameCfgStore, the first use of the block):
 	# a file that sets mpreset ends the process here with exit code 0, before
 	# anything mounts and with nothing saved (docs/gamecfg/game-cfg-re.md).
 	if GameCfgStore.block().is_reset_exit():
 		exit_process(0)
 		return
+	# The subsystems' init turns Scroll Lock off (the same witness).
+	LocalPlayerPresenter.start_process_scroll_lock()
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
@@ -306,6 +340,24 @@ func _ready() -> void:
 	# D-RORD-8 view leg + the fixed-tick weapon drain); the live binding table
 	# is the shell's ControlsBindings model.
 	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
+	_keys = KeyboardPass.new(_player_presenter.get_key_events())
+	# The keyboard pass runs at each update's input-frame head, inside the session's
+	# update (PlayerInputRouter::run_update_rows), so a frame that runs no update keeps
+	# its keys (engine inmatch::TickInputSource carries the witness).
+	_player_presenter.set_keyboard_pass(_run_keyboard_pass)
+	# The menu-screen bit, read again at each update's input-frame head: a screen one
+	# update's keyboard pass opens (the escape row's INGAME) gates the frame's later
+	# updates (PlayerInputRouter::set_menu_screen_probe).
+	_player_presenter.set_menu_screen_probe(_input_frame_menu_open)
+	# The escape row's and the deploy picks' records run the shell's arms when the
+	# update's drain reaches them, in key order with the rows' records
+	# (PlayerInputRouter::set_record_leg).
+	_player_presenter.set_record_leg(_run_record_leg)
+	# The console's SAVEKEYS dumps the live binding table (GameWorld.set_controls_model).
+	_world.set_controls_model(ControlsBindings.model())
+	# The remote admin's GOTO MENUSTATE reads whether an in-game menu screen is up
+	# (GameWorld.set_menu_screen_probe).
+	_world.set_menu_screen_probe(_menu_screen_open)
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks)
 	# still get them; the HUD presenter's
@@ -319,10 +371,21 @@ func _ready() -> void:
 			_hud if _hud != null else self)
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
 	_armory_presenter.closed.connect(resume)
+	# The vehicle screen over live play, like the armory (VEHICLE holds a screen).
+	_vehicle_menu_presenter = VehicleMenuPresenter.new()
+	_vehicle_menu_presenter.name = "VehicleMenuPresenter"
+	add_child(_vehicle_menu_presenter)
+	_vehicle_menu_presenter.setup(
+			func() -> Simulation: return _world.get_sim() if _world != null else null,
+			_hud if _hud != null else self)
+	_vehicle_menu_presenter.opened.connect(func() -> void: _state = State.VEHICLE)
+	_vehicle_menu_presenter.closed.connect(_leave_screen.bind(State.VEHICLE))
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
 	_deploy_presenter = DeployScreenPresenter.install(self, _world.world_view(),
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
+	# DEATH's exit confirmation YES runs input action 3, a menu screen's confirmation.
+	_deploy_presenter.exit_confirmed.connect(_on_screen_exit_confirmed)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	# The process's cfg block every mission's session create reads, and the
 	# create's mpreset exit (docs/net/novaworld-net-re.md D-NET-385).
@@ -437,21 +500,28 @@ func _input(event: InputEvent) -> void:
 	# witness).
 	if event is InputEventKey and (event as InputEventKey).pressed:
 		ControlsBindings.model().key_down_event(ArmoryPresenter.bound_key_of(event as InputEventKey))
-	# An open chat line takes every key (Esc included) before anything else
-	# sees it; only the shell's own window/tools keys pass.
+	# An open chat line owns the keyboard: every key (Esc included) waits in the key
+	# queue for the input frame's keyboard pass, whose chat leg takes it, and nothing
+	# else sees it; only the shell's own window/tools keys pass.
 	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
-			and _hud_presenter.is_chat_capturing():
-		var chat_key := event as InputEventKey
-		if not WindowState.is_toggle_event(event) and chat_key.keycode != DEV_TOOLS_KEY \
-				and _hud_presenter.handle_chat_key(chat_key):
-			get_viewport().set_input_as_handled()
-			return
+			and _hud_presenter.is_chat_capturing() and not _is_shell_key(event as InputEventKey) \
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing()):
+		if (event as InputEventKey).pressed:
+			_queue_key_event(event as InputEventKey)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey:
 		var tools_key := event as InputEventKey
 		if tools_key.pressed and not tools_key.echo and tools_key.keycode == KEY_ESCAPE \
 				and _dev_tools.handle_game_escape():
 			get_viewport().set_input_as_handled()
 			return
+		# Every other key-down, an OS repeat included, joins the device's key queue in
+		# every shell state; the input frame's keyboard pass drains it (KeyboardPass).
+		# The tools window's interact mode keeps the keyboard.
+		if tools_key.pressed and not _is_shell_key(tools_key) \
+				and (not is_dev_tools_open() or _dev_tools.is_game_playing()):
+			_queue_key_event(tools_key)
 	if _state != State.ARMORY or not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
@@ -478,25 +548,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _dev_tools.handle_tools_toggle():
 			get_viewport().set_input_as_handled()
 		return
-	# Once the SP round is over the special-key chain's round-over leg takes
-	# every key: RESTART runs the splash re-run (over a custom loading
-	# background) and the restart, ESC the quit; both reach the shell as the
-	# session's mission exit (_on_session_lost).
-	if _state == State.WORLD and _end_flow.is_round_ended() and _hud_presenter != null \
-			and not _world_load_pending:
-		var bits := _hud_presenter.handle_round_over_key(key)
-		if bits & HudToggles.ROUND_OVER_RESTART:
-			_begin_restart_splash()
-		if bits & HudToggles.ROUND_OVER_CONSUMED:
-			get_viewport().set_input_as_handled()
-			return
-	# The special-key chain takes its keys before the action rows see them:
-	# the quit dialog's, the page keys (the Tab board, the status page, help,
-	# the briefing) and the status page's Enter.
-	if is_gameplay_input_active() and _hud_presenter != null \
-			and _hud_presenter.handle_special_key(key):
-		get_viewport().set_input_as_handled()
-		return
+	# The special-key chain and the binding scan run in the input frame's keyboard
+	# pass over the key queue (_input feeds it; KeyboardPass carries the order).
 	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
 			and _world.is_loaded() and (is_gameplay_input_active() \
 			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
@@ -506,6 +559,38 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
+	# Under a pass-through screen (death.mnu's DEATH, stat.mnu's STAT) the screen's
+	# hotkey scan has seen the key-down already (its presenter's key leg runs
+	# first), and the key waits in the key queue for the input frame the screen's
+	# word lets run, the Escape key's included: nothing else takes it. The tools
+	# window's interact mode keeps the keyboard.
+	if (_state == State.DEPLOY or _state == State.END_ROUND) \
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing()):
+		get_viewport().set_input_as_handled()
+
+
+## The shell's own window and tools keys (F11 fullscreen, the tools toggle), which
+## never reach the game's key queue.
+func _is_shell_key(key: InputEventKey) -> bool:
+	return WindowState.is_toggle_event(key) or key.keycode == DEV_TOOLS_KEY
+
+
+## One key-down into the device's key queue: the player presenter's input router
+## reads Ctrl and Shift from the key state (LocalPlayerPresenter.push_key_event).
+func _queue_key_event(key: InputEventKey) -> void:
+	if _player_presenter != null:
+		_player_presenter.push_key_event(key)
+	else:
+		_keys.push(key)
+
+
+## Whether the keys belong to the input frame's keyboard pass: over live play and
+## under a pass-through screen (the keyboard pass drains the queue whenever its
+## input frame runs; under DEATH's exit confirmation they wait for the NO). The
+## tools window's interact mode keeps the keyboard.
+func _keyboard_pass_owns_keys() -> bool:
+	return (_state == State.WORLD or _state == State.DEPLOY or _state == State.END_ROUND) \
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing())
 
 
 # The workspace's shell policy. Interact owns the cursor and world click-pick;
@@ -541,6 +626,26 @@ func _sync_dev_tools_pick_policy() -> void:
 
 func is_dev_tools_open() -> bool:
 	return _dev_tools != null and _dev_tools.is_open()
+
+
+func hold_frame_stats(held: bool) -> void:
+	_frame_stats_holds = maxi(_frame_stats_holds + (1 if held else -1), 0)
+
+
+func is_frame_stats_held() -> bool:
+	return _frame_stats_holds > 0
+
+
+# The board's reader is elsewhere this frame: the open dev tools, or a probe's
+# hold (hold_frame_stats). The slow-frame readout then leaves it undrained.
+func _frame_stats_read_elsewhere() -> bool:
+	return is_dev_tools_open() or is_frame_stats_held()
+
+
+# Whether the world still times its first frames past a load (the slow-frame readout's post-load
+# lines, an instrument).
+func _post_load_frames_open() -> bool:
+	return _world != null and _world.is_post_load_frames_open()
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
@@ -666,6 +771,8 @@ func shell_state_name() -> String:
 			return "deploy"
 		State.COMMAND_MAP:
 			return "command_map"
+		State.VEHICLE:
+			return "vehicle"
 		_:
 			return "menu"
 
@@ -714,6 +821,12 @@ func _enter_menu(dir: String) -> bool:
 	if not GameCfgStore.enter_main_menu(_root):
 		exit_process(0)
 		return true
+	# The menu's creation follows the first entry's game.cfg read: the menu browser's cookie jar,
+	# loaded from nw_cdata.coo in the working directory, lives for the process (engine
+	# MenuBrowserState; NovaWorldClient.create_cookie_jar).
+	if not _menu_browser_made:
+		_menu_browser_made = true
+		NovaWorldClient.create_cookie_jar(LaunchFlags.working_dir())
 	_player_options.reload()
 	# The player profile loads after the menu's text tables and game.cfg, at
 	# every main-menu entry, as the original's menu init loads it
@@ -835,12 +948,13 @@ func _wire_shell() -> void:
 	_shell_wired = true
 	_menu_shell.start_requested.connect(_on_start_requested)
 	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
-	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
+	_menu_shell.return_to_menu_requested.connect(_on_menu_return_to_menu)
 	_menu_shell.restart_requested.connect(_on_restart_requested)
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_menu_shell.game_reloaded.connect(_on_game_reloaded)
 	_menu_shell.ingame_controls_accepted.connect(_on_ingame_controls_accepted)
+	_menu_shell.screen_activated.connect(_on_menu_screen_activated)
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
@@ -852,6 +966,12 @@ func _wire_shell() -> void:
 	_lan_session = LanSession.new()
 	_lan_session.name = "LanSession"
 	_lan_session.resource_root = _root
+	# The LAN search's socket binds on the block's client quad (engine
+	# inmatch::transport_bind_ports, D-NET-NEW-L8-10).
+	_lan_session.game_config = GameCfgStore.block()
+	# The LAN screen's browse stands for the process's one enumerator: a join's session reset
+	# and the process exit drain its records (engine: ClientRuntime::drain_enumerator).
+	_lan_session.set_process_enumerator(true)
 	add_child(_lan_session)
 	_mp_companion.set_lan_session(_lan_session)
 	_menu_shell.add_companion(_mp_companion)
@@ -859,6 +979,7 @@ func _wire_shell() -> void:
 	_net.wire_menu_companions(_mp_companion)
 	_player_info_companion.set_persisted_profile(_chosen_avatar)
 	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
+	_player_info_companion.player_preview_drawn.connect(_on_player_preview_drawn)
 
 
 # The Mods list switched the game: the profile loads again under the expansion it
@@ -870,8 +991,22 @@ func _on_game_reloaded() -> void:
 	if not GameCfgStore.reload_main_menu(_root):
 		exit_process(0)
 		return
+	# The menu made anew after its teardown (whose save MenuShell ran): its cookie jar loaded again
+	# from nw_cdata.coo, the session cookies the file does not keep gone (NovaWorldClient.
+	# create_cookie_jar).
+	NovaWorldClient.create_cookie_jar(LaunchFlags.working_dir())
 	_player_options.reload()
 	refresh_local_profile_for_mount(true)
+
+
+# The main menu's activation (the STARTUP screen) sets transport mode 0: the LAN
+# screen's browse tears its own open socket down with its connect-log line, and its
+# enumerator runs on over no socket (LanSession.tear_down_transport; engine
+# inmatch::write_transport_socket_teardown_line carries the witness). The NovaWorld
+# session's socket goes with its panel's close (NovaWorldClient.stop).
+func _on_menu_screen_activated(screen_name: String) -> void:
+	if screen_name.nocasecmp_to("STARTUP") == 0 and _lan_session != null:
+		_lan_session.tear_down_transport()
 
 
 # The in-game options Accept wrote the dialog into the current profile record:
@@ -894,6 +1029,13 @@ func _on_ingame_controls_accepted() -> void:
 # spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
+
+
+# The PLAYER_INFO portrait's draw stores the time of day it lights by into the process's
+# clock, never restored (engine inmatch::RemoteAdminConsoles::player_preview_drawn).
+func _on_player_preview_drawn() -> void:
+	if _world != null:
+		_world.player_preview_drawn()
 
 
 ## Load the player profile (player.sav, and the mounted expansion's weapon.sav)
@@ -965,6 +1107,11 @@ func _save_profile_for_single_player() -> void:
 	PlayerProfile.store().record_mission_start(-1)
 	PlayerProfile.save()
 	GameCfgStore.save()
+	# Then the start's block write after the save: the attribute word's
+	# literal (TeamChoose on), which a later host of this process advertises
+	# and the next save point writes to game.cfg (D-NET-NEW-LP-4; the engine's
+	# GameConfigBlock::single_player_mission_start carries the witness).
+	GameCfgStore.block().single_player_mission_start()
 
 
 ## Boot an exact loose mission through the same loading
@@ -1029,9 +1176,16 @@ func request_quit() -> void:
 		return
 	_quit_requested = true
 	# The main loop's exit saves game.cfg before the shutdown
-	# (docs/gamecfg/game-cfg-re.md, the save points).
+	# (docs/gamecfg/game-cfg-re.md, the save points), and the menu's teardown on the way out saves
+	# its cookie jar to nw_cdata.coo (NovaWorldClient.save_cookie_jar).
 	GameCfgStore.save()
-	_complete_runtime_shutdown(begin_runtime_shutdown())
+	NovaWorldClient.save_cookie_jar()
+	var load_operation := begin_runtime_shutdown()
+	# The subsystems' shutdown, after the cursor's show: Scroll Lock off, Num Lock
+	# as the start found it, Caps Lock off (engine controls::kVkNumLock carries the
+	# witness, D-NET-563).
+	LocalPlayerPresenter.exit_process_key_locks()
+	_complete_runtime_shutdown(load_operation)
 
 
 ## The process exit on the cfg block's mpreset word: a read of game.cfg that
@@ -1044,6 +1198,7 @@ func request_quit() -> void:
 func exit_process(code := 0) -> void:
 	if _process_exit_pending:
 		return
+	push_warning("MainGame: game.cfg's mpreset ends the process (exit code %d)" % code)
 	_process_exit_pending = true
 	_quit_requested = true
 	var client: NovaWorldClient = null
@@ -1072,6 +1227,7 @@ func is_process_exit_pending() -> bool:
 # 1 after the main loop's save of game.cfg, which every end of the scene loop
 # runs (docs/gamecfg/game-cfg-re.md, the save points).
 func _quit_failed_boot() -> void:
+	push_warning("MainGame: the game-data mount failed; the process ends (exit code 1)")
 	GameCfgStore.save()
 	get_tree().quit(1)
 
@@ -1169,6 +1325,80 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 		_on_world_load_failed("mission load handoff could not start")
 
 
+## The process has one enumerator, so a join's enumerate-and-join drains the LAN
+## screen's session records first, each writing its removed line (engine:
+## net/npwire/lan_discovery.h drain_records, D-NET-NEW-L8-8).
+func drain_lan_records() -> void:
+	if _lan_session != null:
+		_lan_session.drain_records()
+
+
+## The browse a join went on from (the enumerate-and-join's, the launch search's) hands its
+## records to the process's one enumerator, the LAN screen's browse, where the join's session
+## reset drains them (engine: net/npwire/lan_discovery.h adopt_records, D-NET-NEW-L8-8).
+func adopt_lan_records(from: LanSession) -> void:
+	if _lan_session != null and from != null:
+		_lan_session.adopt_records(from)
+
+
+## A join's enumerate-and-join: the join screen shows retail's PRE_ENUMSESSION
+## line with ABORT_CANCEL while the browse runs (no time limit); Cancel runs
+## `abort`, which leaves to the menu (engine: inmatch/pre_game_menu.h, D-NET-703).
+func begin_join_enumerate(abort: Callable) -> void:
+	if not _join_screen.open(_root, self):
+		return
+	_join_enumerate_abort = abort
+	_join_screen.show_progress(JoinScreenStatus.stage_text(JoinScreenStatus.STAGE_ENUMERATING,
+			Strings.get_override_table(), Strings.get_table(Strings.TABLE_GAMEERR)))
+
+
+## The enumerate ended (a session answered, or the join was abandoned): its
+## join screen closes; a join that goes on opens it again.
+func end_join_enumerate() -> void:
+	if not _join_enumerate_abort.is_valid():
+		return
+	_join_enumerate_abort = Callable()
+	_join_screen.close()
+
+
+## A join the join machine refuses before it dials: the join screen parks on `text`
+## with Cancel only, which runs `abort` (its error arm, then its state 9). False when
+## the screen cannot open.
+func show_join_refusal(text: String, abort: Callable) -> bool:
+	if not _join_screen.open(_root, self):
+		return false
+	_join_enumerate_abort = abort
+	_join_screen.show_failure(text)
+	return true
+
+
+## The join machine's choice (its state 8): a discovered session whose flag word
+## offers one opens pre.mnu's choice panels on the join screen; ACCEPT walks them
+## and its commit hands the three controls to `committed`; BACK or Cancel runs
+## `abort`, which leaves to the menu. False when the screen cannot show a choice.
+## (engine: inmatch/pre_game_menu.h pre_game_entry_panel / pre_game_accept)
+func begin_join_choice(server_flags: int, committed: Callable, abort: Callable) -> bool:
+	if not _join_screen.open(_root, self):
+		return false
+	if not _join_screen.show_choice(server_flags):
+		_join_screen.close()
+		return false
+	_join_enumerate_abort = abort
+	_join_choice_committed = committed
+	return true
+
+
+# The choice's commit: the screen closes and the join goes on with the choice.
+func _on_join_choice_committed(game_password: String, spectate: bool,
+		team_password: String) -> void:
+	var committed := _join_choice_committed
+	_join_choice_committed = Callable()
+	_join_enumerate_abort = Callable()
+	_join_screen.close()
+	if committed.is_valid():
+		committed.call(game_password, spectate, team_password)
+
+
 ## The join screen is up (the probe and test read).
 func is_join_screen_open() -> bool:
 	return _join_screen.is_open()
@@ -1187,6 +1417,13 @@ func _on_join_game_starting() -> void:
 # Cancel on the join screen: an abandoned join leaves the way a cancelled load
 # does; a failure already shown leaves to the menu it came from.
 func _on_join_screen_cancelled() -> void:
+	if _join_enumerate_abort.is_valid():
+		var abort := _join_enumerate_abort
+		_join_enumerate_abort = Callable()
+		_join_choice_committed = Callable()
+		_join_screen.close()
+		abort.call()
+		return
 	_join_screen.close()
 	if _world_load_pending and _world != null and _world.cancel_join_preload():
 		return
@@ -1234,9 +1471,12 @@ func _on_world_loaded() -> void:
 	_player_options.apply(sim)
 	# Every mission start re-seeds the live HUD declutter level from the
 	# persisted config value (retail's session-settings apply), so a death
-	# screen's forced blank HUD ends with the mission it happened in.
+	# screen's forced blank HUD ends with the mission it happened in. The same
+	# start's aspect mode reaches the HUD's sights and scope geometry, which
+	# draw at it until the next mission start (PlayerOptions.apply).
 	if _hud_presenter != null:
 		_hud_presenter.reapply_persisted_hud_detail()
+		_hud_presenter.set_aspect_mode(_player_options.current().aspect_mode)
 	# The F3 engine-fact windows read and mutate through this Simulation from
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.
@@ -1254,10 +1494,18 @@ func _on_world_loaded() -> void:
 	# the gate + device legs live on the coordinator
 	# [orig: Game_ShowStartMissionSplash @ 0x520820 precedes the release @ 0x525d45].
 	if _world_load.maybe_begin_start_mission_splash(_world.get_mission_audio()):
-		if not _world_load.splash_dismissed.is_connected(
-				_finish_world_load_presentation):
-			_world_load.splash_dismissed.connect(_finish_world_load_presentation)
+		if not _world_load.splash_dismissed.is_connected(_on_start_mission_splash_dismissed):
+			_world_load.splash_dismissed.connect(_on_start_mission_splash_dismissed)
 		return
+	_finish_world_load_presentation()
+
+
+## The SP start-mission splash's exit test takes the key that ended it off the key
+## queue (none when a mouse button ended it): the queue was reset as the splash
+## began (the mission start's input reset just ahead of it), so that key is the
+## first one queued (engine controls::KeyEventQueue::reset carries the witness).
+func _on_start_mission_splash_dismissed() -> void:
+	_keys.take_key()
 	_finish_world_load_presentation()
 
 
@@ -1312,9 +1560,17 @@ func _on_join_deploy_pick_required() -> void:
 # (PAUSED / ARMORY / DEPLOY / END_ROUND all hold a screen), so the latch is
 # never burned under another screen and the open retries on the next clear
 # frame. Closing is the presenter's own affair. NOT yet modeled (hud-re
-# D-HUD-19 residuals): the spawn-success suppression gate.
+# D-HUD-19 residuals): the spawn-success suppression gate. The latch is the
+# scene frame's, so a frame the status page stands in for neither opens the
+# screen nor clears the latch (GameWorld's scene gate; the latch's witness
+# lives on ClientState.death_menu_open_latch).
 func _maybe_open_death_menu() -> void:
 	if _state == State.MENU or _world == null:
+		return
+	# The latch's open and close legs sit in the scene frame's world block: a frame the
+	# status page stands in for, or one that skips its world (a cine, the command map over
+	# the menu), takes neither (engine inmatch::FrameOutcome::world_skipped).
+	if not _world.get_last_frame_world_drawn():
 		return
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
@@ -1449,12 +1705,13 @@ func _abort_to_menu(stage: String, reason: String,
 
 func _on_camera_escape() -> void:
 	# Esc: pause <-> resume while in a world (the armory closes back to play);
-	# ignored in the main menu (EXIT quits). During a load, BOTH joiner waits are
-	# interruptible legs — the pre-load connect/session wait and the post-load
-	# admission tail, which is polled once per world tick. Aborting either
-	# is the reachable analog of the original's per-asset ESC/disconnect abort
-	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]. The
-	# SP/host map load remains a single synchronous call the SceneTree cannot
+	# ignored in the main menu (EXIT quits). During a join's load presentation
+	# the ESC is the joiner wait's: the game-start wait's aborts the join
+	# [orig: NapiClient_WaitForGameStart @0x42CC10 - the ESC @0x42CC77, return 3 @0x42CCC7],
+	# and the final wait's leaves that wait for the game loop, aborting nothing
+	# (GameWorld.cancel_join_admission). The cold-spawn hold after the S2C 0x0F
+	# takes none: retail's game loop already runs there (D-NET-NEW-L2-39). The
+	# mission start's load is a single synchronous call the SceneTree cannot
 	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	# The join screen's Cancel answers ESC.
 	if _join_screen.is_open():
@@ -1471,27 +1728,292 @@ func _on_camera_escape() -> void:
 	# hud_toggles.h hud_toggles_escape / hud_round_over_key).
 	if _end_flow.is_round_ended():
 		return
-	# Over live play the HUD's escape chain closes one open HUD window first;
-	# only with none open does the in-game menu open.
-	if _state == State.WORLD and _hud_presenter != null and _hud_presenter.handle_escape():
+	# Over live play and under a pass-through screen (death.mnu's DEATH, stat.mnu's
+	# STAT) the Escape key is the key queue's: the binding scan queues the escape
+	# row's event in the input frame's keyboard pass and its case runs at its record
+	# in the update's drain (_run_record_leg), after a screen's hotkey (DEATH's
+	# LEAVE MISSION lowers the word, the confirmation's NO raises it); over a
+	# screen it never opens the in-game menu: a joiner parked at the pick leaves
+	# through LEAVE MISSION's YES (KeyboardPass and engine world::pass_through_close_axis carry the witness).
+	if _keyboard_pass_owns_keys():
 		return
-	if _state in [State.WORLD, State.DEPLOY, State.END_ROUND]:
-		# ESC from the deploy screen still reaches the in-game menu (and therefore
-		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
+	# The tools window's interact mode: the HUD's escape chain closes one open HUD
+	# window first; only with none open does the in-game menu open.
+	if _state == State.WORLD and _run_escape_action():
+		return
+	if _state == State.WORLD:
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
 		resume()
 	elif _state == State.COMMAND_MAP and _command_map_presenter != null:
 		_command_map_presenter.close()
+	elif _state == State.VEHICLE and _vehicle_menu_presenter != null:
+		_vehicle_menu_presenter.close()
 
 
-## The quit dialog's yes: the Exit Mission tone, then the mission ends and the
-## shell returns to the menu (the host's session goes with it).
+# The Escape key's action (the escape row's case 18): the input reset first (its
+# Player_ResetLocalInput, ahead of its spawn gate; engine
+# inmatch::Role::reset_local_input, D-NET-560), whose Scroll Lock turn-off goes out
+# at the next frame's head (D-NET-563); then the HUD's escape chain, which closes
+# one open HUD window (true) or runs its tail (false: the caller opens the in-game
+# menu only over live play, as the case's menu-screen gate does).
+func _run_escape_action() -> bool:
+	if _world != null and _world.get_sim() != null:
+		if _world.get_sim().escape_input_reset() and _player_presenter != null:
+			_player_presenter.owe_scroll_lock_turn_off()
+	return _hud_presenter != null and _hud_presenter.handle_escape()
+
+
+# Whether the open pass-through screen's word holds, so the update runs the input
+# frame under it: death.mnu's DEATH (its show raises the word, the exit
+# confirmation lowers it and the confirmation's NO raises it again) and stat.mnu's
+# STAT (raised for the whole screen). The frame's dead-player, deploy-overlay and
+# round-over gates are the action head's (engine world::pass_through_close_axis and
+# KeyboardPass carry the witness). The tools window's interact mode keeps the
+# input, as it does over live play.
+func _screen_input_frame() -> bool:
+	if _world_load_pending or (is_dev_tools_open() and not _dev_tools.is_game_playing()):
+		return false
+	if _state == State.DEPLOY:
+		return _deploy_presenter != null and _deploy_presenter.is_input_pass_through()
+	if _state == State.END_ROUND:
+		return _end_round_presenter != null and _end_round_presenter.is_input_pass_through()
+	return false
+
+
+# Whether this frame's input frame runs its keyboard pass: over live play (a
+# finished SP round included: its round-over leg takes the keys) and under a
+# pass-through screen whose word holds; never while a load holds the world (a
+# joiner's admission tail), nor under the tools window's interact mode.
+func _input_frame_drains_keys() -> bool:
+	if _world_load_pending or (is_dev_tools_open() and not _dev_tools.is_game_playing()):
+		return false
+	return _state == State.WORLD or _screen_input_frame()
+
+
+# The chat line's keyboard capture for this frame's samplers (the witness rides
+# ControlsModel.set_keyboard_captured).
+func _sync_keyboard_capture() -> void:
+	ControlsBindings.model().set_keyboard_captured((_state == State.WORLD \
+			or _screen_input_frame()) and _hud_presenter != null \
+			and _hud_presenter.is_chat_capturing())
+
+
+# --- The keyboard pass's legs (KeyboardPass.drain) -----------------------------
+
+## The input frame's keyboard pass, which the player input router runs at the head
+## of each update's input frame (under no menu screen): over live play and under a
+## pass-through screen whose word holds, it drains the key queue, so a key its
+## special-key chain takes never reaches the rows, and its legs (the round-over
+## keys, the escape row's in-game menu, a deploy pick) land in that update; a frame
+## that runs no update keeps its keys (KeyboardPass and engine
+## inmatch::TickInputSource carry the witness).
+func _run_keyboard_pass() -> void:
+	if _input_frame_drains_keys():
+		_keys.drain(self)
+
+
+## A menu screen with no input frame is up: INGAME (the pause), WEAPON (the
+## armory), CMAP (the command map), VEHICLE, or the deploy screen that does not
+## pass input through. The frame head reads it, and the player input router reads
+## it again at each update's input-frame head, so a screen one update's keyboard
+## pass opens (the escape row's INGAME) gates the frame's later updates.
+func _input_frame_menu_open() -> bool:
+	return (_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
+			or _state == State.VEHICLE or (_state == State.DEPLOY
+					and not _deploy_presenter.is_input_pass_through()))
+
+
+## An in-game menu screen is up, any of them: INGAME (the pause), WEAPON, the
+## deploy screen (DEATH), STAT, CMAP or VEHICLE. A remote admin's GOTO MENUSTATE
+## closes it ahead of its exit, so the close's input reset drops what the exit's
+## disconnect queued (engine inmatch/remote_admin.h ExitSite::AdminOverMenuScreen
+## carries the witness).
+func _menu_screen_open() -> bool:
+	return _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND,
+			State.COMMAND_MAP, State.VEHICLE]
+
+
+## An open chat line takes the queue's key (the keyboard pass's capture branch);
+## a key that closes the line hands the keyboard back to the frame's samplers at
+## once, as the capture word does.
+func ring_chat_key(key: InputEventKey) -> bool:
+	if _hud_presenter == null or not _hud_presenter.is_chat_capturing():
+		return false
+	_hud_presenter.handle_chat_key(key)
+	_sync_keyboard_capture()
+	return true
+
+
+## The special-key chain over the queue's key, its event-12 picks (the deploy
+## keys', a co-op round-over RESTART's) queued in key order with the rows' events
+## (LocalPlayerPresenter.queue_pick_event): the quit
+## dialog's keys, a session's round-over keys, the page keys (the Tab board, the
+## status page, help, the briefing), the status page's Enter and the deploy keys.
+## The deploy keys' test is the engine's (dead, or the deploy overlay up), not the
+## deploy screen's: under stat.mnu's STAT, or over live play with no screen up (the
+## round end's teardown closed DEATH before STAT opens), a dead player's deploy key
+## queues its pick as under DEATH (engine hud_toggles.h HudDeployKeyInput and
+## hud_round_over_key carry the witness). Once the SP round is over the chain's
+## round-over leg takes every key an earlier arm (the USE hold, an open Emotes /
+## Radio menu) does not hold: RESTART runs the splash re-run (over a custom loading
+## background) and the restart, ESC the quit; both reach the shell as the
+## session's mission exit (_on_session_lost). A key such an arm passes (a non-digit
+## under the USE hold) goes on to the chain's tail, the deploy test and the help and
+## briefing page keys, as over live play (GameHudPresenter.handle_special_key skips
+## the held legs). An open quit dialog leads them all: its keys run ahead of the
+## round-over leg, and a key it leaves goes to the tail.
+func ring_special_key(key: InputEventKey) -> bool:
+	if _hud_presenter == null:
+		return false
+	if _state == State.WORLD and _end_flow.is_round_ended() \
+			and not _hud_presenter.toggles().is_quit_dialog_open():
+		var bits := _hud_presenter.handle_round_over_key(key)
+		if bits & HudToggles.ROUND_OVER_RESTART:
+			_begin_restart_splash()
+		if bits & HudToggles.ROUND_OVER_CONSUMED:
+			return true
+	return _hud_presenter.handle_special_key(key, _deploy_key_param, _queue_pick)
+
+
+## The binding scan over a key the chain left: the dispatch code of the row it
+## fires (engine BindingSet::event_row, through ControlsModel.event_code).
+func ring_binding_code(scan_code: int) -> int:
+	return ControlsBindings.model().event_code(scan_code)
+
+
+## Any row the scan fired, the escape row's included: its event, with the fire's
+## sign (Shift on a fallback-pass fire) and the event's key, waits for the player
+## input router, which dispatches it once (PlayerInputRouter::queue_row_event). A
+## key the scripted device replayed for its hold fires its row through the hold
+## instead, the escape row's excepted (it has no hold arm).
+func ring_row_event(key: InputEventKey, code: int, scan_code: int) -> void:
+	if _player_presenter == null or (code != KeyboardPass.ESCAPE_CODE \
+			and ControlsModel.is_scripted_key_event(key)):
+		return
+	_player_presenter.queue_row_event(code, ControlsBindings.model().event_signed(scan_code),
+			scan_code)
+
+
+## The keyboard pass's release pass, ahead of its first dequeue: a latched key that
+## reads up queues its release row's event (PlayerInputRouter::run_key_release_pass).
+func ring_release_pass() -> void:
+	if _player_presenter != null:
+		_player_presenter.run_key_release_pass()
+
+
+## A key's deploy pick parameter by the engine's rule, -1 when not taken.
+func _deploy_key_param(key: InputEventKey) -> int:
+	return _deploy_presenter.deploy_key_param(key) if _deploy_presenter != null else -1
+
+
+## The special-key chain's pick (input event 12), queued in key order with the
+## rows' events for the update's drain.
+func _queue_pick(param: int) -> void:
+	if _player_presenter != null:
+		_player_presenter.queue_pick_event(param)
+
+
+## A record of the update's drain whose arm is the shell's, reached in key order
+## (PlayerInputRouter::set_record_leg): the escape row's (case 18), the Escape
+## action: over live play, with no HUD window to close, the in-game menu opens;
+## under a pass-through screen never (a menu screen is open), nor once the round
+## is over; the cheat row 117's weapon-screen toggle (case 40); or input event 12,
+## the pick (the deploy keys', a co-op round-over RESTART's), with or without the
+## deploy screen open. A console line's record reaches these arms as a key's does.
+## A case that reset the input (its Input_ResetAllState: the role's memset of the
+## event queue ends the drain there) owes the devices' reset, which runs at once.
+func _run_record_leg(code: int, param: int) -> void:
+	if code == KeyboardPass.ESCAPE_CODE:
+		if not _run_escape_action() and is_gameplay_input_active():
+			_pause()
+	elif code == KeyboardPass.SCREEN_SHOT_CODE:
+		_take_screen_shot()
+	elif code == WEAPON_SCREEN_CODE:
+		_toggle_weapon_screen()
+	elif _deploy_presenter != null:
+		_deploy_presenter.send_pick(param)
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null and bool(sim.take_input_reset()):
+		_reset_key_state()
+
+
+## The weapon-screen toggle (case 40, the cheat row 117's), past the engine's gates (out of a
+## session, a local player): an open menu screen closes, else weapon.mnu's WEAPON opens, the
+## WEAPON screen's word (State.ARMORY) with it; no armory zone gates it (engine
+## inmatch::Role::dispatch_record carries the witness). A drain runs under no menu screen but
+## the pass-through ones (death.mnu's DEATH, stat.mnu's STAT), so those are what it closes,
+## each close handing play back with its input reset (_leave_screen).
+func _toggle_weapon_screen() -> void:
+	if _menu_screen_open():
+		_close_drain_menu_screen()
+		return
+	_open_armory()
+
+
+## The menu screen a drained record's case closes (the weapon-screen toggle's, the USE row's
+## armory and vehicle legs'): a drain runs under no menu screen but the pass-through ones
+## (death.mnu's DEATH, stat.mnu's STAT), each close handing play back with its input reset
+## (_leave_screen).
+func _close_drain_menu_screen() -> void:
+	if _state == State.DEPLOY and _deploy_presenter != null:
+		_deploy_presenter.close()
+	elif _state == State.END_ROUND and _end_round_presenter != null:
+		_end_round_presenter.close()
+
+
+## The Screen Shot action's device leg (case 2): the frame as it last drew, written as the
+## first free SS%0.5d.jpg in the working directory, or under /sstga the first free SS%0.5d.tga
+## through the engine's run-length TGA writer (LaunchFlags.screen_shot_path and
+## screen_shot_tga_file; engine gameprofile/player_files.h screenshot_file_name and
+## formats/tga/tga.h tga_write_screenshot carry the witness). Nothing is written once every
+## index is taken, or when the device holds no frame.
+func _take_screen_shot() -> void:
+	var path := LaunchFlags.screen_shot_path()
+	if path.is_empty():
+		return
+	var image := get_viewport().get_texture().get_image()
+	if image == null or image.is_empty():
+		return
+	if not LaunchFlags.screen_shot_tga():
+		image.save_jpg(path)
+		return
+	image.convert(Image.FORMAT_RGBA8)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file != null:
+		file.store_buffer(LaunchFlags.screen_shot_tga_file(
+				image.get_data(), image.get_width(), image.get_height()))
+
+
+## The quit dialog's yes runs input action 3 inline: the Exit Mission tone, then the
+## exit (a joiner's CIDEMIS goodbye leaves at once, so no later C2S follows the
+## click), and the shell returns to the menu (the host's session goes with it)
+## (engine inmatch/remote_admin.h input_action_exit carries the witness).
 func _on_quit_confirmed() -> void:
+	_play_exit_tone()
+	if _world != null and _world.get_sim() != null:
+		_world.get_sim().input_action_exit()
+	_on_return_to_menu.call_deferred()
+
+
+## DEATH's exit confirmation YES, a menu screen's: input action 3 inline after the screen's
+## close, whose input reset drops what the action's disconnect queued, then the return to the
+## menu (engine inmatch/remote_admin.h ExitSite carries the witness).
+func _on_screen_exit_confirmed() -> void:
+	_play_exit_tone()
+	if _world != null and _world.get_sim() != null:
+		_world.get_sim().input_action_exit(true)
+	_on_return_to_menu.call_deferred()
+
+
+## Input action 3's Exit Mission tone, which the action plays ahead of its
+## disconnect on every path that runs it, the quit dialog's yes and the INGAME
+## CONFIRM_YES alike (engine inmatch/remote_admin.h input_action_exit carries the
+## witness).
+func _play_exit_tone() -> void:
 	var audio: MissionAudio = _world.get_mission_audio() if _world != null else null
 	if audio != null:
 		audio.ui_soundset(GameHudPresenter.QUIT_CONFIRM_SOUNDSET)
-	_on_return_to_menu.call_deferred()
 
 
 func _on_command_map_requested() -> void:
@@ -1502,17 +2024,43 @@ func _on_command_map_requested() -> void:
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
 	if _state == from_state:
 		_state = State.WORLD
+		# death.mnu's DEATH and stat.mnu's STAT pass input through while their word
+		# holds, so their close's input frame takes the menu cursor's offset from the
+		# re-centre point; DEATH's exit confirmation holds the word down (engine
+		# world::pass_through_close_axis carries the witness).
+		if _player_presenter != null and (from_state == State.END_ROUND \
+				or (from_state == State.DEPLOY and _deploy_presenter.is_input_pass_through())):
+			_player_presenter.close_pass_through_screen()
+		_reset_screen_close_input()
+
+
+## Every menu screen's close runs the whole input reset: the queued events
+## (a console line's action, an echo's binding arm) and the deferred dispatches
+## are dropped, and the devices' reset follows at the next frame's head
+## (Simulation.take_input_reset); with no sim the devices reset at once
+## (engine inmatch/session.h Role::reset_all_input_state carries the witness,
+## UI_CloseMenuScreen @0x54E5E0 tail-calling Input_ResetAllState @0x54E63F).
+func _reset_screen_close_input() -> void:
+	# The reset's key-queue leg (Input_ResetKeyQueue) runs with the close: the keys
+	# waiting under the screen never reach the world (KeyboardPass).
+	_keys.clear()
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null:
+		sim.reset_all_input_state()
+	else:
 		_reset_key_state()
 
 
 # Every menu screen's close resets the input state: a key held through it
 # reads up until its next key-down and dispatches no release, and a deferred
-# dispatch is dropped (engine controls::KeyStateReset and
-# PlayerActions::clear_key_press_latches carry the witness).
+# dispatch is dropped (engine controls::KeyStateReset and KeyPressLatch carry the
+# witness); the key queue goes with it (Input_ResetAllState's Input_ResetKeyQueue;
+# the input router resets it).
 func _reset_key_state() -> void:
 	if _player_presenter != null:
 		_player_presenter.reset_input_state()
 	else:
+		_keys.clear()
 		ControlsBindings.model().reset_key_state()
 
 
@@ -1540,7 +2088,7 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
-	_reset_key_state()
+	_reset_screen_close_input()
 	if _hud_presenter != null:
 		_hud_presenter.set_menu_pause(false)
 
@@ -1549,6 +2097,18 @@ func _on_return_to_menu() -> void:
 	if _world_load_pending:
 		return
 	_teardown_world_to_menu()
+
+
+## The menu shell's CONFIRM_YES. The INGAME screen's (the in-game menu over live
+## play) runs input action 3 inline as a menu screen's confirmation, so a joiner's
+## goodbye leaves at the click; then the shell returns to the menu (engine
+## inmatch/remote_admin.h input_action_exit and ExitSite carry the witness).
+func _on_menu_return_to_menu() -> void:
+	if _state == State.PAUSED and not _world_load_pending and _world != null \
+			and _world.get_sim() != null:
+		_play_exit_tone()
+		_world.get_sim().input_action_exit(true)
+	_on_return_to_menu()
 
 
 ## The MCP screen verbs behind game_control (the in-world screens get eyeballed
@@ -1590,14 +2150,32 @@ func mcp_open_armory() -> Error:
 # of the shell boundary rather than a menu-specific detail. The exit reason picks the
 # post-mission route (GameWorld.post_mission_route): a NovaWorld session the route keeps
 # leaves the world before it unloads and re-enters the NovaWorld menu; an error route
-# shows its text first.
+# shows its text first. The route reads the exit the session's teardown left, as the
+# Post Menu router reads it after the mission's teardown pump: the profile step, then the
+# session's close (GameWorld.close_session_for_route, whose own-client teardown can remap
+# a listen host's quit through the process latch: D-NET-NEW-L1-26), then the route.
 func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
-	var route: PostMissionRoute = _world.post_mission_route(exit_reason) if _world != null \
-			else PostMissionRoute.new()
+	_record_round_end()
+	var route: PostMissionRoute = PostMissionRoute.new()
+	if _world != null:
+		route = _world.post_mission_route(_world.close_session_for_route(exit_reason))
+	if route.exits_game:
+		# The "quit" row's exit (reason 2): the mission comes down (its session's reset sends
+		# the record as it stands), and the game ends as the main loop's does, game.cfg saved
+		# (engine inmatch/mission_exit.h PostMissionRoute::exits_game carries the witness).
+		push_warning("MainGame: exit reason 2 (the session reset) ends the process")
+		_teardown_world(false, false)
+		request_quit()
+		return
 	var novaworld_client: NovaWorldClient = null
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
-	_teardown_world(false)
+	_teardown_world(false, false)
+	# The return takes back the expansion a join's switch left, ahead of the menu's
+	# entry, whose game.cfg read and profile load then run over it (D-NET-622; engine
+	# SessionDrive::restore_kept_expansion carries the witness).
+	if _root != null:
+		_world.restore_join_expansion(_root)
 	if _root != null and _enter_menu(_root.get_root_dir()):
 		if _process_exit_pending:
 			# The menu entry's read ended the process: the session this exit
@@ -1618,9 +2196,11 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 
 # The world and every presenter over it come down: the menu teardown's head, and
 # the SP restart's (`restart` keeps the HUD tip's once-counters, as the
-# restart's start does).
-func _teardown_world(restart: bool) -> void:
-	_record_round_end()
+# restart's start does). The menu teardown runs the profile step itself, ahead
+# of its session's close (`record_round_end` false).
+func _teardown_world(restart: bool, record_round_end := true) -> void:
+	if record_round_end:
+		_record_round_end()
 	_world_load.dismiss()
 	_join_screen.close()
 	finish_hud_hidden_capture()
@@ -1629,6 +2209,8 @@ func _teardown_world(restart: bool) -> void:
 		_player_presenter.teardown()
 	if _armory_presenter != null:
 		_armory_presenter.teardown()  # the built menu holds the OLD world's resource root
+	if _vehicle_menu_presenter != null:
+		_vehicle_menu_presenter.teardown()
 	if _deploy_presenter != null:
 		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
@@ -1672,6 +2254,9 @@ func _restart_mission() -> void:
 		return
 	_teardown_world(true)
 	_state = State.WORLD
+	# The restart's start: the boot skips the fresh start's intro cine and profile word
+	# and keeps the first start's UP-TIME stamp (engine KernelBootOptions::restart).
+	_world.set_restart_boot(true)
 	start_world_load(info, loader, true)
 
 
@@ -1718,6 +2303,7 @@ func _on_exit_to_desktop() -> void:
 	# The main menu's EXIT saves the player profile and game.cfg before the
 	# game quits (engine: runtime/profile/player_profiles.h, the save
 	# points; docs/gamecfg/game-cfg-re.md).
+	push_warning("MainGame: the main menu's EXIT ends the process")
 	PlayerProfile.save()
 	GameCfgStore.save()
 	request_quit()
@@ -1770,11 +2356,17 @@ func _process(delta: float) -> void:
 	if _shutdown_prepared:
 		_dev_tools.set_game_play_available(false)
 		return
+	# The game loop's screen pass leads the frame: an in-game menu screen's click
+	# runs ahead of the frame's net frame and tick, so the INGAME CONFIRM_YES's
+	# exit (a joiner's goodbye) leaves before this frame's session sends
+	# (MenuShell.pump_screen_pass carries the witness). The GameWorld leg table is
+	# unchanged; the pump precedes the whole world frame.
+	if _menu_shell != null and _menu_shell.is_in_game():
+		_menu_shell.pump_screen_pass()
+		if _shutdown_prepared:
+			return
 	_refresh_dev_tools_game_state()
-	# The chat line's keyboard capture for this frame's samplers (the witness
-	# rides ControlsModel.set_keyboard_captured).
-	ControlsBindings.model().set_keyboard_captured(_state == State.WORLD \
-			and _hud_presenter != null and _hud_presenter.is_chat_capturing())
+	_sync_keyboard_capture()
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
 	var probe_enabled := _perf_probe.enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
@@ -1786,10 +2378,17 @@ func _process(delta: float) -> void:
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
-	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND, State.COMMAND_MAP] \
-			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
+	var screen_state: bool = _state in [State.PAUSED, State.ARMORY, State.DEPLOY,
+			State.END_ROUND, State.COMMAND_MAP, State.VEHICLE]
+	if screen_state or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
-			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+			# A game screen's free cursor starts at the re-centre point every gameplay
+			# update left the cursor on (engine world::kCursorCentreX / kCursorCentreY
+			# carry the witness).
+			if screen_state and _player_presenter != null:
+				_player_presenter.release_capture_for_screen()
+			else:
+				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	# The open-menu-screen flag the HUD's armory line yields to, every frame
 	# ahead of the early returns (the SP pause stops the HUD tick): every state
 	# but WORLD holds an in-game screen (PAUSED the in-game menu, ARMORY,
@@ -1800,6 +2399,9 @@ func _process(delta: float) -> void:
 	# The shell-control span closes before the early returns so every frame banks it.
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	_frame_phase_sampler.finish_shell_control(probe_t0)
+	# The deferred flush's queuers: a marker at each gameplay leg's end (an instrument).
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_AHEAD)
 	# Only the pause menu freezes the world, and only in a SINGLE-PLAYER session. The
 	# armory runs over LIVE play: the match keeps simulating around the player while the
 	# WEAPON screen is up [orig: the useitem armory leg @0x4e0b3f has no world-stop leg;
@@ -1816,53 +2418,90 @@ func _process(delta: float) -> void:
 	# tick]); session loads never splash, so the joiner pump is untouched.
 	if _world_load.is_splash_active():
 		return
-	if _state == State.PAUSED and not _world.is_net_session():
-		return
+	# The single-player pause menu still runs every frame: the engine session's Paused
+	# state holds the tick, and the paused frame's own legs (the main-frame counter, the
+	# weather tick ahead of the pause test, the cine pass and the HUD radar) run through
+	# the session's paused branch exactly as under the debug pause row
+	# (engine inmatch::Session::run_paused_update_legs carries the witness).
 	# A joiner's mission start owes its input reset once its game-start wait
 	# ends (engine inmatch::ClientRuntime::take_input_reset).
 	var reset_sim: Simulation = _world.get_sim()
 	if reset_sim != null and reset_sim.take_input_reset():
 		_reset_key_state()
+	# The input frame's keyboard pass runs inside each update the world tick's session
+	# drains, at the input frame's head (_run_keyboard_pass).
+	# The session banks the frame's measured elapsed wall time, not Godot's
+	# process delta, which Godot caps (GameWorld.take_frame_elapsed_seconds and
+	# engine world::TickAccumulator::bank carry the witness).
+	var frame_elapsed: float = _world.take_frame_elapsed_seconds()
 	var frame_input: MissionFrameInput
 	if _player_presenter != null:
-		var player_live := is_gameplay_input_active()
-		# No input frame runs under the INGAME (pause), WEAPON (armory) or CMAP
-		# (command map) screen (engine controls::PlayerActionPoll::menu_open
-		# carries the witness).
+		# The input frame runs over live play and, under a pass-through screen
+		# (death.mnu's DEATH, stat.mnu's STAT), while the screen's word holds: every
+		# action row then meets the action head's dead-player, deploy-overlay and
+		# round-over gates, and the death screen's binding scan. No input frame runs
+		# under the INGAME (pause), WEAPON (armory), CMAP (command map) or VEHICLE
+		# screen, nor under DEATH's exit confirmation (engine
+		# controls::PlayerActionPoll::menu_open carries the witness). Only live play
+		# captures the mouse.
 		frame_input = _player_presenter.before_world_tick(
-				delta, player_live, player_live,
-				_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP)
-		# The held USE row's armory arm took its open in that poll (engine
-		# controls::PlayerActions, through the sim's press latch); the shell
-		# opens what it names.
-		if _player_presenter.take_use_item_armory_request():
-			_open_armory()
+				frame_elapsed, is_gameplay_input_active(),
+				is_gameplay_input_active() or _screen_input_frame(),
+				_input_frame_menu_open())
 	else:
 		frame_input = MissionFrameInput.new()
-		frame_input.delta_seconds = delta
+		frame_input.delta_seconds = frame_elapsed
 	# The frame loop feeds the session the time since the last render: the
 	# mission-start frames bank only that (Session::advance).
 	frame_input.since_render_seconds = _world.get_seconds_since_render()
+	# The command map as the open menu screen: the scene frame then skips its world
+	# (engine inmatch::FrameInput::command_map_open).
+	frame_input.command_map_open = _state == State.COMMAND_MAP
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_PLAYER)
 	var skip_world := probe_enabled and _perf_probe.skip_world
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform,
-				delta, frame_input)
+				frame_elapsed, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_WORLD)
+	if _player_presenter != null:
+		# The held USE row's armory and vehicle-loadout arms took their press in an update's
+		# sample (engine controls::PlayerActions, through the sim's press latch). With a menu
+		# screen up (a pass-through one) either arm closes it instead of opening its own;
+		# over live play the armory opens weapon.mnu WEAPON, the vehicle arm vehicle.mnu
+		# VEHICLE past its team test (engine world::local_player_use_item_arm carries the
+		# witness, D-NET-NEW-LI-40).
+		var armory: bool = _player_presenter.take_use_item_armory_request()
+		var vehicle: bool = _player_presenter.take_use_item_vehicle_menu_request()
+		var use_sim: Simulation = _world.get_sim() if _world != null else null
+		if (armory or vehicle) and _menu_screen_open():
+			_close_drain_menu_screen()
+		elif armory and _state == State.WORLD:
+			_open_armory()
+		elif vehicle and _state == State.WORLD and _vehicle_menu_presenter != null \
+				and use_sim != null and use_sim.local_player_vehicle_zone_team_matches():
+			_vehicle_menu_presenter.open()
 	# Camera placement runs in the world frame now (local-view device leg,
 	# D-RORD-8); this covers frames that skip it (probe world-skip, no live world).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):
 		_player_presenter.after_world_tick()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_PLAYER)
 	# The shared HUD presenter rebuilds the per-frame info while the player is in-world
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe.skip_hud
 	if _hud_presenter != null and not skip_hud \
 			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND,
-					State.COMMAND_MAP]:
-		_hud_presenter.tick(is_gameplay_input_active())
+					State.COMMAND_MAP, State.VEHICLE]:
+		_hud_presenter.tick(is_gameplay_input_active() or _screen_input_frame())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
+	if timing:
+		_frame_phase_sampler.queue_flush_leg(FrameStats.FRAME_FLUSH_HUD)
 	_maybe_open_death_menu()
 	if timing:
 		_frame_phase_sampler.record_shell_spans(

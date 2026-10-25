@@ -70,6 +70,7 @@ void AdminTcpServer::pump() {
 	}
 }
 
+// [orig: CAdminServer_Destructor @0x406DB0 - CAdminServer_DisconnectAllClients called @0x406DB3]
 void AdminTcpServer::close() {
 	for (Client &client : clients_) {
 		server_.close(client.id);

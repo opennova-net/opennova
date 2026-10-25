@@ -6,9 +6,12 @@
 #include <formats/def/def.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 #include "common/test_paths.h"
 
 #include <cmath>
@@ -221,13 +224,13 @@ void test_automatic_expression() {
 	body.inf.anim_state = 140; body.inf.body_heading = 0;
 	body.slot.f[17] = 20 * 65536;
 	body.inf.head_look_target = target;
-	other.pos[0] = 65536; other.heading = INT32_MIN;
+	other.self->position.x.q16 = 65536; other.heading = INT32_MIN;
 	f.world.ai.root_motion = &f.motion;
 	infantry_attention_think(f.world.ai, body, f.world, 0x80);
 	CHECK(f.slot(h).automatic == 6);
 	infantry_attention_think(f.world.ai, body, f.world, 0x180);
 	CHECK(f.slot(h).automatic == 7);
-	other.pos[0] = 5 * 65536;
+	other.self->position.x.q16 = 5 * 65536;
 	body.inf.anim_state = 140;
 	infantry_attention_think(f.world.ai, body, f.world, 0x90);
 	CHECK(f.slot(h).automatic == 8); // animation table entry 140
@@ -247,10 +250,82 @@ void test_look_back_uses_the_placement_heading() {
 	body.inf.anim_state = 140; body.inf.body_heading = 0;
 	body.inf.head_look_target = target;
 	f.entity(target).position.y = -5668.0f / 65536.0f;
-	f.entity(target).yaw = -112;
+	f.entity(target).heading = placed_heading_bam(-112);
 	f.world.ai.root_motion = &f.motion;
 	infantry_attention_think(f.world.ai, body, f.world, 0x80);
 	CHECK(f.slot(h).automatic == 6);
+}
+
+// The scene frame's passes: the main scene's, then the weapon Inset scene's own on a
+// frame that runs that pass, each one counter step and one sort from its own pass's eye,
+// so an Inset frame steps the update's 64-frame look cadence twice; a frame with no
+// local player draws no scene, and one that skips its world runs neither pass.
+// [orig: Render_ProcessMainSceneFrame @0x5CA137, @0x5CA171..0x5CA190, @0x5CA50C;
+//  the Inset call @0x5CA949 -> Render_WeaponInsetScene @0x5C99BC; FaceAnim_RenderAllSlots
+//  ++dword_26C7768 @0x580367; Scar_SortSlotsByDistance @0x57FE72..0x57FE78]
+void test_scene_passes_step_once_per_pass() {
+	auto f = std::make_unique<Fixture>();
+	const auto near_main = f->spawn(1, 10), near_inset = f->spawn(2, 40);
+	std::vector<FacialDraw> draws;
+	LocalPlayerViewFrame view;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 0);
+	view.camera_pose_valid = true;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 1);
+	CHECK(f->slot(near_main).priority == 0 && f->slot(near_inset).priority == 1);
+	view.inset_scope_active = true;
+	view.inset_camera.pos_q16[0] = 40 << 16;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 3);
+	// The Inset pass sorted last, from its own eye.
+	CHECK(f->slot(near_inset).priority == 0 && f->slot(near_main).priority == 1);
+	// A frame that skips its world (a cine plays, or the command map is the open menu
+	// screen) runs neither pass [orig: @0x5CA4EA..0x5CA4EC; @0x5CA620..0x5CA640].
+	view.world_skipped = true;
+	f->world.facials.render_scene_passes(f->world, view, draws);
+	CHECK(f->world.facials.display_frame() == 3);
+}
+
+// The local body's in-place destroy (the ewep row's stale-ground leg on a joiner) frees its face
+// slot ahead of the memset and zeroes its AI slot; through the window the body has no def, so the
+// tick's initialize allocates nothing; the 0x18's model init then takes the next append-only slot,
+// never the freed one. Another row keeps its slot. (D-NET-NEW-L5-28, V-ROLL-AQ D3.)
+// [orig: Entity_Destroy @0x43E810 - the +0x1B8 test @0x43E88A, FaceAnim_FreeEntitySlot @0x57FCA0
+//  (the call @0x43E894), the AI slot memset @0x43E9AE; Entity_InitFromModel @0x40DC30 -
+//  FaceAnim_AllocEntitySlot @0x57FDF0 (the call @0x40E22E); NapiNPClientMsg_FullEntitySpawn
+//  @0x433780 - Entity_InitFromModel @0x433E6C]
+void test_the_local_body_in_place_destroy_frees_its_face() {
+	auto f = std::make_unique<Fixture>();
+	const auto other = f->spawn(1);
+	const auto self = f->spawn(2);
+	CHECK(f->entity(self).facial_slot == 0x8001);
+	static constexpr uint16_t kGround = 0x1003;
+	f->world.cached.local_player = self;
+	f->entity(self).ground_target = EntityHandle{kGround};
+	f->world.rules.mp_session = true;
+	f->world.rules.mp_session_peer = true;
+	f->world.rules.logic_authority = false;
+	f->world.destroyed_mark = [](uint16_t handle) { return handle == kGround; };
+	f->world.logic_tick = 0x7F;
+	auto ai = std::make_unique<AiEntity>();
+	ai->slot.f[3] = 5;
+	person_ewep_mover(f->world, *ai, f->entity(self));
+	CHECK(f->world.out.entity_info_requests.size() == 2);
+	CHECK(!f->entity(self).has_item_def && f->entity(self).player_slot_id == 0xFF);
+	CHECK(f->entity(self).facial_slot == 0 && f->world.facials.for_entity(f->entity(self)) == nullptr);
+	CHECK(!f->world.facials.slots()[1].owner.valid());
+	CHECK(f->world.facials.for_entity(f->entity(other)) != nullptr);
+	CHECK(ai->slot.f[3] == 0);
+	f->world.facials.initialize(f->world);
+	CHECK(f->entity(self).facial_slot == 0 && f->world.facials.slots().size() == 2);
+	Entity &body = f->entity(self);
+	body.item_id = 11;
+	body.item_type = 3;
+	body.has_item_def = true;
+	f->world.facials.initialize_entity(f->world, body);
+	CHECK(body.facial_slot == 0x8002 && f->world.facials.slots().size() == 3);
+	CHECK(f->world.facials.for_entity(body) != nullptr && !f->world.facials.slots()[1].owner.valid());
 }
 
 } // namespace
@@ -262,5 +337,7 @@ int main() {
 	test_slot_lifetime_and_capacity();
 	test_automatic_expression();
 	test_look_back_uses_the_placement_heading();
+	test_scene_passes_step_once_per_pass();
+	test_the_local_body_in_place_destroy_frees_its_face();
 	return failures ? 1 : 0;
 }

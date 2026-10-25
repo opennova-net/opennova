@@ -3,6 +3,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type (a seated target's seat)
 #include <runtime/world/player_view.h>
 #include <runtime/world/spectator_motor.h>
 
@@ -16,6 +17,7 @@ void stamp_spectator_motor(mission::MissionKernel &kernel, const ClientRuntime *
 	s.submode = 0;
 	s.has_target = false;
 	s.target_entity = world::EntityHandle{};
+	s.target_seated = false;
 	s.su_flag = false;
 	if (runtime == nullptr) return;
 	const replication::ClientState &cs = runtime->state();
@@ -37,6 +39,31 @@ void stamp_spectator_motor(mission::MissionKernel &kernel, const ClientRuntime *
 			s.target_yaw = row->heading_bam;
 			s.target_pitch = row->pitch_bam;
 			s.target_roll = row->roll_bam;
+			s.target_eye[0] = row->eye_offset[0];
+			s.target_eye[1] = row->eye_offset[1];
+			s.target_eye[2] = row->eye_offset[2];
+			s.target_lean = row->lean_angle;
+			s.target_recoil = row->recoil_pitch;
+			s.target_torso_roll = row->torso_roll;
+			// A seated row (a carrier and a nonzero bone; bone 0 is the deck it
+			// stands on) names its carrier twin and the seat the bone is, as the
+			// record's attach stamps +0x16C / +0x168 off the carrier's userpoint
+			// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the
+			//  Entity_TryAttachOrDetach call @0x4C1317].
+			if (row->carrier_handle != 0xFFFF && row->mount_bone != 0) {
+				s.target_seated = true;
+				s.target_carrier = world::EntityHandle{row->carrier_handle};
+				s.target_seat_type = 0;
+				s.target_body_roll = row->rm_body_roll;
+				const replication::ClientEntityState *carrier = cs.find(row->carrier_handle);
+				const mission::ItemSeatSpec *spec = carrier != nullptr
+						? mission::item_seat_spec_for_type(kernel.seat_specs, carrier->type_id)
+						: nullptr;
+				if (spec != nullptr)
+					for (const world::Seat &seat : spec->seats)
+						if (seat.bone_index == row->mount_bone)
+							s.target_seat_type = static_cast<uint8_t>(seat.type);
+			}
 		}
 	}
 	// The rising edge's eye, once the local entity exists to take it (the

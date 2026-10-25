@@ -186,13 +186,18 @@ func _check_carrier(carrier: Carrier) -> bool:
 
 	# The request must survive the host loopback, and the REAL presenter
 	# consumes the weapon event.
+	# The switch is a route switch: it stores the route bit and the EquippedSlot
+	# and switches nothing, so the slot's def (the HUD's) follows at once while
+	# the body's AdmDef byte stays the borrowed gun's (D-WPN-52)
+	# [orig: NapiNPServerMsg_HandleWeaponToggle @0x511A70 (@0x511B2C..0x511B38);
+	#  NetPacket_SerializePlayerState @0x4C13EB..0x4C13F8].
 	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
-	assert_eq(sim.get_local_player_weapon_name(), alternate,
-			"%s: right-click selects the carrier's own weapon" % who)
-	assert_ne(sim.get_local_player_weapon_name(), first)
 	assert_eq(world.local_player_hud_weapon_def().weapon_name, alternate,
-			"the HUD weapon def follows the switch")
+			"%s: right-click selects the carrier's own weapon" % who)
+	assert_ne(world.local_player_hud_weapon_def().weapon_name, first)
+	assert_eq(sim.get_local_player_weapon_name(), first,
+			"the route switch leaves the AdmDef byte as the borrow stamped it")
 	# The alternate is the carrier's embedded slot: give it distinct ammo.
 	assert_eq(sim.debug_set_world_entity_weapon_ammo(hull.get_net_id(), 7, 19), OK)
 	assert_eq(world.local_player_weapon_view().clip, 7)
@@ -204,14 +209,14 @@ func _check_carrier(carrier: Carrier) -> bool:
 
 	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
-	assert_eq(sim.get_local_player_weapon_name(), first, "right-click returns")
-	assert_eq(world.local_player_hud_weapon_def().weapon_name, first)
+	assert_eq(world.local_player_hud_weapon_def().weapon_name, first, "right-click returns")
+	assert_eq(sim.get_local_player_weapon_name(), first)
 	assert_eq(world.local_player_weapon_view().clip, first_clip,
 			"the child's slot kept its own clip")
 	assert_eq(world.local_player_weapon_view().reserve, first_reserve)
 	MountLook.right_click(self, sim, _presenter)
 	_advance(sim)
-	assert_eq(sim.get_local_player_weapon_name(), alternate)
+	assert_eq(world.local_player_hud_weapon_def().weapon_name, alternate)
 	assert_eq(world.local_player_weapon_view().clip, 7,
 			"returning preserves the alternate's ammo")
 	assert_eq(world.local_player_weapon_view().reserve, 19)

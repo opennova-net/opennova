@@ -105,6 +105,20 @@ public:
 	HttpListener(db::ConnectionPool &db_pool, RedisPool &redis);
 	~HttpListener();
 
+	// The main page's @HOST_URL@ for a web host, the port the listener serves
+	// and a row's host page: "http://", the host, ":" and the port only when it
+	// is not HTTP's 80, "/" and the page (see host_url).
+	static std::string host_url_for(const std::string &web_host, uint16_t port,
+	                                const std::string &host_page) {
+		return web_root_for(web_host, port) + "/" + host_page;
+	}
+	// The service's own root as its pages name it: "http://", the web host and ":" and the
+	// port only when it is not 80, no trailing '/' (a directly fetched page's {{WEB_ROOT}}: JO's
+	// sign-in template's image lines, the live "http://<web-ip>/nonbhdx2.tga"; D-NET-NEW-L9-52).
+	static std::string web_root_for(const std::string &web_host, uint16_t port) {
+		return "http://" + web_host + (port == 80 ? std::string() : ":" + std::to_string(port));
+	}
+
 	// Optional unknown-message tracker. When set, the catch-all 404 path
 	// records "http" sightings ("<METHOD> /<path>"); /api/unknowns reads the
 	// unknown_messages rows every process flushes into, never a tracker's
@@ -244,8 +258,16 @@ private:
 	// never 127.0.0.1 (else the client POSTs its host registration / fetches
 	// the server browser from its own localhost). The browser list is the
 	// requesting client's game's (catalog::GameRow::gsb_route: "/jop_2.gsb"
-	// for JO's).
-	std::string host_url() const;
+	// for JO's). The main page's @HOST_URL@ is the row's host page (JO's
+	// jop_2_host1.htm, whose refresh opens NWHost.dll) and writes the port only
+	// when it is not HTTP's 80, as the live service's main page names it
+	// ("http://<web-ip>/jop_2_host1.htm") while its lobby's 0x82 names the web
+	// domain with ":80" (LN S2, 2026-10-24). A stock client files its browser
+	// cache by the combined URL, so the host leg's pages, combined under the
+	// port-less origin, key their relay template apart from the login's and
+	// fetch it again (every LN S1 / S2 retail host leg refetches
+	// jop_2_relay.mnx; D-NET-NEW-L9-46).
+	std::string host_url(const catalog::GameRow &game) const;
 	std::string gsb_url(const catalog::GameRow &game) const;
 
 	struct Impl;
@@ -336,8 +358,8 @@ private:
 	std::string address_zone_;
 	// The outbound mail (set_mail_enabled).
 	bool mail_on_ = false;
-	// config.web_host, set in start() before Crow runs (host_url() /
-	// gsb_url()), and config.public_host (the switcher's /api/server-info).
+	// config.web_host, set in start() before Crow runs (host_url(game) /
+	// gsb_url(game)), and config.public_host (the switcher's /api/server-info).
 	std::string web_host_;
 	std::string public_host_;
 	// config.site_url, set in start() before Crow runs: the welcome mail's link.

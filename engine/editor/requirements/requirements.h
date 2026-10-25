@@ -50,7 +50,7 @@ struct RequirementReport {
 bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
 // Whether the manifest's row of `role` is a file the game reads for multiplayer alone, which the project's Multiplayer
 // feature puts on the checklist: mp.mnu, the NovaWorld screens the game loads as a player enters NovaWorld from the
-// startup screen or comes back to it from a game [orig: UI_EnterNovaWorldMenu @ 0x5588fa, from sub_5557A0 (the startup
+// startup screen or comes back to it from a game [orig: UI_EnterNovaWorldMenu @ 0x5588fa, from UI_StartupNovaWorldButton_OnEvent (the startup
 // screen's NW_MULTI_PLAYER and NW_ACTIVATE), Menu_InitShellResources @ 0x5526c2 and UI_NWMultiPlayer_OnBack @
 // 0x558cf9], on the checklist with Multiplayer whatever the phase; and pre.mnu, the join screen a client loads as it
 // joins a session [orig: PreMenu_Init @ 0x5693e0, the load @ 0x56944a], likewise. The mission music GAMEMUS (and an

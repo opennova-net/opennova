@@ -22,7 +22,10 @@ void entity_process_falling_death(
 	if (traits != nullptr && traits->static_death) {
 		m.vel_x = m.vel_y = m.slide_z = 0;
 	} else {
-		if (e.position.z + e.bound_radius >= water_height)
+		// The top word against the water word, a signed compare.
+		// [orig: Entity_ProcessFallingDeathPhysics @0x461D30 - `mov eax, [esi+0Ch];
+		//  add eax, [esi]; cmp eax, g_EnvWaterHeightFixed; jge` @0x461DD4..0x461DDF]
+		if (entity_top_q16(e) >= death_water_q16(water_height))
 			m.slide_z = io::bam_sub(m.slide_z, 334);
 		else {
 			m.vel_x >>= 1;
@@ -30,37 +33,34 @@ void entity_process_falling_death(
 			m.slide_z = -4096;
 		}
 		int32_t ground = INT32_MIN;
-		const int32_t pos[3] = { to_fixed(e.position.x), to_fixed(e.position.y),
-			to_fixed(e.position.z) };
+		const int32_t pos[3] = { e.position.x.q16, e.position.y.q16,
+			e.position.z.q16 };
 		if (world.ai.collision != nullptr) {
 			ground = world.ai.collision->raycast_ground(
 					world, e.handle, pos, 0, 0, 0x10000, 0x200000, &e.ground_target);
 		} else if (terrain != nullptr && terrain->valid()) {
-			ground = to_fixed(terrain::height_field_height_mission_bilinear(
-					*terrain, e.position.x, e.position.y));
+			ground = terrain::height_field_height_bilinear_fixed(
+					*terrain, e.position.x.q16, e.position.y.q16);
 			e.ground_target = {};
 		}
+		// The husk's collision section 0 z words, by the up row's sign.
+		// [orig: Entity_ProcessFallingDeathPhysics @0x461D30 - +0x6C row 0's +0x58
+		//  @0x461E25..0x461E36, +0x54 @0x461E3A..0x461E4B]
 		if (ground != INT32_MIN && traits != nullptr) {
 			if (entity_placement_matrix(e).m[10] >= 0)
-				ground = io::bam_sub(ground, to_fixed(std::abs(traits->husk_rest_min_z)));
+				ground = io::bam_sub(ground, io::bam_abs(traits->husk_rest_z_lo_q16));
 			else
-				ground = io::bam_add(ground, to_fixed(std::abs(traits->husk_rest_max_z)));
+				ground = io::bam_add(ground, io::bam_abs(traits->husk_rest_z_hi_q16));
 		}
 		const int32_t z = io::bam_add(pos[2], m.slide_z);
 		if (ground == INT32_MIN || z > ground) {
-			e.position = { float(from_fixed(io::bam_add(pos[0], m.vel_x))),
-				float(from_fixed(io::bam_add(pos[1], m.vel_y))), float(from_fixed(z)) };
+			e.position.set_q16({io::bam_add(pos[0], m.vel_x), io::bam_add(pos[1], m.vel_y), z});
 		} else {
 			// Full old pose is retained; only the vertical component stops.
 			m.slide_z = 0;
 		}
 	}
 	if (AiEntity *body = world.ai.for_handle(e.handle)) {
-		for (int axis = 0; axis < 3; ++axis)
-			body->net_saved_live_pose[axis] = e.saved_live_pos[axis];
-		body->pos[0] = to_fixed(e.position.x);
-		body->pos[1] = to_fixed(e.position.y);
-		body->pos[2] = to_fixed(e.position.z);
 		body->vel_x = m.vel_x;
 		body->vel_y = m.vel_y;
 	}

@@ -1,10 +1,12 @@
 #include <runtime/inmatch/host_session.h>
+#include <base/vfs/vfs.h> // vfs_country_code (the report clocks' CC.BIN)
 #include <runtime/devtools/tick_profile.h>
 #include <base/io/tick_rate.h>
 
+#include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
-#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate, Server_RouteFrameTailEdges
+#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate
 #include <runtime/inmatch/session_timeout_config.h> // load_session_timeout_config (_NSTMOUT.TXT)
 
 #include <runtime/replication/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
@@ -17,10 +19,14 @@
 #include <net/npwire/session_keys.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/weapon_inventory.h> // the availability builder's two modes
 #include <runtime/world/world.h>
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the process's GetTickCount)
+#include <formats/mission/bms.h>
+#include <runtime/mission/promote.h> // mission_availability_pairs (the item_availability chunk)
+#include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -31,25 +37,31 @@
 
 namespace opennova::inmatch {
 
-namespace {
+// See host_session.h.
+uint32_t host_monotonic_milliseconds() { return world::frame_tick_count_ms(); }
 
-uint32_t monotonic_milliseconds() {
-	const uint64_t value = static_cast<uint64_t>(
-			std::chrono::duration_cast<std::chrono::milliseconds>(
-					std::chrono::steady_clock::now().time_since_epoch()).count());
-	const uint32_t low = static_cast<uint32_t>(value);
-	return low != 0 ? low : 1u;
+// See host_session.h.
+uint32_t host_clock_ms(const HostOwner &owner) {
+	return owner.clock_ms ? owner.clock_ms()
+	                      : static_cast<uint32_t>(uint64_t{owner.now_tick} * uint64_t(io::kTickMs));
 }
+
+namespace {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
 	startup.title = cfg.title;
+	startup.text_override = cfg.text_override;
 	// The host key, from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
 	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
 	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
-	startup.host_start_tick =
-			cfg.host_start_tick != 0 ? cfg.host_start_tick : monotonic_milliseconds();
+	// The start's GetTickCount stamp, the process clock's (D-NET-NEW-L8-27).
+	// [orig: NapiNPProtocol_StartServer @0x62B5E0 - GetTickCount @0x62B612, stored to +0x53C
+	//  @0x62B619]
+	startup.host_start_tick = cfg.host_start_tick != 0 ? cfg.host_start_tick
+			: cfg.clock_ms ? cfg.clock_ms()
+			               : host_monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {
 		startup.session_seed_id = cfg.session_seed_id;
 	} else {
@@ -96,9 +108,9 @@ std::vector<ProtocolMessage> send_session_batches(
 	// earlier node's overflow. This port defers Create to the send boundary, so the latch rides
 	// the record's place in the queue and keeps that first-cause-wins order; the 0x46 that
 	// answers the punt then makes the 0x86 burst echo this record. [orig:
-	//  CNapiNPConnection_SendChatMessage @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
-	//  latch-if-!valid @0x4c7ff2..0x4c8004, TrySendSessionInit @0x4c800c ->
-	//  NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
+	//  CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0 — the record @0x4c7f8e..0x4c7fe4,
+	//  latch-if-!valid @0x4c7ff2..0x4c8004, CNapiNPConnection_SendDescriptionOnce (called
+	//  @0x4c800c) -> NapiNPDataTransfer_SendDescription @0x628C80 serializes conn->disconnect_event and Creates
 	//  it with flag 0x10 @0x628e42; NapiNPMessage_Create's latch @0x6280f9..0x62810a]
 	for (std::size_t m = 0; m < messages.size(); ++m) {
 		const ProtocolMessage &message = messages[m];
@@ -128,7 +140,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			return rest;
 		}
 		sock.send_to(connection.peer, datagram.data(), datagram.size());
-		connection.last_session_send_tick = owner.now_tick;
+		connection.last_session_send_ms = host_clock_ms(owner);
 	}
 	// The build stops once its packet budget went out; the rest waits for the next build.
 	// [orig: BuildOutgoingPackets @0x62860b..0x628619]
@@ -223,23 +235,18 @@ void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEven
 	}
 }
 
-static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
-		bool force_open);
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now);
 
 // The pump's step (1): the receive drain with its handlers, the 0x84 tail,
 // and each established remote's send-boundary clock.
 static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock,
 		uint32_t now, HostEventObserverFn event_observer, void *event_observer_context) {
 	auto &pending_session_messages = owner.pending_session_messages;
-	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
-	uint8_t buf[4096];
-	for (;;) {
-		PeerAddr peer{};
-		const int n = sock.recv_from(buf, sizeof(buf), peer);
-		if (n <= 0) break; // 0 = nothing left/timeout, <0 = error
-		HandleResult r = handle_server_datagram(
-				owner.ctx, peer, buf, static_cast<std::size_t>(n), now,
-				/*defer_in_match_replies=*/true);
+	// The receive stamps its connections with the host clock (D-NET-256).
+	owner.ctx.np_protocol.receive_clock_ms = host_clock_ms(owner);
+	owner.ctx.tick_count_ms = owner.ctx.np_protocol.receive_clock_ms; // the report clocks'
+	// One handled datagram's (or replayed packet's) output, consumed in place.
+	auto consume = [&](const PeerAddr &peer, HandleResult &r) {
 		// Same-address replacement reports PeerGoodbye for the OLD occupant after
 		// the protocol layer has already installed the fresh connection and built
 		// its 0x82/0x83 auth result. Retire the old owner's queues/link before
@@ -255,9 +262,14 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 		}
 		// A 0x44's rebuilt packets leave from inside the receive pump, at this datagram's
 		// position, whatever the connection's S2C send boundary says (D-NET-229).
-		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo @0x61f039]
+		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo (called @0x61F032)]
 		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
 			sock.send_to(peer, dg.data(), dg.size());
+		// The magic packet's reflection goes to the address the packet named, from inside the
+		// receive (D-NET-NEW-L1-20) [orig: NapiNP_HandleMagicPacket @0x622E70 (the
+		//  CNapiNPManager_SendTo call @0x622EF8)].
+		for (const HandleResult::Addressed &a : r.addressed_outbound)
+			sock.send_to(a.to, a.datagram.data(), a.datagram.size());
 		for (const std::vector<uint8_t> &dg : r.outbound) {
 			// 0x81/0x82 remain immediate. The retained settings 0x83 and
 			// established retransmits use the connection's send boundary.
@@ -276,15 +288,36 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
+	};
+	// (1) recv-drain — drain everything pending this frame. The recv timeout lives in the socket owner.
+	uint8_t buf[4096];
+	for (;;) {
+		PeerAddr peer{};
+		const int n = sock.recv_from(buf, sizeof(buf), peer);
+		if (n <= 0) break; // 0 = nothing left/timeout, <0 = error
+		HandleResult r = handle_server_datagram(
+				owner.ctx, peer, buf, static_cast<std::size_t>(n), now,
+				/*defer_in_match_replies=*/true);
+		consume(peer, r);
 	}
+	// The queued pass's new connections turn the connect log off after the drain's lines.
+	finish_manager_receive(owner.ctx);
+	// The connection-list walk after every datagram: the queued packets whose gap a datagram
+	// closed, per connection in list order (NEW-L1-9).
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - the walk @0x626910..0x6269E8,
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the walk's call @0x62696B), after the FIFO
+	//  pass @0x6266CA..0x6267B2]
+	for (ReplayedSessionPacket &replayed : replay_ready_session_packets(
+			owner.ctx, now, /*defer_in_match_replies=*/true))
+		consume(replayed.peer, replayed.result);
 	// The receive pump's per-connection tail: resolve the missing-sequence latch only after the
 	// receive FIFO is empty (a later datagram in this same drain may have closed the gap), and
 	// send the 0x84 at once — the server receive pump runs every Server_TickUpdate, outside the
 	// S2C send boundary, ahead of PumpFlags' 0x10 holdoff decrement below (D-NET-229).
 	// [orig: Server_TickUpdate -> CNapiNetwork_PumpServerProtocolRecv @0x51d895 (flags 0x19) ->
 	//  NapiNPProtocol_Pump @0x62a6ac -> PumpRecvQueues tail @0x6269bb..0x6269d6 ->
-	//  SendMissingSeqList(conn, 0) @0x6269ce; then CNapiNPConnection_PumpFlags @0x62a6f8, the
-	//  0x10 decrement @0x62979a..0x6297ac]
+	//  SendMissingSeqList(conn, 0) @0x6269ce; then CNapiNPConnection_PumpFlags @0x629780 (the
+	//  call @0x62A6F8), the 0x10 decrement @0x62979a..0x6297ac]
 	for (TickOut &t : flush_server_missing_requests(owner.ctx)) {
 		for (const std::vector<uint8_t> &dg : t.outbound)
 			sock.send_to(t.peer, dg.data(), dg.size());
@@ -307,7 +340,8 @@ static void receive_and_advance_boundaries(HostOwner &owner, opennova::IDatagram
 
 void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		HostBeforeServerTickFn before_server_tick, void *before_server_tick_context,
-		HostEventObserverFn event_observer, void *event_observer_context) {
+		HostEventObserverFn event_observer, void *event_observer_context,
+		HostOwnClientDrainFn own_client_drain, void *own_client_drain_context) {
 	devtools::TickProfile *profile =
 			owner.ctx.world != nullptr ? owner.ctx.world->profile : nullptr;
 	const devtools::ProfileScope pump_scope(profile, devtools::Slot::SIM_HOST_PUMP);
@@ -323,51 +357,99 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// Server_TickUpdate @0x51E109 GetTickCount delta vs 0x57E40]
 	owner.ctx.np_protocol.host_run_duration_ms = static_cast<uint32_t>(
 			static_cast<uint64_t>(now) * uint64_t(io::kTickMs));
+	// The METPROTOCOL report clocks read the host clock (D-NET-NEW-L9-22).
+	owner.ctx.tick_count_ms = host_clock_ms(owner);
 	auto &pending_session_messages = owner.pending_session_messages;
 
-	// (1) recv-drain, the 0x84 tail and the send-boundary clocks.
-	receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
-	lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
+	// (0) The previous frame's entity update sent inline, after that frame's send pump: its
+	// records sit on every connection's queue ahead of anything this frame queues, the walk's
+	// sends, the receive pump's replies and its handlers' own sends alike, and leave in this
+	// frame's send pump. Route them now. (D-NET-NEW-L1-6)
+	// [orig: NapiNPServer_SendToConn @0x4C4F20 -> CNapiNPConnection_QueueMessage @0x628640;
+	//  the one in-match send pump, Server_TickUpdate @0x51E487 (CNapiNetwork_PumpServerProtocolSend
+	//  @0x4C4F00); the per-player walk @0x51D88B and the receive pump @0x51D895;
+	//  Game_ProcessMainFrame's Entity_UpdateAllEntities call @0x52674B after Server_TickUpdate
+	//  @0x5266B6]
+	if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0)
+		route_entity_pass_records(owner.ctx, *owner.ctx.world);
 
-	// (2) tick_connections — drive each not-yet-spawned peer's §5.2a burst; surface F3/PeerSpawned.
-	for (TickOut &t : tick_connections(
-			owner.ctx, /*elapsed_ms=*/16, now,
-			/*respect_s2c_send_boundary=*/true)) {
-		for (const std::vector<uint8_t> &dg : t.outbound) {
-			send_or_stage_established_datagram(owner, sock, t.peer, dg);
-		}
-		for (const HostAcceptEvent &ev : t.events) {
-			if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
-				pending_session_messages.erase(t.peer);
-				owner.pending_session_datagrams.erase(t.peer);
+	// (1) and (2), the receive pump, which (3) Server_TickUpdate runs after its per-player
+	// walk, so the walk reads what the last frame left and a message handled now is walked
+	// next frame (D-NET-686). The pump's FIFO pass handles every queued datagram in arrival
+	// order, an in-order session packet parsed at once. The host's own client's requests come
+	// first: its sends to the local address go to the manager's loopback FIFO, which the
+	// manager's receive, earlier in the frame, drains ahead of the socket, queueing each on the
+	// protocol FIFO ahead of every remote datagram. Then the recv-drain, the 0x84 tail and the
+	// send-boundary clocks (each message's handler's raised records go out behind it,
+	// D-NET-NEW-V3-1); the connection producers; and what those raised.
+	// [orig: Server_TickUpdate - Server_UpdateAllActivePlayerSlots @0x51D88B,
+	//  CNapiNetwork_PumpServerProtocolRecv @0x51D895; NapiNPProtocol_PumpRecvQueues @0x6266A0 -
+	//  the FIFO pass @0x6266CA..0x6267B2, its handler call @0x6267AD -> Nwu_HandleClientSession
+	//  @0x626CF0 -> NapiNPProtocol_HandleSessionPacket @0x626A00, the in-order test @0x626BEB,
+	//  CNapiNPConnection_ParseMessages @0x625BC0 (the call @0x626BF4); CNapiNPManager_SendTo
+	//  @0x61EC20 (the address-0 arm @0x61EC59, the loopback FIFO write @0x61ECC6);
+	//  NapiNPManager_PumpReceive @0x623010 reads that FIFO @0x623084..0x6230B3 ahead of
+	//  NapiNPManager_RecvFromSocket @0x61ED50 (the call @0x6230EB), from Game_ProcessMainFrame's
+	//  CNapiNetwork_PumpManagerReceive call @0x526528]
+	bool received = false;
+	auto receive_pump = [&]() {
+		received = true;
+		lap.mark(devtools::Slot::SIM_SERVER_TICK);
+		if (own_client_drain != nullptr) own_client_drain(own_client_drain_context);
+		receive_and_advance_boundaries(owner, sock, now, event_observer, event_observer_context);
+		lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
+		// (2) tick_connections: the receive-timeout reap; surface F3/PeerSpawned. Each
+		// not-yet-spawned row's §5.2a step runs in Server_TickUpdate's tail per-slot block, not
+		// here (run_initial_state_steps false, D-NET-NEW-L1-29).
+		// The reap measures the host clock against each connection's last receive stamp, so a
+		// connection heard during a long load is charged only the time since that receive, and a
+		// silent one the whole time since its last.
+		// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 state 1 - elapsed = GetTickCount -
+		//  conn+0x5E8 (`sub esi, [ebp+5E8h]` @0x62935C), `elapsed > timeout_ms` @0x629362; the
+		//  stamps CNapiNPConnection_ParseMessages @0x625D54, Nwu_HandlePing @0x623C56] (D-NET-256)
+		const uint32_t clock_now = host_clock_ms(owner);
+		for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list)
+			if (c.type == NapiNPConnection::kTypeServerSide && c.phase >= ConnectionPhase::Joined)
+				c.receive_inactive_ms = clock_now - c.receive_stamp_ms;
+		for (TickOut &t : tick_connections(
+				owner.ctx, /*elapsed_ms=*/0, now,
+				/*respect_s2c_send_boundary=*/true, /*run_spawn_pump=*/false,
+				/*run_initial_state_steps=*/false)) {
+			for (const std::vector<uint8_t> &dg : t.outbound) {
+				send_or_stage_established_datagram(owner, sock, t.peer, dg);
 			}
-			dispatch_event(owner, t.peer, ev);
-			if (event_observer != nullptr)
-				event_observer(event_observer_context, ev);
+			for (const HostAcceptEvent &ev : t.events) {
+				if (ev.kind == HostAcceptEvent::Kind::PeerGoodbye) {
+					pending_session_messages.erase(t.peer);
+					owner.pending_session_datagrams.erase(t.peer);
+				}
+				dispatch_event(owner, t.peer, ev);
+				if (event_observer != nullptr)
+					event_observer(event_observer_context, ev);
+			}
 		}
-	}
-
-	// Owner-side entity registration belongs between creation and the first body update.
-	// Retail's AnimMap_RegisterEntity runs at entity creation; embedders with external
-	// animation registries use this boundary to preserve the same lifetime.
-	lap.mark(devtools::Slot::SIM_HOST_CONNECTIONS);
-	if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
-	lap.mark(devtools::Slot::SIM_HOST_ADAPTER);
-
-	// (3) Logic and C2S remain full-rate. Server_TickUpdate consults the
-	// already-advanced per-connection boundary only for fresh remote 0x0A.
+		// Owner-side entity registration belongs between creation and the first body update.
+		// Retail's AnimMap_RegisterEntity runs at entity creation; embedders with external
+		// animation registries use this boundary to preserve the same lifetime.
+		lap.mark(devtools::Slot::SIM_HOST_CONNECTIONS);
+		if (before_server_tick != nullptr) before_server_tick(before_server_tick_context);
+		if (owner.ctx.world != nullptr && owner.ctx.is_authority != 0)
+			route_entity_pass_records(owner.ctx, *owner.ctx.world);
+		lap.mark(devtools::Slot::SIM_HOST_ADAPTER);
+	};
+	owner.ctx.receive_pump = receive_pump;
 	Server_TickUpdate(owner.ctx);
+	owner.ctx.receive_pump = nullptr;
+	if (!received) receive_pump();
 	lap.mark(devtools::Slot::SIM_SERVER_TICK);
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
-	flush_s2c_boundaries(owner, sock, now, /*force_open=*/false);
-	// (4b) The entity update's player-body edges on the tick's Health stores,
-	// after the send pump and ahead of the next receive pump (server_tick.h).
-	// [orig: Game_ProcessMainFrame -- Server_TickUpdate @0x5266B6, then
-	//  Entity_UpdateAllEntities @0x52674B]
-	Server_RouteFrameTailEdges(owner.ctx);
-	// The manager's pump flushes the net log once its interval has passed
-	// [orig: NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	flush_s2c_boundaries(owner, sock, now);
+	// The protocol's pump flushes its _inout.txt log, and the manager's pump the net
+	// log, each once its interval has passed [orig: NapiNPProtocol_Pump @0x62A7EA,
+	// NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	if (owner.ctx.logs.inout != nullptr)
+		owner.ctx.logs.inout->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
 	if (owner.ctx.logs.net != nullptr)
 		owner.ctx.logs.net->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
 	// The chat display's timers step down once a logic tick
@@ -386,14 +468,18 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	lap.mark(devtools::Slot::SIM_HOST_SEND);
 }
 
-void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
-	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/true);
-}
-
 void host_session_load_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
 	if (owner.ctx.is_authority == 0 || owner.ctx.is_in_session == 0) return;
 	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
-	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/false);
+	flush_s2c_boundaries(owner, sock, owner.now_tick);
+}
+
+void host_session_teardown_pump(HostOwner &owner, opennova::IDatagramSocket &sock) {
+	if (owner.ctx.is_authority == 0) return;
+	receive_and_advance_boundaries(owner, sock, owner.now_tick, nullptr, nullptr);
+	// The own pair heads the protocol's list: its twin goes first in the pending walk.
+	(void)drain_own_goodbye(owner.ctx, OwnGoodbye::TeardownPump);
+	flush_s2c_boundaries(owner, sock, owner.now_tick);
 }
 
 // BuildOutgoingPackets over this connection's queue: the packets framed
@@ -420,7 +506,7 @@ static bool build_s2c_queue(HostOwner &owner, opennova::IDatagramSocket &sock,
 		staged.erase(staged.begin(), staged.begin() + static_cast<std::ptrdiff_t>(sent));
 		if (staged.empty()) owner.pending_session_datagrams.erase(pending_datagrams);
 		budget -= sent;
-		c.last_session_send_tick = now;
+		c.last_session_send_ms = host_clock_ms(owner);
 		released = true;
 	}
 	std::vector<ProtocolMessage> messages;
@@ -443,7 +529,7 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 	std::vector<uint8_t> packet;
 	if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, packet)) {
 		sock.send_to(c.peer, packet.data(), packet.size());
-		c.last_session_send_tick = now;
+		c.last_session_send_ms = host_clock_ms(owner);
 	}
 }
 
@@ -458,7 +544,9 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 //   reap requires (D-NET-173, D-NET-236).
 // A due leg forces has_pending_out and builds: every queued record leaves (a
 // closed window's queue included), or one header-only packet; the countdown is
-// not touched. The leg clock arms on the first tick it is read (0 = unarmed).
+// not touched. The leg clock arms on the first tick it is read (0 = unarmed). Both legs read the
+// owner's millisecond clock (GetTickCount's), so a mission load, which runs its send pumps and no
+// tick, fires a leg its interval has elapsed in (D-NET-256).
 // The JO template's intervals are 10000 / 30000 ms (CNapiNetwork_Init
 // @0x4caac5/@0x4cab98 and @0x4caab5/@0x4cab88); 1000 ms is the NOVAWORLDUDP
 // service template's active value @0x4d3e60, not the game session's.
@@ -472,12 +560,12 @@ static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
 static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket &sock,
 		NapiNPConnection &c, uint32_t now) {
 	if (c.server_scrk.empty()) return false;
-	if (c.last_session_send_tick == 0) {
-		c.last_session_send_tick = now;
+	const uint32_t now_ms = host_clock_ms(owner);
+	if (c.last_session_send_ms == 0) {
+		c.last_session_send_ms = now_ms;
 		return false;
 	}
-	const uint64_t since_ms =
-			static_cast<uint64_t>(now - c.last_session_send_tick) * uint64_t(io::kTickMs);
+	const uint64_t since_ms = static_cast<uint32_t>(now_ms - c.last_session_send_ms);
 	const int32_t active_ms = c.timeouts.active_send_interval_ms;
 	const int32_t empty_ms = c.timeouts.idle_send_interval_ms;
 	const bool retained = c.seq.retained_outbound_message_count > 0;
@@ -490,17 +578,15 @@ static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket 
 	const bool released = build_s2c_queue(owner, sock, c, now);
 	if (!released && c.seq.next_outbound_seq == sequence_before)
 		send_header_only(owner, sock, c, now);
-	c.last_session_send_tick = now;
+	c.last_session_send_ms = now_ms;
 	return true;
 }
 
 // The pump's step (4). Drain each remote transport into the ordered pending
-// queue every tick; only an open boundary frames and sends it (force_open
-// ships regardless — the teardown's last flush), then the send-interval legs
-// run whatever the boundary says. The host's own type-2 loopback is consumed
-// in-process and skipped here.
-static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
-		bool force_open) {
+// queue every tick; only an open boundary frames and sends it, then the
+// send-interval legs run whatever the boundary says. The host's own type-2
+// loopback is consumed in-process and skipped here.
+static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now) {
 	auto &pending_session_messages = owner.pending_session_messages;
 	for (NapiNPConnection &c : owner.ctx.np_protocol.connection_list) {
 		if (c.type != NapiNPConnection::kTypeServerSide) continue;
@@ -526,7 +612,7 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 		// themselves @0x62907b..0x629082).
 		const uint32_t sequence_before = c.seq.next_outbound_seq;
 		bool built = false;
-		const bool open = c.s2c_send_boundary_open || force_open;
+		const bool open = c.s2c_send_boundary_open;
 		if (open) {
 			built = build_s2c_queue(owner, sock, c, now);
 			// The owed ACK (D-NET-233): a C2S packet with records arrived since the last
@@ -583,10 +669,10 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	world::MatchRules match_rules;
 	match_rules.title = owner.ctx.config.title;
 	match_rules.game_type = owner.ctx.config.game_type;
-	// SET GameTime feeds g_RespawnTime in retail. The existing host model
-	// calls that field respawn_time; KOTHLimit/time_limit_minutes is unrelated.
-	// [orig: Game_StartMission seed @0x524F66]
-	match_rules.game_time_minutes = owner.ctx.config.respawn_time;
+	// SET GameTime feeds g_RoundTimeLimitMinutes (GameConfig::round_time_limit_minutes);
+	// KOTHLimit/time_limit_minutes is unrelated.
+	// [orig: Game_StartMission @0x524360 - the seed @0x525229..0x525251]
+	match_rules.game_time_minutes = owner.ctx.config.round_time_limit_minutes;
 	match_rules.score_limit = owner.ctx.config.score_limit;
 	match_rules.hill_limit_minutes = owner.ctx.config.time_limit_minutes;
 	match_rules.hill_delta = owner.ctx.config.koth_delta;
@@ -615,16 +701,67 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	// The MP NoTracers rule: bit 0 of the same rules word kills the tracer
 	// visual at round spawn unless the ammo is FORCETRACER; the lobby
 	// publishes its inverse as the "Tracers" key [orig: g_RulesFlags
-	// @ 0x24D1E34 & 1 at RoundData_SpawnRound @ 0x4ec41f; admin set
-	// @ 0x405c80; Lobby_UpdateServerInfo "Tracers" @ 0x4fee4f]
+	// @ 0x24D1E34 & 1 at RoundData_SpawnRound @0x4EC0D0 (@0x4EC72F, @0x4EC79D); the admin
+	// SET's Tracers stores CAdminServer_HandleSetCommand @0x405A60 (@0x405F7A / @0x405F86);
+	// Lobby_UpdateServerInfo @0x4FE8C0 (the "Tracers" test @0x4FEE48, its jz @0x4FEE4F)]
 	owner.ctx.world->round_sim.no_tracers_rule =
 			(owner.ctx.config.mp_attributes & GameConfig::kMpAttribNoTracers) != 0;
+}
+
+// The session's first mission builds the host's class mask and weapon table; a later
+// mission keeps both (the round-count gate), and out of a session neither is built.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (the session block @0x551790: in
+//  session @0x55179C..0x5517A7, round 0 @0x5517AD..0x5517B3)]
+void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
+	NapiNPServerCtx &ctx = owner.ctx;
+	if (cfg.socket_mode == SocketMode::Socketless) return;
+	// The class mask (the S2C 0x76, the 0x2F accept's class test): a class word of 1
+	// enables its class, a word of 2 enables it while the mission-list entry's mask holds
+	// its bit, which every entry's scan stores as 0x3FF.
+	// [orig: @0x55184C (the authority), the entry @0x551858..0x55186F, the words
+	//  @0x551882..0x551990, the store @0x551996; dfx2.exe @0x54EAD7..0x54EB07 (the same
+	//  1 / 2 tests); the entry mask MissionList_ScanAndBuildFromFiles @0x563170 (the store
+	//  @0x56334A), Mission_BuildMapListFromPFF @0x562910 (the store @0x562B12)]
+	ctx.config.class_allow_mask =
+			class_allow_mask_from_words(cfg.config.class_availability, ctx.mission != nullptr);
+	// The weapon table: each cfg word equal to the title's mission value (Jointops.exe 3,
+	// dfx2.exe 2, the one of 2 and 3 that is not its armory-only value) takes the mission's
+	// own word, the mission's item_availability chunk through the builder's name-list mode
+	// (every other entry 1), and the merged words run the builder's template mode. The S2C
+	// 0x66 and the C2S 0x2F accept read its 0 and armory-only entries.
+	// [orig: the merge @0x5517C5..0x55181A, the build @0x551831; dfx2.exe's merge
+	//  `cmp ecx, 2` @0x54EA1B; the mission entry's words MissionList_ScanAndBuildFromFiles
+	//  @0x563170 (the build @0x563345) over Mission_LoadBMSFromLooseFile's item_availability read
+	//  @0x40D59C..0x40D5B1; WeaponDef_BuildItemRestrictionTable @0x54DDB0]
+	ctx.weapon_restrictions.clear();
+	if (ctx.world == nullptr) return;
+	const world::WeaponTable &table = ctx.world->tables.weapons;
+	const int32_t armory = title_in_match(ctx.np_protocol.identity).armory_only_availability;
+	const int32_t mission_value = armory == 2 ? 3 : 2;
+	std::vector<std::pair<std::string, int32_t>> pairs;
+	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);
+	world::WeaponAvailability mission_words;
+	world::weapon_availability_apply_pairs(mission_words, table, pairs, mission_value);
+	std::array<int32_t, 255> words = cfg.config.weapon_availability;
+	for (size_t i = 0; i < words.size(); ++i)
+		if (words[i] == mission_value) words[i] = mission_words.values[i];
+	world::WeaponAvailability built;
+	world::weapon_availability_apply_template(built, table, words, mission_value);
+	for (size_t i = 0; i < built.values.size(); ++i)
+		if (built.values[i] == 0 || built.values[i] == armory)
+			ctx.weapon_restrictions.emplace_back(static_cast<uint8_t>(i),
+					static_cast<uint8_t>(built.values[i]));
 }
 
 } // namespace
 
 CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
+	owner.clock_ms = cfg.clock_ms;
+	// The host context's GetTickCount, ahead of the create whose start and round init stamp
+	// it: the status report's UP-TIME, the S2C 0x58's uptime, the 0x81's UT and the S2C 0x02
+	// probe read it (host_tick_count_ms; D-NET-NEW-L8-27).
+	owner.ctx.process_clock_ms = cfg.clock_ms;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.
@@ -651,6 +788,8 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			cfg.serve_and_play ? ConnectionMode::HostClient : ConnectionMode::HostOnly);
 	set_transport_mode(owner.ctx, cfg.socket_mode);
 	const SessionStartup startup = make_session_startup(cfg);
+	// The character table every player add validates against (D-NET-137).
+	owner.ctx.characters = cfg.characters;
 	// The create also runs Server_InitNewRoundState. A set mpreset word ends
 	// the process there, so nothing of the session follows it
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
@@ -658,6 +797,15 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			owner.ctx, cfg.config, startup,
 			cfg.serve_and_play ? owner.host_loopback : nullptr);
 	if (created == CreateSessionResult::ProcessExit) return created;
+	// The create constructs the METPROTOCOL report clocks over the install's CC.BIN, ahead of its
+	// CNetQuality reset (D-NET-NEW-L9-22) [orig: CNapiGameSession_CreateSession @0x4C97C0 -
+	//  CServerTick_Construct @0x4C9CE8 / @0x4C9CF2].
+	owner.ctx.tick_count_ms = host_clock_ms(owner);
+	gate_clocks_session_create(owner.ctx, vfs_country_code(cfg.game_root));
+	// The create resets g_NetQuality, the flag cooldown stamped with the clock: a Serve Only
+	// host's lives on its context (D-NET-NEW-L8-24) [orig: CNapiGameSession_CreateSession
+	// @0x4C97C0 - CNetQuality_Reset @0x4C58C0 (the call @0x4C9CFC)].
+	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
 	// The connection template every server-side node is created with and the 0x82
 	// advertises: 120000 ms / 1200 records, or the game directory's loose
 	// `_NSTMOUT.TXT` override [orig: CNapiNetwork_Init @0x4ca9d7..0x4caa4b, stores
@@ -668,32 +816,89 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// Server_ProcessPendingPlayerSpawns stamps the local player from it.
 	for (NapiNPConnection &connection : owner.ctx.np_protocol.connection_list) {
 		if (connection.type == NapiNPConnection::kTypeClientSide) {
-			connection.char_vars = cfg.local_character_vars;
+			connection.char_vars = cfg.local_character_vars
+					? *cfg.local_character_vars
+					: fresh_profile_character_vars(CharacterRegistry());
+			// The profile init keeps each record word the host's table names, else the
+			// side's default (D-PLAYERINFO-33) [orig: PlayerSession_InitFromProfile
+			//  @0x50CA80 (@0x50CAC4..0x50CAE2, @0x50CAF1..0x50CB0D)].
+			PlayerSession_ResolveOwnCharacterIds(owner.ctx, connection.char_vars);
 			// The round init's copy of the host's own profile word into its
 			// slot +372 [orig: Server_InitNewRoundState @0x51ca55..0x51ca61].
 			connection.link.auto_medic_enabled = cfg.local_auto_medic_disabled == 0;
+			// And of the host's own pre.mnu SPECTATE word's low byte into the own slot's
+			// spectator latch (+0x188D7), which the create also puts in the own connection's
+			// JSR word: a host that ticked SPECTATE plays as a spectator (its join's spectator
+			// arm, its 0x0A writer's restamp, its 0x75 byte).
+			// [orig: Server_InitNewRoundState - is_mp_session_peer @0x51CA4D, the byte
+			//  @0x51CA67..0x51CA6D; CNapiGameSession_BuildAndCreateSession - netConfig+0xFC
+			//  @0x5697FD..0x569817]
+			const uint8_t spectate = static_cast<uint8_t>(cfg.config.join_spectate);
+			connection.link.spectator = spectate != 0;
+			connection.join_spectator_request = spectate;
+			// Out of a session the side-A class word is the mission's, not the profile's: its
+			// type byte (the header's +0x22A, the mission list entry's +0x1134) when it is 1, 2
+			// or 3, else 1; side B's is left (D-PLAYERINFO-33). Single player's settings apply
+			// stores it ahead of the create, so the own add below takes it; the mission start's
+			// Player_InitPlayer re-stamps the single player's team-1 body from it
+			// (Player_InitPlayerSideWords).
+			// [orig: Game_ApplySessionSettingsToGlobals @0x551500 (@0x551707..0x551725: the entry
+			//  @0x551707, its +0x1134 into g_CharClassTeam1 @0x55170B..0x551714, 1 @0x551725),
+			//  called by SinglePlayer_StartMission @0x561C28 ahead of the create @0x561E65;
+			//  MissionList_ScanAndBuildFromFiles @0x563170 (optionA_1134 = the header's byte
+			//  @0x563365)]
+			// (Out of a session: the socketless single player, the rules word's fact.)
+			if (cfg.socket_mode == SocketMode::Socketless && cfg.mission_type) {
+				const uint8_t type = *cfg.mission_type;
+				connection.char_vars.char_class[0] = type >= 1 && type <= 3 ? type : uint8_t{1};
+			}
 		}
 	}
-	configure_session_world(owner, cfg);
-	if (cfg.serve_and_play && owner.ctx.world != nullptr) {
-		// Serve-and-play: spawn the host's own player and queue its load-time stream before it gets the
-		// per-frame 0x0A its local view renders from. A dedicated/headless HostOnly session has no
-		// local-player connection, so it intentionally performs neither operation.
-		Server_ProcessPendingPlayerSpawns(owner.ctx, *owner.ctx.world);
-		// Run the existing type-2 initial-state path instead of latching spawned directly. The
-		// loopback's effectively-unbounded burst budget queues every load-time pool batch now,
-		// including the 0x0D carrier pose required by mounted children whose ewep parent has no
-		// per-frame compact callback.
-		(void)tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
+	// A Serve Only host's own row takes the profile the host runs under (the shell's player
+	// profile; a fresh record's on a host with none) from the create's profile init, as the
+	// listen host's own connection does above (D-NET-352's FOUND 5).
+	// [orig: CNapiGameSession_CreateSession @0x4C9C9A..0x4C9CCE -> PlayerSession_InitFromProfile
+	//  @0x50CA80]
+	PlayerSession_InitHostRowFromProfile(owner.ctx, cfg.local_character_vars
+			? *cfg.local_character_vars
+			: fresh_profile_character_vars(owner.ctx.characters));
+	if (cfg.serve_and_play) {
+		// Serve-and-play: the host's own add, inside the create (its own connection's
+		// new-connection callback), which spawns no body: g_LocalPlayerEntity is none at a create,
+		// the mission start's round init spawns the body past the PreMission pass and then queues
+		// the own client's load-time stream (HostRole::init_round_after_premission,
+		// D-NET-NEW-L7-39). With no World bound yet the pump adds the own node alone. A
+		// dedicated/headless HostOnly session has no local-player connection.
+		// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
+		//  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm
+		//  @0x51CC33..0x51CC60; Game_StartMission @0x524360 - the
+		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+		Server_ProcessPendingPlayerSpawns(owner.ctx, owner.ctx.world);
 	}
 	return CreateSessionResult::Created;
+}
+
+void bind_host_session_world(HostOwner &owner, const HostConfig &cfg) {
+	if (owner.ctx.world == nullptr) return;
+	// The World's GetTickCount, the session's process clock, which the 0x26 sender's entity+560
+	// stamp and the S2C 0x19 / 0x1A / 0x0F stamps read (world::authority_tick_count_ms;
+	// D-NET-NEW-L8-28), as a map change's next World takes it.
+	owner.ctx.world->tick_count_ms = owner.ctx.process_clock_ms;
+	configure_session_world(owner, cfg);
+	apply_first_mission_settings(owner, cfg);
 }
 
 void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// The same 0x0A byte cap, re-applied from the session config the host
 	// screen or the host file still names.
 	replication::set_entity_send_budget(static_cast<int>(cfg.config.entity_send_budget));
-	continue_session(owner.ctx, cfg.config);
+	continue_session(owner.ctx, cfg.config, cfg.text_override);
+	// Every mission start resets g_NetQuality (D-NET-NEW-L8-24) [orig: Game_StartMission
+	// @0x524360 - CNetQuality_Reset @0x4C58C0 (the call @0x5243B4)].
+	hud::net_quality_reset(owner.ctx.net_quality_indicators, host_clock_ms(owner));
+}
+
+void configure_continued_session_world(HostOwner &owner, const HostConfig &cfg) {
 	configure_session_world(owner, cfg);
 }
 

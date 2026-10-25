@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -70,8 +71,6 @@ class MissionObjectPlacer : public RefCounted, public StaticSourceProvider {
 public:
 	enum {
 		RENDER_LOD = 0,
-		PLAYER_RUNTIME_TYPE_ID = opennova::mission::kPlayerRuntimeTypeId,
-		PLAYER_VISUAL_ITEM_ID = opennova::mission::kPlayerVisualItemId,
 	};
 
 	// One-expression construction for GDScript callers (native classes take
@@ -189,6 +188,21 @@ public:
 	// the main view's. The next static LOD walk applies them.
 	void set_static_instance_inset_occlusion_hidden(int p_bms_id, bool p_hidden);
 	void clear_static_instance_inset_occlusion();
+	// A water mirror's own collect verdict for a batched static (view 0 the
+	// main scene's mirror, 1 the Inset's; OcclusionFrame::apply_mirror_view),
+	// whether that mirror renders and its eye is below the water; a closing
+	// view releases its verdicts. The next static LOD walk applies them: where
+	// a mirror's level differs from what the shared rows show it, every view
+	// draws the instance from its own twin population, the mirror's at the
+	// level its own walk selects (update_static_lod_views views 2 and 3).
+	void set_static_instance_mirror_occlusion_hidden(int p_view, int p_bms_id, bool p_hidden);
+	void set_static_mirror_view_state(int p_view, bool p_open, bool p_below_water);
+	// The level a mirror draws a placed static at (-1 none, -2 not a retained static).
+	int get_static_instance_mirror_lod(int p_view, int p_bms_id) const;
+	// The main camera's view and its water mirror's (ObjectLodFrame::
+	// mirror_collect over the same eye), for tools and tests.
+	int update_static_lods_for_mirror_view(Camera3D *p_main, float p_main_width,
+			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	// The level the Inset view draws a placed static at (its main level while
 	// the views agree; -1 below the floor, -2 not a retained static).
 	int get_static_instance_inset_lod(int p_bms_id) const;
@@ -270,6 +284,27 @@ public:
 
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
+	// The model files and animation maps this placer read from the mount since the last take:
+	// their counts and wall time (an instrument: the wire walk's cold spawns print it beside
+	// ObjectModel's build profile). C++ siblings only.
+	struct LoadProfile {
+		int data_loads = 0;
+		uint64_t data_us = 0;
+		int rig_loads = 0;
+		uint64_t rig_us = 0;
+	};
+	LoadProfile take_load_profile();
+	// The mission start's freeze, every arm's (the full arm's and a dedicated host's reduced one):
+	// the list's (Simulation::get_mission_start_model_files) material resolve, no model built and
+	// nothing drawn: each file's data, its materials' rows through their loaders
+	// (ObjectData::resolve_materials), the list walked head first, the reverse of `files`' load
+	// order. A later build of a listed file (a death's husk swap) finds its data and its textures
+	// loaded (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness;
+	// D-NET-NEW-L3-25, D-NET-NEW-L3-31, D-NET-NEW-L5-8). Past each file's resolve `p_present`
+	// (when valid) presents the loading screen at its stored checkpoint, as the freeze does past
+	// each node's (engine mission/mission_load_plan.h carries the witness, D-NET-NEW-L3-37).
+	// Returns the rows resolved.
+	int resolve_model_materials(const PackedStringArray &p_files, const Callable &p_present);
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	// Diagnostic/read-back identity for the entity's graphic/reflection group.
@@ -402,12 +437,15 @@ private:
 	// emitted over, live rows packed [0, live) (visible_instance_count) in
 	// swap-remove order. The row tables name the retained instance/binding
 	// and the population-local slot each live row draws.
-	// Which views a population's rows draw for: both (the shared population,
-	// on the world bits), the main view only, or the weapon Inset only.
+	// Which views a population's rows draw for: every view (the shared
+	// population, on the world bits), the main view only, the weapon Inset
+	// only, or one water mirror only (the main scene's, the Inset's).
 	enum : uint8_t {
 		kStaticViewShared = 0,
 		kStaticViewMain = 1,
 		kStaticViewInset = 2,
+		kStaticViewMirror = 3,
+		kStaticViewInsetMirror = 4,
 	};
 	struct StaticPopulation {
 		Ref<MultiMesh> multimesh;
@@ -428,6 +466,7 @@ private:
 		// A shared visible population's view twins (-1 until first needed).
 		int main_twin = -1;
 		int inset_twin = -1;
+		int mirror_twin[2] = { -1, -1 };
 	};
 	// One slot of a retained static instance in one population: the row it
 	// occupies while its level is live (-1 otherwise) and what that row is
@@ -463,6 +502,15 @@ private:
 		bool inset_lod_own = false;
 		bool inset_occlusion_hidden = false;
 		bool inset_occlusion_own = false;
+		bool inset_view = false; // the Inset rendered at the last walk
+		// Each water mirror's own verdict (unset = the main view's by the water
+		// side) and the level its own walk selected (-1: it draws none).
+		bool mirror_occlusion_hidden[2] = { false, false };
+		bool mirror_occlusion_own[2] = { false, false };
+		int mirror_lod[2] = { -1, -1 };
+		// The instance's world layer reflects (WORLD) or not (WORLD_NO_MIRROR):
+		// -1 until read off its shared population.
+		int8_t reflected = -1;
 		bool view_split = false;
 		Vector<StaticLodBinding> bindings;
 	};
@@ -472,6 +520,11 @@ private:
 	String _graphic_for(int p_item_id) const;
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	String _model_name_for(const String &p_graphic) const;
+	// The data cache's key: the model file's name without case, so every spelling of one file
+	// (items.def's, the mission start list's) finds one entry, as ThreediGp_LoadModel finds a
+	// loaded model again (the witness: engine inmatch/loaded_model_list.h, the find without
+	// case).
+	String _object_data_key(const String &p_graphic) const;
 	bool _needs_individual_node(int p_item_id);
 	bool _graphic_needs_live_panm(const String &p_graphic);
 	bool _has_occlusion_records(int p_item_id);
@@ -506,8 +559,13 @@ private:
 	// main-view level: its population's level matches, a shadow twin only
 	// carries slots that cast, and while the views differ (`p_split`) the
 	// visible rows live in the view twins (the Inset's at `p_inset_lod`).
-	static bool _static_slot_live(const StaticLodBinding &p_binding,
-			int p_main_lod, int p_inset_lod, bool p_split);
+	static bool _static_slot_live(const StaticLodBinding &p_binding, int p_main_lod,
+			const StaticLodInstance &p_instance);
+	// Whether the instance's shared rows reflect (their world layer is WORLD).
+	bool _static_instance_reflected(int p_instance_row);
+	// The water mirrors' state the static walk reads (OcclusionFrame).
+	bool static_mirror_open_[2] = { false, false };
+	bool static_mirror_below_[2] = { false, false };
 	// Move one retained instance's rows so it is live exactly in the
 	// populations of `p_live_lod` (and, while its views differ, its Inset
 	// level's view twins): removed (swap-remove, the last live row fills the
@@ -564,6 +622,8 @@ private:
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
+	int _append_model_less_item_effect_source(int p_kind, int p_entity_index,
+			int p_bms_id, int p_item_id, const Transform3D &p_xform);
 	int _append_static_light_draw_source(int p_source_index, int p_kind,
 			int p_entity_index, int p_bms_id, int p_item_id,
 			int p_robj_index, const AABB &p_world_bounds);
@@ -585,6 +645,7 @@ private:
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
+	LoadProfile load_profile_; // take_load_profile
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces
 	HashMap<String, StaticLodProfile> static_lod_profile_cache_;

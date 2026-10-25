@@ -4,6 +4,18 @@ extends GutTest
 # retail game-session 0x41 probe and projects the host's 0x81 reply; it does not
 # use an online service and intentionally cannot know the mission before join.
 
+# The engine's time scale before the case (test_the_window_end_keeps_the_browse_socket
+# runs the window under a scaled clock): after_each puts it back whatever the case did.
+var _saved_time_scale := 1.0
+
+
+func before_each() -> void:
+	_saved_time_scale = Engine.time_scale
+
+
+func after_each() -> void:
+	Engine.time_scale = _saved_time_scale
+
 
 func _mission() -> MissionData:
 	var mission := MissionData.new()
@@ -90,6 +102,16 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 				"an unmodeled SUS1 is omitted instead of fabricated")
 		assert_false("mission" in row,
 				"retail discovery does not invent pre-auth mission metadata")
+		# A join from the row takes the listed session at its index, here its own; an
+		# index past the listed sessions names none (engine: lan_discovery.h join_session).
+		var join: LanServerRow = browser.get_join_row(0)
+		assert_not_null(join, "the row's index names the listed session")
+		if join != null:
+			assert_eq(join.host_ip, row.host_ip)
+			assert_eq(join.port, row.port)
+			assert_eq(join.host_key, row.host_key, "the join dials the record's HK")
+			assert_eq(join.client_index, row.client_index, "the join goes on with the browse's CI")
+		assert_null(browser.get_join_row(1), "no listed session at the next index")
 	browser.stop()
 	assert_false(browser.is_browsing())
 
@@ -277,6 +299,119 @@ func test_browse_row_ci_reaches_the_joiner_connection() -> void:
 		OS.delay_msec(2)
 	assert_true(accepted, "the host's 0x82 echoes the browse's CI and the joiner takes it")
 	assert_eq(int(joiner.get_joiner_network_diagnostics()["client_index"]), row.client_index)
+
+
+# `--lan-join browse:<port>` (the parity runner's joiner) joins as a player does
+# from the LAN screen: a search on LanSession's defaults, then the join from the
+# row on that port as its discovered session (JoinTarget.from_lan_row). A row on
+# another port is passed over; the row taken ends the search. This row's
+# spectator flag stops the join at the choice (the join screen's SPECTATE panel,
+# here over an authored pre.mnu), so no world load starts.
+func test_launch_browse_joins_the_row_on_its_port() -> void:
+	LaunchFlags.set_args_override(PackedStringArray(["--lan-join", "browse:32786"]))
+	var screen_dir := "res://.godot/lan_session_test_join_screen"
+	JoinScreenFixture.stage(self, screen_dir)
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := NetSessionController.new()
+	add_child_autofree(controller)
+	controller.setup(null, null, null, layer)
+	var screen := JoinScreenFixture.open(self, screen_dir)
+	controller.standalone_join_screen = screen
+	assert_true(controller.maybe_launch_lan_from_flags(), "the browse form is a join launch")
+	var browse := controller.get_node_or_null("LaunchBrowse") as LanSession
+	assert_not_null(browse, "the launch starts a LAN search")
+	if browse == null:
+		LaunchFlags.clear_args_override()
+		JoinScreenFixture.unstage(screen_dir)
+		return
+	assert_null(controller.get_node_or_null("SpectatorPreflight"),
+			"the search is the join's only enumeration")
+	var other := LanServerRow.make("Other Host", "192.0.2.7", 32770)
+	browse.servers_changed.emit([other])
+	assert_false(controller.is_join_choice_pending(), "a row on another port is passed over")
+	var row := LanServerRow.make("Untitled ", "192.0.2.8", 32786)
+	row.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS
+	row.client_index = 5
+	browse.servers_changed.emit([other, row])
+	assert_false(browse.is_browsing(), "the row taken ends the search")
+	assert_true(controller.is_join_choice_pending(), "the row's session goes on to the join")
+	assert_eq(screen.panel(), JoinScreenStatus.PANEL_SPECTATE,
+			"the row's flag word opens the choice")
+	JoinScreenFixture.press(screen, "BACK")
+	LaunchFlags.clear_args_override()
+	JoinScreenFixture.unstage(screen_dir)
+
+
+# The window's end stops the enumerator alone: the browse's own socket stays open
+# until the mode changes, and the join from a row goes on with it (engine:
+# LanDiscoveryBrowser::stop and the class comment carry the witness; D-NET-NEW-R3-3).
+# Engine.time_scale runs the 30-second window in a few frames.
+func test_the_window_end_keeps_the_browse_socket() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	watch_signals(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", 32787, 32787), OK)
+	# after_each restores the scale too, should the case stop early.
+	Engine.time_scale = 10000.0
+	for _i in range(600):
+		await get_tree().process_frame
+		if not browser.is_browsing():
+			break
+	Engine.time_scale = _saved_time_scale
+	assert_false(browser.is_browsing(), "the window ended")
+	assert_signal_emitted(browser, "browse_finished")
+	var pump: UdpPump = browser.take_transport()
+	assert_not_null(pump, "the browse keeps its socket past the window's end")
+	if pump != null:
+		assert_true(pump.is_open(), "the socket the join goes on with is still open")
+		pump.close()
+
+
+# The main menu's activation sets transport mode 0: the browse's own socket tears down (its
+# connect-log line, engine: inmatch::write_transport_socket_teardown_line carries the witness)
+# and closes, while the enumerator runs on over no socket; the next SEARCH opens a fresh one.
+func test_the_main_menus_teardown_closes_the_browse_socket_and_keeps_the_enumerator() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", 32785, 32785), OK)
+	browser.tear_down_transport()
+	assert_true(browser.is_browsing(), "the enumerator runs on past the teardown")
+	browser.tear_down_transport() # a closed socket tears down once
+	assert_eq(browser.start_browsing("127.0.0.1", 32785, 32785), OK,
+			"the next search opens a fresh socket")
+	var pump: UdpPump = browser.take_transport()
+	assert_not_null(pump, "the search holds a socket again")
+	if pump != null:
+		assert_true(pump.is_open(), "the fresh socket is open")
+		pump.close()
+
+
+# The teardown leaves an installed socket (the NovaWorld session's) to its owner.
+func test_the_teardown_leaves_an_installed_socket_open() -> void:
+	var owner_pump := UdpPump.new()
+	assert_eq(owner_pump.bind_listen(0), OK)
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	browser.set_transport(owner_pump)
+	browser.tear_down_transport()
+	assert_true(owner_pump.is_open(), "the installed socket is its owner's")
+	browser.stop()
+	assert_true(owner_pump.is_open(), "stop leaves it open too")
+	owner_pump.close()
+
+
+# D-NET-712: the proxy-assisted join's rendezvous rides the browse; the shell
+# installs the target's proxy fields on the enumeration before it starts. A
+# target without them (or none) installs nothing and the browse runs as before.
+func test_proxy_install_from_a_target_without_proxy_is_inert() -> void:
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	browser.set_proxy_from_target(null)
+	browser.set_proxy_from_target(JoinTarget.new())
+	assert_eq(browser.start_browsing("127.0.0.1", 32786, 32786), OK)
+	assert_true(browser.is_browsing())
+	browser.stop()
 
 
 func test_invalid_port_range_fails_without_browsing() -> void:

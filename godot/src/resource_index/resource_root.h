@@ -88,10 +88,11 @@ private:
 	mutable uint64_t resolve_memo_epoch_ = 0;
 	mutable bool resolve_memo_built_ = false;
 
-	// Decoded-texture cache for VFS-backed load_texture, and the material rows' decode
-	// memo. Both archive and loose winners resolve through the mounted index so the mount
-	// mode owns precedence. Negative results cache too, so a missing name is probed once.
-	// Same epoch self-clear as the memo above.
+	// Decoded-texture cache for VFS-backed load_texture (a material row's texture is the
+	// registry's below, made from its file with no decoded device texture kept). Both archive
+	// and loose winners resolve through the mounted index so the mount mode owns precedence.
+	// Negative results cache too, so a missing name is probed once. Same epoch self-clear as
+	// the memo above.
 	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
 	// The game's texture registry over this mount's material rows
 	// (renderer/texture_registry.h): what a row's loader made, by the row's key, the first
@@ -188,6 +189,11 @@ public:
 	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
 	// placer among them).
 	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
+	// C++ siblings only (not bound): the decoded textures this root holds dropped (texture_cache_,
+	// texture_registry_), the mount, its index and its parsed assets kept: a mission's teardown,
+	// whose device objects retail destroys while its archives stay open (engine
+	// inmatch/map_change.h carries the witness). A holder keeps the texture it holds.
+	void release_decoded_textures();
 	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an
@@ -260,6 +266,24 @@ public:
 	Ref<Image> load_texture_image(const String &name, TextureLoader loader,
 			LookupPolicy policy = LOOKUP_SESSION_DEFAULT, bool *r_alpha_only = nullptr,
 			opennova::renderer::TextureReader *r_reader = nullptr) const;
+	// load_texture_image bound: the decoded image alone, no device texture made. The effect
+	// world's particle frames read through it, as the game's atlas build decodes each frame
+	// into its page (engine renderer/particle_atlas.h carries the witness).
+	Ref<Image> load_image(const String &name, TextureLoader loader,
+			LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// C++ siblings only (not bound): the pixels load_texture's texture holds, made on the CPU
+	// (its levels: a DDS's own chain, else generated), no device texture made or read back;
+	// uncached; `r_reader` takes the reader that decoded it. The terrain's static shadows read
+	// their casters' alpha through it, and TerrainData its texture slots.
+	Ref<Image> load_image_with_mipmaps(const String &name, TextureLoader loader,
+			opennova::renderer::TextureReader *r_reader = nullptr) const;
+	// The device textures load_texture holds decoded (its cache's entries, a miss's
+	// included): a structural count for tests.
+	int64_t get_decoded_texture_count() const;
+	// C++ seam (not bound; an instrument's read): the material rows' textures the registry holds.
+	int64_t get_registered_material_texture_count() const {
+		return static_cast<int64_t>(texture_registry_.size());
+	}
 	// One material row's texture of runtime `type`: the texture the registry keeps
 	// under the row's key (renderer::texture_registry_key: the name as written and
 	// its loader's suffix, without case), so the first row of a key to load decides

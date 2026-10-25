@@ -46,6 +46,27 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         state.prev_pos[2] = pos[2];
         state.prev_valid = true;
     }
+    // The previous pose the skip test, the plane gating and the run-over victim's
+    // displacement read is the source's savedLivePose (+0x80..+0x88): the mover's entry
+    // stamp, or the model init's at a spawn, which the join and deploy placements leave as
+    // they stand (a hidden body runs no mover), so their warm-up gates on the add's
+    // placement (D-NET-503). A stamped registry row reads its own words. Retail's remote
+    // row is a pool entity its mover stamps at entry, before its chase, ride and
+    // integrate (no authority gate on either org mover's stamp); ours is a decoded row
+    // whose visit takes the same stamp (ClientEntityState::net_saved_live_pose), which
+    // resolve_replica stages here. The last resolve's end pose stands in only for a
+    // row no mover or model init stamped (a harness row).
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the skip test @0x4B2C72, the
+    //  victim delta @0x4B3827 / @0x4B382D; Entity_ComputeBoneCollisionForce @0x4AE150 -
+    //  the source's savedLivePose @0x4AE3AC; the stamps Entity_InitFromModel @0x40E14D..0x40E169,
+    //  Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, Entity_UpdateInfantryAI
+    //  @0x4B9A53..0x4B9A6E (ahead of its is_authority gate @0x4B9A74); a remote row's org2
+    //  resolve, Entity_UpdateInfantryPlayerBody's call @0x4B7CF4]
+    // (The resolver writes none of the three words, so one read serves all three sites.)
+    const int32_t *saved_source = ent != nullptr && ent->saved_live_valid ? ent->saved_live_pos
+            : replica_saved_live_ != nullptr                              ? replica_saved_live_
+                                                                          : state.prev_pos;
+    const int32_t saved_live[3] = {saved_source[0], saved_source[1], saved_source[2]};
 
     // Idle skip-throttle. [orig: @ 0x4b2c3d-0x4b2cba — full update when the anim
     // state's table bit 0 is set, moving, sliding, displaced > 200, airborne
@@ -55,7 +76,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     if ((anim_state_flags & 1u) != 0) full_update = true; // [orig: @ 0x4b2c1e]
     if (vel_xy[0] != 0 || vel_xy[1] != 0) full_update = true;
     if (vel_z > 0 || vel_z < -420) full_update = true;
-    if (abs32(pos[0] - state.prev_pos[0]) > 200 || abs32(pos[1] - state.prev_pos[1]) > 200)
+    // Only X counts: the Y leg takes the absolute value of the equality bit (`cmp ebp,
+    // [esi+84h]; setz al`), 0 or 1, which never passes 200.
+    // [orig: the X leg @0x4B2C72..0x4B2C82, the Y leg @0x4B2C84..0x4B2C99]
+    if (abs32(pos[0] - saved_live[0]) > 200)
         full_update = true;
     // The registry pair is the one retail Flags word; the infantry motors set
     // the bit at their jump / fall edges and clear it on landing.
@@ -212,16 +236,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     // without either has no invented compatibility radius.
     const int32_t source_bound_radius_q16 =
         ent != nullptr && ent->bound_radius > 0.0f
-            ? to_fixed(ent->bound_radius)
+            ? ent->bound_radius.q16
             : replica_source_bound_radius_q16_;
 
     ContactQuery q;
     q.points = points;
     q.radii = radii;
     q.num_points = num_points;
-    q.prev_pos[0] = state.prev_pos[0];
-    q.prev_pos[1] = state.prev_pos[1];
-    q.prev_pos[2] = state.prev_pos[2];
+    q.prev_pos[0] = saved_live[0]; // [orig: Entity_ComputeBoneCollisionForce @0x4AE3AC]
+    q.prev_pos[1] = saved_live[1];
+    q.prev_pos[2] = saved_live[2];
     q.source_bound_radius = source_bound_radius_q16;
     // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
     // rides; retail recomputes the arg per query, so a mid-loop fresh entry
@@ -271,7 +295,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player_class ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
-                const Entity *target_entity = world.registry.get(ch);
+                Entity *target_entity = world.registry.get(ch);
+                // The query's door-touch mask lands on the target, the building's
+                // started at 0 (D-NET-133). [orig: Entity_ComputeBoneCollisionForce
+                //  @0x4AE150 - the reset @0x4AE281, the OR @0x4AEB22]
+                if (target_entity != nullptr) {
+                    if (res.door_mask_reset) target_entity->door_touch_mask = 0;
+                    target_entity->door_touch_mask |= res.door_sections;
+                }
                 const bool powerup = contact && target_entity != nullptr &&
                     target_entity->has_item_def &&
                     (target_entity->item_attrib & kItemAttribPowerup) != 0;
@@ -511,7 +542,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     // [orig: Entity_MovementCollisionResolver @0x4B3505]
                     if ((res.flags & kTouchDoor) != 0)
                         if (Entity *door = world.registry.get(ch))
-                            world.doors.command(world, *door, 6, res.door_sections);
+                            world.doors.command(world, *door, 6);
                 }
             }
             if (pass == 0) {
@@ -592,9 +623,8 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
 
     // The run-over kill and the bump sound [orig: @0x4b37c2..0x4b3a5c — gates,
     // the kill and the sound in vehicle_collision_damage.h]. The pusher's
-    // displacement is its mover-entry savedLivePose delta (+0x80); the victim's
-    // is measured from the resolver's previous-tick pose (its +0x80 stamp lives
-    // in the body motors' prologues).
+    // displacement is its mover-entry savedLivePose delta (+0x80), the victim's
+    // its own (saved_live, above) [orig: @0x4B3818 / @0x4B3827].
     if (pusher.valid() && ent != nullptr) {
         const Entity *p = world.registry.get(pusher);
         const uint32_t vflags = ent->flags | ent->engine_flags;
@@ -603,13 +633,13 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                          (p->flags & kEntityFlagDead) != 0, health,
                                          (vflags & kEntityFlagDead) != 0)) {
 			const int32_t pdx = p->saved_live_valid
-					? io::bam_sub(to_fixed(p->position.x), p->saved_live_pos[0])
+					? io::bam_sub(p->position.x.q16, p->saved_live_pos[0])
 					: 0;
 			const int32_t pdy = p->saved_live_valid
-					? io::bam_sub(to_fixed(p->position.y), p->saved_live_pos[1])
+					? io::bam_sub(p->position.y.q16, p->saved_live_pos[1])
 					: 0;
-			const int32_t vdx = io::bam_sub(pos[0], state.prev_pos[0]);
-			const int32_t vdy = io::bam_sub(pos[1], state.prev_pos[1]);
+			const int32_t vdx = io::bam_sub(pos[0], saved_live[0]);
+			const int32_t vdy = io::bam_sub(pos[1], saved_live[1]);
 			const int32_t rdx = io::bam_sub(pdx, vdx);
 			const int32_t rdy = io::bam_sub(pdy, vdy);
 			const double rl =
@@ -624,7 +654,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             berserk = (pa != nullptr && (pa->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0) ||
                       (va != nullptr && (va->slot.f[AiSlot::kBehaviorFlags] & 0x200) != 0);
             // A player victim keeps its life while its damage-disabled word
-            // (entity+0x124: spawn protection or the dead latch) is set, or
+            // (entity+0x124: spawn protection or a spectator's -1) is set, or
             // while its slot carries the spectator latch (+0x188D7).
             // [orig: `test eax, 100h` @0x4b3918, `cmp [esi+124h], 0`
             //  @0x4b391f; Entity_ValidatePtr @0x4b3933, the slot byte
@@ -644,12 +674,18 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 // The approach quadrant reads the victim's displacement minus
                 // the pusher's [orig: @0x4b395d..0x4b3963].
                 const int quadrant = run_over_quadrant(
-                        bam_heading_from_mission_yaw_deg(static_cast<double>(ent->yaw)),
+                        ent->heading,
                         io::bam_sub(vdx, pdx), io::bam_sub(vdy, pdy));
                 ent->death_anim_state = compute_death_anim_state(
                         kRunOverDeathBone, quadrant, kRunOverDeathCause);
                 ent->last_attacker = p->primary_occupant; // [orig: +0x178 = pusher->occupantEntity]
                 health = 0;
+                // The kill scores here, at once, while the victim exists: the
+                // pusher's occupant over the victim, no class callback between
+                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (+0x178
+                //  @0x4B39D1, Health = 0 @0x4B39D7, the Score_ProcessKillEvent
+                //  call @0x4B39E2)].
+                world.match.process_kill_event(world, p->primary_occupant, source);
                 RoundDeath d;
                 d.victim = source;
                 d.killer = p->primary_occupant;
@@ -657,9 +693,6 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 d.killer_handle = p->primary_occupant.valid()
                         ? p->primary_occupant.packed : 0xFFFFu;
                 d.event_flags = ent->cause_flags & 0xF00u;
-                // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the
-                // Score_ProcessKillEvent call @0x4B39E2)]
-                d.kill_event = true;
                 world.round_sim.deaths.push_back(d);
             }
             // The bump sound follows on every peer, killed or not: the
@@ -702,37 +735,109 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         if ((ent != nullptr && (ent->flags & kEntityFlagParachute) != 0) ||
             (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagParachute) != 0))
             my_radius += 0x20000;
-        for (const PersonSlot &p : persons_) {
-            if (p.h == source) continue;
-            const int32_t threshold = 30 * (my_radius + p.radius) / 100;
-            // Snapshot positions for the coarse reject... [orig: the g_PersonProx*
-            // table reads @ 0x4b3b07-0x4b3b74]
-            const int32_t ddx = p.x - pos[0];
-            const int32_t ddy = p.y - pos[1];
-            const int32_t ddz = p.z - pos[2];
+        // The table's snapshot for the coarse reject: each axis, then the
+        // planar length. [orig: the g_PersonProx* reads @ 0x4b3b07-0x4b3b74]
+        const auto in_reach = [&](int32_t sx, int32_t sy, int32_t sz, int32_t threshold) {
+            const int32_t ddx = sx - pos[0];
+            const int32_t ddy = sy - pos[1];
+            const int32_t ddz = sz - pos[2];
             if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
-                continue;
-            if (vec_len_ftol(ddx, ddy, 0) > threshold) continue;
-            // ...then the LIVE entity for the second distance and the push, and
-            // the dead/hidden peer skip. [orig: g_PersonProxEntity re-read
-            // @ 0x4b3b7a-0x4b3bca, the +36 & 2 skip @ 0x4b3b8d]
-            const Entity *peer = world.registry.get(p.h);
-            if (peer == nullptr || (peer->flags & 2u) != 0) continue;
-            int32_t live[3];
-            entity_pos_fixed(*peer, live);
+                return false;
+            return vec_len_ftol(ddx, ddy, 0) <= threshold;
+        };
+        // One person's push on its LIVE position: the planar distance, a
+        // quarter of the overlap, along the direction away from the peer. The
+        // loop scales the fpatan by the NEGATIVE BAM-per-radian double, so the
+        // (0x200000 - ang) index picks the away direction's own entry.
+        // [orig: the live dx/dy @ 0x4b3b93-0x4b3ba4, the distance @ 0x4b3bca,
+        //  (thr - dist) >> 2 @ 0x4b3bd0-0x4b3bd6, fpatan @ 0x4b3be1, the fmul
+        //  by g_NegBamPerRadian = -2^31/pi (loaded @ 0x4b3ad2) @ 0x4b3bf6 and its
+        //  truncating fistp @ 0x4b3bfc, the index @ 0x4b3c04-0x4b3c0c, the
+        //  cosine off_849934 @ 0x4b3c1e, X @ 0x4b3c31, Y @ 0x4b3c40]
+        const auto push_away = [&](const int32_t live[3], int32_t threshold) {
             const int32_t dist = vec_len_ftol(pos[0] - live[0], pos[1] - live[1], 0);
-            if (dist > threshold) continue;
+            if (dist > threshold) return;
             const int32_t amount = (threshold - dist) >> 2;
-            const int32_t ang = static_cast<int32_t>(
+            const uint32_t ang = static_cast<uint32_t>(static_cast<int64_t>(
                 std::atan2(static_cast<double>(pos[1] - live[1]),
                            static_cast<double>(pos[0] - live[0])) *
-                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
-            const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
+                -io::kBamPerRadian));
+            const uint32_t idx = (0x200000u - ang) >> 22;
             const DirTable &t = dir_table();
             const int32_t sn = t.sin22[idx & 1023];
             const int32_t cs = t.sin22[(idx & 1023) + 256];
             pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
             pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+        };
+        // A pool-0 row: the threshold is 30% of the two boundRadius words
+        // (entity+0, the table's radius), then the live entity for the second
+        // distance and the push, skipping self and a dead peer.
+        // [orig: v100 = 30 * (boundRadius + g_PersonProxRadius) / 100
+        //  @ 0x4b3b07; g_PersonProxRadius = entity+0 @ 0x4b93eb; the
+        //  g_PersonProxEntity re-read @ 0x4b3b7a, self @ 0x4b3b83, the +36 & 2
+        //  skip @ 0x4b3b8d]
+        const auto person_push = [&](const PersonSlot &p) {
+            if (p.h == source) return;
+            const int32_t threshold = 30 * (my_radius + p.bound) / 100;
+            if (!in_reach(p.x, p.y, p.z, threshold)) return;
+            const Entity *peer = world.registry.get(p.h);
+            if (peer == nullptr || (peer->flags & 2u) != 0) return;
+            int32_t live[3];
+            entity_pos_fixed(*peer, live);
+            push_away(live, threshold);
+        };
+        // A joiner's remote person is a pool-0 entity of the client's own,
+        // built from the 0x0C at its wire slot, so it is a row of the same
+        // table: the reach gate on the table's copy of its Position, then its
+        // live dead bit and its live Position for the push (the proxy's
+        // build-time copy and the live words its update leaves), with its
+        // model's boundRadius. [orig: NapiNPClientMsg_0x00C @ 0x42E730
+        //  creates it; Entity_BuildProximityLists_Pool01 @ 0x4b93d0-0x4b9419
+        //  walks pool 0 on every peer, from Entity_UpdateAllEntities
+        //  @ 0x4c240a; Entity_MovementCollisionResolver @0x4B2BD0 (the reach
+        //  gate on g_PersonProxX/Y/Z @0x4B3AF6..0x4B3B74, the dead skip
+        //  @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99)]
+        const auto proxy_push = [&](const WirePersonCollisionProxy &proxy) {
+            const int32_t threshold = 30 * (my_radius + proxy.bound_radius_q16) / 100;
+            if (!in_reach(proxy.position_q16.x, proxy.position_q16.y,
+                          proxy.position_q16.z, threshold))
+                return;
+            if (proxy.dead) return;
+            const int32_t live[3] = {proxy.live_position_q16.x, proxy.live_position_q16.y,
+                                     proxy.live_position_q16.z};
+            push_away(live, threshold);
+        };
+        if (ent == nullptr || wire_person_proxies_.empty()) {
+            for (const PersonSlot &p : persons_) person_push(p);
+        } else {
+            // The table's pool-0 slot order: the local body at its wire slot,
+            // the remote persons at theirs (the projectile walk's merge).
+            struct RepulseEntry {
+                uint16_t key = 0;
+                bool is_proxy = false;
+                uint32_t index = 0;
+            };
+            std::vector<RepulseEntry> walk;
+            walk.reserve(persons_.size() + wire_person_proxies_.size());
+            for (size_t i = 0; i < persons_.size(); ++i) {
+                const PersonSlot &slot = persons_[i];
+                const uint16_t key = (wire_local_player_handle_ != EntityHandle::kInvalid &&
+                                      slot.h == world.cached.local_player)
+                        ? wire_local_player_handle_
+                        : slot.h.packed;
+                walk.push_back({key, false, static_cast<uint32_t>(i)});
+            }
+            for (size_t i = 0; i < wire_person_proxies_.size(); ++i)
+                walk.push_back({wire_person_proxies_[i].wire_handle, true,
+                                static_cast<uint32_t>(i)});
+            std::stable_sort(walk.begin(), walk.end(),
+                             [](const RepulseEntry &a, const RepulseEntry &b) {
+                                 return a.key < b.key;
+                             });
+            for (const RepulseEntry &e : walk) {
+                if (e.is_proxy) proxy_push(wire_person_proxies_[e.index]);
+                else person_push(persons_[e.index]);
+            }
         }
         // The staged REPLICA peers walk the SAME witnessed loop (threshold
         // 30% of summed radii, push (thr - dist)/4 through the quantized
@@ -744,25 +849,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const ReplicaPeer &p = replica_peers_[pi];
             if (p.handle == replica_exclude_handle_) return;
             const int32_t threshold = 30 * (my_radius + p.radius) / 100;
-            const int32_t ddx = p.x - pos[0];
-            const int32_t ddy = p.y - pos[1];
-            const int32_t ddz = p.z - pos[2];
-            if (abs32(ddx) > threshold || abs32(ddy) > threshold || abs32(ddz) > threshold)
-                return;
-            if (vec_len_ftol(ddx, ddy, 0) > threshold) return;
-            const int32_t dist = vec_len_ftol(pos[0] - p.x, pos[1] - p.y, 0);
-            if (dist > threshold) return;
-            const int32_t amount = (threshold - dist) >> 2;
-            const int32_t ang = static_cast<int32_t>(
-                std::atan2(static_cast<double>(pos[1] - p.y),
-                           static_cast<double>(pos[0] - p.x)) *
-                io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
-            const uint32_t idx = (0x200000u - static_cast<uint32_t>(ang)) >> 22;
-            const DirTable &t = dir_table();
-            const int32_t sn = t.sin22[idx & 1023];
-            const int32_t cs = t.sin22[(idx & 1023) + 256];
-            pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
-            pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+            if (!in_reach(p.x, p.y, p.z, threshold)) return;
+            const int32_t live[3] = {p.x, p.y, p.z};
+            push_away(live, threshold);
         };
         // The cell gather: every peer that can pass the threshold test lies
         // within max_reach of the row on x and y. The gather covers TWICE
@@ -881,6 +970,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     const int32_t ground =
         raycast_ground(world, source, pos, 0, 0, 0, 0x20000, &ground_hit);
     lap.mark(devtools::Slot::SIM_AI_INFANTRY_COLLISION_GROUND);
+    body_trace_ground_probe(world, source, pos, ground, ground_hit); // the readout (body_trace.h)
     pos[2] = saved_z;
     // The probe's hit ALWAYS lands in groundEntity — null on a miss, overwriting
     // even a same-resolve CL latch. Generic ground is still resolved only by
@@ -940,7 +1030,9 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         bool is_player_class, uint32_t tick, int32_t anim_state_id,
                                         uint32_t anim_state_flags, const ReplicaPeer *peers,
                                         int32_t peer_count, uint16_t exclude_handle,
-                                        uint32_t *entity_flags, EntityHandle *out_ground) {
+                                        uint32_t *entity_flags, EntityHandle *out_ground,
+                                        const int32_t *saved_live_pos,
+                                        const int32_t *eye_offset) {
     // The row's candidate slice. Retail refreshes every pool-0 entity's slice
     // on the 17-tick edge — the client's wire-built persons included — and the
     // movement resolver walks that slice, up to 16 ticks stale by design
@@ -959,6 +1051,50 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     // The ad-hoc slice is scratch past the arena's own entries (which a
     // skipped row's kept slice may still read), holding at most the room the
     // current fill leaves, as one more source of the build would.
+    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, exclude_handle);
+    replica_peers_ = peers;
+    replica_peer_count_ = peer_count;
+    replica_exclude_handle_ = exclude_handle;
+    stage_replica_peer_index(peers, peer_count, tick);
+    replica_source_bound_radius_q16_ = source_bound_radius_q16;
+    replica_flags_ = entity_flags;
+    replica_saved_live_ = saved_live_pos;
+    int16_t health_dummy = 100; // damage legs are authority-gated off anyway
+    const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
+    // The row's own CameraOffset is the eye point, as retail's resolver reads the
+    // remote entity's [orig: @0x4B2EE2..0x4B2EFB].
+    const int32_t clearance = resolve_entity(
+        world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
+        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
+        /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
+        health_dummy, out_ground, /*ladder_io=*/nullptr, eye_offset);
+    replica_peers_ = nullptr;
+    replica_peer_count_ = 0;
+    replica_exclude_handle_ = 0xFFFF;
+    replica_source_bound_radius_q16_ = 0;
+    replica_flags_ = nullptr;
+    replica_saved_live_ = nullptr;
+    unstage_replica_candidates(arena_mark);
+    return clearance;
+}
+
+int32_t CollisionWorld::raycast_ground_replica(World &world, const int32_t pos[3],
+                                               int32_t source_bound_radius_q16,
+                                               uint16_t row_handle, uint32_t entity_flags,
+                                               int32_t dx, int32_t dy, int32_t z_up,
+                                               int32_t z_drop) {
+    const size_t arena_mark = stage_replica_candidates(pos, source_bound_radius_q16, row_handle);
+    replica_flags_ = &entity_flags;
+    const int32_t ground =
+            raycast_ground(world, EntityHandle{}, pos, dx, dy, z_up, z_drop, nullptr);
+    replica_flags_ = nullptr;
+    unstage_replica_candidates(arena_mark);
+    return ground;
+}
+
+size_t CollisionWorld::stage_replica_candidates(const int32_t pos[3],
+                                                int32_t source_bound_radius_q16,
+                                                uint16_t exclude_handle) {
     const size_t arena_mark = arena_.size();
     const int32_t room = kCandidateArenaCap - arena_used_;
     const int32_t range = source_bound_radius_q16 + 0x40000;
@@ -989,6 +1125,10 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
             continue;
         if (vec_len_ftol(d.x - pos[0], d.y - pos[1], d.z - pos[2]) > total) continue;
         if (slice.count >= room) break;
+        // The pool-0 source build's noage candidate gate.
+        // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA,
+        //  jnz @0x4B8FD4]
+        if (d.noage) continue;
         arena_.push_back(d.h);
         ++slice.count;
     }
@@ -1008,26 +1148,13 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     }
     const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
     candidates_[replica_key.packed] = slice;
-    replica_peers_ = peers;
-    replica_peer_count_ = peer_count;
-    replica_exclude_handle_ = exclude_handle;
-    stage_replica_peer_index(peers, peer_count, tick);
-    replica_source_bound_radius_q16_ = source_bound_radius_q16;
-    replica_flags_ = entity_flags;
-    int16_t health_dummy = 100; // damage legs are authority-gated off anyway
-    const int32_t clearance = resolve_entity(
-        world, replica_key, state, pos, vel_xy, vel_z, capsule_bottom,
-        capsule_top, /*heading=*/0, /*body_pitch=*/0, is_player_class,
-        /*is_authority=*/false, tick, anim_state_id, anim_state_flags,
-        health_dummy, out_ground);
-    replica_peers_ = nullptr;
-    replica_peer_count_ = 0;
-    replica_exclude_handle_ = 0xFFFF;
-    replica_source_bound_radius_q16_ = 0;
-    replica_flags_ = nullptr;
+    return arena_mark;
+}
+
+void CollisionWorld::unstage_replica_candidates(size_t arena_mark) {
+    const EntityHandle replica_key;
     candidates_.erase(replica_key.packed);
     arena_.resize(arena_mark);
-    return clearance;
 }
 
 std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
@@ -1040,7 +1167,7 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         // The SAME per-instance view every query goes through: entity pose ->
-        // collision_matrix_from_heading (quantized dir table) per section.
+        // collision_matrix_from_placement per section.
         const CollisionTargetView *tv = target_view(world, h, view, mats);
         if (tv == nullptr) continue;
         if (range > 0 && anchor != nullptr &&
@@ -1054,7 +1181,7 @@ std::vector<CollisionWorld::DebugInstance> CollisionWorld::debug_instances(
         inst.pos[1] = tv->pos[1];
         inst.pos[2] = tv->pos[2];
         if (const Entity *e = world.registry.get(h))
-            inst.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e->yaw));
+            inst.heading_bam = e->heading;
 
         const CollisionModel &m = *tv->model;
         for (size_t si = 0; si < m.sections.size(); ++si) {
@@ -1122,7 +1249,7 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         if (const Entity *e = world.registry.get(h)) {
             ent.husk = (e->engine_flags & kEntityFlagHusk) != 0 &&
                        instances_.at(h.packed).husk_model_id >= 0;
-            if (e->bound_radius > 0.0f) ent.bound_radius = to_fixed(e->bound_radius);
+            if (e->bound_radius > 0.0f) ent.bound_radius = e->bound_radius.q16;
         }
 
         const CollisionModel &m = *tv->model;
@@ -1234,7 +1361,7 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
         // radius is pose-widened for the projectile gate and would deepen the
         // band. [orig: other->boundRadius @ 0x4bfa29]
         const int32_t peer_bound =
-            peer->bound_radius > 0.0f ? to_fixed(peer->bound_radius) : 0;
+            peer->bound_radius > 0.0f ? peer->bound_radius.q16 : 0;
         if (self_z + (self_bound >> 1) >= live[2] - (peer_bound >> 1) &&
             self_z <= live[2])
             return true;

@@ -32,6 +32,7 @@ public:
 		STAGE_VERIFYING = static_cast<int>(opennova::inmatch::JoinScreenStage::Verifying),
 		STAGE_QUEUED = static_cast<int>(opennova::inmatch::JoinScreenStage::Queued),
 		STAGE_STARTING = static_cast<int>(opennova::inmatch::JoinScreenStage::Starting),
+		STAGE_ENUMERATING = static_cast<int>(opennova::inmatch::JoinScreenStage::Enumerating),
 	};
 	enum Panel {
 		PANEL_ERROR = static_cast<int>(opennova::inmatch::PreGamePanel::Error),
@@ -51,14 +52,32 @@ public:
 	String message_text(const Ref<RtxtStringFile> &p_override_table,
 			const Ref<RtxtStringFile> &p_gameerr) const;
 
+	// The MESSAGES line of a stage that has no queue record, read before any
+	// connection exists (the enumerate-and-join's PRE_ENUMSESSION).
+	static String stage_text(int p_stage, const Ref<RtxtStringFile> &p_override_table,
+			const Ref<RtxtStringFile> &p_gameerr);
+
 	// pre.mnu's panel windows: how many, each one's name, and whether a panel
 	// state shows it (inmatch::pre_game_windows).
 	static int window_count();
 	static String window_name(int p_index);
 	static bool panel_shows_window(int p_panel, int p_index);
+
+	// The choice panels (inmatch::pre_game_entry_panel / pre_game_accept): the panel a
+	// discovered flag word opens on (PANEL_PROGRESS = no choice), and ACCEPT's step on a
+	// panel: the next panel, or ACCEPT_COMMIT, ACCEPT_ABORT, ACCEPT_NONE.
+	enum AcceptStep {
+		ACCEPT_COMMIT = -100,
+		ACCEPT_ABORT = -101,
+		ACCEPT_NONE = -102,
+	};
+	static int entry_panel(int p_server_flags, bool p_authority);
+	static int accept_step(int p_panel, int p_server_flags, bool p_spectate_checked,
+			bool p_authority);
 };
 
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::JoinScreenStatus::Stage);
 VARIANT_ENUM_CAST(godot::JoinScreenStatus::Panel);
+VARIANT_ENUM_CAST(godot::JoinScreenStatus::AcceptStep);

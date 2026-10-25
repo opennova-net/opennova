@@ -45,9 +45,18 @@ const SHROUD_WIDGET := "DEATH_SHROUD"
 # The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
 const SWAP_TEAMS := "SWAP_TEAMS"
 const TEAM_LIST := "BUTTON_TEAMLIST"
+# The LEAVE MISSION button (its Esc hotkey shows CONFIRM_EXIT) and the
+# confirmation's NO and YES.
+const HIDDEN_BACK := "HIDDEN_BACK"
+const CONFIRM_NO := "CONFIRM_NO"
+const CONFIRM_YES := "CONFIRM_YES"
 
 signal opened
 signal closed
+## The exit confirmation's YES, after the screen closed: the shell runs input
+## action 3 (the Exit Mission tone, then the exit; engine
+## world::pass_through_close_axis carries the key witness).
+signal exit_confirmed
 
 var _view: WorldView = null
 var _ui_parent: Node = null
@@ -87,6 +96,11 @@ var _hud_source: Callable = Callable()
 # The DEATH map's pan/zoom state, held for the presenter's (the process's)
 # lifetime and handed to every MapViewWindow the menu rebuild mounts.
 var _map_view_state := MapViewState.new()
+# The menu input pass-through word while DEATH is up: its show raises it, the
+# exit confirmation (HIDDEN_BACK) lowers it and the confirmation's NO raises it
+# again; the close leaves it as it stands (engine world::pass_through_close_axis
+# carries the witness).
+var _input_pass_through := false
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -98,6 +112,12 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## Whether the screen passes input through: its close then runs the input frame
+## that takes the menu cursor's offset (the shell's _leave_screen).
+func is_input_pass_through() -> bool:
+	return _input_pass_through
 
 
 ## The HUD overlay getter the MAP window draws through (the shell hands the HUD
@@ -170,6 +190,7 @@ func open() -> bool:
 	# The show hides the shroud; the per-frame reveal shows it and runs the
 	# content refresh (_process).
 	_set_shroud_shown(false)
+	_input_pass_through = true
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	_show_map_window(sim)
@@ -182,7 +203,7 @@ func open() -> bool:
 # A selection under the initial overlay closes the screen at once; a death
 # re-pick (a joiner's owed pick, or a dead local player) keeps it until the
 # host releases the hold, because an invalid or contested pick is dropped
-# silently and the keys only reach an open screen.
+# silently and the list's rows are the screen's.
 func _initial_overlay(sim: Simulation) -> bool:
 	return not bool(sim.is_join_deploy_pick_pending()) and not bool(sim.is_local_player_dead())
 
@@ -196,28 +217,53 @@ func close() -> void:
 		closed.emit()
 
 
-# The deploy keys (X, SPACE, a team zone's letter) queue the pick while the
-# player is dead or the overlay is up: the engine's rule picks the event-12
-# parameter (Simulation.deploy_key_pick). Like a list select, the initial
-# overlay closes on the send and a death re-pick keeps the screen until the
-# host releases the hold.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if not is_open():
-		return
-	var key := event as InputEventKey
-	if key == null or not key.pressed or key.echo:
-		return
+	if handle_key(event as InputEventKey):
+		get_viewport().set_input_as_handled()
+
+
+## One key-down over the open screen, in the original's order (engine
+## world::pass_through_close_axis carries the key witness): the menu's
+## keyboard hook runs the screen's hotkeys at once (death.mnu's LEAVE MISSION
+## and the confirmation's NO on Escape, its YES on Return), whose click lands
+## ahead of the pass-through test; the key itself waits in the shell's key ring
+## for the input frame the word lets run (KeyboardPass), the Escape key and a
+## key under the exit confirmation alike. True only when the hotkey closed the
+## screen (the confirmation's YES): the close resets the ring, so the key
+## reaches nothing else.
+func handle_key(key: InputEventKey) -> bool:
+	if not is_open() or key == null or not key.pressed or key.echo:
+		return false
+	if _driver == null or not _driver.handle_key_input(key):
+		return false
+	return not is_open()
+
+
+## The special-key chain's deploy leg: the deploy keys (X, SPACE, a team zone's
+## letter) queue the pick (input event 12) while the player is dead in a
+## session or the overlay is up, the engine's rule picking the event's
+## parameter (Simulation.deploy_key_pick). The rule is the leg's only gate, not
+## this screen: under stat.mnu's STAT (the round end's teardown closed DEATH) a
+## dead player's deploy key still picks (engine hud_toggles.h HudDeployKeyInput
+## carries the witness). The parameter, or -1 when the key is not the leg's.
+func deploy_key_param(key: InputEventKey) -> int:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if key == null or sim == null:
+		return -1
+	# The handler compares Windows VK codes, which follow the key's label.
+	return int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
+
+
+## The queued pick's dispatch (case 12), the screen open or not: like a list
+## select, the initial overlay closes on the send and a death re-pick keeps the
+## screen until the host releases the hold.
+func send_pick(param: int) -> void:
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
-		return
-	# The handler compares Windows VK codes, which follow the key's label.
-	var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
-	if param < 0:
 		return
 	var initial_overlay := _initial_overlay(sim)
 	if sim.send_deployment_pick(param) and initial_overlay:
 		close()
-	get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:
@@ -263,8 +309,11 @@ func _process(_delta: float) -> void:
 	# local death. Only all falling closes it: retail's frame loop closes the
 	# latched screen exactly when its open triggers are gone (the per-frame
 	# fold and close-on-clear witnesses live on ClientState.death_menu_open_latch
-	# and hud-re D-HUD-19).
-	if not bool(sim.is_death_menu_held()):
+	# and hud-re D-HUD-19). That close is the scene frame's: a frame a listen
+	# host's status page stood in for closes nothing (its ToggleServer row passes
+	# this screen's input frame; the same witness), and the screen's own frame
+	# runs on until the next drawn frame closes it.
+	if not bool(sim.is_death_menu_held()) and (_view == null or _view.scene_drawn()):
 		close()
 		return
 	# The shroud reveal and, inside it, the content refresh on each 16-tick
@@ -381,8 +430,21 @@ func _apply_team_service_buttons(shown: bool) -> void:
 
 
 # SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
-# ClientRuntime::queue_team_change_request carries the witness).
+# ClientRuntime::queue_team_change_request carries the witness). HIDDEN_BACK
+# and CONFIRM_NO lower and raise the pass-through word (_input_pass_through).
+# CONFIRM_YES closes the in-game screens, then asks the shell for the exit
+# (exit_confirmed).
 func _on_widget_activated(_id: int, widget_name: String) -> void:
+	if widget_name.nocasecmp_to(HIDDEN_BACK) == 0:
+		_input_pass_through = false
+		return
+	if widget_name.nocasecmp_to(CONFIRM_NO) == 0:
+		_input_pass_through = true
+		return
+	if widget_name.nocasecmp_to(CONFIRM_YES) == 0:
+		close()
+		exit_confirmed.emit()
+		return
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
 	var sim: Simulation = _view.sim() if _view != null else null

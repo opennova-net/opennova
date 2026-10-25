@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include "particle/effect_scene.h"
@@ -42,11 +43,12 @@ private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 	Ref<EffectScene> scene_;
-	Callable texture_provider_;
+	Callable image_provider_;
 	String texture_dir_;
 	ObjectID environment_source_;
 	ObjectID reflection_camera_;
 	ObjectID second_scene_camera_;
+	ObjectID inset_mirror_camera_;
 	float water_height_ = 0.0f;
 	// The session's texcompression_level and particle_density (the fresh
 	// profile's until an embedder hands the mission's copy over) and whether
@@ -58,9 +60,12 @@ private:
 	bool shutdown_ = false;
 	bool procedural_fallback_enabled_ = false;
 	std::vector<Node *> warm_nodes_;
+	// The last overlay frame published to the view passes (get_scene_overlay_slot_positions).
+	std::shared_ptr<const SceneOverlaySubmission> scene_overlay_submission_;
 
 	void _invalidate_catalog();
 	void _restore_device_state();
+	void _create_ribbon_device_on_render_thread();
 
 protected:
 	static void _bind_methods();
@@ -73,8 +78,10 @@ public:
 	void set_scene(const Ref<EffectScene> &p_scene);
 	Ref<EffectScene> get_scene() const;
 
-	void set_texture_provider(const Callable &p_provider);
-	Callable get_texture_provider() const;
+	// What answers a particle frame's name with its decoded Image (the effect
+	// world's: the mount's particle loader, ResourceRoot::load_image).
+	void set_image_provider(const Callable &p_provider);
+	Callable get_image_provider() const;
 	void set_texture_dir(const String &p_texture_dir);
 	void set_environment_source(Node *p_source);
 	Node *get_environment_source() const;
@@ -89,6 +96,12 @@ public:
 	// ObjectID is kept; a freed camera retires the view on the next render.
 	void set_second_scene_camera(Camera3D *p_camera);
 	Camera3D *get_second_scene_camera() const;
+	// The weapon Inset pass's own water mirror camera: its reflected scene
+	// runs the mirror's particle pair again for that mirror's eye, on a frame
+	// whose Inset pass renders that mirror (Water::advance_inset_frame; engine
+	// renderer/particle_frame.h compiles_mirror_particles). Null retires it.
+	void set_inset_mirror_camera(Camera3D *p_camera);
+	Camera3D *get_inset_mirror_camera() const;
 	// The session's game.cfg texcompression_level and particle_density
 	// (renderer/texture_compression.h, renderer/particle_density.h): the
 	// atlas pages are built again under the flags they give (DXT5 at a
@@ -106,12 +119,18 @@ public:
 
 	// Deterministic pipeline warm for the loading screen: one centimeter quad
 	// per FirstPerson spatial shader plus a one-shot request for all eight
-	// World RenderingDevice pipelines on the compositor's real framebuffer.
+	// World RenderingDevice pipelines on the compositor's real framebuffer, and
+	// one for every overlay combine's pipeline on each view's framebuffer
+	// format (SceneOverlayCompositorEffect::request_pipeline_warm).
 	// Warming by spawning effects alone is timing-dependent (delayed emitters
 	// emit nothing during the warm frames). clear_warm_pipelines frees the
 	// quads and cancels an unserviced compositor request.
 	void warm_pipelines(const Vector3 &p_position);
 	void clear_warm_pipelines();
+	// Retires every published submission (both camera views, the far passes,
+	// the first-person batch, the distortion row) until the next render_now:
+	// what a reset scene leaves draws nothing (EffectWorld::reset_runtime_state).
+	void clear_draws();
 	// Process-exit boundary for compositor callbacks and device-owned effects.
 	// EXIT_TREE calls it too; the retired effects and the latch it leaves
 	// behind are undone by the next ENTER_TREE (fresh effects, latch cleared),
@@ -124,12 +143,28 @@ public:
 	// Registers that device with a FrameFx node. The world does this every
 	// frame through EffectWorld; previews and tests bind it once.
 	void attach_distortion_row(Node *p_frame_fx);
+	// The particle materials' device objects as the effect system's atlases build: every
+	// particle pass's compositor (each view's pair and the distortion subset) creates its
+	// shaders ahead of its first render callback (ParticleCompositorEffect::create_device).
+	void create_particle_devices();
+	// The tracer pool's materials at the mission textures stage: the distortion ribbon
+	// device and each view's overlay stage, whose NVG laser draws the pool's laser material
+	// (EffectDistortionDrawer::create_device, SceneOverlayCompositorEffect::create_device).
+	void create_tracer_pool_devices();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
 	// publishes an immutable World copy across the render-thread boundary.
 	// Process-driven rendering calls this automatically; tests and previews may
 	// call it explicitly after advancing a scene.
 	void render_now(int64_t p_time_ms);
+	// The catalog's atlas built now, from the scene's definitions under the
+	// session's page flags, when it is not already built for them: the effect
+	// system's init builds it once at the mission start, so the first draw
+	// builds none (engine renderer/particle_atlas.h carries the witness,
+	// D-NET-NEW-L3-26). render_now builds it the same way when it is stale. The
+	// load's build presents the loading screen through `p_present` as it goes
+	// (ParticleAtlasDevice::rebuild).
+	void build_catalog(const Callable &p_present = Callable());
 
 	// The post-particle overlay tail (runtime/renderer/scene_overlay.h): every
 	// view this renderer composes carries one overlay pass right after its
@@ -137,6 +172,10 @@ public:
 	// tail, the mirror its coronas); one immutable frame reaches all three.
 	// Null clears them. Not bound to Godot.
 	void publish_scene_overlay(const std::shared_ptr<const SceneOverlaySubmission> &p_submission);
+	// The vertex positions (the render frame) the last published overlay frame's batches of
+	// `p_slot` (renderer::SceneOverlaySlot) carry, in submission order: a typed read of where a
+	// view's walk placed its draws.
+	PackedVector3Array get_scene_overlay_slot_positions(int p_slot) const;
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
 	// references escape through the F3/debug seam. They are read from each

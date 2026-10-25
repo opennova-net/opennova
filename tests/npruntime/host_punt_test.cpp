@@ -10,6 +10,8 @@
 // instead (D-NET-181).
 
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/server_initial_state.h>
+#include <base/gameprofile/game_type.h> // kDeathmatch (the round-ending second)
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/joiner_connection.h>
@@ -17,6 +19,7 @@
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/punt_log.h> // PuntLog (the violation sweep's #S>9 lines)
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
@@ -33,13 +36,16 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include "enumerated_join.h"
 #include "integrity_oracles.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
@@ -117,16 +123,18 @@ bool drive_to_initial_server_settings(
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
-	if (!expect(hello_result.outbound.size() == 1,
-			"ServerHello emits the close-race ClientAuth"))
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
+	if (!expect(!auth_datagram.empty(),
+			"ServerHello leads to the close-race ClientAuth"))
 		return false;
 
 	ClientAuth client_auth;
 	body.clear();
 	if (!expect(nw_decode_inbound(
-				hello_result.outbound[0].data(), hello_result.outbound[0].size(),
+				auth_datagram.data(), auth_datagram.size(),
 				opcode, body) && opcode == SESSION_OPCODE_CLIENT_AUTH &&
 				parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the close-race ClientAuth"))
@@ -425,7 +433,11 @@ bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 	if (!expect(client.queue_fired_round(fire),
 			"gameplay traffic queues while the established session is live"))
 		return false;
-	client.queue_loadout_resubmit();
+	LoadoutSubmit armory; // an armory ACCEPT's 0x2F (its content is not read here)
+	armory.team = 1;
+	armory.player_class = 8;
+	armory.weapon_slot_index = 0xC3;
+	(void)client.queue_loadout_submit(armory);
 
 	const std::vector<uint8_t> time_sync = frame_s2c(
 			server_tx,
@@ -563,9 +575,9 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.reply.minimap_initial_scan_pending = false;
-	conn.reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	world.match.upsert_player({player, 1, "P"});
+	world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	conn.reply.control_request_countdown = 1;
 	conn.reply.charattr_unanswered_count = charattr_silence;
 	conn.reply.time_sync_unanswered_count = time_sync_silence;
@@ -606,10 +618,17 @@ bool check_host_control_punt(uint32_t charattr_silence,
 
 	inmatch::NapiNPConnection &live =
 			owner.ctx.np_protocol.connection_list.front();
+	// The counter is tested before the countdown, and the punt does not end the
+	// visit: the countdown reaches its zero and reloads, the quartet queuing
+	// nothing after the description [orig: Server_UpdateAllActivePlayerSlots
+	//  @0x5189EF..0x518A3A, the countdown @0x518A42..0x518A5D;
+	//  CNapiNPConnection_QueueMessage's `desc_sent` drop @0x62864D].
 	if (!expect(live.host_disconnect_sent &&
 				live.host_disconnect_mismatch_type == expected_type &&
-				live.reply.control_request_countdown == 1,
-			"the counter is checked before countdown decrement and the cause latches"))
+				live.reply.control_request_countdown ==
+						inmatch::CONTROL_REQUEST_PERIOD_TICKS,
+			"the counter is checked before the countdown, the cause latches and the "
+			"countdown runs on"))
 		return false;
 
 	const std::size_t sent_once = socket.sent.size();
@@ -663,7 +682,21 @@ bool check_host_control_punts_are_ordered_before_the_countdown() {
 	return check_host_control_punt(7, 8, 24);
 }
 
-bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
+// A connection whose description went keeps taking its packets until its teardown: retail's
+// session receive, resend list and ping test the connection's active byte (+0x28) and drop
+// byte (+0x2D, which nothing sets), never the description's sent byte, so a punted joiner's
+// in-flight packets stamp its receive and run through the fragment fold; the per-record dispatch
+// then tests the sent byte and runs no record's handler (no 0x0C applied, no 0x47 answered), and
+// the queue, closed behind the description, holds it alone. Only the correctly keyed goodbye
+// tears the node down. (D-NET-NEW-L1-27)
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - @0x626AE0 / @0x626AEA;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - the drop byte @0x625C3D, the stamp @0x625D54,
+//  the record walk calling CNapiNPConnection_DispatchMessage @0x625EF1;
+//  CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+//  `jnz` @0x62269E; NapiNP_HandleResendList @0x623800 - @0x6238C9 / @0x6238D3;
+//  CNapiNPConnection_SendDescriptionOnce @0x629750 - the store @0x629772;
+//  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
+bool check_described_connection_keeps_taking_records() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -671,6 +704,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	ctx.np_protocol.host_key = 0xA1B2C3D4u;
 	ctx.np_protocol.max_players = 8;
 	const PeerAddr peer{0x0100007Fu, 34046};
+	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 
 	inmatch::NapiNPConnection conn;
 	conn.peer = peer;
@@ -685,36 +719,39 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	conn.client_scrk = kClientScrk;
 	conn.server_scrk = kServerScrk;
 	conn.receive_inactive_ms = 4321;
+	conn.link.transport = &transport;
 
-	// Retain one real S2C message so a valid 0x44 would have something to
-	// replay if the staged-close gate accidentally admitted it.
+	// One retained S2C message, which a keyed 0x44 asks for again.
 	std::vector<uint8_t> retained_body;
 	if (!expect(frame_session_packet(
 				conn.seq, SessionCrypto{kServerScrk, {}, kClientKey},
 				{make_protocol_message(s2c::SPECTATOR_FLAGS, {0x5A})},
 				retained_body) &&
 				conn.seq.retained_outbound_message_count == 1,
-			"staged-close fixture retains one replayable S2C record"))
+			"described-connection fixture retains one replayable S2C record"))
 		return false;
-	conn.host_disconnect_sent = true;
+	// The punt: the description queued, then its sent byte closes the queue.
+	const DisconnectEvent punt =
+			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
+	if (!expect(inmatch::Server_StageHostDisconnect(conn, punt) &&
+				conn.host_disconnect_sent && transport.outbound_pending() == 1,
+			"the punt queues the description"))
+		return false;
 	// The staged punt latched its record when the description was admitted (the
 	// port's SendChatMessage latch rides send_session_batches); this fixture never
 	// runs that pump, so it installs the same record by hand.
-	// [orig: CNapiNPConnection_SendChatMessage @0x4c7ff2..0x4c8004]
-	const DisconnectEvent punt =
-			make_disconnect_event(1, 2, 0, 0, "t35", 33, "LogPuntEvent");
+	// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4c7ff2..0x4c8004]
 	inmatch::latch_disconnect_event(conn, punt);
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 
-	auto ignored = [](const inmatch::HandleResult &result) {
+	auto nothing_sent = [](const inmatch::HandleResult &result) {
 		return result.outbound.empty() &&
 				result.immediate_outbound.empty() &&
-				result.deferred_session_replies.empty() && result.events.empty();
+				result.deferred_session_replies.empty();
 	};
 	auto &live = ctx.np_protocol.connection_list.front();
 
-	// A physical FIRST fragment would normally enter c2s_reassembly even
-	// though it is not yet a semantic message.
+	// A physical FIRST fragment stamps the receive and enters the fold.
 	SessionSequencing client_tx{1, 0};
 	const std::vector<uint8_t> first_fragment = frame_c2s(
 			client_tx,
@@ -724,14 +761,15 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	const inmatch::HandleResult first_result = inmatch::handle_server_datagram(
 			ctx, peer, first_fragment.data(), first_fragment.size(), 1,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(first_result) && live.receive_inactive_ms == 4321 &&
-				live.seq.last_inbound_seq == 0 &&
-				live.c2s_reassembly.buffer.empty(),
-			"a staged close drops C2S before activity, sequencing, or reassembly"))
+	if (!expect(nothing_sent(first_result) && first_result.events.empty() &&
+				live.receive_inactive_ms == 0 &&
+				!live.c2s_reassembly.buffer.empty(),
+			"a described connection's packet stamps its receive and enters the fold"))
 		return false;
 
-	// Completing that record would normally surface PeerC2SInMatch, and a
-	// following PING would normally append a deferred reply to the owner queue.
+	// The FINAL fragment completes the 0x0C, which reaches no handler (the World-less unit
+	// path surfaces nothing); nor does the in-match 0x47: the description stays the last
+	// record queued.
 	const std::vector<uint8_t> final_fragment = frame_c2s(
 			client_tx,
 			{make_protocol_message(c2s::ENTITY_UPLINK, {0x33, 0x44},
@@ -745,54 +783,44 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 	const inmatch::HandleResult ping_result = inmatch::handle_server_datagram(
 			ctx, peer, ping.data(), ping.size(), 3,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(final_result) && ignored(ping_result) &&
-				live.seq.last_inbound_seq == 0 &&
+	if (!expect(nothing_sent(final_result) && final_result.events.empty() &&
 				live.c2s_reassembly.buffer.empty(),
-			"a staged close surfaces no C2S event or deferred reply"))
+			"a described connection's completed record folds and reaches no handler"))
+		return false;
+	replication::Datagram queued;
+	if (!expect(nothing_sent(ping_result) && ping_result.events.empty() &&
+				transport.outbound_pending() == 1 && transport.pop_outbound(queued) &&
+				queued.tag == hightag::DESCRIPTION_PACKET &&
+				queued.protocol_flags_raw == kDescriptionFlags,
+			"the 0x47 is not handled: the description is all the queue holds"))
 		return false;
 
-	// A future sequence is the queue-growth case: it must not enter the
-	// ordered-recovery map or arm a missing-sequence resend after closure.
+	// A future sequence is held for its gap and the gap requested, as for any connection.
 	SessionSequencing future_tx{5, 0};
 	const std::vector<uint8_t> future = frame_c2s(
 			future_tx, {make_protocol_message(c2s::KEEPALIVE, {})});
 	const inmatch::HandleResult future_result = inmatch::handle_server_datagram(
 			ctx, peer, future.data(), future.size(), 4,
 			/*defer_in_match_replies=*/true);
-	if (!expect(ignored(future_result) && live.seq.queued_inbound.empty() &&
-				!live.seq.missing_request_pending &&
-				inmatch::flush_server_missing_requests(ctx).empty(),
-			"a staged close cannot grow or drain the ordered receive queue"))
+	if (!expect(nothing_sent(future_result) && live.seq.queued_inbound.size() == 1 &&
+				live.seq.missing_request_pending &&
+				inmatch::flush_server_missing_requests(ctx).size() == 1,
+			"a described connection's future packet is held and its gap requested"))
 		return false;
 
+	// A keyed resend list is answered from the retained record, and is no receive activity.
+	live.receive_inactive_ms = 4321;
 	std::vector<uint8_t> resend_body;
 	if (!expect(encode_session_resend_list(kServerKey, {1}, resend_body),
-			"staged-close fixture encodes a keyed resend request"))
+			"described-connection fixture encodes a keyed resend request"))
 		return false;
 	const std::vector<uint8_t> resend = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(resend_body));
 	const inmatch::HandleResult resend_result = inmatch::handle_server_datagram(
 			ctx, peer, resend.data(), resend.size(), 5);
-	if (!expect(ignored(resend_result) && live.receive_inactive_ms == 4321 &&
-				live.seq.retained_outbound_message_count == 1,
-			"a staged close neither refreshes nor answers a keyed resend request"))
-		return false;
-
-	const ClientHello hello = make_title_client_hello(kJo, 99);
-	const std::vector<uint8_t> hello_datagram = nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
-	const ClientAuth auth = make_retail_client_auth(
-			live.client_ci, live.client_ck, ctx.np_protocol.host_key);
-	const std::vector<uint8_t> auth_datagram = nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
-	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
-			ctx, peer, hello_datagram.data(), hello_datagram.size(), 6);
-	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
-			ctx, peer, auth_datagram.data(), auth_datagram.size(), 7);
-	if (!expect(ignored(hello_result) && ignored(auth_result) &&
-				ctx.np_protocol.connection_list.size() == 1 &&
-				live.host_disconnect_sent && live.receive_inactive_ms == 4321,
-			"a staged close ignores same-endpoint hello/auth retries"))
+	if (!expect(resend_result.immediate_outbound.size() == 1 &&
+				live.receive_inactive_ms == 4321,
+			"a described connection's keyed resend request is answered"))
 		return false;
 
 	const std::vector<uint8_t> wrong_goodbye = nw_encode_outbound(
@@ -800,9 +828,9 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 			client_goodbye_to_bytes(kServerKey + 1));
 	const inmatch::HandleResult wrong_result = inmatch::handle_server_datagram(
 			ctx, peer, wrong_goodbye.data(), wrong_goodbye.size(), 8);
-	if (!expect(ignored(wrong_result) &&
+	if (!expect(nothing_sent(wrong_result) && wrong_result.events.empty() &&
 				ctx.np_protocol.connection_list.size() == 1,
-			"a staged close rejects an unkeyed ClientGoodbye"))
+			"a described connection rejects an unkeyed ClientGoodbye"))
 		return false;
 
 	const std::vector<uint8_t> keyed_goodbye = nw_encode_outbound(
@@ -821,7 +849,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 				close.events.size() == 1 &&
 				close.events[0].kind == inmatch::HostAcceptEvent::Kind::PeerGoodbye &&
 				ctx.np_protocol.connection_list.empty(),
-			"only the correctly keyed ClientGoodbye completes staged teardown"))
+			"only the correctly keyed ClientGoodbye completes the described teardown"))
 		return false;
 	const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(kClientKey, punt);
 	for (const std::vector<uint8_t> &datagram : close.outbound) {
@@ -830,7 +858,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 		if (!expect(nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
 					opcode == SESSION_OPCODE_SERVER_GOODBYE && body == expected_body &&
 					datagram == close.outbound.front(),
-				"the staged teardown's 0x86 burst echoes the punt record keyed by the client CK"))
+				"the described teardown's 0x86 burst echoes the punt record keyed by the client CK"))
 			return false;
 	}
 	return true;
@@ -968,7 +996,6 @@ bool check_host_pool_overflow_disconnects_with_msgcre() {
 	conn.server_scrk = kServerScrk;
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
-	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
 	conn.seq = inmatch::make_jo_game_session_sequencing(2, 0);
 	conn.seq.retained_outbound[1] = std::vector<ProtocolMessage>(
 			JO_SESSION_OUTBOUND_MESSAGE_MAX - 1, make_protocol_message(0x60, {}));
@@ -1160,12 +1187,15 @@ bool check_server_goodbye_closes_the_joiner() {
 			"a 0x86 before the connection is active is ignored");
 }
 
-// The host's mission exit: the round-reset 0x25 to every in-match remote, then the StopServer
-// walk — {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"} latched and the node Destroyed while host_running
-// is still set, so every connection gets the four-datagram 0x86 burst carrying that record, and
-// only afterwards is host_running cleared. [orig: NapiNPProtocol_StopServer @0x62A820 — the
-//  record @0x62a8c3..0x62a8f6, latch @0x62a904..0x62a919, Destroy @0x62a924, host_running = 0
-//  @0x62a95c; SendDisconnectPacket's host_running gate @0x61f329]
+// The host's mission exit: the round-reset 0x25 queued to every in-match remote, then the
+// StopServer walk — {1, 9, 0, 0, "", 0, "NP.C:SH:STOP"} latched and the node Destroyed while
+// host_running is still set, so every connection gets the four-datagram 0x86 burst carrying that
+// record, and only afterwards is host_running cleared. The destroy drains the queued 0x25 after
+// the burst, and no pump runs between, so the burst is all the wire carries.
+// [orig: NapiNPProtocol_StopServer @0x62A820 — the record @0x62a8c3..0x62a8f6, latch
+//  @0x62a904..0x62a919, Destroy @0x62a924, host_running = 0 @0x62a95c; SendDisconnectPacket's
+//  host_running gate @0x61f329; CNapiNPConnection_Destroy @0x62A4B0 - the teardown called
+//  @0x62A4F9, CNapiNPConnection_DrainMessageQueues called @0x62A50A]
 bool check_host_close_bursts_stop_to_every_connection() {
 	inmatch::HostRole role;
 	inmatch::HostOwner &owner = role.state.host_owner;
@@ -1186,7 +1216,7 @@ bool check_host_close_bursts_stop_to_every_connection() {
 		conn.phase = inmatch::ConnectionPhase::InMatch;
 		conn.admission_stage = inmatch::GameAdmissionStage::Complete;
 		conn.burst.spawned = true;
-		conn.burst.sync_state = 5;
+		conn.slot_state = inmatch::PlayerSlotState::Joined;
 		conn.spawned_announced = true;
 		conn.client_ck = kClientKey + static_cast<uint32_t>(i);
 		conn.server_sk = kServerKey;
@@ -1200,35 +1230,18 @@ bool check_host_close_bursts_stop_to_every_connection() {
 	CaptureDatagramSocket socket;
 	role.set_socket(&socket);
 	role.close();
-	// Per connection: one 0x83 carrying the 0x25, then the four 0x86 STOP datagrams.
-	if (!expect(socket.sent.size() == 10 && owner.ctx.np_protocol.connection_list.empty() &&
+	// Per connection: the four 0x86 STOP datagrams and nothing else (no 0x83 carries the 0x25).
+	if (!expect(socket.sent.size() == 8 && owner.ctx.np_protocol.connection_list.empty() &&
 				owner.ctx.np_protocol.host_running == 0,
-			"close sends 0x25 + four 0x86 to each of two connections, erases them and stops the host"))
+			"close sends four 0x86 to each of two connections, erases them and stops the host"))
 		return false;
 	uint8_t opcode = 0;
-	std::vector<uint8_t> session_body;
-	ProtocolPacketHeader header;
-	std::vector<ProtocolMessage> messages;
-	for (int i = 0; i < 2; ++i) {
-		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
-		const std::vector<uint8_t> &reset = socket.sent[static_cast<std::size_t>(i)];
-		messages.clear();
-		if (!expect(socket.sent_to[static_cast<std::size_t>(i)] == peer &&
-					nw_decode_inbound(reset.data(), reset.size(), opcode, session_body) &&
-					opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
-					decode_protocol_packet_plaintext(session_body.data(),
-							session_body.size(), kServerScrk, header, messages) &&
-					messages.size() == 1 && messages[0].tag == s2c::GAME_RESET &&
-					messages[0].payload.empty(),
-				"each in-match remote first receives the empty round-reset 0x25"))
-			return false;
-	}
 	const DisconnectEvent stop = make_disconnect_event(1, 9, 0, 0, "", 0, "NP.C:SH:STOP");
 	for (int i = 0; i < 2; ++i) {
 		const PeerAddr &peer = i == 0 ? first_peer : second_peer;
 		const std::vector<uint8_t> expected_body = server_goodbye_to_bytes(
 				kClientKey + static_cast<uint32_t>(i), stop);
-		const std::size_t first = 2u + static_cast<std::size_t>(i) * 4u;
+		const std::size_t first = static_cast<std::size_t>(i) * 4u;
 		for (std::size_t j = first; j < first + 4; ++j) {
 			std::vector<uint8_t> body;
 			if (!expect(socket.sent_to[j] == peer &&
@@ -1281,53 +1294,72 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
 	const opennova::world::EntityHandle player =
 			inmatch::Server_BuildPlayerInfoAndAdd(ctx, live, world, /*round_init=*/false);
+	// The join (its C2S 0x0B) writes the pending bit and the state-6 stamp (D-NET-502).
+	(void)inmatch::Server_OnPlayerJoin(ctx, live, 1, {0, 0});
 	if (!expect(player.valid() && live.link.respawn_pending &&
-				live.phase == inmatch::ConnectionPhase::PlayerAdded &&
+				live.phase == inmatch::ConnectionPhase::Spawned &&
 				live.reply.state6_entry_host_ms_valid &&
 				live.reply.state6_entry_host_ms == 1234,
-			"player-add stamps state-6 time and the join-only pending bit"))
+			"the join stamps state-6 time and the join-only pending bit"))
 		return false;
 
+	// The joined slot takes its per-frame 0x0A each tick; no record is the description.
+	// The punt is evaluated in the periodic second's slot walk, so each check runs to
+	// the next periodic second [orig: Server_TickUpdate @0x51E0D4..0x51E13D, inside
+	// the block reloaded 62 @0x51DB93].
+	auto tick_second = [&]() {
+		do {
+			inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+	};
 	auto expect_no_description = [&](const char *message) {
 		replication::Datagram datagram;
-		return expect(!live.host_disconnect_sent &&
-					!transport.pop_outbound(datagram), message);
+		bool description = false;
+		while (transport.pop_outbound(datagram))
+			description = description || datagram.protocol_flags_raw == kDescriptionFlags;
+		return expect(!live.host_disconnect_sent && !description, message);
 	};
 	const uint32_t state6_ms = live.reply.state6_entry_host_ms;
 	live.reply.state6_entry_host_ms_valid = false;
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("an invalid state-6 timestamp blocks t35"))
 		return false;
 
 	live.reply.state6_entry_host_ms_valid = true;
 	live.phase = inmatch::ConnectionPhase::PendingSpawn;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("a pre-state-6 player cannot receive t35"))
 		return false;
 
 	live.phase = inmatch::ConnectionPhase::PlayerAdded;
 	live.link.respawn_pending = false;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("deployment release blocks the join-idle punt"))
 		return false;
 
 	live.link.respawn_pending = true;
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360000u;
-	inmatch::Server_TickUpdate(ctx);
+	tick_second();
 	if (!expect_no_description("exactly six minutes is not strictly over the t35 limit"))
 		return false;
 
+	// The slot's 0x6E (it is held) leads the punt in its walk turn; the
+	// description is the last record it is sent [orig: @0x51E0AD, @0x51E13D].
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
-	inmatch::Server_TickUpdate(ctx);
-	replication::Datagram punt;
+	tick_second();
+	std::vector<replication::Datagram> sent;
+	{
+		replication::Datagram datagram;
+		while (transport.pop_outbound(datagram)) sent.push_back(datagram);
+	}
+	const replication::Datagram *punt = sent.empty() ? nullptr : &sent.back();
 	if (!expect(live.host_disconnect_sent &&
 				live.host_disconnect_mismatch_type == 35 &&
-				transport.pop_outbound(punt) &&
-				!transport.has_outbound() && punt.reliable &&
-				punt.protocol_flags_raw == kDescriptionFlags &&
-				punt.tag == hightag::DESCRIPTION_PACKET &&
-				punt.body == kCapturedPunt,
+				punt != nullptr && punt->reliable &&
+				punt->protocol_flags_raw == kDescriptionFlags &&
+				punt->tag == hightag::DESCRIPTION_PACKET &&
+				punt->body == kCapturedPunt,
 			"the first millisecond over six minutes emits the captured t35 record"))
 		return false;
 
@@ -1345,7 +1377,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	const std::vector<uint8_t> wire = frame_s2c(
 			server_tx,
 			{make_protocol_message(
-					punt.tag, punt.body, punt.protocol_flags_raw)});
+					punt->tag, punt->body, punt->protocol_flags_raw)});
 	inmatch::JoinerConnection joiner("IdlePuntReceiver");
 	joiner.set_title(&kJo);
 	seed_joiner(joiner);
@@ -1385,7 +1417,6 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	conn.link.mode = replication::TransportMode::Client;
 	conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 	conn.reply.minimap_initial_scan_pending = false;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
@@ -1470,21 +1501,45 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 			"the first non-permanent second over 360 emits exact t7");
 }
 
+// A _PUNT.TXT sink in memory (the violation sweep's "#S>9" lines).
+class MemoryFiles final : public inmatch::ServerFileSink {
+public:
+	std::map<std::string, std::string> files;
+	bool exists(const std::string &name) override { return files.count(name) != 0; }
+	void remove(const std::string &name) override { files.erase(name); }
+	bool write(const std::string &name, std::string_view bytes, bool append) override {
+		std::string &f = files[name];
+		if (!append) f.clear();
+		f.append(bytes.data(), bytes.size());
+		return true;
+	}
+};
+
 // The type-6 producer: the 1 Hz violation sweep. With the MaxFriendlyKills limit L,
 // `L < 0 || teamKills <= L` routes to the suicide arm (punt when suicides > 9), else
 // the team-kill arm punts outright; the listen host's own slot is exempt and the
-// description latch keeps a second sweep silent.
-// [orig: Server_CheckPlayerViolations @0x51abd0 — slot +5 gate @0x51aca2, TK gate
-//  @0x51acc2, suicide gate @0x51ad00, punts @0x51ad17/@0x51acd9; caller
-//  Server_TickUpdate @0x51df5f]
+// description latch keeps a second sweep silent. The slot gates are the slot's alone
+// (active, entity, state 6), so a punted slot that lingers is walked again each
+// second: the suicide arm writes "#S>9" to _PUNT.TXT each time while the wire keeps
+// the first description; a slot in state 7 (round over) is walked never.
+// [orig: Server_CheckPlayerViolations @0x51abd0 — the slot gates
+//  @0x51abf6/@0x51abff/@0x51ac0d, slot +5 gate @0x51ac9d (the bot byte @0x51aca2),
+//  TK gate @0x51acc2, suicide compare @0x51aced/@0x51acf0 (/NOPUNT @0x51ad00), "#S>9" @0x51ad0d,
+//  punts @0x51ad17/@0x51acd9; caller Server_TickUpdate @0x51df5f]
 bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
-		int32_t suicides, bool host_own, bool expect_punt, const char *label) {
+		int32_t suicides, bool host_own, bool expect_punt, const char *label,
+		bool round_over = false) {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx,
 			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.max_friendly_kills = max_friendly_kills;
+	MemoryFiles files;
+	inmatch::PuntLog punt_log(files);
+	punt_log.set_time_text([] { return std::string("T"); });
+	punt_log.arm_punt_log();
+	ctx.logs.punt = &punt_log;
 
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -1509,6 +1564,8 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	conn.type = host_own ? inmatch::NapiNPConnection::kTypeClientSide
 	                     : inmatch::NapiNPConnection::kTypeServerSide;
 	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.slot_state = round_over ? inmatch::PlayerSlotState::RoundOver
+	                             : inmatch::PlayerSlotState::Joined;
 	conn.burst.spawned = true;
 	conn.s2c_send_boundary_open = false;
 	conn.link.mode = host_own ? replication::TransportMode::Loopback
@@ -1518,7 +1575,8 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	else
 		conn.link.transport = &transport;
 	conn.link.owned_entity = player;
-	conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
+	conn.reply.player_slot = 3;
+	conn.reply.player_name = "Violator";
 	conn.reply.minimap_initial_scan_pending = false;
 	ctx.np_protocol.connection_list.push_back(std::move(conn));
 	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
@@ -1527,6 +1585,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	inmatch::Server_TickUpdate(ctx);
 	if (!expect(world.match.periodic_second(), "the first host tick is a periodic second"))
 		return false;
+	int periodic_seconds = 1;
 	auto descriptions = [&]() {
 		std::vector<replication::Datagram> out;
 		replication::Datagram datagram;
@@ -1557,8 +1616,23 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 			return false;
 	}
 	// A second sweep never repeats the record.
-	for (int i = 0; i < 62; ++i) inmatch::Server_TickUpdate(ctx);
-	return expect(descriptions().empty(), "a later sweep stays silent behind the first-event latch");
+	for (int i = 0; i < 62; ++i) {
+		inmatch::Server_TickUpdate(ctx);
+		if (world.match.periodic_second()) ++periodic_seconds;
+	}
+	if (!expect(periodic_seconds == 2 && descriptions().empty(),
+			"a later sweep stays silent behind the first-event latch"))
+		return false;
+	// The suicide arm logs "#S>9" each second the slot is walked, the lingering
+	// punted slot's included; the team-kill arm and an unpunted slot log nothing.
+	const bool suicide_arm = expect_punt &&
+			(max_friendly_kills < 0 || team_kills <= max_friendly_kills);
+	std::string expected = "T : START : \r\n";
+	if (suicide_arm)
+		for (int i = 0; i < periodic_seconds; ++i)
+			expected += "T : 03 : \"Violator\" : #S>9 : \r\n";
+	return expect(files.files["_PUNT.TXT"] == expected,
+			"_PUNT.TXT takes one #S>9 per periodic second the suicide arm walks");
 }
 
 bool check_violation_sweep_type6_arms() {
@@ -1577,7 +1651,108 @@ bool check_violation_sweep_type6_arms() {
 			"a negative MaxFriendlyKills keeps the suicide arm") && ok;
 	ok = check_violation_sweep_emits_type6(3, 4, 10, true, false,
 			"the listen host's own slot is never punted") && ok;
+	ok = check_violation_sweep_emits_type6(3, 4, 10, false, false,
+			"a round-over slot (state 7) is not walked", /*round_over=*/true) && ok;
 	return ok;
+}
+
+// The round-ending second (D-NET-NEW-L1-16): the win check runs the round end
+// inside the call, so every state-6 slot is in state 7 with its 0x61 / 0x1D queued
+// before the violation sweep and the flag refresh that follow in the same second.
+// A slot whose tenth suicide stands when its win check ends the round is never
+// punted and writes no "#S>9", and the refresh's 0x2F leaves behind the 0x61 / 0x1D.
+// [orig: Server_TickUpdate - Server_CheckWinConditions @0x51DF5A,
+//  Server_CheckPlayerViolations @0x51DF5F, Server_RefreshNextFlagState @0x51DF64;
+//  Server_CheckWinConditions -> Server_ProcessRoundEnd @0x51AD77 .. @0x51B4E6;
+//  Server_ProcessRoundEnd's slot state 7 @0x51685E; the sweep's state-6 gate @0x51AC0D]
+bool check_round_ending_second_walks_nobody() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.is_in_session = 1;
+	ctx.network_quality_broadcast_countdown = 100;
+	ctx.config.max_friendly_kills = 3;
+	MemoryFiles files;
+	inmatch::PuntLog punt_log(files);
+	punt_log.set_time_text([] { return std::string("T"); });
+	punt_log.arm_punt_log();
+	ctx.logs.punt = &punt_log;
+
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	// A Deathmatch with a one-kill limit: the slot's one enemy kill ends the round
+	// at the first periodic second's win check (winner 0).
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kDeathmatch;
+	rules.score_limit = 1;
+	world.match.configure(rules);
+	const opennova::world::EntityHandle player =
+			opennova::world::spawn_remote_player(world, opennova::world::PlayerSpawn{});
+	if (!expect(player.valid(), "round-end fixture spawned its player")) return false;
+	world.match.upsert_player({player, 0, "Violator"});
+	opennova::world::MatchPlayer *stats = world.match.player(player);
+	if (!expect(stats != nullptr, "round-end fixture registered its roster row")) return false;
+	stats->stats[opennova::world::MatchStats::kEnemyKills] = 1;
+	stats->stats[opennova::world::MatchStats::kSuicides] = 10;
+	// One flag in pool 1, so the second's round-robin refresh sends its 0x2F.
+	opennova::world::Entity flag;
+	flag.kind = opennova::world::EntityKind::Item;
+	flag.item_id = 4091;
+	flag.has_item_def = true;
+	flag.alive = true;
+	if (!expect(world.registry.spawn(1, flag).valid(), "round-end fixture spawned its flag"))
+		return false;
+	ctx.world = &world;
+
+	replication::UdpSessionTransport transport(
+			replication::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPConnection conn;
+	conn.peer = {0x0100007Fu, 34067};
+	conn.type = inmatch::NapiNPConnection::kTypeServerSide;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.slot_state = inmatch::PlayerSlotState::Joined;
+	conn.burst.spawned = true;
+	conn.s2c_send_boundary_open = false;
+	conn.link.mode = replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player;
+	conn.reply.player_slot = 3;
+	conn.reply.player_name = "Violator";
+	conn.reply.minimap_initial_scan_pending = false;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+	inmatch::NapiNPConnection &live = ctx.np_protocol.connection_list.front();
+
+	// The zero-armed periodic second fires on the first host tick.
+	inmatch::Server_TickUpdate(ctx);
+	if (!expect(world.match.periodic_second() && world.match.outcome().ended &&
+				ctx.round_end_announced &&
+				live.slot_state == inmatch::PlayerSlotState::RoundOver,
+			"the first periodic second's win check ends the round inline"))
+		return false;
+	std::vector<replication::Datagram> out;
+	replication::Datagram datagram;
+	while (transport.pop_outbound(datagram)) out.push_back(datagram);
+	bool described = false;
+	size_t seed_at = out.size();
+	size_t header_at = out.size();
+	size_t refresh_at = out.size();
+	for (size_t i = 0; i < out.size(); ++i) {
+		described = described || out[i].tag == hightag::DESCRIPTION_PACKET;
+		if (out[i].tag == s2c::END_ROUND_HEADER && header_at == out.size()) header_at = i;
+		if (out[i].tag == s2c::OBJECTIVE_ENTITY_STATE && refresh_at == out.size()) refresh_at = i;
+	}
+	if (header_at > 0 && header_at < out.size() && out[header_at - 1].tag == s2c::TICK_SEED &&
+			out[header_at - 1].body == std::vector<uint8_t>(4, 0))
+		seed_at = header_at - 1;
+	if (!expect(!live.host_disconnect_sent && !described,
+			"the round-ending second's sweep walks nobody: no t6"))
+		return false;
+	if (!expect(files.files["_PUNT.TXT"] == "T : START : \r\n",
+			"the round-ending second writes no #S>9"))
+		return false;
+	return expect(seed_at < header_at && header_at < refresh_at && refresh_at < out.size(),
+			"the round end's 0x61 / 0x1D leave ahead of the flag refresh's 0x2F");
 }
 
 bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag,
@@ -1668,13 +1843,12 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
 	body.clear();
-	if (!expect(hello_result.outbound.size() == 1 &&
-					nw_decode_inbound(hello_result.outbound[0].data(),
-							hello_result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 					parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the rejected joiner's ClientAuth"))
 		return false;
@@ -1724,13 +1898,12 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	const inmatch::JoinerConnection::PollResult hello_result = joiner.handle_datagram(
+	(void)joiner.handle_datagram(
 			server_hello_datagram.data(), server_hello_datagram.size());
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
 	body.clear();
-	if (!expect(hello_result.outbound.size() == 1 &&
-					nw_decode_inbound(hello_result.outbound[0].data(),
-							hello_result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 					parse_client_auth(body.data(), body.size(), client_auth),
 			"decode the version-mismatch joiner's ClientAuth"))
 		return false;
@@ -1973,7 +2146,7 @@ int main() {
 	ok = check_initial_settings_and_close_emit_only_goodbyes() && ok;
 	ok = check_ordinary_settings_traffic_is_undisturbed() && ok;
 	ok = check_host_control_punts_are_ordered_before_the_countdown() && ok;
-	ok = check_staged_host_disconnect_accepts_only_keyed_goodbye() && ok;
+	ok = check_described_connection_keeps_taking_records() && ok;
 	ok = check_host_description_bypasses_saturated_message_capacity() && ok;
 	ok = check_host_pool_overflow_disconnects_with_msgcre() && ok;
 	ok = check_joiner_pool_overflow_disconnects_with_msgcre() && ok;
@@ -1982,6 +2155,7 @@ int main() {
 	ok = check_join_deploy_idle_punt_uses_state6_elapsed_time() && ok;
 	ok = check_dead_player_punt_uses_a_consecutive_state6_counter() && ok;
 	ok = check_violation_sweep_type6_arms() && ok;
+	ok = check_round_ending_second_walks_nobody() && ok;
 	ok = check_crc_challenges_are_not_answered() && ok;
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;

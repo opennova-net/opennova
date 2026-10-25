@@ -103,7 +103,7 @@ private:
 // fields the join / host page link carries (net/novaworld/relay_request.h).
 bool has_relay_first_call_query(const crow::request &req) {
 	for (const char *name : {"rid", "success", "failure", "relay", "msgbase", "needexpkey",
-	                         "pfid", "mode"}) {
+	                         "pfid", "mode", "gsid", "lan"}) {
 		if (req.url_params.get(name) != nullptr) return true;
 	}
 	return false;
@@ -200,6 +200,10 @@ void add_standard_headers(crow::response &res) {
 
 // The message POST /NWLogin.dll's failure page carries when the login brake
 // refuses the attempt (see handle_login_post).
+// The message the LAN-list join's page carries when the GSID it names is on no
+// listing (see handle_join).
+constexpr const char *kLanGameGoneMessage = "That game is no longer hosted on NovaWorld.";
+
 constexpr const char *kLoginThrottledMessage =
 		"Too many failed logins. Please try again later.";
 
@@ -441,7 +445,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	const std::string public_host   = config.public_host;
 	impl_->access.configure(config);
 
-	web_host_ = config.web_host; // host_url() / gsb_url(), with the port Crow binds
+	web_host_ = config.web_host; // host_url(game) / gsb_url(game), with the port Crow binds
 	public_host_ = public_host;
 	site_url_ = config.site_url; // the welcome mail's link
 
@@ -562,7 +566,7 @@ bool HttpListener::start(const ServerConfig &config) {
 		return false;
 	}
 	running_.store(true);
-	std::printf("[http] HOST_URL=%s\n", host_url().c_str());
+	std::printf("[http] web host %s (HOST_URL / GSB_SERVER per game)\n", web_host_.c_str());
 	std::printf("[http] listening on :%u\n", static_cast<unsigned>(bound_port_));
 	return true;
 }
@@ -622,8 +626,8 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 	return std::nullopt;
 }
 
-std::string HttpListener::host_url() const {
-	return "http://" + web_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
+std::string HttpListener::host_url(const catalog::GameRow &game) const {
+	return host_url_for(web_host_, impl_->app.port(), game.host_page);
 }
 
 std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
@@ -1096,9 +1100,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_prepare = [this, templates_dir](const crow::request &req) {
 		const std::string url_param = req.url_params.get("url") ? req.url_params.get("url") : "";
 		const char *pfid_param = req.url_params.get("pfid");
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const catalog::GameRow &game =
-				client_game(impl_->games, req, parse_cookie_header(request_cookie_header(req)),
-						pfid_param ? pfid_param : "", url_param);
+				client_game(impl_->games, req, cookies, pfid_param ? pfid_param : "", url_param);
 		const std::string url   = url_param.empty() ? game.start_page : url_param;
 		const std::string ver1  = req.url_params.get("ver1") ? req.url_params.get("ver1") : "";
 		const std::string ver2  = req.url_params.get("ver2") ? req.url_params.get("ver2") : "";
@@ -1112,9 +1116,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",     host_url()},
+			{"HOST_URL",     host_url(game)},
 			{"GSB_SERVER",   gsb_url(game)},
-			{"JOINLAN_URL",  ""},
+			{"JOINLAN_URL",  game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, url, vars);
@@ -1124,8 +1128,13 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		add_cookie(res, "VER1",   ver1);
 		add_cookie(res, "VER2",   ver2);
 		add_cookie(res, "GT",     gt);
-		add_cookie(res, "EPASK",  epask);
 		if (!cc.empty()) add_cookie(res, "CC", cc);
+		// The EPASK bundle goes to a client that holds none: the live service's answer to a
+		// re-entry, whose request carries the bundle the first entry set (and the login), sets
+		// YOURIP, VER1, VER2, GT and CC alone (the LN S1 / S1b / S1d records, 2026-10-23: every
+		// nwprepare request without an EPASK cookie is answered with one, every one with it gets
+		// none).
+		if (cookies.find("EPASK") == cookies.end()) add_cookie(res, "EPASK", epask);
 		return res;
 	};
 	CROW_ROUTE(app, "/nwprepare.dll").methods("GET"_method)(handle_prepare);
@@ -1142,35 +1151,46 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string in_p   = req.url_params.get("IN")      ? req.url_params.get("IN")      : game.page("main.htm");
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : game.page("login.htm");
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : game.page("msg.htm");
-		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
-		// An unactivated DFX2 client (its NWCDKIID no wire key) gets the activation login, ACT.
-		const char *act_p = req.url_params.get("ACT");
-		const auto nwcdkiid = cookies.find("NWCDKIID");
-		const std::string nwcdkiid_v = nwcdkiid == cookies.end() ? std::string() : nwcdkiid->second;
-		const bool activating = act_p != nullptr && *act_p != '\0' &&
-				cdkeys::needs_activation(game.title, nwcdkiid_v);
-		const std::string page_p = activating ? std::string(act_p) : out_p;
+		// A login the service remembers is answered with IN, the lobby page, else OUT, the login
+		// page: the live service's NWStart answers a re-entry carrying the login it remembers
+		// with the main page (11041 B, the size of the login's last poll answer) and a first entry
+		// with the login page (4634 B), each with YOURIP and USEJUNCTION as its only cookies (the
+		// LN S1 / S1b / S1d records, 2026-10-23). The remembered login is the request's own
+		// (retail_login_user: its LOGINSESSIONTAG's active session, else its
+		// PERSISTENTEXPRESSLOGINDATA pin), an active account only. Neither page is the start
+		// page's ACT (DFX2's activation login): a DFX2 client whose NWCDKIID is no wire key is
+		// handed its key silently at the login's completion instead
+		// (CdKeyRoutes::login_activation; D-NET-725, the service's policy).
+		std::optional<UserRecord> user;
+		try {
+			const char *how = "";
+			user = retail_login_user(cookies, *db_pool_.acquire(), how);
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] WARN retail login lookup failed: %s\n", e.what());
+		}
+		if (user && user->account_status != "active") user.reset();
+		const std::string &page = user ? in_p : out_p;
 
-		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
+		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s -> %s cookies=[%s]\n",
 				loggable(req.url).c_str(), loggable(in_p).c_str(), loggable(out_p).c_str(),
-				loggable(msgbase).c_str(), cookie_summary(request_cookie_header(req)).c_str());
+				loggable(msgbase).c_str(), user ? "IN" : "OUT",
+				cookie_summary(request_cookie_header(req)).c_str());
 
-		// Hardcoded version-OK; render OUT (the login page).
+		// Hardcoded version-OK.
 		TemplateVars vars{
 			{"IN",          in_p},
 			{"OUT",         out_p},
 			{"MSGBASE",     msgbase},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
-		res.body = render_template_file(templates_dir, page_p, vars);
+		res.body = render_template_file(templates_dir, page, vars);
 		res.set_header("Content-Type", "text/html");
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP",      req.remote_ip_address);
 		add_cookie(res, "USEJUNCTION", "0");
-		add_cookie(res, "EPASK",       epask);
 		return res;
 	};
 	CROW_ROUTE(app, "/nwstart.dll").methods("GET"_method)(handle_start);
@@ -1245,7 +1265,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			const std::string fail_tpl = field_or("failure", game.page("main.htm"));
 			const std::string msg_tpl  = field_or("msgbase", game.page("msg.htm"));
 			return render_legacy_message(templates_dir, message, fail_tpl, msg_tpl,
-			                             req.remote_ip_address, host_url(), gsb_url(game));
+			                             req.remote_ip_address, host_url(game), gsb_url(game));
 		};
 
 		const auto server_status = get_server_status(*db_conn);
@@ -1432,14 +1452,14 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// cookie drop the capture shows the real client does NOT have on the
 		// bare URL) re-routed the completion GET so retail never stored the
 		// identity cookies — they never reached /NWJoin.dll, leaving PUBPCID
-		// empty ("login information is absent (GDC024)"). The handler still
-		// falls back to the LOGINSESSIONTAG cookie to recover the tag.
+		// empty ("login information is absent (GDC024)"). The handler reads the
+		// tag from the LOGINSESSIONTAG cookie alone.
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
-			{"HOST_URL",         host_url()},
+			{"HOST_URL",         host_url(game)},
 			{"GSB_SERVER",       gsb_url(game)},
-			{"JOINLAN_URL",      ""},
+			{"JOINLAN_URL",      game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, relay_template, vars);
@@ -1459,22 +1479,16 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 	// GET /NWLogin.dll  (relay refresh — completes auth)
 	auto handle_login_get = [this, templates_dir](const crow::request &req) {
-		// Prefer ?tag= query param (set by our relay template's refresh
-		// URL). Fall back to LOGINSESSIONTAG cookie for clients that do
-		// preserve it (curl, Vue dev, Godot).
+		// The relay page's bare refresh: the LOGINSESSIONTAG cookie carries the tag
+		// (net/novaworld/relay_request.h).
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else {
-			auto tag_it = cookies.find("LOGINSESSIONTAG");
-			if (tag_it != cookies.end()) tag = tag_it->second;
-		}
+		if (auto tag_it = cookies.find("LOGINSESSIONTAG"); tag_it != cookies.end()) tag = tag_it->second;
 		if (tag.empty()) {
-			std::printf("[http] GET %s -> 400 (no tag in query or cookie)\n",
+			std::printf("[http] GET %s -> 400 (no LOGINSESSIONTAG cookie)\n",
 					loggable(req.url).c_str());
 			crow::response res(400);
-			res.body = "missing LOGINSESSIONTAG (cookie or ?tag= query)";
+			res.body = "missing LOGINSESSIONTAG cookie";
 			return res;
 		}
 		auto session = sessions_.get_login(tag);
@@ -1520,9 +1534,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"IN",           session->success},
 			{"OUT",          session->failure},
 			{"MSGBASE",      session->msgbase},
-			{"HOST_URL",     host_url()},
+			{"HOST_URL",     host_url(game)},
 			{"GSB_SERVER",   gsb_url(game)},
-			{"JOINLAN_URL",  ""},
+			{"JOINLAN_URL",  game.join_lan_url},
 		};
 		const std::string success_template = session->success.empty() ? game.page("main.htm") : session->success;
 		crow::response res(200);
@@ -1536,8 +1550,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		add_cookie(res, "CHAR",     session->nwhandle.empty() ? "DevUser"    : session->nwhandle);
 		add_cookie(res, "PCID",     session->pcid.empty()     ? "00000001"   : session->pcid);
 		add_cookie(res, "EXPBITS",  session->exp_bits.empty() ? "3" : session->exp_bits);
-		// A DFX2 client not yet activated: its machine's NWACT, which its NovaWorld screen
-		// writes to the registry CDKIID (cd_key_routes.h).
+		// A DFX2 client whose NWCDKIID is no wire key (a keyless copy, as sold or byte-patched):
+		// its machine's NWACT, which its NovaWorld screen writes to the registry CDKIID
+		// (cd_key_routes.h), handed silently (D-NET-725).
 		const std::string nwact = impl_->cd_keys.login_activation(session->user_id, game, cookies);
 		if (!nwact.empty())
 			add_cookie(res, "NWACT", nwact);
@@ -1564,19 +1579,58 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	CROW_ROUTE(app, "/NWLogin.dll").methods("GET"_method)(handle_login_get);
 	CROW_ROUTE(app, "/nwlogin.dll").methods("GET"_method)(handle_login_get);
 
-	// ----- Phase I.1: /NWLogout.dll real teardown ------------------------
-	// Drops the HTTP-side LoginSession and the persistent-cookie pin so
-	// the same retail process won't auto-resume as the prior identity.
-	// UDP side keeps running until GOODBYE/heartbeat-timeout — that's the
-	// protocol's contract; logout here is HTTP-only.
+	// ----- /NWLogout.dll: the two-call relay ---------------------------------
+	// The live service's logout is a relay, as its login, join and host are (LN's S1 / S1b / S1d
+	// records, 2026-10-23): the page link's call (success, failure, msgbase, relay, nodb) is
+	// answered with the relay page and a LOGOUTSESSIONTAG (YOURIP and LOGOUTSESSIONTAG its only
+	// cookies), and the page's bare refresh, the tag on its cookie, with the success page (the
+	// login page) whose cookies are YOURIP and the cleared NWH, NWHANDLE, CHAR, NWI, NWV, NWD,
+	// STATSDISPLAYCHID and PERSISTENTEXPRESSLOGINDATA. The relay's legs are told apart as NWJoin's
+	// and NWHost's are (net/novaworld/relay_request.h). The refresh drops the HTTP-side login
+	// session and the persistent-cookie pin, so the process resumes as no one; the UDP side keeps
+	// running until its goodbye or the reap (the protocol's contract). The relay page's message is
+	// this service's text (the live one is unrecorded).
 	auto handle_logout = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
-		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
-			tag = it->second;
+		std::string logout_tag;
+		if (auto it = cookies.find("LOGOUTSESSIONTAG"); it != cookies.end()) logout_tag = it->second;
+
+		if (classify_relay_request(has_relay_first_call_query(req), !logout_tag.empty()) ==
+				RelayLeg::First) {
+			const char *success_param = req.url_params.get("success");
+			const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
+			                                           success_param ? success_param : "");
+			LogoutSession s;
+			s.session_tag = sessions_.generate_tag("NWLogout.dll");
+			s.success = success_param ? success_param : game.page("login.htm");
+			s.failure = req.url_params.get("failure") ? req.url_params.get("failure") : game.page("main.htm");
+			s.msgbase = req.url_params.get("msgbase") ? req.url_params.get("msgbase") : game.page("msg.htm");
+			const std::string relay_template =
+					req.url_params.get("relay") ? req.url_params.get("relay") : game.page("relay.htm");
+			sessions_.put_logout(s.session_tag, s);
+			std::printf("[http] /NWLogout.dll relay -> tag %s success->%s\n",
+					loggable_secret(s.session_tag).c_str(), loggable(s.success).c_str());
+
+			TemplateVars vars{
+				{"MESSAGE",          "Logging out..."},
+				{"REFRESH_ENDPOINT", "NWLogout.dll"},
+				{"HOST_URL",         host_url(game)},
+				{"GSB_SERVER",       gsb_url(game)},
+				{"JOINLAN_URL",      game.join_lan_url},
+			};
+			crow::response res(200);
+			res.body = render_template_file(templates_dir, relay_template, vars);
+			res.set_header("Content-Type", "text/html");
+			add_standard_headers(res);
+			add_cookie(res, "YOURIP", req.remote_ip_address);
+			add_cookie(res, "LOGOUTSESSIONTAG", s.session_tag);
+			return res;
 		}
+
+		// The relay's bare refresh: the logout itself, once per tag.
+		const std::optional<LogoutSession> relay = sessions_.take_logout(logout_tag);
+		std::string tag;
+		if (auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) tag = it->second;
 		if (!tag.empty()) {
 			sessions_.erase_login(tag);
 			try { clear_active_user_session_by_tag(*db_pool_.acquire(), tag); }
@@ -1599,18 +1653,17 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 		}
 
-		const char *success_param = req.url_params.get("success");
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
-		                                           success_param ? success_param : "");
-		const std::string success_tpl = success_param ? success_param : game.page("login.htm");
+		const std::string named = relay ? relay->success : std::string();
+		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {}, named);
+		const std::string success_tpl = named.empty() ? game.page("login.htm") : named;
 		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
 				loggable_secret(tag).c_str(), persist_it != cookies.end() ? 1 : 0,
 				loggable(success_tpl).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
 		if (template_file(templates_dir, success_tpl)) {
@@ -1622,12 +1675,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 		add_standard_headers(res);
 		add_cookie(res, "YOURIP", req.remote_ip_address);
-		// Clear identity cookies so retail's IB3 doesn't auto-resume.
-		// (We don't explicitly clear PERSISTENTEXPRESSLOGINDATA — retail
-		// owns that one.)
-		for (const char *name : {"NWH","NWHANDLE","CHAR","NWI","NWV","NWD",
-		                          "STATSDISPLAYCHID","PCID","EXPBITS",
-		                          "LOGINSESSIONTAG"}) {
+		for (const char *name : {"NWH", "NWHANDLE", "CHAR", "NWI", "NWV", "NWD", "STATSDISPLAYCHID",
+		                          "PERSISTENTEXPRESSLOGINDATA"}) {
 			add_cookie(res, name, "");
 		}
 		return res;
@@ -1677,9 +1726,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			return res;
 		}
 		TemplateVars vars{
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 			{"NWHANDLE",    user ? user->nwhandle : std::string()},
 			{"PCID",        user ? user->pcid     : std::string()},
 			{"NWH",         user ? user->nwh      : std::string()},
@@ -1782,26 +1831,18 @@ void HttpListener::register_legacy_host_join_routes(
 	//                                             success template.
 	auto handle_join = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
-		// Same HTTP/1.0 cookie-loss workaround as /NWLogin.dll: prefer
-		// ?tag= URL param (we set it in REFRESH_ENDPOINT below) and fall
-		// back to NWJOINSESSIONTAG cookie for clients that preserve it.
+		// The relay page's bare refresh carries the tag in the NWJOINSESSIONTAG cookie.
 		std::string tag_from_request;
-		if (req.url_params.get("tag")) {
-			tag_from_request = req.url_params.get("tag");
-		} else {
-			auto tag_it = cookies.find("NWJOINSESSIONTAG");
-			if (tag_it != cookies.end()) tag_from_request = tag_it->second;
-		}
+		if (auto tag_it = cookies.find("NWJOINSESSIONTAG"); tag_it != cookies.end())
+			tag_from_request = tag_it->second;
 
 		// The page link's query (rid=NNN and the page fields) is the first call
 		// even when the client's persistent jar still carries the tag a previous
 		// join or host left: a stock client sends every jar cookie on every GET
-		// (net/novaworld/relay_request.h). Only our client's `?tag=` follow-up and
-		// the relay page's bare refresh resolve a tag.
+		// (net/novaworld/relay_request.h). Only the relay page's bare refresh
+		// resolves a tag.
 		const bool first_call =
-				classify_relay_request(req.url_params.get("tag") != nullptr,
-				                       has_relay_first_call_query(req),
-				                       !tag_from_request.empty()) ==
+				classify_relay_request(has_relay_first_call_query(req), !tag_from_request.empty()) ==
 				RelayLeg::First;
 
 		if (first_call) {
@@ -1819,6 +1860,8 @@ void HttpListener::register_legacy_host_join_routes(
 			s.needexpkey  = req.url_params.get("needexpkey") ? req.url_params.get("needexpkey") : "";
 			s.pfid        = req.url_params.get("pfid")       ? req.url_params.get("pfid")       : "";
 			s.rid         = req.url_params.get("rid")        ? req.url_params.get("rid")        : "";
+			s.gsid        = req.url_params.get("gsid")       ? req.url_params.get("gsid")       : "";
+			s.lan         = req.url_params.get("lan")        ? req.url_params.get("lan")        : "";
 			const std::string tag = s.session_tag;
 			sessions_.put_join(tag, s);
 
@@ -1837,9 +1880,9 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting game server...."},
 				{"REFRESH_ENDPOINT", "NWJoin.dll"},
-				{"HOST_URL",         host_url()},
+				{"HOST_URL",         host_url(game)},
 				{"GSB_SERVER",       gsb_url(game)},
-				{"JOINLAN_URL",      ""},
+				{"JOINLAN_URL",      game.join_lan_url},
 			};
 			crow::response res(200);
 			res.body = render_template_file(templates_dir, relay_template, vars);
@@ -1850,14 +1893,12 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Second call — tag came either from ?tag= or NWJOINSESSIONTAG.
-		// Diagnostic (join-failure triage): show how the tag arrived (proves the
-		// NWJOINSESSIONTAG cookie round-trips on the bare refresh URL) and the
-		// full inbound cookie set — LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA
-		// decide the joiner identity that PUBPCID is encoded from.
-		std::printf("[http] /NWJoin.dll (second call) tag=%s (from %s) cookies=[%s]\n",
+		// Second call — the tag came from the NWJOINSESSIONTAG cookie.
+		// Diagnostic (join-failure triage): the full inbound cookie set —
+		// LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA decide the joiner identity
+		// that PUBPCID is encoded from.
+		std::printf("[http] /NWJoin.dll (second call) tag=%s cookies=[%s]\n",
 				loggable_secret(tag_from_request).c_str(),
-				req.url_params.get("tag") ? "query" : "cookie",
 				cookie_summary(request_cookie_header(req)).c_str());
 		const auto session = sessions_.get_join(tag_from_request);
 		if (!session) {
@@ -1868,32 +1909,79 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Resolve RID — query param wins, falls back to stored value.
-		std::string rid_str = req.url_params.get("rid") ? req.url_params.get("rid") : session->rid;
-		if (rid_str.empty()) {
+		// The joiner's game: the row its page link names.
+		const catalog::GameRow &game =
+				client_game(impl_->games, req, cookies, session->pfid, session->success);
+
+		// Resolve RID — query param wins, falls back to stored value. A LAN-list
+		// join's link (the main page's @JOINLAN_URL@, the games row's join_lan_url)
+		// names the server by its GSID instead: the 0x81 SUS1 the client's LAN
+		// discovery found it by, which is the GSID this service's ServerHostResult
+		// handed that host (service choice: the page answers the link as a join of
+		// that listing).
+		// [orig: UI_DispatchScreenEvent @0x54B920 (dfx2.exe) case 12 - the GSID stored
+		//  @0x54B9AA, @JOINLAN_URL@ read @0x54B9BD, @GSID@ replaced from it
+		//  @0x54B9E1..0x54B9F0, UIScene_OpenUrl @0x54BA76]
+		// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5BC0 (dfx2.exe) - "GSID"
+		//  @0x4D5DB3 -> the protocol's server_user_string1 @0x4D5DFF]
+		// [orig: CNapiNetwork_OnSessionDiscovered @0x4C8580 (dfx2.exe) - the 0x81's SUS1
+		//  into the record @0x4C86CD, the row @0x4C87D4]
+		const std::string rid_str = req.url_params.get("rid") ? req.url_params.get("rid") : session->rid;
+		const std::string gsid = req.url_params.get("gsid") ? req.url_params.get("gsid") : session->gsid;
+		if (rid_str.empty() && gsid.empty()) {
 			crow::response res(400);
 			res.body = "missing RID";
 			return res;
 		}
-		const auto rid_parsed = opennova::strutil::parse_ulong(rid_str);
-		if (!rid_parsed) {
-			crow::response res(400);
-			res.body = "bad RID";
-			return res;
+		std::optional<uint32_t> rid_value;
+		if (!rid_str.empty()) {
+			const auto rid_parsed = opennova::strutil::parse_ulong(rid_str);
+			if (!rid_parsed) {
+				crow::response res(400);
+				res.body = "bad RID";
+				return res;
+			}
+			rid_value = static_cast<uint32_t>(*rid_parsed);
 		}
-		const uint32_t rid_value = static_cast<uint32_t>(*rid_parsed);
 
 		// Look up the hosted entry from active_hosts (Phase I.2 — DB-backed).
 		auto db_conn = db_pool_.acquire();
-		auto host_row = hostdb::find_host_by_rid(*db_conn, rid_value);
+		auto host_row = rid_value ? hostdb::find_host_by_rid(*db_conn, *rid_value)
+		                          : hostdb::find_host_by_gsid(*db_conn, gsid);
+		if (!host_row && !rid_value) {
+			// A GSID no listing holds (the host stopped hosting since the LAN
+			// discovery found it): the msgbase page, which a stock client shows, its
+			// title raising no join.
+			// [orig: UI_ProcessWebResponseContent @0x6CA6C0 (dfx2.exe) - the title test
+			//  @0x6CA835..0x6CA874, event 7 only for "[NK=" / "[HOSTKEY=" (the raise
+			//  @0x6CA86A)]
+			std::fprintf(stderr, "[http] /NWJoin.dll GSID %s not in active_hosts\n",
+			             loggable(gsid).c_str());
+			return render_legacy_message(templates_dir, kLanGameGoneMessage,
+					session->failure.empty() ? game.page("main.htm") : session->failure,
+					session->msgbase.empty() ? game.page("msg.htm") : session->msgbase,
+					req.remote_ip_address, host_url(game), gsb_url(game));
+		}
 		if (!host_row) {
 			std::fprintf(stderr, "[http] /NWJoin.dll RID %u not in active_hosts\n",
-			             static_cast<unsigned>(rid_value));
+			             static_cast<unsigned>(*rid_value));
 			crow::response res(404);
 			res.body = "host not found";
 			return res;
 		}
 		const auto &host = *host_row;
+		// The LAN-list join's .joi: LN nonzero, so the client dials the address its
+		// LAN discovery found (not NK's), and no NI / NP / BK, so no proxy rides the
+		// LAN dial; NK stays, the parse refusing a .joi without it (service choice to
+		// the client's contract).
+		// [orig: URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC,
+		//  LN= @0x54B56A, its atol @0x54B5BE]
+		// [orig: CNapiGameSession_InitTransportConnection @0x4C9F80 (dfx2.exe) - the LN
+		//  dial @0x4C9FD5..0x4C9FED, the proxy only with NI, NP and BK all set: the tests
+		//  @0x4CA192..0x4CA1B0]
+		const auto lan_number = opennova::strutil::parse_int(
+				req.url_params.get("lan") ? std::string(req.url_params.get("lan")) : session->lan);
+		const bool lan_join = lan_number && *lan_number != 0;
 
 		// _encode_token (from base.py:113-116):
 		//   chr(ord(value[i]) + ord(key[i]) - 48)
@@ -1916,27 +2004,26 @@ void HttpListener::register_legacy_host_join_routes(
 		const std::string nk_token = encode_token(nk_plain, NOVAKEY_KEY);
 		const std::string ck_token = encode_token(ck_plain, CK_KEY);
 
-		std::printf("[http] /NWJoin.dll (second call) rid=%u host=%s:%d nk=%s ck=%s\n",
-				static_cast<unsigned>(rid_value), loggable(host.host_ip).c_str(), host.host_port,
-				loggable(nk_token).c_str(), loggable(ck_token).c_str());
+		std::printf("[http] /NWJoin.dll (second call) rid=%u host=%s:%d nk=%s ck=%s%s\n",
+				static_cast<unsigned>(host.rid), loggable(host.host_ip).c_str(), host.host_port,
+				loggable(nk_token).c_str(), loggable(ck_token).c_str(), lan_join ? " lan" : "");
 
-		// The joiner's game, and the listing's: the row its LobbyName names
-		// (the joiner's for a listing with none; null for a LobbyName no row
-		// has, which no game's access covers).
-		const catalog::GameRow &game =
-				client_game(impl_->games, req, cookies, session->pfid, session->success);
+		// The listing's game: the row its LobbyName names (the joiner's for a
+		// listing with none; null for a LobbyName no row has, which no game's
+		// access covers).
 		const catalog::GameRow *host_game =
 				host.game.empty() ? &game : impl_->games.by_lobby_name(host.game);
 		TemplateVars vars{
 			{"NK",          nk_token},
 			{"CK",          ck_token},
-			{"NI",          host.host_ip},
-			{"NP",          std::to_string(host.host_port)},
-			{"BK",          BK_VALUE},
+			{"NI",          lan_join ? std::string() : host.host_ip},
+			{"NP",          lan_join ? std::string() : std::to_string(host.host_port)},
+			{"BK",          lan_join ? std::string() : std::string(BK_VALUE)},
+			{"LAN",         lan_join ? "LN=1&" : ""},
 			{"SERVER_NAME", host.server_name.empty() ? std::string("OpenNova Server") : host.server_name},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		const std::string success_template = session->success.empty() ? game.page("join.joi") : session->success;
 		crow::response res(200);
@@ -1984,7 +2071,7 @@ void HttpListener::register_legacy_host_join_routes(
 						joiner->account_status == "banned"
 								? "This NovaWorld account has been banned. NWEC11"
 								: "This NovaWorld account is restricted. NWEC12",
-						fail_tpl, msg_tpl, req.remote_ip_address, host_url(), gsb_url(game));
+						fail_tpl, msg_tpl, req.remote_ip_address, host_url(game), gsb_url(game));
 			}
 			if (joiner) {
 				joiner_user_id = joiner->id;
@@ -2009,7 +2096,7 @@ void HttpListener::register_legacy_host_join_routes(
 					return render_legacy_message(templates_dir,
 							"This NovaWorld account does not have the required expansion key.",
 							session->needexpkey.empty() ? fail_tpl : session->needexpkey, msg_tpl,
-							req.remote_ip_address, host_url(), gsb_url(game));
+							req.remote_ip_address, host_url(game), gsb_url(game));
 				}
 			}
 			if (host_pcid_key.empty()) {
@@ -2095,7 +2182,7 @@ void HttpListener::register_legacy_host_join_routes(
 
 	// ----- Phase F.2: /NWHost.dll two-phase relay -------------------------
 	// Mirrors onnet's onnw/controllers/nova_world/host.py.
-	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
+	//   First call (the page link's query, or no NWJOINSESSIONTAG cookie):
 	//     - generate session + 48-char A-P host_key (24 random bytes nibble-encoded)
 	//     - record the key's hash with the account the request's retail login
 	//       names, an active account (retail_login_user -> hostdb::record_host_key), if any
@@ -2103,7 +2190,7 @@ void HttpListener::register_legacy_host_join_routes(
 	//       jop_2_host2.htm etc.) where the page link names none
 	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll" (bare; the
 	//       NWJOINSESSIONTAG cookie carries the tag — matches onnet/genuine)
-	//   Second call (tag in query or cookie):
+	//   Second call (the bare refresh, its tag in the cookie):
 	//     - render success template (jop_2_host2.htm) with {{HOSTKEY}} substituted
 	//       so retail's IB3 parser extracts <TITLE>[HOSTKEY=...&]</TITLE>
 	//       and uses it for subsequent UDP ClientHostRequest.
@@ -2120,22 +2207,16 @@ void HttpListener::register_legacy_host_join_routes(
 			return looks_encrypted(s) ? fallback : s;
 		};
 
-		// Resolve tag — prefer ?tag= query, fall back to NWJOINSESSIONTAG cookie.
+		// The tag rides the NWJOINSESSIONTAG cookie.
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
-		if (req.url_params.get("tag")) {
-			tag = req.url_params.get("tag");
-		} else {
-			auto it = cookies.find("NWJOINSESSIONTAG");
-			if (it != cookies.end()) tag = it->second;
-		}
+		if (auto it = cookies.find("NWJOINSESSIONTAG"); it != cookies.end()) tag = it->second;
 
 		// The host page link's query is the first call even with a stale tag
 		// cookie in the client's jar (net/novaworld/relay_request.h).
 		const bool host_first_call =
-				classify_relay_request(req.url_params.get("tag") != nullptr,
-				                       has_relay_first_call_query(req),
-				                       !tag.empty()) == RelayLeg::First;
+				classify_relay_request(has_relay_first_call_query(req), !tag.empty()) ==
+				RelayLeg::First;
 		if (host_first_call) {
 			// First call — generate session.
 			HostSession s;
@@ -2194,9 +2275,9 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
 				{"REFRESH_ENDPOINT", "NWHost.dll"},
-				{"HOST_URL",         host_url()},
+				{"HOST_URL",         host_url(game)},
 				{"GSB_SERVER",       gsb_url(game)},
-				{"JOINLAN_URL",      ""},
+				{"JOINLAN_URL",      game.join_lan_url},
 			};
 			crow::response res(200);
 			res.body = render_template_file(templates_dir, relay_tpl, vars);
@@ -2228,9 +2309,9 @@ void HttpListener::register_legacy_host_join_routes(
 				client_game(impl_->games, req, cookies, session->pfid, session->success);
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
-			{"HOST_URL",    host_url()},
+			{"HOST_URL",    host_url(game)},
 			{"GSB_SERVER",  gsb_url(game)},
-			{"JOINLAN_URL", ""},
+			{"JOINLAN_URL", game.join_lan_url},
 		};
 		crow::response res(200);
 		res.body = render_template_file(templates_dir, session->success, vars);
@@ -2331,13 +2412,22 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			return res;
 		}
 
-		// *.htm / *.mnx / *.joi — game-client templates from
-		// apps/novaworld_web/templates/. No {{VAR}} substitution since
-		// these are loaded via direct GET (e.g. retail's GET /jop_2_main.mnx
-		// after the relay refresh).
+		// *.htm / *.mnx / *.joi from apps/novaworld_web/templates/ by direct GET (retail's GET
+		// /jop_2_main.mnx after the relay refresh): as stored but for {{WEB_ROOT}} (web_root_for:
+		// JO's sign-in template's image lines; D-NET-NEW-L9-52); any other {{X}} stays as it is.
 		const auto ext = std::filesystem::path(subpath).extension().string();
 		if (ext == ".htm" || ext == ".mnx" || ext == ".joi") {
 			if (const auto path = template_file(templates_dir, subpath)) {
+				serve_file(res, *path, content_type_for(*path));
+				res.body = render_template(
+						res.body, {{"WEB_ROOT", web_root_for(web_host_, impl_->app.port())}});
+				return res;
+			}
+		}
+
+		// A root image from static/, as the live /nonbhdx2.tga (D-NET-NEW-L9-52).
+		if (ext == ".tga" && subpath.find('/') == std::string::npos) {
+			if (const auto path = file_under_root(static_dir, subpath)) {
 				serve_file(res, *path, content_type_for(*path));
 				return res;
 			}

@@ -418,6 +418,27 @@ void scanline_texture_alternates_a_dim_row_and_a_noisy_row() {
 	CHECK(bright_rows_in_range);
 }
 
+// The mission textures stage makes the scanlines on the full arm alone; a dedicated host's
+// reduced arm draws none of their texels (D-NET-NEW-L3-35).
+// [orig: Render_InitMissionTextures @0x587120 - the full arm's call @0x587261, the reduced arm
+//  @0x58727A..0x58728C]
+void scanline_texture_builds_on_the_full_arm_alone() {
+	CHECK(builds_frame_fx_scanline_texture(/*dedicated_host=*/false));
+	CHECK(!builds_frame_fx_scanline_texture(/*dedicated_host=*/true));
+}
+
+// The same stage's full arm creates the view effects' shaders (ahead of the tracer pool's) and
+// FrameFX's pixel shaders (the scanline texture's call); the reduced arm creates neither
+// (D-NET-NEW-LF-13).
+// [orig: Render_InitMissionTextures @0x587120 - the full arm's calls @0x587217 and @0x587261, the
+//  reduced arm @0x58727A..0x58728C]
+void view_effect_and_frame_fx_shaders_create_on_the_full_arm_alone() {
+	CHECK(creates_view_effect_shaders(/*dedicated_host=*/false));
+	CHECK(!creates_view_effect_shaders(/*dedicated_host=*/true));
+	CHECK(creates_frame_fx_pixel_shaders(/*dedicated_host=*/false));
+	CHECK(!creates_frame_fx_pixel_shaders(/*dedicated_host=*/true));
+}
+
 // [orig: ps @0x7DC3D8; ps @0x7DC228]
 void nvg_tint_and_glow_follow_their_pixel_shaders() {
 	const FrameFxRgb tint = nvg_tint_color({0.3f, 0.3f, 0.3f});
@@ -448,6 +469,8 @@ int main() {
 	thermal_stage_inverts_the_luma_into_green();
 	fan_keeps_the_centre_and_blurs_toward_the_border();
 	scanline_texture_alternates_a_dim_row_and_a_noisy_row();
+	scanline_texture_builds_on_the_full_arm_alone();
+	view_effect_and_frame_fx_shaders_create_on_the_full_arm_alone();
 	nvg_tint_and_glow_follow_their_pixel_shaders();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

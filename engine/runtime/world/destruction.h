@@ -48,11 +48,6 @@ class CollisionWorld;
 // Per-item destruction traits, host-fed from items.def by the item-traits sweep
 // (Simulation::resolve_item_traits) — the def fields the death chain reads.
 // ----------------------------------------------------------------------------
-struct GlassPointTrait {
-    Vec3 local_pos;
-    Vec3 local_dir;
-};
-
 struct DeathEffectPoint {
 	Vec3 local_pos;
 	Vec3 local_dir;
@@ -70,18 +65,17 @@ struct DeathEffectBank {
 // the S2C 0x13 client kill as cb(entity, 4, 0), and the pool think walks as
 // cb(entity, 0, 0) whenever the entity's +0x2AC countdown expires. An empty
 // tag and a tag without a row resolve the "null" row.
-// [orig: Entity_LookupRenderCallbacks @0x407dc0 — stricmp @0x407de2, the
+// [orig: EntityDef_LookupClassCallbacks @0x407dc0 — the stricmp call @0x407DD8, the
 //  row-0 miss default @0x407dee, def+0x138 @0x407e2d; EntityDef_InitAllCallbacks
 //  @0x4a5aa9 ("Null" for an empty tag); the notify sites @0x4e6f93 / @0x42ebf5;
 //  the pool-1 think gate @0x4b8e1b, the pool-2 cohort gate @0x4c2291]
 enum class ItemDeathClass : uint8_t {
-	// Rows built without a def (hand-built tests) and the class rows whose
-	// event callback is dispatched by another system (the throwable rows
-	// and the organic/vehicle rows that never
-	// reach this notify): the pre-dispatch body, i.e. the tree callback.
+	// Rows built without a def (hand-built tests) and the person rows
+	// (org0 / org1 / plyr), which never reach this notify: the pre-dispatch
+	// body, i.e. the tree callback.
 	kUnwitnessed = 0,
-	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, the
-	       // callback-less nade @0x813138, an empty/unknown tag) -> 0x406FF0:
+	kNull, // "null" @0x813000 (and psec @0x813288, pwrp @0x813360, an empty/unknown
+	       // tag) -> 0x406FF0:
 	       // +0x2AC = 0x1000000 and nothing else — the item never dies.
 	       // The missile rows rokt/stng/hlfr/jvln @0x8132B8..0x813300 ->
 	       // MissileClass_HandleEvent @0x443630 and arty @0x813318 -> ArtyClass_HandleEvent @0x443640
@@ -108,11 +102,45 @@ enum class ItemDeathClass : uint8_t {
     // @0x813348 -> GflrClass_HandleEvent @0x443660: a bare `retn` — no +0x2AC write, no
     // body at all. Never the tree body. (IDA 2026-09-14)
     kNone,
+    // The nade row @0x813138, whose event word is 0: no callback runs (the think and the
+    // round hit test the word, @0x4B4BD8 / @0x4E8205).
+    kNoCallback,
+    // The placed devices' rows: the think is the event callback, so a damage site's
+    // phase runs it too (ThrowableSim::device_class_event).
+    kSatchel,  // schl @0x813150 -> Entity_SatchelThink @0x443670
+    kClaymore, // clym @0x813168 -> Entity_ClaymoreThink @0x4438C0
+    kAVMine,   // vmne @0x813180 -> Entity_AVMineThink @0x443BB0
+    // lndm @0x813198 -> Entity_LandmineThink @0x441A40: the field's think, which never
+    // reads its phase, so every damage phase runs the same think (MinefieldSystem::think).
+    kLandmine,
+    // The brain machines: CHel @0x8132A0 and cpln @0x8133A8 (jmp @0x462120) ->
+    // EntityAI_ProcessAirStateMachine @0x4581B0; cveh @0x813378, cbot @0x813390 and ctrn
+    // @0x8133C0 (jmps @0x462130 / @0x462140) -> EntityAI_ProcessGroundStateMachine
+    // @0x4583C0. Both return at a null +0x64 brain (@0x4581B9..0x4581BE /
+    // @0x4583CA..0x4583D1), which is every item this notify reaches.
+    kBrainMachine,
 };
 
 // The class row for an items.def ai_function tag — the retail table walk
 // (whole-string, case-insensitive; a miss and the empty tag are the null row).
 ItemDeathClass item_death_class_from_tag(const char *ai_function);
+
+// The gnrc / gnrl / gnl2 rows' class init: an entity with no ground link takes the nearest pool-2
+// or pool-1 entity a 10-unit drop from its position meets (CollisionWorld::
+// raycast_nearest_entity), none for bare ground.
+// [orig: Entity_CacheGroundEntityBelow @0x407D60]
+void cache_ground_entity_below(World &world, Entity &e);
+// One row's def+0x148 class init as far as it is that cache: a gnrc / gnrl / gnl2 row runs it,
+// every other row's init is another (or none). The load's pass, a deployable's spawn, the
+// powerup walk and a joiner's 0x18 record call it.
+// [orig: the gnrc @0x8130C0, gnrl @0x8130D8 and gnl2 @0x8130F0 rows' third dword
+//  Entity_CacheGroundEntityBelow @0x407D60; the def+0x148 calls Entity_InitAllFromModels
+//  @0x40E55B, Entity_SpawnDeployable @0x51C462, Powerup_InitAllEntities @0x4432E9 / @0x443335,
+//  NapiNPClientMsg_FullEntitySpawn @0x433E82]
+void run_ground_cache_class_init(World &world, Entity &e);
+// The load's class inits of those rows, over pools 2, 3, 1 and 0 as the model init runs them.
+// [orig: Entity_InitAllFromModels @0x40E460]
+void run_ground_cache_class_inits(World &world);
 
 // The render facts of a death piece's model, host-fed from the loaded .3di
 // (the ItemDeathTraits carrier precedent): the per-LOD RLOD thresholds and
@@ -147,10 +175,27 @@ struct RegionalItemSound {
     int32_t range_ticks = 0;
 };
 
+// One userpoint of a loaded model as the runtime model keeps it: the 48-byte
+// record's raw 16.16 position @0, direction @12 and name @32, model axes
+// [orig: the model's userpoint array +0xC0, count +0xBC, read by
+//  Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90 (@0x5CEB43..0x5CEB49,
+//  the name @0x5CEBBE, the position @0x5CEBD1..0x5CEBE8, the direction
+//  @0x5CECCD..0x5CECE5)].
+struct ModelUserPoint {
+    std::string name;
+    int32_t pos_q16[3] = {};
+    int32_t dir_q16[3] = {};
+};
+
 struct ItemDeathTraits {
     // The event/death callback row (item_death_class_from_tag on the def's
     // ai_function) — destruction_notify_item_damage dispatches on it.
     ItemDeathClass death_class = ItemDeathClass::kUnwitnessed;
+    // The same row's def+0x148 class init is the aircraft one (a CHel or cpln row), whose
+    // tail binds an EWeap def's MountSlot (VehicleSystem::run_weapon_slot_class_init).
+    // [orig: CHel @0x8132A0 -> Entity_InitHelicopterAIFromDef @0x4683C0; cpln @0x8133A8 ->
+    //  j_Entity_InitHelicopterAIFromDef @0x474550]
+    bool air_class_init = false;
     // Intact MODEL/CMDL carriers used by building class callbacks.
     bool model_loaded = false;
     bool model_bounds_loaded = false;
@@ -173,12 +218,40 @@ struct ItemDeathTraits {
     int32_t model_min_q16[3] = {};
     int32_t model_max_q16[3] = {};
     std::string graphic_name;
+    // The bullet GLASS leg's model words (impact_scar.h): the graphic model's
+    // userpoints (entity+0x30) and the primary husk's GHDR name and userpoints
+    // (entity+0x34), which the leg walks instead under Flags & 4.
+    std::vector<ModelUserPoint> graphic_userpoints;
+    std::string husk_name;
+    std::vector<ModelUserPoint> husk_userpoints;
+    // Each model's LOD-0 render model (the runtime model's +0x20) is absent or carries +0x10
+    // bit 0 (a skinned model, GHDR mesh type 2), so the leg projects no decal onto it
+    // (collision_resolve.cpp's lod0_refuses_decal) [orig: Scar_ProjectDecalOntoEntity
+    //  @0x5CE517..0x5CE526].
+    bool graphic_lod0_refuses_decal = false;
+    bool husk_lod0_refuses_decal = false;
+    // Each model has no collision block (the runtime model's +0xB0; ours the parsed collision
+    // tree), so the leg projects no decal onto it [orig: Scar_ProjectDecalOntoEntity
+    //  @0x5CE509..0x5CE511].
+    bool graphic_no_collision_block = false;
+    bool husk_no_collision_block = false;
+    // Each model's scar-cache bone callback (+0xAC) returns no matrix array (LOD 0's RMDL tag
+    // is the bone table's 'pwp0' row), so a hit on section 0 projects no decal
+    // (collision_resolve.cpp's scar_bones_null) [orig: Scar_ProjectDecalOntoEntity
+    //  @0x5CE52C..0x5CE564; BoneCallback_pwp0_Bone @0x4E29E0, `xor eax, eax; retn`].
+    bool graphic_scar_bones_null = false;
+    bool husk_scar_bones_null = false;
     std::string particlefx;
     bool has_particlefx_point = false;
     int32_t particlefx_point_q16[3] = {};
     int32_t particlefx_direction_q16[3] = {};
     std::array<RegionalItemSound, 4> regional_sounds;
     std::array<std::string, 4> regional_loops;
+    // def+0x848, the door-open set: the profile's slot 9, the def's door_open_sound over it
+    // (empty: none resolved). The ele0 mover's start cue plays it.
+    // [orig: ItemDef_ResolveAllResources @0x49E5F0 - the profile copies @0x49E62D / @0x49E74A,
+    //  the name's resolve @0x49E883..0x49E89A]
+    std::string door_open_set;
     bool has_sound_point = false;
     Vec3 sound_point; // intact-model SOUND userpoint, mission-local axes
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
@@ -206,11 +279,16 @@ struct ItemDeathTraits {
     // piece spawn and the piece draw read it [orig: Entity_SpawnDeathPieces
     // @ 0x4934af..0x4934c3 huskFinalModel ?: huskModel]. Empty = no model.
     DeathPieceModel piece_model;
-    // Section 0's z extents (units) — the dead-wreck ground rest offset
-    // [orig: ground -= |sec0 z min| upright / += |sec0 z max| inverted
-    // @ 0x461e23-0x461e4b / @ 0x494034-0x49405e].
-    float husk_rest_min_z = 0.0f;
-    float husk_rest_max_z = 0.0f;
+    // The piece model's collision section 0 z min / z max words (16.16, the
+    // model's axes, z up): the dead wreck's ground rest offset, ground -= |z min|
+    // upright, += |z max| inverted, and the class init's husk floor |z min|.
+    // [orig: the model+0xB0 block's +0x6C row 0, +0x54 / +0x58
+    //  (Threedi_BuildCollisionModelFromChunks @0x5B3BF0 - @0x5B4027 / @0x5B4045);
+    //  Entity_ProcessFallingDeathPhysics @0x461E25..0x461E4B;
+    //  Entity_UpdateFallingDeathPhysics @0x49402D..0x49405E;
+    //  Entity_InitVehicleAIFromDef @0x468839..0x468858]
+    int32_t husk_rest_z_lo_q16 = 0;
+    int32_t husk_rest_z_hi_q16 = 0;
     bool is_decoration = false; // def type 2 (+0x5C) — no death glow light
                                 // [orig: @ 0x4934ee], and the death kick DROPS
                                 // instead of popping [orig: @ 0x493969]
@@ -234,21 +312,16 @@ struct ItemDeathTraits {
     // at the entity position (interned to the +0x4E2 handle at mission start)
     // [orig: Entity_TransitionToGroundDeath @ 0x493080 read @ 0x493088].
     std::string particlefinale;
-    // Husk-model "KZ" user points (model-local, mission axes) — each queues a
-    // kz_OrganicBlast r=5.0 at its full-Euler world pose; empty -> one blast
-    // at the entity position
-    // with r = kz ?: bound radius. [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]
-    std::vector<Vec3> kz_points;
+    // Husk-model "KZ" user points, the model's int32 words (model-local, mission
+    // axes) — each queues a kz_OrganicBlast r=5.0 at its full-Euler world pose;
+    // empty -> one blast at the entity position with r = kz ?: bound radius.
+    // [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0 - the words @0x4EAC93..0x4EACAA]
+    std::vector<FixedVec3> kz_points;
     // Bridge husk "DEAD" user points (model-local, mission axes). UnitType 11
     // emits one un-attached Effect_ShockWaterBrdg at each transformed x/y and
     // the raw mission water plane; an empty bank has no origin fallback.
     // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
     std::vector<Vec3> bridge_dead_points;
-    // Exact intact-model window userpoint selected by retail's static
-    // model/surface table. Positions and directions use mission-local axes;
-    // the explosion sweep applies the entity's complete authored pose.
-    // [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
-    std::vector<GlassPointTrait> glass_points;
 };
 
 struct ItemDeathTraitsTable {
@@ -319,7 +392,11 @@ inline uint8_t death_piece_type_index(const uint8_t (&types)[17], int section) {
 // override float (0 = the ammo's kz_maxradius).
 // ----------------------------------------------------------------------------
 struct ExplosionEntry {
-    Vec3 pos;
+    // The entry's centre words (+0 / +4 / +8), D-NET-507 [orig:
+    // WeaponEffect_QueueExplosion @0x4E8330; Projectile_ProcessExplosionQueue
+    // @0x4EAD80 reads them in its `sub` @0x4EAF31 / @0x4EAF43 / @0x4EAF56, the
+    // deltas stored @0x4EAF33 / @0x4EAF46 / @0x4EAF59].
+    EntityPosition pos;
     int32_t dir_bam = 0;
     int32_t type = 0;          // ammo kztype: 1 knife/ram, 2 standard, 3 medic,
                                // 4 radius-blast (direct hit), 5 c4, 6 bullets, 7 slash
@@ -431,7 +508,6 @@ struct DestructionEvents {
     int32_t items_destroyed = 0;
     int32_t crackles = 0; // wreck-fire crackle rolls that fired (S12b)
     int32_t debris_triangles = 0; // resolved CFAC samples in this drain
-    int32_t glass_points = 0;     // newly broken exact userpoints in this drain
 
     void clear() {
         effects.clear();
@@ -439,7 +515,6 @@ struct DestructionEvents {
         husk_swaps.clear();
         death_lights.clear();
         debris_triangles = 0;
-        glass_points = 0;
     }
 };
 
@@ -448,21 +523,6 @@ inline constexpr const char *kSectionDebrisFoliageEffect =
 inline constexpr const char *kSectionDebrisWoodEffect =
         "Effect_TreeWoodExp"; // [orig: g_FxTreeWoodExp @0x2C25BF4]
 
-inline constexpr const char *kGlassShatterEffects[4] = {
-        "Effect_BldGlassExp", "Effect_BldPaperExp",
-        "Effect_BldFireExp", "Effect_BldDustExp"};
-// The glass userpoint path rolls each effect's ALT probability column from the
-// surface-effect table (40 B rows {name[32], prob_main f32, prob_alt f32}) and
-// spawns on rand16 % 100 <= ftol(prob_alt * 100.0f). Glass's alt cell holds
-// 0x3EA8F5C3 (exactly 0.33f); the product 33.0000013 truncates to 33 in every
-// intermediate precision, so the <= admits rolls 0..33 — 34 of 100.
-// [orig: Effect_RollSurfaceEffectProbability @ 0x5CC1F0 scale flt_7C4654=100.0
-//  @ 0x5CC25A; g_SurfaceEffectProbTable @ 0x8418B8; useAltProbability=1 pushes
-//  @ 0x5CF0B3/0x5CF0F4 in Terrain_SpawnEffectsAtUserPoint]
-inline constexpr float kGlassShatterAltProbability[4] = {
-        0.33f, 0.05f, 0.05f, 0.1f};
-static_assert(static_cast<int>(kGlassShatterAltProbability[0] * 100.0f) == 33,
-              "glass gate boundary: ftol(0.33f * 100) is 33, admitting 34 rolls");
 
 // The wreck-fire random crackle, rolled per tick per masked fire-bone slot at
 // the bone's position on World's stream C (World::next_prng16_c, retail's
@@ -521,19 +581,21 @@ struct DeathPiece {
     uint8_t section = 0;       // the ONE section this piece renders [piece+116]
     uint8_t type_index = 0;    // debris-type table row
     float render_scale = 1.0f; // def debrisScale ?: 1.0 [piece+136]
-    Vec3 pos;                  // [piece+4..12]
-    Vec3 vel;                  // units/tick [piece+28..36]
-    float spin_a = 0.0f;       // [piece+40] spin rates, degrees per tick
-    float spin_b = 0.0f;       // [piece+44] (max*(rand%100)/100 clamped >= min
-                               // [orig: sub @ 0x57b940])
-    // The piece orientation, degrees: the wrecked entity's live heading
-    // (entity+0x10, the BAM heading), pitch and roll at the spawn, then heading
-    // and pitch spin per tick; roll keeps its spawn value
-    // [orig: the pose copy @ 0x4936be..0x4936de; Yaw/Pitch += spin
-    // @ 0x492db9/0x492dc2].
-    float heading = 0.0f;      // [piece+16]
-    float pitch = 0.0f;        // [piece+20]
-    float roll = 0.0f;         // [piece+24]
+    // The piece is an entity-shaped row on words (D-NET-507): Position
+    // (+4..+0xC), the velocity words per tick (+0x1C..+0x24), the BAM32
+    // spin words per tick (+0x28 / +0x2C, Death_RandomSpinRateBam @0x57B940)
+    // and the Yaw / Pitch / Roll words (+0x10..+0x18): the wrecked entity's
+    // live words at the spawn, then Yaw and Pitch spin per tick; Roll keeps
+    // its spawn word. [orig: the pose copy @0x4936BE..0x4936DE; the
+    // velocity stores @0x4937E1 / @0x4937F2 / @0x49380E; the spin stores
+    // @0x4937B0 / @0x4937C5; Entity_ApplyGravitySimple @0x492D80]
+    EntityPosition pos;        // [piece+4..12]
+    int32_t vel[3] = {};       // [piece+28..36]
+    int32_t spin_a = 0;        // [piece+40]
+    int32_t spin_b = 0;        // [piece+44]
+    int32_t heading = 0;       // [piece+16]
+    int32_t pitch = 0;         // [piece+20]
+    int32_t roll = 0;          // [piece+24]
     // Every piece-model section except this piece's own: the sections its
     // draw collapses [piece+124, orig: @ 0x493897..0x4938b0].
     uint32_t hidden_mask = 0;
@@ -571,9 +633,16 @@ public:
     static constexpr int kCapacity = 64;
     std::vector<ExplosionEntry> queue;
 
-    // Authority-only push [orig: WeaponEffect_QueueExplosion @ 0x4e8330 —
-    // non-authority calls and a full queue drop silently].
+    // The raw push every projectile producer shares: no gate, a full queue
+    // drops the entry silently [orig: WeaponEffect_PushExplosionQueueEntry
+    // @0x4E83C0, the 64 cap @0x4E83C7..0x4E83CA].
     void queue_explosion(World &world, const ExplosionEntry &e);
+    // The gated entry the death chain, the collapses, the landing and the item
+    // explosion blasts take: off the authority it returns at once, so a peer's
+    // own death chain queues no blast; else the same 64-entry push
+    // [orig: WeaponEffect_QueueExplosion @0x4E8330 - `cmp is_authority` / `jz`
+    //  @0x4E8333..0x4E8339, the cap @0x4E8342..0x4E8345].
+    void queue_explosion_on_authority(World &world, const ExplosionEntry &e);
 
     // Drain the queue against the entity pools [orig:
     // Projectile_ProcessExplosionQueue @ 0x4ead80]. Kill-zone types 2/4/5/6/7
@@ -701,7 +770,23 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
 void update_item_destroy_fade(World &world, Entity &entity);
+// Entity_PublishSwapFadePhases with no Flags gate: the fade phases and the progress from the
+// death tick, the destroy delay and the def's timing (the caller tests the 0x4 bit).
+void publish_swap_fade_phases(World &world, Entity &entity);
+// The upfx mover's husk leg (Flags 0x4 set): the authority's one S2C 0x26 in a session (sub-type
+// bit 0x20), then a building def's two blasts once the husk fade completes or there is no husk
+// model (bit 0x80). `progress` is the swap fade's.
+void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, double progress);
 void update_item_ambient_sound(World &world, const Entity &entity);
+// The ele0 row's mover over an entity's words (the caller passes the words its kind keeps them
+// in): the savedLivePose stamp, the step (state << 10) - 0x400 into the lift, Z and the vertical
+// step, the next state (0 while the lift is above 0, else 1; 2 below 8 units while the +0x28
+// ground entity stands on this one), and on a change of state the def's door-open set (to 1
+// only) and its first loop. [orig: Entity_UpdateFallAndLandState @0x4A20E0]
+void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z, int32_t &state,
+		int32_t &prev_state);
+// An item on the ele0 row: update_elevator over its own words.
+void update_item_elevator(World &world, Entity &entity);
 void squib_event(World &world, Entity &entity, int phase);
 void tick_squib(World &world, Entity &entity);
 
@@ -728,6 +813,14 @@ void apply_item_state_event(World &world, Entity &target, int16_t section,
 
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
+
+// The item class row `cls`'s event callback body over `target` (destruction_notify_item_damage's
+// dispatch past its organic, AI and section-clone gates; `traits` the row's death traits, null
+// when unswept): the +0x2AC word it writes is Entity::class_think_ticks. A player body bound to an
+// item class row runs it too (world::player_body_row_event, D-NET-348).
+// [orig: g_EntityClassEventCallbackTable @0x813000 - the row's def+0x138 callback]
+void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
+        const ItemDeathTraits *traits, int phase, ItemHitContext hit = {});
 
 // The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
 // -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback. Both
@@ -758,6 +851,20 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // `silent` = the callback flags' bit 0: the pieces fly without their type's
 // trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
 uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
+
+// The death legs' water word: the given water height as a word. Retail keeps no
+// dry sentinel: with no water authored the word is 0, the memset's, and every leg
+// compares against it (a top word below 0 on a dry map is underwater).
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
+int32_t death_water_q16(float water_height);
+
+// An entity's top as the death legs test it against the water word: its Z word
+// plus its bound word (entity+0), a wrapping add. [orig: Entity_InitDeathSounds
+// @0x4939B0 - `mov eax, [esi+0Ch]; add eax, [esi]; cmp eax, g_EnvWaterHeightFixed`
+// @0x493A6E..0x493A73]
+int32_t entity_top_q16(const Entity &e);
 
 // Shared generic falling callback, also called explicitly by vehicle states 21/23.
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]

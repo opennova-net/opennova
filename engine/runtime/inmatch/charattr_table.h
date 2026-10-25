@@ -105,12 +105,19 @@ uint32_t charattr_class_checksum(const CharAttrTable &state, uint8_t class_id, u
 // an active row's word while ATTRIBUTES is not disabled, else 0. World::class_attribute_flags takes them.
 std::array<uint32_t, charattr::kClassCount> charattr_class_attribute_rows(const CharAttrTable &state);
 
+// The sixteen per-class camouflage items as CharAttr_GetCammoTypeId answers them (index = class - 1):
+// properties 10 (JUNGLE_CAMMO), 11 (DESERT_CAMMO), 12 (ARCTIC_CAMMO) of an active row, 0 for an inactive
+// one [orig: CharAttr_GetCammoTypeId @ 0x4127b0]. World::class_cammo_type_ids takes them.
+std::array<std::array<int32_t, 3>, charattr::kClassCount> charattr_class_cammo_rows(const CharAttrTable &state);
+
 // The world's per-class ATTRIBUTES words and disabled word from the table this
 // client holds: a joiner's live copy (every S2C 0x41 / 0x42 applied so far)
 // when `live` is set, else the boot copy (a host's, its restrictions applied);
 // a failed or missing charattr.def is the all-zero table, no class carrying an
 // attribute [orig: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
 // CharAttr_ClassHasAttribute @0x4125e0].
+// The same table's per-class camouflage items go with them, the World's charattr marked installed when the
+// table read a charattr.def (a player spawn binds its class's camouflage row from them, D-NET-348).
 void install_class_attribute_flags(world::World &world, const CharAttrTable *live,
 		const CharAttrTable &boot);
 

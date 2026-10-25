@@ -100,6 +100,14 @@ void Simulation::install_item_catalog() {
 	if (runtime_) runtime_->view().set_item_catalog(assets_.item_replication_catalog);
 }
 
+void Simulation::install_character_registry() {
+	if (!runtime_) return;
+	// A mounted table installs even when empty: its fallback packs 0, as retail's empty
+	// table does (engine ClientReplicaPipeline::resolve_player_net_id carries the witness).
+	runtime_->view().set_character_registry(
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
+}
+
 void Simulation::install_charattr_table() {
 	if (runtime_) runtime_->set_charattr_table(net_.charattr_table);
 	sync_class_attribute_flags();
@@ -140,15 +148,30 @@ void Simulation::install_join_cd_cookie() {
 	runtime_->set_join_cd_cookie(net_.join_cd_cookie);
 }
 
+void Simulation::install_join_glsvss_request() {
+	if (!runtime_) return;
+	runtime_->set_glsvss_request(net_.join_glsvss_request);
+}
+
+void Simulation::install_join_mission_start() {
+	if (!runtime_) return;
+	runtime_->set_sync_tail_loading(net_.join_sync_tail_loading);
+	runtime_->set_mission_data_loading(net_.join_mission_data_loading);
+}
+
 int Simulation::set_character_avatar_database(
 		const Ref<AvatarDatabase> &p_avatar_db) {
 	assets_.character_sex_rows.clear();
+	assets_.character_registry = opennova::inmatch::CharacterRegistry{};
+	assets_.character_registry_mounted = p_avatar_db.is_valid();
 	if (p_avatar_db.is_valid()) {
 		for (const AvatarDatabase::CharacterSexRow &row :
 				p_avatar_db->character_sex_rows())
 			assets_.character_sex_rows.push_back(
 					CharacterSexRow{row.character_id, row.female});
+		assets_.character_registry = p_avatar_db->character_registry();
 	}
+	install_character_registry();
 	apply_character_traits_to_world();
 	return static_cast<int>(assets_.character_sex_rows.size());
 }
@@ -174,7 +197,7 @@ int Simulation::resolve_collision_instances(
 	// Production installs the shared native asset source first (ADR 0044).
 	if (!kernel_->assets().has_source()) {
 		godot::UtilityFunctions::print_verbose(
-				"Simulation: no asset root installed — collision/occlusion "
+				"Simulation: no asset root installed: collision/occlusion "
 				"extraction has no model source (install set_asset_root first)");
 	}
 	// The sweep itself is the kernel's (mission::resolve_collision_instances

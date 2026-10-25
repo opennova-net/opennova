@@ -14,12 +14,17 @@ class FakeWorldView:
 	extends WorldView
 	var root: ResourceRoot
 	var sim_value: Simulation
+	# The last frame's scene gate verdict (a listen host's status page reads false).
+	var scene_drawn_value := true
 
 	func _sim() -> Simulation:
 		return sim_value
 
 	func _resource_root() -> ResourceRoot:
 		return root
+
+	func _scene_drawn() -> bool:
+		return scene_drawn_value
 
 
 ## Remove the staged files named in `targets` (what an authored fixture's

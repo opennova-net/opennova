@@ -79,7 +79,7 @@ std::vector<uint8_t> encode_pool3_sync_batch(const Pool3SyncBatch &batch) {
 		if (rec.ammo_count)      flags |= kPool3SyncHasAmmoCount;      // entry+290 [orig: 0x5035b7]
 		if (rec.team_byte)       flags |= kPool3SyncHasTeamByte;       // entry+354 [orig: 0x5035f1]
 		if (rec.weapon_type)     flags |= kPool3SyncHasWeaponType;     // entry+640 [orig: 0x50360b]
-		if (rec.score_byte)      flags |= kPool3SyncHasScoreByte;      // entry+672 [orig: 0x503633]
+		if (rec.score_present || rec.score_byte) flags |= kPool3SyncHasScoreByte; // entry+672 dword [orig: 0x503633]
 
 		w.u8(flags);                    // [orig: *flags_location = flags @ 0x503660]
 		w.u32(uint32_t(rec.pos_x));     // entry+4  [orig: 0x503553]
@@ -369,8 +369,8 @@ std::vector<uint8_t> encode_infantry_compact_record(const InfantryCompactRecord 
 	w.u16(rec.pos_z_compressed);     // [orig: 0x4c083c / 0x4c08c5]
 	w.u8(rec.yaw_byte);              // (entity+16 + 0x800000) >> 24  [orig: 0x4c08f8]
 	w.u8(rec.flags_byte);            // entity+36                     [orig: 0x4c0917]
-	w.u8(rec.pitch_byte);            // entity+748 (clamped)          [orig: 0x4c0960]
-	w.u8(rec.aim_yaw_byte);          // entity+720                    [orig: 0x4c0983]
+	w.u8(rec.aim_heading_byte);      // entity+748 (clamped)          [orig: 0x4c0960]
+	w.u8(rec.aim_pitch_byte);        // entity+720                    [orig: 0x4c0983]
 	w.u8(rec.anim_byte);             // entity+696 ?: entity+700      [orig: 0x4c09ae]
 	return out; // 14 B
 }
@@ -576,42 +576,77 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 		}
 	}
 
-	// Event loop: tag=1 per-entity compacts, then tag=2 round events, then tag=0.
-	// (The original interleaves 1/2 pairs under the send budget
-	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50f070]; the retail decode loop
-	// is tag-driven, so grouped order is read identically.)
-	for (const FrameUpdateRecord &rec : fu.records) {
-		switch (rec.cls) {
-		case EntityClass::Player:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_player_compact_record(rec.player));
-			break;
-		case EntityClass::Vehicle:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_vehicle_compact_record(rec.vehicle));
-			break;
-		case EntityClass::Infantry:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			append(encode_infantry_compact_record(rec.infantry));
-			break;
-		case EntityClass::NoNetworkCallback:
-			w.u8(1);
-			w.u16(rec.handle);
-			w.u16(rec.type_id);
-			break;
-		default:
-			break;
+	// Event loop: each turn writes the next tag-1 per-entity compact, then the
+	// next tag-2 round event, until both lists are spent; then tag 0. The host's
+	// budget walk chose how many of each this frame carries, in the same pairs.
+	// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - the priority
+	//  list's record (tag 1 @0x50F257) then the g_RoundEventRefs chain's
+	//  (tag 2 @0x50F326, NetPacket_SerializeRoundEvent @0x50F331) in each turn,
+	//  the terminator @0x50F366]
+	// A record with no carrier compresses its anchor-relative x with ECX holding a payload
+	// address: the player's write left it at its carrier word (`lea ecx, [eax+1]` past the
+	// seat byte), the vehicle's at its x word (`lea ecx, [eax+2]` past the parent word), both
+	// the record body's byte 2. So a folded x takes that address's shift bits, and a folded y
+	// and z re-chain off the word before them (`movzx ecx, ax` after each call).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - @0x4C0A89, the call @0x4C0BE1, the
+	//  chain @0x4C0BE6 / @0x4C0C15; Entity_SerializeVehicleState @0x460560 - @0x460C55,
+	//  the call @0x460C78, the chain @0x460C7D / @0x460CA7]
+	const auto world_fold = [&out](auto rec) {
+		if (!(rec.pos_zero_fold & kPosFoldX)) return rec;
+		const auto folded = [](uint16_t word) { return (word & 1u) != 0 ? -1 : 0; };
+		rec.pos_x_compressed = network_compress_fixedpoint(folded(rec.pos_x_compressed),
+				kNapiMsgPayloadBufAddress + uint32_t(out.size()) + 2u);
+		if (rec.pos_zero_fold & kPosFoldY)
+			rec.pos_y_compressed = network_compress_fixedpoint(folded(rec.pos_y_compressed),
+					rec.pos_x_compressed);
+		if (rec.pos_zero_fold & kPosFoldZ)
+			rec.pos_z_compressed = network_compress_fixedpoint(folded(rec.pos_z_compressed),
+					rec.pos_y_compressed);
+		return rec;
+	};
+	const std::size_t turns = std::max(fu.records.size(), fu.round_events.size());
+	for (std::size_t turn = 0; turn < turns; ++turn) {
+		if (turn < fu.records.size()) {
+			const FrameUpdateRecord &rec = fu.records[turn];
+			switch (rec.cls) {
+			case EntityClass::Player:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_player_compact_record(rec.player.carrier_handle == 0xFFFF
+						? world_fold(rec.player) : rec.player));
+				break;
+			case EntityClass::Vehicle:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_vehicle_compact_record(rec.vehicle.parent_slot_handle == 0xFFFF
+						? world_fold(rec.vehicle) : rec.vehicle));
+				break;
+			case EntityClass::Infantry:
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				append(encode_infantry_compact_record(rec.infantry));
+				break;
+			case EntityClass::NoNetworkCallback:
+			case EntityClass::Guided:
+				// A guided record is its header alone: the serializer's mode-1 call with
+				// format 11 writes nothing (D-NET-NEW-L1-28) [orig:
+				// NetPacket_SerializeEntityStatesToPacket @0x50F070 - @0x50F2C7 / @0x50F2CE,
+				// the call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - @0x447C80].
+				w.u8(1);
+				w.u16(rec.handle);
+				w.u16(rec.type_id);
+				break;
+			default:
+				break;
+			}
 		}
-	}
-	for (const RoundEventRecord &ev : fu.round_events) {
-		w.u8(2);
-		append(encode_round_event_record(ev));
+		if (turn < fu.round_events.size()) {
+			w.u8(2);
+			append(encode_round_event_record(fu.round_events[turn]));
+		}
 	}
 	w.u8(0); // event-loop terminator
 	return out;

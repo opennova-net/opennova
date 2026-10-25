@@ -11,6 +11,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h> // CONTROL_REQUEST_PERIOD_TICKS (the join's quartet seed)
 
 #include "host_test_setup.h"
 
@@ -73,17 +74,27 @@ void write_u16_le(std::vector<uint8_t> &bytes, std::size_t offset, uint16_t valu
 int main_impl() {
 	// A World with the host player spawned + one 6002 marker (both the spawn-select start AND a
 	// pool-3 spawn-marker the 0x20 batch streams).
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	w::AiSystem &ai = world.ai;
+	// An in-session host: the join's own 0x0A (D-NET-501) rides retail's is_in_session, which
+	// ours reads as the world's session fact (D-NET-NEW-L1-19) [orig: Server_OnPlayerJoin
+	// @0x51A824..0x51A82D].
+	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
+	// items.def's Player row: the host body's ItemTypeIndex and def (the 0x0C skips a row
+	// without them, D-NET-487).
+	world.tables.player.has_item_def = true;
+	world.tables.player.item_type_index = 1;
+	world.tables.player.item_type = 3;
 	{
 		w::Entity start;
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
-		start.yaw = 0;
+		start.heading = w::placed_heading_bam(0);
 		start.item_type_index = 1; // the trait sweep's row: not an empty slot
 		start.has_item_def = true;
 		world.registry.spawn(3, start);
@@ -113,7 +124,7 @@ int main_impl() {
 		bld.kind = w::EntityKind::Building;
 		bld.item_id = 0x044c;
 		bld.position = {-396.6f, 360.1f, 11.2f};
-		bld.yaw = 0;
+		bld.heading = w::placed_heading_bam(0);
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
@@ -166,14 +177,17 @@ int main_impl() {
 	            "fixture distinguishes canonical and loaded header lengths")) return 1;
 
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::GameConfig config;
 	if (!expect(config.class_allow_mask == 0x03FFu,
 	            "GameConfig defaults to retail's all-ten-classes mask")) return 1;
 	config.class_allow_mask = 0x0155u; // non-default pins config sourcing, not a hard-coded golden
 	config.game_type = 0x00010020u;
 	config.default_spawn_requires_no_team_zone = 1;
-	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
+	// A LAN session host: BuildFlags reads the session fact off the socket mode, so the 0x08
+	// tail is the session's word (a socketless single player's is 0, D-NET-NEW-L1-19).
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Lan,
 	                        /*host_key=*/0, &loopback, config);
 	ctx.world = &world;
 	ctx.mission = &mission;
@@ -183,42 +197,46 @@ int main_impl() {
 	ctx.mission_location_names = {"Weapons Cache", "Rebel Outpost"};
 	const uint32_t advertised_build_flags = ctx.np_protocol.build_flags;
 	ctx.config.server_password = "mutated-after-create";
-	if (!expect(inmatch::build_server_config_flags(ctx) != advertised_build_flags,
+	const uint32_t live_build_flags = inmatch::build_server_config_flags(ctx);
+	if (!expect(live_build_flags == (advertised_build_flags | 0x8u) &&
+	                    live_build_flags != advertised_build_flags,
 	            "fixture mutation changes the live BuildFlags computation")) return 1;
 
-	// Spawn the host's own pool-0 player (so the burst's 0x0C has it with dcb 2).
+	// The host's own add, then the mission start's round init spawns its pool-0 player (so the
+	// burst's 0x0C has it with dcb 2; D-NET-NEW-L7-39).
 	inmatch::Server_InitNewRoundState(ctx);
-	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player spawned")) return 1;
+	if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx, world) == 1, "host player added")) return 1;
+	inmatch::test::round_init_own_body(ctx);
 
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 
 	// Drive the burst to completion, collecting the emitted (tag, body) in order.
 	// The HOST LOOPBACK (type-2) skips the loadout gate and drains in one shot — it has no remote
 	// client sending C2S 0x2F. The loadout gate only applies to REMOTE JOINERS (type-1).
+	// The world stream's 0x1A leaves the own slot in state 5; the own client's C2S 0x0B (its
+	// mission start's end) then joins it from the next receive pump (D-NET-NEW-L4-5).
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step = inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 
-	if (!expect(reached, "burst reached game-state 9 (the world-stream terminator)")) return 1;
-	if (!expect(conn.burst.spawned && conn.burst.game_state == 9, "burst marks spawned + game_state 9")) return 1;
+	if (!expect(reached, "the burst's 0x1A leaves the own slot in state 5 for its C2S 0x0B")) return 1;
+	if (!expect(conn.burst.spawned && conn.burst.game_state == 10 &&
+	                    conn.slot_state == inmatch::PlayerSlotState::Joined,
+	            "the own 0x0B's join marks spawned, game state 10, slot state 6")) return 1;
 	if (!expect(conn.phase == inmatch::ConnectionPhase::Spawned, "connection advanced to Spawned")) return 1;
 
 	// (1) The full §5.2a emitted tag order. Player-sync: 0x2C, 0x08, 0x2A×6, 0x1C, 0x0B, 0x66, 0x76,
 	// 0x11 (matches the retail-lan-host-join golden frames 144-160). World-stream streams EVERY pool in
 	// full (paged ~640 B/datagram): 0x10 pool-2, 0x0D pool-1, 0x0C pool-0, 0x20 pool-3, then the
 	// mission-text 0x7E and 0x1A. Then
-	// the GAME-START BUNDLE 0x42 / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the joiner's
-	// load-gate; matches golden frames 318-319). (0x45 terrain remains absent.) In THIS
+	// the GAME-START BUNDLE 0x42 / 0x0A / 0x0F / 0x4D / 0x61 / 0x3E (the deploy unsticker — clears the
+	// joiner's load-gate; matches golden frames 318-319; the in-session 0x0A is the slot's first,
+	// D-NET-501 [orig: Server_OnPlayerJoin @0x51A82D]). (0x45 terrain remains absent.) In THIS
 	// minimal World pool-1 is empty (header-only 0x0D page); pool-2 carries one building so the
 	// 0x10 page also pins the D-NET-147 fields.
 	const std::vector<uint8_t> want_order = {0x2C, 0x08, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A, 0x2A,
 	                                         0x1C, 0x0B, 0x66, 0x76, 0x11, 0x10, 0x0D, 0x0C, 0x20, 0x7E, 0x1A,
-	                                         0x42, 0x0F, 0x4D, 0x61, 0x3E};
+	                                         0x42, 0x0A, 0x0F, 0x4D, 0x61, 0x3E};
 	std::vector<uint8_t> got_order;
 	for (auto &m : emitted) got_order.push_back(m.tag);
 	if (!expect(got_order == want_order, "emitted tag order matches §5.2a (full player-sync + world-stream)")) {
@@ -281,12 +299,14 @@ int main_impl() {
 				"0x0F gameFlags bit1 advertises the target-less spawn restriction")) {
 			return 1;
 		}
-		// The fresh player carries its start marker's placement angles, so the i16
-		// yaw is the spawn angle's high half: yaw 0 -> (90 << 16) / 360 = 0x4000,
-		// where 90 x 11930464 >> 16 would give 0x3FFF.
+		// The i16 yaw is the heading word's high half. This Co-op word authors no
+		// 6094 / 6001 start (the 6002 is a deathmatch family's), so the add's
+		// placement stores nothing and the fresh player keeps the zeroed entity's
+		// heading word 0 (the start marker's 0x4000 rounding is pinned below).
 		// [orig: NetPacket_WriteWorldStateLoad0x0F `movzx edx, word ptr [ebp+12h]`
-		//  @0x502D6D; Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-		if (!expect(state.yaw == 0x4000 && state.pitch == 0 && state.roll == 0,
+		//  @0x502D6D; Entity_SpawnFromAnimSlotProperty - the memset @0x43C3FE, the
+		//  placement @0x43C459]
+		if (!expect(state.yaw == 0 && state.pitch == 0 && state.roll == 0,
 				"0x0F yaw is the placement heading's high half")) {
 			return 1;
 		}
@@ -311,8 +331,10 @@ int main_impl() {
 		            "0x0C body decodes")) return 1;
 		bool host_dcb = false;
 		for (const auto &r : batch.records)
-			if (r.item_type_id == 0x14B9 && r.owner_connection_id == inmatch::kHostPlayerDcb) host_dcb = true;
-		if (!expect(host_dcb, "0x0C carries the host player (0x14B9) with entity+0x78 == dcb 2")) return 1;
+			if (r.item_type_id == 0x14B9 && r.owner_connection_id == inmatch::test::own_dcb(ctx))
+				host_dcb = true;
+		if (!expect(inmatch::test::own_dcb(ctx) != 0 && host_dcb,
+		            "0x0C carries the host player (0x14B9) with entity+0x78 == its twin's dcb")) return 1;
 	}
 
 	// (2) 0x20 decodes + carries the spawn marker.
@@ -385,8 +407,12 @@ int main_impl() {
 		}
 		if (!expect(dwords_match,
 		            "0x08 rule dwords carry only the 0x00010020 game type")) return 1;
-		if (!expect(read_u32_le(*b, 47) == advertised_build_flags,
-		            "0x08 BuildFlags stays identical to the create-session P2 snapshot"))
+		// The tail is BuildFlags called live, not the create's P2 word (D-NET-NEW-L1-40)
+		// [orig: ServerConfig_SerializeToPacket - CNapiServerConfig_BuildFlags @0x505D29,
+		//  stored @0x505D3B].
+		if (!expect(read_u32_le(*b, 47) == live_build_flags &&
+		                    ctx.np_protocol.build_flags == advertised_build_flags,
+		            "0x08's BuildFlags is the live word; P2 keeps the create's"))
 			return 1;
 	}
 	{
@@ -419,7 +445,8 @@ int main_impl() {
 	// !spawned-gated F3 predicate would drop F3 entirely on the World path (losing the dcb-timing
 	// signal). This drives a fresh host loopback (unspawned) so tick_connections runs the full burst. ---
 	{
-		w::World w2;
+		auto w2_storage = std::make_unique<w::World>();
+		w::World &w2 = *w2_storage;
 		w::AiSystem &ai2 = w2.ai;
 		w2.registry.configure_pool(0, 16);
 		w2.registry.configure_pool(3, 16);
@@ -433,13 +460,15 @@ int main_impl() {
 			w2.registry.spawn(3, m);
 		}
 		ns::LoopbackChannel lb2;
-		inmatch::NapiNPServerCtx ctx2;
+		auto ctx2_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &ctx2 = *ctx2_storage;
 		inmatch::test::bring_up_host(ctx2, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb2);
 		ctx2.world = &w2;
 		ctx2.mission = &mission;
 		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(ctx2, w2) == 1,
-		            "world-path pose player spawned")) return 1;
+		            "world-path pose player added")) return 1;
+		inmatch::test::round_init_own_body(ctx2); // the mission start's round init (D-NET-NEW-L7-39)
 		inmatch::NapiNPConnection &pose_conn = ctx2.np_protocol.connection_list[0];
 		w::AiEntity *pose_ai = ai2.for_handle(pose_conn.link.owned_entity);
 		if (!expect(pose_ai != nullptr, "world-path pose resolves the owned AiEntity")) return 1;
@@ -452,42 +481,46 @@ int main_impl() {
 		for (const inmatch::TickOut &to : outs) {
 			for (const inmatch::HostAcceptEvent &ev : to.events) {
 				if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerEnteredWorldStreaming) {
-					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "F3 self_id == host dcb")) return 1;
+					if (!expect(ev.self_id == inmatch::test::own_dcb(ctx2), "F3 self_id == host dcb")) return 1;
 					if (!expect(ev.pose.pitch == kLookPitchHigh,
 					            "F3 world-path pose pitch == AiEntity BAM32 high word")) return 1;
-					if (f3_at < 0) f3_at = seq;
-				} else if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned) {
-					if (!expect(ev.self_id == inmatch::kHostPlayerDcb, "PeerSpawned self_id == host dcb")) return 1;
-					if (!expect(ev.pose.pitch == kLookPitchHigh,
-					            "PeerSpawned world-path pose pitch == AiEntity BAM32 high word")) return 1;
 					// The spawn marker's yaw 0 placement heading's high half, 0x4000
 					// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
 					if (!expect(ev.pose.heading == 0x4000,
-					            "PeerSpawned world-path pose heading == the placement heading's high half")) return 1;
+					            "F3 world-path pose heading == the placement heading's high half")) return 1;
+					if (f3_at < 0) f3_at = seq;
+				} else if (ev.kind == inmatch::HostAcceptEvent::Kind::PeerSpawned) {
 					if (spawned_at < 0) spawned_at = seq;
 				}
 				++seq;
 			}
 		}
 		if (!expect(f3_at >= 0, "one-shot World burst still surfaces PeerEnteredWorldStreaming (F3)")) return 1;
-		if (!expect(spawned_at >= 0, "one-shot World burst surfaces PeerSpawned")) return 1;
-		if (!expect(f3_at < spawned_at, "F3 surfaces BEFORE PeerSpawned (dcb-timing order)")) return 1;
+		// The burst ends in slot state 5: the own slot joins from its own C2S 0x0B's receiver,
+		// not from the producer, so the burst surfaces no PeerSpawned (D-NET-NEW-L4-5).
+		if (!expect(spawned_at < 0 && !pose_conn.burst.spawned &&
+		                    pose_conn.slot_state == inmatch::PlayerSlotState::AwaitJoin,
+		            "the own burst ends in slot state 5, unjoined")) return 1;
+		(void)inmatch::test::host_own_join(ctx2, pose_conn, /*now_tick=*/1);
+		if (!expect(pose_conn.burst.spawned, "the own C2S 0x0B's join enters the game")) return 1;
 	}
 
 	// A bound World entity without an AiEntity keeps the historical zero-pitch fallback. In
-	// particular, world::Entity::pitch is not a substitute: it has different ownership/units.
+	// particular, world::Entity::pitch_bam is not a substitute: it has different ownership/units.
 	{
-		w::World no_ai_world;
+		auto no_ai_world_storage = std::make_unique<w::World>();
+		w::World &no_ai_world = *no_ai_world_storage;
 		no_ai_world.registry.configure_pool(0, 1);
 		w::Entity entity;
 		entity.kind = w::EntityKind::Organic;
 		entity.item_id = 0x14B9;
-		entity.pitch = 0x1234;
+		entity.pitch_bam = 0x12340000;
 		const w::EntityHandle entity_handle = no_ai_world.registry.spawn(0, entity);
 		if (!expect(entity_handle.valid(), "missing-AI pose fixture entity spawned")) return 1;
 
 		ns::LoopbackChannel no_ai_loopback;
-		inmatch::NapiNPServerCtx no_ai_ctx;
+		auto no_ai_ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &no_ai_ctx = *no_ai_ctx_storage;
 		inmatch::test::bring_up_host(no_ai_ctx, inmatch::ConnectionMode::HostClient,
 		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &no_ai_loopback);
 		no_ai_ctx.world = &no_ai_world;
@@ -516,8 +549,12 @@ int main_impl() {
 	// (client sends loadout request) -> S 0x5A + game-start. Without the gate, 0x1A and the
 	// game-start would land together and the client couldn't send 0x2F between them. ---
 	{
-		w::World w3;
+		auto w3_storage = std::make_unique<w::World>();
+		w::World &w3 = *w3_storage;
 		w::AiSystem &ai3 = w3.ai;
+		// A remote joiner's host is in session: the join's network reset rides is_in_session
+		// (D-NET-NEW-L1-19) [orig: PlayerSlot_ResetNetworkState @0x4F9FD3..0x4F9FD9].
+		w3.rules.mp_session = true;
 		w3.registry.configure_pool(0, 16);
 		w3.registry.configure_pool(3, 16);
 		{
@@ -529,7 +566,8 @@ int main_impl() {
 			m.has_item_def = true;
 			w3.registry.spawn(3, m);
 		}
-		inmatch::NapiNPServerCtx ctx3;
+		auto ctx3_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+		inmatch::NapiNPServerCtx &ctx3 = *ctx3_storage;
 		ns::LoopbackChannel lb3;
 		inmatch::test::bring_up_host(ctx3, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 		                        /*host_key=*/0, &lb3);
@@ -537,6 +575,7 @@ int main_impl() {
 		ctx3.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx3);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx3, w3);
+		inmatch::test::round_init_own_body(ctx3); // the mission start's round init (D-NET-NEW-L7-39)
 
 		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
 		// Built in place: a NapiNPConnection is several KiB, and this frame's stack is full.
@@ -544,7 +583,24 @@ int main_impl() {
 		jconn.type = 1;
 		jconn.connection_id = inmatch::kFirstJoinerDcb;
 		jconn.phase = inmatch::ConnectionPhase::PlayerAdded;
-		jconn.burst.sync_state = 0;
+		jconn.slot_state = inmatch::PlayerSlotState::Added;
+		// D-NET-500: the added slot's track waits for the joiner's C2S 0x09 (sent once its
+		// mission load completed); until then the producer sends nothing.
+		for (int i = 0; i < 4; ++i) {
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			if (!expect(s.messages.empty(), "no player-sync record before the C2S 0x09")) return 1;
+		}
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::CHECKSUM_RESPONSE, {}));
+			const std::vector<opennova::ProtocolMessage> replies = inmatch::dispatch_session_replies(
+					ctx3.config, jconn, msgs, 1, ctx3.np_protocol.connection_list, &w3, inputs);
+			if (!expect(replies.empty() && jconn.slot_state == inmatch::PlayerSlotState::PlayerSync &&
+			                    jconn.burst.game_state == 9,
+			            "the C2S 0x09 answers nothing and enters slot state 2, game state 9")) return 1;
+		}
 
 		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
 		// so the burst takes many calls to stream the player-sync tail — and then PARKS at sync-state
@@ -558,7 +614,7 @@ int main_impl() {
 		for (int i = 0; i < 64 && !parked_for_spawn_menu; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
-			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
+			if (!expect(!jconn.burst.spawned, "joiner not in-game while paced/gated")) return 1;
 			if (!s.messages.empty() && s.messages.front().tag == 0x1C) {
 				std::vector<uint8_t> tags;
 				for (const auto &m : s.messages) tags.push_back(m.tag);
@@ -571,7 +627,7 @@ int main_impl() {
 				if (!expect(m.tag != 0x10 && m.tag != 0x0D && m.tag != 0x0C && m.tag != 0x20,
 				            "no world-stream tag before the client's C2S 0x0A (D-NET-150)")) return 1;
 			}
-			if (jconn.burst.sync_state == 3) parked_for_spawn_menu = true;
+			if (jconn.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest) parked_for_spawn_menu = true;
 		}
 		if (!expect(parked_for_spawn_menu, "player-sync tail parks at sync-state 3 (awaiting C2S 0x0A)")) return 1;
 		if (!expect(saw_atomic_player_sync_tail,
@@ -584,30 +640,38 @@ int main_impl() {
 		// Simulate the client's C2S 0x0A spawn-menu request (what the dispatch case 0x0A applies)
 		// [orig: NapiNPServerMsg_HandlePlayerSpawnRequest @0x513260].
 		jconn.burst.game_state = 9;
-		jconn.burst.sync_state = 4;
+		jconn.slot_state = inmatch::PlayerSlotState::WorldStream;
 		jconn.burst.world_stream_phase = 0;
-		bool reached_loadout_gate = false;
-		for (int i = 0; i < 256 && !reached_loadout_gate; ++i) {
+		bool reached_await_join = false;
+		for (int i = 0; i < 256 && !reached_await_join; ++i) {
 			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
 			++paced_calls;
-			if (!expect(!s.reached_in_game, "joiner not in-game while paced/gated")) return 1;
-			// The per-tick budget means each call emits a bounded number of datagrams (the game-start
-			// bundle is the only atomic >budget batch, and it's past the gate).
-			if (jconn.burst.sync_state == 4 && jconn.burst.world_stream_phase == 8 &&
-			    !jconn.burst.loadout_received) {
-				reached_loadout_gate = true;
-			}
+			if (!expect(!jconn.burst.spawned, "joiner not in-game while paced/gated")) return 1;
+			reached_await_join = jconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
-		if (!expect(reached_loadout_gate, "paced joiner burst reaches the phase 7->8 loadout gate")) return 1;
+		if (!expect(reached_await_join && jconn.burst.game_state == 9,
+		            "the world stream's 0x1A parks the slot in state 5, game state 9")) return 1;
 		if (!expect(paced_calls > 3, "burst was actually PACED across multiple calls (not one-shot)")) return 1;
-		if (!expect(!jconn.burst.spawned, "joiner burst not yet spawned (waiting for loadout)")) return 1;
+		if (!expect(!jconn.burst.spawned, "joiner not joined before its C2S 0x0B")) return 1;
+		for (int i = 0; i < 4; ++i) {
+			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/1);
+			if (!expect(s.messages.empty(), "the producer sends nothing in slot state 5")) return 1;
+		}
 
-		// Simulate the C2S 0x2F -> sets loadout_received, and the stock client's
-		// C2S 0x0B mission-file report that TRIGGERS the bundle [orig:
-		// NapiNPServerMsg_PlayerJoinRequest @0x51AB10 -> Server_OnPlayerJoin
-		// @0x51A680]; drive to completion.
+		// The stock client's join-time C2S 0x2F pair seeded the armory cooldown, then its
+		// C2S 0x0B runs the join [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 ->
+		// Server_OnPlayerJoin @0x51A680].
 		jconn.burst.loadout_received = true;
-		jconn.reply.mission_status_received = true;
+		jconn.link.armory_reuse_seconds = 30;
+		jconn.reply.chat_last_ms = 1234;
+		jconn.reply.rtt_request_countdown = 17;
+		jconn.reply.control_request_countdown = 0;
+		jconn.reply.charattr_unanswered_count = 3;
+		jconn.reply.time_sync_unanswered_count = 2;
+		jconn.reply.time_sync_sequence = 9;
+		w::PlayerSpawn jbody;
+		jbody.team = 1;
+		jconn.link.owned_entity = w::spawn_remote_player(w3, jbody);
 		// D-NET-374: the session's mp_NoCharAbilities and mp_NoScopeDrift ride the
 		// join as one S2C 0x41 each (properties 0 and 7) ahead of the 0x42, whose
 		// body is the authority's packed latches [orig: Server_OnPlayerJoin
@@ -620,36 +684,68 @@ int main_impl() {
 		// [orig: Server_OnPlayerJoin @0x51A71F / @0x51A725].
 		jconn.reply.client_quality = 3;
 		jconn.reply.client_quality_dirty = true;
+		std::vector<opennova::ProtocolMessage> join_tail;
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
+			join_tail = inmatch::dispatch_session_replies(ctx3.config, jconn, msgs, 2,
+					ctx3.np_protocol.connection_list, &w3, inputs);
+		}
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
 		bool saw_transient_42 = false;
 		std::vector<std::vector<uint8_t>> clears;
 		std::vector<uint8_t> latches;
-		bool reached = false;
-		for (int i = 0; i < 16 && !reached; ++i) {
-			inmatch::InitialStateStep s = inmatch::Server_SendInitialGameStateToPlayer(ctx3, jconn, /*now_tick=*/2);
-			for (const auto &m : s.messages) {
-				if (m.tag == 0x41 && !saw_42) clears.push_back(m.body);
-				if (m.tag == 0x42) {
-					saw_42 = true;
-					saw_transient_42 = !m.reliable;
-					latches = m.body;
-				}
-				if (m.tag == 0x0F) saw_0f = true;
-				if (m.tag == 0x3E) saw_3e = true;
+		for (const auto &m : join_tail) {
+			if (m.tag == 0x41 && !saw_42) clears.push_back(m.payload);
+			if (m.tag == 0x42) {
+				saw_42 = true;
+				saw_transient_42 = !m.reliable;
+				latches = m.payload;
 			}
-			reached = s.reached_in_game;
+			if (m.tag == 0x0F) saw_0f = true;
+			if (m.tag == 0x3E) saw_3e = true;
 		}
 		if (!expect(clears == std::vector<std::vector<uint8_t>>({{0x00}, {0x07}}),
 		            "the join's 0x41s name the session's restricted properties, ahead of its 0x42")) return 1;
 		if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the join's 0x42 carries the authority's latches"))
 			return 1;
-		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
 		if (!expect(jconn.reply.client_quality == 0 && !jconn.reply.client_quality_dirty,
 		            "the join zeroes the slot's quality level and its resend flag")) return 1;
-		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
-		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
+		if (!expect(jconn.burst.spawned && jconn.slot_state == inmatch::PlayerSlotState::Joined &&
+		                    jconn.burst.game_state == 10,
+		            "the 0x0B joins the slot: state 6, game state 10")) return 1;
+		if (!expect(saw_42 && saw_0f && saw_3e, "the join sends the game-start messages (0x42/0x0F/0x3E)")) return 1;
 		if (!expect(saw_transient_42,
-		            "phase-8 input flags use retail's one-send transient delivery")) return 1;
+		            "the join's input flags use retail's one-send transient delivery")) return 1;
+		// D-NET-502: the join, not the add, zeroes the armory cooldown the join-time 0x2F seeded
+		// and rewrites the state byte's bits [orig: @0x51A752; @0x51A6D3..0x51A73A].
+		if (!expect(jconn.link.armory_reuse_seconds == 0 && jconn.reply.chat_last_ms == 0 &&
+		                    jconn.reply.rtt_request_countdown == 0 &&
+		                    !jconn.link.preround_loadout_latch &&
+		                    jconn.reply.frontier_hint_pending && !jconn.reply.capture_nag_held &&
+		                    jconn.reply.state6_entry_host_ms_valid,
+		            "the join writes the slot's join words")) return 1;
+		// D-NET-532: the state-6 entry's network reset seeds the quartet countdown with its
+		// period and zeroes the silence counters and the time-sync round
+		// [orig: PlayerSlot_ResetNetworkState @0x4F9FD0, 744 @0x4FA021].
+		if (!expect(jconn.reply.control_request_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS &&
+		                    inmatch::CONTROL_REQUEST_PERIOD_TICKS == 744u &&
+		                    jconn.reply.charattr_unanswered_count == 0 &&
+		                    jconn.reply.time_sync_unanswered_count == 0 &&
+		                    jconn.reply.time_sync_sequence == 0,
+		            "the join's network reset seeds the 744-tick quartet countdown")) return 1;
+		// A second 0x0B from the joined slot (game state 10) is dropped.
+		{
+			inmatch::ServerDispatchInputs inputs;
+			inputs.server_ctx = &ctx3;
+			std::vector<opennova::ProtocolMessage> msgs;
+			msgs.push_back(opennova::make_protocol_message(opennova::c2s::MISSION_FILE_STATUS, {0x00}));
+			if (!expect(inmatch::dispatch_session_replies(ctx3.config, jconn, msgs, 3,
+					ctx3.np_protocol.connection_list, &w3, inputs).empty(),
+			            "a joined slot's second 0x0B is dropped")) return 1;
+		}
 	}
 
 	// --- The game-start bundle opens on the C2S 0x0B alone, for a spectator (whose 0x2F draws
@@ -682,31 +778,32 @@ int main_impl() {
 		ctx4.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx4);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx4, w4);
+		inmatch::test::round_init_own_body(ctx4); // the mission start's round init (D-NET-NEW-L7-39)
 		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.emplace_back();
 		sconn.type = 1;
 		sconn.connection_id = inmatch::kFirstJoinerDcb;
 		sconn.phase = inmatch::ConnectionPhase::PlayerAdded;
 		sconn.link.spectator = as_spectator;
-		for (int i = 0; i < 64 && sconn.burst.sync_state != 3; ++i)
+		sconn.slot_state = inmatch::PlayerSlotState::PlayerSync; // its C2S 0x09
+		for (int i = 0; i < 64 && sconn.slot_state != inmatch::PlayerSlotState::AwaitWorldRequest; ++i)
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
-		if (!expect(sconn.burst.sync_state == 3, "the joiner's player sync parks at state 3"))
+		if (!expect(sconn.slot_state == inmatch::PlayerSlotState::AwaitWorldRequest,
+		            "the joiner's player sync parks at state 3"))
 			return 1;
 		sconn.burst.game_state = 9; // the C2S 0x0A advance
-		sconn.burst.sync_state = 4;
+		sconn.slot_state = inmatch::PlayerSlotState::WorldStream;
 		sconn.burst.world_stream_phase = 0;
 		bool gated = false;
 		for (int i = 0; i < 256 && !gated; ++i) {
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
-			gated = sconn.burst.sync_state == 4 && sconn.burst.world_stream_phase == 8;
+			gated = sconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
-		if (!expect(gated, "the joiner's burst reaches the phase-8 gate")) return 1;
+		if (!expect(gated, "the joiner's world stream ends in slot state 5")) return 1;
 		// An accepted 0x2F alone opens nothing.
 		sconn.burst.loadout_received = true;
-		bool reached = false;
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2).reached_in_game;
-		if (!expect(!reached && !sconn.burst.spawned,
-		            "the bundle does not open on a 0x2F")) return 1;
+		for (int i = 0; i < 16; ++i)
+			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2);
+		if (!expect(!sconn.burst.spawned, "the join does not run on a 0x2F")) return 1;
 		sconn.burst.loadout_received = false;
 		// The C2S 0x0B through the receiver.
 		auto send_0b = [&]() {
@@ -717,20 +814,16 @@ int main_impl() {
 			(void)inmatch::dispatch_session_replies(ctx4.config, sconn, msgs, 3,
 					ctx4.np_protocol.connection_list, &w4, inputs);
 		};
-		// The slot has no entity yet: retail drops its 0x0B, so the bundle stays shut.
+		// The slot has no entity yet: retail drops its 0x0B, so the join does not run.
 		send_0b();
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 3).reached_in_game;
-		if (!expect(!reached && !sconn.reply.mission_status_received,
+		if (!expect(!sconn.burst.spawned && sconn.slot_state == inmatch::PlayerSlotState::AwaitJoin,
 		            "a 0x0B from a slot without its entity is dropped")) return 1;
 		w::PlayerSpawn body;
 		body.team = 1;
 		sconn.link.owned_entity = w::spawn_remote_player(w4, body);
 		if (!expect(sconn.link.owned_entity.valid(), "the slot's entity spawns")) return 1;
 		send_0b();
-		for (int i = 0; i < 16 && !reached; ++i)
-			reached = inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 4).reached_in_game;
-		if (!expect(reached && sconn.burst.spawned,
+		if (!expect(sconn.burst.spawned,
 		            as_spectator ? "a spectator's bundle opens on its 0x0B alone"
 		                         : "a player's bundle opens on its 0x0B alone")) return 1;
 	}
@@ -748,16 +841,21 @@ int main_impl() {
 // [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503ae1..0x503aed;
 //  Entity_InitFromModel @0x40e204..0x40e20a]
 int pool1_flags_field_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(1, 8);
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 0x004A; // the capture's d_buggy
 	vehicle.item_type = 1;
+	vehicle.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	vehicle.item_type_index = 1;
 	const w::EntityHandle vehicle_h = world.registry.spawn(1, vehicle);
 	w::Entity crate;
 	crate.kind = w::EntityKind::Item;
 	crate.item_id = 0x050E;
+	crate.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	crate.item_type_index = 1;
 	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
 	const auto record_of = [&](w::EntityHandle h, opennova::PoolSpawnRecord &out) {
 		const std::vector<uint8_t> wire =
@@ -817,9 +915,11 @@ std::vector<uint8_t> hex_bytes(const char *hex) {
 //  @0x503E7F..0x503EC0; Entity_InitFromModel @0x40E10C..0x40E11E;
 //  Entity_SpawnFromBMSRecord @0x40ED80/@0x40ED8C]
 int pool1_fixture_bytes_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(1, 0x50);
 	const auto place = [&](int slot, w::Entity item) {
+		item.item_type_index = 1; // the trait sweep's row (D-NET-487)
 		return world.registry.spawn_at(w::EntityHandle::make(1, slot), item);
 	};
 	w::Entity item;
@@ -830,11 +930,11 @@ int pool1_fixture_bytes_impl() {
 	item.engine_flags = w::kEntityFlagMatrixBuilt; // its init's matrix bit 0x20000
 	item.name = "never streamed";               // not an AIData def
 	item.position = {1058.0f, 592.0f, 60.0f};
-	item.yaw = 60;                              // heading 30 deg: 0x15550000
+	item.heading = w::placed_heading_bam(60);                              // heading 30 deg: 0x15550000
 	item.ammo_count = 0xFF;
 	if (!expect(place(0x46, item).valid(), "item 0x1046 spawns")) return 1;
 	item.position = {992.0f, -489.0f, static_cast<float>(0x00451200) / 65536.0f};
-	item.yaw = 0;                               // heading 90 deg: 0x40000000
+	item.heading = w::placed_heading_bam(0);                               // heading 90 deg: 0x40000000
 	item.ammo_count = 0x00;
 	if (!expect(place(0x48, item).valid(), "item 0x1048 spawns")) return 1;
 	const std::vector<uint8_t> wire =
@@ -850,12 +950,14 @@ int pool1_fixture_bytes_impl() {
 	// one empty passenger seat, the 0xFF byte, the AI trailer with its spawn x/y
 	// and ai_textfile "d_buggy", and the brain byte 0x00 — every one of them
 	// present exactly as retail gates it.
-	w::World vworld;
+	auto vworld_storage = std::make_unique<w::World>();
+	w::World &vworld = *vworld_storage;
 	vworld.registry.configure_pool(1, 0x20);
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 0x004A;
 	vehicle.has_item_def = true;
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_type = 1;
 	vehicle.item_attrib = w::kItemAttribAIData;
 	vehicle.is_ai_capable = true;
@@ -863,7 +965,7 @@ int pool1_fixture_bytes_impl() {
 	vehicle.ammo_count = 0xFF;
 	vehicle.position = {989.0f, 578.0f, static_cast<float>(0x003C032C) / 65536.0f};
 	vehicle.spawn_position = vehicle.position;
-	vehicle.yaw = 180; // engine heading 270 deg: 0xC0000000
+	vehicle.heading = w::placed_heading_bam(180); // engine heading 270 deg: 0xC0000000
 	vehicle.team = 2;
 	w::Seat passenger;
 	passenger.type = w::SeatType::Passenger;
@@ -896,18 +998,22 @@ int pool1_fixture_bytes_impl() {
 	// before the carrier's init set REFLECTABLE), the turret's live attitude, team
 	// 1, the carrier as its target, the zero byte, the carrier's refNum 1 and its
 	// slot index 1 as subType. The position is float-exact near the record's.
-	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnWeaponOverlays
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940; Entity_SpawnAddEWeapChildren
 	//  refNum @0x40F3B1, Flags @0x40F404, subType @0x40F40E]
-	w::World cworld;
+	auto cworld_storage = std::make_unique<w::World>();
+	w::World &cworld = *cworld_storage;
 	cworld.registry.configure_pool(1, 0x60);
 	w::Entity tank;
 	tank.kind = w::EntityKind::Item;
 	tank.item_id = 0x00A4;
+	tank.has_item_def = true;  // the trait sweep's row (D-NET-487)
+	tank.item_type_index = 1;
 	const w::EntityHandle tank_h = cworld.registry.spawn_at(w::EntityHandle::make(1, 0x2A), tank);
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x00B6;
 	gun.has_item_def = true;
+	gun.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	gun.item_type = 6;
 	gun.engine_flags = w::kEntityFlagMatrixBuilt;
 	gun.position = {1148.75f, -278.5f, 75.0f};
@@ -934,7 +1040,8 @@ int pool1_fixture_bytes_impl() {
 
 	// The 0x10 static record streams the same live dword: the runtime word joins
 	// the spawn-composed one. [orig: NetPacket_SerializePool2StaticToBuffer @0x5044E6]
-	w::World sworld;
+	auto sworld_storage = std::make_unique<w::World>();
+	w::World &sworld = *sworld_storage;
 	sworld.registry.configure_pool(2, 4);
 	w::Entity building;
 	building.kind = w::EntityKind::Building;
@@ -967,9 +1074,10 @@ int pool1_fixture_bytes_impl() {
 // [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -- the start word
 //  @0x5034C5, the zero word @0x503673, the count @0x503687, the budget
 //  @0x50368B..0x503694 (the cursor step @0x503696 skipped on the cross);
-//  Server_SendInitialGameStateToPlayer @0x51BBA0, the call @0x51BD8E]
+//  Server_SendPlayerSlotStateFrame @0x51BBA0, the call @0x51BD8E]
 int pool3_page_start_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 96);
 	for (int i = 0; i < 80; ++i) {
@@ -979,29 +1087,28 @@ int pool3_page_start_impl() {
 		m.position = {static_cast<float>(i), 20.0f, 1.0f};
 		m.item_type_index = 1; // the trait sweep's row: not an empty slot
 		m.has_item_def = true;
+		m.net_id = static_cast<uint16_t>(0x100 + i); // its DcbId, the net word (D-NET-517)
 		world.registry.spawn(3, m);
 	}
 	const std::vector<std::size_t> freed = {5, 10, 15, 32};
 	for (const std::size_t slot : freed)
 		world.registry.despawn(w::EntityHandle::make(3, static_cast<int>(slot)));
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	std::vector<std::vector<uint8_t>> pages;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (const auto &m : step.messages)
-			if (m.tag == 0x20) pages.push_back(m.body);
-		reached = step.reached_in_game;
-	}
+	std::vector<inmatch::InitialStateMessage> emitted;
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
+	for (const auto &m : emitted)
+		if (m.tag == 0x20) pages.push_back(m.body);
 	if (!expect(reached && pages.size() >= 2, "the 80 pool-3 slots take more than one 0x20 page"))
 		return 1;
 	std::vector<opennova::Pool3SyncBatch> batches(pages.size());
@@ -1022,7 +1129,7 @@ int pool3_page_start_impl() {
 				++zero_words;
 				continue;
 			}
-			if (!expect(r.net_handle == w::EntityHandle::make(3, static_cast<int>(slot)).packed,
+			if (!expect(r.net_handle == 0x100 + slot,
 			            "a record's slot is the page's start word plus its index"))
 				return 1;
 		}
@@ -1058,7 +1165,8 @@ int pool3_page_start_impl() {
 //  @0x40EB1C..0x40EB2E; NetPacket_WriteWorldStateLoad0x0F @0x502D10, the strlen
 //  @0x502EA0..0x502EAC; NapiNPClientMsg_0x00F's bounded copy @0x42e538..0x42e584]
 int location_names_by_name_index_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	opennova::bms::File mission;
@@ -1095,7 +1203,8 @@ int location_names_by_name_index_impl() {
 	}
 
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
@@ -1107,17 +1216,12 @@ int location_names_by_name_index_impl() {
 		return 1;
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 	for (const inmatch::InitialStateMessage &m : emitted)
 		if (m.tag == 0x0F) body = &m.body;
 	opennova::WorldStateLoad state;
@@ -1144,7 +1248,8 @@ int location_names_by_name_index_impl() {
 // tool or test embedder) names the 0x0F deploy-map labels from the promoted
 // type-2044 markers' own labels, in spawn order.
 int location_names_fall_back_to_marker_labels_impl() {
-	w::World world;
+	auto world_storage = std::make_unique<w::World>();
+	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
 	const auto add_marker = [&](int32_t type_id, const char *label) {
@@ -1161,24 +1266,20 @@ int location_names_fall_back_to_marker_labels_impl() {
 	add_marker(2044, "North Ridge");
 	add_marker(2044, "South Pier");
 	ns::LoopbackChannel loopback;
-	inmatch::NapiNPServerCtx ctx;
+	auto ctx_storage = std::make_unique<inmatch::NapiNPServerCtx>();
+	inmatch::NapiNPServerCtx &ctx = *ctx_storage;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
 	ctx.mission_location_names.clear();
 	inmatch::Server_InitNewRoundState(ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::test::round_init_own_body(ctx); // the mission start's round init (D-NET-NEW-L7-39)
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
 	const std::vector<uint8_t> *body = nullptr;
 	std::vector<inmatch::InitialStateMessage> emitted;
-	bool reached = false;
-	for (int i = 0; i < 64 && !reached; ++i) {
-		inmatch::InitialStateStep step =
-				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
-		if (!step.advanced) break;
-		for (auto &m : step.messages) emitted.push_back(m);
-		reached = step.reached_in_game;
-	}
+	const bool reached =
+			inmatch::test::drive_host_own_burst_and_join(ctx, conn, /*now_tick=*/1, emitted);
 	for (const inmatch::InitialStateMessage &m : emitted)
 		if (m.tag == 0x0F) body = &m.body;
 	opennova::WorldStateLoad state;

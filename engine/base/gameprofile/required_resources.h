@@ -31,7 +31,9 @@ typedef enum ResourceSeverity {
     RES_DIALOG,     /* error dialog, then boot continues (gameerr.bin)          */
     RES_REQUIRED,   /* loads unchecked / silent-skips but the feature is        */
                          /* non-functional or visibly degraded without it            */
-    RES_SOFT,       /* logged to _errlog.txt, continues                         */
+    RES_SOFT,       /* logged through the error log, continues; the log's gate  */
+                         /* has no setter in a stock run, so no _errlog.txt line     */
+                         /* is written (D-NET-357)                                   */
     RES_OPTIONAL    /* silent skip / graceful fallback / lazy                   */
 } ResourceSeverity;
 

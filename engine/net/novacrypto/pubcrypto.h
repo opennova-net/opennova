@@ -75,6 +75,18 @@ std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::s
 bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
                       std::vector<uint8_t> &plaintext, std::size_t room = SIZE_MAX);
 
+// A key / value pair under a key chain (the remembered login's cookie holds the account name so):
+// decode_key_chain with a room of 0x8000 bytes, then the payload's text to its first NUL is the
+// key and the text past that NUL to the next the value. False where the original returns -1
+// (`key` / `value` emptied): the chain's decode fails; the key's NUL is the payload's last byte
+// or past it (no value); or a string, its NUL included, exceeds its room.
+// [orig: NapiNP_DecodeEncryptedKeyValue @0x619470 - the outputs cleared @0x6194B9 / @0x6194CA,
+//  NapiNP_DecodeEncryptedString called @0x619517 (the room 0x8000 pushed @0x61950C), the key's
+//  room test @0x619552..0x619556, the value's start test @0x61956E..0x619570, its room test
+//  @0x619598..0x61959C]
+bool decode_key_value(const std::string &encoded, const std::string &key_chain, std::string &key,
+                      std::string &value, std::size_t key_room, std::size_t value_room);
+
 // gt.ssc, the gate tag the game reads encoded by its name alone, under the title's key chain
 // (net/title/title_identity.h: TitleIdentity::gate_tag_keys, decode_gate_tag_file)
 // [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0: the name @ 0x7cbb50].

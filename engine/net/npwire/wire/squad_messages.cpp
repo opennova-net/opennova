@@ -84,7 +84,7 @@ uint16_t decode_entity_handle16(const uint8_t *body, size_t len) {
 }
 
 std::vector<uint8_t> encode_squad_join_request(uint8_t leader) {
-	return {leader}; // [orig: NetPacket_SendWeaponSlotSwitch @0x42dc10]
+	return {leader}; // [orig: NetPacket_SendSquadJoin @0x42dc10]
 }
 
 uint8_t decode_squad_join_request(const uint8_t *body, size_t len) {
@@ -179,7 +179,7 @@ FireteamSet decode_fireteam_set(const uint8_t *body, size_t len) {
 }
 
 std::vector<uint8_t> encode_squad_recruit(const SquadRecruit &recruit) {
-	return {recruit.recruiter, recruit.target}; // [orig: NetPacket_SendTeamChange @0x42dd00]
+	return {recruit.recruiter, recruit.target}; // [orig: NetPacket_SendSquadRecruit @0x42dd00]
 }
 
 SquadRecruit decode_squad_recruit(const uint8_t *body, size_t len) {
@@ -200,7 +200,7 @@ uint8_t decode_squad_recruited(const uint8_t *body, size_t len) {
 }
 
 std::vector<uint8_t> encode_go_code(const GoCode &code) {
-	return {code.leader, code.code}; // [orig: NetPacket_SendVoteKick @0x42dd50]
+	return {code.leader, code.code}; // [orig: NetPacket_SendGoCode @0x42dd50]
 }
 
 GoCode decode_go_code(const uint8_t *body, size_t len) {

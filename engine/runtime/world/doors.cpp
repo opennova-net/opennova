@@ -142,9 +142,10 @@ void DoorSystem::tick(World &world) {
 }
 
 // [orig: DoorClass_HandleEvent @0x43F370]
-void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch_mask) {
+void DoorSystem::command(World &world, Entity &entity, int event) {
     if (!entity.door_event) return;
-    if (event == 6) entity.door_touch_mask = touch_mask;
+    // Event 6 takes the sections of the mask the caller stored (D-NET-133)
+    // [orig: `mov edx, [esi+2B4h]` @0x43F3D9].
     if (event == 6 || event == 7 || event == 8) {
         const uint32_t selected = event == 6 ? entity.door_touch_mask : 0xFFFFFFFFu;
         for (int i = 0; i < entity.door_count; ++i) {
@@ -173,9 +174,9 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
             if (sound != nullptr && sound[0] != '\0') {
                 SoundSlotEvent output;
                 output.source_handle = entity.handle.packed;
-                output.pos[0] = static_cast<int32_t>(entity.position.x * 65536.0f);
-                output.pos[1] = static_cast<int32_t>(entity.position.y * 65536.0f);
-                output.pos[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
+                output.pos[0] = entity.position.x.q16;
+                output.pos[1] = entity.position.y.q16;
+                output.pos[2] = entity.position.z.q16;
                 if (world.pose_provider != nullptr)
                     world.pose_provider->resolve_section_pivot(world, entity.handle,
                             std::max(0, entity.door_first_bone + i), output.pos);

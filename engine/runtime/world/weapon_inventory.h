@@ -66,10 +66,21 @@ struct WeaponAvailability {
 // WeaponDef_BuildItemRestrictionTable @ 0x54DDB0: default 1 per entry, matched names take
 // their pair value (-1 maps to 3 kMissionAllowed), and a parent's loadout_subclasses
 // sub-entries INHERIT the parent's value (the skip_count walk). Pair source: the .mis
-// item_availability chunk ({name, status} records).
+// item_availability chunk ({name, status} records). `mission_allowed` is the value -1 maps
+// to: Jointops.exe's 3, dfx2.exe's 2 [orig: @0x54DE47..0x54DE49; dfx2.exe @0x54B0C7..0x54B0C9].
 void weapon_availability_apply_pairs(
         WeaponAvailability &avail, const WeaponTable &table,
-        const std::vector<std::pair<std::string, int32_t>> &pairs);
+        const std::vector<std::pair<std::string, int32_t>> &pairs,
+        int32_t mission_allowed = weapon_availability_value::kMissionAllowed);
+
+// The template mode of the same builder: each entry takes its template word (-1 maps to
+// `mission_allowed`), and a parent's loadout_subclasses sub-entries inherit the parent's
+// value. [orig: WeaponDef_BuildItemRestrictionTable @0x54DDB0 (the template leg
+// @0x54DE7E..0x54DF3D)]
+void weapon_availability_apply_template(
+        WeaponAvailability &avail, const WeaponTable &table,
+        const std::array<int32_t, 255> &words,
+        int32_t mission_allowed = weapon_availability_value::kMissionAllowed);
 
 // One spawn-kit / loadout tuple {name, ammoPrimary, ammoSecondary, flags} — the
 // 4-string record of the 2048-B loadout buffers ({name\0 ammoPri\0 ammoSec\0 flags\0}*)
@@ -80,6 +91,45 @@ struct WeaponKitEntry {
     int32_t ammo_primary = -1;
     int32_t ammo_secondary = -1;
     int32_t flags = -1;
+};
+
+// g_LoadoutWeaponNameList, the process's loadout name list, a buffer apart from the spawn
+// buffer (SpawnLoadoutBuffer): the image's initializer (the title's default kit,
+// weapon_kit_default) until an armory ACCEPT copies the accepted class's buffer over it, on
+// every leg in a session or out of one, or a 0x5A apply rebuilds it from the list's rows,
+// the listen host's own client's included. Every player body the process spawns takes its
+// first name as its equipped weapon (player_spawn_equipped_default). One per process
+// (inmatch::ClientProcessState); a world reads it through World::loadout_weapon_names.
+// [orig: g_LoadoutWeaponNameList @0x8333F8 (0x800 bytes, "WPN_M4AUTO" "-1" "-1" "-1" ..
+//  "WPN_KNIFE"); PlayerClass_InitEntity @0x4B1100..0x4B1116; WeaponLoadout_ApplyFromBuffer
+//  @0x565D27..0x565D4B; NapiNPClientMsg_HandleWeaponLoadoutSync @0x4291FC..0x4293BF]
+struct LoadoutWeaponNameList {
+    std::vector<WeaponKitEntry> entries;
+    bool set = false; // false: the image's initializer
+};
+
+// g_SpawnLoadoutBuffer, the process's spawn buffer (restrictionData): zero in the image, so a
+// fresh process's buffer is empty, and no session, mission start or load clears it; only its
+// writers change it: out of a session the single player's fill (the mission's kit, else the
+// profile's single-player page, else the static page weapon_kit_default) at the start and at
+// the restart, in a session a peer's mission start copying its side's class page (an empty page
+// copies empty), the mission load's kit chunk out of a session, the own slot's list send on the
+// authority and the 0x5A apply off it. Every reader takes it as it stands: Player_InitPlayer's
+// display list and select 195, the mission start's 0x2F pair and the team assign's resubmit, and
+// the round init's own-slot seed; a dedicated start fills nothing, so a Serve Only process runs
+// on what its earlier missions left. One per process (inmatch::ClientProcessState), which the
+// role binds into the local player's loadout (LocalPlayerLoadout::process_buffer).
+// [orig: g_SpawnLoadoutBuffer @0x24D4E00 (0x800 bytes); Game_ApplySessionSettingsToGlobals
+//  @0x551500 (the dedicated start's jz @0x5517A7, the single player's fill
+//  @0x5519A2..0x5519E4); Game_StartMission @0x524360 (the restart's copy @0x524683..0x5246C8, the
+//  peer's side page @0x525767..0x525818, the 0x2F sends @0x52582F / @0x525C24);
+//  Buffer_CopyUntilDoubleNull @0x562F30; Mission_LoadBMSFile @0x40F4E0 (@0x40F961);
+//  Server_SendWeaponSlotListToPlayer @0x502550 (@0x502617..0x502627);
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4293D1..0x4293E9);
+//  NapiNPClientMsg_TeamAssign (@0x431AA3); Server_InitAllPlayerEntitiesForRound @0x516AA0
+//  (@0x516BC4..0x516BE3); Player_InitPlayer @0x4E15F0 (@0x4E1872..0x4E1882, @0x4E1995)]
+struct SpawnLoadoutBuffer {
+    std::vector<WeaponKitEntry> entries;
 };
 
 // The engine defaults: the profile-less spawn kit, the static single-player page
@@ -99,10 +149,14 @@ std::vector<WeaponKitEntry> weapon_kit_filter_by_availability(
         const std::vector<WeaponKitEntry> &kit, const WeaponTable &table,
         const WeaponAvailability &avail);
 
-// Build the player-slot table consumed by Weapon_CalcImpactDamage: each kit
-// row's fourth value is stored at its resolved AmmoDef index. Raw byte 1 means
-// x0.9, 2 means x1.1, and every other value is neutral.
-void weapon_kit_build_damage_classes(const std::vector<WeaponKitEntry> &kit,
+// The out-of-session armory apply's stores into the slot's damage-class bytes, the
+// table Weapon_CalcImpactDamage reads: each kit row whose name resolves stores the low
+// byte of its fourth value, raw, at its weapon's round ammo index; nothing is cleared
+// first (the table grows to `ammo_count` with zeros). A weapon with no round keeps
+// retail's -1 index, whose store aliases the bytes before the table: dropped
+// (D-NET-692). [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 (the name test
+// @0x565E41, the atol @0x565F3D, the store @0x566182..0x56618C)]
+void weapon_kit_store_damage_classes(const std::vector<WeaponKitEntry> &kit,
                                      const WeaponTable &table, size_t ammo_count,
                                      std::vector<uint8_t> &out);
 
@@ -131,7 +185,7 @@ struct WeaponInventorySlot {
 // session's byte in a session and the config's own option offline; the caller
 // passes it. A slot initialized without an owner (the emplacement's own slot)
 // never locks [orig: WeaponSlot_InitFromDef @ 0x53EEF1..0x53EF27 — entityPtr 0
-// skips @ 0x53EEF7, class @ 0x53EEF9, category @ 0x53EF02, byte_A821F0
+// skips @ 0x53EEF7, class @ 0x53EEF9, category @ 0x53EF02, g_SessionAllowSniperScopeZoom
 // @ 0x53EF17 / allowSniperScopeZoom_5EC @ 0x53EF1F].
 bool weapon_slot_zoom_sniper_lock(int32_t owner_class, int32_t def_category,
                                   bool allow_sniper_scope_zoom);
@@ -162,8 +216,48 @@ struct WeaponInventory {
     // Shared loaded rounds, distinct from carried reserves [orig: WeaponSlot_GetSharedLoadedRounds
     // @0x5405F0 / WeaponSlot_SetSharedLoadedRounds @0x540670, local table @0xB761E8].
     std::vector<int32_t> shared_clips;
-    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118 / g_CurrentWeaponSlot]
-    int32_t pending_combo = -1;  // [orig: entity+0x308 staged slot / g_PendingWeaponSlot]
+    int32_t equipped_combo = -1; // [orig: EquippedSlot +0x118]
+    // g_CurrentWeaponSlot, the local player's current slot word: a word apart from the
+    // EquippedSlot, which no select writes. Player_InitPlayer stamps 195 (the spawn's
+    // select then reads it); the category walk, the cycle and the quick-switch equip
+    // store the slot they mount; the 0x5A apply, the single player's armory apply and
+    // the listen host's own list send store the held weapon's combo (its AdmDef's
+    // rank + 65 * category) when the body holds one and otherwise read the word for
+    // their select. The 0x2F sends carry it (the mission start's second, the in-session
+    // ACCEPT's) and a detach without a saved slot of category < 11 mounts it. So a
+    // spawn whose select misses slot 195 (no category-3 weapon, or no weapon) keeps 195
+    // here while the EquippedSlot names another slot or none. It starts at the 195 the
+    // first Player_InitPlayer stamps (every reader runs after one; the image's 0 is never
+    // read). The pool resets never write it.
+    // [orig: g_CurrentWeaponSlot @0xB76474 - Player_InitPlayer @0x4E15F0 (the store
+    //  @0x4E17FF, the select and switch @0x4E198E / @0x4E199A);
+    //  Player_SwitchToWeaponByHandle @0x4E0170 (@0x4E035C); Player_CycleWeaponSlot
+    //  @0x4DFE70 (@0x4DFF4A); Player_EquipWeaponByEntity @0x4E0370 (@0x4E03A1..0x4E03B2);
+    //  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296BC..0x4296E3);
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566285, the 0x2F's read
+    //  @0x565D73); Server_SendWeaponSlotListToPlayer @0x502550 (@0x5028D5..0x5028FC);
+    //  Game_StartMission @0x524360 (@0x525C1A); Entity_DetachFromVehicle @0x4355F0
+    //  (@0x435650)]
+    int32_t current_slot = weapon_combo::kDefaultSpawnCombo;
+    // The slot a mount stages for the switch-out's completion to commit.
+    // [orig: g_PendingWeaponSlot, Player_MountWeaponSlot @0x4DFB16]
+    int32_t pending_combo = -1;
+    // entity+0x308: the last SELECTED slot (a select's own store, whether or not
+    // the seat lets it reach EquippedSlot), or the personal slot a borrowed seat's
+    // attach saved; -1 for none or a slot outside the personal table (a borrowed
+    // carrier's). A key switch and a cycle mount without selecting, and a detach
+    // never clears it. [orig: Player_SelectWeaponSlot @0x4DD6DA / @0x4DD7A8 /
+    // @0x4DD81C; Entity_AttachToVehicleSlot @0x494831; Entity_AttachToUseGunSlot
+    // @0x546C31 / @0x546C48; read by Entity_DetachFromVehicle @0x43563A]
+    int32_t selected_combo = -1;
+    // entity+0x308 when it names a borrowed gun's slot instead: the packed handle
+    // of the mount whose slot a borrowing attach saved because the EquippedSlot
+    // was that gun's (a gun held on foot, or one a seat switch's detach had not
+    // yet switched out), 0xFFFF when +0x308 is selected_combo's personal slot or
+    // none. Every select's store replaces it. [orig: Entity_AttachToVehicleSlot
+    // @0x49481D..0x494831; Entity_AttachToUseGunSlot @0x546BCF..0x546C31;
+    // Player_SelectWeaponSlot @0x4DD6DA / @0x4DD7A8 / @0x4DD81C]
+    uint16_t selected_mount = 0xFFFF;
     // entity+44 carry-presentation bits gathered by the fill (8 = def.flags&0x1000,
     // 0x10 = def.flags2&2) [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5415aa/0x5415bc].
     uint32_t carry_flags = 0;
@@ -183,10 +277,19 @@ struct WeaponInventory {
         shared_clips.assign(table.ammo_class_names.size(), 0);
         equipped_combo = -1;
         pending_combo = -1;
+        selected_combo = -1;
+        selected_mount = 0xFFFF;
         carry_flags = 0;
         quick_switch_combo = -1;
         quick_switch_stash = -1;
     }
+    // The slot pool's reset: every entry zeroed, and nothing else: the current
+    // slot word, the pending and selected slots, the ammo pools and the shared
+    // clips keep their values (an in-session joiner's armory ACCEPT runs it
+    // ahead of its 0x2F; the 0x5A grant's select replaces the current slot).
+    // [orig: WeaponSlotPool_ResetAllEntries @0x53F240 (the 780 entries
+    //  @0x53F24C..0x53F284; the owner word +0x24 has no field here)]
+    void reset_slot_entries() { slots.fill(WeaponInventorySlot{}); }
     const WeaponInventorySlot *slot(int32_t combo) const {
         return (combo >= 0 && combo < weapon_combo::kSlotCount)
                        ? &slots[static_cast<size_t>(combo)]
@@ -291,11 +394,18 @@ struct WeaponAmmoSeat {
     int32_t carrier_reserve = 0;  // Entity_GetMountSlotReserve: its MountSlot reserve word
     int32_t carrier_clip = 0;     // Entity_GetMountSlotClip: its MountSlot clip word
     int32_t carrier_class1 = 0;   // its +0x120 word
+    // While the infinite-ammo cheat's bit is up (World::rules.ignore_weapon_ammo_cost), the
+    // class carry caps every pool read returns ahead of the seat legs, whatever the owner;
+    // null while it is down.
+    const std::vector<int32_t> *cheat_carry_caps = nullptr;
 };
-// The entity's seat, read off its mount [orig: entity+0x168 / +0x16C].
+// The entity's seat, read off its mount, with the cheat's caps while its bit is up
+// [orig: entity+0x168 / +0x16C].
 WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity);
-// A pool read through the seat; `own` is the owner's own pool for the class.
-// [orig: Entity_GetScoreValueBySlotType @0x5406E0]
+// A pool read through the seat; `own` is the owner's own pool for the class. Under the
+// infinite-ammo cheat it is the class's carry cap (0 past the table).
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0 - `test g_DebugCheatFlags, 100h` @0x5406E3,
+//  g_AmmoClassMaxCarry[class] @0x5406F4]
 int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own);
 // A loaded-round bucket read through the seat; `own` is the owner's own bucket.
 // [orig: WeaponSlot_GetSharedLoadedRounds @0x5405F0]
@@ -304,6 +414,14 @@ int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own);
 bool weapon_seat_writes_buckets(const WeaponAmmoSeat &seat);
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
                                    const WeaponAmmoSeat &seat);
+// Every populated slot whose def draws pool units has its loaded rounds zeroed (the slot
+// word, or its def's bucket, which a controller seat does not write), unless the owner sits
+// a UseGun seat (+0x168 3).
+// [orig: WeaponSlots_ClearLoadedRounds @0x5423C0 - the seat test @0x5423C5, the def[56]
+//  gate @0x5423E6, WeaponSlot_SetSharedLoadedRounds(bucket, 0) @0x542430 (its seat test
+//  @0x540684..0x540692) or slot+16 = 0 @0x54243A]
+void weapon_inventory_clear_loaded_rounds(const WeaponTable &table, WeaponInventory &inv,
+                                          const WeaponAmmoSeat &seat);
 // The total clips and the loadout weight with the owner's seat (the seatless forms are
 // the unseated owner) [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool
 //  @0x542638, the bucket @0x542651; Server_RecalculateAllPlayerScores @0x501546 /
@@ -378,9 +496,9 @@ int32_t weapon_inventory_reload_slot(const WeaponTable &table, WeaponInventory &
 void weapon_mount_slot_reload(const WeaponTableEntry &routed_def, WeaponSlotState &routed,
                               const WeaponTableEntry &own_def, WeaponSlotState &own);
 
-// Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stages the pending
-// slot; the caller commits pending->equipped unless seated (the original applies to
-// EquippedSlot only when !parentEntity || parentSlot not in {2,3}).
+// Player_SelectWeaponSlot @ 0x4DD680 — the category-level select. Stores the selected
+// slot (entity+0x308) and, unless seated (`commit_equip` false: the original applies
+// to EquippedSlot only when !parentEntity || parentSlot not in {2,3}), the equipped one.
 //   combo >= 0: the EXACT slot is taken only when its def has the flags2&1 NoSelect
 //   bit (the parachute-style forced equips); otherwise the first populated
 //   NON-NoSelect slot of the combo's category (rank order), else the first such slot
@@ -401,6 +519,13 @@ struct WeaponSwitchGates {
     // category) [orig: @ 0x4e0192..0x4e0223 mount-state gate].
     int32_t equipped_action = 0;
     bool equipped_valid = false; // an equipped slot with a def exists
+    // The EquippedSlot's def when that slot is a borrowed gun's (a UseGun seat's, or
+    // one held on foot after a refused attach, D-NET-420); null names the inventory's
+    // equipped slot. Both walks read the EquippedSlot's own def [orig:
+    // Player_SwitchToWeaponByHandle @0x4E0170 (the EquippedSlot load @0x4E01A5, the
+    // FSM gate @0x4E01CF..0x4E01F6, its def's category compare @0x4E0271); Player_CycleWeaponSlot @0x4DFE70 (the start index
+    // from EquippedSlot->Def @0x4DFE97..0x4DFEDB)].
+    const WeaponTableEntry *borrowed_def = nullptr;
 };
 
 struct WeaponSwitchOutcome {
@@ -425,6 +550,15 @@ struct WeaponSwitchOutcome {
 WeaponSwitchOutcome weapon_switch_to_handle(const WeaponTable &table,
                                             WeaponInventory &inv, int32_t handle,
                                             const WeaponSwitchGates &gates);
+
+// Whether the walk on `handle` passes its two gates ahead of its camera reset: a body in no
+// Controller, Gunner or Driver seat, and an EquippedSlot whose action admits the walk (not
+// FIRE; not RELOAD on the handle's own category; not RECOIL on another), or one with no def.
+// [orig: Player_SwitchToWeaponByHandle @0x4E0170 - the seat gate @0x4E017D..0x4E0192, the
+//  EquippedSlot and its def @0x4E01A5..0x4E01D4, the action gate @0x4E01D6..0x4E01F6, the
+//  reset @0x4E01FC]
+bool weapon_switch_walk_resets_view(const WeaponTable &table, const WeaponInventory &inv,
+                                    int32_t handle, const WeaponSwitchGates &gates);
 
 // Player_CycleWeaponSlot @ 0x4DFE70 — next/prev over ALL 780 combos (direction +1/-1),
 // every candidate needs the ammo score (no weapon_class exemption), silent stop on

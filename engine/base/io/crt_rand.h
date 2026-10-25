@@ -16,8 +16,9 @@ namespace opennova::io {
 // generator is the 32-bit LCG `state = state * 214013 + 2531011`, returning
 // bits 16..30: srand(1) yields 41, 18467, 6334, 26500, 19169, ... The default
 // state 1 is the CRT's own (a process that never calls srand). The SIM-visible
-// consumers (slot-table draw, far-marker spawn scores, the 0x100 death roll)
-// share ONE owner — `World::crt_rand` — so their draw order stays structural;
+// consumers (slot-table draw, the round init's listing key and cookie-key
+// ring, the server-info refresh's ring advance, far-marker spawn scores, the
+// 0x100 death roll) share ONE owner — `World::crt_rand` — so their draw order stays structural;
 // the ported render/effects consumers share the separate thread-local stream
 // in crt/crt_rng.h (the two-stream split is the D-NET-115 divergence).
 // [orig: CRT rand @0x76B00A; srand @0x51C1AA]

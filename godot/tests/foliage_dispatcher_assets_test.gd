@@ -2,8 +2,9 @@ extends GutTest
 
 # The vegetation asset resolver on FoliageDispatcher (the former veg_assets.gd,
 # folded into the dispatcher as instance state): the *veg*.3di listing, the
-# LOD0 mesh aggregate, the :fd texture bake, the network-challenge foliage
-# mark, and the per-root+instance cache keys.
+# LOD0 mesh aggregate, the :fd texture bake and the per-root+instance cache
+# keys. (The C2S 0x3D page's foliage marks are the engine's, inmatch/
+# loaded_model_list.h, pinned by ctest npruntime_loaded_model_list.)
 
 const SOURCE_OBJECT := "res://../fixtures/threedi/synth/bird.3di"
 const OVERRIDE_OBJECT := "res://../fixtures/threedi/synth/house.3di"
@@ -15,12 +16,10 @@ func before_each() -> void:
 	TestFs.remove_dir_recursive(_fixture_root())
 	_dispatcher = FoliageDispatcher.new()
 	add_child_autofree(_dispatcher)
-	ObjectData.reset_network_challenge_model_registry()
 
 
 func after_each() -> void:
 	_dispatcher = null
-	ObjectData.reset_network_challenge_model_registry()
 	TestFs.remove_dir_recursive(_fixture_root())
 
 
@@ -34,60 +33,6 @@ func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 	assert_eq(meshes.size(), 2, "Resolver should preserve the foliage slot array shape.")
 	assert_null(meshes[0], "Null foliage defs should remain null mesh slots.")
 	assert_true(meshes[1] is Mesh, "Resolver should load the mesh for a known .3di graphic.")
-
-
-func test_foliage_model_is_sticky_excluded_from_network_challenge_snapshot() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	ObjectData.reset_network_challenge_model_registry()
-
-	assert_not_null(_dispatcher.load_mesh(resource_root, "Mveg6"))
-	assert_eq(ObjectData.network_challenge_model_count(), 0,
-		"foliage geometry loads normally but its model-def row is excluded")
-
-	# Retail marks the shared definition node, so a later ordinary lookup of the
-	# same filename does not clear the foliage bit before the snapshot.
-	var ordinary := ObjectData.new()
-	assert_eq(ordinary.open_from_resource_root(resource_root, "MVEG6.3DI"), OK)
-	assert_eq(ObjectData.network_challenge_model_count(), 0,
-		"the foliage marker is sticky on a case-folded shared definition")
-
-
-func test_cached_foliage_hit_restores_marker_after_mission_registry_reset() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	ObjectData.reset_network_challenge_model_registry()
-
-	var first_mesh := _dispatcher.load_mesh(resource_root, "Mveg6")
-	assert_not_null(first_mesh)
-	assert_eq(ObjectData.network_challenge_model_count(), 0)
-
-	# Game_StartMission destroys the logical loaded-definition registry, while
-	# the world keeps the mounted resource root and the dispatcher's renderer
-	# cache alive. The next mission's cache hit must therefore recreate the
-	# model-def's sticky foliage mark without reparsing or rebuilding its mesh.
-	ObjectData.reset_network_challenge_model_registry()
-	var cached_mesh := _dispatcher.load_mesh(resource_root, "mVEG6.3di")
-	assert_same(cached_mesh, first_mesh, "the second mission takes the real mesh-cache hit")
-
-	var ordinary := ObjectData.new()
-	assert_eq(ordinary.open_from_resource_root(resource_root, "MVEG6.3DI"), OK)
-	assert_eq(ObjectData.network_challenge_model_count(), 0,
-		"a cached foliage definition remains excluded when another path loads it normally")
-
-
-func test_network_challenge_model_registry_deduplicates_and_resets() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	ObjectData.reset_network_challenge_model_registry()
-	var first := ObjectData.new()
-	var duplicate := ObjectData.new()
-
-	assert_eq(first.open_from_resource_root(resource_root, "Mveg6.3di"), OK)
-	assert_eq(duplicate.open_from_resource_root(resource_root, "mVEG6.3di"), OK)
-	assert_eq(ObjectData.network_challenge_model_count(), 1,
-		"case variants of one mounted .3DI contribute one renderer definition")
-
-	ObjectData.reset_network_challenge_model_registry()
-	assert_eq(ObjectData.network_challenge_model_count(), 0,
-		"mission cache destruction starts the next frozen page empty")
 
 
 func test_resolve_slot_meshes_loads_graphic_resident_only_in_runtime_pff() -> void:

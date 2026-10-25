@@ -243,7 +243,7 @@ enum PresentField : int {
 	PF_DOOR_COUNT,
     // A retained model pick also covers fragments born with Flags & 4 and
     // dynamic rows whose model is built after their death event was drained.
-    // [orig: Entity_RaycastCollisionModel @ 0x413086]
+    // [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0)]
     PF_HUSK,
     // Six Q16 CTRL words evaluated by the native destruction clock.
     PF_OBJECT_DESTROY,

@@ -27,8 +27,8 @@ struct StatsRow {
 namespace stats_rows {
 
 inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, Slot::SIM_AI_INFANTRY_COLLISION_GROUND};
-inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_REMOTE, Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_COLLISION};
-inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY};
+inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_COLLISION};
+inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED, Slot::SIM_WALK_REPLICA_ROWS, Slot::SIM_WALK_REPLICA_POOL0};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY};
 inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_ORPHANS, Slot::SIM_ATTACHMENT_CHILDREN, Slot::SIM_ATTACHMENT_RIDERS};
 inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_UPDATE_ENTITIES, Slot::SIM_WORLD_HOUSEKEEPING};
@@ -41,16 +41,18 @@ inline constexpr Slot k_replication_fan_unattributed[] = {Slot::SIM_REPLICATION_
 inline constexpr Slot k_replication_unattributed[] = {Slot::SIM_REPLICATION_QUERY_PREP, Slot::SIM_REPLICATION_SNAPSHOT, Slot::SIM_REPLICATION_FAN};
 inline constexpr Slot k_server_unattributed[] = {Slot::SIM_SERVER_INPUT, Slot::SIM_SERVER_WORLD, Slot::SIM_MATCH, Slot::SIM_SERVER_RULES, Slot::SIM_SERVER_REPLICATION};
 inline constexpr Slot k_host_unattributed[] = {Slot::SIM_HOST_RECEIVE, Slot::SIM_HOST_CONNECTIONS, Slot::SIM_HOST_ADAPTER, Slot::SIM_SERVER_TICK, Slot::SIM_HOST_SEND};
-inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
+inline constexpr Slot k_client_unattributed[] = {Slot::SIM_CLIENT_ROW_ADM, Slot::SIM_CLIENT_DEPOSIT, Slot::SIM_CLIENT_SETUP, Slot::SIM_CLIENT_RECEIVE, Slot::SIM_CLIENT_AFTER_RECEIVE, Slot::SIM_CLIENT_TIMERS, Slot::SIM_CLIENT_MAINTENANCE, Slot::SIM_CLIENT_SEND};
 inline constexpr Slot k_sim_unattributed[] = {Slot::SIM_HOST_PREP, Slot::SIM_HOST_PUMP, Slot::SIM_PLAYER_TAIL, Slot::SIM_WEAPON_WALK, Slot::SIM_NET, Slot::SIM_CLIENT_MATERIALIZE, Slot::SIM_CLIENT_MIRROR, Slot::SIM_CLIENT_PROXIES, Slot::SIM_CLIENT_WORLD, Slot::SIM_CLIENT_ATTACH, Slot::SIM_CLIENT_PLAYER, Slot::SIM_ADM_RESOLVE};
 inline constexpr Slot k_trace[] = {Slot::TRACE_TERRAIN, Slot::TRACE_STATIC, Slot::TRACE_DYNAMIC, Slot::TRACE_PERSON};
 inline constexpr Slot k_present[] = {Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_mission_rows_remainder[] = {Slot::PRESENT_MISSION_CORE, Slot::PRESENT_MISSION_AIM, Slot::PRESENT_MISSION_CONTROLS, Slot::PRESENT_MISSION_VISIBILITY, Slot::PRESENT_MISSION_BODY};
-inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_STEP, Slot::SIM_SINK, Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
+inline constexpr Slot k_session_frame_other[] = {Slot::SIM_STEP, Slot::SIM_SINK};
+inline constexpr Slot k_wire_rows_remainder[] = {Slot::PRESENT_WIRE_PLAN, Slot::PRESENT_WIRE_POSE, Slot::PRESENT_WIRE_CTRL, Slot::PRESENT_WIRE_BODY, Slot::PRESENT_WIRE_WEAPON, Slot::PRESENT_WIRE_SOUNDS, Slot::PRESENT_WIRE_HELD, Slot::PRESENT_WIRE_VIEWS, Slot::PRESENT_WIRE_CULLED};
+inline constexpr Slot k_runtime_overhead[] = {Slot::SIM_ADVANCE, Slot::PRESENT_SNAPSHOT, Slot::PRESENT_MISSION, Slot::PRESENT_WIRE, Slot::PRESENT_FIRE, Slot::PRESENT_DESTRUCTION, Slot::PRESENT_THROWABLE, Slot::PRESENT_SCARS};
 inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE};
 inline constexpr Slot k_occl_apply_remainder[] = {Slot::OCCL_BUILDING_QUERY, Slot::OCCL_BUILDING_APPLY, Slot::OCCL_CULL_QUERY, Slot::OCCL_CULL_APPLY, Slot::OCCL_LIGHT_QUERY, Slot::OCCL_LIGHT_APPLY, Slot::OCCL_WATER_APPLY};
 inline constexpr Slot k_env[] = {Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::WORLD_IRIS};
-inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS};
+inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS, Slot::MODEL_VIEW_WALK};
 inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_FRAMEFX, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_RAGDOLL, Slot::WORLD_MATERIAL, Slot::WORLD_SLOT_SHADOW, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR, Slot::WORLD_ENV_CUBE};
 inline constexpr Slot k_other_process[] = {Slot::FRAME_PLAYER_BEFORE, Slot::FRAME_WORLD, Slot::FRAME_PLAYER_AFTER, Slot::FRAME_HUD, Slot::FRAME_STATS_SAMPLE, Slot::FRAME_SHELL_CONTROL, Slot::FRAME_ROUND_FLOW, Slot::FRAME_MENU_SHELL, Slot::FRAME_MENU_VIDEO, Slot::FRAME_DEBUG_REFRESH};
 inline constexpr Slot k_engine_frame[] = {Slot::FRAME_PROCESS_CALLBACKS, Slot::FRAME_PHYSICS_CALLBACKS, Slot::FRAME_DEFERRED_FLUSH, Slot::FRAME_DRAW, Slot::FRAME_PACING_INPUT};
@@ -74,16 +76,27 @@ inline constexpr StatsRow kRows[] = {
 	{"update_entities", "Entity update (retail order)", 7, RowKind::SPAN, Slot::SIM_UPDATE_ENTITIES, nullptr, 0},
 	{"update_walks", "Pool-1 + pool-0 walks", 8, RowKind::SPAN, Slot::SIM_UPDATE_WALKS, nullptr, 0},
 	{"ai_infantry", "Infantry/player bodies", 9, RowKind::SPAN, Slot::SIM_AI_INFANTRY, nullptr, 0},
-	{"ai_infantry_remote", "Remote player body", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_REMOTE, nullptr, 0},
 	{"ai_infantry_combat", "NPC combat/perception", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COMBAT, nullptr, 0},
 	{"ai_infantry_animation", "Animation + root motion", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_ANIMATION, nullptr, 0},
+	{"ai_infantry_motion", "NPC slope, carrier, gradient", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_MOTION, nullptr, 0},
 	{"ai_infantry_collision", "Movement collision resolver", 10, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION, nullptr, 0},
 	{"ai_infantry_collision_contacts", "Model contact passes", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_CONTACTS, nullptr, 0},
 	{"ai_infantry_collision_repulsion", "Person repulsion", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_REPULSION, nullptr, 0},
 	{"ai_infantry_collision_ground", "Ground settle ray", 11, RowKind::SPAN, Slot::SIM_AI_INFANTRY_COLLISION_GROUND, nullptr, 0},
 	{"ai_infantry_collision_unattributed", "Resolver remainder", 11, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY_COLLISION, k_ai_infantry_collision_unattributed, 3},
 	{"ai_infantry_unattributed", "Infantry remainder", 10, RowKind::RESIDUAL, Slot::SIM_AI_INFANTRY, k_ai_infantry_unattributed, 4},
-	{"update_walks_other", "Brains, vehicle motors, items", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 1},
+	{"walk_think", "Pool-1 thinks (brains, mines, items)", 9, RowKind::SPAN, Slot::SIM_WALK_THINK, nullptr, 0},
+	{"walk_motor", "Vehicle motors", 9, RowKind::SPAN, Slot::SIM_WALK_MOTOR, nullptr, 0},
+	{"walk_ewep", "Emplaced weapons", 9, RowKind::SPAN, Slot::SIM_WALK_EWEP, nullptr, 0},
+	{"walk_items", "Item legs", 9, RowKind::SPAN, Slot::SIM_WALK_ITEMS, nullptr, 0},
+	{"walk_devices", "Placed devices", 9, RowKind::SPAN, Slot::SIM_WALK_DEVICES, nullptr, 0},
+	{"walk_mounted", "Mounted brains' seat pose", 9, RowKind::SPAN, Slot::SIM_WALK_MOUNTED, nullptr, 0},
+	{"walk_replica_rows", "Joiner: decoded pool-1 rows' slot visits", 9, RowKind::SPAN, Slot::SIM_WALK_REPLICA_ROWS, nullptr, 0},
+	{"walk_replica_pool0", "Joiner: replica legs ahead of the pool-0 walk", 9, RowKind::SPAN, Slot::SIM_WALK_REPLICA_POOL0, nullptr, 0},
+	{"walk_replica_guns", "Replica guns' channels", 10, RowKind::SPAN, Slot::SIM_WALK_REPLICA_GUNS, nullptr, 0},
+	{"walk_replica_middle", "Remote rows through the own slot", 10, RowKind::SPAN, Slot::SIM_WALK_REPLICA_MIDDLE, nullptr, 0},
+	{"walk_replica_proxies", "Proxies' live words", 10, RowKind::SPAN, Slot::SIM_WALK_REPLICA_PROXIES, nullptr, 0},
+	{"update_walks_other", "Walk remainder", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 9},
 	{"update_attachments", "Emplacement attachments", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
 	{"attachment_orphans", "Orphan-chain cleanup", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_ORPHANS, nullptr, 0},
 	{"attachment_children", "Child attachment pose", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_CHILDREN, nullptr, 0},
@@ -95,6 +108,7 @@ inline constexpr StatsRow kRows[] = {
 	{"update_projectiles", "Rotor wash + projectile rounds", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROJECTILES, nullptr, 0},
 	{"update_explosions", "Explosions, round hits, pool-2/3 walks, doors", 8, RowKind::SPAN, Slot::SIM_UPDATE_EXPLOSIONS, nullptr, 0},
 	{"update_proximity", "Pool-0/1 proximity tables", 8, RowKind::SPAN, Slot::SIM_UPDATE_PROXIMITY, nullptr, 0},
+	{"proximity_replica", "Joiner: decoded rows at the proximity build", 9, RowKind::SPAN, Slot::SIM_PROXIMITY_REPLICA, nullptr, 0},
 	{"update_entities_unattributed", "Entity-update unattributed", 8, RowKind::RESIDUAL, Slot::SIM_UPDATE_ENTITIES, k_update_entities_unattributed, 8},
 	{"world_housekeeping", "World housekeeping", 7, RowKind::SPAN, Slot::SIM_WORLD_HOUSEKEEPING, nullptr, 0},
 	{"world_unattributed", "World-update unattributed", 7, RowKind::RESIDUAL, Slot::SIM_SERVER_WORLD, k_world_unattributed, 4},
@@ -134,17 +148,23 @@ inline constexpr StatsRow kRows[] = {
 	{"player_tail", "Frame tail: weather/view/medic", 4, RowKind::SPAN, Slot::SIM_PLAYER_TAIL, nullptr, 0},
 	{"weapon_walk", "Weapon action walk", 4, RowKind::SPAN, Slot::SIM_WEAPON_WALK, nullptr, 0},
 	{"net", "Client network/decode", 4, RowKind::SPAN, Slot::SIM_NET, nullptr, 0},
+	{"client_row_adm", "Row providers + .adm resolve", 5, RowKind::SPAN, Slot::SIM_CLIENT_ROW_ADM, nullptr, 0},
+	{"client_deposit", "Hello + socket drain", 5, RowKind::SPAN, Slot::SIM_CLIENT_DEPOSIT, nullptr, 0},
 	{"client_setup", "Client clock/setup", 5, RowKind::SPAN, Slot::SIM_CLIENT_SETUP, nullptr, 0},
 	{"client_receive", "Receive + state fold", 5, RowKind::SPAN, Slot::SIM_CLIENT_RECEIVE, nullptr, 0},
-	{"client_maintenance", "Replica maintenance/movers", 5, RowKind::SPAN, Slot::SIM_CLIENT_MAINTENANCE, nullptr, 0},
+	{"client_after_receive", "Receive-handler writes on L", 5, RowKind::SPAN, Slot::SIM_CLIENT_AFTER_RECEIVE, nullptr, 0},
+	{"client_local_birth", "L's birth (in-match edge)", 6, RowKind::SPAN, Slot::SIM_CLIENT_LOCAL_BIRTH, nullptr, 0},
+	{"client_timers", "Replica timers/markers", 5, RowKind::SPAN, Slot::SIM_CLIENT_TIMERS, nullptr, 0},
+	{"client_maintenance", "Replica movers", 5, RowKind::SPAN, Slot::SIM_CLIENT_MAINTENANCE, nullptr, 0},
 	{"client_send", "Joiner C2S build/send", 5, RowKind::SPAN, Slot::SIM_CLIENT_SEND, nullptr, 0},
-	{"client_unattributed", "Client-frame unattributed", 5, RowKind::RESIDUAL, Slot::SIM_NET, k_client_unattributed, 4},
+	{"client_unattributed", "Client-frame unattributed", 5, RowKind::RESIDUAL, Slot::SIM_NET, k_client_unattributed, 8},
 	{"client_materialize", "Joiner stream materialize + folds", 4, RowKind::SPAN, Slot::SIM_CLIENT_MATERIALIZE, nullptr, 0},
 	{"client_mirror", "Joiner wire pose mirror", 4, RowKind::SPAN, Slot::SIM_CLIENT_MIRROR, nullptr, 0},
 	{"client_proxies", "Joiner collision proxies", 4, RowKind::SPAN, Slot::SIM_CLIENT_PROXIES, nullptr, 0},
 	{"client_world", "Joiner local world tick (see World update)", 4, RowKind::SPAN, Slot::SIM_CLIENT_WORLD, nullptr, 0},
 	{"client_attach", "Joiner attachment recompose", 4, RowKind::SPAN, Slot::SIM_CLIENT_ATTACH, nullptr, 0},
 	{"client_player", "Joiner view/weapon devices", 4, RowKind::SPAN, Slot::SIM_CLIENT_PLAYER, nullptr, 0},
+	{"replica_collision", "Joiner: decoded persons' resolver + probes (inside the rows above)", 4, RowKind::SPAN, Slot::SIM_REPLICA_COLLISION, nullptr, 0},
 	{"adm_resolve", "Animation registry resolve", 4, RowKind::SPAN, Slot::SIM_ADM_RESOLVE, nullptr, 0},
 	{"sim_unattributed", "Sim-step unattributed", 4, RowKind::RESIDUAL, Slot::SIM_STEP, k_sim_unattributed, 12},
 	{"trace", "Projectile trace (attributed)", 4, RowKind::GROUP, Slot::COUNT, k_trace, 4},
@@ -155,8 +175,10 @@ inline constexpr StatsRow kRows[] = {
 	{"effects_drain", "Effects drain", 3, RowKind::SPAN, Slot::EFFECTS_DRAIN, nullptr, 0},
 	{"sim_sink", "Godot tick sink", 3, RowKind::SPAN, Slot::SIM_SINK, nullptr, 0},
 	{"effects", "Effects tick", 3, RowKind::SPAN, Slot::EFFECTS_TICK, nullptr, 0},
+	{"session_frame_other", "Session frame remainder (bank, input frames, render legs, marshalling)", 3, RowKind::RESIDUAL, Slot::SIM_ADVANCE, k_session_frame_other, 2},
 	{"present", "Present", 3, RowKind::GROUP, Slot::COUNT, k_present, 7},
 	{"snapshot", "Row snapshot", 4, RowKind::SPAN, Slot::PRESENT_SNAPSHOT, nullptr, 0},
+	{"snapshot_body", "Body columns", 5, RowKind::SPAN, Slot::PRESENT_SNAPSHOT_BODY, nullptr, 0},
 	{"mission_rows", "Mission rows", 4, RowKind::SPAN, Slot::PRESENT_MISSION, nullptr, 0},
 	{"mission_rows_core", "Row scan/transform/submission", 5, RowKind::SPAN, Slot::PRESENT_MISSION_CORE, nullptr, 0},
 	{"mission_rows_aim", "Aim overlay", 5, RowKind::SPAN, Slot::PRESENT_MISSION_AIM, nullptr, 0},
@@ -165,11 +187,21 @@ inline constexpr StatsRow kRows[] = {
 	{"mission_rows_body", "Body pose", 5, RowKind::SPAN, Slot::PRESENT_MISSION_BODY, nullptr, 0},
 	{"mission_rows_remainder", "Mission-row orchestration remainder", 5, RowKind::RESIDUAL, Slot::PRESENT_MISSION, k_mission_rows_remainder, 5},
 	{"wire_rows", "Wire rows", 4, RowKind::SPAN, Slot::PRESENT_WIRE, nullptr, 0},
+	{"wire_plan", "Plan check / cold re-plan", 5, RowKind::SPAN, Slot::PRESENT_WIRE_PLAN, nullptr, 0},
+	{"wire_pose", "Stamps + transform + aim", 5, RowKind::SPAN, Slot::PRESENT_WIRE_POSE, nullptr, 0},
+	{"wire_ctrl", "CTRL/PART block", 5, RowKind::SPAN, Slot::PRESENT_WIRE_CTRL, nullptr, 0},
+	{"wire_body", "Remote body animation", 5, RowKind::SPAN, Slot::PRESENT_WIRE_BODY, nullptr, 0},
+	{"wire_weapon", "Weapon channel", 5, RowKind::SPAN, Slot::PRESENT_WIRE_WEAPON, nullptr, 0},
+	{"wire_sounds", "Body sounds", 5, RowKind::SPAN, Slot::PRESENT_WIRE_SOUNDS, nullptr, 0},
+	{"wire_held", "Held weapon + item overlays", 5, RowKind::SPAN, Slot::PRESENT_WIRE_HELD, nullptr, 0},
+	{"wire_views", "Section mask + view verdicts", 5, RowKind::SPAN, Slot::PRESENT_WIRE_VIEWS, nullptr, 0},
+	{"wire_culled", "Culled rows", 5, RowKind::SPAN, Slot::PRESENT_WIRE_CULLED, nullptr, 0},
+	{"wire_rows_remainder", "Wire-walk remainder", 5, RowKind::RESIDUAL, Slot::PRESENT_WIRE, k_wire_rows_remainder, 9},
 	{"fire", "Fire", 4, RowKind::SPAN, Slot::PRESENT_FIRE, nullptr, 0},
 	{"destruction", "Destruction", 4, RowKind::SPAN, Slot::PRESENT_DESTRUCTION, nullptr, 0},
 	{"throwable", "Throwable", 4, RowKind::SPAN, Slot::PRESENT_THROWABLE, nullptr, 0},
 	{"scars", "Scars", 4, RowKind::SPAN, Slot::PRESENT_SCARS, nullptr, 0},
-	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 9},
+	{"runtime_overhead", "Session/presentation overhead", 3, RowKind::RESIDUAL, Slot::WORLD_RUNTIME, k_runtime_overhead, 8},
 	{"local_view", "Local view publication", 2, RowKind::SPAN, Slot::WORLD_LOCAL_VIEW, nullptr, 0},
 	{"framefx", "Q3 compile", 2, RowKind::SPAN, Slot::WORLD_FRAMEFX, nullptr, 0},
 	{"scene_env", "Scene fog/ambient publication", 2, RowKind::SPAN, Slot::WORLD_SCENE_ENV, nullptr, 0},
@@ -200,7 +232,8 @@ inline constexpr StatsRow kRows[] = {
 	{"model_panm", "PANM transforms", 3, RowKind::SPAN, Slot::MODEL_PANM, nullptr, 0},
 	{"model_material", "Material generators/textures", 3, RowKind::SPAN, Slot::MODEL_MATERIAL, nullptr, 0},
 	{"model_order_bounds", "Render order + bounds", 3, RowKind::SPAN, Slot::MODEL_ORDER_BOUNDS, nullptr, 0},
-	{"model_runtime_remainder", "Awake-set/gating remainder", 3, RowKind::RESIDUAL, Slot::WORLD_MATERIAL, k_model_runtime_remainder, 4},
+	{"model_view_walk", "View walk + Inset/mirror splits", 3, RowKind::SPAN, Slot::MODEL_VIEW_WALK, nullptr, 0},
+	{"model_runtime_remainder", "Awake-set/gating remainder", 3, RowKind::RESIDUAL, Slot::WORLD_MATERIAL, k_model_runtime_remainder, 5},
 	{"slot_shadow", "Slot-shadow planning/publication", 2, RowKind::SPAN, Slot::WORLD_SLOT_SHADOW, nullptr, 0},
 	{"particles", "Particle-frame publication", 2, RowKind::SPAN, Slot::WORLD_PARTICLES, nullptr, 0},
 	{"audio", "Audio", 2, RowKind::SPAN, Slot::WORLD_AUDIO, nullptr, 0},
@@ -227,6 +260,11 @@ inline constexpr StatsRow kRows[] = {
 	{"flush_queued", "Queued by callbacks (deferred calls, draws)", 3, RowKind::SPAN, Slot::FRAME_FLUSH_QUEUED, nullptr, 0},
 	{"hud_draw_compile", "HUD draw compile", 4, RowKind::SPAN, Slot::HUD_DRAW_COMPILE, nullptr, 0},
 	{"hud_draw_emit", "HUD draw emit", 4, RowKind::SPAN, Slot::HUD_DRAW_EMIT, nullptr, 0},
+	{"flush_ahead", "Queued ahead of the shell's legs (ugc, input, earlier nodes)", 4, RowKind::SPAN, Slot::FRAME_FLUSH_AHEAD, nullptr, 0},
+	{"flush_player", "Queued by the player presenter", 4, RowKind::SPAN, Slot::FRAME_FLUSH_PLAYER, nullptr, 0},
+	{"flush_world", "Queued by the world tick", 4, RowKind::SPAN, Slot::FRAME_FLUSH_WORLD, nullptr, 0},
+	{"flush_hud", "Queued by the HUD presenters", 4, RowKind::SPAN, Slot::FRAME_FLUSH_HUD, nullptr, 0},
+	{"flush_rest", "Queued by round flow and later nodes", 4, RowKind::SPAN, Slot::FRAME_FLUSH_REST, nullptr, 0},
 	{"flush_tail", "Flush tail (transforms, timers, node frees, RS sync)", 3, RowKind::SPAN, Slot::FRAME_FLUSH_TAIL, nullptr, 0},
 	{"render_draw", "RenderingServer draw (all viewports)", 2, RowKind::SPAN, Slot::FRAME_DRAW, nullptr, 0},
 	{"pacing_input", "Servers/input/pacing", 2, RowKind::SPAN, Slot::FRAME_PACING_INPUT, nullptr, 0},

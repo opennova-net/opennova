@@ -101,6 +101,12 @@ struct ParticleFrameStrides {
 	uint32_t main_view = 1;
 	uint32_t inset = 1;
 	uint32_t mirror = 1;
+	// The weapon Inset pass's own water mirror draws inside its scene ahead of the Inset's
+	// own set, so in the stride the main scene just set
+	// [orig: Render_WeaponInsetScene: the prerender's Render_TerrainScene (the call
+	//  @0x5C99B7) ahead of EffectWorld_SetParticleDensityScale (the call @0x5C9DD9);
+	//  the main scene's set (the call @0x5CA8DE) ahead of the Inset pass (@0x5CA949)].
+	uint32_t inset_mirror = 1;
 	// What this frame's last pass leaves for the next frame's mirror.
 	uint32_t last_pass = 1;
 };
@@ -113,6 +119,7 @@ inline ParticleFrameStrides particle_frame_strides(int32_t session_density, bool
 	                            ? particle_scene_lod_divisor(session_density, ParticleScenePass::NvgScene)
 	                            : strides.inset;
 	strides.mirror = previous_last_pass == 0 ? 1u : previous_last_pass;
+	strides.inset_mirror = strides.main_view;
 	strides.last_pass = strides.main_view;
 	return strides;
 }

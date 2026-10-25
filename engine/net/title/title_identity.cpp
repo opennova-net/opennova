@@ -36,10 +36,6 @@ TitleIdentity jo_row() {
 	t.game_id = GAME_JO;
 	t.nvs = kNapiNpVersion;
 	t.co = kNovaLogicCompany;
-	// The executable's own file name, which the network init reads off its command line: the
-	// stock install's Jointops.exe. [orig: CNapiNetwork_Init @0x4ca747 -> Napi_GetExeBasename
-	//  @0x62e0b0, copied to proto+0x58 @0x4ca759]
-	t.ap = "Jointops.exe";
 	// [orig: CNapiNetwork_Init @0x4ca76c, the literal @0x7ca6d8]
 	t.bdat = "Jul 21 2009 18:54:42";
 	// [orig: CNapiNetwork_Init @0x4ca790, the literal @0x7ca6c8]
@@ -93,6 +89,9 @@ TitleIdentity jo_row() {
 	//  @0x4cdb9f / @0x4cdbb6 - the literals @0x7c9730 / @0x7c9714]
 	t.ver1 = "3";
 	t.ver2 = "2345";
+	// [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title sprintf @0x4A7D30..0x4A7D3C),
+	//  off_8154D8's literal, into g_TitleText]
+	t.connect_log_title = "Joint Operations: Typhoon Rising";
 	// [orig: Mission_DeobfuscateDescription @0x4cdbfe]
 	t.product_code = "jop";
 	// [orig: CNapiGateManager_InitDefaults @0x4d14b6, the literal @0x7cc35c]
@@ -101,6 +100,13 @@ TitleIdentity jo_row() {
 	t.gate_tag_keys = "jop:2:oyez";
 	// The host lists end at LAN. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50]
 	t.host_category_var = false;
+	// NovaLogic's live gate answered JO's tag with no POST pair, an http://[domainname] startupurl
+	// and a TimeOnGateServer line after the reflected pair (the LN S1 retail host record,
+	// 2026-10-23), as it answered DFX2's: the reply the service's gate gives this title.
+	// [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the in-use word set by a udpnovaworld
+	//  line @0x4CF541 skips the POST tests @0x4CF5A0, and no key reads TimeOnGateServer;
+	//  Mission_DeobfuscateDescription @0x4CDAA0 - [DOMAINNAME] @0x4CDB88]
+	t.gate_reply_witnessed = true;
 	// The retail jop_2 pages' pfid (docs/net/novaworld-net-re.md §2, the NWLogin row).
 	t.pfid = 28;
 	// The retail jop_2 pages (docs/net/novaworld-net-re.md §2 and its wave 6, the authenticated web
@@ -108,18 +114,13 @@ TitleIdentity jo_row() {
 	TitlePages pages;
 	pages.msgbase = "jop_2_msg.htm";
 	pages.main = "jop_2_main.htm";
-	pages.login = "jop_2_login.htm";
-	pages.version_file = "jop_2.ver";
-	pages.new_update = "jop_2_newupdateavailable.htm";
-	pages.new_update_bypass = "jop_2_newupdateavailable2.htm";
-	pages.junction = "jop_2_junction.htm";
-	pages.need_to_agree = "jop_2_needtoagree.htm";
 	pages.no_db = "jop_2_nodb.htm";
 	pages.relay = "jop_2_relay.htm";
-	pages.enter_key = "jop_2_key.htm";
 	pages.key_error = "jop_2_key2err.htm";
 	pages.join = "jop_2_join.joi";
 	pages.server_list = "jop_2.gsb";
+	// jop_2_login.mnx's submit is ACCEPT: no LOGIN control.
+	pages.sign_in_submit = "ACCEPT";
 	t.pages = pages;
 	return t;
 }
@@ -148,9 +149,6 @@ TitleIdentity dfx2_row() {
 	t.game_id = GAME_DFX2;
 	t.nvs = kNapiNpVersion;
 	t.co = kNovaLogicCompany;
-	// The executable's own file name: the stock install's dfx2.exe.
-	// [orig: @0x4ca8b7 -> the twin of Napi_GetExeBasename @0x7161e0 (dfx2.exe)]
-	t.ap = "dfx2.exe";
 	// The __DATE__ form, two spaces before the 7. [orig: @0x4ca8dc (dfx2.exe)]
 	t.bdat = "Jul  7 2009 11:33:09";
 	// [orig: @0x4ca900 (dfx2.exe)]
@@ -217,6 +215,10 @@ TitleIdentity dfx2_row() {
 	//  (dfx2.exe)]
 	t.ver1 = "1";
 	t.ver2 = "9013";
+	// [orig: Game_ParseCommandLineAndInit @0x4A7360 (dfx2.exe) - off_8144D8's literal into
+	//  g_TitleText @0x4A7D60..0x4A7D6C, the twin of Game_ParseCommandLineAndInit @0x4A7310 (the
+	//  title sprintf @0x4A7D30..0x4A7D3C)]
+	t.connect_log_title = "DeltaForce: Xtreme 2";
 	// [orig: [PRODUCTCODE] @0x4cdce8 (dfx2.exe)]
 	t.product_code = "dfx2";
 	// [orig: @0x4d1699 (dfx2.exe), the twin of CNapiGateManager_InitDefaults @0x4d1460]
@@ -228,31 +230,32 @@ TitleIdentity dfx2_row() {
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the HostSetup list's
 	//  DFXCATEGORY1 @0x4d0e8a..0x4d0eb1, the Host list's @0x4d0faf..0x4d0fd5]
 	t.host_category_var = true;
+	// NovaLogic's live gate answered the DFX2 tag with no POST pair, an http://[domainname]
+	// startupurl and a TimeOnGateServer line (docs/titles/dfx2-vs-jo-re.md §6.5): the reply the
+	// service's gate gives this title. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the
+	//  in-use word's skip of the POST tests @0x4CF541 / @0x4CF5A0, no key for TimeOnGateServer
+	//  (dfx2.exe's twin @0x4CEEB0 identical); Mission_DeobfuscateDescription @0x4CDAA0 -
+	//  [DOMAINNAME] @0x4CDB88, called from CNapiGameSession_OnNovaWorldConnected @0x4D1665]
+	t.gate_reply_witnessed = true;
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;
 	// The dfx2_0 pages the live gate's startupurl leads to (url=dfx2_0_start.htm, dfx2-vs-jo-re
-	// §6.5), as the service serves them (apps/novaworld_web/templates): the start page's NWStart
-	// link with its ACT page (dfx2_0_start.htm), the login form's fields (dfx2_0_login.htm: its
-	// enterkey and its charglsvssrequest), the join link with its leading lan=0
-	// (dfx2_0_main.mnx) and the dfx2_0.gsb feed.
+	// §6.5), as the service serves them (apps/novaworld_web/templates): the join link with its
+	// leading lan=0 (dfx2_0_main.mnx) and the dfx2_0.gsb feed. The start page's NWStart link with
+	// its ACT page (dfx2_0_start.htm) is the page's refresh, which the flow follows as it stands,
+	// and the login form (dfx2_0_login.htm, its charglsvssrequest included) is the page's, posted
+	// as it stands.
 	TitlePages pages;
 	pages.msgbase = "dfx2_0_msg.htm";
 	pages.main = "dfx2_0_main.htm";
-	pages.login = "dfx2_0_login.htm";
-	pages.version_file = "dfx2_0.ver";
-	pages.new_update = "dfx2_0_newupdateavailable.htm";
-	pages.new_update_bypass = "dfx2_0_newupdateavailable2.htm";
-	pages.junction = "dfx2_0_junction.htm";
-	pages.activate = "dfx2_0_actlogin.htm";
-	pages.need_to_agree = "dfx2_0_needtoagree.htm";
 	pages.no_db = "dfx2_0_nodb.htm";
 	pages.relay = "dfx2_0_relay.htm";
-	pages.enter_key = "dfx2_0_term.htm";
-	pages.glsvss_request = "[dfx]kills";
 	pages.join_lan = "0";
 	pages.key_error = "dfx2_0_key2err.htm";
 	pages.join = "dfx2_0_join.joi";
 	pages.server_list = "dfx2_0.gsb";
+	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
+	pages.sign_in_submit = "LOGIN";
 	t.pages = pages;
 	return t;
 }
@@ -306,7 +309,6 @@ std::vector<std::string> title_identity_missing(const TitleIdentity &t, TitleIde
 	missing_if(out, profile == nullptr || profile->version_text == nullptr, "version text");
 	missing_if(out, t.nvs == nullptr, "NVS");
 	missing_if(out, t.co == nullptr, "CO");
-	missing_if(out, t.ap == nullptr, "AP");
 	missing_if(out, t.bdat == nullptr, "BDAT");
 	missing_if(out, t.pn == nullptr, "PN");
 	missing_if(out, !t.guid.has_value(), "PG");

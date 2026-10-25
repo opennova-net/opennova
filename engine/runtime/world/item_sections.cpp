@@ -10,11 +10,10 @@
 
 namespace opennova::world {
 namespace {
-int32_t section_ground(const World &world, const Vec3 &position) {
+int32_t section_ground(const World &world, int32_t x, int32_t y) {
     const auto *terrain = world.tables.terrain;
-    return io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_mission_bilinear(*terrain,
-                position.x, position.y) * 65536) : 0, 16384);
+    return io::bam_add(terrain && terrain->valid()
+            ? terrain::height_field_height_bilinear_fixed(*terrain, x, y) : 0, 16384);
 }
 void section_effect(World &world, const std::string &name, const Vec3 &position) {
     if (!name.empty()) world.out.destruction.effects.push_back({name, position, {}});
@@ -40,11 +39,11 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     // [orig: @0x440365 / @0x440370].
     seed.section_clone = true;
     seed.death_motion = DeathMotionMode::SectionFalling;
-    seed.yaw = entity.yaw; seed.pitch = entity.pitch; seed.roll = entity.roll;
+    seed.heading = entity.heading; seed.pitch_bam = entity.pitch_bam; seed.roll_bam = entity.roll_bam;
     int32_t pos[3];
     entity_placement_matrix(entity).transform_point(
             traits.model_section_origins_q16[section].data(), pos);
-    seed.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    seed.position.set_q16({pos[0], pos[1], pos[2]});
     seed.spawn_position = seed.position;
     section_effect(world, "Effect_FlashPop", seed.position);
     const auto handle = world.item_piece_spawner
@@ -68,26 +67,26 @@ void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &tr
     if (world.crt_rand.next() & 1) piece->death_anim_state |= 0xF0;
     for (int i = section; i < count; ++i) entity.spawned_piece_mask |= 1u << (i & 31);
     // The tower's footprint retires the terrain pages composed under it
-    // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670].
+    // [orig: Entity_SpawnSectionEntity @ 0x44062E..0x440670; the bound word
+    //  `mov ecx, [esi]` @0x44062E].
     world.out.terrain_scorches.emit_page_invalidation(
-            int32_t(entity.position.x * 65536), int32_t(entity.position.y * 65536),
-            int32_t(entity.bound_radius * 65536));
+            entity.position.x.q16, entity.position.y.q16, entity.bound_radius.q16);
 }
 void fit_section_to_ground(Entity &entity, const int32_t end[3], int32_t ground) {
     // Per-product Q16 rounding, signed sum, x87 nearest sqrt, then <<8.
     // The angle conversions truncate after multiplying the witnessed double.
     // [orig: Entity_InitFloatingPhysics @ 0x4A8581, 0x4A8735]
-    const int32_t dx = io::bam_sub(end[0], int32_t(entity.position.x * 65536));
-    const int32_t dy = io::bam_sub(end[1], int32_t(entity.position.y * 65536));
-    const int32_t dz = io::bam_sub(ground, int32_t(entity.position.z * 65536));
+    const int32_t dx = io::bam_sub(end[0], entity.position.x.q16);
+    const int32_t dy = io::bam_sub(end[1], entity.position.y.q16);
+    const int32_t dz = io::bam_sub(ground, entity.position.z.q16);
     const int32_t squared = io::bam_add(int32_t((int64_t(dx) * dx + (io::kFp16OneInt / 2)) >> 16),
             int32_t((int64_t(dy) * dy + (io::kFp16OneInt / 2)) >> 16));
     const int32_t root = squared >= 0 ? int32_t(std::nearbyint(std::sqrt(double(squared)))) : INT32_MIN;
     const int32_t planar = int32_t(uint32_t(root) << 8);
     const int32_t heading = int32_t(int64_t(std::atan2(double(dy), double(dx)) * io::kBamPerRadian));
     const int32_t slope = int32_t(int64_t(std::atan2(double(dz), double(planar)) * io::kBamPerRadian));
-    entity.yaw = float(mission_yaw_deg_from_bam_heading(heading));
-    entity.pitch = float(io::bam_sub(0x40000000, slope) * kDegreesPerBam);
+    entity.heading = heading; // the Yaw word, stored (D-NET-NEW-L6-2)
+    entity.pitch_bam = io::bam_sub(0x40000000, slope);
 }
 bool tick_tower_section(World &world, Entity &entity) {
     // [orig: Entity_InitFloatingPhysics @ 0x4A8340;
@@ -114,23 +113,22 @@ bool tick_tower_section(World &world, Entity &entity) {
             height = io::bam_add(height, traits->model_section_heights_q16[i]);
     }
     const uint8_t old_flags = uint8_t(entity.death_anim_state);
-    const int32_t yaw = bam_heading_from_mission_yaw_deg(entity.yaw);
-    entity.yaw = float(mission_yaw_deg_from_bam_heading(
-            io::bam_add(yaw, (old_flags & 0xF0) ? -0x1000000 : 0x1000000)));
+    const int32_t yaw = entity.heading;
+    entity.heading = io::bam_add(yaw, (old_flags & 0xF0) ? -0x1000000 : 0x1000000);
     if ((old_flags & 2) == 0) {
-        const int32_t pitch = bam_from_degrees_wrapped(entity.pitch);
+        const int32_t pitch = entity.pitch_bam;
         entity.section_pitch_accel = io::bam_add(entity.section_pitch_accel,
                 pitch <= 0x40000000 ? 0x1000000 : -0x1000000);
-        entity.pitch = float(io::bam_add(io::bam_add(pitch, entity.section_pitch_accel),
-                entity.section_pitch_rate) * kDegreesPerBam);
+        entity.pitch_bam = io::bam_add(io::bam_add(pitch, entity.section_pitch_accel),
+                entity.section_pitch_rate);
     }
     if (old_flags & 3) {
         entity.veh.vel_x >>= 1; entity.veh.vel_y >>= 1;
         if (entity.veh.slide_z < 0) entity.veh.slide_z = 0;
     }
-    int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
-    const int32_t ground = section_ground(world, entity.position);
+    int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
+    const int32_t ground = section_ground(world, entity.position.x.q16, entity.position.y.q16);
     const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
     bool bottom_contact = false;
     if (z > ground && entity.veh.slide_z != 0) {
@@ -146,7 +144,7 @@ bool tick_tower_section(World &world, Entity &entity) {
         }
         bottom_contact = true; pos[2] = ground;
     }
-    entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    entity.position.set_q16({pos[0], pos[1], pos[2]});
     // Every InitFloatingPhysics contact/settle effect is the interned def+0x412
     // handle: particledeath, the word the SectionSettled leg above reads too.
     // [orig: Effect_SubmitDescriptor(.., word def+0x412) @0x4A84B8 (bottom),
@@ -156,8 +154,7 @@ bool tick_tower_section(World &world, Entity &entity) {
     const int32_t local[3] = {0, 0, height};
     int32_t end[3];
     entity_placement_matrix(entity).transform_point(local, end);
-    const Vec3 end_position{end[0] / 65536.0f, end[1] / 65536.0f, end[2] / 65536.0f};
-    const int32_t end_ground = section_ground(world, end_position);
+    const int32_t end_ground = section_ground(world, end[0], end[1]);
     bool top_contact = false;
     if (end[2] < end_ground) {
         end[2] = end_ground;
@@ -196,12 +193,12 @@ bool tick_tower_section(World &world, Entity &entity) {
     return true;
 }
 CollisionMatrix palm_matrix(const Entity &entity) {
-    const int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+    const int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
     // This callback explicitly uses the unscaled Euler builder.
     // [orig: TerrainTile_TransformPointFromSector @ 0x53BDB0]
-    return collision_matrix_from_euler(bam_heading_from_mission_yaw_deg(entity.yaw),
-            bam_from_degrees_wrapped(entity.pitch), bam_from_degrees_wrapped(entity.roll), pos);
+    return collision_matrix_from_euler(entity.heading,
+            entity.pitch_bam, entity.roll_bam, pos);
 }
 void palm_transition(World &world, Entity &entity, int section) {
     // Read the PUSH operands, not the decompiler's phantom ECX argument:
@@ -227,9 +224,9 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.position = entity.position;
         int32_t pos[3];
         palm_matrix(entity).transform_point(traits->model_pivots_q16[pivot].data(), pos);
-        seed.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+        seed.position.set_q16({pos[0], pos[1], pos[2]});
         seed.spawn_position = seed.position;
-        seed.yaw = entity.yaw; // pitch/roll in the zeroed fragment template stay zero.
+        seed.heading = entity.heading; // pitch/roll in the zeroed fragment template stay zero.
         seed.uniform_scale_q16 = 65536;
         seed.engine_flags = kEntityFlagDead;
         seed.alive = false;
@@ -243,14 +240,24 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.palm_fragment = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;
-        const int32_t x = int32_t(entity.position.x * 65536);
-        const int32_t y = int32_t(entity.position.y * 65536);
+        const int32_t x = entity.position.x.q16;
+        const int32_t y = entity.position.y.q16;
+        // The B stream's seed: the palm's pool-2 index, 8 * type and both position
+        // words' cells. [orig: Palm_SpawnFragment @0x53C1C0 (the PRNG_SetSeed_B call
+        //  @0x53C29A)]
         world.prng16_b_state = uint32_t(entity.handle.slot() + 8 * type) +
                 uint32_t((y >> 10) & ~63) + uint32_t((x >> 10) & ~63);
         seed.veh.vel_x = (world.next_prng16_b() & 8191) - 4096;
         seed.veh.vel_y = (world.next_prng16_b() & 8191) - 4096;
         seed.veh.slide_z = (world.next_prng16_b() & 8191) + 2048;
-        if (world.item_piece_spawner) world.item_piece_spawner->spawn_item_piece(seed);
+        const EntityHandle fragment = world.item_piece_spawner
+                ? world.item_piece_spawner->spawn_item_piece(seed) : EntityHandle{};
+        // The fragment's own list, after its model init, and no table: the pool tables
+        // and the slices stand as the tick left them.
+        // [orig: Palm_SpawnFragment @0x53C1C0 - Entity_InitFromModel called @0x53C397,
+        //  Entity_BuildProximityList @0x53C39D]
+        if (Entity *piece = world.registry.get(fragment); piece && world.collision)
+            world.collision->refresh_blink(world, *piece);
     }
     if (world.rules.mp_session && traits && !traits->sound_death.empty())
         world.out.destruction.sounds.push_back({traits->sound_death, entity.position});
@@ -368,14 +375,59 @@ uint32_t palm_sector_hidden_sections(const Entity &entity) {
     default: return 0;
     }
 }
+// The chel row's world callback, after its +0x138 collapse, hides by the rotor
+// speed (+0x460, compared signed) and the airborne flag: Flags 0x2000 hides the
+// section def+0x896 names, a stopped rotor def+0x897's, a rotor faster than
+// 0x28F5C27 def+0x890's and def+0x894's, a slower one def+0x891's and
+// def+0x895's (at exactly 0x28F5C27 neither pair); a zero byte hides nothing.
+// It zeroes the named bone of whichever model it draws, a wreck's husk too. A
+// byte past this 32-bit word names no section here (no shipped def has one).
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (Flags & 0x2000
+//  @0x48F3B2..0x48F3CE; +0x460 == 0 @0x48F3D4..0x48F3F0; above 0x28F5C27
+//  @0x48F3F6..0x48F416 and @0x48F43D..0x48F458; below it @0x48F41C..0x48F437
+//  and @0x48F45E..0x48F479)]
+constexpr int32_t kChelRotorSectionSpeed = 0x28F5C27;
+uint32_t chel_rotor_hidden_sections(const Entity &entity) {
+    const std::array<uint8_t, 8> &section = entity.chel_section_bytes; // def+0x890..+0x897
+    uint32_t mask = 0;
+    const auto hide = [&mask](uint8_t index) {
+        if (index != 0 && index < 32) mask |= 1u << index;
+    };
+    if ((entity.flags & kEntityFlagInAir) != 0) hide(section[6]);
+    const int32_t speed = entity.veh.part_spin.speed;
+    if (speed == 0) hide(section[7]);
+    if (speed > kChelRotorSectionSpeed) {
+        hide(section[0]);
+        hide(section[4]);
+    }
+    if (speed < kChelRotorSectionSpeed) {
+        hide(section[1]);
+        hide(section[5]);
+    }
+    return mask;
+}
 uint32_t item_hidden_sections(const Entity &entity) {
     // The psec / cesp world callback hides the sector builder's sections and
     // nothing else [orig: BoneCallback_psec_World @ 0x53C130].
     if (entity.palm_sections) return palm_sector_hidden_sections(entity);
-    uint32_t mask = entity.section_mask;
+    // Only the person bone walk drops a +0x134 section from the draw. Every
+    // vehicle, building and item world callback collapses the +0x138 word
+    // alone (beside the occlusion word), so a shot-out or blast-broken
+    // section stays drawn there: its break only plays the sound, and the
+    // person ray walks read +0x134 off the entity, not from here.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D),
+    //  reached from BoneCallback_org0_World @0x4E3940 (the call @0x4E3980), the
+    //  world column of rows 'org0' @0x82CF40 and 'bone' @0x82CF80;
+    //  BoneCallback_gnrc_World @0x4E2860 (the read @0x4E2972);
+    //  BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
+    //  Entity_BuildDeathSectionTransforms @0x492AF0 (the test @0x492C8D);
+    //  Entity_BuildAndApplyBoneMatrices @0x48F210 (the test @0x48F39D);
+    //  Render_DestroyedSections @0x449EF0 (the test @0x44A0CD);
+    //  BoneCallback_cpln_World @0x48FE90 (the test @0x48FFFF)]
+    uint32_t mask = entity.kind == EntityKind::Organic ? entity.section_mask : 0;
     if (entity.engine_flags & kEntityFlagHusk)
         mask |= entity.spawned_piece_mask;
-    return mask;
+    return mask | chel_rotor_hidden_sections(entity);
 }
 const std::array<int32_t, 3> *bldg_section_origin_q16(const World &world, const Entity &entity) {
     // The bldg row's world callback reads the byte +0x2C1 of whatever it
@@ -465,36 +517,43 @@ bool tick_item_section_motion(World &world, Entity &entity) {
             entity.death_motion == DeathMotionMode::SectionSettled)
         return tick_tower_section(world, entity);
     if (entity.death_motion != DeathMotionMode::PalmPiece) return false;
-    int32_t pos[3] = {int32_t(entity.position.x * 65536),
-            int32_t(entity.position.y * 65536), int32_t(entity.position.z * 65536)};
+    update_physics_step(world, entity, entity.veh.vel_x, entity.veh.vel_y, entity.veh.slide_z);
+    return true;
+}
+
+// [orig: Entity_UpdatePhysicsStep @ 0x53BE10]
+void update_physics_step(World &world, Entity &entity, int32_t &vel_x, int32_t &vel_y,
+        int32_t &slide_z) {
+    int32_t pos[3] = {entity.position.x.q16,
+            entity.position.y.q16, entity.position.z.q16};
     for (int i = 0; i < 3; ++i) entity.saved_live_pos[i] = pos[i];
-    entity.saved_live_yaw = bam_heading_from_mission_yaw_deg(entity.yaw);
-    entity.saved_live_pitch = bam_from_degrees_wrapped(entity.pitch);
-    entity.saved_live_roll = bam_from_degrees_wrapped(entity.roll);
+    entity.saved_live_yaw = entity.heading;
+    entity.saved_live_pitch = entity.pitch_bam;
+    entity.saved_live_roll = entity.roll_bam;
     entity.saved_live_valid = true;
     const auto *terrain = world.tables.terrain;
-    const int32_t ground = io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_mission_bilinear(*terrain,
-                entity.position.x, entity.position.y) * 65536) : 0, 16384);
-    const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
+    const int32_t ground = io::bam_add(terrain && terrain->valid()
+            ? terrain::height_field_height_bilinear_fixed(*terrain, entity.position.x.q16,
+                    entity.position.y.q16)
+            : 0, 16384);
+    const int32_t z = io::bam_add(pos[2], slide_z);
     if (z <= ground) {
-        entity.veh.vel_x >>= 2;
-        entity.veh.vel_y >>= 2;
-        entity.veh.slide_z = io::bam_sub(0, entity.veh.slide_z) >> 2;
-        if (entity.veh.slide_z < 167) entity.veh.slide_z = 0;
+        vel_x >>= 2;
+        vel_y >>= 2;
+        slide_z = io::bam_sub(0, slide_z) >> 2;
+        if (slide_z < 167) slide_z = 0;
         pos[2] = ground;
     } else {
-        pos[0] = io::bam_add(pos[0], entity.veh.vel_x);
-        pos[1] = io::bam_add(pos[1], entity.veh.vel_y);
+        pos[0] = io::bam_add(pos[0], vel_x);
+        pos[1] = io::bam_add(pos[1], vel_y);
         pos[2] = z;
-        entity.yaw = float(mission_yaw_deg_from_bam_heading(io::bam_add(
-                entity.saved_live_yaw, entity.palm_state == 17 ? 0x2000000 : 0x800000)));
+        entity.heading = io::bam_add(
+                entity.saved_live_yaw, entity.palm_state == 17 ? 0x2000000 : 0x800000);
         if (entity.palm_state != 17 && uint32_t(entity.saved_live_pitch) < 0x40000000u)
-            entity.pitch = float(io::bam_add(entity.saved_live_pitch, 0x1000000) * kDegreesPerBam);
-        entity.veh.slide_z = io::bam_sub(entity.veh.slide_z, 167);
+            entity.pitch_bam = io::bam_add(entity.saved_live_pitch, 0x1000000);
+        slide_z = io::bam_sub(slide_z, 167);
     }
-    entity.position = {pos[0] / 65536.0f, pos[1] / 65536.0f, pos[2] / 65536.0f};
+    entity.position.set_q16({pos[0], pos[1], pos[2]});
     entity.engine_flags &= ~0x20000u;
-    return true;
 }
 } // namespace opennova::world

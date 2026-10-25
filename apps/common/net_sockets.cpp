@@ -227,7 +227,7 @@ std::string local_host_name() {
 	return name;
 }
 
-Socket udp_bind(uint16_t port, uint16_t *out_bound) {
+Socket udp_bind(uint16_t port, uint16_t *out_bound, uint32_t address) {
 	Socket s{};
 	const native_socket_t native_fd = ::socket(AF_INET, SOCK_DGRAM, 0);
 	if (native_fd == INVALID_SOCKET) {
@@ -236,7 +236,7 @@ Socket udp_bind(uint16_t port, uint16_t *out_bound) {
 	const intptr_t fd = static_cast<intptr_t>(native_fd);
 	sockaddr_in addr{};
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_addr.s_addr = address; // already in network order (INADDR_ANY is 0)
 	addr.sin_port = htons(port);
 	if (::bind(native_socket(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR) {
 		close_fd(fd);

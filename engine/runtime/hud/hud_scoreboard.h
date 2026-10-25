@@ -182,7 +182,7 @@ struct ScoreboardRowContext {
 	bool status_suffix = false;
 	// Solo KOTH's countdown rows [orig: g_ScoreboardFlags & 2 @0x423e7d].
 	bool timed = false;
-	// The countdown's minutes [orig: is_authority ? g_TimeLimitMinutes :
+	// The countdown's minutes [orig: is_authority ? g_KothLimitMinutes :
 	// dword_A821C0 @0x423a4b..0x423a5e].
 	int time_limit = 0;
 	// The local player's team byte, -1 without a local entity (retail

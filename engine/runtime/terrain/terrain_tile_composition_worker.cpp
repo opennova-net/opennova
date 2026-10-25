@@ -167,7 +167,8 @@ TerrainTileCompositionWorker::Threads TerrainTileCompositionWorker::Threads::for
 }
 
 TerrainTileCompositionWorker::TerrainTileCompositionWorker(Threads threads)
-		: lane_pool_(retain_row_stripe_pool(threads.lane_threads)) {
+		: lane_pool_(retain_row_stripe_pool(threads.lane_threads)),
+		  raster_lanes_(lane_pool_ != nullptr ? threads.lane_threads + 1 : 1) {
 	const std::size_t count = std::max<std::size_t>(threads.page_workers, 1);
 	workers_.reserve(count);
 	for (std::size_t index = 0; index < count; ++index)
@@ -218,7 +219,7 @@ bool TerrainTileCompositionWorker::enqueue(const TerrainTileCompositionJob &job,
 		const std::shared_ptr<const SourceSnapshot> &sources, const std::array<float, 3> &tint,
 		const TerrainTileLightEpoch &light, TerrainScorchPagePlan scorch, uint64_t demand_frame,
 		const std::shared_ptr<const TerrainStaticShadowCompilationSnapshot> &shadow,
-		uint32_t shadow_material_time_ms, bool capture_diagnostics) {
+		uint32_t shadow_material_time_ms, bool capture_diagnostics, bool device_shadow) {
 	if (sources == nullptr) return false;
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
@@ -243,7 +244,8 @@ bool TerrainTileCompositionWorker::enqueue(const TerrainTileCompositionJob &job,
 		}
 		if (!scheduled.accepted) return false;
 		work_.push_back(WorkItem{ epoch_, demand_frame, sequence, job, sources, tint, light,
-				std::move(scorch), shadow, shadow_material_time_ms, capture_diagnostics });
+				std::move(scorch), shadow, shadow_material_time_ms, capture_diagnostics,
+				device_shadow });
 	}
 	wake_.notify_one();
 	return true;
@@ -312,7 +314,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 			// DECLARED plan it cannot draw).
 			const TerrainTilePageSourceView view =
 					item.sources->view(item.tint, item.light, item.scorch.valid ? &item.scorch : nullptr);
-			completion.pixels = compose_terrain_tile_page(item.job, view, worker_count());
+			completion.pixels = compose_terrain_tile_page(item.job, view, raster_lanes_);
 			completion.success = completion.pixels.is_valid();
 			const auto page_done = std::chrono::steady_clock::now();
 			completion.page_us = static_cast<uint64_t>(
@@ -326,7 +328,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 					active_shadow = item.shadow;
 					// The frame waits on the slowest page, so one page's
 					// shadow pixel loop may spread over the pool's width.
-					shadow_planner.set_raster_threads(worker_count());
+					shadow_planner.set_raster_threads(raster_lanes_);
 				}
 				// Material animation samples the requesting frame's tick, as
 				// retail's tile render does for each model it submits.
@@ -338,9 +340,17 @@ void TerrainTileCompositionWorker::worker_loop() {
 				completion.shadow_plan_us = static_cast<uint64_t>(
 						std::chrono::duration_cast<std::chrono::microseconds>(plan_done - page_done).count());
 				std::vector<uint8_t> composed_before_shadow;
-				if (item.capture_diagnostics) composed_before_shadow = completion.pixels.pixels;
+				if (item.capture_diagnostics && !item.device_shadow)
+					composed_before_shadow = completion.pixels.pixels;
 				if (!shadow_plan.valid || !shadow_plan.raster_required) {
 					completion.success = false;
+				} else if (item.device_shadow) {
+					// The device draws the casters into the uploaded page: the page leaves
+					// here as composed, with the casters' draws beside it.
+					auto device_job = std::make_shared<TerrainStaticShadowDeviceJob>();
+					completion.success =
+							shadow_planner.build_device_job(item.job.target.page, *device_job);
+					if (completion.success) completion.device_shadow = std::move(device_job);
 				} else {
 					TerrainStaticShadowAlphaPage shadow_page = begin_terrain_static_shadow_alpha_page(
 							item.job, completion.pixels, shadow_plan.content);
@@ -349,7 +359,7 @@ void TerrainTileCompositionWorker::worker_loop() {
 							apply_terrain_static_shadow_alpha_page(item.job, shadow_page, completion.pixels);
 				}
 				completion.shadow_diagnostics = shadow_planner.diagnostics();
-				if (completion.success && item.capture_diagnostics) {
+				if (completion.success && item.capture_diagnostics && !item.device_shadow) {
 					for (std::size_t byte = 0; byte < completion.pixels.pixels.size(); ++byte) {
 						if ((byte & 3u) == 3u) {
 							if (composed_before_shadow[byte] != 0) ++completion.shadow_base_nonzero_alpha_bytes;

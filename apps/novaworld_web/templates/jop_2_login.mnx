@@ -37,8 +37,8 @@ ACTIVATE: ENABLE_BACK_BUTTON
 		<COLUMN count="1" spacing="0">
 			<HEADER justify="CENTER" vjustify="TOP" column="0" sort="0" width="390" type="id"></HEADER>
 			<BODY justify="CENTER" vjustify="TOP" column="0" BITMAP_DRAW></BODY>
-			<SUBST column="0" value="0"  URL>/static/jop_2/nonbhdx2.tga</SUBST>
-			<SUBST column="0"  URL>/static/jop_2/nonbhdx2.tga</SUBST>
+			<SUBST column="0" value="0"  URL>{{WEB_ROOT}}/nonbhdx2.tga</SUBST>
+			<SUBST column="0"  URL>{{WEB_ROOT}}/nonbhdx2.tga</SUBST>
 		</COLUMN>
 		<MIN_ITEM_HEIGHT>48</MIN_ITEM_HEIGHT>
 		<FIXED_HEADER_HEIGHT>0</FIXED_HEADER_HEIGHT>

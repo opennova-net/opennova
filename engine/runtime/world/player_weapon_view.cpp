@@ -81,10 +81,16 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	}
 	// The PowerThrow windup for the HUD charge bar [orig: HUD_DrawPowerThrowChargeBar
 	// @ 0x599830 (ex kong "HUD_DrawWeaponReloadBar" misnomer — it only draws the
-	// windup): gates = def+8 sign bit, g_FireChargeStartTick != 0, ammo available;
-	// the drawer derives the fill from held ticks].
-	const bool windup_active = (w.def.flags & weapon_flag::kPowerThrow) != 0 &&
-			w.power_throw_start_tick != 0 && (active_slot.clip > 0 || w.def.clip_capacity < 0);
+	// windup): gates = def+8 sign bit @0x59986C..0x59987B, g_FireChargeStartTick != 0
+	// @0x599881, WeaponSlot_HasAmmoAvailable @0x59988F (rounds loaded or in the pool, a
+	// clipless def's pool); the drawer derives the fill from held ticks]. Both def reads
+	// are the EquippedSlot's def (slot+0x20 @0x59986C, @0x541B39): a borrow's slot is the
+	// gun's from its commit on, and the commit that stores the personal slot (a detach's
+	// switch back) mounts its def with it, so neither lags the store.
+	const WeaponFsmDef *slot_def = local_equipped_slot_def(world, w);
+	const bool windup_active = slot_def != nullptr &&
+			(slot_def->flags & weapon_flag::kPowerThrow) != 0 && w.power_throw_start_tick != 0 &&
+			weapon_fsm_has_ammo_available(*slot_def, active_slot);
 	v.windup_active = windup_active;
 	v.windup_held_ticks = windup_active
 			? static_cast<int32_t>(world.logic_tick - w.power_throw_start_tick)
@@ -150,7 +156,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			// (world/round_sim.h entity_eye_below_water)
 			// [orig: HUD_DrawCrosshair @0x592b59..0x592b65]
 			const bool below_water = entity_eye_below_water(
-					world, body->pos[2], local != nullptr ? local->eye_offset_z : 0);
+					world, body->self->position.z.q16, local != nullptr ? local->eye_offset_z : 0);
 			if (body->inf.stance == InfantryState::Stance::kProne)
 				category = 0;
 			else if (body->inf.stance == InfantryState::Stance::kCrouch)
@@ -231,7 +237,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// The 3P body's weapon channel (the entity's secondary AnimMap channel): the clip key
 	// + its own playhead for the shell's mask-bone override. The key remains populated
 	// when the state id matches the primary because the two playheads are independent.
-	// Empty means the override gate is off (weapon in hands + allowed mount class +
+	// Empty means the override gate is off (the Player bit + allowed mount class +
 	// primary state flag 0x40).
 	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
 	v.body_anim_key = std::string();
@@ -254,7 +260,11 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 		const AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		const Entity *entity = world.registry.get(world.cached.local_player);
 		const bool blocked_mount = entity != nullptr && mount_blocks_weapon_channel(*entity);
-		if (p && entity && infantry_weapon_channel_visible(p->inf, w.active, blocked_mount)) {
+		// The Player bit, as every body's gate tests it, armed or not.
+		// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B14A7]
+		if (p && entity &&
+				infantry_weapon_channel_visible(p->inf,
+						(entity->engine_flags & kEntityFlagPlayer) != 0, blocked_mount)) {
 			v.body_anim_key = infantry_anim_key(p->inf.weapon_clip_state());
 			v.body_anim_phase = p->inf.wpn_clip_phase;
 			v.body_anim_variant = p->inf.wpn_variant;

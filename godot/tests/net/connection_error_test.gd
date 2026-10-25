@@ -53,6 +53,16 @@ func test_an_empty_record_has_no_reason() -> void:
 	assert_eq(error.reason_text(null, _gameerr()), "")
 
 
+# D-NET-NEW-L1-26 (the shell's route order): the shell closes the session before it routes
+# the exit, so the route reads the exit the teardown left (a listen host's quit over a stale
+# kick's latch reads 7 or 9..19); a world with no session hands the requested exit back.
+func test_the_route_reads_the_exit_after_the_session_closes() -> void:
+	var world: GameWorld = autofree(GameWorld.new())
+	assert_eq(world.close_session_for_route(GameWorld.MISSION_EXIT_QUIT),
+			GameWorld.MISSION_EXIT_QUIT, "no session: the requested exit")
+	assert_eq(world.close_session_for_route(7), 7, "no session: an error exit as requested")
+
+
 func test_the_post_mission_route_shows_the_records_reason() -> void:
 	Strings.register_table(Strings.TABLE_GAMEERR, _gameerr())
 	var route := PostMissionRoute.new()

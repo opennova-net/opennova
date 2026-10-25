@@ -220,8 +220,9 @@ struct SectionDebrisSample {
 // m[15] low bit = section disabled. [orig: the per-section matrix array returned
 // by the model's transform callback (model+168); consumed via
 // Math_TransformPointWithTranslation22 @ 0x412f60 (rotate>>22 + translate),
-// Math_TransformPointFixedPoint22 @ 0x412e90 / Math_FixedPointTransformPoint22
-// @ 0x615810 (rotate only), inverted by Matrix_Transpose3x3WithNegateCol3
+// Math_TransformPointFixedPoint22 @ 0x412e90 (rotate only), Math_FixedPointTransformPoint22
+// @ 0x615810 (each row's dot plus 0x200000, >> 22, plus the row's translation word
+// @0x61583B..0x61584E), inverted by Matrix_Transpose3x3WithNegateCol3
 // @ 0x6136d0 (orthonormal transpose + negated rotated translation). Row/column
 // convention is self-consistent here: we both build and invert the matrices.]
 // ----------------------------------------------------------------------------
@@ -247,9 +248,11 @@ struct CollisionMatrix {
     bool invert_uniform_scale_into(CollisionMatrix &out, int32_t scale_q16) const;
 };
 
-// Build the quantized yaw-only entity matrix (heading in BAM32, translation
-// 16.16). Pure-yaw placements retain this exact table path; target_view uses
-// the full-Euler builder when needed and layers callback section poses above it.
+// Build the quantized yaw-only matrix (heading in BAM32 through the direction
+// table, translation 16.16): the test fixtures', the editor range preview's and
+// the minimap outline's matrix.
+// No entity placement uses it: target_view places through
+// collision_matrix_from_placement (D-NET-NEW-L6-10).
 CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t pos[3]);
 
 // The FULL placement matrix Rz(heading)·Ry(-pitch)·Rx(roll) for statics authored
@@ -280,22 +283,28 @@ CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_b
 // @0x43b56c..0x43b5bd; Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
 // @0x614210; Math_BuildFixedPointMatrixFromEulerAngles @0x613f40].
 CollisionMatrix entity_placement_matrix(const Entity &e);
-// The uniform item scale on a placement matrix: each of the nine rotation
-// entries times `scale_q16` (a 64-bit product >> 16), the translation kept;
-// 0 leaves the matrix unscaled. Retail's placement and pose matrices already
-// carry it, so the polygon walker selects the matching scaled inverse.
-// [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210:
-//  the scale rides the rotation diagonal]
-void collision_matrix_scale_rotation(CollisionMatrix &m, int32_t scale_q16);
-// The collision placement of an entity from its mission eulers (degrees; the
-// yaw the mission heading, bam_heading_from_mission_yaw_deg), its 16.16
-// position and its item scale (collision_matrix_scale_rotation): a pure-yaw
-// placement keeps the quantized-table heading path bit-for-bit, and one
-// authored with pitch or roll (a rock seated on a slope) takes the full Euler
-// matrix so the shell leans with the visual. [orig: the entity orientation
-// matrix @ 0x613f40 serves every collision query]
-CollisionMatrix collision_matrix_from_placement(double yaw_deg, double pitch_deg,
-                                                double roll_deg, const int32_t pos[3],
+// The scaled placement matrix: the same three stages as collision_matrix_from_euler over the
+// diagonal scale << 6 (Q16 -> Q22), so the scale nests inside every stage's truncations; a 0
+// scale is the unscaled builder. Retail's placement and pose matrices carry it, so the polygon
+// walker selects the matching scaled inverse.
+// [orig: Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale @0x614210]
+CollisionMatrix collision_matrix_from_euler_scaled(int32_t heading_bam, int32_t pitch_bam,
+		int32_t roll_bam, const int32_t pos[3], int32_t scale_q16);
+// The collision placement of an entity from its Yaw word (Entity::heading,
+// D-NET-NEW-L6-2), its pitch / roll degrees, its 16.16 position and its item
+// scale (collision_matrix_from_euler_scaled): the full Euler matrix for every
+// placement, a pure-yaw one included, with its exact x87 sine and cosine (the
+// quantized direction table is no part of it): a yaw off the table's 2^22 BAM
+// grid turns the shell with the visual, not up to 0.18 degrees off it
+// (D-NET-NEW-L6-10). [orig: BoneCallback_Simple @0x4E2600 (the build @0x4E2662)
+// and BoneCallback_Generic @0x4E26D0 (@0x4E2745) call
+// Math_BuildFixedPointMatrixFromEulerAngles @0x613F40 on every unscaled
+// placement, whose yaw stage @0x6140B2..0x6141DA runs fsin / fcos; a building's,
+// decoration's or powerup's is built once by Entity_InitFromModel @0x40DC30 (the
+// build @0x40E0CC), the same builder, which then sets Flags 0x20000 @0x40E105 so the
+// callbacks keep it]
+CollisionMatrix collision_matrix_from_placement(int32_t heading, int32_t pitch_bam,
+                                                int32_t roll_bam, const int32_t pos[3],
                                                 int32_t scale_q16);
 // A local box (min x, y, z, then max x, y, z; 16.16) as `matrix` places it:
 // the world box its eight corners span.
@@ -309,6 +318,28 @@ void entity_live_euler_bam(const Entity &e, int32_t out[3]);
 bool collision_matrix_apply_render_pose(const CollisionMatrix &entity_world,
                                         const float pose_row_major[16],
                                         CollisionMatrix &out);
+
+// The two halves of that sandwich on their own, for a caller that runs the bone pass
+// over the entity's render float itself: the fixed matrix as the row-major render
+// float (the (-y, z, x) swizzle; rotation / 2^22, translation / 2^16), and a render
+// float back to Q22 / 16.16, each entry truncated toward zero (false on a non-finite
+// or out-of-range entry). [orig: Math_FixedPointToFloatMatrix4x4_Swizzled @0x611080;
+// Math_FloatMatrixToFixedPoint22 @0x611140]
+void collision_matrix_to_render_float(const CollisionMatrix &fixed, float out_row_major[16]);
+bool collision_matrix_from_render_float(const float in_row_major[16], CollisionMatrix &out);
+
+// An addeweap child's fixed matrix on a userpoint of its carrier's root part:
+// the carrier matrix as render floats, the userpoint's 16.16 position words
+// (x, y, z) through it, its direction words (x, y, z) as a look-at frame
+// times it, back to Q22 / 16.16. A root part with no animation leaves the
+// bone matrix the carrier's own. False on a non-finite or out-of-range float.
+// [orig: Bone_BuildAttachmentMatrix @0x56C630 (from Entity_UpdateTransformAndTurret
+//  @0x44109D); Math_FixedPointToFloatMatrix4x4_Swizzled @0x611080;
+//  Math_TransformPointByMatrix4x4 @0x40CF20; Math_BuildDirectionLookAtMatrix
+//  @0x612C90; Math_MultiplyMatrix4x4_Float @0x611750;
+//  Math_FloatMatrixToFixedPoint22 @0x611140]
+bool collision_matrix_attach_userpoint(const CollisionMatrix &carrier, const int32_t point[3],
+                                       const int32_t look[3], CollisionMatrix &out);
 
 // The inverse of the euler builder: yaw/pitch/roll (BAM32) back out of a Q22
 // rotation — yaw from row 1 col 0 over row 0 col 0, then the yaw-unrotated
@@ -602,6 +633,20 @@ struct RayFaceHit {
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
                              const int32_t *ray_dir = nullptr, int32_t ray_length = 0);
+// The nearest-entity walker's face test over one entity: each enabled section's CFAC faces whose
+// box meets the section-local segment's, bit 2 of the flags clear and the material not 16, that
+// the segment crosses (either way) at |d0| * length / (|d0| + |d1|) along `dir` inside the
+// triangle. `best` (the ray length at the walk's start) takes each strictly nearer hit's
+// distance; true when one did.
+// [orig: Physics_RaycastEntityPool @0x4143E0 - the section walk @0x414620..0x41495D (the disabled
+//  bit @0x414620, Matrix_Transpose3x3WithNegateCol3 @0x414633, the local start / end / direction
+//  @0x414646 / @0x41465C / @0x414675), the face box @0x4146F0..0x414738, bit 2 of +0x24
+//  @0x41473E, the material byte +0x28 == 16 under the context's zero +0x48 @0x414748..0x414756,
+//  the crossing @0x4147E2..0x4147F2, the distance @0x4147F8..0x41485A, the test point
+//  @0x41485C..0x4148CD, Math_PointInTriangle2D @0x4148E6, the strict `<` @0x4148F2..0x4148F5]
+bool collision_raycast_entity_faces(const CollisionTargetView &target, const int32_t start[3],
+                                    const int32_t end[3], const int32_t dir[3], int32_t length,
+                                    int32_t &best);
 
 // A person section's hit radius (Q16) about its bone: 45 percent of the
 // authored COBJ radius (65 for section 14, the head) plus the fixed 0xCCC floor
@@ -741,6 +786,12 @@ struct ContactResult {
     int32_t force[4] = {};         // world push force (16.16); [3] spare like the orig
     uint32_t flags = 0;            // contact flags (see the type table)
     uint32_t door_sections = 0;    // CD/type-9 bit-per-section mask [orig: target+692]
+    // The query reached a building (def type 5) past its broad phase: its
+    // door-touch mask (+0x2B4) starts this query at 0, then takes the touched
+    // door bits; the caller writes it to the target (D-NET-133).
+    // [orig: Entity_ComputeBoneCollisionForce @0x4AE150 - the reset @0x4AE281,
+    //  the OR @0x4AEB22]
+    bool door_mask_reset = false;
 };
 
 bool collision_contact_force(const CollisionTargetView &target, const ContactQuery &q,
@@ -794,6 +845,13 @@ struct ResolvedCollisionShape {
 // Projectile traces and per-draw sun visibility share this one typed row.
 struct WirePersonCollisionProxy {
     uint16_t wire_handle = 0xFFFF;
+    // The table's copy of the person's Position, taken when the table is built
+    // ahead of the tick's pool-0 walk: the coarse gates read it, the movement
+    // resolver's reach box and planar length and the person trace's broad phase.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B93F5..0x4B9409); Entity_MovementCollisionResolver @0x4B2BD0 (the
+    //  reach gate @0x4B3AF6..0x4B3B74); Physics_RaycastAgainstProximityList
+    //  @0x4E4A30 (the coarse gate @0x4E4AB4..0x4E4C26)]
     FixedVec3 position_q16;
     int32_t bound_radius_q16 = 0;
     int32_t uniform_scale_q16 = 0;
@@ -807,6 +865,35 @@ struct WirePersonCollisionProxy {
     bool player = false;
     bool mounted = false;
     bool moving = false;
+    // The person's LIVE Flags dead bit (0x02): the table keeps no copy, so the
+    // movement resolver re-reads the entity's own word past the reach gate and
+    // passes over a dead peer; a trace does not test it. A body below the own
+    // slot that dies in its own update this tick is skipped by the own body's
+    // resolve after it (set_wire_person_proxy_live).
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (g_PersonProxEntity
+    //  @0x4B3B7A, the +0x24 & 2 skip @0x4B3B89..0x4B3B8D);
+    //  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
+    bool dead = false;
+    // The LIVE Flags bits both proximity traces pass a row over on, past their coarse
+    // gate: 0x1 (carried / hidden) and 0x2000000 (a minefield: the lndm class init marks
+    // a row with a graphic). The build passes over a bit-0 row already; one that gains a
+    // bit after the build is passed over here (D-NET-196).
+    // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
+    //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
+    //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Minefield_InitEntity @0x4417D0,
+    //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
+    //  `or [esi+24h], 2000000h` @0x441A23]
+    uint32_t live_flags = 0;
+    // The person's LIVE Position: the movement resolver's push and the trace's
+    // bone walk read the entity, not the table's copy. The table build seeds it
+    // from position_q16 (replace_wire_collision_proxies); a person's update
+    // after the build moves it.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the live reads
+    //  @0x4B3B93..0x4B3B99); Physics_RaycastAgainstProximityList @0x4E4A30
+    //  (Physics_RaycastAgainstBoneSections on g_PersonProxEntity, the call
+    //  @0x4E4C59)]
+    FixedVec3 live_position_q16;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -823,10 +910,38 @@ struct WireDynamicCollisionProxy {
     // Numeric handle equality alone is never treated as identity.
     EntityHandle registry_twin;
     int32_t model_id = -1;          // CollisionWorld model registry id; -1 = unresolved
+    // The table's copy of the mover's Position, taken at the tick's proximity
+    // build: the coarse gates read it, the candidate slices' build and the
+    // trace's slot gate.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 (the copies
+    //  @0x4B9393..0x4B93A7, the entity pointer @0x4B93B3);
+    //  Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on
+    //  g_DynProxY/X/Z @0x4E55E6..0x4E575A)]
     FixedVec3 position_q16;
+    // The mover's LIVE Position, heading and pitch / roll samples, which the
+    // narrow phase reads through the table's entity pointer: the bound-sphere
+    // gate and the posed collision faces. The table build seeds the position
+    // from position_q16 (replace_wire_collision_proxies); a move after the
+    // build writes all four (set_wire_dynamic_proxy_live).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 (g_DynProxEntity
+    //  @0x4E5760, the Physics_RaycastAgainstBoneCollision call @0x4E578D);
+    //  Physics_RaycastAgainstBoneCollision @0x4E4CB0 (the live +0 / +4..+12
+    //  reads @0x4E4CD4..0x4E4D23)]
+    FixedVec3 live_position_q16;
     int32_t heading_bam = 0;        // reconstructed entity+16 (yaw_byte << 24)
     int32_t pitch_bam = 0;          // retained entity+20 spawn/dead sample
     int32_t roll_bam = 0;           // retained entity+24 spawn/dead sample
+    // The LIVE Flags bits both proximity traces pass a row over on, past their coarse
+    // gate: 0x1 (carried / hidden) and 0x2000000 (a minefield: the lndm class init marks
+    // a row with a graphic). The build passes over a bit-0 row already; one that gains a
+    // bit after the build is passed over here (D-NET-196).
+    // [orig: Physics_RaycastAgainstProximityList @0x4E4A30 (g_PersonProxEntity @0x4E4C2C,
+    //  `test [eax+24h], 2000001h` @0x4E4C33); Projectile_RaycastProximitySlots @0x4E5340
+    //  (g_DynProxEntity @0x4E5760, the test @0x4E5767); Entity_BuildProximityLists_Pool01
+    //  @0x4B9340 (the bit-0 skips @0x4B9382 / @0x4B93E4); Minefield_InitEntity @0x4417D0,
+    //  the lndm row's init (g_EntityClassEventCallbackTable @0x813000, the row @0x813198) -
+    //  `or [esi+24h], 2000000h` @0x441A23]
+    uint32_t live_flags = 0;
     int32_t bound_radius_q16 = 0;   // exact entity+0 boundRadius
     int32_t uniform_scale_q16 = 0;  // entity+0x158/itemDef+0x1B8 effective scale
     FixedVec3 bbox_center_q16;       // entity+0x1FC..+0x204 sun/LOS origin offset
@@ -981,6 +1096,18 @@ inline constexpr uint8_t kItemDefTypeBuilding = 5;
 inline bool building_def_row(const Entity &e) {
     return e.has_item_def ? e.item_type == kItemDefTypeBuilding
                           : e.kind == EntityKind::Building;
+}
+
+// The static prox list's membership and bound: a pool-2 row with an item type
+// (+0x1C) and a def (+0x20) is written, and the count advances only while it is
+// under 1199, so the 1200th row's write lands but is never counted and no
+// later row is. [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's
+// tests @ 0x4b945d / @ 0x4b9466, `cmp eax, 4AFh` @ 0x4b94b7 and its `jge`
+// @ 0x4b94cb; pass 2's @ 0x4b94f1 / @ 0x4b94fa, `cmp eax, 4AFh` @ 0x4b954b and
+// its `jge` @ 0x4b955f]
+inline constexpr int32_t kStaticProxCountBound = 1199;
+inline bool static_prox_listed(const Entity &e) {
+    return e.item_type_index != 0 && e.has_item_def;
 }
 
 // ----------------------------------------------------------------------------
@@ -1161,6 +1288,11 @@ public:
     void contact_debug_record(ContactDebugKind kind, uint32_t tick, EntityHandle target,
                               const int32_t pos[3], uint8_t hit_class) const;
     const TraceProfile &trace_profile() const { return trace_profile_; }
+    // The profile's consumer clears what it read (the board's feed at each logic tick's sink),
+    // so every trace counts in one reading: those ahead of a tick's table build (the projectile
+    // pass), a render frame's between ticks, and a tick that builds no tables (a host alone,
+    // whose entity update does not run) read their own traces, never a running sum.
+    void clear_trace_profile() const { trace_profile_ = TraceProfile{}; }
     bool trace_profile_enabled() const { return trace_profile_enabled_; }
     // Profiling is disabled by default. Each enable/disable edge clears the
     // snapshot so a new consumer never inherits another capture's counters.
@@ -1210,10 +1342,10 @@ public:
     // tick. The statics table (pool 2, [orig: Entity_BuildProximityLists_Pool2
     // @ 0x4b9430]: buildings first [0..static_building_count), all statics
     // [0..static_count), positions quantized (p + 0x8000) >> 16 as u16, radius
-    // padded +111876, cap 1200) is rebuilt only when a pool-2 instance or the
-    // registry changed — retail builds it at mission start and on teleport
-    // (Entity_BuildAllProximityLists @ 0x4c20f0), never per tick; the instance
-    // and registry-lifetime edges below stand in for those paths.
+    // padded +111876, cap 1200) is built at the first build and then only at retail's
+    // Pool2 calls: the load and the mission start (Entity_BuildAllProximityLists
+    // @ 0x4c20f0: build_initial_tables, build_all_tables) and the teleports
+    // (rebuild_statics), never per tick.
     // [orig: Entity_BuildProximityListsFromPools @ 0x4b8eb0] per-entity candidate
     // slices (dyn radius+4.0u / statics; pool-1 radius+6.0u) into a 3000-entry arena.
     void build_tick_tables(World &world);
@@ -1221,9 +1353,14 @@ public:
     // such as portal setup and first-tick grounding. The 17-tick cadence only
     // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind immediately republishes the existing pool
-    // snapshot and its candidate slices.
+    // A spawn or registry rewind immediately republishes the pool-0 / pool-1 tables and
+    // every candidate slice; the statics stand (a Pool2 call is build_all_tables').
     void refresh_after_registry_change(World &world);
+    // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
+    // first slices, the pre-logic snapshot). The mission start's local-player block and a
+    // restart's reload. [orig: Entity_BuildAllProximityLists @0x4C20F0, called by
+    //  Entity_InitAllFromModels @0x40E5A1 and Game_StartMission @0x525C90]
+    void build_all_tables(World &world);
     // Direct candidate rebuild plus this entity's blink refresh. Pool position
     // snapshots stay at their published epoch; unrelated contacts are retained.
     // [orig: WacCmd_Tele @0x4F22D0 -> 0x4B8EB0, 0x4B3DC0]
@@ -1233,6 +1370,23 @@ public:
     // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
     //  Entity_RespawnVehicle @0x460133]
     void rebuild_candidate_slices(World &world);
+    // The statics table alone (buildings first, then the rest), outside the instance and
+    // registry edges that otherwise rebuild it: the teleport actions' Pool2 calls.
+    // [orig: Entity_BuildProximityLists_Pool2 @0x4B9430, called by
+    //  Entity_TeleportTeamToSpawn @0x43D4F8, EventAction_TeleportEntityToSpawn @0x43E1F2,
+    //  WacCmd_TeleSsn @0x4F7F3E]
+    void rebuild_statics(World &world);
+    // The pool-0 / pool-1 tables alone, no slice build (the statics too only where an
+    // instance or registry edge left them dirty): the teleport actions' Pool01 calls.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340, called by
+    //  Entity_TeleportTeamToSpawn @0x43D4FD, WacCmd_TeleSsn @0x4F7F43]
+    void rebuild_pool01(World &world);
+    // The mission start's authority rebuild after the WAC initial run: the pool-0/1
+    // tables, then every source's slice (which restarts the 17-tick cadence); the
+    // statics table stands as the @0x525C90 rebuild left it.
+    // [orig: Game_StartMission @0x524360 - Entity_BuildProximityLists_Pool01 @0x525E63,
+    //  Entity_BuildProximityListsFromPools @0x525E68]
+    void rebuild_pool01_and_slices(World &world);
 
     // Atomically replace the persistent decoded collision projection. Sorting
     // by wire handle gives both domains deterministic order; the wire-keyed
@@ -1244,10 +1398,28 @@ public:
             std::vector<WirePersonCollisionProxy> persons,
             std::vector<WireDynamicCollisionProxy> dynamics,
             uint16_t local_player_wire_handle = 0xFFFF);
-    // The decoded person's entity+0 boundRadius as its current proxy carries
-    // it (0 when no proxy names the handle): a client's remote person is a
-    // replica row, never a registry entity.
-    int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
+    // A decoded person's update ran after the table was built: its proxy takes the
+    // person's live Position and dead bit (a handle no proxy names is ignored), which
+    // the next repulsion's dead skip and push and the next trace's bone walk re-read
+    // through the table's entity pointer; the table's copy, which the coarse gates
+    // read, stays as built (D-NET-196).
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 (the reach gate on the copy
+    //  @0x4B3AF6..0x4B3B74, the live dead skip @0x4B3B89..0x4B3B8D, the live reads
+    //  @0x4B3B93..0x4B3B99)]
+    void set_wire_person_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
+                                    bool dead, uint32_t live_flags);
+    // A decoded pool-1 mover moved after the table was built: its proxy takes the
+    // mover's live Position, heading and pitch / roll (a handle no proxy names is
+    // ignored), which the next trace's narrow phase reads through the table's entity
+    // pointer; the table's copy, which the slot gate reads, stays as built (D-NET-196).
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on the copy
+    //  @0x4E55E6..0x4E575A, g_DynProxEntity @0x4E5760); Physics_RaycastAgainstBoneCollision
+    //  @0x4E4CB0]
+    void set_wire_dynamic_proxy_live(uint16_t wire_handle, const FixedVec3 &position,
+                                     int32_t heading_bam, int32_t pitch_bam,
+                                     int32_t roll_bam, uint32_t live_flags);
+    // The decoded person's current proxy (null when none names the handle).
+    const WirePersonCollisionProxy *wire_person_proxy(uint16_t wire_handle) const;
     // The decoded pool-1 mover's current proxy (null when none names the
     // handle): the pose and the verified registry twin every trace reads.
     const WireDynamicCollisionProxy *wire_dynamic_proxy(uint16_t wire_handle) const;
@@ -1295,6 +1467,18 @@ public:
     //  g_LocalPlayerEntity @0x5acea7 / @0x5ad2c4]
     bool sun_ray_clear_of_entities(const World &world, const FixedVec3 &start,
             const FixedVec3 &end) const;
+    // The nearest entity the segment meets: pool 2's nearest face hit, then pool 1's when it is
+    // strictly nearer; `exclude` skipped. Each pool walks its rows in slot order: a row with a
+    // type ordinal (+0x1C) and a bound word whose bound box holds the segment's box and whose
+    // centre lies within the bound of the line, its faces through
+    // collision_raycast_entity_faces. A segment under 16 meets nothing, as does a hit at 0.
+    // [orig: Physics_RaycastNearestEntity @0x5394B0 (pool 2 @0x5394ED, the `jge` @0x5394FF, pool
+    //  1 @0x53950E, the `jge` @0x53951E); Physics_InitRayContext @0x5385E0;
+    //  Physics_RaycastEntityPool @0x4143E0 (the +0x1C and bound gates @0x41445C..0x41446E, the
+    //  box @0x414470..0x4144A6, the excludes @0x4144A8..0x4144BA, the line distance
+    //  @0x4144BC..0x4145C5, the bone data @0x4145E4, the return @0x414968)]
+    EntityHandle raycast_nearest_entity(const World &world, EntityHandle exclude,
+            const FixedVec3 &start, const FixedVec3 &end) const;
 
     ProjectileHit trace_knife_impact(const World &world,
                                      const ProjectileTrace &trace) const;
@@ -1417,6 +1601,19 @@ public:
                                                    const int32_t start[3],
                                                    int32_t inout_end[3]);
 
+    // The nearest solid a segment crosses over the published proximity tables
+    // (the statics, then the dynamics), not a candidate slice: the terrain clips
+    // the end first (an indoors source skips it), each table row passes the ray
+    // box and the line distance at its table position and radius, a row with
+    // Flags 0x2000001 or standing on the source (three levels) is skipped, and
+    // the collision model clips the ray; the last clip is the nearest. Returns
+    // the hit entity, invalid on a miss. [orig: Entity_FindNearestByRay
+    // @0x413AF0 (the terrain clip @0x413B12..0x413B1E, the static walk
+    // @0x413C1F..0x413E0D, the dynamic walk @0x413E2C..0x41403A, the end's
+    // restore @0x413E40..0x413E4B)]
+    EntityHandle find_nearest_by_ray(World &world, EntityHandle source, const int32_t start[3],
+                                     const int32_t end[3]);
+
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and
@@ -1467,6 +1664,12 @@ public:
 	bool wire_person_los_clear(World &world, EntityHandle query, const LosWireEndpoint &endpoint,
 			const int32_t start[3], const int32_t end[3], int32_t height_offset,
 			bool all_types = false);
+	// raycast_clear with a decoded remote person as entity B through the same two fields: its
+	// Flags indoors bit (the terrain leg's pair) and its parent slot (excluded from the walk).
+	// [orig: Physics_RaycastTerrainAndSectors @0x539910 - entityB's Flags @0x539949, its
+	//  +0x16C @0x539A08..0x539A12]
+	bool raycast_clear_to_person(World &world, const int32_t a[3], const int32_t b[3],
+			EntityHandle exclude_a, EntityHandle parent_a, const LosWireEndpoint &person);
 	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
@@ -1558,7 +1761,10 @@ public:
     std::vector<ReplicaPowerupContact> take_replica_powerup_contacts();
 
     struct ResolveState {
-        int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
+        // The savedLivePose stand-in for a source no mover stamped (updated per
+        // resolve): a stamped registry source reads its own Entity::saved_live_pos,
+        // a decoded row the stamp resolve_replica stages (resolve_entity).
+        int32_t prev_pos[3] = {};
         bool prev_valid = false;
         uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
     };
@@ -1622,6 +1828,14 @@ public:
     // the dead/hidden and parachute bits gate/widen repulsion
     // [orig: @ 0x4b3aac/0x4b3aba], and the ground probe's terrain clamp is
     // skipped while Indoors [orig: the Flags & 0x800000 gate @ 0x413785].
+    // saved_live_pos (optional) is the row's savedLivePose, its mover's entry stamp,
+    // which the resolver's skip test, plane gating and victim delta read where they
+    // read a registry row's own words; without it the last resolve's end pose stands
+    // in (an unstamped harness row). eye_offset (optional) is the row's CameraOffset
+    // as its mover stored it; without it the resolver derives the org1 eye.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, the call @0x4B7CF4;
+    //  Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E; Entity_MovementCollisionResolver
+    //  @0x4B2BD0 - the eye @0x4B2EE2..0x4B2EFB]
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
@@ -1629,7 +1843,19 @@ public:
                             bool is_player_class, uint32_t tick, int32_t anim_state_id,
                             uint32_t anim_state_flags, const ReplicaPeer *peers,
                             int32_t peer_count, uint16_t exclude_handle,
-                            uint32_t *entity_flags, EntityHandle *out_ground);
+                            uint32_t *entity_flags, EntityHandle *out_ground,
+                            const int32_t *saved_live_pos = nullptr,
+                            const int32_t *eye_offset = nullptr);
+    // A wire replica row's ground column (raycast_ground) through the same
+    // candidate slice its resolve reads (resolve_replica's staging), the row's
+    // Flags mirror gating the terrain clamp. The player body's slope conform
+    // probes a remote body this way [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4B40E0 - the probes @0x4B6E41 / @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 ->
+    // Entity_RaycastGroundHeight @0x4142C0, over the body's proximity slice].
+    int32_t raycast_ground_replica(World &world, const int32_t pos[3],
+                                   int32_t source_bound_radius_q16, uint16_t row_handle,
+                                   uint32_t entity_flags, int32_t dx, int32_t dy,
+                                   int32_t z_up, int32_t z_drop);
 
 	// Fold model contacts into the terrain forces, one query per authored
 	// wheel/hull probe. Returns severity 0..3 and the last severe hit entity.
@@ -1696,6 +1922,9 @@ public:
     // the arena, valid until the next 17th-tick rebuild; null when the entity has
     // no slice (retail's BSS-zero start: the first 16 ticks scan nothing).
     const EntityHandle *candidate_slice(EntityHandle h, int32_t &count_out) const;
+    // Whether the pool-1 dynamic table holds a row for `h`, and that row's radius
+    // [orig: g_DynProxRadius, the copy @0x4B9389].
+    bool dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const;
     // True once the per-tick pool tables have been built — the discriminator
     // between "no candidates near" and "this world never ran the table build"
     // (headless callers), which keep whole-registry fallbacks.
@@ -1729,15 +1958,17 @@ public:
 
     // Retail's per-section collision-triangle debris sampler. The transform
     // callback is resolved through the same target view as projectile traces;
-    // an absent/invalid model produces no synthetic fallback.
-    // [orig: Entity_SpawnSectionDebris @0x43f580]
+    // an absent/invalid model produces no synthetic fallback. The launch origin
+    // is the entity's savedLivePose words (D-NET-507), all zero for the radial
+    // fallback. [orig: Entity_SpawnSectionDebris @0x43f580 - the +0x80 / +0x84 /
+    // +0x88 reads and their zero test @0x43F6BD..0x43F6D8]
     std::vector<SectionDebrisSample> sample_section_debris(
             const World &world, EntityHandle h,
-            const Vec3 &blast_center) const;
+            const int32_t blast_center[3]) const;
 
     // Read-only world-space geometry snapshot for an embedder collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /
-    // collision_matrix_from_heading path every query uses, so what the host
+    // collision_matrix_from_placement path every query uses, so what the host
     // draws is exactly what the resolver tests. Corner order: index bit 0 = max
     // x, bit 1 = max y, bit 2 = max z (mission space, 16.16). `range` > 0 keeps
     // only instances whose entity position is within it (per-axis box) of
@@ -1802,6 +2033,11 @@ public:
 
 private:
     void build_tables(World &world, bool advance_candidate_slices);
+    // Drops the bindings (and candidate slices) whose registry lifetime ended.
+    void prune_stale_bindings(World &world);
+    // The statics table over the pool-2 rows [orig: Entity_BuildProximityLists_Pool2
+    //  @0x4B9430].
+    void build_statics(World &world);
     void build_candidate_slices(World &world);
     void purge_stale_candidate_slices(const World &world);
     // entity_los_clear over an endpoint described by its read fields.
@@ -1844,9 +2080,19 @@ private:
     struct DynSlot {    // [orig: g_DynProx* dword tables]
         int32_t x = 0, y = 0, z = 0, radius = 0;
         EntityHandle h;
+        // The row's +0x114 noage bit (Entity::ammo_word_noage), which every
+        // slice build reads through the row's entity pointer; the word has no
+        // writer after the device's clone, so the table's copy is that word.
+        // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - @0x4B8FCA /
+        //  @0x4B920A]
+        bool noage = false;
     };
     struct PersonSlot { // [orig: g_PersonProx* dword tables]
         int32_t x = 0, y = 0, z = 0, radius = 0;
+        // The row's raw boundRadius word, the table's radius the repulsion
+        // reads; `radius` is the projectile slot's, widened for a posed body.
+        // [orig: g_PersonProxRadius = entity+0 @ 0x4b93eb]
+        int32_t bound = 0;
         EntityHandle h;
     };
     struct CandidateSlice {
@@ -1877,9 +2123,13 @@ private:
         uint32_t candidate = 0;
     };
 
+    // husk_swap false keeps the intact model on a husked row: the ground drop's pool walk reads
+    // entity+0x30 whatever Flags 4 holds [orig: Physics_RaycastEntityPool @0x4143E0 - the
+    // `mov esi, [ecx+30h]` @0x4145CF, its +0xA8 callback @0x4145D2..0x4145E2].
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
-                                           std::vector<CollisionMatrix> &mat_scratch) const;
+                                           std::vector<CollisionMatrix> &mat_scratch,
+                                           bool husk_swap = true) const;
     // One candidate entity vs one radiused segment: the cheap-metadata broad
     // phase, then live section matrices for survivors (shared by sound and the
     // slice-scoped iris/entity sun casts).
@@ -1954,10 +2204,12 @@ private:
     bool stable_los_dense_enabled_ = false;
     bool stable_los_index_ready_ = false;
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
+    // `wire_b`: entity B is a decoded remote person (raycast_clear_to_person), whose Flags
+    // indoors bit stands in for a registry B's.
     bool raycast_clear_impl(World &world, const int32_t a[3], const int32_t b[3],
                             EntityHandle exclude_a, EntityHandle exclude_b,
                             EntityHandle parent_a, EntityHandle parent_b,
-                            bool cache_target_views);
+                            bool cache_target_views, const LosWireEndpoint *wire_b = nullptr);
     uint64_t last_los_sector_candidates_ = 0;
     ProjectileHit trace_projectile_impl(const World &world,
                                         const ProjectileTrace &trace,
@@ -2065,6 +2317,14 @@ private:
     // resolver's flag latch sites and the ground probe's indoors gate read and
     // write it exactly where they read and write ent->flags on a registry row.
     uint32_t *replica_flags_ = nullptr;
+    // Staged like replica_flags_: the calling row's savedLivePose, which
+    // resolve_entity reads where it reads a registry row's own words.
+    const int32_t *replica_saved_live_ = nullptr;
+    // resolve_replica's candidate staging under the reserved invalid key, which
+    // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
+    size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,
+                                    uint16_t exclude_handle);
+    void unstage_replica_candidates(size_t arena_mark);
 };
 
 } // namespace opennova::world

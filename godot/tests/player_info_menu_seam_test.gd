@@ -221,6 +221,37 @@ func test_join_auth_profile_clamps_a_class_outside_five_to_nine_in_a_session() -
 			"out of a session a byte outside 5..9 keeps the default")
 
 
+# A side whose packed word the avatar table does not resolve stays the record's in the
+# loaded profile (its raw word and class byte, no tree indices), and the join carries the
+# word as it is as CI and the class byte as CT, its avatar byte the resolve's miss, 1;
+# with no table the same (D-PLAYERINFO-33; engine inmatch::join_character_profile carries
+# the witness).
+func test_join_profile_carries_an_unresolved_sides_record_word() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var store := PlayerProfile.store()
+	var stale_packed := 0x8000 | (63 << 9) | (15 << 5) | 30
+	assert_eq(store.apply_character_selection({"team": 1, "player_class": 7,
+			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]}), OK)
+	var db := _load_db()
+	assert_null(db.resolve_character_id(stale_packed, 1), "the table has no such character")
+	var loaded := PlayerProfile.load_character_profile(root)
+	var red: Dictionary = (loaded.get("side_profiles", [{}, {}]) as Array)[1]
+	assert_false(red.is_empty(), "the unresolved side stays the record's")
+	assert_eq(int(red.get("avatar_packed", -1)), stale_packed, "its raw word")
+	assert_eq(int(red.get("player_class", -1)), 7, "its class byte")
+	assert_eq(int(red.get("nationality", 0)), -1, "no tree indices")
+	var profile := db.character_join_profile(loaded, true)
+	assert_eq(profile.get_character_id(1), stale_packed, "CI1 is the record's word")
+	assert_eq(profile.get_player_class(1), 7, "CTB is the record's class byte")
+	assert_eq(profile.get_avatar(1), 1, "VCB is the resolve's miss")
+	var no_table := AvatarDatabase.new().character_join_profile(loaded, true)
+	assert_eq(no_table.get_character_id(1), stale_packed, "no table: CI1 is still the word")
+	assert_eq(no_table.get_player_class(1), 7, "no table: CTB is still the class byte")
+
+
 func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	assert_true(companion.owns_menu(_make_avatar_driver()),

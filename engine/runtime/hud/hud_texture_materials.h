@@ -21,15 +21,15 @@ inline constexpr uint32_t kWpIndicatorMaterialWord = 0x300631u;
 // The capture-point team icons JO_LFP.tga / R_LFP.tga / N_LFP.tga [orig:
 // HUD_LoadAllTextures — Texture_LoadFromFile_0(name, 0x300631, 0x100000), the
 // words @0x59e09e / @0x59e0b7 / @0x59e0d0]. Every tile of the strip draws with
-// sub_676D50(tile, 0x300631) [orig: GImage_CreateTiledTextures_0 @0x67a830,
+// GfxShader_CreateForTexture(tile, 0x300631) [orig: GImage_CreateTiledTextures_0 @0x67a830,
 // applied per tile by Render_DrawTiledTextureStrip @0x67aed0].
 inline constexpr uint32_t kLfpIconMaterialWord = 0x300631u;
 
 // The box styles (border.tga with boxtile.tga, border3.tga alone): the extracted
 // fill cell's, the atlas-with-secondary's and the atlas-alone's materials [orig:
-// BoxTexture_LoadAndSetupUVRegions @0x56acd0 — sub_676D50(cell, 0x651) @0x56ae78,
-// CGfxTexture_Create(atlas, secondary, 0x651, 2) @0x56af2d, sub_676D50(atlas,
-// 0x651) @0x56af43].
+// BoxTexture_LoadAndSetupUVRegions @0x56acd0 — GfxShader_CreateForTexture(cell, 0x651) @0x56ae78,
+// GfxShader_CreateTwoTexture(atlas, secondary, 0x651, 2) @0x56af2d,
+// GfxShader_CreateForTexture(atlas, 0x651) @0x56af43].
 inline constexpr uint32_t kBoxMaterialWord = 0x651u;
 
 // The tip panel's icons, k_tip.tga / g_tip.tga [orig: CTipSystem_Init @0x5b6970 —

@@ -102,7 +102,7 @@ void squib_event(World &world, Entity &entity, int phase) {
         }
     } else direction = {0,65536,0};
     const auto second = rotation(io::bam_sub(0, io::bam_add(
-            heading, bam_from_degrees_wrapped(entity.pitch))),0);
+            heading, entity.pitch_bam)),0);
     state.direction = rotate(compose(first,second), direction);
     const int32_t twice = io::bam_add(distance,distance);
     state.center = {io::bam_sub(io::bam_add(source.x,end.x)/2,mul(twice,state.direction.x)),
@@ -113,7 +113,9 @@ void squib_event(World &world, Entity &entity, int phase) {
     if (!state.ammo_index || !world.tables.ammo.by_index(state.ammo_index)) return;
     Entity clone = entity; // the represented fields of retail's first 0x310 bytes
     clone.death_tick = world.logic_tick;
-    world.registry.spawn(1, clone);
+    // includeInUse 0: a destroyed row is passed over (D-NET-485).
+    // [orig: Entity_InitArcMovement - `push 0` @0x449BB3]
+    world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
 }
 void tick_squib(World &world, Entity &entity) {
     if (!entity.death_tick || entity.squib.interval <= 0) return;
@@ -152,9 +154,9 @@ void tick_squib(World &world, Entity &entity) {
                 round.adm_index = entity.equipped_adm_index;
                 round.ammo_index = state.damage_ammo_index;
                 round.pos = entity.position;
-                round.yaw_bam = bam_heading_from_mission_yaw_deg(entity.yaw);
-                round.pitch_bam = bam_from_degrees_wrapped(entity.pitch);
-                round.roll_bam = bam_from_degrees_wrapped(entity.roll);
+                round.yaw_bam = entity.heading;
+                round.pitch_bam = entity.pitch_bam;
+                round.roll_bam = entity.roll_bam;
                 FixedVec3 velocity{entity.veh.vel_x,entity.veh.vel_y,entity.veh.slide_z};
                 world.round_sim.process_damage_hit(world,round,hit,velocity);
                 entity.veh.vel_x=velocity.x; entity.veh.vel_y=velocity.y; entity.veh.slide_z=velocity.z;

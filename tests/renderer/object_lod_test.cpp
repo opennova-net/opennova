@@ -183,7 +183,7 @@ int main() {
   CHECK(attachment_lod_index(1, 0) == -1);
 
   // The held weapon's own 2 px gate compares the RAW projected radius
-  // [orig: BoneCallback_org0_World @0x4e3d41 `cmp dword_A784F0, 20000h; jl`].
+  // [orig: BoneCallback_org0_World @0x4e3d41 `cmp g_MainViewportProjectedRadiusQ16, 20000h; jl`].
   using opennova::renderer::held_weapon_projection_culled;
   CHECK(opennova::renderer::kHeldWeaponMinProjectedRadiusQ16 == 0x20000);
   CHECK(held_weapon_projection_culled(0x1FFFF));

@@ -8,24 +8,6 @@
 
 namespace opennova::world::detail {
 
-// The misleadingly named retail reset writes each rider's Health to zero,
-// clears its attacker, and chooses the crash death animation; it does not detach.
-// [orig: Entity_ResetOccupantAnimSlots @0x463B20]
-void vehicle_kill_crash_occupants(World &world, Entity &e) {
-	if (!world.ai.is_authority)
-		return;
-	auto kill = [&](EntityHandle h) {
-		if (Entity *rider = world.registry.get(h)) {
-			rider->death_anim_state = compute_death_anim_state(0, 2, 2);
-			rider->health = 0;
-			rider->last_attacker = {};
-		}
-	};
-	for (const auto &seat : e.seats)
-		kill(seat.occupant);
-	kill(e.primary_occupant);
-}
-
 // Expiry follows the sleep test, so a newly expired row still solves this tick.
 // [orig: @0x47602E..0x476048; @0x47973F..0x479759; @0x47C457..0x47C471;
 // @0x47F192..0x47F1AC; @0x481A65..0x481A7F]
@@ -42,7 +24,7 @@ void vehicle_expire_contact_wake(World &world, Entity &e) {
 // preserve forward and rebuild the other two axes by normalized crosses.
 // [orig: Entity_BuildOrientationFromVectors @0x458DF0 (down);
 // Entity_RebuildOrientationMatrixFromAxes @0x4632E0 (up)]
-void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
+CollisionMatrix vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 	auto &m = e.veh;
 	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	int64_t raw[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
@@ -52,7 +34,20 @@ void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 	q16_normalize(raw, side);
 	q16_cross(forward, side, raw);
 	q16_normalize(raw, up);
-	vehicle_axes_to_euler(forward, side, up, m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
+	// The rows set into the caller's matrix, the euler words read back from them.
+	// [orig: Math_SetRow2FromVec3Scaled / Row0 / Row1 @0x4634E0..0x4634F6, then
+	//  Math_FixedPointMatrixToEulerAngles @0x463501]
+	CollisionMatrix rows;
+	for (int k = 0; k < 3; ++k) {
+		rows.m[4 * k] = bam_shl_wrap(forward[k], 6);
+		rows.m[4 * k + 1] = bam_shl_wrap(side[k], 6);
+		rows.m[4 * k + 2] = bam_shl_wrap(up[k], 6);
+	}
+	int32_t euler[3];
+	collision_matrix_to_euler(rows, euler);
+	m.yaw_bam = euler[0];
+	m.air_pitch_bam = euler[1];
+	m.air_roll_bam = euler[2];
 	m.crashed = 0;
 	m.byte_2ef = 0;
 	m.settle_2f0 = inverted ? 1 : 0;
@@ -64,6 +59,7 @@ void vehicle_rebuild_rest_orientation(World &world, Entity &e, bool inverted) {
 		vehicle_smoke_effect(world, e, true);
 		vehicle_clear_chassis(m);
 	}
+	return rows;
 }
 
 // Parked-state maintenance is also reached through the sleep returns.
@@ -123,10 +119,10 @@ int32_t vehicle_ground_height_at(
 // by 36 * DcbId.
 // [orig: `test byte ptr g_EntityUpdateCounter,7` in Entity_UpdateVehiclePhysics
 //  @0x48AFB9..0x48AFD6, Entity_UpdateLightVehiclePhysics @0x484099,
-//  Entity_UpdateTankVehiclePhysics @0x488B69 and Entity_ProcessInfantryPhysics
+//  Entity_UpdateTankVehiclePhysics @0x488B69 and Vehicle_ProcessSelectorZeroGround
 //  @0x46E178; the tick + 36 * DcbId stagger in Entity_UpdateWatercraftPhysics
 //  @0x48D51F, Entity_UpdateAircraftPhysics @0x4903A8..0x4903D8 and
-//  Entity_ProcessAirVehiclePhysics @0x46FA24/@0x46FA77;
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA24/@0x46FA77;
 //  Entity_RaycastGroundHeightAndObject @0x414320]
 void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTraits &traits) {
 	auto &m = vehicle.veh;
@@ -136,8 +132,8 @@ void vehicle_refresh_ground_link(World &world, Entity &vehicle, const VehicleTra
 	                                 : world.entity_update_counter;
 	if ((phase & 7u) != 0 && !(air && m.ground_cache == INT32_MIN))
 		return;
-	const int32_t pos[3] = { to_fixed(vehicle.position.x), to_fixed(vehicle.position.y),
-		to_fixed(vehicle.position.z) };
+	const int32_t pos[3] = { vehicle.position.x.q16, vehicle.position.y.q16,
+		vehicle.position.z.q16 };
 	const int32_t ground = vehicle_ground_height_at(world, vehicle, traits, pos);
 	if (air && ground != INT32_MIN)
 		m.ground_cache = ground;
@@ -154,31 +150,32 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	CarrierMotionPose pose;
 	carrier_pose_fixed(vehicle, pose.pos, pose.yaw_bam, pose.pitch_bam, pose.roll_bam);
 	follow_carrier_motion(*carrier, pose);
-	vehicle.position = { float(from_fixed(pose.pos[0])), float(from_fixed(pose.pos[1])),
-		float(from_fixed(pose.pos[2])) };
+	vehicle.position.set_q16({pose.pos[0], pose.pos[1], pose.pos[2]});
 	auto &m = vehicle.veh;
 	m.yaw_bam = pose.yaw_bam;
 	m.air_pitch_bam = pose.pitch_bam;
 	m.air_roll_bam = pose.roll_bam;
-	vehicle.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
-	vehicle.pitch = degrees_i16_from_bam(m.air_pitch_bam);
-	vehicle.roll = degrees_i16_from_bam(m.air_roll_bam);
+	vehicle.heading = m.yaw_bam;
+	vehicle.pitch_bam = m.air_pitch_bam;
+	vehicle.roll_bam = m.air_roll_bam;
 }
 
-int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],
-		const int32_t *radii, int count, int32_t soft, int32_t hard, PlatProbeForce *forces,
-		int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity) {
-	const VehicleTraits *traits = world.vehicles.traits.get(vehicle.item_id);
-	const bool boat = traits != nullptr && traits->family == VehicleFamily::Watercraft;
+int32_t vehicle_probe_pass(World &world, Entity &vehicle, ProbeForcePass pass,
+		const int32_t (*probes)[3], const int32_t *radii, int count, int32_t soft, int32_t hard,
+		PlatProbeForce *forces, int32_t px, int32_t py, int32_t pz, EntityHandle *hit_entity) {
 	int32_t severity = 0;
 	for (int i = 0; i < count; ++i) {
 		forces[i] = {};
 		// Indoors suppresses terrain only; decks and other models still solve.
 		// [orig: Entity_CheckCollisionState @0x462A30, @0x462AE0..0x462AFA]
+		// Only the CheckCollisionState pass exempts its four wheel probes from the broad
+		// phase; the ComputeCollisionForces pass skips any clear probe
+		// [orig: @0x462C13..0x462C45; Entity_ComputeCollisionForces @0x462150, @0x4622D2].
 		if (((vehicle.flags | vehicle.engine_flags) & 0x800000u) == 0)
 			severity = std::max(severity,
 					plat_terrain_probe(world, probes[i][0], probes[i][1], probes[i][2], radii[i],
-							soft, hard, forces[i], !boat && i < 4));
+							soft, hard, forces[i],
+							pass == ProbeForcePass::CheckCollisionState && i < 4));
 	}
 	EntityHandle hit;
 	if (world.ai.collision != nullptr) {
@@ -204,8 +201,13 @@ bool mass_exchange_target(const World &world, const Entity &vehicle, const Entit
 		return false;
 	our_mass = ours->mass;
 	their_mass = theirs->mass;
-	return int64_t(their_mass) < 2LL * our_mass &&
-			other->bound_radius < 2.0f * vehicle.bound_radius &&
+	// Their def mass against twice ours, their bound word against twice ours, each
+	// doubled by a wrapping add, signed compares (D-NET-507).
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - `lea edx, [eax+eax]; cmp ecx,
+	//  edx` @0x47CEA8..0x47CEAB, `mov edx, [esi]; add edx, edx; cmp [edi], edx`
+	//  @0x47CEB3..0x47CEB7; Entity_ProcessVehicleSuspension @0x463C60 - @0x4643E6..0x4643F5]
+	return their_mass < io::bam_add(our_mass, our_mass) &&
+			other->bound_radius.q16 < io::bam_add(vehicle.bound_radius.q16, vehicle.bound_radius.q16) &&
 			int64_t(our_mass) + their_mass != 0;
 }
 
@@ -285,12 +287,9 @@ void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &
 	other->veh.vel_x = io::bam_add(other->veh.vel_x, bam_mul_wrap(3, transfer[0]) >> 2);
 	other->veh.vel_y = io::bam_add(other->veh.vel_y, bam_mul_wrap(3, transfer[1]) >> 2);
 	other->veh.slide_z = io::bam_add(other->veh.slide_z, bam_mul_wrap(3, transfer[2]) >> 2);
-	other->position.x =
-			float(from_fixed(io::bam_add(to_fixed(other->position.x), transfer[0] >> 2)));
-	other->position.y =
-			float(from_fixed(io::bam_add(to_fixed(other->position.y), transfer[1] >> 2)));
-	other->position.z =
-			float(from_fixed(io::bam_add(to_fixed(other->position.z), transfer[2] >> 2)));
+	other->position.x.q16 = io::bam_add(other->position.x.q16, transfer[0] >> 2);
+	other->position.y.q16 = io::bam_add(other->position.y.q16, transfer[1] >> 2);
+	other->position.z.q16 = io::bam_add(other->position.z.q16, transfer[2] >> 2);
 }
 
 // A landing reaction runs once at the first positive probe depth, before

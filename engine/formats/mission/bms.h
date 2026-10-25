@@ -17,7 +17,7 @@ namespace opennova::bms {
 // ============================================================================
 
 constexpr uint32_t kMagic = 0x534D42;  // 'B','M','S' (first 3 header bytes; magic[3] is the format version)
-// [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader (Jointops.exe)]
+// [orig: version gate `g_BmsHeaderVersion < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader (Jointops.exe)]
 constexpr uint8_t kMinVersion = 19;    // 0x13; shipped JO missions are version 19 (magic reads "BMS\x13")
 constexpr size_t kHeaderSize = 616;
 constexpr size_t kEntitySize = 0xAC;  // 172 bytes

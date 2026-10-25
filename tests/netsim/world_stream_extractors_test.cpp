@@ -1,5 +1,5 @@
 // The per-pool LOAD-TIME spawn-batch extractors (engine/runtime/replication entity_wire_bridge) build the
-// full world a host streams to a joiner during world-load [orig: Server_SendInitialGameStateToPlayer
+// full world a host streams to a joiner during world-load [orig: Server_SendPlayerSlotStateFrame
 // @0x51bba0, phases 0x10 -> 0x0D -> 0x0C -> 0x20]. Routing is by handle.pool() (pool_for_kind:
 // Organic->0, Item->1, Building->2, Marker->3). This proves each extractor reads the right pool
 // into the right wire batch AND that the batch round-trips its witnessed decoder field-identically.
@@ -12,6 +12,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -70,13 +71,13 @@ struct FourPoolWorld final : w::World {
 		organic.item_id = 0x0816;     // AI infantry
 		organic.display_name = "tango1"; // entity+0xF4 Name
 		organic.position = {10.0f, 20.0f, 1.5f};
-		organic.yaw = 30;
+		organic.heading = w::placed_heading_bam(30);
 		organic.team = 2;
 		organic.net_id = 0x4242;
 		organic.anim_slot = 5;
 		organic.has_item_def = true; // a retail organic always has its person def
 		organic.item_type = 3;       // ItemDefType person: the 0x0C def-type byte
-		world.registry.spawn(0, organic);
+		world.ai.attach(world.registry.spawn(0, with_def(organic))); // its AI slot (+0x68)
 
 		w::Entity item;
 		item.kind = w::EntityKind::Item;
@@ -85,17 +86,17 @@ struct FourPoolWorld final : w::World {
 		item.ai_text_file = "d_crate";  // the AI slot's +156 BMS ai_textfile
 		item.position = {30.0f, 40.0f, 0.0f};
 		item.spawn_position = item.position; // where its model init placed it
-		item.yaw = 90;
+		item.heading = w::placed_heading_bam(90);
 		item.team = 1;
 		item.health = 250;
 		item.is_ai_capable = pool1_ai_capable;
-		world.registry.spawn(1, item);
+		world.registry.spawn(1, with_def(item));
 
 		w::Entity building;
 		building.kind = w::EntityKind::Building;
 		building.item_id = 0x0123;    // armory-shaped static
 		building.position = {-5.0f, 6.0f, 2.0f};
-		building.yaw = 45;
+		building.heading = w::placed_heading_bam(45);
 		building.team = 0;
 		world.registry.spawn(2, with_def(building));
 
@@ -103,9 +104,10 @@ struct FourPoolWorld final : w::World {
 		marker.kind = w::EntityKind::Marker;
 		marker.item_id = 6006;        // authored KOTH hill marker
 		marker.position = {1.0f, 2.0f, 3.0f};
-		marker.yaw = 270;
+		marker.heading = w::placed_heading_bam(270);
 		marker.team = 1;
 		marker.bound_radius = 25.5f;
+		marker.net_id = 51; // its DcbId, the record's dword 2: the 0x20 net word (D-NET-517)
 		world.registry.spawn(3, with_def(marker));
 	}
 };
@@ -127,7 +129,9 @@ bool run_pool0_organic() {
 	if (!expect(r.pos_x == w::to_fixed(10.0) && r.pos_z == w::to_fixed(1.5), "pos 16.16")) return false;
 	if (!expect(r.orientation == heading_bam(30), "orientation = engine heading BAM")) return false;
 	if (!expect(r.team == 2, "team carried")) return false;
-	if (!expect(r.net_id == 0x4242, "net_id carried")) return false;
+	// entity+0x15C, 0 on a non-player row: the SSN (0x4242) never rides the 0x0C (D-NET-512).
+	// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 - @0x5032CB]
+	if (!expect(r.net_id == 0, "a non-player's netId is its +0x15C word, 0")) return false;
 	if (!expect(r.anim_slot == 5, "anim slot carried")) return false;
 	std::printf("PASS pool0_organic\n");
 	return true;
@@ -221,7 +225,7 @@ bool run_pool1_spawn_mount_handles() {
 	add_seat(3, w::EntityHandle{});
 	add_seat(8, w::EntityHandle::make(0, 8));
 	add_seat(0, w::EntityHandle::make(0, 1));
-	if (!expect(world.registry.spawn(1, carrier).valid(),
+	if (!expect(world.registry.spawn(1, with_def(carrier)).valid(),
 			"occupied pool-1 carrier spawned"))
 		return false;
 
@@ -260,14 +264,14 @@ bool run_pool1_spawn_parent_is_the_occupant() {
 	hull.kind = w::EntityKind::Item;
 	hull.item_id = 0x050E;
 	hull.primary_occupant = driver_h;
-	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	const w::EntityHandle hull_h = world.registry.spawn(1, with_def(hull));
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x058B;
 	gun.emplacement_parent = hull_h;
 	gun.emplacement_parent_spawn_id = world.registry.get(hull_h)->registry_spawn_id;
 	gun.ground_target = hull_h;
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = world.registry.spawn(1, with_def(gun));
 	const auto decoded_record = [&](w::EntityHandle h, nw::PoolSpawnRecord &out) {
 		const std::vector<uint8_t> wire =
 				nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
@@ -447,7 +451,7 @@ bool run_pool2_zone_block_rides_the_chain() {
 	trigger.kind = w::EntityKind::Building;
 	trigger.item_id = 0x0123;
 	trigger.position = {1.0f, 2.0f, 3.0f};
-	trigger.yaw = 90; // engine heading 0: no 0x0001
+	trigger.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	trigger.zone_number = 2;
 	trigger.zone_radius = 70;
 	trigger.is_capture_trigger = true;
@@ -542,7 +546,7 @@ bool run_pool2_zone_block_rides_the_chain() {
 // [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- the call @0x50459A,
 //  the outs [esp+12h] / [esp+13h]; NetPacket_SerializeEntityPoolToPacket_0
 //  @0x503940 -- the call @0x503EEB; ZoneSlotChain_GetZoneInfo @0x4A2750, the
-//  miss @0x4A27EA; Server_SendInitialGameStateToPlayer @0x51BBA0, one call per
+//  miss @0x4A27EA; Server_SendPlayerSlotStateFrame @0x51BBA0, one call per
 //  page @0x51BC50 / @0x51BCBA]
 bool run_zone_outs_carry_within_a_call() {
 	w::World world;
@@ -552,7 +556,7 @@ bool run_zone_outs_carry_within_a_call() {
 	trigger.kind = w::EntityKind::Building;
 	trigger.item_id = 0x0123;
 	trigger.position = {1.0f, 2.0f, 3.0f};
-	trigger.yaw = 90;
+	trigger.heading = w::placed_heading_bam(90);
 	trigger.zone_number = 2;
 	trigger.zone_radius = 30;
 	const w::EntityHandle trigger_h = world.registry.spawn(2, with_def(trigger));
@@ -609,10 +613,10 @@ bool run_zone_outs_carry_within_a_call() {
 	zone_a.item_id = 0x0321;
 	zone_a.zone_number = 2;
 	zone_a.zone_radius = 40;
-	const w::EntityHandle zone_a_h = world.registry.spawn(1, zone_a);
+	const w::EntityHandle zone_a_h = world.registry.spawn(1, with_def(zone_a));
 	w::Entity zone_b = zone_a;
 	zone_b.zone_number = 5;
-	world.registry.spawn(1, zone_b);
+	world.registry.spawn(1, with_def(zone_b));
 	nw::PoolSpawnBatch items = ns::build_pool1_spawn_batch(world);
 	ok &= expect(items.records.size() == 2 && items.records[1].zone_number_rank == 0x05,
 	             "before any hit a numbered entity streams its own zone number");
@@ -641,7 +645,7 @@ bool run_pool3_marker() {
 	if (!expect(out.records.size() == 1, "one decoded marker")) return false;
 	const nw::Pool3SyncRecord &r = out.records[0];
 	if (!expect(r.item_type_id == 6006, "marker type id")) return false;
-	if (!expect(r.net_handle == w::EntityHandle::make(3, 0).packed, "net_handle = pool-3 handle")) return false;
+	if (!expect(r.net_handle == 51, "net word = the DcbId (+0x7C), not the pool handle")) return false;
 	if (!expect(r.movement_val == static_cast<uint32_t>(heading_bam(270)), "movement_val = heading BAM (D-NET-59)")) return false;
 	if (!expect(r.orientation_val == static_cast<uint32_t>(w::to_fixed(25.5f)),
 	            "orientation_val = entity+0 authored marker radius")) return false;
@@ -663,6 +667,7 @@ bool run_pool3_marker_empty_slot_is_a_zero_word() {
 		w::Entity m;
 		m.kind = w::EntityKind::Marker;
 		m.item_id = 6002;
+		m.net_id = static_cast<uint16_t>(0x40 + i); // the DcbId net word (D-NET-517)
 		world.registry.spawn(3, with_def(m));
 	}
 	world.registry.despawn(w::EntityHandle::make(3, 1));
@@ -676,7 +681,7 @@ bool run_pool3_marker_empty_slot_is_a_zero_word() {
 	ok &= expect(nw::decode_pool3_sync_batch(wire.data(), wire.size(), out) &&
 	                     out.entity_count == 3 && out.records.size() == 3 &&
 	                     out.records[1].is_empty_slot &&
-	                     out.records[2].net_handle == w::EntityHandle::make(3, 2).packed,
+	                     out.records[2].net_handle == 0x42,
 	             "the record after the zero word lands on its own slot");
 	if (ok) std::printf("PASS pool3_marker_empty_slot_is_a_zero_word\n");
 	return ok;
@@ -698,11 +703,12 @@ bool run_pool3_marker_unknown_type_is_a_zero_word() {
 	w::Entity known;
 	known.kind = w::EntityKind::Marker;
 	known.item_id = 6002;
+	known.net_id = 0x0901; // the DcbId net word (D-NET-517)
 	world.registry.spawn(3, with_def(known));
 	const nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
 	const bool ok = expect(world.registry.get(unknown_h) != nullptr && batch.records.size() == 2 &&
 	                               batch.records[0].is_empty_slot && !batch.records[1].is_empty_slot &&
-	                               batch.records[1].net_handle == w::EntityHandle::make(3, 1).packed,
+	                               batch.records[1].net_handle == 0x0901,
 	                       "a live marker of an unknown type streams as a zero word");
 	if (ok) std::printf("PASS pool3_marker_unknown_type_is_a_zero_word\n");
 	return ok;
@@ -735,7 +741,13 @@ bool run_pool0_player_bit0_is_per_entity() {
 		player.item_type = 3;
 		player.team = 1;
 		player.flags = flags;
-		return world.registry.spawn(0, player);
+		// A player is its Player bit, whatever its row (D-NET-348) [orig:
+		// Entity_SpawnFromAnimSlotProperty @0x43C433].
+		player.engine_flags |= w::kEntityFlagPlayer;
+		// The trait sweep's row and the body's AI slot (+0x68), which the 0x0C needs (D-NET-487).
+		const w::EntityHandle h = world.registry.spawn(0, with_def(player));
+		world.ai.attach(h);
+		return h;
 	};
 	const w::EntityHandle host = spawn_player(0);
 	const w::EntityHandle a = spawn_player(1u);
@@ -791,15 +803,17 @@ bool run_full_entity_spawn_player() {
 	player.item_attrib = 0x100000u;      // AIData: exact retail name gate
 	player.display_name = "Player";
 	player.position = {12.0f, 34.0f, 5.0f};
-	player.yaw = 30;
+	player.heading = w::placed_heading_bam(30);
 	player.team = 1;
 	player.player_class = 0;             // unset -> must clamp to 8 on the wire
 	player.owner_connection_id = 0x0C;
+	player.minimap_net_id = 0x0200; // the add's validated side-A character id (+0x15C)
+	player.engine_flags |= w::kEntityFlagPlayer; // a player is its Player bit (D-NET-348)
 	const w::EntityHandle h = world.registry.spawn(0, player);
 	const w::Entity *e = world.registry.get(h);
 	if (!expect(e != nullptr, "player spawned")) return false;
 
-	// Remote view (requester != owner): flags 0x0100, minimap net_id, class 8.
+	// Remote view (requester != owner): flags 0x0100, the character id, class 8.
 	nw::FullEntitySpawnRecord rec = ns::build_full_entity_spawn(*e);
 	if (!expect(rec.slot_id == h.packed, "slot_id = wire handle")) return false;
 	if (!expect(rec.item_type_id == 0x14B9, "type id carried")) return false;
@@ -807,7 +821,7 @@ bool run_full_entity_spawn_player() {
 	if (!expect(rec.minimap_flags == 0x0100, "remote player flags 0x0100")) return false;
 	if (!expect(rec.entity_flags == 0x0C, "owner connection id carried")) return false;
 	if (!expect(rec.entity_name == "Player", "name carried")) return false;
-	if (!expect(rec.net_id == (0x0200u | (h.slot() & 0x1Fu)), "minimap net_id (team 1)")) return false;
+	if (!expect(rec.net_id == 0x0200u, "the +0x15C character id, raw (D-NET-137)")) return false;
 	if (!expect(rec.player_class == 8, "playerClass clamped to 8")) return false;
 	if (!expect(rec.parent_entity_handle == 0xFFFF && rec.seat_mask == 0, "on foot, no seats")) return false;
 	if (!expect(rec.mount_handle_8 == 0xFFFF && rec.mount_handle_9 == 0xFFFF,
@@ -872,11 +886,13 @@ bool run_full_entity_spawn_rich_fields() {
 	entity.seats[3].retail_slot = 0;
 	entity.seats[3].occupant = w::EntityHandle::make(0, 1);
 	entity.position = {-12.5f, 8.25f, 3.0f};
-	entity.yaw = 215;
-	entity.pitch = -15;
-	entity.ai_state = 0x1234;
+	entity.heading = w::placed_heading_bam(215);
+	entity.pitch_bam = w::spawn_angle_bam(-15);
+	// A vehicle row's +0x2B4 is its movers' steering filter (D-NET-133).
+	entity.veh.steer_state = 0x1234;
 	entity.anim_slot = 6;
-	entity.net_id = 0x4242;
+	entity.net_id = 0x4242;          // the SSN (+0x7C): never streamed
+	entity.minimap_net_id = 0x1357;  // entity+0x15C, the netId word (D-NET-512)
 	entity.player_class = 7;
 	entity.ref_num = 0xAB;
 	entity.sub_type = 0xCD;
@@ -915,7 +931,7 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.heading_hi == want_heading && rec.pitch_hi == want_pitch,
 	            "yaw/pitch engine BAM high words")) return false;
 	if (!expect(rec.ai_state == 0x34, "ai_state low byte")) return false;
-	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x4242 && rec.player_class == 7,
+	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x1357 && rec.player_class == 7,
 	            "anim/net/class raw fields")) return false;
 	if (!expect(rec.player_slot_id == 0 && rec.alert_level == 0xAB && rec.sub_type == 0xCD,
 	            "tail leaves only entity+340 zero")) return false;
@@ -997,10 +1013,10 @@ bool run_pool1_zone_block_rides_its_sources() {
 	spawn_point.kind = w::EntityKind::Item;
 	spawn_point.item_id = 0x0123;
 	spawn_point.position = {1.0f, 2.0f, 3.0f};
-	spawn_point.yaw = 90; // engine heading 0: no 0x0001
+	spawn_point.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	spawn_point.is_spawn_point = true;
 	spawn_point.zone_radius = 0;
-	world.registry.spawn(1, spawn_point);
+	world.registry.spawn(1, with_def(spawn_point));
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
 	const std::vector<uint8_t> want = {
@@ -1042,10 +1058,10 @@ bool run_palm_state_rides_its_callbacks() {
 	palm.kind = w::EntityKind::Item;
 	palm.item_id = 0x0321;
 	palm.position = {1.0f, 2.0f, 3.0f};
-	palm.yaw = 90; // engine heading 0: no 0x0001
+	palm.heading = w::placed_heading_bam(90); // engine heading 0: no 0x0001
 	palm.palm_state_streamed = true;
 	palm.palm_state = 0; // standing
-	world.registry.spawn(1, palm);
+	world.registry.spawn(1, with_def(palm));
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));
 	const std::vector<uint8_t> want = {
@@ -1088,14 +1104,14 @@ bool run_freed_carrier_row_keeps_the_target_handle() {
 	w::Entity carrier;
 	carrier.kind = w::EntityKind::Item;
 	carrier.item_id = 0x00A4;
-	const w::EntityHandle carrier_h = world.registry.spawn(1, carrier);
+	const w::EntityHandle carrier_h = world.registry.spawn(1, with_def(carrier));
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.item_id = 0x00A6;
 	gun.has_item_def = true;
 	gun.ground_target = carrier_h;
 	gun.emplacement_parent = carrier_h;
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = world.registry.spawn(1, with_def(gun));
 	world.registry.despawn(carrier_h);
 	const std::vector<uint8_t> wire =
 			nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world));

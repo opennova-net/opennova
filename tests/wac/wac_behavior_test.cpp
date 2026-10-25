@@ -14,6 +14,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 using namespace opennova::wac;
 using namespace opennova::world;
@@ -564,7 +565,7 @@ static void test_wac_spatial_wounded_and_mount_predicates() {
     source.health = 40;
     source.health_max = 100;
     source.position = {0.0f, 0.0f, 0.0f};
-    source.yaw = 90; // mission 90 = engine heading 0 = +X
+    source.heading = placed_heading_bam(90); // mission 90 = engine heading 0 = +X
     w.registry.spawn(0, source);
 
     Entity target = source;
@@ -1174,6 +1175,7 @@ static void test_npc_wac_health_names_and_boarding_consumer() {
     carrier.item_type = 1;
     carrier.has_item_def = true;
     carrier.has_graphic_model = true;
+    carrier.graphic_model_userpoints = 1; // its model's userpoint: the seat bone
     carrier.item_attrib = kItemAttribPlayerControl;
     Seat seat;
     seat.type = SeatType::Passenger;
@@ -1280,9 +1282,11 @@ static void test_player_group_loops_and_handle_aliases() {
     Entity seed; seed.item_id = 1001; seed.item_type_index = 7; seed.health = seed.health_max = 100;
     seed.flags = kEntityFlagPlayer; seed.team = 1; seed.net_id = 100;
     const EntityHandle first = w.registry.spawn(0, seed);
-    seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead;
+    // A player body answers a script SSN by its DcbId, 10000 + its slot byte (entity_dcb_id,
+    // D-NET-NEW-L4-21), not its record word: second is SSN 10005.
+    seed.net_id = 500; seed.team = 2; seed.flags |= kEntityFlagDead; seed.player_slot_id = 5;
     const EntityHandle second = w.registry.spawn(0, seed); // dead humans stay in lists
-    seed.net_id = 1; seed.flags |= 1u;
+    seed.net_id = 1; seed.flags |= 1u; seed.player_slot_id = 6;
     const EntityHandle excluded = w.registry.spawn(0, seed); // net ID collides with second's handle
     seed.net_id = 600; seed.flags = 1; seed.team = 1;
     w.registry.spawn(0, seed); // enters all AI, not blue AI
@@ -1317,7 +1321,7 @@ static void test_player_group_loops_and_handle_aliases() {
         "gloop G_emptygroup inc(v7) end\n"
         "gloop G_authored v8 = v8*10+Item end\n"
         "v9 = auto\n"
-        "v10 = SSN_500\n"
+        "v10 = SSN_10005\n"
         "ssnname(v10, TT_ALIASED)\n",
         env);
     // `gloop(G_blueai)` is retail's Unknown Group leg: the `(` is the group
@@ -1351,8 +1355,7 @@ static void test_player_group_loops_and_handle_aliases() {
     CHECK(nested.ok() && !nested.diagnostics.empty() && nested.diagnostics[0].message == "No LOOP Nesting!");
 
     // Both rows now share an SSN; a bound variable must still name second.
-    w.registry.get(first)->net_id = 800;
-    w.registry.get(second)->net_id = 800;
+    w.registry.get(first)->player_slot_id = 5; // first's DcbId is second's 10005 too
     w.registry.get(second)->display_name.clear();
     vm.execute(w);
     CHECK(w.registry.get(first)->display_name == "visited");
@@ -1360,7 +1363,7 @@ static void test_player_group_loops_and_handle_aliases() {
 
     // The compiled reference survives raw SSN changes and runtime restore.
     const auto baseline = vm.capture_runtime_state();
-    w.registry.get(second)->net_id = 800;
+    w.registry.get(second)->player_slot_id = 9; // its DcbId moves to 10009
     vm.execute(w);
     CHECK(w.script.vars.get_mission(10) == second.packed);
     vm.restore_runtime_state(program, baseline);
@@ -1399,14 +1402,23 @@ static void test_wac_area_and_location_queries() {
     w.registry.register_area("authored", area, false, 37);
     Aabb duplicate; duplicate.min = {-100, -100, -100}; duplicate.max = {100, 100, 100};
     w.registry.register_area("duplicate", duplicate, true, 37);
-    w.registry.register_location(duplicate, 8);
-    w.registry.register_location(area, 9);
-    e.position = {}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
+    const auto location = [](const Aabb &b, int32_t id) {
+        LocationVolume v;
+        v.min_q16[0] = to_fixed(b.min.x); v.min_q16[1] = to_fixed(b.min.y); v.min_q16[2] = to_fixed(b.min.z);
+        v.max_q16[0] = to_fixed(b.max.x); v.max_q16[1] = to_fixed(b.max.y); v.max_q16[2] = to_fixed(b.max.z);
+        v.id = id;
+        return v;
+    };
+    w.registry.register_location(location(duplicate, 8));
+    w.registry.register_location(location(area, 9));
+    e.position = Vec3{}; e.item_id = 2001; e.item_type_index = 7; e.net_id = 100;
     w.registry.spawn(2, e); // slot 0: packed blink hit must be nonzero
     const EntityHandle building = w.registry.spawn(2, e);
+    // The player body answers the SSN tests by its DcbId, 10000 + its slot byte 0
+    // (entity_dcb_id, D-NET-NEW-L4-21), not its record word 42.
     Program program = compile_source(
-        "v1=area(37) v2=area3D(37) v3=SSNarea(42,37) v4=SSNarea3D(42,37) "
-        "v5=area(0) v6=outside v7=SSNloc(42,9) v8=location(9)", {});
+        "v1=area(37) v2=area3D(37) v3=SSNarea(10000,37) v4=SSNarea3D(10000,37) "
+        "v5=area(0) v6=outside v7=SSNloc(10000,9) v8=location(9)", {});
     CHECK(program.ok() && program.diagnostics.empty());
     WacVm vm; vm.load(program); vm.execute(w);
     CHECK(w.script.vars.get_mission(1) == 1 && w.script.vars.get_mission(3) == 1);
@@ -1563,7 +1575,7 @@ static void test_distance_literals_and_lead_queries() {
     seed.item_id = 1; seed.item_type_index = 7;
     seed.net_id = 101;
     seed.position = {0.0f, 0.0f, 2.5f};
-    seed.yaw = 90;
+    seed.heading = placed_heading_bam(90);
     seed.health = 0; seed.alive = false; seed.flags = kEntityFlagDead;
     const auto a = w.registry.spawn(0, seed);
     seed.net_id = 102; seed.position.z = 5.0f;
@@ -1703,9 +1715,9 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     seed.group_id = 7;
     const auto person = w.registry.spawn(0, seed);
     w.ai.attach(person);
-    w.ai.for_handle(person)->pos[0] = -2 * 65536;
-    w.ai.for_handle(person)->pos[1] = -3 * 65536;
-    w.ai.for_handle(person)->pos[2] = 4 * 65536;
+    w.ai.for_handle(person)->self->position.x.q16 = -2 * 65536;
+    w.ai.for_handle(person)->self->position.y.q16 = -3 * 65536;
+    w.ai.for_handle(person)->self->position.z.q16 = 4 * 65536;
     seed.net_id = 103; seed.item_type = 1;
     const auto vehicle = w.registry.spawn(1, seed);
     seed.net_id = 104;
@@ -1715,7 +1727,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
     marker.item_type = 4;
     marker.wp_number = 9;
     marker.position = {20.0f, 10.0f, 5.0f};
-    marker.yaw = 30; marker.roll = 4;
+    marker.heading = placed_heading_bam(30); marker.roll_bam = spawn_angle_bam(4);
     marker.flags = marker.engine_flags = kEntityFlagMatrixBuilt;
     const auto first_marker = w.registry.spawn(3, marker);
     marker.position.x = 40.0f;
@@ -1754,7 +1766,7 @@ static void test_wac_positional_sound_and_teleport_quirk() {
         CHECK(w.registry.get(handle)->position.z == 5.0f);
     }
     CHECK(w.registry.get(person)->health == 80);
-    CHECK(w.ai.for_handle(person)->pos[0] == 20 * 65536);
+    CHECK(w.ai.for_handle(person)->self->position.x.q16 == 20 * 65536);
     CHECK(w.registry.get(itemless)->position.x == -2.0f);
     CHECK(w.diagnostics.empty());
 }

@@ -108,6 +108,10 @@ public:
 	FoliageMaskCompositorEffect();
 	~FoliageMaskCompositorEffect() override;
 
+	// The mask shader and its sampler, created with the foliage's vertex shaders as the
+	// foliage's definitions load (FoliageMaskPass::create_device), queued on the render thread
+	// (rd_glsl.h call_device_create). The callback's own create then finds them.
+	void create_device();
 	void publish(const std::shared_ptr<const FoliageMaskFrame> &p_frame);
 	// The weapon Inset pass's own frame (null clears it): the render whose
 	// camera transform equals the frame's view_camera draws it instead.
@@ -127,6 +131,8 @@ private:
 	class Impl;
 	std::unique_ptr<Impl> impl_;
 	std::atomic<bool> shutdown_requested_{false};
+
+	void create_device_on_render_thread();
 };
 
 // Main-thread owner of the mask pass: installs the effect on the scope's
@@ -140,6 +146,10 @@ class FoliageMaskPass {
 public:
 	FoliageMaskPass();
 	~FoliageMaskPass();
+
+	// The mask effect's device objects ahead of its first publish (the effect the publish
+	// installs): FoliageMaskCompositorEffect::create_device.
+	void create_device();
 
 	// p_scope anchors the WorldEnvironment lookup and the viewport the target
 	// is sized for.

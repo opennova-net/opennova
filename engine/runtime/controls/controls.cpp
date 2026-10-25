@@ -127,6 +127,31 @@ static const ActionDef k_catalog[] = {
     // [orig: row 112 @0x8188E8 — code 502, mode 2 (death screen), class 13, no
     //  keys; its default is the RIGHT mouse button (+24 mask 0x2)]
     {112, "DecSpectatorTarget", "Spectator Target -", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x2, 0x0, 0, 0, 2, 80003},
+    // The cheat rows 113..115 and 117, row 116's shape: no key, flags 0x10, mode 1, class 9,
+    // and a token field that holds no text but its 4-byte command CRC (row +0x4B,
+    // little-endian), which Client_ProcessLocalCommand's out-of-session arm matches. Code
+    // 120 refreshes the local weapon tables, 121 toggles the infinite-ammo bit, 122 sets the
+    // local player's health word to 0x4000, 40 opens the single player's weapon screen
+    // (inmatch::Role::dispatch_record carries their arms).
+    // [orig: row 113 @0x818954 (code 120, the token dword 0x520BEC55 @0x81899F); row 114
+    //  @0x8189C0 (121, 0xD2990EA1 @0x818A0B); row 115 @0x818A2C (122, 0x7C1E3767 @0x818A77);
+    //  row 117 @0x818B04 (40, 0xCE42F6BD @0x818B4F); each "!<text>" @+0x23]
+    {113, "U\xEC\x0BR", "FragGrenade", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
+    {114, "\xA1\x0E\x99\xD2", "SmokeGrenade", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
+    {115, "g7\x1E|", "Detonator", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
+    // The cheat row whose code 123 flips the local AI-ignores-the-player bit: no key, flags
+    // 0x10 (the dispatcher's head drops it in a session), mode 1, class 9, its "!Medpack" text,
+    // and a token field that holds no text but the 4-byte command CRC 0xFF623840 (row +0x4B,
+    // little-endian), which Client_ProcessLocalCommand's out-of-session arm matches.
+    // [orig: row 116 @0x818A98 (code 123, flags 0x10, mode 1, class 9; the token dword
+    //  @0x818AE3); Client_ProcessLocalCommand @0x520BF0 - the CRC walk @0x520E17..0x520E30]
+    {116, "@8b\xFF", "Medpack", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
+    {117, "\xBD\xF6" "B\xCE", "ToSpecial", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0},
+    // The Debug-class "fps" row: no key, flags 0 (no head gate, so the walk of a session's S2C
+    // 0x06 echo can queue it too), modes 3; code 74 toggles the frame-rate overlay bit.
+    // [orig: row 118 @0x818B70 (code 74, flags 0, mode 3, class 11, "!Framerate", the token
+    //  "fps" @0x818BBB)]
+    {118, "fps", "Framerate", ActionClass::Debug, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3, 0},
 };
 
 const ActionDef *catalog(std::size_t *out_count) {
@@ -315,8 +340,13 @@ std::vector<ControlRow> build_rows(Device device) {
 namespace {
 
 // The static rows' +0x00 action codes, row 0..118, byte-read from the
-// catalog [orig: word_8159A8 + 108 * row]. The port's catalog carries rows
-// 0..112 (row 66 and rows 113..118 are not modelled); the codes cover all 119.
+// catalog [orig: word_8159A8 + 108 * row]. The port's catalog carries every row
+// but 66, the codes all 119. Row 66 (code 36, flags 0, mode 3, class 0,
+// "!Null") is unreachable: its token field is empty, so no console name walk
+// meets it, the CRC walks meet an earlier zero record first, nothing queues 36
+// by constant and it has no key; its case's exit reason 5 never runs
+// [orig: row 66 @0x817580; Input_HandleActionBinding @0x49AD40 - case 36
+//  @0x49B780].
 constexpr int16_t k_action_codes[119] = {
     166, 164, 152, 151, 156, 157, 148, 147, 153, 170,
     169, 172, 154, 155, 158, 159, 425, 182, 183, 184,

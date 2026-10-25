@@ -115,10 +115,22 @@ public:
 	// .env over them (a .env that is not there is skipped, the earlier passes
 	// over the engine's defaults standing), the overcast table beside it; then
 	// the load's post-steps: the weather snaps its colours to the new targets,
-	// the bodies and the drops read through `root`, FrameFX draws its mission
-	// texture, the cube captures again. The environment row is required.
+	// the drops read through `root`, the cube captures again. The celestial
+	// bodies load apart (load_celestial_models). The environment row is required.
 	WorldEnvironmentLoad load_environment(const Ref<ResourceRoot> &p_root, const String &p_trn_path,
 			const String &p_env_path) const;
+	// The loaded environment's celestial models through `root`: a mission start loads them past
+	// its rows' init, ahead of the HUD's overlay init, and builds their draw objects on the full
+	// arm alone (`p_draws`; engine environment/celestial_frame.h builds_celestial_draws carries
+	// the witness, D-NET-NEW-L3-38).
+	void load_celestial_models(const Ref<ResourceRoot> &p_root, bool p_draws) const;
+	// The loaded environment's sky maps at the mission textures stage: the full arm's, none on a
+	// dedicated host's reduced arm (EnvFile::load_mission_sky_maps, D-NET-NEW-L3-34).
+	void load_sky_maps(bool p_dedicated_host) const;
+	// FrameFX's pixel shaders (FrameFx::create_pixel_shaders) and its mission texture (the
+	// "ffscan" scanlines, FrameFx::init_mission_textures) at the mission textures stage: the full
+	// arm's, none on a dedicated host's reduced arm (D-NET-NEW-L3-35, D-NET-NEW-LF-13).
+	void init_frame_fx_mission_textures(bool p_dedicated_host) const;
 	// The mission header's attrib-gated overrides over the loaded environment
 	// (null clears them) and the water's own rung for the header's height.
 	void apply_mission_overrides(const Ref<MissionEnvironmentOverrides> &p_overrides) const;

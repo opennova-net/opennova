@@ -77,6 +77,13 @@ struct SlotCaptureFrameCounters {
 	int draw_calls = 0;
 };
 
+// What the load's warm packed (SlotCaptureAdapter::warm_streams).
+struct SlotCaptureWarmCounters {
+	int surfaces = 0;
+	int packed_vertices = 0;
+	int readbacks = 0;
+};
+
 // Device adapter for the render-slot silhouette captures (the RD twin of the
 // FrameFx focused-Q3 adapter): the main thread compiles each request's caster
 // geometry into an immutable frame (Q3GeometryCache streams, the PROJSHAD
@@ -90,11 +97,19 @@ public:
 	~SlotCaptureAdapter();
 
 	void compile_frame(const std::vector<SlotCaptureRequest> &p_requests);
+	// The load's warm: every admitted surface of the casters' visible geometry
+	// (ObjectModel instance ids) takes its packed stream now, as the game's
+	// mission start loads every row's model ahead of the first frame
+	// (SlotShadow::warm_caster_streams carries the witness); publishes nothing.
+	SlotCaptureWarmCounters warm_streams(const std::vector<std::uint64_t> &p_casters);
 	void clear_frame();
 	// Render-side: consume evictions, upload streams and bone palettes, draw
 	// every capture of the published frame, resolve into its target. Returns
 	// false on a device failure (the report keeps the reason).
 	bool draw(RenderingDevice *p_rd);
+	// Render thread: the capture shader, sampler and vertex format on p_rd,
+	// ahead of the first draw (draw's own create then finds them).
+	bool create_device(RenderingDevice *p_rd);
 	// Free resources only through the caller's known-live device; a null
 	// device discards cached handles without dereferencing the old pointer.
 	void release_device(RenderingDevice *p_rd);
@@ -123,12 +138,19 @@ private:
 	std::atomic<std::uint64_t> gpu_span_us_{0};
 	std::atomic<bool> gpu_span_valid_{false};
 
+	void create_device_on_render_thread();
+
 protected:
 	static void _bind_methods();
 
 public:
 	SlotCaptureCompositorEffect();
 	~SlotCaptureCompositorEffect() override;
+
+	// The captures' device objects at the renderer's start, as the effect set's PROJSHAD
+	// passes load (SlotShadow::create_capture_device), queued on the render thread
+	// (rd_glsl.h call_device_create). The callback's own create then finds them.
+	void create_device();
 
 	SlotCaptureAdapter &adapter() { return *adapter_; }
 	const SlotCaptureAdapter &adapter() const { return *adapter_; }

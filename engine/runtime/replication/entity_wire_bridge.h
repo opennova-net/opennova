@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <net/npwire/ingame_decode.h>   // EntityClass / PlayerExtendedUplink
 #include <net/npwire/replication_model.h> // GameEntitySnapshot
 #include <runtime/world/ai.h>                  // AiEntity (engine-frame live pose)
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>   // HudTargetCursor
 #include <runtime/world/world.h>
 
 namespace opennova::replication {
@@ -19,7 +21,7 @@ struct ClientEntityState;
 // (ADR 0012 Decision 2): under SP it feeds the owned pool-0 entity through the
 // in-process loopback; under MP the identical fields ARE the C2S uplink a remote
 // client sends. apply_player_intent (below) applies it, gated by the witnessed
-// entity+286 (healthMax) / entity+36 bit-1 checks.
+// read-apply gates (the dead bit, the round-over latch, the slot state, the pre-round).
 struct PlayerIntent {
 	uint16_t entity_handle = 0;        // owned entity (pool<<12)|slot
 	uint16_t item_type_id = 0;
@@ -66,13 +68,14 @@ EntityClass class_for_type_id(uint16_t type_id);
 EntityClass entity_class_of(const world::Entity &e);
 
 // Synthesize the server-owned wire snapshot of a live World entity — the input the
-// §5.9 0x0A builder consumes. Position is the entity's mission-space float lifted to
-// i32 16.16 (world::to_fixed). euler_z is the engine heading (entity+16, D-NET-86).
+// §5.9 0x0A builder consumes. Position is the entity's 16.16 words, raw
+// (D-NET-507). euler_z is the engine heading (entity+16, D-NET-86).
 GameEntitySnapshot snapshot_of(const world::Entity &e);
 
-// The wire "net_id" of a player row is its minimap slot id (entity+0x15C): the
-// per-team id picked at add when present, else the D-NET-137 encoding shim. The
-// host's own present reads the same identity the 0x0C/0x0A writers emit.
+// The wire "net_id" of a player row is its character id (entity+0x15C): the
+// assigned side's id the add validated against the host's Avatars.def (0 with no
+// table, D-NET-137). The host's own present reads the same identity the 0x0C/0x0A
+// writers emit.
 uint16_t player_wire_net_id(const world::Entity &e);
 
 // The §5.10 player compact-record field-17 byte: `(healthTier << 4) | (playerClass & 0xF)`,
@@ -89,7 +92,7 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 
 // ---------------------------------------------------------------------------
 // Per-pool LOAD-TIME spawn batches — the full world the host streams to a joiner
-// during its world-load sequence [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// during its world-load sequence [orig: Server_SendPlayerSlotStateFrame @0x51bba0,
 // phases 0x10 -> 0x0D -> 0x0C -> 0x20]. SEPARATE from the per-frame 0x0A motion path
 // (snapshot_world): these carry IDENTITY/TYPE/SPAWN-POSE for every pool, including the
 // statics/markers that have no compact 0x0A form. Routing is by handle.pool(), which
@@ -98,8 +101,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // Each extractor reads only the fields the engine/runtime/world Entity models; the wire fields a
 // freshly-promoted static/spawn does not carry (ammo, mount-occupancy block, AI trailer, ...) stay
 // zero — faithful for a load-time spawn record, and the flag word each encoder derives
-// (encode_*_batch) gates them out. The orientation field is the engine-frame heading BAM
-// (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
+// (encode_*_batch) gates them out. The orientation field is the entity's Yaw word
+// (Entity::heading, the engine-frame BAM32), as snapshot_of reads it (D-NET-86,
+// D-NET-NEW-L6-2).
 
 // pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 // The batch is the same for every recipient: a player's flags word carries its own entity's bit0
@@ -116,7 +120,7 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // (ZoneSlotChain_GetZoneInfo), whose two out bytes are the call's stack locals, written only by a
 // hit, so a static the chain does not hold streams the last hit's byte from the same call, then its
 // own radius. Before the call's first hit the bytes are uninitialized stack, read here as zero
-// (D-NET-394). Each S2C 0x10 page is one call [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// (D-NET-394). Each S2C 0x10 page is one call [orig: Server_SendPlayerSlotStateFrame @0x51bba0,
 // the call @0x51bc50 per page].
 void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page);
 // The 0x0D zone bytes of one serializer call, its page: each numbered entity asks the zone chain,
@@ -142,18 +146,64 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // NetPacket_SerializeObjectToBuffer @0x504d10]
 FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
+// The same record for a pool row the destroy freed (world::EntityRegistry::destroyed_row,
+// `stale` its last occupant as it left): the serializer walks the row's memory, which the
+// destroy zeroed through +0x2B3 and then stamped, so the null itemDef writes type 0 (the
+// client clears its slot and reads no further), the null links write 0xFFFF, the two
+// fixed mount words take the destroy's 0xFFFF, +0x154 its 0xFF, and the aiState (+0x2B4)
+// and animSlot (+0x374) bytes, past the memset, keep the occupant's. A row no spawn took
+// since the pool's clear is all zeros: its record is the slot id over the defaults.
+// [orig: NetPacket_SerializeObjectToBuffer @0x504D10 - the def tests @0x504D67 /
+//  @0x504DB7 / @0x504FE8, the link tests @0x504E88 / @0x504EFD / @0x504F75, mountHandles
+//  [8] / [9] @0x505105 / @0x50511B, aiState @0x50518C, animSlot @0x5051A0, +0x154
+//  @0x5051EB; Entity_Destroy @0x43E810 - memset(entity, 0, 0x2B4) @0x43EA70, +0x154 = 0xFF
+//  @0x43EA78, mountHandles[0..9] = 0xFFFF @0x43EA86..0x43EA92]
+FullEntitySpawnRecord build_destroyed_row_full_entity_spawn(world::EntityHandle slot,
+		const world::Entity &stale);
+
+// entity+0x2B4, whose low byte the 0x0C / 0x18 records carry as aiState: the first word
+// past the common block the destroy and the 0x0D memset clear, owned per class. A dead
+// vehicle's is 0 (its death chain zeroes the block, then stores its death effects' group
+// slots there: a static effect-group pool slot's address, (0xC8 + 0x78 * slot) & 0xFF,
+// set by the host's whole effect history and 0 under /NOPARTICLES: PERMANENT, ours stays
+// 0); no other class's death touches the word, so a dead gun keeps its MountSlot counter;
+// a 6088 marker's is its effect name's first characters; a powerup's its respawn
+// countdown; a door building's its section-touch mask; a vehicle's its movers' steering
+// filter; another weapon carrier's (def attrib 0x20 without 0x40) its MountSlot's action
+// counter; an armed squib's its def's deathTime; a person's 0.
+// [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030A0 (the read @0x5032A3),
+//  NetPacket_SerializeObjectToBuffer @0x504D10 (the read @0x50518C); the writers:
+//  Entity_InitDeathSounds @0x4939B0 (the zero @0x493A09..0x493A1B, the effect-group stores
+//  the Entity_SpawnMaskedEffectBank calls @0x493A9C / @0x493AEF and @0x493AC3 / @0x493B16), its
+//  reader Entity_UpdateDeadWreckEffects @0x493140 (the slots @0x4931DA);
+//  Entity_UpdateChildAttachment @0x4409A0
+//  (the ewep death `or [esi+24h], 6` @0x440B72 / @0x440C28, no +0x2B4 store),
+//  Entity_DetachFromVehicle @0x4355F0 (the 0x20 arm's 7 @0x435765..0x435772; the same 7
+//  in Entity_DetachFromMount @0x546D00, @0x546D29, has no code or data reference);
+//  Entity_SpawnFromBMSRecord @0x40E9F0 (the
+//  6088 strncpy @0x40F136..0x40F14F); PowerupEntity_InitFromDef @0x442D00 (-1 @0x442D65),
+//  PowerupAction_Pickup @0x4428A0 (@0x442AE1), Powerup_TickRespawn @0x442850 (@0x442878 /
+//  @0x442883); Entity_ComputeBoneCollisionForce @0x4AE150 (the per-query reset @0x4AE281,
+//  the CD bit @0x4AEB22); Entity_UpdateVehiclePhysics @0x48AF00 (@0x48C14E),
+//  Entity_RespawnVehicle @0x45FF40 (@0x4600CC); Entity_GetWeaponSlots @0x5460E0 (the
+//  +0x2B4 slot for attrib 0x20 without 0x40 @0x5460F4..0x546108), WeaponAction_ProcessFrame
+//  @0x540E60 (the counter, slot+0, @0x541339 / @0x54135D); Entity_SpawnFromAnimSlotProperty
+//  @0x43C390 (0 @0x43C518), Player_InitPlayer @0x4E15F0 (0 @0x4E187C);
+//  Entity_InitArcMovement @0x449810 (itemDef->deathTime @0x449975)]
+int32_t entity_word_2b4(const world::Entity &e);
+
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
-// REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4
-// @0x4c2042-0x4c20a9; docs/net/novaworld-net-re.md §5.38a/§5.10]. The inverse of
-// snapshot_of's two-store read at the wire
-// boundary: it SNAPS the registry Entity pose (the store snapshot_of re-broadcasts) and
-// mirrors the engine-frame AiEntity (live pose + heading/pitch) + stages the smooth-target
-// the CLIENT interpolation consumes, marking the entity net-snapped so the motor skips it
-// [orig: Entity_UpdateInfantryAI @0x4b9a03]. Per §5.38 / ADR-0012 this is ONLY ever called
-// for a remote peer — the host NEVER read-applies its own player (motor-from-input). Returns
-// false if the handle is unresolved, it is the local player, or the movement/spawn gate
-// (Entity.flags bit1) is set.
-bool apply_player_intent(world::World &world, const PlayerIntent &intent);
+// REMOTE PEER entity [orig: NetPacket_SerializePlayerState case 4 @0x4C09C0 -
+// @0x4C1CD6..0x4C20A9; docs/net/novaworld-net-re.md §5.38a/§5.10], in retail's order:
+// the movement-input byte, the state-flag bits 2-4 and the analog axes land whatever
+// the body's state; then, unless the body is dead, the round is over, the sender's slot
+// is not in game (`slot_in_game`, playerSlot+0x20 == 6) or the pre-round countdown runs,
+// it stages the smooth target the body update chases (AiSystem::tick_infantry), stores
+// the live yaw/pitch, writes the live position only for a hidden body (Flags bit 0),
+// stores the equipped adm index and restarts the chase (progress 0). Per §5.38 /
+// ADR-0012 the host never read-applies its own player. Returns false if the handle is
+// unresolved, it is the local player, or a pose gate held.
+bool apply_player_intent(world::World &world, const PlayerIntent &intent, bool slot_in_game);
 
 // What the client-side interest list reads beyond the uplinking player itself: the
 // decoded pool-0/1 entities (a joiner's remote persons live only there; its pool-1
@@ -164,6 +214,12 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 // [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20]
 struct UplinkClientInputs {
 	const ClientState *replica = nullptr;
+	// A decoded pool-0 person's entity+0 boundRadius, by its type: the walk reads the
+	// entity's own word, which its spawn set, never a proximity table's copy (a person
+	// spawned since the last table build, or through a pre-round, has its radius all
+	// the same). Unset reads 0. [orig: Server_BuildEntityPriorityListForPlayer
+	//  @0x50DF20 - the pool-0 cursor @0x50DFE1, `sub ebp, [esi]` @0x50E087]
+	std::function<int32_t(uint16_t type_id)> person_bound_radius_q16;
 	uint16_t self_wire_handle = 0xFFFF;
 	uint16_t hud_target_wire_handle = 0xFFFF;
 	// The main loop's frame statistics the two stat bytes carry, as their low
@@ -179,7 +235,7 @@ struct UplinkClientInputs {
 	// the player's ground link, which the writer reads: a record that seats
 	// the player names the seat's own ground link.
 	// [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
-	//  @0x4C1329, then `groundEntity = parentEntity ? parentEntity->groundEntity
+	//  @0x436610 (the call @0x4C1317), then `groundEntity = parentEntity ? parentEntity->groundEntity
 	//  : carrier` @0x4C1346..0x4C1358; case 3 reads +0x28 @0x4C141D]
 	const ClientEntityState *self_echo = nullptr;
 };
@@ -187,8 +243,8 @@ struct UplinkClientInputs {
 // The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended
 // (type-10) player-uplink BODY (the 43-byte PlayerExtendedUplink) from the joiner's own
 // live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
-// Position is the live engine-frame AiEntity.pos[] (i32 16.16 — the exact store the host
-// writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
+// Position is the local player's own live Position words (i32 16.16, read through the
+// AI slot's entity, the store the host writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
 // `intent.heading << 16`). A live mount_target wins over ground_target; when the selected
 // carrier resolves in `world`, the handle plus carrier-local position/heading are emitted.
 // Otherwise the existing FFFF/world-pose form is retained. The trailing four
@@ -205,13 +261,18 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const UplinkClientInputs &interest = {});
 
 // The HUD target cursor (g_HUDTargetCursorEntity, HUD+0x168) as the uplink's
-// interest list reads it, as a wire handle: the aim runtime's lock, else the
-// body's head-look target. L answers to its self handle and a materialized
-// pool-1..3 row to its own; a decoded remote person, which has no registry
-// entity, answers to the aim acquisition's wire row (`aim_wire_person`).
+// interest list reads it, as a wire handle: the HUD pass's last build of the
+// record (world::HudTargetCursor: the aim runtime's lock, else the body's
+// head-look target), so a frame whose pass returned before its build, and every
+// update ahead of the frame's render, reads the previous build. L answers to its
+// self handle and a materialized pool-1..3 row to its own; a decoded remote
+// person, which has no registry entity, answers to the aim acquisition's wire row;
+// a round lock, or a named entity destroyed since the build, answers to none.
 // [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825 -- the lock (aiRuntime+0xC)
-//  @0x4B87F0, else headLookTarget (+0x344) @0x4B881F; read @0x50E1C6 / @0x50E42C]
-uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
-		uint16_t self_wire_handle, uint16_t aim_wire_person);
+//  @0x4B87F0, else headLookTarget (+0x344) @0x4B881F; read @0x50E1C6 / @0x50E42C,
+//  from Client_ProcessNetworkFrame @0x526692 in the update, ahead of the render's
+//  HUD_RenderAllOverlays; Entity_Destroy's clear @0x43E89C..0x43E8A4]
+uint16_t uplink_hud_target_wire_handle(const world::World &world,
+		const world::HudTargetCursor &cursor, uint16_t self_wire_handle);
 
 } // namespace opennova::replication

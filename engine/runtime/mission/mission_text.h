@@ -34,12 +34,12 @@ struct MissionText {
 	// both by stricmp. [orig: TextResource_FindEntryBySectionAndKey @0x75D250,
 	// g_TextOverrideTable searched first unless it is the table asked
 	// @0x75D27B, the section walk @0x75D2B0; TextResource_FindKeyInSection
-	// @0x75D1E0, the key's stricmp @0x75D205]
+	// @0x75D1E0, the key's stricmp called @0x75D1FB]
 	const rtxt::Entry *find(const std::string &section, const std::string &key) const;
 
 	// MissionText_GetString: the found text, "" with no mission table or no
 	// entry [orig: MissionText_GetString @0x51EB50: the g_TextMission test
-	// @0x51EB57, the lookup @0x51EB76]. The debug bit (dword_24C1930 & 0x10000
+	// @0x51EB57, the lookup @0x51EB76]. The debug bit (g_DebugCheatFlags & 0x10000
 	// -> "&" @0x51EB59..0x51EB6A) is a developer switch this port does not
 	// carry.
 	std::string get_string(const std::string &section, const std::string &key) const;

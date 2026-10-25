@@ -43,6 +43,17 @@ struct StaticEffectSource {
 	std::string graphic;
 	StaticSourceTransform world_transform = kStaticSourceIdentity;
 	uint64_t asset_id = 0;
+	// The item's def names no graphic: no model and no asset. The mission start's walk still
+	// reaches the entity (typed, its def naming an effect, the pool's attrib gate), and the
+	// spawn's null-model test sends it to one emitter at the entity's position. items.def's
+	// `volume` and `offset` lines place nothing: the parser takes both keywords and stores no
+	// word.
+	// [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0 - the pool walks
+	//  @0x523201..0x5232B2; Entity_SpawnBoneTrailEffect @0x43BEF0 - the graphicModel test
+	//  @0x43BF49, the Effect_SubmitDescriptor call @0x43C0A4 at entity->Position;
+	//  ItemDef_ParseProperty @0x49EB00 - "volume" @0x4A1AF8 and "offset" @0x4A1B11 jump to the
+	//  plain return @0x4A1CA6]
+	bool model_less = false;
 };
 
 struct StaticLightDrawSource {

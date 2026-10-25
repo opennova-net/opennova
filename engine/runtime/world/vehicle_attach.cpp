@@ -13,6 +13,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/local_player.h> // the local player: stance latches, camera reset, detach mount
+#include <runtime/world/use_press_trace.h> // the USE readout's scan watch (an instrument)
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
@@ -24,9 +25,14 @@ namespace {
 constexpr std::size_t kEntityHandleDomain =
         static_cast<std::size_t>(EntityRegistry::kPoolCount) << 12;
 
+// A pool-0 row blocks the requester while it lives by its dead bit alone (no Health
+// or life fold), has an ItemDef, is not the requester and sits on the other team.
+// [orig: Vehicle_HasEnemyOccupant @0x4359F0 (the dead bit @0x435A49..0x435A4D, the
+//  ItemDef @0x435A4F, the requester and team tests @0x435A55..0x435A65)]
 bool is_blocking_enemy_rider(const Entity &entity, const Entity &requester) {
     if (entity.handle == requester.handle) return false;
-    if (entity.health <= 0 || !entity.alive) return false;
+    if (((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0) return false;
+    if (!entity.has_item_def) return false;
     if (entity.team == requester.team) return false;
     return entity.mounted;
 }
@@ -109,11 +115,189 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
     return armory_mode ? !candidate.armory_points.empty() : !candidate.seats.empty();
 }
 
-// Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
+// The def a carrier slot holds: the gun's own, or, for an EWeap child routed to
+// its vehicle's slot, the vehicle's [orig: Entity_GetWeaponSlots @0x5460E0].
+const WeaponTableEntry *carrier_slot_def(const World &world, const Entity &mount) {
+    const WeaponSlotState *slot = world.vehicles.resolve_mounted_ammo_slot(mount);
+    if (slot == nullptr) return nullptr;
+    uint8_t adm = mount.primary_weapon_slot_adm;
+    if (slot != &mount.primary_weapon_slot) {
+        const Entity *carrier = world.registry.get(mount.ground_target);
+        if (carrier == nullptr) return nullptr;
+        adm = carrier->primary_weapon_slot_adm;
+    }
+    return world.tables.weapons.by_index(adm);
+}
+
+const WeaponTableEntry *slot_ref_def(const World &world, const WeaponSlotRef &ref) {
+    if (ref.kind == WeaponSlotRef::kPersonal) return world.tables.weapons.by_index(ref.adm);
+    if (ref.kind != WeaponSlotRef::kMount) return nullptr;
+    const Entity *mount = world.registry.get(ref.mount);
+    return mount != nullptr ? carrier_slot_def(world, *mount) : nullptr;
+}
+
+// Whether LocalPlayer holds this entity's EquippedSlot pair; without one the
+// entity's own WeaponSlotRefs are its pair.
+bool slot_pair_is_local(const World &world, EntityHandle entity) {
+    return entity == world.cached.local_player && world.local_player_state != nullptr;
+}
+
+// The local player's borrowed attach saves its EquippedSlot at entity+0x308 before
+// the carrier's slot replaces it: a ctrlx seat whatever the slot, a UseGun seat
+// unless the slot's def carries flags 0x80 (Emplaced), which keeps the old +0x308;
+// a null EquippedSlot leaves none. The EquippedSlot is the personal one, or a gun's
+// the player still holds (a refused attach's borrow on foot, or the seat a seat
+// switch's detach only queued the switch-out of), which +0x308 then names
+// (WeaponInventory::selected_mount). A mounting attach (`mounts`: the success leg)
+// saves nothing when the EquippedSlot already is the carrier's slot; a refused
+// UseGun attach's direct store saves regardless. [orig: Entity_AttachToVehicleSlot
+// @0x49481D..0x494831 (the carrier's slot @0x494827..0x49482F; a null slot's leg
+// @0x494867..0x494898); Entity_AttachToUseGunSlot @0x546BCF..0x546C31 (the 0x80
+// test @0x546BE0..0x546BEE, the gun's slot @0x546C2F), @0x546C48]
+void save_borrowed_selected_slot(World &world, LocalPlayer &local, bool use_gun,
+                                 const Entity &carrier, bool mounts) {
+    WeaponInventory &inv = local.inventory;
+    const LocalPlayerWeapon &w = local.weapon;
+    const WeaponInventorySlot *slot = inv.slot(inv.equipped_combo);
+    if (!w.usegun_slot_active && slot == nullptr) {
+        inv.selected_combo = -1;
+        inv.selected_mount = EntityHandle::kInvalid;
+        return;
+    }
+    if (mounts && w.usegun_slot_active && w.usegun_mount == carrier.handle) return;
+    if (use_gun) {
+        const WeaponTableEntry *def = w.usegun_slot_active
+                ? world.tables.weapons.by_index(w.usegun_weapon_adm)
+                : slot->adm_index >= 0
+                ? world.tables.weapons.by_index(static_cast<uint8_t>(slot->adm_index))
+                : nullptr;
+        if (def != nullptr && (def->flags & weapon_flag::kEmplaced) != 0) return;
+    }
+    if (w.usegun_slot_active) {
+        inv.selected_mount = w.usegun_mount.packed;
+        return;
+    }
+    inv.selected_combo = inv.equipped_combo;
+    inv.selected_mount = EntityHandle::kInvalid;
+}
+
+// Any other entity's borrow, success or a refused UseGun attach alike: +0x308
+// takes the EquippedSlot (a UseGun attach keeps the old one over an Emplaced
+// (0x80) def; a ctrlx attach saves none when the slot already was the carrier's)
+// and the EquippedSlot takes the carrier's slot.
+// [orig: Entity_AttachToUseGunSlot @0x546BCF..0x546C15, @0x546C42..0x546C4E;
+//  Entity_AttachToVehicleSlot @0x494867..0x494898]
+void borrow_carrier_slot(const World &world, Entity &occ, const Entity &carrier, bool use_gun) {
+    const WeaponSlotRef old = occ.equipped_slot;
+    if (use_gun) {
+        const WeaponTableEntry *def = slot_ref_def(world, old);
+        if (def == nullptr || (def->flags & weapon_flag::kEmplaced) == 0)
+            occ.selected_slot = old;
+    } else {
+        occ.selected_slot = old.names_mount(carrier.handle) ? WeaponSlotRef{} : old;
+    }
+    occ.equipped_slot = {};
+    occ.equipped_slot.kind = WeaponSlotRef::kMount;
+    occ.equipped_slot.mount = carrier.handle;
+}
+
+// The authority's process refuses an attach while the requester's EquippedSlot is
+// busy: an action past EmptyIdle other than Overheated (fire, recoil, reload, the
+// dry click, a switch or a scope step). The local player's slot is its active
+// one (a borrowed gun's included); another entity's is the slot it names: the
+// carrier slot it borrows, or a remote player's own row of its table, whose
+// action the accepted 0x06 arms and the weapon walk runs (D-NET-336). An NPC
+// person's own slot takes no request and reads idle.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (the EquippedSlot @0x435B18, the
+//  action @0x435B29, the refusal @0x435B2C..0x435B38); a remote player's EquippedSlot
+//  is its record row: Server_ClientFiredRound @0x50BAA0 (@0x50C27F..0x50C28D)]
+bool equipped_slot_busy(World &world, const Entity &occ) {
+    const WeaponSlotState *slot = nullptr;
+    if (slot_pair_is_local(world, occ.handle)) {
+        if (world.local_player_state->weapon.active)
+            slot = active_local_weapon_slot(world, world.local_player_state->weapon);
+    } else if (occ.equipped_slot.kind == WeaponSlotRef::kMount) {
+        if (const Entity *mount = world.registry.get(occ.equipped_slot.mount))
+            slot = world.vehicles.resolve_mounted_ammo_slot(*mount);
+    } else if (occ.equipped_slot.kind == WeaponSlotRef::kPersonal) {
+        auto it = occ.weapon_slots.find(occ.equipped_slot.combo);
+        if (it != occ.weapon_slots.end()) slot = &it->second;
+    }
+    return slot != nullptr && slot->current >= weapon_action::kFire &&
+            slot->current != weapon_action::kOverheated;
+}
+
+// Shared attach write block. Retail splits UseGun from ordinary vehicle slots at
 // the flags write; the remaining relationship fields are common. Returns false for a
-// control seat retail refuses, before any relationship write.
-bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
-    const bool control_seat = is_vehicle_control_seat(veh.seats[seat_idx].type);
+// seat retail refuses, before any relationship write. `force_attach` is a client's
+// (Entity_ProcessVehicleAttach passes 1 there, 0 on the authority).
+// The carrier model's userpoint name types the requested bone: sitex 1, ctrlx 2,
+// drvrx 5 (5-character prefixes), UseGun 3 (the whole name), anything else 0, and 0
+// with no item def, no model or a bone past the userpoint count. Every typed row is
+// a slot row or an off-table row, so the bone's row carries its type, and a carrier
+// with no model has no rows. Rows are 1-based and no model holds 0x80 userpoints, so
+// bone 0 and a bone of 0x80 or more name no row and stay untyped (Q7-11: retail
+// reads outside the name table for them).
+// [orig: Entity_GetBoneSlotType @0x434ED0 (the reads @0x434EF8 / @0x434F0D, the name
+//  compares @0x434F16 / @0x434F34 / @0x434F52 / @0x434F6E)]
+SeatType bone_slot_type(const Entity &veh, uint8_t bone) {
+    if (!veh.has_item_def) return SeatType::None;
+    for (const Seat &s : veh.seats)
+        if (s.bone_index == bone) return s.type;
+    for (const Seat &s : veh.off_table_seats)
+        if (s.bone_index == bone) return s.type;
+    return SeatType::None;
+}
+
+// The process's occupied-seat test walks the def's ten slot bones for the
+// requested one; a bone of 0x80 or more never matches its signed byte compare.
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (@0x435B4C..0x435B70)]
+// Entity::seats holds the table's rows alone (the off-table ones live apart).
+int seat_table_row(const Entity &veh, uint8_t bone) {
+    if (bone >= 0x80) return -1;
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i)
+        if (veh.seats[static_cast<size_t>(i)].bone_index == bone)
+            return i;
+    return -1;
+}
+
+// The slot the type's attach writes: a sitex bone its passenger slot (0..7) or
+// none, ctrlx and drvrx slot 8 and UseGun slot 9 whatever the bone. A table bone's
+// own row is its type's slot (a ninth sitex in slot 8 excepted: the sitex search
+// stops at slot 7), so the bone's row answers first and an off-table ctrlx / drvrx
+// / UseGun bone takes the row of its type's fixed slot.
+// [orig: Entity_AttachToVehicleSlot @0x4946D0 (sitex @0x4946E9..0x494706, ctrlx
+//  @0x494804, drvrx @0x494909 / @0x49492F); Entity_AttachToUseGunSlot @0x546B80
+//  (@0x546CBF)]
+int attach_slot_row(const Entity &veh, SeatType type, uint8_t bone) {
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i) {
+        const Seat &s = veh.seats[static_cast<size_t>(i)];
+        if (s.bone_index == bone && s.type == type &&
+                !(type == SeatType::Passenger && s.retail_slot == 8))
+            return i;
+    }
+    uint8_t fixed_slot = 0;
+    if (type == SeatType::Controller || type == SeatType::Driver)
+        fixed_slot = 8;
+    else if (type == SeatType::Gunner)
+        fixed_slot = 9;
+    else
+        return -1;
+    for (int i = 0; i < static_cast<int>(veh.seats.size()); ++i)
+        if (veh.seats[static_cast<size_t>(i)].retail_slot == fixed_slot) return i;
+    return -1;
+}
+
+bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, SeatType type,
+        uint8_t bone, bool force_attach) {
+    const bool control_seat = is_vehicle_control_seat(type);
+    const bool use_gun = type == SeatType::Gunner;
+    // A sitex bone's held passenger slot refuses (the authority's process refused
+    // it already; a client's detached its holder). [orig: Entity_AttachToVehicleSlot
+    //  @0x494708..0x49471A]
+    if (type == SeatType::Passenger && seat_idx >= 0 &&
+            veh.seats[static_cast<size_t>(seat_idx)].occupant.valid())
+        return false;
     // The local player's control-seat attach resets its camera first, EWeap
     // carrier or not, ahead of the +368 claim test: the scope target and
     // ease, the fov, the binoculars and the NVG restore latch. (The function's
@@ -127,7 +311,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2;
     //  Entity_AttachToUseGunSlot @0x546ba2..0x546ba4, after the gate @0x546c07
     //  and ahead of @0x546bb6 / the mount @0x546c38]
-    if ((control_seat || veh.seats[seat_idx].type == SeatType::Gunner) &&
+    if ((control_seat || use_gun) &&
             occ.handle == world.cached.local_player &&
             world.local_player_state != nullptr)
         local_player_camera_reset(&world, world.local_player_state->weapon,
@@ -142,11 +326,35 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  the 0 return @0x494714..0x49471a; Entity_ProcessVehicleAttach: the local
     //  player's @0x435c09 -> @0x435c67, any other's @0x435c40, past the tip and the
     //  stance clear; the earlier detach @0x435bce]
-    if (control_seat &&
-            !world.vehicles.claim_primary_occupant(veh, occ.handle, veh.seats[seat_idx].type))
+    if (control_seat && !world.vehicles.claim_primary_occupant(veh, occ.handle, type))
         return false;
-    veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
-    occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
+    // The authority's UseGun attach succeeds only while +368 is empty or the
+    // requester's; a refusal still saves +0x308 and points the EquippedSlot at the
+    // gun's slot, the local player's too (only a success mounts through
+    // Player_MountWeaponSlot), then writes nothing else: the requester stays on
+    // foot holding the gun's slot, which the weapon walk pumps through it. A
+    // client's attach is forced and always seats. (D-NET-420)
+    // [orig: Entity_AttachToUseGunSlot -- forceAttach @0x546B91..0x546B98, the +368
+    //  test @0x546BB6..0x546BC6, the save @0x546BCF..0x546C15, the success-only
+    //  mount @0x546C17..0x546C38, the store @0x546C42..0x546C4E, the success gate
+    //  @0x546C56]
+    if (use_gun && !force_attach && veh.primary_occupant.valid() &&
+            veh.primary_occupant != occ.handle) {
+        if (slot_pair_is_local(world, occ.handle)) {
+            LocalPlayer &local = *world.local_player_state;
+            if (local.inventory_valid)
+                save_borrowed_selected_slot(world, local, true, veh, /*mounts=*/false);
+            local_weapon_direct_borrow(world, local.weapon, veh);
+        } else {
+            borrow_carrier_slot(world, occ, veh, true);
+        }
+        return false;
+    }
+    // An off-table sitex bone writes no seat handle. [orig: mountHandles[idx] = handle
+    //  @0x494746; @0x4946F3..0x494706 -> @0x494752]
+    if (seat_idx >= 0)
+        veh.seats[static_cast<size_t>(seat_idx)].occupant = occ.handle;
+    occ.mount_type = type; // [orig: parentSlot(0x168) = slotType @0x49476F]
     static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
                   "the witnessed gunner-mount scrub mask");
     static_assert((kEntityFlagDrowning | kEntityFlagInAir | kEntityFlagMounted) == 0xA040u,
@@ -170,7 +378,7 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.mount_target_bms_id = veh.bms_id;
     occ.mount_target_spawn_origin = veh.spawn_origin;
     occ.mount_bone = bone;                          // [orig: attachBoneId(0x157) = bone]
-    occ.mount_seat = static_cast<int8_t>(seat_idx); // port-local dense seat index
+    occ.mount_seat = static_cast<int8_t>(seat_idx); // port-local dense seat index, -1: none
     occ.mounted = true;
     occ.mounted_config_valid = veh.emplaced_config_valid;
     occ.mounted_config = veh.emplaced_config_valid ? veh.emplaced_config : 0;
@@ -181,12 +389,29 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     //  Entity_AttachToUseGunSlot @0x546C27..0x546C4E]
     if (occ.mount_type == SeatType::Gunner ||
             (occ.mount_type == SeatType::Controller &&
-             (veh.item_attrib & kItemAttribEweap) != 0))
+             (veh.item_attrib & kItemAttribEweap) != 0)) {
+        if (slot_pair_is_local(world, occ.handle)) {
+            if (world.local_player_state->inventory_valid)
+                save_borrowed_selected_slot(world, *world.local_player_state,
+                                            occ.mount_type == SeatType::Gunner, veh,
+                                            /*mounts=*/true);
+        } else {
+            borrow_carrier_slot(world, occ, veh, occ.mount_type == SeatType::Gunner);
+        }
         world.vehicles.bind_use_gun_slot(occ, veh);
-    // The entity's degree mirror as the entity carried it in, before the seat
-    // pose rewrites it (the look copy's fallback below, for an entity with no body).
-    const int16_t entry_yaw = occ.yaw;
-    world.vehicles.pose_mounted_occupant(occ, veh, veh.seats[seat_idx]);
+    }
+    // The entity's Yaw word as the entity carried it in, before the seat pose
+    // rewrites it (the look copy's fallback below, for an entity with no body).
+    const int32_t entry_heading = occ.heading;
+    // Retail's attach stores no Position: the parent, bone, slot and flags only;
+    // a body's own motor poses it from the seat on its next pass (D-NET-507: the
+    // position is one store now, so the seat pose no longer lands early).
+    // [orig: Entity_AttachToVehicleSlot @0x4946D0 - the stores @0x494752..0x494775]
+    const EntityPosition entry_position = occ.position;
+    Seat seat;
+    if (world.vehicles.rider_seat(occ, veh, seat))
+        world.vehicles.pose_mounted_occupant(occ, veh, seat);
+    if (world.ai.for_handle(occ.handle) != nullptr) occ.position = entry_position;
     // Success clears the movement stance bits and, for the local player, the
     // prone/crouch latches, and copies its Yaw into the look yaw. Neither attach
     // writes Yaw, so the look takes the heading the body carried in (a request's
@@ -198,17 +423,20 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.net_stance_bits = 0;
     if (occ.handle == world.cached.local_player) {
         AiEntity *body = world.ai.for_handle(occ.handle);
-        const int32_t yaw = body != nullptr ? body->heading
-                                            : bam_heading_from_mission_yaw_deg(entry_yaw);
+        const int32_t yaw = body != nullptr ? body->heading : entry_heading;
         if (world.local_player_state != nullptr) {
             world.local_player_state->clear_stance_latches();
             world.local_player_state->input.look_heading = yaw;
         }
         if (body != nullptr && body->inf.is_local_player) body->inf.target_heading = yaw;
     }
-    // The UseGun claim (the control seats claimed above).
-    // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d]
-    if (!control_seat)
+    // The UseGun claim (the control seats claimed above): a client's forced
+    // attach stores +368 over any claimant.
+    // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d; forceAttach @0x546B93]
+    if (use_gun && force_attach && veh.primary_occupant.valid() &&
+            veh.primary_occupant != occ.handle)
+        veh.primary_occupant = occ.handle;
+    else if (!control_seat)
         world.vehicles.claim_primary_occupant(veh, occ.handle, occ.mount_type);
     return true;
 }
@@ -217,11 +445,11 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
 // (pose_mounted_occupant) through the carrier's FULL orientation frame, our
 // stand-in for the posed bone transform
 // [orig: Bone_BuildAttachmentMatrix @0x56c630 in the scan @0x435fe7].
-Vec3 local_point_world_pos(const Entity &veh, const Vec3 &local) {
+EntityPosition local_point_world_pos(const Entity &veh, const Vec3 &local) {
     return entity_local_point_world(veh, local);
 }
 
-Vec3 seat_world_pos(World &world, const Entity &veh, const Seat &s) {
+EntityPosition seat_world_pos(World &world, const Entity &veh, const Seat &s) {
     // USE scores every seat kind (sitex, ctrlx, drvrx and UseGun alike) at
     // its live bone through the carrier's attachment build: the carrier's
     // render-class CTRL callback, then its PANM/bones. That is the provider's
@@ -390,12 +618,13 @@ bool find_best_vehicle_seat(
 }
 
 bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &carrier) {
-	// The dead bit in either view, then the def and the graphic model; no Health
-	// read (D-NET-580). The model's userpoint-count test is not ported
+	// The dead bit in either view, then the def, the graphic model and its
+	// userpoint count; no Health read (D-NET-580). A carrier whose model holds
+	// no userpoints is refused before the walk, whatever its children carry
 	// (D-NET-587) [orig: Entity_CanEnterVehicle @0x435485, @0x435492; the model
 	//  @0x435498..0x43549A, its +0xBC @0x43549C..0x4354A3].
 	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def ||
-			!carrier.has_graphic_model)
+			!carrier.has_graphic_model || carrier.graphic_model_userpoints == 0)
 		return false;
 	VehicleSeatSelection seat;
 	if (!find_best_vehicle_seat(
@@ -409,8 +638,8 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 		return false;
 	// The comparison is 16 raw 16.16 counts, not sixteen world units.
 	// [orig: Entity_CanEnterVehicle @0x4354C7..0x435509]
-	const int64_t x = static_cast<int32_t>(carrier.position.x * 65536.0f);
-	const int64_t y = static_cast<int32_t>(carrier.position.y * 65536.0f);
+	const int64_t x = carrier.position.x.q16;
+	const int64_t y = carrier.position.y.q16;
 	return std::abs(x - carrier.saved_live_pos[0]) <= 16 &&
 			std::abs(y - carrier.saved_live_pos[1]) <= 16;
 }
@@ -457,33 +686,45 @@ void raise_boarding_tip(World &world, EntityHandle player, const Entity &vehicle
 
 } // namespace
 
-bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection) {
-    World &world = world_;
-    Entity *occ = world.registry.get(player);
-    Entity *veh = world.registry.get(selection.vehicle);
-    // The process refuses every seat kind of a carrier with no ItemDef, and a
-    // dead carrier or requester, before anything: the enemy and seat tests,
-    // the old seat's detach and the attach. The carrier's test is its dead bit
-    // alone, in either Flags view (D-NET-557); the requester's still folds in
-    // Health and `alive` (D-NET-586).
-    // [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
-    //  @0x435aed..0x435af1, the carrier @0x435af9, the requester @0x435afe),
-    //  ahead of the detach @0x435bce]
-    if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
-    if (occ->health <= 0 || !occ->alive ||
-        (occ->flags & kEntityFlagDead) != 0)
-        return false;
-    if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
-    if (selection.seat_index < 0 ||
-        selection.seat_index >= static_cast<int>(veh->seats.size()))
-        return false;
-    if (vehicle_has_enemy_occupant(world, *veh, *occ)) return false;
-    const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
-    if (seat.type == SeatType::None || seat.type != selection.type) return false;
-    if (seat.occupant.valid() && seat.occupant != player) return false;
-    const bool was_mounted = occ->mounted;
-    if (occ->mounted)
+// The process from its bone typing on, for the authority (`client` false: the busy
+// and enemy gates, an occupied slot refuses, the UseGun attach unforced) or a client
+// applying the authority's relation (`client` true: the slot's holder detaches, the
+// UseGun attach forced). The bone is typed by name and the ten-slot table serves the
+// occupied test alone; the requester leaves any seat it holds; only then does an
+// untyped bone refuse; the type's attach writes its own slot. Returns true when the
+// relation changed (an attach, or the detach ahead of a refusal).
+// [orig: Entity_ProcessVehicleAttach @0x435AA0 (the type @0x435B09..0x435B14, the busy
+//  gate @0x435B18..0x435B38, the enemy test @0x435B40, the table test
+//  @0x435B4C..0x435BBA, the requester's detach @0x435BC2..0x435BCE, the switch
+//  @0x435BE6, the default's 0 return @0x435CC7..0x435CCC)]
+static bool process_bone_attach(World &world, Entity &occ, Entity &veh, uint8_t bone, bool client) {
+    const EntityHandle player = occ.handle;
+    const SeatType type = bone_slot_type(veh, bone);
+    if (!client) {
+        // The authority's busy gate on the requester's EquippedSlot, then its enemy
+        // test [orig: @0x435B18..0x435B38; Vehicle_HasEnemyOccupant @0x435B40].
+        if (world.ai.is_authority && equipped_slot_busy(world, occ)) return false;
+        if (vehicle_has_enemy_occupant(world, veh, occ)) return false;
+    }
+    const int table_row = seat_table_row(veh, bone);
+    if (table_row >= 0) {
+        Seat &held = veh.seats[static_cast<size_t>(table_row)];
+        if (held.occupant.valid()) {
+            // The authority refuses any holder, the requester itself included; a
+            // client detaches it. A streamed handle can name a not-yet-materialized
+            // pool-0 row: its slot and claim release too.
+            // [orig: @0x435B74..0x435BB1; Entity_DetachFromVehicle @0x435BBA]
+            if (!client) return false;
+            const EntityHandle previous = held.occupant;
+            world.vehicles.detach(previous);
+            world.vehicles.release_primary_occupant(veh, previous);
+            held.occupant = {};
+        }
+    }
+    const bool was_mounted = occ.mounted;
+    if (occ.mounted)
         world.vehicles.detach(player); // [orig: @0x435BCE]
+    if (type == SeatType::None) return was_mounted; // [orig: @0x435CC7..0x435CCC]
     // The UseGun attach, which the authority's process calls with forceAttach 0,
     // refuses a player holding no weapon out of a session, after the detach above
     // and ahead of its camera reset, so a body that rode elsewhere stays off. Out
@@ -494,19 +735,75 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     //  -- is_in_session @0x546bf6..0x546bfc, Flags & 0x100 @0x546bfe..0x546c05,
     //  EquippedSlot @0x546c07..0x546c0d, the 0 return @0x546c0f..0x546c14, ahead
     //  of the camera reset @0x546ba4]
-    if (seat.type == SeatType::Gunner && !world.rules.mp_session &&
-            ((occ->flags | occ->engine_flags) & kEntityFlagPlayer) != 0 &&
+    if (!client && type == SeatType::Gunner && !world.rules.mp_session &&
+            ((occ.flags | occ.engine_flags) & kEntityFlagPlayer) != 0 &&
             player == world.cached.local_player && world.local_player_state != nullptr &&
             !world.local_player_state->equipped_slot_held())
         return was_mounted;
-    // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
-    // as apply_confirmed_mount reports, the relation changed only if the body
-    // left a seat first.
-    if (!attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index))
+    // A refused attach writes nothing [orig: @0x435c09 / @0x435c40]; the relation
+    // changed only if the body left a seat first.
+    if (!attach_apply(world, occ, veh, attach_slot_row(veh, type, bone), type, bone, client))
         return was_mounted;
     world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
-    raise_boarding_tip(world, player, *veh, selection.type);
+    raise_boarding_tip(world, player, veh, type); // [orig: the tips @0x435bfd..0x435cc2]
     return true;
+}
+
+// Retail poses a rider by its bone (+0x157) whatever slot it holds: its slot row when that
+// row holds the bone, else the table row holding it (a ninth sitex, which the def walk
+// stores in slot 8 while the sitex search covers slots 0..7, so its rider holds no slot),
+// else the off-table row. [orig: Entity_AttachToVehicleSlot @0x4946D0 (the bone store
+// @0x494769); Entity_UpdateInfantryAI @0x4B9910 (the bone read @0x4BED58 into
+// Entity_GetBoneTransformAndOrientation @0x4BED72); the def walk's ninth sitex
+// @0x43A4F0, the scan end @0x43A5AF]
+bool VehicleSystem::rider_seat(const Entity &occ, const Entity &carrier, Seat &out) const {
+    const bool slot_in_range = occ.mount_seat >= 0 &&
+            occ.mount_seat < static_cast<int>(carrier.seats.size());
+    if (slot_in_range &&
+            carrier.seats[static_cast<size_t>(occ.mount_seat)].bone_index == occ.mount_bone) {
+        out = carrier.seats[static_cast<size_t>(occ.mount_seat)];
+        return true;
+    }
+    for (const Seat &s : carrier.seats) {
+        if (s.bone_index == occ.mount_bone) {
+            out = s;
+            return true;
+        }
+    }
+    for (const Seat &s : carrier.off_table_seats) {
+        if (s.bone_index == occ.mount_bone) {
+            out = s;
+            return true;
+        }
+    }
+    if (!slot_in_range) return false;
+    out = carrier.seats[static_cast<size_t>(occ.mount_seat)];
+    return true;
+}
+
+bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection) {
+    World &world = world_;
+    Entity *occ = world.registry.get(player);
+    Entity *veh = world.registry.get(selection.vehicle);
+    // The process refuses every seat kind of a carrier with no ItemDef, and a
+    // dead carrier or requester, before anything: the enemy and seat tests,
+    // the old seat's detach and the attach. Each test is the dead bit alone, in
+    // either Flags view: the carrier's (D-NET-557) and the requester's (D-NET-586),
+    // which the body's own death edge raises (D-AI-9).
+    // [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
+    //  @0x435aed..0x435af1, the carrier @0x435af9, the requester @0x435afe),
+    //  ahead of the detach @0x435bce]
+    if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
+    if (((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0) return false;
+    if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
+    if (selection.seat_index < 0 ||
+        selection.seat_index >= static_cast<int>(veh->seats.size()))
+        return false;
+    // The request names its seat's bone; the process types it by name.
+    // [orig: Entity_RequestVehicleAttach @0x4364A0 -> Entity_ProcessVehicleAttach
+    //  @0x4365E4]
+    return process_bone_attach(world, *occ, *veh,
+            veh->seats[static_cast<size_t>(selection.seat_index)].bone_index, false);
 }
 
 // The request snaps the requester's yaw to the seat whenever the carrier's bone
@@ -543,33 +840,14 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     Entity *occ = world.registry.get(player);
     Entity *veh = world.registry.get(vehicle);
     // 1. Resolve + dead gates [orig: @0x435b01 — null vehicle/itemDef/player or either
-    //    Flags & 2 reject]. The carrier's is the dead bit alone (D-NET-557); the
-    //    requester's still folds in health/alive (D-NET-586).
+    //    Flags & 2 reject]. Each is the dead bit alone (D-NET-557, D-NET-586).
     if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
-    if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
+    if (((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435afe
     if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435af9
 
-    // 2. Seat classification by the exact wire bone. The byte is a 1-based index into
-    //    the model USRP table (48-byte rows, name at +32), which is exactly how production
-    //    seat specs assign bone_index. Unknown/unrecognized rows reject; retail never
+    // 2. The wire bone, a 1-based USRP row, is typed by its name; retail never
     //    substitutes another free seat.
-    //    [orig: Entity_GetBoneSlotType @0x434ED0 -> slotType 0 reject @0x435B14;
-    //    seat-block index @0x435BA9]
-    int seat_idx = -1;
-    for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
-        if (veh->seats[i].type == SeatType::None) continue;
-        if (veh->seats[i].bone_index == bone) {
-            seat_idx = i;
-            break;
-        }
-    }
-    if (seat_idx < 0) return false;
-
-    VehicleSeatSelection selection;
-    selection.vehicle = vehicle;
-    selection.seat_index = seat_idx;
-    selection.type = veh->seats[static_cast<size_t>(seat_idx)].type;
-    return world.vehicles.attach_to_seat(player, selection);
+    return process_bone_attach(world, *occ, *veh, bone, false);
 }
 
 // The client receive arm, distinct from the authority's request validation.
@@ -584,50 +862,28 @@ bool VehicleSystem::apply_confirmed_mount(
     if (!vehicle.valid() || bone == 0) return detach(player);
     Entity *veh = world.registry.get(vehicle);
     // The process's gates, ahead of the previous holder's and the body's own
-    // detach; the carrier's is its dead bit alone (D-NET-557) [orig:
+    // detach; each is the dead bit alone (D-NET-557, D-NET-586) [orig:
     // Entity_TryAttachOrDetach @0x436610, the call @0x4366E8 -> Entity_ProcessVehicleAttach
-    // @0x435ae5..0x435b01, the ItemDef @0x435aed..0x435af1, the carrier @0x435AF9].
-    if (veh == nullptr || !veh->has_item_def || !occ->alive || occ->health <= 0 ||
-        (occ->flags & kEntityFlagDead) != 0 ||
+    // @0x435ae5..0x435b01, the ItemDef @0x435aed..0x435af1, the carrier @0x435AF9, the
+    // requester @0x435AFE].
+    if (veh == nullptr || !veh->has_item_def ||
+        ((occ->flags | occ->engine_flags) & kEntityFlagDead) != 0 ||
         ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
 
-    int seat_idx = -1;
-    for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {
-        if (veh->seats[i].type != SeatType::None && veh->seats[i].bone_index == bone) {
-            seat_idx = i;
-            break;
-        }
-    }
-    if (seat_idx < 0) return false;
-    Seat &seat = veh->seats[seat_idx];
-    const bool claims_control = is_vehicle_control_seat(seat.type) ||
-                                seat.type == SeatType::Gunner;
-    if (occ->mounted && occ->mount_target == vehicle && occ->mount_bone == bone &&
-        seat.occupant == player && (!claims_control || veh->primary_occupant == player))
+    // An unchanged relation (the rider already on this bone, holding its slot and,
+    // for a claiming type, +368) applies nothing [orig: Entity_TryAttachOrDetach
+    //  @0x4366DD].
+    const SeatType type = bone_slot_type(*veh, bone);
+    const int slot_row = attach_slot_row(*veh, type, bone);
+    const bool claims_control = is_vehicle_control_seat(type) || type == SeatType::Gunner;
+    if (type != SeatType::None && occ->mounted && occ->mount_target == vehicle &&
+            occ->mount_bone == bone &&
+            (slot_row < 0 || veh->seats[static_cast<size_t>(slot_row)].occupant == player) &&
+            (!claims_control || veh->primary_occupant == player))
         return false;
-
-    // The host has already selected this occupant. Retail's client first
-    // detaches the previous slot holder, whereas its authority rejects it.
-    // A streamed handle can name a not-yet-materialized pool-0 row; release
-    // its retained slot/claim too, just as detaching retail's fixed empty row.
-    const EntityHandle previous = seat.occupant;
-    if (previous.valid()) {
-        detach(previous);
-        release_primary_occupant(*veh, previous);
-        seat.occupant = {};
-    }
-    const bool was_mounted = occ->mounted;
-    if (occ->mounted) detach(player);
-    const SeatType seat_type = seat.type;
-    // The client runs the same refusal on its own +368: the relation changed
-    // only when the body left a seat [orig: Entity_ProcessVehicleAttach
-    // @0x435bce, then Entity_AttachToVehicleSlot @0x494714].
-    if (!attach_apply(world, *occ, *veh, seat_idx, bone)) return was_mounted;
-    world.out.scars.clear_entity(player);
-    // The client's attach runs the same function [orig: Entity_TryAttachOrDetach
-    // @0x4366e8 -> Entity_ProcessVehicleAttach, the tip @0x435bfd].
-    raise_boarding_tip(world, player, *veh, seat_type);
-    return true;
+    // The client's process: the slot's holder detaches, the UseGun attach is forced
+    // [orig: Entity_TryAttachOrDetach @0x4366E8 -> Entity_ProcessVehicleAttach]
+    return process_bone_attach(world, *occ, *veh, bone, true);
 }
 
 bool VehicleSystem::detach(EntityHandle player) {
@@ -656,14 +912,15 @@ bool VehicleSystem::detach(EntityHandle player) {
         local.clear_stance_latches();
         if (occ->mount_type == SeatType::Gunner || occ->mount_type == SeatType::Controller)
             local_weapon_detach_mount(world, local.weapon,
-                                      local.inventory_valid ? &local.inventory : nullptr);
+                                      local.inventory_valid ? &local.inventory : nullptr,
+                                      local.view);
     }
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]
         }
     }
-    vehicle_release_equipped_slot(*occ, veh);
+    vehicle_release_equipped_slot(*occ, slot_pair_is_local(world, player));
     // The local player's detach fades a showing tip [orig: @0x4356b0..0x4356bf
     // — CTipSystem_HandleEvent(6) for g_LocalPlayerEntity].
     if (player == world.cached.local_player)
@@ -702,9 +959,9 @@ namespace {
 // tag drawer, not this site)]
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &point,
 		bool label = false) {
-	const int32_t a[3] = { static_cast<int32_t>(player.position.x * 65536.0f),
-		static_cast<int32_t>(player.position.y * 65536.0f),
-		static_cast<int32_t>(player.position.z * 65536.0f) };
+	const int32_t a[3] = { player.position.x.q16,
+		player.position.y.q16,
+		player.position.z.q16 };
 	const int32_t b[3] = { static_cast<int32_t>(point.x * 65536.0f),
 		static_cast<int32_t>(point.y * 65536.0f),
 		static_cast<int32_t>(point.z * 65536.0f) + (label ? 0 : 12288) };
@@ -725,14 +982,19 @@ bool point_los_clear(World &world, const Entity &player, const Entity &cand, con
 	return world.ai.line_of_sight_clear(world, a, b, player.handle, endpoint);
 }
 
-// The shared per-entity reject set of the scan and the label pass
-// [orig: @0x435e28..0x435eae / @0x5a335a..0x5a3395 — dead/destroyed skip, itemDef/model
-// presence, enemy-occupant and carried-object rejects].
+// The per-entity reject set of the scan and the label pass: the dead skip, the
+// itemDef and model presence and a vehicle's enemy occupant are shared; the
+// carrier (+0x28) block differs (below).
+// [orig: Entity_FindNearestSeatOrArmory @0x435D50 (the rejects @0x435E28..0x435EA1;
+//  @0x435EA7..0x435EAE is the Flags 0x20000 matrix branch, no reject);
+//  HUD_DrawVehicleSeatAndArmoryLabels @0x5A335A..0x5A33D9]
 bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &player,
-		const HostileMountIndex &hostile_mounts) {
+		const HostileMountIndex &hostile_mounts, bool label_pass) {
 	if (cand.handle == player.handle) return true;
-    if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
-    if ((cand.flags & 2u) != 0) return true;
+	// The dead bit alone, in either view: no Health, no latch.
+	// [orig: Entity_FindNearestSeatOrArmory `test byte [esi+24h],2` @0x435E2B;
+	//  HUD_DrawVehicleSeatAndArmoryLabels @0x5A336F]
+	if (((cand.flags | cand.engine_flags) & kEntityFlagDead) != 0) return true;
 	// A candidate with no ItemDef offers nothing, seat or armory point [orig: the
 	// scan @0x435e35..0x435e3a, the labels @0x5a335a..0x5a335f].
 	if (!cand.has_item_def) return true;
@@ -743,14 +1005,30 @@ bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &
 	// ours' seats and armory points are that model's userpoint rows
 	// (mission/seat_spec_extract.cpp), so such a model offers no point here.
 	if (!cand.has_graphic_model) return true;
-	if (hostile_mounts.blocks(cand.handle))
+	// A vehicle (def type 1) with an enemy occupant; no other type asks
+	// [orig: the scan @0x435E58..0x435E6C, the labels @0x5A3379..0x5A3395].
+	if (cand.item_type == 1 && hostile_mounts.blocks(cand.handle))
 		return true;
 	const Entity *ground = world.registry.get(cand.ground_target);
-	if (cand.item_type == 6 && ground != nullptr && ground->has_item_def &&
-			(ground->item_attrib & kItemAttribPlayerControl) != 0)
-		return !ground->alive || ground->health <= 0 || (ground->flags & kEntityFlagDead) != 0 ||
-				hostile_mounts.blocks(ground->handle);
-	return false;
+	if (ground == nullptr || !ground->has_item_def) return false;
+	const bool carrier_control = (ground->item_attrib & kItemAttribPlayerControl) != 0;
+	const bool carrier_dead = ((ground->flags | ground->engine_flags) & kEntityFlagDead) != 0;
+	if (!label_pass) {
+		// The scan asks only of a type-6 candidate on a PlayerControl carrier:
+		// the carrier's dead bit, then its enemy occupant [orig: @0x435E72..0x435E89,
+		// the dead bit @0x435E8B, Vehicle_HasEnemyOccupant @0x435E97].
+		if (cand.item_type == 6 && carrier_control)
+			return carrier_dead || hostile_mounts.blocks(ground->handle);
+		return false;
+	}
+	// The label pass has no type test: any candidate on a dead PlayerControl
+	// carrier is hidden, and an EWeap candidate's vehicle (def type 1) carrier
+	// is asked for an enemy occupant, PlayerControl or not
+	// [orig: @0x5A339B..0x5A33AD, the dead bit @0x5A33AF; EWeap @0x5A33B9..0x5A33C0,
+	//  type 1 @0x5A33C2, Vehicle_HasEnemyOccupant @0x5A33CF].
+	if (carrier_control && carrier_dead) return true;
+	return (cand.item_attrib & kItemAttribEweap) != 0 && ground->item_type == 1 &&
+			hostile_mounts.blocks(ground->handle);
 }
 
 // The scan container: the player's proximity slice when the per-tick tables are
@@ -777,7 +1055,8 @@ void for_each_scan_candidate(World &world, const Entity &player, Fn &&fn) {
 static bool find_nearest_free_seat_impl(World &world, const Entity &player,
                                         VehicleSeatSelection &out, bool armory_mode,
                                         const HostileMountIndex &hostile_mounts,
-                                        const VehicleOccupancySource *source) {
+                                        const VehicleOccupancySource *source,
+                                        UseScanWatch *watch = nullptr) {
     // The aim cone, verbatim [orig: @0x435d90 maxDistance = 0x3FFFFFC0, the mounted
     // override @0x435d9a = 0x38E38E0]. Both are BAM32 look-offset radii, not
     // distances: 0x3FFFFFC0 is a hair under 90 deg for a standing player, 0x38E38E0
@@ -787,9 +1066,9 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     const int32_t max_aim_bam = player.mounted ? 59652320 : 1073741760;
     // The scan's view frame is the entity Yaw/Pitch (+0x10/+0x14) [orig: the
     // subtractions @0x4360b6 / @0x4360c6]: the body's BAM32 heading and pitch for
-    // every real player, the mission-degree mirror for a bare entity.
-    int32_t view_heading = bam_heading_from_mission_yaw_deg(player.yaw);
-    int32_t view_pitch = static_cast<int32_t>(player.pitch * kBamPerDegree);
+    // every real player, the entity's Yaw word and pitch mirror for a bare entity.
+    int32_t view_heading = player.heading;
+    int32_t view_pitch = player.pitch_bam;
     if (const AiEntity *body = world.ai.for_handle(player.handle)) {
         view_heading = body->heading;
         view_pitch = body->pitch;
@@ -797,14 +1076,15 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // The eye is Position + CameraOffset in 16.16; the candidate point carries
     // the +0x3000 (0.1875 u) scan bias [orig: @0x435fff..0x436041, the
     // Position.Y subtract @0x436010].
-    const int32_t eye_x = to_fixed(player.position.x) + player.eye_offset_x;
-    const int32_t eye_y = to_fixed(player.position.y) + player.eye_offset_y;
-    const int32_t eye_z = to_fixed(player.position.z) + player.eye_offset_z;
-    // _ftol2_sse over the 0x4EFFFE00 (2^31 - 16384) float clamp the block keeps
-    // on the x87 stack [orig: flt_7C19E0 @0x43604d / @0x43607d / @0x4360f4];
-    // an out-of-range conversion is the x87 indefinite integer.
+    const int32_t eye_x = player.position.x.q16 + player.eye_offset_x;
+    const int32_t eye_y = player.position.y.q16 + player.eye_offset_y;
+    const int32_t eye_z = player.position.z.q16 + player.eye_offset_z;
+    // _ftol2_sse over the 0x4EFFFE00 (2147418112.0, 2^31 - 65536) float clamp the
+    // block keeps on the x87 stack [orig: Entity_FindNearestSeatOrArmory @0x435D50
+    // (flt_7C19E0 @0x43604D / @0x43607D / @0x4360F4)]; an out-of-range conversion is
+    // the x87 indefinite integer.
     const auto ftol_clamped = [](double v) -> int32_t {
-        if (v > 2147467264.0) v = 2147467264.0;
+        if (v > 2147418112.0) v = 2147418112.0;
         return static_cast<int32_t>(v);
     };
     const auto ftol = [](double v) -> int32_t {
@@ -815,12 +1095,51 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
 	int32_t best_score = 0x7FFFFFFF; // [orig: v60 init]
     bool found = false;
 
+    // The USE readout's watch (an instrument, no behaviour: use_press_trace.h): the gate the
+    // scan stopped the watched entity at, keeping the seat that got furthest (on a tie the
+    // nearer one, past every gate the lower score, as the pick compares).
+    if (watch != nullptr) {
+        watch->gate = UseScanGate::kNotWalked;
+        watch->eye_q16[0] = eye_x;
+        watch->eye_q16[1] = eye_y;
+        watch->eye_q16[2] = eye_z;
+        watch->view_heading = view_heading;
+        watch->view_pitch = view_pitch;
+    }
+    const auto watched = [watch](const Entity &cand) {
+        return watch != nullptr && cand.handle.packed == watch->entity;
+    };
+    const auto note_watch = [&](const Entity &cand, UseScanGate gate, int index,
+                                    const EntityPosition *sp, int32_t d3, int32_t aim) {
+        const bool seat_noted = watch->seat_index >= 0;
+        if (gate < watch->gate) return;
+        if (gate == watch->gate && seat_noted) {
+            if (sp == nullptr) return;
+            const bool better = gate == UseScanGate::kOutscored
+                    ? d3 + (aim >> 9) < watch->reach_q16 + (watch->aim_bam >> 9)
+                    : d3 < watch->reach_q16;
+            if (!better) return;
+        }
+        watch->gate = gate;
+        if (index < 0) return;
+        watch->seat_index = static_cast<int8_t>(index);
+        watch->bone = !armory_mode && index < static_cast<int>(cand.seats.size())
+                ? cand.seats[static_cast<size_t>(index)].bone_index : 0;
+        if (sp == nullptr) return;
+        watch->reach_q16 = d3;
+        watch->aim_bam = aim;
+        watch->point_q16[0] = sp->x.q16;
+        watch->point_q16[1] = sp->y.q16;
+        watch->point_q16[2] = sp->z.q16;
+    };
+
     // One candidate point [orig: the shared score/gate block @0x435fe7..0x4361c2 (seats) =
     // @0x43624d..0x436417 (armory points)]. Returns true when it becomes the best hit.
-    const auto consider = [&](const Entity &cand, const Vec3 &sp, int index, SeatType type) {
-        const int32_t dx = to_fixed(sp.x) - eye_x;
-        const int32_t dy = to_fixed(sp.y) - eye_y;
-        const int32_t dz = to_fixed(sp.z) - eye_z + 0x3000;
+    // The candidate point's words less the eye's, the Z biased +0x3000 (D-NET-507).
+    const auto consider = [&](const Entity &cand, const EntityPosition &sp, int index, SeatType type) {
+        const int32_t dx = io::bam_sub(sp.x.q16, eye_x);
+        const int32_t dy = io::bam_sub(sp.y.q16, eye_y);
+        const int32_t dz = io::bam_add(io::bam_sub(sp.z.q16, eye_z), 0x3000);
         // The horizontal and 3D reaches [orig: @0x436047..0x43608a].
         const double horiz_sq = static_cast<double>(dx) * dx + static_cast<double>(dy) * dy;
         const int32_t horiz = ftol_clamped(std::sqrt(horiz_sq));
@@ -844,10 +1163,20 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
         // Score = 3D reach + aim/512 [orig: @0x43610c..0x436111]; the reach gate is
         // 4.0 u @0x436113 and the cone gate @0x43611f..0x436123.
         const int32_t score = d3 + (aim >> 9);
-        if (d3 > 0x40000 || aim > max_aim_bam) return;
+        const bool watch_this = watched(cand);
+        if (d3 > 0x40000 || aim > max_aim_bam) {
+            if (watch_this)
+                note_watch(cand, d3 > 0x40000 ? UseScanGate::kReach : UseScanGate::kCone, index,
+                        &sp, d3, aim);
+            return;
+        }
         // The LOS gate, then the best-score compare [orig: the LOS call
         // @0x436183, `cmp ebx, [esp+0A0h+var_74]` @0x43618F].
-        if (!point_los_clear(world, player, cand, sp)) return;
+        if (!point_los_clear(world, player, cand, sp)) {
+            if (watch_this) note_watch(cand, UseScanGate::kLos, index, &sp, d3, aim);
+            return;
+        }
+        if (watch_this) note_watch(cand, UseScanGate::kOutscored, index, &sp, d3, aim);
         if (score >= best_score) return;
         best_score = score;
         out.vehicle = cand.handle;
@@ -863,16 +1192,25 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
     // 4.0 u gate but ran O(world) per frame. Hostile occupancy is indexed once
     // per query above so its witnessed pool-0 scan is not multiplied here.
     for_each_scan_candidate(world, player, [&](const Entity &cand) {
-        if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+        const bool watch_this = watched(cand);
+        if (!candidate_relevant_for_mode(cand, armory_mode)) {
+            if (watch_this) note_watch(cand, UseScanGate::kNoSeats, -1, nullptr, 0, 0);
+            return;
+        }
+		if (scan_entity_rejected(world, cand, player, hostile_mounts, false)) {
+            if (watch_this) note_watch(cand, UseScanGate::kRejected, -1, nullptr, 0, 0);
 			return;
+        }
 		if (!armory_mode) {
+            if (watch_this) watch->seats = static_cast<int8_t>(cand.seats.size());
             // [orig: the searchMode-0 seat loop @0x435f1e]
             for (int i = 0; i < static_cast<int>(cand.seats.size()); ++i) {
                 const Seat &s = cand.seats[i];
                 if (s.type == SeatType::None) continue; // [orig: boneIdx == 0 skip]
-                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied)
+                if (vehicle_seat_occupancy(world, cand, s, player.handle, source).occupied) {
+                    if (watch_this) note_watch(cand, UseScanGate::kOccupied, i, nullptr, 0, 0);
                     continue; // [orig: mountHandles != 0xFFFF]
+                }
                 consider(cand, seat_world_pos(world, cand, s), i, s.type);
             }
             return;
@@ -883,6 +1221,8 @@ static bool find_nearest_free_seat_impl(World &world, const Entity &player,
             consider(cand, local_point_world_pos(cand, cand.armory_points[i]), i,
                      SeatType::ArmoryPoint);
     });
+    if (watch != nullptr && found && out.vehicle.packed == watch->entity)
+        watch->gate = UseScanGate::kPicked;
     return found;
 }
 
@@ -905,17 +1245,23 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
 
     // One label point [orig: the shared draw block @0x5a3553..0x5a36c9 — the +0.1875 u
     // lift, the 4.0 u 3D gate from the player POSITION, LOS, then the draw].
-    const auto emit = [&](const Entity &cand, const Vec3 &point, int index, SeatType type,
+    const auto emit = [&](const Entity &cand, const EntityPosition &point, int index, SeatType type,
                           bool armory) {
-        Vec3 lifted = point;
-        lifted.z += 0.1875f; // [orig: point.z = boneZ + 12288 @0x5a3585]
-        const double dx = static_cast<double>(lifted.x) - static_cast<double>(player.position.x);
-        const double dy = static_cast<double>(lifted.y) - static_cast<double>(player.position.y);
-        const double dz = static_cast<double>(lifted.z) - static_cast<double>(player.position.z);
-        const double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
-        // [orig: the label radius @0x5a35f0 — dist < 0x40000 (4.0 u), FULL 3D, from the
-        // entity position (not the eye)]
-        if (static_cast<int32_t>(d3 * 65536.0) >= 0x40000) return;
+        // The LOS point is lifted 0x3000; the distance takes the UNLIFTED point's
+        // words less the player's Position words, the x87 length saturated and
+        // truncated, against 0x40000 (D-NET-507).
+        // [orig: HUD_DrawVehicleSeatAndArmoryLabels - `lea esi, [edx+3000h]`
+        //  @0x5a357f, the deltas `sub edx, [esi+0Ch]` / `sub eax, [esi+4]` /
+        //  `sub ecx, [esi+8]` @0x5a359a..0x5a35a0, fsqrt and flt_7C19E0
+        //  @0x5a35cf..0x5a35e6, `cmp eax, 40000h; jge` @0x5a35eb..0x5a35f0]
+        EntityPosition lifted = point;
+        lifted.z.q16 = io::bam_add(point.z.q16, 0x3000);
+        const double dx = double(io::bam_sub(point.x.q16, player.position.x.q16));
+        const double dy = double(io::bam_sub(point.y.q16, player.position.y.q16));
+        const double dz = double(io::bam_sub(point.z.q16, player.position.z.q16));
+        double d3 = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (d3 > 2147418112.0) d3 = 2147418112.0; // flt_7C19E0
+        if (static_cast<int32_t>(d3) >= 0x40000) return;
 		if (!point_los_clear(world, player, cand, lifted, true))
 			return;
 		AttachLabel label;
@@ -940,7 +1286,7 @@ void VehicleSystem::collect_attach_labels(const Entity &player, bool armory_mode
         // || entity == nearest_entity @0x5a3354].
         if (can_fire && cand.handle != nearest.vehicle) return;
         if (!candidate_relevant_for_mode(cand, armory_mode)) return;
-		if (scan_entity_rejected(world, cand, player, hostile_mounts))
+		if (scan_entity_rejected(world, cand, player, hostile_mounts, true))
 			return;
 		if (!armory_mode) {
             // [orig: the seat-label loop @0x5a3464; occupied seats never label @0x5a348f]
@@ -1007,7 +1353,7 @@ bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_actio
             next_action == weapon_action::kOverheated;
 }
 
-bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source) {
+bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSeatSelection &r_hit, const VehicleOccupancySource *source, UseScanWatch *watch) {
     World &world = world_;
     // The candidate-PREVIEW form of player_toggle_mount's unmounted search (a
     // joiner picks its request target without mutating L): the same two arms
@@ -1020,7 +1366,9 @@ bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSea
                 find_best_vehicle_seat(
                         world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source);
     }
-    return world.vehicles.find_nearest_free_seat(player, r_hit, false, source);
+    const HostileMountIndex hostile_mounts(world, player, nullptr, source);
+    return find_nearest_free_seat_impl(
+            world, player, r_hit, false, hostile_mounts, source, watch);
 }
 
 } // namespace opennova::world

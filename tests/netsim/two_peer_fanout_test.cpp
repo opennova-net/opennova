@@ -8,8 +8,9 @@
 // Godot or OS sockets — the harness carries raw datagrams between the two transports the way a
 // real UDP socket pair would.
 //
-// Asserts: (a) an ownerless/stale connection emits nothing and preserves its
-// replication state, while each live connection's frame is anchored to ITS OWN owned entity; (b) a
+// Asserts: (a) an ownerless connection emits nothing and preserves its replication state, a
+// stale one (its body destroyed, its entry reused) emits anchored at the entry's new body
+// (D-NET-449), while each live connection's frame is anchored to ITS OWN owned entity; (b) a
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
@@ -22,6 +23,7 @@
 #include <runtime/inmatch/udp_session_transport.h>
 
 #include "conn_fan_test_util.h"
+#include "../common/hull_brain.h"
 
 #include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <runtime/terrain_query/height_field.h>
@@ -94,7 +96,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
                             uint16_t min_entity_slot = 0) {
 	w::PlayerSpawn s;
 	s.position = pos;
-	s.yaw = yaw;
+	s.heading = w::placed_heading_bam(yaw);
 	s.net_id = net_id;
 	s.min_entity_slot = min_entity_slot;
 	return s;
@@ -140,7 +142,6 @@ bool run_fanout_and_per_connection_anchor() {
 	conns[conn_join].s2c_entity_heading[3] = 11;
 	conns[conn_join].s2c_entity_speed[3] = 13;
 	conns[conn_join].round_watermark = 17;
-	conns[conn_join].round_watermark_armed = true;
 	ns::test::emit_all(world, conns);
 	if (!expect(self_ch.s2c_pending() == 1, "loopback got one S2C frame")) return false;
 	if (!expect(udp_host.outbound_pending() == 0,
@@ -149,8 +150,7 @@ bool run_fanout_and_per_connection_anchor() {
 	                    conns[conn_join].s2c_entity_age[3] == 9 &&
 	                    conns[conn_join].s2c_entity_heading[3] == 11 &&
 	                    conns[conn_join].s2c_entity_speed[3] == 13 &&
-	                    conns[conn_join].round_watermark == 17 &&
-	                    conns[conn_join].round_watermark_armed,
+	                    conns[conn_join].round_watermark == 17,
 	            "ownerless skip preserved phase, cache, age, and watermark state"))
 		return false;
 
@@ -249,11 +249,12 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(self_view.state().anchor_x == hx && jj->x == jx,
 	            "per-connection anchor: each frame anchored to its own recipient")) return false;
 
-	// A packed pool/slot can be reused, but the retail player slot's live
-	// entity pointer does not silently retarget to the new allocation. Preserve
-	// that lifetime edge across the reimpl's packed-handle registry.
-	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 slot gate and
-	// recipient entity read @0x517BF5..0x517C13]
+	// A packed pool/slot can be reused, and the retail player slot's entity pointer is the
+	// entry's address with no lifetime test: once a script destroyed its body and a later
+	// spawn reused the entry, the stale slot's 0x0A goes out anchored at the new body
+	// (D-NET-449, ruled (a); this pinned D-NET-121's refusal before).
+	// [orig: Server_SendEntityStateToPlayer @0x517BAB..0x517BE2 (no lifetime test), the
+	//  recipient entity read @0x517BEF..0x517C13; Pool_AllocEntry @0x44225C]
 	const uint64_t old_spawn_id = conns[conn_join].owned_entity_spawn_id;
 	world.registry.despawn(joiner_h);
 	w::Entity replacement_seed;
@@ -270,37 +271,17 @@ bool run_fanout_and_per_connection_anchor() {
 	            "pool slot reused by a distinct allocation lifetime"))
 		return false;
 
-	const uint8_t stale_phase = conns[conn_join].s2c_phase;
-	const uint8_t stale_age = conns[conn_join].s2c_entity_age[0];
-	const uint32_t stale_watermark = conns[conn_join].round_watermark;
-	const bool stale_armed = conns[conn_join].round_watermark_armed;
 	const std::vector<nw::GameEntitySnapshot> replacement_snapshot =
 			ns::snapshot_world(world);
-	if (!expect(!ns::emit_connection_s2c(
-	                    world, conns[conn_join], replacement_snapshot),
-	            "same packed handle with a stale lifetime emits nothing"))
-		return false;
-	if (!expect(udp_host.outbound_pending() == 0 &&
-	                    conns[conn_join].s2c_phase == stale_phase &&
-	                    conns[conn_join].s2c_entity_age[0] == stale_age &&
-	                    conns[conn_join].round_watermark == stale_watermark &&
-	                    conns[conn_join].round_watermark_armed == stale_armed,
-	            "stale-lifetime skip emits no bytes and mutates no frame state"))
-		return false;
-
-	// A deliberate rebind stamps the replacement lifetime and resumes on the
-	// next open frame boundary, anchored to that replacement's live position.
-	conns[conn_join].owned_entity_spawn_id =
-			world.registry.get(replacement)->registry_spawn_id;
 	if (!expect(ns::emit_connection_s2c(
 	                    world, conns[conn_join], replacement_snapshot),
-	            "valid replacement binding resumes emission"))
+	            "the stale slot's binding emits at the reused entry"))
 		return false;
 	std::vector<uint8_t> rebound_raw;
 	if (!expect(udp_host.pop_outbound(rebound_raw) &&
 	                    rebound_raw.size() > 13 &&
 	                    rebound_raw[0] == nw::s2c::PER_FRAME_UPDATE,
-	            "replacement frame reached the transport"))
+	            "the aliased frame reached the transport"))
 		return false;
 	nw::FrameUpdate rebound_frame;
 	if (!expect(nw::decode_frame_update(
@@ -309,13 +290,14 @@ bool run_fanout_and_per_connection_anchor() {
 	                    rebound_frame.anchor_x == w::to_fixed(75.0) &&
 	                    rebound_frame.anchor_y == w::to_fixed(80.0) &&
 	                    rebound_frame.anchor_z == w::to_fixed(-25.0),
-	            "replacement frame anchors to the replacement allocation"))
+	            "the aliased frame anchors to the body holding the entry"))
 		return false;
 	return true;
 }
 
-// (b) A joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity;
-//     the host's own player is untouched.
+// (b) A joiner's C2S 0x0C uplink drains through its connection and stages its remote-peer body's
+//     chase target (a visible body's position is its own update's, D-NET-NEW-LP-2); the host's own
+//     player is untouched.
 bool run_joiner_uplink_snaps_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -345,17 +327,17 @@ bool run_joiner_uplink_snaps_peer() {
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(udp_host.inbound_pending() == 0, "host drained the joiner connection")) return false;
 
-	// The joiner's registry entity SNAPPED to the wire pose.
+	// The joiner's body staged the wire pose as its chase target; its live position is unchanged.
 	const w::Entity *je = world.registry.get(joiner_h);
 	if (!expect(je != nullptr, "joiner entity present")) return false;
-	if (!expect(je->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(wz)),
-	            "joiner registry position snapped to the wire pose")) return false;
-	if (!expect(je->yaw == 45, "joiner yaw = 90 - BAM/deg (== 45)")) return false;
+	if (!expect(je->position.x == 1.0f && je->position.y == 1.0f && je->position.z == 1.0f,
+	            "a visible joiner body is not snapped to the wire pose")) return false;
+	if (!expect(je->heading == w::placed_heading_bam(45), "joiner yaw = 90 - BAM/deg (== 45)")) return false;
 	const w::AiEntity *jae = ai.for_handle(joiner_h);
-	if (!expect(jae != nullptr && jae->net_is_remote_peer,
-	            "joiner AiEntity marked net-snapped")) return false;
+	if (!expect(jae != nullptr && jae->net_is_remote_peer &&
+	                    jae->net_smooth_target[0] == wx && jae->net_smooth_target[1] == wy &&
+	                    jae->net_smooth_target[2] == wz,
+	            "joiner AiEntity staged the wire pose as its chase target")) return false;
 
 	// The host's own player was NOT touched by the drain.
 	const w::Entity *he = world.registry.get(host_h);
@@ -374,11 +356,10 @@ bool run_joiner_uplink_snaps_peer() {
 			w::to_fixed(50.0), 0x4000, 0));
 	carry(udp_join, udp_host);
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	je = world.registry.get(joiner_h);
+	jae = ai.for_handle(joiner_h);
 	if (!expect(udp_host.inbound_pending() == 0 &&
-	                    je->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	                    je->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	                    je->position.z == static_cast<float>(w::from_fixed(wz)),
+	                    jae->net_smooth_target[0] == wx && jae->net_smooth_target[1] == wy &&
+	                    jae->net_smooth_target[2] == wz,
 	            "pre-round drains but ignores the remote pose uplink")) return false;
 	return true;
 }
@@ -451,14 +432,14 @@ bool run_cross_peer_uplink_rejected() {
 	if (!expect(bae != nullptr && !bae->net_is_remote_peer, "peer B not net-snapped by the spoof"))
 		return false;
 
-	// Positive control: the SAME connection naming its OWN entity (A) DOES snap A — proving the gate
-	// admits the owner, it does not reject every uplink.
+	// Positive control: the SAME connection naming its OWN entity (A) DOES apply to A (its chase
+	// target staged) — proving the gate admits the owner, it does not reject every uplink.
 	udp_a_client.client_send(0x0C, make_0c_uplink(peer_a.packed, w::to_fixed(100.0), 0, 0, 0x0000, 0));
 	carry(udp_a_client, udp_a);
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	const w::Entity *ae2 = world.registry.get(peer_a);
-	if (!expect(ae2 != nullptr && ae2->position.x == 100.0f,
-	            "peer A snapped by ITS OWN connection's uplink (owner gate admits the owner)"))
+	const w::AiEntity *aae = ai.for_handle(peer_a);
+	if (!expect(aae != nullptr && aae->net_smooth_target[0] == w::to_fixed(100.0),
+	            "peer A applied by ITS OWN connection's uplink (owner gate admits the owner)"))
 		return false;
 	return true;
 }
@@ -922,8 +903,10 @@ bool run_0a_vehicle_budget_round_robin() {
 		veh.health = 3000;                                      // items.def hp (full spawn)
 		veh.health_max = 3000;
 		veh.position = {120.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1;
+		veh.has_item_def = true; // the trait sweep's row (D-NET-487)
+		veh.item_type_index = 1;
 		if (!expect(world.registry.spawn(1, veh).valid(), "vehicle spawned")) return false;
 	}
 	// One UNRESOLVED pool-1 item (an ewep-like emplacement without a stamped class): it must
@@ -934,6 +917,8 @@ bool run_0a_vehicle_budget_round_robin() {
 		ewep.kind = w::EntityKind::Item;
 		ewep.item_id = 0x074D; // Mounted Grenade Launcher on Tripod (ai_function ewep)
 		ewep.position = {121.0f, 100.0f, 10.0f};
+		ewep.has_item_def = true; // the trait sweep's row (D-NET-487)
+		ewep.item_type_index = 1;
 		if (!expect(world.registry.spawn(1, ewep).valid(), "emplacement spawned")) return false;
 	}
 
@@ -1085,7 +1070,7 @@ bool run_0a_priority_view_terms() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {70.0f, 95.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1; // same team: no enemy bonus
 		a_h = world.registry.spawn(1, veh);
 		if (!expect(a_h.valid(), "vehicle A spawned")) return false;
@@ -1108,10 +1093,15 @@ bool run_0a_priority_view_terms() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {500.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 2; // enemy of the recipient
 		veh.primary_occupant = crew_h;    // occupied [orig: entity+0x170 @0x50efc9]
-		veh.veh.vel_x = 0x8000;           // this tick's displacement -> speed metric 255
+		// This tick's displacement off the mover-entry saved pose (+0x80):
+		// 0x8000 >> 6 = 512 -> speed metric 255 [orig: @0x50EE7B..0x50EF04].
+		veh.saved_live_pos[0] = veh.position.x.q16 - 0x8000;
+		veh.saved_live_pos[1] = veh.position.y.q16;
+		veh.saved_live_pos[2] = veh.position.z.q16;
+		veh.saved_live_valid = true;
 		b_h = world.registry.spawn(1, veh);
 		if (!expect(b_h.valid(), "vehicle B spawned")) return false;
 	}
@@ -1197,7 +1187,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {-500.0f, 95.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 1;
 		veh.primary_occupant = crew_h;
 		c_h = world.registry.spawn(1, veh);
@@ -1214,7 +1204,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {130.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		veh.team = 2;
 		d_h = world.registry.spawn(1, veh);
 		if (!expect(d_h.valid(), "vehicle D spawned")) return false;
@@ -1344,7 +1334,7 @@ bool run_0a_player_record_field_sources() {
 	if (!expect(ae != nullptr, "host AI pose resolvable")) return false;
 	e->net_move_input = 0x21; // the uplink-ingested +0x12C movement-input byte the record echoes
 	e->flags |= 0x40; // an arbitrary entity+0x24 bit rides the wire unmasked
-	e->pitch = -45; // deliberately disagree with the live split-store look
+	e->pitch_bam = w::spawn_angle_bam(-45); // deliberately disagree with the live split-store look
 	ae->pitch = 0x1F800000;
 	e->equipped_adm_index = 0x09; // the equipped-weapon adm index the record's off-16 echoes
 
@@ -1488,6 +1478,21 @@ struct FanFlatTerrain {
 	}
 };
 
+// The join arms each recipient's round-event watermark at the frame clock less one, in a
+// session past its first frame [orig: Server_OnPlayerJoin @0x51A74C; the clock's 1
+// @0x51E815].
+void arm_round_watermarks(w::World &world, std::vector<ns::Connection> &conns) {
+	if (world.out.rounds.frame_clock < 2) world.out.rounds.frame_clock = 2;
+	for (ns::Connection &c : conns) c.round_watermark = world.out.rounds.frame_clock - 1;
+}
+
+// One server frame's fan, then the tick's frame-clock step [orig: Server_TickUpdate
+// @0x51E48C].
+void emit_frame(w::World &world, std::vector<ns::Connection> &conns) {
+	ns::test::emit_all(world, conns);
+	++world.out.rounds.frame_clock;
+}
+
 bool run_0a_round_score_and_los_read_the_body() {
 	constexpr int32_t kEyeZ = 5 << 16;
 	bool ok = true;
@@ -1506,7 +1511,8 @@ bool run_0a_round_score_and_los_read_the_body() {
 		std::vector<ns::Connection> conns;
 		ns::LoopbackChannel ch;
 		conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, me, 0});
-		ns::test::emit_all(world, conns); // arms the watermark
+		arm_round_watermarks(world, conns);
+		emit_frame(world, conns);
 		ns::Datagram dg;
 		(void)ch.client_recv(dg);
 		const auto round = [&](uint16_t seq, float z) {
@@ -1561,7 +1567,7 @@ bool run_0a_round_score_and_los_read_the_body() {
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.position = {150.0f, 100.0f, 10.0f};
-		veh.yaw = 90;
+		veh.heading = w::placed_heading_bam(90);
 		const w::EntityHandle target = world.registry.spawn(1, veh);
 		world.weather.core.scalar_channels.fog_dist_fp = 600 << 16; // the view distance
 		std::vector<ns::Connection> conns;
@@ -1732,7 +1738,7 @@ bool run_0x26_attach_mounted_echo() {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib |= w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
-		veh.yaw = 0;
+		veh.heading = w::placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
@@ -1902,8 +1908,10 @@ bool run_mounted_g_slot_route_echo() {
 //     heading [orig: op3 reads groundEntity(+0x28); the extended body's pose is
 //     Entity_TransformWorldToLocal output]. The host apply must lift local -> world through
 //     the carrier pose [orig: op4 @0x4c1de1 Entity_TransformLocalToWorld; heading add
-//     @0x43be7e], REPLACE flags bits 2-4 from the raw wire byte [orig: @0x4c1e4d], and the
-//     0x0A echo must re-emit the carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
+//     @0x43be7e] into the body's chase target (D-NET-NEW-LP-2), REPLACE flags bits 2-4 from
+//     the raw wire byte [orig: @0x4c1e4d], store no ground link (the host body's own resolver
+//     probe keeps +0x28), and the 0x0A echo of a body standing on the carrier must re-emit the
+//     carrier + local pos + local yaw byte [orig: op1 @0x4c0a08 /
 //     @0x4c0b07 / sar-24 yaw @0x4c0b85] — echoing 0xFFFF at a grounded retail client
 //     detaches + hard-snaps it to local-as-world coords (the v26 origin teleport).
 bool run_grounded_uplink_apply_and_echo() {
@@ -1920,7 +1928,7 @@ bool run_grounded_uplink_apply_and_echo() {
 		bld.kind = w::EntityKind::Building;
 		bld.item_id = 0x044c;
 		bld.position = {100.0f, 200.0f, 10.0f};
-		bld.yaw = 90;
+		bld.heading = w::placed_heading_bam(90);
 		bld_h = world.registry.spawn(2, bld);
 	}
 	if (!expect(bld_h.valid() && bld_h.pool() == 2, "pool-2 carrier spawned")) return false;
@@ -1948,21 +1956,33 @@ bool run_grounded_uplink_apply_and_echo() {
 	                                         bld_h.packed, /*state_flags=*/0x10));
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 
-	// (1) HOST APPLY: world pos = carrier ⊕ local (identity rotation -> exact adds).
+	// (1) HOST APPLY: the chase target = carrier ⊕ local (identity rotation -> exact adds).
 	const w::Entity *je = world.registry.get(joiner_h);
-	if (!expect(je != nullptr, "joiner entity present")) return false;
-	if (!expect(je->position.x == 102.0f && je->position.y == 200.5f && je->position.z == 11.0f,
+	const w::AiEntity *jae = ai.for_handle(joiner_h);
+	if (!expect(je != nullptr && jae != nullptr, "joiner entity present")) return false;
+	if (!expect(jae->net_smooth_target[0] == w::to_fixed(102.0) &&
+	                    jae->net_smooth_target[1] == w::to_fixed(200.5) &&
+	                    jae->net_smooth_target[2] == w::to_fixed(11.0),
 	            "grounded uplink lifted local -> world through the carrier pose"))
 		return false;
-	if (!expect(je->yaw == 45, "grounded heading composed with the carrier heading")) return false;
-	if (!expect(je->ground_target == bld_h, "uplinked carrier mirrored into ground_target"))
+	if (!expect(je->heading == w::placed_heading_bam(45), "grounded heading composed with the carrier heading")) return false;
+	if (!expect(!je->ground_target.valid(), "the read-apply stores no ground link"))
 		return false;
 	if (!expect((je->flags & 0x1Cu) == 0x10u,
 	            "flags bits 2-4 REPLACED from the wire byte (bit 3 cleared, not xor-kept)"))
 		return false;
 
-	// (2) ECHO: the joiner's 0x0A record re-emits the carrier + compressed LOCAL pos +
-	// local yaw byte (single-bit locals survive the 12-bit-mantissa compressor exactly).
+	// (2) ECHO: a body standing on the carrier (the host body's own resolver probe links it;
+	// this collision-less rig places it there) — the joiner's 0x0A record re-emits the carrier
+	// + compressed LOCAL pos + local yaw byte (single-bit locals survive the 12-bit-mantissa
+	// compressor exactly).
+	{
+		w::Entity *standing = world.registry.get(joiner_h);
+		standing->position.x.q16 = w::to_fixed(102.0);
+		standing->position.y.q16 = w::to_fixed(200.5);
+		standing->position.z.q16 = w::to_fixed(11.0);
+		standing->ground_target = bld_h;
+	}
 	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(join_ch.client_recv(dg), "joiner 0x0A frame dequeued")) return false;
@@ -1991,11 +2011,10 @@ bool run_grounded_uplink_apply_and_echo() {
 	join_ch.client_send(0x0C, make_0c_uplink(joiner_h.packed, w::to_fixed(50.0),
 	                                         w::to_fixed(60.0), w::to_fixed(12.0), 0x2000, 0));
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
-	je = world.registry.get(joiner_h);
-	if (!expect(je->position.x == 50.0f && je->position.y == 60.0f && je->position.z == 12.0f,
-	            "free-standing uplink applies world coords raw")) return false;
-	if (!expect(!je->ground_target.valid(), "ground_target cleared by a free-standing uplink"))
-		return false;
+	if (!expect(jae->net_smooth_target[0] == w::to_fixed(50.0) &&
+	                    jae->net_smooth_target[1] == w::to_fixed(60.0) &&
+	                    jae->net_smooth_target[2] == w::to_fixed(12.0),
+	            "free-standing uplink stages world coords raw")) return false;
 	std::printf("PASS grounded_uplink_apply_and_echo\n");
 	return true;
 }
@@ -2102,15 +2121,17 @@ bool run_round_event_fanout() {
 		                               fu);
 	};
 
-	// A round fired BEFORE either connection's first emit = the pre-join backlog; the
-	// arm gate must swallow it for both.
+	// A round fired a frame BEFORE the join = the pre-join backlog; the join's arm (the
+	// frame clock less one) must swallow it for both.
 	{
 		w::RoundEvent backlog;
 		backlog.shooter_handle = peer_h.packed;
 		backlog.adm_index = 9;
 		world.out.rounds.add(backlog);
 	}
-	ns::test::emit_all(world, conns);
+	++world.out.rounds.frame_clock;
+	arm_round_watermarks(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "arm frames decode"))
@@ -2126,7 +2147,9 @@ bool run_round_event_fanout() {
 	{
 		w::Entity *shooter = world.registry.get(peer_h);
 		if (!expect(shooter != nullptr, "shooter entity live")) return false;
-		shooter->last_fire_target = host_h; // [orig: @0x50c2ad]
+		// The claimed target in the shooter's AI slot word [orig: Server_ClientFiredRound
+		//  @0x50C2AD; the read NetPacket_SerializeRoundEvent @0x504855].
+		ai.for_handle(peer_h)->slot.f[3] = w::AiSlot::target_word(host_h);
 		w::RoundEvent ev;
 		ev.shooter_handle = peer_h.packed;
 		ev.origin_x = ox;
@@ -2141,7 +2164,7 @@ bool run_round_event_fanout() {
 		ev.adm_index = 11;
 		world.out.rounds.add(ev);
 	}
-	ns::test::emit_all(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh;
 		if (!expect(next_frame(ch_host, fh), "host frame decodes")) return false;
@@ -2174,7 +2197,7 @@ bool run_round_event_fanout() {
 	}
 
 	// Watermark: the same round never repeats on the next frame.
-	ns::test::emit_all(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp),
@@ -2182,6 +2205,36 @@ bool run_round_event_fanout() {
 			return false;
 		if (!expect(fh.round_events.empty() && fp.round_events.empty(),
 		            "a swept round never repeats (per-connection watermark)"))
+			return false;
+	}
+
+	// A heat lock on a round (a flare the ring leg returned): the shooter word is set, so
+	// 0x40 goes out, and the pool walk finds no pool for the round: its word is 0xFFFF
+	// [orig: NetPacket_SerializeRoundEvent @0x504820 - the walk's miss @0x504886, the flag
+	//  @0x5048BF..0x5048C1, the word @0x504966]. (D-NET-64)
+	{
+		w::Entity *shooter = world.registry.get(peer_h);
+		if (!expect(shooter != nullptr, "shooter entity live")) return false;
+		ai.for_handle(peer_h)->slot.f[3] =
+				w::AiSlot::target_word(w::TargetRef::of_round(3));
+		w::RoundEvent ev;
+		ev.shooter_handle = peer_h.packed;
+		ev.origin_x = ox;
+		ev.origin_y = oy;
+		ev.origin_z = oz;
+		ev.shot_seq = 78;
+		ev.adm_index = 11;
+		world.out.rounds.add(ev);
+	}
+	emit_frame(world, conns);
+	{
+		nw::FrameUpdate fh, fp;
+		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "round-target frames decode"))
+			return false;
+		if (!expect(fh.round_events.size() == 1, "host gets the round-target event")) return false;
+		const nw::RoundEventRecord &re = fh.round_events[0];
+		if (!expect((re.flags & 0x40) != 0 && re.target_handle == 0xFFFF,
+		            "a round target sets 0x40 with the word 0xFFFF"))
 			return false;
 	}
 	std::printf("PASS round_event_fanout\n");
@@ -2225,7 +2278,8 @@ bool run_ai_round_reaches_the_joiner() {
 		return nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id,
 		                               fu);
 	};
-	ns::test::emit_all(world, conns); // arm both watermarks
+	arm_round_watermarks(world, conns);
+	emit_frame(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		(void)next_frame(ch_host, fh);
@@ -2234,7 +2288,7 @@ bool run_ai_round_reaches_the_joiner() {
 	const w::FixedVec3 origin{w::to_fixed(4.0), w::to_fixed(5.0), w::to_fixed(7.0)};
 	const auto fire_and_read = [&](nw::FrameUpdate &fp) {
 		world.round_sim.fire_source(world, world.registry.get(craft_h), origin, 0, 0, 3);
-		ns::test::emit_all(world, conns);
+		emit_frame(world, conns);
 		nw::FrameUpdate fh;
 		(void)next_frame(ch_host, fh);
 		return next_frame(ch_peer, fp);
@@ -2256,7 +2310,28 @@ bool run_ai_round_reaches_the_joiner() {
 	// A slotless shooter's ammo arm hands the pool 0xF600 over the fresh word's low
 	// nine bits, which the round keeps as its id and the ring carries
 	// [orig: Server_ClientFiredRound @0x50BDAE..0x50BDBC; RoundData_AddRound @0x4FDCF5].
-	return expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF");
+	if (!expect(re.shot_seq == 0xF7FF, "the AI round's word is the slotless 0xF7FF"))
+		return false;
+	// The shooter's AI slot word (+0xC) is the round's target: an AI's scan writes it, and
+	// with it set the record takes 0x40 and the target's handle, as retail's AI rounds at the
+	// joiner do (x9 aikill RR: flags 0x41 / 0x72, target 0x005D); a cleared word sends none.
+	// [orig: NetPacket_SerializeRoundEvent @0x504820 - @0x50484E / @0x504855, the flag
+	//  @0x5048BF..0x5048C1; Entity_UpdateInfantryAI @0x4BBF82..0x4BBF85]
+	world.ai.for_handle(pilot_h)->slot.f[3] = w::AiSlot::target_word(peer_h);
+	nw::FrameUpdate targeted;
+	if (!expect(fire_and_read(targeted) && targeted.round_events.size() == 1,
+			"the targeted round reaches the joiner"))
+		return false;
+	if (!expect((targeted.round_events[0].flags & 0x40) != 0 &&
+					targeted.round_events[0].target_handle == peer_h.packed,
+			"the slot word rides the 0x40 target"))
+		return false;
+	world.ai.for_handle(pilot_h)->slot.f[3] = 0;
+	nw::FrameUpdate cleared;
+	if (!expect(fire_and_read(cleared) && cleared.round_events.size() == 1,
+			"the untargeted round reaches the joiner"))
+		return false;
+	return expect((cleared.round_events[0].flags & 0x40) == 0, "a cleared slot word sends no target");
 }
 
 // (i4) The drive-authority chain (net-re §5.13 witness 2026-07-04): vehicles have NO wire
@@ -2288,10 +2363,13 @@ bool run_vehicle_drive_authority() {
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
-		veh.yaw = 0;
+		veh.heading = w::placed_heading_bam(0);
 		veh.health = 3000;
 		veh.health_max = 3000;
 		veh.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+		// A settled hull: no contact solve runs for this model-less test hull, so the
+		// byte a solve would have set stands in (a spawn holds 0, D-NET-433).
+		veh.veh.grounded = true;
 		w::Seat drv;
 		drv.type = w::SeatType::Driver;
 		drv.bone_index = 1;
@@ -2299,6 +2377,8 @@ bool run_vehicle_drive_authority() {
 		vh = world.registry.spawn_from(1, 0, veh);
 	}
 	if (!expect(vh.valid(), "vehicle spawned")) return false;
+	// The buggy row's class init brains the hull; its mover runs past its head.
+	test_common::brain_hull(world, vh);
 	// The JOX dune buggy's pre-scaled physics block (vehicle_motor_test pins the parse).
 	{
 		w::VehicleTraits t;
@@ -2334,11 +2414,11 @@ bool run_vehicle_drive_authority() {
 	intent.heading = static_cast<int16_t>(
 			static_cast<uint16_t>(local_heading_bits >> 16));
 	intent.move_input = 0x08;
-	if (!expect(ns::apply_player_intent(world, intent), "driver intent read-applied"))
+	if (!expect(ns::apply_player_intent(world, intent, true), "driver intent read-applied"))
 		return false;
 	w::AiEntity *driver_ai = ai.for_handle(ph);
 	if (!expect(driver_ai != nullptr && driver_ai->net_is_remote_peer &&
-	                    driver_ai->heading == driver_wire_look && player->yaw == 45,
+	                    driver_ai->heading == driver_wire_look && player->heading == w::placed_heading_bam(45),
 	            "driver wire LOOK differs from the vehicle seat yaw"))
 		return false;
 
@@ -2371,7 +2451,7 @@ bool run_vehicle_drive_authority() {
 	if (!expect(veh != nullptr && veh->veh.steer_target_bam == driver_wire_look,
 	            "authority motor consumes the full-precision remote driver LOOK"))
 		return false;
-	if (!expect(player != nullptr && driver_ai != nullptr && player->yaw == 45 &&
+	if (!expect(player != nullptr && driver_ai != nullptr && player->heading == w::placed_heading_bam(45) &&
 	                    driver_ai->heading == driver_wire_look,
 	            "post-motor mounted refresh preserves remote driver LOOK"))
 		return false;
@@ -2500,7 +2580,7 @@ bool run_0a_priority_caches_hold_every_pool1_slot() {
 		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
 		veh.health = veh.health_max = 3000;
 		veh.position = {110.0f, 100.0f, 10.0f};
-		veh.yaw = yaw;
+		veh.heading = w::placed_heading_bam(yaw);
 		return world.registry.spawn_at(w::EntityHandle{uint16_t((1u << 12) | slot)}, veh);
 	};
 	const w::EntityHandle low = vehicle_at(10, 90);    // heading BAM 0

@@ -12,6 +12,7 @@
 
 #include <runtime/world/world.h>
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_motor.h> // vehicle_hull_parked
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
 
@@ -82,11 +83,11 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
     AiBrain &b = e.brain;
     int32_t moveSpeed = (b.f[AiBrain::kCurState] == 16) ? b.f[AiBrain::kSpeedB]
                                                         : b.f[AiBrain::kSpeedA];
-    int wr = ai_waypoint_update_target(b, e.pos, nav);
+    int wr = ai_waypoint_update_target(b, e.self->position.words().data(), nav);
     if (wr == -1) { // no resolvable waypoint -> freeze at current transform
-        b.f[AiBrain::kWorkPosX] = e.pos[0];
-        b.f[AiBrain::kWorkPosY] = e.pos[1];
-        b.f[AiBrain::kWorkPosZ] = e.pos[2];
+        b.f[AiBrain::kWorkPosX] = e.self->position.x.q16;
+        b.f[AiBrain::kWorkPosY] = e.self->position.y.q16;
+        b.f[AiBrain::kWorkPosZ] = e.self->position.z.q16;
         b.f[AiBrain::kWorkHeading] = e.heading;
         b.f[AiBrain::kWorkPitch] = e.pitch;
         b.f[AiBrain::kWorkRoll] = e.roll;
@@ -109,9 +110,9 @@ int AiSystem::update_waypoint_movement(AiEntity &e, World &world) {
             if ((loopflag & 1) != 0) {                // one-shot: terminate + freeze
                 b.f[AiBrain::kWpType] = 0;            // aiState[13]=0 (path done)
                 b.f[AiBrain::kWpNode] = numKeyframes - 1;
-                b.f[AiBrain::kWorkPosX] = e.pos[0];
-                b.f[AiBrain::kWorkPosY] = e.pos[1];
-                b.f[AiBrain::kWorkPosZ] = e.pos[2];
+                b.f[AiBrain::kWorkPosX] = e.self->position.x.q16;
+                b.f[AiBrain::kWorkPosY] = e.self->position.y.q16;
+                b.f[AiBrain::kWorkPosZ] = e.self->position.z.q16;
                 b.f[AiBrain::kWorkHeading] = e.heading;
                 b.f[AiBrain::kWorkPitch] = e.pitch;
                 b.f[AiBrain::kOutSpeed] = 0;
@@ -159,7 +160,7 @@ int32_t AiSystem::nearest_route_node(const AiEntity &e, uint32_t list) const {
         uint32_t squared = 0;
         for (int axis = 0; axis < 3; ++axis) {
             const int32_t delta = static_cast<int32_t>(
-                    uint32_t(e.pos[axis]) - uint32_t(node.f[axis + 1])) >> 16;
+                    uint32_t(e.self->position.word(axis)) - uint32_t(node.f[axis + 1])) >> 16;
             squared += uint32_t(delta) * uint32_t(delta);
         }
         const int32_t distance = static_cast<int32_t>(squared);
@@ -202,7 +203,7 @@ void AiSystem::copy_route_order_to_brain(AiEntity &e) {
 // [orig: Entity_SetWaypointByTeam @0x43CE36..0x43CE4F; Entity_SetWaypointForTeam
 //  @0x43DE70..0x43DE89; WacCmd_SsnToWp @0x4F1D9F..0x4F1DB9]
 void AiSystem::seed_route_turn_budget(AiEntity &e) {
-    ai_waypoint_update_target(e.brain, e.pos, nav);
+    ai_waypoint_update_target(e.brain, e.self->position.words().data(), nav);
     e.brain.f[AiBrain::kAnimFlag] = route_turn_budget(e.brain, e.heading);
 }
 
@@ -222,36 +223,23 @@ static int32_t avoid_sin22(int32_t bam) {
     return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 
-// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
-// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
-// load 1 into ecx for the walk's decrement and compare the index against that
-// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
-// items.def row).
-// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
-//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
-//  Entity_UpdateLightVehiclePhysics @0x484F7F, Entity_ProcessInfantryPhysics
-//  @0x46EE70; boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx; jnz`
-//  — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
-//  Entity_ProcessAirVehiclePhysics @0x470B08/@0x470B23,
-//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
-enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
-
-// The pool-1 avoid BRAKE, shared by the ground, cbot and aircraft AI legs: the
-// sites are instruction-identical (footprint ellipse, dead-ahead cone,
-// id/frame-keyed factor) apart from the walk gate above [orig: ground
-// @0x48bd8f-0x48bf26; cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
+// The pool-1 avoid BRAKE (see ai.h), shared by the ground, selector-zero, cbot and
+// aircraft AI legs: the sites are instruction-identical (footprint ellipse, dead-ahead
+// cone, id/frame-keyed factor) apart from the walk gate (AvoidBrakeWalk, ai.h)
+// [orig: ground @0x48bd8f-0x48bf26; Vehicle_ProcessSelectorZeroGround @0x46E100
+// (@0x46EE26..0x46F005); cbot @0x48E577..0x48E756; Entity_UpdateAircraftPhysics
 // @0x4919A4..0x491B67]:
 // for every admitted pool-1 neighbor whose heading-aware footprint ellipse
 // overlaps ours (+1.0 u) AND that sits within ~30 deg of dead ahead, the
 // command speed multiplies by an id/frame-keyed factor in [0.25, 0.75) per
 // tick — vehicles brake behind obstacles; deflecting off them through the hull
 // contact was never the retail path-follow behavior.
-static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
-                                   int32_t cmd_speed, AvoidBrakeWalk walk) {
-    const int32_t self_bound = to_fixed(veh.bound_radius);
-    const int32_t sx = to_fixed(veh.position.x);
-    const int32_t sy = to_fixed(veh.position.y);
-    const int32_t sz = to_fixed(veh.position.z);
+int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
+                            int32_t cmd_speed, AvoidBrakeWalk walk) {
+    const int32_t self_bound = veh.bound_radius.q16;
+    const int32_t sx = veh.position.x.q16;
+    const int32_t sy = veh.position.y.q16;
+    const int32_t sz = veh.position.z.q16;
     const size_t cap = world.registry.pool_capacity(1);
     for (size_t si = 0; si < cap; ++si) {
         const Entity *o =
@@ -266,16 +254,16 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         if (walk == AvoidBrakeWalk::SkipIndexZero ? o->item_type_index == 0
                                                   : o->item_type_index != 1)
             continue;
-        const int32_t ob = to_fixed(o->bound_radius);
+        const int32_t ob = o->bound_radius.q16;
         const int32_t reach = ob + self_bound + 0x10000; // [orig: @0x48bdf2]
-        const int32_t dx = sx - to_fixed(o->position.x);
+        const int32_t dx = sx - o->position.x.q16;
         if (iabs32(dx) > reach) continue;
-        const int32_t dy = sy - to_fixed(o->position.y);
+        const int32_t dy = sy - o->position.y.q16;
         if (iabs32(dy) > reach) continue;
         // Carrier chains never brake for each other [orig: @0x48be1d-0x48be25].
         if (o->ground_target == veh.handle || veh.ground_target == o->handle)
             continue;
-        const int32_t dz2 = 2 * (sz - to_fixed(o->position.z)); // [orig: @0x48be2d]
+        const int32_t dz2 = 2 * (sz - o->position.z.q16); // [orig: @0x48be2d]
         if (iabs32(dz2) > reach) continue;
         const double fdx = static_cast<double>(dx);
         const double fdy = static_cast<double>(dy);
@@ -294,7 +282,7 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: the 1024-entry cos table off_849934 @0x48be8f-0x48bef1].
         const int32_t oyaw = o->veh.yaw_seeded
                 ? o->veh.yaw_bam
-                : bam_heading_from_mission_yaw_deg(static_cast<double>(o->yaw));
+                : o->heading;
         int32_t other_cos22, self_cos22, unused_sin22;
         // Add half a bin, then take the unsigned top ten bits before loading
         // off_849934; continuous cosine changes the overlap/brake threshold.
@@ -318,8 +306,9 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
         // [orig: @0x48bf17-0x48bf26; the counter reads in
         //  Entity_UpdateVehiclePhysics @0x48BF26, Entity_UpdateTankVehiclePhysics
         //  @0x489AEF, Entity_UpdateLightVehiclePhysics @0x4850CC,
-        //  Entity_ProcessInfantryPhysics @0x46EFC1, Entity_UpdateWatercraftPhysics
-        //  @0x48E712, Entity_ProcessAirVehiclePhysics @0x470C70 and
+        //  Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46EFC1),
+        //  Entity_UpdateWatercraftPhysics @0x48E712, Vehicle_ProcessSelectorZeroBoat
+        //  @0x46FA00 (@0x470C70) and
         //  Entity_UpdateAircraftPhysics @0x491B2D].
         const int32_t f = static_cast<int32_t>(
                 ((static_cast<uint32_t>(veh.net_id) +
@@ -336,13 +325,13 @@ static int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
 // [orig: @0x434F98, @0x434FA6, @0x434FC3, @0x43501E, @0x435051]
 // See ai.h. [orig: Entity_IsBoneInProximity @0x434F90]
 bool vehicle_at_spawn_anchor(const World &world, const Entity &veh) {
-	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
-		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
+		veh.spawn_position.z.q16, 0, 0, 0 };
 	if (veh.veh.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
 		return false;
-	const int32_t dx = io::bam_sub(pose[0], to_fixed(veh.position.x));
-	const int32_t dy = io::bam_sub(pose[1], to_fixed(veh.position.y));
-	const int32_t dz = io::bam_sub(pose[2], to_fixed(veh.position.z)) >> 1;
+	const int32_t dx = io::bam_sub(pose[0], veh.position.x.q16);
+	const int32_t dy = io::bam_sub(pose[1], veh.position.y.q16);
+	const int32_t dz = io::bam_sub(pose[2], veh.position.z.q16) >> 1;
 	const double d = std::sqrt(static_cast<double>(dx) * dx + static_cast<double>(dy) * dy +
 			static_cast<double>(dz) * dz);
 	const int32_t di = d >= 2147418112.0 ? INT32_MAX : static_cast<int32_t>(d);
@@ -368,16 +357,16 @@ int count_mounted_entities(const World &world, const Entity &veh) {
     return count;
 }
 
-// See ai.h. [orig: @0x48DFD3..0x48DFDF — `occupant->Position.z +
-// CameraOffset.z <= g_EnvWaterHeightFixed`]. Every caller passes a PLAYER
-// occupant. Retail's CameraOffset.z is live for a body holding its animation
-// channel (the body updater writes it every tick); our player bodies restamp it
-// only on a tick whose head had a clip (the stand-in for org2's unported channel
-// exit), so a player body that never derived one (0) has no head height to test
-// and keeps the wheel — a seated eye sits above the deck, never at it.
+// See ai.h. Every caller passes a PLAYER occupant. The compare is raw: the
+// water word is 0 on a map without water (no dry sentinel), and the eye word
+// is whatever the body's last restamp left.
+// [orig: Entity_UpdateWatercraftPhysics `mov eax,[ecx+74h]; add eax,[ecx+0Ch];
+//  cmp eax, g_EnvWaterHeightFixed; jle` @0x48DFD3..0x48DFDF; the twins
+//  Entity_UpdateVehiclePhysics @0x48B9A0..0x48B9AC and
+//  Entity_ProcessMovementSoundEffects @0x5294BE..0x5294CA; the word's default
+//  Environment_InitDefaults @0x57C011..0x57C01E]
 bool watercraft_driver_submerged(const World &world, const Entity &occ) {
-    if (world.env.water_z == 0 || occ.eye_offset_z == 0) return false;
-    return to_fixed(occ.position.z) + occ.eye_offset_z <= world.env.water_z;
+    return io::bam_add(occ.position.z.q16, occ.eye_offset_z) <= world.env.water_z;
 }
 
 // Stuck escalation uses the live spawn-parent anchor and rejects dead parents.
@@ -389,12 +378,12 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
         ve != nullptr && ve->inf.wait_cooldown == 1)
         return;
     Entity::VehicleMotorState &m = veh.veh;
-    const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652b6]
-    if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652bc/@0x4652c4]
-    const int32_t px = to_fixed(veh.position.x);
-    const int32_t py = to_fixed(veh.position.y);
-    const int32_t pz = to_fixed(veh.position.z);
-    const int32_t self_r = to_fixed(veh.bound_radius); // [orig: entity+0]
+    const int32_t n = ++m.stuck_ticks;                 // [orig: @0x4652A9]
+    if (!is_authority || (n & 0xF) != 0) return;       // [orig: @0x4652b6/@0x4652bc/@0x4652c4]
+    const int32_t px = veh.position.x.q16;
+    const int32_t py = veh.position.y.q16;
+    const int32_t pz = veh.position.z.q16;
+    const int32_t self_r = veh.bound_radius.q16; // [orig: entity+0]
     // dfx2.exe keeps a hull alive for a body within 4 u, not 12, and starts
     // the write-off past 1860 counts, not 3410; the 3720 kill is the same.
     // [orig: @0x46532c (0x40000), @0x4653ac (0x744) in the twin @0x4652a0 (dfx2.exe)]
@@ -408,12 +397,12 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
             if (m.stuck_ticks == 0) return;
             if (!e.has_item_def) return;               // [orig: entity[7] @0x465308]
             if ((e.flags & 3u) != 0) return;           // [orig: (Flags & 3) == 0 @0x465312]
-            const int32_t r = to_fixed(e.bound_radius) + self_r + near_reach;
-            const int32_t dx = px - to_fixed(e.position.x);
+            const int32_t r = e.bound_radius.q16 + self_r + near_reach;
+            const int32_t dx = px - e.position.x.q16;
             if (iabs32(dx) > r) return;
-            const int32_t dy = py - to_fixed(e.position.y);
+            const int32_t dy = py - e.position.y.q16;
             if (iabs32(dy) > r) return;
-            const int32_t dz = pz - to_fixed(e.position.z);
+            const int32_t dz = pz - e.position.z.q16;
             if (iabs32(dz) > r) return;
             const double d = std::sqrt(static_cast<double>(dx) * dx +
                                        static_cast<double>(dy) * dy +
@@ -424,8 +413,8 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     }
     if (m.stuck_ticks <= (dfx2 ? 1860 : 3410)) return; // [orig: @0x4653a6]
 	// [orig: AI_CheckVehicleStuckState @0x4653AC..0x46542D]
-	int32_t pose[6] = { to_fixed(veh.spawn_position.x), to_fixed(veh.spawn_position.y),
-		to_fixed(veh.spawn_position.z), 0, 0, 0 };
+	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
+		veh.spawn_position.z.q16, 0, 0, 0 };
 	if (m.spawn_pose_valid && !world.vehicles.resolve_spawn_pose(veh, pose))
 		return;
 	const int32_t sx = io::bam_sub(px, pose[0]);
@@ -476,8 +465,10 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: a hull
     // at zero health whose dead bit is not up yet keeps its driver's leg until
     // the dying state's death transforms land, exactly like the player leg.
+    // Both flag halves: the item death raises the dead bit on engine_flags
+    // (vehicle_hull_parked; the boat and aircraft legs read the same pair).
     // [orig: ctan @0x48954B..0x489560; cveh @0x48B972..0x48B987]
-    if (controller == nullptr || (veh.flags & 0x10000002u) != 0) {
+    if (controller == nullptr || vehicle_hull_parked(veh)) {
 		// Parked/no driver: the motor's no-controller branch holds heading + zeroes the
 		// command; the brain drops into the player-mode/parked state and the
 		// stuck escalation counts. [orig: @0x48c002-0x48c02d — aiComp[132] = Yaw,
@@ -497,7 +488,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
 
     const int32_t heading = veh.veh.yaw_seeded
             ? veh.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+            : veh.heading;
 
     // cmd speed = the SM mover's out-speed, capped at the def player_speed
     // [orig: @0x48bc23-0x48bc48; ctan @0x4897EC..0x489811 — aiComp[136] =
@@ -511,7 +502,7 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // Per-leg turn budget: recomputed whenever the mover's node advance cleared it.
     // [orig: @0x48bc9a-0x48bcd9; ctan @0x489863..0x4898A2]
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
         b.f[AiBrain::kAnimFlag] = route_turn_budget(b, heading);
     }
 
@@ -545,10 +536,12 @@ void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *control
     // The wait-for-boarders stop: a full stop while any live unmounted pool-0
     // body runs the boarding think toward THIS vehicle [orig: @0x48bf6f-0x48bff9;
     // ctan @0x489B38..0x489BCC — aiComp[132] = Yaw, [136] = 0, [137] = 0,
-    // Flags &= ~0x80; the motor zeroes the ramp for every AI command].
+    // Flags &= ~0x80]. The hold's [137] (+0x224, the ramp) is the leg's only ramp
+    // write.
     if (vehicle_waits_for_boarders(world, veh)) {
         out.steer_target_bam = heading;
         out.cmd_speed = 0;
+        veh.veh.steer_ramp_bam = 0;
         veh.flags &= ~0x80u;
     }
     // The handbrake byte-973 latch @0x48c03a and the crashed stop @0x48c086 sit
@@ -581,7 +574,16 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
         check_vehicle_stuck(world, veh);
         return; // out.ai_drive stays false
     }
+    watercraft_ai_leg(world, veh, traits, b, out);
+}
 
+// See ai.h — the boat AI leg, one body for the cbot mover and the selector-zero
+// boat mover, whose legs are the same instructions (the selector-zero twin
+// preloads its x87 constants; every load, store, branch and product matches).
+// [orig: Entity_UpdateWatercraftPhysics @0x48D480 (@0x48E247..0x48E7EC);
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470795..0x470D4C)]
+void AiSystem::watercraft_ai_leg(World &world, Entity &veh, const VehicleTraits &traits,
+                                 AiBrain &b, VehicleDriveCmd &out) {
     // The 22 -> 16 hand-back at the AI-leg head [orig: @0x48E247..0x48E24D].
     if (b.f[AiBrain::kCurState] == 22) {
         b.f[AiBrain::kCurState] = 16;
@@ -589,11 +591,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
 
     const int32_t heading = veh.veh.yaw_seeded
             ? veh.veh.yaw_bam
-            : bam_heading_from_mission_yaw_deg(static_cast<double>(veh.yaw));
+            : veh.heading;
 
-    // cmd = the SM mover's out-speed capped at def waterSpeed [orig:
-    // @0x48E260..0x48E279 — aiComp[136] = min(brain[128], waterSpeed)]. The
-    // aiComp[135] <- brain[127] target mirror (@0x48E254) is an unmodeled slot.
+    // cmd = the SM mover's out-speed capped at def waterSpeed, after the brain's
+    // target word seeds +0x21C [orig: @0x48E254..0x48E25A, @0x48E260..0x48E279 —
+    // aiComp[135] = brain[127], aiComp[136] = min(brain[128], waterSpeed)].
+    b.f[135] = b.f[AiBrain::kTargetRef];
     int32_t cmd_speed = b.f[AiBrain::kOutSpeed];
     if (cmd_speed > traits.water_speed) cmd_speed = traits.water_speed;
     // The minAI crew health clamp [orig: @0x48E27F..0x48E2C7 — the boat twin
@@ -604,7 +607,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     // @0x48E2D5..0x48E31C — refresh when brain[32] is spent and the waypoint
     // block is live; denom = (brain[35] >> 15) + 32].
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, veh.position.words().data(), nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int32_t err = iabs32(io::bam_sub(heading, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = (err / denom) << 4;
@@ -629,7 +632,7 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
             cmd_speed = static_cast<int32_t>((49152LL * cmd_speed + 0x8000) >> 16);
     }
 
-    // steer = heading + delta — the boat leg has NO delta/8 term
+    // steer = heading + delta — the boat leg has NO delta sar 3 term
     // [orig: @0x48E3F0..0x48E3F5].
     int32_t steer = io::bam_add(heading, delta);
 
@@ -678,10 +681,12 @@ void AiSystem::watercraft_ai_drive(World &world, Entity &veh,
     out.steer_target_bam = steer;
     // The wait-for-boarders stop: hold at cmd 0 while any live unmounted pool-0
     // AI runs boarding mode 125 toward THIS hull's id [orig: @0x48E75B..0x48E7EC
-    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80].
+    // — aiComp[132] = Yaw, [136] = 0, [137] = 0, Flags &= ~0x80]. The hold's [137]
+    // (+0x224, the ramp) is the leg's only ramp write.
     if (vehicle_waits_for_boarders(world, veh)) {
         out.steer_target_bam = heading;
         out.cmd_speed = 0;
+        veh.veh.steer_ramp_bam = 0;
         veh.flags &= ~0x80u;
     }
 }
@@ -737,9 +742,9 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
         // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E read
         //  the row's Yaw/Pitch/Roll, unmoved = the spawn form,
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
-        m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-        m.air_roll_bam = spawn_angle_bam(veh.roll);
+        m.yaw_bam = veh.heading;
+        m.air_pitch_bam = veh.pitch_bam;
+        m.air_roll_bam = veh.roll_bam;
         m.yaw_seeded = true;
     }
     m.ai_drive = true;
@@ -758,12 +763,13 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		return;
 	}
 
-	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->pos[2];
+	const int32_t ground = m.ground_cache != INT32_MIN ? m.ground_cache : ve->self->position.z.q16;
 
 	// Parked is `occupant == 0 || Flags & 0x10000002` and nothing else: no hull
 	// or pilot health term. A dead pilot has already left the seat through the
-	// infantry death edge's detach (the caller hands a dead controller in as
-	// null). [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25]
+	// infantry death edge's detach, which the pool-0 walk runs first (the caller
+	// hands in the seat's occupant as it stands). [orig: Entity_UpdateAircraftPhysics
+	// @0x490F16..0x490F25; Entity_UpdateInfantryAI @0x4B9910 (@0x4B9C57..0x4B9C60)]
 	if (controller == nullptr || ((veh.flags | veh.engine_flags) & 0x10000002u) != 0) {
 		// Parked: both thrust registers and the climb zeroed, the altitude target
 		// pinned 0x4000 under the ground (collective off), the stuck escalation,
@@ -778,7 +784,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
 		//  ground > 0x20000 @0x491C18..0x491C28, `add dword ptr [esi+10h],
 		//  0FFD3F50Ah` @0x491C2A, brain+0x210 = Yaw @0x491C54]
 		if ((veh.flags & kEntityFlagInAir) != 0 &&
-		    io::bam_sub(io::bam_sub(ve->pos[2], m.air_probe_z_off), ground) > 0x20000)
+		    io::bam_sub(io::bam_sub(ve->self->position.z.q16, m.air_probe_z_off), ground) > 0x20000)
 			m.yaw_bam = io::bam_sub(m.yaw_bam, 2886390);
 		m.cmd_speed = 0;
 		m.cmd_lateral_speed = 0;
@@ -821,7 +827,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // [32] = 8 * (|Yaw - brain[21]| / ((brain[35] >> 15) + 32)) — divide THEN
     // x8, unlike the ground leg's 32*err/denom].
     if (b.f[AiBrain::kAnimFlag] == 0 && b.f[AiBrain::kWpType] != 0) {
-        ai_waypoint_update_target(b, ve->pos, nav);
+        ai_waypoint_update_target(b, ve->self->position.words().data(), nav);
         const int32_t denom = (b.f[AiBrain::kStoredKeyTime] >> 15) + 32;
         const int32_t err = iabs32(io::bam_sub(m.yaw_bam, b.f[AiBrain::kWpBearing]));
         b.f[AiBrain::kAnimFlag] = 8 * (err / denom);
@@ -843,7 +849,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     if (b.f[AiBrain::kWpChannel] == 0 && b.f[AiBrain::kWpNode] == 0) node = nullptr;
 	if (node != nullptr && b.f[AiBrain::kCurState] == 7) {
 		// ---- The flight block [orig: @0x491672..0x491998].
-		const int32_t px = ve->pos[0], py = ve->pos[1], pz = ve->pos[2];
+		const int32_t px = ve->self->position.x.q16, py = ve->self->position.y.q16, pz = ve->self->position.z.q16;
         // The node's Z, floored 0x4000 under the hull's own average ground
         // [orig: @0x491672..0x491684].
         int32_t tz = node->f[3];
@@ -911,7 +917,7 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
             node_ground = calc_average_ground_height(*world.tables.terrain, npos, 0, clearance);
         }
         const int32_t node_agl = node_ground != INT32_MIN ? node->f[3] - node_ground : 0;
-        const int32_t floor = self_ground + (to_fixed(veh.bound_radius) >> 2);
+        const int32_t floor = self_ground + (veh.bound_radius.q16 >> 2);
         if (node_agl > 0x60000 || dist > 0x60000) {
             // En route (or the node hangs in the air): never below the hull's
             // ground + bound/4 — a low target lifts 16 u above that floor and
@@ -930,10 +936,8 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
                     ((static_cast<int64_t>(m.cmd_speed) << 13) + 0x8000) >> 16);
             const int32_t nx = px + ((node->f[1] - px) >> 6);
             const int32_t ny = py + ((node->f[2] - py) >> 6);
-            ve->pos[0] = nx;
-            ve->pos[1] = ny;
-            veh.position.x = static_cast<float>(from_fixed(nx));
-            veh.position.y = static_cast<float>(from_fixed(ny));
+            veh.position.x.q16 = nx;
+            veh.position.y.q16 = ny;
             m.net_alt_target = ground - 0x2000;
         }
         // Steer: the heading error clamped to the per-leg budget
@@ -965,10 +969,11 @@ void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller
     // where it stands instead of leaving the moment its first passenger climbs
     // in. Retail runs this AFTER the flight computation, overriding it, so the
     // override lives at the tail here too.
-    // [orig: Entity_ProcessAirVehiclePhysics, the Entity_CanEnterVehicle block
-    //  (kong line 94590) — work_heading = entity->Yaw, aiComp[136]/[137] = 0,
-    //  Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light,
-    //  infantry and mounted-infantry movers]
+    // [orig: Entity_UpdateAircraftPhysics @0x490310, the Entity_CanEnterVehicle
+    //  block (the call @0x491B7A) — work_heading = entity->Yaw, aiComp[136]/[137]
+    //  = 0, Flags &= ~0x80; identical twins in the watercraft (@0x48E75B), light
+    //  (@0x48511D), selector-zero ground (@0x46F010) and boat (@0x470CC1) and
+    //  mounted-infantry (@0x487A40) movers]
     if (vehicle_waits_for_boarders(world, veh)) {
         m.steer_target_bam = m.yaw_bam;
         m.cmd_speed = 0;

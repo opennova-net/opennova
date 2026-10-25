@@ -42,8 +42,12 @@ std::vector<uint8_t> Server_CollectKillPage(const world::World &world, bool spaw
 // The host side of C2S 0x28 [u32 window_min][u32 window_max][u16 start] (a
 // short read is 0): on the authority, for a sender holding a player slot, the
 // page from `start`, sent reliable to the sender alone while it is in the
-// match (mask 0xA0) when it is not empty. The round-over latch stands for the
-// spawn gates. [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550 —
+// match (mask 0xA0) when it is not empty. The page's two gates are the mission
+// load's (ctx.net_spawn_suspended, set while the load's pumps run this handler,
+// D-NET-116) and the round-over latch (the Match outcome).
+// [orig: Server_CollectValidWeaponSlots @0x516000 - g_NetSpawnSuspended @0x516005
+//  (jnz @0x516022), g_RoundOver @0x516028 (jnz @0x51602E);
+//  NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550 —
 //  the authority @0x51A557, the slot @0x51A561..0x51A578, the reads
 //  @0x51A58C..0x51A5B0, the page @0x51A5C0, the send @0x51A5D1..0x51A5F4]
 std::vector<ProtocolMessage> Server_HandleKillPageRequest(const NapiNPServerCtx *ctx,

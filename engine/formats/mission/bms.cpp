@@ -55,7 +55,7 @@ bool parse_header(io::ByteReader& r, Header& h, std::string& error, bool wire_he
             error = "Invalid BMS magic";
             return false;
         }
-        // [orig: version gate `byte_A761D3 < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
+        // [orig: version gate `g_BmsHeaderVersion < 19` @0x40f5aa Mission_LoadBMSFile / @0x40e30a BMS_LoadAndValidateHeader]
         if (static_cast<uint8_t>(h.magic[3]) < kMinVersion) {
             error = "Unsupported BMS version " + std::to_string(static_cast<uint8_t>(h.magic[3])) +
                     " (minimum " + std::to_string(kMinVersion) + ")";

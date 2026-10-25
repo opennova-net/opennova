@@ -172,8 +172,10 @@ void ServerLogRecorder::write_mission_roster(const NapiNPServerCtx &ctx,
 		const world::World &world) {
 	// [orig: Game_StartMission @0x526135..0x52617b — every g_PoolList[0] row
 	//  with Flags 0x100, or every row when not in a session and the authority]
+	// Out of a session is the single player: world.rules.mp_session, since our
+	// listen host's ctx.is_in_session is 1 in single player too.
 	if (!open_) return;
-	const bool every_row = ctx.is_in_session == 0 && ctx.is_authority == 1;
+	const bool every_row = !world.rules.mp_session && ctx.is_authority == 1;
 	world.registry.for_each_in_pool(0, [&](const world::Entity &e) {
 		if (is_player(e) || every_row) write_player(e);
 	});
@@ -187,7 +189,7 @@ void ServerLogRecorder::write_frame(const NapiNPServerCtx &ctx, const world::Wor
 	if (!open_ || (tick & 7u) != 7u) return;
 	flush_if(2 * buffer_.size() + 12 > kBufferBytes); // [orig: @0x4e1ab6]
 	append_server_log_frame(buffer_, static_cast<uint32_t>(static_cast<int32_t>(tick) >> 3));
-	const bool every_row = ctx.is_in_session == 0 && ctx.is_authority == 1;
+	const bool every_row = !world.rules.mp_session && ctx.is_authority == 1;
 	world.registry.for_each_in_pool(0, [&](const world::Entity &e) {
 		if (!is_player(e) && !every_row) return;
 		// [orig: CServerLog_WritePositionRecord @0x4e1b00]

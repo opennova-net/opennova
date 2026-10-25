@@ -38,7 +38,7 @@ struct WirePersonBody {
 	// @0x407720) when its ai_function tag is "plyr", else org0 / org1
 	// (OrganicClass_HandleEvent @0x407310) [orig: the rows @0x813048 /
 	// @0x813018 / @0x813030 of g_EntityClassEventCallbackTable, matched by a
-	// whole-string stricmp in Entity_LookupRenderCallbacks @0x407DE2].
+	// whole-string stricmp in EntityDef_LookupClassCallbacks @0x407DC0 (the call @0x407DD8)].
 	bool plyr_class = false;
 	// The team byte (+354).
 	uint8_t team = 0;

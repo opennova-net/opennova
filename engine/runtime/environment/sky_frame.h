@@ -64,6 +64,20 @@ inline Vec3 sky_dome_anchor(const Vec3 &cam_pos) {
 	return Vec3{cam_pos.x, cam_pos.y * 0.5f, cam_pos.z};
 }
 
+// Whether a mission start loads the sky maps (the two cloud layers): its mission textures stage
+// does on the full arm, past the terrain's textures and ahead of the model freeze, for an
+// environment with advanced clouds alone (the flat dome binds no cloud layer); a dedicated
+// host's reduced arm loads none. The environment's own load reads only their names
+// (D-NET-NEW-L3-34).
+// [orig: Render_InitMissionTextures @0x587120 - the dedicated test @0x58713C, the full arm's
+//  call @0x587187 (PolyTrn_InitTextures @0x58715E before it, the freeze @0x5871CF after),
+//  none on the reduced arm @0x58727A..0x58728C; Terrain_InitRenderingResources @0x5789E0 - the
+//  advanced clouds test @0x578A17, sky_map1 and sky_map2 through Texture_LoadFromArchive (the
+//  calls @0x578A82 / @0x578A9A)]
+constexpr bool loads_mission_sky_maps(bool dedicated_host, int advanced_clouds) noexcept {
+	return !dedicated_host && advanced_clouds != 0;
+}
+
 // Standalone fallback for owners with no weather runtime: a private core
 // ticked for its cloud scroll only at the same fixed 62 Hz cadence — the
 // integer scroll math has ONE home either way. Rendering may run at any

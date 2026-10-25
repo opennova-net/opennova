@@ -15,7 +15,7 @@ The hosted servers (the fleet, its supervisor, the data sets, the console) are
 | Listener | Port | Protocol |
 | --- | --- | --- |
 | `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
-| `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> PN dispatch: NOVAWORLDUDP containers or JointOperations game runtime |
+| `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `InternalListener` (`hosted/internal_listener.*`) | TCP 8070 | the machines' agent routes alone (`hosted/agent_route.*`), on a private address |
 | `HealthListener` (`core/health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
@@ -408,8 +408,13 @@ expansion.
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
   takes the configured `ONNET_GLSVSS_*`, none by default). DFX2's row carries the values
-  NovaLogic's live gate answered for its tag, in this gate's shape (the witness:
-  `docs/titles/dfx2-vs-jo-re.md`). A tag no row (nor the alias) answers to gets no reply,
+  NovaLogic's live gate answered for its tag, in that reply's shape too (the witness:
+  `docs/titles/dfx2-vs-jo-re.md` §6.5; `TitleIdentity::gate_reply_witnessed`, D-NET-721):
+  no `POSTIPADDRESS` / `POSTIPPORT` (its `udpnovaworld` line leaves the pair unread), a
+  `startupurl` on `http://[domainname]/` (the client fills it from the lobby's SessionInit
+  web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after
+  the reflected pair. JO's and ON's rows keep the POST pair, the web endpoint in the
+  `startupurl` and no `TimeOnGateServer`. A tag no row (nor the alias) answers to gets no reply,
   and the unknown tracker records it. The gate reads the table once in `start()`, so its
   receive thread never touches the database for a probe; a change to the table takes a
   restart.
@@ -864,17 +869,24 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
   NWPSSK)`: machine-bound, A to Z, and the same every time that machine asks
   (`cd_key_activations` keeps one row per key and machine). The client's own leg (the mix
   down under its fingerprint, the registry chain decoded) gives back the wire key.
-- **The hand-off.** A DFX2 client sets `NWCDKIID` (the wire key its boot read decoded,
-  empty when unactivated) and `NWPSSK` (its 23-letter fingerprint) as browser variables
-  when it connects to NovaWorld, so every web request carries them as cookies.
-  `GET /NWStart.dll` answers a DFX2 client whose `NWCDKIID` is no wire key with the start
-  page's `ACT` page (`dfx2_0_actlogin.htm`, "Please login to activate this product")
-  instead of `OUT`. Its completed login (`GET /NWLogin.dll`) then carries
-  `Set-Cookie: NWACT=<value>` for the posted `NWPSSK`: the response's `SET-COOKIE`
-  lines land in the browser's one cookie jar, and the NovaWorld screen's idle update reads
-  `NWACT` from it, writes it to the registry `CDKIID`, validates it, and clears it (the
-  witness: the RE record's section 9). The registry write needs an administrator. An activated client, a JO client and a
-  client posting no `NWPSSK` get no `NWACT`.
+- **The hand-off.** A DFX2 client sets `NWCDKIID` (what its boot read's decode left: the
+  wire key, or empty when it has no `CDKIID`) and `NWPSSK` (its 23-letter fingerprint) as
+  browser variables when it connects to NovaWorld, so every web request carries them as
+  cookies. Nobody is asked to activate (D-NET-725): `GET /NWStart.dll` answers every
+  client with the start page's `OUT` page, the plain login, and never with the `ACT` page
+  DFX2's start page names (`dfx2_0_actlogin.htm`, "Please login to activate this
+  product"). The completed login (`GET /NWLogin.dll`) of a DFX2 client whose `NWCDKIID`
+  is no wire key carries `Set-Cookie: NWACT=<value>` for the posted `NWPSSK`: the
+  response's `SET-COOKIE` lines land in the browser's one cookie jar, and the NovaWorld
+  screen's idle update reads `NWACT` from it, writes it to the registry `CDKIID`,
+  validates it, and clears it (the witness: the RE record's section 9). The registry write
+  needs an administrator. An activated client, a JO client and a client posting no
+  `NWPSSK` get no `NWACT`. The three DFX2 copies players run: a retail-keyed one sends
+  its wire key and gets nothing; a keyless as-sold one (no `CDKIID`, or one this machine's
+  fingerprint does not decode) gets its key, which unlocks its menus and hosting at its
+  next start; a keyless byte-patched one (its registry read forced to succeed) sends the
+  same empty `NWCDKIID` and gets its key too, which its menus never needed but a stock
+  LAN host checks.
 - **Minting.** An account that has never held a DFX2 key gets one minted onto it at its
   first activation (`created_by` `auto`) while `ONNET_CD_KEY_AUTO_MINT` is on (the
   default; `0` turns it off, and then only a key an admin assigned activates). An account
@@ -1094,10 +1106,10 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 listed with no owner; "Listed servers and owners" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
-`ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on the
-NovaWorld UDP port, which serves a Hello carrying JO's complete in-match identity as a
-game session; the `nw_host_register_e2e` harness turns it on (default off: the service
-runs no game host).
+`ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on a UDP
+socket of its own (a port of the OS's pick, logged at start), apart from the NovaWorld
+UDP port as a retail game host is (D-NET-717); the `nw_host_register_e2e` harness turns
+it on (default off: the service runs no game host).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
 support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and

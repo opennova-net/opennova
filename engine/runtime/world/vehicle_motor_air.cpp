@@ -79,7 +79,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 	// The inclusive reconciliation boundary follows the strict input boundary.
 	// [orig: Entity_UpdateAircraftPhysics @0x490310, collective/flare/steer block]
 	if (ground != INT32_MIN) {
-		const bool near = io::bam_sub(pz, ground) < bam_mul_wrap(to_fixed(veh.bound_radius), 2);
+		const bool near = io::bam_sub(pz, ground) < bam_mul_wrap(veh.bound_radius.q16, 2);
 		const auto collective = [&](int32_t delta) {
 			if (near)
 				m.net_climb = io::bam_add(m.net_climb, delta);
@@ -104,7 +104,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 			m.net_alt_target = ground;
 		}
 		world.vehicles.tick_flare_input(veh);
-		if (io::bam_sub(pz, ground) <= bam_mul_wrap(to_fixed(veh.bound_radius), 2))
+		if (io::bam_sub(pz, ground) <= bam_mul_wrap(veh.bound_radius.q16, 2))
 			m.net_alt_target = io::bam_add(ground, m.net_climb);
 	}
 	if (m.net_climb != 0) {
@@ -113,7 +113,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 			m.steer_target_bam = (move_order & Entity::kMoveOrderFreeLook) != 0
 					? m.yaw_bam
 					: (pilot != nullptr ? pilot->heading
-										: bam_heading_from_mission_yaw_deg(occ.yaw));
+										: occ.heading);
 		}
 	} else if (ground != INT32_MIN) {
 		m.net_alt_target = io::bam_sub(ground, 0x4000);
@@ -152,16 +152,16 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         // arming already landed the replicated pitch/roll, so only the yaw.
         // [orig: Entity_UpdateAircraftPhysics @0x49034C/@0x490355/@0x49035E;
         //  Entity_SpawnFromBMSRecord @0x40EB42..0x40EBA6]
-        m.yaw_bam = spawn_angle_bam(90 - veh.yaw);
+        m.yaw_bam = veh.heading;
         if (!m.net_predicted) {
-            m.air_pitch_bam = spawn_angle_bam(veh.pitch);
-            m.air_roll_bam = spawn_angle_bam(veh.roll);
+            m.air_pitch_bam = veh.pitch_bam;
+            m.air_roll_bam = veh.roll_bam;
         }
         m.yaw_seeded = true;
     }
-    int32_t px = to_fixed(veh.position.x);
-    int32_t py = to_fixed(veh.position.y);
-    int32_t pz = to_fixed(veh.position.z);
+    int32_t px = veh.position.x.q16;
+    int32_t py = veh.position.y.q16;
+    int32_t pz = veh.position.z.q16;
     // The mover-entry pose — savedLivePose for the solve's sleep compare
     // [orig: the prologue 6-dword capture @0x490326..0x49036B].
     const int32_t start_x = px, start_y = py;
@@ -196,9 +196,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		part_anim_tick(veh, traits);
 
 	vehicle_follow_carrier(world, veh);
-	px = to_fixed(veh.position.x);
-	py = to_fixed(veh.position.y);
-	pz = to_fixed(veh.position.z);
+	px = veh.position.x.q16;
+	py = veh.position.y.q16;
+	pz = veh.position.z.q16;
 
 	// ---- 1. The air interp block [orig: @0x49095E..0x490C98]. 3D distance,
 	// snap 0xA0000 (0x20000 when BOTH received cmds < 293), buckets
@@ -297,7 +297,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// controls, velocity and gear servos [orig: @0x490CD0 -> @0x49274C]; the
 	// tail still sets Flags 0x20000 [orig: @0x492766].
 	if (((veh.flags | veh.engine_flags) & kEntityFlagDead) != 0) {
-		veh.position = { float(from_fixed(px)), float(from_fixed(py)), float(from_fixed(pz)) };
+		veh.position.set_q16({px, py, pz});
 		veh.engine_flags |= kEntityFlagMatrixBuilt;
 		return;
 	}
@@ -339,7 +339,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	if (view_pilot != nullptr) {
 		const AiEntity *body = world.ai.for_handle(view_pilot->handle);
 		const int32_t pitch =
-				body != nullptr ? body->pitch : bam_from_degrees_wrapped(view_pilot->pitch);
+				body != nullptr ? body->pitch : view_pilot->pitch_bam;
 		tilt_error = io::bam_sub(io::bam_sub(pitch, m.air_pitch_bam), m.view_tilt_bam);
 	}
 	int32_t tilt_step = io::bam_sar(io::bam_add(tilt_error, 4), 3);
@@ -457,23 +457,23 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
         if (lat < neg_cap) lat = neg_cap;
         m.air_pitch_rate = io::bam_sub(m.air_pitch_rate, fwd);
         m.air_roll_rate = io::bam_sub(m.air_roll_rate, lat);
-        if (to_fixed(veh.bound_radius) >= 0xF0000)
+        if (veh.bound_radius.q16 >= 0xF0000)
             m.slide_z += (m.net_alt_target - pz + 0x100) >> 9; // heavy 1/512
         else
             m.slide_z += (m.net_alt_target - pz + 0x80) >> 8;  // light 1/256
     }
 
     // Airborne/water picks: the contact solve (below, at the tick tail)
-    // produced Flags 0x2000/0x8000 LAST tick — the witnessed source for these
-    // branches [orig: the mover reads Flags @0x491E35 region]. Boxless rows
-    // (the solve stand-in) keep the local derivation.
-    const bool solve_active = air_contact_solve_active(traits);
+    // produced Flags 0x2000/0x8000 LAST tick, the witnessed source for these
+    // branches [orig: the mover reads Flags @0x491E35 region]; a hull the solve
+    // leaves alone (no graphic model) keeps the flags as they stand. A model
+    // with no box extents (the solve stand-in) derives the airborne pick from
+    // its ground probe.
+    const bool solve_active = !veh.has_graphic_model || air_contact_solve_active(traits);
     const bool airborne = solve_active
             ? (veh.flags & kEntityFlagInAir) != 0
             : (ground == INT32_MIN || pz - ground > 0x10000);
-    const bool in_water = solve_active
-            ? (veh.flags & 0x8000u) != 0
-            : (world.env.water_z != 0 && pz <= world.env.water_z);
+    const bool in_water = (veh.flags & 0x8000u) != 0;
 
     if (airborne) {
         // ---- 5. Airborne aero block [orig: @0x491E35..0x4922BC].
@@ -678,8 +678,9 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     // The contact/suspension solve at the witnessed call site — after
     // integration, before the attitude-rate integration [orig: @0x49254E].
     // It owns Flags 0x2000/0x8000, the grounded Z/attitude conform, and the
-    // planar slope/wall separation; boxless rows keep the terrain-clamp
-    // stand-in inside.
+    // planar slope/wall separation; a model-less hull returns from it after its
+    // prologue, and a model with no box extents keeps the terrain-clamp stand-in
+    // inside.
     aircraft_contact_solve(world, veh, traits, m, start_x, start_y, px, py, pz);
     constexpr int32_t kAttitudeRateClamp = 178956960; // 0xAAAAAA0
     if (m.wheel_rate_bam > kAttitudeRateClamp) m.wheel_rate_bam = kAttitudeRateClamp;
@@ -715,11 +716,10 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 	// [orig: @0x4926EB/@0x4926F9 reads var_B4, stored at @0x491CE4..0x491CF8]
 	slew_turret(veh, turret_step);
 
-	veh.position.x = static_cast<float>(from_fixed(px));
-	veh.position.y = static_cast<float>(from_fixed(py));
-	veh.position.z = static_cast<float>(from_fixed(pz));
-    veh.yaw = static_cast<int16_t>(std::lround(
-            mission_yaw_deg_from_bam_heading(m.yaw_bam)));
+	veh.position.x.q16 = px;
+	veh.position.y.q16 = py;
+	veh.position.z.q16 = pz;
+    veh.heading = m.yaw_bam;
     // ...and the attitude with it. In the original these ARE the entity's own
     // Pitch/Roll -- the integration above writes entity+0x14/+0x18 directly, so
     // there is no separate motor copy to publish. Our split kept
@@ -734,10 +734,8 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
     // the next tick's conform overwriting.
     // [orig: Entity_UpdateAircraftPhysics common tail @0x49237E --
     //  `entity+20 += entity+168; entity+24 += entity+172`]
-    veh.pitch = static_cast<int16_t>(std::lround(
-            static_cast<double>(m.air_pitch_bam) * kDegreesPerBam));
-    veh.roll = static_cast<int16_t>(std::lround(
-            static_cast<double>(m.air_roll_bam) * kDegreesPerBam));
+    veh.pitch_bam = m.air_pitch_bam;
+    veh.roll_bam = m.air_roll_bam;
     // The matrix-build tail sets Flags 0x20000 (kEntityFlagMatrixBuilt, homed on
     // engine_flags) [orig: Entity_UpdateAircraftPhysics @0x49275E, OR @0x492766].
     veh.engine_flags |= kEntityFlagMatrixBuilt;

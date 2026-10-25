@@ -203,6 +203,23 @@ func test_runtime_portrait_idle_spins_and_holds_the_camera() -> void:
 	assert_gt(cam.global_position.z, _preview.menu_center().z, "camera stays in front (+Z)")
 
 
+# Every frame the visible pane processes is a draw, which retail's PLAYER_PREVIEW custom draw
+# turns into its time-of-day store (the shell routes `drawn` to GameWorld.player_preview_drawn);
+# a hidden pane draws nothing (the witness: engine inmatch::kPlayerPreviewTodFixed24).
+func test_each_processed_frame_is_a_draw() -> void:
+	watch_signals(_preview)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var drawn: int = get_signal_emit_count(_preview, "drawn")
+	assert_gt(drawn, 0, "a visible pane's frames emit drawn")
+	_preview.visible = false
+	await get_tree().process_frame
+	var hidden_from: int = get_signal_emit_count(_preview, "drawn")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(get_signal_emit_count(_preview, "drawn"), hidden_from, "a hidden pane draws nothing")
+
+
 func test_runtime_portrait_hover_zooms_in_and_out() -> void:
 	# Mouseover ramps the zoom blend toward 1 and pulls the camera closer; un-hover relaxes it.
 	_preview.frame_menu_pose(_soldier_bounds())

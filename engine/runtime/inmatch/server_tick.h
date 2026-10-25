@@ -9,8 +9,8 @@
 
 #include <runtime/inmatch/napi_np_server_ctx.h> // NapiNPServerCtx
 
-namespace opennova::world {
-struct RoundDeath;
+namespace opennova::mission {
+class MissionKernel;
 }
 
 namespace opennova::inmatch {
@@ -30,24 +30,90 @@ bool Server_StageHostDisconnect(
 		NapiNPConnection &connection, const DisconnectEvent &event);
 bool Server_StageHostPunt(
 		NapiNPConnection &connection, uint32_t mismatch_type);
+// The CRC-mismatch punt's record, the first leg of Server_LogCRCMismatchPunt ahead of its
+// punt: for a slot in the table whose player is active and that is not the host's own, a
+// type-9 punt (HMCRC) steps the process's second PuntCRC counter and a type-10 one (CMCRC) its
+// third (ctx.punt_crc_counters; none bound, nothing counts). The other types step counters
+// nothing reads, and the record's server-log line goes to a log nothing turns on.
+// [orig: Server_LogCRCMismatchPunt @0x517ED0 - Server_PlayerPuntCRCMisMatch called @0x517EF4;
+//  Server_PlayerPuntCRCMisMatch @0x50F380 - the range @0x50F3AA, +4 / +5 / +96481 @0x50F3D6,
+//  the switch on type - 1 @0x50F470..0x50F47B, case 9 dword_C94770 @0x50F4A8, case 10
+//  dword_C94774 @0x50F4CA, ServerLog_BufferAndFlush called @0x50F54F]
+void Server_CountCRCMismatchPunt(NapiNPServerCtx &ctx, const NapiNPConnection &connection,
+		uint32_t mismatch_type);
 
 // Re-roll one player's retained fire-freshness/tick anchor and return its
 // exact 4-byte S2C 0x61 body. Join, revive, and deployment call this one
-// transaction so the connection field and wire value cannot diverge.
-// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==1 arm]
+// transaction so the connection field and wire value cannot diverge. The arm
+// stamps the server frame clock (world.out.rounds.frame_clock), which the
+// death's 620-frame recent-spawn test reads.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==1 arm: the clock
+//  @0x5101A9, +0x178C8 @0x5101B3, +0x178CC = 0 @0x5101B9]
 std::vector<uint8_t> Server_RerollPlayerTickSeed(
-		NapiNPConnection &connection);
+		NapiNPConnection &connection, uint32_t frame_clock);
 
-// The disarm twin: zero the retained anchor and return the four-zero 0x61
-// body. Death and round-end call this arm; the zero seed freezes the
-// client's network-role tick until the next re-arm.
-// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
+// The disarm twin: zero the retained anchor, stamp the server frame clock as
+// the fire grace's start and return the four-zero 0x61 body. Death and
+// round-end call this arm; the zero seed freezes the client's network-role
+// tick until the next re-arm.
+// [orig: Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm: the clock
+//  @0x51022A, +0x178CC @0x510237]
 std::vector<uint8_t> Server_DisarmPlayerTickSeed(
-		NapiNPConnection &connection, uint32_t host_tick);
+		NapiNPConnection &connection, uint32_t frame_clock);
 
-// [orig: PlayerSlot_IsActive @0x4FC760]
+// The round end, synchronous at its latch: Match's outcome and frozen board,
+// then (in an MP session) every in-match slot's 0x61 / 0x1D, game state 11 and
+// slot state 7, the round tallies and the linger, before the caller's next
+// statement, so a later sweep in the same second walks nobody. A no-op once
+// the round is over. The periodic win check and the admin round ends call it;
+// a WAC / BMS action latches inside the world's script pass and Server_TickUpdate
+// announces it behind that pass's routed records.
+// [orig: Server_ProcessRoundEnd @0x5164F0 - the round-over gate @0x5164F6, slot
+//  state 7 @0x51685E; called inline by Server_CheckWinConditions @0x51AD77,
+//  CAdminServer_HandleGotoCommand @0x404A95, CAdminServer_HandleMissionCommand
+//  @0x40660B, CNapiGameSession_HandleServerCommand @0x4D31C0]
+void Server_ProcessRoundEnd(NapiNPServerCtx &ctx, world::World &world,
+		int32_t winning_team);
+
+// The disarmed grace reads the server frame clock against the disarm's stamp.
+// [orig: PlayerSlot_IsActive @0x4FC760 (`cmp g_ServerFrameClock` @0x4FC78E)]
 bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
-		uint32_t client_tick, uint32_t host_tick, uint32_t send_holdoff_ticks);
+		uint32_t client_tick, uint32_t frame_clock, uint32_t send_holdoff_ticks);
+
+// The previous entity update's records, routed onto the connections (server_tick.cpp): the
+// placed devices, the deaths and their staged sends, the medic interactions, the powerup
+// grants, the overlay updates, the gameplay events and the water crossings. Server_TickUpdate
+// runs it at its head; a session owner runs it first at the head of its pump, so the update's
+// sends lead what the tick's walk and receive pump queue (D-NET-NEW-L1-6); the receive pump
+// runs it behind each message's handler, for what that handler raised (D-NET-NEW-V3-1), and
+// once more at its end, for what the connection producers raised (D-NET-686).
+// [orig: Game_ProcessMainFrame - the Entity_UpdateAllEntities call @0x52674B after
+//  Server_TickUpdate's send pump @0x51E487]
+void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world);
+
+// The match's objective records raised since the last drain (the 0x1E events and the 0x2F flag
+// states), sent now: a leaver's carried-flag drop at its body's destroy, inside the disconnect,
+// ahead of the slot's 0x46 (remove_connection_player).
+// [orig: Server_RemoveEntityAndNotify @0x50A270 -> Entity_Destroy @0x50A2C4 ->
+//  Entity_DropCarriedObject @0x439DF0 (Server_SendDestructibleDeathPacket called @0x439F34)]
+void route_match_objective_records(NapiNPServerCtx &ctx, world::World &world);
+
+// The mission teardown's one-shot PostMission sweep on the authority, run as the tick's script
+// pass runs its actions: each action's records go out at its call (a SubGoalWon / Lost's chat
+// relay, a Win's round end), queued ahead of the slot reset's 0x25s, so a map change's next
+// load sends them first and an exit's destroy drains them unsent.
+// [orig: Game_TeardownMission - EventTrigger_UpdateAllWithFlag4 called @0x52266C ahead of
+//  Server_DisconnectAndResetAllPlayerSlots called @0x52269B; EventTrigger_UpdateAllWithFlag4
+//  @0x454E00 - the flag-4 test @0x454E15, EventTrigger_UpdateEntry called @0x454E18;
+//  EventAction_Dispatch @0x4542E0 - GameMsg_AddChatLineAndRelay called @0x454578 / @0x454632,
+//  Server_ProcessRoundEnd called @0x45447B / @0x454495 / @0x4544AF]
+void Server_RunPostMissionSweep(NapiNPServerCtx &ctx, mission::MissionKernel &kernel);
+
+// The frame update's per-slot walk order: the connections by their player slot, the slot
+// table's order, never the join order (ties keep the list's order), so each slot's 0x0A
+// writer stores show in the records of the slots after it (D-NET-449).
+// [orig: Server_TickUpdate's per-slot loop @0x51E3A0..0x51E47C over the slot table]
+std::vector<NapiNPConnection *> connections_in_slot_order(NapiNPServerCtx &ctx);
 
 // The authoritative per-frame host loop [orig: Server_TickUpdate @0x51d7e0]. One call = one engine
 // tick (the original 62 Hz cadence). Walks the SINGLE-OWNER connection table
@@ -80,32 +146,6 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // connection_list; the parallel NetSystem-as-ISystem owner was removed at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx);
 
-// The frame tail after the host's S2C flush: retail's entity update follows
-// Server_TickUpdate's send pump and precedes the next receive pump, so a
-// player body's death edge on a Health store the tick made (the flag reset's
-// -1, RoundDeath::frame_tail_edge), tested ahead of this frame's entity pass,
-// raises its transaction here once that pass ran; its sends lead the next
-// frame. host_session_pump calls it after its flush.
-void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx);
-
-// One transport-free RoundDeath through the one retail player-death
-// transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
-// 0x1E active-player feed, conditional 0x54 Medic state, scoring, and respawn
-// holds. AI victims stop after the 0x13/scoring leg. That transaction is the
-// organic body's alone: its callers are the player body, the infantry AI, the
-// console kill and the C2S 0x4D team change. Vehicles and items keep only the
-// score ledger and the SP tally here; their class death paths own Flags and
-// the S2C 0x26 kill record. The tick drains the queued deaths through it; the
-// team change runs it inline, as retail calls it from the handler.
-// [orig: Entity_CheckAndProcessDeath @0x51B550, called only from
-// Entity_UpdateInfantryPlayerBody @0x4B4CEA, Entity_UpdateInfantryAI @0x4B9D4D
-// and the console kill @0x4D29EC -> GameEvent_PlayerDeath @0x516DD0, which
-// NapiNPServerMsg_0x04D_ChangeTeam also calls directly @0x519059/@0x5190C7;
-// the only 0x13 sends are GameEvent_PlayerDeath @0x516E8E and
-// Entity_CheckAndProcessDeath @0x51B58F]
-void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
-		const world::RoundDeath &death);
-
 // Recompute every in-match player's kit weight from its live rows: the listen
 // host's own player from its local inventory, a remote player from its
 // granted combos + live clips over the authority pool table. The last
@@ -123,10 +163,11 @@ void Server_RecalculateAllPlayerKitWeights(
 void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx);
 // The service's ServerPlayerEnterResult for a held joiner (see
 // NapiNPServerCtx::on_player_enter_request). Success admits it into the spawn
-// pump; a failure punts it with "NWU:NWPENTERFAIL" carrying MsgCode.
+// pump and sends the S2C 0x02 probe the C2S 0x01 held (stamped `now_tick`); a
+// failure punts it with "NWU:NWPENTERFAIL" carrying MsgCode.
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
 bool Server_ApplyPlayerEnterResult(NapiNPServerCtx &ctx, uint32_t connection_id,
-		bool success, int32_t msg_code);
+		bool success, int32_t msg_code, uint32_t now_tick);
 
 // Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
 // non-spawn-point sweep emit_minimap_overlay_for_slot runs once per client

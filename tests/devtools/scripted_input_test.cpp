@@ -1,8 +1,10 @@
 // ScriptedInput: the scenario driver's scripted input device (a probe
 // instrument). Pins the shared script's validation, the retail action code ->
 // catalog token resolution, the logic-tick keyed schedule (frame-quantized,
-// one state change per token per sample, end/cancel releasing everything)
-// and the setup pose's conversion into the retail bridge's ApplyPose words.
+// one state change per token per sample, end/cancel releasing everything),
+// the typed characters (onHook's char set, queued in script order at their
+// sample) and the setup pose's conversion into the retail bridge's ApplyPose
+// words.
 #include <runtime/devtools/scripted_input.h>
 
 #include <cstdio>
@@ -46,6 +48,14 @@ ScriptStep look(int64_t tick, double dx, double dy) {
 	return s;
 }
 
+ScriptStep typed(int64_t tick, uint8_t character) {
+	ScriptStep s;
+	s.kind = Kind::Char;
+	s.tick = tick;
+	s.character = character;
+	return s;
+}
+
 ScriptStep end(int64_t tick) {
 	ScriptStep s;
 	s.kind = Kind::End;
@@ -81,6 +91,12 @@ void test_load_refuses_malformed_scripts() {
 			"a press releasing after the end is refused");
 	CHECK(refuses({look(0, std::numeric_limits<double>::infinity(), 0.0), end(1)}, "look_px"),
 			"a non-finite look is refused");
+	// onHook's driver types backspace, return and printable ASCII only.
+	for (const uint8_t refused : {uint8_t{0x00}, uint8_t{0x09}, uint8_t{0x0A}, uint8_t{0x1B},
+				 uint8_t{0x7F}, uint8_t{0xE9}}) {
+		CHECK(refuses({typed(0, refused), end(1)}, "is not backspace, return or printable ASCII"),
+				"a character no char step types is refused");
+	}
 
 	// A refusal leaves a loaded script in place.
 	ScriptedInput driver;
@@ -211,6 +227,57 @@ void test_look_pixels_accumulate_until_taken() {
 			"a look due with the end still reaches the frame");
 }
 
+// A char step types its character at its sample, in script order with the
+// other chars, and holds no token: the kick's console line, one character
+// every two ticks, then return.
+void test_chars_type_in_order_at_their_sample() {
+	for (uint8_t c = 0x20; c <= 0x7E; ++c)
+		CHECK(opennova::devtools::script_char_typeable(c), "printable ASCII types");
+	CHECK(opennova::devtools::script_char_typeable(0x08) &&
+					opennova::devtools::script_char_typeable(0x0D),
+			"so do backspace and return");
+	ScriptedInput driver;
+	std::string error;
+	CHECK(driver.load({typed(0, 'S'), typed(2, 'E'), typed(2, 'R'), key(Kind::Press, 2, 1),
+						  typed(6, 0x0D), end(8)},
+				  error),
+			"the typing script loads");
+	driver.start();
+	driver.advance(30);
+	CHECK(driver.take_chars() == std::vector<uint8_t>{'S'}, "tick 0 types S");
+	CHECK(driver.take_chars().empty(), "take drains");
+	driver.advance(31);
+	CHECK(driver.take_chars().empty(), "nothing due at tick 1");
+	driver.advance(32);
+	CHECK((driver.take_chars() == std::vector<uint8_t>{'E', 'R'}), "tick 2's two, in order");
+	CHECK(driver.token_held("command"), "the command row's press beside them holds its row");
+	driver.advance(40); // ticks 3..10 at once: return and the end
+	CHECK(driver.take_chars() == std::vector<uint8_t>{0x0D}, "return lands with the end");
+	CHECK(driver.state() == State::Finished, "the end follows it");
+	const auto &records = driver.records();
+	CHECK(records[0].applied_logic_tick == 30 && records[1].applied_logic_tick == 32 &&
+					records[2].applied_logic_tick == 32 && records[4].applied_logic_tick == 40,
+			"each char step records its sample");
+
+	// A char behind a deferred release waits with it, in script order.
+	CHECK(driver.load({key(Kind::Press, 1, 149), typed(2, 'A'), end(5)}, error), "reloads");
+	driver.start();
+	driver.advance(100);
+	driver.advance(103); // the press, its release and the char due at once
+	CHECK(driver.token_held("attack_1"), "the press holds for this sample");
+	CHECK(driver.take_chars().empty(), "the char waits behind the deferred release");
+	driver.advance(104);
+	CHECK(!driver.token_held("attack_1"), "the release lands on the next sample");
+	CHECK(driver.take_chars() == std::vector<uint8_t>{'A'}, "and the char after it");
+	CHECK(driver.records()[1].applied_logic_tick == 104, "recorded at its real sample");
+
+	CHECK(driver.load({typed(0, 'P'), end(9)}, error), "reloads");
+	driver.start();
+	driver.advance(5);
+	driver.cancel();
+	CHECK(driver.take_chars().empty(), "cancel drops the untaken characters");
+}
+
 void test_cancel_and_a_backwards_clock_release_everything() {
 	ScriptedInput driver;
 	std::string error;
@@ -270,6 +337,7 @@ int main() {
 	test_a_press_survives_a_multi_tick_frame();
 	test_press_is_down_then_up_one_tick_later();
 	test_look_pixels_accumulate_until_taken();
+	test_chars_type_in_order_at_their_sample();
 	test_cancel_and_a_backwards_clock_release_everything();
 	test_setup_pose_converts_like_the_retail_bridge();
 	if (g_failures == 0) std::printf("scripted_input: all checks passed\n");

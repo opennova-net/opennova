@@ -204,7 +204,7 @@ struct ZoneCaptureDeltaInput {
     int numbered_zones = 0;            // numbered list entries
     int shared_zone_entities = 0;      // numbered entries carrying this zone's number
     int32_t remaining_ticks = -1;      // g_RoundTimeRemaining
-    uint32_t game_time_minutes = 0;    // g_RespawnTime (SET GameTime)
+    uint32_t game_time_minutes = 0;    // g_RoundTimeLimitMinutes (SET GameTime)
 };
 
 // The complete control-delta formula [orig:

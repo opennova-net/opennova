@@ -3,7 +3,9 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -44,12 +46,19 @@ shader_type canvas_item;
 render_mode unshaded, blend_mix;
 
 varying flat float modulate2x_on;
+varying flat float frame_piece_on;
+varying vec2 window_xy;
 
 void vertex() {
 	modulate2x_on = 0.0;
+	frame_piece_on = 0.0;
+	window_xy = VERTEX;
 	if (UV.y <= -8.0) {
 		UV.y += 16.0;
 		modulate2x_on = 1.0;
+	} else if (UV.x <= -8.0) {
+		UV.x += 16.0;
+		frame_piece_on = 1.0;
 	}
 }
 
@@ -57,8 +66,77 @@ void fragment() {
 	if (modulate2x_on > 0.5) {
 		COLOR.rgb = min(COLOR.rgb * 2.0, vec3(1.0));
 	}
+	if (frame_piece_on > 0.5) {
+		vec2 brush_size = vec2(textureSize(NORMAL_TEXTURE, 0));
+		vec4 brush = texture(NORMAL_TEXTURE, (window_xy + vec2(0.5)) / brush_size.yx);
+		vec3 stage0 = min(COLOR.rgb * 2.0, vec3(1.0));
+		COLOR = vec4(min(stage0 * 2.0 * brush.rgb, vec3(1.0)), COLOR.a * brush.a);
+	}
 }
 )";
+}
+
+namespace {
+
+Ref<Shader> &glyph_canvas_shader_slot() {
+	static Ref<Shader> shader;
+	return shader;
+}
+
+} // namespace
+
+Ref<Shader> glyph_canvas_shader() {
+	Ref<Shader> &shader = glyph_canvas_shader_slot();
+	if (shader.is_null()) {
+		shader.instantiate();
+		shader->set_code(glyph_canvas_shader_code());
+	}
+	return shader;
+}
+
+void release_glyph_canvas_shader() {
+	glyph_canvas_shader_slot().unref();
+}
+
+GlyphCanvasWarm build_glyph_canvas_warm(const RID &p_canvas) {
+	GlyphCanvasWarm warm;
+	if (!p_canvas.is_valid()) {
+		return warm;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	warm.material.instantiate();
+	warm.material->set_shader(glyph_canvas_shader());
+	warm.item = rs->canvas_item_create();
+	rs->canvas_item_set_parent(warm.item, p_canvas);
+	rs->canvas_item_set_material(warm.item, warm.material->get_rid());
+	// A menu frame's three command shapes (MenuFrame::_draw): a rect, a glyph run (its points,
+	// colours and flagged UVs through append_glyph_quads), and a one-pixel line.
+	const Color white(1.0f, 1.0f, 1.0f, 1.0f);
+	rs->canvas_item_add_rect(warm.item, Rect2(0.0f, 0.0f, 4.0f, 4.0f), white);
+	opennova::hud::GameFontQuad glyph{};
+	glyph.x_top_left = 0.0f;
+	glyph.x_top_right = 4.0f;
+	glyph.x_bottom_right = 4.0f;
+	glyph.x_bottom_left = 0.0f;
+	glyph.y_top = 0.0f;
+	glyph.y_bottom = 4.0f;
+	glyph.u1 = 1.0f;
+	glyph.v1 = 1.0f;
+	glyph.color = 0xFFFFFFFFu;
+	GlyphRunArrays arrays;
+	append_glyph_quads({ glyph }, 0, 1, Vector2(0.0f, kGlyphCanvasUvFlag), arrays);
+	rs->canvas_item_add_triangle_array(warm.item, arrays.indices, arrays.points, arrays.colors,
+			arrays.uvs, PackedInt32Array(), PackedFloat32Array(), RID());
+	rs->canvas_item_add_line(warm.item, Vector2(0.0f, 0.0f), Vector2(4.0f, 0.0f), white, 1.0f);
+	return warm;
+}
+
+void free_glyph_canvas_warm(GlyphCanvasWarm &r_warm) {
+	if (r_warm.item.is_valid()) {
+		RenderingServer::get_singleton()->free_rid(r_warm.item);
+		r_warm.item = RID();
+	}
+	r_warm.material.unref();
 }
 
 void append_glyph_quads(const std::vector<opennova::hud::GameFontQuad> &p_glyphs, size_t p_begin,

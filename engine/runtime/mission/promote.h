@@ -15,6 +15,7 @@
 // docs/world/world-wac-ai-re.md for the RE map + the tracked deviations below.
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -70,11 +71,16 @@ struct ItemSeatSpec {
     int32_t mount_config = 0;
     uint32_t item_attrib2 = 0; // includes the IsTurret gun-channel gate
     std::vector<world::Seat> seats;
+    // The typed userpoints off the ten-slot table (Entity::off_table_seats).
+    std::vector<world::Seat> off_table_seats;
     // "armory*" userpoint locals (the embedder feeds them only for items.def Armory-attrib
     // 0x80000 items) + the ewep 'primary_weapon' link — the attach-label sources.
     std::vector<world::Vec3> armory_points;
     std::string primary_weapon;
     std::vector<ItemEmplacementAttachmentSpec> emplacement_attachments;
+    // The def's addeweap slot table (world::Entity::def_slot_userpoints): each authored slot's
+    // userpoint as a 1-based index into the model's userpoints, 0 where it is not found.
+    std::array<uint8_t, 4> slot_userpoints{};
     // Turret articulation limits in BAM, resolved from the primary weapon's
     // weapon.def rows (targetyawrange/targetpitchmax/targetpitchmin) once the
     // embedder's weapon table is loaded — the clamp window the emplaced-controls
@@ -194,6 +200,14 @@ void initialize_ai_profile(world::AiEntity &entity, const aip::Profile &profile)
 // @0x4686C0 (speeds @0x4688C1..0x4688D3)]
 void initialize_class_brain(world::AiEntity &entity, const aip::Profile *profile,
         bool helicopter_init, world::AiSystem &ai);
+// An item's class init over its attached brain, once its profile row (if any) has
+// been copied: a missing row walks the zeroed record's class sort, then the class
+// speeds and draw (initialize_class_brain), then the generic allocator's seeds at the
+// brain's heading (initialize_vehicle_brain). The placed item's promote and the
+// deployable spawn share it. [orig: AIProfile_LoadOrFind @0x45FECA;
+// Entity_InitHelicopterAIFromDef @0x4683C0; Entity_InitVehicleAIFromDef @0x4686C0]
+void initialize_item_class_brain(world::AiEntity &entity, world::World &world,
+        world::AiSystem &ai, const aip::Profile *profile, bool helicopter_init);
 // The generic AI allocator's own brain seeds, shared by the BMS promote and the
 // teammate factory so a placed and a dynamically spawned vehicle brain start
 // identically: the three state words are the memset's zero read back, and the
@@ -212,7 +226,7 @@ struct ItemAttachmentSpawns {
 };
 // Each listed carrier's own addeweap slots, one child per slot; a child is never
 // walked for children of its own (a deployable's spawn calls it for one entity).
-// [orig: Entity_SpawnWeaponOverlays @0x40F300; Entity_SpawnDeployable @0x51C49A]
+// [orig: Entity_SpawnAddEWeapChildren @0x40F300; Entity_SpawnDeployable @0x51C49A]
 ItemAttachmentSpawns spawn_item_attachments(world::World &world,
         const std::vector<world::EntityHandle> &carriers, const std::vector<ItemSeatSpec> &specs);
 // The mission loader's pass: pool 1 then pool 2, each over the rows its count
@@ -235,6 +249,14 @@ struct PromoteResult {
 // drives the sim.
 PromoteResult promote_mission(const bms::File &mission, world::World &world,
                               const PromoteOptions &opts = {});
+
+// The mission's item_availability chunk as (name, status) pairs: an empty name
+// is skipped and the status byte widens SIGNED, -1 being the "mission allowed"
+// sentinel the availability builder maps to 3 [orig:
+// WeaponDef_BuildItemRestrictionTable @0x54DDB0 (`(char)name[strlen+1]`
+// @0x54DE3F, `== -1 -> 3`)]. The stash below and the host's first-mission
+// weapon table read the chunk through it.
+std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bms::File &mission);
 
 // The mission's loadout/availability chunks -> plain world rows, with retail's
 // own atol truncation semantics on the string tuples (a non-numeric prefix

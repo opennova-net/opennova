@@ -5,12 +5,15 @@
 
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/join_character_profile.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_spawn.h>
 
 #include <formats/avatars/avatars.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 using namespace opennova::avatars;
 
@@ -82,6 +85,20 @@ int main() {
 		check(p.player_classes[0] == 8 && p.player_classes[1] == 8, "fresh classes 8/8");
 		check(p.avatars[0] == 1 && p.avatars[1] == 10, "fresh avatars = head voices");
 		check(character_join_vars(p).team_request == 0xFF, "the fresh profile's TR is -1");
+	}
+	// The computed fresh profile the runtime carries when nothing is installed
+	// (D-NET-NEW-L2-7): over this stock-shaped table the witnessed oracle, over
+	// no table ids 0 and the resolve's miss 1.
+	{
+		const CharacterJoinVars v = fresh_profile_character_vars(registry);
+		check(v.char_id[0] == 0x0200 && v.char_id[1] == 0x8207 && v.char_class[0] == 8 &&
+				v.char_class[1] == 8 && v.avatar[0] == 1 && v.avatar[1] == 10 &&
+				v.team_request == 0xFF,
+				"the computed fresh profile is the stock oracle");
+		const CharacterJoinVars none = fresh_profile_character_vars(CharacterRegistry());
+		check(none.char_id[0] == 0 && none.char_id[1] == 0 && none.avatar[0] == 1 &&
+				none.avatar[1] == 1 && none.char_class[0] == 8 && none.team_request == 0xFF,
+				"no Avatars.def: ids 0, avatars 1");
 	}
 	// A persisted side-A selection with class 6 on both blocks.
 	{
@@ -220,7 +237,7 @@ int main() {
 
 	// A one-sided Avatars.def: the side with no combo of its alignment takes
 	// entry 0's id (the other side's, its side bit kept) and its head voice
-	// [orig: EntitySlot_LookupAndPackEntry @0x57ad84..0x57adda].
+	// [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad84..0x57adda].
 	{
 		opennova::inmatch::CharacterRegistry good_only;
 		good_only.add_entry(0, 0, 0, 3, 1, 1, AVATAR_ALIGN_GOOD, 4, false);
@@ -239,6 +256,59 @@ int main() {
 		const JoinCharacterProfile q = join_character_profile(good_only, saved, true);
 		check(q.character_ids[1] == good_only.entries()[0].packed_id,
 				"one-sided: a side-B pick of a good combo does not resolve, the fallback stands");
+	}
+
+	// The record's raw words (D-PLAYERINFO-33): the session apply copies each side block's
+	// word raw and the join's CI0 / CI1 carry it as it is, resolved or not; the class is the
+	// block's own byte (clamped in a session) whatever the table resolves; the avatar byte is
+	// the combo the word names (its own side bit, no side filter), else the resolve's miss, 1.
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - @0x551F7A..0x551FB1, the class
+	//  clamp @0x5516D0..0x5516EC, the resolves @0x551752 / @0x55178B; UI_JoinSelectedSession
+	//  @0x5699D0 - @0x569C06..0x569C31; Avatars_ResolveSelectionIndex @0x57AE60 - the miss
+	//  @0x57AE85]
+	{
+		JoinSideSelection saved[2];
+		saved[0].present = true;
+		saved[0].character_id = 0x0600; // a combo this table has no entry for
+		saved[0].player_class = 7;
+		saved[1].present = true;
+		saved[1].character_id = 0x0400; // a good word in the evil side's block
+		saved[1].player_class = 4;
+		JoinCharacterProfile p = join_character_profile(registry, saved, true);
+		check(p.character_ids[0] == 0x0600 && p.character_ids[1] == 0x0400,
+				"the record's raw words ride as CI0 / CI1");
+		check(p.player_classes[0] == 7 && p.player_classes[1] == 5,
+				"an unresolved side keeps its class byte, clamped in a session");
+		check(p.avatars[0] == 1, "a word the table does not name: the miss's 1");
+		check(p.avatars[1] == 3, "the word's own combo voice, whichever block holds it");
+		p = join_character_profile_without_table(saved, true);
+		check(p.character_ids[0] == 0x0600 && p.character_ids[1] == 0x0400 &&
+				p.avatars[0] == 1 && p.avatars[1] == 1 && p.player_classes[0] == 7,
+				"no table: the raw words and the class bytes still ride");
+		saved[0].voice_override = 9;
+		p = join_character_profile(registry, saved, true);
+		check(p.avatars[0] == 9, "a nonzero override stands over the word's voice");
+	}
+
+	// The host's own row: the profile init keeps a word the host's table names (no side test),
+	// else packs the side's default; over an empty table both are 0.
+	// [orig: PlayerSession_InitFromProfile @0x50CA80 - CAvatarDefs_HasPackedId @0x50CAC4, the
+	//  side-0 pack @0x50CADA; @0x50CAF1, the side-1 pack @0x50CB08; CAvatarDefs_HasPackedId
+	//  @0x57B140 (the call @0x57B14F) -> CAvatarDefs_FindComboByPackedId]
+	{
+		auto ctx = std::make_unique<NapiNPServerCtx>();
+		ctx->characters = registry;
+		CharacterJoinVars vars;
+		vars.char_id[0] = 0x0600;
+		vars.char_id[1] = 0x0400;
+		PlayerSession_ResolveOwnCharacterIds(*ctx, vars);
+		check(vars.char_id[0] == 0x0200, "the own row: an unnamed word packs the side default");
+		check(vars.char_id[1] == 0x0400, "the own row: a named word is kept whatever its block");
+		ctx->characters = CharacterRegistry();
+		vars.char_id[0] = 0x0400;
+		vars.char_id[1] = 0x8207;
+		PlayerSession_ResolveOwnCharacterIds(*ctx, vars);
+		check(vars.char_id[0] == 0 && vars.char_id[1] == 0, "the own row over no table: 0 / 0");
 	}
 
 	if (g_failures != 0) {

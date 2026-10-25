@@ -15,6 +15,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
 #include "serve_test_support.h"
+#include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
@@ -203,11 +204,16 @@ int main() {
 	CHECK(tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 	CHECK(!tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 	CHECK(tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
-	// Serve Only: the dedicated role, no player of the host's own, no local client.
+	// Serve Only: the dedicated role, no local client; the host's own slot 0's hidden body,
+	// owned by connection 0, is its local player (D-NET-352) [orig:
+	//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; Game_StartMission
+	//  @0x525C95..0x525C9E].
 	CHECK(server.role().kind() == inmatch::RoleKind::DedicatedHost);
 	CHECK(!server.role().state.host_owner.serve_and_play);
 	CHECK(server.role().client_runtime() == nullptr);
-	CHECK(!server.kernel().local.has_local_player());
+	CHECK(server.kernel().local.has_local_player());
+	CHECK(server.kernel().world.cached.local_player ==
+			server.role().state.host_owner.ctx.host_slot.body);
 	CHECK(server.kernel().world.rules.mp_session);
 	// A joiner's body binds its items.def row at its spawn (D-NET-395).
 	CHECK(static_cast<bool>(server.role().state.host_owner.ctx.bind_spawned_body));
@@ -251,7 +257,11 @@ int main() {
 	uint16_t joiner_port = 0;
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
-	inmatch::ClientRuntime client("ServeJoiner");
+	// The joiner's wall clock follows the frames this script drives (16 ms each), so its
+	// paced loading loops (the C2S 0x09 leaves NapiClient_SendPlayerSyncAndWaitForSyncTail's > 100 ms
+	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
+	uint32_t tick = 1;
+	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });
 	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
@@ -265,7 +275,6 @@ int main() {
 			client.receive(rx, static_cast<size_t>(n));
 		}
 	};
-	uint32_t tick = 1;
 	ship(client.start());
 	bool in_match = false;
 	for (int f = 0; f < 900 && !in_match; ++f) {
@@ -275,6 +284,7 @@ int main() {
 		}
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		in_match = client.in_match();
 	}
@@ -285,6 +295,7 @@ int main() {
 		if (!server.frame(kFrame)) break;
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 	}
 	CHECK(client.is_deployed());
@@ -319,6 +330,7 @@ int main() {
 			if (!server.frame(kFrame)) break;
 			drain();
 			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+			push_released_mission_start(client, ship);
 			++tick;
 			// The joiner's stored exit 4, in session and not the authority, is
 			// the Game Loop: the reload in place (main_frame_exit).
@@ -393,6 +405,7 @@ int main() {
 			ended = !server.frame(kFrame);
 			drain();
 			(void)client.Client_ProcessNetworkFrame(tick++);
+			push_released_mission_start(client, [](std::vector<uint8_t>) {});
 		}
 		CHECK(ended);
 		CHECK(server.rotation_ended());
@@ -401,6 +414,7 @@ int main() {
 	for (int f = 0; f < 120 && !client.session_lost(); ++f) {
 		drain();
 		(void)client.Client_ProcessNetworkFrame(tick++);
+		push_released_mission_start(client, [](std::vector<uint8_t>) {});
 	}
 	CHECK(client.session_lost());
 	CHECK(client.has_disconnect_event() &&

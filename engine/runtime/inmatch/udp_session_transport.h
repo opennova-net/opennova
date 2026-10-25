@@ -43,6 +43,7 @@ public:
 			bool reliable = true,
 			uint8_t protocol_flags_raw = 0,
 			bool capacity_exempt = false, uint32_t retention_flushes = 0) override; // -> outbound (S2C)
+	void close_host_queue() override { host_queue_closed_ = true; }
 	void client_send(uint8_t tag, std::vector<uint8_t> body) override; // -> outbound (C2S)
 	bool host_recv(Datagram &out) override;   // <- inbound (C2S, host endpoint)
 	bool client_recv(Datagram &out) override; // <- inbound (S2C, client endpoint)
@@ -74,6 +75,7 @@ private:
 	Role role_;
 	std::deque<Datagram> outbound_;              // semantic messages awaiting owner framing
 	std::deque<Datagram> inbound_;              // datagrams parsed from received raw bytes
+	bool host_queue_closed_ = false;            // the connection's description sent byte
 };
 
 } // namespace opennova::replication

@@ -737,7 +737,8 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 					std::vector<uint8_t> bytes;
 					std::string error;
 					return scan->find(bin) && files.read(bin, bytes) && rtxt::parse(bytes.data(), bytes.size(), text, error);
-				});
+				},
+				nullptr); // the editor's preview searches no override table
 		mission_catalog::sort_rows(rows);
 		for (const mission_catalog::Row &row : rows) choices.push_back(menu::mission_choice(row));
 		return choices;

@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -42,11 +46,48 @@ public:
 	// HOST: bind a listen socket on `port` (all interfaces; 0 = an OS-assigned ephemeral port).
 	// Returns a Godot Error (OK == 0).
 	int bind_listen(int port);
+	// The same on `address`, an in_addr word as the platform stores it (0: every interface): the
+	// session socket's bind address (engine: inmatch::transport_bind_address).
+	int bind_listen_at(int port, uint32_t address);
 	// JOINER: bind an ephemeral local socket and set the default destination to host:port.
 	int dial(const String &host, int port);
+	// The client arm's socket open alone: bind over the authored client port range,
+	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294), with no
+	// default destination, so every source is read. The LAN browse opens its
+	// transport this way; the join goes on with it (D-NET-NEW-R3-3).
+	int bind_client();
+	// The client arm's scan and bind address the next bind_client (and dial) uses: the
+	// cfg block's mplanclient quad with its random word and the block's mpipaddressstring
+	// (engine: inmatch::transport_bind_ports(block, Lan, false) / transport_bind_address,
+	// D-NET-NEW-L8-10). Unset: the shipped client quad over every interface.
+	void set_client_bind_scan(std::vector<uint16_t> ports, uint32_t address) {
+		client_bind_ports_ = std::move(ports);
+		client_bind_address_ = address;
+		client_bind_scan_set_ = true;
+	}
+	// Allow sends to a broadcast address (the LAN browse's 255.255.255.255).
+	void set_broadcast_enabled(bool p_enabled);
 
 	bool is_open() const { return socket_.is_valid(); }
 	int local_port() const { return local_port_; }
+	// The open socket's bind address and bound port, as retail's socket keeps them for the
+	// /INOUT host lines (engine: inmatch::JoinerRole::set_local_address carries the witness);
+	// zeros when closed.
+	opennova::PeerAddr local_address() const {
+		return opennova::PeerAddr{bound_address_, static_cast<uint16_t>(local_port_)};
+	}
+	// The process's transport socket: the pump whose socket opened last (a host's or the
+	// NovaWorld session's listen, the LAN browse's or a join's client arm) while it stays
+	// open; null once it closes. Retail holds one transport socket, the manager's, and the
+	// process's network shutdown sends a held server's STOP bursts over it (GameWorld's exit;
+	// engine: inmatch::stop_unstopped_server carries the witness, D-NET-NEW-L1-26).
+	static UdpPump *process_transport();
+	// Whether this pump is the process's transport socket now.
+	bool is_process_transport() const;
+	// A pump that is not the process's transport socket opens without taking
+	// process_transport: the NovaWorld gate worker's, the gate manager's own socket
+	// (engine: inmatch::gate_port_quad carries the witness). Set before the bind.
+	void set_process_transport_claim(bool p_claim) { claims_process_transport_ = p_claim; }
 	// The dialed default destination as a packed PeerAddr (zero before dial).
 	opennova::PeerAddr dialed_host() const;
 	void close();
@@ -104,6 +145,11 @@ private:
 
 	Ref<PacketPeerUDP> socket_;
 	int local_port_ = 0;
+	uint32_t bound_address_ = 0; // the open socket's bind address (local_address)
+	std::vector<uint16_t> client_bind_ports_; // set_client_bind_scan
+	uint32_t client_bind_address_ = 0;
+	bool client_bind_scan_set_ = false;
+	bool claims_process_transport_ = true; // set_process_transport_claim
 	String dest_ip_;
 	int dest_port_ = 0;
 

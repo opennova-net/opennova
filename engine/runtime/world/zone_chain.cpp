@@ -81,15 +81,22 @@ void ZoneSystem::build_chain_from_mission() {
         chain.assigned_slot[assigned_slot_team_for_marker(e.item_id)] = e.zone_number;
     });
 
-    // Zone-entity sweeps: alive, numbered, capture-trigger (ItemDefAttrib 0x20000
-    // "ChangeTeam") entities from pool 1 then pool 2 — the registration ORDER is the
-    // frontier walk order. The add itself refuses a zone number above 30.
-    // [orig: @ 0x4A2E5E (pool 1) / @ 0x4A2EA2 (pool 2); the alive gate is
-    //  !(entity+36 & 1); ZoneSlotChain_AddZoneEntity `cmp al, 1Eh; ja` @0x4A2D90]
+    // Zone-entity sweeps: unhidden, numbered, capture-trigger (ItemDefAttrib
+    // 0x20000 "ChangeTeam") entities from pool 1 then pool 2 — the registration
+    // ORDER is the frontier walk order. The add itself refuses a zone number
+    // above 30. The sweep's state test is the hidden bit (Flags bit 0) alone: no
+    // alive latch, no dead bit (D-NET-433).
+    // [orig: ZoneSlotChain_BuildFromMission - pool 1 @0x4A2E5E, the def
+    //  @0x4A2E77..0x4A2E7E, the zone byte +0x21A @0x4A2E80, `test byte [eax+24h],
+    //  1; jnz` @0x4A2E89..0x4A2E8D, attrib 0x20000 @0x4A2E8F; pool 2 @0x4A2EA2,
+    //  the same tests @0x4A2EBB..0x4A2EDA; ZoneSlotChain_AddZoneEntity `cmp al,
+    //  1Eh; ja` @0x4A2D90]
     for (const int pool : {1, 2}) {
         world.registry.for_each([&](const Entity &e) {
             if (e.handle.pool() != pool) return;
-            if (e.zone_number == 0 || !e.is_capture_trigger || !e.alive) return;
+            if (e.zone_number == 0 || !e.is_capture_trigger ||
+                    ((e.flags | e.engine_flags) & kEntityFlagCarried) != 0)
+                return;
             if (chain_contains(chain, e.handle) || e.zone_number > 30) return;
             chain.zones.push_back(e.handle);
         });

@@ -15,10 +15,10 @@ extends Node
 ## through the Simulation feeds); this node owns only the device work: the
 ## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
 ## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_SpawnSuccessGate && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
+##  g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
 ##  Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
 ##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
-##  UI_TeardownScene (ex sub_54E650) (the UI scene teardown) then HUD_DrawEndRoundStatsOverlay
+##  UI_ProcessMenuScreenFrame (ex sub_54E650) (the menu-screen pass, which closes the screen) then HUD_DrawEndRoundStatsOverlay
 ##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
 ##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); StatScreen_StatFilterTabHandler
 ##  @0x562140]
@@ -64,7 +64,7 @@ func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) ->
 
 
 ## The shell seam: the announcement edge closes the deploy/armory screens (the
-## UI scene teardown every transition pass runs [orig: UI_TeardownScene @0x5b8674]);
+## UI scene teardown every transition pass runs [orig: UI_ProcessMenuScreenFrame @0x5b8674]);
 ## `opened`/`closed` report the STAT screen's cursor ownership through the two
 ## callables (the overlay phase is not a UI state: the world keeps the cursor).
 func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
@@ -87,7 +87,7 @@ static func install(parent: Node, view: WorldView, ui_parent: Node,
 	return presenter
 
 
-# The UI scene teardown at the announcement [orig: UI_TeardownScene @0x5b8674].
+# The UI scene teardown at the announcement [orig: UI_ProcessMenuScreenFrame @0x5b8674].
 func _tear_down_screens() -> void:
 	if _deploy_presenter != null and _deploy_presenter.is_open():
 		_deploy_presenter.close()
@@ -109,6 +109,35 @@ func is_open() -> bool:
 
 func is_overlay_shown() -> bool:
 	return _overlay_shown
+
+
+## STAT's menu input pass-through word: its show raises it and only its
+## deactivate clears it; no stat.mnu callback touches it (the exit
+## confirmation's HIDDEN_BACK and CONFIRM_NO carry their authored actions
+## alone), so the update runs the input frame under the whole screen (the
+## shell's key ring and frame sample; engine world::pass_through_close_axis
+## carries the witness).
+func is_input_pass_through() -> bool:
+	return is_open()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if handle_key(event as InputEventKey):
+		get_viewport().set_input_as_handled()
+
+
+## One key-down over the open screen: the menu's keyboard hook runs stat.mnu's
+## hotkeys at once (HIDDEN_BACK's confirmation, its NO and YES); the key itself
+## waits in the shell's key ring for the input frame (KeyboardPass; engine
+## world::pass_through_close_axis carries the key witness). True only when the
+## hotkey closed the screen (the confirmation's YES), whose close resets the
+## ring.
+func handle_key(key: InputEventKey) -> bool:
+	if not is_open() or key == null or not key.pressed or key.echo:
+		return false
+	if _driver == null or not _driver.handle_key_input(key):
+		return false
+	return not is_open()
 
 
 func get_menu_driver() -> MenuDriver:

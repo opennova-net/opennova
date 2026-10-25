@@ -6,21 +6,32 @@
 #include "network/connection_error.h"
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/mission_exit.h> // kExitMissionSoundset (input action 3's tone)
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
+#include <runtime/inmatch/loaded_model_list.h> // the C2S 0x3D page (D-NET-527)
+#include <runtime/mission/runtime_boot.h>      // boot_files_from_index
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
+#include "simulation/joiner_net_trace_row.h" // the joiner net readout's rows
+#include "simulation/model_list_node_row.h" // the model-list readout's rows
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
+#include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
 #include "util/string_convert.h"
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (the NovaWorld ServerCommand verbs)
+#include <runtime/inmatch/server_ban_lists.h> // Server_HandleBanPuntCommand (the console's authority arm)
+#include <runtime/inmatch/server_console.h> // Server_HandleAdminNetlogCommand, entity_usage_text (SAVENFO)
+#include <runtime/controls/binding_set.h> // keylist_text (SAVEKEYS)
 #include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
@@ -32,8 +43,10 @@
 #include <runtime/inmatch/role_feeds.h> // scoreboard_feed
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
+#include <net/novaworld/lobby_vars.h> // resolve_address_without_dns (the join's row address)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <net/npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
+#include <runtime/world/angle.h>         // placed_heading_bam / mission_yaw_deg_from_bam_heading
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
@@ -78,7 +91,8 @@ const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *name
 
 } // namespace
 
-opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
+opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
+		const std::string &p_sp_mission_file) {
 	namespace inmatch = opennova::inmatch;
 	// The record is the engine's (inmatch/host_config.h shell_host_config); the
 	// binding passes the session's values.
@@ -90,10 +104,32 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		source.lan_network_type = net_.host_network_type;
 	}
 	source.sp_game_type = p_game_type;
+	source.sp_mission_file = p_sp_mission_file;
 	source.profile = player_.profile_record_set ? &player_.profile_record : nullptr;
 	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
 	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
 	cfg.title = session_title(net_.title);
+	// The process's log devices: the switches retail's command line arms reach every host the
+	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
+	// LogSwitches carries the witness).
+	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
+	// The listen socket's bind address and bound port, which HOST STARTED / STOPPED print
+	// (the NovaWorld session's when the host rides it); a socketless host prints the
+	// placeholder (engine: inmatch::inout_host_line, JoinerRole::set_local_address).
+	if (is_host_listening() && net_.pump.is_valid() && net_.pump->is_open()) {
+		cfg.local_address = net_.pump->local_address();
+		cfg.local_address_known = true;
+	}
+	// The mounted Avatars.def's combos the player add validates against (D-NET-137).
+	cfg.characters = assets_.character_registry;
+	// banned.txt and banlist.txt by bare name in the same working directory, as retail opens
+	// them; every host's round init loads them (the witness: engine server_ban_lists.h).
+	if (net_.log_devices != nullptr) cfg.ban_directory = net_.log_devices->files().dir();
+	// The process clock the send-interval legs and the receive reap measure (GetTickCount's):
+	// the mission load runs no tick, its send pumps still fire a due leg (D-NET-256).
+	cfg.clock_ms = inmatch::host_monotonic_milliseconds;
+	// The process's 0x4C report count runs on across sessions (ClientProcessState).
+	cfg.client_process = net_.client_process;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.
@@ -115,7 +151,8 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	bringup.mission_text = net_.mission_text;
 	if (assets_.root.is_valid())
 		bringup.server_text = inmatch::read_host_server_text(
-				opennova::mission::boot_files_from_index(assets_.root->native_index()));
+				opennova::mission::boot_files_from_index(assets_.root->native_index()),
+				net_.mission_text.override_table.get());
 	return bringup;
 }
 
@@ -141,11 +178,12 @@ Array Simulation::get_streamed_placement_records() const {
 		d["bms_id"] = row->bms_id;
 		// The placer resolves graphics by items.def id: the wire type plus the
 		// catalog offset (pools 1..3 never carry the runtime player type).
-		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(
-				row->item_id, false);
+		d["item_id"] = opennova::mission::visual_item_id_for_runtime_type(row->item_id);
 		d["position"] = Vector3(row->position.x, row->position.y, row->position.z);
-		d["rotation_deg"] = Vector3(static_cast<float>(row->pitch),
-				static_cast<float>(row->yaw), static_cast<float>(row->roll));
+		d["rotation_deg"] = Vector3(
+				static_cast<float>(opennova::world::degrees_from_angle_bam(row->pitch_bam)),
+				static_cast<float>(opennova::world::mission_yaw_deg_from_bam_heading(row->heading)),
+				static_cast<float>(opennova::world::degrees_from_angle_bam(row->roll_bam)));
 		d["team"] = row->team;
 		d["group"] = row->group_id;
 		d["ai_flags"] = static_cast<int64_t>(
@@ -180,8 +218,9 @@ void Simulation::print_joiner_net_diagnostic_sample() {
 		if (lae != nullptr)
 			local_state = vformat(
 					" L=(%.1f,%.1f,%.1f) hdg=%d input=0x%02x",
-					lae->pos[0] / 65536.0f, lae->pos[1] / 65536.0f,
-					lae->pos[2] / 65536.0f,
+					lae->self->position.x.q16 / 65536.0f,
+					lae->self->position.y.q16 / 65536.0f,
+					lae->self->position.z.q16 / 65536.0f,
 					static_cast<int64_t>(lae->heading >> 16),
 					static_cast<int64_t>(le ? le->net_move_input : 0));
 	}
@@ -230,21 +269,44 @@ bool Simulation::enable_host_listen(int p_port) {
 	net_.lan_host_pending = !installed;
 	if (net_.pump.is_null()) net_.pump.instantiate();
 	net_.pump->set_capture_path(net_.capture_pcap_path);
-	// The LAN host scans the retail port range from the requested port
-	// (D-NET-210; the sequence policy is npwire net_ports.h
-	// lan_host_bind_ports). Port 0 keeps the OS-assigned bind — the dev/test
-	// seam retail has no analog for.
+	// The LAN host scans from the requested port (the request's first port is
+	// the cfg block's mplanserverportmin) through the block's
+	// mplanserverportmax by its mplanserverportdelta, random 0 (D-NET-210; the
+	// witness is engine inmatch::transport_bind_ports). Port 0 keeps the
+	// OS-assigned bind — the dev/test seam retail has no analog for.
+	// Each bind is on the block's mpipaddressstring (engine: inmatch::transport_bind_address).
+	const uint32_t address = net_.game_config.is_valid()
+			? opennova::inmatch::transport_bind_address(net_.game_config->native().cfg())
+			: 0u;
 	bool bound = false;
 	if (p_port <= 0) {
-		bound = net_.pump->bind_listen(0) == 0;
+		bound = net_.pump->bind_listen_at(0, address) == 0;
 	} else {
-		for (const uint16_t port : opennova::lan_host_bind_ports(
-					 static_cast<uint32_t>(p_port))) {
-			if (net_.pump->bind_listen(port) == 0) {
+		const std::vector<uint16_t> ports = net_.game_config.is_valid()
+				? opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
+						  opennova::inmatch::NetworkType::Lan, /*authority=*/true,
+						  static_cast<uint32_t>(p_port))
+				: opennova::lan_host_bind_ports(static_cast<uint32_t>(p_port));
+		for (const uint16_t port : ports) {
+			if (net_.pump->bind_listen_at(port, address) == 0) {
 				bound = true;
 				break;
 			}
 		}
+	}
+	// The socket open's connect-log lines, the setup over the bound socket or the failure over the
+	// block's quad (engine: inmatch::write_transport_socket_open_lines).
+	if (net_.log_devices != nullptr) {
+		const opennova::PeerAddr local = net_.pump->local_address();
+		const opennova::gamecfg::GameCfg &block = net_.game_config.is_valid()
+				? net_.game_config->native().cfg()
+				: opennova::gamecfg::defaults();
+		opennova::inmatch::write_transport_socket_open_lines(net_.log_devices->connect(),
+				bound ? &local : nullptr, address,
+				opennova::inmatch::transport_port_quad(block, opennova::inmatch::NetworkType::Lan,
+						/*authority=*/true,
+						p_port > 0 ? std::optional<uint32_t>(static_cast<uint32_t>(p_port))
+								   : std::nullopt));
 	}
 	if (!bound) {
 		// Not a LAN host: the socketless SP listen server is what remains.
@@ -316,12 +378,11 @@ int Simulation::get_host_peer_count() const {
 }
 
 void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id,
-		const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid) {
+		const String &p_login_pcid) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
 		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
-		opennova::inmatch::set_novaworld_account_facts(*ctx, p_cookie_keys,
-				opennova::to_std(p_login_pcid));
+		opennova::inmatch::set_novaworld_account_facts(*ctx, opennova::to_std(p_login_pcid));
 	}
 }
 
@@ -341,6 +402,7 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
 		ctx->nwu_in_use = p_in_use;
 		ctx->nwu_session_role = p_role;
+		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-NEW-L8-24)
 		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
 	} else {
 		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
@@ -383,6 +445,132 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	return out;
 }
 
+opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
+		opennova::gamecfg::GameCfg *p_block, std::function<void()> p_save_config) {
+	namespace inmatch = opennova::inmatch;
+	inmatch::AdminConsole::Seams seams;
+	seams.config_block = p_block;
+	seams.save_config = std::move(p_save_config);
+	if (net_.process_rotation != nullptr) {
+		if (net_.rotation_admin == nullptr)
+			net_.rotation_admin = std::make_unique<inmatch::HostRotationAdmin>(
+					*net_.process_rotation, net_.rotation_catalog);
+		seams.rotation = net_.rotation_admin.get();
+	}
+	seams.characters = &assets_.character_registry;
+	seams.items_table = [this]() -> const opennova::def::DefItemsFile * {
+		return kernel_ ? kernel_->items_table() : nullptr;
+	};
+	// The local command's WAC overlay toggle, the authority's (D-NET-371).
+	seams.toggle_overlay = [this](const std::string &p_line) {
+		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
+	};
+	// A host's command walk queues its binding records on the role's input event queue (engine
+	// inmatch/admin_console.h Seams::input_events carries the witness).
+	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
+	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
+	// every console (engine inmatch/remote_admin.h process_game_text).
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	if (title != nullptr) {
+		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(title);
+		seams.version_text = header.version;
+		seams.title_text = header.title;
+	}
+	return seams;
+}
+
+void Simulation::install_console_seams() {
+	namespace inmatch = opennova::inmatch;
+	if (runtime_ == nullptr) return;
+	inmatch::ClientLocalCommandSeams seams;
+	const opennova::TitleIdentity *title = session_title(net_.title);
+	if (title != nullptr) {
+		const inmatch::ConnectLogHeader header = inmatch::connect_log_header(title);
+		seams.version_text = header.version;
+		seams.title_text = header.title;
+	}
+	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine
+	// inmatch/client_console.h ClientLocalCommandSeams::save_nfo carries the witness).
+	seams.save_nfo = [this]() {
+		if (!kernel_ || net_.log_devices == nullptr) return;
+		const char *name = "debug.nfo";
+		const std::string file = inmatch::entity_usage_file_name(name);
+		if (file.empty()) return;
+		std::string text;
+		for (const char c : inmatch::entity_usage_text(kernel_->world, kernel_->items_table(), name)) {
+			if (c == '\n') text += '\r';
+			text += c;
+		}
+		(void)net_.log_devices->files().write(file, text, /*append=*/false);
+	};
+	// SAVEKEYS: keylist.key over the live binding table, written whole (engine
+	// inmatch/client_console.h ClientLocalCommandSeams::save_keys carries the witness).
+	seams.save_keys = [this]() {
+		if (controls_model_.is_null() || net_.log_devices == nullptr) return;
+		(void)net_.log_devices->files().write("keylist.key",
+				opennova::controls::keylist_text(controls_model_->native_bindings()),
+				/*append=*/false);
+	};
+	// The WAC overlay toggle, the authority's alone: a joiner's runtime never flips one
+	// (engine wac/wac_system.h WacSystem::toggle_cheat carries the witness; D-NET-371).
+	seams.toggle_overlay = [this](const std::string &p_line) {
+		return kernel_ && kernel_->wac.toggle_cheat(p_line, !is_joiner(), kernel_->world);
+	};
+	runtime_->set_local_command_seams(std::move(seams));
+}
+
+bool Simulation::dispatch_action_record(int32_t p_code, int32_t p_param) {
+	namespace inmatch = opennova::inmatch;
+	// The exit row's case 3 (row 77 "exit"): the action's Exit Mission tone, then its exit.
+	// The tone rides the world's interface sound channel, which the session leg's terminal
+	// frame still plays (GameWorld::leg_session; engine inmatch/mission_exit.h
+	// kExitMissionSoundset and inmatch/remote_admin.h input_action_exit carry the witness).
+	if (p_code == 3) {
+		if (kernel_) {
+			opennova::world::ScriptSoundEvent tone;
+			tone.kind = opennova::world::ScriptSoundEvent::Kind::Interface;
+			tone.name = inmatch::kExitMissionSoundset;
+			kernel_->world.out.script_sounds.push_back(std::move(tone));
+		}
+		input_action_exit();
+		return true;
+	}
+	// The punt row's case 34 (row 87 "Punt"): the slot the record's first argument names,
+	// reason 33 "ComIdPunt", the authority's alone (engine inmatch/admin_console.h
+	// validated_punt carries the witness).
+	if (p_code == 34) {
+		if (inmatch::NapiNPServerCtx *ctx = host_ctx())
+			inmatch::validated_punt(*ctx, p_param, 33, "ComIdPunt");
+		return true;
+	}
+	// The PuntLog row's case 48 (row 86): punt.log in the working directory, any role's
+	// (engine inmatch/server_log_devices.h ServerLogDevices::dump_punt_log carries the witness).
+	if (p_code == 48) {
+		if (net_.log_devices != nullptr) net_.log_devices->dump_punt_log();
+		return true;
+	}
+	return false;
+}
+
+opennova::inmatch::RemoteAdminBinding Simulation::remote_admin_binding() {
+	opennova::inmatch::RemoteAdminBinding binding;
+	binding.host = host_ctx();
+	binding.client = is_joiner() ? runtime_ : host_client_runtime();
+	binding.joiner = is_joiner() ? joiner_role_ : nullptr;
+	binding.world = kernel_ ? &kernel_->world : nullptr;
+	binding.text_override = net_.mission_text.override_table.get();
+	binding.session = static_cast<uint64_t>(get_instance_id());
+	return binding;
+}
+
+opennova::io::CrtRand *Simulation::process_crt_rand() {
+	return kernel_ ? &kernel_->world.crt_rand : nullptr;
+}
+
+opennova::inmatch::ClientRuntime *Simulation::host_client_runtime() {
+	return host_role_ != nullptr ? host_role_->state.client_runtime.get() : nullptr;
+}
+
 void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook) {
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return;
@@ -404,7 +592,7 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return false;
 	return opennova::inmatch::Server_ApplyPlayerEnterResult(*ctx, p_connection_id, p_success,
-			p_msg_code);
+			p_msg_code, host_role_ != nullptr ? host_role_->state.host_owner.now_tick : 0u);
 }
 
 // The lockgame action at the authority (HudToggles' EVENT_JOIN_LOCK_TOGGLED, in a session on the
@@ -458,11 +646,14 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the session's advertised and admitted cap: the
-	// session create's 1..65 clamp, the title's (this host is in session). The dedicated word makes
-	// the engine's slot limit (GameConfig::player_slot_limit) carry the host's own slot on top.
+	// session create's 1..65 clamp, the title's (this host is in session), stored back into the
+	// process block as the create stores it (engine: inmatch::store_session_player_cap). The
+	// dedicated word makes the engine's slot limit (GameConfig::player_slot_limit) carry the host's
+	// own slot on top.
 	net_.host_serve_and_play = p_options->get_serve_and_play();
-	net_.host_max_players = static_cast<uint32_t>(
-			opennova::inmatch::session_player_cap(p_options->get_max_players(), config.title));
+	net_.host_max_players = static_cast<uint32_t>(opennova::inmatch::store_session_player_cap(
+			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
+			p_options->get_max_players(), config.title));
 	config.max_players = net_.host_max_players;
 	config.dedicated_server = !net_.host_serve_and_play;
 	net_.host_session_config = std::move(config);
@@ -485,6 +676,10 @@ Ref<HostSessionOptions> Simulation::get_host_session_config() const {
 	out->set_max_players(static_cast<int>(net_.host_max_players));
 	out->set_serve_and_play(net_.host_serve_and_play);
 	return out;
+}
+
+int32_t Simulation::previous_round_time_remaining_ticks() const {
+	return net_.client_process != nullptr ? net_.client_process->round_time_remaining_ticks : 0;
 }
 
 int Simulation::get_mission_header_size() const {
@@ -518,6 +713,11 @@ void Simulation::set_join_network_type(int p_type) {
 			p_type == static_cast<int>(opennova::inmatch::NetworkType::NovaWorld)
 			? opennova::inmatch::NetworkType::NovaWorld
 			: opennova::inmatch::NetworkType::Lan;
+	// A NovaWorld join's session destroy keeps its transport (engine:
+	// inmatch::ClientRuntime::tear_down_transport).
+	if (joiner_role_ != nullptr)
+		joiner_role_->set_join_novaworld(
+				net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
 }
 
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
@@ -525,6 +725,11 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	// and re-applied to the joiner runtime on each (re)load via install_join_cd_cookie.
 	net_.join_cd_cookie.assign(p_cookie.ptr(), p_cookie.ptr() + p_cookie.size());
 	install_join_cd_cookie();
+}
+
+void Simulation::set_join_glsvss_request(const PackedByteArray &p_request) {
+	net_.join_glsvss_request.assign(p_request.ptr(), p_request.ptr() + p_request.size());
+	install_join_glsvss_request();
 }
 
 void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
@@ -538,6 +743,8 @@ void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
 	}
 	net_.join_discovered_session = std::move(session);
+	// ... and the browse's socket (D-NET-NEW-R3-3).
+	net_.join_transport = p_target.is_valid() ? p_target->get_transport() : Ref<UdpPump>();
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
 }
@@ -569,17 +776,72 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_title(title);
-	if (net_.pump.is_null()) net_.pump.instantiate();
-	net_.pump->set_capture_path(net_.capture_pcap_path);
-	if (net_.pump->dial(p_host_ip, p_port) != 0) {
-		(void)install_offline_role();
-		return false;
+	// The process's 0x4C report count runs on across joins (ClientProcessState).
+	joiner_role_->use_process_state(net_.client_process);
+	// The process's log devices: a session destroy's stop of a held server writes its
+	// _inout.txt lines (engine: inmatch::JoinerRole::destroy_session).
+	if (net_.log_devices != nullptr) joiner_role_->set_server_logs(net_.log_devices->logs());
+	if (net_.join_transport.is_valid() && net_.join_transport->is_open()) {
+		// The join goes on with the browse's socket, the one the row was found on:
+		// retail's client has one transport socket per network type, and the join
+		// continues on the browse's connection (on NovaWorld the lobby session's
+		// socket, its demux keeping the two protocols apart). The connection reads
+		// its peer's datagrams alone (engine: net/npwire/lan_discovery.h, the
+		// browser's transport; net/npwire/datagram_demux.h, the per-source lookup).
+		// The row's address is the 0x81's source, a dotted quad.
+		const opennova::PeerAddr host{
+				opennova::resolve_address_without_dns(opennova::to_std(p_host_ip)),
+				static_cast<uint16_t>(p_port)};
+		if (host.ip == 0) {
+			(void)install_offline_role();
+			return false;
+		}
+		net_.pump = net_.join_transport;
+		// A node of the process's held server reads its joiner's datagrams there too
+		// (engine: inmatch::JoinerRole::deposit_inbound, D-NET-NEW-L1-26).
+		auto join_socket = std::make_unique<UdpPumpGameSocket>(net_.pump, host);
+		if (net_.client_process != nullptr)
+			join_socket->set_held_server(&net_.client_process->unstopped_server);
+		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(std::move(join_socket));
+		joiner_role_->set_socket(net_.pump_socket.get(), host);
+	} else {
+		if (net_.pump.is_null()) net_.pump.instantiate();
+		net_.pump->set_capture_path(net_.capture_pcap_path);
+		// The dial's socket open is the client arm's: the block's mplanclient quad
+		// with its random word, on its mpipaddressstring (engine:
+		// inmatch::transport_bind_ports(block, Lan, false), D-NET-NEW-L8-10).
+		if (net_.game_config.is_valid())
+			net_.pump->set_client_bind_scan(
+					opennova::inmatch::transport_bind_ports(net_.game_config->native().cfg(),
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false),
+					opennova::inmatch::transport_bind_address(net_.game_config->native().cfg()));
+		const int dialed = net_.pump->dial(p_host_ip, p_port);
+		// The dial's socket open writes its connect-log lines; a name that resolves to nothing
+		// opens none (engine: inmatch::write_transport_socket_open_lines).
+		if (net_.log_devices != nullptr && dialed != static_cast<int>(ERR_CANT_RESOLVE)) {
+			const opennova::PeerAddr local = net_.pump->local_address();
+			const opennova::gamecfg::GameCfg &block = net_.game_config.is_valid()
+					? net_.game_config->native().cfg()
+					: opennova::gamecfg::defaults();
+			opennova::inmatch::write_transport_socket_open_lines(net_.log_devices->connect(),
+					net_.pump->is_open() ? &local : nullptr,
+					opennova::inmatch::transport_bind_address(block),
+					opennova::inmatch::transport_port_quad(block,
+							opennova::inmatch::NetworkType::Lan, /*authority=*/false));
+		}
+		if (dialed != 0) {
+			(void)install_offline_role();
+			return false;
+		}
+		// The joiner role reads and writes the dialed pump through the adapter
+		// from now on.
+		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
+				std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
+		joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
 	}
-	// The joiner role reads and writes the dialed pump through the adapter
-	// from now on.
-	net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
-			std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
-	joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
+	// The join socket's bound address, which a held server's HOST STOPPED prints (engine:
+	// inmatch::JoinerRole::set_local_address).
+	joiner_role_->set_local_address(net_.pump->local_address());
 	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
 	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
 	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
@@ -592,14 +854,27 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 			opennova::to_std(p_spectator_password),
 			opennova::to_std(p_server_password),
 			opennova::to_std(p_join_password));
+	// The process's _connectlog.txt, which the session key's handler closes.
+	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
+	                                                     : nullptr);
+	// The join's network type: a NovaWorld join's session destroy keeps its transport.
+	joiner_role_->set_join_novaworld(
+			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
+	// The session reset's connection destroy drains the process enumerator's records, the
+	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-NEW-L8-8).
+	joiner_role_->set_enumerator_drain([] { LanSession::drain_process_enumerator(); });
+	install_console_seams();
 	install_charattr_table();
 	install_character_join_vars();
 	install_auto_medic_preference();
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
+	install_join_glsvss_request();
+	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
+	install_character_registry();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.
 	joiner_role_->reset_for_join();
@@ -609,10 +884,6 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		return false;
 	}
 	return true;
-}
-
-void Simulation::set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) {
-	if (joiner_role_ != nullptr) joiner_role_->set_join_proxy(p_proxy);
 }
 
 bool Simulation::is_local_spectator() const {
@@ -631,7 +902,8 @@ bool Simulation::is_local_spectator() const {
 
 bool Simulation::set_local_spectator(bool p_spectator) {
 	// A joiner is non-authoritative: its S2C 0x75 state is intentionally
-	// read-only. F3 mutates only the in-process SP/listen-host player.
+	// read-only. F3 mutates only the in-process SP/listen-host player, one way:
+	// retail has no spectator leave (Server_SetPlayerSpectator refuses false).
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (is_joiner() || kernel_ == nullptr || ctx == nullptr || !ctx->is_authority) return false;
 	for (opennova::inmatch::NapiNPConnection &connection :
@@ -646,7 +918,6 @@ bool Simulation::set_local_spectator(bool p_spectator) {
 		}
 		kernel_->local.reset_local_player_input_to_player_facing();
 		set_local_player_weapon_input(false, false, false);
-		if (!p_spectator) respawn_local_player_loadout();
 		return true;
 	}
 	return false;
@@ -667,35 +938,152 @@ bool Simulation::load_charattr(
 	return net_.charattr_table.loaded;
 }
 
-void Simulation::set_join_world_ready(bool p_ready) {
-	if (is_joiner() && runtime_) runtime_->set_world_ready(p_ready);
+void Simulation::finalize_loaded_model_challenge_snapshot() {
+	// The page the C2S 0x3D answers from is the model-def list the mission start's loads
+	// built, computed from the mount and the tables as retail's loads run, not from what
+	// this shell happened to render (D-NET-527; engine: inmatch/loaded_model_list.h). A
+	// joiner loads no mission body, so it has no special event, and its pool 0 is its
+	// replica's; a Serve Only host loads no foliage.
+	namespace inmatch = opennova::inmatch;
+	std::vector<uint32_t> page;
+	net_.mission_start_model_files.clear();
+	net_.mission_start_model_entries.clear();
+	if (kernel_ && assets_.root.is_valid()) {
+		const opennova::mission::BootFileSource files =
+				opennova::mission::boot_files_from_index(assets_.root->native_index());
+		const inmatch::LoadedModelList list = inmatch::mission_start_model_list(*kernel_, files,
+				&net_.charattr_table, !is_joiner(),
+				/*dedicated=*/!is_joiner() && !net_.host_serve_and_play,
+				is_joiner() && runtime_ != nullptr ? &runtime_->state() : nullptr);
+		page = list.freeze();
+		net_.mission_start_model_files = list.model_files();
+		net_.mission_start_model_entries = inmatch::loaded_model_list_entries(list);
+	}
+	// The same frozen count is a host's S2C 0x68 cursor wrap (the role reads
+	// it every tick) [orig: Server_SendLoadedModelPageRequest @0x511375 / @0x511391].
+	net_.loaded_model_list_count = static_cast<uint32_t>(page.size());
+	if (!is_joiner() || !runtime_) return;
+	runtime_->set_loaded_model_challenge_snapshot(std::move(page));
 }
 
-void Simulation::finalize_loaded_model_challenge_snapshot() {
-	if (!is_joiner() || !runtime_) return;
-	const int64_t count = ObjectData::network_challenge_model_count();
-	if (count <= 0) {
-		runtime_->set_loaded_model_challenge_snapshot({});
-		return;
+TypedArray<ModelListNodeRow> Simulation::debug_mission_start_model_nodes() const {
+	TypedArray<ModelListNodeRow> rows;
+	for (const opennova::inmatch::LoadedModelListEntry &entry : net_.mission_start_model_entries) {
+		Ref<ModelListNodeRow> row;
+		row.instantiate();
+		row->assign(entry);
+		rows.push_back(row);
 	}
-	// NetPacket_WriteEntityIndexList writes ONE dword per frozen model-def row —
-	// a 5x-unrolled loop capped at 50 entries after the [u32 startIndex] header
-	// [orig: @0x42d950; the per-entry store @0x42d9f0, the 0x32 cap @0x42da7d].
-	// The complete writer/xref audit for this binary found no surviving writer to
-	// the source field after model resolution, so each included definition
-	// contributes one zero dword. Keep the inmatch seam value-based so a future
-	// witnessed writer can supply its actual row without changing paging.
-	runtime_->set_loaded_model_challenge_snapshot(
-			std::vector<uint32_t>(static_cast<std::size_t>(count), 0u));
+	return rows;
+}
+
+int64_t Simulation::debug_loaded_model_list_count() const {
+	return static_cast<int64_t>(net_.loaded_model_list_count);
+}
+
+TypedArray<JoinerNetTraceRow> Simulation::debug_joiner_net_trace(int64_t p_from_seq) const {
+	TypedArray<JoinerNetTraceRow> rows;
+	if (runtime_ == nullptr) return rows;
+	const uint32_t from = static_cast<uint32_t>(
+			std::clamp<int64_t>(p_from_seq, 0, static_cast<int64_t>(UINT32_MAX)));
+	for (const opennova::inmatch::JoinerNetTraceRecord &record :
+			runtime_->net_trace().since(from)) {
+		Ref<JoinerNetTraceRow> row;
+		row.instantiate();
+		row->assign(record);
+		rows.push_back(row);
+	}
+	return rows;
+}
+
+int64_t Simulation::debug_joiner_net_trace_next_seq() const {
+	return runtime_ != nullptr ? static_cast<int64_t>(runtime_->net_trace().next_seq()) : 0;
+}
+
+const opennova::inmatch::JoinerNetTrace *Simulation::joiner_net_trace() const {
+	return runtime_ != nullptr ? &runtime_->net_trace() : nullptr;
+}
+
+PackedStringArray Simulation::get_mission_start_model_files() const {
+	PackedStringArray files;
+	for (const std::string &file : net_.mission_start_model_files) {
+		files.push_back(opennova::to_gd(file));
+	}
+	return files;
+}
+
+void Simulation::set_join_sync_tail_loading(bool p_loading) {
+	net_.join_sync_tail_loading = p_loading;
+	install_join_mission_start();
+}
+
+void Simulation::set_join_mission_data_loading(bool p_loading) {
+	net_.join_mission_data_loading = p_loading;
+	install_join_mission_start();
+}
+
+bool Simulation::is_join_mission_data_load_running() const {
+	return is_joiner() && runtime_ && runtime_->mission_data_load_running();
+}
+
+void Simulation::end_join_mission_data_load() {
+	if (is_joiner() && runtime_) runtime_->end_mission_data_load();
+}
+
+bool Simulation::is_join_mission_start_released() const {
+	return is_joiner() && runtime_ != nullptr && runtime_->mission_start_released();
+}
+
+void Simulation::end_loaded_join_mission_start() {
+	if (joiner_role_ != nullptr && is_join_mission_start_released())
+		joiner_role_->push_mission_start_end();
+}
+
+void Simulation::push_join_mission_start_first_loadout() {
+	if (joiner_role_ != nullptr) joiner_role_->push_mission_start_first_loadout();
+}
+
+void Simulation::materialize_join_world_stream() {
+	if (joiner_role_ != nullptr) joiner_role_->materialize_world_stream();
+}
+
+void Simulation::run_join_streamed_weapon_slot_class_inits() {
+	if (joiner_role_ != nullptr) joiner_role_->run_streamed_weapon_slot_class_inits();
+}
+
+void Simulation::reload_join_pool0_row_channels() {
+	if (joiner_role_ != nullptr) joiner_role_->reload_pool0_row_channels();
+}
+
+opennova::inmatch::JoinerRole::MissionStartPass Simulation::poll_join_mission_start(
+		const opennova::inmatch::JoinerRole::MissionStartLegs &p_legs) {
+	if (joiner_role_ == nullptr) return opennova::inmatch::JoinerRole::MissionStartPass::Stopped;
+	return joiner_role_->poll_mission_start(p_legs);
 }
 
 bool Simulation::poll_join_preload() {
 	if (joiner_role_ == nullptr || !runtime_) return false;
 	// The pre-mission subset of the joiner role's frame: the same UDP socket and
-	// ClientRuntime advance the retail connect exchange, but no World exists yet
-	// to tick and the runtime's world-ready gate suppresses the load/spawn drive.
+	// ClientRuntime advance the retail connect exchange; no World exists yet to tick,
+	// and the load waits for the S2C 0x1A's mission start (D-NET-NEW-L2-19).
 	joiner_role_->poll_preload();
 	return true;
+}
+
+void Simulation::cancel_join() {
+	if (joiner_role_ != nullptr) joiner_role_->cancel_join();
+}
+
+bool Simulation::cancel_join_final_wait() {
+	return is_joiner() && runtime_ && runtime_->cancel_final_wait();
+}
+
+bool Simulation::is_join_game_loop() const {
+	return is_joiner() && runtime_ && runtime_->in_game_loop();
+}
+
+bool Simulation::is_join_mission_start_aborted() const {
+	return is_joiner() && runtime_ && runtime_->mission_start_aborted();
 }
 
 bool Simulation::is_join_preload_ready() const {
@@ -777,6 +1165,13 @@ String Simulation::get_join_error() const {
 // shell builds retail's reason text from it through its gameerr table
 // (engine: inmatch/disconnect_reason.h).
 Ref<ConnectionError> Simulation::get_connection_error() const {
+	// A host's reason text reads its own client connection's record, none on a host with no
+	// own client (engine: HostRole::own_client_error_record carries the witness).
+	if (!is_joiner() && host_role_ != nullptr) {
+		const std::optional<opennova::inmatch::ConnectionErrorRecord> own =
+				host_role_->own_client_error_record();
+		return own ? ConnectionError::make(*own) : ConnectionError::make_absent();
+	}
 	return ConnectionError::make((is_joiner() && runtime_)
 					? runtime_->connection_error_record()
 					: opennova::inmatch::ConnectionErrorRecord{});
@@ -817,7 +1212,8 @@ int Simulation::get_mission_exit_reason() const {
 
 int Simulation::round_over_key(int p_vk, int p_restart_vk) {
 	if (!kernel_) return 0;
-	return static_cast<int>(opennova::inmatch::round_over_key(role_view(), p_vk, p_restart_vk));
+	return static_cast<int>(
+			opennova::inmatch::round_over_key(role_view(), active_role(), p_vk, p_restart_vk));
 }
 
 bool Simulation::ingame_restart() {
@@ -829,8 +1225,31 @@ bool Simulation::is_joined_in_match() const {
 	return is_joiner() && runtime_ && runtime_->in_match();
 }
 
+bool Simulation::escape_input_reset() {
+	// The Escape key's reset (engine inmatch/session.h Role::reset_local_input carries
+	// the witness); true when the device owes the Scroll Lock turn-off.
+	return role_ != nullptr && kernel_ && active_role().reset_local_input();
+}
+
+void Simulation::input_action_exit(bool p_menu_screen) {
+	// Input action 3 over the running role (engine inmatch/remote_admin.h
+	// input_action_exit carries the witness).
+	if (kernel_)
+		opennova::inmatch::input_action_exit(remote_admin_binding(),
+				p_menu_screen ? opennova::inmatch::ExitSite::MenuScreen
+							  : opennova::inmatch::ExitSite::Input);
+}
+
+void Simulation::reset_all_input_state() {
+	if (kernel_) active_role().reset_all_input_state();
+}
+
 bool Simulation::take_input_reset() {
-	return is_joiner() && runtime_ && runtime_->take_input_reset();
+	// The joiner's mission start owes one, and a role action (the deploy action's
+	// head, D-NET-685) another; both drain.
+	const bool mission_start = is_joiner() && runtime_ && runtime_->take_input_reset();
+	const bool action = active_role().take_input_reset();
+	return mission_start || action;
 }
 
 bool Simulation::is_join_initial_admission_complete() const {
@@ -943,7 +1362,10 @@ int Simulation::get_class_allow_mask() const {
 	if (const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 			ctx != nullptr && ctx->is_authority != 0)
 		return ctx->config.class_allow_mask;
-	return net_.host_session_config.class_allow_mask;
+	// No session yet: the mask the configured class words build at the session's
+	// first mission (the host dialog writes words, never a mask).
+	return opennova::inmatch::class_allow_mask_from_words(
+			net_.host_session_config.class_availability, /*has_mission_entry=*/true);
 }
 
 const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
@@ -1008,7 +1430,7 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 	// Godot (x,y,z) -> mission (x,-z,y), the inverse of the present remap (same as spawn_local_player).
 	spawn.position = {static_cast<float>(p_position.x), static_cast<float>(-p_position.z),
 	                  static_cast<float>(p_position.y)};
-	spawn.yaw = static_cast<int16_t>(p_yaw_deg);
+	spawn.heading = opennova::world::placed_heading_bam(static_cast<int32_t>(p_yaw_deg));
 	spawn.team = static_cast<uint8_t>(p_team);
 	// A synthetic loopback peer; distinct port per call so repeated admits don't alias. Own a transport
 	// so the connection is well-formed. The synthetic admit (no handshake) mirrors the post-PeerSpawned

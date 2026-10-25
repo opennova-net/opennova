@@ -8,6 +8,9 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+
+#include "enumerated_join.h"
+
 #include <cstdio>
 #include <utility>
 
@@ -40,10 +43,11 @@ bool run_identity() {
 	server_hello.hk = 0x55667788u;
 	datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	auto result = joiner.handle_datagram(datagram.data(), datagram.size());
+	(void)joiner.handle_datagram(datagram.data(), datagram.size());
+	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
+	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
-	if (!expect(result.outbound.size() == 1 &&
-			nw_decode_inbound(result.outbound[0].data(), result.outbound[0].size(), opcode, body) &&
+	if (!expect(nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 			parse_client_auth(body.data(), body.size(), auth), "decode ClientAuth")) return false;
 	auto server_auth = build_server_auth(auth, 0x7F000001u, 32769, 0x11223344u,
 			server_scrk, "", "", "", false);

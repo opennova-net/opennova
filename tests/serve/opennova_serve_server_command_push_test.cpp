@@ -10,8 +10,10 @@
 // it [orig: CNapiGameSession_HandleServerCommand @0x4d22f0]. A pushed SetServerName renames the
 // live match and saves game.cfg, a pushed Cycle ends the round and the map changes, the next map's
 // republish carries the new name to the service's row, a pushed ServerStopHosting ends the
-// listing (the server's lister stops on the service's word, and the row leaves the browser at
-// once), and a RID no connection holds is refused.
+// listing (the row leaves the browser at once; the server's session drops to verified and stays
+// up until the match's NovaWorld exit, whose reset sends the goodbye alone, no ClientStopHosting,
+// its line in _connectlog.txt ahead of the socket's teardown line, and finishes the lister on the
+// service's word), and a RID no connection holds is refused.
 #include "server.h"
 #include "serve_test_support.h"
 
@@ -28,12 +30,16 @@
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_session.h>
+#include <runtime/inmatch/mission_exit.h>
 
 #include "common/test_database.h"
+
+#include <base/io/log.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -58,14 +64,28 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
+// The service's lobby session logs each hosting it ends with the statement that ended it
+// (LobbySession::end_hosting): the ClientStopHosting receipts the server's stop must not cause.
+std::atomic<int> client_stop_hosting_logs{ 0 };
+void log_sink(io::LogLevel level, const char *message) {
+	if (std::strstr(message, "reason=ClientStopHosting") != nullptr)
+		++client_stop_hosting_logs;
+	if (level != io::LogLevel::kDebug)
+		std::printf("%s\n", message);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
+	io::set_log_sink(&log_sink);
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 
 	test_db::TestDatabase database;
 	db::ConnectionPool pool(database.options());
+	// The service's logouts (declared ahead of the listener, whose teardown may report one): the
+	// server's goodbye burst ends its session with one.
+	std::atomic<int> logouts{ 0 };
 	ConnectionManager manager;
 	novaworld_server::NwUdpListener listener(manager);
 	listener.set_db_pool(&pool);
@@ -73,7 +93,9 @@ int main(int argc, char **argv) {
 	auto push_command = [&pool](uint32_t rid, const std::string &cmd) {
 		return lobbydb::queue_server_command(*pool.acquire(), rid, cmd);
 	};
-	manager.on_lost([&listener](const Connection &connection, DropReason reason) {
+	manager.on_lost([&listener, &logouts](const Connection &connection, DropReason reason) {
+		if (reason == DropReason::Logout)
+			++logouts;
 		listener.erase_lobby_state(connection.addr, drop_reason_name(reason));
 	});
 	novaworld_server::ServerConfig service;
@@ -116,7 +138,7 @@ int main(int argc, char **argv) {
 	CHECK(serve::parse_serve_options(
 			{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
 					"--lan-port", "0", "--master-host", "127.0.0.1", "--master-gate-port",
-					std::to_string(gate_port)},
+					std::to_string(gate_port), "/CONNECTLOG"},
 			options, error) == 0);
 	auto holder = std::make_unique<serve::Server>(options);
 	const bool started = holder->start(error);
@@ -191,23 +213,52 @@ int main(int argc, char **argv) {
 	CHECK(after.has_value() && after->rid == rid);
 	const std::string cycled_to = server.role().state.host_owner.ctx.config.mission_name;
 
-	// --- ServerStopHosting: the server's session drops to verified and its lister stops on the
-	// service's word; the row leaves the browser as the statement goes out.
+	// --- ServerStopHosting: the server's session drops to verified and sends nothing; the row
+	// leaves the browser as the statement goes out. The session stays up, and the service keeps
+	// it, while the match runs: the match's next 62-frame block reads the dropped word and ends
+	// it with the NovaWorld exit (12), whose router resets the session with the goodbye burst
+	// alone (no ClientStopHosting); the lister finishes there, on the service's word.
+	// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29, the word 1
+	//  @0x4D1D4F; Game_ProcessMainFrame @0x5263F0 - the check @0x52654F..0x52657C;
+	//  PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch` @0x56854F / jz @0x568552 ->
+	//  loc_5686CB, SetNetworkType(0) (the call @0x5686E1); CNapiNetwork_SetNetworkType @0x4C4A50 -
+	//  CNapiGameSession_ResetToDisconnected @0x4D0890 (the call @0x4C4A7D)]
+	CHECK(logouts.load() == 0);
 	CHECK(lobbydb::queue_stop_hosting(*pool.acquire(), rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT) ==
 			PushResult::Queued);
 	int lister_exit = -1;
-	// The lister can finish in the very frame whose mission exit stops the server, which tears the
-	// lister down; the server keeps the code it finished with.
+	bool finished_while_running = false;
+	bool goodbye_while_running = false;
 	CHECK(frame_until(
 			[&] {
-				if (server.lister() != nullptr && server.lister()->finished())
-					lister_exit = server.lister()->exit_code();
-				else if (server.lister() == nullptr)
-					lister_exit = server.last_lister_exit();
-				return lister_exit != -1;
+				if (server.lister() != nullptr) {
+					finished_while_running = finished_while_running || server.lister()->finished();
+					goodbye_while_running = goodbye_while_running || logouts.load() != 0;
+					return false;
+				}
+				lister_exit = server.last_lister_exit();
+				return true;
 			},
 			10s));
+	CHECK(!finished_while_running);
+	CHECK(!goodbye_while_running);
+	CHECK(server.role().state.host_owner.ctx.mission_exit_reason == inmatch::kMissionExitNovaWorld);
 	CHECK(lister_exit == serve::kExitStoppedByService);
+	for (int i = 0; i < 100 && logouts.load() == 0; ++i)
+		std::this_thread::sleep_for(20ms);
+	CHECK(logouts.load() == 1);
+	// The service never read a ClientStopHosting: the router's reset sends the goodbye alone.
+	CHECK(client_stop_hosting_logs.load() == 0);
+	// The router's order in _connectlog.txt: the session's goodbye line (the reset's
+	// OnDisconnect), then the socket's teardown line (D-NET-NEW-L9-23)
+	// [orig: PostMenu_RouteMissionExit @0x568460 - SetNetworkType(0) called @0x5686E1 ahead of
+	//  SetTransportMode(0) called @0x5686F9; CNapiGameSession_OnDisconnect @0x4CFAA0 - the line
+	//  @0x4CFB5C; CNapiNetwork_TearDownSocket @0x4C4C90 - the line @0x4C4CBE..0x4C4CE7]
+	const std::string connect_log = serve_test::read_text(work / "_connectlog.txt");
+	const std::size_t goodbye_line = connect_log.rfind(" : NWU DISCONNECTING FROM NOVAWORLD ");
+	const std::size_t teardown_line = connect_log.rfind(" : NET TEARING DOWN SOCKET\r\n");
+	CHECK(goodbye_line != std::string::npos && teardown_line != std::string::npos &&
+			goodbye_line < teardown_line);
 	bool still_listed = false;
 	for (const auto &h : listener.snapshot_hosted()) still_listed = still_listed || h.lobby.rid == rid;
 	CHECK(!still_listed);
@@ -220,6 +271,7 @@ int main(int argc, char **argv) {
 	gate_thread.join();
 	listener.stop();
 	net::shutdown();
+	io::set_log_sink(nullptr);
 	cwd.restore();
 	std::error_code ec;
 	fs::remove_all(dir, ec);

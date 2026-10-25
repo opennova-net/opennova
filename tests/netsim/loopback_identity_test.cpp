@@ -25,12 +25,14 @@
 #include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
+#include <runtime/world/collision.h>          // CollisionWorld / CollisionModel
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
+#include <memory>
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -242,7 +244,7 @@ bool run() {
 	// explicitly. EntityKind must never be used to guess compact record width.
 	seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	seed.position = {10.0f, 20.0f, -5.0f};
-	seed.yaw = 0x0140;
+	seed.heading = w::placed_heading_bam(0x0140); // a placed row at mission yaw 320
 	seed.team = 1;
 	const w::EntityHandle h = world.registry.spawn(0, seed);
 	if (!expect(h.valid(), "entity spawned")) return false;
@@ -302,12 +304,11 @@ bool run() {
 	if (!expect(es.z == codec_recon(wz, wz),
 	            "z is the codec's exact reconstruction")) return false;
 
-	// Coarse heading round-trips: the high byte of the 32-bit engine-frame BAM that
-	// snapshot_of builds, rounded. The unmoved seed's heading is its placement angle:
+	// Coarse heading round-trips: the high byte of the entity's Yaw word that
+	// snapshot_of reads, rounded. The unmoved seed's word is its placement angle:
 	// ((90 - mission_yaw) << 16) / 360 truncated, then << 16.
 	// [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
-	const int32_t turn16 =
-			static_cast<int32_t>(static_cast<uint32_t>(90 - seed.yaw) << 16) / 360;
+	const int32_t turn16 = static_cast<int32_t>(static_cast<uint32_t>(90 - 0x0140) << 16) / 360;
 	const uint32_t engine_bam = static_cast<uint32_t>(turn16) << 16;
 	const uint8_t want_yaw = static_cast<uint8_t>((engine_bam + 0x00800000u) >> 24);
 	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
@@ -383,8 +384,8 @@ bool run_compact_pose_fields_survive_client_fold() {
 	infantry.cls = nw::EntityClass::Infantry;
 	infantry.infantry.seat_bone_idx = 3;
 	infantry.infantry.vehicle_slot_handle = 0x1008;
-	infantry.infantry.pitch_byte = 0x31;
-	infantry.infantry.aim_yaw_byte = 0xF4;
+	infantry.infantry.aim_heading_byte = 0x31;
+	infantry.infantry.aim_pitch_byte = 0xF4;
 	infantry.infantry.anim_byte = 47;
 	mounted.records.push_back(infantry);
 
@@ -415,22 +416,25 @@ bool run_compact_pose_fields_survive_client_fold() {
 	const ns::ClientEntityState *p = view.state().find(0x0001);
 	if (!expect(p != nullptr && p->carrier_handle == 0x1007 && p->mount_bone == 5 &&
 	                    p->seat_type == 2 && p->pitch_byte == 0x21 &&
-	                    p->aim_yaw_byte == 0 && p->anim_state_id == 62 &&
+	                    p->aim_pitch_byte == 0 && p->anim_state_id == 62 &&
 	                    p->anim_channel_ratio == 19 && p->health_class_byte == 0x28,
 	            "player compact mount/pose bytes survive the client fold")) return false;
 	const ns::ClientEntityState *i = view.state().find(0x0002);
 	if (!expect(i != nullptr && i->carrier_handle == 0x1008 && i->mount_bone == 3 &&
 	                    i->seat_type == 0 && i->pitch_byte == 0x31 &&
-	                    i->aim_yaw_byte == 0xF4 && i->anim_state_id == 47 &&
-	                    i->anim_channel_ratio == 0 &&
-	                    i->pitch_bam == static_cast<int32_t>(0xFE800000u),
-	            "infantry compact target advances live pitch by retail's one-eighth chase"))
+	                    i->aim_pitch_byte == 0xF4 && i->anim_state_id == 47 &&
+	                    i->anim_channel_ratio == 0 && i->pitch_bam == 0,
+	            "infantry compact stages its aim bytes and writes no live Pitch"))
 		return false;
+	// The infantry record writes the aim words (+0x2EC, +0x2D0) and never the live Pitch: the
+	// body update's look chases it every tick (tick_org1_looks), so a
+	// second fold leaves it where it was.
+	// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - the stores @0x4C066C /
+	//  @0x4C0672; Entity_UpdateInfantryAI @0x4B9910 - the look @0x4BEF87..0x4BEF97]
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(mounted));
 	i = view.state().find(0x0002);
-	if (!expect(i != nullptr &&
-	                    i->pitch_bam == static_cast<int32_t>(0xFD300000u),
-	            "successive mounted frames continue the stateful pitch chase"))
+	if (!expect(i != nullptr && i->pitch_bam == 0,
+	            "successive mounted frames write no live Pitch either"))
 		return false;
 
 	// A subsequent free-standing record is the dismount signal. Overwrite every
@@ -452,8 +456,8 @@ bool run_compact_pose_fields_survive_client_fold() {
 	            "player dismount clears retained selector fields")) return false;
 	if (!expect(i != nullptr && i->carrier_handle == 0xFFFF && i->mount_bone == 0,
 	            "infantry dismount clears retained selector fields")) return false;
-	if (!expect(i->pitch_bam == static_cast<int32_t>(0xFD300000u),
-	            "infantry dismount retains the last reconstructed live pitch")) return false;
+	if (!expect(i->pitch_bam == 0,
+	            "the free-standing record writes no live Pitch")) return false;
 	return true;
 }
 
@@ -494,13 +498,17 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 
 	// Tick 1 from a level angle: the decay takes (0+8)>>4 == 0, so the ramp step lands
 	// whole. Ramp-first would already read ∓0x2D00000.
-	view.tick_lean();
+	view.tick_lean_decay();
+	view.tick_lean_ramp();
 	if (!expect(l->lean_angle == -0x3000000 && r->lean_angle == 0x3000000,
 	            "first tick decays the level angle, then applies one whole ramp step"))
 		return false;
 
 	// Held: the decay cancels exactly one ramp step at ~16x it, not ~15x.
-	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	for (int tick = 1; tick < 400; ++tick) {
+		view.tick_lean_decay();
+		view.tick_lean_ramp();
+	}
 	if (!expect(l->lean_angle < -0x2F000000 && l->lean_angle > -0x31000000 &&
 	                    r->lean_angle > 0x2F000000 && r->lean_angle < 0x31000000,
 	            "held lean settles on the witnessed ±0x30000000 equilibrium")) return false;
@@ -513,12 +521,16 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
 	l = view.state().find(0x0001);
 	r = view.state().find(0x0002);
-	view.tick_lean();
+	view.tick_lean_decay();
+	view.tick_lean_ramp();
 	if (!expect(l != nullptr && r != nullptr && l->lean_angle > held_left &&
 	                    l->lean_angle < 0 && r->lean_angle > 0,
 	            "released lean decays back toward level")) return false;
 	// The decay's +8 rounding parks the tail a few BAM units off zero rather than on it.
-	for (int tick = 1; tick < 400; ++tick) view.tick_lean();
+	for (int tick = 1; tick < 400; ++tick) {
+		view.tick_lean_decay();
+		view.tick_lean_ramp();
+	}
 	return expect(l->lean_angle > -0x1000 && l->lean_angle <= 0 &&
 	                      r->lean_angle >= 0 && r->lean_angle < 0x1000,
 	              "released lean settles level");
@@ -766,13 +778,18 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 			static_cast<uint32_t>(moved_carrier->heading_bam),
 			static_cast<uint32_t>(moved_carrier->pitch_bam),
 			static_cast<uint32_t>(moved_carrier->roll_bam));
-	const int32_t expected_heading = opennova::io::bam_add(
-			moved_carrier->heading_bam,
-			static_cast<int32_t>(uint32_t{0x10} << 24));
-	return expect(moved_child->x == expected.x && moved_child->y == expected.y &&
-	                      moved_child->z == expected.z &&
-	                      moved_child->heading_bam == expected_heading,
-	              "child-first rider follows the carrier's final same-tick pose");
+	if (!expect(moved_child->x == expected.x && moved_child->y == expected.y &&
+	                    moved_child->z == expected.z,
+	            "child-first rider follows the carrier's final same-tick pose")) return false;
+	// A live seated org1 body's Yaw is its seat branch's look (tick_org1_looks, after the
+	// tick's gun channels), never the follow's: the walk only arms that look, and the record
+	// wrote no live Yaw (no respawn edge).
+	// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
+	//  look @0x4BEF57..0x4BEF97; NetPacket_SerializeInfantryEntityState @0x4C0320 - the
+	//  respawn arm's +0x10 store @0x4C05D5]
+	return expect(moved_child->heading_bam == 0 && moved_child->rm_look_due &&
+	                      moved_child->rm_look_seated,
+	              "the follow writes no Yaw for a live seated org1 rider; its look is armed");
 }
 
 // A NoNetworkCallback attachment has no compact mover of its own. Its 0x0D
@@ -937,6 +954,8 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	parent_seed.health_max = 3000;
 	parent_seed.flags = 0x02u; // overloaded load/movement gate, not a death verdict
 	parent_seed.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
+	parent_seed.has_item_def = true; // the trait sweep's row (D-NET-487)
+	parent_seed.item_type_index = 1;
 	const w::EntityHandle parent_h = world.registry.spawn(1, parent_seed);
 	if (!expect(parent_h.valid(), "attachment parent spawned")) return false;
 
@@ -951,10 +970,17 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	child_seed.emplacement_parent_spawn_id =
 			world.registry.get(parent_h)->registry_spawn_id;
 	child_seed.ground_target = parent_h; // mission promotion's groundEntity link
+	// An anchor offset rides a resolved userpoint: its 1-based index (+0x319) is
+	// nonzero. A zero index names none, and the child copies its carrier's root
+	// pose with no offset. [orig: Entity_UpdateTransformAndTurret - the index
+	// gate @0x440F04..0x440F34, the root copy @0x441153..0x4411BC]
+	child_seed.emplacement_bone = 1;
 	child_seed.emplacement_local = {2.0f, 0.0f, 0.0f};
 	// This fixture constructs the authority-side authored row directly rather
 	// than through mission promotion, so its exact attachment slot is known.
 	child_seed.emplacement_pose_metadata_resolved = true;
+	child_seed.has_item_def = true; // the trait sweep's row (D-NET-487)
+	child_seed.item_type_index = 1;
 	const w::EntityHandle child_h = world.registry.spawn(1, child_seed);
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 
@@ -1041,13 +1067,17 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	soldier.item_id = 0x2000;
 	soldier.net_class_code = static_cast<uint8_t>(nw::EntityClass::Infantry);
 	soldier.position = {0.0f, 0.0f, 0.0f};
-	soldier.yaw = 90; // engine heading 0: makes the witnessed target-heading clamp literal.
+	soldier.heading = w::placed_heading_bam(90); // engine heading 0: makes the witnessed target-heading clamp literal.
 	const w::EntityHandle ih = world.registry.spawn(0, soldier);
 	if (!expect(ih.valid(), "infantry spawned")) return false;
 	ai.attach(ih);
 	w::AiEntity *ae = ai.for_handle(ih);
 	if (!expect(ae != nullptr, "infantry AI state attached")) return false;
-	ae->inf.target_heading = 0x40000000; // clamps to +0x1FFFFFE0, rounds to byte 0x20.
+	// The target heading (+0x1A8) takes the heading's place for the yaw byte,
+	// carrier-local [orig: @0x4C07C9..0x4C07CD, @0x43BB87]: byte 0x10 against the
+	// identity carrier. The aim heading (+0x2EC) clamps around the live heading.
+	ae->inf.target_heading = 0x10000000;
+	ae->inf.aim_heading = 0x40000000; // clamps to +0x1FFFFFE0, rounds to byte 0x20.
 	ae->inf.aim_pitch = static_cast<int32_t>(0xF0000000u); // rounded high byte 0xF0.
 	w::Entity *infantry_entity = world.registry.get(ih);
 	if (!expect(infantry_entity != nullptr, "infantry entity resolvable")) return false;
@@ -1056,11 +1086,12 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true; // seats need the def (D-NET-422)
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_id = 0x1004;
 	vehicle.position = {100.0f, 200.0f, 10.0f};
-	vehicle.yaw = 90; // identity engine-frame carrier rotation
-	vehicle.pitch = 15;
-	vehicle.roll = -10;
+	vehicle.heading = w::placed_heading_bam(90); // identity engine-frame carrier rotation
+	vehicle.pitch_bam = w::spawn_angle_bam(15);
+	vehicle.roll_bam = w::spawn_angle_bam(-10);
 	vehicle.health = 3000;
 	vehicle.health_max = 3000;
 	vehicle.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
@@ -1104,8 +1135,10 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	// set entity Flags 0x40. [orig: Entity_AttachToUseGunSlot @0x546c5c]
 	if (!expect((wire->infantry.flags_byte & 0x40u) == 0,
 	            "UseGun infantry leaves the generic vehicle-seat flag clear")) return false;
-	if (!expect(wire->infantry.pitch_byte == 0x20 &&
-	                    wire->infantry.aim_yaw_byte == 0xF0 &&
+	if (!expect(wire->infantry.yaw_byte == 0x10,
+	            "mounted infantry's yaw byte is its target heading, carrier-local")) return false;
+	if (!expect(wire->infantry.aim_heading_byte == 0x20 &&
+	                    wire->infantry.aim_pitch_byte == 0xF0 &&
 	                    wire->infantry.anim_byte == 47,
 	            "mounted infantry carries witnessed aim and animation bytes")) return false;
 
@@ -1127,9 +1160,10 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	const ns::ClientEntityState *decoded = view.state().find(ih.packed);
 	if (!expect(decoded != nullptr && decoded->carrier_handle == vh.packed &&
 	                    decoded->mount_bone == 3 && decoded->pitch_byte == 0x20 &&
-	                    decoded->aim_yaw_byte == 0xF0 && decoded->anim_state_id == 47 &&
-	                    decoded->pitch_bam == static_cast<int32_t>(0xFE000000u),
-	            "mounted infantry selector and chased live pitch survive the production fold"))
+	                    decoded->aim_pitch_byte == 0xF0 && decoded->anim_state_id == 47 &&
+	                    decoded->pitch_bam == 0,
+	            "mounted infantry selector and aim bytes survive the production fold; the record "
+	            "writes no live Pitch (the seat branch's look chases it every tick)"))
 		return false;
 	decoded_carrier = view.state().find(vh.packed);
 	if (!expect(decoded_carrier != nullptr && decoded->x == decoded_carrier->x &&
@@ -1216,10 +1250,11 @@ std::vector<uint8_t> make_built_0c_uplink(
 }
 
 // The host read-applies a remote peer's C2S 0x0C uplink: the authority drain (drain_connection_c2s)
-// reads it and EntityWireBridge::apply_player_intent SNAPS the registry Entity (the store the S2C 0x0A
-// frame re-broadcasts), mirrors the engine-frame AiEntity, and stages the smooth-target.
+// reads it and EntityWireBridge::apply_player_intent stages the smooth target the body's update
+// chases and stores the live yaw/pitch; a visible body's live position is its own update's, not the
+// uplink's (D-NET-NEW-LP-2).
 // [orig: NetPacket_DispatchEntityPacketCallback @0x4D6A80 -> NetPacket_SerializePlayerState case 4
-// @0x4c2042-0x4c20a9; §5.10/§5.38]
+// @0x4c2042-0x4c20a9, the hidden-only position stores @0x4C207E..0x4C208E; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -1227,7 +1262,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 	peer.kind = w::EntityKind::Organic;
 	peer.item_id = 0x14B9; // player infantry template
 	peer.position = {0.0f, 0.0f, 0.0f};
-	peer.yaw = 0;
+	peer.heading = w::placed_heading_bam(0);
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "peer spawned")) return false;
 
@@ -1256,14 +1291,12 @@ bool run_apply_player_intent_stages_remote_peer() {
 	ns::test::drain_all(world, conns, /*is_authority=*/true);
 	if (!expect(channel.c2s_pending() == 0, "C2S drained by the tick")) return false;
 
-	// Registry Entity SNAPPED (absolute world pos; no map-origin add on the extended wire).
+	// A visible body is NOT snapped: its position waits for its own update's chase.
 	const w::Entity *pe = world.registry.get(ph);
 	if (!expect(pe != nullptr, "peer still present")) return false;
-	if (!expect(pe->position.x == static_cast<float>(w::from_fixed(wx)) &&
-	            pe->position.y == static_cast<float>(w::from_fixed(wy)) &&
-	            pe->position.z == static_cast<float>(w::from_fixed(wz)),
-	            "registry Entity position snapped to the wire pose")) return false;
-	if (!expect(pe->yaw == 45, "registry yaw = 90 - BAM/deg (== 45)")) return false;
+	if (!expect(pe->position.x.q16 == 0 && pe->position.y.q16 == 0 && pe->position.z.q16 == 0,
+	            "a visible body's live position is not the wire pose")) return false;
+	if (!expect(pe->heading == w::placed_heading_bam(45), "registry yaw = 90 - BAM/deg (== 45)")) return false;
 
 	// Engine-frame AiEntity mirrored + smooth-target staged + net-snapped.
 	const w::AiEntity *ae = ai.for_handle(ph);
@@ -1273,8 +1306,6 @@ bool run_apply_player_intent_stages_remote_peer() {
 			static_cast<uint32_t>(static_cast<uint16_t>(wheading)) << 16);
 	const int32_t pitch_bam = static_cast<int32_t>(
 			static_cast<uint32_t>(static_cast<uint16_t>(wpitch)) << 16);
-	if (!expect(ae->pos[0] == wx && ae->pos[1] == wy && ae->pos[2] == wz,
-	            "AiEntity live pos = wire pose")) return false;
 	if (!expect(ae->heading == heading_bam && ae->pitch == pitch_bam,
 	            "AiEntity heading/pitch = i16<<16 (pure widen, no 90-offset)")) return false;
 	if (!expect(ae->net_smooth_target[0] == wx && ae->net_smooth_target[1] == wy &&
@@ -1286,10 +1317,15 @@ bool run_apply_player_intent_stages_remote_peer() {
 	return true;
 }
 
-// A player's in-air bit is above the one-byte 0x0C state field, so the host must
-// reconstruct it from the uplinked pose instead of trusting an impossible wire
-// flag. Exercise the complete local builder -> codec -> authority apply -> body
-// tick path, including landing and a new grounded press.
+// A player's in-air bit is above the one-byte 0x0C state field: the host's copy of
+// the remote body takes it from its own update (gravity, the resolver's clearance,
+// the fall and landing edges), and the uplinked MoveOrder's jump key meets that
+// state at the org2 jump gate. Exercise the complete local builder -> codec ->
+// authority apply -> body tick path: a held key in the air does not launch, the
+// body lands by its own fall, and a fresh grounded press launches once.
+// [orig: Entity_UpdateInfantryPlayerBody - the fall edge @0x4b7e17..0x4b7e73, the
+//  landing @0x4b7d0a, the jump gate @0x4b7e8c..0x4b7f06; the read-apply stores no
+//  in-air bit, @0x4C1E50 replaces bits 2-4 only]
 bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	FlatTerrain terrain;
 	w::World world;
@@ -1320,9 +1356,9 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	w::Entity local_entity;
 	local_entity.item_id = 0x14B9;
 	w::AiEntity local_ai;
-	local_ai.pos[0] = fx(10.0);
-	local_ai.pos[1] = fx(10.0);
-	local_ai.pos[2] = fx(2.0); // > 0xF000 above a zero-height floor
+	local_entity.position.x.q16 = fx(10.0);
+	local_entity.position.y.q16 = fx(10.0);
+	local_entity.position.z.q16 = fx(2.0); // > 0xF000 above a zero-height floor
 	local_entity.net_move_input = w::Entity::kMoveOrderJump;
 	// Deliberately seed the local high bit. build_player_uplink can serialize
 	// only the low state byte; the authority result below must be pose-derived.
@@ -1337,36 +1373,40 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 		return channel.c2s_pending() == 0;
 	};
 
+	// The host's copy stands 2 units above the floor where the joiner's pose is.
+	w::Entity *host_peer = world.registry.get(ph);
+	host_peer->position.x.q16 = local_entity.position.x.q16;
+	host_peer->position.y.q16 = local_entity.position.y.q16;
+	host_peer->position.z.q16 = local_entity.position.z.q16;
 	nw::PlayerExtendedUplink first_uplink;
 	if (!expect(send_local_pose(&first_uplink), "airborne local uplink drained")) return false;
 	if (!expect(first_uplink.state_flags_byte == 0,
 	            "the in-air high bit is not represented by the 0x0C state byte")) return false;
-	w::Entity *host_peer = world.registry.get(ph);
-	if (!expect(host_peer != nullptr && host_ai->inf.airborne &&
-	                    (host_peer->flags & w::kEntityFlagInAir) != 0 &&
-	                    (host_peer->engine_flags & w::kEntityFlagInAir) != 0,
-	            "authority derives both airborne mirrors from the uplink pose")) return false;
+	if (!expect(!host_ai->inf.airborne && (host_peer->flags & w::kEntityFlagInAir) == 0,
+	            "the read-apply derives no in-air state")) return false;
 	world.run_logic_tick(/*is_authority=*/true);
+	if (!expect(host_ai->inf.airborne && (host_peer->flags & w::kEntityFlagInAir) != 0,
+	            "the host body's own update raises the fall edge")) return false;
 	if (!expect(host_ai->inf.jump_cooldown == 0,
-	            "held jump while pose-derived airborne does not relaunch")) return false;
+	            "a held jump in the air does not launch")) return false;
 
-	// A grounded release clears the same derived state. The small-positive band
-	// remains hysteretic in production; exact floor contact is the landing edge.
-	local_entity.flags = 0;
+	// Released, the body falls to the floor under its own gravity and lands.
 	local_entity.net_move_input = 0;
-	local_ai.inf.airborne = false;
-	local_ai.pos[2] = 0;
-	if (!expect(send_local_pose(), "landing local uplink drained")) return false;
+	if (!expect(send_local_pose(), "released local uplink drained")) return false;
+	for (int t = 0; t < 120 && host_ai->inf.airborne; ++t)
+		world.run_logic_tick(/*is_authority=*/true);
 	if (!expect(!host_ai->inf.airborne &&
 	                    (host_peer->flags & w::kEntityFlagInAir) == 0 &&
 	                    (host_peer->engine_flags & w::kEntityFlagInAir) == 0,
-	            "grounded pose clears both authority airborne mirrors")) return false;
-	world.run_logic_tick(/*is_authority=*/true);
+	            "the host body lands by its own fall")) return false;
 
-	// A new press at the same grounded pose reaches the authority body gate and
-	// stamps the normal 32-tick jump latch plus the derived launch state.
+	// A new press reaches the authority body gate and stamps the normal 32-tick jump
+	// latch plus the launch state.
+	local_entity.flags = 0;
+	local_ai.inf.airborne = false;
+	local_entity.position.z.q16 = host_peer->position.z.q16;
 	local_entity.net_move_input = w::Entity::kMoveOrderJump;
-	if (!expect(send_local_pose(), "grounded repress local uplink drained")) return false;
+	if (!expect(send_local_pose(), "grounded press local uplink drained")) return false;
 	world.run_logic_tick(/*is_authority=*/true);
 	return expect(host_ai->inf.jump_cooldown == 32 && host_ai->inf.airborne &&
 	                      (host_peer->flags & w::kEntityFlagInAir) != 0 &&
@@ -1408,12 +1448,41 @@ bool run_apply_rejects_own_player() {
 }
 
 // A wire-owned player's death still executes the retail relationship edge. The
-// real seat claim must release before the same tick's player compact is built.
-bool run_remote_mounted_player_death_detaches_compact() {
-	w::World world;
+// real seat claim must release before the same tick's player compact is built:
+// the record's bone and seat bytes are zero. Its carrier is the ground link: the
+// update's head took the mount as the ground, and the death edge's detach clears the
+// mount, the bone and the seat type but never the ground. The dead body's ride keeps a
+// ground within its bound radius. Its vertical resolve's ground probe then stores its
+// own hit, unconditionally: the hit, or null on a miss. Only the resolver's idle skip
+// (its counter past 10 on a still body, not every 64th update) returns ahead of the
+// probe. So on a full resolve the probe misses the collision-less hull and the carrier
+// is 0xFFFF; on an idle-skip tick the head store's vehicle stands. The record writes the
+// mount, else the ground.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the head store @0x4B41A2..0x4B41B4,
+//  Entity_DetachFromVehicleIfServer @0x4359D0 called @0x4B4C11, the edge's +0x184
+//  store @0x4B4CDB, the radius drop @0x4B529F..0x4B52FF, the resolver call @0x4B7CF4;
+//  Entity_DetachFromVehicle @0x4355F0 - +0x16C @0x435915, +0x157 @0x43591B, +0x168
+//  @0x435921; Entity_MovementCollisionResolver @0x4B2BD0 - the idle skip
+//  @0x4B2C3D..0x4B2CEC, Entity_RaycastGroundHeightAndObject called @0x4B3D95;
+//  Entity_RaycastGroundHeightAndObject @0x414320 - the +0x28 store @0x414370;
+//  NetPacket_SerializePlayerState @0x4C09C0 - the +0x16C load @0x4C0A00, the +0x28 read
+//  @0x4C0A08, the +0x16C override @0x4C0A15..0x4C0A20, the zero bone and seat @0x4C0A7B /
+//  @0x4C0A95]
+bool run_remote_mounted_player_death_detaches_compact(bool idle_skip) {
+	FlatTerrain terrain;
+	auto world_heap = std::make_unique<w::World>();
+	w::World &world = *world_heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
+	auto collision = std::make_unique<w::CollisionWorld>();
+	collision->terrain = &terrain.field;
+	world.tables.terrain = &terrain.field;
+	world.collision = collision.get();
 	w::AiSystem &ai = world.ai;
+	ai.terrain = &terrain.field;
+	ai.collision = collision.get();
+	// Not every 64th update: the resolver's cadence term leaves the skip to its counter.
+	world.entity_update_counter = 1;
 
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1424,6 +1493,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	peer.health_max = 150;
 	peer.alive = true;
 	peer.engine_flags = w::kEntityFlagPlayer;
+	peer.position = {10.0f, 10.0f, 0.0f};
 	const w::EntityHandle ph = world.registry.spawn(0, peer);
 	if (!expect(ph.valid(), "mounted remote player spawned")) return false;
 	ai.attach(ph);
@@ -1431,10 +1501,17 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	if (!expect(peer_ai != nullptr, "mounted remote player body attached")) return false;
 	peer_ai->inf.active = true;
 	peer_ai->net_is_remote_peer = true;
+	// The authority's chase walks toward the last staged pose: the body's own.
+	peer_ai->net_smooth_target[0] = fx(10.0);
+	peer_ai->net_smooth_target[1] = fx(10.0);
+	peer_ai->net_smooth_target[2] = 0;
+	// The resolver's counter: fresh (a full resolve) or inside its skip band.
+	peer_ai->collide_state.skip_counter = idle_skip ? 15 : 0;
 
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.has_item_def = true; // seats need the def (D-NET-422)
+	vehicle.item_type_index = 1; // the trait sweep's row (D-NET-487)
 	vehicle.item_id = 0x1004;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	vehicle.item_attrib = w::kItemAttribPlayerControl;
@@ -1442,6 +1519,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.health = 3000;
 	vehicle.health_max = 3000;
 	vehicle.alive = true;
+	vehicle.position = {10.0f, 10.0f, 0.0f};
+	vehicle.bound_radius.q16 = fx(4.0);
 	w::Seat driver;
 	driver.type = w::SeatType::Driver;
 	driver.retail_slot = 8;
@@ -1449,6 +1528,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	vehicle.seats.push_back(driver);
 	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
 	if (!expect(vh.valid(), "death-test carrier spawned")) return false;
+	// A hull with no collision geometry: the probe passes through it.
+	collision->assign_entity(vh, collision->add_model(w::CollisionModel{}));
 	if (!expect(world.vehicles.process_attach(ph, vh, 3),
 	            "remote player occupies the actual driver seat")) return false;
 
@@ -1485,14 +1566,16 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	const nw::FrameUpdateRecord *wire_peer = nullptr;
 	for (const nw::FrameUpdateRecord &record : frame.records)
 		if (record.handle == ph.packed) wire_peer = &record;
-	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == 0xFFFFu &&
-	                      wire_peer->player.vehicle_bone == 0,
-	              "same-tick dead player compact carries detached FFFF/zero relationship");
+	const uint16_t carrier = idle_skip ? vh.packed : uint16_t{0xFFFFu};
+	return expect(wire_peer != nullptr && wire_peer->player.carrier_handle == carrier &&
+	                      wire_peer->player.vehicle_bone == 0 && wire_peer->player.seat_type == 0,
+	              idle_skip ? "an idle-skip death tick's compact carries the head store's vehicle"
+	                        : "a full-resolve death tick's compact carries the probe's miss, 0xFFFF");
 }
 
-// The infantry motor SKIPS a net-snapped remote peer entirely — its pose is host-snapped,
-// never re-simulated. [orig: Entity_UpdateInfantryAI @0x4b9a03 entity+0x24 bit0 -> full exit.]
-bool run_motor_skips_net_peer() {
+// On a client the infantry motor skips a wire-owned remote body entirely: the joiner's replica
+// motion owns it (the authority runs its whole org2 update, D-NET-NEW-LP-2).
+bool run_motor_skips_client_wire_peer() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
@@ -1508,16 +1591,17 @@ bool run_motor_skips_net_peer() {
 	ae->inf.active = true;
 	ae->inf.body_heading = 12345;
 	ae->inf.target_heading = 9999999;
-	ae->pos[0] = 111;
-	ae->pos[1] = 222;
-	ae->pos[2] = 333;
+	ae->self->position.x.q16 = 111;
+	ae->self->position.y.q16 = 222;
+	ae->self->position.z.q16 = 333;
 	ae->heading = 4444;
 	ae->net_is_remote_peer = true;
+	ai.is_authority = false;
 	ai.tick_infantry(*ae, world, 0);
 
 	if (!expect(ae->inf.body_heading == 12345 && ae->inf.target_heading == 9999999,
 	            "skip-guard: heading state untouched")) return false;
-	if (!expect(ae->pos[0] == 111 && ae->pos[1] == 222 && ae->pos[2] == 333,
+	if (!expect(ae->self->position.x.q16 == 111 && ae->self->position.y.q16 == 222 && ae->self->position.z.q16 == 333,
 	            "skip-guard: live pos untouched")) return false;
 	if (!expect(ae->heading == 4444, "skip-guard: engine heading untouched")) return false;
 	return true;
@@ -1544,8 +1628,9 @@ int main() {
 	                run_apply_player_intent_stages_remote_peer() &&
 	                run_wire_pose_drives_remote_airborne_jump_gate() &&
 	                run_apply_rejects_own_player() &&
-	                run_remote_mounted_player_death_detaches_compact() &&
-	                run_motor_skips_net_peer();
+	                run_remote_mounted_player_death_detaches_compact(/*idle_skip=*/false) &&
+	                run_remote_mounted_player_death_detaches_compact(/*idle_skip=*/true) &&
+	                run_motor_skips_client_wire_peer();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
 }

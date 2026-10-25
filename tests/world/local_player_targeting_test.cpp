@@ -6,15 +6,23 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <memory>
+#include <vector>
 
 #include <base/io/bam.h>
 #include <formats/def/def.h>
+#include <runtime/mission/item_traits.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/hud_combat_feed.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
+#include <runtime/world/projectile_target_ring.h>
+#include <runtime/world/round_sim.h>
+#include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -52,7 +60,7 @@ struct LocalWorld {
     AiEntity &body() {
         ai.attach(local);
         AiEntity &b = *ai.for_handle(local);
-        b.pos[0] = 10 << 16; b.pos[1] = 20 << 16; b.pos[2] = 3 << 16;
+        b.self->position.x.q16 = 10 << 16; b.self->position.y.q16 = 20 << 16; b.self->position.z.q16 = 3 << 16;
         return b;
     }
 };
@@ -89,9 +97,8 @@ CollisionModel vertical_quad_model() {
     return m;
 }
 
-// The heat-seeker lock fixture the cadence test uses: a LOCK def whose ammo
-// heat-seeks, and one hot enemy vehicle 100 u down +X.
-EntityHandle seed_heat_lock(LocalWorld &lw, LocalPlayer &local) {
+// The heat-seeker weapon: a LOCK def whose ammo heat-seeks (3000 u, a 20 degree cone).
+void seed_heat_weapon(LocalWorld &lw, LocalPlayer &local) {
     local.weapon.active = true;
     local.weapon.def_name = "LOCK";
     std::strcpy(local.weapon.def.soundlockedtone, "LOCKED");
@@ -101,6 +108,12 @@ EntityHandle seed_heat_lock(LocalWorld &lw, LocalPlayer &local) {
     lw.w.tables.ammo.entries.resize(2);
     auto &ammo = lw.w.tables.ammo.entries[1];
     ammo.valid = true; ammo.heat_det_range = 3000; ammo.boresight_maxang = 11930464 * 20;
+}
+
+// The heat-seeker lock fixture the cadence test uses: the LOCK weapon and one hot
+// enemy vehicle 100 u down +X.
+EntityHandle seed_heat_lock(LocalWorld &lw, LocalPlayer &local) {
+    seed_heat_weapon(lw, local);
     Entity target;
     target.item_id = 2; target.item_type = 1; target.health = 100; target.alive = true;
     target.team = 2; target.heat_sig = 500; target.position = {110, 20, 3};
@@ -125,7 +138,7 @@ void test_weapon_view_ray_takes_the_scope_zero_back_out() {
     local.weapon.def.flags = DEF_WEAPON_FLAG_FORCESCOPED; // the CanFire pin
     local.weapon.slot.zero_pitch = bam_from_degrees_wrapped(4.0);
     CHECK(local.local_player_can_fire());
-    const int32_t origin[3] = {body.pos[0], body.pos[1], body.pos[2]};
+    const int32_t origin[3] = {body.self->position.x.q16, body.self->position.y.q16, body.self->position.z.q16};
     const int32_t forward[3] = {1000 << 16, 0, 0};
     const auto endpoint_for = [&](int32_t pitch, int32_t out[3]) {
         collision_matrix_from_euler(body.heading, pitch, body.roll, origin)
@@ -271,10 +284,10 @@ void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
     const int32_t forward[3] = {1000 << 16, 0, 0};
     int32_t endpoint[3];
     collision_matrix_from_euler(fire[3], fire[4], fire[5], fire).transform_point(forward, endpoint);
-    // The last composed eye sits 47 u above the player.
-    local.view_tracker.composed.eye[0] = 10.0f;
-    local.view_tracker.composed.eye[1] = 20.0f;
-    local.view_tracker.composed.eye[2] = 50.0f;
+    // The last composed eye (the g_ViewPos words) sits 47 u above the player.
+    local.view_tracker.composed.pos_q16[0] = 10 << 16;
+    local.view_tracker.composed.pos_q16[1] = 20 << 16;
+    local.view_tracker.composed.pos_q16[2] = 50 << 16;
     local.view_tracker.composed_valid = true;
     lw.w.logic_tick = 16;
     local.update_aim_target();
@@ -372,8 +385,7 @@ void test_aim_ray_names_a_remote_persons_proxy() {
     int32_t fire[6];
     local_weapon_fire_pose(lw.w, local.weapon, local.weapon.slot.clip, false, fire);
     // The composed eye on the fire pose: the ray runs down the fire heading.
-    for (int i = 0; i < 3; ++i)
-        local.view_tracker.composed.eye[i] = static_cast<float>(fire[i]) / 65536.0f;
+    for (int i = 0; i < 3; ++i) local.view_tracker.composed.pos_q16[i] = fire[i];
     local.view_tracker.composed_valid = true;
     int32_t ahead[3];
     const int32_t forward[3] = {100 << 16, 0, 0};
@@ -397,6 +409,166 @@ void test_aim_ray_names_a_remote_persons_proxy() {
     CHECK(local.aim_wire_person() == 0xFFFF);
 }
 
+
+// The heat lock is the shared query's winner over the pool legs and the projectile target
+// ring, so a flare round ahead is the lock: the +0xC word holds the round, the tone flag
+// tests that word, the shooter's fire target is the round (its wire word 0xFFFF), and the
+// infantry pass's entity mirror stays empty.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B51FE..0x4B520A (the tone @0x4B520D..0x4B5222)
+//  -> Entity_SpawnWeaponEffect @0x545840 -> Entity_FindTargets @0x53A610 (the ring leg
+//  @0x53ACF0..0x53ADE0)]
+void test_heat_lock_takes_a_flare_round() {
+    auto lw = std::make_unique<LocalWorld>();
+    CollisionWorld collision;
+    lw->w.collision = &collision;
+    AiEntity &body = lw->body();
+    body.team = 1; lw->entity().team = 1;
+    LocalPlayer local(lw->w);
+    const EntityHandle hot = seed_heat_lock(*lw, local);
+    lw->w.registry.get(hot)->health = 0; // dead past 16 ticks: no entity candidate
+    lw->w.logic_tick = 32;
+    ThrowableClassRow flare{3100, ThrowClass::kAirFlare, ThrowClass::kAirFlare, 5, 0, 0, 1};
+    lw->w.throwables.classes.set(flare);
+    LiveRound &round = lw->w.round_sim.rounds[0];
+    round.active = true;
+    round.item_type_id = 3100;
+    round.motor = ThrowClass::kAirFlare;
+    round.heat_sig = 0x1234;
+    round.pos.set_q16({110 << 16, 20 << 16, 3 << 16});
+    ProjectileTargetRing &ring = lw->w.round_sim.target_ring;
+    round.target_ring_slot = ring.update(0, -1, 10);
+    lw->w.round_sim.rounds[1].target_ring_slot = ring.update(1, -1, 10); // [0, count) reads slot 1
+    local.update_aim_target();
+    CHECK(body.slot.f[3] == -1);
+    CHECK((body.slot.f[2] & 1) != 0);
+    CHECK(!body.inf.combat_target.valid());
+    CHECK(lw->entity().last_fire_target == TargetRef::of_round(0));
+    CHECK(lw->entity().last_fire_target.entity.packed == 0xFFFF);
+}
+
+// A synthetic items.def: the Null row (index 0, which reads as no def), a plyr person
+// carrying heatsig 800, the same person with none (every shipped JO person row: heatsig
+// absent or 0), and an org1 person carrying heatsig 800.
+const char kHeatItems[] =
+        "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+        "begin \"Hot soldier\"\r\n id 105400\r\n type person\r\n hp 100\r\n heatsig 800\r\n"
+        " ai_function plyr\r\nend\r\n"
+        "begin \"Cold soldier\"\r\n id 105401\r\n type person\r\n hp 100\r\n ai_function plyr\r\n"
+        "end\r\n"
+        "begin \"Hot organic\"\r\n id 105402\r\n type person\r\n hp 100\r\n heatsig 800\r\n"
+        " ai_function org1\r\nend\r\n";
+
+// On a joiner the heat lock's pool-0 leg walks the decoded remote persons, the pool-0
+// entities retail's client built (World::wire_person), with every test it runs on a slot: a
+// hot enemy person ahead is the lock, its word the person's (the C2S 0x06 target word its
+// handle), the tone flag up, and the crosshair's cursor quad draws at its fire origin (the
+// plyr row's DcbId 10000 + its +0x154 byte phasing the CameraOffset point), tinted enemy. A
+// teammate, a person def with no heatsig, a body dead past 16 ticks, a Player-flag person
+// under the 0x800 rule and a record whose type indexes no row are no lock; the client's
+// destroy of the row clears the word.
+// [orig: Entity_FindTargets @0x53A610 - the pool-0 leg @0x53A6E7..0x53A8A3;
+//  Entity_ValidateWeaponTarget @0x53A400 - the 0x800 test @0x53A46E..0x53A478, the heat leg
+//  @0x53A54A..0x53A56E; Entity_ComputeWeaponFireOrigin @0x43B4B0 (@0x43B4C0..0x43B523);
+//  PlayerClass_InitEntity @0x4B1060 (@0x4B1149..0x4B1173); HUD_DrawCrosshair - the cursor
+//  @0x592776..0x592790, Entity_ComputeWeaponFireOrigin @0x592803;
+//  NetPacket_WriteEntityPositionUpdate @0x42A610 (@0x42A713..0x42A745);
+//  Entity_ClearAllReferences @0x465670 (@0x4656DB..0x4656E7)]
+void test_heat_lock_takes_a_decoded_remote_person() {
+    auto lw = std::make_unique<LocalWorld>();
+    World &w = lw->w;
+    DefItemsFile items{};
+    CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kHeatItems),
+                  sizeof(kHeatItems) - 1, &items) == 0);
+    opennova::mission::resolve_item_traits(w, items, {}, nullptr);
+    CollisionWorld collision;
+    w.collision = &collision;
+    AiEntity &body = lw->body();
+    body.team = 1; lw->entity().team = 1;
+    w.rules.mp_session = true; // a joiner
+    w.rules.projectile_authority = false;
+    LocalPlayer local(w);
+    seed_heat_weapon(*lw, local);
+    w.out.fire_sounds.set_listener({10, 20, 3});
+    std::map<uint16_t, World::WirePerson> rows;
+    World::WirePerson hot;
+    hot.type_id = 5400;
+    hot.team = 2;
+    hot.byte_154 = 3;
+    hot.flags = kEntityFlagPlayer;
+    hot.pos[0] = 110 << 16; hot.pos[1] = 20 << 16; hot.pos[2] = 3 << 16;
+    hot.eye[0] = 0x10000; hot.eye[1] = 0x20000; hot.eye[2] = 0x40000;
+    rows[0x0003] = hot;
+    w.wire_person = [&rows](uint16_t handle, World::WirePerson &out) {
+        const auto it = rows.find(handle);
+        if (it == rows.end()) return false;
+        out = it->second;
+        return true;
+    };
+    w.wire_person_handles = [&rows](std::vector<uint16_t> &out) {
+        out.clear();
+        for (const auto &row : rows) out.push_back(row.first);
+    };
+    const auto acquire = [&](uint32_t tick) {
+        body.slot.f[3] = 0;
+        w.logic_tick = tick;
+        local.update_aim_target();
+        return AiSlot::target_of(body.slot.f[3]);
+    };
+    TargetRef lock = acquire(16);
+    CHECK(lock == TargetRef::of_wire_person(0x0003));
+    CHECK(body.slot.f[3] == 0x10001 + 0x0003);
+    CHECK((body.slot.f[2] & 1) != 0);
+    CHECK(!body.inf.combat_target.valid());
+    CHECK(lw->entity().last_fire_target.pool_word() == 0x0003);
+    // The crosshair's cursor: the lock word sets the flag; the quad sits at the person's fire
+    // origin. Tick 16: the phase 16 + 36 * 10003 = 0x57EBC has bit 7 up (a quarter of the X / Y
+    // offsets, half the Z) and 0x20 in its 0x60 bits (X jitter (32 - 64) * 64, Y 0).
+    local.build_hud_target_cursor();
+    const HudTargetCursor &cursor = local.hud_target_cursor();
+    CHECK(cursor.lock.wire_person == 0x0003 && cursor.wire_person == 0x0003);
+    LocalPlayerViewFrame frame;
+    fill_hud_combat_view(w, local.weapon, frame, local.view_tracker, false);
+    CHECK(frame.hud_combat.state.target_cursor && frame.hud_combat.state.target_locked);
+    CHECK(!frame.hud_combat.state.target_friendly && frame.hud_combat.target_valid);
+    CHECK(frame.hud_combat.target[0] == (110 << 16) + 0x4000 - 2048);
+    CHECK(frame.hud_combat.target[1] == (20 << 16) + 0x8000);
+    CHECK(frame.hud_combat.target[2] == (3 << 16) + 0x20000);
+    // A teammate: no lock.
+    rows[0x0003].team = 1;
+    CHECK(!acquire(32).valid());
+    rows[0x0003].team = 2;
+    // A person def with no heatsig: the heat leg's range < 0 << 16 never holds.
+    rows[0x0003].type_id = 5401;
+    CHECK(!acquire(48).valid());
+    // A type no items row carries: ItemTypeIndex 0, skipped.
+    rows[0x0003].type_id = 7777;
+    CHECK(!acquire(64).valid());
+    rows[0x0003].type_id = 5400;
+    // Dead: a target for 16 ticks after the edge's stamp, no longer.
+    rows[0x0003].flags |= kEntityFlagDead;
+    rows[0x0003].death_age = 16;
+    CHECK(acquire(80) == TargetRef::of_wire_person(0x0003));
+    rows[0x0003].death_age = 17;
+    CHECK(!acquire(96).valid());
+    rows[0x0003].flags &= ~kEntityFlagDead;
+    // The local cheat word's 0x800 bit drops a Player-flag person; an org1 person stays.
+    w.rules.ai_rules_skip_local_player = true;
+    CHECK(!acquire(112).valid());
+    rows[0x0003].type_id = 5402;
+    rows[0x0003].flags = 0;
+    CHECK(acquire(128) == TargetRef::of_wire_person(0x0003));
+    w.rules.ai_rules_skip_local_player = false;
+    // The client's destroy of the row: its reference sweep clears the word.
+    rows.erase(0x0003);
+    local.note_wire_entity_destroyed(0x0003);
+    CHECK(body.slot.f[3] == 0);
+    local.build_hud_target_cursor();
+    CHECK(!local.hud_target_cursor().lock.valid());
+    w.wire_person = {};
+    w.wire_person_handles = {};
+    def_free_items(&items);
+}
+
 } // namespace
 
 int main() {
@@ -406,6 +578,8 @@ int main() {
     test_locked_tone_waits_for_the_last_catch_up_tick();
     test_camera_leg_aims_the_fire_pose_from_the_composed_eye();
     test_aim_ray_names_a_remote_persons_proxy();
+    test_heat_lock_takes_a_flare_round();
+    test_heat_lock_takes_a_decoded_remote_person();
     if (failures == 0) std::printf("local_player_targeting_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

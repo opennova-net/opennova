@@ -1,6 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/canvas_item_material.hpp>
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
@@ -30,11 +29,13 @@
 #include <runtime/renderer/texture_load_rules.h> // MaterialColorStage
 
 #include "hud/hud_map_pass_renderer.h"
+#include "hud/hud_process_words_carry.h"
 #include "resource_index/resource_root.h"
 
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 #include <unordered_map>
 
 namespace godot {
@@ -90,8 +91,13 @@ public:
 	// art + .fnt through the mounted VFS root (null root -> layout only: bars
 	// and boxes draw, textured/text elements self-hide). Resets the compiler's
 	// runtime state (a fresh HUD build).
-	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root);
+	// `p_full_arm` false: a dedicated host's reduced arm, the box styles, the connection
+	// icons and the fonts alone (no HUD texture load, no map materials).
+	void configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
+			bool p_full_arm = true);
 	bool is_configured() const;
+	// The additive rows' material as it stands (null until a full-arm configure made it): a read seam.
+	Ref<ShaderMaterial> get_additive_material() const { return additive_material_; }
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
     void set_player_context(const Ref<PlayerLocalView> &p_view);
 	void set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
@@ -161,6 +167,11 @@ public:
 	// HudFrameState::menu_screen_open carries the witness): the preround
 	// armory line yields to it.
 	void set_menu_screen_open(bool p_open);
+	// Whether this frame's scene frame calls the gameplay overlay pass (GameWorld::
+	// get_last_frame_hud_pass_called, engine inmatch::FrameOutcome::hud_pass_called): where it
+	// does not, the pass draws nothing and does none of its state work, and the scene frame's
+	// own legs draw (engine hud::HudFrameState::overlay_pass_called).
+	void set_overlay_pass_called(bool p_called);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open (its 4-team page alternates on the
@@ -204,6 +215,13 @@ public:
 	// One line for the CHAT ring (the script chat lines); the engine ring
 	// word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
+	// The process's remote admin reaches the HUD through this group (GameWorld's console
+	// seams, engine inmatch/admin_console.h Seams::chat_window / chat_echo): CHAT GET reads the
+	// CHAT window's display lines, oldest first, and a refused CHAT SEND echoes into it in the
+	// global sender's flood colour.
+	static constexpr const char *kAdminGroup = "opennova_hud_overlay";
+	std::vector<std::string> chat_window_lines() const;
+	void echo_admin_chat(const std::string &p_text);
 	// Drain the sim's S2C 0x1E feed lines, 0x14 chat lines and 0x32 join/leave
 	// lines (Simulation::drain_feed_posts, resolved against the gametext
 	// table) into their rings in wire order. Returns the frame's last involved
@@ -211,8 +229,8 @@ public:
 	String post_feed_lines(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext,
 			bool p_mp_verbose);
 	// The CMAP chat panel's send (CHAT_TEAM: `p_all` false; CHAT_ALL: true):
-	// the line through the team (Chat_SendGlobalMessage, a misnomer) or the
-	// global (Chat_SendTeamMessage, a misnomer) sender; a flooded line echoes
+	// the line through the team (Chat_SendTeamMessage) or the
+	// global (Chat_SendGlobalMessage) sender; a flooded line echoes
 	// on the CHAT ring in that sender's colour. Returns the ChatSendResult.
 	// Witness: hud-re "The windowed map views" (CMap_HandleChatSubmit).
 	// CMAP's CHAT_MSGS slot: the console messages (the engine's
@@ -247,12 +265,14 @@ public:
 	void set_tip(int p_tip, int p_countdown, bool p_local_dead,
 			const Ref<RtxtStringFile> &p_gametext, const Ref<ControlsModel> &p_controls);
 	void set_message_log_title(const String &p_title);
-	// The AAS zone status panel: shown, the session game type (the conquest
-	// arm is unmodelled and draws nothing), the viewer's team (the blink reads
-	// the HUD frame counter, set_frame_clocks), the gametext table its two status strings
-	// resolve in (engine hud_lfp_panel.h, retail's fallbacks; null = the
-	// fallbacks), and the Simulation the zone rows are pulled from natively
-	// (Simulation::fill_lfp_zones). Pass null when hiding.
+	// The AAS zone status panel and the takeover dialog: shown, the session game
+	// type (the panel's conquest arm), the viewer's team (the blink reads the HUD
+	// frame counter, set_frame_clocks; the dialog's camp lines test it), the
+	// gametext table their strings resolve in (engine hud_lfp_panel.h /
+	// hud_takeover_status.h, retail's fallbacks; null = the fallbacks), and the
+	// Simulation the zone rows and the dialog's nearest entry are pulled from
+	// natively (Simulation::fill_lfp_zones / fill_takeover_facts). Pass null when
+	// hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
 			const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
@@ -282,6 +302,9 @@ public:
 	// The Tab board's header strings as the overlay holds them to draw (a read seam for the tests): the title, the
 	// game type's rung, the players' and the spectators' lines and the paging hint, as the board's entry composed them.
 	PackedStringArray get_scoreboard_header_text() const;
+	// The frame-rate overlay's line as the overlay holds it to draw (a read seam for the tests),
+	// "" while the cheat word's 0x400 bit is down (engine hud/hud_frame.h HudFrameRateOverlay).
+	String get_frame_rate_overlay_text() const;
 	Vector2 get_attach_label_position(int p_index) const;
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play
@@ -352,9 +375,17 @@ public:
 	int get_hud_detail_level() const;
 	// BMS action 28 sub 37: HUD item flash timer `index` takes `value` and the
 	// layer table rebuilds at declutter level 0 (hud_declutter.h HudItemFlash
-	// / HudDeclutter::apply_level). The timers count down on the logic tick
-	// set_frame_clocks carries.
+	// / HudDeclutter::apply_level). The compiler holds the timers; its overlay
+	// pass counts them down on the logic tick set_frame_clocks carries.
 	void set_item_flash(int p_index, int p_value);
+	// The 16 timers as this overlay holds them.
+	PackedInt32Array get_item_flash_timers() const;
+	// The HUD's process words as this overlay holds them, and the carry a new mission's overlay
+	// takes from the torn-down one's (GameHudPresenter): retail's are process words no mission
+	// start resets (engine hud_frame.h HudProcessWords carries the witness). The carry stores the
+	// words only: no layer rebuild, no tick. A null carry stores none.
+	Ref<HudProcessWordsCarry> get_process_words() const;
+	void carry_process_words(const Ref<HudProcessWordsCarry> &p_words);
 	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
@@ -467,6 +498,11 @@ public:
 	void set_draw_timing_enabled(bool p_enabled);
 	// [compile_us, emit_us] accumulated since the last consume; zeroes after.
 	PackedInt64Array consume_draw_timing_us();
+	// The draw of the overlay's current state submitted at once, as the next idle frame's redraw
+	// would submit it: the mission load's one forced frame runs while the SceneTree is blocked, so
+	// a queued redraw would reach it with nothing (GameWorld's hud_pipeline_warm signal). Nothing
+	// off the tree.
+	void submit_draw_now();
 
 	void _draw() override;
 
@@ -526,6 +562,9 @@ private:
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
+	// The role's inset friendly name (set_role_facts), set into the combat state
+	// set_combat_state copies from the view.
+	std::string inset_target_name_;
 	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
 	bool server_status_shown_ = false;                // set_server_status_page
 	bool scene_3d_was_disabled_ = false;              // the viewport's own setting under the page
@@ -534,7 +573,6 @@ private:
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.
 	opennova::hud::HudDeclutter declutter_;
-	opennova::hud::HudItemFlash item_flash_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
 	// The colour map the last set_minimap_terrain installed, which a terrain
@@ -574,8 +612,8 @@ private:
 	// slot (reloaded on change).
 	String vehicle_panel_sid_;
 	// Additive rows cannot share this item's blend mode: they render through a
-	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
-	Ref<CanvasItemMaterial> additive_material_;
+	// child RenderingServer canvas item carrying the additive program (ensure_additive_material_).
+	Ref<ShaderMaterial> additive_material_;
 	RID additive_item_;
 	// Retail thresholds the linearly sampled depthspin height field against
 	// the water plane. This material keeps that comparison in the raster pass.
@@ -663,6 +701,7 @@ private:
 	void ensure_minimap_water_material_();
 	void ensure_flat_material_();
 	void ensure_map_materials_();
+	void ensure_additive_material_();
 	// The map pass shader's TSDicon chain bound (icon_max_lod).
 	void apply_map_icon_sampling_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);

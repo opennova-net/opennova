@@ -150,7 +150,6 @@ int main() {
     for (size_t i = 0; i < connections.size(); ++i) {
         connections[i].reply.player_slot = static_cast<uint8_t>(i);
         connections[i].admission_stage = inmatch::GameAdmissionStage::Complete;
-        connections[i].link.last_deploy_tick_valid = true;
     }
     w::Entity item;
     item.kind = w::EntityKind::Item;

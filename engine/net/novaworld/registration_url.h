@@ -23,10 +23,12 @@ namespace opennova {
 //      LAN-discovered endpoint instead of the NK relay pair and reports the
 //      number as the session's "Lan" var. GS is copied by the parser but no
 //      retail code ever reads the buffer (a single xref: the parse call).
-//      [orig: LN `atol` @0x54e33e; GS `strcpy(g_GsBuf, ..)` @0x54e38a;
-//       consumers CNapiGameSession_InitTransportConnection @0x4c9e6c
-//       (`if (g_LobbyNum)` selects byte_C8FE7C/byte_C8FEBC over g_NkBuf /
-//       g_NkExtraBuf) and CNapiGameSession_ConnectOrHost @0x4d5418 ("Lan")]
+//      [orig: URL_ParseConnectionQueryString @0x54DFB0 - the LN atol (the call
+//       @0x54E336, its store @0x54e33e), the GS copy @0x54e38a into g_GsBuf; the
+//       consumers CNapiGameSession_InitTransportConnection @0x4C9E10 - `if (g_LobbyNum)`
+//       @0x4C9E65..0x4c9e6c selects byte_C8FE7C/byte_C8FEBC over g_NkBuf / g_NkExtraBuf,
+//       and CNapiGameSession_ConnectOrHost @0x4D4F10 - g_LobbyNum @0x4d5418, "Lan"
+//       @0x4D541F]
 //
 // Only the NK= and CK= values are cipher-obfuscated (novacrypto::
 // url_cipher_decode with the respective key literals). NI/NP/BK/LN/GS are

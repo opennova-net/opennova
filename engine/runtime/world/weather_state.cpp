@@ -4,6 +4,8 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
+#include <base/io/bam.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -278,6 +280,12 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
     bump_command();
 }
 
+void WeatherState::set_current_time(uint32_t fixed24) {
+    tod_fixed24 = fixed24;
+    tod_epoch_tickdown = 10;
+    bump_command();
+}
+
 void WeatherState::debug_set_time_of_day_minutes(double minute_of_day) {
     tod_fixed24 = tod_fixed24_from_minutes(minute_of_day);
     bump_command();
@@ -417,11 +425,9 @@ void WeatherState::apply_quake_jitter(World &world, WeatherTickEvents &events) {
         const int32_t dx = static_cast<int32_t>(static_cast<int16_t>(rand)) >> 6;
         const int32_t dy = 4 * static_cast<int32_t>(static_cast<int8_t>(rand));
         const int32_t dh = static_cast<int32_t>((16u * rand) >> 7);
-        e.position.x += static_cast<float>(dx) / 65536.0f;
-        e.position.y += static_cast<float>(dy) / 65536.0f;
+        e.position.x.q16 = io::bam_add(e.position.x.q16, dx);
+        e.position.y.q16 = io::bam_add(e.position.y.q16, dy);
         if (AiEntity *a = world.ai.for_handle(e.handle)) {
-            a->pos[0] += dx;
-            a->pos[1] += dy;
             if (heading_bam == nullptr) a->heading += dh;
         }
         if (heading_bam != nullptr) *heading_bam += dh;

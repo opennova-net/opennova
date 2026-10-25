@@ -70,33 +70,25 @@ inline constexpr uint32_t kEntityAttribNoShadow = 0x01000000u;
 // bms::BmsiAttributeFlags::Reflective).
 inline constexpr uint32_t kEntityAttribMirrorReflect = 0x00800000u;
 
-// Runtime-only player type id -> the authored items.def visual item. The
-// runtime entity item/type id stays unchanged; this only chooses
-// graphics/ADM data for presentation.
-inline constexpr int kPlayerRuntimeTypeId = 0x14B9;
-// items.def "Player #1, Single player" -> US01/US01.adm.
-inline constexpr int kPlayerVisualItemId = 105310;
-
-// The items.def id presentation resolves graphics/ADM by, for a runtime
-// entity type id: the runtime-only player type maps to the authored visual
-// item when the catalog carries it (`player_visual_in_catalog` — the shell's
-// item database probe); every other type is the wire/BMS id + kItemIdOffset.
-inline constexpr int visual_item_id_for_runtime_type(
-		int item_id, bool player_visual_in_catalog) {
-	if (item_id == kPlayerRuntimeTypeId && player_visual_in_catalog)
-		return kPlayerVisualItemId;
+// The items.def id a body's graphics, ADM and collision come from, for its
+// runtime type word: the row the word itself names (wire/BMS id +
+// kItemIdOffset), the player's 0x14B9 included. Retail binds a body's def by
+// its type word and nothing else, so a player body of 0x14B9 draws "Player #1,
+// Multiplayer" (105305) and one of 5310 draws "Player #1, Single player" (105310).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - ItemList_FindIndexByTypeId
+//  @0x43C3CA, the row @0x43C3CF..0x43C3D9; NetPacket_SerializePlayerState
+//  @0x4C09C0 - the call @0x4C129D, the def / model stores @0x4C12B8..0x4C12D6
+//  (graphic model = def+0xF0 @0x4C12BE..0x4C12C4)]
+inline constexpr int visual_item_id_for_runtime_type(int item_id) {
 	return item_id + kItemIdOffset;
 }
 
-// The presenter's full resolution over a catalog probe `has_item(id)`: the
-// runtime player type maps to the authored visual item when the catalog
-// carries it; an id the catalog already knows is an authored id and stays; a
-// wire/BMS id below kItemIdOffset resolves to its authored twin when present;
-// anything else is returned unchanged for the caller's own fallback.
+// The presenter's full resolution over a catalog probe `has_item(id)`: an id
+// the catalog already knows is an authored id and stays; a wire/BMS id below
+// kItemIdOffset resolves to its authored twin when present; anything else is
+// returned unchanged for the caller's own fallback.
 template <typename HasItem>
 inline int resolve_visual_item_id(int runtime_type_id, HasItem &&has_item) {
-	if (runtime_type_id == kPlayerRuntimeTypeId && has_item(kPlayerVisualItemId))
-		return kPlayerVisualItemId;
 	if (has_item(runtime_type_id))
 		return runtime_type_id;
 	if (runtime_type_id > 0 && runtime_type_id < kItemIdOffset &&
@@ -141,7 +133,7 @@ inline bool uses_submodel_renderer(std::string_view render_function) {
 // other world callbacks apply, the generic one's and the bldg, door, tree,
 // ewep, chel, cveh, tank and cpln rows', is not this predicate's.)
 // [orig: rows 'psec' @ 0x82D010 / 'cesp' @ 0x82D020 -> BoneCallback_psec_World
-//  @ 0x53C130; Entity_LookupRenderCallbacks stricmp @ 0x407DD8, rows 'palm'
+//  @ 0x53C130; EntityDef_LookupClassCallbacks stricmp @ 0x407DD8, rows 'palm'
 //  @ 0x813270 -> WeaponOverlay_HandleDamage @ 0x53C4C0, 'towr' @ 0x813240 ->
 //  Entity_UpdateSectionDamage @ 0x4406A0; EntityDef_LookupPhysicsCallback
 //  stricmp @ 0x4A9258, row 'psec' @ 0x82AD54 -> Entity_UpdatePhysicsStep
@@ -249,6 +241,24 @@ inline PlacementVec3 presentation_to_bms_position(const PlacementVec3 &p) {
 
 PlacementBasis bms_to_presentation_basis(float pitch_deg, float yaw_deg,
 		float roll_deg);
+
+// Whether a mission start builds the draw objects of its placed entities (the shell's
+// placement: each model's node, each static graphic's populations). A model's load fills memory
+// on every role: its vertices are copied into a FastMem block, no device object made. A placed
+// entity is drawn only in the frame's scene arm, which a dedicated host (in session, the
+// authority, no session peer) never takes, and its start skips the render subsystems' init as
+// well. So a dedicated host's load builds none; the sim's entities, their collision and the
+// mission start's model list stand as on every other role (D-NET-NEW-L3-30).
+// [orig: ThreediGp_LoadModel @0x5B6160 (the call @0x5B6230) -> ThreediGp_LoadFromFile @0x5B5780
+//  -> GPM_LoadRenderModel @0x5B5000 (the call @0x5B5B8F) -> ThreediGp_ConvertVerticesToGPUFormat
+//  @0x5B4C90 (the call @0x5B50CB): FastMem_AllocLabeled @0x759E20 "GPM RModel Vert" (@0x5B4CDA);
+//  GameLoop_RenderFrame @0x521310 - is_mp_session_peer @0x52134E, jz @0x521355 to
+//  Server_DrawStatusScreen @0x521CEF past Render_ProcessMainSceneFrame @0x521CE8;
+//  Game_StartMission @0x524360 - the dedicated word @0x524942..0x52495C, its test @0x5259B4
+//  past Render_InitRenderingSubsystems (the call @0x5259D1)]
+constexpr bool builds_placement_draws(bool dedicated_host) noexcept {
+	return !dedicated_host;
+}
 
 
 // --- placement-pass witness ledger -----------------------------------------

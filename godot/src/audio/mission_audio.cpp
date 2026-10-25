@@ -108,7 +108,8 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("advance_dialog_tick"), &MissionAudio::advance_dialog_tick);
 	ClassDB::bind_method(D_METHOD("resolve_dialog_wave", "wav_id"), &MissionAudio::resolve_dialog_wave);
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
-	ClassDB::bind_method(D_METHOD("sync_script_voice"), &MissionAudio::sync_script_voice);
+	ClassDB::bind_method(D_METHOD("follow_script_voice"), &MissionAudio::follow_script_voice);
+	ClassDB::bind_method(D_METHOD("update_script_voice"), &MissionAudio::update_script_voice);
 	ClassDB::bind_method(D_METHOD("_on_script_voice_finished", "serial", "player_id"),
 			&MissionAudio::_on_script_voice_finished);
 	ClassDB::bind_method(D_METHOD("set_time_of_day_hhmm", "hhmm"), &MissionAudio::set_time_of_day_hhmm);
@@ -284,7 +285,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	// the two states that mean "no ambience will play" so they surface in logs.
 	if (stats_->get_banks_loaded() == 0) {
 		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: no sound banks loaded (probed %s) — mission ambience will be silent",
+				"MissionAudio: no sound banks loaded (probed %s): mission ambience will be silent",
 				global_chain_text));
 		// The log line the editor's Play reads back into a Problems row (ADR 0046 DI-27): game.lwf, the
 		// global chain's bank the game's own sets live in, which a project makes or imports to be heard.
@@ -292,7 +293,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 				vformat("no sound bank loaded (probed %s), so the mission is silent", global_chain_text));
 	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
 		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
+				"MissionAudio: 0/%d sound markers resolved (item db %s): mission ambience will be silent",
 				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
 	}
 
@@ -533,6 +534,34 @@ void MissionAudio::reset_oneshot_playback() {
     recent_fires_.clear();
 }
 
+void MissionAudio::shutdown_audio_channels() {
+	if (bank_.is_valid()) {
+		bank_->reset_oneshots(this);
+	}
+	_stop_all_ambient_channels();
+	const Ref<Simulation> sim = _simulation();
+	if (opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr) {
+		for (const uint64_t voice : queue->voices()) {
+			if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
+						ObjectDB::get_instance(ObjectID(voice)))) {
+				dialog->stop();
+			}
+		}
+	}
+	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
+		dialog->stop();
+	}
+	if (AudioStreamPlayer *wac = _wac_voice_node()) {
+		wac->stop();
+	}
+}
+
+void MissionAudio::stop_dialog_line() {
+	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
+		dialog->stop();
+	}
+}
+
 // The local player's own action-slot presentation arrives as source -1 with no
 // key (player_weapon_effects); it keys on that marker so its re-fires restart
 // their own voice like every other entity's. Everything else keeps the key the
@@ -585,12 +614,13 @@ void MissionAudio::advance_dialog_tick() {
 	const bool rendered = dialog_frame_rendered_;
 	dialog_frame_rendered_ = false;
 	const Ref<Simulation> sim = _simulation();
-	opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr;
-	if (queue == nullptr) {
+	if (sim.is_null()) {
 		return;
 	}
-	queue->tick(rendered,
-			[this](const opennova::audio::DialogLineRef &p_line) { return _load_dialog_line(p_line); },
+	sim->tick_dialog_queue(rendered,
+			[this](const opennova::audio::DialogLineRef &p_line, bool p_play) {
+				return _load_dialog_line(p_line, p_play);
+			},
 			[this](uint64_t p_voice) { return _dialog_voice_playing(p_voice); });
 }
 
@@ -602,7 +632,7 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
 	const opennova::audio::DialogLinePlayback line = opennova::audio::resolve_dialog_line(
-			dialog_bank, dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, nullptr,
+			dialog_bank, dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, nullptr, nullptr,
 			opennova::to_std(p_dialog_name), p_line, p_player_class);
 	if (line.file.empty()) {
 		return false;
@@ -651,12 +681,12 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 
 // A line the dialog queue loads: its wave read and decoded through the VFS (a
 // missing .wav extension tolerated), what the game's wave loader records of it
-// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold), a voice of
-// the dialog channel at the wave's volume byte, then the line's report to the
-// co-op broadcast (engine: Simulation::broadcast_dialog_line ->
-// Server_BroadcastDialogLine), made for every line the queue loads, its wave
-// or none (docs/audio/lwf-dbf-sound-re.md D-SND-42, the dialog line timing).
-opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audio::DialogLineRef &p_line) {
+// for the line's hold (runtime/audio/dialog_queue dialog_clip_hold) and, when the
+// engine's gate lets it play, a voice of the dialog channel at the wave's volume
+// byte. The authority's leg (its chat lines and the co-op broadcast) runs after it
+// in the engine (Simulation::tick_dialog_queue; docs/audio/lwf-dbf-sound-re.md D-SND-42).
+opennova::audio::DialogClip MissionAudio::_load_dialog_line(
+		const opennova::audio::DialogLineRef &p_line, bool p_play) {
 	opennova::audio::DialogClip clip;
 	if (!p_line.file.empty() && root_attached_ && resource_root_.is_valid()) {
 		const String name = opennova::to_gd(p_line.file).get_file();
@@ -671,16 +701,11 @@ opennova::audio::DialogClip MissionAudio::_load_dialog_line(const opennova::audi
 			clip.loaded = true;
 			clip.samples = decoded.loader_samples;
 			clip.pitch_q16 = decoded.loader_pitch_q16;
+			if (!p_play) return clip;
 			if (AudioStreamPlayer *voice = _spawn_dialog_voice(WavLoader::from_pcm(decoded), p_line.volume)) {
 				dialog_voice_id_ = ObjectID(voice->get_instance_id());
 				clip.voice = static_cast<uint64_t>(voice->get_instance_id());
 			}
-		}
-	}
-	if (p_line.line >= 0) {
-		const Ref<Simulation> sim = _simulation();
-		if (sim.is_valid()) {
-			sim->broadcast_dialog_line(p_line.dialog_name, p_line.line);
 		}
 	}
 	return clip;
@@ -696,7 +721,7 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 	const Ref<Simulation> sim = _simulation();
 	if (sim.is_valid()) {
 		const bool loaded = sim->play_script_wave(p_filename);
-		sync_script_voice();
+		follow_script_voice();
 		return loaded;
 	}
 	// Standalone tooling shares the same interrupt-before-load rule.
@@ -752,7 +777,7 @@ void MissionAudio::set_time_of_day_hhmm(double p_hhmm) {
 }
 
 void MissionAudio::advance_ticks(int64_t p_logic_tick) {
-	sync_script_voice();
+	follow_script_voice();
 	if (mixer_.is_null()) {
 		return;
 	}
@@ -797,7 +822,9 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 	// The frame this pass mixes renders: the next dialog tick starts a fresh
 	// line's hold (runtime/audio/dialog_queue DialogQueue::tick).
 	dialog_frame_rendered_ = true;
-	sync_script_voice();
+	// The scripted voice's device follows its channel here; its update is the scene frame's
+	// (update_script_voice).
+	follow_script_voice();
 	int writes = 0;
 	if (mixer_.is_null()) {
 		perf_markers_ = 0;

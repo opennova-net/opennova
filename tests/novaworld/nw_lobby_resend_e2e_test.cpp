@@ -117,7 +117,7 @@ int main() {
 
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x52455345u;
-	cfg.client_key = 0x4E444C53u;
+	cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x4E444C53u, opennova::make_dev_scrk() }; };
 	cfg.na = "resend:lobby";
 	cfg.cookie_vars = []() {
 		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
@@ -142,6 +142,7 @@ int main() {
 	send(session.start());
 	uint8_t rx[4096];
 	for (int i = 0; i < 40 && !session.is_verified(); ++i) {
+		session.set_clock_ms(static_cast<uint32_t>(i + 1)); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 		opennova::net::Endpoint from;
 		const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 200);
 		if (n > 0 && first_server_auth.empty() &&
@@ -252,7 +253,30 @@ int main() {
 		}
 		expect(!replayed.empty() && replayed == first_server_auth,
 		       "the retransmitted 0x42 after a stray Hello draws its cached 0x82");
-		send(session.build_goodbye());
+		// The goodbye burst, four alike: each draws one ServerGoodBye of 18 B, the client's CK and
+		// DS 2, those after the first closed the session included (the live NOVAWORLDUDP service,
+		// the LN S1 / S1b / S1d retail records, 2026-10-23; D-NET-NEW-L9-35).
+		const std::vector<uint8_t> goodbye = session.build_goodbye();
+		for (int i = 0; i < 4; ++i) send(goodbye);
+		const std::vector<uint8_t> want_answer = { 0x53, 0x4C, 0x44, 0x4E, 'D', 'S', 0, 4, 0, 2, 0, 0, 0 };
+		int answers = 0;
+		int wrong = 0;
+		const auto answers_by = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+		while (answers < 4 && std::chrono::steady_clock::now() < answers_by) {
+			opennova::net::Endpoint from;
+			const int n = opennova::net::udp_recv_from(client, rx, sizeof rx, from, 50);
+			if (n <= 0 || opcode_of(rx, static_cast<size_t>(n)) != opennova::SESSION_OPCODE_SERVER_GOODBYE)
+				continue;
+			uint8_t op = 0;
+			std::vector<uint8_t> inner;
+			if (n == 18 && opennova::nw_decode_inbound(rx, static_cast<size_t>(n), op, inner) &&
+					inner == want_answer)
+				++answers;
+			else
+				++wrong;
+		}
+		expect(answers == 4 && wrong == 0,
+		       "each goodbye of the burst draws one 18 B ServerGoodBye: the client's CK and DS 2");
 	}
 	opennova::net::close_socket(client);
 	listener.stop();

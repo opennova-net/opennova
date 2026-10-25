@@ -139,13 +139,13 @@ void EpilogCine::step_timeline(World &world) {
 	//  frame, slot 2 every live frame, slot 4 on the last]
 	for (CineEvent &e : events) {
 		if (!e.live_at(frame)) continue;
-		if (frame == e.start) activate_event(e);
+		if (frame == e.start) activate_event(e, world);
 		update_event(e, world);
-		if (frame == e.start + e.duration) end_event(e);
+		if (frame == e.start + e.duration) end_event(e, world);
 	}
 }
 
-void EpilogCine::activate_event(CineEvent &e) {
+void EpilogCine::activate_event(CineEvent &e, World &world) {
 	switch (e.kind) {
 	case CineEventKind::ImageFade:
 		// [orig: CCineEventImageFade_InitFadeState @0x570FE0 — the delay
@@ -178,10 +178,17 @@ void EpilogCine::activate_event(CineEvent &e) {
 		e.points = 0;
 		e.points_cooldown = kEpilogCounterStepWait;
 		break;
+	case CineEventKind::EditFade:
+		// The start saves its blend progress (the camera-target blend, which has
+		// no target in the lose cine), then, while the cine runs, scales the
+		// main loop's frame-time smoothing history by 1.66; the session's bank
+		// takes it (WorldOutbox::frame_time_scales) [orig: CCineEventEditFade_Start
+		// @0x5726B0 — +0x0C into +0x28 @0x5726B0..0x5726B3, the g_CinePlaying test
+		// @0x5726B6, Game_ScaleSmoothedFrameTime(1.66f) @0x5726C9].
+		if (active) world.out.frame_time_scales.push_back(kEpilogEditFadeStartScale);
+		break;
 	default:
-		// The cached camera's start is a nullsub (@0x571FB0); the edit fade's
-		// camera-target blend (CCineEventEditFade_Start @0x5726B0) has no target in the lose
-		// cine.
+		// The cached camera's start is a nullsub (@0x571FB0).
 		break;
 	}
 }
@@ -270,16 +277,24 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 	default:
 		// The cached camera's interpolation (Cine_CameraInterpolateTransform
 		// @0x5722C0) drives the cine view (D-AI-16); the edit fade's blend
-		// (CCineEventEditFade_Step @0x5726D0) has no target.
+		// (CCineEventEditFade_Step @0x5726D0) has no target (D-AI-19).
 		break;
 	}
 }
 
-void EpilogCine::end_event(const CineEvent &e) {
+void EpilogCine::end_event(const CineEvent &e, World &world) {
+	// The edit fade's end restores the cine target (none in the lose cine) and,
+	// while the cine runs, scales the smoothing history by 0.6024 [orig:
+	// CCineEventEditFade_Finish @0x572750 — g_CineTargetId and the blend clear
+	// @0x572757..0x57275F, the g_CinePlaying test @0x572750 / @0x572769,
+	// Game_ScaleSmoothedFrameTime(0.60240966f) @0x572775].
+	if (e.kind == CineEventKind::EditFade) {
+		if (active) world.out.frame_time_scales.push_back(kEpilogEditFadeFinishScale);
+		return;
+	}
 	// The letterbox's end: a fade-in leaves the bars held opaque, a fade-out
 	// clears them [orig: CCineEventLetterbox_Finish @0x571330 — mode 1 @0x571348 / @0x571352,
-	//  mode 2 @0x57133D / @0x571342]. The other kinds' ends are nullsubs or
-	//  the edit fade's target restore (CCineEventEditFade_Finish @0x572750).
+	//  mode 2 @0x57133D / @0x571342]. The other kinds' ends are nullsubs.
 	if (e.kind != CineEventKind::Letterbox) return;
 	if (e.letterbox_mode == 1) {
 		bars_fading = false;
@@ -299,7 +314,7 @@ void EpilogCine::mission_start(bool first_start, bool in_session, World &world) 
 	// The <mission>.cin intro load: no shipped mission carries a .cin, so the
 	// load finds no file and only its head runs; the cine is flagged running
 	// over an empty timeline, which the first render pass stops.
-	// [orig: Cine_StartScriptPlayback @0x578270 — dword_26970FC = 1 @0x578296, the fade
+	// [orig: Cine_StartScriptPlayback @0x578270 — g_CinePlaying = 1 @0x578296, the fade
 	//  quad down @0x5782A6, mode 0 @0x5782B8; the .pcx probe @0x57833B and the
 	//  re-raise @0x578378]
 	active = true;
@@ -326,8 +341,8 @@ void EpilogCine::begin_win(const Entity *local_player) {
 	camera.duration = kEpilogWinCameraFrames;
 	if (local_player != nullptr) {
 		camera.camera_position = local_player->position;
-		camera.camera_yaw = local_player->yaw;
-		camera.camera_pitch = local_player->pitch;
+		camera.camera_heading = local_player->heading;
+		camera.camera_pitch = local_player->pitch_bam;
 	}
 	events.push_back(camera);
 	win_build_frame = kEpilogWinBuildFrame;
@@ -382,10 +397,11 @@ void EpilogCine::update_lose(World &world) {
 		build_lose_screen();
 		++lose_state; // [orig: @0x5747D4]
 		// Then the dialog reset (the world's dialog table, its waiting lines
-		// with it) and the audio channel shutdown, a device leg the port does
-		// not run (D-HUD-46) [orig: Dialog_ResetAll @0x5747DA,
-		// Audio_ShutdownChannelsAndDeviceTable @0x5747E6].
+		// with it) and the audio channel shutdown, which the embedder's audio
+		// device runs (WorldOutbox::audio_channels_shutdown) [orig: Dialog_ResetAll
+		// @0x5747DA, the Audio_ShutdownChannelsAndDeviceTable call @0x5747E6].
 		world.script.dialog.reset();
+		world.out.audio_channels_shutdown = true;
 		break;
 	case 2:
 		++lose_age; // [orig: @0x5744B9]
@@ -502,6 +518,15 @@ void EpilogCine::build_win_screen(const World &world) {
 	//  @0x5767D2].
 	events.push_back(text_fade(first + 300, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
 			hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+}
+
+bool EpilogCine::playback_active() {
+	// [orig: Cine_IsPlaybackActive @0x575960 - `cmp g_CinePlaying, 0` @0x575960, the
+	//  recalc @0x57596C, `jl` @0x57597C (still playing: 1), the stop @0x57598A]
+	if (!active) return false;
+	if (frame < end_frame()) return true;
+	active = false;
+	return false;
 }
 
 void EpilogCine::render_pass() {

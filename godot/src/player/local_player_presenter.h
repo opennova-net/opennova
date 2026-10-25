@@ -56,9 +56,10 @@ class Simulation;
 // move it) [orig: the local bone path @0x4b6bb3 stores head-Position into
 // CameraOffset(+0x6C); the on-foot person camera leg adds it @0x437f9c].
 // +1.0 is the witnessed NON-person fallback bump (engine: runtime/world/player_view.cpp), kept for
-// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: raw pixel
-// deltas feed Simulation.add_local_player_look (the witnessed integer
-// pipeline -- sensitivity<<11, scoped zoom reduction, +-80 deg pitch clamp
+// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: the
+// cursor offset rides the frame input to the session's mouse pump, whose axis
+// words feed the witnessed integer pipeline (sensitivity<<11, scoped zoom
+// reduction, +-80 deg pitch clamp
 // with the +40 deg up-limit while prone) (engine: runtime/world/local_player.cpp). Calibration values live at engine world/player_view.h
 // (Simulation re-exports).
 //
@@ -100,6 +101,11 @@ public:
 	void setup(Node *p_world, Camera3D *p_camera, GameplayCamera *p_fly_camera = nullptr,
 			const Ref<ControlsModel> &p_controls = Ref<ControlsModel>());
 	void teardown();
+	// The mission start's selection of the session's aspect mode (GameWorld's start
+	// copies): the stretched target for that mode is made and held ahead of the
+	// first live frame, as retail's backbuffer stands before it (the definition
+	// carries the witness).
+	void prepare_view_projection(int p_aspect_mode);
 
 	// Drop the built FP viewmodel so the next update pass rebuilds
 	// gun/arms/FSM from the (changed) equipped weapon -- the armory ACCEPT
@@ -114,6 +120,14 @@ public:
 	// router's digit arms read and close); the HUD presenter hands its
 	// process-lifetime instance over at setup.
 	void set_hud_toggles(const Ref<HudToggles> &p_toggles);
+	// The HUD toggle rows' event words of the input frames since the last
+	// read, in their order (PlayerInputRouter::take_hud_toggle_events); the
+	// HUD presenter applies them.
+	PackedInt64Array take_hud_toggle_events();
+	// The HUD's chat line and the gametext its prompts read, whose talk rows
+	// the input router polls in every input frame
+	// (PlayerInputRouter::set_hud_chat); the HUD presenter hands them over.
+	void set_hud_chat(const Ref<HudChatEntry> &p_chat, const Ref<RtxtStringFile> &p_gametext);
 
 	// A view action (Simulation::VIEW_ACTION_*: view1st F2, viewwithgun F3,
 	// viewchase F4): view1st/viewwithgun select first person, viewchase the
@@ -121,8 +135,9 @@ public:
 	// world/player_view.h player_view_apply_view_action). The preference is
 	// effective only in a control seat: the sim's arbiter resolves the camera mode every tick from
 	// the preference and the seat, so on foot the preference changes nothing
-	// visible (engine: runtime/world/player_view.h). GameHudPresenter polls the rows
-	// (it owns the FP-gun bit two of them also write) and calls this.
+	// visible (engine: runtime/world/player_view.h). The input router polls the rows
+	// in each input frame; GameHudPresenter applies their events (it owns the FP-gun
+	// bit two of them also write) and calls this.
 	void apply_view_action(int p_action);
 	// The debug menu's on-foot third person (the F3 Player page): stock JO
 	// never resolves the chase outside a control seat (net-re §5.39 -- the
@@ -167,6 +182,11 @@ public:
 	// object); siblings of the avatar like the held weapon.
 	Ref<PersonOverlayModels> person_overlays() const { return person_overlays_; }
 	Camera3D *camera() const;
+	// The view block this frame's compose left (engine world/local_player_view.h
+	// LocalPlayerViewFrame::view_block, which carries the witness): the camera's
+	// stamped pose without the main scene's optics offsets, the eye the main
+	// scene's water mirror collects from. False with no composed pose.
+	bool get_view_block_transform(Transform3D &r_out) const;
 	// THE FRAME'S PROJECTION over the surface (the engine's world::view_projection
 	// for the session aspect mode): the horizontal fov is the policy fov in
 	// every mode and the vertical half-extent follows the SELECTED ratio, so a
@@ -205,6 +225,11 @@ public:
 	// arm's square frustum), the surface's own 3D pass off -- one world render
 	// a frame.
 	bool is_nvg_raster_active() const { return nvg_raster_active_; }
+	// The reveal's edge (GameWorld::set_presentation_held(false)): a stretched view this frame's local
+	// view held under the loading presentation draws through its target again at once, at the pose
+	// that step placed, so the revealed frame is the stretched picture. A joiner's admission drops
+	// the hold in the network leg, past the local view.
+	void resume_view_projection();
 	// The FP viewmodel owner (tests and probes inspect the projection feed and
 	// sweep the placement tunables through it).
 	Ref<PlayerViewmodelRig> viewmodel_rig() const { return viewmodel_rig_; }
@@ -236,13 +261,59 @@ public:
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// router's release edge then runs no mount toggle.
 	void consume_use_hold();
+	// The USE hold the HUD's special-key chain reads (PlayerInputRouter::is_use_held).
+	bool is_use_held() const { return input_router_.is_use_held(); }
+	// One key-down's VK through the HUD's special-key chain's digit arms
+	// (PlayerInputRouter::chain_digit_key); true = taken.
+	bool chain_digit_key(int p_vk) { return input_router_.chain_digit_key(p_vk); }
+	// The special-key chain's deploy pick into the input frame's event list
+	// (PlayerInputRouter::queue_pick_event), and the shell's arms for the escape row's and
+	// the picks' records (PlayerInputRouter::set_record_leg).
+	void queue_pick_event(int p_param) { input_router_.queue_pick_event(p_param); }
+	void set_record_leg(const Callable &p_leg) { input_router_.set_record_leg(p_leg); }
 	// The held USE row's armory arm took its open this frame (PlayerInputRouter::
 	// take_armory_request); reading clears it.
 	bool take_use_item_armory_request();
+	// The vehicle-loadout arm's open (PlayerInputRouter::take_vehicle_menu_request);
+	// reading clears it.
+	bool take_use_item_vehicle_menu_request();
 	// A menu close's input reset (PlayerInputRouter::reset_input_state).
 	void reset_input_state();
-	// Mouse-look rides the input router: raw pixel deltas into the SIM's
-	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
+	// The device's key queue the router owns and the shell's key-down feed
+	// (PlayerInputRouter::key_events / push_key_event).
+	Ref<KeyEventQueue> get_key_events() { return input_router_.key_events(); }
+	void push_key_event(const Ref<InputEventKey> &p_event) {
+		input_router_.push_key_event(p_event);
+	}
+	// One row event the keyboard pass's scan queued (PlayerInputRouter::queue_row_event).
+	void queue_row_event(int p_code, bool p_signed, int p_key) {
+		input_router_.queue_row_event(p_code, p_signed, p_key);
+	}
+	// The keyboard pass's release pass (PlayerInputRouter::run_key_release_pass).
+	void run_key_release_pass() { input_router_.run_key_release_pass(); }
+	// The shell's keyboard pass, run at each update's input-frame head
+	// (PlayerInputRouter::set_keyboard_pass).
+	void set_keyboard_pass(const Callable &p_pass) { input_router_.set_keyboard_pass(p_pass); }
+	// The shell's menu-screen bit, read at each update's input-frame head
+	// (PlayerInputRouter::set_menu_screen_probe).
+	void set_menu_screen_probe(const Callable &p_probe) {
+		input_router_.set_menu_screen_probe(p_probe);
+	}
+	// A pass-through screen's close: the next input frame takes the menu
+	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
+	void close_pass_through_screen();
+	// A game screen frees the captured cursor at the re-centre point
+	// (PlayerInputRouter::release_capture_for_screen).
+	void release_capture_for_screen();
+	// The process's keyboard-lock legs and the Escape key's Scroll Lock turn-off
+	// (PlayerInputRouter::start_process_num_lock and its siblings).
+	static void start_process_num_lock();
+	static void start_process_scroll_lock();
+	static void exit_process_key_locks();
+	void owe_scroll_lock_turn_off();
+	// Mouse-look rides the input router: the motion events' cursor offset,
+	// which the session's mouse pump spreads into the axis words the SIM's
+	// witnessed integer pipeline scales (engine: runtime/world/player_look.h).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	bool has_player() const;
@@ -251,6 +322,9 @@ public:
 	// the avatar when missing and let the rig (re)build the FP viewmodel.
 	void ensure_models();
 	void clear_models();
+	// The avatar and what it carries (the held gun, the person overlays) go;
+	// ensure_models builds the next.
+	void release_avatar();
 	void set_fly_camera_locked(bool p_locked);
 
 	// The crosshair's witnessed anchor. First person PINS the exact screen
@@ -299,6 +373,17 @@ private:
 	void feed_virtual_display(bool p_live);
 	void update_view_projection(const opennova::world::ViewProjection &p_projection,
 			bool p_nvg_raster);
+	// The target, its camera and its blit, live (the caller holds it or sizes it).
+	SubViewport *make_view_projection_target();
+	// The load's one forced frame through the held target (GameWorld's
+	// hud_pipeline_warm edges, connected by setup, dropped by teardown).
+	bool draw_held_view_projection(bool p_drawing);
+	void disconnect_forced_frame();
+	// An exit from live play keeps the target (engine world/player_view.h
+	// ViewProjection: retail's backbuffer is made once): it stops drawing, the
+	// blit hides and the surface draws its own 3D again; the next live frame
+	// draws into it with its render buffers kept.
+	void hold_view_projection();
 	void release_view_projection();
 	void update_avatar(const Vector3 &p_pos);
 	GameplayCamera *fly_camera() const;
@@ -308,6 +393,7 @@ private:
 	ObjectID camera_id_;
 	bool third_person_ = false;
 	ObjectID avatar_id_;
+	int avatar_type_id_ = 0; // the local body's type word the avatar was built for
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from
 	Ref<PersonOverlayModels> person_overlays_;
@@ -329,8 +415,17 @@ private:
 	ObjectID projection_camera_id_;
 	ObjectID projection_blit_layer_id_;
 	ObjectID projection_surface_id_;
+	// The same target while held (hold_view_projection): no reader sees it.
+	ObjectID held_projection_viewport_id_;
+	ObjectID held_projection_camera_id_;
+	ObjectID held_projection_blit_layer_id_;
 	float projection_scale_y_ = 1.0f;
 	bool nvg_raster_active_ = false;
+	// The projection this frame's local view asked for while the loading presentation held the
+	// world's draw (stretched or the NVG raster), for the reveal's resume_view_projection.
+	opennova::world::ViewProjection held_frame_projection_;
+	bool held_frame_nvg_raster_ = false;
+	bool held_frame_pending_ = false;
 	// The NVG raster's frame frustum as served to TargetProjectionXrInterface
 	// (the matrix the target draws with while nvg_raster_served_).
 	Projection nvg_raster_projection_;

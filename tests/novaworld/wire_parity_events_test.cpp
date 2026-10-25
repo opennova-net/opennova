@@ -6,7 +6,9 @@
 //   - the executable prints exactly what the library printer prints;
 //   - every line matches the readiness script's own line patterns;
 //   - the collected records and the printed lines agree in count;
-//   - the bytes: the LF-normalized output's SHA-256 for the pinned fixture.
+//   - the bytes: the LF-normalized output's SHA-256 for the pinned fixture;
+//   - the round events' lines (PARITY_ROUND), which the committed session never fires,
+//     over a synthetic S2C 0x0A through the same builder.
 // A fixture regeneration (nw_self_capture_test --write-fixture) changes both hashes:
 // re-pin kFixtureSha256 and kOutputSha256 in the same commit, after checking that the
 // new output still matches the old line contract (the printed hashes are the new ones).
@@ -17,12 +19,15 @@
 
 #include <base/io/file_io.h>
 #include <base/io/sha256.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
 #include "common/run_command.h"
 #include "common/temp_dir.h"
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <regex>
 #include <string>
 #include <vector>
@@ -36,9 +41,9 @@ using namespace opennova;
 namespace {
 
 constexpr const char *kFixtureSha256 =
-		"1fbc8ea46ef3039943b97031357b73b6872b9b8bba809bd26a642d7f58a4e2a0";
+		"e9497e8839ed06d567cd5715db063e00cb14b5155af1891c93d919767e84d1b9";
 constexpr const char *kOutputSha256 =
-		"34e08747528ad84e24232c6d206461d15f94563a04d5c814206557c52e259017";
+		"956670539b687ba9274ed4106b90044f467fddd2cdc0f58a14d402fed0ab2741";
 
 int g_failures = 0;
 
@@ -79,7 +84,8 @@ const std::vector<std::regex> &contract_patterns() {
 		std::regex("^PARITY_DATAGRAM frame=(\\d+) ts_ns=(\\d+) src=(\\d+) dst=(\\d+) "
 				   "len=(\\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) "
 				   "class=(invalid|unknown|client_hello|client_auth|server_hello|"
-				   "server_auth|client_protocol|server_protocol) decode=([01])$"),
+				   "server_auth|client_protocol|server_protocol|client_goodbye|"
+				   "server_goodbye) decode=([01])$"),
 		std::regex("^PARITY_HANDSHAKE frame=(\\d+) ts_ns=(\\d+) dir=([SC]) session=(\\d+) "
 				   "opcode=0x(41|42|81|82) decode=([01]) len=(\\d+) body=([0-9a-fA-F]*)$"),
 		std::regex("^PARITY_PACKET frame=(\\d+) ts_ns=(\\d+) dir=([SC]) session=(\\d+) "
@@ -108,8 +114,18 @@ const std::vector<std::regex> &contract_patterns() {
 		std::regex("^PARITY_ENTITY frame=(\\d+) ts_ns=(\\d+) session=(\\d+) class=([PVIN]) "
 				   "handle=(\\d+) type=(\\d+) pos=(\\d+),(\\d+),(\\d+) "
 				   "orient=(-?\\d+),(-?\\d+) state=(\\d+),(\\d+) vital=(\\d+)$"),
+		std::regex("^PARITY_ROUND frame=(\\d+) ts_ns=(\\d+) session=(\\d+) index=(\\d+) "
+				   "shooter=(\\d+) flags=0x([0-9a-fA-F]{2}) adm=(\\d+) sub=(\\d+) "
+				   "target=(\\d+) seq=(\\d+) slot=(\\d+)$"),
 	};
 	return patterns;
+}
+
+bool matches_contract(const std::string &line) {
+	for (const std::regex &pattern : contract_patterns())
+		if (std::regex_match(line, pattern))
+			return true;
+	return false;
 }
 
 size_t count_prefix(const std::vector<std::string> &lines, const char *prefix) {
@@ -118,6 +134,86 @@ size_t count_prefix(const std::vector<std::string> &lines, const char *prefix) {
 		if (line.rfind(prefix, 0) == 0)
 			++n;
 	return n;
+}
+
+// A S2C 0x0A carrying one player record and two round events, as x8's 01tr-coop-aikill RR
+// sent them to the joiner 0x005D: the rifleman 0x0019's targeted round (0x41, naming the
+// joiner) and the mounted gunner 0x0006's untargeted one with a slot byte (0x32 | 0x80).
+// Retail's writer puts the target word only under 0x40 and the slot byte only under 0x80
+// [orig: NetPacket_SerializeRoundEvent @0x504820 (the flag @0x5048BF..0x5048C1, 0x80
+// @0x5048C4..0x5048C8, the word @0x50494D..0x504966)]; the line holds 65535 / 0 otherwise.
+void test_round_lines(const test_temp::TempDir &dir) {
+	FrameUpdate fu;
+	fu.flags2 = 2; // the env sub-block
+	fu.health = 100;
+	FrameUpdateRecord joiner;
+	joiner.cls = EntityClass::Player;
+	joiner.handle = 0x005D;
+	joiner.type_id = kPlayerPersonTypeId;
+	fu.records.push_back(joiner);
+	RoundEventRecord rifle;
+	rifle.flags = 0x41;
+	rifle.adm_index = 21;
+	rifle.shooter_handle = 0x0019;
+	rifle.target_handle = 0x005D;
+	rifle.shot_seq = 0xF7FF;
+	RoundEventRecord gun;
+	gun.flags = 0xB2;
+	gun.adm_index = 38;
+	gun.slot_byte = 2;
+	gun.shooter_handle = 0x0006;
+	gun.target_handle = 0x0042; // not on the wire without 0x40
+	gun.shot_seq = 12;
+	fu.round_events = { rifle, gun };
+
+	InGameMessage message;
+	message.frame_index = 7;
+	message.dir = 'S';
+	message.tag = 0x0A;
+	message.session = 32776;
+	message.participant = 1;
+	message.payload = encode_frame_update(fu);
+	CaptureDecodeResult decoded;
+	decoded.messages.push_back(message);
+	const std::map<int, uint64_t> stamps = { { 7, 1785000000000000000ull } };
+
+	const std::string path = dir.file("rounds.txt");
+	std::FILE *out = std::fopen(path.c_str(), "wb");
+	expect(out != nullptr, "open the round output file");
+	if (!out)
+		return;
+	{
+		wire::ParityTracePrinter printer(out);
+		wire::ParityTraceBuilder builder(printer);
+		builder.push_decoded(decoded, stamps);
+	}
+	std::fclose(out);
+	wire::ParityTrace trace;
+	wire::ParityTraceCollector collector(trace);
+	wire::ParityTraceBuilder builder(collector);
+	builder.push_decoded(decoded, stamps);
+
+	std::string text, error;
+	expect(io::read_file_text(path, text, error), "read back the round output");
+	const std::vector<std::string> lines = lines_of(text);
+	for (const std::string &line : lines)
+		expect(matches_contract(line), "every synthetic line matches the readiness patterns");
+	expect(count_prefix(lines, "PARITY_ROUND ") == 2 && trace.rounds.size() == 2,
+			"the frame's two round events print and collect");
+	expect(trace.frames.size() == 1 && trace.frames[0].rounds == 2,
+			"the frame state declares the two rounds the round lines carry");
+	expect(lines.size() == 5 && lines[2].rfind("PARITY_ENTITY ", 0) == 0,
+			"the round lines follow the frame's entity line");
+	if (lines.size() != 5)
+		return;
+	expect(lines[3] ==
+					"PARITY_ROUND frame=7 ts_ns=1785000000000000000 session=32776 index=0 "
+					"shooter=25 flags=0x41 adm=21 sub=0 target=93 seq=63487 slot=0",
+			"the targeted round prints its target");
+	expect(lines[4] ==
+					"PARITY_ROUND frame=7 ts_ns=1785000000000000000 session=32776 index=1 "
+					"shooter=6 flags=0xb2 adm=38 sub=0 target=65535 seq=12 slot=2",
+			"the untargeted round prints 65535 and its slot byte");
 }
 
 } // namespace
@@ -177,16 +273,9 @@ int main(int argc, char **argv) {
 	// Every line is one of the contract's lines.
 	const std::vector<std::string> lines = lines_of(lib_text);
 	size_t unmatched = 0;
-	for (const std::string &line : lines) {
-		bool matched = false;
-		for (const std::regex &pattern : contract_patterns())
-			if (std::regex_match(line, pattern)) {
-				matched = true;
-				break;
-			}
-		if (!matched && ++unmatched <= 3)
+	for (const std::string &line : lines)
+		if (!matches_contract(line) && ++unmatched <= 3)
 			std::fprintf(stderr, "unmatched contract line: %.160s\n", line.c_str());
-	}
 	expect(unmatched == 0, "every --parity-events line matches the readiness script's patterns");
 
 	// The collector holds exactly the printed records.
@@ -202,6 +291,8 @@ int main(int argc, char **argv) {
 			"state lines == collected uplinks + frames");
 	expect(count_prefix(lines, "PARITY_ENTITY ") == trace.entities.size(),
 			"entity lines == collected entities");
+	expect(count_prefix(lines, "PARITY_ROUND ") == trace.rounds.size(),
+			"round lines == collected rounds");
 	expect(!trace.handshakes.empty() && !trace.uplinks.empty() && !trace.frames.empty() &&
 					!trace.entities.empty(),
 			"the session exercises handshakes, uplinks, frames and entities");
@@ -220,6 +311,8 @@ int main(int argc, char **argv) {
 		if (output_sha != kOutputSha256)
 			std::fprintf(stderr, "  output sha256 %s\n", output_sha.c_str());
 	}
+
+	test_round_lines(dir);
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

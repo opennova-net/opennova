@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <memory>
 #include <variant>
+#include <vector>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
@@ -60,7 +61,7 @@ struct KillRig {
         n.net_id = 60;
         n.team = 2;
         n.group_id = 4;
-        n.yaw = 90; // engine heading 0: a +X round arrives from behind
+        n.heading = placed_heading_bam(90); // engine heading 0: a +X round arrives from behind
         npc = w->registry.spawn(0, n);
         w->ai.at(w->ai.attach(npc))->inf.active = true;
     }
@@ -114,7 +115,8 @@ static void test_kill_single_runs_the_recorded_round_legs() {
     CHECK(rear_quadrant() == 2);
     CHECK(rig.victim().death_anim_state ==
           compute_death_anim_state(3, 2, death_cause::kBullet));
-    CHECK(rig.w->ai.for_handle(rig.npc)->roll == -0x05B05B00);
+    CHECK(rig.victim().saved_live_roll == -0x05B05B00);
+    CHECK(rig.w->ai.for_handle(rig.npc)->roll == 0);
     CHECK(rig.w->round_sim.hits.size() == 1);
     if (rig.w->round_sim.hits.size() == 1) {
         CHECK(rig.w->round_sim.hits[0].victim == rig.npc);
@@ -236,7 +238,44 @@ static void test_class_event_4_restages_the_death_clip() {
     CHECK(bare.victim().death_anim_state == anim_state::kDeathPungi);
 }
 
+// An ammo whose +72 word names a hit emitter (`secondary_effect`): the round
+// legs release the body's +0x1CC emitter and spawn the effect there (at the
+// body, oriented (0, 0, -0.5), tagged with it, never re-posed), and after the
+// cut the selection becomes the fire death 173; the clone keeps the section's
+// clip and no +0x1CC link.
+// [orig: OrganicClass_HandleEvent @0x407310 - the +72 read @0x407453, the
+//  release @0x4074DB..0x4074F9, the descriptor @0x4074FF..0x40753A, the store
+//  @0x40754A, the clone's +0x1CC = 0 @0x40769E, the override @0x4076D3..0x4076D5;
+//  AmmoDef_ParseProperty `secondary_effect` -> +0x48 @0x40AA36]
+static void test_an_incendiary_round_spawns_its_emitter_and_the_fire_death() {
+    KillRig rig;
+    rig.w->tables.ammo.entries[0].secondary_effect = "Effect_Burn";
+    rig.victim().death_effect_active[0] = 1; // an earlier hit's emitter in +0x1CC
+    rig.record_round(3);
+    CHECK(rig.w->commands.kill_ssn(rig.npc));
+    std::vector<DestructionEffectEvent> slot0;
+    for (const DestructionEffectEvent &effect : rig.w->out.destruction.effects)
+        if (effect.family == 1 && effect.bank_slot == 0 &&
+                effect.attach_wire_handle == rig.npc.packed)
+            slot0.push_back(effect);
+    CHECK(slot0.size() == 2);
+    if (slot0.size() == 2) {
+        CHECK(slot0[0].release);
+        CHECK(!slot0[1].release && slot0[1].effect == "Effect_Burn" &&
+              slot0[1].dir.z == -0.5f && slot0[1].section_tagged && slot0[1].positioned);
+    }
+    CHECK((rig.victim().death_effect_active[0] & 1u) != 0);
+    CHECK(rig.victim().death_anim_state == anim_state::kDeathFire);
+    CHECK(rig.pieces() == 1);
+    rig.w->registry.for_each_in_pool(0, [&](const Entity &e) {
+        if (!e.dismemberment_piece) return;
+        CHECK(e.death_anim_state == compute_death_anim_state(3, 2, death_cause::kBullet));
+        CHECK((e.death_effect_active[0] & 1u) == 0);
+    });
+}
+
 int main() {
+    test_an_incendiary_round_spawns_its_emitter_and_the_fire_death();
     test_kill_single_runs_the_recorded_round_legs();
     test_wac_kill_ssn_zeroes_the_record();
     test_kill_group_runs_the_round_and_keeps_the_attacker();

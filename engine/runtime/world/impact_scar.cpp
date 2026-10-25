@@ -1,18 +1,26 @@
-// The impact-scar ring cache and slot writer — see impact_scar.h.
+// The impact-scar ring cache and slot writer, and the bullet GLASS leg — see
+// impact_scar.h.
 // [orig: Scar_GetEntityCache @0x5CC4C0; Scar_AddEntry @0x5CC830;
 //  Scar_AdvanceRingCursor @0x5CC1D0; Scar_ClearEntriesByEntity @0x5ccec0;
 //  Scar_TextureForId @0x5CC360; Scar_RadiusForId @0x5CC3B0;
-//  Impact_SpawnGlassEffectsOrScar @0x5CF1B0]
+//  Impact_SpawnGlassEffectsOrScar @0x5CF1B0;
+//  Terrain_SpawnSurfaceEffectsAtUserPoints @0x5CEA90;
+//  Scar_ProjectDecalOntoEntity @0x5CE4A0; Scar_HasProjectedDecalAt @0x5CC700;
+//  Effect_RollSurfaceEffectProbability @0x5CC1F0]
 
 #include <runtime/world/impact_scar.h>
 
+#include <algorithm>
 #include <cmath>
 
+#include <base/crt/crt_rng.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/strutil.h>
 
 #include <runtime/world/collision.h>
 #include <runtime/world/collision_detail.h>
+#include <runtime/world/destruction.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -105,6 +113,11 @@ void ScarCache::clear_entity(EntityHandle owner) {
 	for (ScarSlot &slot : world_.slots) {
 		if (slot.live && slot.owner == owner) slot = ScarSlot{};
 	}
+	// Its projected decals are freed [orig: the Scar_FreeProjectedDecals call
+	// @0x5CCF13; the free @0x5CC5FA..0x5CC687].
+	decals_.erase(std::remove_if(decals_.begin(), decals_.end(),
+			[&](const ProjectedDecalList &list) { return list.owner == owner; }),
+			decals_.end());
 	// The entity's own ring is memset and released [orig: the entity-ring
 	// memset in Scar_ClearEntriesByEntity @0x5ccec0].
 	for (ScarRing &ring : rings_) {
@@ -115,6 +128,30 @@ void ScarCache::clear_entity(EntityHandle owner) {
 		ring.in_use = false;
 		return;
 	}
+}
+
+const ProjectedDecalList *ScarCache::find_decals(EntityHandle owner, uint64_t lease) const {
+	for (const ProjectedDecalList &list : decals_)
+		if (list.owner == owner && list.lease == lease) return &list;
+	return nullptr;
+}
+
+ProjectedDecalList &ScarCache::decals_for(EntityHandle owner, uint64_t lease) {
+	for (ProjectedDecalList &list : decals_) {
+		if (list.owner != owner) continue;
+		// A handle reused by a later spawn starts a fresh list (the ring fold).
+		if (list.lease != lease) {
+			list.nodes.clear();
+			list.stamp_tick = 0;
+			list.lease = lease;
+		}
+		return list;
+	}
+	ProjectedDecalList list;
+	list.owner = owner;
+	list.lease = lease;
+	decals_.push_back(std::move(list));
+	return decals_.back();
 }
 
 void ScarCache::reset() {
@@ -129,6 +166,9 @@ void ScarCache::reset() {
 	world_.owner = EntityHandle{};
 	world_.lease = 0;
 	world_.in_use = false;
+	// The projected-decal region is freed with it [orig: Scar_ResetAllCaches
+	// @0x5CC760 - j_MemPool_FreeRegion @0x5CC789].
+	decals_.clear();
 }
 
 int ScarCache::leased_count() const {
@@ -175,17 +215,204 @@ void scar_basis(const int32_t normal_q16[3], uint16_t spin_word,
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The bullet GLASS leg
+// ---------------------------------------------------------------------------
+
+// [orig: the 192-byte rows @0x841980..0x8433C0, their key @0, userpoint @16,
+//  model @32, scar id @176 and radius @180]
+const SurfaceMaterialRow kSurfaceMaterialTable[kSurfaceMaterialRowCount] = {
+	{"GLASS1", "GLASS", "eurhr2", 3, 0x20000}, {"GLASS1", "GLASS", "eurhr2a", 3, 0x20000},
+	{"GLASS1", "GLASS", "eurhr2b", 3, 0x20000}, {"GLASS2", "GLASS02", "eurhr1", 4, 0x20000},
+	{"GLASS2", "GLASS02", "eurhr1b", 4, 0x20000}, {"GLASS2", "GLASS02", "eurhr1c", 4, 0x20000},
+	{"GLASS2", "GLASS02", "eurhr3", 4, 0x20000}, {"GLASS2", "GLASS02", "eurhr3b", 4, 0x20000},
+	{"GLASS2", "GLASS02", "eurhr3c", 4, 0x20000}, {"GLASS1", "GLASS1", "atrm2a", 9, 0x8000},
+	{"GLASS2", "GLASS2", "atrm2a", 14, 0x10000}, {"GLASS3", "GLASS3", "atrm2a", 16, 0x40000},
+	{"GLASS1", "GLASS1", "atrm2b", 9, 0x8000}, {"GLASS2", "GLASS2", "atrm2b", 14, 0x10000},
+	{"GLASS3", "GLASS3", "atrm2b", 15, 0x40000}, {"GLASS1", "GLASS1", "atrm2c", 9, 0x8000},
+	{"GLASS2", "GLASS2", "atrm2c", 14, 0x10000}, {"GLASS3", "GLASS3", "atrm2c", 15, 0x40000},
+	{"GLASS1", "GLASS1", "ctrblda", 7, 0x20000}, {"GLASS2", "GLASS2", "ctrblda", 8, 0x10000},
+	{"GLASS1", "GLASS1", "ctrbldb", 7, 0x20000}, {"GLASS2", "GLASS2", "ctrbldb", 8, 0x10000},
+	{"GLASS1", "GLASS01", "airtowr1", 13, 0x20000}, {"GLASS1", "GLASS1", "atrm1a", 9, 0x8000},
+	{"GLASS2", "GLASS2", "atrm1a", 10, 0x10000}, {"GLASS3", "GLASS3", "atrm1a", 11, 0x80000},
+	{"GLASS4", "GLASS4", "atrm1a", 12, 0x20000}, {"GLASS1", "GLASS1", "atrm1b", 9, 0x8000},
+	{"GLASS2", "GLASS2", "atrm1b", 10, 0x10000}, {"GLASS3", "GLASS3", "atrm1b", 11, 0x80000},
+	{"GLASS4", "GLASS4", "atrm1b", 12, 0x20000}, {"GLASS1", "GLASS1", "atrm1c", 9, 0x8000},
+	{"GLASS2", "GLASS2", "atrm1c", 10, 0x10000}, {"GLASS3", "GLASS3", "atrm1c", 11, 0x80000},
+	{"GLASS4", "GLASS4", "atrm1c", 12, 0x20000}};
+
+const SurfaceMaterialRow *find_surface_material_row(const char *key, const std::string &model) {
+	for (const SurfaceMaterialRow &row : kSurfaceMaterialTable)
+		if (strutil::iequals(row.key, key) && strutil::iequals(row.model, model)) return &row;
+	return nullptr;
+}
+
+int scar_texture_for_id(World &world, uint8_t id) {
+	for (const ScarTableRow &row : kScarTable) {
+		if (row.id != id) continue;
+		const int32_t range = row.last - row.first;
+		if (range > 0) return row.first + static_cast<int32_t>(world.next_prng16()) % (range + 1);
+		return row.first;
+	}
+	return -1;
+}
+
+bool effect_roll_surface_probability(World &world, const char *name, bool use_alt) {
+	if (name == nullptr || name[0] == '\0') return true;
+	const SurfaceEffectProbRow *row = nullptr;
+	for (const SurfaceEffectProbRow &r : kSurfaceEffectProbTable) {
+		if (strutil::iequals(r.name, name)) {
+			row = &r;
+			break;
+		}
+	}
+	if (row == nullptr) return true;
+	const uint16_t seed = world.next_prng16();
+	crt::crt_srand(seed);
+	const int32_t roll = static_cast<int32_t>(world.next_prng16()) % 100;
+	// The float column times flt_7C4654 (100.0f) at the x87 length, truncated.
+	const float p = use_alt ? row->alt : row->main;
+	const int32_t limit = static_cast<int32_t>(static_cast<double>(p) * 100.0);
+	return roll <= limit;
+}
+
+bool scar_has_projected_decal_at(World &world, const Entity &entity, const int32_t origin[3],
+		uint8_t scar_id) {
+	(void)scar_texture_for_id(world, scar_id); // [orig: @0x5CC705, the result unused]
+	const ProjectedDecalList *list =
+			world.out.scars.find_decals(entity.handle, entity.registry_spawn_id);
+	if (list == nullptr) return false;
+	for (const ProjectedDecal &node : list->nodes)
+		if (node.origin[0] == origin[0] && node.origin[1] == origin[1] && node.origin[2] == origin[2])
+			return true;
+	return false;
+}
+
+bool scar_project_decal_onto_entity(World &world, const Entity &entity, const ProjectileHit &hit,
+		const int32_t origin[3], uint8_t scar_id) {
+	// A pool-2 entity, its origin above the water plane [orig: @0x5CE4C9,
+	// @0x5CE4E1].
+	if (entity.handle.pool() != 2) return false;
+	if (origin[2] <= world.env.water_z) return false;
+	// The model the leg walks: the husk under Flags & 4 when one is loaded, else
+	// the graphic [orig: @0x5CE4EB..0x5CE503].
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits != nullptr &&
+			traits->primary_husk_loaded;
+	if (!husk && !entity.has_graphic_model) return false;
+	// The model's collision block (+0xB0) [orig: @0x5CE509..0x5CE511].
+	if (traits != nullptr &&
+			(husk ? traits->husk_no_collision_block : traits->graphic_no_collision_block))
+		return false;
+	// The model's LOD-0 render model, present and not skinned ((+0x20) non-null, its +0x10
+	// bit 0 clear) [orig: @0x5CE517..0x5CE526].
+	if (traits != nullptr &&
+			(husk ? traits->husk_lod0_refuses_decal : traits->graphic_lod0_refuses_decal))
+		return false;
+	// The scar-cache bone callback (+0xAC), which the item load that creates the model binds
+	// (never null there),
+	// called for the section matrices [orig: @0x5CE52C..0x5CE53E]; the struck section, then
+	// its matrix, the array plus 64 bytes a section, must be non-null, so a callback that
+	// returns no array refuses section 0 alone [orig: @0x5CE540..0x5CE564]; then the face and
+	// its no-scar flag [orig: @0x5CE578..0x5CE5A2, the gates Scar_AddEntry shares].
+	if (hit.section_index < 0) return false;
+	if (traits != nullptr &&
+			(husk ? traits->husk_scar_bones_null : traits->graphic_scar_bones_null) &&
+			hit.section_index == 0)
+		return false;
+	if (hit.face_index < 0) return false;
+	if ((hit.material_flags & 0x400u) != 0u) return false;
+	// The first-hit rule [orig: @0x5CE624].
+	if (scar_has_projected_decal_at(world, entity, origin, scar_id)) return false;
+	ProjectedDecalList &list = world.out.scars.decals_for(entity.handle, entity.registry_spawn_id);
+	list.stamp_tick = world.logic_tick; // [orig: @0x5CE646]
+	// The node at the head, then its texture draw [orig: @0x5CE690..0x5CE6A0].
+	ProjectedDecal node;
+	node.texture = scar_texture_for_id(world, scar_id);
+	if (node.texture < 0) return false;
+	for (int i = 0; i < 3; ++i) node.origin[i] = origin[i];
+	for (const ScarTableRow &row : kScarTable) {
+		if (row.id == scar_id) {
+			node.radius_q16 = row.radius_q16; // [orig: Scar_RadiusForId @0x5CE6F4]
+			break;
+		}
+	}
+	list.nodes.insert(list.nodes.begin(), node);
+	return true;
+}
+
+int surface_effects_at_userpoints(World &world, const char *key, const Entity &entity,
+		const ProjectileHit &hit, int scar_type) {
+	// The def's NoScar attribute ends the leg for any def type [orig:
+	// @0x5CEAB3..0x5CEABA].
+	if ((entity.item_attrib & kItemAttribNoScar) != 0u) return 0;
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+	if (traits == nullptr) return 0;
+	// The husk under Flags & 4 when one is loaded, else the graphic
+	// [orig: @0x5CEABC..0x5CEADB].
+	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits->primary_husk_loaded;
+	if (!husk && !entity.has_graphic_model) return 0;
+	const std::string &model_name = husk ? traits->husk_name : traits->graphic_name;
+	const std::vector<ModelUserPoint> &points = husk ? traits->husk_userpoints : traits->graphic_userpoints;
+	// The row, then the two texture gates, each a draw when its id spans more
+	// than one texture [orig: @0x5CEAF7, @0x5CEB08, @0x5CEB1C].
+	const SurfaceMaterialRow *row = find_surface_material_row(key, model_name);
+	if (row == nullptr) return 0;
+	if (scar_texture_for_id(world, static_cast<uint8_t>(scar_type)) < 0) return 0;
+	if (scar_texture_for_id(world, row->scar_id) < 0) return 0;
+	// The entity's matrix: the euler rotation with the entity's (else the def's)
+	// uniform scale [orig: @0x5CEB5C..0x5CEB99].
+	const CollisionMatrix matrix = entity_placement_matrix(entity);
+	const int32_t hx = hit.position_q16.x, hy = hit.position_q16.y, hz = hit.position_q16.z;
+	const int32_t r = row->radius_q16;
+	int matches = 0;
+	for (const ModelUserPoint &point : points) {
+		if (!strutil::iequals(point.name, row->userpoint)) continue; // [orig: @0x5CEBBE]
+		int32_t p[3];
+		matrix.transform_point(point.pos_q16, p); // [orig: @0x5CEBF2]
+		// The inclusive box on each axis [orig: @0x5CEC0F..0x5CEC65].
+		if (hx < io::bam_sub(p[0], r) || hx > io::bam_add(p[0], r)) continue;
+		if (hy < io::bam_sub(p[1], r) || hy > io::bam_add(p[1], r)) continue;
+		if (hz < io::bam_sub(p[2], r) || hz > io::bam_add(p[2], r)) continue;
+		++matches; // [orig: @0x5CEC6B]
+		// The origin is the userpoint (+184 set on every row), the decal leg
+		// taken (+188 set on every row); no decal added: the next point, no
+		// rolls [orig: @0x5CEC72, @0x5CECA2, @0x5CECBD..0x5CECC7].
+		if (!scar_project_decal_onto_entity(world, entity, hit, p, row->scar_id)) continue;
+		// The point's direction through the matrix, then the four rolls, each
+		// ahead of its name test, and a spawn per pass [orig: @0x5CECCD..0x5CECEF;
+		// @0x5CED19 / @0x5CED44 / @0x5CED6F / @0x5CED9D; CEffectWorld_SpawnEmitterAtPosition
+		// @0x5CED37 / @0x5CED62 / @0x5CED8D / @0x5CEDBB].
+		int32_t d[3];
+		matrix.rotate_point(point.dir_q16, d);
+		for (const char *effect : kSurfaceMaterialEffects) {
+			if (!effect_roll_surface_probability(world, effect, false) || effect[0] == '\0') continue;
+			VehicleEffectEvent spawn;
+			spawn.effect = effect;
+			spawn.position = Vec3{float(from_fixed(p[0])), float(from_fixed(p[1])), float(from_fixed(p[2]))};
+			spawn.direction = Vec3{float(from_fixed(d[0])), float(from_fixed(d[1])), float(from_fixed(d[2]))};
+			spawn.source_tick = world.logic_tick;
+			world.out.vehicle_effects.push_back(std::move(spawn));
+		}
+	}
+	return matches;
+}
+
 bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target,
 		int scar_type) {
-	// The ammo kind: 0 leaves nothing, 2 never reaches the ring fallback
-	// [orig: Impact_SpawnGlassEffectsOrScar — the `kind != 0` entry gate and
-	//  the kind-2 skip @0x5cf289].
-	if (!scar_kind_takes_ring_scar(scar_type)) return false;
+	// The ammo kind: 0 leaves nothing [orig: Impact_SpawnGlassEffectsOrScar —
+	// the `kind != 0` entry gate].
+	if (scar_type == kScarKindNone) return false;
 	// The def gate [orig: @0x5cf1f7].
 	if (!scar_entity_allowed(target.engine_flags, target.item_type, target.item_attrib))
 		return false;
-	// (The GLASS userpoint leg would run here and skip the ring scar on a
-	// match — the one open residual, impact_scar.h.)
+	// The GLASS chain: the first key that matched ends the impact [orig:
+	// @0x5CF217 / @0x5CF23A / @0x5CF259 / @0x5CF278].
+	static constexpr const char *kGlassKeys[4] = {"GLASS1", "GLASS2", "GLASS3", "GLASS4"};
+	for (const char *key : kGlassKeys)
+		if (surface_effects_at_userpoints(world, key, target, hit, scar_type) != 0) return true;
+	// Kind 2 never reaches the ring [orig: @0x5cf289].
+	if (!scar_kind_takes_ring_scar(scar_type)) return false;
 
 	// The slot writer's gates in its order: the water plane @0x5CC865, the
 	// ring SELECTION @0x5cc873..0x5cc88c, the husk flag @0x5CC894, the

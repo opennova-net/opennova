@@ -32,6 +32,7 @@ using opennova::hud::HudFrameState;
 using opennova::hud::HudLayout;
 using opennova::hud::HudMinimapCompiler;
 using opennova::hud::HudMinimapInput;
+using opennova::hud::HudProcessWords;
 using opennova::hud::HudTri;
 
 namespace {
@@ -956,13 +957,13 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	// line: an armed timer in its dark phase skips it, the lit phase (bit
 	// 0x10) draws it. [orig: HUD_DrawMapOverlay @0x5a785b..0x5a7866]
 	{
-		HudFrameState flash_state = state;
-		flash_state.item_flash[5] = 0x20;
-		CHECK(compiler.compile(flash_state, 1024.0f, 768.0f).map.lines.empty(),
+		compiler.set_item_flash(5, 0x20);
+		CHECK(compiler.compile(state, 1024.0f, 768.0f).map.lines.empty(),
 				"a dark flash phase hides the waypoint state line");
-		flash_state.item_flash[5] = 0x30;
-		CHECK(compiler.compile(flash_state, 1024.0f, 768.0f).map.lines.size() == 1,
+		compiler.set_item_flash(5, 0x30);
+		CHECK(compiler.compile(state, 1024.0f, 768.0f).map.lines.size() == 1,
 				"the lit flash phase draws the waypoint state line");
+		compiler.set_item_flash(5, 0);
 	}
 	// The M-cycle big map: mode 3 compiles the fullscreen north-up pass —
 	// grid rules and water appear, the compass ring does not (mask 0xAF937 has
@@ -1787,6 +1788,7 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 		state.lfp_panel.local_team = 1;
 		opennova::hud::HudLfpZone z;
 		z.letter_index = 0;
+		z.zone_byte = 1;
 		z.team = 1;
 		z.timer_present = true;
 		z.timer_team = 1;
@@ -1832,9 +1834,50 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 
 } // namespace
 
+// The end-round overlay's stdbox (the box LD-s3 measured at ~3300 tile quads): at
+// surface 1600 x 1200 the box runs sx(8) = floor((8 * 1600 + 512) / 1024) = 13 ..
+// sx(1015) = 1586 and sy(108) = floor((108 * 1200 + 384) / 768) = 169 .. sy(592) = 925
+// for a safe area of 100 .. 600, so the fill is the one quad (29, 193) .. (1570, 901)
+// with UV (29.5 / 32, 193.5 / 32) .. (1570.5 / 32, 901.5 / 32).
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 (HUD_DrawLabelBox(ctx, 8, top + 8,
+//  1015, bottom - 8) @0x5B7D3E); Render_HUDBoxOverlay @0x56B700 (@0x56B824);
+//  HUD_StdboxDrawFillWrapTiled @0x56B5D0]
+void test_compiler_end_round_box_fills_with_one_quad(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.box_texture_valid = true;
+	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.ticks = 100;
+	state.end_round.shown = true;
+	state.end_round.top = 100;
+	state.end_round.bottom = 600;
+	const HudDrawList &list = compiler.compile(state, 1600.0f, 1200.0f);
+	std::vector<HudQuad> fill;
+	size_t pieces = 0;
+	for (const HudQuad &q : list.quads) {
+		if (q.texture == opennova::hud::kHudTexBoxFill) fill.push_back(q);
+		if (q.texture == opennova::hud::kHudTexBoxBorder) ++pieces;
+	}
+	CHECK(fill.size() == 1, "the end-round box fills with one quad");
+	CHECK(pieces == 8, "and its eight border pieces");
+	if (fill.size() == 1) {
+		const HudQuad &q = fill[0];
+		CHECK(q.x0 == 29.0f && q.y0 == 193.0f && q.x1 == 1570.0f && q.y1 == 901.0f,
+				"the fill rect is the box inset 16 / 24 px");
+		CHECK(q.u0 == 0.921875f && q.v0 == 6.046875f && q.u1 == 49.078125f &&
+						q.v1 == 28.171875f,
+				"its UVs are (dest + 0.5) / 32");
+		CHECK(q.wrap && q.color == 0xFF7F7F7Fu, "wrap-addressed at the raw diffuse");
+	}
+}
+
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
-// the fill tiles at a fixed 32 px screen period off the BORDER atlas's own
-// cell (3,0), and the bottom row is cropped rather than squashed.
+// the fill is ONE wrap-addressed quad on the lifted brush cell at its fixed
+// 32 px screen period, and the bottom row is cropped rather than squashed.
 // [orig: Render_HUDBoxOverlay @0x56b700; flt_7CFE3C = 0.000625; rec+0x180/+0x184;
 //  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
@@ -1857,7 +1900,8 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		const HudDrawList &list = compiler.compile(state, surface_w, surface_h);
 		for (const HudQuad &q : list.quads) {
 			if (q.texture == opennova::hud::kHudTexBoxBorder ||
-					q.texture == opennova::hud::kHudTexBoxTile) {
+					q.texture == opennova::hud::kHudTexBoxTile ||
+					q.texture == opennova::hud::kHudTexBoxFill) {
 				out.push_back(q);
 			}
 		}
@@ -1867,20 +1911,22 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	const std::vector<HudQuad> wide = box_quads(1600.0f, 1200.0f);
 	CHECK(!wide.empty(), "the stdbox panel emits quads when its atlas loaded");
 
-	// The fill comes off the BORDER atlas's cell (3,0) — boxtile.tga is a flat
-	// camo sheet with no cell grid, so sampling a quarter-rect of it is wrong.
+	// The fill comes off the BORDER atlas's cell (3,0), lifted into its own
+	// texture; boxtile.tga is a flat camo sheet with no cell grid, so no quad
+	// samples it as stage 0.
 	bool any_tile_slot = false;
 	for (const HudQuad &q : wide) {
 		if (q.texture == opennova::hud::kHudTexBoxTile) any_tile_slot = true;
 	}
 	CHECK(!any_tile_slot,
-			"every stdbox quad samples the border atlas, fill included");
+			"no stdbox quad samples the camo as its first texture");
 
 	// The eight border pieces are the quads whose UV cell is not (3,0).
 	// At surface 1600 the scale is exactly 1, so a piece is one full 32 px cell.
 	auto corner_tl = [](const std::vector<HudQuad> &qs) {
 		for (const HudQuad &q : qs) {
-			if (q.u0 < 0.01f && q.v0 < 0.01f) return q;
+			if (q.texture == opennova::hud::kHudTexBoxBorder && q.u0 < 0.01f && q.v0 < 0.01f)
+				return q;
 		}
 		return HudQuad{};
 	};
@@ -1923,7 +1969,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		bool pieces_half_texel = true;
 		int pieces_seen = 0;
 		for (const HudQuad &q : wide) {
-			if (q.u0 > 3.0f * kCell - 0.01f) continue; // the fill tiles
+			if (q.texture == opennova::hud::kHudTexBoxFill) continue; // the fill
 			++pieces_seen;
 			const bool cropped = std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f;
 			if (!on_half_texel(q.u0) || !on_half_texel(q.u1) || !on_half_texel(q.v0) ||
@@ -1938,68 +1984,52 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 				"the top-left piece samples cell (0,0) from texel 0's centre");
 	}
 
-	// The fill tiles at the cell's own 32 px period, anchored to the ABSOLUTE
-	// screen grid — retail's fill is one wrap-addressed quad, so every tile
-	// boundary sits on a multiple of 32 regardless of where the inset rect
-	// starts [orig: HUD_StdboxDrawFillWrapTiled @0x56b5d0, UV=(dest+0.5)/32].
-	std::vector<HudQuad> fill;
-	float fill_min_x = 1e9f;
-	float fill_max_x = -1e9f;
-	for (const HudQuad &q : wide) {
-		if (q.u0 > 3.0f * kCell - 0.01f) {
-			fill.push_back(q);
-			fill_min_x = std::min(fill_min_x, q.x0);
-			fill_max_x = std::max(fill_max_x, q.x1);
+	// The fill is ONE quad over the inset rect (16 / 24 px at s = 1 inside the
+	// pieces' outer rect) on the lifted brush cell, wrap-addressed, its UV the
+	// screen position over the cell's own 32 px with retail's half texel,
+	// (dest + 0.5) / 32, so the texture's wrap tiles it on the absolute screen grid
+	// [orig: Render_HUDBoxOverlay @0x56B700 - the insets @0x56B7BD..0x56B80D, the
+	// one call @0x56B824; HUD_StdboxDrawFillWrapTiled @0x56B5D0 - the UVs
+	// @0x56B690..0x56B6E9, one strip @0x56B6F5].
+	{
+		std::vector<HudQuad> fill;
+		float box_x0 = 1e9f, box_y0 = 1e9f, box_x1 = -1e9f, box_y1 = -1e9f;
+		for (const HudQuad &q : wide) {
+			if (q.texture == opennova::hud::kHudTexBoxFill) {
+				fill.push_back(q);
+				continue;
+			}
+			box_x0 = std::min(box_x0, q.x0);
+			box_y0 = std::min(box_y0, q.y0);
+			box_x1 = std::max(box_x1, q.x1);
 		}
+		// The bottom row is cropped to 90%, so the outer bottom is the bottom
+		// pieces' top plus a full cell.
+		for (const HudQuad &q : wide)
+			if (q.texture == opennova::hud::kHudTexBoxBorder &&
+					std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f)
+				box_y1 = std::max(box_y1, q.y0 + 32.0f);
+		CHECK(fill.size() == 1, "the interior is one quad, not a tile per cell");
+		if (fill.size() == 1) {
+			const HudQuad &q = fill[0];
+			CHECK(q.wrap, "the fill quad is wrap-addressed");
+			CHECK(q.texture2 == opennova::hud::kHudTexNone, "the fill has no second stage");
+			CHECK(q.x0 == box_x0 + 16.0f && q.x1 == box_x1 - 16.0f && q.y0 == box_y0 + 24.0f &&
+							q.y1 == box_y1 - 24.0f,
+					"the fill covers the 16 / 24 px inset rect at s = 1");
+			CHECK(q.u0 == (q.x0 + 0.5f) / 32.0f && q.v0 == (q.y0 + 0.5f) / 32.0f &&
+							q.u1 == (q.x1 + 0.5f) / 32.0f && q.v1 == (q.y1 + 0.5f) / 32.0f,
+					"the fill's UV is (dest + 0.5) / cell at every corner");
+			CHECK(q.color == 0xFF7F7F7Fu, "at the box's raw half-bright diffuse");
+		}
+		for (const HudQuad &q : wide)
+			if (q.texture == opennova::hud::kHudTexBoxBorder) CHECK(!q.wrap, "a piece is not wrapped");
 	}
-	CHECK(fill.size() > 2, "the interior is tiled, not one stretched quad");
-	int full_tiles = 0;
-	bool grid_ok = true;
-	bool slice_ok = true;
-	for (const HudQuad &q : fill) {
-		// Every edge is either the inset rect's edge or a 32-grid boundary.
-		const auto on_grid = [](float v) {
-			return std::fabs(v - std::floor(v / 32.0f + 0.5f) * 32.0f) < 0.01f;
-		};
-		if (!(on_grid(q.x0) || std::fabs(q.x0 - fill_min_x) < 0.01f)) grid_ok = false;
-		if (!(on_grid(q.x1) || std::fabs(q.x1 - fill_max_x) < 0.01f)) grid_ok = false;
-		// Every tile — clipped on either side — samples the slice of the
-		// cell matching its screen-grid phase.
-		const float frac = (q.x1 - q.x0) / 32.0f;
-		if (std::fabs((q.u1 - q.u0) - kCell * frac) > 0.001f) slice_ok = false;
-		if (std::fabs((q.x1 - q.x0) - 32.0f) < 0.01f) ++full_tiles;
-	}
-	CHECK(grid_ok, "every fill tile edge sits on the 32 px screen grid or the inset edge");
-	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
-	CHECK(full_tiles > 0, "the interior contains full-period tiles");
-	// The half texel (C-351): each tile's UV is (dest - tile + 0.5) / 32 of
-	// the cell, so a tile on the grid starts at texel coordinate 96.5 of the
-	// 128 px atlas (the centre of the cell's first texel), not on the boundary
-	// with cell (2,0)'s transparent last column [orig:
-	// HUD_StdboxDrawFillWrapTiled @0x56B5D0 -- (pos + 0.5) * (1 / cell)].
-	bool half_texel_ok = true;
-	for (const HudQuad &q : fill) {
-		const float tile_x = std::floor(q.x0 / 32.0f + 1e-4f) * 32.0f;
-		const float tile_y = std::floor(q.y0 / 32.0f + 1e-4f) * 32.0f;
-		const float want_u0 = 3.0f * kCell + kCell * ((q.x0 - tile_x + 0.5f) / 32.0f);
-		const float want_v0 = kCell * ((q.y0 - tile_y + 0.5f) / 32.0f);
-		if (std::fabs(q.u0 - want_u0) > 1e-5f || std::fabs(q.v0 - want_v0) > 1e-5f)
-			half_texel_ok = false;
-	}
-	CHECK(half_texel_ok, "every fill tile's UV carries retail's half texel");
-	bool on_grid_tile = false;
-	for (const HudQuad &q : fill) {
-		if (std::fabs(q.x0 - std::floor(q.x0 / 32.0f + 0.5f) * 32.0f) > 0.01f) continue;
-		on_grid_tile = true;
-		CHECK(std::fabs(q.u0 * 128.0f - 96.5f) < 1e-3f,
-				"a grid-aligned fill tile starts at the centre of the cell's first texel");
-	}
-	CHECK(on_grid_tile, "a fill tile starts on the 32 px grid");
 
 	// The pieces' second texture stage: with the boxtile camo loaded every
 	// border piece carries it at the camo's own dims (the screen-anchored UV1
 	// divisors) and the fill carries none; without the camo's dims nothing
-	// does. [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
+	// does. [orig: GfxShader_CreateTwoTexture(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
 	//  applied for the pieces @0x56b902; the style floats @0x56b357/@0x56b361]
 	for (const HudQuad &q : wide)
 		CHECK(q.texture2 == opennova::hud::kHudTexNone,
@@ -2012,7 +2042,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 		bool pieces_ok = true;
 		bool fill_ok = true;
 		for (const HudQuad &q : box_quads(1600.0f, 1200.0f)) {
-			const bool fill_cell = q.u0 > 3.0f * kCell - 0.01f;
+			const bool fill_cell = q.texture == opennova::hud::kHudTexBoxFill;
 			if (fill_cell) {
 				if (q.texture2 != opennova::hud::kHudTexNone) fill_ok = false;
 				continue;
@@ -2528,22 +2558,74 @@ void test_message_log_element(const fnt_font_t *font) {
 			"a single line sits in the bottom row, not the top");
 }
 
-// A mission start zeroes the main-frame counter (world::HudFrameCounters); a held ring line keeps
-// the frames it had left, as retail's per-slot countdowns outlive the start [orig:
-// Input_InitBindingSystem @0x525BA5 clears only the flood table, not the rings].
-void test_message_clock_rebase(const fnt_font_t *font) {
+// A mission start zeroes the main-frame counter (world::HudFrameCounters), and the same start
+// clears all six chat channels ahead of it: a clock restart empties both rings, and the HUD's
+// configure (its mission's HUD init) leaves them empty [orig: Game_StartMission @0x524360 - the
+// Chat_ClearAllChannels call @0x524A10 ahead of the Game_ResetSessionHudState call @0x525BAA].
+void test_message_clock_restart_clears(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
 	layout.chat_text = {5, 40, 0, 0, true};
 	compiler.configure(layout, font);
 	compiler.push_chat_line("a", 0xFF102030u, 1000); // expires at 1930
-	compiler.rebase_message_clock(-1000);
+	compiler.push_message("b", 1000);
 	HudFrameState state;
-	state.main_frame = 929;
-	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() == 1,
-			"the line keeps its frames past the counter's restart");
-	state.main_frame = 930;
-	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "and expires when they run out");
+	state.main_frame = 1001;
+	CHECK(!compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "the held lines draw");
+	compiler.clear_message_rings();
+	CHECK(compiler.chat_lines().empty(), "the restart empties the CHAT ring");
+	state.main_frame = 1;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"no held line draws past the counter's restart");
+	compiler.push_chat_line("c", 0xFF102030u, 1);
+	compiler.configure(layout, font);
+	CHECK(compiler.chat_lines().empty(), "the mission's HUD init leaves the rings empty");
+}
+
+// The HUD's process words outlive a mission: the embedder's next HUD takes the torn-down one's,
+// and its configure (the HUD init) keeps them while it zeroes the fade stamps, so a stance, an
+// ammo key or a silhouette key unchanged across the start restamps no fade
+// [orig: HUD_DrawStanceIndicator @0x599F10 - the stores @0x599F8C / @0x599F92;
+//  HUD_DrawAmmoIndicator @0x599A30 - the stores @0x599AB4 / @0x599ABA / @0x599AC5;
+//  HUD_UpdateWaypointAltitudeColor @0x590970; HUD_DrawTargetEntityOverlay - the key store
+//  @0x59A604; HUD_DrawWeaponSilhouette - the key store @0x59A744; HUD_InitOverlaySystem
+//  @0x5A4620 - the HUD_ResetAllOverlayBuffers call @0x5A4949].
+void test_process_words_carry(const fnt_font_t *font) {
+	HudLayout layout;
+	HudFrameCompiler last;
+	last.configure(layout, font);
+	HudProcessWords words;
+	words.item_flash_timers[3] = 0x400;
+	words.stance_prev = 1;
+	words.stance_cur = 2;
+	words.ammo_key_bucket = 7;
+	words.ammo_key_reserve = 30;
+	words.ammo_key_class = 4;
+	words.waypoint_altitude_color = 0xFF007000u;
+	words.waypoint_altitude_band = 2;
+	words.silhouette_vehicle = 0x1005;
+	words.silhouette_weapon = "M4";
+	last.carry_process_words(words);
+	HudFrameCompiler next;
+	next.carry_process_words(last.process_words());
+	next.configure(layout, font);
+	const HudProcessWords kept = next.process_words();
+	CHECK(kept.item_flash_timers[3] == 0x400 && kept.item_flash_timers[2] == 0,
+			"the item flash timers carry");
+	CHECK(kept.stance_prev == 1 && kept.stance_cur == 2, "the stance bytes carry");
+	CHECK(kept.ammo_key_bucket == 7 && kept.ammo_key_reserve == 30 && kept.ammo_key_class == 4,
+			"the ammo key carries");
+	CHECK(kept.waypoint_altitude_color == 0xFF007000u && kept.waypoint_altitude_band == 2,
+			"the waypoint altitude colour and band carry");
+	CHECK(kept.silhouette_vehicle == 0x1005 && kept.silhouette_weapon == "M4",
+			"the silhouette keys carry");
+	// A fresh HUD with no carry holds BSS-zero words.
+	HudFrameCompiler fresh;
+	fresh.configure(layout, font);
+	const HudProcessWords zero = fresh.process_words();
+	CHECK(zero.stance_cur == 0 && zero.ammo_key_bucket == 0 && zero.silhouette_vehicle == 0 &&
+			zero.silhouette_weapon.empty() && zero.waypoint_altitude_color == 0,
+			"a fresh HUD's words are zero");
 }
 
 // The CHAT feed loop: three newest lines at HUDCHATTEXT, alpha folded from the
@@ -2610,9 +2692,13 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 	lp.shown = true;
 	lp.local_team = 1;
 	state.hud_frame = 0; // phase A
-	const auto zone = [](int letter, int team, bool contested) {
+	// The markers group by the zone byte's low five bits, never the team
+	// [orig: HUD_DrawZoneStatusPanel `mov al, [eax+21Ah]` @0x5a24cd / @0x5a25ce,
+	//  `and ecx, 1Fh` @0x5a24d9 / @0x5a25d7].
+	const auto zone = [](int letter, int team, int zone_no, bool contested) {
 		HudLfpZone z;
 		z.letter_index = letter;
+		z.zone_byte = zone_no;
 		z.team = team;
 		z.timer_present = true;
 		z.timer_team = team;
@@ -2620,7 +2706,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		return z;
 	};
 	// Nothing contested -> nothing drawn at all.
-	lp.zones = {zone(0, 1, false), zone(1, 2, false)};
+	lp.zones = {zone(0, 1, 1, false), zone(1, 2, 2, false)};
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		size_t icons = 0;
@@ -2629,11 +2715,12 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 					q.texture <= opennova::hud::kHudTexLfpNeutral) ++icons;
 		CHECK(icons == 0, "no contested zone seeds the walk: the panel is empty");
 	}
-	// Team 1 holds A and B (B under attack), team 2 holds C (ready).
-	HudLfpZone a = zone(0, 1, true);
-	HudLfpZone b = zone(1, 1, true);
+	// Zone 1 holds A and B (team 1, B under attack), zone 2 holds C (team 2,
+	// ready).
+	HudLfpZone a = zone(0, 1, 1, true);
+	HudLfpZone b = zone(1, 1, 1, true);
 	b.rate = -3; // own point draining -> UNDER ATTACK
-	HudLfpZone c = zone(2, 2, true);
+	HudLfpZone c = zone(2, 2, 2, true);
 	c.control = 0; // enemy point at zero control -> READY
 	lp.zones = {a, b, c};
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -2649,7 +2736,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[0].x0 - (1020.0f - 196.0f)) < 0.01f, "A right-anchors the group");
 		CHECK(std::fabs(icons[1].x0 - (1020.0f - 98.0f)) < 0.01f, "B steps 98 across");
 		CHECK(std::fabs(icons[0].y0 - 27.0f) < 0.01f, "the first row IS the anchor");
-		CHECK(std::fabs(icons[2].y0 - (27.0f + 86.0f)) < 0.01f, "the next team steps 86 down");
+		CHECK(std::fabs(icons[2].y0 - (27.0f + 86.0f)) < 0.01f, "the next zone number steps 86 down");
 		CHECK(std::fabs(icons[2].x0 - (1020.0f - 98.0f)) < 0.01f, "a one-zone group ends at the same edge");
 		CHECK(icons[0].texture == opennova::hud::kHudTexLfpTeam1 &&
 				icons[2].texture == opennova::hud::kHudTexLfpTeam2,
@@ -2671,8 +2758,8 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[2].v0 - 0.75f) < 1e-6f, "ready draws frame 3 on phase B");
 		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
 	}
-	// The conquest arm: no group break on a team change, every contested
-	// marker on its own row at the seed group's x (team 1's two zones put it
+	// The conquest arm: no group break on a zone number change, every contested
+	// marker on its own row at the seed group's x (zone 1's two markers put it
 	// 196 left of the anchor), the rows 86 apart
 	// [orig: HUD_DrawZoneStatusPanel @0x5a25e7..0x5a25f6 (the break skipped), the marker
 	//  leg @0x5a2711..0x5a2786; y_offset steps only in the AAS leg @0x5a27a3].
@@ -2702,6 +2789,32 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
 				q.texture <= opennova::hud::kHudTexLfpNeutral) ++tdm_icons;
 	CHECK(tdm_icons == 3, "a non-conquest game type draws the AAS arm");
+	// One zone number, two owners: a neutral marker and a team 2 marker share
+	// zone 3's row, each on its own team's sheet; a team-1 zone with a zero zone
+	// byte is no marker at all; the seed is the first flagged NUMBERED zone
+	// [orig: `test al, al; jz` @0x5a25dd, the seed @0x5a2509..0x5a256e; the
+	//  sheet by +0x162 @0x59893d..0x598957].
+	lp.game_type = 0;
+	HudLfpZone unnumbered = zone(0, 1, 0, true);
+	HudLfpZone neutral = zone(1, 0, 3, true);
+	HudLfpZone held = zone(2, 2, 3, true);
+	lp.zones = {unnumbered, neutral, held};
+	const HudDrawList &list_n = compiler.compile(state, 1024.0f, 768.0f);
+	std::vector<HudQuad> row_icons;
+	for (const HudQuad &q : list_n.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) row_icons.push_back(q);
+	CHECK(row_icons.size() == 2, "the unnumbered zone draws no marker");
+	if (row_icons.size() == 2) {
+		CHECK(row_icons[0].texture == opennova::hud::kHudTexLfpNeutral &&
+				row_icons[1].texture == opennova::hud::kHudTexLfpTeam2,
+				"a neutral zone draws on the neutral sheet beside its zone-mate");
+		CHECK(std::fabs(row_icons[0].x0 - (1020.0f - 196.0f)) < 0.01f &&
+				std::fabs(row_icons[1].x0 - (1020.0f - 98.0f)) < 0.01f,
+				"both markers of zone 3 share one right-anchored row");
+		CHECK(std::fabs(row_icons[0].y0 - 27.0f) < 0.01f &&
+				std::fabs(row_icons[1].y0 - 27.0f) < 0.01f, "the first group sits on the anchor row");
+	}
 }
 
 // The map medic marker: a local-team medic's blip is REPLACED by the
@@ -3279,13 +3392,135 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	};
 	HudFrameState gated = state;
 	gated.spawn_success_gate = true;
-	CHECK(hidden(gated), "the round-over latch skips the bar");
+	// The latch also returns the overlay pass at its head (hud_overlay_pass_head_test), so
+	// its frame is measured against a latched idle frame.
+	HudFrameState gated_idle = gated;
+	gated_idle.breath_samples = 0;
+	const size_t gated_idle_quads = compiler.compile(gated_idle, 1024, 768).quads.size();
+	const HudDrawList &latched = compiler.compile(gated, 1024, 768);
+	CHECK(latched.quads.size() == gated_idle_quads && bold_glyphs(latched).empty(),
+			"the round-over latch skips the bar");
 	gated = state;
 	gated.declutter_visible[kDeclutterBreathTime] = false;
 	CHECK(hidden(gated), "a hidden BREATHTIME slot skips the bar");
 	gated = state;
 	gated.breath_time = 0;
 	CHECK(hidden(gated), "breathtime 0 skips the bar");
+}
+
+// The frame-rate overlay (D-NET-NEW-LI-32, LI-s26 row 2) and the gameplay overlays' level-3
+// skip (D-NET-NEW-LI-33): under the cheat word's 0x400 bit the line "FR %2i  MN %2i MX %2i CPU %d"
+// draws at design (10, 80) in the bold label slot, the snapshot twin g_HUDColors.active
+// half-bright; the overlay master word takes it down, and detail level 3 skips it and the
+// breath bar after it, while the bar draws below that level.
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `cmp dword_840B18, 0` @0x5BDE9B, `cmp
+//  g_HUDDetailLevel, 3; jz` @0x5BDEA8, `test g_DebugCheatFlags, 400h` @0x5BDEB5,
+//  HUD_DrawFrameRateOverlay called @0x5BDEC2, HUD_DrawBreathBar called @0x5BDED3;
+//  HUD_DrawFrameRateOverlay @0x5BAE20 - the format @0x5BAE4C, the sprintf @0x5BAE52,
+//  g_HUDColors.active @0x5BAE57, y 80 @0x5BAE65, x 10 @0x5BAE67, g_HUDLabelFontBold
+//  @0x5BAE69; HUD_DrawTextLeft_HalfBright @0x5804C0 - @0x5804D8..0x5804F0]
+void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudFrameRateOverlay overlay;
+	overlay.average_fps = 58;
+	overlay.min_fps = 4;
+	overlay.max_fps = 125;
+	overlay.cpu_percent = 7;
+	const std::string text = frame_rate_overlay_text(overlay);
+	CHECK(text == "FR 58  MN  4 MX 125 CPU 7", "the original's format, %2i padding to two");
+	HudLayout layout;
+	layout.breath_time = {300, 100, 0, 0, true};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
+	state.frame_rate = overlay;
+	const uint32_t bold_page = static_cast<uint32_t>(kHudFontSlotLabelBold) * FNT_MAX_PAGES;
+	const auto bold_glyphs = [&](const HudDrawList &list) {
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : list.glyphs)
+			if (g.page == bold_page) out.push_back(g);
+		return out;
+	};
+	CHECK(bold_glyphs(compiler.compile(state, 1024, 768)).empty(), "the bit down draws nothing");
+	state.frame_rate.shown = true;
+	std::vector<GameFontQuad> line = bold_glyphs(compiler.compile(state, 1024, 768));
+	CHECK(line.size() == text.size(), "one bold glyph per character");
+	CHECK(!line.empty() && line[0].x_top_left == 9.5f && line[0].y_top == 79.5f &&
+					line[0].color == 0xFF7F7F7Fu,
+			"the line at design (10, 80), the twin half-bright");
+	HudFrameState hidden = state;
+	hidden.overlay_master = 0;
+	CHECK(bold_glyphs(compiler.compile(hidden, 1024, 768)).empty(), "/NOHUD takes it down");
+	// The breath bar's label rides the same slot: 20 s of breath, 40 of 80 samples.
+	state.breath_time = 20;
+	state.breath_samples = 40;
+	state.breath_label = "Breath";
+	line = bold_glyphs(compiler.compile(state, 1024, 768));
+	CHECK(line.size() == text.size() + 6, "below level 3 the overlay and the bar's label draw");
+	state.hud_detail_level = 3;
+	CHECK(bold_glyphs(compiler.compile(state, 1024, 768)).empty(),
+			"level 3 skips the overlay and the breath bar");
+}
+
+// D-NET-NEW-LI-42: the connection status line ("%s (%i)" at CONNECTSTATUS by its alignment, the
+// bold slot, half-bright white) and the start timer (the STARTTIMER box, "%s %i:%02i" and the
+// footer centred in the large slot, half-bright active), both after the breath bar inside the
+// level-3 skip.
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - HUD_DrawPingDisplay called @0x5BDED8,
+//  HUD_DrawTimerOverlay called @0x5BDEDD; HUD_DrawPingDisplay @0x59D9D0 - sprintf @0x59DA4C;
+//  HUD_DrawTimerOverlay @0x59DAF0 - sprintf @0x59DBEE, the lines @0x59DC28 / @0x59DC6E]
+void test_compiler_connect_status_and_start_timer(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudConnectStatus status;
+	status.label = "Lag";
+	status.seconds = 5;
+	CHECK(connect_status_text(status) == "Lag (5)", "the original's \"%s (%i)\"");
+	HudStartTimer timer;
+	timer.seconds = 125;
+	timer.label = "Start";
+	timer.footer = "Wait";
+	CHECK(start_timer_text(timer) == "Start 2:05", "the original's \"%s %i:%02i\"");
+	HudLayout layout;
+	layout.connect_status = {1012, 10, 0, 1, true};
+	layout.start_timer = {262, 180, 500, 80};
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
+	const auto page_glyphs = [&](const HudDrawList &list, int slot) {
+		const uint32_t page = static_cast<uint32_t>(slot) * FNT_MAX_PAGES;
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : list.glyphs)
+			if (g.page == page) out.push_back(g);
+		return out;
+	};
+	HudDrawList list = compiler.compile(state, 1024, 768);
+	CHECK(page_glyphs(list, kHudFontSlotLabelBold).empty() &&
+					page_glyphs(list, kHudFontSlotLabelLarge).empty(),
+			"neither draws by default");
+	state.connect_status = status;
+	state.connect_status.shown = true;
+	std::vector<GameFontQuad> line = page_glyphs(compiler.compile(state, 1024, 768),
+			kHudFontSlotLabelBold);
+	CHECK(line.size() == 7 && line[0].color == 0xFF7F7F7Fu,
+			"one bold glyph per character, half-bright white");
+	CHECK(!line.empty() && line.back().x_top_right < 1013.0f && line[0].x_top_left < 1000.0f,
+			"right-aligned: the line ends at CONNECTSTATUS x");
+	state.connect_status.shown = false;
+	state.start_timer = timer;
+	line = page_glyphs(compiler.compile(state, 1024, 768), kHudFontSlotLabelLarge);
+	CHECK(line.size() == 14 && line[0].color == 0xFF7F7F7Fu,
+			"the timer line and its footer in the large slot, half-bright");
+	CHECK(line.size() == 14 && line[0].y_top < line[10].y_top, "the footer one line lower");
+	state.connect_status.shown = true;
+	state.hud_detail_level = 3;
+	list = compiler.compile(state, 1024, 768);
+	CHECK(page_glyphs(list, kHudFontSlotLabelBold).empty() &&
+					page_glyphs(list, kHudFontSlotLabelLarge).empty(),
+			"level 3 skips both");
 }
 
 // The mounted dispatch in HUD_RenderOverlays is intentionally asymmetric:
@@ -3418,6 +3653,8 @@ int main() {
 	test_bordered_image_sites(&font);
 	test_death_arm_skips_the_dispatcher(&font);
 	test_compiler_breath_bar(&font);
+	test_compiler_frame_rate_overlay(&font);
+	test_compiler_connect_status_and_start_timer(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);
 	test_kill_announcement(&font);
@@ -3446,12 +3683,14 @@ int main() {
 	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
+	test_compiler_end_round_box_fills_with_one_quad(&font);
 	test_compiler_scoreboard_rows(&font);
 	test_compiler_scoreboard_paging(&font);
 	test_compiler_chat_input(&font);
 	test_message_log_element(&font);
 	test_chat_feed_loop(&font);
-	test_message_clock_rebase(&font);
+	test_message_clock_restart_clears(&font);
+	test_process_words_carry(&font);
 	test_lfp_panel_element(&font);
 	test_spinmap_medic_marker(&font);
 	test_char_extent(&font);

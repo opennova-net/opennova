@@ -427,8 +427,8 @@ int main() {
         opennova::assets::AssetStore assets{&index};
         const auto root_y = [](const SkeletalClips &rig, const char *key, uint32_t frame) {
             const SkeletalClips::LoadedClip *clip = rig.find_clip(key);
-            return clip != nullptr && frame < clip->clip.frames.size()
-                    ? clip->clip.frames[frame][0].world_position.y
+            return clip != nullptr && frame < clip->clip.key_count()
+                    ? clip->clip.key(frame)[0].world_position.y
                     : -1.0f;
         };
 

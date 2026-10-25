@@ -34,8 +34,8 @@ void infantry_detour(AiSystem &ai, AiEntity &e, World &world) {
         // Retail initializes this height for changed modes or state 1. No state-3
         // producer is witnessed; its same-mode arm reads an uninitialized stack
         // word. Keep the ground probe deterministic for that malformed state.
-        const int32_t start[3] = {e.pos[0], e.pos[1], io::bam_add(
-                query.raycast_ground(world, e.handle, e.pos, 0, 0, 65536, 131072, nullptr),
+        const int32_t start[3] = {e.self->position.x.q16, e.self->position.y.q16, io::bam_add(
+                query.raycast_ground(world, e.handle, e.self->position.words().data(), 0, 0, 65536, 131072, nullptr),
                 24576)};
         const int32_t base = io::bam_sub(
                 bearing_to(io::bam_sub(next[0], start[0]), io::bam_sub(next[1], start[1])),
@@ -55,7 +55,7 @@ void infantry_detour(AiSystem &ai, AiEntity &e, World &world) {
                 const int32_t dy = static_cast<int32_t>((int64_t(s) * (radius << 16)) >> 22);
                 const int32_t candidate[3] = {
                     io::bam_add(start[0], dx), io::bam_add(start[1], dy),
-                    io::bam_add(query.raycast_ground(world, e.handle, e.pos, dx, dy,
+                    io::bam_add(query.raycast_ground(world, e.handle, e.self->position.words().data(), dx, dy,
                                                      65536, 131072, nullptr), 28672)};
                 // Both rays admit every entity type [orig: `push 1` @0x4AFD9B /
                 // @0x4AFE10].
@@ -81,8 +81,8 @@ void infantry_detour(AiSystem &ai, AiEntity &e, World &world) {
         inf.path_state = 2;
     }
 
-    const int32_t dx = io::bam_sub(next[0], e.pos[0]);
-    const int32_t dy = io::bam_sub(next[1], e.pos[1]);
+    const int32_t dx = io::bam_sub(next[0], e.self->position.x.q16);
+    const int32_t dy = io::bam_sub(next[1], e.self->position.y.q16);
     const int32_t distance = static_cast<int32_t>(
             std::min(std::hypot(double(dx), double(dy)), 2147418112.0));
     if (distance < 65536) inf.path_state = 0; // [orig: @0x4AFF06]

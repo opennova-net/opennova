@@ -31,16 +31,16 @@ inline int32_t ftol(double v) { return static_cast<int32_t>(v); }
 
 
 // The collectors' fixed entity matrix: the full Euler pack at entity+4 (the
-// canonical heading plus the authored pitch/roll BAMs), which places the
+// Yaw word plus the authored pitch/roll BAMs), which places the
 // entity+0x1FC sphere center before the view transform.
 // [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, called from the
 //  building collector @ 0x5c6c6a, the statics collector @ 0x5c70b1 and the
 //  model leg @ 0x5c8f25]
 inline CollisionMatrix entity_euler_pose(const Entity &e, const int32_t pos[3]) {
     return collision_matrix_from_euler(
-        bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw)),
-        bam_from_degrees_wrapped(static_cast<double>(e.pitch)),
-        bam_from_degrees_wrapped(static_cast<double>(e.roll)), pos);
+        e.heading,
+        e.pitch_bam,
+        e.roll_bam, pos);
 }
 
 // Per-axis Q22-quantized trig factor: c/s = float(ftol(trig(th) * 2^22)) / 2^22,
@@ -159,9 +159,9 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
 RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
     detail::entity_pos_fixed(e, pos);
-    const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
-    const int32_t pitch = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
-    const int32_t roll = bam_from_degrees_wrapped(static_cast<double>(e.roll));
+    const int32_t heading = e.heading;
+    const int32_t pitch = e.pitch_bam;
+    const int32_t roll = e.roll_bam;
     return render_matrix_from_pose(pos, heading, pitch, roll);
 }
 
@@ -547,6 +547,10 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
 
         Entity *e = world.registry.get(slot.h);
         if (e == nullptr) continue;
+        // The walk's Flags match (the mirror's Reflective filter): the one
+        // retail Flags word, the vehicle init's Reflective bit included.
+        // [orig: @ 0x5c6c27..0x5c6c39; Entity_InitFromModel @ 0x40e204..0x40e20a]
+        if (!collect_flags_match(cam, entity_flags_word(*e))) continue;
         const CollisionModel *cm = collision.model_for(world, slot.h);
         if (cm == nullptr || !cm->valid()) continue; // [orig: the entity+48 model gate]
 
@@ -567,8 +571,8 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         const bool pose_hit = static_pose_memo_enabled_ &&
                               memo.handle_packed == slot.h.packed &&
                               memo.cm == cm && memo.model_id == inst_model_id &&
-                              memo.yaw == e->yaw &&
-                              memo.pitch == e->pitch && memo.roll == e->roll &&
+                              memo.heading == e->heading &&
+                              memo.pitch_bam == e->pitch_bam && memo.roll_bam == e->roll_bam &&
                               memo.pos[0] == epos[0] && memo.pos[1] == epos[1] &&
                               memo.pos[2] == epos[2];
         if (!pose_hit) {
@@ -578,9 +582,9 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
             memo.handle_packed = slot.h.packed;
             memo.cm = cm;
             memo.model_id = inst_model_id;
-            memo.yaw = e->yaw;
-            memo.pitch = e->pitch;
-            memo.roll = e->roll;
+            memo.heading = e->heading;
+            memo.pitch_bam = e->pitch_bam;
+            memo.roll_bam = e->roll_bam;
             memo.pos[0] = epos[0];
             memo.pos[1] = epos[1];
             memo.pos[2] = epos[2];
@@ -1179,11 +1183,11 @@ OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel
     OcclusionWorld::TocCandidate c;
     c.self = e.handle;
     detail::entity_pos_fixed(e, c.pos_fixed);
-    c.radius_q16 = to_fixed(e.bound_radius);
+    c.radius_q16 = e.bound_radius.q16;
     c.model = cm;
-    c.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
-    c.pitch_bam = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
-    c.roll_bam = bam_from_degrees_wrapped(static_cast<double>(e.roll));
+    c.heading_bam = e.heading;
+    c.pitch_bam = e.pitch_bam;
+    c.roll_bam = e.roll_bam;
     return c;
 }
 
@@ -1418,7 +1422,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         int32_t center_local[3];
         int32_t radius = 0;
         bound_sphere_fixed(*cm, center_local, radius, e->uniform_scale_q16);
-        const int32_t z = to_fixed(e->position.z) + center_local[2];
+        const int32_t z = e->position.z.q16 + center_local[2];
         return z + radius > cam.water_z && z - radius < cam.water_z;
     };
 
@@ -1525,7 +1529,10 @@ void OcclusionWorld::build_frame(World &world, CollisionWorld &collision,
 void OcclusionWorld::select_view(OcclusionView view) {
     if (view == selected_view_) return;
     selected_view_ = view;
-    ParkedFrame &p = parked_view_;
+    swap_frame(parked_view_);
+}
+
+void OcclusionWorld::swap_frame(ParkedFrame &p) {
     batch_.swap(p.batch);
     slots_.swap(p.slots);
     occluder_edge_planes_.swap(p.occluder_edge_planes);
@@ -1550,6 +1557,30 @@ void OcclusionWorld::select_view(OcclusionView view) {
     std::swap(camera_indoors_, p.camera_indoors);
 }
 
+bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collision,
+                                          const OcclusionFrameCamera &cam,
+                                          const MirrorEntityWalk &walk_entities) {
+    // The camera-below-water word picks the walks' match: unfiltered below,
+    // the Reflective entities alone at or above. [orig: Render_MainScene
+    // `cmp eax, g_EnvWaterHeightFixed; setl dl` @ 0x5c16f2..0x5c16f8;
+    // Terrain_CollectVisibleEntitiesForReflection @ 0x5c9109..0x5c911f]
+    OcclusionFrameCamera mirror = cam;
+    mirror.collect_flag_match = cam.pos_fixed[2] < cam.water_z ? 0u : kEntityFlagReflective;
+    swap_frame(mirror_frame_);
+    build_frame(world, collision, mirror);
+    const bool visible = water_visible_;
+    // Then the entity collectors over the mirror's section masks with the same
+    // match: their latches tick and their re-arms draw the shared PRNG stream
+    // as in any collect, and the reflected subscene draws the lists they build.
+    // [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 — the calls
+    //  @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e; Water_RenderReflectedWorldScene
+    //  @ 0x5c8510 — Terrain_RenderSectorEntities @ 0x5c857b and
+    //  Terrain_RenderSectorEntitiesBySide @ 0x5c8590 / @ 0x5c8599 over them]
+    if (walk_entities) walk_entities(mirror);
+    swap_frame(mirror_frame_);
+    return visible;
+}
+
 // ----------------------------------------------------------------------------
 // The entity render gates
 // ----------------------------------------------------------------------------
@@ -1561,6 +1592,9 @@ void OcclusionWorld::select_view(OcclusionView view) {
 bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
                                            const OcclusionFrameCamera &cam) {
     if ((ent.flags & 1u) != 0) return false; // [orig: @ 0x5c6fec]
+    // The walk's Flags match, ahead of the blink-hits gate and the latch.
+    // [orig: @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10]
+    if (!collect_flags_match(cam, entity_flags_word(ent))) return false;
     if (!blink_hits_render_active(ent.blink_hits)) return false;
 
     int32_t epos[3];
@@ -1575,7 +1609,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
             ((ent.flags | ent.engine_flags) & kEntityFlagParachute) != 0;
         collected = person_render_visible(
             collision, cam, epos,
-            person_collector_radius(to_fixed(ent.bound_radius), parachute),
+            person_collector_radius(ent.bound_radius.q16, parachute),
             ent.occlusion_latch, world.logic_tick);
     } else {
         // Bound sphere + view cull (also paces the latch like the original —
@@ -1646,7 +1680,7 @@ int32_t OcclusionWorld::person_collector_radius(int32_t bound_radius_q16,
 
 // [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60, the person leg: the
 // |view depth| < fog + radius cull @ 0x5c8e26..0x5c8e3c, the viewport clip
-// @ 0x5c8e4d, the sub-pixel floor `cmp dword_A784F0,0C000h; jle` @ 0x5c8e5e
+// @ 0x5c8e4d, the sub-pixel floor `cmp g_MainViewportProjectedRadiusQ16,0C000h; jle` @ 0x5c8e5e
 // BEFORE the latch, then the latch @ 0x5c8e7b..0x5c8eab with the probe aimed
 // at the entity position (`push ebx` = entity+4 @ 0x5c8e91)]
 bool OcclusionWorld::person_render_visible(const CollisionWorld &collision,

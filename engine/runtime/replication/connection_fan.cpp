@@ -18,6 +18,7 @@
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_mount.h>
 
+#include <runtime/audio/oneshot_play.h> // SoundSetIndex (the 0x34 set's spelling)
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -228,15 +229,29 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.passenger = hdr.mount_ammo;
 
 	for (const GameEntitySnapshot &e : entities) {
-		const uint16_t cx = network_compress_fixedpoint(e.x - ax);
-		const uint16_t cy = network_compress_fixedpoint(e.y - ay);
-		const uint16_t cz = network_compress_fixedpoint(e.z - az);
+		// The anchor-relative triple. A value that folds to 0 / -1 takes its word's shift
+		// bits from the call's ECX (network_compress_fixedpoint): y's and z's hold the word
+		// before them (`movzx ecx, ax`); the infantry's x holds the live Yaw (+0x10, loaded
+		// ahead of its +0x1A8 swap); the player's and the vehicle's x a payload address,
+		// which the frame encoder supplies from pos_zero_fold (world_fold).
+		// [orig: NetPacket_SerializeInfantryEntityState @0x4C0320 - `mov ecx, [edi+10h]`
+		//  @0x4C07C0, the calls @0x4C086A / @0x4C0894 / @0x4C08BE, the chain @0x4C086F /
+		//  @0x4C0899; NetPacket_SerializePlayerState @0x4C09C0 - @0x4C0BE6 / @0x4C0C15;
+		//  Entity_SerializeVehicleState @0x460560 - @0x460C7D / @0x460CA7]
+		const uint32_t world_x_ecx =
+				e.entity_class == EntityClass::Infantry ? uint32_t(e.euler_z) : 0u;
+		const uint16_t cx = network_compress_fixedpoint(e.x - ax, world_x_ecx);
+		const uint16_t cy = network_compress_fixedpoint(e.y - ay, cx);
+		const uint16_t cz = network_compress_fixedpoint(e.z - az, cy);
+		const uint8_t world_fold = uint8_t((compress_folds_to_zero(e.x - ax) ? kPosFoldX : 0) |
+				(compress_folds_to_zero(e.y - ay) ? kPosFoldY : 0) |
+				(compress_folds_to_zero(e.z - az) ? kPosFoldZ : 0));
 		// Coarse wire heading from the engine BAM (D-NET-86). The write sides differ per class:
 		// the PLAYER record TRUNCATES the high byte [orig: `*(u8*)(entity+19)` @0x4c0c5d — no
-		// rounding]; the INFANTRY record ROUNDS `(v+0x800000)>>24` [orig: @0x4c08f8]; the VEHICLE
-		// record rounds the high i16 `(v+0x8000)>>16` [orig: @0x460d0a].
+		// rounding]; the INFANTRY record ROUNDS `(v+0x800000)>>24` of its target heading (the
+		// Infantry case) [orig: @0x4c08f8]; the VEHICLE record rounds the high i16
+		// `(v+0x8000)>>16` [orig: @0x460d0a].
 		const uint8_t yaw_byte_trunc = uint8_t(uint32_t(e.euler_z) >> 24);
-		const uint8_t yaw_byte_round = uint8_t((uint32_t(e.euler_z) + 0x00800000u) >> 24);
 		const int16_t yaw_bam16 = int16_t((uint32_t(e.euler_z) + 0x00008000u) >> 16);
 		FrameUpdateRecord rec;
 		// The authoritative wire handle carried off the registry Entity (snapshot_of), not
@@ -245,15 +260,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		rec.handle = e.wire_handle;
 		rec.type_id = e.type_id;
 		rec.cls = e.entity_class;
-		// op1 carrier select: the RIDDEN vehicle (entity+0x16C) wins, else the standing-on
-		// ground entity (entity+0x28) [orig: @0x4c0a08]. With a live carrier the record's
+		// op1 carrier select, the player and the infantry record alike: the RIDDEN vehicle
+		// (entity+0x16C) wins, else the standing-on ground entity (entity+0x28) [orig: @0x4c0a08;
+		// NetPacket_SerializeInfantryEntityState @0x4C0320 - `mov ebp, [edi+28h]` @0x4C06F7,
+		// the +0x16C override @0x4C06EF..0x4C0708]. With a live carrier the record's
 		// position is CARRIER-LOCAL (Entity_TransformWorldToLocal @0x4c0b07) and its yaw
 		// byte is the LOCAL heading's high byte (sar 24 @0x4c0b85); the client mirrors the
 		// carrier back into its own groundEntity (@0x4c1353) — echoing 0xFFFF at a grounded
 		// client detaches + hard-snaps it to the record position (the v26 origin teleport,
 		// D-NET-151). A carrier whose pose we could not resolve (stale handle) falls back
 		// to the free-standing form.
-		const uint16_t player_carrier =
+		const uint16_t organic_carrier =
 				(e.mount_handle != wire_handle::kInvalid) ? e.mount_handle : e.ground_handle;
 		switch (e.entity_class) {
 		case EntityClass::Player:
@@ -266,15 +283,21 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// [orig: ItemDef type/attrib and +0x326/+0x312 gates @0x4c0a39].
 			rec.player.vehicle_bone = e.veh_bone;
 			rec.player.seat_type = e.mounted_weapon_seat_type;
-			if (player_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
+			if (organic_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
-				rec.player.carrier_handle = player_carrier;
-				rec.player.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.player.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.player.pos_z_compressed = network_compress_fixedpoint(local.z);
+				rec.player.carrier_handle = organic_carrier;
+				// ECX: x's call holds the local x itself (`mov ecx, [esp+78h+triggerData]`),
+				// y's and z's the word before them [orig: @0x4C0B0C, the calls @0x4C0B11 /
+				// @0x4C0B36 / @0x4C0B5B, the chain @0x4C0B16 / @0x4C0B3B]
+				rec.player.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(local.x));
+				rec.player.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.player.pos_x_compressed);
+				rec.player.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.player.pos_y_compressed);
 				// LOCAL heading = own - carrier (the transform's out[3]); the wire byte is
 				// its arithmetic high byte [orig: sar eax,18h @0x4c0b85].
 				rec.player.yaw_byte = uint8_t(
@@ -284,6 +307,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.player.pos_x_compressed = cx;
 				rec.player.pos_y_compressed = cy;
 				rec.player.pos_z_compressed = cz;
+				rec.player.pos_zero_fold = world_fold;
 				rec.player.yaw_byte = yaw_byte_trunc; // truncated high byte [orig: @0x4c0c5d]
 			}
 			rec.player.pitch_byte =
@@ -305,8 +329,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// infantry motor's wire mirror — the authority selection pass drives remote
 			// players from their replicated input (D-NET-159; the 43-hardcode was v31's
 			// frozen-body defect).
-			rec.player.anim_state_id =
-					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
+			rec.player.anim_state_id = snapshot_anim_byte(e);
 			rec.player.anim_channel_ratio = e.anim_channel_ratio;
 			                                   // entity+0x188 channel elapsed-ticks-in-loop,
 			                                   // clamp 255 [orig: @0x4c0cf2]
@@ -360,9 +383,15 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
 						uint32_t(e.carrier_roll_bam));
 				rec.vehicle.parent_slot_handle = e.ground_handle;
-				rec.vehicle.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.vehicle.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.vehicle.pos_z_compressed = network_compress_fixedpoint(local.z);
+				// ECX: x's call holds the local x itself, y's and z's the word before them
+				// [orig: @0x460BBB, the calls @0x460BC0 / @0x460BE5 / @0x460C0A, the chain
+				//  @0x460BC5 / @0x460BEA]
+				rec.vehicle.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(local.x));
+				rec.vehicle.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.vehicle.pos_x_compressed);
+				rec.vehicle.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.vehicle.pos_y_compressed);
 				// LOCAL heading = own - carrier (the transform's out[3]), rounded to its
 				// high i16 exactly like the free-standing form [orig: @0x460c2a ->
 				// `add ecx,8000h; sar ecx,10h` @0x460cf2..0x460d0a].
@@ -373,6 +402,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.vehicle.pos_x_compressed = cx;
 				rec.vehicle.pos_y_compressed = cy;
 				rec.vehicle.pos_z_compressed = cz;
+				rec.vehicle.pos_zero_fold = world_fold;
 				rec.vehicle.euler_z = yaw_bam16; // world heading i16 [orig: @0x460cec -> @0x460d0a]
 			}
 			rec.vehicle.flags_byte = e.state_flags;
@@ -396,15 +426,21 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 			// the joiner's family prediction integrates between records; the reader lands it
 			// when the wire flags clear bit 0x02 [orig: write @0x460d5a..0x460d7b; read
 			// @0x460910..0x46091e]. (The old "weapon X" reading was a D-NET-63-era misnomer.)
-			rec.vehicle.vertical_velocity =
-					network_compress_fixedpoint(e.vehicle_vertical_velocity);
+			// Its call's ECX holds the heading word's high byte under the flags byte (`mov cl,
+			// [edi+24h]` over the `movzx ecx, cx` of the rounded heading), which a folded
+			// velocity's word takes [orig: @0x460D01, @0x460D13, the call @0x460D61].
+			rec.vehicle.vertical_velocity = network_compress_fixedpoint(e.vehicle_vertical_velocity,
+					(uint32_t(uint16_t(rec.vehicle.euler_z)) & 0xFF00u) | rec.vehicle.flags_byte);
 			// Live prediction registers: fixed-point forward/lateral commands use
-			// the retail 16-bit codec; steering is the rounded BAM32 high word.
-			// [orig: @0x460dc2..0x460e10; net-re section 5.13]
-			rec.vehicle.weapon_aim_y =
-					network_compress_fixedpoint(e.vehicle_forward_speed_reg);
-			rec.vehicle.weapon_aim_z =
-					network_compress_fixedpoint(e.vehicle_lateral_speed_reg);
+			// the retail 16-bit codec; steering is the rounded BAM32 high word. A folded
+			// forward word takes its shift bits from the health word its call's ECX holds
+			// (`movzx ecx, word ptr [edi+11Eh]`), a folded lateral one from the forward word.
+			// [orig: @0x460dc2..0x460e10, @0x460D84, the calls @0x460DA8 / @0x460DCF, the chain
+			//  @0x460DAD; net-re section 5.13]
+			rec.vehicle.weapon_aim_y = network_compress_fixedpoint(e.vehicle_forward_speed_reg,
+					rec.vehicle.health_word);
+			rec.vehicle.weapon_aim_z = network_compress_fixedpoint(e.vehicle_lateral_speed_reg,
+					rec.vehicle.weapon_aim_y);
 			rec.vehicle.weapon_heading_bam = static_cast<int16_t>(
 					(static_cast<uint32_t>(e.vehicle_steer_target_bam) +
 					 0x00008000u) >> 16);
@@ -412,21 +448,37 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		case EntityClass::Infantry: {
 			// Existing 14-byte infantry record, with the exact witnessed field
 			// sources [orig: NetPacket_SerializeInfantryEntityState @0x4C0320].
-			// A mounted entity writes its raw bone, vehicle handle, and local pose;
-			// no overlay-specific protocol extension is needed.
+			// The carrier is the op1 select above: a mounted body writes its raw
+			// bone, the vehicle and its local pose; an unmounted one standing on an
+			// entity (+0x28: a deck, a building, a body) writes bone 0, that entity
+			// and the pose local to it, so a passenger its vehicle's destruction
+			// kills still names the hull its ground probe hit (D-NET-NEW-L4-20)
+			// [orig: the bone byte 0 @0x4C071F..0x4C072E, the carrier test
+			// @0x4C0735..0x4C073E]. The writer puts the target heading (+0x1A8) in the
+			// heading's place for the pose and the yaw byte, the carried leg's
+			// local yaw included [orig: the swap @0x4C07C9..0x4C07CD;
+			// Entity_TransformWorldToLocal @0x4C07E3, srcPos[3] @0x43BB87].
 			rec.infantry.seat_bone_idx =
 					e.mount_handle != wire_handle::kInvalid ? e.veh_bone : 0;
-			if (e.mount_handle != wire_handle::kInvalid && e.carrier_pose_valid) {
+			if (organic_carrier != wire_handle::kInvalid && e.carrier_pose_valid) {
+				// x's compress call reads the ECX the transform returns with (z's roll term),
+				// y's and z's the word before them [orig: Entity_TransformWorldToLocal
+				//  @0x43BB50 (`mov ecx, eax` @0x43BCDF); the calls @0x4C07ED / @0x4C0812 /
+				//  @0x4C0837, the chain @0x4C07F2 / @0x4C0817]
+				int32_t transform_ecx = 0;
 				const WorldPose local = network_transform_world_to_local(
 						e.x, e.y, e.z, e.carrier_x, e.carrier_y, e.carrier_z,
 						uint32_t(e.carrier_yaw_bam), uint32_t(e.carrier_pitch_bam),
-						uint32_t(e.carrier_roll_bam));
-				rec.infantry.vehicle_slot_handle = e.mount_handle;
-				rec.infantry.pos_x_compressed = network_compress_fixedpoint(local.x);
-				rec.infantry.pos_y_compressed = network_compress_fixedpoint(local.y);
-				rec.infantry.pos_z_compressed = network_compress_fixedpoint(local.z);
+						uint32_t(e.carrier_roll_bam), &transform_ecx);
+				rec.infantry.vehicle_slot_handle = organic_carrier;
+				rec.infantry.pos_x_compressed =
+						network_compress_fixedpoint(local.x, uint32_t(transform_ecx));
+				rec.infantry.pos_y_compressed =
+						network_compress_fixedpoint(local.y, rec.infantry.pos_x_compressed);
+				rec.infantry.pos_z_compressed =
+						network_compress_fixedpoint(local.z, rec.infantry.pos_y_compressed);
 				const uint32_t local_heading =
-						uint32_t(e.euler_z) - uint32_t(e.carrier_yaw_bam);
+						uint32_t(e.infantry_target_heading_bam) - uint32_t(e.carrier_yaw_bam);
 				rec.infantry.yaw_byte =
 						uint8_t((local_heading + 0x00800000u) >> 24);
 			} else {
@@ -434,14 +486,17 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				rec.infantry.pos_x_compressed = cx;
 				rec.infantry.pos_y_compressed = cy;
 				rec.infantry.pos_z_compressed = cz;
-				rec.infantry.yaw_byte = yaw_byte_round; // rounded [orig: @0x4c08f8]
+				// rounded [orig: @0x4c08f8]
+				rec.infantry.yaw_byte = uint8_t(
+						(uint32_t(e.infantry_target_heading_bam) + 0x00800000u) >> 24);
 			}
 			rec.infantry.flags_byte = e.state_flags; // entity+36 low byte [orig: @0x4c0917]
-			// Clamp entity+748 to entity+16 +/- 536870880, then pack the
-			// rounded absolute BAM high byte [orig: @0x4c0921..0x4c0960].
-			// Unsigned arithmetic preserves the original BAM wrap before the
-			// signed comparisons.
-			int32_t target_heading = e.infantry_target_heading_bam;
+			// Clamp entity+748 (the aim heading) to the live entity+16, restored
+			// after the yaw byte, +/- 536870880, then pack the rounded absolute
+			// BAM high byte [orig: @0x4c0905, @0x4c0921..0x4c0960]. Unsigned
+			// arithmetic preserves the original BAM wrap before the signed
+			// comparisons.
+			int32_t target_heading = e.infantry_aim_heading_bam;
 			const int32_t target_delta = static_cast<int32_t>(
 					uint32_t(target_heading) - uint32_t(e.euler_z));
 			constexpr int32_t kInfantryTargetClamp = 536870880;
@@ -452,15 +507,23 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 				target_heading = static_cast<int32_t>(
 						uint32_t(e.euler_z) - uint32_t(kInfantryTargetClamp));
 			}
-			rec.infantry.pitch_byte = uint8_t(
+			rec.infantry.aim_heading_byte = uint8_t(
 					(uint32_t(target_heading) + 0x00800000u) >> 24);
-			rec.infantry.aim_yaw_byte = uint8_t(
+			rec.infantry.aim_pitch_byte = uint8_t(
 					(uint32_t(e.infantry_aim_pitch_bam) + 0x00800000u) >> 24);
-			rec.infantry.anim_byte =
-					e.anim_pending_id != 0 ? e.anim_pending_id : e.anim_state_id;
+			rec.infantry.anim_byte = snapshot_anim_byte(e); // [orig: @0x4C0988..0x4C099F]
 			break;
 		}
 		case EntityClass::Guided:
+			// A guided class (rokt / stng / hlfr / jvln / arty) has a serializer, so its
+			// record goes out: the header, then the serializer's mode-1 call with format 11,
+			// which has no case and writes nothing, its return ignored: a 5-byte record
+			// (D-NET-NEW-L1-28).
+			// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - tag 1 @0x50F257, the
+			//  handle @0x50F298, the type @0x50F2BA, mode 1 @0x50F2C7, format 11 @0x50F2CE, the
+			//  def+0x164 call @0x50F2E2; Entity_SerializeGuidedMissileState @0x447C50 - the
+			//  mode-1 group switch @0x447C80, no case 11]
+			break;
 		case EntityClass::NoNetworkCallback:
 		case EntityClass::Unknown:
 		default:
@@ -474,23 +537,49 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	return encode_frame_update(fu, authority_recipient);
 }
 
-// Resolve the one legal S2C 0x0A anchor: this connection's live player
-// allocation. Retail's wrapper is state==6 gated and immediately reads that
-// player's eye/reference position; an unbound/freed slot never enters the
-// writer and therefore never emits a map-centre fallback frame.
-// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
-// eye stores @0x517BF5..0x517C13]
+} // namespace
+
+const world::Entity &destroyed_entry_body() {
+	// Entity_Destroy zeroes the entry (the 0x2B4-byte memset), so a slot whose body is
+	// gone reads a body at the origin with nothing set [orig: Entity_Destroy @0x43E810 -
+	//  the memset @0x43EA70].
+	static const world::Entity body = [] {
+		world::Entity e;
+		e.position = {0.0f, 0.0f, 0.0f};
+		e.eye_offset_x = 0;
+		e.eye_offset_y = 0;
+		e.eye_offset_z = 0;
+		e.health = 0;
+		e.health_max = 0;
+		e.alive = false;
+		e.flags = 0;
+		e.engine_flags = 0;
+		e.player_class = 0;
+		e.equipped_adm_index = 0;
+		e.team = 0;
+		return e;
+	}();
+	return body;
+}
+
+// See header.
 // [orig: the per-player send descriptor / 12-byte frame anchor = player.spawn_x/y/z, §5.2a.]
 const world::Entity *owned_entity_for_emit(const world::World &w,
                                            const Connection &conn) {
+	// The slot's entity pointer is its entry's address, kept past the body's destroy:
+	// the writer's gate has no lifetime test, so the slot's 0x0A reads whatever body
+	// holds the entry now (a later spawn's, the pool reusing the zeroed entry), or the
+	// zeroed body while the entry is free (D-NET-449).
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 - the active byte @0x517BAB, the
+	//  pointer @0x517BC8..0x517BCC, state 6 @0x517BD2..0x517BD6, the net player
+	//  @0x517BDD..0x517BE2, no lifetime test; Pool_AllocEntry @0x44225C (a zeroed
+	//  ItemTypeIndex reads free), the add's includeInUse 1 @0x43C3DF]
 	if (!conn.owned_entity.valid()) return nullptr;
-	const world::Entity *entity = w.registry.get(conn.owned_entity);
-	if (entity == nullptr) return nullptr;
-	if (conn.owned_entity_spawn_id != 0 &&
-	    entity->registry_spawn_id != conn.owned_entity_spawn_id)
-		return nullptr;
-	return entity;
+	if (const world::Entity *entity = w.registry.get(conn.owned_entity)) return entity;
+	return &destroyed_entry_body();
 }
+
+namespace {
 
 // The anchor is the recipient's EYE: its Position plus its CameraOffset
 // (entity+0x6C/+0x70/+0x74, ours's eye_offset mirror the body tick stamps),
@@ -502,11 +591,11 @@ const world::Entity *owned_entity_for_emit(const world::World &w,
 //  = Position + [+0x6C/+0x70/+0x74]); the list @0x517C1E]
 PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
 	PlayerReplicationState anchor;
-	anchor.spawn_x = static_cast<uint32_t>(world::to_fixed(entity.position.x)) +
+	anchor.spawn_x = static_cast<uint32_t>(entity.position.x.q16) +
 			static_cast<uint32_t>(entity.eye_offset_x);
-	anchor.spawn_y = static_cast<uint32_t>(world::to_fixed(entity.position.y)) +
+	anchor.spawn_y = static_cast<uint32_t>(entity.position.y.q16) +
 			static_cast<uint32_t>(entity.eye_offset_y);
-	anchor.spawn_z = static_cast<uint32_t>(world::to_fixed(entity.position.z)) +
+	anchor.spawn_z = static_cast<uint32_t>(entity.position.z.q16) +
 			static_cast<uint32_t>(entity.eye_offset_z);
 	return anchor;
 }
@@ -571,8 +660,27 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 	case EntityClass::Player:   return 5 + 18;
 	case EntityClass::Vehicle:  return 5 + 11 + ((e.state_flags & kVehicleCompactFlagDeadPose) ? 4 : 10);
 	case EntityClass::Infantry: return 5 + 14;
+	case EntityClass::Guided:   return 5; // the header alone (D-NET-NEW-L1-28)
 	default:                    return 0; // not emitted
 	}
+}
+
+// Whether the recipient's tracked slot naming `handle` despawns: a handle in
+// pools 0..4 within its pool's capacity whose row is freed (no item def), is
+// the recipient's own entity or belongs to a hidden slot (the owner-hidden
+// stamp); Entity_ValidatePtr's owner of a visible other slot is cleared, and
+// an unowned live row stays.
+// [orig: Server_BuildEntityPriorityList @0x50E757..0x50E7F3; Entity_ValidatePtr
+//  @0x500910]
+bool tracked_slot_despawns(const world::World &w, const Connection &conn,
+                           const std::vector<GameEntitySnapshot> &entities, uint16_t handle) {
+	if ((handle & 0xF000u) >= 0x5000u) return false;
+	if ((handle & 0xFFFu) >= w.registry.pool_capacity(handle >> 12)) return false;
+	if (w.registry.get(world::EntityHandle{handle}) == nullptr) return true;
+	if (conn.owned_entity.valid() && conn.owned_entity.packed == handle) return true;
+	for (const GameEntitySnapshot &row : entities)
+		if (row.wire_handle == handle) return row.owner_hidden;
+	return false;
 }
 
 // Select and order this frame's tag-1 records for one connection. A faithful structural
@@ -584,19 +692,15 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 //     shell sort, not stable: the keys are small integers and tie routinely (for a dead or
 //     deploying recipient a saturated, unmoved far entity scores exactly 255), so the
 //     candidates enter in retail's order, pool 0 then pool 1, each by slot];
-//  4. take records until the byte budget (header included) is exhausted — the budget is
-//     a SOFT cap checked after each record [orig: @0x50f34b], so the record in flight
-//     completes; a selected entity's age resets to 0 [orig: @0x50f168].
-// Round-robin across frames is EMERGENT from aging: starved entities' keys climb and
-// age >= 50 force-admits them past the distance gate.
-std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
+// The serializer's budget walk (serialize_frame_records) takes the list's records in this
+// order, paired with the round events. Round-robin across frames is EMERGENT from aging:
+// starved entities' keys climb and age >= 50 force-admits them past the distance gate.
+std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World &w,
                                                       Connection &conn,
                                                       const std::vector<GameEntitySnapshot> &entities,
                                                       const PlayerReplicationState &anchor,
                                                       const int32_t (&body)[3],
-                                                      std::size_t header_bytes,
-                                                      std::size_t hard_frame_limit,
-                                                      std::size_t frame_budget) {
+                                                      std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's 0x5B0 bytes
 	// rounded down to the stride, so 0x5A0: pool 1's last sixteen slots (1184..1199) never
@@ -663,46 +767,73 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// spectator latch — replication_model.h owner_hidden) never enters
 		// another recipient's list; the recipient's OWN entity is always
 		// admitted [orig: @0x50e6fd — `validated == recipient ||
-		// (!slot[97537] && !slot[97536])`]. The original's tracked-slot walk
-		// also despawns a tracked hidden row with a reliable 0x12; that sweep
-		// stays a D-NET-139 residual.
+		// (!slot[97537] && !slot[97536])`].
 		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
 		std::size_t cache = 0;
 		const bool cached = priority_cache_index(e, cache);
 		const uint8_t age = cached ? conn.s2c_entity_age[cache] : uint8_t{0};
 
-		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the
-		// recipient anchor [orig: @0x50e925; z half-weighted]. boundRadius (entity+0) is
-		// unmodeled (0). The anchor is the recipient EYE pos (entity pos + camera
-		// offset entity+0x6C..), as the header carries it (anchor_for_owned_entity).
-		// Squared in double like retail's fild/fmul — the int64 product can
-		// overflow at map-corner separations.
-		const int64_t dx = int64_t(e.x) - ax;
-		const int64_t dy = int64_t(e.y) - ay;
-		const int64_t dzh = (int64_t(e.z) - az) >> 1;
-		const int64_t dist = static_cast<int64_t>(
-				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
-				          double(dzh) * double(dzh)));
-		const int32_t distance_tiles = int32_t(dist >> 16);
-
-		// The recipient's requested-interest floor: a row named by one of its 4
-		// tracked slots keeps that score as a priority floor and passes the
-		// distance gate regardless of range. The invalid-slot 0x12 despawn leg
-		// of the original's walk stays a D-NET-139 residual.
-		// [orig: the tracked-slot walk @0x50e5f4.. -> priorPriority]
+		// The recipient's tracked slots, walked in this admitted row's turn up to
+		// the slot naming the row, whose score is the row's priority floor (it
+		// passes the distance gate regardless of range). On the way, a slot naming
+		// a freed row, the recipient's own entity or a hidden slot's entity is
+		// cleared and despawned to this recipient alone with a one-send S2C 0x12
+		// [u16 handle], ahead of its 0x0A: the first admitted rows' walks clear
+		// them all, in slot order. A handle past pool 4 or a pool's capacity
+		// resolves to nothing and stays.
+		// Pool 1's copy of the walk despawns a slot only when its row is freed
+		// (`!def` @0x50EC9C) and never calls Entity_ValidatePtr; ours applies the
+		// pool-0 tests in every turn, which cannot show: the recipient's own body
+		// is always an admitted pool-0 row, and its turn, which clears its own
+		// handle, walks all four slots with the pool-0 tests before any pool-1 row.
+		// [orig: the walk @0x50E736..0x50E867 (pool 1 @0x50EC45..0x50ECE0): the
+		//  resolve @0x50E757..0x50E794, Entity_ValidatePtr @0x50E7C2 and its
+		//  visible-owner clear @0x50E7DC..0x50E7E5, the despawn test @0x50E7F3, the
+		//  clear @0x50E7F9, mask 32 to this slot @0x50E808 / @0x50E812, the 0x12
+		//  at userParam 1 @0x50E835 (NetPacket_WriteEntityHandle16 @0x504720), the
+		//  stop @0x50E841, the floor @0x50E867]
 		int32_t prior_priority = 0;
 		for (int t = 0; t < 4; ++t) {
-			if (conn.tracked_handle[t] != 0xFFFF &&
-			    conn.tracked_handle[t] == e.wire_handle) {
+			uint16_t &tracked = conn.tracked_handle[t];
+			if (tracked == 0xFFFF) continue;
+			if (tracked_slot_despawns(w, conn, entities, tracked)) {
+				if (despawned != nullptr) despawned->push_back(tracked);
+				tracked = 0xFFFF;
+			}
+			if (tracked == e.wire_handle) {
 				prior_priority = conn.tracked_score[t];
 				break;
 			}
 		}
 
-		// Distance gate [orig: @0x50e925]: skip unless within 1124 tiles, the
-		// tracked-handle priority floor holds it, or age force-admits
-		// [orig: `dist <= 1124 || priorPriority || age >= 50` @0x50e93a].
+		// distanceTiles = (min(sqrt(dx^2 + dy^2 + (dz/2)^2), cap) - boundRadius) >> 16
+		// against the recipient anchor, z half-weighted, the distance truncated to
+		// an int32 and the shift arithmetic; the gate reads it raw, then it floors
+		// at 0. The anchor is the recipient EYE pos (entity pos + camera offset
+		// entity+0x6C..), as the header carries it (anchor_for_owned_entity).
+		// Squared in double like retail's fild/fmul (the int64 product can
+		// overflow at map-corner separations).
+		// [orig: Server_BuildEntityPriorityList - the cap flt_7C19E0 @0x50E8B0..0x50E8CD,
+		//  _ftol2_sse @0x50E8CF, `sub ecx, [ebx]` @0x50E8DC (pool 1 @0x50EDC9),
+		//  `sar ecx, 10h` @0x50E902, the gate @0x50E90D..0x50E925, the floor
+		//  @0x50E92E..0x50E934]
+		const int64_t dx = int64_t(e.x) - ax;
+		const int64_t dy = int64_t(e.y) - ay;
+		const int64_t dzh = (int64_t(e.z) - az) >> 1;
+		constexpr double kMaxDistance = 2147418112.0; // flt_7C19E0
+		const double dist = std::min(
+				std::sqrt(double(dx) * double(dx) + double(dy) * double(dy) +
+				          double(dzh) * double(dzh)),
+				kMaxDistance);
+		int32_t distance_tiles = static_cast<int32_t>(
+				static_cast<uint32_t>(static_cast<int32_t>(dist)) -
+				static_cast<uint32_t>(e.bound_radius_q16)) >> 16;
+
+		// Distance gate: skip unless within 1124 tiles, the tracked-handle
+		// priority floor holds it, or age force-admits
+		// [orig: `dist <= 1124 || priorPriority || age >= 50` @0x50e925].
 		if (distance_tiles > 1124 && prior_priority == 0 && age < 50) continue;
+		if (distance_tiles < 0) distance_tiles = 0;
 
 		// ---- Score, full terms (D-NET-139 port 2026-08-06)
 		// [orig: pool-0 @0x50eb5f, pool-1 @0x50f008 — both expand to
@@ -711,6 +842,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		//            + 1000*(entity == recipient carrier) (+200*occupied, pool 1)
 		//            (+200 inside the view distance)
 		//            + 3*speedDelta + 2*headingDelta].
+		// distScore = 1124 - tiles, floored at 0 [orig: @0x50E937..0x50E943].
 		int64_t v = distance_tiles < 1124 ? (1124 - distance_tiles) : 0;
 
 		if (self_dead_or_spectator) {
@@ -731,7 +863,7 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		} else if (self != nullptr) {
 			// View-angle score: 256 - |elev - Pitch|>>25 - yawTerm, where yawTerm =
 			// |bearing - Yaw|>>24 folded +64 past 64 [orig: the two fpatan blocks
-			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale dbl_7C57B8 folds to plain
+			// @0x50e94a..0x50e9e2; the x(-2^31/pi) scale g_NegBamPerRadian folds to plain
 			// BAM deltas]. Can go negative behind the viewer.
 			// Squared in double like retail's fild/fmul — the int64 product can
 			// overflow at map-corner separations.
@@ -816,10 +948,15 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50eb83]
 		// The tracked-handle floor lands AFTER the bit0 damp, before the age
-		// key composition [orig: `if (priorPriority > v48) v48 = priorPriority`
-		// @0x50eb8c].
+		// key composition. It is retail's only floor: the prior starts at 0 for
+		// every row and a tracked score is the uplink's u16 zero-extended, so a
+		// score the heading singularity drove negative keys as 0.
+		// [orig: `if (priorPriority > v48) v48 = priorPriority` @0x50EB8B..0x50EB8F
+		//  (pool 1 @0x50F02A..0x50F02E); priorPriority = 0 per row @0x50E6C9 /
+		//  @0x50E739; the uplink's store `movzx ecx, cx` @0x4C1F37..0x4C1F3A;
+		//  the key `eax + ((eax * age) >> 8) + age` @0x50EB91..0x50EBA6
+		//  (pool 1 @0x50F030..0x50F044), CPairList_AddEntry @0x50EBB0]
 		if (prior_priority > v) v = prior_priority;
-		if (v < 0) v = 0; // CPairList keys are unsigned; a behind-the-viewer negative floors
 		const bool own = conn.owned_entity.valid() &&
 		                 e.wire_handle == conn.owned_entity.packed &&
 		                 e.entity_class == EntityClass::Player;
@@ -834,30 +971,10 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	world::shell_sort_by_value(scored, [](const Scored &s) { return s.key; });
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SORT);
 
-	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
-	// stamps on selection [orig: @0x50f168 age; @0x50f17c heading (Yaw+0x800000)>>24;
-	// the @0x50f22x speed-metric tail].
-	std::vector<GameEntitySnapshot> selected;
-	std::size_t written = header_bytes;
-	for (const Scored &s : scored) {
-		const std::size_t record_bytes = record_wire_size(*s.snap);
-		if (hard_frame_limit != 0 &&
-				(written > hard_frame_limit ||
-				 record_bytes > hard_frame_limit - written))
-			continue;
-		selected.push_back(*s.snap);
-		std::size_t idx = 0;
-		if (priority_cache_index(*s.snap, idx)) {
-			conn.s2c_entity_age[idx] = 0;
-			conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
-					(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
-			conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
-		}
-		written += record_bytes;
-		if (written >= frame_budget) break; // [orig: @0x50f34b]
-	}
-	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
-	return selected;
+	std::vector<const GameEntitySnapshot *> listed;
+	listed.reserve(scored.size());
+	for (const Scored &s : scored) listed.push_back(s.snap);
+	return listed;
 }
 
 // ---------------------------------------------------------------------------
@@ -873,22 +990,17 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 // ---------------------------------------------------------------------------
 std::vector<RoundEventRecord> select_round_events(const world::World &w, Connection &conn,
                                                   const PlayerReplicationState &anchor,
-                                                  const int32_t (&body)[3],
-                                                  std::size_t budget_left,
-                                                  std::size_t hard_budget_left) {
+                                                  const int32_t (&body)[3]) {
 	std::vector<RoundEventRecord> out;
 	const world::RoundRing &ring = w.out.rounds;
 
-	// Watermark arm gate [orig: the playerSlot+97544 non-zero gate @0x4ffee8 — a
-	// fresh player is armed at the current sequence, so the pre-join ring backlog
-	// is never replayed to a joiner].
-	if (!conn.round_watermark_armed) {
-		conn.round_watermark_armed = true;
-		conn.round_watermark = ring.last_stat();
-		return out;
-	}
-	if (ring.count == 0 || budget_left == 0) {
-		conn.round_watermark = ring.last_stat();
+	// A disarmed watermark (0) walks nothing and stamps nothing; the join arms it at the
+	// frame clock less one, so the join's own frame's rounds reach the joiner and older
+	// ones never do (NEW-L1-8).
+	// [orig: the playerSlot+97544 test @0x4FFEE8, its jz past the stamp to @0x5001B5]
+	if (conn.round_watermark == 0) return out;
+	if (ring.count == 0) {
+		conn.round_watermark = ring.frame_clock; // [orig: @0x5001A8..0x5001AE]
 		return out;
 	}
 
@@ -959,10 +1071,8 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 	//  @0x4FFF24..0x500157, its CPairList_ShellSortByValue call @0x50016a].
 	world::shell_sort_by_value(scored, [](const ScoredRound &s) { return s.score; });
 
-	// Convert to wire records — capped at 255 [orig: the g_RoundEventRefs array
-	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk
-	// [orig: @0x50f34b]).
-	std::size_t written = 0;
+	// Convert to wire records, capped at 255 [orig: the g_RoundEventRefs array
+	// @0x500190]; the serializer's budget walk takes them in this order.
 	for (const ScoredRound &s : scored) {
 		if (out.size() >= 255) break;
 		const world::RoundEvent &ev = *s.ev;
@@ -975,35 +1085,105 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 			rec.flags |= 0x80;
 			rec.slot_byte = ev.slot_byte;
 		}
-		// The shooter's fire target is read LIVE off its entity at serialize time
-		// [orig: @0x50485a reads shooter+104->+12; a freed shooter reads as no target].
-		const world::Entity *shooter = w.registry.get(world::EntityHandle{ev.shooter_handle});
-		if (shooter != nullptr && shooter->last_fire_target.valid()) {
+		// The shooter's fire target is its AI slot's +0xC word, read LIVE at serialize
+		// time: the word an AI's target scan and SetAITarget write, and the 0x06 handler for
+		// a remote player's claimed target. A shooter with no slot, or a freed one, has no
+		// target. Any target sets 0x40; a round (a flare the heat lock took) lies in no pool,
+		// so the walk writes its word as 0xFFFF.
+		// [orig: NetPacket_SerializeRoundEvent @0x504820 - `mov ecx, [ecx+68h]` @0x50484E,
+		//  `mov esi, [ecx+0Ch]` @0x504855, the walk's miss @0x504886, the flag
+		//  @0x5048BF..0x5048C1; the writers Entity_UpdateInfantryAI @0x4BBF82..0x4BBF85,
+		//  Entity_SetAITarget @0x45D760 (@0x45D7B2), Server_ClientFiredRound
+		//  @0x50C2A2..0x50C2AD]
+		const world::EntityHandle shooter_h{ev.shooter_handle};
+		const world::AiEntity *shooter_slot =
+				w.registry.get(shooter_h) != nullptr ? w.ai.for_handle(shooter_h) : nullptr;
+		const world::TargetRef fire_target = shooter_slot != nullptr
+				? world::AiSlot::target_of(shooter_slot->slot.f[3]) : world::TargetRef{};
+		if (fire_target.valid()) {
 			rec.flags |= 0x40;
-			rec.target_handle = shooter->last_fire_target.packed;
+			rec.target_handle = fire_target.entity.packed;
 		}
 		rec.shot_seq = ev.shot_seq;
 		// Fire origin compressed against the SAME anchor the frame header carries
 		// [orig: @0x504994 subtracts g_PriorityRefX/Y/Z — the recipient refs].
-		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)));
-		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)));
-		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)));
+		// A folded x takes its shift bits from the shot sequence word its call's ECX holds
+		// (`movzx ecx, word ptr [edi+1Ch]`, the word written just before), a folded y and z
+		// from the word before them [orig: @0x50496F, the calls @0x50498F / @0x5049B9 /
+		// @0x5049E3, the chain @0x504994 / @0x5049BE].
+		rec.pos_x_compressed = network_compress_fixedpoint(int32_t(ev.origin_x - int32_t(ax)),
+				rec.shot_seq);
+		rec.pos_y_compressed = network_compress_fixedpoint(int32_t(ev.origin_y - int32_t(ay)),
+				rec.pos_x_compressed);
+		rec.pos_z_compressed = network_compress_fixedpoint(int32_t(ev.origin_z - int32_t(az)),
+				rec.pos_y_compressed);
 		// Direction BAM high words, rounded [orig: @0x504a18/@0x504a3c].
 		rec.yaw_bam_high = uint16_t((uint32_t(ev.dir_yaw) + 0x8000u) >> 16);
 		rec.pitch_bam_high = uint16_t((uint32_t(ev.dir_pitch) + 0x8000u) >> 16);
-
-		const std::size_t wire = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
-		                         ((rec.flags & 0x40) ? 2u : 0u);
-		if (hard_budget_left != std::numeric_limits<std::size_t>::max() &&
-				(written > hard_budget_left || wire > hard_budget_left - written))
-			continue;
 		out.push_back(rec);
-		written += wire;
-		if (written >= budget_left) break;
 	}
 
-	conn.round_watermark = ring.last_stat(); // [orig: @0x5001ae stamps stat_id]
+	conn.round_watermark = ring.frame_clock; // [orig: the frame clock @0x5001A8, stored @0x5001AE]
 	return out;
+}
+
+// The serializer's budget walk over the two lists, one turn at a time: the
+// priority list's next row (its tag-1 record; the selection resets its age and
+// stamps its last-sent heading and speed caches), then the round chain's next
+// event (its tag-2 record). The 600-byte budget is soft, read after each turn
+// with the header counted, so the turn in flight completes; a turn that writes
+// nothing ends the walk, as does a header already at the budget. The encoder
+// writes the chosen records in the same pairs. A record past the hard body cap
+// (the joiner's datagram bound) is passed over, where retail's buffer check
+// would fault.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - the header gate
+//  @0x50F0A3, the no-progress test @0x50F0CC, the row @0x50F0DE..0x50F2E2 (the
+//  age @0x50F168, the heading @0x50F17C, the speed @0x50F241), the round
+//  @0x50F312..0x50F331, the budget @0x50F34B]
+void serialize_frame_records(Connection &conn,
+                             const std::vector<const GameEntitySnapshot *> &listed,
+                             const std::vector<RoundEventRecord> &listed_rounds,
+                             std::size_t header_bytes, std::size_t hard_frame_limit,
+                             std::size_t frame_budget,
+                             std::vector<GameEntitySnapshot> &selected,
+                             std::vector<RoundEventRecord> &rounds) {
+	const auto fits = [&](std::size_t written, std::size_t bytes) {
+		return hard_frame_limit == 0 ||
+				(written <= hard_frame_limit && bytes <= hard_frame_limit - written);
+	};
+	std::size_t written = header_bytes;
+	if (written >= frame_budget) return;
+	std::size_t row = 0;
+	std::size_t round = 0;
+	for (;;) {
+		const std::size_t before = written;
+		if (row < listed.size()) {
+			const GameEntitySnapshot &snap = *listed[row++];
+			const std::size_t bytes = record_wire_size(snap);
+			if (fits(written, bytes)) {
+				selected.push_back(snap);
+				std::size_t idx = 0;
+				if (priority_cache_index(snap, idx)) {
+					conn.s2c_entity_age[idx] = 0;
+					conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
+							(static_cast<uint32_t>(snap.euler_z) + 0x800000u) >> 24);
+					conn.s2c_entity_speed[idx] = snap.tick_speed_q6;
+				}
+				written += bytes;
+			}
+		}
+		if (round < listed_rounds.size()) {
+			const RoundEventRecord &rec = listed_rounds[round++];
+			const std::size_t bytes = 1 /*tag*/ + 17 + ((rec.flags & 0x80) ? 1u : 0u) +
+					((rec.flags & 0x40) ? 2u : 0u);
+			if (fits(written, bytes)) {
+				rounds.push_back(rec);
+				written += bytes;
+			}
+		}
+		if (written >= frame_budget) break; // [orig: @0x50F34B]
+		if (written == before) break;      // [orig: @0x50F0CC, the next turn's test]
+	}
 }
 
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
@@ -1038,7 +1218,7 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 // whole Connection (not a bare transport) so it can enforce the per-connection owner gate and
 // null-checks the transport internally — symmetric with emit_connection_s2c.
 bool apply_connection_uplink(world::World &world, Connection &conn,
-                             const std::vector<uint8_t> &body) {
+                             const std::vector<uint8_t> &body, bool slot_in_game) {
 	// 5-byte sub-header [u16 handle][u16 itemTypeId][u8 sub_op], then the 43-B body.
 	std::size_t consumed = 0;
 	EntityPacketSubHeader hdr;
@@ -1061,15 +1241,16 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	if (!decode_player_extended_uplink(body.data() + consumed, body.size() - consumed,
 	                                   up, body_consumed))
 		return false;
-	// The frame statistics land on the slot as the callback parses them,
-	// ahead of the pre-round gate [orig: @0x4c1edd / @0x4c1efa].
+	// The frame statistics and the sender's 4 requested-interest pairs (the 0x0A priority
+	// build's tracked-handle floor) land on the slot as the callback parses them, ahead of
+	// its pose gates [orig: the stats @0x4c1edd / @0x4c1efa; the pairs at playerState
+	// +94346..+94368 @0x4C1F18..0x4C1FFA, owner-gated like the intent].
 	conn.uplink_frame_rate = up.stat_byte_0;
 	conn.uplink_cpu_percent = up.stat_byte_1;
-	// The receive queue remains live during the countdown, but the player
-	// state callback does not apply its remote pose/state until the shared
-	// pre-round timer clears.
-	// [orig: NetPacket_SerializePlayerState @0x4C2010..0x4C2028]
-	if (world.preround_delay_seconds != 0) return false;
+	conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
+	                       up.priority_handle_2, up.priority_handle_3};
+	conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
+	                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
 
 	PlayerIntent intent;
 	intent.entity_handle = hdr.handle;
@@ -1090,25 +1271,18 @@ bool apply_connection_uplink(world::World &world, Connection &conn,
 	intent.analog_y = static_cast<int8_t>(up.analog_y); // the vehicle motor reads the
 	intent.analog_z = static_cast<int8_t>(up.analog_z); // controller's axes [orig: @0x48b783]
 	intent.buttons = 0; // extended uplink carries state/anim bytes, not a buttons word
-	apply_player_intent(world, intent);
-
-	// Store the sender's 4 requested-interest pairs for the 0x0A priority
-	// build's tracked-handle floor [orig: the 0x0C read-apply stores at
-	// playerState+94346/+94356 @0x4c09c0 — owner-gated like the intent].
-	conn.tracked_handle = {up.priority_handle_0, up.priority_handle_1,
-	                       up.priority_handle_2, up.priority_handle_3};
-	conn.tracked_score = {int32_t(up.priority_score_0), int32_t(up.priority_score_1),
-	                      int32_t(up.priority_score_2), int32_t(up.priority_score_3)};
-	return true;
+	// The pose gates (the dead bit, the round-over latch, the slot state, the pre-round
+	// countdown) sit inside the read-apply, after its unconditional stores.
+	return apply_player_intent(world, intent, slot_in_game);
 }
 
-void drain_connection_c2s(world::World &world, Connection &conn) {
+void drain_connection_c2s(world::World &world, Connection &conn, bool slot_in_game) {
 	if (conn.transport == nullptr) return;
 	Datagram dg;
 	while (conn.transport->host_recv(dg)) {
 		// §5.10 player-input uplink only this increment (other in-match C2S tags TBD).
 		if (dg.tag != c2s::ENTITY_UPLINK) continue;
-		(void)apply_connection_uplink(world, conn, dg.body);
+		(void)apply_connection_uplink(world, conn, dg.body, slot_in_game);
 	}
 }
 
@@ -1122,18 +1296,25 @@ std::vector<std::vector<uint8_t>> build_water_cross_messages(
 	// its family — see world::WaterCrossEvent::airborne for the witness and
 	// npwire's kWaterCross* constants for the sets. Coordinates are world UNITS
 	// (the wire's i16), so the 16.16 fixed positions shift down 16 - the same
-	// convention the decode documents.
-	// [orig: NetPacket_WriteOverlayAction @0x505d50 via
-	//  Server_SendOverlayActionToAlive @0x50a1b0]
+	// convention the decode documents; the triple is the crossing site's own
+	// (world::WaterCrossEvent: an infantry body's position, a hull pad's at the plane).
+	// [orig: NetPacket_WriteOverlayAction @0x505d50 (the high words @0x505DB7 /
+	//  @0x505DCB / @0x505DE1) via Server_SendOverlayActionToAlive @0x50a1b0]
 	std::vector<std::vector<uint8_t>> out;
 	for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
 		PlaySoundCommand cmd;
 		cmd.flag = 1; // positioned
-		cmd.sound_name = ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect;
+		// The set the mission start resolved, spelled as its bank spells it (the route drops a
+		// crossing whose set no loaded bank holds) [orig: DialogSystem_Init @0x527692..0x5276C0;
+		// NetPacket_WriteOverlayAction @0x505D99..0x505DAA].
+		const char *wanted = ev.airborne ? kWaterCrossAirborneEffect : kWaterCrossWadeEffect;
+		const audio::SetLocation set = world.tables.sound_sets != nullptr
+				? world.tables.sound_sets->find(wanted) : audio::SetLocation{};
+		cmd.sound_name = set.valid() ? set.name : std::string(wanted);
 		cmd.has_pos = true;
 		cmd.pos_x = static_cast<int16_t>(ev.x >> 16);
 		cmd.pos_y = static_cast<int16_t>(ev.y >> 16);
-		cmd.pos_z = static_cast<int16_t>(ev.water_z >> 16);
+		cmd.pos_z = static_cast<int16_t>(ev.z >> 16);
 		out.push_back(encode_play_sound(cmd));
 	}
 	return out;
@@ -1147,9 +1328,18 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          int32_t server_cpu_percent,
                          const TitleIdentity *title) {
 	std::vector<uint8_t> frame;
-	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
-	                          server_fps, server_cpu_percent, title))
-		return false;
+	std::vector<uint16_t> despawned;
+	const bool built = build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
+	                                        server_fps, server_cpu_percent, title, &despawned);
+	// The list's tracked-slot despawns go out ahead of the frame, each sent
+	// once (D-NET-349).
+	for (const uint16_t handle : despawned) {
+		EntityRemove removal;
+		removal.entity_handle = handle;
+		conn.transport->host_send(s2c::ENTITY_REMOVE, encode_entity_remove(removal),
+				/*reliable=*/false);
+	}
+	if (!built) return false;
 	devtools::ProfileLap lap(w.profile);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
 	                          /*reliable=*/false);
@@ -1164,7 +1354,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes,
                           int32_t server_fps,
                           int32_t server_cpu_percent,
-                          const TitleIdentity *title) {
+                          const TitleIdentity *title,
+                          std::vector<uint16_t> *despawned) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1179,8 +1370,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// priority list's LOS start read where the rest reads the eye anchor
 	// [orig: Server_BuildRoundEventListForPlayer @0x50000A..0x500012;
 	//  Server_BuildEntityPriorityList @0x50EACD / @0x50EFA1..0x50EFA4].
-	const int32_t body[3] = {world::to_fixed(owned->position.x),
-			world::to_fixed(owned->position.y), world::to_fixed(owned->position.z)};
+	const int32_t body[3] = {owned->position.x.q16,
+			owned->position.y.q16, owned->position.z.q16};
     // The retail temporary global is restored after this recipient's write.
     // Keep that budget local so one peer's NAK cannot affect another peer.
     // [orig: Server_SendEntityStateToPlayer @0x517c58..0x517c9a; halving @0x517c62]
@@ -1288,9 +1479,12 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			if (own->mounted && own->mount_target.valid()) {
 				hs.mount_ammo.mount_handle = own->mount_target.packed;
 				hs.mount_ammo.has_mount = true;
+				// The writer's inline route repeats the setter's ground checks; a
+				// failed one writes the zero words [orig: NetPacket_WritePlayerState
+				//  @0x4FF6B0 - @0x4FFE18, @0x4FFE27..0x4FFE3F, @0x4FFE7F].
 				if (const world::Entity *mount = w.registry.get(own->mount_target)) {
 					if (const world::WeaponSlotState *slot =
-							w.vehicles.resolve_mounted_ammo_slot(*mount)) {
+							w.vehicles.resolve_phase8_ammo_slot(*mount)) {
 						hs.mount_ammo.clip = static_cast<uint16_t>(slot->clip);
 						hs.mount_ammo.reserve = static_cast<uint16_t>(slot->reserve);
 					}
@@ -1327,33 +1521,32 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// Server_BuildEntityPriorityList @ 0x50e590 + the NetPacket_SerializeEntityStatesToPacket
 	// @ 0x50f070 budget loop].
 	const std::size_t header_bytes = frame_header_bytes(flags2, game_type, hs);
-	const std::size_t hard_event_bytes = max_frame_body_bytes == 0
-			? std::numeric_limits<std::size_t>::max()
-			: (max_frame_body_bytes > header_bytes
-					? max_frame_body_bytes - header_bytes
-					: 0);
 	lap.mark(devtools::Slot::SIM_REPLICATION_FAN_SETUP);
-	// Round events FIRST under the shared frame budget [orig: the @0x50f312 interleave
-	// serves tag-2 refs inside the SAME @0x50f070 budget loop as the tag-1 records].
-	// The first grouped-order port handed rounds only the leftovers — a real-world
-	// entity set (players + ~21 vehicles) fills the 600-B budget alone, so tag-2
-	// starved to ZERO on the wire and the sweep still advanced the watermark,
-	// discarding every round echo (v29; D-NET-154). Rounds are rare and <= 20 B each;
-	// entities absorb the remainder — same cap, and the retail decode loop is
-	// tag-driven either way. (D-NET-152/154)
-	std::vector<RoundEventRecord> rounds =
-			select_round_events(
-					w, conn, anchor, body,
-					frame_budget > header_bytes ? frame_budget - header_bytes : 0,
-					hard_event_bytes);
-	std::size_t rounds_bytes = 0;
-	for (const RoundEventRecord &r : rounds)
-		rounds_bytes += 1 + 17 + ((r.flags & 0x80) ? 1u : 0u) + ((r.flags & 0x40) ? 2u : 0u);
+	// The round list first, as the priority list's builder calls the round
+	// builder at its head [orig: Server_BuildRoundEventListForPlayer @0x4FFEE0,
+	// called @0x50E59C], then the priority list, then the serializer's walk
+	// takes one of each per turn under the shared budget (D-NET-349; before it
+	// ours wrote every round ahead of the rows, D-NET-152/154).
+	const std::vector<RoundEventRecord> listed_rounds = select_round_events(w, conn, anchor, body);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
-	const std::vector<GameEntitySnapshot> selected =
-			select_frame_entities(
-					w, conn, ents, anchor, body, header_bytes + rounds_bytes,
-					max_frame_body_bytes, frame_budget);
+	const std::vector<const GameEntitySnapshot *> listed =
+			select_frame_entities(w, conn, ents, anchor, body, despawned);
+	std::vector<GameEntitySnapshot> selected;
+	std::vector<RoundEventRecord> rounds;
+	serialize_frame_records(conn, listed, listed_rounds, header_bytes, max_frame_body_bytes,
+			frame_budget, selected, rounds);
+	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_BUDGET);
+	// The list read the recipient's body as the caller's snapshot holds it,
+	// ahead of the writer's stores (the hide bit, the spectator restamp, the
+	// pre-round dead-bit clear, which the host applies before this call); its
+	// own record reads the body after them.
+	// [orig: Server_SendEntityStateToPlayer - the list @0x517C1E, the writer
+	//  @0x517C76, the records @0x517C81]
+	for (GameEntitySnapshot &row : selected) {
+		if (row.wire_handle != owned->handle.packed) continue;
+		row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
+		row.health = owned->health;
+	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 
 	frame_out = build_0a_frame(

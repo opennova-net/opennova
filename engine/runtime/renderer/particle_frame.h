@@ -2,13 +2,16 @@
 
 // Portable particle frame compilation. This is the seam between an immutable
 // simulation snapshot and an embedding renderer. It owns ordering and draw list
-// formation; there are no Godot or particle-simulator dependencies.
+// formation; there are no Godot dependencies (the view's frustum and its sphere
+// test are the simulator's, particle/emitter.h).
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <type_traits>
 #include <vector>
+
+#include <runtime/particle/emitter.h>
 
 namespace opennova::renderer {
 
@@ -50,6 +53,29 @@ enum class ParticleWaterSubset : std::uint8_t {
 // below/above selector. Underwater views reverse the two submissions.
 ParticleWaterSubset particle_water_subset_for_side(bool camera_above_water,
 		bool camera_side);
+
+// Whether a frame compiles the water mirror's two particle passes: they run inside the reflected
+// scene, which a frame renders only while its water pass runs, past the water detail gate (the
+// reimpl runs detail 3: environment/water_mirror.h). A mirror the frame leaves unrendered
+// compiles none (D-NET-NEW-L3-39).
+// [orig: Render_TerrainScene @0x610C80 - the g_WaterActive test @0x610CD2,
+//  Water_ReflectionPrerender (the call @0x610CE0) -> Render_MainScene (the call @0x5C27C6) ->
+//  Water_RenderReflectedWorldScene @0x5C8510 (the call @0x5C171F): the detail gate @0x5C85AD,
+//  EffectWorld_RenderParticlePass (the calls @0x5C85DB / @0x5C85E5)]
+constexpr bool compiles_mirror_particles(bool mirror_rendered) noexcept {
+	return mirror_rendered;
+}
+
+// The Distort graphic's wave angle from GetTickCount's DWORD (the embedder's one
+// clock): retail reads the DWORD unsigned (`fild`, plus 2^32 when the sign bit is
+// set), multiplies by flt_7DB864 = 0.004f and hands the product, still at the
+// x87's extended precision, straight to fsin / fcos for the (sin, cos, -sin) wave.
+// A float shader's sin takes the angle folded to one turn, so a long uptime keeps
+// the phase retail's sine sees (sin and cos are periodic: nothing observable moves).
+// [orig: CEffectWorld_SetupRenderState @0x5E02B0 - GetTickCount @0x5E046C, the
+//  unsigned fix-up @0x5E0474..0x5E047E, `fmul flt_7DB864` @0x5E0484, fsin @0x5E049C,
+//  fcos @0x5E04B0]
+float particle_distort_theta(std::uint32_t tick_ms);
 
 // Exact PTL graphic type values. Retail atlas pages are partitioned by type.
 enum class ParticlePipeline : std::uint8_t {
@@ -220,6 +246,36 @@ struct ParticleViewInput {
 	//  CParticleEmitter_RenderStaticBillboards @ 0x5F4E82..0x5F4EC2;
 	//  CParticleEmitter_RenderTopAlignedBillboards @ 0x5F5681..0x5F56E6]
 	std::uint32_t lod_divisor = 1;
+	// The view's clip state for the render submit: an emitter joins the frame's render
+	// list only with live particles and with its bounds' sphere inside this view
+	// (particle::bounds_visible_in_frustum over the bounds the partition sorts by), so an
+	// emitter out of view is neither partitioned, depth-sorted nor built.
+	// [orig: CParticleEmitter_TrySubmitForRender @ 0x5e7540 - the live-count test
+	//  @0x5e754a, the bounds test's call @0x5e755d, CEffectWorld_RegisterRenderObject's
+	//  call @0x5e756a; it is CParticleSystem's vtable slot +0x24 (0x7dcae0), the call
+	//  CParticleGroup_RenderChildren @ 0x5e5890 makes per child @0x5e58ec / @0x5e58ff /
+	//  @0x5e5979]. Not valid: no clip state, every emitter with live particles submits.
+	// The test reads the current g_MainViewport, which a scene's passes share: the scene's
+	// two world passes (Terrain_RenderWorldScene @ 0x5c93a0, the calls @0x5c95b5 /
+	// @0x5c9690; there is no first-person particle pass), so the embedder hands the
+	// first-person view the main view's frustum; the Inset pass re-runs the scene routine
+	// with its own eye. A water mirror's reflected scene builds no viewport of its own
+	// (Water_RenderReflectedWorldScene @ 0x5c8510 down to its particle calls @0x5c85db /
+	// @0x5c85e5): Render_MainScene rebuilds the mirror eye's right ahead of it
+	// (Viewport_BuildProjectionMatrix, the call @0x5c170b, over the block @0x5c1701 its first
+	// build took @0x5c1499: the mirrored camera block above the plane, the RTT's square rect
+	// @0x5c1464..0x5c1482 and the pass's fov); only its entity collect (the call @0x5c16fc)
+	// runs under the unmirrored block's build (@0x5c16e8). Viewport_BuildProjectionMatrix
+	// @ 0x410fb0 spans the fov across the rect's width and the height at the same focal
+	// (@0x410fc6..0x411056), so each mirror's passes cull by the mirror's own eye over a
+	// square at the pass's horizontal fov, whatever field its image projects (the main
+	// frame's mirror draws the main view's, environment/water_mirror.h). The distortion
+	// row's content gate does not read the submit: EffectWorld_HasDistortionParticles
+	// @ 0x5f6640 answers any class-7 child of a visible group (the group test @0x5e9848,
+	// the class compare @0x5e986b and its jz @0x5e9871: no live count, no view), so the
+	// embedder counts the distortion pass's emitters ahead of the submit's tests (the
+	// selected, the empty and the culled together).
+	particle::ParticleViewFrustum frustum{};
 };
 
 struct ParticleDrawCommand {
@@ -253,6 +309,11 @@ struct ParticleFrameDebugCounters {
 	std::size_t domain_filtered_particles = 0;
 	// Emitters of groups the building-section gate hides this frame.
 	std::size_t section_hidden_emitters = 0;
+	// Emitters the render submit left out: no live particle, or bounds outside the
+	// view's frustum (ParticleViewInput::frustum).
+	std::size_t empty_emitters = 0;
+	std::size_t frustum_culled_emitters = 0;
+	std::size_t frustum_culled_particles = 0;
 	std::size_t water_filtered_emitters = 0;
 	std::size_t water_filtered_particles = 0;
 	std::size_t invisible_particles = 0;

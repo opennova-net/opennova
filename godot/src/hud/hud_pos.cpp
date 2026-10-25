@@ -127,6 +127,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
 	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader_code"), &HudPos::glyph_shader_code);
+	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_wrapped_text", "item", "font", "font_size", "text", "x", "y", "width", "bottom", "align", "color", "skip_lines"), &HudPos::draw_wrapped_text, DEFVAL(0));
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
@@ -624,6 +625,10 @@ Array HudPos::font_page_textures(const Ref<FntResource> &p_font) {
 
 String HudPos::glyph_shader_code() {
 	return String(glyph_canvas_shader_code());
+}
+
+Ref<Shader> HudPos::glyph_shader() {
+	return glyph_canvas_shader();
 }
 
 // --- first-person view effects (hud/view_effects.h) -------------------------

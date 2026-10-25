@@ -2,6 +2,10 @@
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
 
+namespace opennova::rtxt {
+struct File;
+}
+
 // Host bring-up sequence — the in-process listen-server creation path (§5.0), mirroring the
 // witnessed order [orig: SinglePlayer_StartMission @0x561af0]:
 //
@@ -24,19 +28,27 @@ void set_connection_mode(NapiNPServerCtx &ctx, ConnectionMode mode);
 // CNapiNetwork_SetTransportMode @0x4c8750]
 void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket);
 
-// The volatile host-start values the original derives from GetTickCount / rand at StartServer
-// (§6.5: host_key, host_start_tick, session_seed_id). Passed in rather than sampled so the
-// headless runtime stays deterministic and a golden-pcap test can seed-inject the observed
-// values (the plan's determinism approach). [orig: NapiNP_GenerateSessionKey @0x61ea70 ->
-// host_key; GetTickCount -> host_start_tick; (GetTickCount + rand) % 900000 + 100000 ->
-// session_seed_id]
+// The volatile host-start values the original derives from GetTickCount / rand: StartServer's
+// host_key and host_start_tick, and the protocol create's +0x530 draw, which seeds the session
+// CRT stream here (session_seed_id). Passed in rather than sampled so the headless runtime
+// stays deterministic and a golden-pcap test can seed-inject the observed values (the plan's
+// determinism approach). [orig: NapiNPProtocol_StartServer @0x62B5E0 - NapiNP_GenerateSessionKey
+// @0x61ea70 -> host_key @0x62B5FC, GetTickCount -> host_start_tick @0x62B619;
+// NapiNPProtocol_Create @0x625730 - (GetTickCount + rand) % 900000 + 100000 -> +0x530
+// @0x6259B3..0x625A10]
 struct SessionStartup {
 	// The title identity the host speaks (HostConfig::title), installed on the protocol by
 	// start_server (NapiNPProtocol::identity).
 	const TitleIdentity *title = nullptr;
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
+	// The session CRT stream's seed (D-NET-115), drawn as NapiNPProtocol_Create draws the
+	// protocol's +0x530 [orig: @0x6259B3..0x625A10]; the create overwrites that word before any
+	// reader sees it (NapiNPProtocol::magic_key), so the seed is all ours keeps of the draw.
 	uint32_t session_seed_id = 0;
+	// The mount's text-override table (null = none), the session title's first lookup
+	// (HostConfig::text_override).
+	const rtxt::File *text_override = nullptr;
 };
 
 // What the session create hands its caller. Retail's returns 0, or -1 / -2 on
@@ -51,6 +63,19 @@ enum class CreateSessionResult : uint8_t {
 	Created = 0,
 	ProcessExit,
 };
+
+// The mission start's copies of the cfg block's two side passwords into the team pick's pair
+// (GameConfig::mission_side_a_password / _b): `config`'s side_a / side_b_password, the cfg
+// block's words a create's or a map change's config carries, each through strncpy 0x11 into a
+// 17-byte field. A word of 17 or more characters fills its field with no NUL, so the pick reads
+// it running on into the field behind it: side A's into g_SidePasswordB, side B's into
+// g_SessionCountryCode (config.country's first three characters; no instruction addresses the
+// zeroed bytes behind those, so the string ends there).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - strncpy(g_SessionCountryCode,
+//  country_3C5, 3) @0x55200D, strncpy(g_SidePasswordA, sideAPassword_383, 0x11) @0x552043,
+//  strncpy(g_SidePasswordB, sideBPassword_394, 0x11) @0x552054; g_SidePasswordA @0x24D1FF5,
+//  g_SidePasswordB @0x24D2006, g_SessionCountryCode @0x24D2017]
+void apply_mission_side_passwords(GameConfig &config);
 
 // Step 3 — the shared SP/MP session creator [orig: CNapiGameSession_CreateSession @0x4c97c0].
 // A nonzero `config.multiplayer_reset` (the cfg block's `mpreset`, which the
@@ -68,7 +93,9 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 
 // The next mission inside the same session (net-re §5.70.6): the session
 // config takes `config` (the next map's identity on the host screen's or the
-// host file's rules), every mission-start reset of the context runs (the
+// host file's rules) but keeps the create's game_settings passwords (the server
+// and side passwords, D-NET-NEW-L1-42), the team pick's pair takes `config`'s side
+// passwords (apply_mission_side_passwords), every mission-start reset of the context runs (the
 // scoreboard counter, the round-end state, both transfer tokens, the
 // mission-data block, the advertised flag words, the stored exit reason),
 // and the connection list, the protocol state and the session identity stay.
@@ -80,12 +107,22 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 //  stream token `++g_ReplayBlockMagic` @0x5247F3,
 //  CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (its `++dword_C86FC8`
 //  @0x51E9C1), the end-round block @0x5249EA]
-void continue_session(NapiNPServerCtx &ctx, const GameConfig &config);
+// `text_override` is the mount's override table (null = none) the session title
+// searches first (HostConfig::text_override).
+void continue_session(NapiNPServerCtx &ctx, const GameConfig &config,
+		const rtxt::File *text_override);
 
-// [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick /
-// session_seed_id (the latter only when gen_session_seed_flag is set), copies the MP TLV
-// max_players, and sets host_running = 1 (HandleClientHello rejects while it is 0). No-op unless
-// is_authority.
+// The CRT stream the session's draws take: the bound World's (World::crt_rand, which a host's
+// bring-up took from the process), else the process's (NapiNPServerCtx::process_crt_rand: a
+// host's create runs ahead of its first mission's World), else null, whose draws read 0.
+// [orig: rand @0x76B00A, one per-thread stream; Server_AllocatePlayerSlotTable @0x51C180 - srand
+//  @0x51C1AA]
+io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx);
+
+// [orig: NapiNPProtocol_StartServer @0x62b5e0] — host-only. Stamps host_key / host_start_tick,
+// copies the MP TLV max_players, and sets host_running = 1 (HandleClientHello rejects while it is
+// 0); the protocol's magic key (+0x530) is the create's, not the start's (D-NET-NEW-L1-20). No-op
+// unless is_authority.
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup);
 
 } // namespace opennova::inmatch

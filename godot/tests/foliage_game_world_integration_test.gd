@@ -52,6 +52,13 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	var dispatcher := world.get_foliage_dispatcher()
 	assert_not_null(data)
 	assert_not_null(dispatcher)
+	# A world with no mission runs the terrain's mission textures stage right after its connect
+	# leg: the node builds and the foliage configures (D-NET-NEW-L2-46).
+	var terrain: Terrain = world.get_terrain_node()
+	assert_true(terrain != null and terrain.is_built(), "load_world builds the terrain")
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_true(timeline != null and timeline.span_names().has("terrain_textures"),
+			"load_world's timeline carries the terrain's textures stage")
 	if data == null or dispatcher == null:
 		world.unload()
 		return

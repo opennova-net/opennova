@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include <base/io/bam.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/terrain_query/height_field.h>
@@ -20,6 +21,7 @@
 #include <unordered_map>
 
 #include "channel_clip_source.h"
+#include "../common/hull_brain.h"
 
 using namespace opennova::world;
 
@@ -52,6 +54,7 @@ void test_vehicle_death_rows() {
         const EntityHandle h = w.registry.spawn(1, seed);
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
@@ -103,12 +106,14 @@ void test_vehicle_death_rows() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(1, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(1, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = 21;
         e.vel_x = 5000; e.vel_y = 0;             // fast
-        e.pos[0] = 100000;                        // far from the (0-init) death pose
-        e.net_saved_live_pose[0] = 0;
+        e.self->position.x.q16 = 100000;                        // far from the (0-init) death pose
+        e.self->saved_live_pos[0] = 0;
         e.brain.f[AiBrain::kWorkPitch] = 7;
         e.brain.f[AiBrain::kWorkRoll] = 7;
         e.brain.f[AiBrain::kOutSpeed] = 7;
@@ -156,6 +161,7 @@ void test_vehicle_death_states_send_kill_record() {
         const EntityHandle h = w.registry.spawn(1, seed);
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = w.rules.logic_authority;
         AiEntity &e = *sys.at(sys.attach(h));
         e.team = 1;
@@ -219,11 +225,12 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     w->tables.ammo.entries[1].max_age_ticks = 100;
 
     AiSystem sys;
+    sys.bind_registry(&w->registry);
     int idx = sys.attach(h);
     AiEntity &e = *sys.at(idx);
-    e.pos[0] = 10 << 16;
-    e.pos[1] = 20 << 16;
-    e.pos[2] = 5 << 16;
+    e.self->position.x.q16 = 10 << 16;
+    e.self->position.y.q16 = 20 << 16;
+    e.self->position.z.q16 = 5 << 16;
     e.profile.organic.ammo.fill(1);
     e.profile.organic.launch = {1, 2, 3};
 
@@ -233,8 +240,8 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4; // the primary anim-fire event bit
     sys.infantry_fire_pass(e, *w, /*logic_tick=*/1);
     CHECK(w->round_sim.active_count == 1);
-    CHECK(near_f(w->round_sim.rounds[0].pos.x, 10.0f));
-    CHECK(near_f(w->round_sim.rounds[0].pos.z, 5.0f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.x, 10.0f));
+    CHECK(near_f(w->round_sim.rounds[1].pos.z, 5.0f));
 
     // The provider resolves the posed launch point -> rounds spawn from it.
     FakeMuzzleProvider provider;
@@ -243,9 +250,9 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4;
     sys.infantry_fire_pass(e, *w, 3);
     CHECK(w->round_sim.active_count == 2);
-    CHECK(near_f(w->round_sim.rounds[1].pos.x, 10.5f));
-    CHECK(near_f(w->round_sim.rounds[1].pos.y, 19.75f));
-    CHECK(near_f(w->round_sim.rounds[1].pos.z, 5.25f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.x, 10.5f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.y, 19.75f));
+    CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.25f));
 
     // A provider that declines this handle -> the raw origin again (no stamp
     // survives between ticks; retail computes the point at every fire).
@@ -253,7 +260,7 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     e.inf.last_events = 0x4;
     sys.infantry_fire_pass(e, *w, 9);
     CHECK(w->round_sim.active_count == 3);
-    CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.0f));
+    CHECK(near_f(w->round_sim.rounds[3].pos.z, 5.0f));
     w->pose_provider = nullptr;
 }
 
@@ -265,12 +272,13 @@ static void test_weapon_fire_origin_fallback_chain() {
     World w;
     w.registry.configure_pool(0, 4);
     AiSystem sys;
+    sys.bind_registry(&w.registry);
     EntityHandle h = EntityHandle::make(0, 1);
     int idx = sys.attach(h);
     AiEntity &e = *sys.at(idx);
-    e.pos[0] = 10 << 16;
-    e.pos[1] = 20 << 16;
-    e.pos[2] = 5 << 16;
+    e.self->position.x.q16 = 10 << 16;
+    e.self->position.y.q16 = 20 << 16;
+    e.self->position.z.q16 = 5 << 16;
 
     int32_t out[3];
     AiSystem::weapon_fire_origin(e, out);
@@ -326,14 +334,15 @@ static void test_los_endpoints_use_muzzle_stamp() {
     World w;
     w.registry.configure_pool(0, 4);
     AiSystem sys;
+    sys.bind_registry(&w.registry);
     sys.terrain = &band.field;
     EntityHandle ha = EntityHandle::make(0, 0);
     EntityHandle hb = EntityHandle::make(0, 1);
     int ia = sys.attach(ha);
     AiEntity &a = *sys.at(ia);
-    a.pos[0] = 2 << 16;
-    a.pos[1] = 100 << 16;
-    a.pos[2] = 0;
+    a.self->position.x.q16 = 2 << 16;
+    a.self->position.y.q16 = 100 << 16;
+    a.self->position.z.q16 = 0;
 
     Entity target{};
     target.position = Vec3{20.0f, 100.0f, 0.0f};
@@ -372,6 +381,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     CollisionWorld collision;
     w.collision = &collision;
     AiSystem sys;
+    sys.bind_registry(&w.registry);
 
     Entity veh_seed{};
     veh_seed.kind = EntityKind::Item;
@@ -381,7 +391,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     veh_seed.item_type = 1; // not def type 3: the non-person leg
     veh_seed.alive = true;
     veh_seed.position = Vec3{10.0f, 20.0f, 0.0f};
-    veh_seed.yaw = 90;
+    veh_seed.heading = placed_heading_bam(90);
     veh_seed.bbox_center = Vec3{0.0f, 0.0f, 1.5f};
     const EntityHandle veh = w.registry.spawn(1, veh_seed);
 
@@ -440,11 +450,25 @@ static void test_aim_origin_takes_the_non_person_leg() {
     w.logic_tick = 0xFFFFFFFFu; // wrapped phase = 35, same jitter band
     sys.weapon_aim_origin(w, target, out);
     CHECK(out[0] == 96256 && out[1] == 98304 && out[2] == 131072);
+    // A player body's identity is its DcbId (entity_dcb_id), 10000 + its slot on a plyr row,
+    // not the net id ours keeps (0 on our host): slot 3's phase 36 * 10003 = 0x57EAC is low
+    // (& 0x80) with jitter 0x20, where net id 0's is high with jitter 0.
+    // [orig: Entity_ComputeWeaponFireOrigin `mov eax, [esi+7Ch]` @0x43B4C2;
+    //  PlayerClass_InitEntity @0x4B1149..0x4B1173]
+    target.net_id = 0;
+    target.engine_flags |= kEntityFlagPlayer;
+    target.player_slot_id = 3;
+    w.logic_tick = 0;
+    sys.weapon_aim_origin(w, target, out);
+    CHECK(out[0] == 79872 && out[1] == 114688 && out[2] == 65536);
+    target.engine_flags &= ~kEntityFlagPlayer;
+    target.player_slot_id = 0;
 
-    // During the motor, the live fixed-point body/eye leads its registry mirror.
+    // The attached body's position is the entity's own words (one store, as
+    // retail's): the person leg and the raw origin read the same words.
     const int body_index = sys.attach(person);
     AiEntity &body = *sys.at(body_index);
-    body.pos[0] = 17; body.pos[1] = 29; body.pos[2] = 41;
+    body.self->position.x.q16 = 17; body.self->position.y.q16 = 29; body.self->position.z.q16 = 41;
     body.inf.eye_offset_x = -3; body.inf.eye_offset_y = -5; body.inf.eye_offset_z = 7;
     target.net_id = 0;
     w.logic_tick = 128;
@@ -452,7 +476,7 @@ static void test_aim_origin_takes_the_non_person_leg() {
     CHECK(out[0] == -4080 && out[1] == -2021 && out[2] == 44);
     target.has_item_def = false; // kind alone never selects the person leg
     sys.weapon_aim_origin(w, target, out);
-    CHECK(out[0] == 65536 && out[1] == 131072 && out[2] == 0);
+    CHECK(out[0] == 17 && out[1] == 29 && out[2] == 41);
     w.pose_provider = nullptr;
 }
 
@@ -513,7 +537,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     npc.inf.active = true;
     npc.team = 1;
     npc.net_id = 0x11;
-    npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+    npc.self->position.x.q16 = 0; npc.self->position.y.q16 = 0; npc.self->position.z.q16 = 0;
     npc.profile.organic.launch[1] = 2;
     npc.slot.f[10] = 0; // zero aim error: the pitch pin is exact
     npc.slot.f[11] = 0;
@@ -577,6 +601,7 @@ static void test_sm_turret_fire() {
         w = std::make_unique<World>();
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
+        sys.bind_registry(&w->registry);
         w->tables.ammo.entries.resize(2);
         w->tables.ammo.entries[1].valid = true;
         w->tables.ammo.entries[1].velocity = 620;
@@ -593,9 +618,9 @@ static void test_sm_turret_fire() {
         sys.is_authority = true;
         int idx = sys.attach(sh);
         e = sys.at(idx);
-        e->pos[0] = 0;
-        e->pos[1] = 0;
-        e->pos[2] = 0;
+        e->self->position.x.q16 = 0;
+        e->self->position.y.q16 = 0;
+        e->self->position.z.q16 = 0;
         e->heading = 0; // facing +X = the bearing to the target
         e->brain.f[AiBrain::kCurState] = kAiGroundCombat;
         e->brain.f[AiBrain::kStep] = 16;
@@ -700,6 +725,7 @@ static void test_sm_fire_stamps_the_hull_adm_byte() {
         AiEntity *e = nullptr;
         EntityHandle hull;
         Rig() {
+            sys.bind_registry(&w->registry);
             w->registry.configure_pool(0, 8);
             w->registry.configure_pool(1, 8);
             w->tables.ammo.entries.resize(3);
@@ -845,6 +871,7 @@ static void test_entity_update_stamps_the_session_fact() {
     w.rules.mp_session = true;
     w.update_all_entities(ctx);
     CHECK(w.ai.is_in_session);
+    w.registry.configure_pool(0, 8); // the brain's row (its position words)
     AiEntity &e = *w.ai.at(w.ai.attach(EntityHandle::make(0, 0)));
     e.health = 100;
     e.vel_x = 2000;
@@ -898,7 +925,7 @@ static void test_round_hit_reaches_the_same_pass_body_update() {
     victim.health = 1000;
     victim.team = 2;
     victim.net_id = 0x21;
-    victim.pos[0] = 20 << 16;
+    victim.self->position.x.q16 = 20 << 16;
 
     RoundSpawnParams shot;
     shot.owner = shooter_h;
@@ -965,7 +992,7 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     victim.health = 10;
     victim.team = 2;
     victim.net_id = 0x21;
-    victim.pos[0] = 20 << 16;
+    victim.self->position.x.q16 = 20 << 16;
 
     TickContext tick{};
     tick.world = &w;
@@ -987,8 +1014,8 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     // A dismemberment piece may attach a brain and move the AI array: re-read
     // the victim's brain.
     AiEntity &corpse = *ai.for_handle(victim_h);
-    const int32_t transition_x = corpse.pos[0];
-    const int32_t transition_z = corpse.pos[2];
+    const int32_t transition_x = corpse.self->position.x.q16;
+    const int32_t transition_z = corpse.self->position.z.q16;
     tick.logic_tick = 2;
     w.update_all_entities(tick);
 
@@ -996,20 +1023,20 @@ static void test_lethal_hit_blends_into_death_animation_without_position_jump() 
     CHECK(corpse.inf.body_clip_state() == anim_state::kIdle);
     CHECK(corpse.inf.clip_phase == 2);
     CHECK(corpse.inf.anim_blend_weight == 1.0f);
-    CHECK(corpse.pos[0] == transition_x);
-    CHECK(corpse.pos[2] == transition_z);
+    CHECK(corpse.self->position.x.q16 == transition_x);
+    CHECK(corpse.self->position.z.q16 == transition_z);
 
-    const int32_t blend_x = corpse.pos[0];
-    const int32_t blend_z = corpse.pos[2];
+    const int32_t blend_x = corpse.self->position.x.q16;
+    const int32_t blend_z = corpse.self->position.z.q16;
     tick.logic_tick = 3;
     w.update_all_entities(tick);
 
     CHECK(corpse.inf.clip_phase == 1);
     CHECK(corpse.inf.anim_blend_weight == 0.1f);
-    CHECK(corpse.pos[0] - blend_x == DeathTransitionRootSource::kFirstBlendDx);
-    if (corpse.pos[2] - blend_z != DeathTransitionRootSource::kFirstBlendDz) {
+    CHECK(corpse.self->position.x.q16 - blend_x == DeathTransitionRootSource::kFirstBlendDx);
+    if (corpse.self->position.z.q16 - blend_z != DeathTransitionRootSource::kFirstBlendDz) {
         std::printf("first death blend position jump: dz=%d, expected blended dz=%d\n",
-                    corpse.pos[2] - blend_z, DeathTransitionRootSource::kFirstBlendDz);
+                    corpse.self->position.z.q16 - blend_z, DeathTransitionRootSource::kFirstBlendDz);
         ++failures;
     }
 }
@@ -1027,6 +1054,17 @@ static void configure_test_emplacement_weapon(WeaponTableEntry &weapon) {
     for (int action = 0; action < weapon_action::kCount; ++action)
         weapon.action_fsm.actions[action].id = action;
     weapon.action_fsm.actions[weapon_action::kRecoil].delay_end = 1;
+}
+
+// The guns' class inits: each pool-1 row naming a weapon binds and seeds its slot at its
+// spawn, ahead of any mount, which binds none.
+// [orig: Entity_InitBoneReferences @0x441470 -> WeaponSlot_InitFromEntityDef (the call
+//  @0x441482)]
+static void bind_test_gun_slots(World &w) {
+    w.registry.for_each_in_pool(1, [&](const Entity &row) {
+        if (!row.primary_weapon.empty())
+            w.vehicles.init_weapon_slot_from_entity_def(*w.registry.get(row.handle));
+    });
 }
 
 static void configure_rifleman(AiEntity &npc, uint16_t net_id, uint8_t team) {
@@ -1395,7 +1433,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+    gun.heading = placed_heading_bam(90); // engine heading 0: faces the enemy on +X.
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -1423,6 +1461,7 @@ static void test_mounted_gunner_acquires_and_fires() {
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
     npc.profile.organic.ammo.fill(0); // mounted fire must not use the personal rifle slot
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     bool acquired = false;
@@ -1508,7 +1547,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
                                  // built around a def-less gun, drops it below
         gun.team = 1;
         gun.net_id = 0x31;
-        gun.yaw = 90;
+        gun.heading = placed_heading_bam(90);
         gun.item_attrib = kItemAttribEweap;
         gun.primary_weapon.assign(1, 'x');
         for (int barrel = 0; barrel < 4; ++barrel)
@@ -1547,6 +1586,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x11, 1);
         npc.profile.organic.ammo.fill(0);
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x11, 0x31));
         w->registry.get(points.gun)->has_item_def = false; // the def-less gun past boarding
         CHECK(w->registry.get(points.gun)->primary_weapon_slot.clip == -1);
@@ -1614,7 +1654,7 @@ static void test_weapon_fire_position_legs() {
     const int veh_index = sys.attach(veh_h);
     AiEntity &person = *sys.at(person_index);
     configure_rifleman(person, 0x11, 1);
-    person.pos[0] = 1 << 16; person.pos[1] = 2 << 16; person.pos[2] = 3 << 16;
+    person.self->position.x.q16 = 1 << 16; person.self->position.y.q16 = 2 << 16; person.self->position.z.q16 = 3 << 16;
     person.inf.eye_offset_x = 0x100;
     person.inf.eye_offset_y = -0x200;
     person.inf.eye_offset_z = 0x18000;
@@ -1656,6 +1696,7 @@ static void test_weapon_fire_position_legs() {
     w->tables.weapons.entries[1].name.assign(1, 'x');
     w->tables.weapons.entries[1].valid = true;
     configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(sys.weapon_fire_position(*w, person, out) == 1);
     CHECK(out[0] == (7 << 16) && out[1] == (8 << 16) && out[2] == (9 << 16));
@@ -1663,11 +1704,11 @@ static void test_weapon_fire_position_legs() {
     // Without the EWeap attrib the seat's parent is no gun: the CameraOffset leg.
     w->registry.get(provider.gun)->item_attrib = 0;
     CHECK(sys.weapon_fire_position(*w, person, out) == 1);
-    CHECK(out[0] == person.pos[0] + 0x100 && out[2] == person.pos[2] + 0x18000);
+    CHECK(out[0] == person.self->position.x.q16 + 0x100 && out[2] == person.self->position.z.q16 + 0x18000);
 
     // A non-person without a model: the raw position.
     AiEntity &veh = *sys.at(veh_index);
-    veh.pos[0] = 10 << 16; veh.pos[1] = 20 << 16; veh.pos[2] = 30 << 16;
+    veh.self->position.x.q16 = 10 << 16; veh.self->position.y.q16 = 20 << 16; veh.self->position.z.q16 = 30 << 16;
     CHECK(sys.weapon_fire_position(*w, veh, out) == 3);
     CHECK(out[0] == (10 << 16) && out[1] == (20 << 16) && out[2] == (30 << 16));
     // A model without a LOOK point: the position raised 0.75 u.
@@ -1752,7 +1793,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = 0x31;
-        gun.yaw = 90; // engine heading 0: faces the enemy on +X.
+        gun.heading = placed_heading_bam(90); // engine heading 0: faces the enemy on +X.
         gun.position = Vec3{2.0f, 100.0f, 0.0f};
         gun.item_attrib = kItemAttribEweap;
         gun.item_attrib2 = cannon ? opennova::def::DEF_ITEM_ATTRIB2_ISTURRET
@@ -1800,9 +1841,10 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         ai.terrain = &ridge.field;
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x11, 1);
-        npc.pos[0] = 2 << 16;
-        npc.pos[1] = 100 << 16;
+        npc.self->position.x.q16 = 2 << 16;
+        npc.self->position.y.q16 = 100 << 16;
         npc.profile.organic.ammo.fill(0);
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x11, 0x31));
         CHECK(w->registry.get(point.gun)->primary_weapon_slot.clip == (cannon ? 1 : -1));
 
@@ -1811,7 +1853,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
         int32_t aim[3], from[3];
         ai.weapon_aim_origin(*w, *w->registry.get(enemy_h), aim);
         for (const int32_t lift : {0, 1 << 16}) {
-            from[0] = npc.pos[0]; from[1] = npc.pos[1]; from[2] = npc.pos[2] + lift;
+            from[0] = npc.self->position.x.q16; from[1] = npc.self->position.y.q16; from[2] = npc.self->position.z.q16 + lift;
             CHECK(!ai.line_of_sight_clear(*w, from, aim, npc_h, enemy_h));
         }
         CHECK(ai.weapon_fire_position(*w, npc, from) == 1);
@@ -1852,7 +1894,7 @@ static void test_water_crossing_fires_once_on_entry() {
     q.add(to_fixed(-834.0), to_fixed(122.0), w.env.water_z, /*airborne=*/true);
     CHECK(q.events.size() == 1);
     CHECK(q.events[0].airborne);
-    CHECK(q.events[0].water_z == to_fixed(12.0));
+    CHECK(q.events[0].z == to_fixed(12.0));
 
     // The queue is per-tick: the host drains and clears it, so a hull that stays
     // submerged contributes nothing further.
@@ -1892,44 +1934,49 @@ static void test_infantry_floats_and_splashes_once() {
     // Shallower than the hysteresis gap: retail does NOT start floating here, so
     // a body wading the very edge of a river neither latches nor splashes. This
     // is the assertion a naive `z < water` port fails.
-    npc.pos[2] = w->env.water_z - to_fixed(0.3);
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(0.3);
     ai.infantry_water_block(npc, *w, ent, 0, 1);
     CHECK(w->out.water_crossings.events.empty());
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Past the gap, walking (not airborne): one crossing, carrying the wade sound.
-    npc.pos[2] = w->env.water_z - to_fixed(1.0);
-    const int32_t sank_to = npc.pos[2];
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(1.0);
+    const int32_t sank_to = npc.self->position.z.q16;
     ai.infantry_water_block(npc, *w, ent, 0, 1);
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(!w->out.water_crossings.events[0].airborne);
-    CHECK(w->out.water_crossings.events[0].water_z == w->env.water_z);
+    // The splash rides the body's own position, the float target the block just
+    // stored, not the plane: the 0x34's z word is the body's (D-NET-NEW-L3-13).
+    // [orig: Entity_UpdateInfantryAI - the store @0x4BFB84, `lea eax, [esi+4]`
+    //  @0x4BFC2B, the send @0x4BFC40]
+    CHECK(w->out.water_crossings.events[0].z == npc.self->position.z.q16);
+    CHECK(w->out.water_crossings.events[0].z < w->env.water_z);
     CHECK((ent->flags & kEntityFlagDrowning) != 0);
     // He is being lifted toward the surface, not left on the riverbed: the block
     // stores the float target outright; the motor's +0xAC quarter-step tail that
     // follows it is what paces the settle (infantry_org1_parity). [orig:
     // Entity_UpdateInfantryAI store @0x4BFB84, tail @0x4BFC65..0x4BFC86]
-    CHECK(npc.pos[2] > sank_to);
+    CHECK(npc.self->position.z.q16 > sank_to);
 
     // Still under, still latched: the host drained the queue and nothing refills it.
     w->out.water_crossings.clear();
     for (int i = 0; i < 8; ++i) ai.infantry_water_block(npc, *w, ent, 0, 2 + i);
     CHECK(w->out.water_crossings.events.empty());
     // He sits at the float target, just under the plane within the bob's amplitude.
-    const int32_t settled = npc.pos[2] - w->env.water_z;
+    const int32_t settled = npc.self->position.z.q16 - w->env.water_z;
     CHECK(settled < 0 && settled > -to_fixed(1.0));
     std::printf("  [inf-water] settled %.3f u under the plane\n",
                 static_cast<double>(settled) / 65536.0);
 
     // Out of the water clears the latch, so the next entry can splash again.
-    npc.pos[2] = w->env.water_z + to_fixed(0.5);
+    npc.self->position.z.q16 = w->env.water_z + to_fixed(0.5);
     ai.infantry_water_block(npc, *w, ent, 0, 20);
     CHECK((ent->flags & kEntityFlagDrowning) == 0);
 
     // Now the same body arrives from the AIR. Same family, same plane, DIFFERENT
     // sound - the selector retail actually uses.
     ent->flags |= kEntityFlagInAir;
-    npc.pos[2] = w->env.water_z - to_fixed(1.0);
+    npc.self->position.z.q16 = w->env.water_z - to_fixed(1.0);
     ai.infantry_water_block(npc, *w, ent, 0, 21);
     CHECK(w->out.water_crossings.events.size() == 1);
     CHECK(w->out.water_crossings.events[0].airborne);
@@ -1962,7 +2009,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
                              // built around a def-less gun, drops it below
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -1991,6 +2038,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     npc.inf.combat_target = target_h;
     npc.inf.aim_valid = true;
     npc.inf.aim_heading = 0;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     w->registry.get(w->registry.find_by_net_id(0x31))->has_item_def = false; // the def-less gun past boarding
 
@@ -2022,9 +2070,15 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     // the AI. The walk reads the frame's own tick, one behind logic_tick.
     w->cached.local_player = npc_h;
     w->logic_tick = 1;
+    npc.inf.aim_ref0 = EntityHandle{};
     w->pump_weapon_actions();
     CHECK(w->out.rounds.count == 1);
     CHECK(w->out.rounds.records[0].shooter_handle == npc_h.packed);
+    // The slot's fire writes no +0x2F0 on the gunner: only the body's anim-event
+    // fire blocks store the target there. [orig: Entity_UpdateInfantryAI @0x4B9910 (the stores
+    //  @0x4BF381 / @0x4BF3F5 / @0x4BF4AD; none in the request @0x4BF4B3..0x4BF59E);
+    //  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80]
+    CHECK(!npc.inf.aim_ref0.valid());
     CHECK(w->out.rounds.records[0].origin_x == 0x12345);
     CHECK(w->out.rounds.records[0].origin_y == -0x23456);
     CHECK(w->out.rounds.records[0].origin_z == 0x34567);
@@ -2072,11 +2126,14 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
 // The walk's pool-1 leg pumps an unoccupied EWEAP row's own slot only while
 // its heat window is open: the kick decays and a lapsed window closes, and a
-// row with an occupant, a non-EWEAP row or a cold slot is left alone.
+// row with an occupant, a non-EWEAP row or a cold slot is left alone. A gun at or
+// below the water word closes its window at the visit, the word compared raw: a
+// map with no water authored keeps it 0, so a gun at Z 0 is under it.
 // [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the occupant
 //  test @0x5426E9, the EWEAP bit @0x5426FF, the window @0x54270E;
 //  WeaponAction_ProcessFrame -- the kick decay @0x541262..0x54129B, the
-//  window close @0x54125F]
+//  window close @0x54125F, the water compare @0x541004..0x54100D;
+//  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
 static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 4);
@@ -2087,9 +2144,11 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     w->tables.weapons.entries[1].valid = true;
     configure_test_emplacement_weapon(w->tables.weapons.entries[1]);
     w->ai.is_authority = true;
-    const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window) {
+    const auto spawn_gun = [&](uint32_t attrib, bool occupied, int32_t window,
+                               float z = 10.0f) {
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.position = {0.0f, 0.0f, z};
         gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
         gun.has_item_def = true;
         gun.has_graphic_model = true;
@@ -2104,8 +2163,10 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     const EntityHandle manned = spawn_gun(kItemAttribEweap, true, 50);
     const EntityHandle plain = spawn_gun(0, false, 50);
     const EntityHandle cold = spawn_gun(kItemAttribEweap, false, 0);
+    const EntityHandle wet = spawn_gun(kItemAttribEweap, false, 50, 0.0f);
     w->logic_tick = 11; // the frame's own tick is 10, inside the window
     w->pump_weapon_actions();
+    CHECK(w->registry.get(wet)->primary_weapon_slot.heat_window_end_tick == 0);
     CHECK(w->registry.get(hot)->primary_weapon_slot.kick == 2);
     CHECK(w->registry.get(hot)->primary_weapon_slot.heat_window_end_tick == 50);
     CHECK(w->registry.get(manned)->primary_weapon_slot.kick == 3);
@@ -2147,7 +2208,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
         gun.has_graphic_model = true;
         gun.team = 1;
         gun.net_id = net_id;
-        gun.yaw = 90;
+        gun.heading = placed_heading_bam(90);
         gun.primary_weapon.assign(1, 'x');
         Seat seat{};
         seat.type = SeatType::Gunner;
@@ -2169,6 +2230,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     const EntityHandle second_gun = spawn_gun(0x32);  // pool-1 slot 1
     const EntityHandle early = spawn_npc(0x11);       // pool-0 slot 0
     const EntityHandle late = spawn_npc(0x12);        // pool-0 slot 1
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x12, 0x31));
     CHECK(w->commands.mount(0x11, 0x32));
     w->registry.get(first_gun)->primary_weapon_slot.next = weapon_action::kFire;
@@ -2178,6 +2240,92 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     CHECK(w->out.rounds.count == 2);
     CHECK(w->out.rounds.records[0].shooter_handle == early.packed);
     CHECK(w->out.rounds.records[1].shooter_handle == late.packed);
+}
+
+// The gun's MountSlot keeps its owner through the detach, and the walk's pool-1 leg runs
+// the hot gun's handlers for that gunner: a FIRE the gunner had latched leaves as its
+// round, from its own eye along its look now that it stands on foot, and the kick's
+// trail-off sounds at the gunner who left (the emplaced minigun's GS_MINITAIL).
+// [orig: Entity_DetachFromVehicle @0x4355F0 (no +0x24 store); WeaponAction_ProcessFrame
+//  @0x540E60 - the owner's trail-off @0x541281..0x54129B, the transition's handler call
+//  with slot->owner @0x5413FF; WeaponAction_Fire @0x542B10 - the owner test @0x542B24,
+//  the send @0x542C5E; Entity_CalcWeaponFirePosition @0x4DC750 - no parent
+//  @0x4DC847..0x4DC880]
+static void test_weapon_walk_runs_a_hot_gun_for_its_last_gunner() {
+    auto w = std::make_unique<World>();
+    w->registry.configure_pool(0, 8);
+    w->registry.configure_pool(1, 8);
+    seed_test_rifle_ammo(*w);
+    w->tables.weapons.entries.resize(2);
+    WeaponTableEntry &weapon = w->tables.weapons.entries[1];
+    weapon.name.assign(1, 'x');
+    weapon.ammo_index = 1;
+    weapon.valid = true;
+    configure_test_emplacement_weapon(weapon);
+    std::strcpy(weapon.action_fsm.soundtrailoff, "MINI_TAIL");
+    w->out.fire_sounds.set_listener({0.0f, 0.0f, 10.0f});
+    AiSystem &ai = w->ai;
+    ai.is_authority = true;
+    Entity gun{};
+    gun.kind = EntityKind::Item;
+    gun.position = {0.0f, 0.0f, 10.0f};
+    gun.item_type_index = 7; // the def row's ordinal: the +0x1C slice gate
+    gun.has_item_def = true; // seats need the def (D-NET-422)
+    gun.has_graphic_model = true;
+    gun.item_attrib = kItemAttribEweap;
+    gun.team = 1;
+    gun.net_id = 0x31;
+    gun.heading = placed_heading_bam(90);
+    gun.primary_weapon.assign(1, 'x');
+    Seat seat{};
+    seat.type = SeatType::Gunner;
+    gun.seats.push_back(seat);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
+    Entity seed{};
+    seed.kind = EntityKind::Organic;
+    seed.position = {2.0f, 0.0f, 10.0f};
+    seed.item_type_index = 3; // the def row's ordinal: the +0x1C slice gate
+    seed.team = 1;
+    seed.health = 100;
+    seed.net_id = 0x11;
+    const EntityHandle npc_h = w->registry.spawn(0, seed);
+    AiEntity &npc = *ai.at(ai.attach(npc_h));
+    configure_rifleman(npc, 0x11, 1);
+    bind_test_gun_slots(*w);
+    CHECK(w->commands.mount(0x11, 0x31));
+    CHECK(w->vehicles.detach(npc_h));
+    Entity &gun_live = *w->registry.get(gun_h);
+    CHECK(gun_live.primary_weapon_owner == npc_h);
+    CHECK(!gun_live.primary_occupant.valid());
+    // The gun's last shot left its heat window open and a FIRE latched.
+    gun_live.primary_weapon_slot.heat_window_end_tick = 50;
+    gun_live.primary_weapon_slot.next = weapon_action::kFire;
+    w->logic_tick = 1;
+    w->pump_weapon_actions();
+    CHECK(w->out.rounds.count == 1);
+    if (w->out.rounds.count == 1) {
+        const RoundEvent &round = w->out.rounds.records[0];
+        CHECK(round.shooter_handle == npc_h.packed);
+        CHECK(round.origin_x ==
+                opennova::io::bam_add(npc.self->position.x.q16, npc.inf.eye_offset_x));
+        CHECK(round.origin_y ==
+                opennova::io::bam_add(npc.self->position.y.q16, npc.inf.eye_offset_y));
+        CHECK(round.origin_z ==
+                opennova::io::bam_add(npc.self->position.z.q16, npc.inf.eye_offset_z));
+        CHECK(round.dir_yaw == npc.heading);
+    }
+    const Vec3 gunner_at = w->registry.get(npc_h)->position;
+    bool tail_at_gunner = false;
+    for (uint32_t tick = 2; tick < 40 && !tail_at_gunner; ++tick) {
+        w->logic_tick = tick;
+        w->pump_weapon_actions();
+        for (const ReadyFireSound &sound : w->out.fire_sounds.drain())
+            if (sound.set_name == "MINI_TAIL" && sound.pos.x == gunner_at.x &&
+                    sound.pos.y == gunner_at.y && sound.pos.z == gunner_at.z)
+                tail_at_gunner = true;
+    }
+    CHECK(tail_at_gunner);
+    CHECK(w->out.rounds.count == 1);
 }
 
 // T8: past the four-tick cadence and the spatial stagger the mounted request
@@ -2206,7 +2354,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2232,6 +2380,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
     configure_rifleman(npc, 0x11, 1);
     npc.slot.f[15] = 6 << 16;
     npc.inf.combat_target = target_h;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
     w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
@@ -2274,7 +2423,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2300,6 +2449,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
     ai.root_motion = &clips;
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x11, 1);
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     TickContext ctx{};
@@ -2345,7 +2495,7 @@ static void test_mounted_request_runs_for_a_passenger() {
         truck.has_graphic_model = true;
         truck.team = 1;
         truck.net_id = 0x31;
-        truck.yaw = 90;
+        truck.heading = placed_heading_bam(90);
         if (armed) truck.primary_weapon.assign(1, 'x');
         Seat seat{};
         seat.type = SeatType::Passenger;
@@ -2371,6 +2521,7 @@ static void test_mounted_request_runs_for_a_passenger() {
         AiEntity &npc = *ai.at(ai.attach(npc_h));
         configure_rifleman(npc, 0x12, 1);
         npc.inf.combat_target = target_h;
+        bind_test_gun_slots(*w);
         CHECK(w->commands.mount(0x12, 0x31));
         CHECK(w->registry.get(npc_h)->mount_type == SeatType::Passenger);
         w->registry.get(npc_h)->equipped_adm_index = 7; // the rider's personal byte
@@ -2414,7 +2565,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2440,6 +2591,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
     configure_rifleman(npc, 0x11, 1);
     npc.slot.f[15] = 6 << 16;
     npc.inf.combat_target = target_h;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
     CHECK(w->registry.get(gun_h)->primary_weapon_slot_adm == 1);
     w->registry.get(gun_h)->equipped_adm_index = 5; // the gun's own AI fire wrote it
@@ -2469,7 +2621,7 @@ static void test_mounted_look_traverses_before_fire_request() {
     gun.has_graphic_model = true;
     gun.team = 1;
     gun.net_id = 0x31;
-    gun.yaw = 90;
+    gun.heading = placed_heading_bam(90);
     gun.primary_weapon.assign(1, 'x');
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2498,6 +2650,7 @@ static void test_mounted_look_traverses_before_fire_request() {
     npc.inf.aim_heading = 0x20000000;
     npc.inf.aim_pitch = 0;
     npc.heading = 0;
+    bind_test_gun_slots(*w);
     CHECK(w->commands.mount(0x11, 0x31));
 
     CHECK(ai.pose_if_mounted(npc, *w));
@@ -2567,7 +2720,9 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     //  @0x43569C]
     CHECK(w->registry.get(npc_h)->equipped_adm_index == 0);
     CHECK(!w->registry.get(npc_h)->use_gun_slot_swapped);
-    CHECK(!w->registry.get(gun_h)->primary_weapon_owner.valid());
+    // The gun's MountSlot keeps the dead gunner as its owner [orig: Entity_DetachFromVehicle
+    //  @0x4355F0 - no +0x24 store].
+    CHECK(w->registry.get(gun_h)->primary_weapon_owner == npc_h);
     CHECK(npc.inf.anim_state == kSelectedDeath);
     CHECK(w->registry.get(npc_h)->death_anim_state == 0);
     CHECK(w->registry.get(npc_h)->corpse_timer == 123);
@@ -2576,7 +2731,11 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
     CHECK(npc.inf.anim_blend_weight == 1.0f);
 }
 
-static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
+// `player_body`: the seated body is a player's (Flags 0x100: the org2 body update),
+// whose mounted site returns ahead of its one resolver call, so no tick resolves it.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 /
+//  @0x4B6977, the resolver call @0x4B7CF4; Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
+static void run_mounted_collision_tail_phase(bool player_body) {
     auto w = std::make_unique<World>();
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
@@ -2599,6 +2758,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     npc_seed.team = 1;
     npc_seed.health = 100;
     npc_seed.net_id = 0x10;
+    if (player_body) npc_seed.engine_flags |= kEntityFlagPlayer;
     const EntityHandle npc_h = w->registry.spawn(0, npc_seed);
 
     CollisionWorld collision;
@@ -2608,7 +2768,9 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     ai.root_motion = &channel_only; // the gunner holds its channel
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
-    CHECK(w->commands.mount(0x10, 0x20));
+    // A player body answers the script by its DcbId, 10000 + its slot byte 0 (entity_dcb_id,
+    // D-NET-NEW-L4-21), not its record word.
+    CHECK(w->commands.mount(player_body ? 10000 : 0x10, 0x20));
     w->registry.get(gun_h)->has_item_def = false; // the def-less gun past boarding
     CHECK(collision.instance_count() == 0);
 
@@ -2629,7 +2791,13 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     // [orig: Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
     ctx.logic_tick = 8;
     w->update_all_entities(ctx);
-    CHECK((npc_live->flags & kEntityFlagArmoryZone) == 0);
+    // A seated player body's update never reaches the resolver (L7-s10's FOUND).
+    CHECK((npc_live->flags & kEntityFlagArmoryZone) == (player_body ? kEntityFlagArmoryZone : 0u));
+}
+
+static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models() {
+    run_mounted_collision_tail_phase(false);
+    run_mounted_collision_tail_phase(true);
 }
 
 // A joiner still runs each vehicle's retail physics callback for presentation
@@ -2662,10 +2830,13 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     vehicle.health_max = 3000;
     vehicle.alive = true;
     vehicle.position = Vec3{100.0f, 200.0f, 10.0f};
-    vehicle.yaw = 37;
+    vehicle.heading = placed_heading_bam(37);
     vehicle.veh.speed = 0;
     vehicle.primary_occupant = npc_h; // NPC claimant: the PlayerControl loop gate
     const EntityHandle vehicle_h = w->registry.spawn(1, vehicle);
+    // The truck row's class init brained it: a brainless hull's mover stops at its
+    // head, sound fold included, on the client as on the authority.
+    test_common::brain_hull(*w, vehicle_h);
     Entity *npc_live = w->registry.get(npc_h);
     CHECK(npc_live != nullptr);
     npc_live->mounted = true;
@@ -2681,7 +2852,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     AiSystem &ai = w->ai;
 
     const Vec3 before = w->registry.get(vehicle_h)->position;
-    const int16_t yaw_before = w->registry.get(vehicle_h)->yaw;
+    const int16_t yaw_before = mission_yaw_whole_deg(w->registry.get(vehicle_h)->heading);
     w->run_logic_tick(false);
 
     const Entity *after = w->registry.get(vehicle_h);
@@ -2689,7 +2860,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     CHECK(after->position.x == before.x);
     CHECK(after->position.y == before.y);
     CHECK(after->position.z == before.z);
-    CHECK(after->yaw == yaw_before);
+    CHECK(mission_yaw_whole_deg(after->heading) == yaw_before);
 
     CHECK(w->out.sound_emitters.size() == 1);
     if (w->out.sound_emitters.size() == 1) {
@@ -2761,7 +2932,7 @@ static void test_aircraft_combat_states() {
 	sys.is_authority = true;
 	auto &b = ai.brain;
 	ai.health = 500;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.team = 1;
 	ai.profile.type = 1;
 	ai.profile.field220 = 6000;
@@ -2798,8 +2969,8 @@ static void test_aircraft_combat_states() {
 	CHECK((b.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
 	// A moving, rolling hull continues the saved six-component burst without
 	// solving again or consuming scatter randomness.
-	ai.pos[0] = 4 << 16;
-	ai.pos[2] = 15 << 16;
+	ai.self->position.x.q16 = 4 << 16;
+	ai.self->position.z.q16 = 15 << 16;
 	ai.heading = 12345;
 	ai.pitch = 23456;
 	ai.roll = 34567;
@@ -2807,15 +2978,15 @@ static void test_aircraft_combat_states() {
 	sys.row(8).tick(ctx);
 	CHECK(w.out.rounds.count == 2 && b.f[AiBrain::kAmmoA] == 2);
 	if (w.out.rounds.count == 2) {
-		CHECK(w.out.rounds.records[1].origin_z == ai.pos[2] + saved_z);
+		CHECK(w.out.rounds.records[1].origin_z == ai.self->position.z.q16 + saved_z);
 		CHECK(w.out.rounds.records[1].dir_yaw == ai.heading + b.f[AiBrain::kSavedDeltaA + 3]);
 		CHECK(w.out.rounds.records[1].dir_pitch == ai.pitch + b.f[AiBrain::kSavedDeltaA + 4]);
 	}
 	CHECK(sys.prng_a == random_before);
 	// Secondary processed fire omits the primary fire bit and perfect-aim
 	// scatter; the secondary continuation site still draws its two values.
-	ai.pos[0] = 0;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.x.q16 = 0;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.heading = ai.pitch = ai.roll = 0;
 	ai.profile.flags100 = 0;
 	b.f[AiBrain::kBurstWindow] = 0;
@@ -2904,7 +3075,7 @@ static void test_aircraft_fire_stamps_the_hull_adm_byte() {
 	sys.is_authority = true;
 	auto &b = ai.brain;
 	ai.health = 500;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.team = 1;
 	ai.profile.type = 1;
 	ai.profile.field220 = 6000;
@@ -2987,7 +3158,7 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 	sys.attach(th);
 	AiEntity &ai = *sys.for_handle(sh);
 	auto &b = ai.brain;
-	ai.pos[2] = 10 << 16;
+	ai.self->position.z.q16 = 10 << 16;
 	ai.pitch = 0x10000000;
 	ai.roll = 0x20000000;
 	ai.profile.fire_a.flags = 0x10;
@@ -3063,6 +3234,7 @@ static void test_vehicle_class_state_machine_gates() {
 	const EntityHandle crew = w.registry.spawn(0, crew_seed);
 	auto sys_heap = std::make_unique<AiSystem>();
 	AiSystem &sys = *sys_heap;
+	sys.bind_registry(&w.registry);
 	const int idx = sys.attach(hull);
 	AiEntity &e = *sys.at(idx);
 	e.health = 100;
@@ -3250,7 +3422,7 @@ struct AircraftRig {
 		ai = sys.at(sys.attach(hull_h));
 		sys.is_authority = true;
 		ai->health = 500;
-		ai->pos[2] = 10 << 16;
+		ai->self->position.z.q16 = 10 << 16;
 		ai->team = 1;
 		ai->profile.type = 1;
 		ai->profile.field220 = 6000;
@@ -3573,6 +3745,9 @@ int main() {
     {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        auto rows_heap = std::make_unique<World>(); // the brain's row (its position words)
+        rows_heap->registry.configure_pool(0, 8);
+        sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kStep] = 64;
@@ -3633,6 +3808,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3654,6 +3831,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3674,6 +3853,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -3706,6 +3887,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = true;
         const auto alert_event = [](int idx, int32_t level) {
             AiEventEntry ev{};
@@ -3789,6 +3972,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiHeloLand; // 6
@@ -3817,6 +4002,7 @@ int main() {
 
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
@@ -3909,6 +4095,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].loopflag = 0;
@@ -3954,6 +4142,8 @@ int main() {
             World &w = *w_heap;
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
+            w.registry.configure_pool(0, 8); // the brain's row (its position words)
             sys.nav.channels.resize(2);
             sys.nav.channels[1].count = 3;
             sys.nav.channels[1].loopflag = loopflag;
@@ -3991,6 +4181,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 100, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4014,6 +4206,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
@@ -4037,6 +4231,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -4064,6 +4260,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -4101,9 +4299,11 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
-        e.pos[0] = 11; e.pos[1] = 22; e.pos[2] = 33;
+        e.self->position.x.q16 = 11; e.self->position.y.q16 = 22; e.self->position.z.q16 = 33;
         e.heading = 44; e.pitch = 55; e.roll = 66;
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
         e.brain.f[AiBrain::kWpType] = 1;
@@ -4142,6 +4342,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 0, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4206,6 +4408,9 @@ int main() {
     {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+        rows_heap->registry.configure_pool(0, 8);
+        sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.heading = 0;
@@ -4316,6 +4521,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == false);
@@ -4329,6 +4535,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             AiTarget out{};
@@ -4344,6 +4551,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[2] = 100;
             AiTarget out{};
@@ -4360,15 +4568,20 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[0] = 100;
             // Kill the pool-1 vehicle so the pool-0 player leg decides.
             w.registry.get(EntityHandle::make(1, 0))->health = 0;
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == true);
-            CHECK(out.net_id == 0x11);
+            CHECK(out.handle == EntityHandle::make(0, 1));
+            // Its single key is its DcbId (entity_dcb_id): 10000 + slot 0 on the seed's plyr
+            // row, not the 0x11 on its Entity [orig: AI_HandleEvent_HelicopterCombatD
+            //  @0x4677C9; PlayerClass_InitEntity @0x4B1149..0x4B1173].
+            CHECK(out.net_id == 10000);
             // The local cheat word's 0x800 bit excludes the LOCAL player from that leg
-            // [orig: `test dword_24C1930,800h` @0x467141].
+            // [orig: `test g_DebugCheatFlags,800h` @0x467141].
             w.cached.local_player = EntityHandle::make(0, 1);
             w.rules.ai_rules_skip_local_player = true;
             AiTarget out2{};
@@ -4383,6 +4596,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[3] = 100;
             AiTarget out{};
@@ -4399,6 +4613,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.registry.get(EntityHandle::make(1, 0))->radar_sig = 0;
@@ -4407,13 +4622,14 @@ int main() {
             CHECK(sys.acquire_target(w, e, out) == false);
         }
 
-        // The round-end latch nulls acquisition [orig: g_SpawnSuccessGate @0x24C1928].
+        // The round-end latch nulls acquisition [orig: g_RoundOver @0x24C1928].
         {
             auto w_heap = std::make_unique<World>();
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.process_round_end(0);
@@ -4429,6 +4645,7 @@ int main() {
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            sys.bind_registry(&w.registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             Entity far_vehicle;
@@ -4451,6 +4668,9 @@ int main() {
         {
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
+            auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+            rows_heap->registry.configure_pool(0, 8);
+            sys.bind_registry(&rows_heap->registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiCandidate a{};
             a.handle = EntityHandle::make(1, 1);
@@ -4480,6 +4700,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.is_authority = false;
         sys.is_in_session = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4504,6 +4726,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         w.prng16_state = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -4536,6 +4760,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys.prng_a = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -4550,6 +4776,8 @@ int main() {
         // Now with a base delay: branch A jitters via stream A (49) and advances it.
         auto sys2_heap = std::make_unique<AiSystem>();
         AiSystem &sys2 = *sys2_heap;
+        sys2.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         sys2.prng_a = 1;
         int i2 = sys2.attach(EntityHandle::make(0, 0));
         AiEntity &e2 = *sys2.at(i2);
@@ -4584,6 +4812,7 @@ int main() {
 
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         int idx = sys.attach(self_h);
         AiEntity &e = *sys.at(idx);
         e.team = 1;
@@ -4615,6 +4844,7 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
         // The arrival proximity is the def turn-rate word (itemDef+0x924), read
         // live from the entity's def [orig: @0x457DCB..0x457DCE].
         w.registry.configure_pool(1, 1);
@@ -4663,6 +4893,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade;
@@ -4688,6 +4920,8 @@ int main() {
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
+        sys.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8); // the brain's row (its position words)
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
 
@@ -4733,9 +4967,10 @@ int main() {
     {
         auto w_heap = std::make_unique<World>();
         World &w = *w_heap;
+        w.registry.configure_pool(1, 8); // the brain's row (its position words)
         int idx = w.ai.attach(EntityHandle::make(1, 0));
         AiEntity &e = *w.ai.at(idx);
-        e.pos[0] = 0; e.pos[1] = 0; e.pos[2] = 7 << 16;
+        e.self->position.x.q16 = 0; e.self->position.y.q16 = 0; e.self->position.z.q16 = 7 << 16;
         e.brain.f[AiBrain::kOutSpeed] = 3;
         e.brain.f[AiBrain::kWorkPosX] = 100 << 16;
         e.brain.f[AiBrain::kWorkPosY] = 0;
@@ -4745,9 +4980,9 @@ int main() {
         ctx.world = &w;
         ctx.is_authority = true;
         w.update_all_entities(ctx);
-        CHECK(e.pos[0] == 0);
-        CHECK(e.pos[1] == 0);
-        CHECK(e.pos[2] == (7 << 16));
+        CHECK(e.self->position.x.q16 == 0);
+        CHECK(e.self->position.y.q16 == 0);
+        CHECK(e.self->position.z.q16 == (7 << 16));
         CHECK(e.heading == heading);
     }
 
@@ -4840,7 +5075,7 @@ int main() {
         npc.inf.active = true;
         npc.team = 1;
         npc.net_id = 0x11;
-        npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 40 << 16;
+        npc.self->position.x.q16 = 0; npc.self->position.y.q16 = 0; npc.self->position.z.q16 = 40 << 16;
         npc.profile.organic.ammo.fill(1); // -> w.tables.ammo[1]
         npc.profile.organic.launch = {1, 2, 3};
         npc.profile.clip_size = 30;
@@ -4906,6 +5141,7 @@ int main() {
     test_infantry_floats_and_splashes_once();
     test_mounted_fire_uses_retail_range_and_spatial_stagger();
     test_weapon_walk_visits_pool0_in_slot_order();
+    test_weapon_walk_runs_a_hot_gun_for_its_last_gunner();
     test_weapon_walk_pumps_hot_unoccupied_guns();
     test_mounted_request_copies_the_parent_adm_byte();
     test_mounted_gunner_runs_the_anim_event_fire_block();

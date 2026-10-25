@@ -33,6 +33,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/organic_fire.h>
+#include <runtime/world/physics_class_table.h>
 #include <runtime/world/system.h>
 
 namespace opennova::terrain {
@@ -41,6 +42,7 @@ struct TerrainHeightField;
 
 namespace opennova::world {
 
+class EntityRegistry;
 class World;
 struct VehicleDriveCmd;
 struct VehicleTraits;
@@ -259,6 +261,24 @@ struct AiSlot {
     // [orig: read Entity_IsSsnAtAlertLevel @0x43e780; command writes
     //  Entity_ApplyCommand @0x43ac2d/=2, @0x43ac8d/=1, @0x43acfd/=0]
     enum { kAlertByte = 136 };
+    // +0xC (f[3]), the current target pointer as one word: an entity's handle + 1, a
+    // round's -(slot + 1) (the heat-seeker query's 0x200 leg returns a round of the
+    // projectile array, D-NET-64), a joiner's decoded remote person's 0x10001 + its wire
+    // handle (the query's pool-0 leg walks the person retail's client built in its pool 0,
+    // D-NET-NEW-L8-56), or 0. One word, so a writer of any kind replaces the others, as
+    // retail's one pointer store does.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 (@0x4B520A); the stng init StngClass_InitFromDef @0x445EF0 (@0x445F10);
+    //  Entity_FindTargets @0x53A610 (the pool-0 leg @0x53A6E7..0x53A8A3, the ring leg @0x53ACF0..0x53ADE0)]
+    static int32_t target_word(const TargetRef &t) {
+        if (t.round >= 0) return -(t.round + 1);
+        if (t.wire_person != 0xFFFF) return 0x10001 + static_cast<int32_t>(t.wire_person);
+        return t.entity.valid() ? static_cast<int32_t>(t.entity.packed) + 1 : 0;
+    }
+    static TargetRef target_of(int32_t word) {
+        if (word < 0) return TargetRef::of_round(-word - 1);
+        if (word > 0x10000) return TargetRef::of_wire_person(static_cast<uint16_t>(word - 0x10001));
+        return word != 0 ? TargetRef{EntityHandle{static_cast<uint16_t>(word - 1)}} : TargetRef{};
+    }
 };
 static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stride");
 
@@ -442,11 +462,18 @@ public:
 // (faithful units: 32-bit fixed-point position, 32-bit binary-angle heading).
 struct AiEntity {
     EntityHandle handle;
+    // The entity this slot belongs to (the row behind `handle`). Retail's AI
+    // code reaches the slot through its entity (entity+0x68) and reads the
+    // entity's own Position words (+4/+8/+0xC); the slot keeps no position of
+    // its own beyond the spawn copy +0x10..+0x18. Bound by AiSystem::attach,
+    // rebound when a restore replaces the registry's rows.
+    // [orig: Entity_InitFromModel @0x40DC30 - the slot's +0x10..+0x18 copies of
+    //  Position @0x40E115..0x40E127]
+    Entity *self = nullptr;
     AiBrain brain;
     AiSlot slot;
     AiProfile profile;
     bool has_occupant = true;  // entity+0x170 (the hull's first claimant) present
-    int32_t pos[3] = {};       // entity+4/+8/+12 (position X/Y/Z, 32-bit fixed)
     int32_t heading = 0;       // entity+16 (32-bit binary angle); copied to brain[132]
     int32_t pitch = 0;         // entity+20
     int32_t roll = 0;          // entity+24
@@ -463,22 +490,20 @@ struct AiEntity {
 
     // --- network receive-apply: a remote peer's pose, read-applied on the host ---
     // The host stages a joiner's reported 0x0C pose into these engine-frame slots
-    // [orig: NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9]. Retail's
-    // entity+0x24 bit 0 only selects the conditional hard snap at @0x4C207E; it
-    // is not an all-remote classifier. `net_is_remote_peer` is OpenNova's explicit
-    // snapshot-ownership fact: it skips locomotion but retains the authority org2
-    // animation/collision tail. net_smooth_target/heading/pitch are staged
-    // for the CLIENT-side interpolation smoothing (motor fall-through @0x4b9a8c, is_authority==0)
-    // — a deferred, client-only concern; the authority host never interpolates. NEVER set for
-    // the host's own player (ADR-0012 amendment / §5.38).
+    // [orig: NetPacket_SerializePlayerState case 4 @0x4C2042..0x4C20A9] and the body's
+    // own update chases it (player_body_network_chase, from AiSystem::tick_infantry):
+    // the chase overwrites the staged target with its per-tick steps, as retail reuses
+    // the same words. `net_is_remote_peer` is OpenNova's snapshot-ownership fact (a
+    // client keeps such a body outside the mover); the org2 mover itself is chosen by
+    // the player classifier. NEVER set for the host's own player (ADR-0012 amendment /
+    // §5.38).
     bool    net_is_remote_peer = false;
-    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world)
-    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; also mirrored to heading/+0x10)
-    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; also mirrored to pitch/+0x14)
+    int32_t net_smooth_target[3] = {};   // entity+0x234/+0x238/+0x23C (16.16 world; then the steps)
+    int32_t net_smooth_heading = 0;      // entity+0x240 (BAM32; then the heading step)
+    int32_t net_smooth_pitch = 0;        // entity+0x244 (BAM32; then the pitch step)
     int16_t net_interp_progress = 0;     // entity+0x27C (reset to 0 on each read-apply)
-    // Deferred client-interp bookkeeping (consumed by the @0x4b9a8c fall-through only):
-    int32_t net_saved_live_pose[3] = {}; // entity+0x80/+0x84/+0x88 (interp delta basis)
-    int16_t net_interp_steps = 0;        // entity+0x27E (2..16; buckets {3,4,5,8,16})
+    int16_t net_interp_steps = 0;        // entity+0x27E: the chase's step bucket (10 on the authority;
+                                         // the client's local body 48 / 512)
 
     int32_t vel_x = 0;         // entity+152 (0x98, velocity X)
     int32_t vel_y = 0;         // entity+156 (0x9C, velocity Y), a hull's mirror; an
@@ -540,6 +565,88 @@ struct AiCandidate {
     // called only at 0x467363/0x46738b].
     bool los_blocked = false;
 };
+
+// The player-body update's network chase, run at the update head after the
+// savedLivePose stamp, toward the target the last record staged: on the authority for
+// every player body but the local one (a remote player whose 0x0C the read-apply
+// staged), off it for the local body (its own record's echo, staged by the client's
+// receive; a client's other player bodies chase in the replica motion,
+// client_replica_motion.cpp). At progress 0 it measures the staged target against
+// `body`'s savedLivePose (3D, float, truncated): a gap over 2 units is dropped on the
+// authority and snaps the position off it (the angles too for a body not the local
+// one); one under 0x2AAA moves nothing but the angles; anything between steps in a
+// bucket (10 on the authority; the local body's 48 while its MoveOrder moves, else
+// 512), with on the authority no vertical step (and none at all while the vertical
+// speed exceeds 1670), off it the vertical step halved below 0x5555 and none below
+// 0x2AAA. Then it applies the steps while progress is below the divisor (2 on the
+// authority, 12 off it; the local body takes no angle step) or the bucket (position),
+// and counts progress up to 512, past which a movement clip falls back to idle 43
+// and, off the authority, the rest of the body update is skipped: false.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4279..0x4B4445,
+//  @0x4B444A..0x4B4640, @0x4B464F..0x4B4670]
+bool player_body_network_chase(AiEntity &e, Entity &body, bool authority, bool local);
+
+// The physics row a body's +0x1C4 update holds: its bound items row's move function
+// (PlayerTemplate::move_row, through player_item_row). The entity update's pool walks call
+// it for every body whose row is not the null row, whose stub they skip whole: org1 runs the
+// AI update, org2 the player-body update, org0's is a bare return. Test plumbing, not retail
+// behaviour (retail always loads items.def and charattr.def): a player body (the local one, a
+// remote peer, a Player-flag body) that spawned from the seed (player_spawn_row's harness
+// case: a World with no items rows or whose peer read no charattr.def) runs the seed's row,
+// and in a World with no items rows every other body runs org1.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - @0x43C440, the store @0x43C453;
+//  Entity_UpdateAllEntities @0x4C2100 - the read @0x4C2460, the Entity_UpdateNullClass compare
+//  @0x4C2466..0x4C246B, the null test @0x4C246F, the call @0x4C2472;
+//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53; g_EntityClassPhysicsTable rows org0
+//  @0x82AC1C -> Entity_UpdateOrg0Movement @0x4AFF60 (a bare retn), org1 @0x82AC28 ->
+//  Entity_UpdateInfantryAI @0x4B9910, org2 @0x82AC34 -> Entity_UpdateInfantryPlayerBody
+//  @0x4B40E0, null @0x82ABC8 -> Entity_UpdateNullClass @0x4A8070]
+PhysicsClass body_move_row(const World &world, const AiEntity &body, const Entity *entity);
+
+// The ewep row's mover over a person body's words (ai_system.cpp carries the witness): the
+// World's pool-0 walk runs it for a body bound to the ewep row, and a joiner runs it over a
+// decoded person row's words (inmatch::run_replica_person_ewep). The body need not be in the
+// registry; its ground (+0x28) and occupant (+0x170) are looked up there.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0]
+void person_ewep_mover(World &world, AiEntity &e, Entity &body);
+
+// The memset over a body's first 0x2B4 bytes that Entity_Destroy and the 0x18 record each run: every
+// word ours keeps of that block comes back zero, the words past it stay (ai_system.cpp carries the
+// list). [orig: Entity_Destroy @0x43E810 - the memset @0x43EA70; NapiNPClientMsg_FullEntitySpawn
+// @0x433780 - the memset @0x433821]
+void clear_body_block_below_2b4(AiEntity &e, Entity &body);
+
+// A body's DcbId (+0x7C) as the org1 update reads it: its stagger key and its think's aim-pitch
+// seed. A placed person's is its record's (AiEntity::net_id). A player body's is its class
+// init's: the plyr row's stamps 10000 + the slot byte (+0x154), an org row's and an item row's
+// write none, so it keeps the spawn memset's 0; ours keeps the player's net id on
+// AiEntity::net_id and Entity::net_id, so a player body's +0x7C reads its DcbId here (the row the
+// body binds, as body_move_row picks it).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key @0x4B9948..0x4B9953, the aim seed
+//  @0x4BAA4B..0x4BAA59; PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173;
+//  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE]
+int32_t body_dcb_id(const World &world, const AiEntity &body, const Entity *entity);
+
+// Any entity's DcbId (+0x7C), the Entity form of body_dcb_id for the reads that hold an
+// Entity: a player body's (a Player-flag row, or a body the AI knows as the local or a remote
+// player) is its bound row's class-init word as body_dcb_id reads it; every other entity's is
+// its record's SSN (Entity::net_id). Read where retail reads a body's +0x7C that can be a
+// player: the org1 attention's sees relations, the target walk's selector words, the weapon
+// validator, the person aim point's phase, the vehicle AI's candidate and engage relations,
+// and the projectile hit's shot relations. A player's 10000 + slot fails every relation
+// setter's `< 0x80` row guard.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - self @0x4BE42C / @0x4BE456, target @0x4BE43C /
+//  @0x4BE453; Entity_FindTargets @0x53A610 - @0x53A791 / @0x53A7C3, its pool-1 / pool-2 twins
+//  @0x53A99F / @0x53A9D1 / @0x53AB96 / @0x53ABD0;
+//  Entity_ValidateWeaponTarget @0x53A400 - @0x53A4C0; Weapon_CalcDamageByType @0x539140 -
+//  @0x53944C; Entity_ComputeWeaponFireOrigin @0x43B4B0 - @0x43B4C2;
+//  AI_HandleEvent_HelicopterCombatD @0x467730 - self @0x4677BF / @0x4677DD / @0x46788F /
+//  @0x4678AD, target @0x4677C9 / @0x4677DA / @0x467899 / @0x4678AA;
+//  Entity_FindNearestThreat @0x4B0990 - self @0x4B0A7B / @0x4B0A99 / @0x4B0ABF / @0x4B0ADD,
+//  target @0x4B0A85 / @0x4B0A96 / @0x4B0AC9 / @0x4B0ADA;
+//  Projectile_ProcessDamageOnTarget @0x4E7FB0 - shooter @0x4E80C0 / @0x4E80EA, target
+//  @0x4E80D0 / @0x4E80E1; the guard e.g. SeesMatrix_SetSingleSingleBit @0x452BF0 - @0x452BF4..0x452C05]
+int32_t entity_dcb_id(const World &world, const Entity &entity);
 
 class AiSystem; // fwd
 
@@ -616,6 +723,25 @@ bool vehicle_at_spawn_anchor(const World &world, const Entity &veh);
 // ground link's own ground link is (a body on a carried gun)]. Body in
 // ai_waypoints.cpp.
 int count_mounted_entities(const World &world, const Entity &veh);
+
+// Which pool-1 neighbours the avoid-brake walk considers, by their ItemTypeIndex
+// (entity+0x1C). The ground forms skip index 0 only; the boat and aircraft forms
+// load 1 into ecx for the walk's decrement and compare the index against that
+// register, so they consider ONLY neighbours of ItemTypeIndex 1 (the second
+// items.def row).
+// [orig: ground `cmp dword ptr [edi+1Ch],0; jz` — Entity_UpdateVehiclePhysics
+//  @0x48BDD9, Entity_UpdateTankVehiclePhysics @0x4899A2,
+//  Entity_UpdateLightVehiclePhysics @0x484F7F, Vehicle_ProcessSelectorZeroGround
+//  @0x46E100 (@0x46EE70); boat/air `mov ecx,1; sub [count],ecx ... cmp [edi+1Ch],ecx;
+//  jnz` — Entity_UpdateWatercraftPhysics @0x48E5AA/@0x48E5C5,
+//  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470B08/@0x470B23),
+//  Entity_UpdateAircraftPhysics @0x4919D1/@0x4919E6]
+enum class AvoidBrakeWalk { SkipIndexZero, OnlyIndexOne };
+
+// The pool-1 avoid brake the AI drive legs share: the command speed after every
+// admitted neighbour ahead has braked it. Body in ai_waypoints.cpp.
+int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading, int32_t cmd_speed,
+		AvoidBrakeWalk walk);
 
 // A PLAYER driver whose head is under the water plane hands the boat to the
 // AI leg [orig: Entity_UpdateWatercraftPhysics @0x48DFD3..0x48DFDF —
@@ -702,14 +828,14 @@ struct RelMatCall {
 // [orig: AI_HandleEvent_HelicopterCombatD @0x4677b3..0x4678b2.] The matrices live in the
 // net/relation layer; we record the calls (op + the two keys) rather than apply them.
 enum RelOp {
-    kRelEventSpecial = 0, // EventMatrix_SetSpecialBit   @0x452a40 (self relmat, target relmat)
-    kRelSharedMem = 1,    // SharedMem_Init              @0x452ad0 (self net,    target relmat)
-    kRelProximity = 2,    // EntityMatrix_SetProximityBit@0x452b60 (self relmat, target net)
-    kRelEnemy = 3,        // TeamMatrix_SetEnemy         @0x452bf0 (self net,    target net)
-    kRelAllied = 4,       // TeamMatrix_SetAllied        @0x452aa0 (self relmat, target relmat)
-    kRel452B30 = 5,       // sub_452B30                  @0x452b30 (self net,    target relmat)
-    kRelDamaged = 6,      // EntityMatrix_SetDamagedBit  @0x452bc0 (self relmat, target net)
-    kRelSpotted = 7,      // TeamMatrix_SetSpottedBy     @0x452c70 (self net,    target net)
+    kRelEventSpecial = 0, // SeesMatrix_SetGroupGroupBit   @0x452a40 (self relmat, target relmat)
+    kRelSharedMem = 1,    // SeesMatrix_SetSingleGroupBit              @0x452ad0 (self net,    target relmat)
+    kRelProximity = 2,    // SeesMatrix_SetGroupSingleBit@0x452b60 (self relmat, target net)
+    kRelEnemy = 3,        // SeesMatrix_SetSingleSingleBit         @0x452bf0 (self net,    target net)
+    kRelAllied = 4,       // TargetedMatrix_SetGroupGroupBit        @0x452aa0 (self relmat, target relmat)
+    kRel452B30 = 5,       // TargetedMatrix_SetSingleGroupBit @0x452b30 (self net, target relmat)
+    kRelDamaged = 6,      // TargetedMatrix_SetGroupSingleBit  @0x452bc0 (self relmat, target net)
+    kRelSpotted = 7,      // TargetedMatrix_SetSingleSingleBit     @0x452c70 (self net,    target net)
 };
 struct RelOpCall { int op; int32_t a; int32_t b; };
 
@@ -758,8 +884,9 @@ public:
     //  @0x813378 cveh / @0x813390 cbot / @0x8133a8 cpln / @0x8133c0 ctrn,
     //  resolved by EntityDef_InitAllCallbacks @0x4a5aae]
     void think_brain(AiEntity &e, World &world);
-    // One pool-0 row's +0x1C4 body update: the org1 motor (or the joiner's
-    // presentation leg for a wire-owned peer).
+    // One pool-0 row's +0x1C4 body update, its bound row's move function
+    // (body_move_row): org1 the AI motor, org2 the player body (or the joiner's
+    // presentation leg for a wire-owned peer); any other row runs nothing here.
     // [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 (`call eax`);
     //  g_EntityClassPhysicsTable row "org1" -> Entity_UpdateInfantryAI @0x4b9910]
     void update_organic(AiEntity &e, World &world, uint32_t logic_tick);
@@ -768,6 +895,9 @@ public:
     // play start (after promote + the pre-mission pass), when it snapshots the World.
     void capture_spawn_baseline();
 
+    // The registry whose rows the slots belong to (World binds its own at
+    // construction; a standalone system binds its rig's).
+    void bind_registry(EntityRegistry *registry) { registry_ = registry; }
     // Attach a brain to a world entity; returns its AI index (faithful to the
     // unk_AED380 array index used by AIEvent entity_index).
     int attach(EntityHandle h);
@@ -850,7 +980,7 @@ public:
     // pool 1 helo-brained then pool 0 players; 1 = pool 1 non-helo; 2 = pool 0 non-player;
     // 3 = pool 2) — into a scratch list, then the scoring core with the lazy LOS probe.
     // Entry gates: teamless-without-see-all and the round-end latch [orig:
-    // g_SpawnSuccessGate @0x24C1928] return null. `variant_a` runs
+    // g_RoundOver @0x24C1928] return null. `variant_a` runs
     // AI_FindBestTarget @0x465A50 instead, instruction-identical but for
     // the two arc bytes read signed (movsx @0x465A8C/0x465A9B against B's
     // movzx @0x466FBC/0x466FCB): the aircraft sites always, and
@@ -881,7 +1011,8 @@ public:
 	void clear_entity_references(World &world, EntityHandle removed);
 
 	// The 8 relation-matrix writes of acquisition/fire: the sees quad + the targeted quad,
-	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = net_id +0x7C).
+	// in the witnessed order/keys (group = Entity::group_id +0x11C, single = the DcbId +0x7C,
+	// entity_dcb_id).
 	// [orig: @0x4677b3..0x4678b2 / @0x4b0a6f..0x4b0ae2; matrix identity via the setter
 	// bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
 	void apply_engage_relations(World &world, const Entity &self, const Entity &target);
@@ -936,6 +1067,14 @@ public:
     // matrices reused inside a server-declared stable query epoch.
     bool line_of_sight_clear_cached(World &world, const int32_t a[3], const int32_t b[3],
                                     EntityHandle from, EntityHandle to) const;
+    // The same LOS toward a joiner's decoded remote person (World::wire_person), the pool-0
+    // entity of retail's client that no sector pool holds: its end of the walk excludes its
+    // seat mount, and its Flags word is the indoors pair's second half.
+    // [orig: Physics_RaycastTerrainAndSectors @0x539910 - the indoors pair
+    //  @0x539944..0x53994C, entityB's +0x16C @0x539A08..0x539A12]
+    bool line_of_sight_clear_to_person(World &world, const int32_t a[3], const int32_t b[3],
+                                       EntityHandle from, EntityHandle person_seat,
+                                       uint32_t person_flags) const;
 
     // [orig: Entity_AlertNearbyAllies @0x4654b0] pool-1 (rebase: + pool-0 organics with
     // brains) same-team, alive, non-building entities within `radius_units` (16.16):
@@ -948,7 +1087,9 @@ public:
     // The record takes the slot's fire action's adm-indexed arm: `fire_mode` the
     // action's mode byte, `fire_adm` the slot's weapon, the gunner (the slot's owner)
     // the shooter. Host-only (the caller is authority-gated). An aircraft's or a
-    // handler's fire is Weapon_FireProcess, RoundSim::fire_source.
+    // handler's fire is Weapon_FireProcess, RoundSim::fire_source. False only when the
+    // ammo row is missing; a cease fire refuses the pair at the send's head and still
+    // answers true (the fire action ignores the send's return).
     // [orig: WeaponAction_Fire - the mode byte @0x542C11, the adm @0x542C1C..0x542C2F,
     //  Entity_FireWeaponAndSendPacket @0x542C5E -> Server_ClientFiredRound's local pass
     //  (the flags and adm into the ring @0x50C780..0x50C790) -> RoundData_AddRound
@@ -996,7 +1137,7 @@ public:
 
     // The two class event callbacks (fn1 of g_EntityClassEventCallbackTable
     // @0x813000, resolved per items.def ai_function by EntityDef_InitAllCallbacks
-    // @0x4a5aae -> Entity_LookupRenderCallbacks @0x407dc0): the CHel row and the
+    // @0x4a5aae -> EntityDef_LookupClassCallbacks @0x407DC0): the CHel row and the
     // cpln thunk @0x462120 run the air-class machine, the cveh row and the
     // cbot/ctrn thunks @0x462130/@0x462140 the vehicle-class one. Both share one
     // body; they differ only in the alert leg's state pair, the client tick and
@@ -1060,8 +1201,9 @@ public:
     // boarding commands retain slot[38]. [orig: @0x407EA0]
     int32_t nearest_route_node(const AiEntity &e, uint32_t list) const;
 
-    // The vehicle-physics input staging for a PlayerControl vehicle without a live PLAYER
-    // controller, shared by the cveh and ctan movers whose legs are instruction-equivalent
+    // The vehicle-physics AI / parked leg for a PlayerControl vehicle without a live PLAYER
+    // controller, run in place by the movers' occupant block (VehicleSystem::tick_motor),
+    // shared by the cveh and ctan movers whose legs are instruction-equivalent
     // [orig: Entity_UpdateVehiclePhysics @0x48af00 — the parked stamp @0x48c002-0x48c02d
     // and the AI-driver leg @0x48bc12-0x48c034 (2026-07-16 witness);
     // Entity_UpdateTankVehiclePhysics @0x488AB0 — AI leg @0x4897DB..0x489C00, parked
@@ -1073,7 +1215,7 @@ public:
     //    player_speed), re-resolve the waypoint target when the per-leg turn budget
     //    (brain[32]) is spent, clamp the bearing delta to the budget, damp speed 0.75x
     //    per ~30/60 deg of residual turn when turn_rate2<<6 < budget, steer = heading +
-    //    delta + delta/8, and fill `out` (ai_drive = true).
+    //    delta + (delta sar 3), and fill `out` (ai_drive = true).
     // The pool-1 collision-avoid brake, the minAI crew health clamp and the
     // wait-for-boarders stop are inline; the parked branch runs the stuck
     // escalation; the handbrake byte-973 latch and the crashed stop sit in
@@ -1088,7 +1230,7 @@ public:
     //  - an AI controller: 22->16 hand-back, cmd = min(brain outSpeed, water_speed),
     //    boat turn budget (|err|/denom) << 4 on the spent-budget refresh, +-budget
     //    delta clamp, 0.75x speed damps at 15/30/45 deg of residual turn, steer =
-    //    heading + delta (no delta/8 term), the slip counter-steer + its 4-tier
+    //    heading + delta (no delta sar 3 term), the slip counter-steer + its 4-tier
     //    speed damps, and the shared pool-1 avoid brake.
     // The minAI crew health clamp (@0x48E27F..0x48E2C7), the wait-for-boarders
     // stop (@0x48E75B..0x48E7EC) and the parked leg's stuck check
@@ -1096,6 +1238,14 @@ public:
     // brain[127] mirror stays an unmodeled slot (D-NET-161).
     void watercraft_ai_drive(World &world, Entity &veh, const Entity *controller,
                              const VehicleTraits &traits, VehicleDriveCmd &out);
+    // The boat AI leg over `brain`'s words (a client's are zero), the one body the
+    // cbot mover's and the selector-zero boat mover's legs share: the 22 -> 16
+    // hand-back, +0x21C from the target word, the command into `out`, the ramp only
+    // in the boarders' hold. watercraft_ai_drive runs it for an occupied live hull.
+    // [orig: Entity_UpdateWatercraftPhysics @0x48D480 (@0x48E247..0x48E7EC);
+    //  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x470795..0x470D4C)]
+    void watercraft_ai_leg(World &world, Entity &veh, const VehicleTraits &traits,
+                           AiBrain &brain, VehicleDriveCmd &out);
 
     // The CHel AI flight drive: stage this tick's flight commands (fwd/lat
     // cyclic, steer heading, target altitude, engine flag) into the aircraft
@@ -1205,38 +1355,30 @@ public:
     void infantry_mounted_fire_pass(AiEntity &e, World &world, uint32_t logic_tick,
                                     uint32_t key);
     // One pool-0 row's visit in the frame's weapon-action walk
-    // (World::pump_weapon_actions): a UseGun gunner (an NPC or a remote player)
-    // pumps the parent MountSlot it borrowed. The infantry request above only
-    // writes next=FIRE; this visit advances the authored weapon FSM and emits
-    // the round with the gunner as owner. A gunner that has died drops its
-    // link instead.
+    // (World::pump_weapon_actions): a row (an NPC or a remote player) whose
+    // EquippedSlot names a carrier's slot pumps it, seated or held on foot after
+    // a refused UseGun attach. The infantry request above only writes next=FIRE;
+    // this visit advances the authored weapon FSM and, for a seated gunner that
+    // owns the slot (Entity::primary_weapon_owner, the MountSlot's +0x24), emits
+    // the round with the gunner as owner, a dead one's latched shot included. The
+    // owner outlives the detach (vehicle_release_equipped_slot).
     // [orig: WeaponAction_ProcessAllEntities pool-0 walk @0x5426A6..0x5426C9
     //  (the gunner's +0x118 is the parent's MountSlot) ->
     //  WeaponAction_ProcessFrame @0x540E60]
     void pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick);
-    // The port's mount->gunner link (Entity::primary_weapon_owner) has no
-    // retail twin: retail's borrow lives on the gunner's own +0x118 and ends
-    // with it. A link whose gunner is gone, dead, reseated or on another mount
-    // is dropped when the walk reaches the mount's pool-1 row.
-    void release_stale_gunner_link(World &world, Entity &mount);
+    void pump_personal_slot(World &world, Entity &owner, uint32_t logic_tick);
     // Reconcile the split AiEntity/registry stores, wire animation, and part channels
     // at either the mounted return or the ordinary end of the infantry tick.
     void finish_infantry_tick(AiEntity &e, World &world);
     // The camera offset (+0x74) restamped from the head the motor head just posed: the local
     // player's from its skeletal head anchor, floored on foot; else from the frame's capsule
-    // extent and the lean, an NPC's tilted laterally along its look heading.
+    // extent and the lean, an NPC's tilted laterally along its look heading. mounted_site is
+    // the site the player body's pass took (the selector reads the parent ahead of the
+    // seat block's detach).
     // [orig: carrier selector @0x4B6386; mounted local selector @0x4B66CD;
     //  org2 @0x4B6908..0x4B696C / @0x4B6BB3..0x4B6CC8; org1 @0x4BF078..0x4BF14C]
-    void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame);
-    // AUTHORITY body-anim selection for a net-snapped REMOTE player. The movement motor must
-    // not re-simulate a wire-snapped peer (tick_infantry skips it), but the retail authority
-    // still runs the player-body ANIM selection for every player, consuming the REPLICATED
-    // MoveOrder byte (bits 0-2 dir, bit 3 moving) + stance bits (C2S 0x1D -> MoveOrder bits
-    // 8-9) every 4th tick, and the selected state/ratio feed that player's 0x0A record bytes
-    // 14/15. Also mirrors the wire-anim fields onto the world Entity. [orig:
-    // Entity_UpdateInfantryPlayerBody @0x4b40e0 — local-or-authority gate @0x4b70a3-0x4b70b2,
-    // 4th-tick gate @0x4b70ce, selection @0x4b7183-0x4b729d, commit @0x4b7356-96]
-    void remote_player_body_anim(AiEntity &e, World &world, uint32_t logic_tick);
+    void infantry_restamp_eye(AiEntity &e, World &world, const RootMotionFrame &frame,
+                              bool mounted_site);
     // Mirror the selected body-anim state + channel phase (and, for the local player, the
     // packed MoveOrder low byte) onto the world Entity the 0x0A snapshot reads.
     void mirror_wire_anim(AiEntity &e, World &world);
@@ -1274,13 +1416,18 @@ public:
     //  (the 8-case jumptable @0x4b7411: 0 -> 37, 1/2 -> 38, 3..5 -> 40, 6/7 -> 39,
     //  default 36 @0x4b7448); 4th-tick gate @0x4b70ce]
     void player_body_select(AiEntity &e, World &world, uint32_t entity_flags, uint32_t logic_tick);
-    // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
+    // The lean-angle producer, every body tick in two halves around the body's eye:
+    // the decay lean -= (lean+8)>>4 at the pass's head, then, after the eye, the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
     // alive + not prone + not latched on a ladder or under a deployed chute
     // (entity_flags carries the retail Flags view for the 0x100020 gate).
-    // [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6 under the (Flags & 0x100020)
-    // gate @0x4b7dad; the seated (+0x168==1) +-0x1400000 variant unported]
-    void infantry_lean_tick(AiEntity &e, uint32_t entity_flags);
+    // [orig: decay @0x4b5c97; the eye @0x4B699F..0x4B6BAB; ramp @0x4b7dbf/@0x4b7dd6
+    // under the (Flags & 0x100020) gate @0x4b7dad]; a seated body runs no on-foot ramp:
+    // a passenger (+0x168 == 1) ramps +-0x1400000 ahead of its eye instead
+    // [orig: @0x4B6684..0x4B66C3].
+    void infantry_lean_decay(AiEntity &e);
+    void infantry_lean_ramp(AiEntity &e, uint32_t entity_flags);
+    void infantry_lean_seated_ramp(AiEntity &e);
     // The D-COL-5 climb legs (infantry_ladder.cpp; record world-wac-ai-re.md §30).
     // org2, EVERY tick: the on-ladder state override (32/33/34 by the dir fan +
     // look-pitch sign) and the side/back dismounts.
@@ -1368,6 +1515,10 @@ private:
     // lowest free slot or a new one.
     int place_dismemberment_piece(EntityHandle h, AiEntity &&piece);
 
+    // Each slot's entity (AiEntity::self) is this registry's row for its handle.
+    void bind_self(AiEntity &e);
+
+    EntityRegistry *registry_ = nullptr;
     std::vector<AiEntity> entities_;       // pool-relative; index == AIEvent entity_index
     // A body's own update holds references into entities_, and its org1
     // death edge's hit callback can clone a dismemberment piece mid-update

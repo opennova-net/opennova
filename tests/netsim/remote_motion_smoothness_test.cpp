@@ -352,6 +352,78 @@ bool run_respawn_snaps_without_glide() {
 	return expect(es->respawn_revision == 1, "the respawn edge was counted once");
 }
 
+// D-NET-NEW-L5-60: the respawn arm's reset releases the row's +0x1CC group (a decay or a hit
+// emitter): the dead record queues no release, the dead->alive edge queues exactly one for the
+// row, and a further live record none. The release rides its own queue, which the embedder
+// drains at the receive's point (V-ROLL-BA F2), never the walk's corpse queue.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the dead test @0x4C1109,
+//  Entity_ResetToSpawnState called @0x4C113C; the reset's release @0x4B97CB..0x4B97F5]
+bool run_respawn_releases_the_corpse_group() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x000B;
+	seed_row(view, handle, kPlayerType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	bool walk_queue_clean = true;
+	const auto releases = [&] {
+		for (const auto &d : view.drain_corpse_decays())
+			walk_queue_clean &= !(d.release && d.handle == handle);
+		int count = 0;
+		for (const uint16_t released : view.drain_respawn_releases())
+			if (released == handle) ++count;
+		return count;
+	};
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF);
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax, 0x02)));
+	view.tick_remote_motion(0xFFFF);
+	if (!expect(releases() == 0, "a dead record releases nothing")) return false;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	if (!expect(releases() == 1, "the respawn edge releases the row's group once")) return false;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	if (!expect(releases() == 0, "a live record after it releases nothing")) return false;
+	return expect(walk_queue_clean, "the walk's corpse queue carries no respawn release");
+}
+
+// D-NET-NEW-L5-61: the respawn arm and its reset store neither the torso roll (+0x2DC) nor the
+// lean (+0xB0), so the dead->alive fold leaves the row's corpse words for its body ticks to ease,
+// while the reset zeroes the Roll. [orig: NetPacket_SerializePlayerState @0x4C09C0 - the arm
+// @0x4C1109..0x4C114C, Entity_ResetToSpawnState called @0x4C113C; Entity_ResetToSpawnState
+// @0x4B9610 - Roll @0x4B97E3]
+bool run_respawn_keeps_the_torso_roll_and_lean() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x000C;
+	seed_row(view, handle, kPlayerType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+	view.tick_remote_motion(0xFFFF);
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax, 0x02)));
+	view.tick_remote_motion(0xFFFF);
+	static constexpr int32_t kTorsoRoll = 0x03210000;
+	static constexpr int32_t kLean = -0x04560000;
+	ns::ClientEntityState *dead = view.state().find(handle);
+	if (!expect(dead != nullptr, "the dead row exists")) return false;
+	dead->torso_roll = kTorsoRoll;
+	dead->lean_angle = kLean;
+	dead->roll_bam = 0x01000000;
+	const auto edges = dead->respawn_revision;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax + (80 << 16))));
+	const ns::ClientEntityState *es = view.state().find(handle);
+	if (!expect(es != nullptr && es->respawn_revision == edges + 1, "the respawn edge folded"))
+		return false;
+	if (!expect(es->roll_bam == 0, "the reset zeroes the Roll")) return false;
+	return expect(es->torso_roll == kTorsoRoll && es->lean_angle == kLean,
+	              "the respawn edge keeps the torso roll and the lean");
+}
+
 // Pin the org2 bucket ladder's exact per-step math at three distances,
 // INCLUDING the verbatim non-monotonic [0x6000,0x7000) -> 7 rung — a silent
 // "monotonicizing fix" must fail here [orig: the ladder @0x4B44C4..0x4B4581;
@@ -841,6 +913,9 @@ bool run_terrain_settle_respects_retail_probe_window() {
 bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	StanceSource src;
 	FlatTerrain terrain(0);
 	view.set_root_motion_source(&src);
@@ -873,6 +948,9 @@ bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 bool run_reset_bottom_state_keeps_raw_vertical_root() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	ResetBottomSource src;
 	view.set_root_motion_source(&src);
 
@@ -999,7 +1077,7 @@ bool run_player_root_motion_dead_reckons() {
 // footsteps; groundEntity takes the carrier [orig: NetPacket_SerializePlayerState
 // @0x4c10d4 -> LABEL_123 stage, Entity_TryAttachOrDetach @0x436610 bone-0
 // detach, the +0x28 store @0x4c1353]. A non-zero bone is a seat: the row rides
-// the carrier attach and its channel disarms.
+// the carrier attach, and a seated player row keeps its channel (D-NET-330).
 bool run_player_on_ground_carrier_keeps_chasing() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
@@ -1072,13 +1150,16 @@ bool run_player_on_ground_carrier_keeps_chasing() {
 	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward,
 	             "the grounded row's sim channel stays armed (footsteps scan it)");
 
-	// The same sample with a seat bone is a mount: carried, channel disarmed.
+	// The same sample with a seat bone is a mount: carried, and a seated player
+	// row keeps its channel, which its body pass runs at the head of the mounted
+	// site (D-NET-330).
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(grounded_frame(ax + step_fx * 96, 3)));
 	es = view.state().find(handle);
 	ok &= expect(es->carrier_handle == building && es->mount_bone == 3,
 	             "a non-zero bone is a seat: the row rides the carrier");
-	ok &= expect(es->rm_state == -1, "a seated row's channel disarms");
+	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward,
+	             "a seated player row's channel stays armed");
 	return ok;
 }
 
@@ -1254,7 +1335,9 @@ bool run_root_rotation_pair_is_the_world_motors() {
 // (cosine -6433/2^22 there) would drag X back 7/65536 a tick; an Infantry row
 // facing +Y drifts X back by retail's 30.5 ppm cosine (-201/2^22: one 65536th a
 // tick for the clip's 4096 step, Y 4095 a tick), where the exact trig holds X and
-// walks Y 4096. Each heading is set on the row (a first record does not swing it).
+// walks Y 4096. Each heading is set on the row (a first record does not swing it). The
+// Infantry row's look Yaw stays 0 off its body heading: the root turns by the body heading
+// (+0x8C), never the Yaw (D-NET-NEW-L5-30).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4255;
 //  Entity_UpdateInfantryAI @0x4BF001..0x4BF074]
 bool run_replica_root_step_takes_the_world_pair() {
@@ -1314,7 +1397,8 @@ bool run_replica_root_step_takes_the_world_pair() {
 		view.state().find(handle)->rm_adm_id = 0;
 		view.tick_remote_motion(0xFFFF);
 		ns::ClientEntityState *row = view.state().find(handle);
-		row->heading_bam = 0x40000000; // a first record does not swing the heading
+		row->heading_bam = 0; // the look, a quarter turn off the body
+		row->rm_body_heading = 0x40000000;
 		row->net_target_heading_bam = 0x40000000;
 		const int32_t x0 = row->x;
 		const int32_t y0 = row->y;
@@ -1322,7 +1406,9 @@ bool run_replica_root_step_takes_the_world_pair() {
 		const ns::ClientEntityState *es = view.state().find(handle);
 		std::fprintf(stderr, "[root-pair] org1 dX=%d dY=%d\n", es->x - x0, es->y - y0);
 		ok &= expect(es->y - y0 == 16 * 4095 && es->x - x0 == -16,
-		             "an Infantry row facing +Y drifts X back by retail's cosine");
+		             "an Infantry row whose body faces +Y drifts X back by retail's cosine");
+		ok &= expect(es->heading_bam == 0 && es->rm_body_heading == 0x40000000,
+		             "the root turns by the body heading; the look Yaw stays its own");
 	}
 	return ok;
 }
@@ -1418,6 +1504,9 @@ bool run_root_transition_blends() {
 bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
+	// The replica water channel compares the raw plane (no dry sentinel): set it
+	// below this scenario's rows so the channel stays out of it.
+	view.set_water_z(std::numeric_limits<int32_t>::min());
 	WalkSource src;
 	view.set_root_motion_source(&src);
 	const uint16_t handle = 0x0047;
@@ -1450,6 +1539,10 @@ bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ok &= expect(es->net_anim_current == opennova::world::anim_state::kDeathFire &&
 	                     (es->rm_entity_flags & 0x2u) != 0u && es->net_death_anim == 0,
 	             "the death edge commits the parked state and latches the bit");
+	// The edge stamps its tick into +0x1AC [orig: Entity_UpdateInfantryPlayerBody
+	//  @0x4B4CC1 / @0x4B4CCC].
+	ok &= expect(es->death_tick == view.frame_tick() && es->death_tick != 0,
+	             "the death edge stamps the walk's tick as the death tick");
 	view.tick_remote_motion(0xFFFF);
 	ok &= expect(view.state().find(handle)->rm_state ==
 	                     opennova::world::anim_state::kDeathFire,
@@ -1563,6 +1656,9 @@ bool run_entity_death_parks_the_death_anim() {
 	es = view.state().find(handle);
 	ok &= expect(es->net_anim_current == death && (es->rm_entity_flags & 0x2u) != 0u,
 	             "the death edge commits the 0x13 state and latches the bit");
+	// [orig: Entity_UpdateInfantryAI @0x4B9D24 / @0x4B9D2F]
+	ok &= expect(es->death_tick == view.frame_tick() && es->death_tick != 0,
+	             "the org1 death edge stamps the walk's tick as the death tick");
 	return ok;
 }
 
@@ -1888,6 +1984,8 @@ int main() {
 	ok &= run_player_large_jump_snaps_in_one_tick();
 	ok &= run_player_deadband_ignores_jitter();
 	ok &= run_respawn_snaps_without_glide();
+	ok &= run_respawn_releases_the_corpse_group();
+	ok &= run_respawn_keeps_the_torso_roll_and_lean();
 	ok &= run_org2_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bucket_ladder_is_verbatim();
 	ok &= run_vehicle_bit0_record_keeps_chasing();

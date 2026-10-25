@@ -39,6 +39,8 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include "npruntime/fresh_profile_oracle.h"
+#include "npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
 #include <net/npwire/ingame_decode.h>          // PlayerExtendedUplink (the §5.10 0x0C body)
 #include <net/npwire/ingame_message_catalog.h> // ingame_message_name
@@ -50,6 +52,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <base/pcapio/pcap_reader.h>
 #include <base/pcapio/pcap_writer.h> // build_pcap_udp
@@ -138,7 +141,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
-		start.yaw = 0;
+		start.heading = w::placed_heading_bam(0);
 		start.item_type_index = 1; // the trait sweep's row: not an empty slot (D-NET-416)
 		start.has_item_def = true;
 		world.registry.spawn(3, start);
@@ -148,7 +151,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		bld.kind = w::EntityKind::Building;
 		bld.item_id = 0x044c;
 		bld.position = {-396.6f, 360.1f, 11.2f};
-		bld.yaw = 0;
+		bld.heading = w::placed_heading_bam(0);
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
@@ -181,10 +184,18 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	host_cfg.host_key = 0x0FE0E112u; // deterministic (HostConfig: "deterministic for tests")
 	host_cfg.serve_and_play = false;
 	inmatch::start_host_session(owner, host_cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(owner, host_cfg);
 
 	MemoryDatagramSocket sock;
-	inmatch::ClientRuntime client("SelfCapture");
+	// The joiner's wall clock follows the host ticks this script drives (16 ms each), so its
+	// paced wait loops release as they would in real time, whatever the machine's speed.
+	uint64_t client_ms = 1;
+	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
 	client.set_title(&kJo);
+	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
+	// installs the stock file's (the witnessed oracle, D-NET-NEW-L2-7).
+	client.set_character_join_vars(inmatch::stock_fresh_profile_character_vars());
 
 	int cap_seq = 0;
 	auto record = [&](int src, int dst, const std::vector<uint8_t> &d) {
@@ -202,6 +213,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	};
 	auto pump_and_deliver = [&]() {
 		inmatch::host_session_pump(owner, sock);
+		client_ms += 16;
 		for (const std::vector<uint8_t> &d : sock.outbound) {
 			record(kHostPort, kJoinerPort, d); // S2C
 			client.receive(d.data(), d.size());
@@ -219,6 +231,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	for (int f = 0; f < 400 && !ready; ++f) {
 		pump_and_deliver();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
+		push_released_mission_start(client, ship_joiner);
 		++tick;
 		ready = client.in_match() && client.is_deployed();
 	}
@@ -233,6 +246,12 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	up.pos_z = w::to_fixed(-50.0);
 	up.heading = 0x2000;
 	up.pitch = 0x0100;
+	// No tracked entities: the four interest pairs are unused, (0xFFFF, 0), as the
+	// client's builder pre-fills them; a 0x0000 handle names a pool-0 row the host's
+	// list would despawn [orig: NetPacket_SerializePlayerState @0x4C09C0, case 3
+	//  @0x4C1BC7..0x4C1BD8; Server_BuildEntityPriorityList @0x50E7F3].
+	up.priority_handle_0 = up.priority_handle_1 = up.priority_handle_2 =
+			up.priority_handle_3 = 0xFFFF;
 	for (int f = 0; f < 12; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(up, tick)) ship_joiner(d);
 		++tick;
@@ -240,7 +259,22 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d); // fold + 0x2C
 		++tick;
 	}
-	return true;
+
+	// Phase C: one full cadence of every periodic producer, whatever tick the join ended on:
+	// the host's scoreboard clock (S2C 0x16 every 311 ticks), its network-quality byte (S2C
+	// 0x79 every 310, its own countdown) and the joiner's net-quality report (C2S 0x4C every
+	// 310 in-match frames). The join waits for none of them (D-NET-526), so a window ending
+	// at the first list would cover the 0x79 only when its boundary fell inside it.
+	// [orig: Server_TickUpdate @0x51D8F9..0x51D917 (0x16), @0x51E1B2..0x51E1E4 (0x79);
+	//  Client_ProcessNetworkFrame @0x42C22D..0x42C279 (0x4C)]
+	const uint64_t lists_before = client.state().scoreboard.revision;
+	for (int f = 0; f < 340; ++f) {
+		pump_and_deliver();
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship_joiner(d);
+		++tick;
+	}
+	return expect(client.state().scoreboard.revision != lists_before,
+			"the host's scoreboard clock reached the joined joiner");
 }
 
 std::map<Key, long> histogram(const std::vector<CaptureDatagram> &caps) {

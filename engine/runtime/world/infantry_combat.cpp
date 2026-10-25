@@ -30,16 +30,14 @@ namespace {
 
 // Infantry's context-7/8/9 target walk. Range/FOV validation, target policy,
 // bounded stable scoring and final LOS follow the shared retail target query.
+// `team` is the scanner's Team byte as the scan reads it [orig: Entity_FindNearestThreat
+// @0x4B09C8].
 // [orig: Entity_FindNearestThreat @0x4B0990 -> Entity_FindTargets @0x53A610]
 EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity &e,
-                                          int32_t range) {
+                                          uint8_t team, int32_t range) {
     const Entity *self = world.registry.get(e.handle);
     if (self == nullptr || (e.slot.f[1] & 1) != 0) return {};
     const bool scanner_berserk = (e.slot.f[1] & 0x200) != 0;
-    // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
-    // the team byte around the scan [orig: Entity_UpdateInfantryAI
-    // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
-    const uint8_t team = (e.team == 0 && (e.slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
     // [orig: scanner-team setup @0x4B0A02]
     if (team == 0 && !scanner_berserk) return {};
     const uint32_t self_flags = self->flags | self->engine_flags;
@@ -53,7 +51,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     // start at its weapon fire position, which for a UseGun gunner is the
     // gun's own point, not the eye inside the hull; anything but a posed
     // point takes the fire-origin recipe [orig: @0x53A658..0x53A679].
-    const int32_t pose[6] = {e.pos[0], e.pos[1], e.pos[2], e.heading, e.pitch, e.roll};
+    const int32_t pose[6] = {e.self->position.x.q16, e.self->position.y.q16, e.self->position.z.q16, e.heading, e.pitch, e.roll};
     int32_t origin[3];
     if (sys.weapon_fire_position(world, e, origin) != 1) sys.weapon_aim_origin(world, e, origin);
     struct Candidate { EntityHandle handle; int32_t score; };
@@ -70,12 +68,18 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             if (((flags & 2) != 0 || c->health <= 0) &&
                     int32_t(world.logic_tick - c->death_tick) > 16) continue;
             if ((flags & kEntityFlagPlayer) != 0 && world.match.outcome().ended) continue;
-            const bool selected = self->target_selectors.admits_team(c->net_id, c->group_id);
+            // The selector words match the candidate's DcbId (+0x7C, entity_dcb_id), a
+            // player's 10000 + slot. [orig: Entity_FindTargets `cmp eax, [esi+7Ch]`
+            //  @0x53A791 / @0x53A7C3 (pool 0), @0x53A99F / @0x53A9D1 (pool 1),
+            //  @0x53AB96 / @0x53ABD0 (pool 2); Entity_ValidateWeaponTarget @0x53A4C0;
+            //  Weapon_CalcDamageByType @0x53944C]
+            const int32_t dcb_id = entity_dcb_id(world, *c);
+            const bool selected = self->target_selectors.admits_team(dcb_id, c->group_id);
             const AiEntity *candidate_ai = sys.for_handle(h);
             const bool candidate_berserk = candidate_ai != nullptr && (candidate_ai->slot.f[1] & 0x200) != 0;
             if (!selected && !scanner_berserk && !candidate_berserk &&
                     (c->team == 0 || c->team == team)) continue;
-            if (!self->target_selectors.allows(c->net_id, c->group_id)) continue;
+            if (!self->target_selectors.allows(dcb_id, c->group_id)) continue;
             // Pool 2's explicitly selected targets bypass the armor-pair gate.
             // [orig: @0x53A878, @0x53AA86, @0x53AC3F]
             if (!(pool == 2 && selected) && c->armor_impact == -1 && c->armor_kz == -1) continue;
@@ -108,7 +112,7 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
                     score = INT32_MAX;
             }
             if ((c->item_attrib & 0x40) != 0 && !c->primary_occupant.valid()) score = INT32_MAX;
-            score = self->target_selectors.adjust_score(score, c->net_id, c->group_id);
+            score = self->target_selectors.adjust_score(score, dcb_id, c->group_id);
             if (score == INT32_MAX) continue;
             candidates.push_back({h, score});
             // Retail sorts at 128 and resumes insertion at 127, discarding
@@ -148,9 +152,9 @@ int32_t clamped_distance(int32_t dx, int32_t dy, int32_t dz) {
 // The registry Position in the Q16 lanes the target's savedLivePose stamp uses
 // (vehicle_motor.h carrier_pose_fixed).
 void registry_position(const Entity &entity, int32_t out[3]) {
-    out[0] = static_cast<int32_t>(entity.position.x * io::kFp16One);
-    out[1] = static_cast<int32_t>(entity.position.y * io::kFp16One);
-    out[2] = static_cast<int32_t>(entity.position.z * io::kFp16One);
+    out[0] = entity.position.x.q16;
+    out[1] = entity.position.y.q16;
+    out[2] = entity.position.z.q16;
 }
 
 // [orig: Entity_CheckGroundHeightAtPosition @0x4AFF70] The PROBE entity's own
@@ -225,7 +229,7 @@ void aim_eye(const int32_t body[3], const int32_t muzzle[3], const int32_t aim[3
 // The Q16 Position of a body: the motor's own lane when it has one.
 void body_position(const AiSystem &sys, const Entity &entity, int32_t out[3]) {
     if (const AiEntity *body = sys.for_handle(entity.handle)) {
-        std::copy_n(body->pos, 3, out);
+        std::copy_n(body->self->position.words().data(), 3, out);
         return;
     }
     registry_position(entity, out);
@@ -253,6 +257,21 @@ void lead_target(const Entity &target, const int32_t target_pos[3], const int32_
 }
 
 } // namespace
+
+// See infantry_internal.h.
+EntityHandle infantry_find_nearest_threat(AiSystem &sys, World &world, AiEntity &e, uint8_t team,
+                                          int32_t range) {
+    const EntityHandle found = infantry_scan_nearest_threat(sys, world, e, team, range);
+    // The authority's relation quads ride the hit, inside the scan, with the scanner as self
+    // [orig: Entity_FindNearestThreat @0x4B0990 - the hit test @0x4B0A4C, the is_authority
+    //  test @0x4B0A59, the quads @0x4B0A6F..0x4B0AE2].
+    if (found.valid() && sys.is_authority) {
+        const Entity *self = world.registry.get(e.handle);
+        const Entity *target = world.registry.get(found);
+        if (self != nullptr && target != nullptr) sys.apply_engage_relations(world, *self, *target);
+    }
+    return found;
+}
 
 // The entity LOS [orig: Entity_CheckLineOfSightTerrainAndEntities @0x53B130]
 // over the shared collision world, or its terrain leg alone when the embedder
@@ -303,8 +322,14 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (phase == 0) staged = range;
         else if (phase == 2) staged = std::max(io::bam_sar(range, 1), std::min(range, 0x60000));
 
-        EntityHandle found = infantry_scan_nearest_threat(*this, world, e, staged);
-        const bool scan_hit = found.valid();
+        // A coward (AiSlot[1] & 8) with no team scans as team 2: the think swaps
+        // the team byte around the scan [orig: Entity_UpdateInfantryAI
+        // @0x4BBEB5..0x4BBEC3, restored @0x4BBED8].
+        const uint8_t scan_team =
+                (e.team == 0 && (slot.f[1] & 8) != 0) ? uint8_t(2) : e.team;
+        // The scan's authority relation quads ride its hit alone, so neither the
+        // re-committed held target nor the lastAttacker fallback below reaches them.
+        EntityHandle found = infantry_find_nearest_threat(*this, world, e, scan_team, staged);
 
         // A short-phase miss KEEPS the held target, dead or alive: on phases 1-3
         // the empty result re-commits slot[3] itself [orig: `test ebp,ebp; jz`
@@ -326,7 +351,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 if (att->team != e.team) {
                     int32_t att_pos[3];
                     registry_position(*att, att_pos);
-                    if (infantry_entity_los(*this, world, e.handle, inf.last_attacker, e.pos,
+                    if (infantry_entity_los(*this, world, e.handle, inf.last_attacker, e.self->position.words().data(),
                                             att_pos, 0, false))
                         found = inf.last_attacker;
                 }
@@ -352,12 +377,6 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             slot.f[3] = static_cast<int32_t>(found.packed) + 1; // raw slot[3] write
                                                                 // [orig: @0x4BBF85 —
                                                                 // no refcount here]
-            // The authority relation quads ride the scan HIT alone [orig: the
-            // Entity_FindNearestThreat authority block @0x4b0a6f..0x4b0ae2 --
-            // inside the scan, so neither the re-committed held target nor
-            // the lastAttacker fallback reaches it].
-            if (is_authority && scan_hit && self_entity != nullptr)
-                apply_engage_relations(world, *self_entity, *t);
         } else {
             inf.same_target_ticks = 0;
             inf.combat_target = EntityHandle{};
@@ -398,9 +417,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         registry_position(*tent, tpos);
         // The witnessed distance metric: sqrt(dx^2 + dy^2 + (dz sar 1)^2), 16.16.
         // [orig: @0x4BC0E1..0x4BC141]
-        target_distance = clamped_distance(io::bam_sub(tpos[0], e.pos[0]),
-                                           io::bam_sub(tpos[1], e.pos[1]),
-                                           io::bam_sar(io::bam_sub(tpos[2], e.pos[2]), 1));
+        target_distance = clamped_distance(io::bam_sub(tpos[0], e.self->position.x.q16),
+                                           io::bam_sub(tpos[1], e.self->position.y.q16),
+                                           io::bam_sar(io::bam_sub(tpos[2], e.self->position.z.q16), 1));
         // THE REACTION CHAIN: inside attack range with the hold timer run out.
         // The combat reactions ARE the attack anims, availability-gated in the
         // witnessed order (each later hit overrides), post_attack last.
@@ -485,9 +504,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             // The (dz sar 1) distance to the aim point, fistp-chopped, compared
             // UNSIGNED against 2 u [orig: @0x4BC3AE..0x4BC438 — `jbe`].
             const int32_t distance = clamped_distance(
-                    io::bam_sub(inf.aim_point[0], e.pos[0]),
-                    io::bam_sub(inf.aim_point[1], e.pos[1]),
-                    io::bam_sar(io::bam_sub(inf.aim_point[2], e.pos[2]), 1));
+                    io::bam_sub(inf.aim_point[0], e.self->position.x.q16),
+                    io::bam_sub(inf.aim_point[1], e.self->position.y.q16),
+                    io::bam_sar(io::bam_sub(inf.aim_point[2], e.self->position.z.q16), 1));
             if (static_cast<uint32_t>(distance) > 0x20000u && self_entity != nullptr &&
                 ground_at_position(*this, world, *self_entity, inf.aim_point)) {
                 // [orig: @0x4BC448..0x4BC469]
@@ -558,14 +577,14 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         aim_error(acc, spread, key, err_heading, err_pitch);
         int32_t muzzle[6];
         organic_fire_pose(world, e, 1, muzzle); // [orig: @0x4BC692, launch byte +0x366]
-        lead_target(*tent, tpos, e.pos, inf.aim_point);
+        lead_target(*tent, tpos, e.self->position.words().data(), inf.aim_point);
         int32_t eye[3];
-        aim_eye(e.pos, muzzle, inf.aim_point, true, eye);
+        aim_eye(e.self->position.words().data(), muzzle, inf.aim_point, true, eye);
         const int32_t adx = io::bam_sub(inf.aim_point[0], eye[0]);
         const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
         const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
         // The heading candidate: the chopped bearing [orig: @0x4BC832..0x4BC85C,
-        // dbl_7C57B8 negated] plus the heading error [orig: `mov ecx,[esp+60h];
+        // g_NegBamPerRadian negated] plus the heading error [orig: `mov ecx,[esp+60h];
         // sub ecx,eax` @0x4bc861..0x4bc865].
         const int32_t candidate = io::bam_add(
                 io::retail_ftol_sse2(std::atan2(double(ady), double(adx)) * io::kBamPerRadian),
@@ -622,7 +641,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         const Entity *parent_ride = self_entity != nullptr && self_entity->mounted
                 ? world.registry.get(self_entity->mount_target) : nullptr;
         if (tent != nullptr) {
-            lead_target(*tent, tpos, e.pos, inf.aim_point);
+            lead_target(*tent, tpos, e.self->position.words().data(), inf.aim_point);
         } else if (parent_ride != nullptr && (key & 0xFFu) == 0x20u) {
             // The no-target arm of a carried body, once per 256 staggered ticks:
             // the aim point re-seats 100 u along the carrier's yaw from the body's
@@ -632,8 +651,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             int32_t parent_pos[3];
             int32_t parent_yaw = 0, parent_pitch = 0, parent_roll = 0;
             carrier_pose_fixed(*parent_ride, parent_pos, parent_yaw, parent_pitch, parent_roll);
+            const std::array<int32_t, 3> live = e.self->position.words();
             const int32_t *saved = self_entity->saved_live_valid ? self_entity->saved_live_pos
-                                                                 : e.pos;
+                                                                 : live.data();
             const double angle = static_cast<double>(parent_yaw) * io::kRadiansPerBamX87;
             const int32_t s = static_cast<int32_t>(std::sin(angle) * 4194304.0);
             const int32_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
@@ -642,14 +662,14 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             };
             inf.aim_point[0] = io::bam_add(saved[0], io::bam_add(
                     static_cast<int32_t>((static_cast<int64_t>(c) * 0x640000) >> 22),
-                    shl5(io::bam_sub(e.pos[0], saved[0]))));
+                    shl5(io::bam_sub(e.self->position.x.q16, saved[0]))));
             inf.aim_point[1] = io::bam_add(saved[1], io::bam_add(
                     static_cast<int32_t>((static_cast<int64_t>(s) * 0x640000) >> 22),
-                    shl5(io::bam_sub(e.pos[1], saved[1]))));
-            inf.aim_point[2] = io::bam_add(saved[2], shl5(io::bam_sub(e.pos[2], saved[2])));
+                    shl5(io::bam_sub(e.self->position.y.q16, saved[1]))));
+            inf.aim_point[2] = io::bam_add(saved[2], shl5(io::bam_sub(e.self->position.z.q16, saved[2])));
         }
         int32_t eye[3];
-        aim_eye(e.pos, muzzle, inf.aim_point, false, eye);
+        aim_eye(e.self->position.words().data(), muzzle, inf.aim_point, false, eye);
         const int32_t adx = io::bam_sub(inf.aim_point[0], eye[0]);
         const int32_t ady = io::bam_sub(inf.aim_point[1], eye[1]);
         const int32_t adz = io::bam_sub(inf.aim_point[2], eye[2]);
@@ -750,9 +770,9 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         if (const Entity *player = world.registry.get(world.cached.local_player)) {
             int32_t at[3];
             body_position(*this, *player, at);
-            const int32_t dx = io::bam_sub(at[0], e.pos[0]);
-            const int32_t dy = io::bam_sub(at[1], e.pos[1]);
-            const int32_t dz = io::bam_sub(at[2], e.pos[2]);
+            const int32_t dx = io::bam_sub(at[0], e.self->position.x.q16);
+            const int32_t dy = io::bam_sub(at[1], e.self->position.y.q16);
+            const int32_t dz = io::bam_sub(at[2], e.self->position.z.q16);
             const int32_t heading =
                     io::retail_ftol_sse2(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
             const int32_t planar =
@@ -894,10 +914,10 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     if (occ == nullptr || !occ->mounted) return;
     Entity *mount = world.registry.get(occ->mount_target);
     if (mount == nullptr) return;
-    // The parent's weapon slot and AdmDef byte exist from its own init in
-    // retail; the port seeds them lazily. [orig: WeaponSlot_InitFromEntityDef
-    //  @0x5466C0]
-    world.vehicles.prepare_weapon_slot(*mount);
+    // The parent's weapon slot and AdmDef byte are its class init's, bound at its
+    // spawn (VehicleSystem::run_weapon_slot_class_init); the request binds nothing.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0, from Entity_InitBoneReferences
+    //  @0x441482]
     if (!inf.combat_target.valid()) return;
 
     // The dedicated request runs on its four-tick infantry cadence, then a
@@ -912,17 +932,17 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
     if (target == nullptr) return;
 
     const int32_t target_pos[3] = {
-        static_cast<int32_t>(target->position.x * io::kFp16One),
-        static_cast<int32_t>(target->position.y * io::kFp16One),
-        static_cast<int32_t>(target->position.z * io::kFp16One)};
+        target->position.x.q16,
+        target->position.y.q16,
+        target->position.z.q16};
     const uint32_t stagger = static_cast<uint32_t>(target_pos[0]) -
             static_cast<uint32_t>(target_pos[1]) + key;
     if ((stagger & 0x40u) != 0) return;
 
     // Past the cadence and the stagger the rider takes the parent's live AdmDef
     // byte (+0x2B0). WeaponSlot_InitFromEntityDef stores the slot's byte there
-    // at the parent's spawn (kept here as primary_weapon_slot_adm, seeded on
-    // first use), and the parent's own AI fire overwrites it with the ammo byte
+    // at the parent's spawn (kept here as primary_weapon_slot_adm, which its
+    // class init binds), and the parent's own AI fire overwrites it with the ammo byte
     // of every ready block (kept in its equipped_adm_index). A parent that
     // names no weapon and never fired holds its spawn clear's zero, not the
     // port's none sentinel. [orig: Entity_UpdateInfantryAI @0x4BF4F4..0x4BF4FA;
@@ -943,10 +963,10 @@ void AiSystem::infantry_mounted_fire_pass(AiEntity &e, World &world,
             world.tables.weapons.by_index(adm);
     if (weapon == nullptr || weapon->ammo_index < 0) return;
 
-    const int32_t dx = io::bam_sub(target_pos[0], e.pos[0]);
-    const int32_t dy = io::bam_sub(target_pos[1], e.pos[1]);
+    const int32_t dx = io::bam_sub(target_pos[0], e.self->position.x.q16);
+    const int32_t dy = io::bam_sub(target_pos[1], e.self->position.y.q16);
     // Retail deliberately halves the vertical component before the 3-D range test.
-    const int32_t dz = io::bam_sar(io::bam_sub(target_pos[2], e.pos[2]), 1);
+    const int32_t dz = io::bam_sar(io::bam_sub(target_pos[2], e.self->position.z.q16), 1);
     const double fdx = static_cast<double>(dx);
     const double fdy = static_cast<double>(dy);
     const double fdz = static_cast<double>(dz);

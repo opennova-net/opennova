@@ -179,6 +179,8 @@ jobs:
           # The scripted game launch starts behind every window and never takes
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
+          # The parity runner's scenario aim_at arithmetic (retail's look yaw).
+          python -B -m unittest discover -s scripts/net -p "test_*.py"
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it

@@ -18,6 +18,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
 using namespace opennova;
@@ -161,6 +162,7 @@ static void test_wac_accuracyspread_drives_npc_aim() {
     const world::EntityHandle npc_h = w.registry.spawn(0, npc_seed);
 
     world::AiSystem ai;
+    ai.bind_registry(&w.registry);
     const int ai_index = ai.attach(npc_h);
     world::AiEntity &npc = *ai.at(ai_index);
     npc.team = 1;
@@ -886,8 +888,8 @@ static void test_redirect_actions_preserve_authored_node() {
     const int second_ai_index = ai.attach(second_h);
     world::AiEntity &first_ai = *ai.at(first_ai_index);
     world::AiEntity &second_ai = *ai.at(second_ai_index);
-    first_ai.pos[0] = 90 << 16;
-    second_ai.pos[0] = 10 << 16;
+    first_ai.self->position.x.q16 = 90 << 16;
+    second_ai.self->position.x.q16 = 10 << 16;
     ai.nav.channels.resize(3);
     ai.nav.channels[2].count = 2;
     ai.nav.channels[2].entries[0] = 0;
@@ -922,8 +924,8 @@ static void test_redirect_actions_preserve_authored_node() {
 
     // Arrival closes the mission loop: the mover must use the live registry's
     // script-facing group/SSN keys, not the provisional AiEntity mirrors.
-    first_ai.pos[0] = 0;
-    second_ai.pos[0] = 100 << 16;
+    first_ai.self->position.x.q16 = 0;
+    second_ai.self->position.x.q16 = 100 << 16;
     ai.update_waypoint_movement(first_ai, w);
     ai.update_waypoint_movement(second_ai, w);
     CHECK(w.script.relations.group_visited(3, 2, 0));
@@ -1376,6 +1378,74 @@ static void test_player_awol_counter_and_trigger() {
     CHECK(sys2.awol_count() == 0);
 }
 
+// D-NET-507: the AWOL probe compares the position words with the area record's own
+// X/Y words (x_min, x_max, y_min, y_max, signed, unnormalized): a player one word
+// under the record's x_min is out although the float bounds' view rounds it in.
+// [orig: Entity_IsLocalPlayerOutOfBounds @0x439D40 - @0x439D69..0x439D85]
+static void test_player_awol_probe_reads_the_record_words() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const std::array<int32_t, 4> record = {(10 << 16) | 0x1234, 100 << 16, 0, 100 << 16};
+    w.registry.register_area("", zone, /*active=*/true, -1, {}, false, record);
+    world::Entity seed{};
+    seed.alive = true;
+    seed.position.set_q16({(10 << 16) | 0x1233, 50 << 16, 0});
+    const world::EntityHandle player = w.registry.spawn(0, seed);
+    w.cached.local_player = player;
+
+    mission::BmsEventSystem sys;
+    load_probe(sys, make_trigger(bms::TriggerMainType::Player,
+                                 static_cast<int>(bms::PlayerTriggerType::PlayerAwol),
+                                 /*threshold=*/2));
+    w.add_system(&sys);
+    w.load_systems();
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 1); // one word under x_min: out
+
+    w.registry.get(player)->position.x.q16 = (10 << 16) | 0x1234;
+    tick_n(w, kCycle);
+    CHECK(sys.awol_count() == 0); // on x_min: in
+}
+
+// D-NET-507: the within-area triggers and the WAC area tests compare the position
+// words with the area record's own words, signed inclusive: a body one word under
+// the record's x_min is out although the float bounds' view rounds it in; the
+// triggers' Z is the record's when it constrains Z, else +-0x40000000, and the WAC
+// 3D test reads the raw record Z words.
+// [orig: Entity_IsBmsRefInTriggerBounds @0x43E510 - @0x43E531..0x43E5C1;
+//  WacCmd_SsnArea @0x4F1020 - @0x4F10A6..0x4F10BD; WacCmd_SsnArea3D @0x4F0F60 -
+//  @0x4F0FE6..0x4F100E]
+static void test_area_tests_read_the_record_words() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const std::array<int32_t, 4> xy = {(10 << 16) | 0x1234, 100 << 16, 0, 100 << 16};
+    const int index = w.registry.register_area(
+            "", zone, /*active=*/true, /*zone_id=*/7, {}, false, xy,
+            std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000},
+            std::array<int32_t, 2>{-(5 << 16), 5 << 16});
+    world::Entity seed{};
+    seed.alive = true;
+    seed.net_id = 42;
+    seed.item_type_index = 1;
+    seed.position.set_q16({(10 << 16) | 0x1233, 50 << 16, 6 << 16});
+    const world::EntityHandle h = w.registry.spawn(0, seed);
+    CHECK(!w.commands.ssn_in_area(42, index)); // one word under x_min
+    CHECK(!w.commands.ssn_in_script_area(world::EntityTarget(h), 7, false));
+    w.registry.get(h)->position.x.q16 = (10 << 16) | 0x1234;
+    CHECK(w.commands.ssn_in_area(42, index)); // on x_min; z inside +-0x40000000
+    CHECK(w.commands.ssn_in_script_area(world::EntityTarget(h), 7, false));
+    CHECK(!w.commands.ssn_in_script_area(world::EntityTarget(h), 7, true)); // z past the raw 5 << 16
+    w.registry.get(h)->position.z.q16 = 5 << 16;
+    CHECK(w.commands.ssn_in_script_area(world::EntityTarget(h), 7, true));
+}
+
 // The cat-7 mount-sub dispatch must discriminate the four predicates — the shipped
 // IDB carried PERMUTED names for exactly these, so a permuted case map is the
 // realistic defect and every row below catches one permutation.
@@ -1680,7 +1750,7 @@ static void test_player_dialog_triggers() {
     // 48 ticks); one without loads none.
     std::vector<uint64_t> live;
     uint64_t next_voice = 1;
-    const auto load = [&](const audio::DialogLineRef &line) {
+    const auto load = [&](const audio::DialogLineRef &line, bool) {
         audio::DialogClip clip;
         if (line.file.empty()) return clip;
         clip.loaded = true;
@@ -1696,7 +1766,9 @@ static void test_player_dialog_triggers() {
         return false;
     };
     const auto dialog_ticks = [&](int n) {
-        for (int i = 0; i < n; ++i) w.script.dialog.tick(true, load, playing);
+        // The shipped DialogueLevel (Config_SetDefaults' 192): the lines play.
+        constexpr int32_t kDialogueLevel = 192;
+        for (int i = 0; i < n; ++i) w.script.dialog.tick(true, kDialogueLevel, load, playing);
     };
 
     CHECK(sys.evaluate_trigger_for_test(w, done));      // never played: no slot
@@ -2029,6 +2101,60 @@ static void test_single_alert_triggers() {
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 99)));
 }
 
+// A co-op mission's Single triggers name each player as 10000 + its slot: the spawn copies the
+// slot byte to +0x154 ahead of the class init, whose plyr row stamps 10000 + it into the DcbId
+// every SSN walk keys, on the host for every player body alike, the host's own (slot 0) and a
+// joiner's (slot 1); a slot no body holds reads destroyed. The walks hold no session gate.
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the +0x154 copy @0x43C418, the init call
+//  @0x43C4FE; PlayerClass_InitEntity @0x4B1060 - @0x4B1149..0x4B1173; Server_PlayerAdd @0x51CBC0 -
+//  the spawn @0x51D056, the +0x154 store @0x51D08B; Entity_IsAliveByBmsRef @0x43E640 - @0x43E669;
+//  Entity_IsBmsRefInTriggerBounds @0x43E510 - @0x43E591; EntityPool_FindByNetId @0x4F0A20 -
+//  @0x4F0A81..0x4F0A8C]
+static void test_coop_single_triggers_name_each_player_by_slot() {
+    World w;
+    w.rules.mp_session = true;
+    w.rules.logic_authority = true;
+    w.registry.configure_pool(0, 8);
+    world::Aabb zone;
+    zone.min = {10.0f, 0.0f, -16384.0f};
+    zone.max = {100.0f, 100.0f, 16384.0f};
+    const int area = w.registry.register_area(
+            "", zone, /*active=*/true, /*zone_id=*/7, {}, false,
+            std::array<int32_t, 4>{10 << 16, 100 << 16, 0, 100 << 16},
+            std::array<int32_t, 2>{static_cast<int32_t>(0xC0000000u), 0x40000000},
+            std::array<int32_t, 2>{-(5 << 16), 5 << 16});
+    world::PlayerSpawn own;
+    own.net_id = 0; // a player's record SSN word is 0 (D-NET-112)
+    const world::EntityHandle host_body = world::spawn_player(w, own);
+    world::PlayerSpawn joiner;
+    joiner.net_id = 0;
+    const world::EntityHandle joiner_body = world::spawn_remote_player(w, joiner);
+    CHECK(host_body.valid() && joiner_body.valid());
+    if (!host_body.valid() || !joiner_body.valid()) return;
+    w.registry.get(joiner_body)->player_slot_id = 1; // the joiner's slot byte (+0x154)
+    w.registry.get(host_body)->position.set_q16({200 << 16, 50 << 16, 0});
+    w.registry.get(joiner_body)->position.set_q16({50 << 16, 50 << 16, 0});
+
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    CHECK(w.commands.resolve_ssn(10000) == host_body);
+    CHECK(w.commands.resolve_ssn(10001) == joiner_body);
+    CHECK(!w.commands.resolve_ssn(10002).valid());
+    CHECK(!w.commands.resolve_ssn(0).valid()); // no player body keeps the memset's 0
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAlive, 10000)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAlive, 10001)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10002)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIsWithinArea, 10001, area)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIsWithinArea, 10000, area)));
+    w.registry.get(joiner_body)->flags |= world::kEntityFlagDead;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10001)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDestroyed, 10000)));
+}
+
 // Subs 6/9/12 are HEALTH thresholds, not unit counts [orig:
 // Entity_HasDamageCapacity @0x43e3d0 / HasFullHealth @0x43e470 /
 // HasHealthAboveThreshold @0x43e350 — pools 0-1, signed, no alive gate].
@@ -2171,7 +2297,7 @@ static void test_single_distance_los_chain() {
     org.item_id = 1001; org.item_type_index = 7;
     org.net_id = 70;
     org.position = {0.0f, 0.0f, 0.0f};
-    org.yaw = 90; // mission 90 deg = engine BAM 0 = facing +X
+    org.heading = world::placed_heading_bam(90); // mission 90 deg = engine BAM 0 = facing +X
     world::EntityHandle a_h = w.registry.spawn(0, org);
     org.net_id = 71;
     org.position = {30.0f, 0.0f, 0.0f};
@@ -2213,20 +2339,20 @@ static void test_single_distance_los_chain() {
     // 71 faces +Y (mission yaw 0), 70 lies due -X of it: 90 deg off-cone.
     // (Exactly 180 deg astern would PASS via retail's abs INT_MIN overflow
     // quirk — carried in the port, so the test avoids the degenerate angle.)
-    w.registry.get(b_h)->yaw = 0;
+    w.registry.get(b_h)->heading = world::placed_heading_bam(0);
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 71, 70, 40)));
     // Rotate the shooter 45 deg away: outside the 30-deg cone.
-    w.registry.get(a_h)->yaw = 45;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(45);
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
     // 20 deg off: inside the cone.
-    w.registry.get(a_h)->yaw = 70;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(70);
     CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
 
     // Sub 45's range AND bearing ride the +0x1FC bbox-center offset points
     // (position + the host-stamped model bbox center, added unrotated)
     // [orig: the deltas over the offset sums @0x4f18cd..0x4f18dd; center
     //  writer Entity_InitFromModel @0x40df1e..0x40df4a].
-    w.registry.get(a_h)->yaw = 90;
+    w.registry.get(a_h)->heading = world::placed_heading_bam(90);
     w.registry.get(b_h)->bbox_center = {15.0f, 0.0f, 0.0f};
     CHECK(!sys.evaluate_trigger_for_test(w,
             single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
@@ -2356,8 +2482,11 @@ static void test_area_trigger_pool_and_identity_rules() {
     w.registry.spawn(3, inside);
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     CHECK(!sys.evaluate_trigger_for_test(w, group));
+    // A player body (record SSN word 0) answers by its DcbId, 10000 + its slot byte 0, in a
+    // session or out of one: the walk has no session gate (entity_dcb_id).
     inside.net_id = 0;
     inside.group_id = 0;
+    inside.engine_flags |= world::kEntityFlagPlayer;
     const auto local = w.registry.spawn(0, inside);
     w.cached.local_player = local;
     single.param1 = 0;
@@ -2365,9 +2494,9 @@ static void test_area_trigger_pool_and_identity_rules() {
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     CHECK(!sys.evaluate_trigger_for_test(w, group));
     single.param1 = 10000;
-    CHECK(sys.evaluate_trigger_for_test(w, single)); // SP representation alias
+    CHECK(sys.evaluate_trigger_for_test(w, single));
     w.rules.mp_session = true;
-    CHECK(!sys.evaluate_trigger_for_test(w, single)); // no MP local-player substitution
+    CHECK(sys.evaluate_trigger_for_test(w, single));
     single.param1 = 0x10047; // must not wrap to SSN 71
     CHECK(!sys.evaluate_trigger_for_test(w, single));
     group.param1 = 259; // must not wrap to group 3
@@ -2707,9 +2836,9 @@ static void test_structural_bms_actions() {
     marker.has_item_def = true;
     marker.wp_number = 9;
     marker.position = {10.0f, 20.0f, 30.0f};
-    marker.yaw = 45;
-    marker.pitch = 5;
-    marker.roll = -3;
+    marker.heading = world::placed_heading_bam(45);
+    marker.pitch_bam = world::spawn_angle_bam(5);
+    marker.roll_bam = world::spawn_angle_bam(-3);
     // The BMS spawn stamps the chute bit on engine_flags; the teleport read
     // merges both views.
     marker.engine_flags = world::kEntityFlagParachute;
@@ -2789,10 +2918,10 @@ static void test_structural_bms_actions() {
         CHECK(entity->position.x == 10.0f);
         CHECK(entity->position.y == 20.0f);
         CHECK(entity->position.z == 30.0f);
-        CHECK(entity->yaw == 45);
-        CHECK(entity->pitch == 5);
+        CHECK(entity->heading == world::placed_heading_bam(45));
+        CHECK(entity->pitch_bam == world::spawn_angle_bam(5));
         // Pool 0 enters Entity_ResetToSpawnState, which levels Roll.
-        CHECK(entity->roll == (handle.pool() == 0 ? 0 : -3));
+        CHECK(entity->roll_bam == (handle.pool() == 0 ? 0 : world::spawn_angle_bam(-3)));
     }
     CHECK(w.registry.get(pool0_h)->spawn_position.x == 10.0f);
     CHECK((w.registry.get(pool0_h)->engine_flags &
@@ -2801,18 +2930,22 @@ static void test_structural_bms_actions() {
            world::kEntityFlagMatrixBuilt) == 0);
     CHECK((w.registry.get(pool2_h)->engine_flags &
            world::kEntityFlagMatrixBuilt) == 0);
-    CHECK(pool1_ai.pos[0] == (10 << 16));
-    CHECK(pool1_ai.pos[1] == (20 << 16));
-    CHECK(pool1_ai.pos[2] == (30 << 16));
+    CHECK(pool1_ai.self->position.x.q16 == (10 << 16));
+    CHECK(pool1_ai.self->position.y.q16 == (20 << 16));
+    CHECK(pool1_ai.self->position.z.q16 == (30 << 16));
     CHECK(pool1_ai.heading ==
           world::bam_heading_from_mission_yaw_deg(45.0));
+    // The group action stores no savedLivePose, AI row or not [orig:
+    //  Entity_TeleportTeamToSpawn @0x43D390].
+    for (world::EntityHandle handle : {pool0_h, pool1_h, pool2_h})
+        CHECK(!w.registry.get(handle)->saved_live_valid);
 
     dispatch(bms::ActionType::ChangeSteamAction, 100, 5);
     CHECK(w.registry.get(pool0_h)->team == 5);
     dispatch(bms::ActionType::SingleChangeGroup, 100, 7);
     CHECK(w.registry.get(pool0_h)->group_id == 7);
 
-    w.registry.get(pool0_h)->position = {};
+    w.registry.get(pool0_h)->position = world::Vec3{};
     w.registry.get(pool0_h)->engine_flags |= world::kEntityFlagMatrixBuilt;
     dispatch(bms::ActionType::SingleTeleportAction, 100, 9);
     CHECK(w.registry.get(pool0_h)->position.x == 10.0f);
@@ -2822,6 +2955,19 @@ static void test_structural_bms_actions() {
     CHECK((w.registry.get(pool0_h)->flags & world::kEntityFlagParachute) != 0);
     CHECK((w.registry.get(pool0_h)->engine_flags &
            world::kEntityFlagParachute) != 0);
+    // The single action stores the marker's whole pose into savedLivePose ahead
+    // of the pool-0 reset, which levels the entity's Roll word and not the saved
+    // one, and stores the Yaw word into +0x8C and zero into +0x90.
+    // [orig: EventAction_TeleportEntityToSpawn @0x43E05F..0x43E096;
+    //  Entity_ResetToSpawnState @0x4B968C / @0x4B97DD]
+    {
+        const world::Entity &moved = *w.registry.get(pool0_h);
+        CHECK(moved.saved_live_valid && moved.saved_live_pos[0] == (10 << 16) &&
+              moved.saved_live_pos[1] == (20 << 16) && moved.saved_live_pos[2] == (30 << 16));
+        CHECK(moved.saved_live_yaw == world::placed_heading_bam(45) &&
+              moved.saved_live_pitch == 0 &&
+              moved.saved_live_roll == world::spawn_angle_bam(-3));
+    }
 
     dispatch(bms::ActionType::VaporizeGroup, 4);
     CHECK(w.registry.get(pool1_h) == nullptr);
@@ -2943,6 +3089,8 @@ int main() {
     test_second_time_through_parity();
     test_teammate_triggers();
     test_player_awol_counter_and_trigger();
+    test_player_awol_probe_reads_the_record_words();
+    test_area_tests_read_the_record_words();
     test_player_mount_trigger_dispatch();
     test_player_input_bit_triggers();
     test_player_berserk_trigger();
@@ -2952,6 +3100,7 @@ int main() {
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();
     test_single_alert_triggers();
+    test_coop_single_triggers_name_each_player_by_slot();
     test_single_health_triggers();
     test_holding_triggers();
     test_single_distance_los_chain();

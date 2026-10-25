@@ -82,7 +82,7 @@ struct KitPage {
 // A side block: 6 bytes of header, five kit pages, then an unwitnessed tail.
 struct Side {
     uint8_t player_class = 8;  // +0, 5..9 [orig: clamp @0x5516d0-@0x5516ec]
-    uint8_t avatar_a = 0;      // +1 [orig: EntitySlot_LookupAndPackEntry out-param @0x54bbea]
+    uint8_t avatar_a = 0;      // +1 [orig: CAvatarDefs_PackFirstComboOfAlignment out-param @0x54bbea]
     uint8_t avatar_b = 0;      // +2
     uint16_t avatar_packed = 0;  // +4, the packed avatar id
     // Class c lives at +6 + 2048*(c-5) [orig: the Game_StartMission switch
@@ -145,7 +145,7 @@ KitPage default_kit_page(SideId side, uint8_t player_class);
 // The defaults when weapon.sav is absent, the record half of
 // [orig: PlayerProfile_InitDefaults @0x54bb40]: both sides class 8, the
 // default kit pages above, the avatar bytes zero (the original seeds them from
-// the character table, EntitySlot_LookupAndPackEntry @0x54bbea; the embedder
+// the character table, CAvatarDefs_PackFirstComboOfAlignment @0x54bbea; the embedder
 // that holds that table fills them).
 File make_defaults();
 

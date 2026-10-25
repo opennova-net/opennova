@@ -1,6 +1,7 @@
 // The ladder climb legs of the infantry motor (the D-COL-5 port), split out of
 // infantry.cpp (W3-7 size gate): the org2 on-ladder override + dismounts, the
-// org1 on-ladder block, the view clamp, and the resolver-IO build. The gravity
+// org1 on-ladder block, and the resolver-IO build (the ladder's view clamp is the
+// org2 view phase's, infantry_view.cpp). The gravity
 // variant, the jump/bottom exit tails, and the root/gravity gates stay inline
 // in tick_infantry where the witnessed flow interleaves them.
 // Witness record: docs/world/world-wac-ai-re.md §30.
@@ -16,28 +17,19 @@
 
 namespace opennova::world {
 
-void ladder_push_back(int32_t pos[3], int32_t yaw_bam) {
+void ladder_push_back(EntityPosition &pos, int32_t yaw_bam) {
     const double rad =
         static_cast<double>(yaw_bam) * io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
     const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-    pos[0] -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
-    pos[1] -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
+    pos.x.q16 -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
+    pos.y.q16 -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
 }
 
 void ladder_unlatch(Entity *ent) {
     if (ent == nullptr) return;
     ent->flags &= ~kEntityFlagLadderContact;
     ent->engine_flags &= ~kEntityFlagLadderContact;
-}
-
-void infantry_ladder_view_clamp(InfantryState &inf, uint32_t entity_flags) {
-    if ((entity_flags & (kEntityFlagLadderContact | kEntityFlagParachute)) == 0) return;
-    const int32_t d = io::bam_sub(inf.target_heading, inf.body_heading);
-    if (d > 1431655680)
-        inf.target_heading = io::bam_add(inf.body_heading, 1431655680);
-    else if (d < -1431655680)
-        inf.target_heading = io::bam_sub(inf.body_heading, 1431655680);
 }
 
 LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
@@ -81,8 +73,7 @@ LadderResolveIO make_ladder_resolve_io(AiEntity &e, int32_t tick_start_z) {
 // horizontal pair. [orig: Entity_UpdateInfantryPlayerBody @ 0x4b7484-0x4b76d8]
 void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
     InfantryState &inf = e.inf;
-    if (!inf.is_local_player || tick_entity == nullptr || collision == nullptr ||
-        e.health <= 0)
+    if (tick_entity == nullptr || collision == nullptr || e.health <= 0)
         return;
     const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
     if ((flags & kEntityFlagLadderContact) == 0 || (flags & kEntityFlagDead) != 0)
@@ -111,10 +102,13 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
             // The forward fan climbs; the look-pitch sign picks the direction,
             // with the witnessed edge quirks: +0x7FFFFFFF, -1, and INT32_MIN
             // all resolve UP. [orig: cases 0/1/7 @ 0x4b74bc-0x4b750a]
+            // The look pitch is the body's Pitch word: the local player's look
+            // accumulator, any other player body's own.
+            const int32_t look_pitch = inf.is_local_player ? inf.look_pitch : e.pitch;
             int sign = 0;
-            if (inf.look_pitch > 0) sign = inf.look_pitch != 0x7FFFFFFF ? 1 : 0;
-            if (static_cast<uint32_t>(inf.look_pitch) > 0x80000000u &&
-                inf.look_pitch != -1)
+            if (look_pitch > 0) sign = look_pitch != 0x7FFFFFFF ? 1 : 0;
+            if (static_cast<uint32_t>(look_pitch) > 0x80000000u &&
+                look_pitch != -1)
                 sign = -1;
             stamp(sign < 0 ? anim_state::kClimbDown : anim_state::kClimbUp);
             break;
@@ -132,10 +126,10 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
                                io::kRadiansPerBamX87;
             const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
             const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-            e.pos[0] -= static_cast<int32_t>((57344LL * c) >> 22);
-            e.pos[1] -= static_cast<int32_t>((57344LL * s) >> 22);
-            e.pos[2] += 0x4000;
-            ladder_push_back(e.pos, lf.yaw);
+            e.self->position.x.q16 -= static_cast<int32_t>((57344LL * c) >> 22);
+            e.self->position.y.q16 -= static_cast<int32_t>((57344LL * s) >> 22);
+            e.self->position.z.q16 += 0x4000;
+            ladder_push_back(e.self->position, lf.yaw);
             ladder_unlatch(tick_entity);
             break;
         }
@@ -144,7 +138,7 @@ void AiSystem::infantry_ladder_override(AiEntity &e, Entity *tick_entity) {
         case 5:
             // The back fan steps straight off the face.
             // [orig: cases 3-5 @ 0x4b7681-0x4b76cc]
-            ladder_push_back(e.pos, lf.yaw);
+            ladder_push_back(e.self->position, lf.yaw);
             ladder_unlatch(tick_entity);
             break;
         default:
@@ -181,8 +175,8 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
                        io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
     const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-    const int32_t probe_x = e.pos[0] + static_cast<int32_t>((81920LL * c) >> 22);
-    const int32_t probe_y = e.pos[1] + static_cast<int32_t>((81920LL * s) >> 22);
+    const int32_t probe_x = e.self->position.x.q16 + static_cast<int32_t>((81920LL * c) >> 22);
+    const int32_t probe_y = e.self->position.y.q16 + static_cast<int32_t>((81920LL * s) >> 22);
     bool held = false;
     if (inf.anim_state != anim_state::kClimbTop) {
         // The congestion hold: a live person near the probe point at or above
@@ -190,10 +184,10 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
         // ENTITY bound radius, as retail reads entity->boundRadius on each row.
         // [orig: the pool-0 scan @ 0x4bf9ac-0x4bfa39 -> state 32]
         const int32_t bound = tick_entity->bound_radius > 0.0f
-                                  ? to_fixed(tick_entity->bound_radius)
+                                  ? tick_entity->bound_radius.q16
                                   : 0;
         held = collision->ladder_person_ahead(world, e.handle, probe_x, probe_y,
-                                              e.pos[2], bound);
+                                              e.self->position.z.q16, bound);
         if (held && root_motion != nullptr &&
             root_motion->has_clip(inf.adm_id, anim_state::kClimbIdle))
             stamp_keep_pending(anim_state::kClimbIdle);
@@ -207,15 +201,15 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
                             io::kRadiansPerBamX87;
         const int32_t lc = static_cast<int32_t>(std::cos(lrad) * io::kQ22One);
         const int32_t ls = static_cast<int32_t>(std::sin(lrad) * io::kQ22One);
-        e.pos[0] += static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
-        e.pos[1] += static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
+        e.self->position.x.q16 += static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
+        e.self->position.y.q16 += static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
     }
     // climb_up below (anchor - 0.75u) or when climb_top has no clip; climb_top
     // inside the anchor band. [orig: @ 0x4bfaca-0x4bfad8 — 49152 = 0.75u]
     const bool top_available =
         root_motion != nullptr &&
         root_motion->has_clip(inf.adm_id, anim_state::kClimbTop);
-    const int next = (!top_available || e.pos[2] <= lf.anchor[2] - 49152)
+    const int next = (!top_available || e.self->position.z.q16 <= lf.anchor[2] - 49152)
                          ? anim_state::kClimbUp
                          : anim_state::kClimbTop;
     if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, next))

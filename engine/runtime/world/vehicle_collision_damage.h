@@ -8,11 +8,11 @@ namespace opennova::world {
 // Two retail contact-damage legs share these predicates.
 //
 // THE KIND-1 (KNIFE) KILL-ZONE CALLBACK. The explosion drain installs
-// Entity_ApplyVehicleCollisionDamage for entry type 1 [orig: @0x4EAE1C]; the
+// Entity_ApplyKnifeKillZoneDamage for entry type 1 [orig: @0x4EAE1C]; the
 // IDB name is a misnomer, the entry type being the knife's kztype 1 (the
 // instantkillzone spawn queues it @0x4EC20E). Its source argument is the queue
 // entry, not a vehicle entity. Ported as entity_apply_melee_damage
-// (world/destruction.cpp). [orig: Entity_ApplyVehicleCollisionDamage @0x4E6620]
+// (world/destruction.cpp). [orig: Entity_ApplyKnifeKillZoneDamage @0x4E6620]
 //
 // THE RUN-OVER KILL AND BUMP SOUND of the movement resolver, ported in
 // CollisionWorld::resolve_entity (world/collision_resolve.cpp).
@@ -126,7 +126,7 @@ inline bool run_over_contact_applies(bool pusher_is_vehicle, bool pusher_is_vict
 //   * the authority alone kills (@0x4b38d8);
 //   * an indestructible victim (Flags 0x4000000) survives (@0x4b3901);
 //   * a PLAYER victim (Flags 0x100) whose damage-disabled word (entity+0x124:
-//     spawn protection or the dead latch) is set survives (@0x4b3918..0x4b392a),
+//     spawn protection or a spectator's -1) is set survives (@0x4b3918..0x4b392a),
 //     and so does one whose player slot carries the spectator latch
 //     (slot +0x188D7 through Entity_ValidatePtr @0x4b3933..0x4b3946).
 // The kill: death anim = cause 2 (explosive) at bone 2 by the approach

@@ -173,7 +173,7 @@ struct DeathMapView {
 	// dead code, not ported.
 	// [orig: DeathScreen_UpdateShroudReveal @0x554730 — @0x554784..0x5547b4,
 	//  the dead zoom ease @0x5547ad..0x5547d8; per frame from
-	//  UI_TeardownScene @0x54e67c]
+	//  UI_ProcessMenuScreenFrame @0x54e67c]
 	void ease_frame();
 	// Event 1: stamp the window and hand back the view the pass draws.
 	// [orig: CMap_OverlayInputHandler @0x554332..0x5543b7]
@@ -282,7 +282,7 @@ MapViewRect command_map_waypoint_dialog_rect(int32_t click_x, int32_t click_y,
 void command_map_waypoint_world(const CommandMapView &cmap, int32_t player_x, int32_t player_y,
 		int32_t &out_x, int32_t &out_y);
 
-// The placed-waypoint table's slot count [orig: g_ConnectionSlotTable
+// The placed-waypoint table's slot count [orig: g_CMapUserWaypoints
 // @0x252dcd0, 16 x 8 bytes; the `dword_252DD50 < 16` gates].
 inline constexpr int kCommandMapWaypointSlots = 16;
 
@@ -389,7 +389,7 @@ struct DeathMapFacts {
 	int32_t bounds_max_y = 0;
 	// The CMAP's placed-waypoint table (world/user_waypoints.h) as the hover
 	// and delete-button legs read it: each slot's position and name, `live`
-	// false for an empty slot [orig: g_ConnectionSlotTable @0x252dcd0 — the
+	// false for an empty slot [orig: g_CMapUserWaypoints @0x252dcd0 — the
 	// entity's +4 position and +244 name].
 	struct UserWaypoint {
 		bool live = false;

@@ -29,6 +29,10 @@ param(
     [int] $TimeoutSeconds = 240,
     [ValidateRange(100, 10000)]
     [int] $PollMilliseconds = 1000,
+    # A Serve Only host has no player of its own: its S2C 0x46 roster names no
+    # host (slot 0 cleared, on a retail Serve Only host as on ours; LP-s7), so
+    # no host sync row is required.
+    [switch] $NoHostPlayer,
     [switch] $SelfTest
 )
 
@@ -110,6 +114,7 @@ function ConvertFrom-ParityLines {
     $events = [System.Collections.Generic.List[object]]::new()
     $states = [System.Collections.Generic.List[object]]::new()
     $entities = [System.Collections.Generic.List[object]]::new()
+    $rounds = [System.Collections.Generic.List[object]]::new()
     $handshakes = [System.Collections.Generic.List[object]]::new()
     $datagrams = [System.Collections.Generic.List[object]]::new()
 
@@ -117,7 +122,7 @@ function ConvertFrom-ParityLines {
         $line = "$rawLine".TrimEnd([char]13, [char]10)
         if (-not $line.StartsWith('PARITY_', [StringComparison]::Ordinal)) { continue }
 
-        if ($line -match '^PARITY_DATAGRAM frame=(\d+) ts_ns=(\d+) src=(\d+) dst=(\d+) len=(\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) class=(invalid|unknown|client_hello|client_auth|server_hello|server_auth|client_protocol|server_protocol) decode=([01])$') {
+        if ($line -match '^PARITY_DATAGRAM frame=(\d+) ts_ns=(\d+) src=(\d+) dst=(\d+) len=(\d+) outer=([01]) opcode=(0x[0-9a-fA-F]{2}|--) class=(invalid|unknown|client_hello|client_auth|server_hello|server_auth|client_protocol|server_protocol|client_goodbye|server_goodbye) decode=([01])$') {
             $opcodeText = $Matches[7].ToLowerInvariant()
             $outerDecoded = $Matches[6] -eq '1'
             $datagramClass = $Matches[8]
@@ -131,6 +136,7 @@ function ConvertFrom-ParityLines {
                 client_hello = 0x41; client_auth = 0x42
                 server_hello = 0x81; server_auth = 0x82
                 client_protocol = 0x43; server_protocol = 0x83
+                client_goodbye = 0x46; server_goodbye = 0x86
             }
             if ((-not $outerDecoded -and
                     ($opcodeText -cne '--' -or $datagramClass -cne 'invalid' -or $decoded)) -or
@@ -317,7 +323,7 @@ function ConvertFrom-ParityLines {
                 dir = 'S'; session = [int]$Matches[3]; tag = '0a'
                 decode = $Matches[4] -eq '1'; length = [int]$Matches[5]
                 local = $Matches[12] -eq '1'; records = [int]$Matches[16]
-                players = [int]$Matches[17]
+                players = [int]$Matches[17]; rounds = [int]$Matches[21]
             })
             continue
         }
@@ -327,6 +333,26 @@ function ConvertFrom-ParityLines {
                 frame = [int]$Matches[1]; ts_ns = [uint64]$Matches[2]
                 session = [int]$Matches[3]; class = $Matches[4]
                 handle = [uint32]$Matches[5]; type_id = [uint32]$Matches[6]
+            })
+            continue
+        }
+
+        # One S2C 0x0A tag-2 round event: the target word rides only under flag 0x40 and
+        # the slot byte only under 0x80 (NetPacket_SerializeRoundEvent @0x504820), so the
+        # line holds 65535 / 0 in their place otherwise.
+        if ($line -match '^PARITY_ROUND frame=(\d+) ts_ns=(\d+) session=(\d+) index=(\d+) shooter=(\d+) flags=0x([0-9a-fA-F]{2}) adm=(\d+) sub=(\d+) target=(\d+) seq=(\d+) slot=(\d+)$') {
+            $roundFlags = [Convert]::ToInt32($Matches[6], 16)
+            if (($roundFlags -band 0x40) -eq 0 -and [uint32]$Matches[9] -ne 0xffff) {
+                throw 'PARITY_ROUND names a target without flag 0x40.'
+            }
+            if (($roundFlags -band 0x80) -eq 0 -and [uint32]$Matches[11] -ne 0) {
+                throw 'PARITY_ROUND carries a slot byte without flag 0x80.'
+            }
+            $rounds.Add([pscustomobject]@{
+                frame = [int]$Matches[1]; ts_ns = [uint64]$Matches[2]
+                session = [int]$Matches[3]; index = [int]$Matches[4]
+                shooter = [uint32]$Matches[5]; flags = $roundFlags
+                target = [uint32]$Matches[9]
             })
             continue
         }
@@ -414,9 +440,38 @@ function ConvertFrom-ParityLines {
             throw 'PARITY_ENTITY does not bind to an ordinary S2C 0x0A packet.'
         }
     }
+    # Each owner's round lines are the rounds its S2C 0x0A states declare.
+    $roundCountByOwner = @{}
+    foreach ($round in $rounds) {
+        $ownerKey = '{0}|S|{1}' -f $round.frame, $round.session
+        if (-not $packetIndex.ContainsKey($ownerKey)) { throw "PARITY_ROUND has no owning packet: $ownerKey." }
+        $owner = $packetIndex[$ownerKey]
+        if ($owner.ts_ns -ne $round.ts_ns -or $owner.tag_identities -notcontains '0a:0') {
+            throw 'PARITY_ROUND does not bind to an ordinary S2C 0x0A packet.'
+        }
+        if (-not $roundCountByOwner.ContainsKey($ownerKey)) { $roundCountByOwner[$ownerKey] = 0 }
+        $roundCountByOwner[$ownerKey] = [int]$roundCountByOwner[$ownerKey] + 1
+    }
+    $declaredRoundsByOwner = @{}
+    foreach ($state in @($states | Where-Object { $_.dir -eq 'S' })) {
+        $ownerKey = '{0}|S|{1}' -f $state.frame, $state.session
+        if (-not $declaredRoundsByOwner.ContainsKey($ownerKey)) { $declaredRoundsByOwner[$ownerKey] = 0 }
+        $declaredRoundsByOwner[$ownerKey] = [int]$declaredRoundsByOwner[$ownerKey] + $state.rounds
+    }
+    $roundOwnerKeys = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($ownerKey in $roundCountByOwner.Keys) { $null = $roundOwnerKeys.Add([string]$ownerKey) }
+    foreach ($ownerKey in $declaredRoundsByOwner.Keys) { $null = $roundOwnerKeys.Add([string]$ownerKey) }
+    foreach ($ownerKey in $roundOwnerKeys) {
+        $declared = if ($declaredRoundsByOwner.ContainsKey($ownerKey)) { [int]$declaredRoundsByOwner[$ownerKey] } else { 0 }
+        $actual = if ($roundCountByOwner.ContainsKey($ownerKey)) { [int]$roundCountByOwner[$ownerKey] } else { 0 }
+        if ($actual -ne $declared) {
+            throw "S2C 0x0A owner $ownerKey has $actual PARITY_ROUND record(s) for $declared declared round(s)."
+        }
+    }
     return [pscustomobject]@{
         packets = @($packets.ToArray()); events = @($events.ToArray())
         states = @($states.ToArray()); entities = @($entities.ToArray())
+        rounds = @($rounds.ToArray())
         handshakes = @($handshakes.ToArray())
         datagrams = @($datagrams.ToArray())
     }
@@ -550,7 +605,12 @@ function Test-SessionWireReadiness {
                 "'$($Expected.mission_display_name)', observed '$($info.mission)'.")
         }
         $advertisedMissions.Add([string] $info.mission)
-        Assert-OrdinalEqual $info.map $Expected.map 'S2C 0x7B map'
+        # The map file in any letter case: a retail host's mission after a
+        # cycle names it as its rotation entry spells it (TDH_I3A.BMS for a
+        # TDH_I3A.bms first start; LP-s7's pre-join cycle cells), the same file.
+        if (-not $info.map.Equals($Expected.map, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "S2C 0x7B map mismatch: expected '$($Expected.map)' in any letter case, observed '$($info.map)'."
+        }
         Assert-OrdinalEqual $info.expansion $Expected.expansion 'S2C 0x7B expansion'
         if ([uint32]$info.game_type -ne [uint32]$Expected.game_type) {
             throw "S2C 0x7B game type mismatch: expected $($Expected.game_type), observed $($info.game_type)."
@@ -609,7 +669,8 @@ function Test-SessionWireReadiness {
     $joinerSync = @($syncNames | Where-Object {
         $_.name.Equals($Expected.joiner_callsign, [StringComparison]::Ordinal)
     } | Sort-Object { $_.event.ts_ns } | Select-Object -First 1)
-    if ($hostSync.Count -eq 0) {
+    $noHostPlayer = ($Expected.PSObject.Properties.Name -contains 'no_host_player') -and [bool] $Expected.no_host_player
+    if ($hostSync.Count -eq 0 -and -not $noHostPlayer) {
         return New-NotReady "session $Session S2C 0x46 has not identified exact host '$($Expected.host_callsign)'"
     }
     if ($joinerSync.Count -eq 0) {
@@ -627,7 +688,7 @@ function Test-SessionWireReadiness {
 
     [uint64]$notBefore = 0
     foreach ($milestone in @(
-        [uint64]$hostSync[0].event.ts_ns
+        $(if ($hostSync.Count -gt 0) { [uint64]$hostSync[0].event.ts_ns } else { [uint64]0 })
         [uint64]$joinerSync[0].event.ts_ns
         [uint64]$missionHeaders[0].ts_ns
         [uint64]$missionStatus[0].ts_ns
@@ -697,7 +758,7 @@ function Test-SessionWireReadiness {
             advertised_mission = $advertisedMission
             session_config_frame = [int]$sessionConfigs[0].frame
             mission_header_frame = [int]$missionHeaders[0].frame
-            host_player_sync_frame = [int]$hostSync[0].event.frame
+            host_player_sync_frame = $(if ($hostSync.Count -gt 0) { [int]$hostSync[0].event.frame } else { $null })
             joiner_player_sync_frame = [int]$joinerSync[0].event.frame
             mission_status_frame = [int]$missionStatus[0].frame
             world_load_frame = [int]$worldLoad[0].frame
@@ -1133,6 +1194,39 @@ function Invoke-WireReadinessSelfTest {
     if (-not $missingDuplicateStateRejected) {
         throw 'Duplicate-record fail-closed self-test accepted two gameplay events with one state.'
     }
+    # A frame's round lines: an AI rifle's targeted round (0x41, the joiner 93) and a mounted
+    # gun's untargeted one (0x32); a missing line and a target without 0x40 fail closed.
+    $roundFrame = @(
+        'PARITY_PACKET frame=901 ts_ns=17100000000 dir=S session=32776 sid=0x22222222 seq=901 ack=0 flags=0x00 records=1 tags=0x00a wire=0x00a:0x40:600:-'
+        'PARITY_EVENT frame=901 ts_ns=17100000000 dir=S session=32776 participant=1 tag=0x0a settings=0 len=600 body=-'
+        'PARITY_STATE frame=901 ts_ns=17100000000 dir=S session=32776 tag=0x0a kind=frame decode=1 len=600 sub=0 flags=2,0 anchor=1,2,3 local=1 local_state=0,100,0 records=1 players=1 vehicles=0 infantry=0 none=0 rounds=2 carried=65535 weapon=0,0,0,0,0,0,0,0,0 timer=0,0,0,0,0,0 env=0,0,0,0,0,0,0,0,0 objective=0,0,0,0,0 mount=0,65535,0,0,0'
+        'PARITY_ROUND frame=901 ts_ns=17100000000 session=32776 index=0 shooter=25 flags=0x41 adm=21 sub=0 target=93 seq=63487 slot=0'
+        'PARITY_ROUND frame=901 ts_ns=17100000000 session=32776 index=1 shooter=6 flags=0x32 adm=38 sub=0 target=65535 seq=12 slot=0'
+    )
+    $roundFacts = ConvertFrom-ParityLines $roundFrame
+    if ($roundFacts.rounds.Count -ne 2 -or $roundFacts.rounds[0].target -ne 93 -or
+            $roundFacts.rounds[1].flags -ne 0x32) {
+        throw 'PARITY_ROUND self-test did not keep the frame''s two rounds.'
+    }
+    $missingRoundRejected = $false
+    try { $null = ConvertFrom-ParityLines @($roundFrame | Select-Object -SkipLast 1) }
+    catch {
+        $missingRoundRejected =
+            $_.Exception.Message -match 'has 1 PARITY_ROUND record\(s\) for 2 declared round\(s\)'
+    }
+    if (-not $missingRoundRejected) {
+        throw 'Round-count fail-closed self-test accepted a frame missing a declared round.'
+    }
+    $unflaggedTargetRejected = $false
+    try {
+        $null = ConvertFrom-ParityLines (@($roundFrame | Select-Object -SkipLast 1) +
+            'PARITY_ROUND frame=901 ts_ns=17100000000 session=32776 index=1 shooter=6 flags=0x32 adm=38 sub=0 target=93 seq=12 slot=0')
+    } catch {
+        $unflaggedTargetRejected = $_.Exception.Message -match 'names a target without flag 0x40'
+    }
+    if (-not $unflaggedTargetRejected) {
+        throw 'Round-target fail-closed self-test accepted a target without flag 0x40.'
+    }
     Write-Output 'PARITY_WIRE_READY_SELF_TEST=PASS'
 }
 
@@ -1203,6 +1297,7 @@ $expected = [pscustomobject]@{
     mission_header = [byte[]] $missionIdentity.Bytes
     mission_header_sha256 = [string] $missionIdentity.Sha256
     game_type = [uint32]$GameType; expansion = $Expansion
+    no_host_player = [bool] $NoHostPlayer
 }
 
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')

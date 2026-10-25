@@ -1,5 +1,7 @@
 #pragma once
 
+#include <net/npwire/peer_addr.h> // the manager receive's packet lines
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -80,7 +82,9 @@ ConnectionKeys generate_connection_keys(NapiPrng &prng);
 
 // The same draws from the process's one manager PRNG, seeded at first use
 // (napi_prng_platform_seed) and serialized, a connection's key and SCRK under one
-// hold. The game protocol's host key, SK / SCRK and CK / SCRK draw here.
+// hold. The game protocol's host key, SK / SCRK and CK / SCRK draw here, and the
+// NovaWorld lobby connection's CK / SCRK, its protocol made on the same manager
+// (D-NET-704).
 // [orig: NapiNPProtocol_StartServer @0x62b5f5 (the host key); HandleClientJoin and
 //  InitFromSession above]
 uint32_t manager_session_key();
@@ -88,8 +92,8 @@ ConnectionKeys manager_connection_keys();
 
 // An SCRK from the OS CSPRNG, in the generator's charset and 63-draw shape but in
 // no fixed order or length (63 at most): NovaLogic's master service's SCRK, which is
-// not Jointops.exe's code, and the NovaWorld lobby client's, which has not moved
-// to the manager PRNG yet (D-NET-524's residual). The game protocol draws generate_tx_key.
+// not Jointops.exe's code. The game protocol and the NovaWorld lobby client draw
+// generate_tx_key on the manager PRNG (D-NET-524, D-NET-704).
 std::string make_dev_scrk();
 
 // 60-char lowercase-hex NWUID (retail format). Random per session.
@@ -100,9 +104,9 @@ std::string make_dev_nwuid();
 uint32_t make_random_session_u32();
 
 // A session key over an arbitrary 32-bit draw, drawn until nonzero, zero being no key:
-// the NovaWorld master service's SK and the lobby client's CK, which do not draw from
-// the game's manager PRNG (generate_session_key); `draw` unset is
-// make_random_session_u32, a test injecting its own.
+// the NovaWorld master service's SK, which does not draw from the game's manager PRNG
+// (generate_session_key); `draw` unset is make_random_session_u32, a test injecting
+// its own.
 // [orig: NapiNP_GenerateSessionKey @0x61EA70 - the jz @0x61EAC3]
 uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 
@@ -111,19 +115,26 @@ uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 // as its index. Retail steps it for the client side's connections (type 2) and the
 // host's server-side ones (type 1) alike; a client connection's index is the CI its
 // 0x41s and 0x42 carry. `advance_connection_index` steps the given counter;
-// `next_connection_index` steps the process's one counter. A LAN browse's enumerator
-// connection takes one, and the join from a row it discovered goes on with that same
-// connection, so the browse's 0x41s and the join's 0x42 carry one CI; a dial without
-// a row creates its own connection and takes the next. Only our client connections
-// step it: the host's server-side creates do not (D-NET-713; a server-side index never
-// reaches the wire, the 0x82 echoing the client's CI, so only a later client
-// connection in the same process numbers differently).
+// `next_connection_index` steps the process's one counter. A browse creates its
+// enumerator connection twice and keeps the second (next_browse_connection_index,
+// net/npwire/lan_discovery.h), and the join from a row it discovered goes on with that
+// same connection, so the browse's 0x41s and the join's 0x42 carry one CI; a join with
+// no row enumerates on its own connection, created the same way. The host's creates step it
+// too (D-NET-713): each 0x42 that passes the protocol's gates at its server-side create (a
+// lock, ban or capacity refusal after it included), and twice at a listen host's session
+// create (its own client and its self-join's server-side node). A server-side node's index
+// is its dcb, which its state change makes its connection_id: the 0x82's MI (the CI it
+// echoes is the client's), the joiner's 0x48 echo and its player's entity+0x78, a listen
+// host's own player taking its self-join twin's. A later connection in the same process,
+// client side or server side, numbers from where the earlier creates left the counter.
 // [orig: CNapiNPConnection_Create @0x62acb0 - `add [esi+0ECCh], edx` @0x62b282 on both
 //  arms (the type test @0x62b1d1..0x62b1d5), the 0 -> 1 wrap @0x62b288..0x62b28a,
 //  conn+0x14 @0x62b296; a type-2 connection's enumerator is created with it @0x62b1dc;
 //  the creates: type 2 @0x4c9b9c / @0x4c9d9c, type 1 in NapiNPProtocol_HandleClientJoin
-//  @0x62bf06; CNapiNPConnection_SendSessionInit's CI is the client's, conn+0x154
-//  @0x620fa7; CNapiNetwork_StartClientConnection @0x4ca160 ->
+//  @0x62bf06; CNapiNPConnection_OnStateChange @0x626060 - connection_id from conn+0x14
+//  @0x626199..0x62619c; CNapiNPConnection_SendSessionInit's CI is the client's, conn+0x154
+//  @0x620fa7, its MI the node's connection_id @0x620fd4..0x620fe8;
+//  CNapiNetwork_StartClientConnection @0x4ca160 ->
 //  CNapiNPConnection_InitFromSession @0x626320 on the enumerator's connection]
 uint32_t advance_connection_index(uint32_t &counter);
 uint32_t next_connection_index();
@@ -131,9 +142,59 @@ uint32_t next_connection_index();
 // Decode an inbound NW-UDP datagram. On success, populates `opcode_out`
 // (byte 0 of the CRC-stripped packet, plaintext) and `body_out` (the
 // NWU-decrypted payload after byte 0). Names are swapped vs onnet —
-// server-side decrypt is our nwu_encrypt.
+// server-side decrypt is our nwu_encrypt. The two steps are
+// nw_unpack_inbound (the envelope: the CRC-stripped packet, false when the
+// unpack fails) and nw_split_unpacked (the opcode byte and the NWU-decrypted
+// body; false for an empty packet).
+// [orig: NapiNP_UnpackPacket @0x62CA20, from NapiNPManager_PumpReceive @0x623206]
 bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
                        uint8_t &opcode_out, std::vector<uint8_t> &body_out);
+bool nw_unpack_inbound(const uint8_t *raw, size_t raw_len, std::vector<uint8_t> &unpacked_out);
+bool nw_split_unpacked(const std::vector<uint8_t> &unpacked, uint8_t &opcode_out,
+                       std::vector<uint8_t> &body_out);
+
+// The NAPI manager receive's two set-asides, shared by the host's, the joiner's and the LAN
+// browse's receive: PunkBuster's datagrams (0xFF, then the "\xFF\xFF\xFFPB_" prefix
+// case-insensitively, more than 7 bytes), handed to the PunkBuster handler unpacked with no
+// packet line after RAW (ours runs no PunkBuster leg, D-NET-171) [orig:
+// NapiNPManager_PumpReceive @0x6231A7..0x6231D9; the prefix byte_7DFE30]; and the NAT magic
+// ("baffle") packet, the unpacked words 0x1071 and '0', 48 bytes or more [orig:
+// NapiNPManager_HandlePacket @0x622F1B..0x622F36; NapiNP_HandleMagicPacket @0x622E70].
+bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len);
+bool napi_baffle_packet(const std::vector<uint8_t> &unpacked);
+
+// The NAPI manager receive's packet lines in _connectlog.txt, each written as ConnectLog's
+// `"<time> : <text>"` while the log is on. An address is Napi_FormatAddress's "a.b.c.d:port"
+// (peer_addr_to_string).
+//
+// The manager's five packet callbacks, installed on the game's manager (ctx +0xE58, mgr
+// +0x110..+0x120) only while the log is on [orig: NapiLib_SetManagerCallbacks @0x4C6F50,
+// @0x4C6F64..0x4C6FAC] and called from its receive [orig: NapiNPManager_PumpReceive
+// @0x623010; NapiNPManager_HandlePacket @0x622F10]: every datagram the socket hands over
+// (RAW, its socket length), the unpacked packet (COOKED, the CRC-stripped length), the 0x1071
+// magic packet (BAFFLE), a packet a protocol's opcode handler took (PROTOCOL, the protocol's
+// name, proto +0xDC) and a dropped one (TOSSED with its reason: 1 the receive rate at 100 or
+// more, 2 the receive-rate draw, 3 an unpack failure, 4 no protocol took it).
+// [orig: Network_LogRawPacketReceived @0x4C43A0; Network_LogCookedPacketReceived
+//  @0x4C4440; Network_LogBaffledPacket @0x4C44E0; Network_LogNapiProtocolRecv
+//  @0x4C6100; Network_LogTossedPacket @0x4C4580]
+enum class NapiTossReason : int32_t {
+	RecvRateFull = 1,
+	RecvRateDraw = 2,
+	Unpack = 3,
+	NoProtocol = 4,
+};
+std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from);
+std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
+		const std::string &protocol_name);
+std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason);
+// The protocol's receive callback for each packet its pump reads from a queue, ahead of the
+// handler's queued leg: NET GOT, the packet's length with its opcode, the opcode as two hex
+// digits [orig: NapiLog_OnRecv @0x4C46B0, installed at proto +0x26C by CNapiNetwork_Init
+// @0x4CA908..0x4CA9CD; NapiNPProtocol_PumpRecvQueues @0x6266A0 - the call @0x6268AA].
+std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode);
 
 // Encode an outbound reply: prepend `opcode`, NWU-encrypt the body part
 // (server-side encrypt is our nwu_decrypt), then NAPI envelope-wrap.

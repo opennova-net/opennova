@@ -1,6 +1,7 @@
 #include "terrain/terrain_data.h"
 
 #include "terrain/terrain_foliage_def.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_foliage_map.h"
 #include "terrain/terrain_tile_info.h"
 
@@ -12,6 +13,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/terrain/lighting.h>
+#include <runtime/terrain/terrain_load_legs.h>
 #include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/terrain_raycast.h>
 
@@ -592,15 +594,25 @@ void TerrainData::_notify_terrain_changed() {
 // mounted root's, or the loose TRN directory's.
 // ---------------------------------------------------------------------------
 
-Ref<Texture2D> TerrainData::load_source_texture(
+Ref<Image> TerrainData::load_source_image(
 		const String &p_filename, opennova::renderer::TextureLoader p_loader) const {
 	if (p_filename.is_empty()) return {};
 	if (resource_root.is_valid() && !resource_root->get_root_dir().is_empty()) {
-		return resource_root->load_texture(p_filename,
+		return resource_root->load_image_with_mipmaps(p_filename,
 				static_cast<ResourceRoot::TextureLoader>(p_loader));
 	}
 	if (trn_path.is_empty()) return {};
-	return opennova::load_texture_from_dir(trn_path.get_base_dir(), p_filename, p_loader);
+	return opennova::load_image_from_dir(trn_path.get_base_dir(), p_filename, p_loader);
+}
+
+bool TerrainData::texture_rgba8(const Ref<Texture2D> &p_texture, opennova::terrain::Rgba8Image &r_out) const {
+	if (p_texture.is_valid()) {
+		const auto held = slot_images_.find(p_texture->get_instance_id());
+		if (held != slot_images_.end()) {
+			return image_to_rgba8(held->second, r_out);
+		}
+	}
+	return texture_to_rgba8(p_texture, r_out);
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +656,53 @@ Error TerrainData::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 	return step == LOAD_STEP_DONE ? OK : load_error_;
 }
 
+// The connect leg's share of the load (engine terrain/terrain_load_legs.h carries the witness):
+// the plan's units of the mission textures stage held for load_textures(), the rest run.
+Error TerrainData::load_config_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name) {
+	const Error begun = begin_load_from_resource_root(p_resource_root, p_name);
+	if (begun != OK) {
+		return begun;
+	}
+	using opennova::terrain::TerrainLoadFile;
+	const auto file_of = [](const LoadUnit &unit) {
+		switch (unit.kind) {
+			case LoadUnit::Kind::Texture: return TerrainLoadFile::TextureSlot;
+			case LoadUnit::Kind::Tilestrip: return TerrainLoadFile::TileSetAtlas;
+			case LoadUnit::Kind::Heights: return TerrainLoadFile::HeightData;
+			case LoadUnit::Kind::PcxSlot: break;
+		}
+		return String(unit.slot) == "charmap" ? TerrainLoadFile::CharMap : TerrainLoadFile::FoliageMap;
+	};
+	std::vector<LoadUnit> rest;
+	for (const LoadUnit &unit : load_units_) {
+		const bool textures = opennova::terrain::terrain_load_leg(file_of(unit)) ==
+				opennova::terrain::TerrainLoadLeg::MissionTextures;
+		(textures ? texture_units_ : rest).push_back(unit);
+	}
+	load_units_ = std::move(rest);
+	LoadStep step = LOAD_STEP_MORE;
+	while (step == LOAD_STEP_MORE) {
+		step = load_step();
+	}
+	if (step != LOAD_STEP_DONE) {
+		texture_units_.clear();
+		return load_error_;
+	}
+	return OK;
+}
+
+bool TerrainData::load_textures() {
+	if (texture_units_.empty()) {
+		return false;
+	}
+	const std::vector<LoadUnit> units = std::move(texture_units_);
+	texture_units_.clear();
+	for (const LoadUnit &unit : units) {
+		_run_load_unit(unit);
+	}
+	return true;
+}
+
 Error TerrainData::_load_from_trn_text(const std::string &trn_content, const String &source_label) {
 	(void)source_label;
 	// A .trn on its own (no mission, no project): the file alone.
@@ -667,6 +726,8 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	colormap_live_texture.unref();
 	blendmap_image.unref();
 	load_units_.clear();
+	texture_units_.clear();
+	slot_images_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
 	load_state_ = LoadState::None;
@@ -711,6 +772,8 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 // height data. load_step() runs one.
 Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later) {
 	load_units_.clear();
+	texture_units_.clear();
+	slot_images_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
 	load_state_ = LoadState::None;
@@ -778,6 +841,10 @@ Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content, con
 	tilestrip.slot = "tilestrip";
 	tilestrip.filename = String(opennova::trn_mission_tilestrip(trn, mission_tile_set).c_str());
 	tilestrip.loader = TextureLoader::Tga;
+	// The tile set's name is the configuration's, its atlas the textures' (engine
+	// terrain/terrain_load_legs.h): the name stands from the plan, which the kernel's surface
+	// table pairs with.
+	trn.tilestrip = opennova::to_std(tilestrip.filename);
 	load_units_.push_back(tilestrip);
 	LoadUnit heights;
 	heights.kind = LoadUnit::Kind::Heights;
@@ -800,10 +867,19 @@ void TerrainData::_note_load_missing(const String &p_name) const {
 // directory). Warn when a referenced texture fails to resolve (e.g. a raw .tga stripped from an
 // exported PCK) so the failure is visible instead of silently untextured.
 Ref<Texture2D> TerrainData::_load_slot_texture(const char *slot, const String &filename,
-		opennova::renderer::TextureLoader loader) const {
-	Ref<Texture2D> tex = load_use_root_
-			? resource_root->load_texture(filename, static_cast<ResourceRoot::TextureLoader>(loader))
-			: opennova::load_texture_from_dir(load_dir_, filename, loader);
+		opennova::renderer::TextureLoader loader) {
+	Ref<Texture2D> tex;
+	if (load_use_root_) {
+		// The texture made of the pixels the root decodes, which stay with it, so the terrain's
+		// derived inputs read them and never the texture back (texture_rgba8).
+		opennova::renderer::TextureReader reader = opennova::renderer::TextureReader::None;
+		const Ref<Image> image = resource_root->load_image_with_mipmaps(filename,
+				static_cast<ResourceRoot::TextureLoader>(loader), &reader);
+		tex = opennova::upload_texture_with_mipmaps(image, reader);
+		if (tex.is_valid()) slot_images_[tex->get_instance_id()] = image;
+	} else {
+		tex = opennova::load_texture_from_dir(load_dir_, filename, loader);
+	}
 	if (tex.is_null() && !filename.is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: ", slot, " texture '", filename,
 			"' did not resolve under ", load_dir_, " (terrain may render untextured)");
@@ -923,6 +999,23 @@ bool TerrainData::_load_heights(const String &cpt_name) {
 	return true;
 }
 
+bool TerrainData::_run_load_unit(const LoadUnit &unit) {
+	switch (unit.kind) {
+		case LoadUnit::Kind::Texture:
+			this->*unit.target = _load_slot_texture(unit.slot, unit.filename, unit.loader);
+			break;
+		case LoadUnit::Kind::PcxSlot:
+			_load_pcx_slot(String(unit.slot), unit.filename);
+			break;
+		case LoadUnit::Kind::Tilestrip:
+			tilestrip_tex = _load_slot_texture(unit.slot, unit.filename, unit.loader);
+			break;
+		case LoadUnit::Kind::Heights:
+			return _load_heights(unit.filename);
+	}
+	return true;
+}
+
 TerrainData::LoadStep TerrainData::load_step() {
 	// No load begun (none asked, or the begin refused): nothing loads, a failure; one ended answers
 	// as it ended.
@@ -937,26 +1030,13 @@ TerrainData::LoadStep TerrainData::load_step() {
 		return load_error_ == OK ? LOAD_STEP_DONE : LOAD_STEP_FAILED;
 	}
 	const LoadUnit unit = load_units_[load_next_++];
-	switch (unit.kind) {
-		case LoadUnit::Kind::Texture:
-			this->*unit.target = _load_slot_texture(unit.slot, unit.filename, unit.loader);
-			break;
-		case LoadUnit::Kind::PcxSlot:
-			_load_pcx_slot(String(unit.slot), unit.filename);
-			break;
-		case LoadUnit::Kind::Tilestrip:
-			tilestrip_tex = _load_slot_texture(unit.slot, unit.filename, unit.loader);
-			trn.tilestrip = opennova::to_std(unit.filename);
-			break;
-		case LoadUnit::Kind::Heights:
-			if (!_load_heights(unit.filename)) {
-				// Why it failed stays (get_load_failure): the file and its parse error.
-				load_units_.clear();
-				load_next_ = 0;
-				load_state_ = LoadState::Failed;
-				return LOAD_STEP_FAILED;
-			}
-			break;
+	if (!_run_load_unit(unit)) {
+		// Why it failed stays (get_load_failure): the file and its parse error.
+		load_units_.clear();
+		texture_units_.clear();
+		load_next_ = 0;
+		load_state_ = LoadState::Failed;
+		return LOAD_STEP_FAILED;
 	}
 	if (load_next_ < load_units_.size()) {
 		return LOAD_STEP_MORE;

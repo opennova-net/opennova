@@ -1,7 +1,9 @@
 #include <net/novaworld/nwu_host_role.h>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/log.h>
-#include <base/io/tick_rate.h>
+#include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
+#include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
 #include <net/title/title_identity.h>
@@ -18,8 +20,6 @@ NwuHostRole::NwuHostRole(NwuLobbySession &lobby, Hooks hooks)
 bool NwuHostRole::request(const HostRegistration &cfg) {
 	cfg_ = cfg;
 	players_.clear();
-	pcid_ring_ = SessionIdRing{};
-	refresh_ticks_ = 0.0;
 	// BuildHostVarLists mints the per-registration AppId first: (tick + rand) folded into
 	// [1000, 9999]. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b6e ->
 	//  CNapiNetwork_RandomizeTimeout @0x4c4d80]
@@ -27,10 +27,18 @@ bool NwuHostRole::request(const HostRegistration &cfg) {
 	// A fresh host sends CurrentlyHosting = 0 (ConnectOrHost's StartHostingSession(ctx, 0)).
 	send_host_request(/*currently_hosting=*/0);
 	if (phase_ != Phase::Requested) {
+		// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - "%s : NWU HOSTING
+		//  FAILED...StartHostingSession failed!!!" @0x4D5153, NWEC51 @0x4D5165]
+		menu_leg_line(kHostStartFailedLine);
 		if (hooks_.on_failed) hooks_.on_failed(NWEC_HOST_START_FAILED);
 		return false;
 	}
 	return true;
+}
+
+// ConnectOrHost's lines are the menu's legs': the command-line host writes none.
+void NwuHostRole::menu_leg_line(const std::string &text) {
+	if (!lobby_.command_line_host() && lobby_.connect_log_on()) lobby_.connect_log(text);
 }
 
 void NwuHostRole::stop() {
@@ -41,32 +49,45 @@ void NwuHostRole::stop() {
 	players_.clear();
 }
 
+// The server-info refresh is the hosted match's (inmatch::run_server_info_refresh, whose update
+// the embedder hooks to update_server_info): the role keeps no refresh clock and no cookie-key
+// ring of its own, its PCIDKey being the match's column.
 void NwuHostRole::tick(uint32_t now_ms) {
-	const uint32_t elapsed_ms = ticked_ ? now_ms - last_tick_ms_ : 0u;
-	last_tick_ms_ = now_ms;
-	ticked_ = true;
-	ClientSession *session = lobby_.session();
-	if (session == nullptr) return;
-	if (phase_ == Phase::Requested) {
-		// The host poll: no ServerHostResult within SESSION_CONNECT_TIMEOUT_MS ->
-		// ClientStopHosting + NWEC52. [orig: CNapiGameSession_ConnectOrHost @0x4d4f10 (0xEA60)]
-		if (now_ms - register_started_ms_ > SESSION_CONNECT_TIMEOUT_MS) {
-			stop();
-			if (hooks_.on_failed) hooks_.on_failed(NWEC_HOST_TIMEOUT);
-		}
+	if (phase_ == Phase::Requested) poll_request(now_ms);
+}
+
+// The host poll's pass after each periodic update, while the request is out: the 60 s test,
+// then the session's state. No ServerHostResult within SESSION_CONNECT_TIMEOUT_MS -> its line,
+// ClientStopHosting, the timeout line and NWEC52; the command-line host waits on with no
+// timeout. The wait ends the moment the session leaves state 5 (a refusal, a ServerStopHosting,
+// a punt, the reap or a reconnect's state): state 6 is the result's success, whose notice runs
+// the started leg (handle_host_result); any other writes the not-hosting line and fails with the
+// MsgCode word's NWEC (NWEC53..60, NWEC58 for any other code: the word holds the last refusal's
+// or statement's code, 0 when none was taken on this connection). The command-line host's wait
+// ends the same way, its leg writing no line (its caller resets the session).
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - the 0xEA60 compare @0x4D518E (`ja`
+//  @0x4D5193), "%s : NWU HOSTING FAILED...TIMEOUT WAITING FOR REPLY FROM NOVAWORLD!!!" @0x4D5245,
+//  CGameSession_StopHosting (the call @0x4D5252), "%s : NWU HOSTING TIMEOUT!!!" @0x4D528E,
+//  NWEC52 @0x4D529F; the state test @0x4D5195..0x4D519D, `cmp eax,6` @0x4D519F, "%s : NWU
+//  HOSTING FAILED...WE'RE NOT IN HOSTING STATE!!!" @0x4D51DF, the +0x130 switch
+//  @0x4D51F3..0x4D5207; Game_HostMultiplayerSession @0x4A65A0 - the untimed wait
+//  @0x4A671D..0x4A6742, state 6 @0x4A6744, else CNapiGameSession_ResetToDisconnected @0x4A674F]
+void NwuHostRole::poll_request(uint32_t now_ms) {
+	if (phase_ != Phase::Requested) return;
+	if (!lobby_.command_line_host() && now_ms - register_started_ms_ > SESSION_CONNECT_TIMEOUT_MS) {
+		menu_leg_line(kHostTimeoutWaitingLine);
+		stop();
+		menu_leg_line(kHostTimeoutLine);
+		if (hooks_.on_failed) hooks_.on_failed(NWEC_HOST_TIMEOUT);
 		return;
 	}
-	if (phase_ != Phase::Hosting) return;
-	// The server-info refresh runs on the logic clock: every SESSION_HOST_INFO_REFRESH_TICKS the
-	// cookie-key ring advances and the Host list is republished as its changed vars.
-	// [orig: Server_TickUpdate @0x51d7e0 (the 0x744 refresh) -> Lobby_UpdateServerInfo @0x4fe8c0]
-	refresh_ticks_ += static_cast<double>(elapsed_ms) * io::kTickHz / 1000.0;
-	if (refresh_ticks_ >= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS)) {
-		refresh_ticks_ -= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS);
-		pcid_ring_.advance(now_ms, static_cast<int>(lobby_.random_u32() & 0x7FFFu));
-		cfg_.pcid_key = pcid_ring_.current();
-		update_server_info();
-	}
+	const ClientSession *session = lobby_.session();
+	const int state = session != nullptr ? session->lobby_state() : 0;
+	if (state == 5 || state == 6) return;
+	phase_ = Phase::Idle;
+	menu_leg_line(kHostNotHostingLine);
+	if (hooks_.on_failed)
+		hooks_.on_failed(novaworld_host_error_tag(session != nullptr ? session->server_msg_code() : 0));
 }
 
 // The Host list's columns go into the session's list in any session state, a refresh in an NWU
@@ -92,11 +113,34 @@ void NwuHostRole::update_server_info() {
 
 // The mission start runs its update only on a NovaWorld authority in session; while the request
 // is out the marks stay and the first refresh in state 6 carries the whole lists.
-// [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates)]
-void NwuHostRole::publish_mission_start() {
+// [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates); the first
+//  mission's send Server_SendMetricsToGate @0x4FB0A0]
+void NwuHostRole::publish_mission_start(int32_t session_round_count) {
 	if (phase_ == Phase::Idle)
 		return;
 	republish_lists();
+	// The first mission's ID report. [orig: Game_StartMission - @0x524908..0x524928]
+	if (session_round_count != 0)
+		return;
+	const HostRegistration cfg = host_cfg();
+	lobby_.send_gate_metrics(gate_metrics_id_text(gate_metrics_host(cfg), cfg.gcc));
+}
+
+// The strings every reporter prints: the gate reply's METLABEL and LOBBYNAME, the version
+// text, and the METEXT that gates the machine locale's rows.
+// [orig: g_ServerLabel (METLABEL, CNapiGateManager_ProcessResponse @0x4CF26D), g_LobbyName
+//  (LOBBYNAME @0x4CF1D8), g_VersionText, g_IsDedicatedServer (METEXT @0x4CF2C1)]
+GateMetricsHost NwuHostRole::gate_metrics_host(const HostRegistration &cfg) const {
+	const GateResponse &gate = lobby_.gate_response();
+	GateMetricsHost host;
+	host.label = gate.met_label;
+	host.lobby = gate.lobby_name;
+	host.version = cfg.version;
+	host.met_ext = gate.met_ext != 0;
+	host.locale.country_name = cfg.country_name;
+	host.locale.language = cfg.language;
+	host.locale.tz_bias = cfg.tz_bias;
+	return host;
 }
 
 // Retail marks every var of both lists changed, runs the server-info update (whose tail,
@@ -134,7 +178,19 @@ bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 		// the hosting stands while its answer is out.
 		return true;
 	case Notice::Kind::StopHosting:
-		if (phase_ != Phase::Idle) {
+		// Every ServerStopHosting the session reads writes its triple to _inout.txt under the
+		// switch, whatever the hosting. [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 -
+		//  MsgCode / MsgParam1 / MsgParam2's atol @0x4D1CB3 / @0x4D1CD2 / @0x4D1CF3, "%s : NOVAWORLD
+		//  STOP HOSTING.  nwuservermsgcode=%ld, nwuservermsgparam1=%ld, nwuservermsgparam2=%ld"
+		//  @0x7CC478, the append @0x4D1DBC]
+		if (hooks_.inout_line)
+			hooks_.inout_line("NOVAWORLD STOP HOSTING.  nwuservermsgcode=" +
+					std::to_string(notice.fields.msg_code) + ", nwuservermsgparam1=" +
+					std::to_string(notice.fields.msg_param1) + ", nwuservermsgparam2=" +
+					std::to_string(notice.fields.msg_param2));
+		// While the request is out the statement's state 4 ends the host poll (poll_request,
+		// over the MsgCode the statement wrote); a standing hosting stops.
+		if (phase_ == Phase::Hosting) {
 			phase_ = Phase::Idle;
 			if (hooks_.on_stopped) hooks_.on_stopped(notice.msg_key);
 		}
@@ -173,15 +229,16 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 	} else if (phase_ != Phase::Requested) {
 		return;
 	} else if (!notice.fields.success) {
-		// Rejected: the MsgCode maps through the host switch (NWEC53..60).
-		phase_ = Phase::Idle;
-		if (hooks_.on_failed)
-			hooks_.on_failed(novaworld_host_error_tag(notice.fields.msg_code));
+		// Rejected: the session is back in state 4 with the refusal's MsgCode in its word, which
+		// the host poll's state test maps (poll_request).
 		return;
 	} else {
-		// Hosting (state 6): the refresh clock starts.
+		// Hosting (state 6): the menu leg's two lines, and the refresh clock starts.
+		// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - "%s : NWU HOSTING STARTED!  YIPPEE"
+		//  @0x4D532D, then "%s : NWU MOVING ON TO HOSTING OR PLAYING..." @0x4D536D]
+		menu_leg_line(kHostStartedLine);
+		menu_leg_line(kMovingOnLine);
 		phase_ = Phase::Hosting;
-		refresh_ticks_ = 0.0;
 		hosting_started_ms_ = lobby_.clock_ms();
 		fresh = true;
 		io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
@@ -197,21 +254,36 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 
 // The slot's five vars go into the session's PlayerList in any state (a player added while the
 // request is out rides the first update's PlayerList); ClientHostPlayerAdded fires only while
-// hosting is established (state 6), the session's gate. Retail then sends the PlayerList delta
-// at once as well, ours at the next refresh (D-NET-490).
-// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5; the state-6 wrapper @0x4d0e20]
+// hosting is established (state 6), the session's gate. Then the add runs the lists' update with
+// 0, which in state 6 sends the changed lists as a ClientHostUpdate at once: the new slot's vars
+// and whatever else is marked (D-NET-490), unless the slot's +5 byte is set: a joiner's add clears
+// it, the local player's slot keeps the round init's 1, so the listen host's own add sends its
+// statement alone (HostPlayerSlot::local, D-NET-659). A removal runs none (the update's callers
+// are the server-info update, the add and the mission start).
+// [orig: Server_PlayerAdd @0x51cbc0 - @0x51d3f0, @0x51d421..0x51d4b5
+//  (CNapiGameSession_SendPlayerAddedIfHosting @0x4d0e20, the state-6 wrapper around
+//  CNapiGameSession_SendPlayerAdded), the +5 byte cleared
+//  @0x51cf02 and tested @0x51d4ba, CPlayerManager_RebuildLists(edi = 0 @0x51d35f) @0x51d4c6;
+//  CPlayerManager_RebuildLists @0x4d4590 - the state-6 test @0x4D4593, its other callers
+//  @0x4ff63a / @0x524903]
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
 	cfg_.player_count = static_cast<int>(players_.size());
-	if (ClientSession *session = lobby_.session()) session->send_host_player_added(slot);
+	if (ClientSession *session = lobby_.session()) {
+		session->send_host_player_added(slot);
+		if (!slot.local) session->send_host_update(/*include_all=*/false);
+	}
 }
 
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
-// while hosting is established (state 6).
-// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the state-6 wrapper @0x51b5f3 (@0x4d0e40), then
+// while hosting is established (state 6). Neither leg reads the roster: a teardown sends them for
+// a slot this role never announced too, a held server's player at the next host's session reset
+// on the new hosting among them (inmatch::stop_unstopped_server, D-NET-NEW-L9-21).
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 - the state-6 wrapper @0x51b5f3
+//  (CNapiGameSession_SendPlayerRemovedIfHosting @0x4d0e40, the state test @0x4D0E48), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
 void NwuHostRole::clear_player_slot(int slot) {
-	if (players_.erase(slot) == 0) return;
+	players_.erase(slot);
 	cfg_.player_count = static_cast<int>(players_.size());
 	if (ClientSession *session = lobby_.session()) session->send_host_player_removed(slot);
 }
@@ -236,7 +308,6 @@ void NwuHostRole::set_player_vars(int slot, const std::string &team, const std::
 
 void NwuHostRole::sync_roster(const std::vector<HostPlayerSlot> &wanted) {
 	const RosterSync sync = plan_roster_sync(players_, wanted);
-	for (int slot : sync.removed) clear_player_slot(slot);
 	for (const HostPlayerSlot &player : sync.added) set_player_slot(player);
 	for (const HostPlayerSlot &player : sync.vars) set_player_vars(player.slot, player.team, player.type);
 }
@@ -248,12 +319,6 @@ RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
 				a.ip_and_port == b.ip_and_port && a.pcid == b.pcid;
 	};
 	RosterSync sync;
-	for (const auto &entry : current) {
-		bool kept = false;
-		for (const HostPlayerSlot &player : wanted)
-			if (player.slot == entry.first && same_player(player, entry.second)) kept = true;
-		if (!kept) sync.removed.push_back(entry.first);
-	}
 	for (const HostPlayerSlot &player : wanted) {
 		const auto it = current.find(player.slot);
 		if (it == current.end() || !same_player(player, it->second))
@@ -269,7 +334,6 @@ void NwuHostRole::set_columns(const HostRegistration &columns) {
 	next.app_id = cfg_.app_id;
 	next.host_key = cfg_.host_key;
 	next.lobby_name = cfg_.lobby_name;
-	next.pcid_key = cfg_.pcid_key;
 	next.reconnect_counter = cfg_.reconnect_counter;
 	next.player_count = cfg_.player_count;
 	next.round_time_remaining_ticks = columns.round_time_remaining_ticks;
@@ -335,8 +399,14 @@ HostRegistration NwuHostRole::host_cfg() const {
 		cfg.ver1 = title->ver1;
 		cfg.ver2 = title->ver2;
 		cfg.category_var = title->host_category_var;
+		// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
+		// "V%i.%i.%i.%i" over the build's four numbers (GameProfile::version_text).
+		// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
+		//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
+		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
+		if (profile != nullptr && profile->version_text != nullptr)
+			cfg.version = profile->version_text;
 	}
-	cfg.pcid_key = pcid_ring_.current();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;
 }

@@ -6,7 +6,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::previous_game_type
 #include <runtime/inmatch/server_spawn.h> // Server_ChangeEntityTeam
-#include <runtime/inmatch/server_tick.h>  // Server_ProcessPlayerDeath
+#include <runtime/inmatch/server_player_death.h> // Server_RunPlayerDeath
 #include <runtime/world/entity.h>
 #include <runtime/world/round_sim.h>      // RoundDeath
 #include <runtime/world/world.h>
@@ -41,8 +41,15 @@ int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx) {
 		if (team == 1) ++imbalance;
 		else if (team == 2) --imbalance;
 	}
-	// A Serve Only host's own slot 0, an active row with no connection (D-NET-352).
+	// An orphaned row is an active row (D-NET-NEW-L1-24), and a Serve Only host's own slot 0,
+	// an active row with no connection (D-NET-352).
 	// [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19)]
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) {
+		const NapiNPConnection &row = orphan.row;
+		const uint8_t team = row.assigned_team_valid ? row.assigned_team : uint8_t{0};
+		if (team == 1) ++imbalance;
+		else if (team == 2) --imbalance;
+	}
 	if (ctx.host_slot.active) {
 		if (ctx.host_slot.team == 1) ++imbalance;
 		else if (ctx.host_slot.team == 2) --imbalance;
@@ -70,8 +77,10 @@ bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx) {
 
 void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 	// The pair list: (time in the server, slot) for every active slot that is
-	// not the host's own, in slot order. The connection's join stamp stands
-	// in for the slot's +94384 connect time.
+	// not the host's own, in slot order, an orphaned row too (D-NET-NEW-L1-24),
+	// keyed by the row's own add stamp (+0x170B0, row_added_host_ms).
+	// [orig: Server_AutoBalanceTeams @0x4FCC30 - +4 @0x4FCC74, +5 @0x4FCC7A, the key
+	//  @0x4FCC82, CPairList_AddEntry called @0x4FCC90]
 	struct Pair {
 		int32_t key;
 		NapiNPConnection *slot;
@@ -80,13 +89,19 @@ void Server_AutoBalanceTeams(NapiNPServerCtx &ctx, world::World *world) {
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list)
 		if (c.phase >= ConnectionPhase::PlayerAdded && c.type != NapiNPConnection::kTypeClientSide)
 			slots.push_back(&c);
+	for (OrphanedPlayerRow &orphan : ctx.orphaned_player_rows)
+		if (orphan.row.type != NapiNPConnection::kTypeClientSide) slots.push_back(&orphan.row);
 	std::stable_sort(slots.begin(), slots.end(), [](const NapiNPConnection *a,
 			const NapiNPConnection *b) { return a->reply.player_slot < b->reply.player_slot; });
 	std::vector<Pair> pairs;
-	const uint32_t now_ms = ctx.np_protocol.host_run_duration_ms;
+	// Now is GetTickCount, the clock the rows' add stamps read (D-NET-NEW-L8-33)
+	// [orig: @0x4FCC5C].
+	const uint32_t now_ms = host_tick_count_ms(ctx);
 	for (NapiNPConnection *c : slots)
-		pairs.push_back({static_cast<int32_t>(now_ms - c->join_validated_host_ms), c});
-	// CPairList_ShellSort: Knuth's gaps, descending by key, 1-based indexes.
+		pairs.push_back({static_cast<int32_t>(now_ms - c->row_added_host_ms), c});
+	// CPairList_ShellSort: Knuth's gaps, 1-based indexes, ascending by key: an entry shifts while
+	// the earlier key is at least the inserted one, so the newest row moves first [orig:
+	//  CPairList_ShellSort @0x526C00 - `cmp [esi+edx-8], ebp` @0x526C77, `jl` @0x526C7B].
 	const int count = static_cast<int>(pairs.size());
 	int gap = 1;
 	if (count / 9 >= 1) {
@@ -179,11 +194,7 @@ void Server_HandleTeamChangeRequest(NapiNPServerCtx &ctx, NapiNPConnection &conn
 		if (entity != nullptr) {
 			entity->health = 0;                           // +0x11E
 			entity->last_attacker = world::EntityHandle{}; // +0x178
-			world::RoundDeath death;
-			death.victim = handle;
-			death.victim_handle = handle.packed;
-			death.event_flags = entity->cause_flags & 0xF00u;
-			Server_ProcessPlayerDeath(ctx, world, death);
+			Server_RunPlayerDeath(ctx, world, handle);
 			if ((entity = world.registry.get(handle)) != nullptr) entity->flags |= 2u;
 		}
 		// The penalty replaces the death's respawn holds, and the revive

@@ -39,34 +39,25 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
 
     // Resolve the whole attachment family before allocating any rows. The
     // extractor's cycle/depth handling is shared with ordinary mission boot.
-    mission::SeatSpecExtraction extracted;
-    mission::extract_item_seat_specs(*table,
-            [this](const std::string &graphic) { return assets().model(graphic).get(); },
-            {int(request.item_type) + kItemIdOffset}, extracted);
-    for (const ItemSeatSpec &spec : extracted.specs) {
-        const auto existing = std::find_if(seat_specs.begin(), seat_specs.end(),
-                [&](const ItemSeatSpec &row) { return row.type_id == spec.type_id; });
-        if (existing == seat_specs.end()) seat_specs.push_back(spec);
-        else *existing = spec;
-    }
-    for (const auto &graphic : extracted.graphic_by_type) mounted_graphics[graphic.first] = graphic.second;
-    std::sort(seat_specs.begin(), seat_specs.end(),
-            [](const ItemSeatSpec &a, const ItemSeatSpec &b) { return a.type_id < b.type_id; });
-    mission::stamp_seat_spec_turret_limits(world, seat_specs);
+    merge_item_seat_specs(request.item_type);
 
     Entity seed;
     seed.kind = request.helicopter ? world::EntityKind::Item : world::EntityKind::Organic;
     seed.item_id = request.item_type;
     seed.net_id = request.ssn;
     seed.team = 1;
-    seed.position = {request.pos[0] / 65536.0f, request.pos[1] / 65536.0f, request.pos[2] / 65536.0f};
+    seed.position.set_q16({request.pos[0], request.pos[1], request.pos[2]});
     seed.spawn_position = seed.position;
-    seed.yaw = float(mission_yaw_deg_from_bam_heading(request.heading));
+    seed.heading = request.heading; // the request's word (D-NET-NEW-L6-2)
     seed.spawn_heading = request.heading;
     seed.spawn_origin = kSpawnOriginNone;
     seed.spawn_phase = request.helicopter ? world.vehicle_ai_spawn_phase : 63;
     initialize_item_seats(seed, seat_specs);
-    const EntityHandle handle = world.registry.spawn(request.helicopter ? 1 : 0, seed);
+    // includeInUse 0: a destroyed row is passed over (D-NET-485). [orig:
+    //  Entity_CloneFromTemplate - `push 0` @0x439750 (pool 0);
+    //  Entity_CloneFromTemplateWithAI - `push 0` @0x4397D0 (pool 1)]
+    const EntityHandle handle = world.registry.spawn(request.helicopter ? 1 : 0, seed,
+            world::EntityRegistry::Reuse::Fresh);
     if (!handle.valid()) return {};
     world.ai.release(handle);
     const int index = world.ai.attach(handle);
@@ -84,8 +75,6 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         entity.veh.air_roll_bam = 0;
     }
     AiEntity &ai = *world.ai.at(index);
-    std::copy_n(request.pos, 3, ai.pos);
-    std::copy_n(request.pos, 3, ai.net_saved_live_pose);
     std::copy_n(request.pos, 3, entity.saved_live_pos);
     entity.saved_live_yaw = request.heading;
     entity.saved_live_valid = true;
@@ -150,11 +139,13 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
         world.ai.row(ai.brain.f[AiBrain::kCurState]).enter(context);
     }
 
-    const ItemAttachmentSpawns children = spawn_item_attachments(world, {handle}, seat_specs);
-    for (EntityHandle child : children.handles) {
-        mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), child);
-        ensure_collision_instance(world, child);
-    }
+    // Neither factory spawns addeweap children: the helicopter is a clone of a
+    // refNum-0 template and the person a def spawn, and only the load and a
+    // deployable run the child spawner, so a teammate's def rows never become guns.
+    // [orig: Entity_SpawnHelicopter @0x4521A0 (the template's refNum byte 0
+    //  @0x45227C, Entity_CloneFromTemplateWithAI @0x4522E1); Entity_SpawnFromItemDef
+    //  @0x452390; Entity_SpawnAddEWeapChildren @0x40F300, called only from
+    //  Mission_LoadBMSFile @0x40FD69 / @0x40FD8E and Entity_SpawnDeployable @0x51C49A]
     world.facials.initialize(world);
     collision.refresh_after_registry_change(world);
     return handle;
@@ -196,7 +187,14 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     //  bytes verbatim @0x43997D; the +0x1C4 update Entity_UpdatePool1Slot
     //  calls @0x4B8E41..0x4B8E53; Render_SectorEntity @0x5C431B]
     ensure_collision_instance(world, handle);
-    collision.refresh_after_registry_change(world);
+    // No table is published here: the clone and both spawners run no Pool01, Pool2 or
+    // slice build, so the pool tables keep their tick epoch and the slices their 17-tick
+    // phase. A palm fragment's own list is its spawner's tail (palm_transition); a
+    // section piece takes none.
+    // [orig: Entity_CloneFromTemplateByType @0x4398A0 (callees Pool_AllocEntry,
+    //  Entity_AllocateAISlot, AnimMap_RegisterEntity); Entity_SpawnSectionEntity @0x4402D0
+    //  (no proximity callee); Palm_SpawnFragment @0x53C1C0 - Entity_BuildProximityList
+    //  called @0x53C39D alone]
     return handle;
 }
 } // namespace opennova::mission

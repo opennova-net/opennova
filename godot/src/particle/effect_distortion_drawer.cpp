@@ -258,7 +258,7 @@ RID EffectDistortionDrawer::ribbon_pipeline_for(int64_t p_framebuffer_format) {
 	Ref<RDPipelineColorBlendState> blend;
 	blend.instantiate();
 	blend->set_attachments(attachments);
-	const RID pipeline = rd_->render_pipeline_create(shader_, p_framebuffer_format, vertex_format_,
+	const RID pipeline = create_rd_render_pipeline(rd_, shader_, p_framebuffer_format, vertex_format_,
 			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample, depth, blend);
 	if (pipeline.is_valid())
 		pipelines_.emplace(p_framebuffer_format, pipeline);

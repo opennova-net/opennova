@@ -14,6 +14,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
 #include <runtime/world/entity.h> // retail_pool_capacity (the handle gate)
+#include <runtime/world/round_sim.h> // DeployedRoundCopy (the found leg)
 
 #include <cstddef>
 #include <cstdint>
@@ -38,25 +39,72 @@ void ClientReplicaPipeline::apply_deployed_item(
 					world::retail_pool_capacity(1))
 		return;
 
+	// The found leg first: the record walks this client's whole round pool,
+	// freed slots included, for its own copies of the throw (world::RoundSim::
+	// match_deployed_item). The last matching round with a def is copied
+	// whole into the device; any match skips the not-found leg's init.
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the walk
+	//  @0x546820..0x54698F, the flag @0x5468C1, its test @0x546995]
+	world::DeployedRoundCopy copy;
+	const bool matched = deployed_round_walk_ && deployed_round_walk_(spawn, copy);
+	ClientEntityState *existing = state_.find(spawn.slot_handle);
+	if (matched && !copy.copied) {
+		// Only def-less rounds matched: the slot is neither copied nor
+		// initialized, only re-posed, its own parent kept; a slot that holds no
+		// device stays without one.
+		// [orig: @0x546898..0x54697A]
+		if (existing == nullptr) return;
+		existing->x = spawn.pos_x;
+		existing->y = spawn.pos_y;
+		existing->z = spawn.pos_z;
+		existing->heading_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(spawn.angle_x) << 16);
+		existing->pitch_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(spawn.angle_y) << 16);
+		existing->roll_bam = static_cast<int32_t>(
+				static_cast<uint32_t>(spawn.angle_z) << 16);
+		existing->net_smooth_heading = existing->heading_bam;
+		existing->net_target_heading_bam = existing->heading_bam;
+		existing->yaw_byte = static_cast<uint8_t>(
+				static_cast<uint32_t>(existing->heading_bam) >> 24);
+		++state_.world_stream_revision;
+		state_.mark_changed();
+		return;
+	}
+
 	uint16_t selected_type = spawn.item_id;
+	// The owner is packet word 1's pool slot, its address computed with no test of
+	// the handle, and its team byte read whatever the slot holds: a slot no row
+	// holds is a cleared one (the mission's pool clear, a destroy's memset), whose
+	// byte is 0, as an unknown team's is. An owner handle outside the five pools'
+	// capacities addresses memory past the pool table or the pool; ours keeps the
+	// base item there (the not-found pick's own fallback; a PERMANENT candidate,
+	// the D-NET-NEW-L7-20 follow).
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the owner pointer
+	//  @0x54677D..0x5467B5, its null test @0x5469BE, the byte @0x5469DD; Pool_Clear
+	//  @0x442060 (Mission_ResetBmsState's call @0x40DBC7); Entity_Destroy @0x43E810
+	//  (the memset @0x43EA70)]
+	const world::EntityHandle owner_handle{spawn.owner_handle};
+	const bool owner_in_pools = owner_handle.valid() &&
+			owner_handle.pool() < world::kEntityPoolCount &&
+			static_cast<std::size_t>(owner_handle.slot()) <
+					world::retail_pool_capacity(owner_handle.pool());
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
-	const bool owner_team_known = owner != nullptr && owner->team_known;
-	const uint8_t owner_team = owner_team_known ? owner->team : uint8_t{0xFF};
-	const bool viewer_team_known = viewer != nullptr && viewer->team_known;
-	const uint8_t viewer_team = viewer_team_known ? viewer->team : uint8_t{0xFF};
-	ClientEntityState *existing = state_.find(spawn.slot_handle);
-	// The team-variant pick runs only on the FRESH-SPAWN leg (retail's
-	// found/update path never touches the item id) and only when BOTH
-	// authored variant ids are nonzero — a one-sided pair shows every
-	// client the base item id.
-	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x5469db (found &&
-	//  g_LocalPlayerEntity && packet[2] != 0 && packet[3] != 0),
-	//  enemy pick @0x5469fb..0x546a08, base id @0x546a11; the found-path
-	//  update @0x546828..0x54697a leaves the type alone]
-	if (existing != nullptr) {
-		selected_type = existing->type_id;
-	} else if (owner_team_known && viewer_team_known &&
+	const uint8_t owner_team =
+			owner != nullptr && owner->team_known ? owner->team : uint8_t{0};
+	const uint8_t viewer_team =
+			viewer != nullptr && viewer->team_known ? viewer->team : uint8_t{0};
+	// A copied device takes its round's item. The not-found leg's team-variant
+	// pick needs BOTH authored variant ids nonzero (a one-sided pair shows every
+	// client the base item id) and runs on every such record, a slot that
+	// already holds a device included.
+	// [orig: the copy @0x546871 (+0x1C); the not-found leg @0x5469A0..0x546A11
+	//  (found && g_LocalPlayerEntity && packet[2] != 0 && packet[3] != 0
+	//  @0x5469db, the enemy pick @0x5469fb..0x546a08, the base id @0x546a11)]
+	if (copy.copied) {
+		selected_type = static_cast<uint16_t>(copy.item_id);
+	} else if (owner_in_pools && viewer != nullptr &&
 			spawn.friendly_item_id != 0 && spawn.enemy_item_id != 0) {
 		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
 				owner_team != viewer_team;
@@ -65,23 +113,27 @@ void ClientReplicaPipeline::apply_deployed_item(
 	}
 	if (selected_type == 0) return;
 
+	// Both legs write the whole slot (the copy, or the memset and the item
+	// init), so every such record starts a fresh lifetime.
+	// [orig: the copy @0x546871; the memset @0x5469B2]
 	const bool type_changed = existing != nullptr &&
 			existing->type_id != selected_type;
-	const uint32_t next_spawn_revision = existing == nullptr || type_changed ||
-			existing->spawn_revision == 0 ? begin_entity_lifetime(spawn.slot_handle)
-			: existing->spawn_revision;
+	const uint32_t next_spawn_revision = begin_entity_lifetime(spawn.slot_handle);
 
 	ClientEntityState &row = state_.upsert(spawn.slot_handle);
 	if (type_changed) state_.mark_topology_changed();
-	if (existing == nullptr || type_changed) {
-		row = ClientEntityState{};
-		row.handle = spawn.slot_handle;
-		row.type_id = selected_type;
-		row.cls = classify(selected_type);
-		row.net_id = 0;
-		row.spawn_revision = next_spawn_revision;
-	} else if (row.spawn_revision == 0) {
-		row.spawn_revision = next_spawn_revision;
+	row = ClientEntityState{};
+	row.handle = spawn.slot_handle;
+	row.type_id = selected_type;
+	row.cls = classify(selected_type);
+	row.net_id = 0;
+	row.spawn_revision = next_spawn_revision;
+	// The copy's Flags, its model init's matrix-built bit and its noage bit;
+	// the item init's own Flags legs land with the device's def (the trait
+	// resweep), as on the not-found leg.
+	if (copy.copied) {
+		row.spawn_entity_flags = copy.flags;
+		row.spawn_ammo_word_noage = copy.noage;
 	}
 
 	row.spawn_tag = s2c::DEPLOYED_ITEM;
@@ -114,12 +166,22 @@ void ClientReplicaPipeline::apply_deployed_item(
 	row.parent_handle = wire_handle::kInvalid;
 	row.target_handle = spawn.parent_handle;
 	row.parent_pose_valid = false;
-	if (owner_team_known) {
-		row.team = owner_team;
+	if (copy.copied) {
+		// The copy carries its round's team byte [orig: @0x546871 (+0x162)].
+		row.team = copy.team;
 		row.team_known = true;
 	} else {
-		row.team = 0xFF;
-		row.team_known = false;
+		// The not-found leg memsets the slot and nothing it runs after writes +0x162:
+		// the item init's callback for the device rows writes the spin words alone and
+		// the model init no team, so the device's team byte is 0 whatever the owner's
+		// (whose byte only picks the variant above) (D-NET-NEW-L7-20).
+		// [orig: the memset @0x5469B2; Entity_InitFromItemDef @0x49E550 (the call
+		//  @0x546A15, its callback tail-call @0x49E5D5..0x49E5EA);
+		//  Entity_InitThrowableSpin_Satchel @0x4435C0, Entity_InitThrowableSpin_Claymore
+		//  @0x4435E0, Entity_InitThrowableSpin_AVMine @0x443610; Entity_InitFromModel
+		//  @0x40DC30 (the call @0x546A3C)]
+		row.team = 0;
+		row.team_known = true;
 	}
 	++state_.world_stream_revision;
 	state_.mark_changed();

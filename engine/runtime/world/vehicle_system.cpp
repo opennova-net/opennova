@@ -52,15 +52,12 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
 					vehicle_family_uses_direct_air_mover(traits->family))
 				stamp_saved_live_pose(*veh);
 			// The family movers promote a freshly allocated brain out of the
-			// allocator's state 0 at their HEAD, before the occupant/AI-driver
-			// block reads the word: the AI leg's PRETTY -> FOLLOWWP hand-back
-			// (22 -> 16 @0x48bc16, 14 -> 7 @0x49158a) has to see PRETTY, not 0.
-			// Our drive staging runs ahead of the motor (and of the motor-side
-			// twin in tick_health), so the promotion is hoisted with it: a driven
-			// hull left at 0 here never handed back — the state machine commits
-			// the pending 0 straight back every tick. The mover must still
-			// hand the authored state back to FOLLOWWP; a fresh brain retains
-			// its zero working speed until a real movement controller sets it.
+			// allocator's state 0 at their HEAD, before the health cadence and the
+			// occupant/AI-driver block read the word: the AI leg's PRETTY -> FOLLOWWP
+			// hand-back (22 -> 16 @0x48bc16, 14 -> 7 @0x49158a) has to see PRETTY,
+			// not 0. Nothing between this site and the mover head reads the word, so
+			// the promotion runs here for every family. A fresh brain retains its
+			// zero working speed until a real movement controller sets it.
 			// [orig: Entity_UpdateVehiclePhysics `cmp [edi+10h],0; jnz; mov
 			//  [edi+10h],16h` @0x48afac..0x48afb2, ahead of the occupant block
 			//  @0x48b949; Entity_UpdateAircraftPhysics @0x490377..0x49037d
@@ -79,16 +76,32 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
             if (vehicle_family_uses_direct_air_mover(traits->family)) {
                 if (!veh->veh.net_predicted) {
                     Entity *actrl = world.vehicles.resolve_controller(*veh);
-                    const bool actrl_alive = actrl != nullptr && actrl->alive &&
-                                             actrl->health > 0;
+                    // The parked test (an empty seat or the hull's Flags
+                    // 0x10000002) precedes the player test; the occupant's life is
+                    // never read (a seated body's death edge detaches it first).
                     // A player pilot whose eye sits at or below the water plane
                     // loses the stick to the AI leg, as in the staged families.
-                    // [orig: Entity_UpdateAircraftPhysics `test [ebp+24h],100h`
-                    //  @0x490F36, the eye test @0x490F3F..0x490F4B]
-                    const bool aplayer = actrl_alive && actrl->handle.pool() == 0 &&
+                    // [orig: Entity_UpdateAircraftPhysics @0x490F16..0x490F25, `test
+                    //  [ebp+24h],100h` @0x490F36, the eye test @0x490F3F..0x490F4B]
+                    const bool aplayer = actrl != nullptr && !vehicle_hull_parked(*veh) &&
+                                         actrl->handle.pool() == 0 &&
                                          actrl->player_class != 0 &&
                                          !watercraft_driver_submerged(world, *actrl);
-                    if (aplayer) {
+                    // A dead hull's mover runs its head (the health cadence, the
+                    // ground probe, the carrier ride) and bails to its matrix tail
+                    // at the dead bit, ahead of the occupant and AI block: no
+                    // player stamp, no parked arm (its PRETTY stamp, stuck count
+                    // and airborne yaw). The mover's authority head is our AI-drive
+                    // admission, so it is raised without the AI leg.
+                    // [orig: Entity_UpdateAircraftPhysics @0x490310 (`test byte ptr
+                    //  [esi+24h], 2; jnz` @0x490CD0..0x490CD4 -> @0x49274C..0x492766,
+                    //  ahead of the parked arm @0x491C09..0x491C6D)]
+                    const bool hull_dead =
+                            ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0;
+                    if (hull_dead) {
+                        veh->veh.ai_drive = true;
+                        world.vehicles.aircraft_client_tick(*veh, *traits);
+                    } else if (aplayer) {
                         // The player leg parks the brain at PRETTY every visit, so
                         // an AI state left from an earlier pilot stops running.
                         // [orig: Entity_UpdateAircraftPhysics `mov dword ptr
@@ -108,8 +121,7 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                         //  separate mover]
                         world.vehicles.aircraft_client_tick(*veh, *traits);
                     } else {
-                        world.ai.chel_ai_drive(world, *veh, actrl_alive ? actrl : nullptr,
-                                      *traits);
+                        world.ai.chel_ai_drive(world, *veh, actrl, *traits);
                         world.vehicles.aircraft_client_tick(*veh, *traits);
 						if (AiEntity *brain = world.ai.for_handle(h)) {
 							brain->brain.f[AiBrain::kWorkPosZ] = veh->veh.net_alt_target;
@@ -125,87 +137,59 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                     // runs the aircraft function (and therefore the tail) for
                     // every vehicle it is not driving, seeding the drive
                     // command from the wire — so advancing the accumulator here
-                    // restores that, it does not add a new one.
-                    // [orig: the HELO twin @0x48FA70 called from the aircraft
-                    //  mover's tail @0x4905A6; the not-driven client leg is
-                    //  @0x48B7F0]
-                    world.vehicles.part_anim_tick(*veh, *traits);
+                    // restores that, it does not add a new one. The tail's call
+                    // keeps the mover's own gate: a live (Health > 0), shown
+                    // (Flags bit 0 clear) aircraft.
+                    // [orig: the HELO twin Entity_UpdateHeloRotorSpin @0x48FA70 called from the aircraft
+                    //  mover's tail, Entity_UpdateAircraftPhysics @0x490310 (the
+                    //  gate @0x490592..0x4905A0, the call @0x4905A6); the
+                    //  not-driven client leg is @0x48B7F0]
+                    if (veh->health > 0 && (veh->flags & 1u) == 0)
+                        world.vehicles.part_anim_tick(*veh, *traits);
 				}
 				// The installed +0x1C4 callback: the saved mover above, then the
 				// same-refNum children ride the 'agun' points [orig:
 				// Entity_UpdateAttachedChildren @0x45D550, @0x45D573 then @0x45D578..].
 				world.vehicles.update_attached_children(*veh);
 				if (AiEntity *ve = world.ai.for_handle(h)) {
-                    ve->pos[0] = to_fixed(veh->position.x);
-                    ve->pos[1] = to_fixed(veh->position.y);
-                    ve->pos[2] = to_fixed(veh->position.z);
 					ve->pitch = veh->veh.air_pitch_bam;
 					ve->roll = veh->veh.air_roll_bam;
 					ve->heading = veh->veh.yaw_seeded
 							? veh->veh.yaw_bam
-							: bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+							: veh->heading;
 				}
 				return;
             }
-            // Stage the drive input class the motor will consume: a live PLAYER controller
-            // keeps the occupant leg; an AI controller (or none) routes through the brain
-            // (state stamps + the witnessed steer/speed leg). [orig: the occupant class
-            // switch inside Entity_UpdateVehiclePhysics @0x48b949-0x48c034]
-            VehicleDriveCmd cmd;
-            if (traits->player_control) {
-                Entity *ctrl = world.vehicles.resolve_controller(*veh);
-                // A DEAD controller parks the vehicle. The infantry death edge detaches
-                // first; this guard preserves the same result if the vehicle pass happens
-                // to observe the controller earlier in the frame.
-                // [orig: infantry death detach @0x4b9c57..0x4b9c60]
-                const bool ctrl_alive =
-                        ctrl != nullptr && ctrl->alive && ctrl->health > 0;
-                bool player_ctrl = ctrl_alive && ctrl->handle.pool() == 0 &&
-                                   ctrl->player_class != 0;
-                // A PLAYER driver whose head is under the water plane is driven
-                // by the AI leg in every family this staging serves, not only the
-                // boat. [orig: the submerged-driver cuts — cveh @0x48B9A0..0x48B9AC
-                // -> @0x48BC12; ctan @0x489579..0x489585 -> @0x4897DB; cbik
-                // @0x484AC6..0x484AD2 -> @0x484DB8; cbot @0x48DFD3..0x48DFDF
-                // -> @0x48E247]
-                if (player_ctrl && watercraft_driver_submerged(world, *ctrl))
-                    player_ctrl = false;
-                if (player_ctrl) {
-                    // A player drive freezes the SM mover exactly like the parked leg —
-                    // the route never advances under a human driver [orig: the player
-                    // leg forces SM state 22 too @0x48b993 / the boat leg @0x48DFF5].
-                    if (AiEntity *ve = world.ai.for_handle(h)) {
-                        ve->brain.f[AiBrain::kCurState] = 22;
-                    }
-                } else if (traits->family == VehicleFamily::Watercraft) {
-                    world.ai.watercraft_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr,
-                                        *traits, cmd);
-                } else {
-                    world.ai.vehicle_ai_drive(world, *veh, ctrl_alive ? ctrl : nullptr, *traits,
-                                     cmd);
-                }
-            }
+            // Each family mover runs its own occupant block (the parked, player and AI
+            // arms) in place after its head: the selector-zero ground and boat movers
+            // (VehicleSystem::tick_simple_motor), the cveh / ctan / cbik core
+            // (tick_motor) and the cbot mover (tick_watercraft_motor). A dead hull's
+            // mover bails to its matrix tail ahead of that block.
+            // [orig: Entity_DispatchPhysics_cveh @0x48EFC0 (the call @0x48EFC7) /
+            //  Entity_DispatchPhysicsUpdate @0x48F010 (@0x48F053) ->
+            //  Vehicle_ProcessSelectorZeroGround @0x46E100 (@0x46E9D4..0x46F0D0);
+            //  Vehicle_ProcessSelectorZeroBoat @0x46FA00 (@0x4704D6..0x470D79); cveh
+            //  @0x48B949..0x48C034; ctan @0x489522..0x489BF9; cbik @0x484A98..0x4851D9;
+            //  cbot @0x48DF7F..0x48E81E; the dead bails cveh @0x48B810..0x48B814, ctan
+            //  @0x4893E9..0x4893ED, cbik @0x484936..0x48493A, cbot @0x48DDFA..0x48DDFE]
             // Per-family motor dispatch, the class-table split [orig:
             // Entity_DispatchPhysics_cbot @0x48EFA3 -> the cbot mover @0x48D480
             // vs _cveh @0x48efc0 -> the ground core @0x48af00].
             if (traits->family == VehicleFamily::Watercraft) {
-                world.vehicles.tick_watercraft_motor(*veh, *traits, &cmd);
+                world.vehicles.tick_watercraft_motor(*veh, *traits);
             } else {
-                world.vehicles.tick_motor(*veh, *traits, &cmd);
+                world.vehicles.tick_motor(*veh, *traits);
             }
             // The installed +0x1C4 callback: the saved mover above, then the
             // same-refNum children ride the 'agun' points [orig:
             // Entity_UpdateAttachedChildren @0x45D550, @0x45D573 then @0x45D578..].
             world.vehicles.update_attached_children(*veh);
-            // Mirror the integrated transform back into the brain entity — one struct in
-            // the original; the SM mover and the present snapshot read pos[]/heading.
+            // Mirror the integrated heading back into the brain entity — one struct in
+            // the original (the position is the entity's own words, read through `self`).
             if (AiEntity *ve = world.ai.for_handle(h)) {
-                ve->pos[0] = to_fixed(veh->position.x);
-                ve->pos[1] = to_fixed(veh->position.y);
-                ve->pos[2] = to_fixed(veh->position.z);
                 ve->heading = veh->veh.yaw_seeded
                         ? veh->veh.yaw_bam
-                        : bam_heading_from_mission_yaw_deg(static_cast<double>(veh->yaw));
+                        : veh->heading;
                 // The mover's command registers ARE brain[132]/[136]/[137]
                 // (brain+0x210/+0x220/+0x224, the mover's moveMode base = entity
                 // +0x64): the next think reads the mover's steer target back, e.g.
@@ -287,16 +271,53 @@ void VehicleSystem::update_motor(Entity &row, bool is_authority) {
                 world.vehicles.ground_client_tick(*veh, *traits);
                 return;
             }
-            // The shared aircraft mover has no movement-sound call. In retail,
-            // Entity_ProcessMovementSoundEffects @0x5294A0 is reached from the
-            // ground/bike/water paths, but neither CHel @0x490310 nor cpln's
-            // thunk calls it. Physicsless air rows are newly eligible above, so
-            // keep them out of the ground-sound presentation tail in every
-            // prediction/death state.
-            if (vehicle_family_uses_direct_air_mover(traits->family)) return;
+            // A brainless row's ground, tank, bike, boat or selector-zero mover jumps
+            // from its stamp to the matrix-build tail on the client as on the authority,
+            // so a row the chase does not run (wire-frozen or wrecked) folds no movement
+            // sound either: each mover's Entity_ProcessMovementSoundEffects calls sit
+            // inside the bailed span, and the tail holds only the matrix build and the
+            // Flags OR.
+            // [orig: cveh @0x48AFA6 -> @0x48D43E (the fold calls @0x48D1BF, @0x48D3F9;
+            //  the tail @0x48D43E..0x48D451); ctan @0x488B56 -> @0x48AEB6 (@0x48AB20,
+            //  @0x48AE08; the tail @0x48AEB6..0x48AEC9); cbik @0x484086 -> @0x486A04
+            //  (@0x486769, @0x4869B5; the tail @0x486A04..0x486A17); cbot @0x48D4EF ->
+            //  @0x48EF50 (@0x48EEB4; the tail @0x48EF50..0x48EF63); selector-zero ground
+            //  @0x46E165 -> @0x46F9B2 (@0x46F820, @0x46F96A; the tail @0x46F9B2..0x46F9C5);
+            //  selector-zero boat @0x46FA64 -> @0x471670 (@0x4700C0, @0x4715D2; the tail
+            //  @0x471670..0x471683); Entity_ProcessMovementSoundEffects @0x5294A0]
+            if (!vehicle_family_uses_direct_air_mover(traits->family) &&
+                    world.ai.for_handle(h) == nullptr) {
+                veh->engine_flags |= kEntityFlagMatrixBuilt;
+                return;
+            }
+            // Every mover has one exit, its matrix-build tail, so a client visit of a
+            // brained hull the chase does not run (wire-frozen, wrecked, or not yet
+            // armed) still ends there and takes Flags 0x20000. The client leg falls
+            // through its chase into the shared dead test, so a dead hull bails to that
+            // tail ahead of the movement fold. The shared aircraft mover has no
+            // movement-sound call (neither CHel @0x490310 nor cpln's thunk reaches
+            // Entity_ProcessMovementSoundEffects @0x5294A0), so an air row takes the
+            // tail alone in every prediction or death state.
+            // [orig: the tails and their one retn: cveh @0x48D43E..0x48D451 /
+            //  @0x48D462, ctan @0x48AEB6..0x48AEC9 / @0x48AEDA, cbik
+            //  @0x486A04..0x486A17 / @0x486A28, cbot @0x48EF50..0x48EF63 / @0x48EF73,
+            //  selector-zero ground @0x46F9B2..0x46F9C5 / @0x46F9D5, boat
+            //  @0x471670..0x471683 / @0x471693, aircraft @0x492753..0x492766 /
+            //  @0x492776; the client legs into the dead tests: cveh `cmp is_authority`
+            //  @0x48B53F, `jnz` @0x48B54C, the test @0x48B810..0x48B814; ctan
+            //  @0x489108..0x489114, @0x4893E9..0x4893ED; cbik @0x484642..0x484648,
+            //  @0x484936..0x48493A; cbot @0x48DB6B..0x48DB78, @0x48DDFA..0x48DDFE;
+            //  selector-zero ground @0x46E60E..0x46E61B, @0x46E89D..0x46E8A1;
+            //  selector-zero boat @0x470398..0x47039C -> @0x471669]
+            if (vehicle_family_uses_direct_air_mover(traits->family) ||
+                    ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) {
+                veh->engine_flags |= kEntityFlagMatrixBuilt;
+                return;
+            }
             world.vehicles.update_ground_sound(*veh, *traits,
                                         /*wrecked=*/veh->health <= 0,
                                         /*collided=*/false);
+            veh->engine_flags |= kEntityFlagMatrixBuilt;
     }
 }
 

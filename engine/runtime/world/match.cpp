@@ -64,13 +64,13 @@ bool is_flag_bay(int32_t item_id) {
            item_id == kTeam4Bay || item_id == kTeam3Bay;
 }
 
-// The Yaw word back to the definition pose's, the spawn heading of the
-// whole-degree placement yaw [orig: Entity_SyncPositionFromDefinition
-// @0x43aa96]. A dropped object holds its heading as a live BAM word.
-void restore_authored_heading(Entity &flag, int16_t home_yaw) {
-    flag.yaw = home_yaw;
+// The Yaw word back to the definition pose's [orig:
+// Entity_SyncPositionFromDefinition @0x43aa96]. A dropped object holds its
+// heading as a live BAM word.
+void restore_authored_heading(Entity &flag, int32_t home_heading) {
+    flag.heading = home_heading;
     if (flag.veh.yaw_seeded)
-        flag.veh.yaw_bam = spawn_angle_bam(90 - home_yaw);
+        flag.veh.yaw_bam = home_heading;
 }
 
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0 — the per-id bit OR into
@@ -103,12 +103,30 @@ bool is_live_player(const Entity *entity) {
     return entity != nullptr && (entity->flags & kEntityFlagDead) == 0;
 }
 
-bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
-    if (radius < 0.0f)
+// A word delta made absolute as `cdq; xor; sub` does (wrapping).
+int32_t abs_word_delta(int32_t a, int32_t b) {
+    const int32_t d = io::bam_sub(a, b);
+    return d < 0 ? io::bam_sub(0, d) : d;
+}
+
+// The proximity test on the position words: each absolute X/Y delta against the
+// radius word, then the rounded 16.16 squares summed in a word, `fsqrt; fistp`
+// (nearest) and `<< 8` against it. [orig: Server_UpdateCaptureZoneProximity
+//  @0x5086A0 - the objective's 20 units @0x5088A9..0x508925, the hill's bound word
+//  @0x5089F1..0x508A68]
+bool within_2d(const EntityPosition &a, const EntityPosition &b, int32_t radius_q16) {
+    const int32_t adx = abs_word_delta(a.x.q16, b.x.q16);
+    const int32_t ady = abs_word_delta(a.y.q16, b.y.q16);
+    if (adx > radius_q16 || ady > radius_q16)
         return false;
-    const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
-    const double dy = static_cast<double>(a.y) - static_cast<double>(b.y);
-    return dx * dx + dy * dy <= static_cast<double>(radius) * radius;
+    const auto square = [](int32_t v) {
+        return static_cast<uint32_t>(static_cast<uint64_t>(int64_t(v) * v + 0x8000) >> 16);
+    };
+    const int32_t sum = static_cast<int32_t>(square(adx) + square(ady));
+    // fistp of a negative operand's NaN root stores the integer indefinite.
+    const int32_t root = sum < 0 ? INT32_MIN
+                                 : static_cast<int32_t>(std::nearbyint(std::sqrt(double(sum))));
+    return static_cast<int32_t>(static_cast<uint32_t>(root) << 8) <= radius_q16;
 }
 
 // The 32-bit `imul` the score multiplier rides.
@@ -272,7 +290,7 @@ void Match::configure(const MatchRules &rules) {
         rules_.score_values = default_match_score_values(rules_.game_type, rules_.title);
     players_.clear();
     player_punts_.clear();
-    teams_ = {};
+    teams_.assign(kTeamRecordCount, MatchStats{});
     team_hold_ticks_ = {};
     periodic_second_timer_ = 0;
     periodic_second_fired_ = false;
@@ -285,8 +303,8 @@ void Match::configure(const MatchRules &rules) {
     gameplay_events_.clear();
     // Game_StartMission starts at -1 and seeds GameTime only for a network
     // session outside the Co-op waypoint family, and only when nonzero.
-    // [orig: g_RoundTimeRemaining=-1 @0x524A89; seed
-    // 3720*g_RespawnTime @0x525242..0x525251; decrement @0x5266D6]
+    // [orig: g_RoundTimeRemaining=-1 @0x524A5D; seed
+    // 3720*g_RoundTimeLimitMinutes @0x525242..0x525251; decrement @0x526602]
     if (rules.game_time_minutes != 0 && !is_waypoint_family(rules.game_type)) {
         const uint64_t ticks = uint64_t(rules.game_time_minutes) * kTicksPerMinute;
         remaining_ticks_ = ticks > uint64_t(std::numeric_limits<int32_t>::max())
@@ -305,16 +323,24 @@ void Match::upsert_player(const MatchPlayerIdentity &identity) {
         by_entity->identity = identity;
         return;
     }
+    // A fresh stats record: every field zero but field 35, the round marker, which starts at 1.
+    // The player add initialises it so, and every mission start resets each slot's record the
+    // same way (the next mission's rows are added fresh here).
+    // [orig: Server_PlayerAdd @0x51D4FE -> CPlayerStats_InitWeaponTracking @0x52BF60 (+0x8C = 1
+    //  @0x52C047); Server_ResetAllPlayerSlotFrameState @0x4FC39E -> CPlayerStats_ResetAllArrays
+    //  @0x52C4C0 (the 0xAC-byte memset @0x52C4CB, +0x8C = 1 @0x52C4DB)]
+    MatchPlayer fresh{identity, {}, 0};
+    fresh.stats[MatchStats::kRoundMarker] = 1;
     // A retail roster slot has one live owner. Rebinding it starts a fresh stats
     // record rather than leaving a disconnected entity's counters addressable.
     auto by_slot = std::find_if(players_.begin(), players_.end(), [&](const MatchPlayer &p) {
         return p.identity.slot == identity.slot;
     });
     if (by_slot != players_.end()) {
-        *by_slot = MatchPlayer{identity, {}, 0};
+        *by_slot = std::move(fresh);
         return;
     }
-    players_.push_back(MatchPlayer{identity, {}, 0});
+    players_.push_back(std::move(fresh));
 }
 
 void Match::remove_player(World &world, EntityHandle entity) {
@@ -338,6 +364,11 @@ void Match::set_player_respawn_pending(EntityHandle entity, bool pending) {
 void Match::set_player_slot_team(EntityHandle entity, uint8_t team) {
     if (MatchPlayer *row = player(entity))
         row->slot_team = team;
+}
+
+void Match::set_player_slot_in_game(EntityHandle entity, bool in_game) {
+    if (MatchPlayer *row = player(entity))
+        row->slot_in_game = in_game;
 }
 
 const MatchPlayer *Match::player(EntityHandle entity) const {
@@ -546,7 +577,7 @@ Match::CarryObjectiveState *Match::carry_state(World &world, EntityHandle object
     // The definition pose's yaw word is the spawn heading [orig:
     // Entity_InitFromModel @0x40e12a..0x40e130 copies Yaw into aiRuntime
     // f0_7[7]]; nothing has turned the row before its first carry service.
-    carry_objectives_.back().home_yaw = entity->yaw;
+    carry_objectives_.back().home_heading = entity->heading;
     return &carry_objectives_.back();
 }
 
@@ -571,10 +602,16 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+    // The 0x14 feed carries the flag's own words, read before the carry moves it: the
+    // attach hands the sender the carrier and the flag, and the sender takes the x/y of
+    // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
+    //  stored @0x43C191) @0x43C18F, push edi (the carrier) @0x43C190, the call @0x43C197;
+    //  Server_BroadcastFlagPickupEvent @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
+    //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
                                 player_handle,
                                 flag_handle,
-                                carrier->position,
+                                flag->position,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
                                 player_handle,
@@ -589,7 +626,7 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
     Entity *flag = world.registry.get(flag_handle);
     if (state == nullptr || flag == nullptr)
         return;
-    const Vec3 event_position = flag->position;
+    const EntityPosition event_position = flag->position;
     if (Entity *carrier = world.registry.get(flag->primary_occupant);
         carrier != nullptr && carrier->mounted_child == flag_handle)
         carrier->mounted_child = EntityHandle{};
@@ -602,7 +639,7 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
     // @0x43aa96, called from
     //  Entity_UpdateIdleCheck @0x40857d, Entity_ProcessWaypointInteraction
     //  @0x4ad8c3 / @0x4ad908, Server_ProcessScoringAndBroadcast @0x516a5b]
-    restore_authored_heading(*flag, state->home_yaw);
+    restore_authored_heading(*flag, state->home_heading);
     flag->alive = true;
     state->return_ticks = 0;
     gameplay_events_.push_back({kind,
@@ -629,7 +666,7 @@ void Match::record_flag_save(World &world, EntityHandle player_handle,
     //  ++stats[11] (slot dword 29) @0x52f8d7, points += scoringTable[83]
     //  (score.ini FLAGSAVE, VAR slot 9) @0x52f8ec, the team mirror
     //  ++team[28] (= team field 11) @0x52f988 with the same award @0x52f98c;
-    //  dispatched by Server_BroadcastEntityDeathEvent @0x517A90 (push 8
+    //  dispatched by Server_BroadcastFlagSaveEvent @0x517A90 (push 8
     //  @0x517b03) from Entity_ProcessWaypointInteraction @0x4AD820]
     add_event(world, *scorer, MatchStats::kFlagSaves, score_value(9));
     add_team_event(entity->team, MatchStats::kFlagSaves, score_value(9));
@@ -662,7 +699,7 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
         add_team_record_event(1, MatchStats::kFlagCaptures, score_value(10));
     else if (flag->item_id == kNeutralFlag)
         add_team_event(carrier->team, MatchStats::kFlagCaptures, score_value(10));
-    const Vec3 capture_position = flag->position;
+    const EntityPosition capture_position = flag->position;
     const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
     carrier->mounted_child = EntityHandle{};
     flag->primary_occupant = EntityHandle{};
@@ -772,16 +809,14 @@ void drop_object_from_carrier(World &world, Entity &object, const DropCarrierPos
     // quarter turn; the pitch and roll words stay the object's own, now held
     // as live BAM words like a mover's. [orig: @0x439e9f..0x439ec3]
     if (!object.veh.yaw_seeded) {
-        object.veh.air_pitch_bam = spawn_angle_bam(object.pitch);
-        object.veh.air_roll_bam = spawn_angle_bam(object.roll);
+        object.veh.air_pitch_bam = object.pitch_bam;
+        object.veh.air_roll_bam = object.roll_bam;
         object.veh.yaw_seeded = true;
     }
     object.veh.yaw_bam = io::bam_add(carrier.heading_bam, 0x40000000);
-    object.yaw = static_cast<int16_t>(
-        std::lround(mission_yaw_deg_from_bam_heading(object.veh.yaw_bam)));
+    object.heading = object.veh.yaw_bam;
     object.position = carrier.position;
-    object.position.z = static_cast<float>(
-        from_fixed(io::bam_add(to_fixed(carrier.position.z), 0x4000)));
+    object.position.z.q16 = io::bam_add(carrier.position.z.q16, 0x4000);
     // The dropped object takes its carrier's blink quad, then re-runs its own
     // proximity/blink query at the drop point (the quad and the indoors bit
     // the collector's blink-hits gate and the render waves read).
@@ -842,19 +877,19 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     CarryObjectiveState *state = carry_state(world, flag_handle);
     if (flag == nullptr || state == nullptr)
         return false;
-    const int32_t x = to_fixed(flag->position.x);
-    const int32_t y = to_fixed(flag->position.y);
-    const int32_t z = to_fixed(flag->position.z);
-    const int32_t home_x = to_fixed(state->home.x);
-    const int32_t home_y = to_fixed(state->home.y);
-    const int32_t home_z = to_fixed(state->home.z);
+    const int32_t x = flag->position.x.q16;
+    const int32_t y = flag->position.y.q16;
+    const int32_t z = flag->position.z.q16;
+    const int32_t home_x = state->home.x.q16;
+    const int32_t home_y = state->home.y.q16;
+    const int32_t home_z = state->home.z.q16;
     int32_t pose[3];
     int32_t heading = 0;
     int32_t pitch = 0;
     int32_t roll = 0;
     carrier_pose_fixed(*flag, pose, heading, pitch, roll);
     if (x == home_x && y == home_y && z == home_z &&
-        heading == spawn_angle_bam(90 - state->home_yaw))
+        heading == state->home_heading)
         return false; // [orig: @0x43a9f8 — already at the definition pose]
     const int64_t dx = int64_t{x} - home_x;
     const int64_t dy = int64_t{y} - home_y;
@@ -868,7 +903,7 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
         // (@0x43ab22) — this port clears it like the timeout return does, no
         // raycast seam here.
         flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
-        restore_authored_heading(*flag, state->home_yaw);
+        restore_authored_heading(*flag, state->home_heading);
         flag->ground_target = EntityHandle{};
     }
     // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
@@ -888,21 +923,24 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
     return !near_home;
 }
 
+// A Player's death first unlinks every pool-0 AI body whose +0x170
+// point-share link names it. [orig: GameEvent_PlayerDeath
+// @0x516E07..0x516E45]
+void Match::unlink_point_share_links(World &world, EntityHandle victim_handle) {
+    const Entity *dead = world.registry.get(victim_handle);
+    if (dead == nullptr || ((dead->flags | dead->engine_flags) & kEntityFlagPlayer) == 0)
+        return;
+    world.registry.for_each_in_pool(0, [&](const Entity &row) {
+        if (row.handle == victim_handle || row.primary_occupant != victim_handle ||
+                world.ai.for_handle(row.handle) == nullptr)
+            return;
+        world.registry.get(row.handle)->primary_occupant = EntityHandle{};
+    });
+}
+
 void Match::record_death(World &world, EntityHandle victim_handle,
                          EntityHandle killer_handle, uint32_t cause_flags) {
-    // A Player's death first unlinks every pool-0 AI body whose +0x170
-    // point-share link names it. [orig: GameEvent_PlayerDeath
-    // @0x516E07..0x516E45]
-    if (const Entity *dead = world.registry.get(victim_handle);
-            dead != nullptr &&
-            ((dead->flags | dead->engine_flags) & kEntityFlagPlayer) != 0) {
-        world.registry.for_each_in_pool(0, [&](const Entity &row) {
-            if (row.handle == victim_handle || row.primary_occupant != victim_handle ||
-                    world.ai.for_handle(row.handle) == nullptr)
-                return;
-            world.registry.get(row.handle)->primary_occupant = EntityHandle{};
-        });
-    }
+    unlink_point_share_links(world, victim_handle);
     if (outcome_.ended)
         return;
     // The kill scorer reads the victim's carried-object link (+0x268) as the
@@ -947,6 +985,18 @@ void Match::score_death(World &world, EntityHandle victim_handle) {
         return;
     add_event(world, *victim, MatchStats::kDeaths, score_value(5));
     add_team_event(victim_entity->team, MatchStats::kDeaths, score_value(5));
+}
+
+// See match.h. The slot's CPlayerStats takes the counter and the points award as a
+// roster player's does (add_event), with no share: the row's body carries no point-share
+// links. [orig: GameEvent_ProcessScoring @0x53074E..0x530774 (the slot +0x48),
+//  @0x530779..0x5307A7 (the team record +0x44)]
+void Match::score_row_death(MatchStats &row, uint8_t team) {
+    if (outcome_.ended || !gt::has_score_table(rules_.game_type))
+        return;
+    row[MatchStats::kDeaths] = io::bam_add(row[MatchStats::kDeaths], 1);
+    row[MatchStats::kPoints] = io::bam_add(row[MatchStats::kPoints], score_value(5));
+    add_team_event(team, MatchStats::kDeaths, score_value(5));
 }
 
 // Scorer event 3 with an other-entity (the victim).
@@ -1116,9 +1166,12 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
     add_team_points(killer_team, score_value(37));
 }
 
-// Only the damage-pass lethal edges call Score_ProcessKillEvent
-// (RoundDeath::kill_event), and it returns without a killer or when the
-// VICTIM's ItemDef `score` word is zero, so a Player (no score on any Player
+// Only the damage-pass lethal edges call Score_ProcessKillEvent, each at its
+// site while the victim exists, and it returns without a killer, off the
+// authority (the one lethal gate with no authority test of its own is the
+// projectile site's [orig: Projectile_ProcessDamageOnTarget @0x4E80F7..0x4E8133,
+// its own is_authority test @0x4E8148]), or when the VICTIM's ItemDef `score`
+// word is zero, so a Player (no score on any Player
 // definition) never enters it, not even for a self-kill. Scorer event 12 runs
 // in every session; the SP tallies (the epilog score screen's counts and the
 // WAC bluekills/greenkills builtins) only outside one, by the local player
@@ -1133,24 +1186,26 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 // bucket (victim+534 -> 0xC846A0, unreachable behind the score gate) are
 // unmodeled: nothing live reads them (world.h MissionKillStats; D-AI-10;
 // world-wac-ai-re §20.4).
-// [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, target def
+// [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, victim @0x4FD40E,
+//  `cmp g_NapiNPCtx.is_authority, 0` @0x4FD412, target def
 //  @0x4FD41E, `cmp word ptr [eax+194h], 0` @0x4FD422, event 12 @0x4FD438, the
 //  session test @0x4FD440..0x4FD447, `cmp edi, g_LocalPlayerEntity` @0x4FD449;
 //  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213; the
 //  class switch @0x4FD242, the overflows @0x4FD264 / @0x4FD293 / @0x4FD2C2);
 //  Score_TallyKillByOthers @0x4FD300 (@0x4FD325..0x4FD366)]
-void Match::process_kill_event(World &world, const RoundDeath &death) {
-    if (!death.kill_event || !death.killer.valid())
+void Match::process_kill_event(World &world, EntityHandle killer, EntityHandle victim_handle) {
+    if (!killer.valid())
         return;
-    const Entity *victim = world.registry.get(death.victim);
-    if (victim == nullptr || !victim->has_item_def || victim->item_score == 0)
+    const Entity *victim = world.registry.get(victim_handle);
+    if (victim == nullptr || !world.ai.is_authority || !victim->has_item_def ||
+            victim->item_score == 0)
         return;
-    record_kill_event(world, death.killer, death.victim);
+    record_kill_event(world, killer, victim_handle);
     if (world.rules.mp_session)
         return;
     MissionKillStats &ks = world.kill_stats;
     const bool person = victim->item_type == 3;
-    if (death.killer == world.cached.local_player) {
+    if (killer == world.cached.local_player) {
         if (victim->team == 1) {
             if (person) ++ks.bluekills_by_player;
         } else if (victim->team == 0) {
@@ -1315,8 +1370,13 @@ void Match::update_objective_proximity(const World &world) {
     const bool team_mode = (rules_.game_type & 0x10000u) != 0;
     for (MatchPlayer &match_player : players_) {
         const Entity *player_entity = world.registry.get(match_player.identity.entity);
+        // Every active slot's mask clears; one out of state 6 or without its
+        // entity is skipped after the clear.
+        // [orig: Server_UpdateCaptureZoneProximity - `cmp [esi+20h], 6`
+        //  @0x50872A, the clear @0x50872E, its `jnz` @0x508735, the entity
+        //  @0x50873B]
         match_player.objective_proximity_mask = 0;
-        if (player_entity == nullptr)
+        if (!match_player.slot_in_game || player_entity == nullptr)
             continue;
         // A spectator-latched slot is skipped after its mask clear.
         // [orig: Server_UpdateCaptureZoneProximity `cmp byte ptr [esi+188D7h], 0`
@@ -1359,7 +1419,7 @@ void Match::update_objective_proximity(const World &world) {
             if (const Entity *owner = world.registry.get(objective->primary_occupant))
                 position_source = owner;
             if (live && within_2d(player_entity->position,
-                                  position_source->position, 20.0f))
+                                  position_source->position, 0x140000))
                 match_player.objective_proximity_mask |=
                     objective_proximity_bit(objective->item_id);
         }
@@ -1367,7 +1427,7 @@ void Match::update_objective_proximity(const World &world) {
         bool in_hill = false;
         for (const Entity *hill : hills) {
             if (!within_2d(player_entity->position, hill->position,
-                           hill->bound_radius))
+                           hill->bound_radius.q16))
                 continue;
             // The team modes OR the hill team's bit through a byte `shl`, its
             // count taken mod 32; the others set bit 0 whatever the team.
@@ -1383,10 +1443,22 @@ void Match::update_objective_proximity(const World &world) {
 
         bool in_capturable_entity = false;
         for (const Entity *zone : capturable_entities) {
-            const float radius = static_cast<float>(zone->zone_radius);
-            const float dz = std::fabs(player_entity->position.z - zone->position.z);
-            if (!within_2d(player_entity->position, zone->position, radius) ||
-                dz > radius * 0.5f)
+            // The zone's words less the player's, each made absolute (`cdq; xor; sub`,
+            // wrapping); the X/Y length saturated at flt_7C19E0 and truncated against
+            // the radius word (+0x15E << 16), then |dz| against half of it (a signed
+            // halving). [orig: Server_UpdateCaptureZoneProximity @0x5086A0 - the
+            //  deltas @0x508B57..0x508B92, fsqrt @0x508B9A, the clamp
+            //  @0x508B9C..0x508BAF, `movzx eax, word ptr [edi+15Eh]; shl eax, 10h`
+            //  @0x508BB1..0x508BB8, `jg` @0x508BC4..0x508BC8, `cdq; sub eax, edx;
+            //  sar eax, 1` @0x508BD2..0x508BD5, `jg` @0x508BD7..0x508BDB]
+            const int32_t adx = abs_word_delta(zone->position.x.q16, player_entity->position.x.q16);
+            const int32_t ady = abs_word_delta(zone->position.y.q16, player_entity->position.y.q16);
+            const int32_t adz = abs_word_delta(zone->position.z.q16, player_entity->position.z.q16);
+            const int32_t radius_q16 =
+                    static_cast<int32_t>(static_cast<uint32_t>(zone->zone_radius) << 16);
+            const int32_t length = static_cast<int32_t>(std::min(
+                    std::sqrt(double(adx) * adx + double(ady) * ady), 2147418112.0)); // flt_7C19E0
+            if (length > radius_q16 || adz > radius_q16 / 2)
                 continue;
             if (!world.zones.is_capturable(1, *zone) &&
                 !world.zones.is_capturable(2, *zone))
@@ -1491,7 +1563,8 @@ std::array<int32_t, 5> Match::count_alive_players_per_team(const World &world) c
         // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 - the spectator
         //  test @0x500214, `movzx eax, byte ptr [ecx+1A0h]` @0x50021D, the
         //  dead bit @0x50022F, the mask's bit 0 @0x500235, the count @0x50023E]
-        if (match_player.spectator || !is_live_player(entity) ||
+        if (!match_player.slot_in_game || match_player.spectator ||
+            !is_live_player(entity) ||
             (match_player.objective_proximity_mask & 0x01u) == 0 ||
             match_player.slot_team >= holders.size())
             continue;
@@ -1531,11 +1604,11 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     }
     CarryObjectiveState *state = carry_state(world, flag.handle);
     if (state == nullptr) return;
-    const int32_t x = int32_t(flag.position.x * 65536);
-    const int32_t y = int32_t(flag.position.y * 65536);
-    const int32_t dx = io::bam_sub(x, int32_t(state->home.x * 65536));
-    const int32_t dy = io::bam_sub(y, int32_t(state->home.y * 65536));
-    const int32_t dz = io::bam_sub(int32_t(flag.position.z * 65536), int32_t(state->home.z * 65536));
+    const int32_t x = flag.position.x.q16;
+    const int32_t y = flag.position.y.q16;
+    const int32_t dx = io::bam_sub(x, state->home.x.q16);
+    const int32_t dy = io::bam_sub(y, state->home.y.q16);
+    const int32_t dz = io::bam_sub(flag.position.z.q16, state->home.z.q16);
     const bool near_home = std::sqrt(double(dx) * dx + double(dy) * dy) < 131072.0 &&
             io::bam_abs(dz) < 131072;
     const bool idle = x == state->previous_x_q16 && y == state->previous_y_q16 &&
@@ -1555,13 +1628,15 @@ void Match::tick_flag_event(World &world, Entity &flag) {
         return_flag_home(world, handle, MatchGameplayEventKind::FlagReturn);
         state = carry_state(world, handle);
     }
-    state->previous_x_q16 = int32_t(flag.position.x * 65536);
-    state->previous_y_q16 = int32_t(flag.position.y * 65536);
+    state->previous_x_q16 = flag.position.x.q16;
+    state->previous_y_q16 = flag.position.y.q16;
     const Entity *occupant = world.registry.get(flag.primary_occupant);
     const Entity *local = world.registry.get(world.cached.local_player);
+    // The carrier's X/Y words, raw (D-NET-507).
+    // [orig: Entity_UpdateIdleCheck @0x408430 - @0x4085C2 / @0x4085C8]
     if (occupant != nullptr && local != nullptr && local->team == flag.team) {
-        flag.position.x = occupant->position.x;
-        flag.position.y = occupant->position.y;
+        flag.position.x.q16 = occupant->position.x.q16;
+        flag.position.y.q16 = occupant->position.y.q16;
     }
     flag.class_think_ticks = 62;
 }
@@ -1583,9 +1658,9 @@ void fall_step(World &world, Entity &object) {
     // @0x4adf0d..0x4adf6d; the step @0x4adf33..0x4adf55]
     stamp_saved_live_pose(object);
     Entity::VehicleMotorState &m = object.veh;
-    const int32_t x = to_fixed(object.position.x);
-    const int32_t y = to_fixed(object.position.y);
-    const int32_t z = to_fixed(object.position.z);
+    const int32_t x = object.position.x.q16;
+    const int32_t y = object.position.y.q16;
+    const int32_t z = object.position.z.q16;
     const int32_t next_x = io::bam_add(x, m.vel_x);
     const int32_t next_y = io::bam_add(m.vel_y, y);
     const int32_t next_z = io::bam_add(m.slide_z, z);
@@ -1599,9 +1674,7 @@ void fall_step(World &world, Entity &object) {
         world, object.handle, FixedVec3{x, y, io::bam_add(z, 0x1000)},
         (object.flags & kEntityFlagIndoors) != 0, &ground);
     if (next_z > height) {
-        object.position = {static_cast<float>(from_fixed(next_x)),
-                           static_cast<float>(from_fixed(next_y)),
-                           static_cast<float>(from_fixed(next_z))}; // [orig: @0x4ae016..0x4ae01f]
+        object.position.set_q16({next_x, next_y, next_z}); // [orig: @0x4ae016..0x4ae01f]
         return;
     }
     // The landing: the ground height, the ground link and no velocity
@@ -1610,7 +1683,7 @@ void fall_step(World &world, Entity &object) {
     // other def follows a dead ground entity plainly and rides otherwise
     // (a ride with no ground only keeps saving its pose)
     // [orig: @0x4adfc9..0x4ae00e].
-    object.position.z = static_cast<float>(from_fixed(height));
+    object.position.z.q16 = height;
     object.ground_target = ground;
     m.vel_x = 0;
     m.vel_y = 0;
@@ -1646,17 +1719,14 @@ void follow_ground(World &world, Entity &object, bool ride) {
         CarrierMotionPose pose;
         carrier_pose_fixed(object, pose.pos, pose.yaw_bam, pose.pitch_bam, pose.roll_bam);
         follow_carrier_motion(*ground, pose);
-        object.position = {static_cast<float>(from_fixed(pose.pos[0])),
-                           static_cast<float>(from_fixed(pose.pos[1])),
-                           static_cast<float>(from_fixed(pose.pos[2]))};
+        object.position.set_q16({pose.pos[0], pose.pos[1], pose.pos[2]});
         object.veh.yaw_seeded = true;
         object.veh.yaw_bam = pose.yaw_bam;
         object.veh.air_pitch_bam = pose.pitch_bam;
         object.veh.air_roll_bam = pose.roll_bam;
-        object.yaw = static_cast<int16_t>(
-            std::lround(mission_yaw_deg_from_bam_heading(pose.yaw_bam)));
-        object.pitch = static_cast<int16_t>(std::lround(double(pose.pitch_bam) * kDegreesPerBam));
-        object.roll = static_cast<int16_t>(std::lround(double(pose.roll_bam) * kDegreesPerBam));
+        object.heading = pose.yaw_bam;
+        object.pitch_bam = pose.pitch_bam;
+        object.roll_bam = pose.roll_bam;
         if (ride && entity_dead(*ground)) {
             object.drop_motion = DropMotion::Fall;
             object.veh.slide_z = -0x4000;
@@ -1765,15 +1835,15 @@ void Match::update_flag_objectives(World &world) {
             // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
             // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
             // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
-            // @0x43A9BE) -> Server_BroadcastEntityDeathEvent @0x4AD8D3]
+            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
             if (state == nullptr)
                 continue;
-            const int64_t dx = int64_t{to_fixed(target->position.x)} -
-                               to_fixed(state->home.x);
-            const int64_t dy = int64_t{to_fixed(target->position.y)} -
-                               to_fixed(state->home.y);
-            const int64_t dz = int64_t{to_fixed(target->position.z)} -
-                               to_fixed(state->home.z);
+            const int64_t dx = int64_t{target->position.x.q16} -
+                               state->home.x.q16;
+            const int64_t dy = int64_t{target->position.y.q16} -
+                               state->home.y.q16;
+            const int64_t dz = int64_t{target->position.z.q16} -
+                               state->home.z.q16;
             const bool displaced =
                 static_cast<int64_t>(std::sqrt(static_cast<long double>(
                     dx * dx + dy * dy))) >= 0x20000 ||
@@ -1791,7 +1861,22 @@ void Match::update_flag_objectives(World &world) {
     }
 }
 
-void Match::advance_tick(World &world, TickPhase phase) {
+void Match::step_round_clock(const World &world) {
+    // The round clock has no round-over latch: its decrement is gated on the
+    // authority and the pause (the caller's, Server_TickUpdate's head), the
+    // epilog screen and the pre-round timer only, so it keeps counting through
+    // the post-round linger. The pre-round word is the one the last server
+    // tick's periodic block left, as the server tick's own admission reads it.
+    // [orig: Game_ProcessMainFrame @0x5263F0 - `cmp g_EpilogScreenActive`
+    //  @0x5265EA, `cmp g_PreRoundDelayTimer` @0x5265F2, `cmp
+    //  g_RoundTimeRemaining` @0x5265FA / `jle` @0x526600, the `sub` @0x526602]
+    if (world.epilog_screen_active() || world.preround_delay_seconds != 0)
+        return;
+    if (remaining_ticks_ > 0)
+        --remaining_ticks_;
+}
+
+void Match::advance_tick(World &world) {
     // The shared periodic service starts armed at zero, executes immediately,
     // then reloads 62 and decrements-before-testing on later simulation ticks.
     // KOTH accumulation and host-side 1 Hz services read this frame's verdict.
@@ -1815,13 +1900,6 @@ void Match::advance_tick(World &world, TickPhase phase) {
         //  Server_UpdateCaptureZoneProximity @0x5086A3]
         if (periodic_second_fired_)
             accumulate_team_scores(world);
-        // The round clock has no round-over latch: its decrement is gated on
-        // the authority, the epilog screen and the pre-round timer only, so it
-        // keeps counting through the post-round linger.
-        // [orig: Game_ProcessMainFrame @0x5265DA..0x526602]
-        if (phase == TickPhase::Gameplay && !world.epilog_screen_active() &&
-            remaining_ticks_ > 0)
-            --remaining_ticks_;
         return;
     }
     ensure_objective_census(world);
@@ -1829,10 +1907,6 @@ void Match::advance_tick(World &world, TickPhase phase) {
         update_objective_proximity(world);
         accumulate_team_scores(world);
     }
-    if (phase != TickPhase::Gameplay)
-        return;
-    if (remaining_ticks_ > 0)
-        --remaining_ticks_;
 }
 
 void Match::process_movement_contacts(World &world) {
@@ -1894,7 +1968,8 @@ int32_t Match::team_primary_score(uint8_t team) const {
     // @0x508E0A (the +0x148 fold)]
     if (team >= teams_.size())
         return 0;
-    return primary_score(teams_[team], team_hold_ticks_[team]);
+    // The hold timer lives beside the first five records (the boards' teams).
+    return primary_score(teams_[team], team < team_hold_ticks_.size() ? team_hold_ticks_[team] : 0);
 }
 
 MatchLiveScoreboard Match::live_scoreboard(World &world) {
@@ -1973,7 +2048,9 @@ std::optional<int32_t> Match::winner_if_finished(const World &world) {
         // expiry. [orig: Server_CheckWinConditions @0x51AE34..0x51AE3B]
         if (rules_.score_limit == 0)
             return std::nullopt;
-        for (uint8_t team = 0; team < teams_.size(); ++team) {
+        // The limit walk reads the first five records alone. [orig: Server_CheckWinConditions
+        // @0x51AE41..0x51AE70, +0x154 per record to +0x6A8]
+        for (uint8_t team = 0; team < 5; ++team) {
             if (teams_[team][MatchStats::kEnemyKills] >=
                 static_cast<int32_t>(rules_.score_limit))
                 return static_cast<int32_t>(team);
@@ -2174,7 +2251,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
     result_.game_type = rules_.game_type;
     result_.winner_team = winner_team;
     result_.score_fields = rules_.score_fields;
-    result_.team_stats = teams_;
+    // The end-of-round board reads the first five records (its team rows).
+    std::copy_n(teams_.begin(), result_.team_stats.size(), result_.team_stats.begin());
     result_.team_hold_ticks = team_hold_ticks_;
     result_.team_row_count = scoreboard_team_row_count(rules_);
     if (rules_.game_type == gt::kAdvanceAndSecure ||

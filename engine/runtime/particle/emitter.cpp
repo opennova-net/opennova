@@ -243,34 +243,10 @@ void apply_emission_shape(Emitter &e, const ParticleDef &def, const Vec3 &direct
 	}
 }
 
-// Retail's sphere-in-viewport test for the NOVISNOUPDATE gate: the AABB's
-// center and half-diagonal (a zero extent becomes 0.01) against the clip state
-// [orig: BoundingBox_IsVisibleInFrustum @ 0x5e45b0 -> @ 0x5f6ca0 ->
-//  Viewport_TransformAndClipPoint @ 0x4115e0]. The port tests the sphere against
-// the six camera planes instead of retail's fixed-point viewport projection.
+// The NOVISNOUPDATE gate's test of the emitter's live bounds
+// (bounds_visible_in_frustum carries the witness).
 bool emitter_bounds_visible(const Emitter &e, const ParticleViewFrustum &frustum) noexcept {
-	const Vec3 center{
-		(e.bounds_min.x + e.bounds_max.x) * 0.5f,
-		(e.bounds_min.y + e.bounds_max.y) * 0.5f,
-		(e.bounds_min.z + e.bounds_max.z) * 0.5f,
-	};
-	const Vec3 extent{
-		e.bounds_max.x - e.bounds_min.x,
-		e.bounds_max.y - e.bounds_min.y,
-		e.bounds_max.z - e.bounds_min.z,
-	};
-	float radius = 0.5f * vec3_length(extent);
-	if (radius == 0.0f) {
-		radius = 0.0099999998f;
-	}
-	for (const auto &plane : frustum.planes) {
-		const float distance = plane[0] * center.x + plane[1] * center.y +
-				plane[2] * center.z + plane[3];
-		if (distance < -radius) {
-			return false;
-		}
-	}
-	return true;
+	return bounds_visible_in_frustum(e.bounds_min, e.bounds_max, frustum);
 }
 
 void integrate_particle(Particle &p, const ParticleDef &def, const Emitter &e, float dt,
@@ -852,7 +828,7 @@ float particle_scale_curve_blend(const CurveRef &curve, int lut_index, float fra
 	// CEffectTableDef_ParseCallback @ 0x5e4070; CParticleTableDef_Construct
 	// @ 0x5e26d4]; a transformed clone's is the reference's mask, inverse 0x01 |
 	// reverse 0x02 [orig: CParticleManager_FindTableDefByName @ 0x5e95da..0x5e95fc
-	// -> sub_5E80F0 @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
+	// -> CParticleTableDef_ConstructClone @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
 	// @ 0x5e2730 / @ 0x5e273c tests]. The resolve hands an unmodified reference
 	// only a base table (flags 0) and a modified one only the clone stamped with
 	// its own mask (@ 0x5e95b8..0x5e95c6), so the byte is the reference's mask
@@ -1027,6 +1003,35 @@ bool emitter_alive(const Emitter &e) noexcept {
 		return true;
 	}
 	return !e.particles.empty();
+}
+
+// [orig: BoundingBox_IsVisibleInFrustum @ 0x5e45b0: the center and half-diagonal
+// @0x5e45b7..0x5e4602, the 0.01 radius @0x5e4611..0x5e4617, the sphere's clip test
+// call @0x5e461f]
+bool bounds_visible_in_frustum(Vec3 minimum, Vec3 maximum,
+		const ParticleViewFrustum &frustum) noexcept {
+	const Vec3 center{
+		(minimum.x + maximum.x) * 0.5f,
+		(minimum.y + maximum.y) * 0.5f,
+		(minimum.z + maximum.z) * 0.5f,
+	};
+	const Vec3 extent{
+		maximum.x - minimum.x,
+		maximum.y - minimum.y,
+		maximum.z - minimum.z,
+	};
+	float radius = 0.5f * vec3_length(extent);
+	if (radius == 0.0f) {
+		radius = 0.0099999998f;
+	}
+	for (const auto &plane : frustum.planes) {
+		const float distance = plane[0] * center.x + plane[1] * center.y +
+				plane[2] * center.z + plane[3];
+		if (distance < -radius) {
+			return false;
+		}
+	}
+	return true;
 }
 
 void emitter_advance(Emitter &e, float dt, const EmitterEnvironment &env, Emitter *child,

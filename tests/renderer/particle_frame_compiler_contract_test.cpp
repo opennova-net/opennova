@@ -3,6 +3,7 @@
 #include <runtime/renderer/particle_density.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <utility>
@@ -10,6 +11,7 @@
 
 namespace {
 namespace r = opennova::renderer;
+namespace op = opennova::particle;
 
 static_assert(sizeof(r::ParticleVertex) == 28,
 		"particle upload vertices retain the retail stride");
@@ -556,7 +558,8 @@ bool flat_particle_runs_contract() {
 	add_emitter(snapshot, 2, r::ParticleRenderDomain::World, 30.0f,
 			{quad(30.0f, 0x21u, draw_state)});
 	// Emitter 3 claims ten particles starting inside emitter 2's run; only the
-	// one existing particle is compiled. Emitter 4 starts past the end.
+	// one existing particle is compiled. Emitter 4 starts past the end: its
+	// clamped run is empty, so it never submits (no live particle).
 	add_emitter(snapshot, 3, r::ParticleRenderDomain::World, 50.0f, {});
 	snapshot.emitters.back().first_particle = 2;
 	snapshot.emitters.back().particle_count = 10;
@@ -568,7 +571,8 @@ bool flat_particle_runs_contract() {
 	r::ParticleViewInput view;
 	const auto &packet = compiler.compile(snapshot, view);
 	if (!check(packet.debug.input_particles == 4 &&
-			packet.debug.selected_emitters == 4 &&
+			packet.debug.selected_emitters == 3 &&
+			packet.debug.empty_emitters == 1 &&
 			packet.debug.truncated_particles == 0,
 			"overrunning runs are clamped to the flat array")) return false;
 	if (!check(packet.vertices.size() == 16 &&
@@ -577,7 +581,7 @@ bool flat_particle_runs_contract() {
 			packet.vertices[8].primary_color == 0x11u &&
 			packet.vertices[12].primary_color == 0x12u,
 			"the clamped run re-emits the shared particle far-to-near")) return false;
-	return check(packet.emitter_bounds.size() == 4,
+	return check(packet.emitter_bounds.size() == 3,
 			"every selected emitter reports exactly one bounds entry");
 }
 
@@ -689,16 +693,14 @@ bool retained_sort_stack_contract() {
 	return true;
 }
 
-bool empty_batch_leaves_emitters_unstamped_contract() {
-	// Z partition: {A,B} overlap and are separated from {C,D}, which overlap
-	// each other; every emitter overlaps on X and Y. Retail recurses {A,B}
-	// through all three axes into one batch, then, because the trailing group
-	// closed the range with no singleton rendered, re-partitions the WHOLE
-	// range until the all-axes fallback batches A,B,C,D together. A and B hold
-	// no particles, so their first batch filled nothing and left them
-	// unstamped; the wider batch fills them again (to nothing) while C and D
-	// draw once, far-to-near. The diagnostics still carry one bounds entry per
-	// emitter [orig: CParticleManager_RenderBatch @ 0x5e9a78].
+bool empty_emitters_never_submit_contract() {
+	// Z partition: {A,B} would overlap apart from {C,D}, which overlap each
+	// other; every emitter overlaps on X and Y. A and B hold no live particle,
+	// so the child's render submit leaves them out of the render list
+	// [orig: CParticleEmitter_TrySubmitForRender @ 0x5e7540, the count test
+	// @0x5e754a]: the partition walks {C,D} alone, through all three axes into
+	// the all-axes fallback batch, and they draw once, far-to-near, with one
+	// bounds entry each.
 	const auto draw_state = state(r::ParticlePipeline::Blend, 0, 0, 0);
 	r::ParticleFrameSnapshot snapshot;
 	add_emitter(snapshot, 0xa, r::ParticleRenderDomain::World, 20.0f, {});
@@ -711,32 +713,86 @@ bool empty_batch_leaves_emitters_unstamped_contract() {
 	r::ParticleFrameCompiler compiler;
 	r::ParticleViewInput view;
 	const auto &packet = compiler.compile(snapshot, view);
-	if (!check(packet.debug.recursive_partition_calls == 5 &&
-			packet.debug.render_batch_leaves == 2,
-			"the empty leaf is followed by the whole-range fallback batch")) {
+	if (!check(packet.debug.empty_emitters == 2 && packet.debug.selected_emitters == 2 &&
+			packet.debug.recursive_partition_calls == 3 &&
+			packet.debug.render_batch_leaves == 1,
+			"the empty emitters never submit; the pair takes the all-axes batch")) {
 		return false;
 	}
 	if (!check(packet.vertices.size() == 8 &&
 			packet.vertices[0].primary_color == 0xc1u &&
 			packet.vertices[4].primary_color == 0xd1u,
-			"the refilled empty emitters do not disturb the far-to-near output")) {
+			"the submitted pair draws far-to-near")) {
 		return false;
 	}
-	if (!check(packet.emitter_bounds.size() == 4,
-			"re-filled emitters keep a single bounds entry")) return false;
-	bool seen[4] = {false, false, false, false};
-	for (const r::ParticleEmitterDrawBounds &bounds : packet.emitter_bounds) {
-		if (bounds.emitter_id < 0xa || bounds.emitter_id > 0xd)
-			return check(false, "bounds entries name only the four emitters");
-		seen[bounds.emitter_id - 0xa] = true;
-	}
-	if (!check(seen[0] && seen[1] && seen[2] && seen[3],
-			"every emitter appears exactly once in the bounds list")) return false;
-	return check(packet.emitter_bounds[0].quad_count == 0 &&
-			packet.emitter_bounds[1].quad_count == 0 &&
-			packet.emitter_bounds[2].quad_count == 1 &&
-			packet.emitter_bounds[3].quad_count == 1,
-			"the empty leaf registers its emitters before the fallback batch");
+	return check(packet.emitter_bounds.size() == 2 &&
+			packet.emitter_bounds[0].emitter_id == 0xc &&
+			packet.emitter_bounds[1].emitter_id == 0xd &&
+			packet.emitter_bounds[0].quad_count == 1 &&
+			packet.emitter_bounds[1].quad_count == 1,
+			"only the submitted emitters carry bounds entries");
+}
+
+// A camera at the origin looking down +Z (the add_emitter boxes' axis): near 1, far 100,
+// a 90-degree square frustum, as `a x + b y + c z + d >= 0` inside.
+op::ParticleViewFrustum forward_frustum() {
+	op::ParticleViewFrustum frustum;
+	const float planes[6][4] = {
+		{0.0f, 0.0f, 1.0f, -1.0f},   // near: z >= 1
+		{0.0f, 0.0f, -1.0f, 100.0f}, // far: z <= 100
+		{1.0f, 0.0f, 1.0f, 0.0f},    // left: x >= -z
+		{-1.0f, 0.0f, 1.0f, 0.0f},   // right: x <= z
+		{0.0f, 1.0f, 1.0f, 0.0f},    // bottom: y >= -z
+		{0.0f, -1.0f, 1.0f, 0.0f},   // top: y <= z
+	};
+	for (int plane = 0; plane < 6; ++plane)
+		for (int k = 0; k < 4; ++k)
+			frustum.planes[plane][k] = planes[plane][k];
+	frustum.valid = true;
+	return frustum;
+}
+
+bool frustum_submit_contract() {
+	// The child's render submit tests its bounds' sphere against the view's clip
+	// state before it registers [orig: CParticleEmitter_TrySubmitForRender @ 0x5e7540,
+	// the BoundingBox_IsVisibleInFrustum call @0x5e755d, the registration call
+	// @0x5e756a]: an emitter behind the eye or past the far plane is neither
+	// partitioned, depth-sorted nor built; one whose sphere reaches into the view
+	// submits; with no clip state every emitter with live particles submits.
+	const auto draw_state = state(r::ParticlePipeline::Blend, 0, 0, 0);
+	r::ParticleFrameSnapshot snapshot;
+	add_emitter(snapshot, 1, r::ParticleRenderDomain::World, 50.0f,
+			{quad(50.0f, 0x11u, draw_state)});
+	// Behind the eye: its box spans z -21..-19.
+	add_emitter(snapshot, 2, r::ParticleRenderDomain::World, -20.0f,
+			{quad(-20.0f, 0x21u, draw_state), quad(-20.5f, 0x22u, draw_state)});
+	// Past the far plane: z 199..201.
+	add_emitter(snapshot, 3, r::ParticleRenderDomain::World, 200.0f,
+			{quad(200.0f, 0x31u, draw_state)});
+	// Its center sits past the far plane (z 100.6), but its box (z 99.6..101.6)
+	// reaches into the view: the sphere test keeps it.
+	add_emitter(snapshot, 4, r::ParticleRenderDomain::World, 100.6f,
+			{quad(100.6f, 0x41u, draw_state)});
+
+	r::ParticleFrameCompiler compiler;
+	r::ParticleViewInput view;
+	view.frustum = forward_frustum();
+	const auto &culled = compiler.compile(snapshot, view);
+	if (!check(culled.debug.frustum_culled_emitters == 2 &&
+			culled.debug.frustum_culled_particles == 3 &&
+			culled.debug.selected_emitters == 2 &&
+			culled.debug.emitted_quads == 2,
+			"the emitters out of view never submit")) return false;
+	if (!check(culled.emitter_bounds.size() == 2 &&
+			culled.vertices.size() == 8 &&
+			culled.vertices[0].primary_color == 0x41u &&
+			culled.vertices[4].primary_color == 0x11u,
+			"the submitted emitters draw far-to-near")) return false;
+	view.frustum = {};
+	const auto &all = compiler.compile(snapshot, view);
+	return check(all.debug.frustum_culled_emitters == 0 &&
+			all.debug.selected_emitters == 4 && all.debug.emitted_quads == 5,
+			"with no clip state every emitter with live particles submits");
 }
 
 bool thermal_material_contract() {
@@ -763,6 +819,29 @@ bool thermal_material_contract() {
 			"the thermal secondary materials by type");
 }
 
+// The Distort wave's angle from GetTickCount's DWORD: read unsigned, times
+// flt_7DB864 (0.004f) at extended precision into fsin / fcos; ours folds it to one
+// turn, so the sine a long uptime takes is still retail's (a naive float product
+// at a five-day count is up to 0.06 rad off).
+// [orig: CEffectWorld_SetupRenderState @0x5E02B0 - @0x5E046C..0x5E04B0]
+bool distort_theta_contract() {
+	const double scale = static_cast<double>(0.004f);
+	const std::uint32_t ticks[] = {0u, 1000u, 0x7FFFFFFFu, 0x80000000u, 432000000u, 0xFFFFFFFFu};
+	for (const std::uint32_t tick : ticks) {
+		const float theta = r::particle_distort_theta(tick);
+		const double exact = static_cast<double>(tick) * scale;
+		if (!check(theta >= 0.0f && theta < 6.2831855f, "the wave angle folds to one turn"))
+			return false;
+		if (!check(std::fabs(std::sin(static_cast<double>(theta)) - std::sin(exact)) < 1e-5 &&
+						std::fabs(std::cos(static_cast<double>(theta)) - std::cos(exact)) < 1e-5,
+				"the folded angle keeps the DWORD's phase, read unsigned"))
+			return false;
+	}
+	return check(near(r::particle_distort_theta(1000u), 4.0f) &&
+					r::particle_distort_theta(0u) == 0.0f,
+			"the angle is the DWORD x 0.004");
+}
+
 } // namespace
 
 int main() {
@@ -777,9 +856,11 @@ int main() {
 	if (!flat_particle_runs_contract()) return 1;
 	if (!retained_sort_stack_contract()) return 1;
 	if (!density_stride_contract()) return 1;
-	if (!empty_batch_leaves_emitters_unstamped_contract()) return 1;
+	if (!empty_emitters_never_submit_contract()) return 1;
+	if (!frustum_submit_contract()) return 1;
 	if (!thermal_material_contract()) return 1;
 	if (!distortion_class_pass_contract()) return 1;
 	if (!section_hidden_group_contract()) return 1;
+	if (!distort_theta_contract()) return 1;
 	return 0;
 }

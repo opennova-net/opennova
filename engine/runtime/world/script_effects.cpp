@@ -15,10 +15,7 @@ ScriptEffectEvent descriptor(const World &world, const Entity &entity, const std
     event.owner = entity.handle;
     event.name = name;
     event.source_tick = world.logic_tick;
-    if (const AiEntity *body = world.ai.for_handle(entity.handle))
-        event.position = {body->pos[0], body->pos[1], body->pos[2]};
-    else
-        event.position = {to_fixed(entity.position.x), to_fixed(entity.position.y), to_fixed(entity.position.z)};
+    event.position = {entity.position.x.q16, entity.position.y.q16, entity.position.z.q16};
     return event;
 }
 
@@ -27,8 +24,8 @@ ScriptEffectEvent descriptor(const World &world, const Entity &entity, const std
 // These are entity angles; no terrain normal or target-facing query participates.
 std::array<int32_t, 3> direction(const World &world, const Entity &entity) {
     const AiEntity *body = world.ai.for_handle(entity.handle);
-    const uint32_t yaw = uint32_t(body ? body->heading : bam_heading_from_mission_yaw_deg(entity.yaw));
-    const uint32_t pitch = uint32_t(body ? body->body_pitch : bam_from_degrees_wrapped(entity.pitch));
+    const uint32_t yaw = uint32_t(body ? body->heading : entity.heading);
+    const uint32_t pitch = uint32_t(body ? body->body_pitch : entity.pitch_bam);
     const double yaw_phase = double(((yaw + 0x200000u) >> 22) & 1023u) * (2.0 * io::kPi / 1024.0);
     const double pitch_phase = double(((pitch + 0x200000u) >> 22) & 1023u) * (2.0 * io::kPi / 1024.0);
     const int32_t cy = int32_t(std::cos(yaw_phase) * io::kQ22One);

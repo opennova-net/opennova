@@ -32,6 +32,12 @@ static_assert(opennova::world::weapon_flag::kAuto ==
 static_assert(opennova::world::weapon_flag::kPowerThrow ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG_POWERTHROW),
 		"kPowerThrow drifted from def.h");
+static_assert(opennova::world::weapon_flag::kOnlyFireScoped ==
+				static_cast<int32_t>(DEF_WEAPON_FLAG_ONLYFIRESCOPED),
+		"kOnlyFireScoped drifted from def.h");
+static_assert(opennova::world::weapon_flag::kOnlyFireLocked ==
+				static_cast<int32_t>(DEF_WEAPON_FLAG_ONLYFIRELOCKED),
+		"kOnlyFireLocked drifted from def.h");
 static_assert(opennova::world::weapon_flag::kForceCrouch ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG_FORCECROUCH),
 		"kForceCrouch drifted from def.h");
@@ -46,10 +52,13 @@ static_assert(opennova::world::weapon_flag2::kInset ==
 		"kInset drifted from def.h");
 
 void Simulation::request_local_player_weapon_category(WeaponCategory p_category) {
-	if (kernel_->local.view.binoculars_view_active) return;
+	// The case's gates, the binocular view and a running PowerThrow windup, are the
+	// engine's (world::local_player_weapon_category_admitted).
 	// [orig: input cases 200-210 @ 0x4e1144 -> Player_SwitchToWeaponByHandle
-	//  ((action-200)*65). The binoculars-view and fire-charge input gates have no
-	//  sim mechanics yet — record note.]
+	//  ((action-200)*65)]
+	if (!opennova::world::local_player_weapon_category_admitted(kernel_->local.weapon,
+				kernel_->local.view))
+		return;
 	if (kernel_->local.weapon.usegun_switch != LocalUseGunSwitch::kNone) return;
 	if (!kernel_->local.inventory_valid) return;
 	if (p_category < 0 || p_category >= opennova::world::weapon_combo::kCategories)
@@ -133,7 +142,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// (engine: runtime/world/infantry_weapon_channel.cpp). The lean term is the sim's lean angle
-	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-conform
+	// (entity+0xB0; decay / ramp in infantry_lean_decay / infantry_lean_ramp); roll is the slope-conform
 	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
 	// (entity+0x2DC, infantry_torso_roll_tick); body_pitch is the slope-conform
 	// body pitch (entity+0x90; both fed by infantry_slope_pass). pitch_blend is
@@ -206,16 +215,21 @@ opennova::world::WeaponInstallData Simulation::install_data_from_def(
 	return data;
 }
 
-// The production mount (S6b): the kernel finds the row in ITS retained
+// The embedder's by-name mount (S6b): the kernel finds the row in ITS retained
 // weapon.def parse and mounts the descriptors the weapon table baked as it
 // loaded; the channel plays from the table's shared ANIMADM rings, no shell
-// dictionary and no render dependency [orig: the ACCEPT chain —
+// dictionary and no render dependency [orig: the table's bake:
 // WeaponSlotTable_LoadAllFromDefs @ 0x5414e0 + Player_MountWeaponSlot
 // @ 0x4dfa40; Anim_InitActions @ 0x541fa0 baked the delays at the def's END].
+// A loadout apply's ACCEPT mounts in the sim itself; the shell presents after it.
 bool Simulation::install_local_player_weapon_by_name(
 		const String &p_weapon_name, bool p_preserve_slot_state) {
 	return kernel_->install_weapon(
 			opennova::to_std(p_weapon_name), p_preserve_slot_state);
+}
+
+bool Simulation::install_local_player_spawn_weapon_by_name(const String &p_weapon_name) {
+	return kernel_->install_spawn_weapon(opennova::to_std(p_weapon_name));
 }
 
 void Simulation::rebake_local_player_weapon(const Ref<WeaponDef> &p_def,
@@ -243,8 +257,10 @@ void Simulation::set_local_player_first_person_model_available(bool p_available)
 	if (!p_available || !kernel_) return;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
+	// The model the shell loaded is the EquippedSlot's def's (D-WPN-52 follow).
 	if (player != nullptr)
-		kernel_->local.weapon.first_person_model_adm = player->equipped_adm_index;
+		kernel_->local.weapon.first_person_model_adm =
+				opennova::world::local_first_person_model_def_adm(kernel_->local.weapon, *player);
 }
 
 bool Simulation::is_local_player_first_person_model_available() const {
@@ -258,6 +274,10 @@ void Simulation::set_local_player_weapon_input(bool p_fire_held, bool p_fire_pre
 	// the shell's own per-frame write.
 	opennova::world::local_weapon_set_input(kernel_->local.weapon, kernel_->local.view,
 			p_fire_held || player_.debug_weapon_fire_held, p_fire_pressed, p_reload_pressed);
+}
+
+void Simulation::local_player_left_button_down() {
+	if (kernel_) kernel_->local.left_button_down();
 }
 
 Ref<PlayerWeaponView> Simulation::get_local_player_weapon_state() const {
@@ -462,8 +482,10 @@ bool Simulation::debug_weapon_trigger(int p_trigger) {
 	if (slot == nullptr) return false;
 	// p_trigger is devtools::WeaponRequest::Trigger, paired at the drain.
 	switch (p_trigger) {
-		case 0:  // Fire: the press edge, latched until the pump consumes it.
-			kernel_->local.set_weapon_input(weapon.fire_held, true, false);
+		case 0:  // Fire: a key's press and release, the fire row's two legs (a PowerThrow's
+			// tap throw among them; engine world::LocalPlayer::fire_record).
+			(void)kernel_->local.fire_record(true, true);
+			(void)kernel_->local.fire_record(false, true);
 			return true;
 		case 1:  // Reload: refused exactly where the input dispatcher refuses it.
 			if (!opennova::world::weapon_fsm_reload_allowed(weapon.def, *slot)) return false;

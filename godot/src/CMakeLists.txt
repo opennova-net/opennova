@@ -61,6 +61,7 @@ add_library(opennova_bindings OBJECT
     network/novaworld_identity.cpp
     network/udp_datagram.cpp
     network/udp_pump.cpp
+    network/admin_tcp_pump.cpp
     network/lan_session.cpp
     network/lan_server_row.cpp
     network/net_protocol.cpp
@@ -71,6 +72,7 @@ add_library(opennova_bindings OBJECT
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp
     terrain/terrain_static_shadow_rasterizer.cpp
+    terrain/terrain_static_shadow_device_pass.cpp
     terrain/terrain_tile_cache_device.cpp
     terrain/terrain_data.cpp
     terrain/terrain_foliage_def.cpp
@@ -176,6 +178,10 @@ add_library(opennova_bindings OBJECT
     simulation/present_event_records.cpp
     simulation/environment_snapshot.cpp
     simulation/weapon_kit_entry.cpp
+    simulation/use_press_row.cpp
+    simulation/body_trace_row.cpp
+    simulation/joiner_net_trace_row.cpp
+    simulation/model_list_node_row.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
     hud/font_page_glyphs.cpp
@@ -303,6 +309,8 @@ add_library(opennova_bindings OBJECT
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
+    player/key_event_queue.cpp
+    player/key_lock_device.cpp
     player/player_input_router.cpp
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp

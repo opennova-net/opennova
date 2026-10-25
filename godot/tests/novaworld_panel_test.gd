@@ -22,7 +22,7 @@ func after_each() -> void:
 	_root_dirs.clear()
 
 
-func _real_root(missions: PackedStringArray) -> ResourceRoot:
+func _real_root(missions: PackedStringArray, files := {}) -> ResourceRoot:
 	var dir := OS.get_temp_dir().replace("\\", "/") + \
 			"/opennova_nw_panel_%d_%d" % [Time.get_ticks_usec(), _root_dirs.size()]
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
@@ -35,16 +35,22 @@ func _real_root(missions: PackedStringArray) -> ResourceRoot:
 		if file != null:
 			file.store_string("bms")
 			file.close()
+	for file_name in files:
+		var extra := FileAccess.open(dir.path_join(file_name), FileAccess.WRITE)
+		assert_not_null(extra, "fixture %s opens for write" % file_name)
+		if extra != null:
+			extra.store_string(files[file_name])
+			extra.close()
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	return root
 
 
-func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
+func _make_panel(missions: PackedStringArray, files := {}) -> NovaWorldPanel:
 	var panel = PANEL_SCENE.instantiate()
 	panel.start_client_on_ready = false
 	panel.target_override = NovaWorldSettings.Target.OPENNOVA
-	panel.resource_root = _real_root(missions)
+	panel.resource_root = _real_root(missions, files)
 	add_child_autofree(panel)
 	return panel
 
@@ -257,7 +263,6 @@ func _panel_with_requests_in_flight() -> NovaWorldPanel:
 			client.connect(signal_name, connection["callable"])
 	assert_eq(panel.visible_rows().size(), 3, "the browser is populated")
 	assert_eq(panel.joining_rid(), 2, "a join to the selected row is in flight")
-	assert_eq(panel.join_callsign(), "ljim", "the signed-in handle is the callsign")
 	assert_true(panel.host_enabled(), "Host is live on the signed-in session")
 	assert_true(_host_start_button(panel).disabled, "the host Start waits on its request")
 	return panel
@@ -274,7 +279,6 @@ func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> voi
 	assert_eq(panel.visible_rows().size(), 0, "%s clears the rows" % cause)
 	assert_eq(panel.server_item_count(), 0, "%s empties the table" % cause)
 	assert_eq(panel.joining_rid(), 0, "%s drops the join in flight" % cause)
-	assert_eq(panel.join_callsign(), panel.player_name, "%s drops the signed-in handle" % cause)
 	assert_false(panel.host_enabled(), "%s disables Host" % cause)
 	assert_false(panel.join_enabled(), "%s disables Join" % cause)
 	assert_false(panel.login_enabled(), "%s disables Login" % cause)
@@ -305,7 +309,6 @@ func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> voi
 	assert_eq(panel.message_text(), message)
 	assert_false(panel.browser_visible(), "a late sign-in cannot reopen the lobby")
 	assert_false(panel.host_enabled())
-	assert_eq(panel.join_callsign(), panel.player_name, "a late sign-in names no callsign")
 	# A late ping pass reads nothing into the signed-out panel.
 	panel.set_rows_for_test(_browser_rows())
 	panel.set_pings_for_test({1: 33})
@@ -340,6 +343,106 @@ func test_disconnect_at_sign_in_disarms_login() -> void:
 	var status := panel.status_text()
 	password.text_submitted.emit(password.text)
 	assert_eq(panel.status_text(), status, "Enter after the disconnect starts no sign-in")
+
+
+# Enter on the sign-in page runs the page's VK_RETURN hotkey: in either field, which lets the
+# keyboard go first, or in neither, one Enter presses the submit while it is enabled. (The
+# unstarted session fails the sign-in at once, so a press shows the message screen.)
+# [orig: CEditWnd_HandleKeyEvent @0x6623A0 case 0xD - g_UIFocusWnd = 0 @0x66249F, the VK_RETURN
+#  scan called @0x6624EF; UI_DispatchKeyboardEventToChildren @0x63AD10 - the WM_KEYDOWN focus
+#  test @0x63ADDA; CWnd_IsVisibleInHierarchy @0x646290]
+func test_enter_on_sign_in_runs_the_submit_hotkey() -> void:
+	var form := "Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm/"
+	var pressed := "The matchmaking service is still connecting."
+	var enter := InputEventKey.new()
+	enter.keycode = KEY_ENTER
+	enter.pressed = true
+	for field_name in ["UsernameEdit", "PasswordEdit"]:
+		var panel := _make_panel(PackedStringArray())
+		panel.client_for_test().emit_signal("connected")
+		(panel.get_node(form + "UsernameEdit") as LineEdit).text = "ljim"
+		var field := panel.get_node(form + field_name) as LineEdit
+		field.grab_focus()
+		assert_true(field.has_focus(), "%s holds the keyboard" % field_name)
+		field.text_submitted.emit(field.text)
+		assert_false(field.has_focus(), "Enter in %s lets the keyboard go" % field_name)
+		assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+				"one Enter in %s presses the submit" % field_name)
+		assert_eq(panel.message_text(), pressed)
+
+	var bare := _make_panel(PackedStringArray())
+	bare.client_for_test().emit_signal("connected")
+	(bare.get_node(form + "UsernameEdit") as LineEdit).text = "ljim"
+	assert_null(bare.get_viewport().gui_get_focus_owner(), "the page opens with no focus")
+	bare.get_viewport().push_input(enter)
+	assert_eq(bare.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+			"Enter with no field holding the keyboard presses the submit")
+	assert_eq(bare.message_text(), pressed)
+
+	# A submit that is not enabled (DFX2's LOGIN gate closed, a sign-in in flight) is skipped:
+	# the field still lets the keyboard go.
+	var closed := _make_panel(PackedStringArray())
+	closed.client_for_test().emit_signal("connected")
+	(closed.get_node(form + "LoginButton") as Button).disabled = true
+	var user := closed.get_node(form + "UsernameEdit") as LineEdit
+	user.text = "ljim"
+	user.grab_focus()
+	var status := closed.status_text()
+	user.text_submitted.emit(user.text)
+	closed.get_viewport().push_input(enter)
+	assert_false(user.has_focus(), "Enter lets the keyboard go with the submit disabled")
+	assert_eq(closed.current_screen(), NovaWorldPanel.Screen.LOGIN, "and presses nothing")
+	assert_eq(closed.status_text(), status)
+
+
+# The sign-in page's REMEMBER_LOGIN checkbox ("Remember my login information.", the GLOBAL_VAR
+# checkbox of JO's and DFX2's sign-in templates): the page's activation shows the state it sets
+# from game.cfg's rememberlogin; a click flips it and stores the new state as the browser state's
+# property (which the next nw_cdata.coo save reads) and as rememberlogin, writing no file (the
+# shell's game.cfg save points write the word). The checkbox takes clicks only. (engine:
+# LobbyHttpFlow::store_remember_login, fill_remembered_login.)
+func test_remember_login_checkbox_stores_rememberlogin() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_rl_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	_root_dirs.append(run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	GameCfgStore.reset()
+	var block := GameCfgStore.block()
+	block.set_word("rememberlogin", 0)
+	var panel := _make_panel(PackedStringArray())
+	var client := panel.client_for_test()
+	client.emit_signal("connected")
+	var form := "Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm/"
+	var check := panel.get_node(form + "RememberLoginCheck") as CheckBox
+	assert_eq(check.text, "Remember my login information.")
+	assert_eq(check.focus_mode, Control.FOCUS_NONE, "the checkbox takes no keyboard")
+
+	# The sign-in page's activation with rememberlogin 0: unchecked.
+	check.set_pressed_no_signal(true)
+	client.reshow_sign_in()
+	client.emit_signal("web_lobby_opened", false, "")
+	assert_false(check.button_pressed, "the activation shows rememberlogin 0")
+	assert_false(client.is_remember_login_checked())
+
+	# A click checks it: the property and rememberlogin take it; no file is written.
+	check.button_pressed = true
+	assert_true(client.is_remember_login_checked(), "the click sets the property")
+	assert_eq(block.get_word("rememberlogin"), 1, "and stores rememberlogin")
+	assert_false(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
+		"the click saves nothing")
+	# The next click clears both.
+	check.button_pressed = false
+	assert_false(client.is_remember_login_checked())
+	assert_eq(block.get_word("rememberlogin"), 0)
+
+	# The next activation shows rememberlogin as it stands (1 here).
+	block.set_word("rememberlogin", 1)
+	client.reshow_sign_in()
+	client.emit_signal("web_lobby_opened", false, "")
+	assert_true(check.button_pressed, "the activation shows rememberlogin 1")
+	assert_true(client.is_remember_login_checked())
+	assert_eq(block.get_word("rememberlogin"), 1, "the activation stores nothing")
+	GameCfgStore.reset()
 
 
 # A live Join goes with the session that armed it.
@@ -418,6 +521,69 @@ func test_hosting_started_hands_the_request_up() -> void:
 		"the FFI options retain the NovaWorld period-12 selector")
 
 
+# The multiplayer menu's MULTI_PLAYER_HOST as the shipped one authors its spins: value= rows (an
+# <ITEM> with none holds 0), GAME_LOCATION's two-letter rows behind an empty one.
+func _host_dialog_menu() -> String:
+	var body := MenuDriverFixture.wnd("edit", "GAME_NAME", 10)
+	body += MenuDriverFixture.wnd("spinlist", "GAME_LOCATION", 34,
+			'<ITEMS><ITEM value="33"></ITEM><ITEM value="8">DE</ITEM><ITEM value="32">US</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("spinlist", "SERVER_PUNKBUSTER", 58,
+			'<ITEMS><ITEM>NO</ITEM><ITEM value="1">YES</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("spinlist", "REPLAY", 82,
+			'<ITEMS><ITEM>NEXT</ITEM><ITEM value="1">REPLAY</ITEM></ITEMS>')
+	body += MenuDriverFixture.wnd("edit", "MAX_PLAYERS", 106)
+	return MenuDriverFixture.screen_xml("MULTI_PLAYER_HOST", body)
+
+
+# The NovaWorld host is retail's host dialog with the page's map picker for its controls,
+# untouched: the dialog opens on the process's cfg block (its cap clamped to the screen's
+# 64 in the block) and START reads back every control as the mounted menu's screen shows
+# it, so the request is the block's: its name is game.cfg's, which the block keeps (the
+# page has no name of its own); with no pb\pbcl.dll the PunkBuster spin stores 0; a word
+# no spin row holds comes back as row 0's (replay 2 as NEXT's 0); the country comes back as
+# the matched row's own name ("us" as "US"). The launch's save then writes the block's
+# words, not the file's (engine inmatch/host_settings.h read_untouched_host_dialog carries
+# the witness).
+func test_host_request_is_the_untouched_host_dialog() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_cfg_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	_root_dirs.append(run_dir)
+	var cfg_path := run_dir.path_join(GameCfgStore.FILE_NAME)
+	var file := FileAccess.open(cfg_path, FileAccess.WRITE)
+	assert_not_null(file, "game.cfg opens for write")
+	if file != null:
+		file.store_string("version = 29\r\ngame_name = \"Night Ops\"\r\nmpmaxplayers = 80\r\n" +
+				"sv_punkbuster = 1\r\nreplay = 2\r\ncountry = \"us\"\r\n")
+		file.close()
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	GameCfgStore.reset()
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]),
+			{NovaWorldPanel.HOST_DIALOG_MENU: _host_dialog_menu()})
+	panel.select_mission(0)
+	var client := panel.client_for_test()
+	for connection in client.get_signal_connection_list("host_failed"):
+		client.disconnect("host_failed", connection["callable"])
+	watch_signals(panel)
+	panel.press_host()
+	client.emit_signal("hosting_started")
+	assert_signal_emitted(panel, "host_requested")
+	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
+	assert_eq(config.server_name, "Night Ops", "the request hosts under game.cfg's name")
+	assert_eq(config.max_players, 64, "under the cap the screen's populate clamped")
+	assert_eq(config.server_punkbuster, 0, "with PunkBuster stored 0 (no pb\\pbcl.dll)")
+	assert_eq(config.country, "US", "and the country the location row's own name")
+	assert_eq(GameCfgStore.block().host_dialog_value("GAME_NAME"), "Night Ops",
+		"the block keeps the file's name")
+	assert_eq(GameCfgStore.block().host_dialog_value("REPLAY"), "0",
+		"and takes row 0's value for a word no REPLAY row holds")
+	var saved := FileAccess.get_file_as_string(cfg_path)
+	assert_string_contains(saved, 'country                 = "US"',
+		"the launch's save writes the block's country, not the file's")
+	assert_string_contains(saved, "replay                  = 0",
+		"and its replay word")
+	GameCfgStore.reset()
+
+
 # The NovaWorld menu's re-entry after a match: the panel takes the session
 # back, leaves its hosting and play, and lands in the lobby when signed in.
 func test_adopted_session_lands_in_the_lobby_or_sign_in() -> void:
@@ -427,7 +593,24 @@ func test_adopted_session_lands_in_the_lobby_or_sign_in() -> void:
 	assert_eq(panel.client_for_test(), session, "the panel holds the returned session")
 	assert_eq(session.get_parent(), panel)
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
-		"an unauthenticated session lands on the sign-in screen")
+		"an unverified session lands on the sign-in screen")
+
+
+# The re-entry's web lobby open (the engine's LobbyHttpFlow::enter): its page
+# lands the panel on the lobby for a login the service remembers, else on the
+# sign-in screen.
+func test_web_lobby_open_lands_on_its_page() -> void:
+	var panel := _make_panel(PackedStringArray())
+	var session := NovaWorldClient.new()
+	panel.adopt_client(session)
+	session.emit_signal("web_lobby_opened", true, "ljim")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOBBY,
+		"the lobby page lands on the lobby")
+	assert_true(panel.browser_visible(), "the games show behind the remembered login")
+	session.emit_signal("web_lobby_opened", false, "")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
+		"the sign-in page lands on sign-in")
+	assert_false(panel.browser_visible(), "and hides the games")
 
 
 # A match that ended with an error text shows it first; Back re-enters
@@ -590,24 +773,6 @@ func test_a_row_on_a_missing_expansion_is_greyed_and_unjoinable() -> void:
 			"the details pane leads with the reason")
 	panel.select_visible_row_for_test(0)
 	assert_true(panel.join_enabled(), "selecting a joinable row re-enables Join")
-
-
-# On NovaWorld the account handle IS the callsign: the host rosters the player
-# under the service identity, and a stock client's ClientAuth NA is the handle
-# (wire-witnessed live: stock na="ljim" = the 0x7B/0x46 roster name). A local
-# callsign would leave the joiner's name-match waiting forever (pre-spawn
-# free-cam). Signed out, the local callsign stands.
-func test_nw_join_callsign_is_the_signed_in_handle() -> void:
-	var panel := _make_panel(PackedStringArray())
-	panel.player_name = "Player"
-	assert_eq(panel.join_callsign(), "Player",
-			"signed out, the local callsign stands")
-	panel.set_signed_in_handle("ljim")
-	assert_eq(panel.join_callsign(), "ljim",
-			"signed in, the NW handle is the join callsign")
-	panel.set_signed_in_handle("  ")
-	assert_eq(panel.join_callsign(), "ljim",
-			"a blank handle cannot clobber the retained one")
 
 
 func test_a_server_that_refused_this_install_is_greyed_with_its_reason() -> void:

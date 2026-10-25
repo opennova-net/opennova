@@ -179,30 +179,28 @@ int main() {
 	}
 
 	// --- the reopen edges: a letter read in the frame that draws it
-	// [orig: Render_ProcessMainSceneFrame @ 0x5ca192 ahead of @ 0x5ca645;
-	// Terrain_RenderWorldScene @ 0x5c93b8 ahead of @ 0x5c95d4]. Only a
-	// cleared indoors or water letter reopens a pass; a set letter, a steady
-	// value and the sky letter take no edge.
+	// [orig: Render_ProcessMainSceneFrame @ 0x5ca192 ahead of @ 0x5ca645].
+	// Only a cleared indoors letter reopens a pass; a set letter, a steady
+	// value, the sky letter and the water letter take no edge (the water
+	// letter's label gates the strips alone and lands with the collect).
 	{
 		const ScenePassGateEdges out_of_room = scene_pass_gate_edges(0x2, 0);
-		CHECK(out_of_room.terrain_opened && !out_of_room.water_opened);
-		const ScenePassGateEdges water_back = scene_pass_gate_edges(0x8, 0);
-		CHECK(!water_back.terrain_opened && water_back.water_opened);
+		CHECK(out_of_room.terrain_opened);
 		const ScenePassGateEdges both = scene_pass_gate_edges(0x2 | 0x8, 0);
-		CHECK(both.terrain_opened && both.water_opened);
+		CHECK(both.terrain_opened);
 		// The letters beside the cleared one ride along untouched: 00TRa's
 		// Armry01 room box with the indoors letter (flags 0x28, letters 0x2E)
-		// into its box without it (letters 0x28): the water letter stays.
+		// into its box without it (letters 0x28).
 		const ScenePassGateEdges next_room = scene_pass_gate_edges(0x2E, 0x28);
-		CHECK(next_room.terrain_opened && !next_room.water_opened);
+		CHECK(next_room.terrain_opened);
 		const ScenePassGateEdges keeps_sky = scene_pass_gate_edges(0x0E, 0x04);
-		CHECK(keeps_sky.terrain_opened && keeps_sky.water_opened);
+		CHECK(keeps_sky.terrain_opened);
 		const uint32_t no_edge[][2] = {
-				{0, 0x2}, {0, 0x8}, {0x2, 0x2}, {0x8, 0x8}, {0x2A, 0x2A},
+				{0, 0x2}, {0, 0x8}, {0x8, 0}, {0x2, 0x2}, {0x8, 0x8}, {0x2A, 0x2A},
 				{0x4, 0}, {0, 0x4}, {0x28, 0x2A}, {0, 0}};
 		for (const auto &pair : no_edge) {
 			const ScenePassGateEdges e = scene_pass_gate_edges(pair[0], pair[1]);
-			CHECK(!e.terrain_opened && !e.water_opened);
+			CHECK(!e.terrain_opened);
 		}
 	}
 
@@ -213,6 +211,30 @@ int main() {
 		CHECK(!scene_water_visible(0x8, false));
 		CHECK(scene_water_visible(0x8, true));
 		CHECK(scene_water_visible(0x2 | 0x4 | 0x20, false));
+	}
+	// The one g_BlinkWaterVisible word: each scene's label reads it ahead of
+	// its own collect, the mirror's collect landing first when that mirror ran,
+	// else the last collect's (the previous scene's).
+	// [orig: Terrain_RenderWorldScene, the label's read @0x5c93c1 ahead of the
+	//  collect @0x5c94f0; Render_MainScene, the mirror's collect @0x5c16fc]
+	{
+		using opennova::renderer::SceneWaterWord;
+		SceneWaterWord w;
+		// The main scene, its mirror up: the mirror's verdict decides the label;
+		// its own collect then writes the word.
+		CHECK(w.label(0x8, true, true));
+		w.collect(false);
+		// The weapon Inset, its mirror down: the main collect's word.
+		CHECK(!w.label(0x8, false, true));
+		w.collect(true);
+		// The next frame's main scene, its mirror down: the Inset's word.
+		CHECK(w.label(0x8, false, false));
+		w.collect(false);
+		// With its mirror up, the mirror's word whatever the last collect left.
+		w.collect(true);
+		CHECK(!w.label(0x8, true, false));
+		// No water letter: every label passes.
+		CHECK(w.label(0, false, false));
 	}
 	// The force-indoors attribute and the blink hit's owning building.
 	{

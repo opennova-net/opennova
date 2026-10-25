@@ -68,8 +68,13 @@ void test_game_info(const fnt_font_t *font) {
 		// "18:20 J (3)" (60*20 - 100 = 1100 s) and "15:50 R" (950 s, no hold).
 		const std::vector<GameFontQuad> bold = glyphs_on(list, kHudFontSlotLabelBold);
 		CHECK(bold.size() == 11 + 7);
-		// The snapshot twin seeded from the hudpos text colour, half-bright.
-		const uint32_t hb = half_bright_argb(layout.hud_text);
+		// The timers draw in the twin as it stood before this frame's restamp:
+		// on the first frame the HUD init's seed, entry 2's 0xFF010101
+		// placeholder, half-bright black [orig: HUD_InitTeamColorTable
+		// @0x51F2DE after Game_StartMission's HUD_InitOverlaySystem @0x525733,
+		// the first-load call @0x5258C1; the read @0x59CC9B kept @0x59CCB4].
+		const uint32_t hb = half_bright_argb(0xFF010101u);
+		CHECK(hb == 0xFF000000u);
 		bool colors = !bold.empty();
 		for (const GameFontQuad &g : bold) colors = colors && g.color == hb;
 		CHECK(colors);
@@ -77,6 +82,15 @@ void test_game_info(const fnt_font_t *font) {
 		CHECK(bold.size() == 18 && bold[11].y_top - bold[0].y_top == 16.0f);
 		// No coverage: no "In the Zone".
 		CHECK(glyphs_on(list, kHudFontSlotLabelLarge).empty());
+	}
+	{
+		// The next frame reads the first frame's restamp: the hudpos text colour.
+		const std::vector<GameFontQuad> bold =
+				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+		const uint32_t hb = half_bright_argb(layout.hud_text);
+		bool colors = !bold.empty();
+		for (const GameFontQuad &g : bold) colors = colors && g.color == hb;
+		CHECK(colors);
 	}
 	// Inside the hill: team 1 trails -> red; leads -> blue; tie -> the twin.
 	state.session.zone_coverage = 40;

@@ -50,6 +50,11 @@ public:
 	// TracerPass::Distortion); an empty frame clears them.
 	void publish_ribbons(const opennova::renderer::TracerRibbonFrame &p_frame);
 
+	// Render thread: the distortion ribbon material's device objects (its shader and vertex
+	// format), created with the tracer pool's materials at the mission textures stage
+	// (ParticleRenderer::create_tracer_pool_devices); the first ribbon draw then finds them.
+	void create_device(RenderingDevice *p_rd) { ensure_ribbon_device(p_rd); }
+
 	bool frame_has_distortion() const override;
 	bool draw_distortion(const FrameFxDistortionTarget &p_target,
 			opennova::renderer::FrameFxDistortionSet p_set, std::size_t &r_draws) override;

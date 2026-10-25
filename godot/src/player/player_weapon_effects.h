@@ -75,9 +75,11 @@ public:
 
 	// Mount a weapon.def entry (the def, its FSM and the viewmodel rebuilt for
 	// it), or drop the equipped one: the path a committed switch or clear takes,
-	// which the dev tools' viewmodel controls take too. The switch answers
-	// whether the named weapon is mounted afterwards.
-	bool apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state);
+	// which the dev tools' viewmodel controls take too. `p_installed`: the sim's
+	// commit already mounted the def, so only the viewmodel follows it. The switch
+	// answers whether the named weapon is mounted afterwards.
+	bool apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state,
+			bool p_installed);
 	void apply_weapon_clear();
 
 	// The live anchor for an owner-bound weapon-effect group: the spawning

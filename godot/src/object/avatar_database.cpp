@@ -384,6 +384,7 @@ Ref<CharacterJoinProfile> AvatarDatabase::character_join_profile(
 		saved[side].combo_index = profile_dict_int(sd, "combo", -1);
 		saved[side].player_class = profile_dict_int(sd, "player_class",
 				opennova::inmatch::kJoinDefaultPlayerClass);
+		saved[side].character_id = profile_dict_int(sd, "avatar_packed", -1);
 	}
 	Ref<CharacterJoinProfile> out;
 	out.instantiate();

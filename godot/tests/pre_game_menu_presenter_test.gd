@@ -1,49 +1,23 @@
 extends GutTest
 # The join screen (pre.mnu PRE_GAME_MENU) over an authored pre.mnu: the panel
 # table shows the MESSAGES box with Cancel during the join and after a failure,
-# the status line replaces the box's text, and Cancel reports the abandoned join.
+# the status line replaces the box's text, Cancel reports the abandoned join, and
+# the choice panels walk a discovered flag word to the commit (BACK abandons).
 # The shipped pre.mnu stays covered by the retail menu-corpus compilation test.
 
 const TMP_DIR := "res://.godot/pre_game_menu_presenter_test"
-const STAGED := ["pre.mnu", "menutxt.bin"]
 
 
 func before_each() -> void:
-	var dir := ProjectSettings.globalize_path(TMP_DIR)
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	var w := MenuDriverFixture.wnd
-	var body: String = (
-			w.call("window", "GAME_PASSWORD_WRAPPER", 20,
-					w.call("edit", "GAME_PASSWORD", 30), " HIDDEN")
-			+ w.call("window", "SPECTATE_WRAPPER", 60,
-					w.call("radio", "SPECTATE", 70), " HIDDEN")
-			+ w.call("window", "TEAM_PASSWORD_WRAPPER", 100,
-					w.call("window", "TEAM_STATIC_WRAPPER", 110, "", " HIDDEN")
-					+ w.call("window", "SPECTATOR_STATIC_WRAPPER", 130, "", " HIDDEN")
-					+ w.call("edit", "TEAM_PASSWORD", 150), " HIDDEN")
-			+ w.call("window", "ERROR_WRAPPER", 200,
-					w.call("multiline_edit", "MESSAGES", 210, "", " READONLY"), " HIDDEN")
-			+ w.call("window", "ABORT_WRAPPER", 300,
-					w.call("button", "ABORT_CANCEL", 310), " HIDDEN")
-			+ w.call("window", "ABORTRETRY_WRAPPER", 400,
-					w.call("button", "BACK", 410) + w.call("button", "ACCEPT", 440), " HIDDEN"))
-	TestFs.write_bytes(self, dir.path_join("pre.mnu"),
-			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
-	TestFs.write_bytes(self, dir.path_join("menutxt.bin"), RtxtStringFile.new().to_byte_array())
+	JoinScreenFixture.stage(self, TMP_DIR)
 
 
 func after_all() -> void:
-	PresenterFixture.unstage(TMP_DIR, PackedStringArray(STAGED))
+	JoinScreenFixture.unstage(TMP_DIR)
 
 
 func _open() -> PreGameMenuPresenter:
-	var presenter := PreGameMenuPresenter.new()
-	add_child_autofree(presenter)
-	var owner := Node.new()
-	add_child_autofree(owner)
-	assert_true(presenter.open(PresenterFixture.root_over(self, TMP_DIR), owner),
-			"the join screen opens over pre.mnu")
-	return presenter
+	return JoinScreenFixture.open(self, TMP_DIR)
 
 
 func test_the_join_shows_its_status_line_with_cancel() -> void:
@@ -158,3 +132,49 @@ func test_the_panel_table_matches_the_engine() -> void:
 			"the team-password panel shows the team text")
 	assert_false(JoinScreenStatus.panel_shows_window(JoinScreenStatus.PANEL_TEAM_PASSWORD, 7),
 			"and not the spectator text")
+
+
+# The choice (engine inmatch/pre_game_menu.h, ctest npruntime_pre_game_menu): a
+# plain team game offers none; a server password opens GAME_PASSWORD, its ACCEPT
+# goes on to SPECTATE, a checked SPECTATE to the spectator password in the shared
+# TEAM_PASSWORD control, whose ACCEPT commits the three controls and returns the
+# screen to its progress panel.
+func test_the_choice_walks_the_flag_word_to_the_commit() -> void:
+	var presenter := _open()
+	watch_signals(presenter)
+	assert_false(presenter.show_choice(JoinTarget.FLAG_TEAM_CHOICE),
+			"a plain team game offers no choice")
+	assert_true(presenter.show_choice(JoinTarget.FLAG_SERVER_PASSWORD
+			| JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD))
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD)
+	assert_true(presenter.is_window_shown("GAME_PASSWORD_WRAPPER"))
+	assert_true(presenter.is_window_shown("ABORTRETRY_WRAPPER"), "BACK and ACCEPT show")
+	assert_false(presenter.is_window_shown("ERROR_WRAPPER"))
+	JoinScreenFixture.set_text(presenter, "GAME_PASSWORD", "srv")
+	JoinScreenFixture.press(presenter, "ACCEPT")
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_SPECTATE)
+	assert_true(presenter.is_window_shown("SPECTATE_WRAPPER"))
+	JoinScreenFixture.set_checked(presenter, "SPECTATE", true)
+	JoinScreenFixture.press(presenter, "ACCEPT")
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_SPECTATOR_PASSWORD)
+	assert_true(presenter.is_window_shown("SPECTATOR_STATIC_WRAPPER"))
+	assert_false(presenter.is_window_shown("TEAM_STATIC_WRAPPER"))
+	JoinScreenFixture.set_text(presenter, "TEAM_PASSWORD", "spec")
+	JoinScreenFixture.press(presenter, "ACCEPT")
+	assert_signal_emitted_with_parameters(presenter, "choice_committed", ["srv", true, "spec"])
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_PROGRESS)
+
+
+# A side password off a plain player: SPECTATE unchecked goes on to TEAM_PASSWORD
+# with the team static; BACK abandons the join like Cancel.
+func test_back_abandons_the_choice() -> void:
+	var presenter := _open()
+	watch_signals(presenter)
+	assert_true(presenter.show_choice(JoinTarget.FLAG_ALLOW_SPECTATORS
+			| JoinTarget.FLAG_BLUE_PASSWORD))
+	JoinScreenFixture.press(presenter, "ACCEPT")
+	assert_eq(presenter.panel(), JoinScreenStatus.PANEL_TEAM_PASSWORD)
+	assert_true(presenter.is_window_shown("TEAM_STATIC_WRAPPER"))
+	JoinScreenFixture.press(presenter, "BACK")
+	assert_signal_emitted(presenter, "cancelled")
+	assert_signal_not_emitted(presenter, "choice_committed")

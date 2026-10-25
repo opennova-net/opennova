@@ -46,10 +46,8 @@ FontViewportApplier::FontViewportApplier(SubViewport &viewport) {
 	glyphs->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	viewport.add_child(glyphs);
 	glyphs_id_ = glyphs->get_instance_id();
-	glyph_shader_.instantiate();
-	glyph_shader_->set_code(glyph_canvas_shader_code());
 	glyph_material_.instantiate();
-	glyph_material_->set_shader(glyph_shader_);
+	glyph_material_->set_shader(glyph_canvas_shader());
 	RenderingServer *rs = RenderingServer::get_singleton();
 	glyph_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(glyph_item_, glyphs->get_canvas_item());

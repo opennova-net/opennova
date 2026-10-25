@@ -181,7 +181,7 @@ struct Rig {
 		enemy = world->registry.spawn(0, seed);
 		world->ai.attach(self);
 		if (AiEntity *body = world->ai.for_handle(self)) {
-			body->pos[0] = body->pos[1] = body->pos[2] = 0;
+			body->self->position.x.q16 = body->self->position.y.q16 = body->self->position.z.q16 = 0;
 			body->heading = 0; // facing east: yaw 0
 		}
 		world->cached.local_player = self;
@@ -299,9 +299,11 @@ void test_whiz_blip_reads_a_brained_shooter_body() {
 	AiEntity *body = world.ai.at(world.ai.attach(rig.enemy));
 	CHECK(body != nullptr, "the shooter takes a brain");
 	if (body == nullptr) return;
-	body->pos[0] = 40 << 16; // the brain's carrier, ten units past the float mirror
-	body->pos[1] = 2 << 16;
-	body->pos[2] = 0;
+	// The brain's carrier sits ten units past the listener; the position is the
+	// entity's own words (D-NET-507: the AI mirror is gone).
+	body->self->position.x.q16 = 40 << 16;
+	body->self->position.y.q16 = 2 << 16;
+	body->self->position.z.q16 = 0;
 	LiveRound round;
 	round.owner = rig.enemy;
 	round_tracer_whiz(world, round, &ammo, {3 << 16, 1 << 16, 0}, {-(1 << 16), 1 << 16, 0},
@@ -463,6 +465,15 @@ void test_wire_shooter_and_target() {
 	radar_note_guided_missile(world, world.round_sim.rounds[4], 4);
 	CHECK(state.missile_count == 1 && state.lock_tone == 0,
 			"a pool-0 wire target resolves through the rows, not the registry");
+	// A remote person riding a hull the local player drives: the first arm reads
+	// the target row's ride link (D-NET-196) [orig: Entity_UpdateGuidedMissile_0
+	// @0x446060 - the target's +0x170 @0x4465DB..0x4465F5, the tone @0x4465F8].
+	remote.ride_link_is_local = true;
+	world.round_sim.rounds[5].guided.target = 0x0005;
+	radar_note_guided_missile(world, world.round_sim.rounds[5], 5);
+	CHECK(state.missile_count == 2 && state.lock_tone == kRadarLockToneTicks,
+			"a wire target whose ride link is the local player notes and sets the tone");
+	remote.ride_link_is_local = false;
 	world.round_sim.wire_actor_provider = {};
 }
 
@@ -473,6 +484,23 @@ void test_lock_tone() {
 	world.round_sim.rounds[9].guided.target = rig.self.packed;
 	radar_note_guided_missile(world, world.round_sim.rounds[9], 9);
 	CHECK(state.lock_tone == 31, "the lock note stores 31");
+	// A round target (a flare the missile holds): its +368, its source, is the arm; a
+	// round is never the local player [orig: Entity_UpdateGuidedMissile_0 @0x446060
+	// (@0x4465DB..0x446602)]. (D-NET-64)
+	{
+		const int32_t count = state.missile_count;
+		state.lock_tone = 0;
+		world.round_sim.rounds[11].owner = rig.enemy;
+		world.round_sim.rounds[12].guided.target_round = 11;
+		radar_note_guided_missile(world, world.round_sim.rounds[12], 12);
+		CHECK(state.lock_tone == 0 && state.missile_count == count,
+				"a missile on another's flare is not noted");
+		world.round_sim.rounds[11].owner = rig.self;
+		radar_note_guided_missile(world, world.round_sim.rounds[12], 12);
+		CHECK(state.lock_tone == 31 && state.missile_count == count + 1,
+				"a missile on the local player's flare is noted");
+		state.lock_tone = 31;
+	}
 	radar_tick_lock_tone(state);
 	CHECK(state.lock_tone == 30, "the pending-slot pass drains one per tick");
 	world.tick_pending_sound_slots();

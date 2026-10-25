@@ -811,7 +811,7 @@ typedef struct DefItemDef {
     /* 'input_function <class>': the input class row -- null / troop / tank. Its
        first callback is the key handler, its second the mounted first-person
        camera the carrier leg calls. [orig: ItemDef_ParseProperty @0x49F650 ->
-       def+0x168; rows @0x829DA8, resolved by Entity_LookupPhysicsCallbacks
+       def+0x168; rows @0x829DA8, resolved by EntityDef_LookupInputCallbacks
        @0x497910 into def+0x170 / def+0x174] */
     char input_function[16];
     /* 'virtualdisplay <model> <userpoint>': the cockpit model the `tank` render
@@ -1114,6 +1114,10 @@ typedef struct DefItemDef {
        next token]. Bytes, as `attrib_parent`. Appended (layout stability). */
     unsigned char attrib_good;
     unsigned char attrib_evil;
+    /* 'huskshadow <model>' -> the 16-byte name at +0xB0, copied unguarded (ours truncates), which the item's
+       model load loads as its husk-shadow model [orig: ItemDef_ParseProperty @0x49f45e..0x49f491 (the copy to
+       +0xB0); EntityDef_LoadModelsAndCallbacks @0x43a361..0x43a38a]. Appended (layout stability). */
+    char huskshadow[16];
 } DefItemDef;
 
 /* The file-wide vehicle spawn registry's slots: 'pcvehicle_spawnlist' ids take them in
@@ -1235,7 +1239,13 @@ typedef struct DefHudPosDef {
        (HUD_ParseTextAlignment on the third token)] */
     int zone_info[3];
     int exp_points[4];
-    int connect_status[4];
+    /* CONNECTSTATUS is the three-field form too: x, y, then the alignment
+       word as the third token, no hidden dword (the shipped line is
+       `CONNECTSTATUS 1012,10,right`) (D-NET-NEW-LI-42). [orig:
+       HUD_ParseHudposToken @0x59FAE9..0x59FB32 -> dword_2723804 / dword_2723808
+       (atof), dword_272380C (HUD_ParseTextAlignment on the third token,
+       called @0x59FB28); read by HUD_DrawPingDisplay @0x59D9D0] */
+    int connect_status[3];
     int team_xy[4];
     int player_count[4];
     int ammo_count_pos[4];

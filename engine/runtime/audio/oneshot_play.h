@@ -48,6 +48,11 @@ struct SetLocation {
 	// range in whole units, also read by the ammo loader's whiz radius
 	// [orig: AmmoDef_InitEffectsTable @0x40a050 / @0x40a072].
 	int32_t cull_range = 0;
+	// The set's own name as its bank spells it (set+4), which the 0x34's writer copies onto the
+	// wire whatever the case of the name it was found by. [orig: SoundBank_FindTriggerByName
+	// @0x75BEBF (stricmp of set+4); NetPacket_WriteOverlayAction @0x505D99..0x505DAA (the
+	// copy of entityDef+4)]
+	std::string name;
 	bool valid() const { return bank >= 0; }
 };
 

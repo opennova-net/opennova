@@ -16,6 +16,12 @@ extends Control
 
 const FlyCameraScript = preload("res://game/fly_camera.gd")
 
+## Every frame the pane draws (its _process, which runs while it is visible): retail's
+## PLAYER_PREVIEW custom draw stores the time of day it lights by into the process clock
+## (PlayerInfoMenuCompanion.player_preview_drawn; engine
+## inmatch::RemoteAdminConsoles::player_preview_drawn).
+signal drawn
+
 # The standing character uses only the compatible third-person slots. A combo row
 # also carries `arms`, but retail arm graphics reference bones outside this preview rig.
 # Portrait tuning: a front portrait of a standing soldier for
@@ -384,6 +390,7 @@ func set_hovered(value: bool) -> void:
 # that fades in on hover.
 func _process(delta: float) -> void:
 	advance(delta)
+	drawn.emit()
 
 
 ## One portrait animation step of `delta` seconds (the _process body; tests

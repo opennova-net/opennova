@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object_id.hpp>
 
+#include <runtime/inmatch/character_registry.h>           // the host's Avatars.def combos
 #include <runtime/renderer/precipitation_frame.h>         // the precipitation drawer state + frame
 #include <runtime/replication/item_replication_catalog.h> // canonical items.def replication traits
 
@@ -67,6 +68,12 @@ struct SimulationAssetState {
 		bool female = false;
 	};
 	std::vector<CharacterSexRow> character_sex_rows;
+	// The same table's combos, which the host's player add validates each side's
+	// character id against (D-NET-137); empty without an Avatars.def.
+	opennova::inmatch::CharacterRegistry character_registry;
+	// An Avatars.def is mounted (loaded, empty or not): its registry, empty too, is the
+	// joiner's decode table (Simulation::install_character_registry).
+	bool character_registry_mounted = false;
 	// The installed script program. Held as a shared_ptr so it survives
 	// reset_world(); each (re)load re-applies it onto the fresh kernel
 	// WacSystem when the kernel's own layered load installed none.

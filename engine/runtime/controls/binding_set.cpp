@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -348,6 +349,43 @@ int BindingSet::mouse_event_action(uint16_t mask,
   return -1;
 }
 
+int BindingSet::mouse_click_action(uint32_t event,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  // Input_TryDispatchBindingByWeaponType's two switches over the row's mouse word and flags.
+  const auto takes = [event](uint16_t word, uint32_t flags) {
+    const bool release_row = (flags & 0x400000u) != 0;
+    if ((flags & 4u) == 0) {
+      switch (event) {
+        case 2: case 1024: if (word == 1) return true; break;
+        case 8: case 2048: if (word == 2) return true; break;
+        case 32: case 4096: if (word == 16) return true; break;
+        default: break;
+      }
+    }
+    switch (event) {
+      case 4: return word == 1 && release_row;
+      case 0x10: return word == 2 && release_row;
+      case 0x100: return word == 1024;
+      case 0x200: return word == 2048;
+      default: return false;
+    }
+  };
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  for (bool modified : {true, false}) {
+    for (std::size_t i = 0; i < records_.size(); ++i) {
+      const BindingRecord &r = records_[i];
+      if ((cat[i].modes & (dead ? 2u : 1u)) == 0 || !takes(r.mouse_mask, cat[i].flags)) continue;
+      const bool has_mod = r.primary_mod || r.secondary_mod || r.mouse_mod;
+      if (has_mod != modified) continue;
+      if (!modified || (r.primary_mod && key_down(r.primary_mod)) ||
+          (r.secondary_mod && key_down(r.secondary_mod)) ||
+          (r.mouse_mod && key_down(r.mouse_mod))) return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
 int BindingSet::action_index_for_row(int row) const {
   if (row < 0) {
     return -1;
@@ -433,6 +471,61 @@ int BindingSet::scan_first_row(int vk, bool modified,
     if (scan_eligible(i)) return i;
   }
   return -1;
+}
+
+int BindingSet::event_row(int scan_code, const std::function<bool(int)> &key_down,
+                          bool *fallback_signed) const {
+  if (fallback_signed != nullptr) *fallback_signed = false;
+  // [orig: Input_ProcessKeyboardEvents -- the modifier pass's fire @0x49d42f
+  //  jumps to the next event @0x49d437, past the fallback]
+  const int modified = scan_first_row(scan_code, true, key_down);
+  if (modified >= 0) return modified;
+  const int fallback = scan_first_row(scan_code, false, key_down);
+  if (fallback >= 0 && fallback_signed != nullptr) {
+    // [orig: @0x49d452..0x49d470 -- Shift's key state, or the row's 0x200]
+    std::size_t n = 0;
+    *fallback_signed =
+        key_down(16) || (catalog(&n)[fallback].flags & 0x200u) != 0;
+  }
+  return fallback;
+}
+
+int BindingSet::release_row(int key) const {
+  // [orig: Input_ProcessKeyboardEvents -- the walk @0x49d252..0x49d27f over
+  //  the re-laid records, the slots @0x49d260 / @0x49d268, `test [eax-12h],
+  //  ebp` (0x80800000 @0x49d236) @0x49d26f]
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  for (const int i : scan_order()) {
+    const BindingRecord &rec = records_[static_cast<std::size_t>(i)];
+    if (rec.primary != key && rec.secondary != key) continue;
+    if ((cat[i].flags & 0x80800000u) != 0) return i;
+  }
+  return -1;
+}
+
+std::vector<KeyRowEvent> BindingSet::release_pass(
+    KeyPressLatch &latch, const std::function<bool(int)> &key_state) const {
+  std::vector<KeyRowEvent> out;
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  // [orig: Input_ProcessKeyboardEvents @0x49d22f..0x49d2cc]
+  for (int key = 0; key < KeyPressLatch::kKeyCount; ++key) {
+    if (!latch.is_set(key) || key_state(key)) continue;  // @0x49d240 / @0x49d249
+    const int row = release_row(key);
+    if (row < 0) continue;  // the latch stays set @0x49d281
+    // The sign: Shift's state, else the 0x200 flag of the record the second
+    // pointer reaches, the one at the key's index (the row whose code is the
+    // key) [orig: @0x49d283..0x49d298].
+    const ActionDef *by_index = action_for_code(key);
+    const bool sign =
+        key_state(16) || (by_index != nullptr && (by_index->flags & 0x200u) != 0);
+    // An open text line queues nothing [orig: @0x49d29f; the queue @0x49d2b1].
+    if (!keyboard_captured_)
+      out.push_back(KeyRowEvent{action_code(cat[row].id), sign, key, true});
+    latch.release(key);  // @0x49d2b9
+  }
+  return out;
 }
 
 int BindingSet::pressed_key(int index,
@@ -542,6 +635,56 @@ std::string display_string_for_token(const BindingSet &set, const std::string &t
     return format_display_string(*rec, (cat[i].flags & 0x200u) != 0u);
   }
   return "???";
+}
+
+std::string keylist_text(const BindingSet &set) {
+  constexpr uint32_t kFiltered = 0x4000000u;
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  struct Row {
+    int code;
+    std::size_t index;  // catalog row
+  };
+  std::vector<Row> rows;
+  for (int code = 0; code < 768; ++code) {
+    const ActionDef *def = action_for_code(code);
+    if (def == nullptr || (def->flags & kFiltered) == 0u) continue;
+    rows.push_back({code, static_cast<std::size_t>(def - cat)});
+  }
+  std::string out;
+  const auto line = [&out](const std::string &text) {
+    for (const char c : text) {
+      if (c == '\n') out += '\r';
+      out += c;
+    }
+  };
+  char buf[512];
+  std::snprintf(buf, sizeof(buf),
+      "v-0x%08x  %d If the Version is out of sync, the CommandCodes may not work sync\n",
+      0x31313230u, static_cast<int>(rows.size()));
+  line(buf);
+  line("//Index    SEQ           Base: Key1    Key2   Mod: Key1    Key2,  Mouse , MMouse,  "
+       "Joy, MJoy,                       Description\n");
+  int index = 0;
+  for (const Row &row : rows) {
+    const ActionDef &def = cat[row.index];
+    const BindingRecord *rec = set.record(static_cast<int>(row.index));
+    const BindingRecord none;
+    const BindingRecord &r = rec != nullptr ? *rec : none;
+    const std::string description = key_help_string("Text", def.token, def.name);
+    const std::string display = format_display_string(r, (def.flags & 0x200u) != 0u);
+    std::snprintf(buf, sizeof(buf),
+        "%4d,            0x%04x,     0x%04x, 0x%04x,     0x%04x, 0x%04x,  0x%04x, 0x%04x, "
+        "0x%02x, 0x%02x, %4d, %s%s, %27s    ,%s    %s\n",
+        index, static_cast<unsigned>(row.code), r.primary, r.secondary, r.primary_mod,
+        r.secondary_mod, r.mouse_mask, r.mouse_mod, r.joy_button, r.joy_mod, row.code,
+        (def.flags & 0x800u) != 0u ? "*" : "", (def.flags & kFiltered) != 0u ? "*" : "",
+        description.c_str(), display.c_str(),
+        (def.flags & 0x800000u) != 0u ? " Action on Key Up only" : "");
+    line(buf);
+    ++index;
+  }
+  return out;
 }
 
 int BindingSet::index_of_token(const std::string &token) const {

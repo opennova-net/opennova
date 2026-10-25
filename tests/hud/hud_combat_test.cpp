@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <vector>
 #include <formats/def/def.h>
 #include <net/npwire/ingame_encode.h>
 #include <runtime/hud/hud_bay_logos.h>
@@ -118,11 +120,11 @@ static void geometry_and_draw() {
 			return q.filled && near(q.x0, 20) && near(q.x1, 24) && near(q.y1 - q.y0, 200);
 		});
 	};
-	s.item_flash[0] = 0x20;
+	compiler.set_item_flash(0, 0x20);
 	CHECK(!agl_bar(compiler.compile(s, 1024, 768)));
-	s.item_flash[0] = 0x30;
+	compiler.set_item_flash(0, 0x30);
 	CHECK(agl_bar(compiler.compile(s, 1024, 768)));
-	s.item_flash[0] = 0;
+	compiler.set_item_flash(0, 0);
 }
 
 static void mortar_map_and_world_cues() {
@@ -257,6 +259,11 @@ static void combat_text_font_slots() {
 	CHECK(pages(inset, kHudFontSlotLabelBold) == 4 && pages(inset, kHudFontSlotHud) == 0);
 	CHECK(std::all_of(inset.glyphs.begin(), inset.glyphs.end(),
 			[](const auto &g) { return g.color == 0xFF7F0000u; }));
+	// No name from the display-name lookup: the brackets draw, no text does
+	// (D-NET-655) [orig: Render_WeaponInsetScene -- the null test @0x5CA0B3..0x5CA0B5].
+	s.combat.target_name.clear();
+	const auto &unnamed = compiler.compile(s, 1024, 768);
+	CHECK(pages(unnamed, kHudFontSlotLabelBold) == 0 && unnamed.glyphs.empty());
 
 	// "89 m" measures 4 * (8 + 1) - 1 = 35 in the font, 70 at the bold slot's
 	// 2x: the hudpos-font line starts at design 512 - 35 and runs left to right.
@@ -318,32 +325,66 @@ static void world_feeds() {
 	seed.has_item_def = true;
 	seed.item_type = 3;
 	seed.position = { 0, 0, 10 };
-	seed.yaw = 90;
+	seed.heading = placed_heading_bam(90);
 	const auto player = world.registry.spawn(0, seed);
 	world.cached.local_player = player;
 	world.ai.attach(player);
 	auto *body = world.ai.for_handle(player);
-	body->pos[2] = 10 << 16;
+	body->self->position.z.q16 = 10 << 16;
 	body->heading = 0;
 	auto *p = world.registry.get(player);
 	seed.position = { 100, 0, 10 };
 	seed.display_name = "Squadmate";
 	const auto target = world.registry.spawn(0, seed);
 	body->inf.combat_target = target;
+	body->slot.f[3] = AiSlot::target_word(TargetRef{target});
 	body->slot.f[2] = 1;
 	LocalPlayerWeapon weapon;
 	weapon.active = true;
 	weapon.def_name = "MORTAR";
 	LocalPlayerViewFrame frame;
 	LocalPlayerViewTracker tracker;
+	// One frame over a steady cursor: the HUD pass's record over the slot word and the head-look
+	// target, which the next scene frame's inset finds unchanged.
 	auto read = [&](bool scoped = false) {
 		frame = {};
 		frame.scope_settled = scoped;
+		tracker.hud_cursor = hud_target_cursor_build(world, body, 0xFFFF);
+		tracker.hud_cursor_at_scene = tracker.hud_cursor;
 		fill_hud_combat_view(world, weapon, frame, tracker, scoped);
 	};
 	read();
 	CHECK(frame.hud_combat.state.target_cursor && frame.hud_combat.state.target_locked);
 	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
+	// A heat lock on a flare holds a round in the slot's +0xC word: the cursor flag
+	// stands, drawn at the round's Position and tinted by its own team byte; no
+	// head-look fallback runs, and the inset's brackets and friendly marker, which need
+	// a pool-0 index, stay off. [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B882D;
+	//  HUD_DrawCrosshair @0x5927AA..0x592803; Render_WeaponInsetScene @0x5C9F78]
+	{
+		LiveRound &flare = world.round_sim.rounds[5];
+		flare.pos.set_q16({ 200 << 16, 30 << 16, 12 << 16 });
+		flare.team = 2;
+		body->slot.f[3] = AiSlot::target_word(TargetRef::of_round(5));
+		body->inf.combat_target = {};
+		body->inf.head_look_target = target;
+		read();
+		const auto &st = frame.hud_combat.state;
+		CHECK(st.target_cursor && st.target_locked);
+		CHECK(!st.target_brackets && !st.inset_friendly && !st.target_friendly);
+		CHECK(frame.hud_combat.target_valid && frame.hud_combat.target[0] == 200 << 16 &&
+				frame.hud_combat.target[1] == 30 << 16 && frame.hud_combat.target[2] == 12 << 16);
+		flare.team = 1;
+		read();
+		CHECK(frame.hud_combat.state.target_friendly && !frame.hud_combat.state.target_brackets);
+		// A zero word takes the head-look target and sets no cursor.
+		body->slot.f[3] = 0;
+		read();
+		CHECK(!frame.hud_combat.state.target_cursor && frame.hud_combat.target_valid);
+		body->inf.head_look_target = {};
+		body->inf.combat_target = target;
+		body->slot.f[3] = AiSlot::target_word(TargetRef{target});
+	}
 	// Every HUD-owning instance is a client (modes 2 and 3): bit 3 admits or
 	// refuses the brackets on a listen host and a joiner alike, and bit 8 --
 	// the dedicated host's -- never reaches a HUD. [orig: @0x5926D4..0x5926E1]
@@ -392,6 +433,10 @@ static void world_feeds() {
 	p->carry_flags = 24;
 	read();
 	CHECK(frame.hud_combat.state.vehicle_controls && frame.hud_combat.state.gear == 0);
+	// The silhouette's key is the mount's pool slot, which a later spawn into that slot keeps
+	// [orig: HUD_DrawTargetEntityOverlay - the key compare @0x59A5F7 over g_HUDRootEntity, a
+	//  pool-slot pointer; EntityPool_Allocate @0x442130, called once by Game_Run].
+	CHECK(frame.hud_combat.state.vehicle_identity == mounted.packed);
 	CHECK(frame.hud_combat.state.altitude_agl_q16 == 90 << 16);
 	CHECK(frame.hud_combat.state.parachute && frame.hud_combat.state.armor);
 	CHECK(!frame.hud_combat.state.target_brackets &&
@@ -500,6 +545,107 @@ static void world_feeds() {
 	weapon.active = false;
 	read(true);
 	CHECK(!frame.hud_combat.state.impact_map);
+}
+
+// The crosshair reads this pass's record of the HUD target cursor, the weapon inset the record
+// as the scene frame found it ahead of the pass (the last pass's), and on a joiner either may
+// name a decoded remote person, read through its row as the pool-0 entity retail's client
+// built for it (World::wire_person): its pool, its team byte and, for the crosshair's
+// brackets only, the type of the def its record's type word indexes (none at index 0). A
+// head-look target sets no cursor flag, so no cursor quad.
+// [orig: HUD_DrawCrosshair @0x592640 - the pool test (the call @0x592675), the team read
+//  @0x592692, the def type @0x592CE8..0x592CF3, the cursor flag @0x592776..0x592790;
+//  Render_WeaponInsetScene @0x5C9740 - g_HUDTargetCursorEntity @0x5C9F5D, the pool test (the
+//  call @0x5C9F6D), the team compare @0x5C9F84..0x5C9F98; Render_ProcessMainSceneFrame
+//  @0x5CA0F0 - the inset's call @0x5CA949 ahead of the pass's @0x5CACE3 / @0x5CAD04]
+static void cursor_records() {
+	auto world_heap = std::make_unique<World>();
+	World &world = *world_heap;
+	world.registry.configure_pool(0, 8);
+	Entity seed;
+	seed.alive = true;
+	seed.health = 100;
+	seed.team = 1;
+	seed.has_item_def = true;
+	seed.item_type = 3;
+	const auto player = world.registry.spawn(0, seed);
+	world.cached.local_player = player;
+	world.ai.attach(player);
+	seed.position = { 100, 0, 10 };
+	const auto mate = world.registry.spawn(0, seed);
+	LocalPlayerWeapon weapon;
+	weapon.active = true;
+	LocalPlayerViewFrame frame;
+	LocalPlayerViewTracker tracker;
+	HudTargetCursor none;
+	HudTargetCursor named;
+	named.entity = EntityLifetime{ mate, world.registry.get(mate)->registry_spawn_id };
+	const auto read = [&](const HudTargetCursor &pass, const HudTargetCursor &scene) {
+		frame = {};
+		tracker.hud_cursor = pass;
+		tracker.hud_cursor_at_scene = scene;
+		fill_hud_combat_view(world, weapon, frame, tracker, false);
+		return frame.hud_combat.state;
+	};
+	// The inset reads the last pass's record: a teammate the pass now names shows on the
+	// crosshair at once and in the inset one frame later; one it has dropped stays in the inset
+	// for that frame.
+	HudCombatState st = read(named, none);
+	CHECK(st.target_brackets && !st.inset_friendly);
+	st = read(named, named);
+	CHECK(st.target_brackets && st.inset_friendly);
+	st = read(none, named);
+	CHECK(!st.target_brackets && st.inset_friendly);
+	// A decoded remote person: no registry entity, its row through the role's hook. The items
+	// rows: index 0 reads as no def, type 10 a person (3), type 11 a vehicle (1).
+	world.tables.item_rows.assign(3, PlayerTemplate{});
+	world.tables.item_rows[0].type_id = 1;
+	world.tables.item_rows[1].type_id = 10;
+	world.tables.item_rows[1].item_type = 3;
+	world.tables.item_rows[2].type_id = 11;
+	world.tables.item_rows[2].item_type = 1;
+	struct Row {
+		uint16_t handle;
+		uint8_t team;
+		uint16_t type_id;
+	};
+	std::vector<Row> rows = { { 0x0005, 1, 10 }, { 0x0006, 2, 10 }, { 0x0007, 1, 11 },
+		{ 0x1008, 1, 10 }, { 0x000A, 1, 99 } };
+	world.wire_person = [&rows](uint16_t handle, World::WirePerson &out) {
+		for (const Row &row : rows)
+			if (row.handle == handle) {
+				out.team = row.team;
+				out.type_id = row.type_id;
+				return true;
+			}
+		return false;
+	};
+	HudTargetCursor wire;
+	const auto person = [&](uint16_t handle) {
+		wire.wire_person = handle;
+		return read(wire, wire);
+	};
+	st = person(0x0005); // a teammate with a person def
+	CHECK(st.target_brackets && st.inset_friendly);
+	CHECK(!st.target_cursor && !frame.hud_combat.target_valid);
+	st = person(0x0006); // the other team
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	st = person(0x0007); // no person def: the inset takes no def test
+	CHECK(!st.target_brackets && st.inset_friendly);
+	st = person(0x000A); // no items row of the type: index 0, no def
+	CHECK(!st.target_brackets && st.inset_friendly);
+	st = person(0x1008); // off pool 0
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	st = person(0x0009); // no row holds the handle
+	CHECK(!st.target_brackets && !st.inset_friendly);
+	// The row's team is read at each read: a team change shows on the next frame's reads.
+	rows[1].team = 1;
+	st = person(0x0006);
+	CHECK(st.target_brackets && st.inset_friendly);
+	// The destroy's clear (hud_target_cursor_note_destroyed) leaves the record naming none.
+	hud_target_cursor_note_destroyed(wire, 0x0006);
+	st = read(wire, wire);
+	CHECK(!st.target_brackets && !st.inset_friendly);
 }
 
 static void parser_and_received_feedback() {
@@ -795,6 +941,7 @@ int main() {
 	mortar_map_and_world_cues();
 	combat_text_font_slots();
 	world_feeds();
+	cursor_records();
 	parser_and_received_feedback();
 	sent_feedback();
 	if (!failures)

@@ -12,8 +12,8 @@
 namespace opennova::world {
 namespace {
 FixedVec3 position(const Entity &e) {
-    return {io::float_to_fp16_16(e.position.x), io::float_to_fp16_16(e.position.y),
-            io::float_to_fp16_16(e.position.z)};
+    return {e.position.x.q16, e.position.y.q16,
+            e.position.z.q16};
 }
 int32_t add(int32_t a, int32_t b) {
     return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
@@ -31,13 +31,13 @@ int32_t distance(FixedVec3 a, FixedVec3 b) {
 // [orig: Weapon_FireProcess @0x53F5B0]
 void fire(World &world, Entity &field, FixedVec3 p, uint8_t ammo_index) {
 	world.round_sim.fire_source(world, &field, p,
-			field.veh.yaw_seeded ? field.veh.yaw_bam : bam_heading_from_mission_yaw_deg(field.yaw),
-			bam_from_degrees_wrapped(field.pitch), ammo_index);
+			field.veh.yaw_seeded ? field.veh.yaw_bam : field.heading,
+			field.pitch_bam, ammo_index);
 }
 
 } // namespace
 
-// [orig: Entity_InitHardpoints @ 0x4417D0]
+// [orig: Minefield_InitEntity @ 0x4417D0]
 void MinefieldSystem::initialize(World &world, Entity &entity, bool think_enabled,
         bool render_enabled, bool has_graphic, uint32_t small_ammo, uint32_t large_ammo,
         const std::string &small_marker, const std::string &large_marker,
@@ -94,7 +94,9 @@ void MinefieldSystem::think(World &world, Entity &field) {
     std::array<bool, count> contacts{};
     for (int i = 0; i < count; ++i) positions[i] = point(field, i);
     const FixedVec3 center = position(field);
-    const int32_t radius = io::float_to_fp16_16(field.bound_radius);
+    // The field's bound word [orig: Entity_LandmineThink @0x441A40 - `cmp eax,
+    //  [ebp+0]` @0x441B9F].
+    const int32_t radius = field.bound_radius.q16;
     auto actor = [&](const MinefieldActor &body) {
         if (body.item_id == 0 || (body.flags & 1) ||
             distance(body.position, center) > radius) return;
@@ -118,7 +120,7 @@ void MinefieldSystem::think(World &world, Entity &field) {
     world.registry.for_each_in_pool(1, [&](const Entity &vehicle) {
         if (!vehicle.item_id || !vehicle.has_item_def ||
             vehicle.item_type != 1 || ((vehicle.engine_flags | vehicle.flags) & 1)) return;
-        const int32_t vehicle_radius = io::float_to_fp16_16(vehicle.bound_radius);
+        const int32_t vehicle_radius = vehicle.bound_radius.q16;
         FixedVec3 probe = position(vehicle);
         if (distance(probe, center) > add(radius, vehicle_radius)) return;
         probe.z = add(probe.z, 4096);
@@ -131,9 +133,8 @@ void MinefieldSystem::think(World &world, Entity &field) {
                 ground = world.collision->minefield_ground(world, vehicle.handle, probe, indoors);
             else if (!indoors)
                 ground = world.tables.terrain
-                        ? io::float_to_fp16_16(terrain::height_field_height_mission_bilinear(
-                                *world.tables.terrain, probe.x * io::kInvFp16One,
-                                probe.y * io::kInvFp16One))
+                        ? terrain::height_field_height_bilinear_fixed(
+                                *world.tables.terrain, probe.x, probe.y)
                         : 0;
             contact.z = add(ground, 0x8000);
             if (distance(contact, positions[i]) - vehicle_radius / 2 < 49152)

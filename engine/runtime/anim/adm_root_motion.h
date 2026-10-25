@@ -82,6 +82,10 @@ public:
 	// The served entry's own clock and loop bit decide the wrap.
 	bool clip_wraps_at(int adm_id, int state_id, int variant,
 	                   int32_t phase_ticks) const override;
+	// The served entry's own float clock: t at the playhead (the armed park
+	// included) and its step.
+	bool clip_clock_at(int adm_id, int state_id, int variant, int32_t phase_ticks,
+	                   int32_t armed_boundary, float &time, float &delta) const override;
 
 	// THE CROSSED-FRAME TRIGGER SCAN — the authored event words a body crossed
 	// between two playhead positions, in order, one entry per authored clip

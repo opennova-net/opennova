@@ -35,8 +35,8 @@ uint32_t corpse_kick_seed(uint32_t wire_key, int anim_state);
 
 // Whether a corpse whose hips stand at `hips_height` (presentation frame, world
 // units) may start a ragdoll: a body that dies in the water keeps retail's
-// float, its clip, so a ragdoll starts only above the water plane; a world with
-// no water starts one anywhere (ADR 0060 d6).
+// float, its clip, so a ragdoll starts only above the water plane, the
+// environment's raw water word (0 on a map without water; ADR 0060 d6).
 bool corpse_ragdoll_may_start(const World &world, float hips_height);
 
 // The ragdoll set's key for the local avatar, the one subject with no row of

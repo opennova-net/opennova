@@ -20,22 +20,30 @@ ClientRosterSlot *active_slot(ClientState &state, uint8_t index) {
 
 } // namespace
 
-int ClientReplicaPipeline::local_roster_slot() const {
-	// g_LocalPlayerEntity+0x154, the local player's own slot index. The host
+int ClientReplicaPipeline::local_body_slot() const {
+	// g_LocalPlayerEntity+0x154, the local body's own slot index. The host
 	// stamps a player entity's +0x154 from its slot's +20 id, the id S2C 0x04
 	// byte 17 carries as g_LocalPlayerSlotId, so both name one slot: the one
 	// set_local_player_slot latches (a joiner's 0x04, the listen host's own
-	// connection), live while the player is dead or spectating.
+	// connection), live while the player is dead or spectating. The body's own
+	// word is the record's byte a 0x0C or 0x18 of its handle stores, and the 0xFF
+	// its in-place destroy stores (mark_local_body_destroyed) until such a record
+	// rebuilds it, each at its message's place in the receive; the spawn-slot
+	// notice reads g_LocalPlayerSlotId instead (local_player_slot_).
 	// [orig: Server_PlayerAdd @0x51d087..0x51d08b; Server_InitAllPlayerEntitiesForRound
-	//  @0x516b97..0x516b9a; NapiNPClientMsg_SessionSlotConfig @0x4254a2]
-	return local_player_slot_;
+	//  @0x516b97..0x516b9a; NapiNPClientMsg_SessionSlotConfig @0x4254a2;
+	//  NapiNPClientMsg_0x00C @0x42E730 - the store @0x42EA06; NapiNPClientMsg_FullEntitySpawn
+	//  @0x433780 - the store @0x433BBB; Entity_Destroy @0x43E810 - @0x43EA78;
+	//  NapiNPClientMsg_HandleSpawnSlot @0x4317f0]
+	return local_body_slot_ >= 0 ? local_body_slot_ : local_player_slot_;
 }
 
 void ClientReplicaPipeline::apply_squad_join(const std::vector<uint8_t> &body) {
-	// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600 — the link + fireteam
-	//  reset @0x42564a..0x425652; `leader == local slot` @0x42565e (the line
-	//  unless +50 & 2 @0x42566c, the RECRUIT_ACCEPT sound unless +50 & 1
-	//  @0x4256a0, the waypoint push j_Server_BroadcastChatToAllPlayers
+	// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600 — the slot @0x42564a..0x425652, the
+	//  link + fireteam reset @0x42565f..0x425662; `leader == g_LocalPlayerEntity+0x154`
+	//  (local_body_slot) @0x425666..0x425672 (the line unless +50 & 2 @0x425674, its
+	//  Chat_AddMessageChannel1 @0x4256a0..0x4256ab, the RECRUIT_ACCEPT sound unless +50 & 1
+	//  @0x4256B3, the waypoint push j_Server_BroadcastChatToAllPlayers
 	//  @0x4256d1); `leader == 0xFF` @0x4256db -> the foreign-waypoint sweep
 	//  @0x4256e0 whichever member the message names (no local-slot test);
 	//  the team-list refresh @0x4256e5]
@@ -44,7 +52,7 @@ void ClientReplicaPipeline::apply_squad_join(const std::vector<uint8_t> &body) {
 	if (slot == nullptr) return;
 	slot->squad_leader = join.leader;
 	slot->fireteam = 0;
-	if (join.leader == local_player_slot_) {
+	if (join.leader == local_body_slot()) {
 		ClientSquadEvent event;
 		event.kind = ClientSquadEvent::Kind::MemberJoined;
 		event.slot = join.member;
@@ -82,15 +90,16 @@ void ClientReplicaPipeline::apply_squad_order(const std::vector<uint8_t> &body) 
 }
 
 void ClientReplicaPipeline::apply_fireteam_set(const std::vector<uint8_t> &body) {
-	// [orig: NapiNPClientMsg_0x073 @0x425770 — the store @0x4257c0; on the
-	//  local slot the LEADER's +50: bit 2 skips everything @0x4257ec, bit 1
-	//  skips MP_COMMAND1 @0x4257f4, else the HUD_CMAP_SETFIRETEAM line; the
-	//  team-list refresh @0x425892]
+	// [orig: NapiNPClientMsg_0x073 @0x425770 — the slot @0x4257c0, the store @0x4257d3; on the
+	//  local slot (the slot's +0xC against g_LocalPlayerEntity+0x154, local_body_slot,
+	//  @0x4257d0..0x4257e2) the LEADER's (its slot @0x4257ec..0x4257f4) +50:
+	//  & 2 skips everything @0x425807, & 1 skips MP_COMMAND1 @0x42580f, else the
+	//  HUD_CMAP_SETFIRETEAM line; the team-list refresh @0x425892]
 	const FireteamSet set = decode_fireteam_set(body.data(), body.size());
 	ClientRosterSlot *slot = active_slot(state_, set.member);
 	if (slot == nullptr) return;
 	slot->fireteam = set.fireteam;
-	if (set.member == local_player_slot_) {
+	if (set.member == local_body_slot()) {
 		const ClientRosterSlot *leader = active_slot(state_, slot->squad_leader);
 		if (leader != nullptr && (leader->radio_mute_flags & 2u) == 0u) {
 			ClientSquadEvent event;

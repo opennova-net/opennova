@@ -290,6 +290,7 @@ bool encode_protocol_packet_plaintext(const ProtocolPacketHeader &hdr,
 struct QueuedSessionPacket {
 	ProtocolPacketHeader header{};
 	std::vector<ProtocolMessage> messages;
+	std::size_t body_bytes = 0; // the packet's body past its opcode (Packet::body_bytes)
 };
 
 // The default cs_dir0.packet_queue_max copied into every retail connection. The JOINTOPERATIONS
@@ -379,6 +380,12 @@ struct SessionDeframeAdmission {
 	struct Packet {
 		ProtocolPacketHeader header;
 		std::vector<ProtocolMessage> messages;
+		// The packet's body length past its opcode, what the parse is handed (a queued packet's
+		// as it was queued). [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 -
+		//  CNapiNPConnection_ParseMessages(conn, payload, payload_len) (the call @0x626BF4), the
+		//  queued copy NapiNPPacket_CreateAndInsert @0x626C32; NapiNPProtocol_PumpRecvQueues
+		//  @0x6266A0 - its ParseMessages (the call @0x62696B)]
+		std::size_t body_bytes = 0;
 	};
 
 	bool admitted = false;
@@ -456,18 +463,31 @@ void complete_session_send_flush(SessionSequencing &seq);
 // sequences succeed with no messages; future sequences queue until the gap closes, when all newly
 // contiguous messages drain in order. Generic consumers use a no-queue high-water policy: a newer
 // sequence is admitted even across a gap, while zero/stale/duplicate sequences are suppressed.
-// Returns false (leaving seq untouched) only if decode fails; a wrong session_id is quietly
-// consumed without changing sequencing state. `admission_out`, when supplied, distinguishes admitted
+// A header too short for a field reads that field as 0, as retail's bounded reader does (a
+// missing session_id never matches, a missing sequence is consumed, a short in-order packet is
+// admitted with no record; D-NET-719). Returns false (leaving seq untouched) only if the record
+// region's decode fails; a wrong session_id is quietly consumed without changing sequencing state. `admission_out`, when supplied, distinguishes admitted
 // header-only packets from stale/future packets and reports the greatest ACK carried by every packet
 // admitted during this call. The outer NWU envelope must already be stripped.
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 gates/queues @0x626be0..0x626c3a;
 // CNapiNPConnection_ParseMessages @0x625bc0 latches the admitted seq and decrypts records with the
 // INBOUND crypto_key @conn+0x10c — the peer key, distinct from the outbound tx_crypto_key.]
+// `drain_queued_successors` false admits the in-order packet alone and leaves the queued
+// successors its arrival made contiguous for take_ready_session_packet: a server's receive pump
+// replays them in its connection-list walk, after every datagram of that pump (NEW-L1-9).
 bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
                             const uint8_t *body, size_t body_len,
                             ProtocolPacketHeader &hdr_out,
                             std::vector<ProtocolMessage> &messages_out,
-                            SessionDeframeAdmission *admission_out = nullptr);
+                            SessionDeframeAdmission *admission_out = nullptr,
+                            bool drain_queued_successors = true);
+
+// Take the queued packet whose gap has closed (sequence last_inbound_seq + 1) off the ordered
+// queue and admit it: `admission_out` carries that one packet. False when none is ready.
+// [orig: NapiNPProtocol_PumpRecvQueues's connection-list walk @0x626910..0x6269E8 - the head
+//  test against recv_ack_seq + 1 @0x626960, CNapiNPConnection_ParseMessages @0x62696B, the
+//  node's unlink and free @0x626970..0x6269B1]
+bool take_ready_session_packet(SessionSequencing &seq, SessionDeframeAdmission &admission_out);
 
 // Applies retail fragment semantics and returns true when `payload_out`
 // contains a complete payload ready for higher-level dispatch. An

@@ -9,6 +9,18 @@ extends RefCounted
 
 const FIXTURE_ITEMS := "res://../fixtures/def/items.def"
 
+## Retail ITEMS.DEF's first row. Its load ordinal 0 is the ItemTypeIndex every
+## unresolved body carries, so the S2C 0x0C / 0x0D load streams pass over a row
+## at index 0 (D-NET-487) [orig: NetPacket_SerializeEntityStatesToBuffer
+## @0x5030A0 - @0x503134; NetPacket_SerializeEntityPoolToPacket_0 @0x503940 -
+## @0x5039DD]. A staged table whose first row is a body a test streams leads
+## with this row, as the shipped table does.
+const NULL_ROW := """begin "Null"
+  id 100000
+  type marker
+end
+"""
+
 ## One deploy-selectable pool-1 spawn zone: the mission stores id 1359 and the
 ## promotion applies ITEM_ID_OFFSET, so the ItemDef identity is 101359.
 const SPAWN_ZONE_ROW := """begin "Spawn Zone Fixture"

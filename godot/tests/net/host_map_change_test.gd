@@ -69,7 +69,164 @@ func test_the_map_change_keeps_the_listen_hosts_session_across_the_reload() -> v
 	assert_true(sim.is_mp_session())
 	var config := sim.get_host_session_config()
 	assert_eq(String(config.mission_file).to_lower(), "mnml.bms")
+	# The next map's freeze is the first map's: its listed models' materials resolve and none
+	# builds, then the full arm's device warm runs (D-NET-NEW-L3-31).
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		var freeze := names.find("model_materials")
+		assert_true(freeze >= 0 and names.find("effects_warm") > freeze,
+				"the listen host's map change freezes, then warms: %s" % [names])
+		assert_false(names.has("model_warm"), "no listed model builds: %s" % [names])
 	world.unload()
+
+
+# Every mission start's load builds the HUD, a map change's too (D-NET-NEW-L8-40): the overlay
+# init ahead of the freeze, the HUD's textures and fonts past it and ahead of the full arm's warm.
+# The shell's teardown frees the first map's overlay; the next map's load builds and loads a new
+# one, and no frame has mounted either (the first frame with a player of its own mounts it).
+# [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, Render_InitMissionTextures
+#  @0x525A6E -> HUD_LoadAllTextures @0x587205, HUD_InitAllFonts @0x525A9A]
+func test_the_map_change_builds_the_hud_inside_its_load() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var presenter := GameHudPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, null)
+	assert_eq(world.load_mission_as_host(_host_options(1)), OK)
+	var first: HudOverlay = presenter.get_game_hud()
+	assert_not_null(first, "the first map's load built the HUD")
+	if first == null:
+		return
+	assert_true(first.is_configured(), "the first map's textures stage loaded it")
+	assert_false(first.is_inside_tree(), "no frame mounted it")
+	assert_not_null(first.get_minimap_terrain_picture(), "the full arm loads the terrain picture")
+	_assert_hud_legs(world.last_load_timeline())
+	var next_map: String = world.begin_map_change()
+	world.unload()
+	presenter.teardown()
+	assert_eq(world.load_next_mission(next_map), OK)
+	var second: HudOverlay = presenter.get_game_hud()
+	assert_not_null(second, "the next map's load built the HUD")
+	if second == null:
+		return
+	assert_false(second == first, "the next mission start's overlay init built a new one")
+	assert_true(second.is_configured(), "the next map's textures stage loaded it")
+	assert_false(second.is_inside_tree(), "no frame mounted it")
+	_assert_hud_legs(world.last_load_timeline())
+	world.unload()
+	presenter.teardown()
+
+
+func _assert_hud_legs(timeline: LoadTimeline) -> void:
+	assert_not_null(timeline)
+	if timeline == null:
+		return
+	var names := Array(timeline.span_names())
+	var init := names.find("hud_init")
+	var freeze := names.find("model_materials")
+	var textures := names.find("hud_textures")
+	var warm := names.find("effects_warm")
+	assert_true(init >= 0 and init < freeze and freeze < textures and textures < warm,
+			"the HUD's init, the freeze, the HUD's textures, the warm: %s" % [names])
+
+
+# Retail opens its archives once per process, never at a map change (engine inmatch/map_change.h
+# carries the witness, D-NET-NEW-L3-24): a host mounted on its own archives (no injected root)
+# loads the next map on the same mount.
+func test_the_map_change_loads_on_the_sessions_mount() -> void:
+	var dir := OS.get_cache_dir().path_join("opennova_host_mount_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	WorldFixture.stage_shell_archives(self, dir)
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var options := _host_options(1)
+	options.dir = dir
+	assert_eq(world.load_mission_as_host(options), OK)
+	var mount: ResourceRoot = world.get_resource_root()
+	assert_not_null(mount)
+	var next_map: String = world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms")
+	world.unload()
+	assert_eq(world.load_next_mission(next_map), OK)
+	assert_same(world.get_resource_root(), mount, "the next map loads on the session's mount")
+	world.unload()
+	if mount != null:
+		mount.clear()
+	await get_tree().process_frame
+	TestFs.remove_dir_recursive(dir)
+
+
+# A Serve Only host's map change runs the next mission start's reduced arm, as its first load
+# does: no effect system at the head (D-NET-NEW-L3-23), its listed models' materials resolved and
+# none of the warm's legs: no effect spawn, no model build, no pipeline warm, no forced frame
+# (engine inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
+# D-NET-NEW-L3-25).
+func test_a_serve_only_hosts_map_change_runs_the_reduced_arm() -> void:
+	var world := WorldFixture.make_world(self)
+	await get_tree().process_frame
+	world.set_playable(false)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(RuntimeFixture.directory())), OK)
+	world.set_resource_root(root)
+	var options := _host_options(1)
+	options.serve_and_play = false
+	var presenter := GameHudPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, null)
+	assert_eq(world.load_mission_as_host(options), OK)
+	# The reduced arm's HUD (D-NET-NEW-L8-40): the fonts, the stdbox and the connection icons the
+	# status page draws, none of the full arm's HUD art, terrain picture or map materials
+	# [orig: Render_InitMissionTextures @0x587120 - the arm test @0x58713C to @0x58727A, past
+	# HUD_LoadAllTextures @0x587205 and ViewFx_InitShadersAndTextures @0x587217].
+	var hud: HudOverlay = presenter.get_game_hud()
+	assert_not_null(hud, "a Serve Only load builds the HUD its status page draws through")
+	if hud != null:
+		assert_true(hud.is_configured(), "its reduced arm loaded it")
+		assert_null(hud.get_minimap_terrain_picture(), "no terrain picture on the reduced arm")
+	var sim: Simulation = world.get_sim()
+	assert_not_null(sim)
+	if sim == null:
+		return
+	assert_eq(sim.session_role(), Simulation.ROLE_DEDICATED_HOST, "a Serve Only host")
+	var next_map: String = world.begin_map_change()
+	assert_eq(next_map.to_lower(), "mnml.bms", "the rotation names the next map")
+	world.unload()
+	presenter.teardown()
+	assert_eq(world.load_next_mission(next_map), OK)
+	assert_same(world.get_sim(), sim, "the next map runs on the same simulation")
+	assert_eq(sim.session_role(), Simulation.ROLE_DEDICATED_HOST, "still a Serve Only host")
+	assert_null(presenter.get_game_hud().get_minimap_terrain_picture(),
+			"the map change's reduced arm loads no terrain picture either")
+	assert_null(world.get_effect_world(), "the next map loads no effect system either")
+	var timeline: LoadTimeline = world.last_load_timeline()
+	assert_not_null(timeline)
+	if timeline != null:
+		var names := Array(timeline.span_names())
+		assert_false(names.has("effect_system"), "no effect system at the head: %s" % [names])
+		assert_true(names.has("model_materials"),
+				"the next map resolves its listed models' materials: %s" % [names])
+		# The reduced arm still loads the HUD's fonts and the stdbox frame its status page
+		# draws (D-NET-NEW-L8-40) [orig: Game_StartMission @0x524360 - HUD_InitAllFonts
+		# @0x525A9A, BoxTexture_LoadAndSetupUVRegions @0x525AC0].
+		var freeze := names.find("model_materials")
+		assert_true(names.find("hud_init") >= 0 and names.find("hud_init") < freeze
+				and names.find("hud_textures") > freeze,
+				"the HUD's init and textures legs run on the reduced arm: %s" % [names])
+		for leg in ["effects_warm", "effect_spawn", "model_warm", "present_pipelines",
+				"forced_draw_1", "force_sync", "warm_reset"]:
+			assert_false(names.has(leg),
+					"no %s at a Serve Only host's map change: %s" % [leg, names])
+	world.unload()
+	presenter.teardown()
 
 
 func test_the_rotations_end_keeps_nothing() -> void:

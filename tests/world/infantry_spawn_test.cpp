@@ -58,15 +58,15 @@ struct Rig {
         Entity seed;
         seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
         seed.item_type = 3; seed.net_id = uint16_t(id); seed.team = 1; seed.group_id = 7;
-        seed.position = {8, 8, 0}; seed.yaw = 90;
+        seed.position = {8, 8, 0}; seed.heading = placed_heading_bam(90);
         handle = world.registry.spawn(0, seed);
         world.ai.attach(handle);
         body().inf.active = true;
         body().net_id = id;
-        body().pos[0] = body().pos[1] = 8 * 65536;
-        body().net_saved_live_pose[0] = 3 * 65536;
-        body().net_saved_live_pose[1] = 4 * 65536;
-        body().net_saved_live_pose[2] = 5 * 65536;
+        body().self->position.x.q16 = body().self->position.y.q16 = 8 * 65536;
+        entity().saved_live_pos[0] = 3 * 65536;
+        entity().saved_live_pos[1] = 4 * 65536;
+        entity().saved_live_pos[2] = 5 * 65536;
         body().profile.clip_size = 23;
         body().slot.f[18] = 3 * 62 + 61;
         world.ai.root_motion = &source;
@@ -101,10 +101,21 @@ void warmup_permutation_and_root_motion() {
         CHECK(targets.size() == size_t(2 * (steps[i] + 1)));
         for (size_t n = 0; n + 1 < targets.size(); n += 2)
             CHECK(targets[n] == 43 && targets[n + 1] == 1);
-        CHECK(r.body().pos[0] == 8 * 65536 && r.body().pos[1] == 8 * 65536);
-        CHECK(r.body().pos[2] == 65536);
+        CHECK(r.body().self->position.x.q16 == 8 * 65536 && r.body().self->position.y.q16 == 8 * 65536);
+        CHECK(r.body().self->position.z.q16 == 65536);
         CHECK(r.body().inf.last_events == 0);
-        CHECK(r.entity().net_anim_phase == std::min(steps[i] + 1, 255));
+        // The warm-up mirrors the record's anim ratio byte. An 11-tick warm-up ends inside the
+        // walk fade (1/15), where the byte is the fade's float weight over its step, truncated:
+        // the quotient is 10.9999997 at 53 and 64 bits and 11 at 24, so the test pins the mirror
+        // and the two-value window, never the edge (Q3-11). Past the fade, a source without the
+        // retail clock gives the elapsed ticks.
+        // [orig: NetPacket_SerializePlayerState @0x4C0CF2..0x4C0D35]
+        const uint8_t ratio = r.entity().net_anim_phase;
+        CHECK(ratio == wire_anim_ratio(r.body().inf, &r.source));
+        if (r.body().inf.body_blend_active())
+            CHECK(steps[i] + 1 < 15 && (ratio == steps[i] || ratio == steps[i] + 1));
+        else
+            CHECK(ratio == std::min(steps[i] + 1, 255));
         CHECK(r.entity().npc_respawns == 3 && r.body().inf.magazine == 23);
         CHECK(r.entity().spawn_position.z == 0);
         CHECK(r.body().inf.aim_point[0] == 6 * 65536); // saved X + three units
@@ -114,13 +125,13 @@ void warmup_permutation_and_root_motion() {
     Rig ramp;
     ramp.source.bottom = 1024; ramp.source.rise = 10; ramp.source.vertical = 100;
     ramp.init();
-    CHECK(ramp.body().pos[2] == 1234); // first blended DZ, bottom deltas, final bottom and extra step
+    CHECK(ramp.body().self->position.z.q16 == 1234); // first blended DZ, bottom deltas, final bottom and extra step
     CHECK(ramp.body().inf.prev_capsule_bottom == 1134);
 
     Rig absent;
     absent.owned->ai.root_motion = nullptr;
     absent.init();
-    CHECK(absent.body().pos[2] == 0 && absent.body().inf.clip_phase == 0);
+    CHECK(absent.body().self->position.z.q16 == 0 && absent.body().inf.clip_phase == 0);
     CHECK(absent.body().inf.magazine == 23);
 }
 
@@ -150,7 +161,7 @@ void postures_mounts_and_wash() {
     CHECK(mounted.body().inf.anim_state == 75);
     CHECK(mounted.body().inf.wpn_state == 43);
     CHECK(mounted.body().inf.clip_phase == 10 && mounted.body().inf.wpn_clip_phase == 10);
-    CHECK(mounted.body().pos[2] == 0);
+    CHECK(mounted.body().self->position.z.q16 == 0);
     CHECK(mounted.entity().ground_target == carrier.ground_target);
     carrier.emplaced_config = 7; mounted.init(); // unavailable clip -> generic mount
     CHECK(mounted.body().inf.anim_state == 67);
@@ -241,7 +252,7 @@ void world_free_pose_matches_the_world() {
         CHECK(spawned.pose.state == organic_spawn_state(facts, &fresh, 0));
         // The height the warmup lifted the world's body by (no collision wired: no ground solve);
         // a parented body only animates.
-        CHECK(spawned.rise == r.body().pos[2]);
+        CHECK(spawned.rise == r.body().self->position.z.q16);
         CHECK(c.mounted ? spawned.rise == 0 : spawned.rise > 0);
     }
     CHECK(organic_warmup_updates(0) == 10 && organic_warmup_updates(13) == 362 &&
@@ -501,7 +512,7 @@ struct StillPeople {
         Entity seed;
         seed.kind = EntityKind::Organic; seed.item_id = 41; seed.has_item_def = true;
         seed.item_type = 3; seed.net_id = uint16_t(id); seed.team = uint8_t(team);
-        seed.position = {x, y, 0}; seed.yaw = int16_t(yaw);
+        seed.position = {x, y, 0}; seed.heading = placed_heading_bam(int16_t(yaw));
         seed.flags = guard ? 0x40u : 0u;
         const EntityHandle handle = owned->registry.spawn(0, seed);
         owned->ai.attach(handle);
@@ -510,8 +521,8 @@ struct StillPeople {
         body.inf.adm_id = adm;
         body.net_id = id;
         body.team = uint8_t(team);
-        body.pos[0] = int32_t(x * 65536.0f);
-        body.pos[1] = int32_t(y * 65536.0f);
+        body.self->position.x.q16 = int32_t(x * 65536.0f);
+        body.self->position.y.q16 = int32_t(y * 65536.0f);
         body.heading = bam_heading_from_mission_yaw_deg(yaw);
         body.slot.bytes()[AiSlot::kAlertByte] = alert;
         body.slot.f[17] = sight << 16;
@@ -545,8 +556,8 @@ bool same_attention(StillPeople &a, StillPeople &b, size_t i) {
            p.eye_offset_x == q.eye_offset_x && p.eye_offset_y == q.eye_offset_y &&
            p.eye_offset_z == q.eye_offset_z && u.eye_offset_x == v.eye_offset_x &&
            u.eye_offset_y == v.eye_offset_y && u.eye_offset_z == v.eye_offset_z &&
-           ((u.flags ^ v.flags) & 0x40u) == 0 && u.yaw == v.yaw && x.pos[0] == y.pos[0] &&
-           x.pos[1] == y.pos[1] && x.pos[2] == y.pos[2] && u.position.x == v.position.x &&
+           ((u.flags ^ v.flags) & 0x40u) == 0 && mission_yaw_whole_deg(u.heading) == mission_yaw_whole_deg(v.heading) && x.self->position.x.q16 == y.self->position.x.q16 &&
+           x.self->position.y.q16 == y.self->position.y.q16 && x.self->position.z.q16 == y.self->position.z.q16 && u.position.x == v.position.x &&
            u.position.y == v.position.y && u.position.z == v.position.z && x.health == y.health &&
            u.health == v.health && p.max_health == q.max_health;
 }
@@ -632,7 +643,7 @@ void channelless_body_runs_nothing() {
         r.body().inf.eye_offset_x = r.body().inf.eye_offset_y = r.body().inf.eye_offset_z = 12345;
         CHECK(!infantry_has_anim_channel(r.body().inf, &r.source));
         const InfantryState before = r.body().inf;
-        const int32_t at[3] = {r.body().pos[0], r.body().pos[1], r.body().pos[2]};
+        const int32_t at[3] = {r.body().self->position.x.q16, r.body().self->position.y.q16, r.body().self->position.z.q16};
         for (uint32_t tick = 1; tick <= 40; ++tick) {
             if (still) r.owned->ai.tick_still_body(r.body(), *r.owned, tick);
             else r.owned->ai.update_organic(r.body(), *r.owned, tick);
@@ -641,7 +652,7 @@ void channelless_body_runs_nothing() {
         CHECK(same_channels(after, before) && after.anim_state == anim_state::kIdle);
         CHECK(after.eye_offset_x == 12345 && after.eye_offset_y == 12345 &&
               after.eye_offset_z == 12345);
-        CHECK(r.body().pos[0] == at[0] && r.body().pos[1] == at[1] && r.body().pos[2] == at[2]);
+        CHECK(r.body().self->position.x.q16 == at[0] && r.body().self->position.y.q16 == at[1] && r.body().self->position.z.q16 == at[2]);
     }
     // With its RESET row the body holds its channel.
     Rig held(5);
@@ -798,11 +809,11 @@ void grounding_strict_one_unit_limit() {
         CollisionWorld collision;
         collision.terrain = &field;
         r.owned->ai.collision = &collision;
-        r.body().pos[2] = c.first;
+        r.body().self->position.z.q16 = c.first;
         r.entity().position.z = c.first / 65536.0f;
         r.body().collide_state.skip_counter = 25;
         r.init();
-        CHECK(r.body().pos[2] == c.second);
+        CHECK(r.body().self->position.z.q16 == c.second);
         CHECK(r.entity().spawn_position.z == c.first / 65536.0f);
         CHECK(r.entity().position.z == c.second / 65536.0f);
         CHECK(r.body().collide_state.skip_counter == 0);

@@ -2011,12 +2011,18 @@ int test_joiner_routes_admin_only(Harness &h) {
 
 // GET /nwprepare.dll renders the page it names with HOST_URL and GSB_SERVER
 // on the public host and the port Crow serves: the OS's pick here, where the
-// config's port is 0.
+// config's port is 0. HOST_URL is the game's host page, the port written only
+// when it is not 80: the live main page's "http://<web-ip>/jop_2_host1.htm"
+// beside its 0x82's "<web-ip>:80" (LN S2, D-NET-NEW-L9-46).
 int test_menu_urls_name_bound_port(Harness &h) {
+	TEST_EXPECT(nws::HttpListener::host_url_for("198.51.100.7", 80, "jop_2_host1.htm") ==
+			"http://198.51.100.7/jop_2_host1.htm");
+	TEST_EXPECT(nws::HttpListener::host_url_for("198.51.100.7", 8080, "dfx2_0_host1.htm") ==
+			"http://198.51.100.7:8080/dfx2_0_host1.htm");
 	const auto reply = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
-	const std::string want = base + "/nwhost.dll|" + base + "/jop_2.gsb";
+	const std::string want = base + "/jop_2_host1.htm|" + base + "/jop_2.gsb";
 	const std::string body = body_text(reply);
 	if (body != want) std::fprintf(stderr, "  the menu URLs: %s\n", body.c_str());
 	TEST_EXPECT(body == want);
@@ -2098,7 +2104,11 @@ int test_lobby_per_title(Harness &h) {
 
 	// The menu URL page as each client's game fills it.
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
-	const auto urls = [&base](const char *gsb) { return base + "/nwhost.dll|" + base + gsb; };
+	// HOST_URL names the game's host page (DFX2's its own, the OpenNova row JO's).
+	const auto urls = [&base](const char *gsb) {
+		const bool dfx2 = std::string(gsb).rfind("/dfx2_0", 0) == 0;
+		return base + (dfx2 ? "/dfx2_0_host1.htm|" : "/jop_2_host1.htm|") + base + gsb;
+	};
 	struct Prepared {
 		const char *gt;
 		const char *gsb;
@@ -2200,6 +2210,13 @@ struct CookieJar {
 // page naming the DFX2 browser list, that list holding the DFX2 listing
 // alone, the join of it (the DFX2 .joi, NWPF 38), and a DFX2 host's key on
 // the DFX2 host page, by its page link and by the bare HOST_URL.
+// The DFX2 games row's join_lan_url as backend/seed/0001_games.sql carries it (onnet's value,
+// verbatim): the main page's @JOINLAN_URL@ global, whose @GSID@ the client replaces.
+constexpr const char *kDfx2JoinLanUrl =
+		"NWJoin.dll?needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi&failure=dfx2_0_main.htm"
+		"&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login"
+		"&gsid=@GSID@&lan=1";
+
 int test_dfx2_client_path(Harness &h) {
 	const uint16_t port = h.secure_port;
 	const std::string base = "http://127.0.0.1:" + std::to_string(port);
@@ -2274,8 +2291,8 @@ int test_dfx2_client_path(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply) ==
 			nws::render_template(page("dfx2_0_main.htm"),
-					{ { "HOST_URL", base + "/nwhost.dll" }, { "GSB_SERVER", base + "/dfx2_0.gsb" },
-							{ "JOINLAN_URL", "" } }));
+					{ { "HOST_URL", base + "/dfx2_0_host1.htm" }, { "GSB_SERVER", base + "/dfx2_0.gsb" },
+							{ "JOINLAN_URL", kDfx2JoinLanUrl } }));
 	TEST_EXPECT(body_text(reply).find(base + "/dfx2_0.gsb</IB3_SUBST>") != std::string::npos);
 	TEST_EXPECT(set_cookie_value(reply, "EXPBITS") == "1");
 	// Activated already: no NWACT, and no key minted for the account.
@@ -2606,13 +2623,19 @@ int test_gsb_rosters(Harness &h) {
 
 // A retail DFX2 client's activation through the login (cd_key_routes.h login_activation), on
 // listeners of its own (their own retail login brakes), one minting an account's first key and
-// one not (ONNET_CD_KEY_AUTO_MINT=0). An unactivated client (its NWCDKIID empty) gets the
-// activation login at NWStart, and its completed login carries NWACT for the NWPSSK it posts:
-// the client's own reading of it (the mix under that fingerprint, the registry chain) gives the
-// wire key of the account's key, minted now. The same machine gets the same NWACT again, another
-// machine its own; an activated client (a wire key in NWCDKIID), a JO client and a client posting
-// no NWPSSK get none; an account whose key was revoked gets none and no new key; with minting
-// off, an account with no key gets none while one holding a key is activated.
+// one not (ONNET_CD_KEY_AUTO_MINT=0). Nobody is asked to activate (D-NET-725): NWStart renders
+// the plain login (OUT) for every client, never the start page's ACT. The NWCDKIID a DFX2 copy
+// sends is what its boot read's decode left, copied whatever the read's outcome, from a buffer
+// that starts empty [orig: CDKey_ReadRegistry @0x411b90 - the buffer emptied @0x411bf9, the copy
+// @0x411cc0..0x411cd3 (dfx2.exe)], so the three copies players run reach the service as: a
+// retail-keyed one, its wire key; a keyless as-sold one, empty (no CDKIID) or a value no wire key
+// (a CDKIID this machine's fingerprint does not decode); a keyless byte-patched one (the read
+// forced to succeed, its menus open), empty as well. A keyless copy's completed login carries
+// NWACT for the NWPSSK it posts: the client's own reading of it (the mix under that fingerprint,
+// the registry chain) gives the wire key of the account's key, minted now. The same machine gets
+// the same NWACT again, another machine its own; a retail-keyed client, a JO client and a client
+// posting no NWPSSK get none; an account whose key was revoked gets none and no new key; with
+// minting off, an account with no key gets none while one holding a key is activated.
 int test_dfx2_activation(Harness &h) {
 	namespace cdkey = opennova::cdkey;
 	constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
@@ -2669,8 +2692,7 @@ int test_dfx2_activation(Harness &h) {
 						{ { "EPASK", opennova::epask_to_string(epask), false },
 								{ "NAME", user, true }, { "PASSWORD", password, true },
 								{ "success", dfx2 ? "dfx2_0_main.htm" : "jop_2_main.htm", true },
-								{ "failure", dfx2 ? "dfx2_0_actlogin.htm" : "jop_2_login.htm",
-										true },
+								{ "failure", dfx2 ? "dfx2_0_login.htm" : "jop_2_login.htm", true },
 								{ "msgbase", dfx2 ? "dfx2_0_msg.htm" : "jop_2_msg.htm", true },
 								{ "relay", dfx2 ? "dfx2_0_relay.htm" : "jop_2_relay.htm", true },
 								{ "pfid", dfx2 ? "38" : "28", true } },
@@ -2687,6 +2709,7 @@ int test_dfx2_activation(Harness &h) {
 		out.completion = h.send_to(port, "GET", "/NWLogin.dll", jar.header());
 		return out;
 	};
+	// A keyless copy with no CDKIID (as sold, or byte-patched): an empty NWCDKIID.
 	const auto unactivated = [](const char *machine) {
 		return std::map<std::string, std::string>{ { "NWCDKIID", "" }, { "NWCDKIIDEXP1", "" },
 			{ "NWPSSK", machine } };
@@ -2700,12 +2723,13 @@ int test_dfx2_activation(Harness &h) {
 				: std::string();
 	};
 
-	// The first activation: the activation login, then the NWACT of a key minted for the account.
+	// The first activation, a byte-patched keyless copy (an empty NWCDKIID): the plain login, then
+	// the NWACT of a key minted for the account.
 	const int64_t player = make_account(h, "act_player", "pw-act-player");
 	TEST_EXPECT(player > 0);
 	auto login = retail_login(
 			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
-	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.transport_ok && login.completion.code == 200);
 	TEST_EXPECT(body_text(login.completion).find("NovaWorld Main Menu") != std::string::npos);
 	const std::string nwact_a = set_cookie_value(login.completion, "NWACT");
@@ -2725,8 +2749,11 @@ int test_dfx2_activation(Harness &h) {
 			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineA), true);
 	TEST_EXPECT(set_cookie_value(login.completion, "NWACT") == nwact_a);
 	TEST_EXPECT(live_wire_key(player) == minted);
-	login = retail_login(
-			minting.bound_port(), "act_player", "pw-act-player", unactivated(kMachineB), true);
+	// Machine B a keyless as-sold copy whose CDKIID this machine does not decode: its NWCDKIID no
+	// wire key, the plain login and its own NWACT.
+	login = retail_login(minting.bound_port(), "act_player", "pw-act-player",
+			{ { "NWCDKIID", "JUNK" }, { "NWCDKIIDEXP1", "" }, { "NWPSSK", kMachineB } }, true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
 	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
@@ -2744,6 +2771,16 @@ int test_dfx2_activation(Harness &h) {
 			{ { "NWCDKIID", wire_key }, { "NWCDKIIDEXP1", "" }, { "NWPSSK", kMachineA } }, true);
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	// A retail-keyed copy (its key NovaLogic's, any serial under the wire chain) on an account
+	// with no key of ours: the login page, no NWACT and nothing minted.
+	const int64_t keyed = make_account(h, "act_keyed", "pw-act-keyed");
+	login = retail_login(minting.bound_port(), "act_keyed", "pw-act-keyed",
+			{ { "NWCDKIID", cdkey::make_wire_key("RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
+					{ "NWPSSK", kMachineB } },
+			true);
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
+	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
+	TEST_EXPECT(live_wire_key(keyed).empty());
 	// No NWPSSK: nothing to bind an NWACT to, and nothing minted.
 	const int64_t bare = make_account(h, "act_bare", "pw-act-bare");
 	login = retail_login(
@@ -2782,7 +2819,7 @@ int test_dfx2_activation(Harness &h) {
 	const int64_t waiting = make_account(h, "act_waiting", "pw-act-waiting");
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(login.start_page == page("dfx2_0_actlogin.htm"));
+	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	TEST_EXPECT(login.completion.code == 200 && !sets_cookie(login.completion, "NWACT"));
 	TEST_EXPECT(live_wire_key(waiting).empty());
 	auto made = h.send(
@@ -2901,7 +2938,7 @@ private:
 	static opennova::ClientSession::Config config(uint32_t client_index, const Cookies *cookies) {
 		opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = client_index;
-		cfg.client_key = 0x50555348u;
+		cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x50555348u, opennova::make_dev_scrk() }; };
 		cfg.na = "http:push";
 		cfg.cookie_vars = [cookies]() {
 			Cookies vars{ { "NWUID", "" } };
@@ -2923,6 +2960,7 @@ private:
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
 		uint8_t rx[4096];
 		while (std::chrono::steady_clock::now() < deadline && !done()) {
+			session_.set_clock_ms(++clock_ms_); // one millisecond a turn: a 0x81's 0x42 goes at the first pump past it
 			net::Endpoint from;
 			const int n = net::udp_recv_from(socket_.get(), rx, sizeof rx, from, 20);
 			std::vector<std::vector<uint8_t>> out;
@@ -2937,6 +2975,7 @@ private:
 
 	Cookies cookies_; // before session_, whose Cookie lists read it
 	opennova::ClientSession session_;
+	uint32_t clock_ms_ = 0; // the session's clock
 	net::ScopedSocket socket_;
 	uint16_t port_ = 0;
 	net::Endpoint service_{};
@@ -3737,6 +3776,77 @@ int test_admin_lobbies(Harness &h) {
 	return 0;
 }
 
+// The NovaWorld menu's re-entry: /NWStart.dll answers IN, the lobby page, for a login the service
+// remembers (the request's LOGINSESSIONTAG with an active session) and OUT, the login page,
+// otherwise, each with YOURIP and USEJUNCTION as its only cookies; /nwprepare.dll sets EPASK only
+// for a client that holds none. The LN S1 / S1b / S1d retail records (2026-10-23): a re-entry's
+// nwprepare (its request carrying EPASK and the login) sets YOURIP, VER1, VER2, GT and CC, and its
+// NWStart answers the main page; a first entry's sets EPASK too, and its NWStart answers the login
+// page.
+int test_nwstart_remembers_the_login(Harness &h) {
+	const std::string start = "/NWStart.dll?MSGBASE=jop_2_msg.htm&IN=jop_2_main.htm&OUT=jop_2_login.htm";
+	// The names a reply sets, in name order (the header map keeps no order among them).
+	const auto names = [](const net::HttpReply &r) {
+		std::vector<std::string> n = set_cookie_names(r);
+		std::sort(n.begin(), n.end());
+		return n;
+	};
+	const std::vector<std::string> start_cookies = { "USEJUNCTION", "YOURIP" };
+	const auto lobby_page = [](const net::HttpReply &r) {
+		return body_text(r).find("@GSB_SERVER@") != std::string::npos;
+	};
+	const auto login_page = [](const net::HttpReply &r) {
+		return body_text(r).find("ACTION=\"NWLogin.dll\"") != std::string::npos;
+	};
+
+	// A first entry: the start page sets EPASK; NWStart answers the login page.
+	const auto prepare = h.send_to(h.fresh_port, "GET", "/nwprepare.dll?url=jop_2_start.htm");
+	const std::string epask = set_cookie_value(prepare, "EPASK");
+	TEST_EXPECT(prepare.code == 200 && !epask.empty());
+	auto out = h.send_to(h.fresh_port, "GET", start, { "Cookie: EPASK=" + epask });
+	TEST_EXPECT(out.code == 200 && login_page(out) && !lobby_page(out));
+	TEST_EXPECT(names(out) == start_cookies);
+
+	// A login, then the re-entry: its start page sets no EPASK, its NWStart answers the lobby.
+	TEST_EXPECT(make_account(h, "reentry_ada", "pw-reentry_ada") > 0);
+	const auto login = nwlogin_to(h, h.fresh_port, "reentry_ada", "pw-reentry_ada");
+	const std::string tag = set_cookie_value(login, "LOGINSESSIONTAG");
+	TEST_EXPECT(!tag.empty());
+	const std::string jar = "Cookie: EPASK=" + epask + "; LOGINSESSIONTAG=" + tag;
+	const auto again = h.send_to(h.fresh_port, "GET", "/nwprepare.dll?url=jop_2_start.htm", { jar });
+	TEST_EXPECT(again.code == 200 && set_cookie_value(again, "EPASK").empty());
+	TEST_EXPECT(names(again) == (std::vector<std::string>{ "GT", "VER1", "VER2", "YOURIP" }));
+	auto in = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(in.code == 200 && lobby_page(in) && !login_page(in));
+	TEST_EXPECT(names(in) == start_cookies);
+
+	// A tag the service holds no login for, and the tag after its logout, get the login page. The
+	// logout is the live service's relay: the page link's call answers the relay page with YOURIP
+	// and LOGOUTSESSIONTAG, its bare refresh the login page with YOURIP and eight cookies cleared.
+	out = h.send_to(h.fresh_port, "GET", start,
+			{ "Cookie: EPASK=" + epask + "; LOGINSESSIONTAG=nope" });
+	TEST_EXPECT(out.code == 200 && login_page(out));
+	const auto logout_first = h.send_to(h.fresh_port, "GET",
+			"/NWLogout.dll?success=jop_2_login.htm&failure=jop_2_main.htm&msgbase=jop_2_msg.htm"
+			"&relay=jop_2_relay.htm&nodb=jop_2_nodb.htm",
+			{ jar });
+	const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+	TEST_EXPECT(logout_first.code == 200 && !logout_tag.empty() && !login_page(logout_first));
+	TEST_EXPECT(body_text(logout_first).find("NWLogout.dll") != std::string::npos);
+	TEST_EXPECT(names(logout_first) == (std::vector<std::string>{ "LOGOUTSESSIONTAG", "YOURIP" }));
+	out = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(out.code == 200 && lobby_page(out));
+	const auto logout = h.send_to(h.fresh_port, "GET", "/NWLogout.dll",
+			{ jar + "; LOGOUTSESSIONTAG=" + logout_tag });
+	TEST_EXPECT(logout.code == 200 && login_page(logout));
+	TEST_EXPECT(names(logout) == (std::vector<std::string>{ "CHAR", "NWD", "NWH", "NWHANDLE", "NWI",
+			"NWV", "PERSISTENTEXPRESSLOGINDATA", "STATSDISPLAYCHID", "YOURIP" }));
+	TEST_EXPECT(set_cookie_value(logout, "NWHANDLE").empty());
+	out = h.send_to(h.fresh_port, "GET", start, { jar });
+	TEST_EXPECT(out.code == 200 && login_page(out) && !lobby_page(out));
+	return 0;
+}
+
 // GET /api/lobbies/<rid>'s roster is who plays on the server now: the joiners /NWJoin.dll
 // recorded, one per account (two joining from one address are two), each gone once its lobby
 // session, signed in as that account, stops playing there (its ClientStopPlaying) or ends (its
@@ -3777,6 +3887,17 @@ int test_join_roster(Harness &h) {
 	TEST_EXPECT(nwjoin(ada).code == 200);
 	TEST_EXPECT(nwjoin(bo).code == 200);
 	TEST_EXPECT(roster() == (std::vector<std::string>{ "roster_ada", "roster_bo" }));
+	// No client sends the relay's tag in a query (D-NET-267 as amended): a ?tag= with no tag cookie is
+	// no second call, it starts a fresh relay, and the roster does not move.
+	{
+		const auto first = h.send_to(h.fresh_port, "GET", "/NWJoin.dll?rid=" + rid);
+		const std::string tag = set_cookie_value(first, "NWJOINSESSIONTAG");
+		const auto queried = h.send_to(h.fresh_port, "GET", "/NWJoin.dll?tag=" + tag,
+				{ "Cookie: LOGINSESSIONTAG=" + ada });
+		const std::string fresh = set_cookie_value(queried, "NWJOINSESSIONTAG");
+		TEST_EXPECT(!tag.empty() && queried.code == 200 && !fresh.empty() && fresh != tag);
+		TEST_EXPECT(roster() == (std::vector<std::string>{ "roster_ada", "roster_bo" }));
+	}
 
 	// Each plays on it, its lobby session signed in as its account.
 	PushHost ada_client(h.nw_udp.bound_port(), 0x524f5332u);
@@ -4006,12 +4127,13 @@ int test_name_and_value_rules(Harness &h) {
 	TEST_EXPECT(!nws::template_file(templates_root, "leak.htm").has_value());
 	TEST_EXPECT(!nws::template_file(templates_root, "jop_2/../jop_2_msg.htm").has_value());
 	const auto static_root = h.retail_root / "static";
-	TEST_EXPECT(nws::file_under_root(static_root, "jop_2/nonbhdx2.tga").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2//nonbhdx2.tga").has_value());
+	TEST_EXPECT(nws::file_under_root(static_root, "dfx2_0/nonbhdx2.tga").has_value());
+	TEST_EXPECT(nws::file_under_root(static_root, "nonbhdx2.tga").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0//nonbhdx2.tga").has_value());
 	TEST_EXPECT(!nws::file_under_root(static_root, "/etc/hostname").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2/../../secret.txt").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0/../../secret.txt").has_value());
 	TEST_EXPECT(!nws::file_under_root(static_root, "leak.tga").has_value());
-	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2").has_value()); // a directory
+	TEST_EXPECT(!nws::file_under_root(static_root, "dfx2_0").has_value()); // a directory
 
 	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
 				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
@@ -4038,7 +4160,7 @@ int test_name_and_value_rules(Harness &h) {
 // missing template, with no file's bytes: the absolute and dot-segment names,
 // raw and percent-encoded, the backslash and drive names, a hidden file and a
 // symlink planted in the templates root, on /NWAccount.dll and
-// /NWCharacter.dll (404), /NWLogout.dll ("Logged out."), /nwprepare.dll,
+// /NWCharacter.dll (404), /NWLogout.dll's relay refresh ("Logged out."), /nwprepare.dll,
 // /NWStart.dll, both /NWJoin.dll and /NWHost.dll legs, and the retail
 // POST /NWLogin.dll's msgbase / failure page (a bad password) and its relay and
 // success pages (a good one): an empty page.
@@ -4077,8 +4199,12 @@ int test_template_names_refused(Harness &h) {
 					get("/NWAccount.dll?success=" + q), 404, not_found, "NWAccount " + what));
 			TEST_EXPECT(expect(
 					get("/nwcharacter.dll?success=" + q), 404, not_found, "nwcharacter " + what));
-			TEST_EXPECT(expect(
-					get("/NWLogout.dll?success=" + q), 200, "Logged out.", "NWLogout " + what));
+			const auto logout_first = get("/NWLogout.dll?success=" + q);
+			const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+			TEST_EXPECT(logout_first.transport_ok && logout_first.code == 200 && !logout_tag.empty() &&
+					!carries_secret(logout_first));
+			TEST_EXPECT(expect(get("/NWLogout.dll", { "Cookie: LOGOUTSESSIONTAG=" + logout_tag }), 200,
+					"Logged out.", "NWLogout " + what));
 			TEST_EXPECT(expect(get("/nwprepare.dll?url=" + q), 200, "", "nwprepare " + what));
 			TEST_EXPECT(expect(get("/NWStart.dll?OUT=" + q), 200, "", "NWStart " + what));
 			TEST_EXPECT(
@@ -4123,7 +4249,8 @@ int test_template_names_refused(Harness &h) {
 
 // Every retail template still renders, by the names a stock client sends:
 // /nwprepare.dll?url= fills each in (with no gate tag, a DFX2 page's game is
-// DFX2's by its prefix, its browser list /dfx2_0.gsb; every other page's JO's),
+// DFX2's by its prefix, its browser list /dfx2_0.gsb and its LAN-list join's
+// link the games row's; every other page's JO's),
 // the catch-all serves each as it is, the retail static file serves, and the
 // default pages render.
 int test_retail_templates_render(Harness &h) {
@@ -4134,9 +4261,11 @@ int test_retail_templates_render(Harness &h) {
 		if (name == "leak.htm" || name == ".hidden.htm")
 			continue; // the planted ones
 		const nws::TemplateVars vars{
-			{ "HOST_URL", base + "/nwhost.dll" },
+			{ "HOST_URL",
+					base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0_host1.htm" : "/jop_2_host1.htm") },
 			{ "GSB_SERVER", base + (name.rfind("dfx2_0_", 0) == 0 ? "/dfx2_0.gsb" : "/jop_2.gsb") },
-			{ "JOINLAN_URL", "" },
+			// DFX2's games row carries the LAN-list join's link; JO's carries none.
+			{ "JOINLAN_URL", name.rfind("dfx2_0_", 0) == 0 ? kDfx2JoinLanUrl : "" },
 		};
 		const std::string text = test_io::read_file_text(entry.path().string());
 		TEST_EXPECT(!text.empty());
@@ -4147,22 +4276,34 @@ int test_retail_templates_render(Harness &h) {
 		}
 		TEST_EXPECT(rendered.transport_ok && rendered.code == 200);
 		TEST_EXPECT(body_text(rendered) == nws::render_template(text, vars));
+		// A direct GET serves the page as stored but for {{WEB_ROOT}}, the service's own root
+		// (D-NET-NEW-L9-52).
 		const auto served = h.send_to(h.secure_port, "GET", "/" + name);
-		TEST_EXPECT(served.transport_ok && served.code == 200 && body_text(served) == text);
+		TEST_EXPECT(served.transport_ok && served.code == 200 &&
+				body_text(served) == nws::render_template(text, { { "WEB_ROOT", base } }));
 	}
-	const auto tga = h.send_to(h.secure_port, "GET", "/static/jop_2/nonbhdx2.tga");
+	const auto tga = h.send_to(h.secure_port, "GET", "/static/dfx2_0/nonbhdx2.tga");
 	TEST_EXPECT(tga.transport_ok && tga.code == 200);
 	TEST_EXPECT(tga.body ==
-			test_io::read_file((h.retail_root / "static" / "jop_2" / "nonbhdx2.tga").string()));
+			test_io::read_file((h.retail_root / "static" / "dfx2_0" / "nonbhdx2.tga").string()));
+	// The sign-in template's image at the service's root, as the live service serves it.
+	const auto root_tga = h.send_to(h.secure_port, "GET", "/nonbhdx2.tga");
+	TEST_EXPECT(root_tga.transport_ok && root_tga.code == 200);
+	TEST_EXPECT(root_tga.body ==
+			test_io::read_file((h.retail_root / "static" / "nonbhdx2.tga").string()));
 	const auto asset = h.send_to(h.secure_port, "GET", "/assets/app.js");
 	TEST_EXPECT(asset.transport_ok && asset.code == 200 && body_text(asset) == "console.log(1);");
 
 	const auto account = h.send_to(h.secure_port, "GET", "/NWAccount.dll?success=jop_2_main.htm");
 	TEST_EXPECT(account.transport_ok && account.code == 200 && !body_text(account).empty());
-	const auto logout = h.send_to(h.secure_port, "GET", "/NWLogout.dll");
+	const auto logout_first = h.send_to(h.secure_port, "GET", "/NWLogout.dll");
+	const std::string logout_tag = set_cookie_value(logout_first, "LOGOUTSESSIONTAG");
+	TEST_EXPECT(logout_first.transport_ok && logout_first.code == 200 && !logout_tag.empty());
+	const auto logout = h.send_to(h.secure_port, "GET", "/NWLogout.dll",
+			{ "Cookie: LOGOUTSESSIONTAG=" + logout_tag });
 	TEST_EXPECT(logout.transport_ok && logout.code == 200);
 	const nws::TemplateVars jo_vars{
-		{ "HOST_URL", base + "/nwhost.dll" },
+		{ "HOST_URL", base + "/jop_2_host1.htm" },
 		{ "GSB_SERVER", base + "/jop_2.gsb" },
 		{ "JOINLAN_URL", "" },
 	};
@@ -4187,10 +4328,10 @@ int test_catch_all_stays_in_root(Harness &h) {
 					 std::string("/%2e%2e%2fsecret.txt"), std::string("/static/..%2fsecret.txt"),
 					 std::string("/static/%2e%2e%2f%2e%2e%2fsecret.txt"),
 					 std::string("/..%5csecret.txt"),
-					 std::string("/static/jop_2/..%5c..%5c..%5csecret.txt"),
+					 std::string("/static/dfx2_0/..%5c..%5c..%5csecret.txt"),
 					 std::string("/.hidden.htm"), std::string("/leak.htm"),
-					 std::string("/static/leak.tga"), std::string("/webleak.txt"),
-					 std::string("/static/jop_2/../../secret.txt") }) {
+					 std::string("/static/leak.tga"), std::string("/leak.tga"),
+					 std::string("/webleak.txt"), std::string("/static/dfx2_0/../../secret.txt") }) {
 			const auto reply = h.send_to(port, "GET", path);
 			const bool ok = reply.transport_ok && reply.code != 200 && !carries_secret(reply);
 			if (!ok) {
@@ -4264,7 +4405,7 @@ int test_header_values_cannot_split(Harness &h) {
 	TEST_EXPECT(split_free(reply));
 	TEST_EXPECT(has_set_cookie(reply, "VER1=; Path=/") && has_set_cookie(reply, "VER2=; Path=/"));
 	TEST_EXPECT(body_text(reply) ==
-			"http://127.0.0.1:" + std::to_string(h.port) + "/nwhost.dll|" +
+			"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2_host1.htm|" +
 					"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2.gsb");
 
 	// A stored nwhandle, and expansion bits an admin set: the retail login's
@@ -4653,6 +4794,100 @@ int test_join_identity(Harness &h) {
 	return 0;
 }
 
+// DFX2's LAN-list join (Q7-24): dfx2.exe lists the LAN servers its discovery finds with a GSID
+// (the 0x81's SUS1) in the NovaWorld menu's LAN_LIST, and its Join opens the main page's
+// @JOINLAN_URL@ with @GSID@ replaced by that row's GSID
+// [orig: CNapiNetwork_OnSessionDiscovered @0x4C8580 (dfx2.exe) - the row @0x4C87D4]
+// [orig: UI_DispatchScreenEvent @0x54B920 (dfx2.exe) case 12 - the GSID stored @0x54B9AA,
+//  @JOINLAN_URL@ @0x54B9BD, the replace from it @0x54B9E1..0x54B9F0, UIScene_OpenUrl @0x54BA76].
+// The GSID is the one this service's ServerHostResult handed the host, which the host writes as
+// its 0x81 SUS1, so active_hosts.gsid names the server
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5BC0 (dfx2.exe) - "GSID" @0x4D5DB3 ->
+//  server_user_string1 @0x4D5DFF].
+// The page (service choice, to the client's contract): the .joi whose title starts "[NK="
+// (event 7) [orig: UI_ProcessWebResponseContent @0x6CA6C0 (dfx2.exe) - the test
+//  @0x6CA835..0x6CA874, the raise @0x6CA86A], NK kept and LN=1 [orig:
+//  URL_ParseConnectionQueryString @0x54B230 (dfx2.exe) - NK= @0x54B3BC (none: no join), LN=
+//  @0x54B56A, its atol @0x54B5BE], so the client dials the LAN address its discovery found, and
+// NI / NP / BK empty, so no proxy [orig: CNapiGameSession_InitTransportConnection @0x4C9F80
+//  (dfx2.exe) - the LN dial @0x4C9FD5..0x4C9FED, the proxy with all three set: the tests
+//  @0x4CA192..0x4CA1B0].
+// The title's "LN=1&" goes out as the page text "LN=1&amp;", which the client's text loop
+// decodes [orig: XML_DecodeEntityReference @0x6E2640 (dfx2.exe), called @0x6E3471]. A GSID no
+// listing holds answers the msgbase page, whose title raises no join. A GLB join of the same
+// listing keeps its .joi byte for byte: {{LAN}} empty, NI / NP / BK the host's.
+int test_dfx2_join_lan(Harness &h) {
+	const auto seeded = h.pool.acquire()->query(
+			"SELECT join_lan_url FROM games WHERE slug = 'dfx2_consumer';");
+	TEST_EXPECT(seeded.size() == 1 && seeded[0].as_text(0).value_or("") == kDfx2JoinLanUrl);
+	constexpr uint32_t kLanRid = 4344;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kLanRid;
+		row.gsid = "GSID-10-00000014-20261021130000000-00000000000a4b1c";
+		row.game = "dfx2_0_consumer";
+		row.app_id = "20";
+		row.server_name = "LAN Party";
+		row.host_ip = "10.0.32.9";
+		row.host_port = 32768;
+		row.pcid_key = "pcid-key-for-the-lan-join";
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	// Each link's first leg (the relay page and its tag), then the second (the answer).
+	bool relays_ok = true;
+	const auto relay_then_joi = [&h, &relays_ok](const std::string &link) {
+		const auto first = h.send_to(h.fresh_port, "GET", "/" + link);
+		relays_ok = relays_ok && first.transport_ok && first.code == 200 && !join_tag(first).empty();
+		return h.send_to(h.fresh_port, "GET", "/NWJoin.dll",
+				{ "Cookie: NWJOINSESSIONTAG=" + join_tag(first) });
+	};
+	const std::string joi_page = test_io::read_file_text(
+			(h.retail_root / "templates" / "dfx2_0_join.joi").string());
+	// NK: "10.0.32.9:32768" and CK: app id "20", each char plus its key char less '0'.
+	const std::string nk = "eifegmgdqqffqio";
+
+	// The LAN-list join: the link as the client builds it from the global.
+	std::string link = kDfx2JoinLanUrl;
+	link.replace(link.find("@GSID@"), 6, "GSID-10-00000014-20261021130000000-00000000000a4b1c");
+	auto reply = relay_then_joi(link);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply) ==
+			fill_markers(joi_page, { { "{{NK}}", nk }, { "{{CK}}", "ef" }, { "{{NI}}", "" },
+					{ "{{NP}}", "" }, { "{{BK}}", "" }, { "{{LAN}}", "LN=1&amp;" },
+					{ "{{SERVER_NAME}}", "LAN Party" } }));
+	TEST_EXPECT(body_text(reply).find("[NK=" + nk + "&CK=ef&NI=&NP=&BK=&LN=1&amp;]") !=
+			std::string::npos);
+	TEST_EXPECT(set_cookie_value(reply, "NWPF") == "38");
+
+	// The GLB join of the same listing: the .joi as before, no LN.
+	reply = relay_then_joi(
+			"NWJoin.dll?lan=0&needexpkey=dfx2_0_key2err.htm&success=dfx2_0_join.joi"
+			"&failure=dfx2_0_main.htm&relay=dfx2_0_relay.htm&msgbase=dfx2_0_msg.htm"
+			"&nodb=dfx2_0_nodb.htm&pfid=38&mode=Login&rid=" + std::to_string(kLanRid));
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply) ==
+			fill_markers(joi_page, { { "{{NK}}", nk }, { "{{CK}}", "ef" }, { "{{NI}}", "10.0.32.9" },
+					{ "{{NP}}", "32768" }, { "{{BK}}", "986119" }, { "{{LAN}}", "" },
+					{ "{{SERVER_NAME}}", "LAN Party" } }));
+	TEST_EXPECT(body_text(reply).find("[NK=" + nk + "&CK=ef&NI=10.0.32.9&NP=32768&BK=986119&]") !=
+			std::string::npos);
+
+	// A GSID no listing holds: the DFX2 message page, no "[NK=" title.
+	link = kDfx2JoinLanUrl;
+	link.replace(link.find("@GSID@"), 6, "GSID-10-00000014-20261021130000000-ffffffffffffffff");
+	reply = relay_then_joi(link);
+	const std::string gone = fill_markers(
+			test_io::read_file_text((h.retail_root / "templates" / "dfx2_0_msg.htm").string()),
+			{ { "{{MESSAGE}}", "That game is no longer hosted on NovaWorld." } });
+	TEST_EXPECT(gone.find("{{") == std::string::npos);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && body_text(reply) == gone);
+	TEST_EXPECT(body_text(reply).find("[NK=") == std::string::npos);
+	TEST_EXPECT(relays_ok);
+
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kLanRid);
+	return 0;
+}
+
 // ONNET_API_PROXY_ONLY: the third listener answers /api (and everything under
 // it, a route or not, any method) with 403 {"error":"proxy_required"} to a
 // peer that is not its trusted proxy, while its retail routes, the .gsb feed,
@@ -4678,7 +4913,7 @@ int test_api_proxy_only(Harness &h) {
 		TEST_EXPECT(body_text(reply) == "{\"error\":\"proxy_required\"}");
 	}
 	for (const char *path : { "/nwprepare.dll?url=jop_2_start.htm", "/NWStart.dll", "/NWLogout.dll",
-				 "/NWAccount.dll", "/jop_2.gsb", "/jop_2_main.htm", "/static/jop_2/nonbhdx2.tga",
+				 "/NWAccount.dll", "/jop_2.gsb", "/jop_2_main.htm", "/nonbhdx2.tga",
 				 "/assets/app.js" }) {
 		const auto reply = h.send_to(h.fresh_port, "GET", path);
 		if (reply.code != 200)
@@ -4743,6 +4978,75 @@ int test_retail_proxy_names_client(Harness &) {
 // tags, page names, numbers, addresses, URLs, names with spaces) goes out byte
 // for byte, so the pages a stock client gets are the template with the value
 // in it, unchanged.
+// D-NET-NEW-L9-52: JO's served pages are the live ones byte for byte (LN-s6's S3 record): every
+// line CRLF, jop_2_relay.mnx and jop_2_main.mnx with no final line ending, main.mnx's two icon
+// tables each carrying their two SUBST blocks, host2.htm's HOSTKEY title line unindented, and
+// login.mnx's two image lines naming the service's own root. The pages with no value are the live
+// sizes exactly: the start page 462 B, relay.mnx 1183 B, main.mnx 67809 B, host1 418 B, host3
+// 369 B, jend 400 B; login.mnx is the live 12802 B less its 15-character web IP twice, plus this
+// service's root twice; host2.htm 317 B less its 48-character HOSTKEY.
+int test_served_pages_live_bytes(Harness &h) {
+	const std::string base = "http://127.0.0.1:" + std::to_string(h.secure_port);
+	const auto crlf_only = [](const std::string &page) {
+		for (std::size_t i = 0; i < page.size(); ++i) {
+			if (page[i] == '\n' && (i == 0 || page[i - 1] != '\r')) return false;
+			if (page[i] == '\r' && (i + 1 == page.size() || page[i + 1] != '\n')) return false;
+		}
+		return true;
+	};
+	const auto ends_crlf = [](const std::string &page) {
+		return page.size() >= 2 && page.compare(page.size() - 2, 2, "\r\n") == 0;
+	};
+	// A failed GET reads empty, which no size below matches.
+	const auto get = [&h](const std::string &path) {
+		const auto reply = h.send_to(h.secure_port, "GET", path);
+		if (!reply.transport_ok || reply.code != 200) {
+			std::fprintf(stderr, "  GET %s: %s\n", path.c_str(), describe(reply).c_str());
+			return std::string();
+		}
+		return body_text(reply);
+	};
+	const std::string start = get("/nwprepare.dll?url=jop_2_start.htm");
+	TEST_EXPECT(start.size() == 462 && crlf_only(start) && ends_crlf(start));
+	for (const auto &[path, size] : { std::pair<std::string, std::size_t>{ "/jop_2_host1.htm", 418 },
+				 { "/jop_2_host3.htm", 369 }, { "/jop_2_jend.htm", 400 } }) {
+		const std::string page = get(path);
+		if (page.size() != size)
+			std::fprintf(stderr, "  %s: %zu B, live %zu B\n", path.c_str(), page.size(), size);
+		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
+	}
+	const std::string relay_mnx = get("/jop_2_relay.mnx");
+	TEST_EXPECT(relay_mnx.size() == 1183 && crlf_only(relay_mnx) && !ends_crlf(relay_mnx));
+	const std::string main_mnx = get("/jop_2_main.mnx");
+	TEST_EXPECT(main_mnx.size() == 67809 && crlf_only(main_mnx) && !ends_crlf(main_mnx));
+	std::size_t stat_rows = 0;
+	for (std::size_t at = main_mnx.find("URL>@ICON_STAT@</SUBST>"); at != std::string::npos;
+			at = main_mnx.find("URL>@ICON_STAT@</SUBST>", at + 1))
+		++stat_rows;
+	TEST_EXPECT(stat_rows == 2 &&
+			main_mnx.find("<SUBST column=\"6\" URL>@PROD_ICON_JOX0@</SUBST>") != std::string::npos);
+	const std::string login_mnx = get("/jop_2_login.mnx");
+	const std::string image = "URL>" + base + "/nonbhdx2.tga</SUBST>\r\n";
+	TEST_EXPECT(login_mnx.size() == 12802 - 2 * 15 + 2 * base.substr(7).size() &&
+			crlf_only(login_mnx) && ends_crlf(login_mnx));
+	const std::size_t first_image = login_mnx.find(image);
+	TEST_EXPECT(first_image != std::string::npos &&
+			login_mnx.find(image, first_image + 1) != std::string::npos);
+	// The pages a DLL leg fills: their stored bytes (each value line's fill is that leg's test's).
+	for (const auto &[name, size] : { std::pair<std::string, std::size_t>{ "jop_2_relay.htm", 791 },
+				 { "jop_2_main.htm", 10993 }, { "jop_2_join.joi", 894 },
+				 { "jop_2_host2.htm", 317 - 48 + 11 } }) {
+		const std::string page =
+				test_io::read_file_text((h.retail_root / "templates" / name).string());
+		if (page.size() != size)
+			std::fprintf(stderr, "  %s: %zu B, want %zu B\n", name.c_str(), page.size(), size);
+		TEST_EXPECT(page.size() == size && crlf_only(page) && ends_crlf(page));
+	}
+	TEST_EXPECT(test_io::read_file_text((h.retail_root / "templates" / "jop_2_host2.htm").string())
+					.find("<TITLE>\r\n[HOSTKEY={{HOSTKEY}}&]\r\n</TITLE>") != std::string::npos);
+	return 0;
+}
+
 int test_template_values_escaped(Harness &h) {
 	for (const std::string &plain : { std::string("ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP"),
 				 std::string("NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d"),
@@ -4777,6 +5081,17 @@ int test_template_values_escaped(Harness &h) {
 	auto reply = start("jop_2_main.htm", "jop_2_msg.htm");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply) == filled("jop_2_main.htm", "jop_2_msg.htm"));
+	// The live sign-in page as NWStart answers the live query (LN's S2 record): 4634 B, every line
+	// ending CRLF, the help text's "Create Account: " with its trailing space.
+	{
+		const std::string live = body_text(reply);
+		std::size_t bare_lf = 0;
+		for (std::size_t i = 0; i < live.size(); ++i)
+			if (live[i] == '\n' && (i == 0 || live[i - 1] != '\r'))
+				++bare_lf;
+		TEST_EXPECT(live.size() == 4634 && bare_lf == 0 &&
+				live.find("\r\nCreate Account: \r\n") != std::string::npos);
+	}
 	reply = start("x\"><b>in</b>", "m'><i>");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(
@@ -8595,6 +8910,7 @@ int run(Harness &h, const char *part) {
 		{ "lobby", "admin_end_session", test_admin_end_session },
 		{ "lobby", "admin_lobbies", test_admin_lobbies },
 		{ "lobby", "join_roster", test_join_roster },
+		{ "lobby", "nwstart_remembers_the_login", test_nwstart_remembers_the_login },
 		{ "hosted", "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted", "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted", "hosted_console_routes", test_hosted_console_routes },
@@ -8617,9 +8933,11 @@ int run(Harness &h, const char *part) {
 		{ "retail_pages", "header_values_cannot_split", test_header_values_cannot_split },
 		{ "retail_pages", "reset_during_login", test_reset_during_login },
 		{ "retail_pages", "join_identity", test_join_identity },
+		{ "retail_pages", "dfx2_join_lan", test_dfx2_join_lan },
 		{ "retail_pages", "api_proxy_only", test_api_proxy_only },
 		{ "retail_pages", "retail_proxy_names_client", test_retail_proxy_names_client },
 		{ "retail_pages", "template_values_escaped", test_template_values_escaped },
+		{ "retail_pages", "served_pages_live_bytes", test_served_pages_live_bytes },
 		{ "retail_pages", "register_handle_rule", test_register_handle_rule },
 		{ "retail_pages", "login_row_kept_alive", test_login_row_kept_alive },
 		{ "retail_pages", "host_tag_serves_once", test_host_tag_serves_once },

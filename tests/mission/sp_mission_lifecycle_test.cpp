@@ -30,6 +30,8 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include <algorithm>
+#include <functional>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -83,6 +85,8 @@ struct SpMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
 	std::unique_ptr<im::HostRole> role = std::make_unique<im::HostRole>();
 	std::unique_ptr<im::Session> session;
+	// Run inside the boot's bring-up, past the role's (the round init it installed stands).
+	std::function<void()> after_bringup;
 
 	bool boot(const std::map<std::string, std::string> &files, bool restart,
 			ms::MissionKernel *previous = nullptr) {
@@ -94,7 +98,10 @@ struct SpMission {
 				static_cast<bms::AttribFlags>(kernel->mission.header.attrib_flags)));
 		options.restart = restart;
 		im::HostRole *host = role.get();
-		options.bringup_net_session = [host] { host->bring_up_singleplayer(); };
+		options.bringup_net_session = [this, host] {
+			host->bring_up_singleplayer();
+			if (after_bringup) after_bringup();
+		};
 		std::string error;
 		if (!kernel->boot(options, error)) {
 			std::printf("boot failed: %s\n", error.c_str());
@@ -187,6 +194,83 @@ void test_counter_step_plays_text_end_on_arrival() {
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
 }
 
+// D-NET-NEW-L7-39: the single player's session create adds its own slot with no body (the own
+// arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
+// init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
+// local-player block leave it hidden until the own join, which clears it. So a first start's
+// PreMission pass meets no local player: its ShowWinSubgoal shows the objective and plays no
+// NEW_GOAL (the null test). A restart's start (Game_StartMission(1)) runs the same pass and
+// round init, but retail's restart destroys the entities without clearing g_LocalPlayerEntity
+// (only Player_InitPlayer's memset does, past the pass), so its pass reads the destroyed row and
+// plays NEW_GOAL at its Position; ours has no body there. The restart leg pins ours, a
+// deliberate fix of that dangling read (D-NET-NEW-L7-40, PERMANENT, ratified by the
+// maintainer 2026-10-23, Q-L7-39-1 (a)).
+// [orig: Server_PlayerAdd's own arm @0x51CC33..0x51CC60; Game_TeardownMission - the memset of
+//  g_LocalPlayerEntity @0x522774..0x522780; Game_StartMission @0x524360 - the
+//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the Server_InitAllPlayerEntitiesForRound call
+//  @0x525BAF, the Player_InitPlayer call @0x525BBC; EventAction_Dispatch case 35 - the
+//  g_LocalPlayerEntity test @0x4546E7..0x4546F1; Entity_SpawnFromAnimSlotProperty - Flags |=
+//  0x101 @0x43C508; Server_OnPlayerJoin - the clear @0x51A7DA; Game_RestartRoundSP - the
+//  Game_StartMission call @0x5263DB; Game_DestroyAllEntitiesAndReset @0x5235C0 (Entity_Destroy
+//  called @0x5235FA, no store to g_LocalPlayerEntity); Player_InitPlayer - the memset called
+//  @0x4E1602; EventAction_Dispatch case 35 - Sound_PlayAtPosition called @0x45470C]
+void test_the_local_body_is_born_at_the_round_init() {
+	const std::map<std::string, std::string> files;
+	for (const bool restart : {false, true}) {
+		auto m = std::make_unique<SpMission>();
+		m->kernel->world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+		bool body_ahead_of_round_init = true;
+		ms::MissionKernel *kernel = m->kernel.get();
+		m->after_bringup = [kernel, &body_ahead_of_round_init] {
+			const std::function<void()> round_init = kernel->round_init;
+			CHECK(static_cast<bool>(round_init));
+			kernel->round_init = [kernel, &body_ahead_of_round_init, round_init] {
+				body_ahead_of_round_init = kernel->local.has_local_player();
+				if (round_init) round_init();
+			};
+		};
+		CHECK(m->boot(files, restart));
+		w::World &world = m->world();
+		// Absent through the PreMission pass: the pass ran its ShowWinSubgoal (the objective
+		// bit) and played no NEW_GOAL.
+		CHECK(!body_ahead_of_round_init);
+		CHECK((world.script.subgoals.show_win & (1u << 1)) != 0);
+		int new_goals = 0;
+		for (const w::ReadyFireSound &ready : world.out.fire_sounds.drain())
+			if (ready.set_name == "NEW_GOAL") ++new_goals;
+		CHECK(new_goals == 0);
+		// The boot spawned none; the round init followed the pass.
+		const std::vector<std::string> &trace = m->kernel->boot_trace;
+		const auto at = [&trace](const char *name) {
+			return static_cast<size_t>(std::find(trace.begin(), trace.end(), name) - trace.begin());
+		};
+		CHECK(at("spawn_local_player") == trace.size());
+		CHECK(at("premission") < at("round_init") && at("round_init") < trace.size());
+		// Present and hidden past the round init: the own slot's body, under the round
+		// init's 620-tick protection, the only one.
+		const im::NapiNPConnection *own = nullptr;
+		for (const im::NapiNPConnection &conn : m->role->state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == im::NapiNPConnection::kTypeClientSide) own = &conn;
+		CHECK(own != nullptr);
+		const w::Entity *body = world.registry.get(world.cached.local_player);
+		CHECK(body != nullptr);
+		if (own == nullptr || body == nullptr) continue;
+		CHECK(own->link.owned_entity == world.cached.local_player);
+		CHECK((body->flags & w::kEntityFlagCarried) != 0);
+		CHECK(body->damage_state == 620);
+		int bodies = 0;
+		world.registry.for_each_in_pool(0, [&](const w::Entity &e) {
+			if (e.owner_connection_id == own->connection_id) ++bodies;
+		});
+		CHECK(bodies == 1);
+		// The own join (the start's own 0x0B, the first frame's receive pump) clears the bit,
+		// out of a session for good.
+		m->frames(2);
+		body = world.registry.get(world.cached.local_player);
+		CHECK(body != nullptr && (body->flags & w::kEntityFlagCarried) == 0);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -230,6 +314,11 @@ int main() {
 		// round-end pose for 300 frames, the 62-frame letterbox, state 0.
 		// [orig: @0x578479..0x57861D]
 		CHECK(cine.mode == w::EpilogCineMode::Win && cine.active && cine.frame == -1);
+		// The SP tail stops the playing dialog line ahead of its Dialog_ResetAll
+		// [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]; the WIN epilog's
+		// start shuts no audio channel down (only the LOSE cine's does).
+		CHECK(world.out.dialog_line_stop);
+		CHECK(!world.out.audio_channels_shutdown);
 		CHECK(cine.win_state == 0 && cine.win_build_frame == 95);
 		CHECK(cine.events.size() == 2);
 		const w::CineEvent *camera = find_event(cine, w::CineEventKind::CacheCamera);
@@ -355,21 +444,31 @@ int main() {
 		// The SP tail's Dialog_ResetAll clears the world's dialog table, its
 		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
+		// The playing line stops ahead of that reset [orig: @0x51694B].
+		CHECK(world.out.dialog_line_stop);
 		CHECK(world.out.effects.count("round_end") == 1);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);
 		CHECK(cine.events.size() == 2);
+		// Cine_StartPlayback shuts the audio channels down for the embedder
+		// [orig: Cine_StartPlayback @0x577840 - the call @0x577853].
+		CHECK(world.out.audio_channels_shutdown);
+		world.out.audio_channels_shutdown = false; // the embedder took it
 		CHECK(find_event(cine, w::CineEventKind::EditFade) != nullptr);
 		// No cine frame has rendered in this process yet: the first dispatch
 		// enters state 1 and its render draws one; the second builds.
 		(void)m.frame();
 		CHECK(cine.lose_state == 1 && !cine.screen_active && cine.frame_drawn);
+		CHECK(!world.out.audio_channels_shutdown);
 		CHECK(world.script_may_advance());
 		// The build's Dialog_ResetAll clears the table again [orig:
 		// Cinematic_EpilogUpdate @0x5747DA].
 		world.script.dialog.enqueue(audio::dialog_name_of(6), {});
 		(void)m.frame();
 		CHECK(cine.screen_active && cine.lose_state == 2);
+		// The build shuts the audio channels down again [orig: Cinematic_EpilogUpdate
+		// @0x5747E6].
+		CHECK(world.out.audio_channels_shutdown);
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
 		CHECK(cine.frame == 2 && cine.lose_age == 1);
 		CHECK(!world.script_may_advance());
@@ -391,9 +490,10 @@ int main() {
 		// --- the round-over keys (behind the gate the round end raised) ---
 		const im::RoleView view = m.view();
 		namespace k = hud::hud_round_over;
-		CHECK(im::round_over_key(view, 'X', 'R') == k::kConsumed);
+		CHECK(im::round_over_key(view, *m.role, 'X', 'R') == (k::kArm | k::kConsumed));
 		CHECK(world.mission_exit_reason == 0);
-		CHECK(im::round_over_key(view, 'R', 'R') == (k::kConsumed | k::kRestart));
+		CHECK(im::round_over_key(view, *m.role, 'R', 'R') ==
+				(k::kArm | k::kConsumed | k::kRestart));
 		CHECK(!cine.screen_active);
 		CHECK(world.mission_exit_reason == 4);
 		CHECK(im::main_frame_exit(world.mission_exit_reason, false, true) ==
@@ -401,6 +501,34 @@ int main() {
 		// The session reports the exit on its next frame.
 		const im::FrameOutcome out = m.frame();
 		CHECK(out.status == im::FrameStatus::SessionLost);
+	}
+
+	// --- the lose cine's edit fade scales the bank's smoothing history ---------
+	{
+		// The fade (start 0, one frame) scales the main loop's frame-time
+		// smoothing history by 1.66f at its start (timeline frame 0) and by
+		// 0.60240966f at its finish (frame 1), while the cine runs; the session
+		// applies the scales after the tick and clears the list (world::
+		// TickAccumulator::scale_smoothing_history carries the witness).
+		// [orig: Cine_AdvanceTimelineFrame @0x56FFC4 (vtable+4 on the start frame)
+		//  / @0x56FFE5 (vtable+0x10 on the last); CCineEventEditFade_Start @0x5726C9;
+		//  CCineEventEditFade_Finish @0x572775]
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		world.process_round_end(2);
+		CHECK(world.out.frame_time_scales.empty());
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 1 &&
+				world.out.frame_time_scales[0] == w::kEpilogEditFadeStartScale);
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 2 &&
+				world.out.frame_time_scales[1] == w::kEpilogEditFadeFinishScale);
+		world.epilog.update(world);
+		CHECK(world.out.frame_time_scales.size() == 2);
+		(void)m.frame();
+		CHECK(world.out.frame_time_scales.empty());
 	}
 
 	// --- the round init's dialog reset -----------------------------------------
@@ -425,20 +553,59 @@ int main() {
 		const im::RoleView view = m.view();
 		namespace k = hud::hud_round_over;
 		// Before the round ends the leg is not reached.
-		CHECK(im::round_over_key(view, 27, 'R') == 0);
+		CHECK(im::round_over_key(view, *m.role, 27, 'R') == 0);
 		m.world().process_round_end(2);
-		CHECK(im::round_over_key(view, 27, 'R') == (k::kConsumed | k::kExit));
+		CHECK(im::round_over_key(view, *m.role, 27, 'R') == (k::kArm | k::kConsumed | k::kExit));
 		CHECK(m.world().mission_exit_reason == 1);
-		// The pure rule: a session takes nothing, the co-op game type every key.
+		// The pure rule: a session's board arm takes PgUp / PgDn alone and lets
+		// every other key, ADVANCED's 'A' included, go on to the chain's tail; the
+		// co-op game type takes every key [orig: Input_HandleSpecialKeys
+		// @0x49c7d5..0x49c8e2].
 		hud::HudRoundOverKeyInput in;
 		in.vk = 'R';
 		in.in_session = true;
 		in.game_type = 0x10000; // TDM
-		CHECK(hud::hud_round_over_key(in) == 0);
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 0x21; // VK_PRIOR [orig: @0x49c802]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 0x22; // VK_NEXT [orig: @0x49c82c]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 'A'; // ADVANCED [orig: @0x49c859 -> the tail @0x49c864]
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 27; // ESC: the binding scan's [orig: @0x49c859 -> the tail]
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		in.vk = 'R';
 		in.game_type = 0x10020; // co-op
-		CHECK(hud::hud_round_over_key(in) == (k::kConsumed | k::kRestart));
-		in.game_type = 0x30020; // co-op with bit 0x20000
-		CHECK(hud::hud_round_over_key(in) == 0);
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed | k::kRestart));
+		in.vk = 0x21; // co-op: the page keys are taken with every other key [orig: @0x49c8d5]
+		CHECK(hud::hud_round_over_key(in) == (k::kArm | k::kConsumed));
+		in.vk = 'R';
+		in.game_type = 0x30020; // co-op with bit 0x20000: the board arm
+		CHECK(hud::hud_round_over_key(in) == k::kArm);
+		// In a session the leg's exits are the role's: a co-op session's ESC and
+		// RESTART store 1 and 4 on the role's g_MissionExitReason (the listen
+		// host's world here), and the board arm stores nothing [orig:
+		// Input_HandleSpecialKeys @0x49c8e2 / @0x49c8ad; the session test
+		// @0x49c7d5..0x49c7fd].
+		{
+			SpMission c;
+			CHECK(c.boot(files, false));
+			c.world().process_round_end(2);
+			c.world().rules.mp_session = true;
+			c.world().match.live_rules().game_type = 0x10000; // TDM: the board arm
+			CHECK(im::round_over_key(c.view(), *c.role, 27, 'R') == k::kArm);
+			CHECK(im::round_over_key(c.view(), *c.role, 0x22, 'R') == (k::kArm | k::kConsumed));
+			CHECK(c.world().mission_exit_reason == 0);
+			c.world().match.live_rules().game_type = 0x10020; // co-op
+			CHECK(im::round_over_key(c.view(), *c.role, 'X', 'R') == (k::kArm | k::kConsumed));
+			CHECK(c.world().mission_exit_reason == 0);
+			CHECK(im::round_over_key(c.view(), *c.role, 27, 'R') ==
+					(k::kArm | k::kConsumed | k::kExit));
+			CHECK(c.world().mission_exit_reason == 1);
+			CHECK(im::round_over_key(c.view(), *c.role, 'R', 'R') ==
+					(k::kArm | k::kConsumed | k::kRestart));
+			CHECK(c.world().mission_exit_reason == 4);
+		}
 		// The main frame's router [orig: @0x526806..0x526867].
 		CHECK(im::main_frame_exit(0, false, true) == im::MainFrameExit::None);
 		CHECK(im::main_frame_exit(8, false, true) == im::MainFrameExit::GameLoop);
@@ -484,8 +651,9 @@ int main() {
 		played->world().process_round_end(1);
 		played->frames(120); // into the score screen
 		CHECK(played->world().epilog_screen_active());
-		CHECK(im::round_over_key(played->view(), 'R', 'R') ==
-				(hud::hud_round_over::kConsumed | hud::hud_round_over::kRestart));
+		CHECK(im::round_over_key(played->view(), *played->role, 'R', 'R') ==
+				(hud::hud_round_over::kArm | hud::hud_round_over::kConsumed |
+						hud::hud_round_over::kRestart));
 		CHECK(played->frame().status == im::FrameStatus::SessionLost);
 		CHECK(im::main_frame_exit(played->world().mission_exit_reason, false, true) ==
 				im::MainFrameExit::RestartRoundSP);
@@ -502,7 +670,7 @@ int main() {
 			CHECK(again->position.x == fresh_player->position.x);
 			CHECK(again->position.y == fresh_player->position.y);
 			CHECK(again->position.z == fresh_player->position.z);
-			CHECK(again->yaw == fresh_player->yaw);
+			CHECK(w::mission_yaw_whole_deg(again->heading) == w::mission_yaw_whole_deg(fresh_player->heading));
 		}
 		CHECK(fired_set(*restarted.kernel) == boot_set);
 		CHECK(!rw.match.outcome().ended);
@@ -526,6 +694,7 @@ int main() {
 	}
 
 	test_counter_step_plays_text_end_on_arrival();
+	test_the_local_body_is_born_at_the_round_init();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -9,8 +9,10 @@
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/lobby_identity.h>
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the leg's cap)
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
+#include <optional>
 
 namespace opennova::serve {
 
@@ -108,6 +110,13 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 								"[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
 						end(kExitFailed);
 					};
+					// The gate and connect lines to the server's _connectlog.txt.
+					hooks.connect_log_on = [this]() {
+						return options_.connect_log != nullptr && options_.connect_log->enabled();
+					};
+					hooks.connect_log = [this](const std::string &text) {
+						if (options_.connect_log != nullptr) options_.connect_log->line(text);
+					};
 					return hooks;
 				}(),
 				[this]() {
@@ -120,21 +129,40 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 						out.ip = net::NetDatagramSocket::to_peer(endpoint).ip;
 						return true;
 					};
+					env.gate_local_port = [this]() { return gate_port_; };
+					// The command-line host's gate wait (CNapiGateManager_WaitForGateResponse).
+					env.command_line_host = true;
 					return env;
 				}()),
 		role_(lobby_, [this]() {
 			NwuHostRole::Hooks hooks;
 			hooks.on_hosting = [this]() { on_listed(); };
+			hooks.inout_line = [this](const std::string &text) {
+				if (options_.server_logs != nullptr)
+					inmatch::server_logs_inout_line(*options_.server_logs, text);
+			};
 			hooks.on_failed = [this](const std::string &tag) {
 				io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
 				source_.on_host_result(false, tag);
 				end(kExitFailed);
 			};
+			// ServerStopHosting drops the session to verified and sends nothing; the session
+			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
+			// reaches the router, whose network-type reset sends the goodbye burst with no
+			// ClientStopHosting (the embedder's stop at that exit). The lister finishes then,
+			// with the service's word as its outcome (D-NET-NEW-L9-20).
+			// [orig: CNapiGameSession_HandleServerMessage @0x4D1C50 - SetState(4) @0x4D1D29,
+			//  the word 1 @0x4D1D4F, no send; Game_ProcessMainFrame @0x5263F0 - the 62-frame
+			//  check @0x52654F..0x52657C; PostMenu_RouteMissionExit @0x568460 - `cmp eax, 0Ch`
+			//  @0x56854F / jz @0x568552 -> loc_5686CB, SetNetworkType(0) (the call @0x5686E1);
+			//  CNapiNetwork_SetNetworkType @0x4C4A50 - ResetToDisconnected (the call @0x4C4A7D);
+			//  CNapiGameSession_ResetToDisconnected @0x4D0890 - CNapiNPConnection_RequestDisconnect
+			//  @0x61E0F0 (the call @0x4D08A1)]
 			hooks.on_stopped = [this](const std::string &key) {
 				io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)",
 						key.c_str());
 				source_.on_host_result(false, key);
-				end(kExitStoppedByService);
+				stopped_by_service_ = true;
 			};
 			hooks.on_command = [this](const ServerCommand &command) {
 				source_.on_command(command);
@@ -155,7 +183,25 @@ Lister::~Lister() {
 bool Lister::start() {
 	if (!source_.start(exit_code_))
 		return false;
-	gate_udp_ = net::ScopedSocket(net::udp_bind(0));
+	// The gate worker's socket binds on every interface over the block's mpgateserverlocalport
+	// quad, the first free port of its scan (D-NET-NEW-L9-5); the session socket is the host's.
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE7D2 (the bind address 0), @0x4CE7DE..0x4CE810
+	//  (the quad into the context); CNapiGateManager_CreateAndBindSocket @0x633770 - the address
+	//  and the quad into the bind @0x6337D4..0x633824, NapiUdpSocket_CreateAndBind @0x633830]
+	for (const uint16_t port : options_.gate_ports) {
+		gate_udp_ = net::ScopedSocket(net::udp_bind(port, &gate_port_, 0));
+		if (gate_udp_.is_valid()) break;
+	}
+	// A probe whose bind finds no port fails its start: the gate wait writes its CONFIGURING and
+	// STARTING lines ahead of the connect machine, then logs the manager's state, which the
+	// machine left at 2 (its fall back to -6 is outside the state setter's -5..3); no probe
+	// leaves (NwuLobbySession::gate_start_failed).
+	// [orig: CNapiGateManager_WaitForConnect @0x4CE816..0x4CE84D ("GATE CONFIGURING GATE
+	//  MANAGER."), @0x4CE855..0x4CE88C ("GATE STARTING GATE SERVICE."), the machine @0x4CE89D,
+	//  the failure @0x4CE8A4, "%s : GATE GATE SERVICE START FAILED [%ld]." @0x4CE8D2 of the state
+	//  +0x20 @0x4CE8C2, NapiFile_AppendLine @0x4CE8E7; CNapiGateManager_ProcessConnectStateMachine
+	//  @0x633E3C (state 2), the bind @0x633E43, SetState(-6) @0x633E64]
+	if (!gate_udp_.is_valid()) (void)lobby_.gate_start_failed();
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
 		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");
@@ -211,10 +257,10 @@ bool Lister::tick(uint32_t now_ms) {
 	return phase_ != Phase::Done;
 }
 
-void Lister::publish_server_info() {
+void Lister::publish_server_info(int32_t session_round_count) {
 	if (phase_ != Phase::Hosting || ending_) return;
 	refresh_listing(true);
-	role_.publish_mission_start();
+	role_.publish_mission_start(session_round_count);
 }
 
 void Lister::stop() {
@@ -237,6 +283,14 @@ void Lister::disconnect() {
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58]
 void Lister::on_listed() {
 	phase_ = Phase::Hosting;
+	// The host request's wait ended: the menu's next frame opens the HOSTKEY page's refresh
+	// (engine: LobbyHttpFlow::on_host_response's Resolved request carries the witness). A failed
+	// request ends the lister, so only the listed one fetches it.
+	if (host_page_.valid && !http_.valid()) {
+		ship(host_page_);
+		host_page_in_flight_ = true;
+	}
+	host_page_ = HttpRequestSpec{};
 	io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)",
 			registration().server_name.c_str(), role_.roster().size());
 	source_.on_host_result(true, std::string());
@@ -264,6 +318,12 @@ void Lister::on_verified() {
 
 void Lister::on_http_reply(const net::HttpReply &reply) {
 	if (!reply.transport_ok) io::logf(LogLevel::kWarn, "[http] %s", reply.error.c_str());
+	// The HOSTKEY page's refresh (on_listed): its answer settles the flow's host leg.
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);
+		return;
+	}
 	if (phase_ == Phase::LoggingIn) {
 		const LoginResult r = flow_.on_login_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 		if (r.kind == LoginResult::Kind::NeedRequest) {
@@ -278,7 +338,8 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		add_log_secret(r.nwhandle);
 		io::logf(LogLevel::kInfo, "[http] logged in");
 		sync_flow_context();
-		const HostKeyResult first = flow_.host();
+		// The Host's jar entries carry the registration's Exp (g_ExpansionName).
+		const HostKeyResult first = flow_.host(registration().expansion);
 		if (first.kind != HostKeyResult::Kind::NeedRequest) {
 			io::logf(LogLevel::kError, "[http] the hosting page failed: %s", first.reason.c_str());
 			end(kExitFailed);
@@ -301,6 +362,8 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		}
 		host_key_ = r.host_key;
 		io::logf(LogLevel::kInfo, "[http] HOSTKEY %s", mask_value(host_key_, 6).c_str());
+		// The HOSTKEY page's refresh goes out once the host request's wait ends (on_listed).
+		host_page_ = r.request;
 		request_host();
 	}
 }
@@ -316,10 +379,42 @@ void Lister::ship(const HttpRequestSpec &spec) {
 	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
 	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
 	http_ = std::async(std::launch::async, [spec, method, allow_public]() {
-		return net::http_exchange(method, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
-				[allow_public](const std::string &host, net::Endpoint &out) {
-					return resolve_destination(host, out, allow_public, "web host");
-				});
+		// One resolve per request: the connect uses the address the nocachefix pair reads.
+		// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called
+		//  @0x658E4B into the request's +0x30 word, which CUIBrowser_SendHTTPRequest @0x658840
+		//  reads for the pair @0x6588A3 and the connect reads @0x6597F3]
+		std::optional<net::Endpoint> resolved;
+		const auto resolve = [allow_public, &resolved](const std::string &host, net::Endpoint &out) {
+			if (!resolved) {
+				net::Endpoint server{};
+				if (!resolve_destination(host, server, allow_public, "web host")) return false;
+				resolved = server;
+			}
+			out.ip = resolved->ip;
+			return true;
+		};
+		// A menu-browser GET takes its nocachefix pair once its server resolved: the tick at the
+		// send and that server's address (browser_cache_bust_url, D-NET-NEW-L9-31).
+		std::string url = spec.url;
+		if (spec.cache_bust) {
+			const std::size_t scheme = url.find("://");
+			const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
+			const std::size_t host_end = url.find_first_of(":/", host_at);
+			const std::string host = url.substr(host_at,
+					host_end == std::string::npos ? std::string::npos : host_end - host_at);
+			net::Endpoint server{};
+			if (!resolve(host, server)) {
+				net::HttpReply refused;
+				refused.error = "cannot reach " + host;
+				return refused;
+			}
+			url = browser_cache_bust_url(url, world::frame_tick_count_ms(), server.ip);
+		}
+		// The menu browser's Host line leads the flow's lines: the URL's host with no port
+		// (browser_request_host, D-NET-NEW-L9-49), where the transport would write the authority.
+		std::vector<std::string> headers{"Host: " + browser_request_host(spec.url)};
+		headers.insert(headers.end(), spec.headers.begin(), spec.headers.end());
+		return net::http_exchange(method, url, headers, spec.body, kHttpTimeoutMs, resolve);
 	});
 }
 
@@ -359,20 +454,22 @@ void Lister::sync_flow_context() {
 		ctx.server_nwuid = session->server_nwuid();
 	}
 	ctx.identity_vars = identity_vars_;
+	// The jar's gate-reply fields: the junction pair and the locale three's switch (D-NET-NEW-L9-32).
+	ctx.use_junction = lobby_.use_junction();
+	ctx.extended_metrics = options_.extended_metrics;
 	flow_.set_context(std::move(ctx));
 }
 
 // The verify Cookie: the machine's identity set, then the browser jar once the login filled it.
 std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 	if (identity_vars_.empty()) {
-		identity_.client_index = lobby_.client_index();
-		identity_.client_key = lobby_.client_key();
 		read_locale_identity(identity_);
 		LobbyMachineTokens tokens = fallback_machine_tokens(stable_identity());
 		RetailMachineInputs machine;
 		if (read_retail_machine_inputs(machine)) tokens = make_retail_machine_tokens(machine);
 		identity_.nwpssk = tokens.nwpssk;
 		identity_.nwusid = tokens.nwusid;
+		identity_.nwhwi = options_.hardware_identity;
 		identity_vars_ = make_lobby_identity_vars(identity_);
 	}
 	sync_flow_context();
@@ -414,27 +511,38 @@ void Lister::sync_roster() {
 void Lister::end(int code) {
 	if (ending_ || phase_ == Phase::Done) return;
 	ending_ = true;
-	exit_code_ = code;
+	exit_code_ = stopped_by_service_ ? kExitStoppedByService : code;
 }
 
 // Close the session: with `stop_hosting` (stop) the ClientStopHosting statement leaves on one
-// send pump first and the verified connection's disconnect burst follows (NovaWorldClient::stop's
+// send pump first and the connection's disconnect burst follows (NovaWorldClient::stop's
 // teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
-// it.
+// it. The burst is RequestDisconnect's: a connection the server accepted (state 5, verifying or
+// verified) sends it, one still in its Hello / Auth legs nothing (D-NET-NEW-L9-1)
+// [orig: CNapiNPConnection_RequestDisconnect @0x61E0F0 - state 5 -> SetState(6)
+//  @0x61E0F3..0x61E0FA; CNapiNPConnection_TeardownActiveConnection's state-5 burst
+//  @0x62549E..0x6254D3].
 // The NovaWorld leg goes first: a console close leaves the process a few seconds.
 void Lister::teardown(bool stop_hosting) {
 	if (phase_ == Phase::Done) return;
 	phase_ = Phase::Done;
 	if (lobby_.is_open()) {
+		// A refused or failed host request left the role idle: no ClientStopHosting, the burst
+		// alone, as retail's ResetToDisconnected sends it [orig: Game_HostMultiplayerSession
+		//  @0x4A65A0 - CNapiGameSession_ResetToDisconnected @0x4A6718 / @0x4A674F].
+		const bool stop_sent = stop_hosting && role_.phase() != NwuHostRole::Phase::Idle &&
+				lobby_.session() != nullptr;
 		if (stop_hosting) {
 			role_.stop();
 			lobby_.flush();
 		}
-		if (ClientSession *session = lobby_.session(); session != nullptr && session->is_verified()) {
-			const std::vector<uint8_t> goodbye = session->build_goodbye();
-			for (std::size_t i = 0; i < session->disconnect_burst_count(); ++i) lobby_.send(goodbye);
-			io::logf(LogLevel::kInfo, "[session] %s",
-			         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
+		if (ClientSession *session = lobby_.session(); session != nullptr) {
+			std::vector<std::vector<uint8_t>> out;
+			session->request_disconnect(out);
+			for (const std::vector<uint8_t> &dg : out) lobby_.send(dg);
+			if (!out.empty())
+				io::logf(LogLevel::kInfo, "[session] %s",
+				         stop_sent ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
 		}
 		lobby_.close();
 	}

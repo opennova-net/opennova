@@ -264,8 +264,8 @@ int main() {
 		CHECK(near_equal(kernel.local.player_position().y, spawn_pos.y, 0.001f));
 		CHECK(near_equal(kernel.local.player_position().z, spawn_pos.z, 0.001f));
 		if (const w::AiEntity *body = kernel.local.player_ai()) {
-			CHECK(near_equal(body->pos[0] / 65536.0f, spawn_pos.x, 0.01f));
-			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
+			CHECK(near_equal(body->self->position.x.q16 / 65536.0f, spawn_pos.x, 0.01f));
+			CHECK(near_equal(body->self->position.y.q16 / 65536.0f, spawn_pos.y, 0.01f));
 		}
 		CHECK(kernel.world.script.vars.get_mission(3) == 0);
 		// The restart lands on the play-start score block and masks, the
@@ -516,6 +516,49 @@ int main() {
 		CHECK(!frame.vertices.empty() && std::fabs(frame.vertices[0] - 10.0f) < 0.001f);
 	}
 
+	// --- the server's player count across kernels ---------------------------------
+	// g_ServerNumPlayers is a process global with one writer, the periodic second's
+	// recount: the next mission's flare roll reads the last count until its first recount
+	// [orig: Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B);
+	//  Weapon_GetFlareDeflectChance @0x5382A0]. (D-NET-64)
+	{
+		auto first = std::make_unique<ms::MissionKernel>();
+		first->world.server_num_players = 3;
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		CHECK(second->world.server_num_players == 3);
+	}
+
+	// --- the round pool's cursor and id counter across kernels --------------------
+	// Both are process words only the allocator writes; the mission start's memsets
+	// end at the activity bytes, short of them, so the next mission's first round
+	// takes the slot after the previous mission's last and mints the next id (its
+	// shot_seq on the wire): the local player's slot id over nine bits, the counter
+	// under them. A kernel that carried nothing starts a process's pool.
+	// [orig: CEntityManager_AllocateSlot @0x4EAAD0 (the slot id @0x4EAAED, the counter
+	//  @0x4EAAE8..0x4EAB04, the cursor @0x4EAB1C..0x4EAB37); Projectile_InitDragTable
+	//  @0x4E78D0 (the activity bytes' memset @0x4E7911..0x4E791C)] (D-NET-NEW-L7-18)
+	{
+		constexpr uint8_t kSlotId = 2; // a joiner's own S2C 0x04 slot
+		auto first = std::make_unique<ms::MissionKernel>();
+		w::RoundSim &left = first->world.round_sim;
+		left.local_slot_id = kSlotId;
+		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 1);
+		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 2);
+		CHECK(left.rounds[2].shot_seq == ((kSlotId << 9) | 2));
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		w::RoundSim &next = second->world.round_sim;
+		next.local_slot_id = kSlotId;
+		CHECK(next.allocate_slot(second->world, w::RoundSim::kFreshRoundWord) == 3);
+		CHECK(next.rounds[3].shot_seq == ((kSlotId << 9) | 3));
+		auto fresh = std::make_unique<ms::MissionKernel>();
+		w::RoundSim &own = fresh->world.round_sim;
+		own.local_slot_id = kSlotId;
+		CHECK(own.allocate_slot(fresh->world, w::RoundSim::kFreshRoundWord) == 1);
+		CHECK(own.rounds[1].shot_seq == ((kSlotId << 9) | 1));
+	}
+
 	// --- the no-session objective relay ------------------------------------------
 	// The bare tick has no connection for the S2C 0x3F relay, so the queue is
 	// released while the local chat effect stays. [orig:
@@ -560,7 +603,7 @@ int main() {
 		CHECK(kernel.world.logic_tick == tick0 + 1);
 		kernel.local.teleport_local_player(w::Vec3{7.0f, 8.0f, 9.0f}, 0.0, 0.0);
 		CHECK(near_equal(kernel.local.player_position().z, 9.0f, 0.001f));
-		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[2] == 9 << 16);
+		if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->self->position.z.q16 == 9 << 16);
 		tick_no_net(kernel);
 		CHECK(kernel.world.logic_tick == tick0 + 2);
 	}

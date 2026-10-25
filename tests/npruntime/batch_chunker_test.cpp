@@ -123,11 +123,16 @@ int main() {
 				"call 2: the page restarts at the crossing record") && ok;
 	}
 
-	// A record that crosses alone still moves the stream on (one record a page), or it would never end.
+	// A record that crosses alone is counted and keeps the cursor, as any crossing record does, so
+	// every page resends it and the pool never ends (D-NET-414; unreachable with the four pools'
+	// records). [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 - the count @0x50463E, the
+	// `jg` @0x50464B past the cursor step @0x50464D]
 	{
 		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
-				3, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{700, 4}, 0, 100);
-		ok = expect(r.pages.size() == 3 && r.exhausted, "a lone crossing record steps on") && ok;
+				3, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{700, 4}, 0, 2);
+		ok = expect(r.pages.size() == 2 && r.pages[0] == r.pages[1] && r.pages[0].size() == 704 &&
+		                    r.next_cursor == 0 && !r.exhausted,
+		            "a lone crossing record keeps the cursor: each page resends it") && ok;
 	}
 
 	// The named production policies pin every witnessed entity-pool margin and the tile pre-check.

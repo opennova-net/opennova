@@ -109,9 +109,9 @@ std::unique_ptr<Rig> make_rig() {
     AiEntity &e = rig->e();
     e.team = 1;
     e.health = 100;
-    e.pos[0] = 2 << 16;
-    e.pos[1] = 100 << 16;
-    e.pos[2] = 0;
+    e.self->position.x.q16 = 2 << 16;
+    e.self->position.y.q16 = 100 << 16;
+    e.self->position.z.q16 = 0;
     e.heading = 0;
     AiBrain &b = e.brain;
     b.f[AiBrain::kCurState] = kAiGroundCombat;
@@ -508,7 +508,7 @@ static void test_aircraft_failed_rescan_drops_the_target() {
     AiEntity &ai = *sys.at(sys.attach(hull_h));
     ai.health = 500;
     ai.team = 1;
-    ai.pos[2] = 10 << 16;
+    ai.self->position.z.q16 = 10 << 16;
     AiProfile &p = ai.profile;
     p.type = 1;
     p.flags100 = 4; // FLEE: the processed leg turns to the half-turn heading

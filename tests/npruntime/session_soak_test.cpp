@@ -30,6 +30,7 @@
 
 #include <net/npwire/idatagram_socket.h>
 #include "impaired_datagram_socket.h"
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include <net/npwire/ingame_decode.h>
 
 #include <base/io/tick_rate.h>
@@ -39,6 +40,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -244,7 +246,7 @@ bool run_soak(const SoakCase &soak) {
 		start.kind = w::EntityKind::Marker;
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
-		start.yaw = 0;
+		start.heading = w::placed_heading_bam(0);
 		world.registry.spawn(3, start);
 	}
 	for (int i = 0; i < soak.world_markers; ++i) {
@@ -252,7 +254,7 @@ bool run_soak(const SoakCase &soak) {
 		marker.kind = w::EntityKind::Marker;
 		marker.item_id = 6002;
 		marker.position = {10.0f + static_cast<float>(i), 20.0f, 1.0f};
-		marker.yaw = 0;
+		marker.heading = w::placed_heading_bam(0);
 		world.registry.spawn(3, marker);
 	}
 	bms::File mission;
@@ -274,6 +276,8 @@ bool run_soak(const SoakCase &soak) {
 	host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	host_cfg.serve_and_play = false;
 	inmatch::start_host_session(owner, host_cfg);
+	// The session onto its World (the create reads none): its rules, the own add.
+	inmatch::bind_host_session_world(owner, host_cfg);
 
 	// ---- the impaired wire: one host endpoint routing to every joiner's ----
 	uint64_t now_ms = 0;
@@ -339,6 +343,9 @@ bool run_soak(const SoakCase &soak) {
 			} else {
 				out = j.client->Client_ProcessNetworkFrame(tick);
 			}
+			push_released_mission_start(*j.client, [&out](std::vector<uint8_t> datagram) {
+				out.push_back(std::move(datagram));
+			});
 			for (const std::vector<uint8_t> &d : out)
 				if (!d.empty()) j.sock->send_to(kHostAddr, d.data(), d.size());
 			const uint32_t frontier = j.client->inbound_frontier_seq();
@@ -419,9 +426,43 @@ bool run_soak(const SoakCase &soak) {
 	host_sock.set_profile(healed);
 	for (SoakJoiner &j : joiners) j.sock->set_profile(healed);
 	for (int f = 0; f < 62 * 4; ++f) step(true);
+	// A reliable record a joiner sent within the last round trip is still on the wire when the
+	// drain ends; the host's ACK must retire it within the loss-free recovery bound, which is
+	// the property, whatever record the join's timeline happens to put in flight at that tick.
+	// The joiner keeps playing through the bound, and a record it frames meanwhile (a reply a
+	// host S2C draws) may be the one in flight at the bound's end, wherever the send boundaries
+	// fall (each remote add re-phases its connection's, D-NET-NEW-L3-21): the property covers
+	// the records framed when the drain ends, every packet below the joiner's next sequence.
+	std::vector<bool> c2s_retired(joiners.size(), false);
+	std::vector<uint32_t> drain_seq(joiners.size(), 0);
+	std::vector<std::size_t> depth_min(joiners.size(), SIZE_MAX), depth_max(joiners.size(), 0);
+	for (std::size_t i = 0; i < joiners.size(); ++i) drain_seq[i] = joiners[i].client->outbound_seq();
+	for (uint32_t f = 0;; ++f) {
+		bool all = true;
+		for (std::size_t i = 0; i < joiners.size(); ++i) {
+			const inmatch::ClientRuntime &c = *joiners[i].client;
+			const uint32_t oldest = c.oldest_retained_outbound_seq();
+			if (oldest == 0 || oldest >= drain_seq[i]) c2s_retired[i] = true;
+			depth_min[i] = std::min(depth_min[i], c.retained_outbound_depth());
+			depth_max[i] = std::max(depth_max[i], c.retained_outbound_depth());
+			all = all && c2s_retired[i];
+		}
+		if (all || f > quick_ticks + 2u * kHoldoffTicks) break;
+		step(true);
+	}
+	for (std::size_t i = 0; i < joiners.size(); ++i) {
+		const inmatch::NapiNPConnection *hc = host_connection(joiners[i].addr);
+		std::printf("[soak %s] joiner %zu drain: below seq %u, oldest retained %u, depth %zu..%zu,"
+		            " host acks %u (queued %zu), joiner frontier %u\n",
+				soak.name, i, drain_seq[i], joiners[i].client->oldest_retained_outbound_seq(),
+				depth_min[i], depth_max[i], hc != nullptr ? hc->seq.last_inbound_seq : 0u,
+				hc != nullptr ? hc->seq.queued_inbound.size() : std::size_t{0},
+				joiners[i].client->inbound_frontier_seq());
+	}
 
 	bool ok = true;
-	for (const SoakJoiner &j : joiners) {
+	for (std::size_t ji = 0; ji < joiners.size(); ++ji) {
+		const SoakJoiner &j = joiners[ji];
 		const inmatch::NapiNPConnection *hc = host_connection(j.addr);
 		const uint32_t frames_in_play = j.client->state().frames_applied - j.frames_at_join;
 		std::printf("[soak %s] c2s sent=%llu dropped=%llu dup=%llu reorder=%llu\n", soak.name,
@@ -447,8 +488,7 @@ bool run_soak(const SoakCase &soak) {
 		ok = expect(j.client->inbound_gap_depth() == 0 && hc != nullptr &&
 		                    hc->seq.queued_inbound.empty(),
 		            "every gap is recovered once the link heals") && ok;
-		ok = expect(j.client->retained_outbound_depth() == 0,
-		            "the host's ACKs retire every reliable C2S record") && ok;
+		ok = expect(c2s_retired[ji], "the host's ACKs retire every reliable C2S record") && ok;
 		ok = expect(hc != nullptr && hc->seq.retained_outbound_message_count < 16,
 		            "the joiner's ACKs retire the host's reliable S2C records") && ok;
 		if (!soak.check_cadence) continue;

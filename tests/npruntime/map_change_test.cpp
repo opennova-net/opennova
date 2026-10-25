@@ -10,6 +10,7 @@
 // has the sides back.
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_rand.h>
 #include <net/title/title_identity.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
@@ -30,6 +31,7 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include "joiner_mission_start.h" // the harness's end of a released mission start
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 
@@ -158,23 +160,20 @@ struct Host {
 			return false;
 		}
 		++missions;
-		// A map change's round init spawns the kept slots after the PreMission
-		// pass, none of them in the bring-up ahead of it (D-NET-354); a fresh
-		// session has none. [orig: Game_StartMission @0x524360 -- the
+		// Every mission start's round init spawns the active slots after the
+		// PreMission pass, none of them in the bring-up ahead of it: a map
+		// change's kept slots (D-NET-354) and a fresh session's own slot alike
+		// (D-NET-NEW-L7-39). [orig: Game_StartMission @0x524360 -- the
 		//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
 		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
 		const std::vector<std::string> &trace = kernel->boot_trace;
 		const auto at = [&trace](const char *name) {
 			return static_cast<size_t>(std::find(trace.begin(), trace.end(), name) - trace.begin());
 		};
-		if (next_mission) {
-			++map_changes;
-			CHECK(at("premission") < trace.size());
-			CHECK(at("premission") < at("round_init") && at("round_init") + 1 == trace.size());
-			CHECK(!kept_slot_spawned_in_bringup);
-		} else {
-			CHECK(at("round_init") == trace.size());
-		}
+		if (next_mission) ++map_changes;
+		CHECK(at("premission") < trace.size());
+		CHECK(at("premission") < at("round_init") && at("round_init") + 1 == trace.size());
+		CHECK(!kept_slot_spawned_in_bringup);
 		kept_slot_spawned_in_bringup = false;
 		return true;
 	}
@@ -236,6 +235,8 @@ struct PlayHost {
 	def::DefItemsFile items{};
 	net::ScopedSocket socket;
 	std::unique_ptr<net::NetDatagramSocket> datagrams;
+	// The session config's StartDelay seconds for the next boot.
+	uint32_t start_delay = 0;
 
 	PlayHost() {
 		uint16_t port = 0;
@@ -276,6 +277,7 @@ struct PlayHost {
 		r.role = &role;
 		r.host = &role;
 		r.host_cfg.config.server_name = "Play Host";
+		r.host_cfg.config.start_delay = start_delay;
 		r.host_cfg.config.game_type = game_type::kAttackDefend;
 		r.host_cfg.config.mission_file = "ADMAP.BMS";
 		r.host_cfg.config.max_players = 9;
@@ -349,8 +351,30 @@ void test_play_host_map_change() {
 				host.role.state.host_owner.ctx.mission_exit_reason, host.kernel->world.mission_exit_reason,
 				unsigned(host.role.state.host_owner.ctx.is_in_session));
 	CHECK(ended);
+	// The CRT stream crosses the map change through the process: the teardown hands the old
+	// World's back and the next World takes it at its bring-up, so the next mission's draws run on
+	// from the session's one seed (D-NET-NEW-L1-50) [orig: Server_AllocatePlayerSlotTable
+	// @0x51C180 - srand @0x51C1AA, the session's one seed; Game_StartMission @0x524360 seeds
+	// nothing].
+	const io::CrtRand before = host.kernel->world.crt_rand;
 	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(host.role.process_crt_rand().state == before.state);
+	host.start_delay = 9;
 	CHECK(host.boot_map(/*next_mission=*/true));
+	// The next mission's round counters' reset copies its StartDelay into the pre-round timer, as
+	// every mission start's does in a session on the authority (D-NET-NEW-L1-51) [orig:
+	// Server_ResetRoundCounters @0x516C50 - the session test @0x516C66, the authority test @0x516C80,
+	// the g_PreRoundDelayTimer store @0x516C8D; Game_StartMission's call @0x525B90].
+	CHECK(host.kernel->world.preround_delay_seconds == 9u);
+	{
+		io::CrtRand walk = before;
+		bool continued = walk.state == host.kernel->world.crt_rand.state;
+		for (int i = 0; i < 4096 && !continued; ++i) {
+			(void)walk.next();
+			continued = walk.state == host.kernel->world.crt_rand.state;
+		}
+		CHECK(continued);
+	}
 	inmatch::NapiNPConnection *own = host.loopback();
 	CHECK(own != nullptr && own->link.owned_entity.valid());
 	if (own == nullptr || !own->link.owned_entity.valid()) return;
@@ -368,6 +392,109 @@ void test_play_host_map_change() {
 	// The A&D latch found the host's player and the objective.
 	CHECK(host.kernel->local.attack_defend_role != 0);
 	std::printf("map_change: the listen host's own player respawned once, bound, A&D latched\n");
+}
+
+// D-NET-NEW-L1-24 (L1-s16): the map change's slot walks take an orphaned row as any active row.
+// The reset walk moves a row in states 2..7 to state 1 and clears its per-mission state (its body
+// goes with the old world); the round init spawns every active row's body from the row's own
+// words, its owner the row's connection id, so the orphaned row comes back with a body of its own
+// in the new mission. (The row here is a remote row's words over the own connection's id, so its
+// net player is the own connection: a client-side node, which the walk sends no 0x25.)
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x516160 - the active byte @0x516190, state 1
+//  @0x5161FD; Server_InitAllPlayerEntitiesForRound @0x516AA0 - the active byte @0x516AE0,
+//  Entity_SpawnFromAnimSlotProperty called @0x516B67, the owner from row+0x18 @0x516B6C..0x516B72]
+void test_an_orphaned_row_is_reset_and_respawned_at_the_map_change() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	for (int f = 0; f < 120 && !(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid()); ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	inmatch::NapiNPConnection *own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	own->net_player_serial = ++ctx.last_net_player_serial; // the re-add's draw
+	inmatch::OrphanedPlayerRow orphan;
+	orphan.row = *own;
+	orphan.row.type = inmatch::NapiNPConnection::kTypeServerSide;
+	orphan.row.reply.player_slot = 3;
+	orphan.row.slot_state = inmatch::PlayerSlotState::Joined;
+	orphan.row.burst.spawned = false;
+	orphan.row.link.owned_entity = {};
+	ctx.orphaned_player_rows.push_back(orphan);
+	CHECK(inmatch::Server_ExecuteServerCommand(ctx, &host.kernel->world, "Cycle", "", {}).handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host.session.advance(input).terminal();
+		host.kernel->world.out.discard_presentation();
+	}
+	CHECK(ended);
+	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(ctx.orphaned_player_rows.size() == 1 &&
+			ctx.orphaned_player_rows[0].row.slot_state == inmatch::PlayerSlotState::Added &&
+			!ctx.orphaned_player_rows[0].row.link.owned_entity.valid());
+	CHECK(host.boot_map(/*next_mission=*/true));
+	own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid() && ctx.orphaned_player_rows.size() == 1);
+	if (own == nullptr || ctx.orphaned_player_rows.size() != 1) return;
+	const world::EntityHandle body = ctx.orphaned_player_rows[0].row.link.owned_entity;
+	CHECK(body.valid() && body != own->link.owned_entity &&
+			host.kernel->world.registry.get(body) != nullptr);
+	CHECK(host.own_bodies() == 2); // the own row's and the orphaned row's, both its id's
+	std::printf("map_change: the orphaned row reset to state 1 and respawned at the round init\n");
+}
+
+// A kept slot's live age (+0x184, the integrity quartet's 1860-tick gate) outlives the map
+// change: the reset and the round init store none, so the next mission's row starts at the age
+// the slot had, and a slot whose body sits hidden at the deploy screen (which the play-tick walk
+// skips) is past the gate at once; its quartet's first fire then waits only for the join's
+// 744-tick countdown (x5: retail's second-mission quartet 11.9 s after its first 0x0A).
+// [orig: Server_DisconnectAndResetAllPlayerSlots @0x5163A4..0x516432,
+//  Server_ResetAllPlayerSlotFrameState @0x4FC350..0x4FC3C9 and
+//  Server_InitAllPlayerEntitiesForRound @0x516AA0 store no +0x184; Server_OnPlayerJoin's
+//  PlayerSlot_ResetNetworkState call @0x51A72B re-arms the countdown alone]
+void test_a_kept_slots_live_age_outlives_the_map_change() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	for (int f = 0; f < 120 && !(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid()); ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	inmatch::NapiNPConnection *own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	CHECK(inmatch::Server_ExecuteServerCommand(ctx, &host.kernel->world, "Cycle", "", {}).handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host.session.advance(input).terminal();
+		host.kernel->world.out.discard_presentation();
+	}
+	CHECK(ended);
+	world::MatchPlayer *row = host.kernel->world.match.player(own->link.owned_entity);
+	CHECK(row != nullptr);
+	if (row == nullptr) return;
+	row->play_ticks = 2000; // past the quartet's 1860-tick gate
+	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(own->kept_play_ticks == 2000u);
+	CHECK(host.boot_map(/*next_mission=*/true));
+	own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	const world::MatchPlayer *next = host.kernel->world.match.player(own->link.owned_entity);
+	CHECK(next != nullptr && next->play_ticks >= 2000u);
+	std::printf("map_change: the kept slot's live age carried into the next mission's row\n");
 }
 
 // A joiner the host admits mid-match: the spawn pump's body binds its items.def
@@ -401,12 +528,100 @@ void test_play_host_mid_match_join_binds_body() {
 	std::printf("map_change: a mid-match joiner's body bound at its spawn\n");
 }
 
+// V-L2-s8 (NEW-L2-19 FOUND 3): a round end that reaches a joiner inside its mission start's
+// waits abandons that mission start: no load and no 0x2F / 0x2F / 0x0B for it; the game loop's
+// round-over linger runs out to exit 4, whose game loop restarts the mission start for the
+// host's next mission in the runtime (no shell reload), and the joiner plays that one. The
+// restart runs ahead of the frame after the one that stored the exit (V-L2-s9 f1): the main
+// frame's tail reads the exit after that frame's net frame and the main loop's next
+// iteration runs the mission start.
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - `cmp g_RoundOver` @0x42CCA1;
+//  NapiClient_SendPlayerSyncAndWaitForSyncTail @0x42CB20 - @0x42CBC5; Game_StartMission
+//  @0x524360 - "aborted 1" @0x524DB0..0x524DD1, "aborted 3" @0x524E2E..0x524E4F;
+//  Game_ProcessMainFrame @0x5263F0 - the exit read @0x5267F8, reason 4 @0x526822 ->
+//  UI_NavHistoryPush(&g_GameModeGameLoop) @0x526808; Game_MainLoop @0x52B630 - the next
+//  mode's init @0x52B702..0x52B70D]
+void test_round_end_abandons_a_joiners_mission_start() {
+	auto host_storage = std::make_unique<Host>();
+	Host &host = *host_storage;
+	CHECK(host.start());
+	if (host.kernel == nullptr) return;
+	const net::Endpoint host_ep{{127, 0, 0, 1}, host.port};
+	uint16_t joiner_port = 0;
+	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
+	CHECK(joiner_sock.is_valid());
+	uint32_t tick = 1;
+	auto client_storage = std::make_unique<inmatch::ClientRuntime>(
+			"AbandonJoiner", [&tick] { return uint64_t{tick} * 16u; });
+	inmatch::ClientRuntime &client = *client_storage;
+	client.set_title(&kJo);
+	auto ship = [&](const std::vector<uint8_t> &d) {
+		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
+	};
+	bool host_up = true;
+	int exit_frames = 0;            // frames that ended abandoned with exit 4 stored
+	bool restarted_next = true;     // each such frame's next frame restarted the start
+	bool released_in_first = false; // the first mission's 0x1A released its mission start
+	int shell_reloads = 0;
+	auto step = [&]() {
+		host_up = host.frame();
+		uint8_t rx[4096];
+		net::Endpoint from{};
+		for (;;) {
+			const int n = net::udp_recv_from(joiner_sock.get(), rx, sizeof(rx), from, 0);
+			if (n <= 0) break;
+			client.receive(rx, static_cast<size_t>(n));
+		}
+		const bool exit_pending = client.mission_start_aborted() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver;
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
+		++tick;
+		if (exit_pending)
+			restarted_next &= !client.mission_start_aborted() &&
+					client.mission_exit_reason() == inmatch::kMissionExitNone;
+		if (client.mission_start_aborted() &&
+				client.mission_exit_reason() == inmatch::kMissionExitRoundOver) {
+			++exit_frames;
+			return; // the runtime restarts it ahead of the next frame, not the shell
+		}
+		if (host.missions == 1) released_in_first |= client.mission_start_released();
+		if (client.mission_exit_reason() == inmatch::kMissionExitRoundOver) {
+			CHECK(client.begin_mission_reload());
+			++shell_reloads;
+		}
+	};
+	auto run_until = [&](auto done, int frames) {
+		for (int f = 0; f < frames && host_up && !done(); ++f) step();
+		return done();
+	};
+	ship(client.start());
+	// Into the world stream's wait: the 0x11 answered, the 0x1A not yet in.
+	CHECK(run_until([&] { return client.preload_ready(); }, 1200));
+	CHECK(!client.mission_start_released() && !client.in_match());
+	CHECK(inmatch::Server_ExecuteServerCommand(host.ctx(), &host.kernel->world, "Cycle", "", {})
+					.handled);
+	// The round end's 0x25 raises the gate in the wait and zeroes the linger; the pass that
+	// abandons the start is the wait's, so the game loop's first frame runs out the linger
+	// (D-NET-NEW-L2-48) and the frame after it restarts the start for the next mission.
+	CHECK(run_until([&] {
+		return host.missions == 2 && client.in_match() && client.is_deployed();
+	}, 4000));
+	CHECK(!released_in_first && exit_frames == 1 && restarted_next);
+	CHECK(shell_reloads == 0);
+	CHECK(client.map_file() == "MAPA.BMS" && !client.session_lost());
+	std::printf("map_change: a round end inside the mission start abandoned it for the next\n");
+}
+
 } // namespace
 
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 	test_play_host_map_change();
+	test_an_orphaned_row_is_reset_and_respawned_at_the_map_change();
+	test_a_kept_slots_live_age_outlives_the_map_change();
 	test_play_host_mid_match_join_binds_body();
+	test_round_end_abandons_a_joiners_mission_start();
 	Host host;
 	CHECK(host.start());
 	if (host.kernel == nullptr) return 1;
@@ -417,7 +632,11 @@ int main() {
 	uint16_t joiner_port = 0;
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
-	inmatch::ClientRuntime client("RotationJoiner");
+	// The joiner's wall clock follows the frames this script drives (16 ms each), so its
+	// paced loading loops (the C2S 0x09 leaves NapiClient_SendPlayerSyncAndWaitForSyncTail's > 100 ms
+	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
+	uint32_t tick = 1;
+	inmatch::ClientRuntime client("RotationJoiner", [&tick] { return uint64_t{tick} * 16u; });
 	client.set_title(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());
@@ -431,7 +650,6 @@ int main() {
 			client.receive(rx, static_cast<size_t>(n));
 		}
 	};
-	uint32_t tick = 1;
 	// One frame of each side; a stored joiner exit of 4 in session is the Game
 	// Loop, the reload in place.
 	int reloads = 0;
@@ -440,6 +658,7 @@ int main() {
 		host_up = host.frame();
 		drain();
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) ship(d);
+		push_released_mission_start(client, ship);
 		++tick;
 		const int32_t reason = client.mission_exit_reason();
 		if (reason == 0) return;

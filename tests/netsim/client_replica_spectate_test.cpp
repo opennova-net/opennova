@@ -1,6 +1,6 @@
 // The death screen's spectate state over the replica rows: the target walk,
 // the sub-mode cycle, the three spectator actions, the SPECTATORTARGET track,
-// the destroyed-target re-pick and the S2C 0x75 fold.
+// the destroyed-target re-pick, the destroy's embedder notice and the S2C 0x75 fold.
 // [orig: Spectator_CycleTarget_0 @0x52ac20; Spectator_CycleMode @0x52aff0;
 //  Input_HandleActionBinding cases 500..502 @0x49bd58..0x49bd9e;
 //  Entity_TrySetMinimapTrackTarget @0x52abc0; Entity_Destroy @0x43e820;
@@ -141,6 +141,22 @@ int main() {
 		view.apply(opennova::s2c::ENTITY_REMOVE, opennova::encode_entity_remove(removal));
 		CHECK(view.state().spectate_target == 0xFFFF && view.state().death_screen_submode == 0,
 				"with no candidate left the re-pick resets to free");
+	}
+	// The destroy tells the embedder each row it takes, at its reference clears (the joiner's
+	// HUD target cursor lets go of a decoded remote person there): the 0x12's row, once.
+	// [orig: Entity_Destroy @0x43E810 - `cmp g_HUDTargetCursorEntity, esi` @0x43E89C, the
+	//  clear @0x43E8A4]
+	{
+		ns::ClientReplicaPipeline view = make_view();
+		std::vector<uint16_t> destroyed;
+		view.set_replica_destroy_observer([&destroyed](uint16_t handle) {
+			destroyed.push_back(handle);
+		});
+		opennova::EntityRemove removal;
+		removal.entity_handle = 0x0005;
+		view.apply(opennova::s2c::ENTITY_REMOVE, opennova::encode_entity_remove(removal));
+		CHECK(destroyed.size() == 1 && destroyed[0] == 0x0005 && view.state().find(0x0005) == nullptr,
+				"the destroy names its row to the embedder");
 	}
 	// S2C 0x75: bit 0 is the death screen, the sub-mode and target clear, a
 	// set bit grants the enemy tags.

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/spawn_select.h>
@@ -19,16 +20,28 @@ namespace {
 // @0x519745..0x519757]. Team 0 therefore maps to 1.
 inline uint8_t enemy_of(uint8_t team) { return team == 1 ? 2 : 1; }
 
-// The 3D in-radius test [orig: Server_UpdateCaptureZoneProximity @0x5086A0 —
-// 2D distance <= radius AND |dz| <= radius/2; the zone radius is entity+350].
+// The 3D in-radius test on the position words, the census's, the team
+// convert's and the capture scoring's alike: the X and Y word deltas (wrapping
+// `sub`) squared and summed on the FPU, the root saturated at flt_7C19E0 and
+// truncated by _ftol2_sse against the radius word (+0x15E << 16, a signed
+// compare), then the absolute Z word delta against half of that (a signed
+// halving). No radius-0 exemption: a zero radius admits an entity on the zone.
+// [orig: CaptureZone_CalculateControlDelta @0x501120 - the deltas
+//  @0x5011AF..0x5011C7, fsqrt @0x5011E0, the clamp @0x5011E2..0x5011ED, the
+//  radius @0x5011EF..0x5011F6, _ftol2_sse @0x5011F9, `jg` @0x501200, `cdq; sub;
+//  sar` @0x501204..0x501207, `jg` @0x50120B; Server_UpdateCaptureZoneEntities
+//  @0x519690 - @0x51991D..0x51998B; CaptureZone_CheckProximityScoring @0x500C50 -
+//  @0x500D0C..0x500D72]
 bool in_zone_radius(const Entity &player, const Entity &zone) {
-    if (zone.zone_radius == 0) return false;
-    const float r = static_cast<float>(zone.zone_radius);
-    const float dx = player.position.x - zone.position.x;
-    const float dy = player.position.y - zone.position.y;
-    const float dz = player.position.z - zone.position.z;
-    if (std::fabs(dz) > r * 0.5f) return false;
-    return dx * dx + dy * dy <= r * r;
+    const int32_t dx = io::bam_sub(player.position.x.q16, zone.position.x.q16);
+    const int32_t dy = io::bam_sub(player.position.y.q16, zone.position.y.q16);
+    const int32_t dz = io::bam_sub(player.position.z.q16, zone.position.z.q16);
+    const int32_t adz = dz < 0 ? io::bam_sub(0, dz) : dz;
+    const int32_t radius_q16 =
+            static_cast<int32_t>(static_cast<uint32_t>(zone.zone_radius) << 16);
+    const int32_t length = io::retail_ftol_sse2(std::min(
+            std::sqrt(double(dx) * dx + double(dy) * dy), 2147418112.0)); // flt_7C19E0
+    return length <= radius_q16 && adz <= radius_q16 / 2;
 }
 
 // A "playing" pool-0 player entity (the original iterates playing slots; our
@@ -219,11 +232,10 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     const MatchRules &rules = world.match.rules();
 
     // The in-game census the delta walks: every slot in state 6 whose body is
-    // neither carried nor dead. Past the round end, which moves every active
-    // slot to state 7, it takes none, so every presence and every delta is 0.
-    // Ours's roster carries no slot state: the census takes every registered
-    // Player's row, none once the outcome is decided, and so still counts a
-    // joiner loading between its add and its join (D-NET-441).
+    // neither carried nor dead (a joiner loading between its add and its join
+    // is not in state 6, D-NET-441). Past the round end, which moves every
+    // active slot to state 7, it takes none, so every presence and every delta
+    // is 0.
     // [orig: CaptureZone_CalculateControlDelta @0x501120 — slot active
     //  @0x501169, its entity @0x501173..0x501178, `test byte [ent+24h], 3`
     //  @0x50117E, state 6 @0x501188 / `jnz` @0x50118C; Server_ProcessRoundEnd's
@@ -238,7 +250,7 @@ void ZoneSystem::capture_second_tick(ZoneCaptureEvents &out) {
     if (!world.match.outcome().ended) {
         for (const MatchPlayer &row : world.match.players()) {
             const Entity *e = world.registry.get(row.identity.entity);
-            if (e == nullptr ||
+            if (e == nullptr || !row.slot_in_game ||
                     (entity_flags(*e) & (kEntityFlagCarried | kEntityFlagDead)) != 0)
                 continue;
             census.push_back(e);

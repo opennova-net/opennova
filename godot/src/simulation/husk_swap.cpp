@@ -60,6 +60,10 @@ HuskGraftResult husk_graft_individual(MissionObjectPlacer &p_placer, Node3D &p_n
 		model->set_authored_lod_projection_owner(intact_model);
 		model->set_occlusion_section_mask(intact_model->get_occlusion_section_mask(),
 				intact_model->get_forced_section_mask());
+		// The destroyed sections are the entity's one word, which retail
+		// applies to whichever model it draws: the husk hides the sections
+		// that flew off as death pieces from its first frame.
+		model->set_destroyed_section_mask(intact_model->get_destroyed_section_mask());
 	}
 	set_husk_static_shadow(model, casts_static_shadow);
 	// The reflect flag belongs to the entity, not its current graphic. The
@@ -162,6 +166,18 @@ void husk_graft_restore(MissionObjectPlacer *p_placer, const HuskGraft &p_graft)
 		if (Node3D *child = live_node3d(saved.first)) {
 			child->set_visible(saved.second);
 		}
+	}
+	// The entity's destroyed-section word goes back with the picture: the
+	// intact model takes what the husk holds now. The game's rows stamp the
+	// word on the drawn model ahead of the destruction pass, so that is the
+	// current word (0 after a respawn, which zeroes it) and the rows'
+	// last-stamped cache stays true of the model drawn next; the children
+	// saved with the death's sections hidden show every part again.
+	ObjectModel *husk = Object::cast_to<ObjectModel>(live_node3d(p_graft.husk));
+	ObjectModel *intact =
+			husk != nullptr ? Object::cast_to<ObjectModel>(husk->get_parent()) : nullptr;
+	if (intact != nullptr) {
+		intact->set_destroyed_section_mask(husk->get_destroyed_section_mask());
 	}
 }
 

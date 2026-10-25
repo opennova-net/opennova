@@ -5,7 +5,8 @@ extends GutTest
 # machine itself is pinned by the npruntime_join_session_policy ctest; these
 # pins cover the binding round trip on the surfaces the drive consumes: the
 # D-NET-178 expansion reconcile decision (host x mounted x installed), the
-# preload window, and one admission frame walked edge to edge. The executing
+# preload's failure edge (no deadline, D-NET-NEW-L2-44), and one admission frame
+# walked edge to edge. The executing
 # half (mount + verify + abort) is covered end to end against a live
 # in-process host in godot/tests/net/join_expansion_reconcile_test.gd.
 
@@ -57,17 +58,13 @@ func test_comparisons_are_case_and_whitespace_insensitive() -> void:
 		"the mount uses the ON-DISK spelling, not the wire's")
 
 
-func test_preload_window_is_the_retail_connect_window() -> void:
+func test_preload_waits_until_a_join_error() -> void:
+	# Retail's join screen waits in the host's queue with no deadline (D-NET-NEW-L2-44):
+	# only a join error fails the preload.
 	var policy := NetSessionPolicy.new()
-	policy.arm_preload(1000)
-	assert_eq(policy.preload_step("", 1000), NetSessionPolicy.STEP_WAIT)
-	assert_eq(policy.preload_step("", 1000 + 59999), NetSessionPolicy.STEP_WAIT,
-		"one ms before the 0xEA60 window closes it still waits")
-	assert_eq(policy.preload_step("", 1000 + 60000), NetSessionPolicy.STEP_FAIL,
-		"the retail ConnectOrHost window closes the preload")
-	assert_string_contains(policy.fail_reason(), "timed out")
-	policy.arm_preload(1000)
-	assert_eq(policy.preload_step("no route", 1001), NetSessionPolicy.STEP_FAIL)
+	assert_eq(policy.preload_step(""), NetSessionPolicy.STEP_WAIT)
+	assert_eq(policy.fail_reason(), "")
+	assert_eq(policy.preload_step("no route"), NetSessionPolicy.STEP_FAIL)
 	assert_eq(policy.fail_reason(), "join failed: no route")
 
 
@@ -87,39 +84,39 @@ func test_promote_validation_normalizes_the_wire_basename() -> void:
 
 func test_admission_frame_walks_deploy_then_ready_edges() -> void:
 	var policy := NetSessionPolicy.new()
-	policy.arm_admission_watch(0)
+	policy.arm_admission_watch()
 	# A pending deploy pick: settle owed, the rising edge emits once, the
 	# watchdog disarms (the DEATH screen is the player-paced hold).
-	var pre: int = policy.begin_admission_frame("", true, false, "", "", 1)
+	var pre: int = policy.begin_admission_frame("", true, false, "")
 	assert_true((pre & NetSessionPolicy.SETTLE_REQUIRED) != 0)
 	var post: int = policy.finish_admission_frame(true, false)
 	assert_true((post & NetSessionPolicy.EMIT_DEPLOY_PICK) != 0)
 	assert_false(policy.is_admission_watch_active())
-	policy.begin_admission_frame("", true, false, "", "", 2)
+	policy.begin_admission_frame("", true, false, "")
 	assert_eq(policy.finish_admission_frame(true, false), 0,
 		"a held pick does not re-emit")
 	# The pick releases, the cold wire drain empties: admission-ready once.
-	policy.begin_admission_frame("", false, true, "", "", 3)
+	policy.begin_admission_frame("", false, true, "")
 	post = policy.finish_admission_frame(true, true)
 	assert_true((post & NetSessionPolicy.EMIT_ADMISSION_READY) != 0)
-	policy.begin_admission_frame("", false, true, "", "", 4)
+	policy.begin_admission_frame("", false, true, "")
 	assert_eq(policy.finish_admission_frame(true, true), 0,
 		"admission-ready is once per join")
 
 
 func test_session_loss_latches_once_and_rearms_per_join() -> void:
 	var policy := NetSessionPolicy.new()
-	policy.arm_admission_watch(0)
-	var pre: int = policy.begin_admission_frame("host punt", true, true, "", "", 1)
+	policy.arm_admission_watch()
+	var pre: int = policy.begin_admission_frame("host punt", true, true, "")
 	assert_true((pre & NetSessionPolicy.EMIT_SESSION_LOST) != 0,
 		"terminal state wins over every admission edge")
 	assert_true((pre & NetSessionPolicy.FRAME_DONE) != 0)
 	assert_eq(policy.session_loss_reason(), "host punt")
 	assert_false(policy.is_admission_watch_active())
-	pre = policy.begin_admission_frame("host punt", true, true, "", "", 2)
+	pre = policy.begin_admission_frame("host punt", true, true, "")
 	assert_eq(pre, NetSessionPolicy.FRAME_DONE,
 		"one session-loss notification per session; later frames only suppress")
 	policy.reset_for_join()
-	pre = policy.begin_admission_frame("host punt", false, false, "", "", 3)
+	pre = policy.begin_admission_frame("host punt", false, false, "")
 	assert_true((pre & NetSessionPolicy.EMIT_SESSION_LOST) != 0,
 		"a fresh join attempt re-arms the notification")

@@ -1,0 +1,42 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "coop_ai_kill",
+  "mission": "01TR.bms",
+  "game_type": 65568,
+  "actor": "joiner",
+  "staging": [
+    {"slot": 1, "position_bms": [243.3, 840.05, 42.88]}
+  ],
+  "staging_tick": {
+    "value": 4528,
+    "tolerance": 7,
+    "why": "Which camp AI perceives, turns on and hits the staged joiner first is set by the host tick the staging lands on, not by the game (L4-s32; rulings R-L4-s32-1 and R-LX-s26-1). Each AI's think key is g_CurrentTick + 36 x DcbId (Entity_UpdateInfantryAI @0x4B9948..0x4B9953); perception runs when key & 0x1F is 0, its range staged by (key >> 5) & 3 (@0x4BBE3E..0x4BBEB3: phases 1 and 3 reach 6 units at most); the aim's pitch error phase is ((key >> 9) + (key >> 2)) & 0x3F (@0x4BC61E..0x4BC623), whose key >> 9 term steps once per 512 ticks, so no staging modulus under 32768 holds it. Both hosts count the tick from the mission start (retail zeroes g_CurrentTick in Game_StartMission on every role, @0x525B9F, and steps it once per main frame, @0x5265B4; ours is World::logic_tick, zeroed and stepped at the same points), so every topology stages at one absolute host tick and the whole key is equal. The shooters' DcbIds are their 01TR.bms records' +8 words (Entity_SpawnFromBMSRecord @0x40EBC1): 0x0000 6, 0x0027 41 and 0x0028 42 stand within 6 units of the spot and perceive every 32 ticks, at host tick mod 32 = 8, 28 and 24; 0x0001 7, 0x0006 10, 0x0019 35 and 0x0020 33 stand 17 to 28 units off and see that far only on range phases 0 and 2, every 64 ticks, at host tick mod 64 = 4, 24, 20 and 28. 4528 is 48 mod 64 (176 mod 256), 8 ticks after 0x0000's boundary and 8 before 0x0028's, the widest gap between them, so a staging that lands within 7 ticks of it keeps every AI's first perception. It is the first such tick past every earlier aikill cell's readiness (x4 to p208: our hosts staged at 3420 to 3730; a retail host's tick at its staging was at most 4383, 62.5 a second times the wall time since its launch call), so no cell arrives past it, and the wait for it stays under the runner's 50 s."
+  },
+  "setup": {"pose": {"position_bms": [243.3, 840.05, 42.88], "yaw": 288, "pitch": -32}},
+  "steps": [
+    {"tick": 0, "down": 149},
+    {"tick": 6, "up": 149},
+    {"tick": 12, "down": 149},
+    {"tick": 18, "up": 149},
+    {"tick": 24, "down": 149},
+    {"tick": 30, "up": 149},
+    {"tick": 36, "down": 149},
+    {"tick": 42, "up": 149},
+    {"tick": 48, "down": 149},
+    {"tick": 54, "up": 149},
+    {"tick": 60, "down": 149},
+    {"tick": 66, "up": 149},
+    {"tick": 72, "down": 149},
+    {"tick": 78, "up": 149},
+    {"tick": 84, "down": 149},
+    {"tick": 90, "up": 149},
+    {"tick": 300, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "fired_round", "shooter": "actor"},
+      {"dir": "S", "kind": "entity_death", "entity": "0x0000"}
+    ]
+  }
+}

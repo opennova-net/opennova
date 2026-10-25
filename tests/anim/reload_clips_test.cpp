@@ -1,6 +1,6 @@
 // The remote-player reload asset chain: the wire type 0x14B9 resolves to the
-// player's visual item (105310, the row retail's items.def gives US01, the
-// stock soldier), its graphic/anim_def name the rig, the infantry anim-key
+// row its type word names (105305, "Player #1, Multiplayer", the row retail's
+// items.def gives US01, the stock soldier), its graphic/anim_def name the rig, the infantry anim-key
 // table maps 65/66 to reload/reload2, the rig's clip set carries both reload
 // clips with more than one frame, each clip actually moves the pose, and the
 // weapon-channel splice consumes the reload key — the masked forearm leaves the
@@ -79,12 +79,12 @@ double max_rot_delta(const std::vector<anim::PoseBone> &a, const std::vector<ani
 
 } // namespace
 
-// The player's visual item as the stock catalog spells it, on our rig.
+// The player's row as the stock catalog spells it, on our rig.
 constexpr const char *kItemsDef =
-		"begin \"Player #1, Single player\"\r\n"
+		"begin \"Player #1, Multiplayer\"\r\n"
 		"\tgraphic person\r\n"
 		"\tanim_def rig19\r\n"
-		"\tid 105310\r\n"
+		"\tid 105305\r\n"
 		"\thp 150\r\n"
 		"\ttype person\r\n"
 		"end\r\n";
@@ -109,8 +109,8 @@ int main() {
 	expect(std::strcmp(anim::kAnimSlotNames[world::anim_state::kReload2], "reload2") == 0,
 			"infantry anim key 66 is reload2");
 
-	// --- 0x14B9 -> the US01 visual item.
-	const int visual = mission::visual_item_id_for_runtime_type(kPlayerRuntimeType, items);
+	// --- 0x14B9 -> the row its type word names.
+	const int visual = mission::visual_item_id_for_runtime_type(kPlayerRuntimeType);
 	const DefItemDef *def = mission::find_item_def(items, visual);
 	if (!expect(def != nullptr, "wire type 0x14B9 resolves to a visual item")) {
 		def_free_items(&items);
@@ -118,7 +118,7 @@ int main() {
 	}
 	std::printf("reload_clips: 0x14B9 -> item %d graphic=%s anim_def=%s\n", visual, def->graphic,
 			def->anim_def);
-	expect(visual == 105310, "wire type 0x14B9 resolves to the player's visual item 105310");
+	expect(visual == 105305, "wire type 0x14B9 resolves to its own row, 105305");
 	expect(iequals(def->graphic, "person"), "the wire remote player's graphic is the person model");
 	expect(iequals(def->anim_def, "rig19"), "the wire remote player's anim_def is the rig19 set");
 

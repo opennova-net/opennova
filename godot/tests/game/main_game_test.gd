@@ -278,12 +278,19 @@ func test_shell_presentation_session_stages_and_reveals_world_atomically() -> vo
 	assert_false(menu.visible)
 	assert_false(world.visible)
 	assert_false(hud_item.visible)
+	assert_true(world.is_presentation_held(),
+			"the loading presentation holds the world's draw until its reveal")
 	assert_true(world.world_loaded.is_connected(loaded_callback))
 	assert_true(world.load_failed.is_connected(failed_callback))
 
 	session.finish_world_load(WorldLoadCoordinator.new(), world, hud)
 	assert_true(world.visible)
 	assert_true(hud_item.visible)
+	assert_false(world.is_presentation_held(), "the reveal drops the hold")
+	# The menu hides the world and holds nothing.
+	session.enter_menu(world, hud)
+	assert_false(world.visible)
+	assert_false(world.is_presentation_held())
 
 
 # One REAL main frame of the booted in-world shell: `process_frame` fires before
@@ -515,6 +522,40 @@ func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> vo
 	assert_eq(presenter.crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE,
 			"the presenter keeps its lazy-build cache in the native art range")
 
+
+# The HUD builds inside the mission start's load, at its overlay init and its textures stage
+# (D-NET-NEW-L8-40): when the load ends (world_loaded, still inside the load's call) the
+# presenter's overlay exists with its textures loaded and is off the HUD layer; the first
+# in-world frame mounts that same overlay and builds none.
+# [orig: Game_StartMission @0x524360 - HUD_InitOverlaySystem @0x525733, Render_InitMissionTextures
+#  @0x525A6E -> HUD_LoadAllTextures @0x587205, HUD_InitAllFonts @0x525A9A]
+func test_the_load_builds_the_hud_and_the_first_frame_mounts_it() -> void:
+	var shell: MainGame = await WorldFixture.boot_shell(self)
+	_temp_dir = WorldFixture.last_shell_dir()
+	if shell == null:
+		return
+	_shell = shell
+	var presenter: GameHudPresenter = shell.get_hud_presenter()
+	var at_load := {"hud": null, "configured": false, "mounted": true}
+	shell.get_world().world_loaded.connect(func() -> void:
+		var hud: HudOverlay = presenter.get_game_hud()
+		at_load["hud"] = hud
+		at_load["configured"] = hud != null and hud.is_configured()
+		at_load["mounted"] = hud != null and hud.is_inside_tree()
+	, CONNECT_ONE_SHOT)
+	var loaded: bool = await WorldFixture.start_shell_mission(self, shell)
+	assert_true(loaded, "the minimal mission loads through the real front end")
+	if not loaded:
+		return
+	assert_not_null(at_load["hud"], "the load built the overlay")
+	assert_true(bool(at_load["configured"]), "the load's textures stage loaded it")
+	assert_false(bool(at_load["mounted"]), "no frame had mounted it at the load's end")
+	await get_tree().process_frame
+	assert_same(presenter.get_game_hud(), at_load["hud"],
+			"the first in-world frame mounted the load's overlay, building none")
+	assert_true(presenter.get_game_hud().is_inside_tree(), "the frame mounted it")
+
+
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var root := ResourceRoot.new()
 	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
@@ -545,7 +586,7 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.setup(world, null, null)
-	preload("res://game/world/hud_text_tables.gd").register(root, world)
+	preload("res://game/world/hud_text_tables.gd").register(root, world.get_loaded_mission_file())
 
 	assert_not_null(Strings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")
@@ -563,11 +604,11 @@ func _booted_in_world() -> MainGame:
 	assert_true(loaded, "the minimal mission loads through the real front end")
 	if not loaded:
 		return null
-	# One shell frame ticks the HUD presenter, which builds the lazy overlay
-	# the HUD-hidden capture declutters.
+	# One shell frame ticks the HUD presenter, which mounts the overlay the load
+	# built and the HUD-hidden capture declutters.
 	await get_tree().process_frame
 	assert_not_null(shell.get_hud_presenter().get_game_hud(),
-			"the first in-world frame built the presenter's overlay")
+			"the load built the presenter's overlay")
 	return shell
 
 

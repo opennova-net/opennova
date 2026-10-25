@@ -30,10 +30,22 @@ namespace opennova {
 // echo passes over its echoes (run_ping_passes with the device pass) and polls
 // `cancelled` between chunks; `done` receives the folded rows on the sweep's
 // thread, only for a sweep nothing superseded.
+//
+// Each reply answers its row as it lands: the device pass hands an echo it has just
+// stamped answered to `replied`, and `reply` receives that row and its round trip on
+// the sweep's thread, only while nothing superseded the sweep. Retail's ping thread
+// takes each reply off its receive loop and writes the entry's round trip and status 0
+// there, so the entries a join's PING reads mid-sweep are the replies so far.
+// [orig: CNapiNPConnection_NetworkThreadProc @0x6300F0 - recvfrom called @0x6301AE, the
+//  loop's -1 test @0x6301B0..0x6301B3, CNapiNPConnection_HandlePingResponse called @0x6301C2;
+//  CNapiNPConnection_HandlePingResponse @0x62FC20 - the round trip @0x62FC79, status 0
+//  @0x62FC9C]
 class PingSweepRunner {
 public:
+	using EchoReplied = std::function<void(const PingEcho &echo)>;
 	using SweepBody = std::function<void(std::vector<PingEcho> &echoes,
-			const std::function<bool()> &cancelled)>;
+			const std::function<bool()> &cancelled, const EchoReplied &replied)>;
+	using SweepReply = std::function<void(int64_t row_id, int ms, int64_t generation)>;
 	using SweepDone = std::function<void(std::vector<std::pair<int64_t, int>> results,
 			int64_t generation)>;
 
@@ -45,15 +57,19 @@ public:
 	// Starts a sweep over (row id, dotted IPv4) targets; any running sweep is
 	// superseded and never reports.
 	void start(std::vector<std::pair<int64_t, std::string>> targets, SweepBody body,
-			SweepDone done, int64_t generation) {
+			SweepReply reply, SweepDone done, int64_t generation) {
 		reap_finished();
 		for (const std::unique_ptr<Sweep> &sweep : sweeps_) sweep->cancelled.store(true);
 		std::unique_ptr<Sweep> sweep = std::make_unique<Sweep>();
 		Sweep *raw = sweep.get();
 		raw->thread = std::thread([raw, targets = std::move(targets), body = std::move(body),
-				done = std::move(done), generation]() {
+				reply = std::move(reply), done = std::move(done), generation]() {
 			std::vector<PingEcho> echoes = make_ping_echoes(targets);
-			if (body) body(echoes, [raw]() { return raw->cancelled.load(); });
+			const EchoReplied replied = [raw, &reply, generation](const PingEcho &echo) {
+				if (echo.answered && reply && !raw->cancelled.load())
+					reply(echo.row_id, fold_ping_result(0, echo.ms), generation);
+			};
+			if (body) body(echoes, [raw]() { return raw->cancelled.load(); }, replied);
 			if (!raw->cancelled.load() && done) done(fold_ping_sweep(echoes), generation);
 			raw->finished.store(true);
 		});

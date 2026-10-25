@@ -10,6 +10,7 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
 
 #include <cmath>
 #include <cstdio>
@@ -59,7 +60,7 @@ struct Rig {
         veh.item_id = 1294;
         veh.ref_num = ref_num;
         veh.position = {100.0f, 50.0f, 5.0f};
-        veh.yaw = 90;
+        veh.heading = placed_heading_bam(90);
         veh.health = 2000;
         veh.health_max = 2000;
         veh.alive = true;
@@ -154,7 +155,7 @@ void test_per_tick_follow() {
 
     const Entity &ea = *r.w.registry.get(a);
     CHECK(close_to(ea.position.x, 108.0f) && close_to(ea.position.y, 50.0f) && close_to(ea.position.z, 5.0f));
-    CHECK(ea.yaw == 90 && ea.pitch == 0 && ea.roll == 0);
+    CHECK(ea.heading == placed_heading_bam(90) && ea.pitch_bam == 0 && ea.roll_bam == 0);
     CHECK(ea.veh.vel_x == 123 && ea.veh.vel_y == -45 && ea.veh.slide_z == 7);
     CHECK(ea.veh.wheel_rate_bam == 99 && ea.veh.air_pitch_rate == 5 && ea.veh.air_roll_rate == -6);
     const Entity &eb = *r.w.registry.get(b);
@@ -173,7 +174,7 @@ void test_per_tick_follow() {
     // A brain-carrying child sees the same words through its AiEntity mirrors.
     AiEntity &child_brain = *r.w.ai.at(r.w.ai.attach(a));
     r.w.vehicles.update_attached_children(veh);
-    CHECK(child_brain.pos[0] == (108 << 16) && child_brain.pos[1] == (50 << 16));
+    CHECK(child_brain.self->position.x.q16 == (108 << 16) && child_brain.self->position.y.q16 == (50 << 16));
     CHECK(child_brain.vel_x == 123 && child_brain.vel_y == -45);
 
     // The motor pass chains the follow after the mover: the children keep

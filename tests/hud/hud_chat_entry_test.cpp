@@ -43,6 +43,9 @@ struct Sent {
 	std::string text;
 };
 
+// A talk or command row past its gates opens the line and releases Caps Lock.
+constexpr uint32_t kOpened = chat_entry_event::kBegan | chat_entry_event::kCapsLockRelease;
+
 // Types a string one character at a time.
 void type(ChatEntry &c, const char *s, const ChatEntryFacts &f) {
 	for (const char *p = s; *p; ++p) c.key(static_cast<unsigned char>(*p), 0, f, kText, nullptr);
@@ -87,7 +90,7 @@ void test_dispatch_gates() {
 	f.death_screen = true;
 	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == 0);
 	f.spawn_gate = true;
-	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == kOpened);
 	CHECK(c.capturing() && c.prompt() == "<STRMISC_TALKLOCAL>" &&
 			c.open_dispatch() == kChatDispatchLocal);
 	c.reset();
@@ -101,14 +104,14 @@ void test_dispatch_gates() {
 	CHECK(c.dispatch(kChatDispatchTeam, f, kText) == 0);
 	CHECK(c.dispatch(kChatDispatchSquad, f, kText) == 0);
 	f.novaworld = true;
-	CHECK(c.dispatch(kChatDispatchSquad, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchSquad, f, kText) == kOpened);
 	c.reset();
 	// Crew talk: dead is refused; afoot plays the denied tone.
 	f = live();
 	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == chat_entry_event::kDeniedSound);
 	CHECK(!c.capturing());
 	f.in_vehicle = true;
-	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == kOpened);
 	c.reset();
 	// The host-only pair needs the authority and skips the reset hold.
 	f = live();
@@ -125,15 +128,15 @@ void test_dispatch_gates() {
 void test_repeat_row() {
 	ChatEntry c;
 	ChatEntryFacts f = live();
-	CHECK(c.dispatch(kChatDispatchRepeat, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchRepeat, f, kText) == kOpened);
 	CHECK(c.open_dispatch() == kChatDispatchLocal);
 	c.reset();
 	f.in_vehicle = true;
-	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == kOpened);
 	c.reset();
 	CHECK(c.last_action() == kChatDispatchCrew);
 	f.in_vehicle = false;
-	CHECK(c.dispatch(kChatDispatchRepeat, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchRepeat, f, kText) == kOpened);
 	CHECK(c.open_dispatch() == kChatDispatchLocal && c.last_action() == kChatDispatchLocal);
 }
 
@@ -186,9 +189,10 @@ void test_submit_history_and_debounce() {
 	CHECK(!c.capturing() && c.text().empty() && c.prompt().empty());
 	CHECK(c.history()[0] == "one");
 	// The debounce: within 8 frames of the send nothing opens.
-	CHECK(c.dispatch(kChatDispatchTeam, live(108), kText) == 0);
+	CHECK(c.dispatch(kChatDispatchTeam, live(108), kText) ==
+			chat_entry_event::kCapsLockRelease);
 	f = live(109);
-	CHECK(c.dispatch(kChatDispatchTeam, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.dispatch(kChatDispatchTeam, f, kText) == kOpened);
 	type(c, "two", f);
 	c.key(13, 0, f, kText, send);
 	// A case-insensitive repeat does not re-enter the ring.
@@ -217,7 +221,7 @@ void test_submit_history_and_debounce() {
 	r.dispatch(kChatDispatchLocal, f, kText);
 	type(r, "x", f);
 	r.key(13, 0, f, kText, refuse);
-	CHECK(r.dispatch(kChatDispatchLocal, live(501), kText) == chat_entry_event::kBegan);
+	CHECK(r.dispatch(kChatDispatchLocal, live(501), kText) == kOpened);
 }
 
 // A flooded send reports the echo with the line the sender cut and its
@@ -296,7 +300,7 @@ void test_poll_rows() {
 	const ChatEntryFacts f = live();
 	const uint32_t local = 1u << kChatRowLocal;
 	const uint32_t enter = 1u << kChatRowTalk;
-	CHECK(c.poll_rows(local, true, f, kText) == chat_entry_event::kBegan);
+	CHECK(c.poll_rows(local, true, f, kText) == kOpened);
 	CHECK(c.open_dispatch() == kChatDispatchLocal);
 	// Held: no second edge; capturing: rows are the editor's.
 	CHECK(c.poll_rows(local, true, f, kText) == 0);
@@ -308,7 +312,7 @@ void test_poll_rows() {
 	CHECK(c.poll_rows(enter, true, f, kText) == 0 && !c.capturing());
 	// Released, then pressed after the debounce: the repeat row reopens Local.
 	c.poll_rows(0, true, live(300), kText);
-	CHECK(c.poll_rows(enter, true, live(301), kText) == chat_entry_event::kBegan);
+	CHECK(c.poll_rows(enter, true, live(301), kText) == kOpened);
 	c.reset();
 	// Inactive gameplay never dispatches; Shift or Alt held gates nothing.
 	ChatEntry d;
@@ -316,7 +320,120 @@ void test_poll_rows() {
 	CHECK(d.poll_rows(local, false, f, kText) == 0);
 }
 
+// The talk rows' event dispatch (D-CTRL-6): each fired row is one queued event.
+// While the line is open the later events find it open. The Enter that submitted
+// never reached the scan (the open line took it), so a talk key-down scanned after
+// the close is a fresh event and opens the line again, where the held-state poll's
+// editor-consumed test would drop it. Inactive gameplay dispatches nothing.
+void test_dispatch_rows() {
+	ChatEntry c;
+	const ChatEntryFacts f = live();
+	const uint32_t local = 1u << kChatRowLocal;
+	const uint32_t enter = 1u << kChatRowTalk;
+	CHECK(c.dispatch_rows(local, true, f, kText) == kOpened);
+	CHECK(c.open_dispatch() == kChatDispatchLocal);
+	CHECK(c.dispatch_rows(local, true, f, kText) == 0);
+	c.key('x', 0, f, kText, nullptr);
+	c.key(13, 0, f, kText, [](int, std::string &) { return ChatSendResult::Sent; });
+	CHECK(!c.capturing());
+	CHECK(c.dispatch_rows(enter, true, live(301), kText) == kOpened);
+	c.reset();
+	ChatEntry d;
+	CHECK(d.dispatch_rows(local, false, f, kText) == 0);
+	CHECK(d.dispatch_rows(0, true, f, kText) == 0 && !d.capturing());
+}
+
 } // namespace
+
+// The command entry (D-NET-710): input actions 1 and 20 open the capture with the
+// STRMISC_ENTERCMD prompt and a 60-byte cap (59 characters), out of a session too and with
+// no talk debounce; action 20's capture stays open across Enter (the console mode); the
+// sender gets the action code and its Refused stamps no debounce; the command rows ride
+// the catalog's "command" and "command2" tokens after the talk rows.
+// [orig: Input_HandleActionBinding cases 1, 20 @0x49AEF7..0x49AF10, the tail
+//  @0x49bb08..0x49bb16; Chat_BeginChatInput @0x498060 (`== 20` @0x4981a0)]
+void test_command_entry() {
+	ChatEntryFacts out_of_session;
+	out_of_session.frame = 5;
+	ChatEntry c;
+	CHECK(c.dispatch(kChatDispatchCommand, out_of_session, kText) == kOpened);
+	CHECK(c.capturing() && c.prompt() == "<STRMISC_ENTERCMD>" && !c.console());
+	CHECK(c.open_dispatch() == kChatDispatchCommand);
+	type(c, std::string(80, 'a').c_str(), out_of_session);
+	CHECK(c.text().size() == 59);
+	std::vector<Sent> sent;
+	const ChatSender refuse = [&](int dispatch, std::string &text) {
+		sent.push_back({dispatch, text});
+		return ChatSendResult::Refused;
+	};
+	CHECK((c.key(13, 0, out_of_session, kText, refuse) & chat_entry_event::kSubmitted) != 0);
+	CHECK(sent.size() == 1 && sent[0].dispatch == kChatDispatchCommand && !c.capturing());
+	// The console mode: Enter runs the sender and keeps the line open.
+	ChatEntry console;
+	CHECK(console.dispatch(kChatDispatchConsole, out_of_session, kText) ==
+			kOpened);
+	CHECK(console.console() && console.open_dispatch() == kChatDispatchConsole);
+	type(console, "NETLOG", out_of_session);
+	(void)console.key(13, 0, out_of_session, kText, refuse);
+	CHECK(sent.size() == 2 && sent[1].dispatch == kChatDispatchConsole &&
+			sent[1].text == "NETLOG" && console.capturing() && console.text().empty());
+	// A Refused send stamps no talk debounce: a talk key right after still opens.
+	ChatEntryFacts f = live(200);
+	ChatEntry talk;
+	CHECK(talk.dispatch(kChatDispatchCommand, f, kText) == kOpened);
+	(void)talk.key(13, 0, f, kText, refuse);
+	CHECK(talk.dispatch(kChatDispatchLocal, f, kText) == kOpened);
+	CHECK(std::string(chat_talk_row_token(kChatRowCommand)) == "command");
+	CHECK(std::string(chat_talk_row_token(kChatRowCommand2)) == "command2");
+	CHECK(chat_talk_row_dispatch(kChatRowCommand) == kChatDispatchCommand);
+	CHECK(chat_talk_row_dispatch(kChatRowCommand2) == kChatDispatchConsole);
+	// The host's side talks, catalog rows 90 / 91 (D-NET-NEW-LI-36): their record (a keylist
+	// key's, a typed token's) opens the side's line on a session's authority only.
+	// [orig: Input_HandleActionBinding @0x49AD40 - cases 104 / 105 @0x49BAB3..0x49BB12]
+	CHECK(std::string(chat_talk_row_token(kChatRowRed)) == "talkred");
+	CHECK(std::string(chat_talk_row_token(kChatRowBlue)) == "talkblue");
+	CHECK(chat_talk_row_dispatch(kChatRowRed) == kChatDispatchRed);
+	CHECK(chat_talk_row_dispatch(kChatRowBlue) == kChatDispatchBlue);
+	ChatEntryFacts side = live(300);
+	ChatEntry joiner_side;
+	CHECK(joiner_side.dispatch_rows(1u << kChatRowBlue, true, side, kText) == 0);
+	side.authority = true;
+	ChatEntry host_side;
+	CHECK(host_side.dispatch_rows(1u << kChatRowBlue, true, side, kText) ==
+					chat_entry_event::kBegan &&
+			host_side.open_dispatch() == kChatDispatchBlue);
+}
+
+// Every talk row past its arm's gates releases Caps Lock ahead of the debounce, so a debounced
+// press releases it too; a gate's refusal and the crew's denied tone release nothing, nor does
+// the host-only pair; the command rows release it at their entry; the channel cycle's
+// re-dispatch runs the arm again [orig: Input_HandleActionBinding @0x49AD40 - the join
+// @0x49B9CF, the call @0x49B9D1 ahead of the debounce @0x49B9D6, the command arm
+// @0x49AEF7..0x49AEF9; the cycle's Input_HandleActionBinding calls @0x49CEBB / @0x49CECE /
+// @0x49CF03]
+void test_caps_lock_release() {
+	using chat_entry_event::kCapsLockRelease;
+	ChatEntry c;
+	ChatEntryFacts f = live(100);
+	f.team_game = false;
+	CHECK(c.dispatch(kChatDispatchTeam, f, kText) == 0);
+	f = live(100);
+	CHECK(c.dispatch(kChatDispatchCrew, f, kText) == chat_entry_event::kDeniedSound);
+	CHECK(c.dispatch(kChatDispatchTeam, f, kText) == kOpened);
+	type(c, "x", f);
+	c.key(13, 0, f, kText, [](int, std::string &) { return ChatSendResult::Sent; });
+	CHECK(c.dispatch(kChatDispatchGlobal, live(104), kText) == kCapsLockRelease && !c.capturing());
+	ChatEntryFacts host = live(100);
+	host.authority = true;
+	ChatEntry red;
+	CHECK(red.dispatch(kChatDispatchRed, host, kText) == chat_entry_event::kBegan);
+	ChatEntry command;
+	ChatEntryFacts out_of_session;
+	CHECK(command.dispatch(kChatDispatchCommand, out_of_session, kText) == kOpened);
+	ChatEntry cycle;
+	cycle.dispatch(kChatDispatchTeam, live(400), kText);
+	CHECK((cycle.key('\\', 0, live(400), kText, nullptr) & kCapsLockRelease) != 0);
+}
 
 int main() {
 	test_channels_and_colors();
@@ -328,6 +445,9 @@ int main() {
 	test_presets();
 	test_channel_cycle();
 	test_poll_rows();
+	test_dispatch_rows();
+	test_command_entry();
+	test_caps_lock_release();
 	if (failures == 0) std::printf("hud_chat_entry_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

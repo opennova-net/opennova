@@ -16,6 +16,7 @@
 #include <formats/cpt/cpt_io.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/height_field.h>
 #include <formats/trn/trn_io.h>
 
@@ -23,6 +24,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace godot {
@@ -130,6 +132,8 @@ private:
 	};
 	std::vector<LoadUnit> load_units_;
 	size_t load_next_ = 0;
+	// The texture slots and the tilestrip a configuration load held for load_textures().
+	std::vector<LoadUnit> texture_units_;
 	// What load_step answers: no load begun (or one refused), one running, done, failed.
 	enum class LoadState : uint8_t { None, Running, Done, Failed };
 	LoadState load_state_ = LoadState::None;
@@ -141,10 +145,15 @@ private:
 	void _note_load_missing(const String &p_name) const;
 	Error _begin_load_from_trn_text(const std::string &trn_content, const opennova::TrnLaterTexts &later);
 	Ref<Texture2D> _load_slot_texture(const char *slot, const String &filename,
-			opennova::renderer::TextureLoader loader) const;
+			opennova::renderer::TextureLoader loader);
+	// The pixels each slot texture a load made through the mounted root was uploaded from, by
+	// the texture's instance id (texture_rgba8).
+	std::unordered_map<uint64_t, Ref<Image>> slot_images_;
 	void _use_default_pcx_slot(const String &slot_id);
 	void _load_pcx_slot(const String &slot_id, const String &filename);
 	bool _load_heights(const String &cpt_name);
+	// One planned unit run; false when the height data does not parse (load_error_ / load_failure_ say why).
+	bool _run_load_unit(const LoadUnit &unit);
 
 protected:
 	static void _bind_methods();
@@ -201,12 +210,17 @@ public:
 	Ref<Texture2D> get_foliagemap_tex() const;
 	void set_tilestrip_tex(const Ref<Texture2D> &p_tex);
 	Ref<Texture2D> get_tilestrip_tex() const;
-	// C++ runtime auxiliary-texture seam: resolves through the same mounted VFS
+	// C++ runtime auxiliary-image seam: resolves through the same mounted VFS
 	// (or loose TRN directory) as authored terrain slots without exposing the
 	// ResourceRoot or a second lookup policy; `p_loader` is the retail loader the
-	// texture's role uses (renderer::TextureLoader).
-	Ref<Texture2D> load_source_texture(const String &p_filename,
+	// file's role uses (renderer::TextureLoader). The decoded image, no device
+	// texture made (the tile cache's scorch set reads its pixels).
+	Ref<Image> load_source_image(const String &p_filename,
 			opennova::renderer::TextureLoader p_loader) const;
+	// `p_texture`'s top level as RGBA8: the pixels this data's load decoded it from when it
+	// is a slot texture the load made (no device readback), else the texture read back (one
+	// an editor assigned). False when there are none.
+	bool texture_rgba8(const Ref<Texture2D> &p_texture, opennova::terrain::Rgba8Image &r_out) const;
 
 	// Numeric accessors
 	void set_detail_density(int p_val);
@@ -229,7 +243,8 @@ public:
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	// The same load a file at a time (the OpenNova Editor's mission device builds a terrain a unit
 	// a frame): begin reads and parses the .trn and plans a unit per file the load reads (the nine
-	// texture slots, the two PCX-backed maps, the tilestrip, the height data); load_step runs the
+	// texture slots, the two PCX-backed maps, the tilestrip, the height data; the tile set's name
+	// taken at the plan); load_step runs the
 	// next and says whether more are left, the load is done (is_loaded()) or it failed (the height
 	// data does not parse). load_from_resource_root is begin and every step. The terrain is not
 	// loaded until the last step.
@@ -240,6 +255,14 @@ public:
 	};
 	Error begin_load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	LoadStep load_step();
+	// The game's mission start loads its terrain in two legs (engine terrain/terrain_load_legs.h
+	// carries the witness, D-NET-NEW-L2-46): load_config_from_resource_root is the connect leg's
+	// share (the .trn and .env configuration with the tile set's name, the height data, the char
+	// and foliage maps; is_loaded() after it), holding the units of the mission textures stage
+	// (the texture slots, the tilestrip) for load_textures(), which loads them (false when none
+	// were held). load_from_resource_root runs both at once.
+	Error load_config_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
+	bool load_textures();
 	// The units of the load in flight, how many ran, and the slot the next one reads ("" none).
 	int get_load_step_count() const;
 	int get_load_steps_done() const;

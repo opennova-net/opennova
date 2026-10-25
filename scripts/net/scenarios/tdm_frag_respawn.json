@@ -1,0 +1,35 @@
+{
+  "schema": "opennova.scenario.v1",
+  "name": "tdm_frag_respawn",
+  "mission": "TDH_I3A.bms",
+  "game_type": 65536,
+  "actor": "joiner",
+  "staging": [
+    {"slot": 0, "position_bms": [35.0, -16.0, 16.9]}
+  ],
+  "steps": [
+    {"tick": 0, "press": 205},
+    {"tick": 40, "look_px": [0, 400]},
+    {"tick": 45, "look_px": [0, 400]},
+    {"tick": 80, "down": 149},
+    {"tick": 120, "up": 149},
+    {"tick": 1200, "press": 153},
+    {"tick": 1500, "press": 153},
+    {"tick": 1800, "end": true}
+  ],
+  "settle_seconds": 10,
+  "expect": {
+    "sequence": [
+      {"dir": "C", "kind": "fired_round", "shooter": "actor", "target": "0xffff"},
+      {"dir": "S", "kind": "entity_death", "entity": "0x0000"},
+      {"dir": "S", "kind": "game_event", "type": ["4", "5", "6"], "attacker": "actor", "victim": "0"},
+      {"dir": "S", "kind": "entity_death", "entity": "actor"},
+      {"dir": "S", "kind": "tick_seed", "seed": "0"},
+      {"dir": "S", "kind": "death_camera"},
+      {"dir": "S", "kind": "game_event", "type": ["1", "2", "3"], "attacker": "actor", "victim": "0", "aux": "0"},
+      {"dir": "S", "kind": "tick_seed"}
+    ],
+    "count_kinds": ["fired_round", "entity_death", "game_event"],
+    "mask": {"game_event": ["type"], "tick_seed": ["seed"]}
+  }
+}

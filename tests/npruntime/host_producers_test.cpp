@@ -19,6 +19,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
+#include <runtime/inmatch/server_ban_lists.h> // Server_BanPlayerSlot
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -125,7 +126,8 @@ struct HostFixture {
 			// The slot team (+0x1A0) the player add stores beside the body's.
 			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
 			conn.assigned_team_valid = true;
-			(void)inmatch::Server_RerollPlayerTickSeed(conn);
+			conn.slot_state = inmatch::PlayerSlotState::Joined; // in game (state 6)
+			(void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
 	}
@@ -309,11 +311,12 @@ bool check_host_quality_window() {
 	if (!expect(f.ctx.net_quality_sample_countdown == 62, "the countdown reloads 62"))
 		return false;
 	// One slot mature with a 1000 ms mean ping: 255/1000*1000 -> 255, /5 = 51.
-	f.conn(0).reply.control_live_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+	f.world.match.upsert_player({f.players[0], 1, "P"});
+	f.world.match.player(f.players[0])->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
 	for (uint32_t i = 0; i < 10; ++i) f.conn(0).reply.rtt_ring[i] = 1000;
 	f.ctx.net_quality_sample_countdown = 1;
 	inmatch::Server_SampleHostNetQuality(f.ctx);
-	// The per-slot mean clamps at 255 before the scale: 255 * 255 / 1000 = 65;
+	// The walk's average clamps at 255 before the scale: 255 * 255 / 1000 = 65;
 	// the first (idle, no eligible slot) sample stored 0, so the five-slot
 	// average is 65 / 5 = 13,
 	// which the max-fold selects over the floor-1 bandwidth/loss terms.
@@ -336,6 +339,38 @@ bool check_host_quality_window() {
 	inmatch::Server_SampleHostNetQuality(cold.ctx);
 	return expect(cold.ctx.host_network_quality == 255 / 5,
 			"an unmeasured frame rate samples the ceiling 255");
+}
+
+// A mission start zeroes the 62-frame countdown and resets the send window,
+// its folded quality and level: a map change's first frame samples into an
+// empty window, so one sample averages /5 as a fresh session's first does.
+// [orig: Game_StartMission @0x524360 - the countdown store @0x52439E,
+//  CNetStats_Reset @0x5243AA (@0x4C2FF0); the sample @0x52658B]
+bool check_mission_start_resets_the_quality_sample() {
+	HostFixture f(2);
+	f.ctx.stats_avg_fps = 8; // frame pressure 128 every sample
+	f.ctx.host_quality_window = ns::NetQualityWindow{};
+	for (int i = 0; i < 5; ++i) {
+		f.ctx.net_quality_sample_countdown = 1;
+		inmatch::Server_SampleHostNetQuality(f.ctx);
+	}
+	inmatch::Server_SampleHostNetQuality(f.ctx); // 61 frames to go
+	if (!expect(f.ctx.host_network_quality == 128 && f.ctx.net_quality_level == 2 &&
+					f.ctx.net_quality_sample_countdown == 61,
+			"five samples fill the window, the countdown mid-way"))
+		return false;
+	inmatch::continue_session(f.ctx, f.ctx.config, /*text_override=*/nullptr);
+	if (!expect(f.ctx.net_quality_sample_countdown == 0 &&
+					f.ctx.host_quality_window.avg_bandwidth == 0 &&
+					f.ctx.host_quality_window.bandwidth[0] == 0 &&
+					f.ctx.host_quality_window.cursor == 0 &&
+					f.ctx.host_network_quality == 0 && f.ctx.net_quality_level == 0,
+			"the mission start zeroes the countdown, the window, the quality and the level"))
+		return false;
+	inmatch::Server_SampleHostNetQuality(f.ctx);
+	return expect(f.ctx.net_quality_sample_countdown == 62 &&
+					f.ctx.host_network_quality == 128 / 5,
+			"the next frame samples into the empty window");
 }
 
 // The NovaWorld exit leads the host's 62-frame block too (D-NET-220): a
@@ -442,6 +477,35 @@ bool check_chat_routing() {
 	return expect(replies.empty(), "a spectator cannot chat");
 }
 
+// A punted sender's records are parsed but never handled: the per-record dispatch tests the
+// description's sent byte the punt set and skips the record's handler, so P1's team line reaches
+// no one (P3 and P2 nothing) and P1's queue, closed behind its description, holds the description
+// alone. (D-NET-NEW-L1-27)
+// [orig: CNapiNPConnection_DispatchMessage @0x622570 - `cmp byte ptr [esi+70Dh], 0` @0x622697 /
+//  `jnz` @0x62269E past the handler's call @0x6226EF; CNapiNPConnection_SendDescriptionOnce
+//  @0x629750 - the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 - the test
+//  @0x62864D..0x628654]
+bool check_punted_sender_chat_is_not_handled() {
+	HostFixture f(4);
+	for (auto &t : f.transports) (void)drain(t);
+	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
+			"the punt stages P1's description"))
+		return false;
+	const std::vector<ProtocolMessage> replies =
+			f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(2, "go"));
+	for (const ProtocolMessage &m : replies) f.transports[0].host_send(m.tag, m.payload);
+	f.transports[0].host_send(s2c::CHAT_BROADCAST, {0x01});
+	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
+	if (!expect(to_p1.size() == 1 && to_p1[0].tag == hightag::DESCRIPTION_PACKET &&
+					to_p1[0].protocol_flags_raw == 0xA0,
+			"P1's queue holds its description alone: a later send returns unqueued"))
+		return false;
+	return expect(replies.empty() && drain(f.transports[2]).empty() &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty() &&
+					f.conn(0).reply.chat_last_ms == 0,
+			"a punted sender's team line reaches no handler: no one is sent it");
+}
+
 // --------------------------------------------------------------------------
 // 0x3D, 0x42 -> 0x70, 0x51.
 // --------------------------------------------------------------------------
@@ -501,7 +565,7 @@ bool check_vehicle_spawn_availability() {
 // D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a
 // duplicate PCID; a tick off the boundary kicks no one.
 // [orig: Server_TickUpdate - the 0x79 countdown @0x51E1B2..0x51E1C5, the send @0x51E202,
-//  CNapiServer_DisconnectPendingSpawnBans @0x51E20C]
+//  CNapiServer_KickDuplicatePcids (called @0x51E20C)]
 bool check_duplicate_pcid_kick_at_the_quality_boundary() {
 	HostFixture f(2);
 	f.conn(0).account.pcid = "P-DUP-0001";
@@ -521,25 +585,26 @@ bool check_spectator_respawn_request() {
 	HostFixture f(2);
 	// Gates: permanent death and a spectator capacity.
 	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	if (!expect(!f.conn(0).reply.spectator_convert_pending, "no permanent death: refused"))
+	if (!expect(!f.conn(0).link.spectator, "no permanent death: refused"))
 		return false;
 	f.ctx.config.permanent_death = true;
 	f.ctx.config.spectator_slots = 1;
-	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	if (!expect(f.conn(0).reply.spectator_convert_pending, "the request is admitted")) return false;
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::Server_TickUpdate(f.ctx);
-	if (!expect(f.conn(0).link.spectator, "the host tick converts the slot")) return false;
-	const w::Entity *player = f.world.registry.get(f.players[0]);
-	if (!expect(player != nullptr && player->team == 0 && player->health == 1,
-			"the convert clears the team and leaves health 1"))
-		return false;
+	// D-NET-551/554: the convert runs inline in the receive pump.
+	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C8D5]
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	if (!expect(f.conn(0).link.spectator, "the receive pump converts the slot")) return false;
 	std::vector<ns::Datagram> to_p2 = drain(f.transports[1]);
 	const std::vector<uint8_t> want = {5, 'P', '1', 0};
 	bool saw = false;
 	for (const ns::Datagram &d : to_p2)
 		if (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == want) saw = true;
 	if (!expect(saw, "S2C 0x32 [5][name] reaches the other player")) return false;
+	inmatch::Server_TickUpdate(f.ctx);
+	const w::Entity *player = f.world.registry.get(f.players[0]);
+	if (!expect(player != nullptr && player->team == 0 && player->health == 1,
+			"the convert clears the team and leaves health 1"))
+		return false;
 	// Past the round end the handler's first gate drops the request.
 	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840..0x51C847]
 	HostFixture over(2);
@@ -547,8 +612,7 @@ bool check_spectator_respawn_request() {
 	over.ctx.config.spectator_slots = 1;
 	over.world.match.latch_round_over();
 	(void)over.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
-	inmatch::Server_ProcessSpectatorRespawnRequests(over.ctx, over.world);
-	return expect(!over.conn(0).link.spectator && !over.conn(0).reply.spectator_convert_pending,
+	return expect(!over.conn(0).link.spectator,
 			"past the round end the request converts nothing");
 }
 
@@ -574,16 +638,16 @@ bool check_spectator_convert_deploys() {
 	body->flags |= w::kEntityFlagDead;
 	body->health = 0;
 	body->alive = false;
-	body->yaw = 30;
-	body->pitch = 5;
+	body->heading = w::placed_heading_bam(30);
+	body->pitch_bam = w::spawn_angle_bam(5);
 	body->group_id = 4;
 	body->position = {40.0f, 50.0f, 6.0f};
 	f.conn(0).link.respawn_pending = true;
 	f.conn(0).link.respawn_delay_seconds = 5;
 	f.conn(0).link.spawn_target_hold_seconds = 4;
-	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+	const std::vector<ProtocolMessage> own_replies =
+			f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	if (!expect(f.conn(0).link.spectator && body->team == 0 && body->group_id == 0,
 			"the request converts the slot and clears the command group word"))
 		return false;
@@ -595,16 +659,19 @@ bool check_spectator_convert_deploys() {
 			"the deploy's 620 protection overwrites the -1; the body stays hidden"))
 		return false;
 	if (!expect(body->position.x == 40.0f && body->position.y == 50.0f && body->position.z == 6.0f &&
-					body->yaw == 90 && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
+					body->heading == w::placed_heading_bam(90) && body->pitch_bam == 0 && !f.conn(0).reply.convert_holds_pose,
 			"the hold arm places nothing, zeroes the angle words and clears its latch"))
 		return false;
 	if (!expect(f.conn(0).link.respawn_delay_seconds == 5 &&
 					f.conn(0).link.spawn_target_hold_seconds == 4,
 			"the 0xFFFF deploy leaves the +360 delay and the +364 hold"))
 		return false;
+	// The deploy's private sends queue on the converted player's connection at
+	// their calls, ahead of the 0x32 (D-NET-686).
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
-	if (!expect(own.size() >= 3 && own[0].tag == s2c::WEAPON_LOADOUT &&
-					own[1].tag == s2c::TICK_SEED && own.back().tag == s2c::FORMATTED_GAME_TEXT,
+	if (!expect(own_replies.empty() && own.size() >= 3 &&
+					own[0].tag == s2c::WEAPON_LOADOUT && own[1].tag == s2c::TICK_SEED &&
+					own.back().tag == s2c::FORMATTED_GAME_TEXT,
 			"the deploy's 0x5A and 0x61 reach the converted player ahead of the 0x32"))
 		return false;
 	inmatch::Server_TickUpdate(f.ctx);
@@ -626,7 +693,6 @@ bool check_spectator_convert_deploys() {
 	f.conn(1).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(1, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(point_handle.packed), static_cast<uint8_t>(point_handle.packed >> 8)});
-	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
 	if (!expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
 					other->position.y == 400.0f && other->position.z == 21.0f,
 			"a named spawn point of any team places the converted body"))
@@ -647,7 +713,6 @@ bool check_spectator_convert_deploys() {
 	const uint16_t own_handle = crafted.players[0].packed;
 	(void)crafted.dispatch(0, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(own_handle), static_cast<uint8_t>(own_handle >> 8)});
-	inmatch::Server_ProcessSpectatorRespawnRequests(crafted.ctx, crafted.world);
 	return expect(crafted.conn(0).link.spectator &&
 					crafted.conn(0).link.respawn_delay_seconds == 5 &&
 					crafted.conn(0).link.spawn_target_hold_seconds == 0,
@@ -704,7 +769,6 @@ bool check_spectator_convert_stores_the_slot_team() {
 		const uint16_t own = f.players[i].packed;
 		(void)f.dispatch(i, c2s::SPECTATOR_RESPAWN,
 				{static_cast<uint8_t>(own), static_cast<uint8_t>(own >> 8)});
-		inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
 		return body;
 	};
 	f.world.logic_tick = 2; // an even tick: the parity names team 2
@@ -729,8 +793,7 @@ bool check_spectator_convert_stores_the_slot_team() {
 bool check_join_leave_lines() {
 	HostFixture f(3);
 	for (auto &t : f.transports) (void)drain(t);
-	inmatch::broadcast_player_joined_text(f.ctx.np_protocol.connection_list,
-			f.conn(0), &f.world);
+	inmatch::broadcast_player_joined_text(f.ctx.np_protocol.connection_list, f.conn(0));
 	const std::vector<uint8_t> joined = {1, 'P', '1', 0, 1};
 	const auto count = [](std::vector<ns::Datagram> dgs, const std::vector<uint8_t> &want) {
 		int n = 0;
@@ -744,8 +807,7 @@ bool check_join_leave_lines() {
 					count(drain(f.transports[2]), joined) == 1,
 			"every other in-match player gets [1][name][team]"))
 		return false;
-	inmatch::broadcast_player_leaving_text(f.ctx.np_protocol.connection_list, f.conn(1),
-			&f.world);
+	inmatch::broadcast_player_leaving_text(f.ctx.np_protocol.connection_list, f.conn(1));
 	const std::vector<uint8_t> leaving = {2, 'P', '2', 0, 2};
 	if (!expect(count(drain(f.transports[1]), leaving) == 0, "the leaver gets no line"))
 		return false;
@@ -771,9 +833,9 @@ bool check_medic_revive_transaction() {
 	victim->position = {12.0f, 34.0f, 5.0f};
 	// The body's own position words: the entity update mirrors them onto the row.
 	if (w::AiEntity *body = f.world.ai.for_handle(f.players[0])) {
-		body->pos[0] = 12 << 16;
-		body->pos[1] = 34 << 16;
-		body->pos[2] = 5 << 16;
+		body->self->position.x.q16 = 12 << 16;
+		body->self->position.y.q16 = 34 << 16;
+		body->self->position.z.q16 = 5 << 16;
 		body->health = 0;
 	}
 	w::MatchRules medic_rules;
@@ -1110,11 +1172,24 @@ bool check_server_commands() {
 		return false;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "Earthquake", "", {"99"});
 	if (!expect(f.world.weather.quake_ticks == 240u, "Earthquake clamps to 40 seconds")) return false;
+	// TimeOfDay packs retail's clock word, hour << 24 | minute * 0x44400, sets the minute
+	// counter's tickdown to 10, then owes the tile cache's reset and the environment cube's full
+	// refresh (D-NET-NEW-LI-35) [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 - the
+	// packing @0x4D2C19..0x4D2C91, Environment_SetCurrentTime called @0x4D2C94,
+	// Terrain_ResetTileCache called @0x4D2C9C, EnvCube_ForceFullRefresh called @0x4D2CA1;
+	// Environment_SetCurrentTime @0x57C4B0 - the stores @0x57C4B4 / @0x57C4B9]. The pins sit
+	// clear of an exact hundred, where floor(hhmm * 0.01f) depends on the x87 precision.
+	f.world.weather.tod_epoch_tickdown = 0;
+	const uint32_t resets = f.world.weather.time_set_resets;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "TimeOfDay", "", {"0630"});
-	if (!expect(out.handled && f.world.weather.tod_fixed24 == 390u * 0x44444u, "TimeOfDay 0630 = minute 390"))
+	if (!expect(out.handled && f.world.weather.tod_fixed24 == ((6u << 24) | (30u * 0x44400u)) &&
+					f.world.weather.tod_epoch_tickdown == 10 &&
+					f.world.weather.time_set_resets == resets + 1,
+			"TimeOfDay 0630 = hour 6, minute 30, the tickdown 10, one cache reset"))
 		return false;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "TimeOfDay", "", {"2400"});
-	if (!expect(f.world.weather.tod_fixed24 == 720u * 0x44444u, "an out-of-range TimeOfDay is noon"))
+	if (!expect(f.world.weather.tod_fixed24 == inmatch::environment_time_from_hhmm(1200),
+			"an out-of-range TimeOfDay is 1200's word"))
 		return false;
 	for (auto &t : f.transports) (void)drain(t);
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "Lightning", "", {});
@@ -1127,17 +1202,33 @@ bool check_server_commands() {
 		flashed = flashed && saw;
 	}
 	if (!expect(flashed, "Lightning broadcasts the SETFLASH1 16 text command")) return false;
-	// KillPlayer zeroes the health and queues the death.
+	// KillPlayer zeroes the health and runs the death transaction inline (its
+	// 0x13 out at once); nothing stores the dead bit, which the body's edge
+	// latches in the next entity update.
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "KillPlayer", "ByIndex", {"2"});
 	const w::Entity *p2 = f.world.registry.get(f.players[1]);
-	if (!expect(out.handled && p2 != nullptr && p2->health == 0 && f.world.round_sim.deaths.size() == 1 &&
-					f.world.round_sim.deaths[0].victim == f.players[1],
+	bool p2_death = false;
+	for (const ns::Datagram &d : drain(f.transports[0]))
+		p2_death = p2_death || (d.tag == s2c::ENTITY_DEATH && d.body.size() >= 2 &&
+				static_cast<uint16_t>(d.body[0] | (d.body[1] << 8)) == f.players[1].packed);
+	if (!expect(out.handled && p2 != nullptr && p2->health == 0 && f.world.round_sim.deaths.empty() &&
+					(p2->flags & w::kEntityFlagDead) == 0u && p2_death,
 			"KillPlayerByIndex kills slot 2"))
 		return false;
-	// EndMission ends the round with the named winner and shortens the linger.
+	// EndMission ends the round with the named winner, inline: the slot is in
+	// state 7 and its 0x61 / 0x1D are queued before the command returns, then
+	// the 620-tick linger replaces the round end's 2790 (D-NET-NEW-L1-16)
+	// [orig: Server_ProcessRoundEnd @0x4D31C0, g_EndRoundLingerTimer = 0x26C @0x4D31CA].
+	(void)drain(f.transports[0]);
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
-	if (!expect(out.handled && f.world.match.outcome().ended && f.ctx.round_end_linger_override_ticks == 620,
-			"EndMission Red ends the round with the 620-tick linger pending"))
+	std::vector<uint8_t> end_tags;
+	for (const ns::Datagram &d : drain(f.transports[0]))
+		if (d.tag == s2c::TICK_SEED || d.tag == s2c::END_ROUND_HEADER) end_tags.push_back(d.tag);
+	if (!expect(out.handled && f.world.match.outcome().ended && f.ctx.round_end_announced &&
+					f.conn(0).slot_state == inmatch::PlayerSlotState::RoundOver &&
+					end_tags == std::vector<uint8_t>{s2c::TICK_SEED, s2c::END_ROUND_HEADER} &&
+					f.ctx.round_end_linger_ticks == 620,
+			"EndMission Red ends the round inline with the 620-tick linger"))
 		return false;
 	// PuntPlayer on a remote punts it; on the host's own slot it stops hosting.
 	HostFixture g(2, 1);
@@ -1488,11 +1579,11 @@ bool check_change_team() {
 	ok = expect(out.handled && f.world.registry.get(f.players[1])->team == 3 &&
 					to_p3.size() == 1 && to_p3[0].tag == s2c::CHAT_BROADCAST,
 			"a team-3 player keeps its team and still gets the chat") && ok;
-	// A target that is not in the game is a no-op.
-	f.conn(1).phase = inmatch::ConnectionPhase::Joined;
+	// A target that is not in the game (slot state 6) is a no-op.
+	f.conn(1).slot_state = inmatch::PlayerSlotState::AwaitJoin;
 	out = inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "ChangeTeam", "ByName", {"P2"});
 	ok = expect(!out.handled, "a target outside the game is a no-op") && ok;
-	f.conn(1).phase = inmatch::ConnectionPhase::InMatch;
+	f.conn(1).slot_state = inmatch::PlayerSlotState::Joined;
 
 	// C2S 0x29 [0] reads the list back as S2C 0x51 [0][the 0x50 record] to
 	// the sender; an index past the list draws nothing; a new round clears it.
@@ -1558,22 +1649,25 @@ bool check_player_enter_hook() {
 		return false;
 	if (!expect(conn_by_id(20).player_enter_pending(), "the joiner waits in state 4")) return false;
 	// Success admits; a failure punts with NWPENTERFAIL; the third times out.
-	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 20, true, 0) &&
+	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 20, true, 0, 0) &&
 					!conn_by_id(20).player_enter_pending() && !conn_by_id(20).host_disconnect_sent,
 			"a successful result releases the hold"))
 		return false;
-	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, false, 6001) &&
+	if (!expect(inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, false, 6001, 0) &&
 					conn_by_id(21).host_disconnect_sent,
 			"a failed result punts the joiner"))
 		return false;
-	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, true, 0),
+	if (!expect(!inmatch::Server_ApplyPlayerEnterResult(f.ctx, 21, true, 0, 0),
 			"a result for a settled joiner is refused"))
 		return false;
-	f.ctx.np_protocol.host_run_duration_ms = 0x1D4C0u;
+	// The request at 1000 ms entered state 4, which restamped the deadline base, so the wait's
+	// 120 s run from there (D-NET-NEW-L8-34) [orig: CNetPlayer_SetGameState(4) called
+	// @0x4C8BCA - GetTickCount @0x4C408A, +0xA4 @0x4C4156; the state-4 test @0x4C8CB3..0x4C8CC1].
+	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C0u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
 	if (!expect(!conn_by_id(22).host_disconnect_sent, "exactly 120 s is not yet the ticket deadline"))
 		return false;
-	f.ctx.np_protocol.host_run_duration_ms = 0x1D4C1u;
+	f.ctx.np_protocol.host_run_duration_ms = 1000u + 0x1D4C1u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
 	if (!expect(conn_by_id(22).host_disconnect_sent, "past 120 s the ticket wait reaps")) return false;
 	// Without the arm the announced state is punted at once and a fresh joiner
@@ -1968,14 +2062,105 @@ bool check_radio_call_split_slots() {
 
 } // namespace
 
+// The dispatcher's server rows' engine halves (D-NET-NEW-LI-36; Role::dispatch_record routes
+// the records): netdelay, resetgames and Ban, and the clock word tod and TimeOfDay share.
+// [orig: Server_SetNetworkDelay @0x50CBC0 - the gates @0x50CBF0, SendFiltered(0x1B, 1)
+//  @0x50CC28, the text @0x50CC5A, SendFiltered(0x14, 1) @0x50CC9D;
+//  Server_ForceRoundEndAndClearState @0x5175A0 - the clears @0x5175AA / @0x5175B4 / @0x5175BE;
+//  Server_BanPlayerSlot @0x5082D0 - the gates @0x508316, the list @0x50838E..0x5083B5,
+//  CNapiNPConnection_QueueDisconnectEvent called @0x5083EE, sprintf @0x508411,
+//  Chat_AddMessageChannel2 called @0x508427, the dirty word @0x50842F]
+bool check_server_rows() {
+	{
+		// netdelay 5 with a send holdoff of 3: S2C 0x1B [5], then the chat [0][0xFF] with
+		// 1000 * 5 * 3 / 62 = 241 ms, to both slots; a delay past 100 (unsigned) sends nothing.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.config.send_holdoff_ticks = 3u;
+		for (auto &t : f.transports) (void)drain(t);
+		if (!expect(inmatch::Server_SetNetworkDelay(f.ctx, 5), "netdelay 5 goes out")) return false;
+		const std::string text = "Delay set to 241ms";
+		std::vector<uint8_t> chat = {0, 0xFF};
+		chat.insert(chat.end(), text.begin(), text.end());
+		chat.push_back(0);
+		for (auto &t : f.transports) {
+			const std::vector<ns::Datagram> sent = drain(t);
+			if (!expect(sent.size() == 2 && sent[0].tag == s2c::NETWORK_DELAY &&
+							sent[0].body == std::vector<uint8_t>({5, 0, 0, 0}) &&
+							sent[1].tag == s2c::CHAT_BROADCAST && sent[1].body == chat,
+					"netdelay: S2C 0x1B [5] then the chat line, to every slot"))
+				return false;
+		}
+		if (!expect(!inmatch::Server_SetNetworkDelay(f.ctx, 101) &&
+						!inmatch::Server_SetNetworkDelay(f.ctx, -1) && drain(f.transports[0]).empty(),
+				"netdelay past 100 unsigned sends nothing"))
+			return false;
+		f.ctx.is_in_session = 0;
+		if (!expect(!inmatch::Server_SetNetworkDelay(f.ctx, 5), "netdelay needs a session"))
+			return false;
+	}
+	{
+		// resetgames: the round ends, then team 1's and team 2's wins and the rounds played
+		// clear; teams 3 and 4 keep theirs.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.round_wins = {3, 4, 5, 6};
+		f.ctx.rounds_played = 7;
+		inmatch::Server_ForceRoundEndAndClearState(f.ctx, f.world);
+		if (!expect(f.ctx.round_wins[0] == 0 && f.ctx.round_wins[1] == 0 && f.ctx.round_wins[2] == 5 &&
+						f.ctx.round_wins[3] == 6 && f.ctx.rounds_played == 0,
+				"resetgames clears teams 1 and 2 and the rounds"))
+			return false;
+	}
+	{
+		// Ban 1: slot 1's address and name join banned.txt's list, the slot is punted with
+		// STRSRV18, the SYSTEM ring takes "<STRSRV18> <name>" in white, the list is dirty.
+		HostFixture f(2, 1);
+		f.ctx.is_authority = 1;
+		f.ctx.transport_mode = inmatch::NetworkType::Lan;
+		f.ctx.server_text.kicked = "Kicked:";
+		f.conn(0).peer.ip = 0x0A00000Bu;
+		if (!expect(inmatch::Server_BanPlayerSlot(f.ctx, 1), "Ban 1 takes slot 1")) return false;
+		const auto &bans = f.ctx.bans.addresses.entries;
+		if (!expect(bans.size() == 1 && bans[0].address == 0x0A00000Bu && bans[0].name == "P1" &&
+						f.conn(0).host_disconnect_sent && !f.conn(1).host_disconnect_sent &&
+						f.ctx.bans.addresses_dirty,
+				"Ban 1 lists and punts slot 1"))
+			return false;
+		const auto &lines = f.world.out.hud_chat_lines;
+		if (!expect(lines.size() == 1 && lines[0].text == "Kicked: P1" && lines[0].system_ring &&
+						lines[0].argb == 0xFFFFFFFFu && *lines[0].key == '\0',
+				"Ban 1's SYSTEM line"))
+			return false;
+		if (!expect(!inmatch::Server_BanPlayerSlot(f.ctx, 9) && !inmatch::Server_BanPlayerSlot(f.ctx, -1),
+				"Ban of an empty or out-of-range slot does nothing"))
+			return false;
+		f.ctx.transport_mode = static_cast<inmatch::NetworkType>(0);
+		if (!expect(!inmatch::Server_BanPlayerSlot(f.ctx, 2), "Ban needs a LAN or NovaWorld transport"))
+			return false;
+	}
+	// The clock word: hour << 24 | minute * 0x44400 from HHMM, unclamped (the tod row's), the
+	// pins clear of an exact hundred (floor(hhmm * 0.01f) there depends on the x87 precision).
+	// [orig: Input_HandleActionBinding @0x49AD40 - case 438's packing @0x49BDC5..0x49BE42]
+	if (!expect(inmatch::environment_time_from_hhmm(630) == ((6u << 24) | (30u * 0x44400u)) &&
+					inmatch::environment_time_from_hhmm(1230) == ((12u << 24) | (30u * 0x44400u)) &&
+					inmatch::environment_time_from_hhmm(45) == 45u * 0x44400u &&
+					inmatch::environment_time_from_hhmm(2550) == ((25u << 24) | (50u * 0x44400u)),
+			"the clock word from HHMM"))
+		return false;
+	return true;
+}
+
 int main() {
 	bool ok = check_ping_ring_and_strikes();
 	ok = check_ping_dispatch_return_leg() && ok;
 	ok = check_client_quality_store_and_resend() && ok;
 	ok = check_host_quality_window() && ok;
+	ok = check_mission_start_resets_the_quality_sample() && ok;
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
 	ok = check_chat_routing() && ok;
+	ok = check_punted_sender_chat_is_not_handled() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_duplicate_pcid_kick_at_the_quality_boundary() && ok;
@@ -1999,6 +2184,7 @@ int main() {
 	ok = check_radio_call_rules() && ok;
 	ok = check_radio_call_request() && ok;
 	ok = check_radio_call_split_slots() && ok;
+	ok = check_server_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

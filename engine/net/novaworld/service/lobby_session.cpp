@@ -775,7 +775,18 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 		            update_keys.c_str(), state.host_key.size(), state.pcid_key.size());
 	}
 	if (var_has(host_vars, "ServerName"))      state.server_name = var_value(host_vars, "ServerName");
-	if (var_has(host_vars, "Players"))         state.player_count = parse_int_safe(var_value(host_vars, "Players"));
+	// Players has two writers: the roster's statements (ClientHostPlayerAdded / Removed set the
+	// count to the roster's size) and the Host list's Players var, which a stock host writes at its
+	// server-info update alone. A player's add sends its statement and then the changed lists, both
+	// queued for one pump (one datagram), with the Host list's Players as the last update left it,
+	// so the count is taken from an update only when the update itself carries Players (service
+	// policy: the latest writer holds). [orig: Lobby_UpdateServerInfo @0x4FE8C0; Server_PlayerAdd
+	// @0x51CBC0 - CNapiGameSession_SendPlayerAddedIfHosting (the call @0x51D4B5),
+	// CPlayerManager_RebuildLists(0) (the call @0x51D4C6); CNapiGameSession_SendPlayerAdded
+	// @0x4CFEC0 and CNapiGameSession_SendHostUpdate @0x4D3860 each end in
+	// CNapiNPConnection_QueueMessage @0x628640]
+	if (update.count("Host") && var_has(update["Host"], "Players"))
+		state.player_count = parse_int_safe(var_value(host_vars, "Players"));
 	if (var_has(host_vars, "MaxPlayers"))      state.max_players  = parse_int_safe(var_value(host_vars, "MaxPlayers"));
 	else if (var_has(host_setup, "MaxPlayers")) state.max_players = parse_int_safe(var_value(host_setup, "MaxPlayers"));
 	if (var_has(host_vars, "Region"))          state.region       = var_value(host_vars, "Region");

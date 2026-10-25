@@ -71,12 +71,26 @@ void Water::_bind_methods() {
 			&Water::get_noise_color_texture);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&Water::get_mesh_instance);
+	ClassDB::bind_method(D_METHOD("get_strip_surface_rewrites"),
+			&Water::get_strip_surface_rewrites);
 	ClassDB::bind_method(D_METHOD("get_night_vision_mesh_instance"),
 			&Water::get_night_vision_mesh_instance);
 	ClassDB::bind_method(D_METHOD("get_reflection_viewport"),
 			&Water::get_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_reflection_camera"),
 			&Water::get_reflection_camera);
+	ClassDB::bind_method(D_METHOD("warm_reflection_target", "camera"),
+			&Water::warm_reflection_target);
+	ClassDB::bind_method(D_METHOD("get_night_vision_material"),
+			&Water::get_night_vision_material);
+	ClassDB::bind_method(D_METHOD("get_inset_reflection_viewport"),
+			&Water::get_inset_reflection_viewport);
+	ClassDB::bind_method(D_METHOD("get_inset_reflection_camera"),
+			&Water::get_inset_reflection_camera);
+	ClassDB::bind_method(D_METHOD("get_inset_mesh_instance"),
+			&Water::get_inset_mesh_instance);
+	ClassDB::bind_method(D_METHOD("get_inset_water_material"),
+			&Water::get_inset_water_material);
 	// The externally-callable render-frame drive: the
 	// test harness drives frames here; the engine's virtual delegates in.
 	ClassDB::bind_method(D_METHOD("advance_frame", "delta"),
@@ -88,6 +102,20 @@ void Water::_bind_methods() {
 			&Water::set_blink_water_visible);
 	ClassDB::bind_method(D_METHOD("set_blink_water_views", "main", "inset"),
 			&Water::set_blink_water_views);
+	ClassDB::bind_method(D_METHOD("is_main_view_water"), &Water::is_main_view_water);
+	ClassDB::bind_method(D_METHOD("get_blink_water_latch"), &Water::get_blink_water_latch);
+	ClassDB::bind_method(D_METHOD("latch_blink_water", "water_pass_runs", "visible"),
+			&Water::latch_blink_water);
+	ClassDB::bind_method(D_METHOD("open_inset_water_latch"), &Water::open_inset_water_latch);
+	ClassDB::bind_method(D_METHOD("set_inset_visible_terrain_bounds", "valid",
+								"min_height", "max_height"),
+			&Water::set_inset_visible_terrain_bounds);
+	ClassDB::bind_method(D_METHOD("is_inset_water_pass_active"),
+			&Water::is_inset_water_pass_active);
+	ClassDB::bind_method(D_METHOD("advance_inset_frame", "camera", "view_block"),
+			&Water::advance_inset_frame);
+	ClassDB::bind_method(D_METHOD("is_inset_mirror_rendered"),
+			&Water::is_inset_mirror_rendered);
 	ClassDB::bind_method(D_METHOD("set_noise_frame_counter", "counter"),
 			&Water::set_noise_frame_counter);
 	ClassDB::bind_method(D_METHOD("get_noise_frame_counter"),
@@ -128,6 +156,10 @@ void Water::_bind_methods() {
 			"VISUAL_LAYER_SHADOW_CASTER_MASK", VISUAL_LAYER_SHADOW_CASTER_MASK);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"REFLECTION_CULL_MASK", REFLECTION_CULL_MASK);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_MIRROR_VIEW", VISUAL_LAYER_MIRROR_VIEW);
+	ClassDB::bind_integer_constant(get_class_static(), "",
+			"VISUAL_LAYER_INSET_MIRROR_VIEW", VISUAL_LAYER_INSET_MIRROR_VIEW);
 }
 
 void Water::set_environment_path(const NodePath &p_path) {
@@ -220,20 +252,28 @@ void Water::release_runtime_renderer_resources() {
 		_clear_water_plane();
 	}
 	has_drawable_surface_ = false;
-	if (reflection_viewport_ != nullptr) {
-		reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+	inset_open_ = false;
+	inset_mirror_rendered_ = false;
+	for (MirrorRig *rig : {&mirror_, &inset_mirror_}) {
+		if (rig->viewport != nullptr) {
+			rig->viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
+		}
+		if (rig->camera != nullptr) {
+			rig->camera->clear_current();
+		}
+		_release_reflection_decode(*rig);
 	}
-	if (reflection_camera_ != nullptr) {
-		reflection_camera_->clear_current();
+	for (const Ref<ShaderMaterial> &material :
+			{water_material_, night_vision_material_, inset_material_}) {
+		if (material.is_valid()) {
+			material->set_shader_parameter("u_has_reflection", false);
+			material->set_shader_parameter("u_reflection", Variant());
+			material->set_shader_parameter("u_noise_color", Variant());
+			material->set_shader_parameter("u_noise_normal", Variant());
+		}
 	}
-	_release_reflection_decode();
-	if (water_material_.is_valid()) {
-		water_material_->set_shader_parameter("u_has_reflection", false);
-		water_material_->set_shader_parameter("u_reflection", Variant());
-		water_material_->set_shader_parameter("u_noise_color", Variant());
-		water_material_->set_shader_parameter("u_noise_normal", Variant());
-	}
-	for (MeshInstance3D **strip : {&mesh_instance_, &night_vision_mesh_instance_}) {
+	for (MeshInstance3D **strip :
+			{&mesh_instance_, &night_vision_mesh_instance_, &inset_mesh_instance_}) {
 		if (*strip == nullptr) {
 			continue;
 		}
@@ -245,36 +285,51 @@ void Water::release_runtime_renderer_resources() {
 		memdelete(*strip);
 		*strip = nullptr;
 	}
-	if (reflection_viewport_ != nullptr) {
-		TargetProjectionXrInterface::release(reflection_viewport_);
-		memdelete(reflection_viewport_);
-		reflection_viewport_ = nullptr;
-		reflection_camera_ = nullptr;
-	}
+	_release_mirror_rig(mirror_);
+	_release_mirror_rig(inset_mirror_);
 	reflection_environment_.unref();
 	noise_color_tex_.unref();
 	noise_normal_tex_.unref();
 	noise_color_img_.unref();
 	noise_normal_img_.unref();
 	water_material_.unref();
+	night_vision_material_.unref();
+	inset_material_.unref();
+	noise_counter_valid_ = false;
 	cached_cam_id_ = ObjectID();
 	built_ = false;
+}
+
+void Water::_release_mirror_rig(MirrorRig &r_rig) {
+	if (r_rig.viewport == nullptr) {
+		return;
+	}
+	TargetProjectionXrInterface::release(r_rig.viewport);
+	memdelete(r_rig.viewport);
+	r_rig.viewport = nullptr;
+	r_rig.camera = nullptr;
 }
 
 // Publish this water plane's height as the session's transparent water-split
 // (the g_WaterSplitHeightFloat equivalent; the witness rides the
 // render-order record) so
-// blended world materials can take their far/camera-side rung; cleared when
-// the water node leaves the tree.
+// blended world materials can take their far/camera-side rung, and with it
+// the mirrors' clip arm; cleared when the water node leaves the tree. Both
+// follow the height, never g_WaterActive: the split is written every frame
+// (renderer/render_order.h transparent_queue_for) and every mirror that
+// renders, the Inset's included, renders clipped (environment/water_mirror.h,
+// the CLIP note). A zero height still splits, about 0.0 (is_waterline_active);
+// no mirror renders at it, so the clip arms nothing
+// (ObjectModel::refresh_water_mirror_clip; env::water_draws_at_height).
 void Water::_push_water_split_height() {
 	if (!built_ || !is_inside_tree() || globals_held_) {
 		return;
 	}
-	const bool active = is_water_pass_active() && is_visible_in_tree();
+	const bool active = is_water_render_active() && is_visible_in_tree();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	_write_global(rs, "opennova_water_active", active);
 	_write_global(rs, "opennova_water_height", water_height_);
-	if (active) {
+	if (is_waterline_active() && is_visible_in_tree()) {
 		Camera3D *cam = Object::cast_to<Camera3D>(
 				ObjectDB::get_instance(cached_cam_id_));
 		const bool camera_above = cam == nullptr ||
@@ -304,17 +359,52 @@ void Water::set_blink_water_visible(bool p_visible) {
 	blink_water_visible_ = p_visible;
 }
 
+void Water::latch_blink_water(bool p_water_pass_runs, bool p_visible) {
+	blink_water_visible_ =
+			opennova::env::water_pass_latch(blink_water_visible_, p_water_pass_runs, p_visible);
+}
+
+void Water::open_inset_water_latch() {
+	inset_blink_latch_ = blink_water_visible_;
+}
+
+// The labels reach the strips alone; the node, the mirrors and the bloom's
+// redraw keep drawing (renderer::scene_water_visible carries the witness).
 void Water::set_blink_water_views(bool p_main, bool p_inset) {
-	set_visible(p_main || p_inset);
-	if (mesh_instance_ == nullptr) {
-		return;
+	main_view_water_ = p_main;
+	inset_view_water_ = p_inset;
+	_apply_strip_layers();
+}
+
+void Water::_apply_strip_layers() {
+	if (mesh_instance_ != nullptr) {
+		const uint32_t layer = !main_view_water_ ? 0u
+				: !inset_open_ ? uint32_t(VISUAL_LAYER_WATER)
+							   : uint32_t(visual_layers::MAIN_VIEW_WATER);
+		if (mesh_instance_->get_layer_mask() != layer) {
+			mesh_instance_->set_layer_mask(layer);
+		}
 	}
-	const uint32_t layer = p_main == p_inset ? uint32_t(VISUAL_LAYER_WATER)
-			: p_main ? uint32_t(visual_layers::MAIN_VIEW_WATER)
-					 : uint32_t(visual_layers::INSET_VIEW);
-	if (mesh_instance_->get_layer_mask() != layer) {
-		mesh_instance_->set_layer_mask(layer);
+	if (inset_mesh_instance_ != nullptr) {
+		const uint32_t layer =
+				inset_open_ && inset_view_water_ ? uint32_t(visual_layers::INSET_VIEW) : 0u;
+		if (inset_mesh_instance_->get_layer_mask() != layer) {
+			inset_mesh_instance_->set_layer_mask(layer);
+		}
 	}
+}
+
+void Water::set_inset_visible_terrain_bounds(bool p_valid, float p_min_height,
+		float p_max_height) {
+	inset_bounds_valid_ = p_valid;
+	inset_min_height_ = p_min_height;
+	inset_max_height_ = p_max_height;
+}
+
+bool Water::is_inset_water_pass_active() const {
+	return is_water_render_active() &&
+			opennova::water_pass_active(inset_bounds_valid_, inset_min_height_,
+					inset_max_height_, water_height_, inset_blink_latch_);
 }
 
 void Water::set_noise_frame_counter(uint32_t p_counter) {
@@ -336,8 +426,9 @@ void Water::_sync_render_activity() {
 	// rows.
 	const bool reflection_active = world_active && has_drawable_surface_ &&
 			cached_cam_id_.is_valid() && mirror_enabled_;
-	if (reflection_viewport_ != nullptr) {
-		reflection_viewport_->set_update_mode(reflection_active
+	main_reflection_active_ = reflection_active;
+	if (mirror_.viewport != nullptr) {
+		mirror_.viewport->set_update_mode(reflection_active
 						? SubViewport::UPDATE_ALWAYS
 						: SubViewport::UPDATE_DISABLED);
 	}
@@ -351,34 +442,38 @@ void Water::_sync_render_activity() {
 	}
 	if (!is_water_render_active() || !is_inside_tree() || !is_visible_in_tree()) {
 		_clear_night_vision_surfaces();
+		_retire_inset();
 	}
+	_apply_night_vision_reflection();
 }
 
 void Water::_notification(int p_what) {
 	if (p_what == NOTIFICATION_VISIBILITY_CHANGED && built_) {
 		_sync_render_activity();
-	} else if (p_what == NOTIFICATION_ENTER_TREE && built_ &&
-			reflection_camera_ != nullptr &&
-			reflection_decode_effect_.is_null()) {
-		// Re-entry after an EXIT_TREE release: the retained mirror camera needs
-		// a fresh decode effect (the released one stays shut down).
-		_install_reflection_decode();
+	} else if (p_what == NOTIFICATION_ENTER_TREE && built_) {
+		// Re-entry after an EXIT_TREE release: each retained mirror camera
+		// needs a fresh decode effect (the released one stays shut down).
+		for (MirrorRig *rig : {&mirror_, &inset_mirror_}) {
+			if (rig->camera != nullptr && rig->decode_effect.is_null()) {
+				_install_reflection_decode(*rig);
+			}
+		}
 	}
 }
 
 // The mirror camera's decode-only terminal effect: one FrameFxCompositorEffect
 // on a compositor the camera owns (never the beauty WorldEnvironment's chain).
-void Water::_install_reflection_decode() {
-	if (reflection_camera_ == nullptr) {
+void Water::_install_reflection_decode(MirrorRig &r_rig) {
+	if (r_rig.camera == nullptr) {
 		return;
 	}
-	reflection_decode_effect_.instantiate();
-	reflection_compositor_.instantiate();
+	r_rig.decode_effect.instantiate();
+	r_rig.compositor.instantiate();
 	TypedArray<Ref<CompositorEffect>> capture_effects;
-	Ref<CompositorEffect> generic_decode = reflection_decode_effect_;
+	Ref<CompositorEffect> generic_decode = r_rig.decode_effect;
 	capture_effects.push_back(generic_decode);
-	reflection_compositor_->set_compositor_effects(capture_effects);
-	reflection_camera_->set_compositor(reflection_compositor_);
+	r_rig.compositor->set_compositor_effects(capture_effects);
+	r_rig.camera->set_compositor(r_rig.compositor);
 }
 
 // Idempotent release of the mirror decode chain, the same EXIT_TREE leg
@@ -387,24 +482,22 @@ void Water::_install_reflection_decode() {
 // live, then free the effect-owned device resources. A Water freed outside
 // release_runtime_renderer_resources() (GUT fixtures, embedder previews)
 // otherwise leaks its RD chain.
-void Water::_release_reflection_decode() {
-	Ref<FrameFxCompositorEffect> decode_effect = reflection_decode_effect_;
+void Water::_release_reflection_decode(MirrorRig &r_rig) {
+	Ref<FrameFxCompositorEffect> decode_effect = r_rig.decode_effect;
 	if (decode_effect.is_valid())
 		decode_effect->set_enabled(false);
-	if (reflection_camera_ != nullptr &&
-			reflection_camera_->get_compositor() == reflection_compositor_)
-		reflection_camera_->set_compositor(Ref<Compositor>());
-	if (reflection_compositor_.is_valid())
-		reflection_compositor_->set_compositor_effects(
-				TypedArray<Ref<CompositorEffect>>());
+	if (r_rig.camera != nullptr && r_rig.camera->get_compositor() == r_rig.compositor)
+		r_rig.camera->set_compositor(Ref<Compositor>());
+	if (r_rig.compositor.is_valid())
+		r_rig.compositor->set_compositor_effects(TypedArray<Ref<CompositorEffect>>());
 	RenderingServer *server = RenderingServer::get_singleton();
 	if (decode_effect.is_valid() && server != nullptr &&
 			server->get_rendering_device() != nullptr)
 		server->force_sync();
 	if (decode_effect.is_valid())
 		decode_effect->release_device_resources();
-	reflection_decode_effect_.unref();
-	reflection_compositor_.unref();
+	r_rig.decode_effect.unref();
+	r_rig.compositor.unref();
 	decode_effect.unref();
 }
 
@@ -421,17 +514,24 @@ void Water::_exit_tree() {
 	// reflection branch — the u_water_color fallback takes over if the
 	// material outlives the node. Re-armed by the next build(); the next
 	// mirror update serves the raster again.
-	if (reflection_viewport_ != nullptr) {
-		reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
-		TargetProjectionXrInterface::release(reflection_viewport_);
+	for (MirrorRig *rig : {&mirror_, &inset_mirror_}) {
+		if (rig->viewport != nullptr) {
+			rig->viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
+			TargetProjectionXrInterface::release(rig->viewport);
+		}
 	}
-	if (water_material_.is_valid()) {
-		water_material_->set_shader_parameter("u_has_reflection", false);
-		water_material_->set_shader_parameter("u_reflection", Variant());
+	inset_mirror_rendered_ = false;
+	for (const Ref<ShaderMaterial> &material :
+			{water_material_, night_vision_material_, inset_material_}) {
+		if (material.is_valid()) {
+			material->set_shader_parameter("u_has_reflection", false);
+			material->set_shader_parameter("u_reflection", Variant());
+		}
 	}
-	// The mirror decode chain never outlives the node's time in the tree;
-	// ENTER_TREE re-installs it on the retained camera.
-	_release_reflection_decode();
+	// The mirror decode chains never outlive the node's time in the tree;
+	// ENTER_TREE re-installs them on the retained cameras.
+	_release_reflection_decode(mirror_);
+	_release_reflection_decode(inset_mirror_);
 }
 
 void Water::_ready() {
@@ -471,7 +571,8 @@ void Water::_apply_environment_water_height() {
 }
 
 void Water::build() {
-	for (MeshInstance3D **strip : {&mesh_instance_, &night_vision_mesh_instance_}) {
+	for (MeshInstance3D **strip :
+			{&mesh_instance_, &night_vision_mesh_instance_, &inset_mesh_instance_}) {
 		if (*strip != nullptr) {
 			(*strip)->queue_free();
 			*strip = nullptr;
@@ -489,6 +590,14 @@ void Water::build() {
 	// brackets (the ladder lives in engine/runtime/renderer/render_order,
 	// REN-3).
 	water_material_->set_render_priority(opennova::renderer::kRungWater);
+	// The same program for the bloom's redraw and the Inset pass's strip, each
+	// over its own mirror image (bloom_water_mirror_image, inset_mirror_source).
+	night_vision_material_.instantiate();
+	night_vision_material_->set_shader(shader);
+	night_vision_material_->set_render_priority(opennova::renderer::kRungWater);
+	inset_material_.instantiate();
+	inset_material_->set_shader(shader);
+	inset_material_->set_render_priority(opennova::renderer::kRungWater);
 
 	// The witnessed screen-marched strip mesh is LIVE (env #29): every frame
 	// rebuilds the surface from WaterCore::strip_build, so the mesh starts
@@ -531,6 +640,22 @@ void Water::build() {
 	add_child(night_vision_mesh_instance_);
 	FrameFx::register_q3_source(night_vision_mesh_instance_,
 			opennova::renderer::Q3Source::Water);
+	// The weapon Inset pass's own strip, marched at its own screen
+	// (advance_inset_frame): drawn by the Inset camera alone, on its bit.
+	Ref<ArrayMesh> inset_mesh;
+	inset_mesh.instantiate();
+	inset_mesh_instance_ = memnew(MeshInstance3D);
+	inset_mesh_instance_->set_name("WaterInsetStrip");
+	inset_mesh_instance_->set_mesh(inset_mesh);
+	inset_mesh_instance_->set_as_top_level(true);
+	inset_mesh_instance_->set_position(Vector3());
+	inset_mesh_instance_->set_cast_shadows_setting(
+			GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+	inset_mesh_instance_->set_gi_mode(GeometryInstance3D::GI_MODE_DISABLED);
+	inset_mesh_instance_->set_layer_mask(0);
+	add_child(inset_mesh_instance_);
+	inset_open_ = false;
+	inset_mirror_rendered_ = false;
 	built_ = true;
 
 	// The witnessed per-frame noise texture pair (created once, updated per
@@ -543,31 +668,87 @@ void Water::build() {
 			Image::FORMAT_RGBA8, water_core_->get_normal_rgba8());
 	noise_color_tex_ = ImageTexture::create_from_image(noise_color_img_);
 	noise_normal_tex_ = ImageTexture::create_from_image(noise_normal_img_);
-	water_material_->set_shader_parameter("u_noise_color", noise_color_tex_);
-	water_material_->set_shader_parameter("u_noise_normal", noise_normal_tex_);
+	noise_counter_valid_ = false;
+	for (const Ref<ShaderMaterial> &material :
+			{water_material_, night_vision_material_, inset_material_}) {
+		material->set_shader_parameter("u_noise_color", noise_color_tex_);
+		material->set_shader_parameter("u_noise_normal", noise_normal_tex_);
+	}
 
 	// The reflection RTT (env #30): the mirrored scene renders offscreen and
 	// the strip shader samples it as t2. The reimpl form is a SubViewport on
 	// the SAME World3D with a mirrored camera; Godot renders SubViewports
 	// ahead of the viewport that samples them, preserving the witnessed
-	// prerender order (water_mirror.h carries the cites).
-	if (reflection_viewport_ == nullptr) {
-		reflection_viewport_ = memnew(SubViewport);
-		reflection_viewport_->set_name("WaterReflectionViewport");
+	// prerender order (water_mirror.h carries the cites). Retail's one target
+	// takes the weapon Inset pass's mirror after the main frame's water drew
+	// over it; here the Inset's renders into a second target, which its strip
+	// and the bloom's redraw sample in its place (inset_mirror_source,
+	// bloom_water_mirror_image).
+	_build_mirror_rig(mirror_, "WaterReflectionViewport", "WaterReflectionCamera");
+	_build_mirror_rig(inset_mirror_, "WaterInsetReflectionViewport",
+			"WaterInsetReflectionCamera");
+	// Hold each RTT in a named Ref: passing the get_texture() temporary
+	// straight into the Variant argument crashed at scene instantiation
+	// (godot-cpp rvalue-Ref conversion hazard).
+	Ref<ViewportTexture> rtt = mirror_.viewport->get_texture();
+	water_material_->set_shader_parameter("u_reflection", rtt);
+	water_material_->set_shader_parameter("u_has_reflection", false);
+	Ref<ViewportTexture> inset_rtt = inset_mirror_.viewport->get_texture();
+	inset_material_->set_shader_parameter("u_reflection", inset_rtt);
+	inset_material_->set_shader_parameter("u_has_reflection", false);
+	_sync_render_activity();
+}
+
+// Retail makes the reflection target and its surfaces with the mission start's render
+// subsystems, ahead of the first frame (engine mission/mission_load_plan.h carries the
+// witness, D-NET-NEW-LF-23). The rig's device objects are made at its first draw, so that draw
+// runs in the load's forced frame through the frame's own install (the world's rendering opens
+// at the load's end, so the world-active gate is not read here); UPDATE_ONCE drops back to
+// UPDATE_DISABLED past the draw, and the first real frame installs and arms the mirror as every
+// frame does.
+bool Water::warm_reflection_target(Camera3D *p_camera) {
+	if (!built_ || !mirror_enabled_ || mirror_.viewport == nullptr || mirror_.camera == nullptr ||
+			p_camera == nullptr || !p_camera->is_inside_tree() || !is_inside_tree()) {
+		return false;
+	}
+	MissionEnvironment *env = _env_node();
+	if (env != nullptr && env->is_loaded()) {
+		_apply_environment_water_height();
+	}
+	if (!is_water_active()) {
+		return false;
+	}
+	const DrawingView drawing = _drawing_view(p_camera);
+	if (drawing.camera == nullptr) {
+		return false;
+	}
+	_update_reflection_camera(drawing.camera, drawing.projection, drawing.frame_perspective);
+	if (!TargetProjectionXrInterface::is_serving(mirror_.viewport)) {
+		return false;
+	}
+	mirror_.viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+	return true;
+}
+
+void Water::_build_mirror_rig(MirrorRig &r_rig, const String &p_viewport_name,
+		const String &p_camera_name) {
+	if (r_rig.viewport == nullptr) {
+		r_rig.viewport = memnew(SubViewport);
+		r_rig.viewport->set_name(p_viewport_name);
 		// The mirror renders the LIVE world, not a copy.
-		reflection_viewport_->set_use_own_world_3d(false);
-		reflection_viewport_->set_handle_input_locally(false);
+		r_rig.viewport->set_use_own_world_3d(false);
+		r_rig.viewport->set_handle_input_locally(false);
 		// Retail's 512 x 512 RTT; each mirror update serves its raster the
 		// main view's frustum (_update_reflection_camera), non-square texels.
 		static_assert(opennova::env::kReflectionRttSize ==
 						TargetProjectionXrInterface::kTargetSide,
 				"the mirror RTT is the XR projection interface's square");
-		reflection_viewport_->set_size(
+		r_rig.viewport->set_size(
 				Vector2i(opennova::env::kReflectionRttSize,
 						opennova::env::kReflectionRttSize));
-		add_child(reflection_viewport_);
-		reflection_camera_ = memnew(Camera3D);
-		reflection_camera_->set_name("WaterReflectionCamera");
+		add_child(r_rig.viewport);
+		r_rig.camera = memnew(Camera3D);
+		r_rig.camera->set_name(p_camera_name);
 		// Every retail pass writes gamma-domain numeric values (no D3DSAMP_SRGBTEXTURE /
 		// D3DRS_SRGBWRITEENABLE in the device sweeps; the mirror scene renders through
 		// Water_RenderReflectedWorldScene @0x5c8510 into the Water_CreateReflectionRenderTarget
@@ -581,36 +762,31 @@ void Water::build() {
 		// inherit the beauty WorldEnvironment's chain. An HDR 2D target would
 		// skip the encode but run the canvas dim in linear space (0x40/255
 		// becomes ~0.05), which is the wrong domain for that multiply.
-		_install_reflection_decode();
+		_install_reflection_decode(r_rig);
 		// The witnessed mirror scene: sky/terrain/celestials plus the
 		// flag-0x400 world population — vehicles by item type and records
-		// whose BMS attribute authors Reflective. It has no water surface, FP
-		// overlay, player/person render leg, foliage blanket, or empty-sector
-		// flat terrain (the prerender view skips empty sectors whenever the
-		// mission has water; this mirror only renders for a nonzero height,
-		// see docs/terrain/terrain-re.md "Empty-sector flat fallback").
-		// _update_reflection_camera re-adds WORLD_NO_MIRROR below water,
-		// where the retail collectors run unfiltered.
-		reflection_camera_->set_cull_mask(REFLECTION_CULL_MASK);
-		reflection_viewport_->add_child(reflection_camera_);
-		reflection_camera_->make_current();
+		// whose BMS attribute authors Reflective, which no person carries (the
+		// drawn local body included). It has no water surface, FP overlay,
+		// foliage blanket, or empty-sector flat terrain (the prerender view
+		// skips empty sectors whenever the mission has water; this mirror only
+		// renders for a nonzero height, see docs/terrain/terrain-re.md
+		// "Empty-sector flat fallback"). _install_mirror_view re-adds
+		// WORLD_NO_MIRROR below water, where the retail collectors run
+		// unfiltered and its person waves draw the persons. Each mirror admits its
+		// own bit too, the twins drawing its own collect's verdicts.
+		r_rig.camera->set_cull_mask(REFLECTION_CULL_MASK | _mirror_own_layer(r_rig));
+		r_rig.viewport->add_child(r_rig.camera);
+		r_rig.camera->make_current();
 		// The witnessed post-scene dim and the sun/moon/glow redraw after it
 		// close the mirror target in its overlay pass, after the mirror's
-		// particles and coronas (runtime/renderer/scene_overlay.h
+		// particles, tracer ribbons and coronas (runtime/renderer/scene_overlay.h
 		// kMirrorOverlayOrder; GameWorld's scene_overlay leg). The second
 		// fullscreen quad retail draws after the far band
 		// (g_WaterShaderAdditiveFlat, ONE/ONE of 0xFF000000, Render_MainScene
 		// @ 0x5c190c..0x5c1990) only saturates the RTT alpha, which neither
 		// water program reads, so the mirror draws no counterpart.
 	}
-	reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
-	// Hold the RTT in a named Ref: passing the get_texture() temporary
-	// straight into the Variant argument crashed at scene instantiation
-	// (godot-cpp rvalue-Ref conversion hazard).
-	Ref<ViewportTexture> rtt = reflection_viewport_->get_texture();
-	water_material_->set_shader_parameter("u_reflection", rtt);
-	water_material_->set_shader_parameter("u_has_reflection", false);
-	_sync_render_activity();
+	r_rig.viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
 }
 
 void Water::advance_frame(double) {
@@ -653,7 +829,10 @@ void Water::advance_frame(double) {
 	// Blink-visible water last frame means no prerender and no strip), and the
 	// FrameFX bloom pass's nightvision redraw, which is the above-water call
 	// alone and not gated on g_WaterActive. Both skip an eye exactly on the
-	// plane (environment/water_frame.h water_surface_sides).
+	// plane (environment/water_frame.h water_surface_sides). The scene's
+	// water letter label reaches the beauty strip alone, through its layer
+	// (set_blink_water_views; renderer/scene_pass_gates.h scene_water_visible):
+	// neither the mirror nor the redraw reads it.
 	const opennova::env::WaterSurfaceSides sides =
 			opennova::env::water_surface_sides(static_cast<float>(cam_pos.y),
 					water_height_);
@@ -673,59 +852,36 @@ void Water::advance_frame(double) {
 
 	// env #30: refresh the mirror camera before this frame's strip rebuild —
 	// the SubViewport renders ahead of the main view, like the witnessed
-	// prerender (itself gated on g_WaterActive).
+	// prerender (itself gated on g_WaterActive alone, the letter
+	// notwithstanding: the strip marches under a skipping label too, so the
+	// mirror the bloom's redraw samples still renders).
 	if (beauty_active) {
 		_update_reflection_camera(view_cam, drawing.projection, drawing.frame_perspective);
 	}
 
 	// Regenerate the animated noise pair once per rendered water frame, at
 	// the world's entity-update count when one is fed (set_noise_frame_counter),
-	// else at this Water's own render-frame count. Both Render_WaterSurface
-	// calls regenerate it at the same counter, so one update serves the frame.
+	// else at this Water's own render-frame count. Every Render_WaterSurface
+	// call regenerates it at the same counter, so one update serves the frame.
 	// [orig: Render_WaterSurface @0x5c3326 -> Water_GenerateNoiseTextures
 	//  @0x5C0360, its counter @0x5C0366]
 	if (!frame_counter_fed_) frame_counter_ += 1;
-	water_core_->update(frame_counter_);
-	const int size = water_core_->get_texture_size();
-	noise_color_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
-			water_core_->get_color_rgba8());
-	noise_normal_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
-			water_core_->get_normal_rgba8());
-	noise_color_tex_->update(noise_color_img_);
-	noise_normal_tex_->update(noise_normal_img_);
+	noise_counter_valid_ = false;
+	_regenerate_noise();
 
-	// Strip inputs (engine derivation; defaults keep envless owners
-	// marching).
-	const opennova::env::WaterFrameInputs inputs =
-			opennova::env::build_water_frame_inputs(
-					env != nullptr ? &env->state() : nullptr, water_alpha_);
-	float murk = inputs.murk;
-	float fog_end = inputs.fog_end;
-	// The strip's per-vertex depth curve from the smoothed fog distance's
-	// integer word (environment/env_water_render.h carries the witness). No
-	// texcoord transform exists: the noise pair samples the rows' absolute
-	// world/32 texcoords.
-	const opennova::env::WaterDepthCurve depth_curve =
-			opennova::env::water_depth_curve(fog_end);
-	const Color lit(inputs.lit.r, inputs.lit.g, inputs.lit.b);
-	Ref<EnvFile> env_data;
-	if (inputs.env_loaded && env != nullptr) {
-		env_data = env->get_environment_data();
-		water_material_->set_shader_parameter("u_water_color",
-				Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
-		water_material_->set_shader_parameter("u_fog_color",
-				env->get_scene_fog_color());
-	}
+	const MarchInputs inputs = _march_inputs(env);
 
 	if (beauty_active) {
-		const int rows = _march_strip(drawing, sides.underwater, false, murk, fog_end,
-				depth_curve, lit, env_data);
+		const int rows = _march_strip(drawing, sides.underwater, false, inputs, water_material_);
 		if (rows < 2) {
 			// Plane off-screen or a sub-2-row march — nothing submits.
 			_clear_strip_surfaces();
 		} else {
 			has_drawable_surface_ = true;
-			_upload_strip(mesh_instance_, _strip_arrays(), water_material_);
+			if (!_rewrite_strip_in_place(rows)) {
+				_upload_strip(mesh_instance_, _strip_arrays(), water_material_);
+				_strip_surface_rebuilt(rows);
+			}
 			// The witnessed per-side material swap: camera-above -> the blend
 			// material, underwater -> the opaque one — ported as the shader's
 			// u_underwater_view branch.
@@ -738,13 +894,12 @@ void Water::advance_frame(double) {
 		// march with the nightvision row colors (flat 0.1 base, no specular
 		// RGB) (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d;
 		// Render_WaterSurface @ 0x5c3489..0x5c3492).
-		const int rows = _march_strip(drawing, false, true, murk, fog_end, depth_curve,
-				lit, env_data);
+		const int rows = _march_strip(drawing, false, true, inputs, night_vision_material_);
 		if (rows < 2) {
 			_clear_night_vision_surfaces();
 		} else {
 			const Array arrays = _strip_arrays();
-			_upload_strip(night_vision_mesh_instance_, arrays, water_material_);
+			_upload_strip(night_vision_mesh_instance_, arrays, night_vision_material_);
 			// Hand the arrays over so the focused Q3 cache re-packs them from
 			// memory instead of reading the freshly uploaded surface back through
 			// the server in the same frame.
@@ -752,6 +907,167 @@ void Water::advance_frame(double) {
 		}
 	}
 	_sync_render_activity();
+}
+
+// The march inputs every water pass of a frame shares (engine derivation;
+// defaults keep envless owners marching), the lit colours pushed to every
+// water material.
+Water::MarchInputs Water::_march_inputs(MissionEnvironment *p_env) {
+	const opennova::env::WaterFrameInputs inputs =
+			opennova::env::build_water_frame_inputs(
+					p_env != nullptr ? &p_env->state() : nullptr, water_alpha_);
+	MarchInputs out;
+	out.murk = inputs.murk;
+	out.fog_end = inputs.fog_end;
+	// The strip's per-vertex depth curve from the smoothed fog distance's
+	// integer word (environment/env_water_render.h carries the witness). No
+	// texcoord transform exists: the noise pair samples the rows' absolute
+	// world/32 texcoords.
+	out.depth_curve = opennova::env::water_depth_curve(out.fog_end);
+	out.lit = Color(inputs.lit.r, inputs.lit.g, inputs.lit.b);
+	if (inputs.env_loaded && p_env != nullptr) {
+		out.env_data = p_env->get_environment_data();
+		for (const Ref<ShaderMaterial> &material :
+				{water_material_, night_vision_material_, inset_material_}) {
+			if (material.is_null()) {
+				continue;
+			}
+			material->set_shader_parameter("u_water_color",
+					Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
+			material->set_shader_parameter("u_fog_color", p_env->get_scene_fog_color());
+		}
+	}
+	return out;
+}
+
+void Water::_regenerate_noise() {
+	if (noise_counter_valid_ && noise_counter_ == frame_counter_) {
+		return;
+	}
+	noise_counter_ = frame_counter_;
+	noise_counter_valid_ = true;
+	water_core_->update(frame_counter_);
+	const int size = water_core_->get_texture_size();
+	noise_color_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
+			water_core_->get_color_rgba8());
+	noise_normal_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
+			water_core_->get_normal_rgba8());
+	noise_color_tex_->update(noise_color_img_);
+	noise_normal_tex_->update(noise_normal_img_);
+}
+
+// The weapon Inset pass's water, after the main scene's (the witnesses:
+// environment/water_mirror.h inset_mirror_source, environment/water_frame.h
+// water_pass_latch): the Inset's own g_WaterActive, its mirror of the view
+// block under it, then its strip past its own water letter, marched at its own
+// screen and sampling that mirror. The Inset camera draws its perspective
+// through its rect's half pixel; the march takes the plain perspective, as the
+// main march takes the frame's.
+void Water::advance_inset_frame(Camera3D *p_camera, const Transform3D &p_view_block) {
+	if (!built_ || water_material_.is_null()) {
+		return;
+	}
+	const bool open = p_camera != nullptr && p_camera->is_inside_tree() &&
+			p_camera->get_viewport() != nullptr;
+	if (!open && !inset_open_) {
+		// Retired when it closed (or never opened).
+		return;
+	}
+	inset_open_ = open;
+	if (!open || !is_water_render_active() || !is_inside_tree() || !is_visible_in_tree()) {
+		_retire_inset();
+		return;
+	}
+	Viewport *inset_view = p_camera->get_viewport();
+	const Vector2 inset_size = inset_view->get_visible_rect().size;
+	const bool active = is_inset_water_pass_active();
+	inset_mirror_rendered_ = false;
+	if (active && mirror_enabled_ && inset_mirror_.viewport != nullptr &&
+			inset_mirror_.camera != nullptr && inset_size.x > 1.0f && inset_size.y > 1.0f) {
+		const auto to_vec3 = [](const Vector3 &v) {
+			return opennova::env::Vec3{static_cast<float>(v.x),
+					static_cast<float>(v.y), static_cast<float>(v.z)};
+		};
+		opennova::env::MirrorSourceView source;
+		source.basis_x = to_vec3(p_view_block.basis.get_column(0));
+		source.basis_y = to_vec3(p_view_block.basis.get_column(1));
+		source.basis_z = to_vec3(p_view_block.basis.get_column(2));
+		source.origin = to_vec3(p_view_block.origin);
+		source.fov_deg = static_cast<float>(p_camera->get_fov());
+		source = opennova::env::inset_mirror_source(source);
+		if (inset_mirror_.viewport->get_anisotropic_filtering_level() !=
+				inset_view->get_anisotropic_filtering_level()) {
+			inset_mirror_.viewport->set_anisotropic_filtering_level(
+					inset_view->get_anisotropic_filtering_level());
+		}
+		// Square: the node-side frame is the target itself.
+		_install_mirror_view(inset_mirror_, source, p_camera->get_near(), p_camera->get_far(),
+				0.0f,
+				Vector2i(opennova::env::kReflectionRttSize, opennova::env::kReflectionRttSize));
+		inset_mirror_rendered_ = true;
+	}
+	if (inset_mirror_.viewport != nullptr) {
+		inset_mirror_.viewport->set_update_mode(inset_mirror_rendered_
+						? SubViewport::UPDATE_ALWAYS
+						: SubViewport::UPDATE_DISABLED);
+	}
+	inset_material_->set_shader_parameter("u_has_reflection", inset_mirror_rendered_);
+
+	bool drawn = false;
+	const opennova::env::WaterSurfaceSides sides = opennova::env::water_surface_sides(
+			static_cast<float>(p_camera->get_camera_transform().get_origin().y), water_height_);
+	if (active && inset_view_water_ && (sides.above || sides.underwater) &&
+			inset_size.x > 1.0f && inset_size.y > 1.0f) {
+		_regenerate_noise();
+		const MarchInputs inputs = _march_inputs(_env_node());
+		DrawingView view;
+		view.camera = p_camera;
+		view.raster = Vector2i(inset_size);
+		view.projection = Projection::create_perspective(p_camera->get_fov(),
+				inset_size.x / inset_size.y, p_camera->get_near(), p_camera->get_far(),
+				p_camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH);
+		view.frame_perspective = true;
+		const int rows = _march_strip(view, sides.underwater, false, inputs, inset_material_);
+		if (rows >= 2) {
+			_upload_strip(inset_mesh_instance_, _strip_arrays(), inset_material_);
+			inset_material_->set_shader_parameter("u_underwater_view", sides.underwater);
+			drawn = true;
+		}
+	}
+	if (!drawn) {
+		_clear_inset_strip_surfaces();
+	}
+	_apply_strip_layers();
+	_apply_night_vision_reflection();
+}
+
+void Water::_retire_inset() {
+	inset_mirror_rendered_ = false;
+	if (inset_mirror_.viewport != nullptr) {
+		inset_mirror_.viewport->set_update_mode(SubViewport::UPDATE_DISABLED);
+	}
+	if (inset_material_.is_valid()) {
+		inset_material_->set_shader_parameter("u_has_reflection", false);
+	}
+	_clear_inset_strip_surfaces();
+	_apply_strip_layers();
+	_apply_night_vision_reflection();
+}
+
+void Water::_apply_night_vision_reflection() {
+	if (night_vision_material_.is_null()) {
+		return;
+	}
+	const bool inset = opennova::env::bloom_water_mirror_image(inset_mirror_rendered_) ==
+			opennova::env::WaterMirrorImage::kInset;
+	const MirrorRig &rig = inset ? inset_mirror_ : mirror_;
+	if (rig.viewport == nullptr) {
+		return;
+	}
+	Ref<ViewportTexture> rtt = rig.viewport->get_texture();
+	night_vision_material_->set_shader_parameter("u_reflection", rtt);
+	night_vision_material_->set_shader_parameter("u_has_reflection",
+			inset || main_reflection_active_);
 }
 
 // The world (this node's parent) registers its local view presenter
@@ -803,7 +1119,7 @@ Water::DrawingView Water::_drawing_view(Camera3D *p_surface_cam) const {
 // retail draws the main view's field into it (non-square texels).
 void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_projection,
 		bool p_frame_perspective) {
-	if (reflection_viewport_ == nullptr || reflection_camera_ == nullptr) {
+	if (mirror_.viewport == nullptr || mirror_.camera == nullptr) {
 		return;
 	}
 	if (p_cam == nullptr || !p_cam->is_inside_tree()) {
@@ -826,9 +1142,9 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	// The mirror draws under the device's one texfilter mode like the main
 	// view (engine renderer/texture_filter.h): the terrain detail family's
 	// hardware anisotropy is the viewport's, so the mirror takes the view's.
-	if (reflection_viewport_->get_anisotropic_filtering_level() !=
+	if (mirror_.viewport->get_anisotropic_filtering_level() !=
 			viewport->get_anisotropic_filtering_level()) {
-		reflection_viewport_->set_anisotropic_filtering_level(
+		mirror_.viewport->set_anisotropic_filtering_level(
 				viewport->get_anisotropic_filtering_level());
 	}
 	// The drawn frustum's width over height: proj[1][1] / proj[0][0] for the
@@ -874,57 +1190,86 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 			p_cam->get_keep_aspect_mode() == Camera3D::KEEP_HEIGHT;
 	source.aspect = static_cast<float>(focal_y / focal_x);
 	source.v_offset = p_cam->get_v_offset();
+	// The camera node's own frame (the mirror viewport's visible rect) is the
+	// source's, so its node-side projection is the source camera's; the raster
+	// is the served one.
+	_install_mirror_view(mirror_, source, p_cam->get_near(), p_cam->get_far(),
+			p_cam->get_h_offset(), Vector2i(source_size));
+}
 
+Transform3D Water::mirror_view_transform(const Transform3D &p_source) const {
+	const auto to_vec3 = [](const Vector3 &v) {
+		return opennova::env::Vec3{static_cast<float>(v.x),
+				static_cast<float>(v.y), static_cast<float>(v.z)};
+	};
+	opennova::env::MirrorSourceView source;
+	source.basis_x = to_vec3(p_source.basis.get_column(0));
+	source.basis_y = to_vec3(p_source.basis.get_column(1));
+	source.basis_z = to_vec3(p_source.basis.get_column(2));
+	source.origin = to_vec3(p_source.origin);
 	const opennova::env::WaterMirrorView view =
 			opennova::env::build_water_mirror_view(source, water_height_);
+	const auto to_v3 = [](const opennova::env::Vec3 &v) {
+		return Vector3(v.x, v.y, v.z);
+	};
+	return Transform3D(Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
+			to_v3(view.origin));
+}
+
+uint32_t Water::_mirror_own_layer(const MirrorRig &p_rig) const {
+	return &p_rig == &inset_mirror_ ? uint32_t(visual_layers::INSET_MIRROR_VIEW)
+									: uint32_t(visual_layers::MIRROR_VIEW);
+}
+
+void Water::_install_mirror_view(MirrorRig &r_rig, const opennova::env::MirrorSourceView &p_source,
+		double p_near, double p_far, real_t p_h_offset, const Vector2i &p_source_frame) {
+	Camera3D *mirror = r_rig.camera;
+	const opennova::env::WaterMirrorView view =
+			opennova::env::build_water_mirror_view(p_source, water_height_);
 	const auto to_v3 = [](const opennova::env::Vec3 &v) {
 		return Vector3(v.x, v.y, v.z);
 	};
 	// The reflected-scene clip needs no per-frame arming: the object and
 	// terrain shaders discard below the water in the one pass whose camera
 	// omits the water layer, on both sides of the plane (water_mirror.h).
-	reflection_camera_->set_global_transform(Transform3D(
+	mirror->set_global_transform(Transform3D(
 			Basis(to_v3(view.basis_x), to_v3(view.basis_y), to_v3(view.basis_z)),
 			to_v3(view.origin)));
-	reflection_camera_->set_cull_mask(view.below_water
+	mirror->set_cull_mask((view.below_water
 					? (REFLECTION_CULL_MASK | VISUAL_LAYER_WORLD_NO_MIRROR | visual_layers::MAIN_VIEW_NO_MIRROR)
-					: REFLECTION_CULL_MASK);
-	reflection_camera_->set_keep_aspect_mode(view.keep_aspect_height ?
+					: REFLECTION_CULL_MASK) | _mirror_own_layer(r_rig));
+	mirror->set_keep_aspect_mode(view.keep_aspect_height ?
 					Camera3D::KEEP_HEIGHT : Camera3D::KEEP_WIDTH);
 	switch (view.projection) {
 		case opennova::env::MirrorProjection::kOrthogonal:
-			reflection_camera_->set_orthogonal(view.size,
-					p_cam->get_near(), p_cam->get_far());
+			mirror->set_orthogonal(view.size, p_near, p_far);
 			break;
 		case opennova::env::MirrorProjection::kFrustum:
-			reflection_camera_->set_frustum(view.size,
-					Vector2(view.frustum_offset_x, view.frustum_offset_y),
-					p_cam->get_near(), p_cam->get_far());
+			mirror->set_frustum(view.size,
+					Vector2(view.frustum_offset_x, view.frustum_offset_y), p_near, p_far);
 			break;
 		case opennova::env::MirrorProjection::kPerspective:
 		default:
-			reflection_camera_->set_perspective(view.fov_deg,
-					p_cam->get_near(), p_cam->get_far());
+			mirror->set_perspective(view.fov_deg, p_near, p_far);
 			break;
 	}
-	// The camera node's own frame (the mirror viewport's visible rect) is the
-	// source's, so its node-side projection -- the particle renderer's mirror
-	// view reads it -- is the source camera's; the raster is the served one.
-	const Vector2i source_frame(source_size);
-	if (reflection_viewport_->get_size_2d_override() != source_frame) {
-		reflection_viewport_->set_size_2d_override(source_frame);
+	// The camera node's own frame (the mirror viewport's visible rect): its
+	// node-side projection is the one the particle renderer's mirror view
+	// reads.
+	if (r_rig.viewport->get_size_2d_override() != p_source_frame) {
+		r_rig.viewport->set_size_2d_override(p_source_frame);
 	}
 	// These offsets are independent of the projection mode and are otherwise
 	// lost when the reflection camera is rebuilt from the source transform.
-	reflection_camera_->set_h_offset(p_cam->get_h_offset());
-	reflection_camera_->set_v_offset(view.v_offset);
+	mirror->set_h_offset(p_h_offset);
+	mirror->set_v_offset(view.v_offset);
 	// The mirror image sits on the RTT's own D3D9 pixel centres
 	// (env::WaterMirrorView::raster_shift): a perspective mirror's node draws
 	// through that half texel, so its projection meets the served raster. An
 	// orthogonal or frustum source (an editor or test camera) keeps its node's
 	// own frustum; the served raster below takes the half texel in every form.
 	if (view.projection == opennova::env::MirrorProjection::kPerspective) {
-		draw_camera_through_d3d9_raster(reflection_camera_, view.raster_shift);
+		draw_camera_through_d3d9_raster(mirror, view.raster_shift);
 	}
 	// The raster: the mirror frustum at the source's aspect over the 512
 	// square, the matrix Camera3D builds for these settings over a viewport of
@@ -933,23 +1278,22 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 	switch (view.projection) {
 		case opennova::env::MirrorProjection::kOrthogonal:
 			mirror_projection = Projection::create_orthogonal_aspect(view.size, view.aspect,
-					p_cam->get_near(), p_cam->get_far(), !view.keep_aspect_height);
+					p_near, p_far, !view.keep_aspect_height);
 			break;
 		case opennova::env::MirrorProjection::kFrustum:
 			mirror_projection = Projection::create_frustum_aspect(view.size, view.aspect,
-					Vector2(view.frustum_offset_x, view.frustum_offset_y),
-					p_cam->get_near(), p_cam->get_far());
+					Vector2(view.frustum_offset_x, view.frustum_offset_y), p_near, p_far);
 			break;
 		case opennova::env::MirrorProjection::kPerspective:
 		default:
 			mirror_projection = Projection::create_perspective(view.fov_deg, view.aspect,
-					p_cam->get_near(), p_cam->get_far(), !view.keep_aspect_height);
+					p_near, p_far, !view.keep_aspect_height);
 			break;
 	}
 	mirror_projection = ndc_translation(view.raster_shift) * mirror_projection;
-	TargetProjectionXrInterface::serve(reflection_viewport_,
-			reflection_camera_->get_camera_transform(), mirror_projection);
-	_apply_reflection_clear();
+	TargetProjectionXrInterface::serve(r_rig.viewport, mirror->get_camera_transform(),
+			mirror_projection);
+	_apply_reflection_clear(r_rig);
 }
 
 // The mirror target's own clear (EnvironmentState::water_mirror_clear_color:
@@ -960,13 +1304,18 @@ void Water::_update_reflection_camera(Camera3D *p_cam, const Projection &p_proje
 // (GameWorld::update_frame_clear_color). Without a loaded environment the
 // camera keeps the World's clear.
 void Water::_apply_reflection_clear() {
-	if (reflection_camera_ == nullptr) {
+	_apply_reflection_clear(mirror_);
+	_apply_reflection_clear(inset_mirror_);
+}
+
+void Water::_apply_reflection_clear(MirrorRig &r_rig) {
+	if (r_rig.camera == nullptr) {
 		return;
 	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
-		if (reflection_camera_->get_environment().is_valid()) {
-			reflection_camera_->set_environment(Ref<Environment>());
+		if (r_rig.camera->get_environment().is_valid()) {
+			r_rig.camera->set_environment(Ref<Environment>());
 		}
 		return;
 	}
@@ -975,8 +1324,8 @@ void Water::_apply_reflection_clear() {
 		reflection_environment_->set_background(Environment::BG_COLOR);
 		reflection_environment_->set_ambient_source(Environment::AMBIENT_SOURCE_DISABLED);
 	}
-	if (reflection_camera_->get_environment() != reflection_environment_) {
-		reflection_camera_->set_environment(reflection_environment_);
+	if (r_rig.camera->get_environment() != reflection_environment_) {
+		r_rig.camera->set_environment(reflection_environment_);
 	}
 	const opennova::env::Rgb clear =
 			env->state().water_mirror_clear_color(mirror_scene_outdoors_);
@@ -996,9 +1345,7 @@ void Water::set_mirror_scene_outdoors(bool p_outdoors) {
 // overcast blend (the native env curve); below the surface the murk
 // visibility curve replaces the weather fog distance.
 int Water::_march_strip(const DrawingView &p_view, bool p_underwater, bool p_nightvision,
-		float p_murk, float p_fog_end,
-		const opennova::env::WaterDepthCurve &p_depth_curve,
-		const Color &p_lit, const Ref<EnvFile> &p_env_data) {
+		const MarchInputs &p_inputs, const Ref<ShaderMaterial> &p_material) {
 	Camera3D *cam = p_view.camera;
 	if (cam == nullptr || !cam->is_inside_tree()) {
 		return 0;
@@ -1008,10 +1355,10 @@ int Water::_march_strip(const DrawingView &p_view, bool p_underwater, bool p_nig
 		return 0;
 	}
 	MissionEnvironment *env = _env_node();
-	float pass_fog_end = EnvFile::fog_end_above_water(p_fog_end,
+	float pass_fog_end = EnvFile::fog_end_above_water(p_inputs.fog_end,
 			env != nullptr ? env->get_overcast_blend() : 0.0f);
-	if (p_underwater && p_env_data.is_valid()) {
-		pass_fog_end = p_env_data->get_fog_end_underwater();
+	if (p_underwater && p_inputs.env_data.is_valid()) {
+		pass_fog_end = p_inputs.env_data->get_fog_end_underwater();
 	}
 	// The adjusted camera transform includes Camera3D h/v offsets, keeping
 	// the screen-marched row coordinates registered to the view that draws
@@ -1022,11 +1369,11 @@ int Water::_march_strip(const DrawingView &p_view, bool p_underwater, bool p_nig
 			pass_fog_end);
 	// The retail scene projection the strip depth is tested against: near 0.2,
 	// far = the same fog word + 1 (renderer::scene_far_plane).
-	water_material_->set_shader_parameter("u_scene_depth_range",
+	p_material->set_shader_parameter("u_scene_depth_range",
 			Vector2(opennova::env::kWaterSceneNear,
-					opennova::renderer::scene_far_plane(p_fog_end)));
-	return water_core_->strip_build(water_height_, p_murk, p_lit,
-			p_depth_curve.scale, p_depth_curve.bias, p_underwater, p_nightvision);
+					opennova::renderer::scene_far_plane(p_inputs.fog_end)));
+	return water_core_->strip_build(water_height_, p_inputs.murk, p_inputs.lit,
+			p_inputs.depth_curve.scale, p_inputs.depth_curve.bias, p_underwater, p_nightvision);
 }
 
 // The last march as surface arrays. Vertices are absolute world positions;
@@ -1067,12 +1414,65 @@ void Water::_upload_strip(MeshInstance3D *p_mesh_instance, const Array &p_arrays
 	mesh->surface_set_material(0, p_material);
 }
 
-void Water::_clear_strip_surfaces() {
-	has_drawable_surface_ = false;
+// The beauty strip's surface rewritten in place, its device buffers kept, while the march keeps
+// the row count the surface was made with: the vertex and attribute streams take the march's
+// bytes (WaterCore::strip_surface_bytes, the server's own packing of the arrays a rebuild hands
+// it), the index stream stays (it is the row count's alone, env::water_strip_batches), and the
+// mesh's AABB is the march's, as a rebuild computes it. Retail writes its strip into the one
+// dynamic vertex buffer it keeps on every call (engine formats/env/env_water_render.h, the batch
+// contract, carries the witness); ours rebuilt the surface, its three buffers made and freed,
+// every frame (D-NET-NEW-LF-22). A server without a device (the headless
+// dummy) keeps no buffers to rewrite, so it takes the rebuild.
+bool Water::_rewrite_strip_in_place(int p_rows) {
+	if (p_rows != strip_surface_rows_ || mesh_instance_ == nullptr) {
+		return false;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs->get_rendering_device() == nullptr) {
+		return false;
+	}
+	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	if (mesh.is_null() || mesh->get_surface_count() != 1) {
+		return false;
+	}
+	AABB aabb;
+	water_core_->strip_surface_bytes(strip_vertex_bytes_, strip_attribute_bytes_, aabb);
+	mesh->surface_update_vertex_region(0, 0, strip_vertex_bytes_);
+	mesh->surface_update_attribute_region(0, 0, strip_attribute_bytes_);
+	rs->mesh_set_custom_aabb(mesh->get_rid(), aabb);
+	++strip_surface_rewrites_;
+	return true;
+}
+
+// A rebuilt surface holds its own AABB: the rewrite's stand-in goes.
+void Water::_strip_surface_rebuilt(int p_rows) {
+	strip_surface_rows_ = p_rows;
 	if (mesh_instance_ == nullptr) {
 		return;
 	}
 	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	if (mesh.is_valid()) {
+		RenderingServer::get_singleton()->mesh_set_custom_aabb(mesh->get_rid(), AABB());
+	}
+}
+
+void Water::_clear_strip_surfaces() {
+	has_drawable_surface_ = false;
+	strip_surface_rows_ = 0;
+	if (mesh_instance_ == nullptr) {
+		return;
+	}
+	Ref<ArrayMesh> mesh = mesh_instance_->get_mesh();
+	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
+		mesh->clear_surfaces();
+	}
+}
+
+void Water::_clear_inset_strip_surfaces() {
+	if (inset_mesh_instance_ == nullptr) {
+		return;
+	}
+	Ref<ArrayMesh> mesh = inset_mesh_instance_->get_mesh();
 	if (mesh.is_valid() && mesh->get_surface_count() > 0) {
 		mesh->clear_surfaces();
 	}

@@ -413,6 +413,73 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
     return hit;
 }
 
+// The nearest-entity walker's face test (collision.h). Unlike the round's walker it inverts every
+// section matrix as a rotation (no scale), skips the faces whose flags carry bit 2 or whose
+// material is 16, takes a crossing either way, and keeps only a strictly nearer hit.
+// [orig: Physics_RaycastEntityPool @0x4143E0 - @0x414620..0x41495D]
+bool collision_raycast_entity_faces(const CollisionTargetView &target, const int32_t start[3],
+                                    const int32_t end[3], const int32_t dir[3], int32_t length,
+                                    int32_t &best) {
+    if (target.model == nullptr || target.matrices == nullptr) return false;
+    const CollisionModel &model = *target.model;
+    bool hit = false;
+    for (size_t si = 0; si < model.sections.size(); ++si) {
+        const CollisionSection &sec = model.sections[si];
+        const CollisionMatrix &mat = target.matrices[si];
+        if (mat.disabled()) continue; // [orig: `test byte ptr [edi+3Ch], 1` @0x414620]
+        CollisionMatrix inv;
+        mat.invert_into(inv); // [orig: Matrix_Transpose3x3WithNegateCol3 @0x414633]
+        int32_t ls[3], le[3], ldir[3];
+        transform_translate_then_rotate(inv.m, start, ls); // [orig: @0x414646]
+        transform_translate_then_rotate(inv.m, end, le);   // [orig: @0x41465C]
+        inv.rotate_point(dir, ldir);                       // [orig: @0x414675]
+        int32_t smin[3], smax[3];
+        for (int i = 0; i < 3; ++i) {
+            smin[i] = std::min(ls[i], le[i]); // [orig: @0x414685..0x4146D3]
+            smax[i] = std::max(ls[i], le[i]);
+        }
+        const CollisionFaceVertex *verts = model.face_vertices.data() + sec.face_vertex_start;
+        for (int32_t fi = 0; fi < sec.face_count; ++fi) {
+            const CollisionFace &face = model.faces[sec.face_start + fi];
+            // [orig: the box @0x4146F0..0x414738; `test byte ptr [ebp+24h], 2` @0x41473E; the
+            //  material byte under the context's zero +0x48 @0x414748..0x414756]
+            if (smin[0] > face.max[0] || smax[0] < face.min[0] || smin[1] > face.max[1] ||
+                    smax[1] < face.min[1] || smin[2] > face.max[2] || smax[2] < face.min[2])
+                continue;
+            if ((face.flags & 2u) != 0 || face.material == 16) continue;
+            const int32_t d0 =
+                    static_cast<int32_t>((static_cast<int64_t>(ls[1]) * face.normal[1] +
+                                          static_cast<int64_t>(ls[0]) * face.normal[0] +
+                                          static_cast<int64_t>(ls[2]) * face.normal[2]) >>
+                                         14) +
+                    face.plane_dist;
+            const int32_t d1 =
+                    static_cast<int32_t>((static_cast<int64_t>(le[1]) * face.normal[1] +
+                                          static_cast<int64_t>(le[0]) * face.normal[0] +
+                                          static_cast<int64_t>(le[2]) * face.normal[2]) >>
+                                         14) +
+                    face.plane_dist;
+            if (d0 > 0 ? d1 > 0 : d1 <= 0) continue; // [orig: @0x4147E2..0x4147F2]
+            const int32_t a0 = abs32(d0);
+            const int32_t total = a0 + abs32(d1);
+            // [orig: @0x4147F8..0x41485A; the "Check Divide Error" clamp @0x41483C]
+            const int32_t dist = a0 <= total
+                    ? static_cast<int32_t>(static_cast<int64_t>(a0) * length / total)
+                    : 0x40000000;
+            int32_t hp[3];
+            for (int i = 0; i < 3; ++i)
+                hp[i] = ls[i] + static_cast<int32_t>(
+                                        (static_cast<int64_t>(ldir[i]) * dist + 0x8000) >> 16);
+            if (!point_in_triangle_2d(hp, face, verts)) continue; // [orig: @0x4148E6]
+            if (dist < best) { // [orig: @0x4148F5]
+                best = dist;
+                hit = true;
+            }
+        }
+    }
+    return hit;
+}
+
 bool collision_raycast_person_sections(const CollisionTargetView &target,
                                        const int32_t start[3], const int32_t end[3],
                                        int32_t extra_radius, uint32_t section_mask,
@@ -766,10 +833,16 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
     if (target.model == nullptr || target.matrices == nullptr) return false;
     if ((target.entity_flags & 1u) != 0) return false; // [orig: targetEntity[9] & 1 @ 0x4ae1bd]
     const CollisionModel &model = *target.model;
-    if (model.sections.empty() || q.num_points <= 0) return false;
+    if (q.num_points <= 0) return false;
 
     // Broad phase per point. [orig: @ 0x4ae1d0]
     if (!contact_query_overlaps_bound(target.pos, target.bound_radius, q)) return false;
+    // A building's door-touch mask starts every query that gets this far at 0;
+    // the type-9 legs below OR their bits in (D-NET-133). [orig:
+    //  Entity_ComputeBoneCollisionForce @0x4AE150 - `cmp [ecx+5Ch], 5` @0x4AE275,
+    //  `mov [ebp+2B4h], ebx` @0x4AE281]
+    out.door_mask_reset = target.is_building;
+    if (model.sections.empty()) return false;
 
     int32_t any_collision = 0;
     int32_t max_penetration = 0;
@@ -931,7 +1004,7 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             // Yaw/pitch are TARGET-RELATIVE: entity Yaw/Pitch minus
                             // atan2 * -BAM (net +). The XY length is ftol'd to int
                             // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
-                            // dbl_7C57B8 = -2^31/pi]
+                            // g_NegBamPerRadian = -2^31/pi]
                             ladder.yaw =
                                 target.yaw_bam -
                                 static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
@@ -978,7 +1051,8 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             }
                         }
                         break;
-                    case bvol_type::kDoorCD: // door touch [orig: @ 0x4aeb0f-0x4aeb22]
+                    case bvol_type::kDoorCD: // door touch, ORed into the target's mask
+                                             // [orig: @ 0x4aeb0f-0x4aeb22, `or [eax+2B4h], edx` @0x4AEB22]
                         out.flags |= kTouchDoor;
                         out.door_sections |= 1u << ((static_cast<uint32_t>(si) -
                                 static_cast<uint32_t>(target.door_first_bone)) & 31u);

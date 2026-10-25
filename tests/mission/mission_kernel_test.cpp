@@ -535,7 +535,8 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 
 // A spawned body's first candidate slice reads the bound radius its model
 // init stamps: the host's and the joiner's bind, and a spawn once the
-// collision world is up, build the slices after the model init.
+// collision world is up, build the slices after the model init. The same bind
+// gives a person row its facial slot.
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel
 //  called @0x43C492, the Entity_BuildProximityListsFromPools call @0x43C4EB]
 static void test_player_spawn_slice_reads_its_model_radius() {
@@ -552,6 +553,10 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		return;
 	}
 	CHECK(!mount.empty() && test_io::write_file(root + "/SliceMount.3di", mount));
+	// The person row's face, SliceMount.GRM by its graphic (the authored GRM fixture).
+	const std::vector<uint8_t> face = test_io::read_file(
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm");
+	CHECK(!face.empty() && test_io::write_file(root + "/SliceMount.grm", face));
 	// Retail's head row, the player's (its model the same mount), and the
 	// placed mount.
 	static const char kItems[] =
@@ -599,9 +604,17 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		spawn.health = 100;
 		const w::EntityHandle remote = w::spawn_remote_player(world, spawn);
 		CHECK(remote.valid());
+		CHECK(world.registry.get(remote) != nullptr &&
+				world.facials.for_entity(*world.registry.get(remote)) == nullptr);
 		kernel.bind_spawned_body(remote);
 		const w::Entity *body = world.registry.get(remote);
 		CHECK(body != nullptr && body->bound_radius > 0.0f);
+		// The bind is the spawn's model init: the person row takes its facial slot there, with
+		// no tick between, as a round init's body (the local player's) does (D-NET-NEW-L7-39,
+		// V-ROLL-BB F1) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -
+		//  Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot (the call
+		//  @0x40E22E)].
+		CHECK(body != nullptr && world.facials.for_entity(*body) != nullptr);
 		CHECK(kernel.collision.candidate_count(remote) == 1);
 		// A spawn after the boot through the kernel's own spawn.
 		spawn.position = {10.0f, 20.0f - (4.0f + 1.5f * radius), 0.0f};
@@ -620,6 +633,85 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 	fs::remove_all(root, ec);
 }
 
+// A kernel-hosted world answers the ewep anchored leg's two model reads for a carrier with no
+// seat or attachment metadata (seat specs off): its model is the load of its def's graphic, as
+// entity+0x30 is. The userpoint record's subobject word is the model's own record's; an index
+// off the table (0, or past the count) has none. The record's attachment frame resolves off the
+// carrier's placement.
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the store @0x439FDC;
+//  Entity_UpdateTransformAndTurret @0x440CA0 - the record @0x440F3A..0x440F40, its subobject
+//  @0x440F50, Bone_BuildAttachmentMatrix @0x44109D]
+static void test_kernel_answers_an_anchor_off_the_def_graphic() {
+	namespace fs = std::filesystem;
+	const std::string root = std::string(test_paths_temp_dir()) + "/" +
+			test_paths_unique("opennova_kernel_anchor");
+	std::error_code ec;
+	fs::remove_all(root, ec);
+	fs::create_directories(root, ec);
+	const std::vector<uint8_t> mount = test_io::read_file(
+			std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/mount.3di");
+	if (test_io::is_lfs_pointer(mount)) {
+		std::printf("[skip] fixtures/threedi/synth/mount.3di is an unpulled LFS pointer\n");
+		return;
+	}
+	CHECK(!mount.empty() && test_io::write_file(root + "/AnchorMount.3di", mount));
+	static const char kItems[] =
+			"begin \"Anchor mount\"\r\n id 100164\r\n type object\r\n graphic AnchorMount\r\n hp 100\r\nend\r\n";
+	def::DefItemsFile items{};
+	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+			sizeof(kItems) - 1, &items) == 0);
+	{
+		ResourceIndex index;
+		CHECK(index.scan(root, std::string(), VfsMountMode::LooseOnly));
+		assets::AssetStore store{&index};
+		const assets::Model model = store.model("AnchorMount");
+		CHECK(model && model->user_points != nullptr && model->user_point_count >= 6u);
+		std::map<std::string, std::string> files;
+		bms::File m{};
+		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
+		m.items[0].id = 21;
+		ms::MissionKernel kernel;
+		kernel.set_items_table(&items);
+		kernel.set_assets(&store);
+		kernel.open_document(std::move(m), "anchor", source_over(&files));
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.wac = false;
+		options.terrain = false;
+		options.seat_specs = false; // no seat extraction: only the def row names the graphic
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		w::World &world = kernel.world;
+		const w::Entity *carrier = world.registry.by_net_id(21);
+		CHECK(carrier != nullptr && world.pose_provider == &kernel);
+		if (carrier == nullptr || !model || model->user_points == nullptr ||
+				model->user_point_count < 6u || world.pose_provider == nullptr) {
+			def::def_free_items(&items);
+			return;
+		}
+		CHECK(carrier->has_graphic_model &&
+				carrier->graphic_model_userpoints == model->user_point_count);
+		w::IPoseProvider &pose = *world.pose_provider;
+		for (int up = 1; up <= static_cast<int>(model->user_point_count); ++up) {
+			int32_t subobject = 0x7FFFFFFF;
+			CHECK(pose.userpoint_subobject(world, *carrier, up, subobject));
+			CHECK(subobject == model->user_points[up - 1].subobject_index);
+		}
+		int32_t none = 0;
+		CHECK(!pose.userpoint_subobject(world, *carrier, 0, none));
+		CHECK(!pose.userpoint_subobject(world, *carrier,
+				static_cast<int>(model->user_point_count) + 1, none));
+		w::Seat point;
+		point.type = w::SeatType::Gunner;
+		point.bone_index = 6;
+		point.attachment_frame = true;
+		w::MountedPose frame;
+		CHECK(pose.resolve_mounted_pose(world, *carrier, point, frame));
+	}
+	def::def_free_items(&items);
+	fs::remove_all(root, ec);
+}
+
 int main() {
     test_first_frame_tick_matches_on_host_and_joiner();
     test_joiner_installs_only_the_wac_terminator();
@@ -632,6 +724,7 @@ int main() {
 	test_restart_cancel_keeps_the_personal_slot_zoom();
 	test_board_walk_reaches_a_kernel_named_point();
 	test_player_spawn_slice_reads_its_model_radius();
+	test_kernel_answers_an_anchor_off_the_def_graphic();
 	// The synthetic mission: two placed entities plus one (empty) BMS event,
 	// and a mission-named WAC layer in the in-memory source.
 	std::map<std::string, std::string> files;
@@ -727,9 +820,9 @@ int main() {
 	CHECK(near_equal(kernel.local.player_position().y, 200.0f, 0.001f));
 	CHECK(near_equal(kernel.local.player_position().z, 5.0f, 0.001f));
 	if (const w::AiEntity *body = kernel.local.player_ai()) {
-		CHECK(body->pos[0] == 100 << 16);
-		CHECK(body->pos[1] == 200 << 16);
-		CHECK(body->pos[2] == 5 << 16);
+		CHECK(body->self->position.x.q16 == 100 << 16);
+		CHECK(body->self->position.y.q16 == 200 << 16);
+		CHECK(body->self->position.z.q16 == 5 << 16);
 		CHECK(kernel.local.input.look_heading == body->heading);
 	}
 
@@ -741,7 +834,7 @@ int main() {
 		body->inf.vel[2] = -0x8000;
 		const int32_t pos_q16[3] = {819200, -212992, 8437761};
 		CHECK(kernel.local.apply_pose(pos_q16, static_cast<int32_t>(0xC0000000u), -268435456));
-		CHECK(body->pos[0] == 819200 && body->pos[1] == -212992 && body->pos[2] == 8437761);
+		CHECK(body->self->position.x.q16 == 819200 && body->self->position.y.q16 == -212992 && body->self->position.z.q16 == 8437761);
 		CHECK(near_equal(kernel.local.player_position().x, 12.5f, 0.0001f));
 		CHECK(near_equal(kernel.local.player_position().y, -3.25f, 0.0001f));
 		CHECK(body->heading == static_cast<int32_t>(0xC0000000u) && body->pitch == -268435456);
@@ -749,12 +842,21 @@ int main() {
 		CHECK(kernel.local.input.look_heading == body->heading &&
 		      kernel.local.input.look_pitch == body->pitch);
 		CHECK(body->inf.vel[0] == 0 && body->inf.vel[1] == 0 && body->inf.vel[2] == 0);
+		// Nothing else: the resolver's idle-skip counter (retail's +0x373, stepped in its
+		// 11..20 band [orig: Entity_MovementCollisionResolver @0x4B2BD0 (@0x4B2CBC..0x4B2CD2)])
+		// survives ApplyPose on every role, so a body posed above its floor hovers in the skip
+		// band as retail's does; the dev tool's teleport resets it.
+		body->collide_state.skip_counter = 15;
+		CHECK(kernel.local.apply_pose(pos_q16, static_cast<int32_t>(0xC0000000u), -268435456));
+		CHECK(body->collide_state.skip_counter == 15);
+		kernel.local.teleport_local_player(w::Vec3{ 12.5f, -3.25f, 128.75f }, 0.0, 0.0);
+		CHECK(body->collide_state.skip_counter == 0);
 	}
 
 	// set_entity_position / set_entity_health round-trip the same dual store.
 	kernel.world.commands.set_entity_position(player_h, w::Vec3{50.0f, 60.0f, 2.0f});
 	CHECK(near_equal(kernel.local.player_position().x, 50.0f, 0.001f));
-	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->pos[1] == 60 << 16);
+	if (const w::AiEntity *body = kernel.local.player_ai()) CHECK(body->self->position.y.q16 == 60 << 16);
 	kernel.world.commands.set_entity_health(player_h, 37);
 	CHECK(kernel.local.player_health() == 37);
 	CHECK(kernel.local.player()->alive);

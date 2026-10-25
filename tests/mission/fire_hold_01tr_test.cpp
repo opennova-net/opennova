@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
 			const w::AiEntity *ai = rig.world.ai.for_handle(e->handle);
 			std::printf("dump ssn=%d pool=%d pos=(%.1f %.1f %.1f) team=%d group=%d item=%d type=%d kind=%d "
 					"flags=0x%x attrib=0x%x armor=(%d,%d) bms=%d sel=(%d %d %d %d)",
-					ssn, e->handle.pool(), e->position.x, e->position.y, e->position.z, int(e->team),
+					ssn, e->handle.pool(), float(e->position.x), float(e->position.y), float(e->position.z), int(e->team),
 					int(e->group_id), int(e->item_id), int(e->item_type), int(e->kind),
 					unsigned(e->flags | e->engine_flags), unsigned(e->item_attrib), int(e->armor_impact),
 					int(e->armor_kz), int(e->bms_id), int(e->target_selectors.exclusive_ssn),
@@ -75,8 +75,8 @@ int main(int argc, char **argv) {
 			std::printf("\n");
 		};
 		if (player != nullptr)
-			std::printf("player pos=(%.1f %.1f %.1f) team=%d\n", player->position.x, player->position.y,
-					player->position.z, int(player->team));
+			std::printf("player pos=(%.1f %.1f %.1f) team=%d\n", float(player->position.x), float(player->position.y),
+					float(player->position.z), int(player->team));
 		for (int ssn : {2, 70, 71, 1780, 1786, 1789}) dump(ssn);
 	}
 	std::map<int, int> fires_by_ssn;

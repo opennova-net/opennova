@@ -3,7 +3,7 @@ extends GutTest
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 
-# The HUD declutter seam on GameHudPresenter: the huddetail edge cycles the
+# The HUD declutter seam on GameHudPresenter: each huddetail event cycles the
 # LIVE hud_detail level with wrap, the death screen forces level 3 through the
 # same live seam, neither write reaches the persisted config value (which only
 # the settings path owns), every mission start re-seeds the live level from
@@ -32,31 +32,31 @@ func _persisted_hud_detail() -> int:
 	return GameCfgStore.block().get_word(GameHudPresenter.HUD_DETAIL_CONFIG_KEY)
 
 
-func test_huddetail_edge_cycles_and_wraps_the_live_level() -> void:
+func test_huddetail_events_cycle_and_wrap_the_live_level() -> void:
 	var presenter: GameHudPresenter = autofree(GameHudPresenter.new())
 	var config := presenter.hud_detail_config()
 	var start := presenter.hud_detail_level()
 	assert_eq(start, config,
 			"a fresh presenter's live level is the persisted config value")
 
-	# A plain down edge cycles once; holding the key does not repeat.
-	presenter.poll_hud_detail_edge(true, true)
+	# One event cycles once; each further key-down (a held key's OS repeat)
+	# cycles again, as the key scan fires the row per event (D-CTRL-6).
+	presenter.dispatch_hud_detail(true, true)
 	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"the down edge cycles the level once")
-	presenter.poll_hud_detail_edge(true, true)
-	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"holding the key does not re-cycle")
+			"the event cycles the level once")
+	presenter.dispatch_hud_detail(true, true)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4,
+			"a repeat's event cycles it again")
 
-	# Held across a closed gate window: the latch rides the UNGATED state.
-	presenter.poll_hud_detail_edge(true, false)
-	presenter.poll_hud_detail_edge(true, true)
-	assert_eq(presenter.hud_detail_level(), (start + 1) % 4,
-			"a press held across a gate window cannot re-fire")
+	# With gameplay input closed the event's case cycles nothing; no event, no cycle.
+	presenter.dispatch_hud_detail(true, false)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4,
+			"no cycle while the gate is closed")
+	presenter.dispatch_hud_detail(false, true)
+	assert_eq(presenter.hud_detail_level(), (start + 2) % 4, "no event, no cycle")
 
-	presenter.poll_hud_detail_edge(false, true)
-
-	# Three more cycles are the identity: level + 1 wraps past 3 to 0.
-	for i in range(3):
+	# Two more cycles are the identity: level + 1 wraps past 3 to 0.
+	for i in range(2):
 		presenter.cycle_hud_detail()
 	assert_eq(presenter.hud_detail_level(), start,
 			"four cycles wrap 0->1->2->3->0 back to the start")
@@ -354,8 +354,8 @@ func test_equipped_inset_flag_drives_the_aimed_reticle_through_presenter() -> vo
 			assert_not_null(inset_camera)
 			assert_eq(camera.cull_mask & second_view_excluded, second_view_excluded,
 					"the source camera of this fixture admits every excluded layer")
-			assert_eq(inset_camera.cull_mask, (camera.cull_mask & ~(second_view_excluded | (1 << 20) | (1 << 22) | (1 << 23))) | (1 << 21),
-					"the Inset camera takes the source mask without the viewmodel/body/caster and main-view layers, plus the Inset's own")
+			assert_eq(inset_camera.cull_mask, (camera.cull_mask & ~(second_view_excluded | (1 << 20) | (1 << 22) | (1 << 23) | (1 << 27))) | (1 << 21),
+					"the Inset camera takes the source mask without the viewmodel/body/caster, main-view and main-view-no-reflection layers, plus the Inset's own")
 			# While the pass renders, the particle renderer holds its camera and
 			# compiles the world's particles for it as a view group of its own.
 			assert_eq(inset_view.get_active_render_camera(), inset_camera)
@@ -604,3 +604,27 @@ func test_hud_uses_the_presented_camera_frame() -> void:
 	assert_true(nvg.is_nvg_mask_visible(),
 			"the next presented frame updates both camera and overlay")
 	player.teardown()
+
+
+# The 16 HUD item flash timers outlive a mission: retail's are process words no mission start,
+# round init or HUD init writes (the start's HUD init zeroes their last tick alone), while the
+# presenter rebuilds its overlay per mission, so it carries the HUD's process words (engine
+# hud_frame.h HudProcessWords) into the next one, through the next overlay's configure; the
+# carry rebuilds no layer table [orig: g_HUDItemFlashTimers @0x2723CF8 - its writers the tick's
+# walk @0x59A9F7 and the arm's store @0x5A302A; HUD_InitOverlaySystem @0x5A4620 - the
+# HUD_ResetAllOverlayBuffers call @0x5A4949].
+func test_item_flash_timers_carry_into_the_next_missions_overlay() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var presenter := HudFixture.booted_presenter(self, _staged_dir)
+	var hud := presenter.get_game_hud()
+	hud.set_item_flash(5, 0x800)
+	assert_eq(hud.get_item_flash_timers()[5], 0x800, "the arm stores the timer")
+	assert_not_null(hud.get_process_words(), "the overlay hands its process words over")
+	presenter.teardown()
+	presenter.ensure_game_hud()
+	var next := presenter.get_game_hud()
+	assert_ne(next, hud, "the next mission builds a new overlay")
+	var timers := next.get_item_flash_timers()
+	assert_eq(timers.size(), 16)
+	assert_eq(timers[5], 0x800, "the armed timer keeps its count into the next mission")
+	assert_eq(timers[4], 0, "an unarmed one stays zero")

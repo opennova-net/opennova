@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -18,24 +19,17 @@
 namespace opennova::terrain {
 namespace {
 
-// The temp target is twice the page at every tier: config+0x1740 selects
-// page dword_31A00D4 = 0x100 with temp dword_31A00D0 = 0x200, otherwise
-// 0x80 with 0x100 [orig: PolyTrn_LoadTerrainConfig @0x60E41D..0x60E446]. The
+// The temp target is twice the page (kTerrainStaticShadowTemporaryScale). The
 // collector sizes its viewport from the temp dimension [orig: @0x60D5E0,
 // @0x60D9E4], and the page composite samples the temp with MINFILTER LINEAR
 // over a quad spanning [-0.5, page - 0.5] [orig: PolyTrn_RenderTile
 // @0x60E0D1..0x60E0E0, @0x60E152..0x60E166]: every page pixel lands exactly
 // between two temp texels per axis, so the bilinear fetch is the 2x2 box.
-constexpr uint32_t kTemporaryScale = 2;
+constexpr uint32_t kTemporaryScale = kTerrainStaticShadowTemporaryScale;
 constexpr float kDegenerateArea = 1.0e-12f;
-// The same 0.25 vertical clamp the collect phase applies in fixed point
-// [orig: float clamp @ 0x60D33F..0x60D341, fixed twin (0x4000)
-// @ 0x60d325..0x60d32c].
-constexpr float kMinimumVerticalLight = 0.25f;
-// Projected depth h*0.0005 - 0.00005 [orig: RenderSlot_SetupShadowCascadeMatrices_0
-// @ 0x58D4D3..0x58D618].
-constexpr float kProjectedDepthScale = 0.00050000002f;
-constexpr float kProjectedDepthBias = -0.000050000002f;
+constexpr float kMinimumVerticalLight = kTerrainStaticShadowMinimumVerticalLight;
+constexpr float kProjectedDepthScale = kTerrainStaticShadowDepthScale;
+constexpr float kProjectedDepthBias = kTerrainStaticShadowDepthBias;
 
 struct ScreenVertex {
 	float x = 0.0f;
@@ -277,7 +271,7 @@ uint8_t blend_fragment(uint8_t destination,
 
 bool validate(const TerrainStaticShadowRasterInput &input,
 		const TerrainStaticShadowAlphaPage &page) noexcept {
-	if (!page.is_valid() || !std::isfinite(input.receiver_depth)) return false;
+	if (!page.is_valid() || !std::isfinite(input.clear_depth)) return false;
 	if (page.width > std::numeric_limits<uint32_t>::max() / kTemporaryScale ||
 			page.height > std::numeric_limits<uint32_t>::max() / kTemporaryScale) {
 		return false;
@@ -422,9 +416,37 @@ bool prepare_triangle(const TerrainStaticShadowRasterTriangle &triangle,
 	return true;
 }
 
+// The temp's black-pixel bookkeeping: blocks of kBlock x kBlock pixels on a
+// grid aligned to the temp origin, each counting its non-black pixels. A block
+// row is exactly one row stripe (kBlock == kRowStripeRows), so only the lane
+// owning the stripe ever reads or writes its counts.
+constexpr int kBlock = 8;
+static_assert(kBlock == kRowStripeRows,
+		"a live-count block row must be exactly one lane's row stripe");
+
+struct LiveBlocks {
+	std::vector<uint8_t> counts;
+	uint32_t columns = 0;
+};
+
+// One lane's counts on a cache line of its own (the lanes bump them per
+// fragment), and its pixel loop's own wall time.
+struct alignas(64) LaneStats {
+	TerrainStaticShadowRasterStats counts;
+	uint64_t elapsed_us = 0;
+};
+
+using RasterClock = std::chrono::steady_clock;
+
+uint64_t microseconds_since(RasterClock::time_point started) noexcept {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			RasterClock::now() - started).count());
+}
+
 // The pixel loop of one prepared triangle over rows [row_begin, row_end).
 void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
-		uint32_t high_width, uint8_t *temporary, float *depth_buffer) noexcept {
+		uint32_t high_width, uint8_t *temporary, float *depth_buffer,
+		LiveBlocks &live, TerrainStaticShadowRasterStats &stats) noexcept {
 	const std::array<ScreenVertex, 3> &vertices = prepared.vertices;
 	const TerrainStaticShadowRasterTriangle &triangle = *prepared.source;
 	const float orientation = prepared.orientation;
@@ -433,11 +455,21 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 	const int x1 = prepared.x1;
 	const int y0 = std::max(prepared.y0, row_begin);
 	const int y1 = std::min(prepared.y1, row_end);
-	constexpr int kBlock = 8;
-	for (int block_y = y0; block_y < y1; block_y += kBlock) {
-	const int block_y_end = std::min(block_y + kBlock, y1);
-	for (int block_x = x0; block_x < x1; block_x += kBlock) {
-	const int block_x_end = std::min(block_x + kBlock, x1);
+	// The blocks walk the temp's grid (not the triangle's corner): which block
+	// a pixel falls in changes only which blocks the rejections can skip,
+	// never which pixels a triangle admits.
+	for (int block_row = y0 / kBlock; block_row * kBlock < y1; ++block_row) {
+	const int block_y = std::max(block_row * kBlock, y0);
+	const int block_y_end = std::min(block_row * kBlock + kBlock, y1);
+	for (int block_column = x0 / kBlock; block_column * kBlock < x1; ++block_column) {
+	const int block_x = std::max(block_column * kBlock, x0);
+	const int block_x_end = std::min(block_column * kBlock + kBlock, x1);
+	uint8_t &block_live = live.counts[static_cast<std::size_t>(block_row) * live.columns +
+			static_cast<std::size_t>(block_column)];
+	if (block_live == 0) {
+		++stats.absorbed_blocks;
+		continue;
+	}
 	if (edge_rejects_block(vertices[1], vertices[2], orientation,
 				block_x, block_x_end - 1, block_y, block_y_end - 1) ||
 			edge_rejects_block(vertices[2], vertices[0], orientation,
@@ -448,6 +480,13 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 	}
 	for (int y = block_y; y < block_y_end; ++y) {
 		for (int x = block_x; x < block_x_end; ++x) {
+			const std::size_t pixel =
+					static_cast<std::size_t>(y) * high_width + x;
+			uint8_t &destination = temporary[pixel];
+			if (destination == 0) {
+				++stats.absorbed_pixels;
+				continue;
+			}
 			const float sample_x = static_cast<float>(x);
 			const float sample_y = static_cast<float>(y);
 			const float e0 = edge(vertices[1], vertices[2],
@@ -466,8 +505,7 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 			const float w2 = e2 * inverse_area;
 			const float depth = vertices[0].depth * w0 +
 					vertices[1].depth * w1 + vertices[2].depth * w2;
-			const std::size_t pixel =
-					static_cast<std::size_t>(y) * high_width + x;
+			++stats.fragments;
 			// Every shipped PROJSHAD declaration has normal z mode. Retail
 			// therefore applies LESSEQUAL and writes depth even for alpha,
 			// additive, and multiplicative material-blend variants.
@@ -488,9 +526,9 @@ void raster_rows(const PreparedTriangle &prepared, int row_begin, int row_end,
 						triangle.alpha_test_inverted)) continue;
 			}
 			depth_buffer[pixel] = depth;
-			uint8_t &destination = temporary[pixel];
 			destination = blend_fragment(
 					destination, triangle.blend, source_alpha);
+			if (destination == 0) --block_live;
 		}
 	}
 	}
@@ -555,6 +593,7 @@ bool rasterize_terrain_static_shadow_alpha(
 		const TerrainStaticShadowRasterInput &input,
 		TerrainStaticShadowAlphaPage &page) noexcept {
 	if (!validate(input, page)) return false;
+	const RasterClock::time_point setup_started = RasterClock::now();
 	const uint32_t high_width = page.width * kTemporaryScale;
 	const uint32_t high_height = page.height * kTemporaryScale;
 	const std::size_t high_count =
@@ -562,22 +601,31 @@ bool rasterize_terrain_static_shadow_alpha(
 	std::vector<uint8_t> temporary;
 	std::vector<uint8_t> resolved;
 	std::vector<float> depth_buffer;
+	LiveBlocks live;
+	live.columns = (high_width + kBlock - 1) / kBlock;
+	const uint32_t block_rows = (high_height + kBlock - 1) / kBlock;
 	try {
 		temporary.resize(high_count);
 		resolved.resize(page.alpha.size());
-		depth_buffer.assign(high_count, input.receiver_depth);
+		depth_buffer.assign(high_count, input.clear_depth);
+		live.counts.assign(static_cast<std::size_t>(live.columns) * block_rows, 0);
 	} catch (const std::bad_alloc &) {
 		return false;
 	}
 
 	for (uint32_t y = 0; y < high_height; ++y) {
 		for (uint32_t x = 0; x < high_width; ++x) {
-			temporary[static_cast<std::size_t>(y) * high_width + x] =
-					page.alpha[static_cast<std::size_t>(y / kTemporaryScale) *
-							page.width + x / kTemporaryScale];
+			const uint8_t value = page.alpha[static_cast<std::size_t>(y / kTemporaryScale) *
+					page.width + x / kTemporaryScale];
+			temporary[static_cast<std::size_t>(y) * high_width + x] = value;
+			if (value != 0) {
+				++live.counts[static_cast<std::size_t>(y / kBlock) * live.columns + x / kBlock];
+			}
 		}
 	}
 
+	const uint64_t setup_us = microseconds_since(setup_started);
+	const RasterClock::time_point prepare_started = RasterClock::now();
 	// Every fan triangle, set up once in input order: lane k prepares the
 	// k-th contiguous run of the input, and the runs are walked in lane order.
 	const std::size_t lanes = input.triangles.size() >= kParallelMinimumTriangles
@@ -604,8 +652,8 @@ bool rasterize_terrain_static_shadow_alpha(
 				// (Sutherland-Hodgman, exactly the clipper's arithmetic).
 				// [orig: RenderSlot_SetupShadowCascadeMatrices_0 @0x58D5F8 (P[10] =
 				// 0.0005), @0x58D602 (P[14] = -0.00005), @0x58D60C (P[15] = 1);
-				// the temp RT clear depth 0.99995 @0x60D5BF places the far side
-				// likewise]
+				// the temp's depth clear 0.99995 (kTerrainStaticShadowTempClearDepth,
+				// @0x60D5BF) is the far side the casters' LESSEQUAL test admits]
 				std::array<TerrainStaticShadowRasterVertex, kClippedPolygonMax> clipped;
 				const std::size_t clipped_count = clip_near_plane(
 						triangle.vertices, clipped);
@@ -626,19 +674,27 @@ bool rasterize_terrain_static_shadow_alpha(
 		return false;
 	}
 
+	const uint64_t prepare_us = microseconds_since(prepare_started);
+	const RasterClock::time_point pixel_started = RasterClock::now();
 	// Each pixel's fragments arrive in triangle order however the rows are
 	// split, so the stripes below produce the serial loop's bytes exactly.
+	std::vector<LaneStats> lane_stats(lanes);
 	run_row_stripe_lanes(lanes, [&](std::size_t lane) noexcept {
+		const RasterClock::time_point lane_started = RasterClock::now();
+		TerrainStaticShadowRasterStats &stats = lane_stats[lane].counts;
 		for (const std::vector<PreparedTriangle> &prepared : runs) {
 			for (const PreparedTriangle &triangle : prepared) {
 				for_lane_stripes(lane, lanes, triangle.y0, triangle.y1,
 						[&](int row_begin, int row_end) {
 							raster_rows(triangle, row_begin, row_end, high_width,
-									temporary.data(), depth_buffer.data());
+									temporary.data(), depth_buffer.data(), live, stats);
 						});
 			}
 		}
+		lane_stats[lane].elapsed_us = microseconds_since(lane_started);
 	});
+	const uint64_t pixel_us = microseconds_since(pixel_started);
+	const RasterClock::time_point resolve_started = RasterClock::now();
 
 	for (uint32_t y = 0; y < page.height; ++y) {
 		for (uint32_t x = 0; x < page.width; ++x) {
@@ -655,6 +711,20 @@ bool rasterize_terrain_static_shadow_alpha(
 		}
 	}
 	page.alpha.swap(resolved);
+	if (input.stats != nullptr) {
+		for (const LaneStats &lane : lane_stats) {
+			input.stats->fragments += lane.counts.fragments;
+			input.stats->absorbed_blocks += lane.counts.absorbed_blocks;
+			input.stats->absorbed_pixels += lane.counts.absorbed_pixels;
+			input.stats->pixel_lane_sum_us += lane.elapsed_us;
+			input.stats->pixel_lane_max_us = std::max(input.stats->pixel_lane_max_us,
+					lane.elapsed_us);
+		}
+		input.stats->setup_us += setup_us;
+		input.stats->prepare_us += prepare_us;
+		input.stats->pixel_us += pixel_us;
+		input.stats->resolve_us += microseconds_since(resolve_started);
+	}
 	return true;
 }
 

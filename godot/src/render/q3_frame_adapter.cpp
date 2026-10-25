@@ -890,7 +890,7 @@ RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
 	attachments.push_back(attachment);
 	color_blend->set_attachments(attachments);
-	RID pipeline = rd->render_pipeline_create(shader, p_framebuffer_format,
+	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
 			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
 			multisample, depth, color_blend);
 	if (!pipeline.is_valid())
@@ -1213,7 +1213,8 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	// the Inset's twins never reach it.
 	constexpr std::uint32_t kObjectPassLayers = visual_layers::WORLD |
 			visual_layers::WORLD_NO_MIRROR | visual_layers::MAIN_VIEW |
-			visual_layers::MAIN_VIEW_NO_MIRROR | visual_layers::VIEWMODEL;
+			visual_layers::MAIN_VIEW_NO_MIRROR | visual_layers::SCENE_VIEW_NO_REFLECTION |
+			visual_layers::MAIN_VIEW_NO_REFLECTION | visual_layers::VIEWMODEL;
 	std::vector<Transform3D> &emitted_transforms = impl_->emitted_transforms;
 	const std::vector<Q3SourceRecord *> &live = Q3SourceRegistry::live_records();
 	for (std::size_t index = 0; index < live.size(); ++index) {
@@ -1442,6 +1443,10 @@ bool Q3FrameAdapter::draw_view(RenderingDevice *p_rd, RenderData *p_render_data,
 		std::size_t &r_draw_calls) {
 	return impl_ && impl_->initialize(p_rd) && impl_->draw(p_render_data, p_view,
 			p_framebuffer, r_draw_calls);
+}
+
+bool Q3FrameAdapter::create_device(RenderingDevice *p_rd) {
+	return impl_ && impl_->initialize(p_rd);
 }
 
 void Q3FrameAdapter::release_device(RenderingDevice *p_rd) {

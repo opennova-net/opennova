@@ -4,10 +4,13 @@
 // See joiner_role.h for the ownership split; every phase keeps its witnesses.
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/spectator_session.h>
+#include <runtime/inmatch/admin_console.h> // apply_rules_word (the mission data's rules word)
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_weapon_replay.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/mission_exit.h> // kMissionExitQuit (input action 3)
+#include <runtime/inmatch/napi_np_protocol.h> // stop / receive / pump_unstopped_server (the held server)
 
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/inmatch/charattr_table.h>
@@ -18,8 +21,14 @@
 
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
+#include <net/npwire/ingame_message_id.h> // s2c::FULL_ENTITY_SPAWN (a 0x18 row's def load)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
 #include <net/title/title_identity.h>    // TitleIdentity::game_id (the rules' title)
+#include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
+#include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report, process_gate_memory
+
+#include <base/gameprofile/gameprofile.h> // the title's version text (the join's PING)
+#include <base/vfs/vfs.h>                 // vfs_country_code (the join's PING's CC.BIN)
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
 #include <base/io/perf_clock.h>          // perf_now_us (the frame's phase clocks)
@@ -27,10 +36,11 @@
 
 #include <runtime/mission/collision_resolve.h> // find_item_def (a rider's authored hp)
 #include <runtime/mission/seat_spec_extract.h> // refresh_item_seat_spec (a streamed row's seats)
-#include <runtime/wac/remote_command.h>        // run_remote_command (the S2C 0x23 handler body)
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>   // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <runtime/world/geom.h>
+#include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the 0x5A name list)
+#include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row), the replica re-pick
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
@@ -67,11 +77,16 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	server_password_ = server_password;
 	join_password_ = join_password;
 	runtime = std::make_unique<ClientRuntime>(player_name);
+	runtime->set_input_event_queue(&input_events_); // its console's records
 	runtime->set_profile(kernel_ != nullptr ? &kernel_->profile : nullptr);
+	// A submission with no kit seam resolves the fresh profile's page through the
+	// kernel's weapon table (JoinerConnection::set_weapon_table).
+	runtime->set_weapon_table(kernel_ != nullptr ? &kernel_->world.tables.weapons : nullptr);
 	runtime->set_join_request(join_role, spectator_password, server_password, join_password);
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
 	runtime->set_title(title_);
+	runtime->use_process_state(client_process_);
 	return *runtime;
 }
 
@@ -80,6 +95,7 @@ void JoinerRole::bind(mission::MissionKernel &kernel) {
 	// rebind); only the new one is touched.
 	Role::bind(kernel);
 	if (runtime) runtime->set_profile(&kernel.profile);
+	if (runtime) runtime->set_weapon_table(&kernel.world.tables.weapons);
 	// The +368 readers (the vehicle sound and part-spin gates) resolve remote
 	// claimants through this role's decoded state.
 	kernel.world.vehicles.occupancy_source = this;
@@ -98,13 +114,58 @@ bool JoinerRole::bring_up() {
 		create_runtime(player_name_, join_role_, spectator_password_, server_password_, join_password_);
 		reset_for_runtime_rebuild();
 	}
-	runtime->set_world_ready(true);
-	runtime->view().begin_mission();
-	reset_for_load(runtime->deployment_release_revision());
+	// The round-over gate is lowered only at the mission start's head, which the runtime
+	// folds at the mission data's pass (ClientRuntime's mission_started), never at the load
+	// (V-L2-s8) [orig: Game_StartMission @0x524360 - `mov g_RoundOver, ebx` @0x524A1F].
+	reset_for_load();
+	stamp_mission_rules();
+	mirror_session_zoom_rule(); // the load's fresh world, ahead of its fill
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
+	// The process's spawn buffer, which no start clears (world::SpawnLoadoutBuffer)
+	// [orig: g_SpawnLoadoutBuffer @0x24D4E00].
+	kernel_->local.loadout.process_buffer =
+			client_process_ != nullptr ? &client_process_->spawn_loadout_buffer : nullptr;
 	return rebuild;
 }
 
+
+// The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags @0x24D1E34),
+// whose one session writer on a joiner is the mission data's copy: the world takes it at the
+// copy and at the mission start's load (a fresh world), never per frame, so an admin SET of the
+// word holds until the next copy (its 0x10000 bit gates the scope-zero -1 floor in session, its
+// 0x200 the friendly fire, its bit 0 the round spawn's tracers, its 0x8000 the claymore sweep:
+// apply_rules_word).
+// [orig: NapiNPClientMsg_HandleMissionDataChunk @0x432410 - the block's memcpy into unk_24D1E08
+//  @0x432470 (g_RulesFlags at +44); the other writer CAdminServer_HandleSetCommand @0x405A60
+//  (@0x405C80..0x40618A); Player_AdjustWeaponZoomLevel @0x4DBCC0 (@0x4DBD0C..0x4DBD2E);
+//  RoundData_SpawnRound @0x4EC0D0 (@0x4EC72F / @0x4EC79D, NoTracers, bit 0)]
+void JoinerRole::stamp_mission_rules() {
+	if (!kernel_ || !runtime) return;
+	apply_rules_word(kernel_->world, runtime->view().mp_attributes());
+	mp_attributes_revision_seen_ = runtime->mp_attributes_revision();
+}
+
+// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16, a session byte the
+// handler stores at its receive. Each mission start's player sync carries the 0x08 (ahead of
+// the S2C 0x11 and the 0x1A), so the load's Player_InitPlayer fills the slots from it, as each
+// S2C 0x5A rebuild does: in a session on a peer WeaponSlot_InitFromDef reads that byte. Ours
+// folds the dword into the client state and mirrors the byte onto the world's rules after each
+// fold (the preload's passes, the head of the net frame's after-receive leg, ahead of its kit
+// apply) and onto the load's fresh world (bring_up), ahead of its fill (L2-s36 FOUND).
+// [orig: NapiNPClientMsg_HandleSessionConfig @0x4281D0 - the bit-16 store @0x42837A..0x428392;
+//  Server_SendPlayerSlotStateFrame @0x51BBA0 - ServerConfig_SerializeToPacket called @0x51BF95;
+//  Game_StartMission @0x524360 - NapiClient_SendPlayerSyncAndWaitForSyncTail @0x524DAB,
+//  NapiClient_WaitForGameStart @0x524E29, Player_InitPlayer @0x525BBC; Player_InitPlayer
+//  @0x4E15F0 - WeaponSlotTable_LoadAllFromDefs @0x4E1920; NapiNPClientMsg_HandleWeaponLoadoutSync
+//  @0x4290E0 - WeaponSlotTable_LoadAllFromDefs @0x4294FA; WeaponSlotTable_LoadAllFromDefs
+//  @0x5414E0 - WeaponSlot_InitFromDef @0x5415E4; WeaponSlot_InitFromDef @0x53EE70 -
+//  @0x53EF07..0x53EF17]
+void JoinerRole::mirror_session_zoom_rule() {
+	if (!kernel_ || !runtime) return;
+	world::World &world = kernel_->world;
+	world.rules.allow_sniper_scope_zoom = (runtime->state().session_rules_flags & 0x10000u) != 0;
+	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
+}
 
 // --- the role's own legs ---------------------------------------------------
 
@@ -119,58 +180,122 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 	socket_->send_to(host_addr_, dg.data(), dg.size());
 }
 
-// The install: node = inet_addr(NI) / atol(NP), cookie = atol(BK), relay =
-// inet_addr(NK host) / the NK port. A dotted quad that does not parse is
-// retail's INADDR_NONE (0) and leaves the proxy disabled.
-// [orig: CNapiGameSession_InitTransportConnection @0x4ca051..0x4ca0c7]
-void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
-	ProxyRendezvousConfig proxy;
-	proxy.node_addr = proxy_inet_addr(options.proxy_node_ip);
-	proxy.node_port = options.proxy_node_port;
-	proxy.cookie = options.proxy_cookie;
-	proxy.relay_addr = proxy_inet_addr(options.proxy_relay_ip);
-	proxy.relay_port = options.proxy_relay_port;
-	set_join_proxy(proxy);
+// The mission start's end once the S2C 0x1A released it: its pumps' datagrams, the two
+// 0x2F and the 0x0B in one packet or two by the send-holdoff countdown
+// (ClientRuntime::push_mission_start_end). The final wait's first pass follows the push's
+// send in the same call, no frame between (D-NET-NEW-L2-35): its manager receive reads the
+// socket, its client receive runs the handlers over what came during the load, and its send
+// ships what the push's countdown held (the busy spin's passes count it out at once). The
+// wait's later passes are the frames' (run_tick), until the S2C 0x0F: a pass that leaves the
+// role inside the wait is the wait's, as run_tick latches it, so the first tick after the push
+// whose receive takes the 0x0F ends the Game Loop mode's initialize (take_final_wait_end;
+// D-NET-NEW-L2-51).
+// [orig: Game_StartMission @0x524360 - @0x5258a2, the send @0x526255, Game_PumpWindowMessages
+//  @0x52625A, Input_ResetKeyQueue @0x526288, the wait's first pass:
+//  CNapiNetwork_PumpManagerReceive @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE,
+//  CNapiNetwork_PumpClientProtocolSend @0x5262DA, the exit test @0x5262DF; GameLoop_Init
+//  @0x526370 (the call @0x526377)]
+void JoinerRole::push_mission_start_end(const std::function<void()> &present) {
+	if (!runtime) return;
+	// The role's legs at their points in the push (D-NET-NEW-L2-52): L's birth where
+	// Player_InitPlayer binds and inits the local entity, the null-tested block past the second
+	// 0x2F's queue, and the Attack & Defend latch on L as they left it, ahead of the 0x0B's
+	// queue. Retail's joiner latches there, after Player_InitPlayer and the receive drain.
+	// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC, the receive drain
+	//  @0x525BD9, the second 0x2F @0x525C2E, Entity_BuildAllProximityLists @0x525C90,
+	//  Game_LatchAttackDefendRole @0x5260C1, the 0x0B @0x52624B]
+	ClientRuntime::MissionStartEndLegs legs;
+	static_cast<ClientRuntime::MissionStartPumpLegs &>(legs) = mission_start_pump_legs();
+	legs.init_player = [this] {
+		init_local_player_at_mission_start();
+		// L, the receive handlers' local player from here on (the receive past the init reads
+		// its Position).
+		runtime->set_local_player_position(kernel_->world);
+	};
+	legs.start_block = [this] { run_mission_start_local_block(); };
+	legs.present = present;
+	legs.latch = [this] { kernel_->local.latch_attack_defend_role(runtime->game_type()); };
+	for (const std::vector<uint8_t> &dg : runtime->push_mission_start_end(legs)) send(dg);
+	if (!runtime->in_final_wait()) return;
+	deposit_inbound();
+	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_)) send(dg);
+	final_wait_seen_ = runtime->in_final_wait();
 }
 
-void JoinerRole::set_join_proxy(const ProxyRendezvousConfig &proxy) {
-	proxy_ = proxy;
-	// PeerAddr packs octets exactly like the inet_addr dword (first octet in the
-	// low byte), so the node address is the same word.
-	proxy_node_addr_ = PeerAddr{};
-	proxy_node_addr_.ip = proxy_.node_addr;
-	proxy_node_addr_.port = static_cast<uint16_t>(proxy_.node_port & 0xFFFFu);
-	proxy_last_send_ms_ = 0;
+// The game-start wait's pass, and when its receive took the S2C 0x1A the mission start's call
+// in the same call: the load, the settle, the push and the final wait's first pass (joiner_role.h
+// carries the witness).
+// [orig: NapiClient_WaitForGameStart @0x42CC10 - the receive @0x42CC88, the send @0x42CC92, the
+//  flag test @0x42CCB9..0x42CCBF, the return @0x42CCC1; Game_StartMission @0x524360 - the call
+//  @0x524E29, @0x524E54..0x524E63, the send @0x526255]
+JoinerRole::MissionStartPass JoinerRole::poll_mission_start(const MissionStartLegs &legs) {
+	if (!runtime) return MissionStartPass::Stopped;
+	if (!runtime->mission_start_released()) {
+		poll_preload();
+		if (legs.after_pass && !legs.after_pass()) return MissionStartPass::Stopped;
+		if (!runtime->mission_start_released()) return MissionStartPass::Waiting;
+	}
+	if (!legs.load || !legs.load()) return MissionStartPass::Stopped;
+	if (legs.settle && !legs.settle()) return MissionStartPass::Stopped;
+	push_mission_start_end(legs.present);
+	return MissionStartPass::Started;
 }
 
-// The enumerator pump's rendezvous leg: while the announce is outstanding (the
-// hello not yet answered) and every proxy field is installed, one 48-byte
-// datagram goes to the game node on the 3000 ms announce interval, ahead of
-// the announce itself. The first pump sends at once (no last-send tick); the
-// enumerator stops once a session answered, so a later phase sends nothing.
-// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 — the interval
-//  @0x6290ed (3000 for a dialing host), the `!last_send || elapsed > interval`
-//  arm @0x629119, the all-six gate ending @0x62914f, then
-//  CNapiNPConnection_SendPingPacket @0x61F8C0 (the call @0x629159), then
-//  NapiNPSession_SendAnnouncePacket @0x61FA00 (the call @0x629170); the
-//  enumerator's active flag enum_info+44 is read as "the hello is still being
-//  announced" here]
-void JoinerRole::pump_proxy_rendezvous() {
-	if (socket_ == nullptr || !runtime || !proxy_.enabled()) return;
-	if (started_ && runtime->phase() != JoinerConnection::Phase::Hello) return;
-	const uint64_t now_ms = io::perf_now_us() / 1000u;
-	if (proxy_last_send_ms_ != 0 &&
-			now_ms - proxy_last_send_ms_ <= kProxyRendezvousIntervalMs)
+// The load's first leg (ClientRuntime::push_mission_start_first_loadout) [orig:
+// Game_StartMission @0x524360 - the first 0x2F @0x525836, the pumps @0x5258a2..@0x525a61].
+void JoinerRole::push_mission_start_first_loadout() {
+	if (!runtime) return;
+	for (const std::vector<uint8_t> &dg :
+			runtime->push_mission_start_first_loadout(mission_start_pump_legs()))
+		send(dg);
+}
+
+// The load's legs at its network points (ClientRuntime::MissionStartPumpLegs carries the
+// witness, D-NET-NEW-L2-54): a NovaWorld join's periodic updates read the socket, a LAN join's
+// read nothing; every receive runs the handlers' writes on L as it stands ahead of it.
+ClientRuntime::MissionStartPumpLegs JoinerRole::mission_start_pump_legs() {
+	ClientRuntime::MissionStartPumpLegs legs;
+	if (join_novaworld_) legs.periodic_deposit = [this] { deposit_inbound(); };
+	legs.after_receive = [this] { apply_receive_writes(); };
+	return legs;
+}
+
+// The embedder's loading step: the update's manager receive (its answers leave from inside it),
+// then the NovaWorld session's own half (ClientProcessState::nwu_periodic_update carries the
+// witness, D-NET-NEW-L9-25) [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 -
+// NapiNPManager_Pump(flags 4) @0x4D441F ahead of NapiNPProtocol_Pump(-1) @0x4D442E].
+void JoinerRole::pump_mission_start_periodic_update() {
+	if (!runtime || !join_novaworld_ || !runtime->declared_load_running()) return;
+	deposit_inbound();
+	for (const std::vector<uint8_t> &dg : runtime->pump_mission_start_manager_receive()) send(dg);
+	if (client_process_ != nullptr && client_process_->nwu_periodic_update)
+		client_process_->nwu_periodic_update();
+}
+
+void run_loading_step(JoinerRole *joiner, const ClientProcessState &process) {
+	if (joiner != nullptr) {
+		joiner->pump_mission_start_periodic_update();
 		return;
-	proxy_last_send_ms_ = now_ms == 0 ? 1 : now_ms;
-	const std::array<uint8_t, kProxyRendezvousDatagramSize> packet =
-			build_proxy_rendezvous_datagram(proxy_);
-	socket_->send_to(proxy_node_addr_, packet.data(), packet.size());
+	}
+	if (process.nwu_periodic_update) process.nwu_periodic_update();
 }
 
 // Drain every datagram pending on the socket into the runtime's recv fold
 // (the witnessed poll-before-logic order [orig: Game_ProcessMainFrame
-// @0x5263f0]).
+// @0x5263f0]). A held node's joiner's datagram (a server an earlier error-arm exit left
+// unstopped, ClientProcessState::unstopped_server) goes to that node's socket leg: every socket
+// of the process reads into the one manager, whose opcode dispatch finds the node by the
+// source, whatever the pump's flags; its queued 0x43s and 0x46s wait for a Pump(-1): the joined
+// match's receive pump runs flags 0x1A and its send pump 0x2E2, neither with bit 0, so the
+// server-opcode queue stays unread until the next browse or join attempt. A resend list's
+// outgoing link flag reaches the process's indicators (D-NET-NEW-L1-26;
+// receive_unstopped_server carries the witness).
+// [orig: NapiNPManager_HandlePacket @0x622F10 - DispatchOpcode called @0x622F96;
+//  NapiNPProtocol_HandleSessionPacket @0x626A00 - the type-1 arm's FindConnection(1, sender)
+//  called @0x626AC5, the queue store @0x626C8C (pool_client, +0x22C);
+//  CNapiNetwork_PumpClientProtocolRecv @0x4C4FE0 - `push 1Ah` @0x4C4FEB;
+//  CNapiNetwork_PumpClientProtocolSend @0x4C5000 - `push 2E2h` @0x4C500B;
+//  NapiNPProtocol_PumpRecvQueues @0x6266A0 - the bit-0 test @0x6266C5 ahead of the +0x22C read]
 void JoinerRole::deposit_inbound() {
 	if (socket_ == nullptr || !runtime) return;
 	uint8_t buf[4096];
@@ -178,17 +303,71 @@ void JoinerRole::deposit_inbound() {
 		PeerAddr from{};
 		const int n = socket_->recv_from(buf, sizeof(buf), from);
 		if (n <= 0) break;
+		if (client_process_ != nullptr && !(from == host_addr_)) {
+			const UnstoppedReceive held = receive_unstopped_server(
+					client_process_->unstopped_server, server_logs_, *socket_, from, buf,
+					static_cast<std::size_t>(n), static_cast<uint32_t>(runtime->join_clock_ms()));
+			if (held.net_quality_link_errors != 0)
+				runtime->raise_net_quality_link_errors(held.net_quality_link_errors);
+			if (held.taken) continue;
+		}
 		runtime->receive(buf, static_cast<std::size_t>(n));
 	}
 }
 
 void JoinerRole::poll_preload() {
 	if (!runtime) return;
-	pump_proxy_rendezvous();
-	send_hello_once();
+	// The join's own connection exists from the attempt's start, ahead of its first receive;
+	// its first send (the enumerate's 0x41, or the join's request) leaves from its own pump legs,
+	// behind the held nodes'.
+	// [orig: CNapiGameSession_InitTransportConnection @0x4C9E10 - CreateServerConnection called
+	//  @0x4C9E16, the enumerator's NapiTimer_Start @0x4CA127, NapiNPManager_Pump @0x4CA139, then
+	//  NapiNPProtocol_Pump(-1) @0x4CA14B]
+	std::vector<uint8_t> first_send;
+	if (!started_) {
+		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26;
+		// release_unstopped_own_client carries the witness).
+		if (client_process_ != nullptr)
+			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
+					&client_process_->disconnect_latch);
+		first_send = runtime->start();
+		started_ = true;
+	}
 	deposit_inbound();
-	for (const std::vector<uint8_t> &dg : runtime->Client_ProcessNetworkFrame(now_tick_))
-		send(dg);
+	// A join attempt's protocol pump is Pump(-1), the enumerate-and-join's loop (the Hello
+	// phase) and the connect's (the Auth phase, through the pass whose receive takes the
+	// ServerAuth): after its receive it walks the protocol's connections in list order, the
+	// held server's nodes ahead of the join's own, so they take PumpFlags' legs over the join's
+	// socket first; the pumps after the connect run the client's flags, which no type-1 node
+	// passes (D-NET-NEW-L1-26; pump_unstopped_server carries the legs' witness).
+	// [orig: UI_EnumerateAndJoinSession @0x569F50 - CNapiNetwork_PumpTransportAndProtocol called
+	//  @0x56A0D5; UI_JoinSelectedSession - CNapiNetwork_PumpAndCheckState called @0x569E60 /
+	//  @0x569E96; CNapiNetwork_PumpAndCheckState @0x4C6E80 - NapiNPProtocol_Pump(-1) called
+	//  @0x4C6EA2; CNapiNPConnection_Create - the tail link @0x62B17D..0x62B18A]
+	if (client_process_ != nullptr && socket_ != nullptr &&
+			(runtime->phase() == JoinerConnection::Phase::Hello ||
+			 runtime->phase() == JoinerConnection::Phase::Auth)) {
+		const uint32_t link_errors = pump_unstopped_server(client_process_->unstopped_server,
+				server_logs_, *socket_, static_cast<uint32_t>(runtime->join_clock_ms()));
+		if (link_errors != 0) runtime->raise_net_quality_link_errors(link_errors);
+	}
+	if (!first_send.empty()) send(first_send);
+	const std::vector<std::vector<uint8_t>> frame = runtime->Client_ProcessNetworkFrame(now_tick_);
+	mirror_session_zoom_rule(); // the player sync's S2C 0x08 lands in these passes
+	// The join's connect succeeded: a NovaWorld join sends PING to the gate's metrics address
+	// over the join's socket ahead of the JOIN (D-NET-NEW-L9-22).
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
+	//  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN's queue @0x56A53F]
+	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
+			title_ != nullptr) {
+		GateMetricsHost host;
+		host.version = gameprofile::gameprofile_by_id(title_->game_id)->version_text;
+		read_gate_metrics_locale(host.locale);
+		send_join_gate_ping_report(*socket_, static_cast<uint32_t>(runtime->join_clock_ms()),
+				process_gate_memory(), process_gate_ping_manager(), std::move(host),
+				vfs_country_code(runtime->expansion_version_root()));
+	}
+	for (const std::vector<uint8_t> &dg : frame) send(dg);
 	++now_tick_;
 }
 
@@ -245,7 +424,11 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 			: nullptr;
 	if (item == nullptr) return result;
 	result.health = result.max_health = item->hp;
-	if (rider->cls == EntityClass::Player && rider->net_has_compact) {
+	// A rider the 0x13 killed holds Health 0 ahead of its next record, as the
+	// powerup picker reads it [orig: Entity_KillBySlotId Health = 0 @0x42BD33].
+	if (rider->net_health_zero) {
+		result.health = 0;
+	} else if (rider->cls == EntityClass::Player && rider->net_has_compact) {
 		// The compact's health/class byte reconstructs a tier midpoint, not
 		// an exact health fraction (replication::replica_tier_health).
 		result.health = replication::replica_tier_health(rider->health_class_byte, item->hp);
@@ -306,8 +489,7 @@ bool JoinerRole::remote_claimant(const world::Entity &carrier, world::Entity &ou
 	out = world::Entity{};
 	out.handle = world::EntityHandle{rider->handle};
 	out.item_id = rider->type_id;
-	out.position = {opennova::io::fp16_16_to_float(rider->x),
-			opennova::io::fp16_16_to_float(rider->y), opennova::io::fp16_16_to_float(rider->z)};
+	out.position.set_q16({rider->x, rider->y, rider->z}); // the replica's words (D-NET-507)
 	out.team = rider->team_known ? rider->team : 0;
 	out.flags = rider->state_flags;
 	if (rider->cls == EntityClass::Player) {
@@ -344,26 +526,63 @@ void JoinerRole::collect_hostile_mounts(const world::Entity &requester,
 bool JoinerRole::queue_mount_toggle() {
 	if (!kernel_ || !runtime) return false;
 	world::World &world = kernel_->world;
+	// The USE readout's scan record (an instrument, no behaviour: world/use_press_trace.h).
+	using Outcome = world::UseToggleOutcome;
+	world::UsePressRecord trace = kernel_->local.use_press_record(world::UsePressEvent::kToggleScan);
+	const auto note = [this, &trace](Outcome outcome, bool queued) {
+		trace.outcome = outcome;
+		kernel_->local.use_trace.append(trace);
+		return queued;
+	};
+	// No dead test: the USE press's dispatcher dropped a dead player's
+	// (LocalPlayer::take_use_item_press) [orig: Entity_ToggleVehicleMount @0x436950].
 	const world::Entity *player = kernel_->local.player();
-	if (player == nullptr || !player->alive || player->health <= 0) return false;
+	if (player == nullptr) return note(Outcome::kNoPlayer, false);
 	if (player->mounted && world.script.wac_values.seatbelt != 0)
-		return false;
+		return note(Outcome::kSeatbelt, false);
 	world::VehicleSeatSelection hit;
 	// Mounted Use first scans for an alternative seat, then falls back to
 	// detach. Both relations wait for the host echo; only the attach request's
 	// yaw leg edits L here. [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
-	if (!world.vehicles.find_mount_toggle_candidate(*player, hit, this))
-		return player->mounted &&
-				runtime->queue_vehicle_detach(player->mount_target.packed);
+	// A watched entity takes the gate the scan stopped it at (the readout's scan watch).
+	trace.scan.entity = trace.watch;
+	// The watched entity's seat source: its type's row in the installed table and whether
+	// the materializer owns the registry row (the readout's scan watch).
+	if (const world::Entity *watched = trace.watch != 0xFFFFu
+					? world.registry.get(world::EntityHandle{trace.watch})
+					: nullptr) {
+		trace.scan.type_id = static_cast<uint16_t>(watched->item_id);
+		trace.scan.spec_rows = static_cast<int16_t>(
+				std::min<size_t>(kernel_->seat_specs.size(), 0x7FFF));
+		const mission::ItemSeatSpec *spec =
+				mission::item_seat_spec_for_type(kernel_->seat_specs, trace.scan.type_id);
+		trace.scan.spec_seats = spec != nullptr
+				? static_cast<int8_t>(std::min<size_t>(spec->seats.size(), 127))
+				: int8_t{-1};
+		trace.scan.owned = materializer_.owned(world, watched->handle) == watched ? 1 : 0;
+	}
+	trace.candidate = world.vehicles.find_mount_toggle_candidate(
+			*player, hit, this, trace.watch != 0xFFFFu ? &trace.scan : nullptr);
+	if (!trace.candidate) {
+		if (!player->mounted) return note(Outcome::kNoCandidate, false);
+		const bool detach = runtime->queue_vehicle_detach(player->mount_target.packed);
+		return note(detach ? Outcome::kDetachQueued : Outcome::kDetachRefused, detach);
+	}
+	trace.vehicle = hit.vehicle.packed;
+	trace.seat_index = static_cast<int16_t>(hit.seat_index);
 	const world::Entity *vehicle = world.registry.get(hit.vehicle);
 	if (vehicle == nullptr || hit.seat_index < 0 ||
-			hit.seat_index >= static_cast<int>(vehicle->seats.size())) return false;
+			hit.seat_index >= static_cast<int>(vehicle->seats.size()))
+		return note(Outcome::kBadSeat, false);
 	const uint8_t bone = vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index;
+	trace.bone = bone;
 	// The request turns L to the seat before it queues the 0x26; the host's
 	// confirm writes no yaw. [orig: Entity_RequestVehicleAttach @0x43655F..0x4365CE
 	//  ahead of the queue @0x436602]
 	world.vehicles.request_attach_heading(player->handle, hit);
-	return runtime->queue_vehicle_attach(hit.vehicle.packed, bone);
+	trace.attach_sent_before = runtime->attach_requests_sent();
+	const bool attach = runtime->queue_vehicle_attach(hit.vehicle.packed, bone);
+	return note(attach ? Outcome::kAttachQueued : Outcome::kAttachRefused, attach);
 }
 
 // [orig: Entity_FindAvailableSeat @0x436790 -> Entity_RequestVehicleAttach @0x436602]
@@ -382,7 +601,18 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
-bool JoinerRole::request_stance(int stance) {
+void JoinerRole::flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount at,
+		std::size_t occurrence) {
+	// [orig: Player_MountWeaponSlot @0x4DFA40 - CNapiNetwork_QueueReliableMessage(0x1D)
+	//  @0x4DFC30, inside its message's handler; ClientRuntime carries the order]
+	if (kernel_ == nullptr) return;
+	std::vector<uint16_t> &requests = kernel_->world.out.stance_requests;
+	for (const uint16_t action_id : requests)
+		if (runtime) (void)runtime->queue_receive_mount_stance_change(at, occurrence, action_id);
+	requests.clear();
+}
+
+bool JoinerRole::send_stance_request(int stance) {
 	if (!kernel_ || stance < 0 || stance > 2) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
 	return queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);
@@ -396,15 +626,8 @@ bool JoinerRole::request_stance(int stance) {
 void JoinerRole::resolve_row_adm_ids() {
 	mission::MissionKernel &kernel = *kernel_;
 	if (!runtime) return;
-	const bool rearm = infantry_adm_revision_seen_ != kernel.infantry_adm_revision();
+	rearm_row_adm_ids();
 	for (replication::ClientEntityState &es : runtime->state().entities) {
-		if (rearm) {
-			es.rm_adm_id = -2;
-			es.rm_state = -1;
-			es.rm_leg_seeded = false;
-			es.wpn_state = es.wpn_playing = -1;
-			es.wpn_deferred = 0;
-		}
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
 		if (es.type_id == 0) continue;
@@ -412,11 +635,75 @@ void JoinerRole::resolve_row_adm_ids() {
 		if (adm_id < -1) continue; // the sources are not armed yet: leave the row pending
 		es.rm_adm_id = static_cast<int16_t>(adm_id);
 	}
-	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
+	// The rows serve their channels from the ring heads the World's bodies use (D-NET-196),
+	// and the walk parks the rows past the own body's slot for the World's entity pass
+	// (pump: tick_remote_motion_after_self).
+	runtime->view().set_anim_variant_rings(&kernel.world.ai.anim_rings);
+	runtime->view().set_self_body_split(true);
+	// The pool-1 rows take their visits at their own slots of the World's pool-1 walk
+	// (pump: World::pool1_slot_leg, D-NET-196).
+	runtime->view().set_pool1_interleave(true);
 	// The rows' secondary selection reads the held record's hold kind.
 	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
+}
+
+void JoinerRole::rearm_row_adm_ids() {
+	mission::MissionKernel &kernel = *kernel_;
+	if (infantry_adm_revision_seen_ == kernel.infantry_adm_revision()) return;
+	for (replication::ClientEntityState &es : runtime->state().entities) {
+		es.rm_adm_id = -2;
+		es.rm_state = -1;
+		es.wpn_state = es.wpn_playing = -1;
+		es.wpn_deferred = 0;
+	}
+	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
+}
+
+// The mission start's model reload walks pool 0 last: a slot with a row takes it again, a
+// player's (Flags 0x100) at its class's camouflage item for the climate, and a row naming an
+// animDef loads that .adm and registers the body; the pool-1 and pool-2 legs load models alone.
+// A joiner's pool 0 is its replica's person rows, which its stream's spawn records built ahead
+// of the reload (replica_pool0_bodies), so their channels are stamped here, in the load, and
+// the frame's row pass (resolve_row_adm_ids) leaves a stamped row as it stands (D-NET-NEW-L2-56).
+// A player row (the client's own included: retail's L is its pool-0 slot) takes the camouflage
+// row here, as the reload stores it, so the first record's pre-apply check and L's birth read
+// that row, not the record's type (D-NET-NEW-L2-57). A climate past the three the format names
+// reads a stale word there in retail (no stock mission); ours takes the desert row (PERMANENT,
+// D-NET-NEW-L2-58).
+// [orig: Game_StartMission @0x524360 - Game_ReloadEntityModelsAndCallbacks called @0x52550E,
+//  ahead of Entity_InitAllFromModels called @0x52567F; Game_ReloadEntityModelsAndCallbacks
+//  @0x522830 - the pool-1 leg's load @0x5229B8, the pool-2 leg's @0x522B16, the pool-0 walk
+//  @0x522C0C..0x522C33, the Flags 0x100 test @0x522C52 (its jz @0x522C59), the class word +0x294
+//  and the climate's property @0x522C5B..0x522C90 (the stale word's jnz @0x522C6D),
+//  CharAttr_GetCammoTypeId called @0x522C91, ItemList_FindIndexByTypeId called @0x522CA2, the
+//  index store `mov [esi+1Ch], eax` @0x522CAA, the def store @0x522CC6, the animDef test
+//  @0x522D07, AnimMap_LoadAdmFile called @0x522D14, AnimMap_RegisterEntity called @0x522D38]
+void JoinerRole::reload_pool0_row_channels() {
+	if (kernel_ == nullptr || !runtime) return;
+	mission::MissionKernel &kernel = *kernel_;
+	const world::World &w = kernel.world;
+	rearm_row_adm_ids();
+	for (replication::ClientEntityState &es : runtime->state().entities) {
+		if ((es.handle >> 12) != 0 || es.type_id == 0) continue;
+		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
+		if ((es.rm_entity_flags & world::kEntityFlagPlayer) != 0u && !w.tables.item_rows.empty() &&
+				w.tables.class_cammo_installed) {
+			// The class word as the stream left it: a compact's class nibble, else the spawn's.
+			const uint8_t player_class = es.net_has_compact
+					? static_cast<uint8_t>(es.health_class_byte & 0x0Fu)
+					: es.spawn_player_class;
+			const int32_t index = world::item_index_by_type_id(
+					w, world::player_cammo_type_id(w, player_class));
+			runtime->view().retype_row(es,
+					static_cast<uint16_t>(w.tables.item_rows[static_cast<size_t>(index)].type_id));
+		}
+		const uint16_t type_id = es.type_id;
+		const int adm_id = kernel.adm_id_for_runtime_type(type_id);
+		if (adm_id < -1) continue; // the sources are not armed: the frame's pass resolves it
+		es.rm_adm_id = static_cast<int16_t>(adm_id);
+	}
 }
 
 // A streamed topology/world change landed in the registry: retire the
@@ -425,13 +712,33 @@ void JoinerRole::resolve_row_adm_ids() {
 // materializer.
 void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResult &sync) {
 	mission::MissionKernel &kernel = *kernel_;
-	for (const world::EntityLifetime lifetime : sync.retired)
+	for (const world::EntityLifetime lifetime : sync.retired) {
 		kernel.retire_replica_entity(lifetime);
+		// The destroyed row's brain goes with it [orig: Entity_Destroy @0x43E810 - the
+		//  brain record's memset @0x43E98E..0x43E995, +0x64 = 0 @0x43E99D].
+		kernel.world.ai.release(lifetime.handle);
+	}
 	// Zone/deploy lookup is a registry-derived cache. Any streamed topology
 	// change can add/remove an eligible zone and must invalidate it before UI
 	// or a C2S 0x0E pick consults the world.
 	++world_sync_serial_;
 	kernel.resweep_item_traits();
+	// A 0x18 row's def loads as its record lands, so a type new since the mission start
+	// takes its seat, mount and attachment table before the row is seated below; a def
+	// already loaded loads nothing. The rows streamed before the mission start took theirs
+	// at its pass over the live pool-1 and pool-2 slots: a header-only joiner's settle
+	// installs the table over every streamed row's type.
+	// [orig: NapiNPClientMsg_FullEntitySpawn @0x433780 - EntityDef_LoadModelsAndCallbacks
+	//  called @0x433BFB; EntityDef_LoadModelsAndCallbacks @0x439F50 - the loaded test
+	//  @0x439F9C..0x439FB3; Game_ReloadEntityModelsAndCallbacks @0x522830 - the pool-1 call
+	//  @0x5229B8, the pool-2 call @0x522B16]
+	for (const world::EntityLifetime lifetime : sync.spawned) {
+		const replication::ClientEntityState *wire =
+				runtime->state().find(lifetime.handle.packed);
+		if (wire != nullptr && wire->spawn_tag == s2c::FULL_ENTITY_SPAWN &&
+				mission::item_seat_spec_for_type(kernel.seat_specs, wire->type_id) == nullptr)
+			kernel.merge_item_seat_specs(wire->type_id);
+	}
 	auto refresh_seats = [&](const std::vector<world::EntityLifetime> &rows) {
 		for (const world::EntityLifetime lifetime : rows) {
 			if (!mission::pool_takes_item_seat_spec(lifetime.handle.pool())) continue;
@@ -442,6 +749,57 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	};
 	refresh_seats(sync.spawned);
 	refresh_seats(sync.updated);
+	// Each arriving pool-1 row takes its def's class init, in slot order: an AIData
+	// brain-class row its brain, from the profile its 0x0D AI trailer names (a 0x18
+	// row's zeroed slot names none). A 0x0D row takes it at the mission start's pool-1
+	// init, after the initial state, so before the world's first tick; a 0x18 row at
+	// the record's own call.
+	// [orig: Game_StartMission - NapiClient_WaitForGameStart called @0x524E29, the
+	//  Entity_InitAllFromModels call @0x52567F (the pool-1 class init @0x40E5D3);
+	//  NapiNPClientMsg_0x00D @0x432C40 (the AI slot @0x43332A, its +156 name
+	//  @0x433363..0x43337C); NapiNPClientMsg_FullEntitySpawn @0x433780 (the AI slot
+	//  @0x433D41, the class init @0x433E82)]
+	std::vector<world::EntityLifetime> arrived;
+	for (const world::EntityLifetime lifetime : sync.spawned)
+		if (lifetime.handle.pool() == 1) arrived.push_back(lifetime);
+	std::sort(arrived.begin(), arrived.end(),
+			[](const world::EntityLifetime &a, const world::EntityLifetime &b) {
+				return a.handle.packed < b.handle.packed;
+			});
+	for (const world::EntityLifetime lifetime : arrived) {
+		world::Entity *row = kernel.world.registry.get(lifetime);
+		const replication::ClientEntityState *wire =
+				runtime->state().find(lifetime.handle.packed);
+		if (row == nullptr || wire == nullptr) continue;
+		row->ai_text_file = wire->spawn_ai_name;
+		// A brained vehicle row's client mover runs from its class init, not from its
+		// first compact: the allocator staged the row's own pose as the chase target and
+		// its Yaw as the received steer, so ahead of any record the chase holds and the
+		// solve settles the row from that pose. The mover's entry reads the row's
+		// attitude and Flags as the 0x0D landed them (D-NET-433).
+		// [orig: Entity_InitVehicleAI @0x460200 - @0x4602F9..0x460326, @0x46032D..0x460352;
+		//  Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the mover called ungated);
+		//  Entity_UpdateVehiclePhysics @0x48AF00 - the client chase @0x48B53F..0x48B7C5,
+		//  the received-register mirror @0x48B7F8..0x48B80A]
+		if (kernel.init_item_class_brain(lifetime.handle) &&
+				kernel.world.vehicles.traits.get(row->item_id) != nullptr) {
+			world::Entity::VehicleMotorState &m = row->veh;
+			m.air_pitch_bam = row->pitch_bam;
+			m.air_roll_bam = row->roll_bam;
+			m.plat_solve_valid = false;
+			m.net_engine_on = (row->flags & 0x80u) != 0u;
+			m.net_predicted = true;
+		}
+		// The same class init's slot leg: an ewep row, or an EWeap CHel / cpln row, binds and
+		// seeds its MountSlot from its def's weapon, with the row's traits and model in place
+		// (the resweep above), as the 0x18's own call does. A header-only load's streamed row
+		// has no weapon name here yet (its seat table lands later in the load), so the load's
+		// own leg binds it (run_streamed_weapon_slot_class_inits).
+		// [orig: Entity_InitAllFromModels @0x40E460 - the pool-1 class init @0x40E5D3;
+		//  NapiNPClientMsg_FullEntitySpawn @0x433780 - the class init @0x433E82 ->
+		//  Entity_InitBoneReferences @0x441470 / Entity_InitHelicopterAIFromDef @0x4683C0]
+		kernel.world.vehicles.run_weapon_slot_class_init(*row);
+	}
 	// The wire materializer deliberately does not fabricate seat
 	// definitions. Item/model resolution above installs them, then this
 	// idempotent fold projects the retained 0x0D mountHandles image by each
@@ -449,6 +807,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	materializer_.set_local_player(self_wire_handle(), kernel.world.cached.local_player);
 	(void)materializer_.sync(runtime->state(), kernel.world);
 	kernel.refresh_collision_instances();
+	run_full_spawn_ground_caches(sync); // a 0x18 row's class init (D-NET-NEW-L6-40)
 }
 
 // The authoritative mount relation changed: the view effects refresh and the
@@ -484,10 +843,16 @@ void JoinerRole::tick_local_weapon() {
 				kernel_->seat_specs);
 	};
 	world::local_weapon_pump_tick(kernel.world, lp.weapon, io);
+	if (io.fire_deferred) lp.queue_deferred_event(world::LocalPlayer::kDeferredFireCode);
 	lp.hud_map_control.weapon_command(io.map_command);
 	std::vector<world::LocalWeaponFiredWire> fires;
-	if (io.fired.valid)
+	// Each descriptor's shooter's entity+0x160 word (its off32), beside it.
+	std::vector<int16_t> shooter_words;
+	if (io.fired.valid) {
 		fires.push_back(io.fired);
+		const world::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+		shooter_words.push_back(local != nullptr ? local->ammo_def_word : int16_t{0});
+	}
 	// Countermeasures use the same sequence and descriptor path as the local
 	// weapon. Their launch effects already ran at the vehicle input boundary.
 	// The SHOOTER is the vehicle's occupantEntity — the pilot — not the
@@ -509,22 +874,18 @@ void JoinerRole::tick_local_weapon() {
 		world::LocalWeaponFiredWire fired;
 		fired.valid = true;
 		fired.shot_seq = kernel.world.round_sim.spawned_round_word();
-		// The descriptor's off32 is the PILOT's entity+0x160 — his handheld
-		// ammo-def index, the same source the on-foot pump reads (the equipped
-		// adm's ammo row) — NOT the flare's: the writer's flags byte is
-		// *(WORD*)(shooterEntity+352) [orig: @0x42c01a..0x42c052 -> off32
-		// @0x42a7da]. The flare's ammo-def index travels only as the adm byte
-		// (weaponFlags -> off7 @0x42a69b) under targetId 1 (off6 @0x42a68a,
+		// The descriptor's off32 is the PILOT's entity+0x160 word, the same
+		// source the on-foot fire reads below, NOT the flare's: the writer's
+		// flags byte is *(WORD*)(shooterEntity+352) [orig: @0x42c01a..0x42c052
+		// -> off32 @0x42a7da]. The flare's ammo-def index travels only as the adm
+		// byte (weaponFlags -> off7 @0x42a69b) under targetId 1 (off6 @0x42a68a,
 		// the ammo-def arm).
 		const world::Entity *shooter = kernel.world.registry.get(params.owner);
-		const world::WeaponTableEntry *handheld = shooter != nullptr
-				? kernel.world.tables.weapons.by_index(shooter->equipped_adm_index)
-				: nullptr;
-		fired.ammo_index = handheld != nullptr ? handheld->ammo_index : -1;
+		shooter_words.push_back(shooter != nullptr ? shooter->ammo_def_word : int16_t{0});
 		fired.adm_index = params.adm_index;
-		fired.round.origin_x = world::to_fixed(params.origin.x);
-		fired.round.origin_y = world::to_fixed(params.origin.y);
-		fired.round.origin_z = world::to_fixed(params.origin.z);
+		fired.round.origin_x = params.origin.x.q16;
+		fired.round.origin_y = params.origin.y.q16;
+		fired.round.origin_z = params.origin.z.q16;
 		fired.round.dir_yaw = params.dir_yaw_bam;
 		fired.round.dir_pitch = params.dir_pitch_bam;
 		fired.round.mode_flags = 1;
@@ -536,13 +897,14 @@ void JoinerRole::tick_local_weapon() {
 		// @0x422fd5]. The on-foot pump stamps the same 12 on its own witnessed leg.
 		fired.round.subtype = 12;
 		for (int axis = 0; axis < 3; ++axis)
-			fired.shooter_pose[axis] = pilot->pos[axis];
+			fired.shooter_pose[axis] = pilot->self->position.word(axis);
 		fired.shooter_pose[3] = pilot->heading;
 		fired.shooter_pose[4] = pilot->pitch;
 		fires.push_back(fired);
 	}
 	kernel.world.out.source_fires.clear();
-	for (const auto &fired : fires) {
+	for (std::size_t fire_index = 0; fire_index < fires.size(); ++fire_index) {
+		const world::LocalWeaponFiredWire &fired = fires[fire_index];
 		// The client-side half of Entity_FireWeaponAndSendPacket: the pump
 		// predicted the round; queue the fixed C2S 0x06 descriptor. The pose
 		// helper writes full XYZ, rounded Yaw/Pitch high words, and retail's
@@ -577,18 +939,16 @@ void JoinerRole::tick_local_weapon() {
 		// reacting to our shots; that was WRONG, and the symptom survived this
 		// fix. The actual mechanism is D-NET-184 and is not packet-driven.
 		fire.hit_part = fired.shot_seq;
-		// entity+0x160 — the shooter's current AMMO-DEFINITION index, a u16 index
-		// into g_AmmoDefTable (stride 276). The host stores it onto the remote
-		// shooter's entity [orig: the send-side read Entity_FireWeaponAndSendPacket
-		// @0x42C01A; the equip-time source WeaponSlot_InitFromEntityDef @0x54673B
-		// copies admEntry[1]'s low word; retail seeds 3 beside the WPN_M4AUTO
-		// default in PlayerClass_InitEntity @0x4B1105, which is why a retail
-		// client was captured sending 0x03]. Only the LOW BYTE crosses the wire —
-		// the writer's parameter is a char @0x42a7da and the receiver reads one
-		// byte @0x51347d — so indices >= 256 are untransmittable by design.
-		// We shipped 0 here until 2026-07-26 (D-WPN-8).
-		fire.extra_byte1 =
-				fired.ammo_index >= 0 ? static_cast<uint8_t>(fired.ammo_index) : uint8_t(0);
+		// off32: the shooter's entity+0x160 word (world::Entity::ammo_def_word), read
+		// off the shooter at the fire. A player's body holds its class init's 3 (no
+		// weapon switch or grant writes the word), so every retail joiner sends 0x03
+		// whatever it fires; ours sent the fired weapon's ammo row (0x13 in x6). Only
+		// the LOW BYTE crosses the wire: the writer's parameter is a char and the
+		// receiver reads one byte (D-WPN-8).
+		// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - `movsx edx, word ptr
+		//  [edi+160h]` @0x42C01A, the shooter @0x42C047 -> NetPacket_WriteEntityPositionUpdate
+		//  @0x42A7DA; PlayerClass_InitEntity @0x4B1105; the receiver's byte @0x51347D]
+		fire.extra_byte1 = static_cast<uint8_t>(shooter_words[fire_index]);
 		fire.extra_byte2 = fired.round.subtype;
 		fire.misc_byte = fired.charge;
 		const std::array<int32_t, 5> fire_pose = {
@@ -629,7 +989,35 @@ void JoinerRole::sync_class_attribute_flags() {
 	static const CharAttrTable kNoTable{};
 	kernel_->world.tables.class_attribute_flags =
 			charattr_class_attribute_rows(live != nullptr ? *live : kNoTable);
+	kernel_->world.tables.class_cammo_type_ids =
+			charattr_class_cammo_rows(live != nullptr ? *live : kNoTable);
+	kernel_->world.tables.class_cammo_installed = live != nullptr && live->loaded;
 }
+
+namespace {
+
+// Input action 3's Exit Mission tone on the world's interface channel, which the session leg's
+// terminal frame still plays (inmatch/mission_exit.h kExitMissionSoundset carries the witness).
+void raise_exit_mission_tone(world::World &world) {
+	world::ScriptSoundEvent tone;
+	tone.kind = world::ScriptSoundEvent::Kind::Interface;
+	tone.name = kExitMissionSoundset;
+	world.out.script_sounds.push_back(std::move(tone));
+}
+
+// The embedder's stop of a decoded organic row's +0x1CC group, by the key every spawn into the
+// slot carries (family 1, the row's wire handle, no spawn origin), as a hit emitter's
+// (world/wire_person_hit.cpp) and the corpse leg's decay below are keyed.
+void push_replica_slot_release(world::World &world, uint16_t wire_handle) {
+	world::DestructionEffectEvent release;
+	release.family = 1;
+	release.attach_wire_handle = wire_handle;
+	release.attach_spawn_origin = world::kSpawnOriginNone;
+	release.release = true;
+	world.out.destruction.effects.push_back(std::move(release));
+}
+
+} // namespace
 
 // The joiner frame [orig: Game_ProcessMainFrame @0x5263f0 -- the client-side
 // branch of the one frame function the host frame also rides]: the view
@@ -647,6 +1035,46 @@ void JoinerRole::run_tick(const TickInput &) {
 			kernel.world.rules.mp_session);
 	wire_leg_start_us_ = static_cast<int64_t>(io::perf_now_us());
 	pump();
+	// The final wait for the S2C 0x0F is the mission start's last loop, inside the Game
+	// Loop mode's initialize: the tick that leaves it (the 0x0F's receive, or the ESC
+	// taken since the last tick) ends that initialize (Session::advance carries the
+	// witness). [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5,
+	//  its exits @0x5262DF / @0x5262E9; GameLoop_Init @0x526370 (the call @0x526377)]
+	const bool waiting = runtime->in_final_wait();
+	if (final_wait_seen_ && !waiting && runtime->in_game_loop()) final_wait_end_ = true;
+	final_wait_seen_ = waiting;
+	// A description record's punt whose callback queued an input action (DPC 1, 33 or an
+	// unlisted code: action 3; DPC 34: action 36), which the input pass dispatches: action 3
+	// stores exit reason 1, plays the Exit Mission tone and runs a disconnect that finds the
+	// connection gone; action 36 stores exit reason 5. Retail's pass is the next main frame's;
+	// ours runs it at the loss's tick, which the session leaves (session_lost), as the HUD leg
+	// below does.
+	// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4C63D0 - Input_QueueEvent(36) @0x4C6596,
+	//  Input_QueueEvent(3) @0x4C67A4; Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame
+	//  @0x52661D; Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the tone
+	//  @0x49AF30, the disconnect @0x49AF42; case 36: reason 5 @0x49B780]
+	if (const int32_t action = runtime->take_teardown_input_action(); action != 0) {
+		if (action == kInputActionExit) {
+			raise_exit_mission_tone(kernel.world);
+			quit_to_menu();
+		} else {
+			runtime->set_mission_exit_reason(mission_exit_reason_for_input_action(action));
+		}
+	}
+	// A link the connection lost with no exit reason (the silence reap, a record outside the
+	// description class) leaves only g_NetDisconnectedFlag; the HUD's overlay pass then runs
+	// input action 3 once the round-over gate is up: exit reason 1 and the action's Exit
+	// Mission tone (its disconnect finds no connection). The frame's session leg plays the
+	// tone on the terminal frame (inmatch/mission_exit.h kExitMissionSoundset).
+	// [orig: HUD_DrawOverlayPanels @0x5C0060 - `cmp g_NetDisconnectedFlag, 0` @0x5C00FC, `cmp g_RoundOver,
+	//  0` @0x5C0105, Input_HandleActionBinding(3) @0x5C0118; CNapiNetwork_OnDisconnectedFromServer
+	//  @0x4C63D0 - g_NetDisconnectedFlag = 1 @0x4C64A4, the description-class gate @0x4C6563;
+	//  Input_HandleActionBinding @0x49AD40 - case 3: reason 1 @0x49AF26, the tone @0x49AF30]
+	if (runtime->session_lost() && runtime->mission_exit_reason() == kMissionExitNone &&
+			runtime->state().spawn_success_gate) {
+		runtime->set_mission_exit_reason(kMissionExitQuit);
+		raise_exit_mission_tone(kernel.world);
+	}
 	sync_class_attribute_flags();
 	// The pump's phases, its wire leg and the local world tick's own breakdown
 	// all land on the kernel's profile, once per tick.
@@ -659,12 +1087,6 @@ void JoinerRole::run_tick(const TickInput &) {
 				static_cast<int64_t>(io::perf_now_us()) - adm_start);
 }
 
-namespace {
-
-constexpr double kFixed16 = io::kFp16OneD;
-
-} // namespace
-
 void JoinerRole::pump() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
@@ -676,6 +1098,11 @@ void JoinerRole::pump() {
 	// A joiner is never the logic authority (run_logic_tick restamps it; events applied
 	// before the first tick read it; the default is true), and runs its title's rules.
 	world.rules.logic_authority = false;
+	// The process's loadout name list, whose first name every body the joiner spawns takes as
+	// its equipped weapon (world::player_spawn_equipped_default), as HostRole::apply_rule_words
+	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
+	//  @0x4B1060 (@0x4B1100..0x4B1116)].
+	world.loadout_weapon_names = &rt.loadout_weapon_names();
 	world.rules.title = title_ != nullptr ? title_->game_id : gameprofile::GAME_JO;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
@@ -684,9 +1111,10 @@ void JoinerRole::pump() {
 	devtools::ProfileLap lap(world.profile);
 	wire_frame_providers();
 	resolve_row_adm_ids();
-	pump_proxy_rendezvous();
+	lap.mark(devtools::Slot::SIM_CLIENT_ROW_ADM);
 	send_hello_once();
 	deposit_inbound();
+	lap.mark(devtools::Slot::SIM_CLIENT_DEPOSIT);
 	// The frame input reaches L's body BEFORE the client net frame builds
 	// this frame's C2S 0x0C from that body: retail's Player_PackInputStateToEntity
 	// immediately precedes Player_BuildTag0CInputBody in the send block, the
@@ -702,19 +1130,39 @@ void JoinerRole::pump() {
 	// [orig: Client_ProcessNetworkFrame @0x42C180 — the send-holdoff gate
 	//  @0x42C3DD, Player_PackInputStateToEntity @0x42C3E9, then
 	//  Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
+	// A pass of the mission start's final wait for the S2C 0x0F (judged here, ahead of its
+	// receive: the pass whose receive takes the 0x0F is the wait's too) runs the receive and the
+	// send alone: no input pass, no main frame. Its receive's writes land (L's birth, its record,
+	// the 0x0F's pose, the mirrors, the drains, the session words); the vehicle poll, the proxies,
+	// the World's tick and the later legs wait for the game loop's first frame, whose net frame
+	// builds the first 0x0C from L as the 0x0F left it (D-NET-NEW-L2-48).
+	// [orig: Game_StartMission @0x524360 - the final wait @0x526295..0x5262E5: Input_ResetKeyQueue
+	//  @0x526288 ahead of it, the ESC read @0x5262A2..0x5262AD, CNapiNetwork_PumpManagerReceive
+	//  @0x5262B4, CNapiNetwork_PumpClientProtocolRecv @0x5262BE, CNapiNetwork_PumpClientProtocolSend
+	//  @0x5262DA, the exit test @0x5262DF; no Game_ProcessMainFrame]
+	const bool final_wait_pass = rt.in_final_wait();
 	lap.restart();
-	lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
+	if (!final_wait_pass) lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
+	// L's spawn edge runs inside the net frame (its after-receive leg), so whether L
+	// existed is read ahead of it.
+	const bool had_local = local_spawned_;
 	const FrameSignals decoded = run_client_net_frame();
+	// The respawn arms' +0x1CC releases land at the receive's point: retail's reset runs inside
+	// the record decode, ahead of the frame's entity update, whose projectile pass may spawn a
+	// hit emitter into the same slot (D-NET-NEW-L5-60).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - Client_ProcessNetworkFrame called @0x526692 ahead
+	//  of Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
+	//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateAllEntities @0x4C2100 -
+	//  Weapon_UpdateAllProjectiles called @0x4C223A]
+	for (const uint16_t handle : rt.view().drain_respawn_releases())
+		push_replica_slot_release(world, handle);
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round
 	// predicate. Mirror it onto World before any local entity/system work.
 	world.preround_delay_seconds =
 			rt.state().preround_delay_seconds;
 	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world();
-	const bool had_local = local_spawned_;
-	spawn_and_arm_local_player();
-	apply_world_state_load();
 	apply_replica_track(world, rt.state(), rt.game_type(), true, track_seen_);
 	if (decoded.health) apply_authoritative_health();
 	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
@@ -740,8 +1188,9 @@ void JoinerRole::pump() {
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 	mirror_mission_entities();
-	// The Attack & Defend latch the boot ran with no L, on L's spawn frame
-	// once the mirror applied the frame's teams, as retail's joiner latches
+	// The Attack & Defend latch the boot ran with no L, on a seeded session's L spawn
+	// frame once the mirror applied the frame's teams (a join's L latches in its mission
+	// start's push, JoinerRole::push_mission_start_end), as retail's joiner latches
 	// after its mission start pumped every message, the last drain after
 	// Player_InitPlayer [orig: Game_StartMission @0x524360 -- the
 	//  NapiClient_WaitForGameStart call @0x524E29, the Player_InitPlayer call
@@ -750,11 +1199,24 @@ void JoinerRole::pump() {
 	//  call @0x5260C1].
 	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
+	// The vehicle screen's poll, after the client net frame and ahead of the
+	// entity update, its 0x42 left for the next send boundary (vehicle_menu.h).
+	// [orig: Game_ProcessMainFrame -- Client_ProcessNetworkFrame @0x526692,
+	//  VehicleMenu_PollAvailability @0x5266A1, Entity_UpdateAllEntities @0x52674B]
+	if (!final_wait_pass) rt.poll_vehicle_menu(world, kernel.items_table());
 
-	// Received projectile/reload gameplay and the decoded remote collision
-	// proxies are live inputs to this frame's entity/round/weapon pumps. Applying
-	// them here is the retail recv-before-actions boundary, not presentation work.
-	refresh_wire_collision_proxies();
+	// Received projectile/reload gameplay is a live input to this frame's
+	// entity/round/weapon pumps; applying it here is the retail recv-before-actions
+	// boundary, not presentation work. The decoded rows' collision proxies are the
+	// table the previous entity update built (rebuilt at this one's proximity build,
+	// below); the rows the receive and ClientRuntime's leg moved since then give
+	// their proxies their live words, which every trace from here re-reads past its
+	// coarse gate on the table's copy (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+	//  call @0x4C240A; Projectile_RaycastProximitySlots @0x4E5340 (the slot gate on the
+	//  copy @0x4E55E6..0x4E575A, g_DynProxEntity @0x4E5760)]
+	if (!final_wait_pass) sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_PROXIES);
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
@@ -763,9 +1225,9 @@ void JoinerRole::pump() {
 	// the world's gate before the frame's entity update, which the gate then
 	// holds; a mission start lowers both (ClientReplicaPipeline::begin_mission
 	// beside the load's fresh Match).
-	// [orig: g_SpawnSuccessGate — NapiNPClientMsg_0x01D @0x430858,
+	// [orig: g_RoundOver — NapiNPClientMsg_0x01D @0x430858,
 	//  NapiNPClientMsg_GameReset @0x422849; Game_ProcessMainFrame -- the
-	//  is_in_session / g_SpawnSuccessGate tests @0x526734..0x526742]
+	//  is_in_session / g_RoundOver tests @0x526734..0x526742]
 	if (rt.state().spawn_success_gate) world.match.latch_round_over();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
@@ -774,31 +1236,112 @@ void JoinerRole::pump() {
     // The joiner's own roster slot rides a fresh round id [orig:
     //  NapiNPClientMsg_SessionSlotConfig @0x4254A2 -> g_LocalPlayerSlotId].
     world.round_sim.local_slot_id = rt.local_player_slot();
-    // The joiner's rules word is the S2C 0x64 +44 mpattrib dword (g_RulesFlags
-    // @0x24D1E34); its 0x10000 bit gates the scope-zero -1 floor in session
-    // [orig: Player_AdjustWeaponZoomLevel @0x4dbd0c..0x4dbd2e].
-	world.rules.mpattrib = rt.view().mp_attributes();
-	// The session's sniper-zoom rule is the S2C 0x08 flags dword's bit 16
-	// [orig: NapiNPClientMsg_HandleSessionConfig @0x42837A..0x428392 -> byte_A821F0].
-	world.rules.allow_sniper_scope_zoom = (rt.state().session_rules_flags & 0x10000u) != 0;
-	world.rules.sniper_zoom_fill = world.rules.allow_sniper_scope_zoom; // an in-session peer
-    world.rules.auto_scope_zero =
-            (rt.view().mp_attributes() & GameConfig::kMpAttribAutoScopeZero) != 0;
-    world.rules.no_friendly_fire =
-            (rt.view().mp_attributes() & GameConfig::kMpAttribNoFriendlyFire) != 0;
+	if (rt.mp_attributes_revision() != mp_attributes_revision_seen_) stamp_mission_rules();
     materializer_.fill_minefield_actors(rt.state(), self_wire_handle(), world.minefields.remote_actors);
 	stamp_spectator_motor(kernel, runtime.get(), /*joiner=*/true); // this frame's receive folded
+	// A final-wait pass ends here: the handler writes above land in it, as the client table's
+	// handlers run in the wait's receive, ahead of the first frame's input (a 0x0F's cease fire).
+	// [orig: Game_StartMission @0x524360 - @0x5262BE ahead of @0x5262DA; NapiNPClientMsg_0x00F
+	//  @0x42E200 (@0x42E316); Game_ProcessMainFrame @0x5263F0 - Input_ProcessFrame @0x52661D]
+	if (final_wait_pass) {
+		++now_tick_;
+		return;
+	}
+	// The replica pool-0 rows through the own body's slot take their visits inside the
+	// World's entity pass, after its proximity build and ahead of its pool-0 walk. Each
+	// visited person's proxy then takes its live Position and its live dead bit (a death
+	// edge the visit latched), which the own body's resolver re-reads through the table's
+	// entity pointer past the reach gate on the table's copy (D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the proximity build @0x4C240A, the
+	//  pool-0 walk @0x4C2426..0x4C2472; Entity_MovementCollisionResolver @0x4B2BD0 (the
+	//  dead skip @0x4B3B89..0x4B3B8D, the live reads @0x4B3B93..0x4B3B99);
+	//  Entity_UpdateInfantryPlayerBody @0x4B40E0 (the death gate @0x4B4BF1)]
+	// Ahead of them, the replica guns' channels: each gun's ai-fn and class update run in the
+	// pool-1 walk, so a remote gunner's words and window store precede its body's chase
+	// (D-NET-NEW-L5-31). [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C,
+	//  the +0x1C4 call @0x4B8E53; Entity_UpdateAllEntities @0x4C2100 - @0x4C2158..0x4C21E9; the
+	//  gun's Entity_UpdateChildAttachment @0x4409A0]
+	world.before_pool0_walk = [this, &rt, &kernel, &world] {
+		const devtools::ProfileScope prewalk(world.profile, devtools::Slot::SIM_WALK_REPLICA_POOL0);
+		devtools::ProfileLap parts(world.profile); // its three parts (an instrument)
+		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
+				&materializer_, kernel.wire_header_world, ReplicaGunLeg::Pool1Walk);
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_GUNS);
+		rt.view().tick_remote_motion_through_self();
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_MIDDLE);
+		sync_wire_collision_proxies_live();
+		parts.mark(devtools::Slot::SIM_WALK_REPLICA_PROXIES);
+	};
+	// The decoded rows join the entity update's proximity build, after its pool-1 walk
+	// and its projectile pass: the World movers' poses first reach their rows, as the
+	// build reads the movers' live entities, then the proxies are rebuilt from the rows
+	// (D-NET-196). A decoded pool-1 row at a slot past the World's pool-1 capacity, which
+	// the walk never reached, takes its slot visit first. The after-tick mirror below
+	// still covers a tick whose entity update is not admitted.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+	//  the Weapon_UpdateAllProjectiles call @0x4C223A, the Entity_BuildProximityLists_Pool01
+	//  call @0x4C240A; Entity_BuildProximityLists_Pool01 @0x4B9340 (the pool-1 copies
+	//  @0x4B9389..0x4B93A7)]
+	world.before_proximity_build = [this, &rt, &world] {
+		const devtools::ProfileScope replica(world.profile, devtools::Slot::SIM_PROXIMITY_REPLICA);
+		for (const uint16_t handle : rt.view().unvisited_pool1_rows())
+			visit_replica_pool1_slot(world::EntityHandle{handle});
+		mirror_predicted_vehicles();
+		refresh_wire_collision_proxies();
+	};
+	// The replica pool-1 rows take their visits at their own slots of the World's pool-1
+	// walk, interleaved with the World's movers in slot order (visit_replica_pool1_slot,
+	// D-NET-196).
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9]
+	devtools::ProfileNsSum slot_visits(world.profile, devtools::Slot::SIM_WALK_REPLICA_ROWS);
+	world.pool1_slot_leg = [this, &slot_visits](world::EntityHandle handle) {
+		slot_visits.lap([&] { visit_replica_pool1_slot(handle); });
+	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(
 			/*is_authority=*/false,
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
+	world.before_proximity_build = nullptr;
+	world.before_pool0_walk = nullptr;
+	world.pool1_slot_leg = nullptr;
+	// The replica rows past the own body's pool-0 slot take their visits now, after
+	// the World's entity pass ran the own body: retail's pool-0 walk updates every
+	// used slot in slot order, the local body at its own (D-NET-196). A middle half
+	// the entity pass did not run (a skipped update) goes first.
+	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
+	//  the +0x1C4 call @0x4C2472]
+	rt.view().tick_remote_motion_after_self();
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	// The door callback's C2S 0x1A requests this tick raised, queued in raise
 	// order for the next send boundary (world/doors.cpp carries the witness).
 	for (const world::DoorRowEvent &request : world.out.door_requests)
 		rt.queue_door_request(request.handle, request.state, request.number);
 	world.out.door_requests.clear();
+	// The plyr class callback's seat leave for the local body, its C2S 0x27
+	// (world/infantry_death.cpp carries the witness).
+	for (const uint16_t target : world.out.detach_requests) (void)rt.queue_detach_packet(target);
+	world.out.detach_requests.clear();
+	// The mount requests' 0x1Ds the tick raised, in raise order, for the next send block (the
+	// receive's own flushed inside it, run_client_net_frame's after_receive;
+	// world/player_weapon.cpp mount_queue_switch_out carries the witness).
+	flush_stance_requests();
+	// The movers' C2S 0x0F requests, raised in the entity update behind this frame's send
+	// block, queue for the next boundary in raise order; the own body L asks by its wire handle
+	// H, the one slot retail's body is (world/ai_system.cpp's ewep mover carries the witness).
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the 0x0Fs @0x440DAB / @0x440E29;
+	//  Game_ProcessMainFrame: Client_ProcessNetworkFrame @0x526692, then
+	//  Entity_UpdateAllEntities @0x52674B]
+	// L's own request is its stale-ground leg's, which destroys L in place right after it:
+	// the destroy's tail stores 0xFF in L's slot byte, which the receive's readers of it take
+	// until a record of H rebuilds it (ClientReplicaPipeline::mark_local_body_destroyed).
+	// [orig: @0x440E29, Entity_Destroy @0x440E2F; Entity_Destroy @0x43E810 - @0x43EA78]
+	for (const world::EntityHandle request : world.out.entity_info_requests) {
+		const bool own = request == world.cached.local_player;
+		rt.queue_entity_info_request(own ? self_wire_handle() : request.packed);
+		if (own) rt.view().mark_local_body_destroyed();
+	}
+	world.out.entity_info_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -808,6 +1351,12 @@ void JoinerRole::pump() {
 	// the retail second carrier-follow phase; doing it before the world mover
 	// leaves children one tick behind their vehicle.
 	if (!preround_active) rt.refresh_remote_attachments();
+	// The rows the after-self leg and the recompose moved give their proxies their
+	// live words, which the frame's weapon actions (a knife's ray, a remote slot's)
+	// and the views read past the table's copy (D-NET-196).
+	// [orig: Game_ProcessMainFrame @0x5263F0 - the Entity_UpdateAllEntities call @0x52674B
+	//  ahead of the WeaponAction_ProcessAllEntities call @0x526786]
+	sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
 	mirror_mission_entities();
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -839,12 +1388,7 @@ void JoinerRole::pump() {
 		const def::DefItemsFile *items = kernel_->items_table();
 		for (const auto &decay : rt.view().drain_corpse_decays()) {
 			if (decay.release) {
-				world::DestructionEffectEvent release;
-				release.family = 1;
-				release.attach_wire_handle = decay.handle;
-				release.attach_spawn_origin = world::kSpawnOriginNone;
-				release.release = true;
-				world.out.destruction.effects.push_back(std::move(release));
+				push_replica_slot_release(world, decay.handle);
 				continue;
 			}
 			const def::DefItemDef *item = items != nullptr
@@ -866,9 +1410,10 @@ void JoinerRole::pump() {
 			world.out.destruction.effects.push_back(std::move(effect));
 		}
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
-				&materializer_, kernel.wire_header_world);
+				&materializer_, kernel.wire_header_world, ReplicaGunLeg::AfterOwnBody);
 		rt.tick_remote_recoil();
 	}
+	rt.view().tick_org1_looks(); // org1's looks, after the gun channels and the recoil
 	lp.sync_local_mounted_input_heading();
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,
@@ -887,31 +1432,9 @@ void JoinerRole::pump() {
 		tick_local_weapon();
 		lp.tick_medic_cooldown(rt.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	}
+	flush_stance_requests(); // the weapon walk's mount requests (a UseGun staging, an auto switch)
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	++now_tick_;
-}
-
-void JoinerRole::apply_weather_sample() {
-	mission::MissionKernel &kernel = *kernel_;
-	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
-	ClientRuntime &rt = *runtime;
-	// Each newly received phase-2 ENV sub-block lands in the weather home's
-	// TARGET globals exactly once; the local currents keep chasing
-	// [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].
-	const replication::ClientEnvironmentState &environment = rt.state().environment;
-	if (!environment.present || environment.revision == weather_revision_seen_) return;
-	weather_revision_seen_ = environment.revision;
-	world::WeatherWireSample sample;
-	sample.fog_dist = environment.fog_dist;
-	sample.fog_accel = environment.fog_accel;
-	sample.tod_fixed = environment.tod_fixed;
-	sample.quake_ticks = environment.quake_ticks;
-	sample.cloud_scroll = environment.cloud_scroll;
-	sample.rain_pct = environment.rain_pct;
-	sample.overcast = environment.overcast;
-	sample.precipitation_kind = environment.env_param;
-	world.weather.apply_wire_sample(sample);
 }
 
 void JoinerRole::wire_frame_providers() {
@@ -925,6 +1448,27 @@ void JoinerRole::wire_frame_providers() {
 	// @0x4B3D6E..0x4B3DA9]
     rt.view().set_round_receiver([this](const replication::ClientRoundEvent &ev) { apply_round_event(ev); });
     rt.view().set_guided_round_resolver([this](int16_t id) { return kernel_->world.round_sim.find_guided(id); });
+    // An S2C 0x59 walks this client's own round pool where it lands; the
+    // record's parent is the entity its handle names here.
+    // [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770 - the parent
+    //  @0x5467C3..0x5467F5, the walk @0x546820..0x54698F]
+    rt.view().set_deployed_round_walk(
+            [this](const DeployedItemSpawn &spawn, world::DeployedRoundCopy &out) {
+                world::World &w = kernel_->world;
+                world::DeployedRoundQuery query;
+                query.friendly_item = spawn.friendly_item_id;
+                query.enemy_item = spawn.enemy_item_id;
+                query.owner_handle = spawn.owner_handle;
+                const world::Entity *parent = spawn.parent_handle == self_wire_handle()
+                        ? w.registry.get(w.cached.local_player)
+                        : replica_world_entity(w, world::EntityHandle{spawn.parent_handle});
+                if (parent != nullptr) {
+                    query.parent = parent->handle;
+                    query.parent_spawn_id = parent->registry_spawn_id;
+                }
+                out = w.round_sim.match_deployed_item(query);
+                return out.matched;
+            });
     world.round_sim.guided_inputs_provider = [this](const world::LiveRound &round, world::GuidedInputs &in) {
         const auto *owner = runtime->state().find(round.shooter_handle);
         in.owner = in.owner || owner != nullptr;
@@ -957,6 +1501,14 @@ void JoinerRole::wire_frame_providers() {
     // whiz blip reads; the local player's own wire handle is the missile
     // note's target-is-local arm. [orig: NetPacket_DeserializeRoundEvent
     //  @0x42f491; Entity_SerializeGuidedMissileState @0x447ece]
+    // A slot's destroyed mark, read by the ewep mover's stale-ground leg: the decoded rows'
+    // marks, which the shared destroy sets and a record's memset clears.
+    // [orig: Entity_Destroy @0x43E810 - the mark @0x43EA7F; Entity_UpdateTransformAndTurret
+    //  @0x440CA0 - the read @0x440D2A]
+    world.destroyed_mark = [this](uint16_t handle) {
+        const std::vector<uint16_t> &marks = runtime->state().destroyed_marks;
+        return std::find(marks.begin(), marks.end(), handle) != marks.end();
+    };
     world.round_sim.wire_actor_provider = [this](uint16_t handle, world::RoundSim::WireActor &out) {
         out = world::RoundSim::WireActor{};
         out.is_local = runtime->has_self_handle() && handle == runtime->self_handle();
@@ -971,7 +1523,47 @@ void JoinerRole::wire_frame_providers() {
         out.pos[1] = row->y;
         out.pos[2] = row->z;
         out.flags = row->rm_entity_flags;
+        // The row's ride link, which a guided round's lock note reads (D-NET-196)
+        // [orig: Entity_UpdateGuidedMissile_0 @0x446060 - @0x4465DB..0x4465F5].
+        out.ride_link_is_local = runtime->has_self_handle() &&
+                row->ride_occupant == runtime->self_handle();
         return true;
+    };
+    // A decoded remote person's words as the pool-0 entity retail's client built for its row
+    // holds them (world::World::WirePerson): the record's type word, team byte and +0x154
+    // byte, the Flags word with the client's latches, the zeroed Health, the death edge's
+    // stamp on the replica clock (g_CurrentTick's stand-in), the Position, the CameraOffset
+    // the body update restamps, and the seat mount a seated row's compact names (its carrier
+    // under a nonzero bone, D-NET-224). The pool-0 walks visit every row but the client's own,
+    // which is the registry's local player. [orig: NapiNPClientMsg_0x00C @0x42E730 - the type
+    //  word @0x42E83B, the team @0x42E979, the +0x154 byte @0x42EA06; Entity_FindTargets
+    //  @0x53A610 - the pool-0 walk @0x53A6E7..0x53A8A3]
+    world.wire_person = [this](uint16_t handle, world::World::WirePerson &out) {
+        const replication::ClientEntityState *row = runtime->state().find(handle);
+        if (row == nullptr) return false;
+        out = world::World::WirePerson{};
+        out.type_id = row->type_id;
+        out.team = row->team_known ? row->team : 0;
+        out.byte_154 = row->spawn_byte_154;
+        out.flags = row->rm_entity_flags;
+        out.health_zero = row->net_health_zero;
+        out.death_age = static_cast<int32_t>(runtime->view().frame_tick() - row->death_tick);
+        out.pos[0] = row->x;
+        out.pos[1] = row->y;
+        out.pos[2] = row->z;
+        for (int axis = 0; axis < 3; ++axis) out.eye[axis] = row->eye_offset[axis];
+        if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0)
+            out.seat_parent = row->carrier_handle;
+        return true;
+    };
+    world.wire_person_handles = [this](std::vector<uint16_t> &handles) {
+        handles.clear();
+        const bool self = runtime->has_self_handle();
+        for (const replication::ClientEntityState &row : runtime->state().entities)
+            if (wire_handle::pool(row.handle) == wire_handle::kPoolOrganic &&
+                    !(self && row.handle == runtime->self_handle()))
+                handles.push_back(row.handle);
+        std::sort(handles.begin(), handles.end());
     };
     // The damage pass's wire-built persons: a remote player or infantry is a
     // replica row here, where retail's client flies its rounds into its own
@@ -1014,11 +1606,13 @@ void JoinerRole::wire_frame_providers() {
         return skeletal_pose_inputs_for_client(*row, state, context, inputs);
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
-	// The replica water/float channel reads the mission water plane
-	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
-	// water in this world).
-	rt.view().set_water_z(
-			world.env.water_z, world.env.water_z != 0);
+	// The replica water/float channel reads the mission water plane raw: retail
+	// keeps no dry sentinel (the word is 0 with no water authored), and the body
+	// updates compare against it unconditionally.
+	// [orig: g_EnvWaterHeightFixed @ 0x26C6454; Environment_InitDefaults
+	//  @0x57C010 (the memset @0x57C011..0x57C01E); Entity_UpdateInfantryPlayerBody @0x4B40E0
+	//  (@0x4B803C), Entity_UpdateInfantryAI @0x4B9910 (@0x4BFAFE)]
+	rt.view().set_water_z(world.env.water_z);
 	// Replica peer/source spheres are initialized from the exact same typed
 	// items.def/model result as projectile and lighting projections. The
 	// pipeline retains this callback across frames; it reads the kernel the
@@ -1026,6 +1620,60 @@ void JoinerRole::wire_frame_providers() {
 	rt.view().set_replica_bound_radius_resolver(
 			[this](uint16_t type_id) -> int32_t {
 				return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
+			});
+	// A seated row's seat type, from the carrier's seat table by the record's
+	// bone, as the attach stamps +0x168 off the carrier model's userpoint
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the Entity_TryAttachOrDetach
+	//  call @0x4C1317].
+	rt.view().set_replica_seat_type_resolver(
+			[this](uint16_t carrier_type_id, uint8_t bone) -> uint8_t {
+				const mission::ItemSeatSpec *spec =
+						mission::item_seat_spec_for_type(kernel_->seat_specs, carrier_type_id);
+				if (spec == nullptr) return 0;
+				for (const world::Seat &seat : spec->seats)
+					if (seat.bone_index == bone) return static_cast<uint8_t>(seat.type);
+				return 0;
+			});
+	// A seated row's seat carry and its carrier's mount config (resolve_replica_seat_frame).
+	rt.view().set_replica_seat_frame_resolver(
+			[this](uint16_t carrier_handle, uint16_t carrier_type_id, uint8_t bone,
+					replication::ClientReplicaPipeline::ReplicaSeatFrame &out) {
+				return resolve_replica_seat_frame(carrier_handle, carrier_type_id, bone, out);
+			});
+	// The player body's slope conform on a remote row reads the def's attrib
+	// word (the 0x200 conform bit), from the same items.def
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `test [def+54h], 200h`
+	//  @0x4B6D99].
+	rt.view().set_replica_def_attrib_resolver(
+			[this](uint16_t type_id) -> uint32_t {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				return item != nullptr ? static_cast<uint32_t>(item->attrib) : 0u;
+			});
+	// A 0x18 body's channel, stamped in the handler as resolve_row_adm_ids stamps the rest.
+	rt.view().set_replica_adm_resolver(
+			[this](uint16_t type_id) { return kernel_->adm_id_for_runtime_type(type_id); });
+	// A player row's ground in its crash state, read off the World's vehicle (its def type and
+	// its +0x2EC byte) [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4AE0..0x4B4AF9].
+	rt.view().set_replica_ground_crashed_resolver([this](uint16_t ground) {
+		const world::Entity *e =
+				world_ != nullptr ? world_->registry.get(world::EntityHandle{ground}) : nullptr;
+		return e != nullptr && e->has_item_def && e->item_type == 1 && e->veh.crashed != 0;
+	});
+	// An org1 deck ride reads its parent's second attrib word (the IsTurret bit) from the same
+	// items.def [orig: Entity_UpdateInfantryAI @0x4B9910 - `test dword ptr [eax+58h], 1000h`
+	//  @0x4BA823].
+	rt.view().set_replica_def_attrib2_resolver(
+			[this](uint16_t type_id) -> uint32_t {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				return item != nullptr ? static_cast<uint32_t>(item->attrib2) : 0u;
 			});
 	// The replica dead tail's def fields, from the same items.def the spawn
 	// stream typed the row from: deathtime (the edge's moveTimer seed),
@@ -1046,6 +1694,56 @@ void JoinerRole::wire_frame_providers() {
 				out.decay_effect = item->particledeath[0] != '\0';
 				return true;
 			});
+	// A player record's def re-pick (D-NET-348): the class's camouflage item for
+	// this world's climate, looked up as an items row (the first row for a
+	// miss), as the joiner's spawn binds it; a world with no charattr / items
+	// tables keeps the spawn's row. The client's own record lands on L, its
+	// pool-0 slot: it skips the class store, so the pick reads L's own class
+	// word, and the self row takes the row fold_local_record binds on L, which
+	// the next self record's pre-apply check reads (a body with no def drops
+	// the record ahead of the pick) (D-NET-NEW-L2-57).
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92,
+	//  L's jump past the class store `cmp edi, g_LocalPlayerEntity; jz` @0x4C11AC..0x4C11B2
+	//  (Entity_SetHealthFromDifficultyByte called @0x4C11BA), the climate pick
+	//  @0x4C1248..0x4C129C, ItemList_FindIndexByTypeId @0x4C129D;
+	//  NapiNPClientMsg_0x00A @0x42FEC0 - the slot's def type and index
+	//  @0x4307BC..0x4307C4]
+	rt.view().set_replica_player_cammo_resolver(
+			[this](uint16_t handle, uint8_t player_class, uint16_t &type_id) {
+				const world::World &w = kernel_->world;
+				if (w.tables.item_rows.empty() || !w.tables.class_cammo_installed)
+					return false;
+				if (runtime->has_self_handle() && handle == runtime->self_handle()) {
+					const world::Entity *local =
+							local_spawned_ ? w.registry.get(w.cached.local_player) : nullptr;
+					if (local == nullptr || !local->has_item_def) return false;
+					player_class = local->player_class;
+				}
+				const int32_t index = world::item_index_by_type_id(
+						w, world::player_cammo_type_id(w, player_class));
+				type_id = static_cast<uint16_t>(
+						w.tables.item_rows[static_cast<size_t>(index)].type_id);
+				return true;
+			});
+	// The replica rows' ride link reads the ground entity's occupant (+0x170)
+	// and its own ground entity (+0x28) off this world's twin; an occupant that
+	// is L answers the client's own wire handle, its decoded row (D-NET-196).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5EA9..0x4B5EF1]
+	rt.view().set_ground_occupant_provider(
+			[this](uint16_t ground, uint16_t &occupant, uint16_t &ground_of_ground) {
+				if (world_ == nullptr) return false;
+				const world::Entity *e = world_->registry.get(world::EntityHandle{ground});
+				if (e == nullptr) return false;
+				occupant = e->primary_occupant.valid() ? e->primary_occupant.packed
+				                                       : world::EntityHandle::kInvalid;
+				if (e->primary_occupant.valid() &&
+						e->primary_occupant == world_->cached.local_player &&
+						runtime->has_self_handle())
+					occupant = runtime->self_handle();
+				ground_of_ground = e->ground_target.valid() ? e->ground_target.packed
+				                                            : world::EntityHandle::kInvalid;
+				return true;
+			});
 	// The 0x13's class callback reads the joiner world's hit record, which
 	// this peer's own rounds write [orig: NapiNPClientMsg_EntityDeath
 	// @0x42EBF5 -> OrganicClass_HandleEvent @0x40734C].
@@ -1053,6 +1751,10 @@ void JoinerRole::wire_frame_providers() {
 			[this]() -> const world::HitRecord * {
 				return &kernel_->world.round_sim.hit_record;
 			});
+	// A decoded person bound to the ewep row runs the World's ewep update over its words.
+	rt.view().set_person_ewep_mover([this](replication::ClientEntityState &row) {
+		return run_replica_person_ewep(kernel_->world, runtime->state(), row, self_wire_handle());
+	});
 	// The 0x26 route's section store, at the fold, under the gate
 	// apply_item_state_event applies to the same entity (it stores the same
 	// word again when the drain runs the callback).
@@ -1065,212 +1767,37 @@ void JoinerRole::wire_frame_providers() {
 						(e->engine_flags & world::kEntityFlagDead) == 0)
 					world.round_sim.hit_record.section = section;
 			});
-	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
-	// joiner world's collision tables live, each armed Player/Infantry row's
-	// settle runs the ported movement collision resolver — candidate-model
-	// contacts + push-out, world-person and replica-peer repulsion, and the
-	// ground probe THROUGH candidate models — replacing the terrain-column
-	// subset. Retail runs remote organics through the ordinary org movers
-	// whose shared tail calls the resolver ungated [orig: calls @0x4B7CF4 /
-	// @0x4BF7FA; resolver @0x4B2BD0]. The per-row ResolveState persists here
-	// (replica_resolve_states_) across pumps.
-	if (world.ai.collision != nullptr) {
-		rt.view().set_replica_contact_resolver(
-				[this](replication::ClientReplicaPipeline::ReplicaContactQuery
-								&q) -> int32_t {
-					using world::CollisionWorld;
-					CollisionWorld *col = world_->ai.collision;
-					CollisionWorld::ResolveState &st =
-							replica_resolve_states_[q.row_handle];
-					// Role-member scratch: this resolver runs per armed
-					// replica row per 62.5 Hz pump, and every row of one pump
-					// shares the same staged peer table (q.tick is the pump
-					// key), so the field-order copy between the two mirrored
-					// peer PODs happens once per tick, not once per row.
-					std::vector<CollisionWorld::ReplicaPeer> &peers =
-							replica_peer_scratch_;
-					if (replica_peer_scratch_src_ != q.peers ||
-							replica_peer_scratch_count_ != q.peer_count ||
-							replica_peer_scratch_tick_ != q.tick) {
-						peers.clear();
-						peers.reserve(static_cast<size_t>(q.peer_count));
-						for (int32_t i = 0; i < q.peer_count; ++i) {
-							CollisionWorld::ReplicaPeer p;
-							p.handle = q.peers[i].handle;
-							p.x = q.peers[i].x;
-							p.y = q.peers[i].y;
-							p.z = q.peers[i].z;
-							p.radius = q.peers[i].radius;
-							peers.push_back(p);
-						}
-						replica_peer_scratch_src_ = q.peers;
-						replica_peer_scratch_count_ = q.peer_count;
-						replica_peer_scratch_tick_ = q.tick;
-					}
-					world::EntityHandle ground;
-					const world::Vec3 resolve_pos{opennova::io::fp16_16_to_float(q.pos[0]),
-							opennova::io::fp16_16_to_float(q.pos[1]),
-							opennova::io::fp16_16_to_float(q.pos[2])};
-					const int32_t clearance = col->resolve_replica(
-							*world_, st, q.pos, q.vel_xy, q.vel_z,
-							q.capsule_bottom, q.capsule_top,
-							q.source_bound_radius_q16, q.is_player_class,
-							q.tick, q.anim_state_id, q.anim_state_flags,
-							peers.data(), static_cast<int32_t>(peers.size()),
-							q.row_handle, &q.entity_flags, &ground);
-					// A remote player's powerup contact runs the pickup on this
-					// peer's copy of the row, for a transient copy of the body at
-					// the pose the resolve read (its integrated position): the
-					// def hp until the first compact, the class byte's tier after,
-					// zero once dead. The pickup's sound plays there and the row
-					// hides or is destroyed here, as on every peer.
-					// [orig: Entity_MovementCollisionResolver @0x4B2FB8..0x4B2FCC
-					//  (no authority gate) -> PowerupAction_Pickup @0x4428A0;
-					//  Entity_InitFromItemDef @0x49E550; the dead zero @0x4C10FB]
-					const auto pickups = col->take_replica_powerup_contacts();
-					if (!pickups.empty()) {
-						const replication::ClientEntityState *row =
-								runtime->state().find(q.row_handle);
-						world::Entity picker;
-						picker.has_item_def = true;
-						picker.item_id = q.type_id;
-						picker.position = resolve_pos;
-						picker.health_max = world_->tables.player.item_hp.value_or(0);
-						picker.health = picker.health_max;
-						if (row != nullptr && row->net_health_zero) picker.health = 0;
-						else if (row != nullptr && row->net_has_compact)
-							picker.health = replication::replica_tier_health(
-									row->health_class_byte, picker.health_max);
-						world::TickContext ctx;
-						ctx.world = world_;
-						ctx.logic_tick = world_->logic_tick;
-						ctx.is_authority = false;
-						for (const auto &contact : pickups)
-							world::powerup_pickup_by(*world_, contact.target, picker, ctx);
-					}
-					q.out_ground = ground.valid() ? ground.packed
-					                              : world::EntityHandle::kInvalid;
-					return clearance;
-				});
-		// The deck-ride carrier seam: resolved_ground is the registry handle
-		// the ground probe stored; the ride reads that entity's LIVE pose
-		// against its mover-entry savedLivePose stamp — the witnessed pair
-		// [orig: the org movers read groundEntity's Position vs +0x80../body*
-		// +0x8C.. @0x4b530b../@0x4ba47f..]. One shared reader
-		// (carrier_pose_fixed) serves both sides so representations can
-		// never diverge; a never-stamped entity (static) reads zero delta.
-		rt.view().set_carrier_pose_provider(
-				[this](uint16_t handle,
-						replication::ClientReplicaPipeline::CarrierPose
-								&out) -> bool {
-					if (world_ == nullptr) return false;
-					world::EntityHandle h;
-					h.packed = handle;
-					const world::Entity *e = world_->registry.get(h);
-					if (e == nullptr) return false;
-					world::carrier_pose_fixed(
-							*e, out.pos, out.yaw, out.pitch, out.roll);
-					if (e->saved_live_valid) {
-						out.saved_pos[0] = e->saved_live_pos[0];
-						out.saved_pos[1] = e->saved_live_pos[1];
-						out.saved_pos[2] = e->saved_live_pos[2];
-						out.saved_yaw = e->saved_live_yaw;
-						out.saved_pitch = e->saved_live_pitch;
-						out.saved_roll = e->saved_live_roll;
-					} else {
-						out.saved_pos[0] = out.pos[0];
-						out.saved_pos[1] = out.pos[1];
-						out.saved_pos[2] = out.pos[2];
-						out.saved_yaw = out.yaw;
-						out.saved_pitch = out.pitch;
-						out.saved_roll = out.roll;
-					}
-					out.bound_radius = world::to_fixed(e->bound_radius);
-					return true;
-				});
-	} else {
-		rt.view().set_replica_contact_resolver(nullptr);
-		rt.view().set_carrier_pose_provider(nullptr);
-	}
+	// The client's destroy of a row: the HUD target cursor naming its decoded remote person
+	// names none (world::LocalPlayer::note_wire_entity_destroyed carries the witness).
+	rt.view().set_replica_destroy_observer(
+			[this](uint16_t handle) { kernel_->local.note_wire_entity_destroyed(handle); });
+	wire_replica_collision_seams();
 }
 
 // ClientHello once (Idle -> Hello) the first armed frame.
 void JoinerRole::send_hello_once() {
 	if (!started_) {
+		// The attempt's connection create releases a held own client first (D-NET-NEW-L1-26).
+		if (client_process_ != nullptr)
+			release_unstopped_own_client(client_process_->unstopped_server, server_logs_,
+					&client_process_->disconnect_latch);
 		const std::vector<uint8_t> hello = runtime->start();
 		if (!hello.empty()) send(hello);
 		started_ = true;
 	}
 }
 
-// Recv-fold + connect-drive + the gated C2S 0x0C uplink, then the decoded-state
-// folds (loadout/kit, side assignment, deployment-release latch, the ~1 Hz
-// freeze tripwire, objective sync into world subgoals). The wire-leg-complete
-// hook fires right after the uplink ship, before the folds, so the embedder's
-// F3 Stats board measures exactly the wire leg. Returns what this frame's pump
-// decoded (drives the later phases).
-JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
-	mission::MissionKernel &kernel = *kernel_;
-	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
+// The receive handlers' writes on L, in the receive's place: the runtime runs this leg right
+// after a receive pump, the frame's (ahead of the send block, open or not) and the mission
+// start's load's two (ClientRuntime::AfterReceive, ClientRuntime::MissionStartPumpLegs; the
+// frame's witness is run_client_net_frame's).
+void JoinerRole::apply_receive_writes() {
+	world::World &world = kernel_->world;
+	world::LocalPlayer &lp = kernel_->local;
 	ClientRuntime &rt = *runtime;
-	const uint32_t now = now_tick_;
-	// Run the client net frame first: recv-fold (-> ClientState) + connect-drive + the C2S 0x0C
-	// uplink (gated InMatch && deployed inside the runtime). The uplink describes L's pose as left by
-	// the previous entity update; this frame's raw-input/motor pass follows all inbound application.
-	const uint32_t health_updates_before =
-			rt.state().health_updates_applied;
-	const uint32_t objective_updates_before =
-			rt.state().objective_updates_applied;
-	const bool local_existed_before_net = local_spawned_;
-	std::vector<std::vector<uint8_t>> outs;
-	const bool have_L = local_spawned_ && world.cached.local_player.valid();
-	const world::Entity *e =
-			have_L ? world.registry.get(world.cached.local_player) : nullptr;
-	const world::AiEntity *ae =
-			have_L ? world.ai.for_handle(world.cached.local_player) : nullptr;
-	// A release can arrive during this recv pump. Do not let that newly-opened
-	// runtime gate transmit the corpse/stale pre-deploy pose in the same frame;
-	// L resumes uplinking only after the simulation has consumed the release and
-	// a later positive authoritative health tail.
-	const bool can_offer_uplink =
-			rt.is_deployed() && e != nullptr && ae != nullptr &&
-			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
-			!redeploy_release_pending_;
-	rt.set_local_player_position(world); // L, the receive handlers' local player
-	if (can_offer_uplink) {
-		// The interest list scores the decoded entities against L; the HUD
-		// target cursor is the aim acquisition's combat target, else its
-		// aim-ray entity, named by its wire handle (a materialized pool-1..3
-		// row sits at its own; L answers to its self handle).
-		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
-		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
-		// It is built at the send block, after this frame's receive, whose fold
-		// of L's own record (its compact revision moved) re-points L's ground
-		// link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
-		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
-		const replication::ClientEntityState *self_row = rt.state().find(self);
-		const uint32_t self_revision = self_row != nullptr ? self_row->compact_revision : 0;
-		outs = rt.Client_ProcessNetworkFrame([&](PlayerExtendedUplink &up) {
-			replication::UplinkClientInputs interest;
-			interest.replica = &rt.state();
-			interest.self_wire_handle = self;
-			interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
-					world, *ae, self, kernel.local.aim_wire_person());
-			interest.avg_fps = uplink_avg_fps_;
-			interest.cpu_percent = uplink_cpu_percent_;
-			self_row = rt.state().find(self);
-			if (self_row != nullptr && self_row->compact_revision != self_revision)
-				interest.self_echo = self_row;
-			up = replication::build_player_uplink(world, *e, *ae, interest);
-			return true;
-		}, now);
-	} else {
-		outs = rt.Client_ProcessNetworkFrame(now);
-	}
-	for (const std::vector<uint8_t> &dg : outs) send(dg);
-	// The wire leg ends here (the stats board's net split).
-	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - wire_leg_start_us_;
+	// The receive's S2C 0x08 byte, which a first grant's 0x5A slot rebuild (the kit apply
+	// below) fills from (mirror_session_zoom_rule).
+	mirror_session_zoom_rule();
 	// The host policy is installed before either the granted kit or side
 	// reseed can consult availability. A pre-load packet remains retained in
 	// ClientState until the first world frame reaches this boundary.
@@ -1279,57 +1806,247 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		lp.loadout.availability.values = rt.state().weapon_availability;
 		weapon_availability_revision_seen_ = rt.state().weapon_availability_revision;
 	}
-	if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
-	// The team selector may only just have become known (the S2C 0x04 latch landing
-	// after the catalog) or may have moved us across the line (S2C 0x50). Either way the
-	// resident kit buffer follows the side, exactly as retail re-copies restrictionData
-	// for the newly assigned side [orig: NapiNPClientMsg_TeamAssign @0x431a9a].
+	// Each of the receive's S2C 0x5A grants applies at its turn (a grant deferred from an
+	// earlier receive, with none in this one, once): the kit, its mount request, whose C2S
+	// 0x1D queues at its 0x5A's place, the name list and L's row.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0, once per message
+	//  (CNapiNPConnection_DispatchMessage @0x625EF1)]
+	const auto apply_grant = [&](std::size_t grant) {
+		if (kit_seams.apply_authoritative) kit_seams.apply_authoritative();
+		// The apply's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x5A's place
+		// among this receive's sends, ahead of what the handlers of the messages behind it in
+		// the datagram queued, as the handler's own mount queues it
+		// (ClientRuntime::queue_receive_mount_stance_change).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - Player_MountWeaponSlot
+		//  @0x4296F4 -> CNapiNetwork_QueueReliableMessage(0x1D) @0x4DFC30]
+		flush_receive_mount_stance_requests(ClientRuntime::ReceiveMount::kWeaponLoadout, grant);
+		// Each S2C 0x5A, its class on L, re-resolves L's row by that class: the camouflage
+		// item by the mission climate, its ItemTypeIndex and def (D-NET-348's joiner half).
+		// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class store @0x4293FC,
+		//  the climate pick @0x42942D..0x429463, ItemList_FindIndexByTypeId @0x42946C, the
+		//  ItemTypeIndex / itemDef stores @0x42948E / @0x429485, no index compare, the model
+		//  words through @0x4294BA, AnimMap_InitBoneTypes @0x4294C4]
+		if (rt.authoritative_loadout_revision() != loadout_row_revision_seen_) {
+			loadout_row_revision_seen_ = rt.authoritative_loadout_revision();
+			// The apply first rebuilds the process's loadout name list from the list's rows (each
+			// row whose weapon the table has: its name and three values), ahead of its L test, so
+			// the next body the joiner spawns takes the list's first weapon (D-NET-143).
+			// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the memset @0x42920C, the
+			//  rows @0x429230..0x4293B9 (AdmDef_GetEntryByIndex @0x42923D, the name @0x4292F0), the
+			//  L test @0x4293F2]
+			apply_weapon_loadout_name_list(world, rt.authoritative_loadout());
+			if (world::Entity *local = world.registry.get(world.cached.local_player)) {
+				world::rebind_player_camouflage_row(world, *local);
+				// Off the authority the grant's class is also its side's class word
+				// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the Team test
+				//  @0x429411..0x42941D, g_CharClassTeam2 @0x42941F, g_CharClassTeam1 @0x429427].
+				granted_side_class_[local->team == 1 || local->team == 3 ? 0 : 1] = local->player_class;
+			}
+		}
+	};
+	// The receive's message legs on L run in the receive's order, each message's whole ahead
+	// of the next's (ClientRuntime::receive_legs): each 0x5A's apply, each self 0x50's local
+	// arm and Player_InitPlayer(1), each 0x35's pickup. So a 0x5A behind a 0x35 rebuilds the
+	// slot table the pickup landed in, a self 0x50 behind a 0x5A re-copies its side's profile
+	// page over the grant's kit and its init rebuilds from the page, and each of two self
+	// 0x50s re-runs the init on its own side. What a receive outside a frame's folded (the
+	// push's final-wait pass) carries no mark: it runs first, as its receive came first, its
+	// 0x1D at the queue's end.
+	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - CNapiNPConnection_DispatchMessage
+	//  @0x625EF1, once per message in the packet's order; NapiNPClientMsg_HandleWeaponLoadoutSync
+	//  @0x4290E0; NapiNPClientMsg_TeamAssign @0x431910; NapiNPClientMsg_0x035 @0x4261A0]
+	const std::vector<ClientRuntime::ReceiveLeg> legs = rt.receive_legs();
+	const auto marked = [&legs](ClientRuntime::ReceiveMount at) {
+		return static_cast<std::size_t>(std::count_if(legs.begin(), legs.end(),
+				[at](const ClientRuntime::ReceiveLeg &leg) { return leg.at == at; }));
+	};
+	if (rt.receive_loadout_grant_count() == 0) apply_grant(0);
+	// Every self 0x50 whose local arm ran since the last after-receive, the profile kit re-arm
+	// following the arm, not every self 0x50 (D-NET-572): the ones ahead of this frame's marks
+	// (a receive outside a frame's) each run here, with the team its arm read.
+	const std::vector<uint8_t> team_assigns = rt.drain_self_team_assigns();
+	const std::size_t unmarked_team_assigns = team_assigns.size() -
+			std::min(team_assigns.size(), marked(ClientRuntime::ReceiveMount::kSelfTeamAssign));
+	for (std::size_t i = 0; i < unmarked_team_assigns; ++i) {
+		apply_self_team_assign(team_assigns[i]);
+		flush_stance_requests();
+	}
+	const std::vector<WeaponPickupNotice> pickups = rt.drain_weapon_pickups();
+	const std::size_t unmarked_pickups = pickups.size() -
+			std::min(pickups.size(), marked(ClientRuntime::ReceiveMount::kWeaponPickup));
+	for (std::size_t i = 0; i < unmarked_pickups; ++i) {
+		apply_weapon_pickup(*this, rt, world, lp, pickups[i]);
+		flush_stance_requests();
+	}
+	for (const ClientRuntime::ReceiveLeg &leg : legs) {
+		switch (leg.at) {
+		case ClientRuntime::ReceiveMount::kWeaponLoadout:
+			rt.stage_receive_loadout_grant(leg.occurrence);
+			apply_grant(leg.occurrence);
+			break;
+		case ClientRuntime::ReceiveMount::kSelfTeamAssign:
+			apply_self_team_assign(leg.team);
+			// Its walk's mount request (a ForceCrouch def's C2S 0x1D) queues at the 0x50's
+			// place, past the handler's own sends [orig: NapiNPClientMsg_TeamAssign @0x431910
+			//  - the 0x2F @0x431AAD, the 0x22 / 0x23 @0x431AE4 / @0x431B05,
+			//  Player_InitPlayer(1) @0x431B14].
+			flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+			break;
+		case ClientRuntime::ReceiveMount::kWeaponPickup:
+			// Each S2C 0x35 for L mounts its pickup inside the receive, its 0x1D at its place,
+			// so this frame's send block frames it [orig: NapiNPClientMsg_0x035 @0x4261A0 -
+			//  Player_MountPickedUpWeapon @0x42624C / @0x42625B -> Player_MountWeaponSlot
+			//  @0x4E040E; Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead
+			//  of the send block @0x42C3DD].
+			if (unmarked_pickups + leg.occurrence < pickups.size())
+				apply_weapon_pickup(*this, rt, world, lp,
+						pickups[unmarked_pickups + leg.occurrence]);
+			flush_receive_mount_stance_requests(leg.at, leg.occurrence);
+			break;
+		}
+	}
+	// The team selector may only just have become known: the S2C 0x04 latch landing after
+	// the catalog, a side change no self 0x50 carried (each self 0x50's leg above copied its
+	// own side's page). The resident kit buffer follows the side, as the mission start's copy
+	// would have read the latch [orig: Game_StartMission @0x524360 - the side pick
+	//  @0x525798, the copy @0x525818].
 	if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
 		if (kit_seams.push) kit_seams.push();
 	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
 	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
 	// entity's Team and the round sim's presenting-client team, or friend/foe styling
 	// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
-	// the latch and entity->Team for the entity itself.
+	// the latch and entity->Team for the entity itself. Each self 0x50 whose local arm ran
+	// stored its own team at its turn above; this stores the receive's last, the one a
+	// self 0x50 ahead of the local entity's binding leaves.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
 	//  style select reads the local player's Team @0x4ec740]
 	{
 		const uint64_t self_team_revision = rt.self_team_revision();
 		if (self_team_revision > self_team_revision_seen_) {
 			self_team_revision_seen_ = self_team_revision;
-			const uint8_t assigned = rt.assigned_team();
-			if (world::Entity *L =
-					world.registry.get(world.cached.local_player)) {
-				L->team = assigned;
-			}
-			world.round_sim.local_team = assigned;
-			// The 0x50 handler also RE-SELECTS the newly assigned side's profile page
-			// and re-submits it: profileData = (team==1||team==3) ? blue : red, class
-			// = *profileData, page = profileData + {6,2054,4102,6150,8198}
-			// [orig: NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9e — the submit
-			// passes slot 195 RAW]. The re-submission itself lives in the joiner
-			// runtime; re-arm the seam from the NEW side so its content is the page
-			// retail would have copied. The resident buffer itself moves with the side
-			// in reseed_kit_on_side_change above (retail's qmemcpy replaces
-			// restrictionData wholesale @0x431a9a) — a reassignment WITHIN one side
-			// reaches only this re-arm, which is what retail's unconditional re-submit
-			// does too.
-			if (kit_seams.push) kit_seams.push();
+			// Leg 2's store on the joiner's own entity (not the g_LocalTeam latch,
+			// which the local arm alone takes, D-NET-572).
+			store_local_team(rt.self_assigned_team());
 		}
 	}
-	const uint64_t deployment_release_revision =
-			rt.deployment_release_revision();
-	if (deployment_release_revision > deployment_release_revision_seen_) {
-		deployment_release_revision_seen_ = deployment_release_revision;
-		// The first release creates L below. A later release must revive that
-		// existing identity, but only after a positive 0x0A tail observed after
-		// this release frame (not a stale positive already queued ahead of it).
-		if (local_existed_before_net) {
-			redeploy_release_pending_ = true;
-			redeploy_health_updates_at_release_ =
-					rt.state().health_updates_applied;
-		}
+	{
+		// L's birth on the stats board (an instrument).
+		devtools::ProfileScope birth(world.profile, devtools::Slot::SIM_CLIENT_LOCAL_BIRTH);
+		spawn_and_arm_local_player();
 	}
+	rebuild_local_from_full_spawn();
+	fold_local_record();
+	apply_world_state_load();
+	// The receive's mount requests (the 0x5A apply's queued at its place above) queue their
+	// C2S 0x1D in the receive, as the handler's own call does, so this frame's send block
+	// frames them, not the next one's.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (the mount @0x4296F4) ->
+	//  Player_MountWeaponSlot @0x4DFA40 (CNapiNetwork_QueueReliableMessage(0x1D)
+	//  @0x4DFC1B..0x4DFC30); Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228
+	//  ahead of the send block @0x42C3DD]
+	flush_stance_requests();
+}
+
+// The client net frame (recv-fold + connect-drive + the gated C2S 0x0C uplink) with the
+// receive handlers' writes on L in its after-receive leg (loadout/kit, side assignment,
+// a seeded session's birth of L on the in-match edge, its own record with its respawn arm
+// and the 0x0F's pose), then the ~1 Hz freeze tripwire and the objective sync into
+// world subgoals.
+// The wire leg's clock stops right after the ship, so the embedder's F3 Stats board
+// measures the net frame with its folds. Returns what this frame's pump decoded (drives
+// the later phases).
+JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
+	mission::MissionKernel &kernel = *kernel_;
+	world::World &world = kernel.world;
+	ClientRuntime &rt = *runtime;
+	const uint32_t now = now_tick_;
+	// The uplink describes L's pose as left by the previous entity update and this frame's
+	// receive; this frame's raw-input/motor pass follows all inbound application.
+	// The health edge is this net frame's own (its applier writes L; the one receive outside
+	// the net frame, the push's final-wait first pass, folds only what came during the load,
+	// ahead of any host reply to the mission start's sends, D-NET-NEW-L2-52).
+	const uint32_t health_updates_before =
+			rt.state().health_updates_applied;
+	// The own record's compact revision ahead of the receive: a record the receive folds
+	// is the uplink's echo (the builder below).
+	const uint16_t self_before = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+	const replication::ClientEntityState *self_row_before = rt.state().find(self_before);
+	const uint32_t self_revision_before =
+			self_row_before != nullptr ? self_row_before->compact_revision : 0;
+	rt.set_local_player_position(world); // L, the receive handlers' local player
+	mark_defless_self_slot(); // a destroyed L's records drop (D-NET-NEW-L2-59)
+	// The receive handlers' writes on L, in the receive's place: the runtime runs this leg
+	// right after its receive pump, ahead of the send block, open or not
+	// (ClientRuntime::AfterReceive). Each fold applies what the receive brought (each is
+	// revision-gated): the availability; the message legs in the receive's order (each
+	// 0x5A's kit and row, each self 0x50's team, page copy and init, each 0x35's pickup);
+	// the side's kit buffer and the 0x50's last team; then a seeded session's birth of L on
+	// the in-match edge (a join's L is born at its mission start, as retail's, so the handlers
+	// write it inside the receive, D-NET-NEW-L2-52), its own record (a respawn arm's
+	// redeploy among its writes, D-NET-NEW-L2-55) and the 0x0F's pose. So a release's 0x0C is
+	// built from L as the receive left it (D-NET-526): a game-loop frame's in that frame;
+	// the final wait's 0x0F pass sends the completion burst alone and the game loop's first
+	// frame builds the first 0x0C (D-NET-NEW-L2-48).
+	// [orig: Client_ProcessNetworkFrame @0x42C180 - the receive @0x42C228 ahead of the send
+	//  block @0x42C3DD, the build from g_LocalPlayerEntity @0x42C46F..0x42C482;
+	//  Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC;
+	//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the L test @0x4293F2, the
+	//  selection @0x4296E3, the hold clear @0x429713; NapiNPClientMsg_TeamAssign @0x431910 -
+	//  @0x4319DB / @0x4319EE, the local arm @0x431A35..0x431AAD; NapiNPClientMsg_0x00F
+	//  @0x42E200 - the hold clear @0x42E391, the pose stores @0x42E3B9..0x42E3F2]
+	const ClientRuntime::AfterReceive after_receive = [&] {
+		apply_receive_writes();
+	};
+	// The builder at the send block, on L as the receive left it (a respawn arm's redeployed
+	// body included, D-NET-NEW-L2-55). Its own refusals: no body, a Health word of 0, the dead
+	// bit (no alive latch, D-NET-433), and its serializer's no def (a body its own ewep update
+	// destroyed). The sub-header's type word is L's def's as it stands: the row the mission
+	// start's reload bound, then each self record's camouflage re-pick (D-NET-NEW-L2-57).
+	// [orig: Player_BuildTag0CInputBody @0x42A550 - `cmp word [eax+11Eh], 0; jz`
+	//  @0x42A58F..0x42A597, `test byte [eax+24h], 2; jnz` @0x42A599..0x42A59D;
+	//  Pool_SerializeEntityViaVTable @0x4D64E0 - the def test @0x4D654F..0x4D6554, the def's
+	//  type word `mov ax, [eax+50h]` @0x4D659B, stored at +2 @0x4D659F]
+	const std::vector<std::vector<uint8_t>> outs = rt.Client_ProcessNetworkFrame(
+			[&](PlayerExtendedUplink &up, uint16_t &item_type_id) {
+		if (!local_spawned_ || !world.cached.local_player.valid()) return false;
+		const world::Entity *e = world.registry.get(world.cached.local_player);
+		const world::AiEntity *ae = world.ai.for_handle(world.cached.local_player);
+		if (e == nullptr || ae == nullptr || world::retail_signed_i16(e->health) == 0 ||
+				(e->flags & 2u) != 0u || !e->has_item_def)
+			return false;
+		item_type_id = static_cast<uint16_t>(e->item_id);
+		// The interest list scores the decoded entities against L; the HUD
+		// target cursor is the HUD pass's last build of its record (the lock
+		// word, else the aim-ray entity), named by its wire handle (a
+		// materialized pool-1..3 row sits at its own; L answers to its self handle).
+		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
+		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
+		// The receive's fold of L's own record (its compact revision moved) re-pointed
+		// L's ground link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
+		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+		replication::UplinkClientInputs interest;
+		interest.replica = &rt.state();
+		// A decoded person's boundRadius, from the same typed items.def/model result its
+		// spawn takes (the replica pipeline's resolver).
+		interest.person_bound_radius_q16 = [this](uint16_t type_id) -> int32_t {
+			return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
+		};
+		interest.self_wire_handle = self;
+		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
+				world, kernel.local.hud_target_cursor(), self);
+		interest.avg_fps = uplink_avg_fps_;
+		interest.cpu_percent = uplink_cpu_percent_;
+		const replication::ClientEntityState *self_row = rt.state().find(self);
+		const uint32_t revision_before = self == self_before ? self_revision_before : 0;
+		if (self_row != nullptr && self_row->compact_revision != revision_before)
+			interest.self_echo = self_row;
+		up = replication::build_player_uplink(world, *e, *ae, interest);
+		return true;
+	}, now, after_receive);
+	for (const std::vector<uint8_t> &dg : outs) send(dg);
+	// The wire leg ends here (the stats board's net split).
+	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - wire_leg_start_us_;
 	// Frozen-session tripwire (live-diagnosis aid, ~1 Hz): sample the signature
 	// continuously; the embedder's diagnostic hook owns the (env-gated) print.
 	// An unrecovered S2C sequence gap stalls the ordered frontier, the remote world
@@ -1366,7 +2083,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	decoded.health =
 			rt.state().health_updates_applied != health_updates_before;
 	decoded.objectives =
-			rt.state().objective_updates_applied != objective_updates_before;
+			rt.state().objective_updates_applied != objective_updates_seen_;
+	objective_updates_seen_ = rt.state().objective_updates_applied;
 	if (decoded.objectives) {
 		const replication::ClientState &client = rt.state();
 		world.script.subgoals.won = client.objective_won;
@@ -1377,145 +2095,118 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	return decoded;
 }
 
-// Drain typed S2C gameplay events after the client recv pump: tag-2 fires
-// spawn visual-only rounds; the requester's 0x49 echo performs its refill.
-void JoinerRole::apply_gameplay_events() {
+// Player_InitPlayer's class word: the side L's Team names (team 1 or 3 the first side),
+// stored with no range test: the 0x5A's grant for that side, else the session start's
+// (the join vars' class bytes, which the session start clamped; a joiner whose shell
+// installed none holds the fresh profile's, 8 on both sides).
+// [orig: Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_CharClassTeam2
+//  @0x4E1819..0x4E181F, g_CharClassTeam1 @0x4E182C..0x4E1832;
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x42941F / @0x429427]
+void JoinerRole::stamp_init_player_class(world::Entity &local) const {
+	const int side = local.team == 1 || local.team == 3 ? 0 : 1;
+	if (granted_side_class_[side] != 0) {
+		local.player_class = granted_side_class_[side];
+		return;
+	}
+	if (const CharacterJoinVars *vars = runtime->character_join_vars())
+		local.player_class = vars->char_class[side];
+}
+
+void JoinerRole::store_local_team(uint8_t team) {
+	// [orig: NapiNPClientMsg_TeamAssign @0x431910 - @0x4319EE; the round-spawn style select
+	//  reads the local player's Team @0x4EC740]
+	world::World &world = kernel_->world;
+	if (world::Entity *L = world.registry.get(world.cached.local_player)) L->team = team;
+	world.round_sim.local_team = team;
+}
+
+// One self S2C 0x50 whose local arm ran, at its turn in the receive: its Team store on L,
+// then the arm's copy of the page of the side its team names over the spawn buffer, whatever
+// the buffer held (a 0x5A grant's kit, an armory ACCEPT's) and whether or not the side moved,
+// the 0x2F seam re-armed (the re-submission itself is the runtime's, at its place), then
+// Player_InitPlayer(1), which rebuilds the slots from that buffer, on the side L's Team now
+// names.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - g_LocalTeam @0x4319DB, the Team store
+//  @0x4319EE, the side pick @0x431A27..0x431A54, the class switch @0x431A59..0x431A66,
+//  the copy @0x431A9A, NetPacket_SendLoadoutSubmit (the call @0x431AAD), Player_InitPlayer(1)
+//  @0x431B14; Player_InitPlayer @0x4E15F0 - AvatarDef_BuildDisplayList(g_SpawnLoadoutBuffer)
+//  @0x4E1882]
+void JoinerRole::apply_self_team_assign(uint8_t team) {
+	store_local_team(team);
+	if (kit_seams.reseed_on_team_assign) kit_seams.reseed_on_team_assign(team);
+	if (kit_seams.push) kit_seams.push();
+	reinit_local_player_on_team_assign();
+}
+
+// A self S2C 0x50 on the local entity re-runs Player_InitPlayer(1) after its local arm:
+// the class (and avatar) words of the side L's Team names, the weapon leg (the slots
+// reset and reloaded from the resident kit the arm re-copied, the spawn default
+// selected) with the view and map resets, and the hidden bit cleared; then the
+// handler stores the message's animSlot and NetId on the entity, so L ends with the
+// 0x50's identity pair (D-NET-570). L that does not exist yet has its pair from the
+// spawn. The NetId is the self row's, which the pipeline's fold already restamped when
+// the joiner's avatar table lacks the wire id (ClientReplicaPipeline::resolve_player_net_id,
+// D-NET-NEW-L2-27).
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the compare @0x431B0A, Player_InitPlayer(1)
+//  @0x431B14, animSlot @0x431B3A, NetId @0x431B46, the fallback @0x431B4D..0x431B77;
+//  Player_InitPlayer @0x4E15F0 - the Team test @0x4E1809..0x4E1817, the class and avatar
+//  @0x4E181F..0x4E1843, the weapon leg @0x4E1909..0x4E19A1, the hidden clear @0x4E19C2]
+void JoinerRole::reinit_local_player_on_team_assign() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::World &world = kernel.world;
-	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	rt.apply_received_effects(world);
-
-	// S2C 0x23 replicated WAC commands: run the registry row's handler here
-	// with the operands the wire carried — the same body the host VM ran for a
-	// broadcast row, or ran only here for a targeted ptext/pwave/pconsol. Fx
-	// and SoundSet operands index this peer's mounted catalogs.
-	// [orig: GameMode_DispatchRemoteCommand @0x4F81E0 — the call-convention
-	//  switch @0x4f8438 into the row's handler]
-	const std::vector<ScriptRemoteCommand> remote_commands =
-			rt.drain_script_remote_commands();
-	if (!remote_commands.empty()) {
-		const std::vector<std::string> effect_names =
-				kernel.script_effect_catalog.interned_names();
-		const wac::RemoteCommandNames names{
-				&effect_names, &kernel.script_sound_catalog.names()};
-		std::vector<world::ScriptRemoteArg> args;
-		for (const ScriptRemoteCommand &command : remote_commands) {
-			args.clear();
-			args.reserve(command.args.size());
-			for (const ScriptRemoteCommandArg &arg : command.args)
-				args.push_back({static_cast<int32_t>(arg.value), arg.text});
-			const wac::RemoteCommandResult result =
-					wac::run_remote_command(world, command.command_index, args, names);
-			// A wire row with no handler body here is the joiner's dispatch gap;
-			// the host VM records the same kind at its instruction site.
-			if (!result.handled)
-				world.diagnostics.record({world::RuntimeGapKind::WacCommand,
-						command.command_index, 0, -1, -1}, world.logic_tick);
-		}
+	world::Entity *local = world.registry.get(world.cached.local_player);
+	if (local == nullptr) {
+		// Past the mission start's binding with no L yet (a self handle bound only past the
+		// mission start: ours bears L on the in-match edge, D-NET-NEW-L2-52): the re-run and
+		// the 0x50's own pair wait for that spawn (stamp_mission_start_identity). A local arm
+		// ahead of the binding (a stale one in a reload's waits) is overwritten by the mission
+		// start's init, so it leaves nothing.
+		if (!rt.in_mission_start() && !rt.in_pre_game() && !rt.mission_start_aborted())
+			post_start_identity_pending_ = true;
+		return;
 	}
-
-	// S2C 0x3F: kind 0 re-runs the objective notification here with relay
-	// flag 0 (off the authority it posts the chat lines and relays nothing),
-	// then NEW_GOAL at the local player for flag 1. Kind 1, and the kind-0
-	// arm's fall-through into the same reads, is the mission-text chat relay:
-	// the key resolves in this peer's mission text and a non-empty line posts
-	// (a kind-0 body has no tail, so its empty key posts nothing).
-	// [orig: NapiNPClientMsg_0x03F @0x42BB20 — HUD_ShowObjectiveNotification
-	//  @0x42bbc2, NEW_GOAL @0x42bbc7..0x42bbe4, MissionText_GetStringByKey
-	//  @0x42bc26 -> GameMsg_AddChatLineAndRelay @0x42bc39 (its line gate
-	//  @0x5ba170..0x5ba18d)]
-	for (const ObjectiveNotification &notice : rt.drain_objective_notifications()) {
-		if (notice.kind == 0) {
-			world.show_objective_notification(notice.slot, notice.is_win, notice.is_active, 0);
-			if (notice.flag == 1) {
-				if (const world::Entity *player = world.registry.get(world.cached.local_player))
-					world.out.fire_sounds.play_immediate("NEW_GOAL", player->position, 0);
-			}
-		}
-		if ((notice.kind == 0 || notice.kind == 1) && !notice.key.empty() &&
-				(world.rules.mp_session_peer || !world.rules.mp_session))
-			world.out.effects.push({"mission_text_chat", notice.team, 0, 0, 0, notice.key});
+	// The side's word, stored as it is (stamp_init_player_class).
+	stamp_init_player_class(*local);
+	kernel.local.respawn_init(/*rebuild_kit=*/true);
+	local->hidden = false;
+	local->flags &= ~world::kEntityFlagCarried;
+	// The pair the pipeline folded onto the self row from this 0x50 (a player row's).
+	const replication::ClientEntityState *self =
+			rt.has_self_handle() ? rt.state().find(rt.self_handle()) : nullptr;
+	if (self != nullptr && self->cls == EntityClass::Player) {
+		local->anim_slot = self->spawn_anim_slot;
+		local->minimap_net_id = self->net_id;
 	}
+}
 
-	// Retail's S2C 0x0A tag-2 record is a fired-round descriptor. Re-run the
-	// normal round spawner so tracers and physical impacts are produced locally;
-	// World::run_logic_tick admits this pool only under the explicit
-	// mp_session && !projectile_authority visual-client gate. Every descriptor
-	// is spawned VisualOnly below, and that mode gates every gameplay consequence.
-	for (const auto &ev : rt.drain_round_events()) apply_round_event(ev);
-
-	for (const WeaponReload &reload :
-			rt.drain_reload_notifications()) {
-		++lp.weapon.reload_received_serial;
-		lp.weapon.reload_received_entity = reload.entity_handle;
-		lp.weapon.reload_received_param = reload.reload_param;
-		// ClientRuntime already applied the remote-Person receive-handler stamp
-		// before that frame's body tick. This drain retains diagnostics, the
-		// non-person branch's refill on an EWeap entity's own MountSlot, and the
-		// self-only WeaponSlot_ReloadAmmo branch below.
-		// [orig: NapiNPClientMsg_WeaponReload_0x049 @0x42C0A0 - the non-person
-		//  WeaponSlot_ReloadAmmo call @0x42C109, whose EWeap slot @0x54172D]
-		if (!rt.has_self_handle() || reload.entity_handle != rt.self_handle()) {
-			world::Entity *mount = world.registry.get(world::EntityHandle{reload.entity_handle});
-			if (mount != nullptr && mount->has_item_def &&
-					(mount->item_attrib & world::kItemAttribEweap) != 0u &&
-					world.vehicles.prepare_weapon_slot(*mount))
-				world.vehicles.reload_weapon_slot(*mount);
-			continue;
-		}
-		if (!lp.inventory_valid) continue;
-
-		const int32_t combo = reload.reload_param;
-		world::WeaponInventorySlot *reloaded = lp.inventory.slot(combo);
-		const world::WeaponTableEntry *def =
-				(reloaded != nullptr && reloaded->adm_index >= 0)
-						? world.tables.weapons.by_index(
-								static_cast<uint8_t>(reloaded->adm_index))
-						: nullptr;
-		if (reloaded == nullptr || def == nullptr) continue;
-
-		// WeaponSlot_ReloadAmmo is run only on the echoed notification: refund
-		// the payload-addressed slot's remaining clip to its ammo-class pool and
-		// draw a full clip. A late echo still reloads that exact slot after a switch;
-		// only the currently active personal slot has an FSM mirror to update here.
-		// The refill reads, spends and writes through the player's seat
-		// [orig: WeaponSlot_ReloadAmmo @0x5417C5..0x541842].
-		const world::Entity *self_body = world.registry.get(world.cached.local_player);
-		const world::WeaponAmmoSeat seat = self_body != nullptr
-				? world::entity_ammo_seat(world, *self_body) : world::WeaponAmmoSeat{};
-		const int32_t reloaded_rounds = world::weapon_inventory_reload_slot(
-				world.tables.weapons, lp.inventory, combo, seat);
-		if (lp.weapon.active && !lp.weapon.usegun_slot_active &&
-				lp.inventory.equipped_combo >= 0) {
-			world::WeaponSlotState &active_slot =
-					*world::active_local_weapon_slot(world, lp.weapon);
-			const world::WeaponInventorySlot *equipped =
-					lp.inventory.slot(lp.inventory.equipped_combo);
-			const world::WeaponTableEntry *equipped_def =
-					(equipped != nullptr && equipped->adm_index >= 0)
-							? world.tables.weapons.by_index(
-									static_cast<uint8_t>(equipped->adm_index))
-							: nullptr;
-			if (equipped_def != nullptr) {
-				active_slot.reserve = world::weapon_seat_pool(seat, equipped_def->ammo_class_id,
-						world::weapon_pool_get(lp.inventory, equipped_def->ammo_class_id));
-			}
-			if (combo == lp.inventory.equipped_combo) {
-				active_slot.clip = reloaded_rounds;
-				active_slot.phase = static_cast<uint8_t>(
-						active_slot.phase &
-						~world::weapon_phase::kReloadPendingBit);
-			}
-		}
-		++lp.weapon.reload_applied_serial;
-		world::AiEntity *player = world.ai.for_handle(world.cached.local_player);
-		if (player != nullptr && player->inf.active)
-			player->inf.reload_anim_ticks = 80;
+// The joiner's own entity's identity at the mission start's Player_InitPlayer, which ours runs
+// on L at its birth (the mission start's push, else the in-match edge, D-NET-NEW-L2-52): the
+// init restamps animSlot from the avatar byte of the side L's Team names (team 1 or 3 the
+// first side; the avatar bytes are
+// the ones the join sent as VCA / VCB) and never writes the NetId, so L keeps the latest
+// 0x0C / 0x50 NetId, the self row's; a self 0x50 whose local arm ran after the init (the
+// mission start bound the local entity, L born on the in-match edge) re-ran the init and then
+// stored its own pair, so L takes that 0x50's animSlot instead. With no self row (a seeded
+// harness) the record's NetId stands; with no join vars installed, the record's animSlot.
+// [orig: Game_StartMission @0x524360 - Player_InitPlayer @0x525BBC; Player_InitPlayer
+//  @0x4E15F0 - the Team test @0x4E1809..0x4E1817, g_AvatarTeam2 @0x4E1825 / g_AvatarTeam1
+//  @0x4E1838, the animSlot store @0x4E1843; NapiNPClientMsg_TeamAssign @0x431910 - the local
+//  compare @0x431B0A, Player_InitPlayer(1) @0x431B14, animSlot @0x431B3A, NetId @0x431B46;
+//  UI_JoinSelectedSession @0x5699D0 - the join's avatar bytes g_AvatarTeam1 @0x569C2A /
+//  g_AvatarTeam2 @0x569C46]
+void JoinerRole::stamp_mission_start_identity(world::PlayerSpawn &spawn) {
+	ClientRuntime &rt = *runtime;
+	const replication::ClientEntityState *self =
+			rt.has_self_handle() ? rt.state().find(rt.self_handle()) : nullptr;
+	const bool self_row = self != nullptr && self->cls == EntityClass::Player;
+	if (self_row) spawn.minimap_net_id = self->net_id;
+	if (post_start_identity_pending_ && self_row) {
+		spawn.anim_slot = self->spawn_anim_slot;
+	} else if (const CharacterJoinVars *vars = rt.character_join_vars()) {
+		spawn.anim_slot = vars->avatar[spawn.team == 1 || spawn.team == 3 ? 0 : 1];
 	}
-	apply_weapon_pickups(*this, rt, world, lp);
-
-	// The frame decays remote recoil after the emplacement channels consume it.
+	post_start_identity_pending_ = false;
 }
 
 void JoinerRole::reset_for_join() {
@@ -1531,10 +2222,9 @@ void JoinerRole::reset_for_join() {
 	// correction).
 	started_ = false;
 	local_spawned_ = false;
-	deployment_release_revision_seen_ = 0;
+	final_wait_seen_ = false;
+	final_wait_end_ = false;
 	mounted_ammo_revision_seen_ = 0;
-	redeploy_release_pending_ = false;
-	redeploy_health_updates_at_release_ = 0;
 	last_frontier_seq_ = 0;
 	last_records_applied_ = 0;
 	last_outbound_seq_ = 0;
@@ -1586,171 +2276,98 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 	return true;
 }
 
-// Leaving: the disconnect datagrams ride the shell's send leg.
+// Leaving: the session's teardown at the mission's exit, by its post-mission route, its
+// datagrams riding the shell's send leg. A route that destroys the session leaves through
+// FullDestroy, which latches "N.C:SWWAD[1]:<exit reason>" when nothing is latched (a load
+// wait's ESC or timeout: reason 1); the session reset (reason 2, the "quit" row's exit) bursts
+// the record as it stands, zeros when nothing was latched; the error arms (5, 6, 7, 20 and the
+// disconnect classes 9..19) tear nothing down, so a connection still up sends no goodbye. With
+// no exit reason the Post Menu never runs: the teardown is the process exit's (the app's quit,
+// the shell's unload), whose library shutdown resets the session, so the burst carries the
+// record as it stands too (V-L2-s8).
+// [orig: PostMenu_RouteMissionExit @0x568460 - reason 2's CNapiGameSession_ResetActiveSession
+//  @0x56846F (-> CNapiNPConnection_Destroy @0x4C8A93), the error arms' loc_5686DA..0x568715 (no
+//  teardown), CNapiGameSession_FullDestroy(g_MissionExitReason) @0x568677..0x568683;
+//  CNapiGameSession_FullDestroy @0x4C96A0 - @0x4C96CC, @0x4C96DB;
+//  Client_CheckDisconnectOrEscDuringLoad @0x520270 - reason 1 @0x5202A8; Game_ProcessMainFrame
+//  @0x5263F0 - the Post Menu only on a nonzero reason @0x526860..0x526867;
+//  Game_ShutdownSubsystems @0x4A5300 - NapiLib_Shutdown (the call @0x4A5398); NapiLib_Shutdown
+//  @0x4C9580 - CNapiGameSession_ResetActiveSession (the call @0x4C958B)]
 void JoinerRole::close() {
 	if (kernel_) {
 		kernel_->world.round_sim.guided_inputs_provider = {};
 		kernel_->world.round_sim.wire_actor_provider = {};
+		kernel_->world.destroyed_mark = {};
+		kernel_->world.wire_person = {};
+		kernel_->world.wire_person_handles = {};
 		kernel_->world.round_sim.wire_person_body = {};
 		kernel_->wire_person_pose = {};
 	}
 	if (!runtime) return;
-	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+	// The round clock the joiner's S2C 0x0A wrote outlives the session: a later host's first
+	// mission-start update in this process reads it (D-NET-NEW-L1-52) [orig: NapiNPClientMsg_0x00A
+	//  @0x42FEC0 - the g_RoundTimeRemaining stores @0x430220 / @0x430235; Lobby_UpdateServerInfo's
+	//  read @0x4FED57].
+	if (client_process_ != nullptr)
+		client_process_->round_time_remaining_ticks = runtime->state().round_time_remaining_ticks;
+	// The shell's abort of a mission-start wait (its ESC, a window's expiry) is the wait's
+	// return, which stores reason 1 ahead of the Post Menu.
+	int32_t reason = runtime->mission_exit_reason();
+	if (reason == kMissionExitNone && runtime->in_mission_start()) reason = kMissionExitQuit;
+	if (reason == kMissionExitNone) {
+		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+	} else if (reason == kMissionExitReset) {
+		// The reason-2 arm's session reset: the connection's destroy (its leave, then its
+		// enumerator's drain), then the held server's stop.
+		for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
+		runtime->drain_enumerator(enumerator_drain_);
+		stop_held_server();
+	} else if (route_mission_exit(reason, /*novaworld=*/false).destroys_session) {
+		destroy_session(reason);
+	}
 }
 
-void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
-    auto &world = kernel_->world;
-    auto &rt = *runtime;
-    auto &kernel = *kernel_;
+void JoinerRole::cancel_join() {
+	if (!runtime || !runtime->in_pre_game()) return;
+	destroy_session(runtime->pre_game_cancel_reason());
+}
 
-	// The retail deserializer dispatches only the alt/projectile bit or the
-	// standard adm-indexed bit [orig: @0x42f2a8]. Other flag shapes do not
-	// enter RoundData_SpawnRound.
-	if ((ev.flags & (kRoundEventFlagAltFire | kRoundEventFlagAdmIndexed)) == 0)
-		return;
-	// The event names its shooter, which must resolve to a live entity with an
-	// item def on this client, or the whole event is dropped: no 0xFFFF, no pool
-	// past 4, no slot past its pool, no empty slot or def. Here a shooter is a
-	// decoded row with its type or a native twin with its def.
-	// [orig: NetPacket_DeserializeRoundEvent - the 0xFFFF test @0x42F451, the pool
-	//  @0x42F465, the slot @0x42F47C..0x42F482, the entity and its +0x20 def
-	//  @0x42F497..0x42F4A1]
-	{
-		if (wire_handle::is_batch_end_sentinel(ev.shooter_handle)) return;
-		const replication::ClientEntityState *row = rt.state().find(ev.shooter_handle);
-		const world::Entity *twin = world.registry.get(world::EntityHandle{ev.shooter_handle});
-		if ((row == nullptr || row->type_id == 0) && (twin == nullptr || !twin->has_item_def))
-			return;
-	}
-	// Bit 0 is tested first: the ammo-def arm reads the byte as the round's ammo
-	// index and spawns with no weapon. Only with bit 0 clear does the adm-indexed
-	// arm resolve the byte as a weapon and fly that weapon's round.
-	// [orig: NetPacket_DeserializeRoundEvent - the arm test @0x42F521, the ammo
-	//  bound @0x42F52C..0x42F53E, the null weapon @0x42F582 into
-	//  RoundData_SpawnRound @0x42F5BA; the adm arm's AdmDef_GetEntryByIndex
-	//  @0x42F6D9 and its ammo byte @0x42F6F9]
-	const bool ammo_arm = (ev.flags & kRoundEventFlagAltFire) != 0;
-	int32_t round_ammo = -1;
-	if (ammo_arm) {
-		if (world.tables.ammo.by_index(ev.adm_index) == nullptr) return;
-		round_ammo = ev.adm_index;
-	} else {
-		const world::WeaponTableEntry *adm =
-				world.tables.weapons.by_index(ev.adm_index);
-		if (adm == nullptr || adm->ammo_index < 0) return;
-		round_ammo = adm->ammo_index;
-	}
-	world::RoundSpawnParams round;
-	world::RoundSourceState source;
-	round.owner = world::EntityHandle{};
-	round.shooter_handle = ev.shooter_handle;
-	// The mounted shooter's own vehicle joins the trace exclusion exactly
-	// like retail's mount rule — see wire_carrier_exclusion_for.
-	round.shooter_carrier_handle = wire_carrier_exclusion_for(
-			rt.state(), ev.shooter_handle, kernel.seat_specs);
-	// Retail resolves the wire shooter entity and copies its TEAM into the
-	// spawned round — the friend/enemy throwable item and tracer styling key
-	// on it. Without this every remote grenade wore the enemy variant (and a
-	// variant with no motor row froze mid-air). [orig: @0x4ec705]
-	if (replication::ClientEntityState *shooter_row =
-				rt.state().find(ev.shooter_handle)) {
-		round.shooter_team = shooter_row->team;
-		const int anim = shooter_row->anim_state_id;
-		// The category follows the retail animation-flags table, not a
-		// hand-maintained list of familiar locomotion clips. In particular,
-		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_AnimStateFlagsTable @0x8139E8, mapped onto +0x12C by
-		// NetPacket_SerializePlayerState @0x4C11FD..0x4C1242; category read in
-		// RoundData_SpawnRound @0x4EC129..0x4EC14C, the row @0x4EC2A6..0x4EC2FD]
-		const uint32_t anim_flags = world::infantry_anim_flags(anim);
-		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
-		// The spread's up/down limit reads the raw prone bit, not the row
-		// [orig: RoundData_SpawnRound @0x4EC137, read @0x4EC454].
-		source.prone = prone;
-		const bool crouched =
-				(anim_flags & world::kAnimStanceFlagCrouched) != 0;
-		const bool mounted =
-				round.shooter_carrier_handle != wire_handle::kInvalid;
-		// The shooter's Flags dword as a retail client holds a decoded peer's:
-		// the spawn word and the client motor's bits (the row's mirror), with the
-		// latest compact record's byte folded in under 0xFD, as the 0x0A fold
-		// does (`Flags ^= (Flags ^ wire) & 0xFD`): Parachute 0x20 rides the
-		// record, Drowning 0x8000 and LadderContact 0x100000 are the motor's.
-		// [orig: NetPacket_SerializePlayerState @0x4C1307..0x4C1311 (a player);
-		//  @0x4C065D..0x4C0662 (an infantry)]
-		const uint32_t mirror = shooter_row->rm_entity_flags;
-		const uint32_t shooter_flags = shooter_row->state_flags_known
-				? (mirror & ~0xFDu) | (shooter_row->state_flags & 0xFDu)
-				: mirror;
-		// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
-		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
-		// decoded row has no CameraOffset carrier, so raw fixed position Z is
-		// the bounded projection. Do not invent a standing-eye constant here.
-		const bool below_water = world.env.water_z != 0 &&
-				shooter_row->z < world.env.water_z;
-		source.person_with_item_def =
-				shooter_row->cls == EntityClass::Player ||
-				shooter_row->cls == EntityClass::Infantry;
-		source.player = shooter_row->cls == EntityClass::Player;
-		// The recoil's x4 leg: Drowning, or the eye below the water
-		// [orig: RoundData_SpawnRound `test ecx, 8000h` @0x4EC342 (the shotgun
-		//  leg) / @0x4EC86D (the single round), the eye @0x4EC34E..0x4EC35A /
-		//  @0x4EC879..0x4EC885].
-		source.underwater =
-				(shooter_flags & world::kEntityFlagDrowning) != 0u || below_water;
-		// The stance row: Parachute, Drowning or LadderContact, or the eye below
-		// the water, forces the standing row 2; a mount after it wins (row 1).
-		// [orig: RoundData_SpawnRound `test dword ptr [ebp+24h], 108020h`
-		//  @0x4EC2D5, the eye @0x4EC2DE..0x4EC2EA, row 2 @0x4EC2EC, the mount
-		//  @0x4EC2F4..0x4EC2FD]
-		const bool standing_override =
-				(shooter_flags & (world::kEntityFlagParachute | world::kEntityFlagDrowning |
-				                  world::kEntityFlagLadderContact)) != 0u ||
-				below_water;
-		source.stance_category = mounted ? 1 : (standing_override ? 2 :
-				(prone ? 0 : (crouched ? 1 : 2)));
-		source.scope_raised =
-				(shooter_row->state_flags &
-				 world::kEntityFlagScopeRaised) != 0;
-		// The spawn's Indoors stamp reads the resolved shooter's live Flags
-		// (client_weapon_replay.cpp) [orig: RoundData_SpawnRound @0x4EC830].
-		source.indoors = replica_shooter_indoors(kernel, *shooter_row);
-		source.recoil_pitch = &shooter_row->recoil_pitch;
-		// The zero-elevation row keys on the shooter's equipped AdmDef, the
-		// replica's 0x0A off-16 echo [orig: RoundData_SpawnRound entity+0x2B0
-		// @0x4ec16f].
-		source.equipped_adm_index = shooter_row->equipped_adm_index;
-		replica_weapon_action_source(*shooter_row, world, ev.flags, source);
-		round.source_state = &source;
-		// The adm-arm action sounds play at the SHOOTER's position, and a
-		// decoded remote shooter has no local entity — supply its row
-		// position for the sim's fire-sound leg (world/fire_sound.h).
-		// [orig: entity+4 @ 0x4020ef; the pool resolve @ 0x42f491]
-		round.shooter_pos = world::Vec3{
-				static_cast<float>(shooter_row->x / kFixed16),
-				static_cast<float>(shooter_row->y / kFixed16),
-				static_cast<float>(shooter_row->z / kFixed16)};
-		round.shooter_pos_valid = true;
-	}
-	round.origin.x = static_cast<float>(ev.origin_x) / kFixed16;
-	round.origin.y = static_cast<float>(ev.origin_y) / kFixed16;
-	round.origin.z = static_cast<float>(ev.origin_z) / kFixed16;
-	round.dir_yaw_bam = ev.dir_yaw_bam;
-	round.dir_pitch_bam = ev.dir_pitch_bam;
-	round.ammo_index = round_ammo;
-	round.adm_index = ev.adm_index;
-	round.no_weapon = ammo_arm;
-	round.shot_seq = ev.shot_seq;
-	round.subtype = ev.subtype;
-	round.charge = ev.slot_byte;
-	// Carry the arm through so presentation can honour retail's split: the
-	// adm-indexed arm spawns no ammo-def effect at the wire position (which is
-	// the shooter's EYE — Position + CameraOffset), it executes the addressed
-	// def's action rows at the weapon's own userpoint instead.
-	// [orig: @0x42f521 / @0x42f6ce]
-	round.wire_round_flags = ev.flags;
-	world.round_sim.spawn(
-			world, round, world::RoundConsequenceMode::VisualOnly);
+// The joiner's FullDestroy(reason): the leave burst goes out at once, then the session reset (the
+// connection destroy's drain, then stop_held_server), then the transport's teardown with its
+// line, after the held server's stop.
+// [orig: CNapiGameSession_FullDestroy @0x4C96A0 - the leave @0x4C96DB,
+//  CNapiGameSession_ResetActiveSession called @0x4C96E2, CNapiNetwork_TearDownSocket called
+//  @0x4C9763; CNapiGameSession_ResetActiveSession @0x4C8A70 - NapiNPProtocol_StopServer called
+//  @0x4C8AA1; CNapiNPConnection_TeardownActiveConnection @0x6253C0 - the burst sent at once
+//  (CNapiNPConnection_SendDisconnectPacket called @0x625406)]
+void JoinerRole::destroy_session(int32_t reason) {
+	for (const std::vector<uint8_t> &dg : runtime->destroy_session(reason, enumerator_drain_))
+		send(dg);
+	stop_held_server();
+	runtime->tear_down_transport(join_novaworld_);
+}
 
+// A joiner's session reset (a destroying route's FullDestroy, the Post Menu's reason-2 arm)
+// stops a server an earlier error-arm exit left unstopped, after the connection's leave and over
+// the same socket, still open: each held joiner's STOP burst and /INOUT removal line, then HOST
+// STOPPED over the join socket's bound address (set_local_address; the placeholder without
+// one). A joiner's connection mode is 2, so no held player's slot teardown runs (no
+// `player_removed`) (D-NET-NEW-L1-26's joiner leg).
+// [orig: CNapiGameSession_ResetActiveSession @0x4C8A70 - the connection's
+//  CNapiNPConnection_Destroy called @0x4C8A93, then NapiNPProtocol_StopServer called @0x4C8AA1;
+//  PostMenu_RouteMissionExit @0x568460 - reason 2's reset called @0x56846F ahead of
+//  CNapiNetwork_SetTransportMode(0) @0x568493; CGameSession_SetConnectionMode(2) called
+//  @0x558333 / @0x56A05B (is_authority 0 @0x4C4A2E)]
+void JoinerRole::stop_held_server() {
+	if (client_process_ != nullptr)
+		stop_unstopped_server(client_process_->unstopped_server, server_logs_, socket_,
+				local_address_known_ ? &local_address_ : nullptr);
+}
+
+void JoinerRole::quit_to_menu() {
+	if (!runtime) return;
+	// [orig: Input_HandleActionBinding @0x49AF26, then the disconnect @0x49AF38..0x49AF42]
+	runtime->set_mission_exit_reason(kMissionExitQuit);
+	for (const std::vector<uint8_t> &dg : runtime->disconnect("I.C:CIDEMIS")) send(dg);
 }
 } // namespace opennova::inmatch

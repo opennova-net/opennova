@@ -6,6 +6,7 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/world.h>
 #include <runtime/world/powerup.h>
+#include <runtime/world/angle.h>
 #include "common/mission_rig.h"
 #include "common/mission_set.h"
 
@@ -487,7 +488,7 @@ int main() {
 
 		std::vector<int32_t> fill;
 		std::vector<int32_t> edges;
-		placed.yaw = 90.0f; // entity heading 0, placement heading -90
+		placed.heading = world::placed_heading_bam(90); // entity heading 0, placement heading -90
 		world::minimap_footprint_place(mesh, placed, fill, edges);
 		CHECK(fill == std::vector<int32_t>({12 * k, 19 * k,
 				15 * k, 17 * k, 17 * k, 22 * k}),
@@ -498,7 +499,7 @@ int main() {
 
 		fill.clear();
 		edges.clear();
-		placed.yaw = 0.0f; // entity heading 90, placement heading 0
+		placed.heading = world::placed_heading_bam(0); // entity heading 90, placement heading 0
 		world::minimap_footprint_place(mesh, placed, fill, edges);
 		CHECK(fill == std::vector<int32_t>({11 * k, 22 * k,
 				13 * k, 25 * k, 8 * k, 27 * k}),

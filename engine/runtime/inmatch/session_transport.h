@@ -45,6 +45,15 @@ public:
 			uint8_t tag, std::vector<uint8_t> body, bool reliable = true,
 			uint8_t protocol_flags_raw = 0,
 			bool capacity_exempt = false, uint32_t retention_flushes = 0) = 0;
+	// The connection's description went: its sent byte is set behind the description's own
+	// queueing, and every later host_send to it returns unqueued until the connection is
+	// destroyed (a punted connection goes to its teardown, never back to state 1). The host's
+	// own loopback is never described, so only a remote peer's transport keeps the byte
+	// (D-NET-NEW-L1-27).
+	// [orig: CNapiNPConnection_SendDescriptionOnce @0x629750 - NapiNPDataTransfer_SendDescription
+	//  called @0x629768, then the store @0x629772; CNapiNPConnection_QueueMessage @0x628640 -
+	//  the test @0x62864D..0x628654]
+	virtual void close_host_queue() {}
 	// client -> host (the C2S 0x0C input uplink).
 	virtual void client_send(uint8_t tag, std::vector<uint8_t> body) = 0;
 

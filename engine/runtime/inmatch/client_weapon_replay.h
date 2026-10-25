@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+namespace opennova { struct WeaponPickupNotice; }
 namespace opennova::replication { struct ClientState; struct ClientEntityState; }
 namespace opennova::world { class World; class LocalPlayer; struct RoundSourceState; }
 namespace opennova::mission { class MissionKernel; }
@@ -14,10 +15,11 @@ void tick_replica_weapon_slots(replication::ClientState &, world::World &);
 // person row's resolver-kept mirror, a pool-1 row's BB walk recomputed at the
 // event (D-COL-13), another row's received word.
 bool replica_shooter_indoors(mission::MissionKernel &, const replication::ClientEntityState &);
-// The S2C 0x35 powerup weapon grants this frame folded: the one naming the
-// joiner's own player lands the weapon its copy of the row names and mounts it
-// (world/powerup.h powerup_weapon_grant_received).
+// One S2C 0x35 powerup weapon grant the receive folded: naming the joiner's own player, it
+// lands the weapon its copy of the row names and mounts it (world/powerup.h
+// powerup_weapon_grant_received); the caller queues its mount's 0x1D at the 0x35's place.
 // [orig: NapiNPClientMsg_0x035 @0x4261A0 -- the handle resolves @0x4261CF..0x426239,
 //  Player_MountPickedUpWeapon @0x42624C / @0x42625B]
-void apply_weapon_pickups(JoinerRole &, ClientRuntime &, world::World &, world::LocalPlayer &);
+void apply_weapon_pickup(JoinerRole &, ClientRuntime &, world::World &, world::LocalPlayer &,
+        const WeaponPickupNotice &);
 }

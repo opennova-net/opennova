@@ -1,9 +1,11 @@
 #include "hud/hud_chat_entry.h"
 
+#include "player/key_lock_device.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "util/string_convert.h"
 
+#include <runtime/controls/player_actions.h> // kVkCapital
 #include <runtime/hud/feed_format.h>
 
 using namespace godot;
@@ -46,9 +48,28 @@ int HudChatEntry::poll_rows(int p_rows_down, bool p_active,
 			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
 	last_events_ = static_cast<int>(entry_.poll_rows(static_cast<uint32_t>(p_rows_down),
 			p_active, facts, game_text_lookup(p_gametext)));
-	if ((last_events_ & EVENT_DENIED_SOUND) != 0 && p_sim.is_valid())
-		p_sim->raise_chat_denied_sound();
+	apply_device_events(p_sim.is_valid() ? p_sim.ptr() : nullptr);
 	return last_events_;
+}
+
+int HudChatEntry::dispatch_rows(int p_rows_fired, bool p_active,
+		const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext, int64_t p_frame) {
+	const uint32_t frame = static_cast<uint32_t>(p_frame);
+	const opennova::hud::ChatEntryFacts facts =
+			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
+	last_events_ = static_cast<int>(entry_.dispatch_rows(static_cast<uint32_t>(p_rows_fired),
+			p_active, facts, game_text_lookup(p_gametext)));
+	apply_device_events(p_sim.is_valid() ? p_sim.ptr() : nullptr);
+	return last_events_;
+}
+
+void HudChatEntry::apply_device_events(Simulation *p_sim) const {
+	if ((last_events_ & EVENT_DENIED_SOUND) != 0 && p_sim != nullptr)
+		p_sim->raise_chat_denied_sound();
+	// The row released Caps Lock (engine hud::chat_entry_event::kCapsLockRelease carries the
+	// witness).
+	if ((last_events_ & EVENT_CAPS_LOCK_RELEASE) != 0)
+		key_lock_device::set(opennova::controls::kVkCapital, false);
 }
 
 bool HudChatEntry::key_event(const Ref<InputEventKey> &p_event, const Ref<Simulation> &p_sim,
@@ -71,7 +92,7 @@ bool HudChatEntry::key_event(const Ref<InputEventKey> &p_event, const Ref<Simula
 	};
 	last_events_ = static_cast<int>(
 			entry_.key(key_char, vk, facts, game_text_lookup(p_gametext), send));
-	if ((last_events_ & EVENT_DENIED_SOUND) != 0 && sim != nullptr) sim->raise_chat_denied_sound();
+	apply_device_events(sim);
 	return true;
 }
 
@@ -96,6 +117,9 @@ void HudChatEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll_rows", "rows_down", "active", "sim",
 								 "gametext", "frame"),
 			&HudChatEntry::poll_rows);
+	ClassDB::bind_method(D_METHOD("dispatch_rows", "rows_fired", "active", "sim",
+								 "gametext", "frame"),
+			&HudChatEntry::dispatch_rows);
 	ClassDB::bind_method(D_METHOD("key_event", "event", "sim", "gametext", "frame"),
 			&HudChatEntry::key_event);
 	ClassDB::bind_method(D_METHOD("last_events"), &HudChatEntry::last_events);
@@ -115,5 +139,7 @@ void HudChatEntry::_bind_methods() {
 	BIND_ENUM_CONSTANT(EVENT_CANCELLED);
 	BIND_ENUM_CONSTANT(EVENT_EDITED);
 	BIND_ENUM_CONSTANT(EVENT_FLOOD_ECHO);
+	BIND_ENUM_CONSTANT(EVENT_CAPS_LOCK_RELEASE);
+	BIND_ENUM_CONSTANT(ROW_COMMAND);
 	BIND_ENUM_CONSTANT(ROW_COUNT);
 }

@@ -612,7 +612,9 @@ func _use(sim: Simulation) -> void:
 		event.pressed = pressed
 		Input.parse_input_event(event)
 		Input.flush_buffered_events()
-		_presenter.before_world_tick(Simulation.tick_dt(), false, true)
+		# The router samples the row in the update's input frame, inside the tick.
+		_world.tick(_camera.global_position, _camera.global_transform, Simulation.tick_dt(),
+				_presenter.before_world_tick(Simulation.tick_dt(), false, true))
 
 
 func test_cannon_prompt_from_the_landing_craft_deck() -> void:

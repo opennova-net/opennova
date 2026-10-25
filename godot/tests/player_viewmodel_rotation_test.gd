@@ -8,6 +8,12 @@ const HIP := Vector3(22.5, 22.5, 337.5)
 const ADS := Vector3(11.25, 45.0, 22.5)
 const POS := Vector3(64.0, 32.0, -160.0)
 const TPOS := Vector3(32.0, 16.0, -128.0)
+# The camera update steps the FP motion lead from the body's one-tick
+# displacement and decays it a 32nd an update; the rig adds its read to the
+# offset (engine player_view_motion_lead_step carries the witness). A landing
+# leaves a lead, so a check that reads a still body's offset steps this many
+# frames after it first: (31/32)^256 takes the clamp's 4096 under 2 (16.16).
+const SETTLE_FRAMES := 256
 var _root := ""
 var _world: GameWorld
 var _camera: Camera3D
@@ -111,7 +117,7 @@ func _boot(weapon_name: String = "WPN_M4AUTO") -> void:
 	_presenter.setup(_world, _camera, null, ControlsModel.new())
 	_presenter.set_input_override(PlayerMoveIntent.new())
 	await get_tree().process_frame
-	WorldFixture.step_player_frames(_presenter, _world, _camera, 20)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 20 + SETTLE_FRAMES)
 	assert_true(_world.get_sim().has_local_player())
 	assert_eq(_world.get_sim().get_local_player_weapon_name(), weapon_name,
 			"the normal spawn path installed the requested DEF")
@@ -186,7 +192,7 @@ func test_airborne_actual_rig_keeps_hip_cant_then_restores_current_ads_pose() ->
 		if not _world.local_player_view().suppress_view_bias:
 			break
 	assert_false(_world.local_player_view().suppress_view_bias, "the player landed")
-	WorldFixture.step_player_frames(_presenter, _world, _camera, 20)
+	WorldFixture.step_player_frames(_presenter, _world, _camera, 20 + SETTLE_FRAMES)
 	_assert_rig(ADS, 1.0)
 
 

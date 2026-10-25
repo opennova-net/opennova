@@ -157,7 +157,7 @@ void CommandMapScreen::table_cell_clicked(const String &p_widget_name, int p_row
 						p_row, p_column, p_state, paint_->roster, static_cast<uint32_t>(p_now_ms));
 		if (runtime == nullptr) return;
 		if (click.send_recruit) runtime->send_squad_recruit(click.slot);
-		if (click.send_join) runtime->send_squad_join(click.slot);
+		if (click.send_join && sim->kernel_) runtime->send_squad_join(sim->kernel_->world, click.slot);
 		if (click.set_squad_color) runtime->state().roster[click.slot].squad_color = click.squad_color;
 	} else if (name == kPlayerList) {
 		const opennova::menu::CommandMapPlayerClick click =

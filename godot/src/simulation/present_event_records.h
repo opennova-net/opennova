@@ -45,7 +45,7 @@ public:
 	// Godot-space position and the placer euler (pitch, mission yaw, roll).
 	static Ref<ThrowableVisualRow> make(int64_t p_key, int p_item_id, const Vector3 &p_pos,
 			const Vector3 &p_rotation_deg, const String &p_move_effect = String(),
-			bool p_move_effect_live = true);
+			bool p_move_effect_live = true, bool p_mirror_collected = false);
 
 	int64_t get_key() const { return value_.key; }
 	int get_item_id() const { return value_.item_id; }
@@ -53,6 +53,7 @@ public:
 	Vector3 get_rotation_deg() const;
 	String get_move_effect() const;
 	bool get_move_effect_live() const { return value_.move_effect_live; }
+	bool get_mirror_collected() const { return value_.mirror_collected; }
 };
 
 // One persistent vehicle trail point, already posed by the simulation.

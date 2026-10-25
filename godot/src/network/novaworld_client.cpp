@@ -8,7 +8,13 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/host_config.h> // transport_bind_ports / gate_bind_ports
+#include <runtime/inmatch/punt_log.h>   // ConnectLog (the gate and connect lines)
+#include <runtime/inmatch/server_files.h> // ServerLogs, server_logs_inout_line
+#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the lobby's clock)
+
 #include <array>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/http_client.hpp>
 #include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
@@ -25,9 +31,11 @@
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connect_or_host.h>
+#include <net/novaworld/gate_metrics.h> // process_gate_ping_manager (the join's PING)
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
+#include <net/novaworld/lobby_identity.h> // read_retail_machine_inputs (the jar file's volume key)
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
@@ -76,11 +84,16 @@ const char *state_name(NovaWorldClient::State s) {
 } // namespace
 
 NovaWorldClient::NovaWorldClient() :
-		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {}
+		lobby_(make_lobby_hooks(), make_lobby_environment()), host_role_(lobby_, make_host_hooks()) {
+	// The menu browser's jar is the process's: every panel's client and every session share it
+	// (engine: MenuBrowserState).
+	flow_.share_browser(opennova::process_menu_browser());
+}
 // A hosted match may still hold the shared pump: its demux must not call into
 // this lobby once it is gone.
 NovaWorldClient::~NovaWorldClient() {
 	if (nw_pump_.is_valid()) nw_pump_->demux().set_session_claim(nullptr);
+	publish_connect_or_host_wait(/*alive=*/false);
 }
 
 void NovaWorldClient::_bind_methods() {
@@ -92,12 +105,24 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_player_name"), &NovaWorldClient::get_player_name);
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &NovaWorldClient::set_resource_root);
 	ClassDB::bind_method(D_METHOD("get_resource_root"), &NovaWorldClient::get_resource_root);
+	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &NovaWorldClient::set_game_config);
+	ClassDB::bind_method(D_METHOD("get_game_config"), &NovaWorldClient::get_game_config);
 	ClassDB::bind_method(D_METHOD("set_gametext", "gametext"), &NovaWorldClient::set_gametext);
 	ClassDB::bind_method(D_METHOD("get_gametext"), &NovaWorldClient::get_gametext);
 
 	ClassDB::bind_method(D_METHOD("start"), &NovaWorldClient::start);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
+	ClassDB::bind_method(D_METHOD("escape_connect"), &NovaWorldClient::escape_connect);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
+			&NovaWorldClient::forget_gate_response);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("create_cookie_jar", "dir"),
+			&NovaWorldClient::create_cookie_jar);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("save_cookie_jar"),
+			&NovaWorldClient::save_cookie_jar);
+	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
+	ClassDB::bind_method(D_METHOD("get_session_player_name", "profile_name"),
+			&NovaWorldClient::get_session_player_name);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &NovaWorldClient::is_authenticated);
@@ -109,14 +134,30 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_server_ping_rids"), &NovaWorldClient::get_server_ping_rids);
 	ClassDB::bind_method(D_METHOD("get_server_ping_values"),
 			&NovaWorldClient::get_server_ping_values);
+	ClassDB::bind_method(D_METHOD("_apply_ping_reply", "rid", "ms", "generation"),
+	                     &NovaWorldClient::apply_ping_reply);
 	ClassDB::bind_method(D_METHOD("_apply_ping_results", "results", "generation"),
 	                     &NovaWorldClient::apply_ping_results);
+	ClassDB::bind_method(D_METHOD("open_web_lobby"), &NovaWorldClient::open_web_lobby);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
+	ClassDB::bind_method(D_METHOD("get_remembered_login_name"),
+			&NovaWorldClient::get_remembered_login_name);
+	ClassDB::bind_method(D_METHOD("has_remembered_login"), &NovaWorldClient::has_remembered_login);
+	ClassDB::bind_method(D_METHOD("clear_remembered_login"), &NovaWorldClient::clear_remembered_login);
+	ClassDB::bind_method(D_METHOD("login_remembered"), &NovaWorldClient::login_remembered);
+	ClassDB::bind_method(D_METHOD("reshow_sign_in"), &NovaWorldClient::reshow_sign_in);
+	ClassDB::bind_method(D_METHOD("is_sign_in_submit_enabled", "name", "password"),
+			&NovaWorldClient::is_sign_in_submit_enabled);
+	ClassDB::bind_method(D_METHOD("is_remember_login_checked"),
+			&NovaWorldClient::is_remember_login_checked);
+	ClassDB::bind_method(D_METHOD("store_remember_login", "checked"),
+			&NovaWorldClient::store_remember_login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
 	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
 	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
 	ClassDB::bind_method(D_METHOD("stop_hosting"), &NovaWorldClient::stop_hosting);
 	ClassDB::bind_method(D_METHOD("stop_playing"), &NovaWorldClient::stop_playing);
+	ClassDB::bind_method(D_METHOD("get_game_pump"), &NovaWorldClient::get_game_pump);
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("copy_join_proxy_to", "target"), &NovaWorldClient::copy_join_proxy_to);
 	ClassDB::bind_method(D_METHOD("get_join_lobby_number"), &NovaWorldClient::get_join_lobby_number);
@@ -124,6 +165,9 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(
 		D_METHOD("on_gsb_request_completed", "result", "response_code", "headers", "body"),
 		&NovaWorldClient::on_gsb_request_completed);
+	ClassDB::bind_method(
+		D_METHOD("on_enter_request_completed", "result", "response_code", "headers", "body"),
+		&NovaWorldClient::on_enter_request_completed);
 	ClassDB::bind_method(
 		D_METHOD("on_login_request_completed", "result", "response_code", "headers", "body"),
 		&NovaWorldClient::on_login_request_completed);
@@ -151,6 +195,10 @@ void NovaWorldClient::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("error_occurred", PropertyInfo(Variant::STRING, "message")));
 	ADD_SIGNAL(MethodInfo("state_changed", PropertyInfo(Variant::INT, "state")));
 	ADD_SIGNAL(MethodInfo("login_succeeded", PropertyInfo(Variant::STRING, "nwhandle")));
+	// The menu entry's page (open_web_lobby): the lobby (signed_in, the jar's NWHANDLE) or the
+	// sign-in page.
+	ADD_SIGNAL(MethodInfo("web_lobby_opened", PropertyInfo(Variant::BOOL, "signed_in"),
+			PropertyInfo(Variant::STRING, "nwhandle")));
 	ADD_SIGNAL(MethodInfo("login_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("join_failed", PropertyInfo(Variant::STRING, "reason")));
 	ADD_SIGNAL(MethodInfo("joined_game", PropertyInfo(Variant::STRING, "host"),
@@ -206,7 +254,10 @@ void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 	gametext_ = gametext;
 	host_role_.set_lobby_text(opennova::make_host_lobby_text(
 			[&gametext](const char *section, const char *key, std::string &out) {
-				if (gametext.is_null() || !gametext->has_string_in_section(section, StringName(key))) return false;
+				if (gametext.is_null()) return false;
+				// The override table first (D-NET-675).
+				if (RtxtStringFile::text_override_lookup(section, key, out)) return true;
+				if (!gametext->has_string_in_section(section, StringName(key))) return false;
 				out = opennova::to_std(gametext->get_string_in_section(section, StringName(key)));
 				return true;
 			}));
@@ -251,7 +302,8 @@ void NovaWorldClient::start() {
 	// HTTP fetchers are child nodes. Created once and reused; each
 	// request_completed signal drives its own bound callback. browser_http_ is
 	// the GSB server browser (Phase 2); login_http_ runs the EPASK login chain
-	// (Phase 3); join_http_ runs the NWJoin handshake (Phase 5).
+	// (Phase 3); enter_http_ runs the menu entry's startup-URL leg (open_web_lobby);
+	// join_http_ runs the NWJoin handshake (Phase 5); host_http_ the NWHost leg.
 	if (browser_http_ == nullptr) {
 		browser_http_ = memnew(HTTPRequest);
 		add_child(browser_http_);
@@ -265,6 +317,13 @@ void NovaWorldClient::start() {
 		login_http_->set_timeout(10.0);
 		login_http_->connect("request_completed",
 		                     Callable(this, "on_login_request_completed"));
+	}
+	if (enter_http_ == nullptr) {
+		enter_http_ = memnew(HTTPRequest);
+		add_child(enter_http_);
+		enter_http_->set_timeout(10.0);
+		enter_http_->connect("request_completed",
+		                     Callable(this, "on_enter_request_completed"));
 	}
 	if (join_http_ == nullptr) {
 		join_http_ = memnew(HTTPRequest);
@@ -290,28 +349,60 @@ void NovaWorldClient::start() {
 		return;
 	}
 	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
+	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
+	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
-	// The gate worker's socket (an OS-assigned port), and the NovaWorld network
-	// type's one socket: bound from the mpnovaworld range, it carries the NWU
-	// session now and, when this session hosts, the hosted match's game traffic
-	// too (the pump's demux, D-NET-346; engine: net/npwire/net_ports.h
-	// novaworld_bind_ports). Then the driver mints the ci/ck pair on them; a
-	// bind failure is the error state.
+	// The NovaWorld network type's one socket first, as the menu's entry opens it ahead
+	// of the gate service's start: bound from the cfg block's mpnovaworld quad, its
+	// random word included (engine: inmatch::transport_bind_ports), it carries the NWU
+	// session now and, when this session hosts, the hosted match's game traffic too
+	// (the pump's demux, D-NET-346); its open writes the socket's connect-log lines
+	// (engine: inmatch::write_novaworld_socket_open_lines). Then the gate worker's
+	// socket: on every interface over the cfg block's mpgateserverlocalport quad
+	// (engine: inmatch::gate_bind_ports, its first free port the probe's source), the
+	// gate manager's own socket, so never the process's transport socket. Then the driver
+	// mints the ci/ck pair on them. A session socket that bound nothing goes on closed
+	// (engine: inmatch::write_novaworld_socket_open_lines carries the witness): the gate's
+	// start, the gate's exchange and the NovaWorld connect run as ever, the session's
+	// datagrams go nowhere, and the connect ends as an unanswered one does; a gate socket bind
+	// failure is the error state.
 	gate_pump_.instantiate();
+	gate_pump_->set_process_transport_claim(false);
 	nw_pump_.instantiate();
-	if (gate_pump_->bind_listen(0) != OK) {
-		enter_state(STATE_ERROR, String("gate UDP bind failed"));
-		return;
-	}
 	bool nw_bound = false;
-	for (const uint16_t port : opennova::novaworld_bind_ports()) {
-		if (nw_pump_->bind_listen(port) == OK) {
+	const std::vector<uint16_t> nw_ports = game_config_.is_valid()
+			? opennova::inmatch::transport_bind_ports(game_config_->native().cfg(),
+					  opennova::inmatch::NetworkType::NovaWorld, /*authority=*/false)
+			: opennova::novaworld_bind_ports();
+	// On the block's mpipaddressstring, whatever the network type (inmatch::transport_bind_address).
+	const uint32_t nw_address = game_config_.is_valid()
+			? opennova::inmatch::transport_bind_address(game_config_->native().cfg())
+			: 0u;
+	for (const uint16_t port : nw_ports) {
+		if (nw_pump_->bind_listen_at(port, nw_address) == OK) {
 			nw_bound = true;
 			break;
 		}
 	}
-	if (!nw_bound) {
-		enter_state(STATE_ERROR, String("nw UDP bind failed"));
+	if (opennova::inmatch::ConnectLog *log = process_connect_log()) {
+		const opennova::PeerAddr local = nw_pump_->local_address();
+		opennova::inmatch::write_novaworld_socket_open_lines(*log,
+				game_config_.is_valid() ? game_config_->native().cfg()
+										: opennova::gamecfg::defaults(),
+				nw_bound ? &local : nullptr);
+	}
+	bool gate_bound = false;
+	const std::vector<uint16_t> gate_ports = opennova::inmatch::gate_bind_ports(
+			game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults());
+	for (const uint16_t port : gate_ports) {
+		if (gate_pump_->bind_listen_at(port, 0u) == OK) {
+			gate_bound = true;
+			break;
+		}
+	}
+	if (!gate_bound) {
+		// The gate service's start failure: its connect-log lines and the menu's NWEC15.
+		enter_state(STATE_ERROR, opennova::to_gd(lobby_.gate_start_failed()));
 		return;
 	}
 	gate_socket_ = std::make_unique<UdpPumpDatagramSocket>(gate_pump_.ptr());
@@ -321,7 +412,7 @@ void NovaWorldClient::start() {
 	demux.set_session_claim([this](const opennova::PeerAddr &from, const uint8_t *data, std::size_t len) {
 		return lobby_.claims(from, data, len);
 	});
-	clock_accum_s_ = 0.0;
+	clock_origin_ms_ = opennova::world::frame_tick_count_ms();
 	clock_ms_ = 0;
 	// The game's command line: its NovaWorld switches override the gate response.
 	const opennova::LaunchFlags flags = LaunchFlags::parsed();
@@ -329,6 +420,8 @@ void NovaWorldClient::start() {
 	command_line.post_ip_address = flags.post_ip_address;
 	command_line.post_port_number = flags.post_port_number;
 	command_line.udp_novaworld = flags.udp_novaworld;
+	command_line.glsvss_rims = flags.glsvss_rims;
+	command_line.glsvss_agrms = flags.glsvss_agrms;
 	command_line.use_junction = flags.use_junction;
 	command_line.clear_junction = flags.clear_junction;
 	lobby_.set_command_line(command_line);
@@ -338,7 +431,82 @@ void NovaWorldClient::start() {
 	host_role_.stop();
 
 	enter_state(STATE_GATE_PROBING);
+	probe_frame_ = Engine::get_singleton()->get_process_frames();
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
+}
+
+void NovaWorldClient::forget_gate_response() {
+	opennova::process_gate_memory().forget();
+}
+
+// The key is the current directory's volume's, as retail's GetVolumeInformationA on a null root
+// reads it (engine: read_retail_machine_inputs; off Windows it reads nothing and the key is the
+// fingerprint of an all-zero volume).
+void NovaWorldClient::create_cookie_jar(const String &p_dir) {
+	opennova::RetailMachineInputs volume;
+	opennova::read_retail_machine_inputs(volume);
+	opennova::process_menu_browser().create(
+			opennova::to_std(p_dir.path_join(opennova::kCookieJarFileName)), opennova::cookie_jar_key(volume));
+}
+
+void NovaWorldClient::save_cookie_jar() {
+	std::string error;
+	if (!opennova::process_menu_browser().save(error))
+		UtilityFunctions::push_warning(String("NovaWorldClient: ") + opennova::to_gd(error));
+}
+
+namespace {
+opennova::inmatch::ConnectLog *g_process_connect_log = nullptr;
+opennova::inmatch::ServerLogs g_process_server_logs;
+bool g_process_server_logs_set = false;
+// The client whose ConnectOrHost leg waits, or null.
+const NovaWorldClient *g_process_leg_waiter = nullptr;
+} // namespace
+
+// The legs that block inside one menu frame: the play poll and the host poll, each until its
+// result or 60 s (engine: connect_or_host.h's legs' waits).
+bool NovaWorldClient::connect_or_host_wait() const {
+	return play_in_flight_ || host_role_.phase() == opennova::NwuHostRole::Phase::Requested;
+}
+
+void NovaWorldClient::publish_connect_or_host_wait(bool alive) {
+	if (alive && connect_or_host_wait()) {
+		g_process_leg_waiter = this;
+	} else if (g_process_leg_waiter == this) {
+		g_process_leg_waiter = nullptr;
+	}
+}
+
+bool NovaWorldClient::process_connect_or_host_wait() {
+	return g_process_leg_waiter != nullptr;
+}
+
+void NovaWorldClient::set_process_server_logs(const opennova::inmatch::ServerLogs *logs) {
+	g_process_server_logs_set = logs != nullptr;
+	g_process_server_logs = logs != nullptr ? *logs : opennova::inmatch::ServerLogs{};
+}
+
+void NovaWorldClient::set_process_connect_log(opennova::inmatch::ConnectLog *log) {
+	g_process_connect_log = log;
+}
+
+opennova::inmatch::ConnectLog *NovaWorldClient::process_connect_log() {
+	return g_process_connect_log;
+}
+
+PackedByteArray NovaWorldClient::get_glsvss_request() const {
+	const std::string &request = lobby_.gate_response().glsvss_request;
+	PackedByteArray out;
+	out.resize(static_cast<int64_t>(request.size()));
+	if (!request.empty()) std::memcpy(out.ptrw(), request.data(), request.size());
+	return out;
+}
+
+// The session apply's rule (engine: novaworld_character_name): the CHAR cookie over the profile's
+// name when it is not empty.
+String NovaWorldClient::get_session_player_name(const String &profile_name) const {
+	const std::string character = opennova::novaworld_character_name(flow_.cookies());
+	return character.empty() ? profile_name : opennova::cp1252_to_gd(character);
 }
 
 void NovaWorldClient::stop() {
@@ -353,19 +521,15 @@ void NovaWorldClient::stop() {
 		host_role_.stop();
 		// The stop statements leave on one send pump before the goodbye.
 		lobby_.flush();
-		opennova::ClientSession *session = lobby_.session();
-		if (session->is_verified()) {
-			// The reset's teardown of a connected connection sends its disconnect burst.
-			const std::vector<uint8_t> goodbye = session->build_goodbye();
-			for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
-				lobby_.send(goodbye);
-			}
-		} else if (!session->reconnecting() &&
-		           (state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
-			// A first connect still in its handshake says goodbye once (to its server once a
-			// 0x81 named one; before that the driver has nowhere to send it); a connection a
-			// reconnect is still re-establishing has nothing to tear down.
-			lobby_.send(session->build_goodbye());
+		// The reset's disconnect request (ClientSession::request_disconnect, the engine's port of
+		// retail's, D-NET-705): a connection that is up, from its accepted 0x82 on (verifying,
+		// verified, hosting or playing), tears down with its disconnect burst; one still probing
+		// or joining (its first connect's Hello or Auth), or one a reconnect is re-establishing,
+		// sends nothing.
+		std::vector<std::vector<uint8_t>> out;
+		lobby_.session()->request_disconnect(out);
+		for (const auto &dg : out) {
+			lobby_.send(dg);
 		}
 	}
 	if (browser_http_ != nullptr) {
@@ -373,6 +537,9 @@ void NovaWorldClient::stop() {
 	}
 	if (login_http_ != nullptr) {
 		login_http_->cancel_request();
+	}
+	if (enter_http_ != nullptr) {
+		enter_http_->cancel_request();
 	}
 	if (join_http_ != nullptr) {
 		join_http_->cancel_request();
@@ -382,6 +549,11 @@ void NovaWorldClient::stop() {
 	}
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	host_page_in_flight_ = false;
+	pending_login_ = false;
+	pending_login_user_ = String();
+	pending_login_pass_ = String();
 	server_entries_.clear();
 	server_pings_ = Dictionary();
 	++ping_generation_; // a sweep still running reports into a list that is gone
@@ -393,6 +565,10 @@ void NovaWorldClient::stop() {
 	if (gate_pump_.is_valid()) gate_pump_->close();
 	if (nw_pump_.is_valid()) {
 		nw_pump_->demux().set_session_claim(nullptr); // the lobby is gone
+		// The session reset above, then transport mode 0: an open socket's teardown line, then
+		// its close (engine: inmatch::write_transport_socket_teardown_line).
+		opennova::inmatch::write_transport_socket_teardown_line(g_process_connect_log,
+				nw_pump_->is_open());
 		nw_pump_->close();
 	}
 	gate_pump_.unref();
@@ -402,27 +578,46 @@ void NovaWorldClient::stop() {
 	}
 }
 
-void NovaWorldClient::_process(double delta) {
+void NovaWorldClient::_process(double) {
+	// The ms wall clock every retail deadline and interval runs on: GetTickCount, the process's
+	// one clock (engine world/tick_count_clock.h), never a sum of the engine's capped process
+	// steps, which lost the time of every hitch past the cap.
+	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
+		// A leg whose session a punt, the reap or an error ended still ends its wait on the
+		// session's state (engine: NwuHostRole::poll_request, connect_or_host.h's
+		// play_leg_exit_tag), so the menus' admin pump and the panel's Close come back.
+		if (host_role_.phase() == opennova::NwuHostRole::Phase::Requested)
+			host_role_.poll_request(clock_ms_);
+		poll_play();
+		publish_connect_or_host_wait();
 		return;
 	}
 
 	// The driver pumps the gate + session sockets, the stage retransmits, the
 	// connect deadlines and the session's negotiated keepalive/reap; role
 	// progress arrives through the hooks (sync_session_state / traces).
-	// The ms wall clock every retail deadline and interval runs on (GetTickCount).
-	clock_accum_s_ += delta;
-	clock_ms_ = static_cast<uint32_t>(clock_accum_s_ * 1000.0);
-	lobby_.tick(clock_ms_);
+	// The probe is the menu's state-1 frame, whose session pump ran ahead of it, so the lobby's
+	// first tick is the next frame's (engine: NwuLobbySession::probe). An activation in the
+	// input step (a key, a button) runs start() before this frame's process step, which then
+	// reaches this node: the tick waits a frame. One in another node's process (the menu
+	// shell's mouse pump) is already right, the step walking the node list it began with.
+	if (Engine::get_singleton()->get_process_frames() != probe_frame_)
+		lobby_.tick(clock_ms_);
 	drain_session_notices();
 	host_role_.tick(clock_ms_);
 
-	// The start-playing poll: the ServerPlayResult must land within the connect
-	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
-	if (play_in_flight_ && lobby_.session() &&
-	    lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
-		abort_playing(String(opennova::NWEC_PLAY_TIMEOUT));
-	}
+	poll_play();
+	publish_connect_or_host_wait();
+}
+
+// A loading step's update runs the session's pump alone, on the clock as it stands mid-load; the
+// frame's notices, host refresh and play poll stay _process's (engine:
+// inmatch::ClientProcessState::nwu_periodic_update carries the witness, D-NET-NEW-L9-25).
+void NovaWorldClient::run_load_step_update() {
+	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) return;
+	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
+	lobby_.tick(clock_ms_);
 }
 
 // The role-specific halves of the shared NwuLobbySession driver: what to do
@@ -459,6 +654,18 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 				String("The NovaWorld gate named no session server; its lobby without one is not "
 					   "supported."));
 	};
+	// The session login verified: the menu's state 9 opens its web lobby over the gate's startup
+	// URL, as every entry does (open_web_lobby, engine LobbyHttpFlow::enter): the start page, NWStart
+	// and the sign-in page (or the lobby page for a login the service remembers) load while the
+	// player reads the sign-in screen.
+	hooks.on_connect_validated = [this]() { open_web_lobby(); };
+	// The gate and connect lines to the process's _connectlog.txt.
+	hooks.connect_log_on = []() {
+		return g_process_connect_log != nullptr && g_process_connect_log->enabled();
+	};
+	hooks.connect_log = [](const std::string &text) {
+		if (g_process_connect_log != nullptr) g_process_connect_log->line(text);
+	};
 	return hooks;
 }
 
@@ -467,6 +674,9 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 opennova::NwuLobbySession::Environment NovaWorldClient::make_lobby_environment() {
 	opennova::NwuLobbySession::Environment env;
 	env.random_u32 = []() { return opennova::os_random_nonzero_u32(); };
+	env.gate_local_port = [this]() {
+		return static_cast<uint16_t>(gate_pump_.is_valid() ? gate_pump_->local_port() : 0);
+	};
 	env.resolve_ipv4 = [](const std::string &host, opennova::PeerAddr &out) {
 		IP *ip = IP::get_singleton();
 		if (ip == nullptr) return false;
@@ -508,7 +718,8 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_cookie_vars() {
 	if (identity_vars_.empty()) {
 		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
-				lobby_.client_index(), lobby_.client_key());
+				game_config_.is_valid() ? game_config_->native().cfg()
+										: opennova::gamecfg::defaults());
 		identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	}
 	sync_flow_context();
@@ -642,7 +853,6 @@ void NovaWorldClient::sync_session_state() {
 		// reconnecting, which it does on its own while its word is set.
 		if (session->reconnecting()) break;
 		if (session->disconnected_by_peer() && state_ != STATE_DISCONNECTED) {
-			play_in_flight_ = false;
 			enter_state(STATE_DISCONNECTED, opennova::to_gd(session->last_error()));
 		}
 		break;
@@ -665,23 +875,14 @@ void NovaWorldClient::drain_session_notices() {
 		if (host_role_.handle_notice(notice)) continue;
 		switch (notice.kind) {
 		case Notice::Kind::PlayResult:
-			if (!play_in_flight_) break;
-			if (notice.fields.success) {
-				play_in_flight_ = false;
-				resolve_join_target();
-			} else {
-				// The rejected play maps through the dword_B60110 switch (NWEC04..14).
-				abort_playing(opennova::to_gd(opennova::novaworld_error_tag(
-						opennova::novaworld_error_from_code(notice.fields.msg_code))));
-			}
+			// The result's state (8, or 4 with the refusal's MsgCode in the session's word) is
+			// what the play poll reads after this drain (poll_play).
 			break;
 		case Notice::Kind::StopPlaying:
-			play_in_flight_ = false;
 			trace(String("ServerStopPlaying msgcode=")
 			    + String::num_int64(notice.fields.msg_code));
 			break;
 		case Notice::Kind::LeaveNovaWorld:
-			play_in_flight_ = false;
 			trace(String("ServerLeaveNovaWorld msgcode=")
 			    + String::num_int64(notice.fields.msg_code));
 			emit_signal("punted", notice.fields.msg_code);
@@ -729,18 +930,66 @@ void NovaWorldClient::sync_flow_context() {
 	ctx.server_nwuid = lobby_.session() ? lobby_.session()->server_nwuid() : std::string();
 	ctx.locale = opennova::to_std(OS::get_singleton()->get_locale());
 	ctx.identity_vars = identity_vars_;
+	// The jar's gate-reply fields: the junction pair and the locale three's switch, the cfg block's
+	// mpextractextendedmetricinformation (engine: LobbyHttpContext, D-NET-NEW-L9-32).
+	ctx.use_junction = lobby_.use_junction();
+	ctx.extended_metrics = (game_config_.is_valid() ? game_config_->native().cfg()
+	                                                : opennova::gamecfg::defaults())
+	                               .mp_extract_extended_metric_information != 0;
+	// game.cfg's rememberlogin: the sign-in page's remembered login (engine: LobbyHttpContext,
+	// D-NET-NEW-L9-51).
+	ctx.remember_login = (game_config_.is_valid() ? game_config_->native().cfg()
+	                                              : opennova::gamecfg::defaults())
+	                             .rememberlogin != 0;
 	flow_.set_context(std::move(ctx));
 }
 
-// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body).
+// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body). The
+// menu browser's header set is the flow's (engine: LobbyHttpFlow::request_headers / post_headers,
+// D-NET-NEW-L9-31), which names its User-Agent, Accept and a post's Content-Length, so the
+// transport adds none of its own; Host leads them, as the browser's does, and no Accept-Encoding
+// rides along. Godot's client still writes its request line as HTTP/1.1 where the browser's is
+// HTTP/1.0.
 Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
 	PackedStringArray headers;
+	// The URL's host with no port, as the menu browser writes it (engine: browser_request_host,
+	// D-NET-NEW-L9-49).
+	const std::size_t scheme = spec.url.find("://");
+	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
+	const std::size_t path_at = spec.url.find('/', host_at);
+	const std::string authority = spec.url.substr(host_at,
+			path_at == std::string::npos ? std::string::npos : path_at - host_at);
+	headers.push_back(opennova::to_gd("Host: " + opennova::browser_request_host(spec.url)));
 	for (const std::string &h : spec.headers) {
 		headers.push_back(opennova::to_gd(h));
 	}
+	http->set_accept_gzip(false);
+	// A menu-browser GET takes its nocachefix pair: the tick now and the server's resolved
+	// address (engine: browser_cache_bust_url, D-NET-NEW-L9-31). The host is resolved once and
+	// the request connects to that address, its Host line still the name, so the connect uses the
+	// address the pair reads, as the browser's does (one resolve into the request's +0x30 word,
+	// cited at browser_cache_bust_url in engine/net/novaworld/http_flow.h).
+	std::string url = spec.url;
+	if (spec.cache_bust) {
+		const std::size_t colon = authority.find(':');
+		IP *ip = IP::get_singleton();
+		const String address = ip != nullptr
+				? ip->resolve_hostname(opennova::to_gd(authority.substr(0, colon)), IP::TYPE_IPV4)
+				: String();
+		const PackedStringArray octets = address.split(".");
+		if (octets.size() != 4)
+			return ERR_CANT_RESOLVE;
+		std::array<uint8_t, 4> server{};
+		for (int i = 0; i < 4; ++i)
+			server[static_cast<std::size_t>(i)] = static_cast<uint8_t>(octets[i].to_int());
+		const std::string port = colon == std::string::npos ? std::string() : authority.substr(colon);
+		url = spec.url.substr(0, host_at) + opennova::to_std(address) + port +
+				(path_at == std::string::npos ? std::string() : spec.url.substr(path_at));
+		url = opennova::browser_cache_bust_url(url, opennova::world::frame_tick_count_ms(), server);
+	}
 	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)
 		? HTTPClient::METHOD_POST : HTTPClient::METHOD_GET;
-	return http->request(opennova::to_gd(spec.url), headers, method, opennova::to_gd(spec.body));
+	return http->request(opennova::to_gd(url), headers, method, opennova::to_gd(spec.body));
 }
 
 void NovaWorldClient::trigger_gsb() {
@@ -839,24 +1088,118 @@ void NovaWorldClient::start_ping_sweep() {
 	for (const opennova::GsbServerEntry &entry : server_entries_) {
 		targets.emplace_back(static_cast<int64_t>(entry.rid), entry.ip);
 	}
+	// The process's ping manager takes the sweep's rows, which a NovaWorld join's PING
+	// reads (engine: net/novaworld/gate_metrics.h GatePingManager, D-NET-NEW-L9-22).
+	opennova::process_gate_ping_manager().start_sweep(ping_generation_, targets);
 	if (targets.empty()) {
 		emit_signal("server_pings_updated");
 		return;
 	}
 	// A refreshed list's sweep supersedes the running one at once (the engine's
-	// PingSweepRunner, net/novaworld/ping_sweep_runner.h).
-	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
-	                   ping_generation_);
+	// PingSweepRunner, net/novaworld/ping_sweep_runner.h); each reply answers its row in
+	// the process's ping manager as it lands, the sweep's end the list's display.
+	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_reply"),
+	                   Callable(this, "_apply_ping_results"), ping_generation_);
+}
+
+void NovaWorldClient::apply_ping_reply(int64_t rid, int ms, int64_t generation) {
+	// One reply as it lands: its entry in the process's ping manager answers with its
+	// round trip, so a join made mid-sweep reports the replies so far (engine:
+	// PingSweepRunner's per-reply leg carries the witness); a superseded sweep's drops there.
+	opennova::process_gate_ping_manager().apply_result(generation, rid, ms);
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
+	const Array rids = results.keys();
+	// The process's ping manager keeps its sweep's results whatever became of the list
+	// (a stopped session's included); a newer sweep's start drops them there.
+	for (int i = 0; i < rids.size(); ++i) {
+		opennova::process_gate_ping_manager().apply_result(generation,
+				static_cast<int64_t>(rids[i]), static_cast<int>(results[rids[i]]));
+	}
 	// A result of an older generation (its list was replaced or the session
 	// stopped while its deferred call was queued) is stale.
 	if (generation != ping_generation_) return;
-	const Array rids = results.keys();
 	for (int i = 0; i < rids.size(); ++i)
 		server_pings_[rids[i]] = results[rids[i]];
 	emit_signal("server_pings_updated");
+}
+
+// ---- The NovaWorld menu's entry: its web lobby's open ---------------------
+
+// The engine owns the leg (LobbyHttpFlow::enter: the startup URL, the start page's refresh to
+// NWStart, the lobby or sign-in page, each page's template through the browser cache); this ships
+// its requests on enter_http_ and maps its outcome onto the session's sign-in and the list load.
+void NovaWorldClient::open_web_lobby() {
+	if (state_ != STATE_CONNECTED) {
+		emit_signal("login_failed", String("The matchmaking service is still connecting."));
+		return;
+	}
+	if (enter_http_ == nullptr) {
+		emit_signal("login_failed", String("The matchmaking client is unavailable."));
+		return;
+	}
+	if (flow_.enter_active()) return; // the entry's open is already in flight
+	sync_flow_context();
+	const opennova::EnterResult r = flow_.enter();
+	if (r.kind != opennova::EnterResult::Kind::NeedRequest) {
+		emit_signal("login_failed", opennova::to_gd(r.reason));
+		return;
+	}
+	lobby_.connect_log(opennova::http_getting_line(r.request.url));
+	if (ship_spec(enter_http_, r.request) != OK) {
+		flow_.on_enter_response(false, 0, {}, {}); // drive the machine back to Idle
+		emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
+	}
+}
+
+void NovaWorldClient::on_enter_request_completed(int result, int response_code,
+                                                 const PackedStringArray &headers,
+                                                 const PackedByteArray &body) {
+	if (state_ != STATE_CONNECTED || !flow_.enter_active()) {
+		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+	}
+	const opennova::EnterResult r = flow_.on_enter_response(
+		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	switch (r.kind) {
+	case opennova::EnterResult::Kind::NeedRequest:
+		if (ship_spec(enter_http_, r.request) != OK) {
+			flow_.on_enter_response(false, 0, {}, {});
+			emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
+		}
+		break;
+	case opennova::EnterResult::Kind::Lobby:
+		// The service remembered the login: the lobby page, whose list load follows (a press that
+		// waited for the page has nothing to post).
+		pending_login_ = false;
+		pending_login_user_ = String();
+		pending_login_pass_ = String();
+		authenticated_ = true;
+		emit_signal("web_lobby_opened", true, opennova::cp1252_to_gd(r.nwhandle));
+		trigger_gsb();
+		break;
+	case opennova::EnterResult::Kind::SignIn:
+		authenticated_ = false;
+		if (pending_login_) {
+			// A Login pressed while the page loaded posts its form now.
+			pending_login_ = false;
+			const String user = pending_login_user_;
+			const String pass = pending_login_pass_;
+			pending_login_user_ = String();
+			pending_login_pass_ = String();
+			login(user, pass);
+			break;
+		}
+		emit_signal("web_lobby_opened", false, String());
+		break;
+	case opennova::EnterResult::Kind::Failed:
+		pending_login_ = false;
+		pending_login_user_ = String();
+		pending_login_pass_ = String();
+		authenticated_ = false;
+		emit_signal("login_failed", opennova::to_gd(r.reason));
+		break;
+	}
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------
@@ -874,9 +1217,20 @@ void NovaWorldClient::login(const String &username, const String &password) {
 	if (flow_.login_active()) {
 		return;  // a login is already in flight
 	}
+	// The entry's open is still in flight (the startup URL, NWStart): the sign-in page's form can
+	// only be posted once that page is shown, so the press waits for it (on_enter_request_completed).
+	if (flow_.enter_active()) {
+		pending_login_ = true;
+		pending_login_user_ = username;
+		pending_login_pass_ = password;
+		return;
+	}
 	sync_flow_context();
-	const opennova::LoginResult r = flow_.login(
-		opennova::to_std(username), opennova::to_std(password));
+	begin_login(flow_.login(opennova::to_std(username), opennova::to_std(password)));
+}
+
+// A login's first step out of the flow: its first request shipped, or its failure reported.
+void NovaWorldClient::begin_login(const opennova::LoginResult &r) {
 	switch (r.kind) {
 	case opennova::LoginResult::Kind::NeedRequest:
 		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).
@@ -892,6 +1246,55 @@ void NovaWorldClient::login(const String &username, const String &password) {
 	default:
 		break;  // Succeeded is impossible synchronously
 	}
+}
+
+String NovaWorldClient::get_remembered_login_name() const {
+	return opennova::to_gd(flow_.remembered_login_name());
+}
+
+bool NovaWorldClient::has_remembered_login() const {
+	return flow_.has_remembered_login();
+}
+
+void NovaWorldClient::clear_remembered_login() {
+	flow_.clear_remembered_login();
+}
+
+// The sign-in page shown again after a failed login: its fill re-run (engine:
+// LobbyHttpFlow::reshow_sign_in).
+void NovaWorldClient::reshow_sign_in() {
+	sync_flow_context();
+	flow_.reshow_sign_in();
+}
+
+// The sign-in page's submit gate (engine: LobbyHttpFlow::sign_in_submit_enabled).
+bool NovaWorldClient::is_sign_in_submit_enabled(const String &name, const String &password) const {
+	return flow_.sign_in_submit_enabled(opennova::to_std(name), opennova::to_std(password));
+}
+
+// The REMEMBER_LOGIN checkbox's state: the browser state's property (engine:
+// MenuBrowserState::remember_login_checked).
+bool NovaWorldClient::is_remember_login_checked() const {
+	return flow_.browser().remember_login_checked.value_or(false);
+}
+
+// A REMEMBER_LOGIN click: the property and the cfg block's rememberlogin take the state (engine:
+// LobbyHttpFlow::store_remember_login); the click saves nothing.
+void NovaWorldClient::store_remember_login(bool p_checked) {
+	const int32_t word = flow_.store_remember_login(p_checked);
+	if (game_config_.is_valid()) game_config_->native().cfg().rememberlogin = word;
+}
+
+// The sign-in page's unclicked Login: the remembered fill's post (engine:
+// LobbyHttpFlow::login_remembered).
+void NovaWorldClient::login_remembered() {
+	authenticated_ = false;
+	if (state_ != STATE_CONNECTED || login_http_ == nullptr || flow_.login_active()) {
+		emit_signal("login_failed", String("The matchmaking service is still connecting."));
+		return;
+	}
+	sync_flow_context();
+	begin_login(flow_.login_remembered());
 }
 
 void NovaWorldClient::on_login_request_completed(int result, int response_code,
@@ -990,6 +1393,12 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		trace(String("join resolved host ") + opennova::cp1252_to_gd(r.host_ip) + ":"
 			+ String::num_int64(static_cast<int64_t>(r.host_port)));
 		start_playing(r);
+		// The .joi page's refresh (engine: JoinResult::request, D-NET-NEW-L9-31), behind the
+		// play leg it started; its answer settles the flow.
+		if (r.request.valid && ship_spec(join_http_, r.request) != OK)
+			(void)flow_.on_join_response(false, 0, {}, {});
+		break;
+	case opennova::JoinResult::Kind::Settled:
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// D-1: any async join failure falls back to the lobby (CONNECTED) — consolidates
@@ -1012,31 +1421,82 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	// installs on its NP connection (engine/net/novaworld/proxy_rendezvous.h).
 	// The engine's install of the six fields (net/novaworld/http_flow.h).
 	join_proxy_ = opennova::proxy_rendezvous_from_join(resolved);
+	// ConnectOrHost's play leg: its checks and their lines (engine: connect_or_host.h).
 	opennova::ClientSession *session = lobby_.session();
-	if (!session || !session->is_verified()) {
+	const char *refusal = opennova::play_leg_refusal(
+			session != nullptr && lobby_.is_open(), session ? session->session_flags() : 0u);
+	for (const std::string &line : opennova::connect_or_host_check_lines(
+			     /*host_leg=*/false, refusal, session ? session->lobby_state() : 0))
+		lobby_.connect_log(line);
+	if (refusal != nullptr) {
 		enter_state(STATE_CONNECTED);
-		emit_signal("join_failed", String(opennova::NWEC_WRONG_SESSION_STATE));
+		emit_signal("join_failed", String(refusal));
 		return;
 	}
 	const std::vector<opennova::ClientVar> play_setup = opennova::make_play_setup_vars(
 			pending_join_server_name_, resolved.host_ip, std::to_string(resolved.host_port),
 			resolved.app_id, resolved.ln);
 	if (!session->request_playing(play_setup)) {
+		lobby_.connect_log(opennova::kPlayStartFailedLine);
 		enter_state(STATE_CONNECTED);
 		emit_signal("join_failed", String(opennova::NWEC_PLAY_START_FAILED));
 		return;
 	}
 	play_in_flight_ = true;
 	play_started_ms_ = lobby_.clock_ms();
+	// The play poll empties the key queue before its first read (engine: connect_or_host.h).
+	play_escape_requested_ = false;
 }
 
-void NovaWorldClient::abort_playing(const String &tag) {
-	if (play_in_flight_ && lobby_.session()) {
-		lobby_.session()->stop_playing();
+// The player's ESC while a leg waits: the play poll takes it at its next key read (poll_play);
+// the host leg's wait never reads one; otherwise the first connect's polls take it
+// (NwuLobbySession::escape).
+bool NovaWorldClient::escape_connect() {
+	if (play_in_flight_) {
+		play_escape_requested_ = true;
+		return true;
 	}
+	// The host leg's wait reads no key and pumps no window message: its ESC is never taken, and
+	// the request stands (engine: connect_or_host.h's legs' waits).
+	if (host_role_.phase() == opennova::NwuHostRole::Phase::Requested) return true;
+	return lobby_.escape();
+}
+
+// Each frame after the session's pump and its notices, as retail's play loop runs after each
+// periodic update: the 60 s test (the timeout's line, NWEC02), else the frame's key read (the
+// escape's line, NWEC03), either stopping the play (ClientStopPlaying); then the session's state:
+// still 7 waits on, 8 hands the join target on, any other writes the not-playing line and fails
+// with the leg's tag or the MsgCode word's map (engine: connect_or_host.h's play_leg_exit_tag).
+// A shell already DISCONNECTED or ERROR stays there.
+void NovaWorldClient::poll_play() {
+	if (!play_in_flight_) return;
+	opennova::ClientSession *session = lobby_.session();
+	std::string tag = opennova::NWEC_SESSION_NOT_SET_UP; // the leg's preset
+	bool stopped = false;
+	if (session != nullptr &&
+			lobby_.clock_ms() - play_started_ms_ > opennova::SESSION_CONNECT_TIMEOUT_MS) {
+		lobby_.connect_log(opennova::kPlayTimeoutLine);
+		tag = opennova::NWEC_PLAY_TIMEOUT;
+		stopped = true;
+	} else if (session != nullptr && play_escape_requested_) {
+		lobby_.connect_log(opennova::kPlayEscapedLine);
+		tag = opennova::NWEC_PLAY_CANCELLED;
+		stopped = true;
+	}
+	if (stopped) session->stop_playing();
+	const int state = session != nullptr ? session->lobby_state() : 0;
+	if (!stopped && state == 7) return;
 	play_in_flight_ = false;
-	enter_state(STATE_CONNECTED);
-	emit_signal("join_failed", tag);
+	play_escape_requested_ = false;
+	if (state == 8) {
+		lobby_.connect_log(opennova::kMovingOnLine);
+		resolve_join_target();
+		return;
+	}
+	lobby_.connect_log(opennova::play_not_playing_line(state));
+	if (state_ != STATE_DISCONNECTED && state_ != STATE_ERROR) enter_state(STATE_CONNECTED);
+	emit_signal("join_failed", opennova::to_gd(opennova::play_leg_exit_tag(
+			tag, session != nullptr ? session->server_msg_code() : 0)));
 }
 
 // The hosting half's outcomes, mapped onto our State + signals.
@@ -1048,12 +1508,18 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 		if (state_ != STATE_HOSTING_REQUESTED) return;
 		enter_state(STATE_HOSTING);
 		emit_signal("hosting_started");
+		ship_host_page();
 	};
 	hooks.on_failed = [this](const std::string &tag) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 			enter_state(STATE_CONNECTED);
 		}
 		emit_signal("host_failed", opennova::to_gd(tag));
+		ship_host_page();
+	};
+	hooks.inout_line = [](const std::string &text) {
+		if (g_process_server_logs_set)
+			opennova::inmatch::server_logs_inout_line(g_process_server_logs, text);
 	};
 	hooks.on_stopped = [this](const std::string &reason) {
 		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
@@ -1076,22 +1542,17 @@ opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 	return hooks;
 }
 
-// The NovaWorld menu's Host, on this logged-in session: ConnectOrHost's
-// teamId != 0 leg (engine: net/novaworld/connect_or_host.h). Each failure
-// leaves its NWEC tag for the error dialog, and only a hosting session (state 6)
-// lets the shell start the mission.
+// The NovaWorld menu's Host, on this logged-in session: the hosting page first, then, once its
+// HOSTKEY dispatches the leg, ConnectOrHost's teamId != 0 leg (engine:
+// net/novaworld/connect_or_host.h). Each failure leaves its NWEC tag for the error dialog, and only
+// a hosting session (state 6) lets the shell start the mission.
 void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
-	opennova::ClientSession *session = lobby_.session();
-	const opennova::GateResponse &gate = lobby_.gate_response();
-	const bool set_up = options.is_valid() && session != nullptr && lobby_.is_open();
-	const char *refusal = opennova::host_leg_refusal(set_up,
-			set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
-	if (refusal != nullptr) {
-		emit_signal("host_failed", String(refusal));
+	// No hosting page without the verified session's lobby: the leg never reaches ConnectOrHost.
+	if (!options.is_valid() || state_ != STATE_CONNECTED) {
+		emit_signal("host_failed", String(opennova::NWEC_SESSION_NOT_SET_UP));
 		return;
 	}
 	opennova::HostRegistration cfg;
-	cfg.lobby_name = gate.lobby_name;
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
 			!options->get_serve_and_play(),
@@ -1112,11 +1573,27 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	//  UI_ProcessWebResponseContent @0x63d5bb..0x63d604 -> UI_DispatchScreenEvent @0x54f2fa]
 	pending_host_cfg_ = cfg;
 	sync_flow_context();
-	const opennova::HostKeyResult first = flow_.host();
+	// The Host's jar entries, PLoad and EXP, carry the host's Exp (engine: LobbyHttpFlow::host).
+	const opennova::HostKeyResult first = flow_.host(cfg.expansion);
+	if (first.kind == opennova::HostKeyResult::Kind::NeedRequest) {
+		if (const std::string *host_url = flow_.browser_global("@HOST_URL@"))
+			lobby_.connect_log(opennova::http_hosting_line(*host_url));
+	}
 	if (first.kind != opennova::HostKeyResult::Kind::NeedRequest ||
 	    ship_spec(host_http_, first.request) != OK) {
 		fail_host_leg(opennova::to_gd(first.reason.empty() ? "host request failed" : first.reason));
 	}
+}
+
+// The host request's wait ended, its result what it may: the HOSTKEY page's refresh goes out, as
+// the menu's next frame opens it once ConnectOrHost returned (engine: on_host_response's Resolved
+// request carries the witness).
+void NovaWorldClient::ship_host_page() {
+	const opennova::HttpRequestSpec page = pending_host_page_;
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	if (!page.valid || host_http_ == nullptr) return;
+	host_page_in_flight_ = ship_spec(host_http_, page) == OK;
+	if (!host_page_in_flight_) flow_.on_host_response(false, 0, {}, {}); // settle the flow's leg
 }
 
 void NovaWorldClient::fail_host_leg(const String &reason) {
@@ -1129,6 +1606,14 @@ void NovaWorldClient::fail_host_leg(const String &reason) {
 // was left (stop_hosting, stop) is dropped.
 void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		const PackedStringArray &headers, const PackedByteArray &body) {
+	// The HOSTKEY page's refresh went out once the host request's wait ended: its answer settles
+	// the flow's leg whatever the hosting's state now.
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
+				pba_to_strvec(headers), from_pba(body));
+		return;
+	}
 	if (state_ != STATE_HOSTING_REQUESTED || !flow_.host_active()) return;
 	const opennova::HostKeyResult r = flow_.on_host_response(
 		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
@@ -1137,7 +1622,27 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 		if (ship_spec(host_http_, r.request) != OK) fail_host_leg(String("host request failed"));
 		return;
 	case opennova::HostKeyResult::Kind::Resolved: {
+		// The page's HOSTKEY dispatches the leg: ConnectOrHost's checks run now, on the session
+		// and the gate reply as they stand (engine: connect_or_host.h, ahead of host_leg_refusal).
+		opennova::ClientSession *session = lobby_.session();
+		const opennova::GateResponse &gate = lobby_.gate_response();
+		const bool set_up = session != nullptr && lobby_.is_open();
+		const char *refusal = opennova::host_leg_refusal(set_up,
+				set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
+		for (const std::string &line : opennova::connect_or_host_check_lines(
+				     /*host_leg=*/true, refusal, set_up ? session->lobby_state() : 0))
+			lobby_.connect_log(line);
+		// The HOSTKEY page's refresh (engine: on_host_response's Resolved request) goes out once
+		// ConnectOrHost returned: at once after a refusal, else when the host request's wait ends
+		// (ship_host_page).
+		pending_host_page_ = r.request;
+		if (refusal != nullptr) {
+			fail_host_leg(String(refusal));
+			ship_host_page();
+			return;
+		}
 		opennova::HostRegistration cfg = pending_host_cfg_;
+		cfg.lobby_name = gate.lobby_name;
 		cfg.host_key = r.host_key;
 		host_role_.request(cfg);
 		return;
@@ -1151,11 +1656,14 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 
 void NovaWorldClient::disconnect_at_exit() {
 	opennova::ClientSession *session = lobby_.session();
-	if (session == nullptr || !lobby_.is_open() || !session->is_verified())
+	if (session == nullptr || !lobby_.is_open())
 		return;
-	const std::vector<uint8_t> goodbye = session->build_goodbye();
-	for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
-		lobby_.send(goodbye);
+	// The same disconnect request as stop(): the burst from a connection that is up, nothing
+	// from one that is not.
+	std::vector<std::vector<uint8_t>> out;
+	session->request_disconnect(out);
+	for (const auto &dg : out) {
+		lobby_.send(dg);
 	}
 }
 
@@ -1164,6 +1672,11 @@ void NovaWorldClient::disconnect_at_exit() {
 // ClientSession statements).
 void NovaWorldClient::stop_hosting() {
 	if (host_http_ != nullptr) host_http_->cancel_request();
+	pending_host_page_ = opennova::HttpRequestSpec{};
+	if (host_page_in_flight_) {
+		host_page_in_flight_ = false;
+		flow_.on_host_response(false, 0, {}, {}); // the cancelled refresh settles the flow's leg
+	}
 	host_role_.stop();
 	if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
 		enter_state(STATE_CONNECTED);
@@ -1221,10 +1734,9 @@ void NovaWorldClient::enter_state(State next, const String &reason) {
 	const State previous = state_;
 	state_ = next;
 	if (next == STATE_DISCONNECTED || next == STATE_ERROR) {
-		// A play in flight dies with the session: the rest of this _process (the notice
-		// drain, the play timeout) must not resolve or abort it back into CONNECTED.
+		// A play in flight ends on the session's state at its poll, which leaves the shell in
+		// DISCONNECTED / ERROR (poll_play).
 		authenticated_ = false;
-		play_in_flight_ = false;
 	}
 	trace(String(state_name(previous)) + " -> " + state_name(next)
 		+ (reason.is_empty() ? String() : (String(" (") + reason + String(")"))));

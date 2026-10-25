@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -81,17 +82,36 @@ public:
 	// samples Godot Input here at the device seam, plus the attached scripted
 	// device's held tokens.
 	bool is_token_pressed(const String &p_token) const;
+	// The same, without the keyboard slots and the mouse buttons: the scripted device's
+	// hold and the joystick. A keyboard key fires its row through the key queue's events
+	// (the shell's KeyboardPass), a mouse button's through its click records
+	// (mouse_click_code; D-CTRL-6).
+	bool is_token_held_off_keyboard(const String &p_token) const;
+	// The scripted device holds the token's row and the row binds the left mouse button: the
+	// hold stands for that button (engine controls::PlayerActionSource::scripted_left_button).
+	bool is_token_scripted_left_button(const char *p_token) const;
+	// The dispatch code a mouse button message's event queues (2 / 4 / 1024 left down /
+	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle), -1 for none, under
+	// the death screen's mode gate the key scan holds (engine BindingSet::mouse_click_action
+	// carries the witness).
+	int mouse_click_code(int p_event) const;
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.
 	void set_scripted_input(const Ref<ScriptedInput> &p_input) { scripted_input_ = p_input; }
 	Ref<ScriptedInput> get_scripted_input() const { return scripted_input_; }
-	// The device sample's step of the attached script at the session's logic
-	// tick. Each code the step starts or stops holding also arrives as its
-	// bound key's own press or release event (slot 1, else slot 2), as a
+	// The input frame's step of the attached script at the logic tick it runs
+	// as (the frame's head and each later update's; PlayerInputRouter's
+	// before_world_tick and run_update_rows). Each code the step starts or stops holding also arrives as
+	// its bound key's own press or release event (slot 1, else slot 2), as a
 	// keyboard's would: the readers of raw key events (the deploy keys, the
 	// held-USE digits) see the script the way the binding scan does. A
-	// mouse-bound code holds its token only; no click is synthesized.
+	// mouse-bound code holds its token only; no click is synthesized. Each
+	// character a char step typed arrives as its key's press carrying the
+	// character, then its release, so an open chat line's editor takes it
+	// through the shell's chat route as a typed key; outside an open line it
+	// reaches only the readers of raw key events (retail's keystroke would
+	// also fire its key's binding).
 	void advance_scripted_input(int64_t p_logic_tick);
 	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
@@ -117,11 +137,26 @@ public:
 	void consume_key_press(int p_vk);
 	// A VK's held state as the samplers read it (a consumed press reads up).
 	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
+	// The dispatch code of the binding row one dequeued key event fires, -1 for
+	// none: the scan over the event's key (KeyEventQueue::last_scan_code) under
+	// the key scan's live gates, the modifier words read from the key state now
+	// (engine BindingSet::event_row carries the witness).
+	int event_code(int p_scan_code) const;
+	// Whether that fire carries the sign bit: a fallback-pass fire with Shift held
+	// (engine BindingSet::event_row's fallback_signed).
+	bool event_signed(int p_scan_code) const;
+	// Whether a key event is one the scripted device replayed for its hold (its row
+	// fires through the hold, not through the key queue's scan).
+	static bool is_scripted_key_event(const Ref<InputEventKey> &p_event);
 	// Whether a key bound to the token is down by the key state alone (the
 	// reset-aware device state; no scan gate, no keyboard capture, a
 	// special-key take included; engine controls::PlayerActionSource::keys_down
 	// carries the witness).
 	bool is_token_key_down(const char *p_token) const;
+	// A VK down by the key state alone (the reset-aware device state; a key the
+	// special-key chain took still reads down): the keyboard pass's release pass
+	// reads it (engine BindingSet::release_pass carries the witness).
+	bool is_key_state_down(int p_vk) const;
 	// A menu close's key-state reset: every key held now reads up until its
 	// next key-down, which the shell reports through key_down_event for every
 	// key press and OS repeat, or its release (engine controls::KeyStateReset
@@ -181,6 +216,7 @@ public:
 private:
 	// The physical key state by VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
+	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

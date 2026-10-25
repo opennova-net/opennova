@@ -32,13 +32,13 @@ int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx);
 bool Server_ShouldAutoBalance(const NapiNPServerCtx &ctx);
 
 // The round init's team balance: every active slot but the host's own, the
-// longest connected first, moves from the larger team to the smaller while
+// shortest connected first, moves from the larger team to the smaller while
 // the difference is at least two and the minimum threshold; a moved slot
 // takes the new team (its side's avatar and kit follow the team at its next
 // spawn), and a live entity changes team and joins the team-change list.
 // [orig: Server_AutoBalanceTeams @0x4FCC30 -- the pair list of (time in the
 //  server, slot) over active non-local slots @0x4FCC72..0x4FCC95, the
-//  descending shell sort CPairList_ShellSort @0x526C00 (the call @0x4FCCAC),
+//  ascending shell sort CPairList_ShellSort @0x526C00 (the call @0x4FCCAC),
 //  the walk @0x4FCCDC..0x4FCDD8: team 1 -> 2 @0x4FCD0E, team 2 -> 1
 //  @0x4FCD8F, the entity's team and avatar @0x4FCD4F..0x4FCD5B /
 //  @0x4FCD9F..0x4FCDAC, CBufferList_AddOrFind @0x4FCD67 / @0x4FCDB8]

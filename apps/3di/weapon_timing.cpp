@@ -111,16 +111,33 @@ bool measure(const std::vector<WeaponFsmActionRow> &rows, const std::string &mod
 	};
 	int budget = 128;
 	for (const auto &row : rows) budget += 5 * (row.delaystart + row.delayend + 2);
+	// The deferred fire record the last tick queued. The FSM consumes no re-queue of its
+	// own: a tick's re-queue (the recoil window's, or a mid-FIRE request's) leaves it as
+	// Input_QueueDeferredEvent(0x95), and the next input frame's flush dispatches that
+	// record ahead of the pump through the fire case, whose press leg requests fire only
+	// while the binding is still down. The game's chain is LocalWeaponPumpIO::fire_deferred
+	// -> LocalPlayer::deferred_events -> inmatch::Role::drain_input_events ->
+	// LocalPlayer::fire_record; ideal conditions pass every gate of the record.
+	// [orig: WeaponAction_Recoil @0x542DD0 (the re-queue @0x542E7F..0x542E9D);
+	//  WeaponSlot_RequestFire @0x53EFA0 (@0x53EFFD); Input_QueueDeferredEvent @0x4993E0;
+	//  Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591);
+	//  Input_HandleActionBinding_0 @0x4E0420 (case 0x95: Input_IsBindingActive(0x95)
+	//  @0x4E07D9, the press leg @0x4E08DC)]
+	bool deferred_fire = false;
 	for (int tick = 0; tick < budget; ++tick) {
 		WeaponFsmInputs in;
 		in.current_tick = tick;
 		if (requested_action == wa::kFire) {
-			in.fire_pressed = tick == 0 || (mode == "semi" && slot.current == wa::kIdle);
+			// The input frame: the binding's state, the frame's own press record, then the
+			// flushed deferred record.
 			in.fire_held = mode == "auto";
+			in.fire_pressed = tick == 0 || (mode == "semi" && slot.current == wa::kIdle) ||
+			                  (deferred_fire && in.fire_held);
 		}
 		WeaponFsmEvents ev;
 		const int previous = slot.current;
 		weapon_fsm_tick(def, slot, in, ev);
+		deferred_fire = slot.refire_queued;
 		if (ev.play_anim) {
 			close_clip();
 			playing = slot.current;

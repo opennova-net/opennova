@@ -3,12 +3,23 @@
 // Godot device adapter for the engine-owned terrain tile-composition cache.
 // Page identity, the per-frame sweep, invalidation, pixel composition and the
 // composition thread pool remain portable; this class owns only source
-// extraction, the frame's synchronous compose-and-upload, Texture2DArray
-// upload, and counters.
+// extraction, the frame's synchronous compose-and-upload, the page array's
+// upload, the static-shadow device pass and counters.
+//
+// With a RenderingDevice on the calling (render) thread the page array is a device
+// texture (RGBA8, storage use) the pages upload into and the static-shadow device pass
+// draws the casters into (TerrainStaticShadowDevicePass); without one (a headless run, a
+// separate render thread) it is an ImageTextureLayered and the casters rasterize on the
+// composition worker (the CPU raster, the device pass's oracle).
 
 #include <godot_cpp/classes/texture2d_array.hpp>
+#include <godot_cpp/classes/texture2d_array_rd.hpp>
+#include <godot_cpp/classes/texture_layered.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+
+#include "terrain/terrain_static_shadow_device_pass.h"
 
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain/terrain_scorch.h>
@@ -24,6 +35,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace godot {
@@ -57,9 +69,12 @@ public:
 	TerrainTileCacheDevice(const TerrainTileCacheDevice &) = delete;
 	TerrainTileCacheDevice &operator=(const TerrainTileCacheDevice &) = delete;
 
+	// `p_page_targets` false: the sources load and install, and no page array is made, so nothing
+	// composes and the cache is not ready (a dedicated host's mission start; engine
+	// terrain/terrain_load_legs.h builds_tile_cache_targets).
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainSurfaceInputs> &p_surface_inputs,
-			const Ref<TerrainTileInfo> &p_tile_info_override);
+			const Ref<TerrainTileInfo> &p_tile_info_override, bool p_page_targets = true);
 	void clear();
 	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
 	// claims stamp the given TOD epoch (g_EnvTodEpoch).
@@ -76,7 +91,16 @@ public:
 	}
 	void set_static_shadow_rasterizer(
 			TerrainStaticShadowPageRasterizer *p_rasterizer);
+	// The windowed device checks' seams: whether shadowed pages go to the device pass where
+	// it runs (on by default; off rasterizes them on the CPU into the same device array, the
+	// pass's oracle; a change recomposes every page), and one layer's bytes as the device
+	// holds them (a readback that waits for the device; empty for the uploaded array).
+	void set_device_shadow_enabled(bool p_enabled);
+	PackedByteArray read_device_layer(int p_layer) const;
 	void invalidate_static_shadow_pages();
+	// Every page cold, the time sets' tile-cache reset (engine world::WeatherState::
+	// reset_time_caches carries the witness).
+	void invalidate_all_pages() { _invalidate_all(); }
 	// Appends one already-resolved permanent record and retires exactly the
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(
@@ -134,9 +158,13 @@ public:
 	std::optional<opennova::TerrainTilePageBinding> find_sector_patch(
 			const opennova::TerrainTileSectorPatchPoint &p_point);
 
-	Ref<Texture2DArray> get_texture() const { return texture_; }
+	// The page array the terrain, the detail foliage and MATCHTERRAIN sample: the device
+	// texture where the pages live on the device, else the uploaded Texture2DArray.
+	Ref<TextureLayered> get_texture() const;
 	Dictionary get_diagnostics() const;
-	bool is_ready() const { return texture_.is_valid() && sources_ready_; }
+	bool is_ready() const {
+		return (texture_.is_valid() || device_texture_.is_valid()) && sources_ready_;
+	}
 
 private:
 	void _upload_completed();
@@ -144,12 +172,29 @@ private:
 	void _reset_shadow_epoch_diagnostics();
 	void _invalidate_all();
 	bool _allocate_texture();
+	bool _allocate_device_texture(RenderingDevice *p_rd);
+	void _release_device_texture();
+	// Whether this frame's shadowed pages go to the device pass (built on first use; a
+	// device that refuses it leaves the CPU raster for the rest of the cache's life).
+	bool _device_shadow_ready();
+	void _retire_device_shadow(const std::string &p_reason);
 
 	opennova::TerrainTileCompositionCache cache_;
 	// The page-composition thread pool (engine): demand / completion queues,
 	// the source snapshot, the epoch cancel.
 	std::unique_ptr<opennova::terrain::TerrainTileCompositionWorker> async_;
 	Ref<Texture2DArray> texture_;
+	// The device form of the page array (see the header note) and its pass.
+	RenderingDevice *rd_ = nullptr;
+	RID page_rid_;
+	Ref<Texture2DArrayRD> device_texture_;
+	TerrainStaticShadowDevicePass shadow_pass_;
+	bool shadow_pass_retired_ = false;
+	bool device_shadow_enabled_ = true;
+	std::string shadow_pass_failure_;
+	uint64_t shadow_device_jobs_ = 0;
+	uint64_t frame_shadow_device_jobs_ = 0;
+	uint64_t frame_shadow_device_draws_ = 0;
 	bool tile_overlay_required_ = false;
 	bool tile_overlay_ready_ = false;
 	bool sources_ready_ = false;
@@ -210,6 +255,10 @@ private:
 	// then the main thread's own wall time: the wait on the pool and the
 	// completed pages' uploads.
 	uint64_t frame_compose_shadow_build_us_ = 0;
+	// The build's serial walk and the raster's stages, summed per page (an instrument:
+	// TerrainStaticShadowPlannerDiagnostics::frame_triangle_walk_us, TerrainStaticShadowRasterStats).
+	uint64_t frame_compose_shadow_walk_us_ = 0;
+	opennova::terrain::TerrainStaticShadowRasterStats frame_compose_raster_{};
 	uint64_t frame_compose_wait_us_ = 0;
 	uint64_t frame_upload_us_ = 0;
 	uint64_t frame_uploads_ = 0;

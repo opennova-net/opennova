@@ -320,6 +320,14 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(row->server_name == "DFX2 Srv");
 		TEST_EXPECT(row->max_players == 100);
 		TEST_EXPECT(row->pb_server == "0");
+		// The GSID ServerHostResult handed the host (the generator's) is the listing's and
+		// names it: the key a LAN-list join's page resolves the server by (the host's 0x81
+		// SUS1). [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D5BC0 (dfx2.exe) -
+		//  "GSID" @0x4D5DB3 -> server_user_string1 @0x4D5DFF]
+		TEST_EXPECT(d.gsid == "GSID-TEST-4100" && row->gsid == d.gsid);
+		const auto by_gsid = opennova::hostdb::find_host_by_gsid(db, d.gsid);
+		TEST_EXPECT(by_gsid && by_gsid->rid == d.rid);
+		TEST_EXPECT(!opennova::hostdb::find_host_by_gsid(db, "GSID-TEST-none"));
 		const auto dfx2 = opennova::hostdb::list_hosts_by_game(db, "dfx2_0_consumer");
 		TEST_EXPECT(dfx2.size() == 1 && dfx2[0].rid == d.rid);
 		TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "jop_2_consumer").size() == 1);

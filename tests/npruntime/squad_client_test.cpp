@@ -9,8 +9,8 @@
 //  @0x4258b0, NapiNPClientMsg_0x078 @0x425970, NapiNPClientMsg_0x033
 //  @0x425fa0, NapiNPClientMsg_0x07C @0x426020, Waypoint_CreateForPlayer
 //  @0x4dfcb0, CMap_HandleWaypointCreateConfirm @0x54a0d0,
-//  CMap_DestroyFirstActiveLoadingEntity @0x547990,
-//  Server_DestroyBatchedEntities @0x548110]
+//  CMap_OnUserWaypointClose @0x547990,
+//  CMap_OnClearWaypoints @0x548110]
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -85,7 +85,7 @@ struct Client {
 
 void test_join_and_breakup() {
 	Client c;
-	CHECK(c.runtime.local_roster_slot() == 0);
+	CHECK(c.runtime.local_body_slot() == 0);
 	// Mate joins the local player: the link, then the join line.
 	SquadJoin join;
 	join.leader = 0;
@@ -174,7 +174,7 @@ void test_local_slot_is_the_latched_slot() {
 		c.runtime.view().set_local_player_slot(0);
 		c.bind(0, "Lead", w::EntityHandle{static_cast<uint16_t>(0x00FF)}); // no entity
 		CHECK(c.runtime.state().roster[0].entity_slot == -1);
-		CHECK(c.runtime.local_roster_slot() == 0);
+		CHECK(c.runtime.local_body_slot() == 0);
 		SquadJoin join;
 		join.leader = 0;
 		join.member = 1;
@@ -187,7 +187,7 @@ void test_local_slot_is_the_latched_slot() {
 		Client c;
 		c.runtime.view().set_viewer_handle(0xFFFF); // the listen host's view
 		c.runtime.view().set_local_player_slot(1);
-		CHECK(c.runtime.local_roster_slot() == 1);
+		CHECK(c.runtime.local_body_slot() == 1);
 		SquadJoin join;
 		join.leader = 0;
 		join.member = 1;
@@ -201,6 +201,120 @@ void test_local_slot_is_the_latched_slot() {
 		CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::Fireteam &&
 				lines[0].value == 3);
 	}
+}
+
+// D-NET-NEW-L5-26: the readers of g_LocalPlayerEntity+0x154 read the local body's own slot
+// byte, which its in-place destroy (its ewep update's stale-ground leg) stores as 0xFF until a
+// record of its handle rebuilds it, at that record's place in the receive. Inside the window a
+// 0x71 naming the local slot is no join of ours, a 0x71 [0xFF] is (the line, not the sweep), a
+// 0x73 on the local slot posts nothing, and the recruit and go-code sends carry 0xFF; the join
+// send plays the body's RECRUIT_ACCEPT set whenever the leader is not the byte. The spawn-slot
+// notice keeps g_LocalPlayerSlotId.
+// [orig: NapiNPClientMsg_HandleSquadJoin @0x425666..0x425672; NapiNPClientMsg_0x073
+//  @0x4257d0..0x4257e2; NetPacket_SendSquadJoin @0x42dc3c..0x42dc5d;
+//  CMap_EntityWidgetHandler @0x54864e..0x54865c; CMap_OnGoCodeButton @0x54829a..0x5482ad;
+//  Entity_Destroy @0x43E810 - @0x43EA78; NapiNPClientMsg_FullEntitySpawn @0x433780 - @0x433BBB]
+void test_destroy_window_reads_the_body_slot_byte() {
+	Client c(true);
+	c.runtime.view().set_local_player_slot(0);
+	auto sounds = [&c]() {
+		int n = 0;
+		for (const w::ScriptSoundEvent &e : c.world.out.script_sounds)
+			if (e.kind == w::ScriptSoundEvent::Kind::Interface &&
+					e.name.find("RECRUIT_ACCEPT") != std::string::npos)
+				++n;
+		c.world.out.script_sounds.clear();
+		return n;
+	};
+	// Outside the window: a join on the own slot plays nothing, on another the set.
+	c.runtime.send_squad_join(c.world, 0);
+	CHECK(sounds() == 0);
+	c.runtime.send_squad_join(c.world, 1);
+	CHECK(sounds() == 1);
+	c.runtime.view().mark_local_body_destroyed();
+	CHECK(c.runtime.local_body_slot() == 0xFF);
+	// A 0x71 naming the local slot is another squad's: no line.
+	SquadJoin join;
+	join.leader = 0;
+	join.member = 1;
+	c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+	c.runtime.apply_received_effects(c.world);
+	CHECK(c.runtime.drain_squad_lines().empty());
+	// A 0x71 [0xFF] matches the byte: the join line, and no foreign-waypoint sweep.
+	WaypointCreate create;
+	create.name = "THEIRS";
+	create.x = 3 << 16;
+	create.y = 4 << 16;
+	create.owner_index = static_cast<uint8_t>(c.mate.slot());
+	c.runtime.view().apply(s2c::WAYPOINT_CREATE, encode_waypoint_create(create));
+	c.runtime.apply_received_effects(c.world);
+	c.runtime.drain_squad_lines();
+	CHECK(c.pool4_rows() == 1);
+	join.leader = 0xFF;
+	c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+	c.runtime.apply_received_effects(c.world);
+	auto lines = c.runtime.drain_squad_lines();
+	CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::Join &&
+			lines[0].text == "Mate");
+	CHECK(c.pool4_rows() == 1);
+	// A 0x73 on the local slot posts nothing.
+	FireteamSet set;
+	set.member = 0;
+	set.fireteam = 2;
+	c.runtime.view().apply(s2c::FIRETEAM_SET, encode_fireteam_set(set));
+	c.runtime.apply_received_effects(c.world);
+	CHECK(c.runtime.drain_squad_lines().empty());
+	// The sends: the join on the old own slot now plays the set; the recruit and the go code
+	// carry the byte.
+	c.runtime.flush_host_sends();
+	c.wire.clear();
+	sounds();
+	c.runtime.send_squad_join(c.world, 0);
+	CHECK(sounds() == 1);
+	c.runtime.send_squad_recruit(1);
+	c.runtime.send_go_code(c.world, 2);
+	c.runtime.flush_host_sends();
+	int recruits = 0, go_codes = 0;
+	replication::Datagram d;
+	while (c.wire.host_recv(d)) {
+		if (d.tag == c2s::SQUAD_RECRUIT) {
+			const SquadRecruit r = decode_squad_recruit(d.body.data(), d.body.size());
+			CHECK(r.recruiter == 0xFF && r.target == 1);
+			++recruits;
+		} else if (d.tag == c2s::GO_CODE) {
+			const GoCode g = decode_go_code(d.body.data(), d.body.size());
+			CHECK(g.leader == 0xFF && g.code == 2);
+			++go_codes;
+		}
+	}
+	CHECK(recruits == 1 && go_codes == 1);
+	// The go-code button also posts the leader's own line (no suppress flags) through the send
+	// [orig: CMap_OnGoCodeButton - Server_PlayGoCodeSoundAndChat(L, code, 0) @0x5482b8..0x5482bc].
+	lines = c.runtime.drain_squad_lines();
+	CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::GoCode &&
+			lines[0].value == 2);
+	// A 0x18 of the body's handle rebuilds the byte at its place in the receive: the 0x71
+	// behind it in the same pump is a join of ours again.
+	FullEntitySpawnRecord rebuild;
+	rebuild.slot_id = c.local.packed;
+	rebuild.item_type = 3;
+	rebuild.item_type_id = 0x14B9;
+	rebuild.team = 1;
+	rebuild.minimap_flags = 0x0100u;
+	rebuild.player_slot_id = 0;
+	c.runtime.view().apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rebuild));
+	join.leader = 0;
+	c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+	c.runtime.apply_received_effects(c.world);
+	CHECK(c.runtime.local_body_slot() == 0);
+	lines = c.runtime.drain_squad_lines();
+	CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::Join);
+	// A record of another handle leaves the byte alone.
+	c.runtime.view().mark_local_body_destroyed();
+	rebuild.slot_id = c.mate.packed;
+	rebuild.player_slot_id = 1;
+	c.runtime.view().apply(s2c::FULL_ENTITY_SPAWN, encode_full_entity_spawn(rebuild));
+	CHECK(c.runtime.local_body_slot() == 0xFF);
 }
 
 void test_placed_waypoint_table() {
@@ -242,8 +356,8 @@ void test_waypoint_wipe_is_exact() {
 	const int32_t y = -((700 << 16) + 3);
 	const w::EntityHandle first = w::place_user_waypoint(c.world, x, y, "RALLY");
 	CHECK(first.valid() && c.pool4_rows() == 1);
-	CHECK(c.world.registry.get(first)->waypoint_x_q16 == x &&
-			c.world.registry.get(first)->waypoint_y_q16 == y);
+	CHECK(c.world.registry.get(first)->position.x.q16 == x &&
+			c.world.registry.get(first)->position.y.q16 == y);
 	CHECK(w::user_waypoint_row(c.world, first).x == x &&
 			w::user_waypoint_row(c.world, first).y == y);
 	const w::EntityHandle second = w::place_user_waypoint(c.world, x, y, "rally");
@@ -271,7 +385,7 @@ void test_waypoint_wipe_is_exact() {
 // zeroed row until the allocator re-takes it. The squad-join push sends one
 // C2S 0x17 per non-null entry with the row's exact dwords, the wiped one
 // empty at the origin.
-// [orig: Server_BroadcastChatToAllPlayers @0x549200 ->
+// [orig: CMap_SendUserWaypoints @0x549200 ->
 //  NetPacket_WriteTypeNameAndPosition @0x42b160]
 void test_member_join_pushes_each_entry() {
 	Client c(true);
@@ -358,6 +472,7 @@ int main() {
 	test_join_and_breakup();
 	test_orders_fireteam_go_code_and_destroy();
 	test_local_slot_is_the_latched_slot();
+	test_destroy_window_reads_the_body_slot_byte();
 	test_placed_waypoint_table();
 	test_waypoint_wipe_is_exact();
 	test_member_join_pushes_each_entry();

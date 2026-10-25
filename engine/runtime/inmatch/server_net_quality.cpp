@@ -1,6 +1,7 @@
 #include <runtime/inmatch/server_net_quality.h>
 
 #include <algorithm>
+#include <vector>
 
 #include <net/npwire/ingame_decode.h>   // kPlayerSyncHasQuality
 #include <net/npwire/ingame_encode.h>   // encode_player_sync
@@ -21,11 +22,11 @@ constexpr uint32_t kPingRingCursor = 10;  // +100408 = entry 10 of the +100368 r
 constexpr uint16_t kPingStrikeLimit = 20; // strictly-greater after the increment
 constexpr uint32_t kPingChatMin = 36;
 constexpr uint32_t kPingChatMax = 37;
-constexpr uint32_t kNetQualitySampleFrames = 62; // dword_24D1DDC reload
+constexpr uint32_t kNetQualitySampleFrames = 62; // g_NetQualityUpdateCountdown reload
 
-// CNapiNPConnection_SendChatMessage(conn, "", code, tag) is the chat-coded
+// CNapiNPConnection_QueueDisconnectEvent(conn, "", code, tag) is the chat-coded
 // punt: the same H:0x03 description the join watchdog stages.
-// [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0]
+// [orig: CNapiNPConnection_QueueDisconnectEvent @0x4C7EF0]
 void stage_ping_punt(NapiNPConnection &conn, uint32_t code, const char *tag) {
 	DisconnectEvent event;
 	event.ds = 1;
@@ -86,9 +87,12 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported) {
 }
 
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world) {
-	// [orig: @0x51DE79] is_in_session && !g_PreRoundDelayTimer &&
-	// !g_SpawnSuccessGate (the latter is not copied into this context).
-	if (!ctx.is_in_session || world.preround_delay_seconds != 0) return;
+	// is_in_session && !g_PreRoundDelayTimer && !g_RoundOver, the last
+	// the authority's round-over latch (Match's outcome)
+	// [orig: Server_TickUpdate @0x51DE4B..0x51DE5F; Server_ProcessRoundEnd's
+	//  store @0x5168E4, Game_StartMission's clear @0x524A1F].
+	if (!ctx.is_in_session || world.preround_delay_seconds != 0 || world.match.outcome().ended)
+		return;
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	const int32_t capacity = static_cast<int32_t>(roster.size());
 	if (capacity == 0) return;
@@ -131,11 +135,16 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 				ctx.nwu_session_role)) {
 		ctx.mission_exit_reason = kMissionExitNovaWorld;
 	}
-	// The pre-round hold clears the send window instead of sampling it
-	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_NetSpawnSuspended ||
-	//  g_SpawnSuccessGate || g_PreRoundDelayTimer` -> CNetStats_ClearSendCounters
-	//  @0x4C2F50]; the two spawn gates have no host-side model here.
-	if (ctx.world != nullptr && ctx.world->preround_delay_seconds != 0) {
+	// The holds clear the send window instead of sampling it: the pre-round
+	// timer and, on the authority, the round-over latch (g_RoundOver, set
+	// by the round end, cleared by the next mission start: Match's outcome).
+	// g_NetSpawnSuspended is set only inside the synchronous mission load, so no
+	// sample ever sees it [orig: CNetQuality_UpdateMetrics @0x4C52C0 - the gates
+	//  @0x4C52EA..0x4C5308 -> CNetStats_ClearSendCounters @0x4C2F50 (the call @0x4C55E3);
+	//  Server_ProcessRoundEnd @0x5168E4; Game_StartMission - the spawn gate's set
+	//  @0x524398 and clear @0x52631B, the round-over clear @0x524A1F].
+	if (ctx.world != nullptr && (ctx.world->preround_delay_seconds != 0 ||
+			ctx.world->match.outcome().ended)) {
 		replication::net_quality_window_clear(ctx.host_quality_window);
 		ctx.host_network_quality = 0;
 		// The tail still buckets the cleared scalar [orig: @0x4c585a..0x4c58b0].
@@ -145,22 +154,61 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// The send window's three inputs [orig: @0x4C531B..0x4C54C6].
 	uint32_t ping_sum = 0;
 	uint32_t active = 0;
-	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// *(player-1) && !*player (not the local slot) && !slot+96478 &&
-		// slot+383 >= 1860 [orig: @0x4C53C0..0x4C53F1]
-		if (!is_in_match(conn) ||
-				conn.link.mode == replication::TransportMode::Loopback ||
-				conn.reply.control_live_ticks < CONTROL_REQUEST_LIVE_GATE_TICKS)
-			continue;
-		uint32_t mean = Server_PlayerAveragePingMs(conn);
-		if (mean > 0xFFu) mean = 0xFFu;               // per-slot clamp @0x4C540B
-		ping_sum += mean;
-		++active;
+	// A slot row the walk samples: the slot's active byte, not the local slot (+5), not a bot
+	// (+0x178E3), and its play ticks (slot+0x184) at least 1860.
+	// [orig: CNetQuality_UpdateMetrics @0x4C5376..0x4C5398, `cmp [edi+17Fh],
+	//  744h` with edi = slot+5 @0x4C538E]
+	const auto eligible = [&](const NapiNPConnection &conn) {
+		const world::MatchPlayer *row =
+				ctx.world != nullptr ? ctx.world->match.player(conn.link.owned_entity)
+						: nullptr;
+		return is_in_match(conn) && conn.link.mode != replication::TransportMode::Loopback &&
+				row != nullptr &&
+				static_cast<int32_t>(row->play_ticks) >=
+						static_cast<int32_t>(CONTROL_REQUEST_LIVE_GATE_TICKS);
+	};
+	// The walk is over the slot table, so an orphaned row (a row a repeated C2S 0x02's add left
+	// behind) is sampled as any row, with its own ring as the re-add left it: its net player's
+	// later samples land in the net player's current row (D-NET-NEW-L1-31).
+	// [orig: CNetQuality_UpdateMetrics - g_PlayerSlots walked @0x4C5373..0x4C540B, stride 0x188E8
+	//  @0x4C5403; NapiNPServerMsg_HandlePingResponse @0x515070 - the slot through the net
+	//  player's +0xC0 @0x515093]
+	const uint32_t capacity = ctx.config.total_player_slot_capacity();
+	std::vector<const NapiNPConnection *> by_slot(capacity, nullptr);
+	const auto place = [&](const NapiNPConnection &conn) {
+		if (conn.reply.player_slot < capacity && eligible(conn))
+			by_slot[conn.reply.player_slot] = &conn;
+	};
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) place(conn);
+	for (const OrphanedPlayerRow &orphan : ctx.orphaned_player_rows) place(orphan.row);
+	// The walk's count starts at the slot table's capacity and steps down once per row, and the
+	// ring's ten-sample loop leaves 10 in it at every sampled row: the walk ends nine rows past
+	// the last sampled one, so a row ten or more past the previous sampled row is never reached.
+	// Each sampled row's ten-sample mean is summed as it stands; the 255 clamp is the average's,
+	// past the walk (net_quality_host_ping_metric). Past the table's end retail's walk reads on
+	// into the memory after g_PlayerSlots, which ours never does: it stops at the capacity.
+	// PERMANENT (ratified 2026-10-22 by the maintainer, Q12-2 (a)): a deliberate fix of a retail
+	// out-of-bounds read; the table sits at a random offset in its buffer and only its own
+	// rows are zeroed, so what lies past it is no session's data (D-NET-NEW-L1-31).
+	// [orig: CNetQuality_UpdateMetrics - the count from g_PlayerSlotCapacity @0x4C535B, the
+	//  `count <= 0` exit @0x4C536D, the 10 @0x4C53CC, `--count` @0x4C5400, `jg` @0x4C540B; the
+	//  ring's sum over ten @0x4C53AA..0x4C53F7 added unclamped @0x4C53FA; the clamp on the
+	//  walk's average @0x4C5442..0x4C5448; Server_AllocatePlayerSlotTable @0x51C180 - the
+	//  random offset @0x51C1A4..0x51C1BC, the maxPlayers-only memset @0x51C1CB]
+	int32_t count = static_cast<int32_t>(capacity);
+	for (uint32_t slot = 0; count > 0 && slot < capacity; ++slot) {
+		if (const NapiNPConnection *conn = by_slot[slot]) {
+			ping_sum += Server_PlayerAveragePingMs(*conn);
+			++active;
+			count = 10;
+		}
+		--count;
 	}
 	// With no eligible slot the ping and loss samples are stored as 0, not the
 	// floor 1 [orig: LABEL_23 — `*(this + cursor + 17) = 0; *(this + cursor + 22) = 0`].
-	// The slots' loss counters (+100359) are unmodeled: an eligible slot reads 0,
-	// which the loss term floors to 1.
+	// The slots' loss counters (+0x1880C) have no writer but this walk's own zeroing, so an
+	// eligible slot reads 0, which the loss term floors to 1 [orig: @0x4C539A / @0x4C53A0, the
+	// image's only references to the field].
 	const uint32_t avg_ping = active != 0 ? ping_sum / active : 0u;
 	// The frame-pressure term reads the main loop's FR counter
 	// [orig: `mov ecx, g_StatsAvgFps` @0x4C531B].

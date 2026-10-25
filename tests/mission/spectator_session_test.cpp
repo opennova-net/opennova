@@ -116,15 +116,15 @@ int main() {
 		body->pitch = 0;
 		kernel.local.input.look_pitch = 0;
 		frame(role, keys()); // the pitch mirror settles
-		const int32_t x0 = body->pos[0], y0 = body->pos[1], z0 = body->pos[2];
+		const int32_t x0 = body->self->position.x.q16, y0 = body->self->position.y.q16, z0 = body->self->position.z.q16;
 		frame(role, keys(/*forward=*/true));
-		const double dx = static_cast<double>(body->pos[0] - x0);
-		const double dy = static_cast<double>(body->pos[1] - y0);
+		const double dx = static_cast<double>(body->self->position.x.q16 - x0);
+		const double dy = static_cast<double>(body->self->position.y.q16 - y0);
 		const double moved = std::sqrt(dx * dx + dy * dy);
 		CHECK(std::fabs(moved - 10570.0) <= 2.0);
-		CHECK(body->pos[2] == z0);
+		CHECK(body->self->position.z.q16 == z0);
 		// The registry mirror follows (the camera, the radar, the uplink).
-		CHECK(std::abs(w::to_fixed(kernel.local.player()->position.x) - body->pos[0]) <= 2);
+		CHECK(std::abs(w::to_fixed(kernel.local.player()->position.x) - body->self->position.x.q16) <= 2);
 		// No fire leaves the death screen.
 		CHECK(!kernel.local.weapon.fire_held);
 	}
@@ -156,8 +156,8 @@ int main() {
 		CHECK(tb != nullptr && body != nullptr);
 		if (tb != nullptr && body != nullptr) {
 			// The local slot runs ahead of the target's: within one tick's motion.
-			CHECK(std::abs(body->pos[0] - tb->pos[0]) <= 0x10000);
-			CHECK(std::abs(body->pos[1] - tb->pos[1]) <= 0x10000);
+			CHECK(std::abs(body->self->position.x.q16 - tb->self->position.x.q16) <= 0x10000);
+			CHECK(std::abs(body->self->position.y.q16 - tb->self->position.y.q16) <= 0x10000);
 			CHECK(body->heading == tb->heading);
 		}
 		// The forward key zooms the chase in instead of moving.
@@ -181,12 +181,26 @@ int main() {
 				replication::ClientReplicaPipeline::kSpectateActionCycleMode);
 		CHECK(client.state().death_screen_submode == 0);
 		const w::AiEntity *body = kernel.local.player_ai();
-		if (tb != nullptr && body != nullptr) {
-			// The composed first-person view sits at the copied pose, so the
-			// placement lands within the eye's pull-back of it.
-			CHECK(std::abs(body->pos[0] - tb->pos[0]) <= 0x8000);
-			CHECK(std::abs(body->pos[1] - tb->pos[1]) <= 0x8000);
-			CHECK(std::abs(body->pos[2] - tb->pos[2]) <= 0x8000);
+		const w::Entity *te = world.registry.get(target);
+		const w::Entity *le = kernel.local.player();
+		if (tb != nullptr && body != nullptr && te != nullptr && le != nullptr) {
+			// The wrap composes the view from the camera's tracked entity, still
+			// the target the first-person frames tracked, so the eye is the
+			// target's (its pose plus ITS CameraOffset, pulled back along its
+			// view), and the local entity lands at that eye less ITS OWN
+			// CameraOffset (the spectator's 0xD000 seat): the target's x / y
+			// within the pull-back, its z plus the target's eye less the seat.
+			// [orig: Spectator_CycleMode @0x52AFF0 - Camera_ComputeThirdPersonView
+			//  @0x52B082, g_ViewPos less g_LocalPlayerEntity's +0x6C..+0x74
+			//  @0x52B087..0x52B0B7; Camera_ComputeThirdPersonView @0x437D10 reads
+			//  g_CameraTrackedEntity @0x437D2B, which the render frame's
+			//  Camera_SetTrackedEntity @0x4391D0 (the call @0x5CA262) left on the
+			//  target in sub-mode 2 (@0x4391F7..0x4391F9)]
+			CHECK(std::abs(body->self->position.x.q16 - tb->self->position.x.q16) <= 0x8000);
+			CHECK(std::abs(body->self->position.y.q16 - tb->self->position.y.q16) <= 0x8000);
+			CHECK(std::abs(body->self->position.z.q16 -
+							  (tb->self->position.z.q16 + te->eye_offset_z - le->eye_offset_z)) <= 0x8000);
+			CHECK(le->eye_offset_z == 0xD000);
 			CHECK(kernel.local.input.look_heading == body->heading);
 		}
 	}

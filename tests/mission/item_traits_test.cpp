@@ -25,6 +25,7 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -319,6 +320,15 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  graphic psecevent\r\n"
     "  sid s5psecevent\r\n"
     "  ai_function psec\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Mortar Shell\"\r\n"
+    "  id 100604\r\n"
+    "  type object\r\n"
+    "  graphic s5shell\r\n"
+    "  sid s5shell\r\n"
+    "  ai_function arti\r\n"
+    "  move_function arti\r\n"
     "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -356,7 +366,8 @@ EntityHandle spawn(World &w, int pool, uint16_t item_id, EntityKind kind) {
 // a def that names none, for a .3di that fails to load and in a world with no
 // model source, so a carrier whose graphic failed is refused admission through
 // its loaded child's seat; the Player row's and a throwable class row's slots
-// take the same load, and an organic takes its visual def's.
+// take the same load, and an organic takes its own type's def's (D-NET-348: the
+// player's 0x14B9 binds 105305, no stand-in row).
 // [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 - the store @0x439FDC;
 //  Game_ReloadEntityModelsAndCallbacks @0x522830 - the +0x30 stores @0x5229D7 /
 //  @0x522B35 / @0x522CD1; Entity_InitFromItemDef @0x49E598; Entity_CanEnterVehicle
@@ -375,13 +386,12 @@ void test_graphic_model_is_the_loads_result() {
     fs::remove_all(root, ec);
     fs::create_directories(root, ec);
     CHECK(test_io::write_file(root + "/LoadsHull.3di", mount));
-    // Retail's head row; the Player row, its loading model; the visual row,
-    // a lost one; a carrier whose graphic is lost and one whose loads; a row
-    // with no graphic; a mine class row of each kind.
+    // Retail's head row; the Player row, its loading model; a carrier whose
+    // graphic is lost and one whose loads; a row with no graphic; a mine class
+    // row of each kind.
     static const char kDefs[] =
         "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
         "begin \"Player\"\r\n id 105305\r\n type person\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
-        "begin \"Player visual\"\r\n id 105310\r\n type person\r\n graphic LostBody\r\n hp 100\r\nend\r\n"
         "begin \"Hull lost\"\r\n id 100700\r\n type vehicle\r\n graphic LostHull\r\n hp 100\r\nend\r\n"
         "begin \"Hull kept\"\r\n id 100701\r\n type vehicle\r\n graphic LoadsHull\r\n hp 100\r\nend\r\n"
         "begin \"Bare\"\r\n id 100702\r\n type object\r\n hp 100\r\nend\r\n"
@@ -432,7 +442,8 @@ void test_graphic_model_is_the_loads_result() {
         // reaches the child's seat.
         CHECK(!vehicle_can_enter(w, nullptr, *w.registry.get(lost_h)));
         CHECK(vehicle_can_enter(w, nullptr, *w.registry.get(kept_h)));
-        // The collision sweep's load is the organic's visual def's, lost here.
+        // The collision sweep's load is the organic's own def's, the Player row's
+        // loading model, as the traits sweep's was.
         world::EntityPoseProvider pose;
         pose.set_assets(&models);
         CollisionWorld collision;
@@ -440,7 +451,7 @@ void test_graphic_model_is_the_loads_result() {
         mission::CollisionResolveState state;
         const mission::CollisionResolveDeps deps{collision, occlusion, pose, models};
         mission::resolve_collision_instances(w, defs, state, deps);
-        CHECK(!w.registry.get(body_h)->has_graphic_model);
+        CHECK(w.registry.get(body_h)->has_graphic_model);
         CHECK(!w.registry.get(lost_h)->has_graphic_model);
         CHECK(w.registry.get(kept_h)->has_graphic_model);
     }
@@ -460,6 +471,35 @@ void test_graphic_model_is_the_loads_result() {
     }
     def_free_items(&defs);
     fs::remove_all(root, ec);
+}
+
+// A bay's group flags come from each spawn-list group's item: the first row
+// whose type id (its id less 100000) is the list's token, so "1291" names the
+// 101291 row (unit_type 1 sets bit 0, unit_type 3 bit 1); a token naming no
+// row reads the Null row, which sets none.
+// [orig: ItemDefs_LoadAndValidate @0x4A1F66..0x4A1F86 (the row scan against
+//  def +0x50), @0x4A1FA7..0x4A1FCF, @0x4A2010..0x4A2058]
+void test_a_bay_takes_its_groups_unit_types() {
+    static const char kDefs[] =
+        "begin \"Null\"\r\n id 100000\r\n type marker\r\nend\r\n"
+        "begin \"FAV\"\r\n id 101291\r\n type vehicle\r\n unit_type 1\r\nend\r\n"
+        "begin \"Helo\"\r\n id 101300\r\n type vehicle\r\n unit_type 3\r\nend\r\n"
+        "begin \"Bay\"\r\n id 101400\r\n type marker\r\n attrib: VehicleBay\r\n"
+        " pcvehicle_spawnlist 1291 1300\r\nend\r\n"
+        "begin \"Bay none\"\r\n id 101401\r\n type marker\r\n attrib: VehicleBay\r\n"
+        " pcvehicle_spawnlist 9999\r\nend\r\n";
+    DefItemsFile defs{};
+    CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kDefs),
+            sizeof(kDefs) - 1, &defs) == 0);
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(2, 4);
+    const EntityHandle bay = spawn(w, 2, 1400, EntityKind::Item);
+    const EntityHandle none = spawn(w, 2, 1401, EntityKind::Item);
+    mission::resolve_item_traits(w, defs, {}, nullptr);
+    CHECK(w.registry.get(bay)->vehicle_bay_flags == (1u | 2u));
+    CHECK(w.registry.get(none)->vehicle_bay_flags == 0u);
+    def_free_items(&defs);
 }
 
 } // namespace
@@ -506,7 +546,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 28);
+    CHECK(file.count == 29);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -711,7 +751,7 @@ int main() {
 
     // As an addeweap child, the same def's subType 0xFF lands before the ewep
     // class init reads its anchor at subType -1: no userpoint, no designation,
-    // so it rides its carrier's root. [orig: Entity_SpawnWeaponOverlays
+    // so it rides its carrier's root. [orig: Entity_SpawnAddEWeapChildren
     //  @0x40F40E -> Entity_InitFromModel @0x40DCAF -> Entity_InitBoneReferences
     //  @0x4415F1]
     const Entity *shield_e = w.registry.get(shield_h);
@@ -802,7 +842,7 @@ int main() {
     // mixed-case tag matches, the absent tag / a tag without a row (the
     // shipped "gnr1" typo) / the callback-less nade row resolve the null row
     // (0x406FF0, never dies), and bld2 resolves its collapse callback. [orig:
-    // Entity_LookupRenderCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
+    // EntityDef_LookupClassCallbacks @0x407dc0; EntityDef_InitAllCallbacks @0x4a5aa9]
     const auto class_of = [&](int32_t id) {
         const ItemDeathTraits *t = w.tables.item_death_traits.get(id);
         return t != nullptr ? t->death_class : ItemDeathClass::kUnwitnessed;
@@ -817,10 +857,10 @@ int main() {
     CHECK(class_of(546) == ItemDeathClass::kNull);        // "gnr1": no row
     CHECK(class_of(520) == ItemDeathClass::kNull);        // the bunker authors no tag
     CHECK(class_of(530) == ItemDeathClass::kNull);        // nor the bush
-    CHECK(class_of(500) == ItemDeathClass::kUnwitnessed); // cveh: the AI machine's death
+    CHECK(class_of(500) == ItemDeathClass::kBrainMachine); // cveh: the ground machine's row
     CHECK(item_death_class_from_tag("") == ItemDeathClass::kNull);
     CHECK(item_death_class_from_tag("null") == ItemDeathClass::kNull);
-    CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNull);   // fn1 = 0
+    CHECK(item_death_class_from_tag("nade") == ItemDeathClass::kNoCallback); // fn1 = 0: no callback
     CHECK(item_death_class_from_tag("psec") == ItemDeathClass::kNull);   // row 27 -> 0x406FF0
     CHECK(item_death_class_from_tag("pwrp") == ItemDeathClass::kNull);   // row 36 -> 0x406FF0
     CHECK(item_death_class_from_tag("Tree") == ItemDeathClass::kTree);
@@ -898,7 +938,7 @@ int main() {
         CHECK(helo_vt->physics == 0);
         // The ai_function binds the CHel event row in any case; the render
         // tag compares exactly, so `CHel` is not the lowercase chel bone row.
-        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2;
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call @0x407DD8;
         //  BoneCallback_LookupByTag @0x4e32c6, row 'chel' @0x82cfd0]
         CHECK(helo_vt->brain_class == VehicleBrainClass::Air);
         CHECK(helo_vt->render_family == VehicleRenderFamily::None);
@@ -915,7 +955,7 @@ int main() {
         CHECK(!prefix_tank_vt->amphibian);
         // `cvehX`: the event row is whole-name (no brain), while the render
         // tag is the first four characters (the cveh bone row).
-        // [orig: Entity_LookupRenderCallbacks stricmp @0x407de2; the tag
+        // [orig: EntityDef_LookupClassCallbacks @0x407DC0 - the stricmp call @0x407DD8; the tag
         //  packed from def+0x13C..0x13F @0x4a5ace..0x4a5af1]
         CHECK(prefix_tank_vt->brain_class == VehicleBrainClass::Unset);
         CHECK(prefix_tank_vt->render_family == VehicleRenderFamily::Ground);
@@ -988,7 +1028,11 @@ int main() {
 			CHECK(!fragment->palm_sections && fragment->palm_fragment);
 			Entity *palm = w.registry.get(psec_palm_h);
 			palm->palm_state = 0;
-			CHECK(item_hidden_sections(*palm) == palm->section_mask);
+			// The gnrc callback collapses +0x138 alone: a +0x134 break stays
+			// drawn [orig: BoneCallback_gnrc_World @0x4E2860 (the read @0x4E2972)].
+			palm->section_mask = 0x4;
+			CHECK(item_hidden_sections(*palm) == 0);
+			palm->section_mask = 0;
 			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "psec");
 			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "gnrc");
 			fragment->palm_fragment = false;
@@ -1031,17 +1075,31 @@ int main() {
 				{"TANK", false, false}, {"bldg", false, true}, {"bldgX", false, true},
 				{"Bldg", false, false}, {"BLDG", false, false},
 			};
+			// The chel row alone carries the def's +0x890..+0x897 byte run, the
+			// sections its world callback hides by rotor speed and the airborne
+			// flag: here the words rotor_parts 1 2 3 4 and aux_parts 5 6 write.
+			// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+			//  @0x48F3BE..0x48F469)]
+			truck_def->deathtime_ticks = 0x00000201;
+			truck_def->clipsize = 0x06050403;
+			const std::array<uint8_t, 8> chel_bytes = {1, 2, 0, 0, 3, 4, 5, 6};
 			for (const auto &tag : tags) {
 				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
 						"%s", tag.tag);
 				mission::resolve_item_traits(w, file, wire_class, nullptr);
 				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
 				CHECK(w.registry.get(truck_h)->bldg_section_pivot == tag.bldg);
+				const bool chel = std::strcmp(tag.tag, "chel") == 0;
+				CHECK(w.registry.get(truck_h)->chel_section_bytes ==
+						(chel ? chel_bytes : std::array<uint8_t, 8>{}));
 			}
+			truck_def->deathtime_ticks = 0;
+			truck_def->clipsize = 0;
 			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
 			mission::resolve_item_traits(w, file, wire_class, nullptr);
 			CHECK(w.registry.get(truck_h)->death_section_pivot);
 			CHECK(!w.registry.get(truck_h)->bldg_section_pivot);
+			CHECK(w.registry.get(truck_h)->chel_section_bytes == (std::array<uint8_t, 8>{}));
 		}
 	}
 
@@ -1106,6 +1164,17 @@ int main() {
     CHECK(dup_e != nullptr &&
           dup_e->item_type_index == static_cast<int32_t>(entry_for(file, 100602) - file.entries));
     CHECK(w.throwables.classes.get(500) == nullptr);
+    // An arti def lands its row for its physics row alone (the mortar shell's motor): the
+    // arti name binds no event row, so no think class.
+    // [orig: Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C); the physics row
+    //  "arti" @0x82AC7C -> 0x445500; the event table @0x813000 holds no "arti" row]
+    const ThrowableClassRow *shell = w.throwables.classes.get(604);
+    CHECK(shell != nullptr);
+    if (shell != nullptr) {
+        CHECK(shell->move_row == PhysicsClass::Arti);
+        CHECK(shell->think == ThrowClass::kNone);
+        CHECK(shell->motor == ThrowClass::kNone);
+    }
 
     // Idempotent re-run: the once-per-id tables must not duplicate or reset.
     mission::resolve_item_traits(w, file, wire_class, nullptr);
@@ -1257,6 +1326,7 @@ int main() {
 
     def_free_items(&file);
     test_graphic_model_is_the_loads_result();
+    test_a_bay_takes_its_groups_unit_types();
     if (failures == 0) std::printf("mission_item_traits: OK\n");
     return failures == 0 ? 0 : 1;
 }

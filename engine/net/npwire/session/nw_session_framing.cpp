@@ -7,6 +7,8 @@
 #include <base/os_random/os_random.h>
 
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
 #include <mutex>
 #include <random>
 
@@ -157,6 +159,8 @@ uint32_t advance_connection_index(uint32_t &counter) {
 	return counter;
 }
 
+// The process's counter, zero with the protocol, created once per process [orig:
+//  NapiNPProtocol_Create @0x625730 - the 0xFE0-byte memset called @0x62576C].
 uint32_t next_connection_index() {
 	static std::mutex mutex;
 	static uint32_t counter = 0;
@@ -164,24 +168,95 @@ uint32_t next_connection_index() {
 	return advance_connection_index(counter);
 }
 
-bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
-                       uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
-	std::vector<uint8_t> stripped(raw_len);
+bool nw_unpack_inbound(const uint8_t *raw, size_t raw_len, std::vector<uint8_t> &unpacked_out) {
+	unpacked_out.assign(raw_len, 0);
 	size_t out_size = 0;
-	if (napi_envelope_decode(raw, raw_len, stripped.data(), stripped.size(),
+	if (napi_envelope_decode(raw, raw_len, unpacked_out.data(), unpacked_out.size(),
 	                         &out_size) != 0) {
+		unpacked_out.clear();
 		return false;
 	}
-	stripped.resize(out_size);
-	if (stripped.empty()) return false;
+	unpacked_out.resize(out_size);
+	return true;
+}
 
-	opcode_out = stripped[0];
-	body_out.assign(stripped.begin() + 1, stripped.end());
+bool nw_split_unpacked(const std::vector<uint8_t> &unpacked, uint8_t &opcode_out,
+                       std::vector<uint8_t> &body_out) {
+	if (unpacked.empty()) return false;
+	opcode_out = unpacked[0];
+	body_out.assign(unpacked.begin() + 1, unpacked.end());
 	// Names swapped vs onnet — server-side decrypt is our nwu_encrypt.
 	if (!body_out.empty()) {
 		nwu_encrypt(body_out.data(), body_out.size(), SESSION_NWU_KEY);
 	}
 	return true;
+}
+
+bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
+                       uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
+	std::vector<uint8_t> unpacked;
+	return nw_unpack_inbound(raw, raw_len, unpacked) &&
+	       nw_split_unpacked(unpacked, opcode_out, body_out);
+}
+
+bool napi_punkbuster_datagram(const uint8_t *raw, std::size_t len) {
+	if (raw == nullptr || len <= 7 || raw[0] != 0xFF) return false;
+	static const uint8_t kPrefix[] = {0xFF, 0xFF, 0xFF, 'P', 'B', '_'};
+	for (std::size_t i = 0; i < sizeof(kPrefix); ++i) {
+		uint8_t got = raw[1 + i];
+		if (got >= 'a' && got <= 'z') got = static_cast<uint8_t>(got - 'a' + 'A');
+		if (got != kPrefix[i]) return false;
+	}
+	return true;
+}
+
+bool napi_baffle_packet(const std::vector<uint8_t> &unpacked) {
+	return unpacked.size() >= 0x30 && unpacked[0] == 0x71 && unpacked[1] == 0x10 &&
+			unpacked[2] == 0x30 && unpacked[3] == 0x00;
+}
+
+namespace {
+
+std::string packet_line(const char *format, ...) {
+	char buf[1024];
+	va_list args;
+	va_start(args, format);
+	std::vsnprintf(buf, sizeof(buf), format, args);
+	va_end(args);
+	return buf;
+}
+
+} // namespace
+
+std::string napi_got_raw_text(int32_t bytes, const PeerAddr &from) {
+	return packet_line("NAPI GOT RAW %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_cooked_text(int32_t bytes, const PeerAddr &from) {
+	return packet_line("NAPI GOT COOKED %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_baffle_text(int32_t bytes, const PeerAddr &from) {
+	return packet_line("NAPI GOT BAFFLE %ld BYTES FROM %s", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str());
+}
+
+std::string napi_got_protocol_text(int32_t bytes, const PeerAddr &from,
+		const std::string &protocol_name) {
+	return packet_line("NAPI GOT PROTOCOL %ld BYTES FROM %s [%s]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), protocol_name.c_str());
+}
+
+std::string napi_tossed_text(int32_t bytes, const PeerAddr &from, NapiTossReason reason) {
+	return packet_line("NAPI TOSSED %ld BYTES FROM %s [%ld]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), static_cast<long>(reason));
+}
+
+std::string net_got_text(int32_t bytes, const PeerAddr &from, uint32_t opcode) {
+	return packet_line("NET GOT %ld BYTES FROM %s [0x%2.2lx]", static_cast<long>(bytes),
+			peer_addr_to_string(from).c_str(), static_cast<unsigned long>(opcode));
 }
 
 std::vector<uint8_t> nw_encode_outbound(uint8_t opcode, std::vector<uint8_t> body) {

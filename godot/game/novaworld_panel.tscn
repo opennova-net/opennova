@@ -320,12 +320,11 @@ layout_mode = 2
 disabled = true
 text = "Log In"
 
-[node name="SessionNote" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm"]
+[node name="RememberLoginCheck" type="CheckBox" parent="Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.5, 0.52, 0.4, 1)
-theme_override_font_sizes/font_size = 11
-text = "Credentials are used for this session only."
-horizontal_alignment = 1
+size_flags_horizontal = 4
+focus_mode = 0
+text = "Remember my login information."
 
 [node name="LobbyView" type="VBoxContainer" parent="Center/Shell/Margin/RootVBox/Pages"]
 visible = false

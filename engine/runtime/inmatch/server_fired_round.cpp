@@ -48,7 +48,18 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		return;
 	world::Entity *shooter = world->registry.get(conn.link.owned_entity);
 	if (shooter == nullptr) return;
-	if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->logic_tick,
+	// The claimed target resolves to its pool row by the handle's bounds alone: not
+	// 0xFFFF, pool < 5, slot < the pool's capacity. A row the destroy already freed
+	// still resolves (no liveness test), so its handle is the target.
+	// [orig: NapiNPServerMsg_0x006_ClientFiredRound @0x513310 - the 0xFFFF test
+	//  @0x51359D, pool < 5 @0x5135B3, slot < capacity @0x5135CC..0x5135D2, the row
+	//  @0x5135D4..0x5135DD, else 0 @0x5135E5]
+	world::EntityHandle fire_target{};
+	if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
+		const world::EntityHandle th{fr.target_handle};
+		if (world->registry.row_storage(th) != nullptr) fire_target = th;
+	}
+	if (!Server_AcceptsPlayerFireTick(conn, fr.current_tick, world->out.rounds.frame_clock,
 			config.effective_send_holdoff_ticks())) return;
 
 	if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) return;
@@ -89,7 +100,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		//  @0x50C297 / @0x50C30D]
 		const bool mounted_route =
 				shooter->use_gun_slot_swapped && shooter->mount_target.valid();
-		WeaponSlotState *personal = nullptr;
+		world::PersonalWeaponSlot *personal = nullptr;
 		world::WeaponSlotState *mounted_slot = nullptr;
 		const world::WeaponTableEntry *slot_def = nullptr;
 		if (mounted_route) {
@@ -119,9 +130,9 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			if (slot_def == nullptr) return;
 			fired_adm = mounted_adm;
 		} else {
-			const auto found = conn.weapon_slots.find(
+			const auto found = shooter->weapon_slots.find(
 					static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
-			if (found == conn.weapon_slots.end()) return;
+			if (found == shooter->weapon_slots.end()) return;
 			personal = &found->second;
 			slot_def = world->tables.weapons.by_index(personal->adm_index);
 			if (slot_def == nullptr) return;
@@ -184,20 +195,24 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				if (static_cast<int16_t>(mounted_slot->clip) == 0) return;
 				--mounted_slot->clip;
 			} else {
-				WeaponSlotState &slot = *personal;
-				if (slot.clip == 0) return;
+				world::PersonalWeaponSlot &slot = *personal;
+				if (static_cast<int16_t>(slot.clip) == 0) return;
 				--slot.clip;
 			}
 		}
 		// The accepted fire re-points the shooter's EquippedSlot: the borrowed
 		// mount slot it fired through, else the personal slot of the fired
-		// combo. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
-		if (shooter->use_gun_slot_swapped && shooter->mount_target.valid()) {
-			conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kMount;
-			conn.equipped_slot.mount = shooter->mount_target;
+		// combo, which also ends a borrow a refused UseGun attach left on a body
+		// on foot (D-NET-420). [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d]
+		if (mounted_route) {
+			shooter->equipped_slot = {};
+			shooter->equipped_slot.kind = world::WeaponSlotRef::kMount;
+			shooter->equipped_slot.mount = shooter->mount_target;
 		} else {
-			conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
-			conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot = {};
+			shooter->equipped_slot.kind = world::WeaponSlotRef::kPersonal;
+			shooter->equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot.adm = personal->adm_index;
 		}
 		// The slot's fire action re-enters the handler with the weapon that
 		// fires, whose local pass judges the round again: the owner checks
@@ -245,20 +260,38 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 				fire_pitch = pose[4];
 			}
 		}
+		// The primary leg, past its refusals and ahead of the arm, stores the claimed
+		// target into the shooter's AI slot word (+0xC), when it has a slot; the tag-2
+		// serializer reads that word LIVE. The alt leg returns through
+		// RoundData_AddRound without it, so an alt round leaves the last primary claim.
+		// [orig: Server_ClientFiredRound @0x50BAA0 - the primary leg @0x50C172,
+		//  `mov eax, [eax+68h]` @0x50C2A2, the null test @0x50C2A7, the store
+		//  @0x50C2AD, the arm @0x50C2B0; the alt return @0x50BE4B..0x50BE65;
+		//  NetPacket_SerializeRoundEvent @0x504855]
+		if (world::AiEntity *shooter_slot = world->ai.for_handle(shooter->handle))
+			shooter_slot->slot.f[3] = world::AiSlot::target_word(fire_target);
+		shooter->last_fire_target = fire_target;
 		const world::FixedVec3 claimed{fr.pos_x, fr.pos_y, fr.pos_z};
 		round_lands =
 				world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
 				world::weapon_fire_origin_status(*world, *shooter, *slot_def, claimed,
 						/*replay_client_action=*/false) == 0;
+		// The authority arms the slot the fire went through, after the controller
+		// pose read its pre-fire next action: FIRE runs on it (its shot and spend
+		// are this handler's legs), and the weapon walk pumps it on from there, a
+		// remote player's own row included (D-NET-336).
+		// [orig: Server_ClientFiredRound @0x50BAA0 - the arm @0x50C2B0..0x50C2F0,
+		//  the fire action @0x50C30D -> WeaponAction_Fire @0x542B10]
+		{
+			world::WeaponSlotState &armed =
+					mounted_slot != nullptr ? *mounted_slot
+					                        : static_cast<world::WeaponSlotState &>(*personal);
+			world::WeaponFsmInputs arm_inputs;
+			arm_inputs.is_local = false;
+			world::WeaponFsmEvents arm_events;
+			world::weapon_fsm_arm_network_fire(fire_def, armed, arm_inputs, arm_events);
+		}
 	}
-	// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
-	// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
-	world::EntityHandle fire_target{};
-	if (!wire_handle::is_batch_end_sentinel(fr.target_handle)) {
-		const world::EntityHandle th{fr.target_handle};
-		if (world->registry.get(th) != nullptr) fire_target = th; // [orig: @0x5135d2]
-	}
-	shooter->last_fire_target = fire_target;
 	// A primary round re-enters through the adm fire action, whose
 	// local pass scores the shot (scorer event 1) once it clears the
 	// pose checks; alt fire returns through RoundData_AddRound first.
@@ -331,9 +364,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			world::RoundSpawnParams rp;
 			rp.owner = conn.link.owned_entity;
 			rp.shooter_handle = fr.shooter_handle;
-			rp.origin.x = opennova::io::fp16_16_to_float(fr.pos_x);
-			rp.origin.y = opennova::io::fp16_16_to_float(fr.pos_y);
-			rp.origin.z = opennova::io::fp16_16_to_float(fr.pos_z);
+			rp.origin.set_q16({fr.pos_x, fr.pos_y, fr.pos_z}); // the wire's words (D-NET-507)
 			rp.dir_yaw_bam = ev.dir_yaw;
 			rp.dir_pitch_bam = ev.dir_pitch;
 			rp.ammo_index = round_ammo;

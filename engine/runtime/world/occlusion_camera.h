@@ -54,6 +54,29 @@ struct OcclusionViewSpec {
 	int32_t object_detail = renderer::kObjectLodDetailLevelMax;
 };
 
+// The view a water mirror's reflected subscene draws from: at or above the
+// plane (presentation y = water_z_units) the eye mirrored in it with yaw kept
+// and pitch and roll negated, below it the live view unchanged; the
+// projection that follows the mirror's collect is built over that block, so
+// the subscene's own collects (its death pieces) test against it. The triad
+// takes environment/water_mirror.h build_water_mirror_view's proper mirror
+// (forward and right reflected, the reflected up negated).
+// [orig: Render_MainScene @ 0x5c1240 - `cmp eax, g_EnvWaterHeightFixed; jl`
+//  @ 0x5c1367..0x5c1370, z' = 2wh - z @ 0x5c1379..0x5c137b, pitch and roll
+//  negated @ 0x5c138e / @ 0x5c1390, the unchanged copy @ 0x5c13f6..0x5c1414;
+//  the second Viewport_BuildProjectionMatrix @ 0x5c170b ahead of
+//  Water_RenderReflectedWorldScene @ 0x5c171f]
+inline OcclusionViewSpec mirror_reflected_view(const OcclusionViewSpec &view) {
+	OcclusionViewSpec out = view;
+	if (view.eye[1] < view.water_z_units) return out;
+	out.eye[1] = 2.0f * view.water_z_units - view.eye[1];
+	out.forward[1] = -view.forward[1];
+	out.right[1] = -view.right[1];
+	out.up[0] = -view.up[0];
+	out.up[2] = -view.up[2];
+	return out;
+}
+
 // Render float world from a presentation direction: the presentation frame
 // with x and z swapped ((-my, mz, mx)/65536 == (pz, py, px)).
 inline void render_dir_from_presentation(const float p[3], float out[3]) {

@@ -13,9 +13,17 @@
 namespace opennova::world {
 
 // The husk RENDER graphic the Flags & 4 swap shows: the def's `husk` first,
-// `huskfinal` when no `husk` is authored, "" when neither is — the witnessed
-// render + collision pick [orig: Entity_RaycastCollisionModel @ 0x413086; the
-// collision-model pick @ 0x538720 shares the husk-first order]. Deliberately
+// `huskfinal` when no `husk` is authored, "" when neither is. Retail's draw
+// takes the entity's husk model (+0x34, the def's `husk`) under Flags & 4 and
+// the graphic when there is none [orig: Render_SectorEntity @ 0x5C4190 (the
+// Flags & 4 test @ 0x5C41A0)]; the collision picks take the same +0x34 [orig:
+// Entity_RaycastCollisionModel @ 0x413060 (the pick @ 0x41307B..0x413088);
+// Physics_RaycastAgainstEntityPool @ 0x538720 (the pick @ 0x538A15)]. The
+// `huskfinal` fallback is ours: retail draws a final husk only through the
+// swap stage, the pending +0x38 inside the fade [orig:
+// Entity_RenderPendingSwapModel @ 0x5C3E50 (the call @ 0x5C4234)], then
+// promoted into +0x34 [orig: Render_SectorEntity @ 0x5C4190 (the stores
+// @ 0x5C4241 / @ 0x5C42C7)]. Deliberately
 // NOT unified with the death-piece model pick, which is huskFINAL first
 // (destruction.h ItemDeathTraits::husk_section_count [orig: @ 0x4934af]):
 // the two differ on purpose.

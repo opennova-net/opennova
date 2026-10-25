@@ -36,8 +36,11 @@
 #include "common/boot_file_source.h"
 #include "common/synthetic_mission.h"
 
+#include <base/io/crt_rand.h>
+
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -108,7 +111,8 @@ std::string mission_text_bytes(const char *title) {
 std::map<std::string, std::string> mount() {
 	std::map<std::string, std::string> files;
 	files["synth.til"] = til_bytes();
-	files["synth.env"] = "enviro_name \"Synth\"\r\nwater_height 40\r\nfog_level 900\r\n";
+	files["synth.env"] =
+			"enviro_name \"Synth\"\r\ntimeofday \"Dusk\"\r\nwater_height 40\r\nfog_level 900\r\n";
 	files["synthstrip.tsd"] = "INDEX_7 TSD_SNOW\r\n";
 	files["score.ini"] = "VERSION 40\r\nGAMETYPE \"DM\"\r\nFIELD \"NUMENEMYKILLS\" 1\r\n"
 	                     "VAR \"FIRE\" 7\r\nVAR \"ENEMYKILL\" 9\r\n";
@@ -224,7 +228,11 @@ int main() {
 		CHECK(host.water_at_bringup == (20 << 16));
 		CHECK(host.mission_start_pending_at_bringup == false); // the boot had not ended yet
 		CHECK(kernel.world.env.water_z == (20 << 16));
-		CHECK(kernel.terrain_store.height_field().has_water);
+		CHECK(kernel.terrain_store.height_field().water_y == (20 << 16)); // the plane word itself: retail keeps no dry flag
+		// D-NET-709: the .env's timeofday "Dusk" leaves class 1 on the world (retail's chain
+		// stores 1 for anything but "dawn"), the class the listing's TimeOfDay reads
+		// [orig: TimeOfDay_ParseProperty @0x57CDE2; Lobby_UpdateServerInfo @0x4FF038].
+		CHECK(kernel.world.env.time_of_day_enum == 1);
 
 		// D-NET-344: the dedicated host carries the "Server" strings.
 		CHECK(ctx.server_text.medic_request_format == "%s needs a medic");
@@ -236,10 +244,16 @@ int main() {
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
 
-		// Serve Only: no player of the host's own, no local client.
+		// Serve Only: no local client; the host's own slot 0 has its hidden body, owned by
+		// connection 0, which binds as the local player (D-NET-352) [orig:
+		//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; NapiNP_GetLocalConnectionId
+		//  @0x4C6D40..0x4C6D4A; Game_StartMission @0x525C95..0x525C9E].
 		CHECK(!host.role.state.host_owner.serve_and_play);
 		CHECK(host.role.client_runtime() == nullptr);
-		CHECK(!kernel.local.has_local_player());
+		CHECK(kernel.local.has_local_player());
+		if (const world::Entity *own = kernel.world.registry.get(kernel.world.cached.local_player))
+			CHECK(own->owner_connection_id == 0 && (own->flags & world::kEntityFlagCarried) != 0 &&
+					kernel.world.cached.local_player == host.role.state.host_owner.ctx.host_slot.body);
 		CHECK(kernel.world.rules.mp_session);
 
 		// --- phase B: the mission start, then the load's end -----------------
@@ -263,6 +277,34 @@ int main() {
 		CHECK(kernel.world.out.weather_sounds.empty());
 		CHECK(kernel.world.out.tip_events.empty());
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
+	}
+
+	// --- the host's character table (D-NET-137): with none installed by the
+	// embedder, the boot takes the mounted Avatars.def, the file g_AvatarDefs
+	// loads, so a joiner's add validates against it; an embedder's table stands.
+	// [orig: CAvatarDefs_Init @0x57B180 - File_ParseASCIIFile("Avatars.def") @0x57B1D5]
+	{
+		const std::string avatars =
+				"define head H\r\n{\r\n\tgraphic h.3di\r\n\tcamo 0 0 0\r\n\tvoice 1\r\n\tsex m\r\n}\r\n"
+				"define body B\r\n{\r\n\tgraphic b.3di\r\n\tcamo 0 0 0\r\n}\r\n"
+				"define arms A\r\n{\r\n\tgraphic a.3di\r\n\tcamo 0 0 0\r\n}\r\n"
+				"nationality 0 N\r\n{\r\n\talignment good\r\n\tdivision 0 D\r\n\t{\r\n"
+				"\t\tcombo 1 H B A\r\n\t}\r\n}\r\n";
+		Host host;
+		host.files["Avatars.def"] = avatars;
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		const inmatch::CharacterRegistry &mounted = host.role.state.host_owner.ctx.characters;
+		CHECK(mounted.entries().size() == 1);
+		CHECK(mounted.find_by_packed_id(mounted.first_character_id(0)) != nullptr);
+
+		Host installed;
+		installed.files["Avatars.def"] = avatars;
+		inmatch::HostBootRequest r = installed.request(0);
+		r.host_cfg.characters.add_entry(1, 0, 0, 7, 0, 1, 1, 4, false); // 0x8207
+		r.host_cfg.characters.add_entry(1, 0, 1, 7, 0, 2, 1, 9, false); // 0x8407
+		CHECK(inmatch::boot_host_mission(std::move(r), installed.boot, error));
+		CHECK(installed.role.state.host_owner.ctx.characters.entries().size() == 2);
 	}
 
 	// --- the mission text and the mount's override table (D-NET-657): every
@@ -312,6 +354,35 @@ int main() {
 		CHECK(plain.boot.mission_text.override_table == nullptr);
 		CHECK(plain.role.state.host_owner.ctx.mission_briefing3 == "Mission three");
 		CHECK(plain.boot.mission_text.location_name(2) == "Ridge");
+	}
+
+	// --- D-NET-675: the gametext "Server" strings search the mount's override
+	// table first, and the kernel hands the table to the world, whose dialog
+	// subtitles search it first too.
+	// [orig: GameText_GetString @0x51EBD0 -- the call @0x51EBF6 into
+	//  TextResource_FindEntryBySectionAndKey @0x75D250, the override test @0x75D27B;
+	//  Dialog_LoadAudioClip @0x44DDD6]
+	{
+		rtxt::File file;
+		file.sections.push_back({"Server", 0});
+		rtxt::Entry medic;
+		medic.key = "STRSRV_MEDREQ";
+		medic.text = "%s calls for a medic";
+		medic.section_index = 0;
+		file.entries.push_back(medic);
+		++file.sections[0].string_count;
+		file.normalize_grouping();
+		std::vector<uint8_t> bytes;
+		std::string error;
+		if (!rtxt::write(file, bytes, error)) std::printf("rtxt::write: %s\n", error.c_str());
+		Host host;
+		inmatch::HostBootRequest r = host.request(0);
+		r.text_override_table = bytes;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(ctx.server_text.medic_request_format == "%s calls for a medic");
+		CHECK(ctx.server_text.change_to_blue_format == "%s joined blue"); // the gametext's own
+		CHECK(host.kernel != nullptr && host.kernel->world.tables.text_override != nullptr);
 	}
 
 	// --- the water rungs (env #44): the .env's line writes after the .trn's,
@@ -414,15 +485,17 @@ int main() {
 	}
 
 	// --- D-NET-385: the session create's mpreset exit, reported to the
-	// embedder. A set word refuses the create inside the kernel boot's bring-up:
-	// phase A returns false with the exit outcome, no session stands, and the
-	// session stays Loading for the embedder, which ends its process with code
-	// 0 and runs no phase B. A clear word boots as ever. The dedicated host
-	// first, then a listen host (serve-and-play), whose clear boot registers
-	// its own type-2 loopback connection and builds its HostClient view: with
-	// the word set the role's bring-up returns at the refused create, before
-	// either.
-	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
+	// embedder. A set word refuses the create at phase A's head, ahead of the
+	// mission start (D-NET-NEW-L1-50): phase A returns false with the exit
+	// outcome, no session stands, the session never entered its load and no
+	// kernel was made; the embedder ends its process with code 0 and runs no
+	// phase B. A clear word boots as ever. The dedicated host first, then a
+	// listen host (serve-and-play), whose clear boot registers its own type-2
+	// loopback connection and builds its HostClient view: with the word set
+	// the create returns refused, before either.
+	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0),
+	//  called @0x56997D from CNapiGameSession_BuildAndCreateSession, ahead of
+	//  GameLoop_Init's Game_StartMission call @0x526377]
 	{
 		Host host;
 		std::string error;
@@ -435,7 +508,8 @@ int main() {
 		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
 		CHECK(ctx.is_in_session == 0);
 		CHECK(ctx.np_protocol.host_running == 0);
-		CHECK(host.session.state() == inmatch::State::Loading);
+		CHECK(host.session.state() != inmatch::State::Loading);
+		CHECK(host.kernel == nullptr);
 
 		Host clear;
 		CHECK(inmatch::boot_host_mission(clear.request(0), clear.boot, error));
@@ -473,7 +547,116 @@ int main() {
 		CHECK(loopbacks(reset.role.state.host_owner.ctx) == 0);
 		CHECK(reset.role.state.host_owner.ctx.is_in_session == 0);
 		CHECK(reset.role.state.host_owner.ctx.total_logins == 0);
-		CHECK(reset.session.state() == inmatch::State::Loading);
+		CHECK(reset.session.state() != inmatch::State::Loading);
+		CHECK(reset.kernel == nullptr);
+	}
+
+	// --- D-NET-NEW-L1-50: the session create runs ahead of the mission start. Phase A's head
+	// creates a fresh session before any World exists: its round-state init seeds the process's
+	// CRT stream with the session seed and draws the slot table's offset, GameServerBaffleKey and
+	// the PCIDKey ring there, so both keys stand before the fresh kernel is made (the mission
+	// start's server-info update reads them ahead of its loads), and the mission's World takes the
+	// stream at the bring-up: the load's next draw is the create's fourth.
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
+	//  @0x5695B3 (Server_AllocatePlayerSlotTable's srand @0x51C1AA and rand @0x51C1AF, the key's
+	//  rand @0x51CB6D, CSessionIdRing_Init's rand @0x4DBC45), CNapiGameSession_CreateSession called
+	//  @0x56997D; GameLoop_Init's Game_StartMission call @0x526377]
+	{
+		static constexpr uint32_t kSeed = 424242u;
+		static constexpr uint32_t kStartTick = 90000u;
+		Host host;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.session_seed_id = kSeed;
+		r.host_cfg.host_start_tick = kStartTick;
+		r.host_cfg.host_key = 0x1234u;
+		r.host_cfg.config.start_delay = 7;
+		// The stream the create leaves: the seed, the slot table's draw, the key's, the ring's.
+		io::CrtRand stream;
+		stream.seed(kSeed);
+		(void)stream.next();
+		const uint32_t key_draw = stream.next();
+		const uint32_t ring_draw = stream.next();
+		bool created_before_kernel = false;
+		uint32_t key_at_kernel = 0;
+		uint32_t ring_at_kernel = 0;
+		const std::function<mission::MissionKernel &()> make_kernel = std::move(r.fresh_kernel);
+		r.fresh_kernel = [&]() -> mission::MissionKernel & {
+			const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+			created_before_kernel = ctx.is_in_session == 1 && ctx.world == nullptr;
+			key_at_kernel = ctx.game_server_baffle_key;
+			ring_at_kernel = static_cast<uint32_t>(ctx.cookie_key_table.current());
+			return make_kernel();
+		};
+		uint32_t stream_at_bringup = 0;
+		r.after_bringup = [&](bool) { stream_at_bringup = host.kernel->world.crt_rand.state; };
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		CHECK(created_before_kernel);
+		CHECK(key_at_kernel == (kStartTick + key_draw) % 0xDBBA0u + 0x186A0u);
+		CHECK(ring_at_kernel == ((kStartTick + ring_draw) & 0xFFFFFFu) + 0x1000000u);
+		CHECK(host.role.process_crt_rand().state == stream.state);
+		CHECK(stream_at_bringup == stream.state);
+		// The pre-round timer is the mission start's round counters' (D-NET-NEW-L1-51), past the
+		// PreMission pass: the World the create never saw takes the session's StartDelay there
+		// [orig: Server_ResetRoundCounters @0x516C50 - the g_PreRoundDelayTimer store @0x516C8D;
+		//  Game_StartMission's call @0x525B90].
+		CHECK(host.kernel != nullptr && host.kernel->world.preround_delay_seconds == 7u);
+	}
+
+	// --- D-NET-NEW-L1-50: an embedder that loads ahead of phase A (the game's world load) creates
+	// the session at its load's start (create_host_session), and phase A's head creates none
+	// again: the session keeps the start tick its create stamped, past every clock read of the
+	// boot. A refused create leaves nothing to boot.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - CNapiGameSession_BuildAndCreateSession
+	//  called @0x56A46A, after UI_HandleHostSessionStart's SetTransportMode(3) call @0x556EA6;
+	//  GameLoop_Init's Game_StartMission call @0x526377]
+	{
+		Host host;
+		uint32_t clock = 5000;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.clock_ms = [&clock] { return clock += 10; };
+		CHECK(inmatch::create_host_session(host.role, r.files, r.mission_basename,
+					r.text_override_table, r.host_cfg, r.session_score_ini) ==
+				inmatch::CreateSessionResult::Created);
+		CHECK(host.role.create_ran());
+		const uint32_t start_tick = host.role.state.host_owner.ctx.np_protocol.host_start_tick;
+		const uint32_t key = host.role.state.host_owner.ctx.game_server_baffle_key;
+		CHECK(start_tick != 0u && key != 0u);
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(ctx.np_protocol.host_start_tick == start_tick);
+		CHECK(ctx.game_server_baffle_key == key);
+		CHECK(!host.role.create_ran()); // the bring-up spent it
+		CHECK(host.kernel != nullptr && ctx.world == &host.kernel->world);
+
+		// A listen host's own player is added inside the create, bodyless, before any World:
+		// its connection's new-connection callback runs the add there.
+		// [orig: NapiNPServer_HandleNewConnection @0x4C8040 - the local arm @0x4C8213, its
+		//  Server_BuildPlayerInfoAndAdd call @0x4C82A5; Server_PlayerAdd's own arm
+		//  @0x51CC33..0x51CC60]
+		Host listen;
+		listen.role.set_kind(inmatch::RoleKind::ListenHost);
+		inmatch::HostBootRequest lr = listen.request(0);
+		lr.host_cfg.serve_and_play = true;
+		CHECK(inmatch::create_host_session(listen.role, lr.files, lr.mission_basename,
+					lr.text_override_table, lr.host_cfg, lr.session_score_ini) ==
+				inmatch::CreateSessionResult::Created);
+		const inmatch::NapiNPConnection *own = nullptr;
+		const inmatch::NapiNPServerCtx &listen_ctx = listen.role.state.host_owner.ctx;
+		for (const inmatch::NapiNPConnection &c : listen_ctx.np_protocol.connection_list)
+			if (c.type == inmatch::NapiNPConnection::kTypeClientSide) own = &c;
+		CHECK(listen_ctx.world == nullptr);
+		CHECK(own != nullptr && own->phase == inmatch::ConnectionPhase::PlayerAdded &&
+				!own->link.owned_entity.valid());
+
+		Host refused;
+		inmatch::HostBootRequest rr = refused.request(0);
+		rr.host_cfg.config.multiplayer_reset = 1;
+		CHECK(inmatch::create_host_session(refused.role, rr.files, rr.mission_basename,
+					rr.text_override_table, rr.host_cfg, rr.session_score_ini) ==
+				inmatch::CreateSessionResult::ProcessExit);
+		CHECK(refused.role.state.host_owner.ctx.is_in_session == 0);
 	}
 
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs

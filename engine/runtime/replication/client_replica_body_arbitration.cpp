@@ -81,13 +81,15 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 // scream, the corpse timer, the detach and the drop are the same block's other
 // legs. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bf1 gate, @0x4b4c72..
 // 0x4b4cdb; Entity_UpdateInfantryAI @0x4b9937 gate, @0x4b9cc9..0x4b9d3e;
-// Entity_ComputeAnimSlotIndex(.., 0, 0, 4) @0x4b4c87 / @0x4b9cd6]
-int16_t replica_death_edge(ClientEntityState &es) {
+// Entity_ComputeAnimSlotIndex(.., 0, 0, 4) @0x4b4c87 / @0x4b9cd6; the death tick
+// g_CurrentTick into +0x1AC @0x4B4CC1 / @0x4B4CCC and @0x4B9D24 / @0x4B9D2F]
+int16_t replica_death_edge(ClientEntityState &es, uint32_t tick) {
 	int state = es.net_death_anim != 0
 			? es.net_death_anim
 			: world::compute_death_anim_state(0, 0, world::death_cause::kGeneric);
 	if ((es.rm_entity_flags & world::kEntityFlagDrowning) != 0)
 		state = world::anim_state::kDeathDrown; // [orig: @0x4b4c96 / @0x4b9cf9]
+	es.death_tick = tick;
 	es.rm_entity_flags = (es.rm_entity_flags | world::kEntityFlagDead) &
 			~(world::kEntityFlagMounted | world::kEntityFlagAiClimb);
 	es.net_death_anim = 0;

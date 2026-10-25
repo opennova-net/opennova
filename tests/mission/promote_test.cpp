@@ -12,6 +12,8 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/world.h>
+#include <runtime/world/angle.h>
+#include <runtime/world/carrier_motion.h>
 
 #include "../common/synthetic_mission.h"
 #include "../world/channel_clip_source.h"
@@ -32,6 +34,9 @@ static void stamp_fixture_carrier_defs(World &world) {
 			Entity &def = *world.registry.get(v.handle);
 			def.has_item_def = true;
 			def.has_graphic_model = true; // the def's graphic, the seats' model
+			// That model's userpoints are the seat bones (the entry admission refuses
+			// a model holding none) [orig: Entity_CanEnterVehicle @0x43549C..0x4354A3].
+			def.graphic_model_userpoints = static_cast<uint32_t>(v.seats.size());
 			def.item_type = 1;
 			def.item_attrib |= kItemAttribPlayerControl;
 		}
@@ -102,9 +107,12 @@ static void test_bms_record_index_is_pool_slot() {
     bms::File m{};
     m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
     m.items[0].id = 21;
+    m.items[0].yaw = 30;
+    m.items[0].pitch = 10;
+    m.items[0].roll = -7;
     m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
     m.items[1].id = 22;
-    m.organics.push_back(organic(1 << 16, 1 << 16, 0, 1, 0, 0));
+    m.organics.push_back(organic((300 << 16) | 0x1235, -((400 << 16) | 0x0C07), 0x2A0001, 1, 0, 0));
     m.organics[0].id = 31;
 
     auto w = std::make_unique<World>();
@@ -118,6 +126,38 @@ static void test_bms_record_index_is_pool_slot() {
     CHECK(h21.valid() && h21.pool() == 1 && h21.slot() == 0);
     CHECK(h22.valid() && h22.pool() == 1 && h22.slot() == 1);
     CHECK(h31.valid() && h31.pool() == 0 && h31.slot() == 0);
+    // The model init's savedLivePose is the placed words, the organic AI init's aim
+    // basis [orig: Entity_InitFromModel @0x40E14B..0x40E169].
+    // One store for every row, the item rows included (D-NET-507).
+    (void)ai;
+    const Entity *body = w->registry.get(h31);
+    CHECK(body != nullptr && body->saved_live_valid &&
+          body->saved_live_pos[0] == ((300 << 16) | 0x1235) &&
+          body->saved_live_pos[1] == -((400 << 16) | 0x0C07) &&
+          body->saved_live_pos[2] == 0x2A0001);
+    const Entity *item21 = w->registry.get(h21);
+    CHECK(item21 != nullptr && item21->saved_live_valid &&
+          item21->saved_live_pos[0] == (10 << 16) && item21->saved_live_pos[1] == (20 << 16) &&
+          item21->saved_live_pos[2] == (3 << 16));
+    // The attitude triple too (+0x8C / +0x90 / +0x94): the placed Yaw word and
+    // the spawn-form Pitch / Roll words, so a rider of the unmoved rotated row
+    // reads a zero delta: the carry leaves its position and its yaw as they are.
+    // [orig: Entity_InitFromModel @0x40E166..0x40E18C;
+    //  Entity_InterpolateFromParentDelta @0x4A8D60]
+    CHECK(item21 != nullptr && item21->saved_live_yaw == placed_heading_bam(30) &&
+          item21->saved_live_pitch == spawn_angle_bam(10) &&
+          item21->saved_live_roll == spawn_angle_bam(-7));
+    if (item21 != nullptr) {
+        CarrierMotionPose rider;
+        rider.pos[0] = (12 << 16) | 0x1234;
+        rider.pos[1] = (21 << 16) | 0x0567;
+        rider.pos[2] = (4 << 16);
+        rider.yaw_bam = 0x12345678;
+        follow_carrier_motion(*item21, rider);
+        CHECK(rider.pos[0] == ((12 << 16) | 0x1234) && rider.pos[1] == ((21 << 16) | 0x0567) &&
+              rider.pos[2] == (4 << 16) && rider.yaw_bam == 0x12345678 &&
+              rider.pitch_bam == 0 && rider.roll_bam == 0);
+    }
 }
 
 static void test_emplacement_attachments() {
@@ -215,7 +255,7 @@ static void test_emplacement_attachments() {
     // Each child's subType is its slot index; the refNum-less carrier took the
     // lowest free refNum for its group, and every child carries it, the
     // carrier's command group and its Flags.
-    // [orig: Entity_SpawnWeaponOverlays @0x40F361..0x40F40E]
+    // [orig: Entity_SpawnAddEWeapChildren @0x40F361..0x40F40E]
     CHECK(plain_child->sub_type == 0 && gun_child->sub_type == 1 &&
           crosshair_child->sub_type == 2);
     CHECK(parent->ref_num == 1);
@@ -223,17 +263,21 @@ static void test_emplacement_attachments() {
           crosshair_child->ref_num == 1);
     // The children's records carry that refNum, so they join its group list;
     // the carrier the spawner handed it to does not.
-    // [orig: Entity_SpawnWeaponOverlays @0x40F389 / @0x40F4C7;
+    // [orig: Entity_SpawnAddEWeapChildren @0x40F389 / @0x40F4C7;
     //  Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45]
     CHECK(!parent->ref_group_member);
     CHECK(plain_child->ref_group_member && gun_child->ref_group_member &&
           crosshair_child->ref_group_member);
     CHECK(plain_child->group_id == parent->group_id);
-    CHECK(gun_child->engine_flags == parent->engine_flags &&
+    // The child's own compose then sets its matrix bit [orig:
+    // Entity_UpdateTransformAndTurret @0x440CA0 (@0x4411C2)].
+    CHECK((gun_child->engine_flags & ~kEntityFlagMatrixBuilt) ==
+                  (parent->engine_flags & ~kEntityFlagMatrixBuilt) &&
           gun_child->flags == parent->flags);
+    CHECK((gun_child->engine_flags & kEntityFlagMatrixBuilt) != 0);
 
     parent->position = {30.f, 40.f, 5.f};
-    parent->yaw = 90;
+    parent->heading = placed_heading_bam(90);
     cw->run_logic_tick();
     plain_child = cw->registry.get(plain_h);
     CHECK(plain_child->position.x == 30.f && plain_child->position.y == 38.f &&
@@ -303,7 +347,7 @@ static void test_emplacement_attachments() {
 // its count held before the pass: a building carrier's slot spawns its child
 // into pool 1 (subType = its slot index), and a child's own slots are never
 // walked, so no grandchild spawns. [orig: Mission_LoadBMSFile
-//  @0x40FD49..0x40FD96; Entity_SpawnWeaponOverlays @0x40F300]
+//  @0x40FD49..0x40FD96; Entity_SpawnAddEWeapChildren @0x40F300]
 static void test_attachment_pass_walks_the_loaded_rows() {
     bms::File m{};
     m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
@@ -445,9 +489,9 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     Entity child_seed{};
     child_seed.kind = EntityKind::Item;
     child_seed.position = {17.f, 23.f, 9.f};
-    child_seed.yaw = 37;
-    child_seed.pitch = -4;
-    child_seed.roll = 6;
+    child_seed.heading = placed_heading_bam(37);
+    child_seed.pitch_bam = spawn_angle_bam(-4);
+    child_seed.roll_bam = spawn_angle_bam(6);
     child_seed.emplacement_parent = parent_h;
     child_seed.emplacement_parent_spawn_id = parent->registry_spawn_id;
     const EntityHandle child_h = world->registry.spawn(1, child_seed);
@@ -460,7 +504,7 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     CHECK(!child->emplacement_pose_metadata_resolved);
     CHECK(child->position.x == 17.f && child->position.y == 23.f &&
           child->position.z == 9.f);
-    CHECK(child->yaw == 37 && child->pitch == -4 && child->roll == 6);
+    CHECK(child->heading == placed_heading_bam(37) && child->pitch_bam == spawn_angle_bam(-4) && child->roll_bam == spawn_angle_bam(6));
 }
 
 // D-HUD-20: the authored display name rides name_index through the embedder's
@@ -800,12 +844,13 @@ static void test_script_spatial_tables_are_promoted_and_replaced() {
     CHECK(promoted != nullptr && promoted->zone_id == 37);
     CHECK(promoted->bounds.max.z == bms::AreaTrigger::kUnboundedZMax);
     CHECK(promoted->script_bounds.max.z == 1);
-    CHECK(w->registry.location_at({0, 0, 0}) == 9);
-    CHECK(w->registry.location_at({2, 0, 0}) == 0);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({0, 0, 0})) == 9);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({2 << 16, 0, 0})) == 0); // strict
+    CHECK(w->registry.location_at(EntityPosition::of_q16({(2 << 16) - 1, 0, 0})) == 9);
     w->registry.intern_group("old_mission");
     mission::promote_mission(bms::File{}, *w, {});
     CHECK(w->registry.area(0) == nullptr);
-    CHECK(w->registry.location_at({0, 0, 0}) == 0);
+    CHECK(w->registry.location_at(EntityPosition::of_q16({0, 0, 0})) == 0);
     CHECK(w->registry.script_group_index("old_mission") == -1);
     CHECK(w->registry.script_group_index("humans") == 1);
     // The seven default groups hold their fixed slots, named as the mode's
@@ -971,6 +1016,66 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
     CHECK(world->registry.get(EntityHandle::make(3, 1))->class_think_ticks == 0);
 }
 
+// Every record spawn stamps the load's spawn-phase counter modulo 60 into its
+// +0x2AC clock and steps it by 11: the admitted records in load order (an
+// accepted organic above pool 0's used window included, a rejected record never),
+// then the addeweap children, which spawn through the same record spawn. The
+// world keeps the counter past the load, so a later carrier's children step on.
+// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 - the stamp @0x40EC8C..0x40ECB8;
+//  Mission_LoadBMSFile @0x40F4E0 - the organic spawn @0x40FB19, the children
+//  @0x40FD69 / @0x40FD8E; Entity_SpawnAddEWeapChildren @0x40F300 - the record
+//  spawn @0x40F3FF; Mission_ResetBmsState @0x40DB80 (the zero @0x40DBD1)]
+static void test_attachment_children_take_the_spawn_phase_stagger() {
+    bms::File m{};
+    m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 3 << 16));
+    m.items.push_back(item(/*type_id=*/164, 30 << 16, 20 << 16, 3 << 16));
+    m.items.push_back(item(/*type_id=*/164, 50 << 16, 20 << 16, 3 << 16));
+    m.items[2].bmsi_attributes = 0x80; // multiplayer only: rejected offline, no stamp
+    bms::Entity bunker = item(/*type_id=*/0x60, 40 << 16, 50 << 16, 0);
+    bunker.type = bms::ItemType::Building;
+    m.buildings.push_back(bunker);
+    m.organics.resize(4);
+    for (bms::Entity &e : m.organics) e.type_id = 5001;
+    m.organics[1].bmsi_attributes = 0x80; // rejected: organics[3] lands above used
+
+    mission::PromoteOptions o{};
+    mission::ItemSeatSpec carrier{};
+    carrier.type_id = 164;
+    mission::ItemEmplacementAttachmentSpec gun{};
+    gun.child_type_id = 166;
+    gun.stored_slot = 1;
+    carrier.emplacement_attachments.push_back(gun);
+    o.item_seat_specs = {carrier};
+
+    auto w = std::make_unique<World>();
+    w->bms_spawn_phase_counter = 500; // a previous load's: the load zeroes it
+    mission::promote_mission(m, *w, o);
+    // Stamps 0, 11 (items), 22 (bunker), 33, 44, 55 (organics 0, 2 and 3): 66.
+    CHECK(w->registry.get(EntityHandle::make(1, 0))->class_think_ticks == 0);
+    CHECK(w->registry.get(EntityHandle::make(1, 1))->class_think_ticks == 11);
+    CHECK(w->registry.get(EntityHandle::make(2, 0))->class_think_ticks == 22);
+    // The children follow in pool-1 order: 66 % 60 and 77 % 60.
+    const Entity *first = nullptr;
+    const Entity *second = nullptr;
+    w->registry.for_each([&](const Entity &e) {
+        if (e.emplacement_parent == EntityHandle::make(1, 0)) first = &e;
+        if (e.emplacement_parent == EntityHandle::make(1, 1)) second = &e;
+    });
+    CHECK(first != nullptr && second != nullptr);
+    if (first == nullptr || second == nullptr) return;
+    CHECK(first->class_think_ticks == 6);
+    CHECK(second->class_think_ticks == 17);
+    CHECK(w->bms_spawn_phase_counter == 88);
+
+    // A carrier spawned after the load (a deployable's) steps on: 88 % 60.
+    const mission::ItemAttachmentSpawns later =
+            mission::spawn_item_attachments(*w, {EntityHandle::make(1, 0)}, o.item_seat_specs);
+    CHECK(later.handles.size() == 1);
+    if (later.handles.size() == 1)
+        CHECK(w->registry.get(later.handles[0])->class_think_ticks == 28);
+    CHECK(w->bms_spawn_phase_counter == 99);
+}
+
 // The BMS AI-attribute fold inside the AI branch (the def carries 0x100000):
 // every authored bit lands on its AiSlot[1] behavior bit or entity Flags bit,
 // and 0x2000000 sets entity+0x2C bit 0x80 outside the branch. A record whose
@@ -1112,6 +1217,7 @@ int main() {
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_pool_used_counts_are_the_load_counts();
     test_bms_admission_zeros_rejected_marker_projections();
+    test_attachment_children_take_the_spawn_phase_stagger();
     test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),
     // 2 organics on that route (teams 1/2), 1 building.
@@ -1258,7 +1364,7 @@ int main() {
     // VEHICLE brain sorts the zeroed record's keys to {0,3,2,1}: ai_brain_rows.)
     CHECK(e0->profile.class_priority[1] == 0);
     CHECK(e0->profile.slot_class[0] == 3);
-    CHECK(e0->pos[0] == 0);               // spawned at origin
+    CHECK(e0->self->position.x.q16 == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
     // The relation group key is the record's command group, not its SSN
     // [orig: Entity_SpawnFromBMSRecord @0x40EBB3..0x40EBB7 -> entity+0x11C].
@@ -1419,6 +1525,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {1.f, 2.f, 3.f};
+        s.bone_point[0] = 131072;
+        s.bone_point[1] = -65536;
+        s.bone_point[2] = 196608;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 
@@ -1448,9 +1557,9 @@ int main() {
               occ->position.y == 131075.f / 65536.f && occ->position.z == 3.f);
         CHECK(cai.at(0)->slot.f[37] == 125);
         CHECK(cai.at(0)->slot.f[38] == 11);
-        CHECK(cai.at(0)->pos[0] == to_fixed(10.0) + 65530);
-        CHECK(cai.at(0)->pos[1] == 131075);
-        CHECK(cai.at(0)->pos[2] == to_fixed(3.0));
+        CHECK(cai.at(0)->self->position.x.q16 == to_fixed(10.0) + 65530);
+        CHECK(cai.at(0)->self->position.y.q16 == 131075);
+        CHECK(cai.at(0)->self->position.z.q16 == to_fixed(3.0));
     }
 
     {
@@ -1483,7 +1592,7 @@ int main() {
         CHECK(veh != nullptr && !veh->seats[0].occupant.valid());
         CHECK(cai.at(0)->inf.move_mode == 3);       // the board walk is ORDERED
         CHECK(cai.at(0)->inf.at_final_oneshot);     // final-approach gait flag
-        CHECK(cai.at(0)->pos[0] == 0);              // but no clips -> no displacement
+        CHECK(cai.at(0)->self->position.x.q16 == 0);              // but no clips -> no displacement
     }
 
     {
@@ -1498,11 +1607,17 @@ int main() {
         mission::PromoteOptions co{};
         mission::ItemSeatSpec seats{};
         seats.type_id = 1420;
+        // Each seat is its own userpoint row (the process types a seat by its bone).
         Seat s0{};
         s0.type = SeatType::Passenger;
+        s0.bone_index = 1;
         Seat s1{};
         s1.type = SeatType::Passenger;
+        s1.bone_index = 2;
         s1.seat_local = {1.f, 0.f, 0.f};
+        s1.bone_point[0] = 0;
+        s1.bone_point[1] = -65536;
+        s1.bone_point[2] = 0;
         seats.seats.push_back(s0);
         seats.seats.push_back(s1);
         co.item_seat_specs.push_back(seats);
@@ -1541,10 +1656,18 @@ int main() {
         seats.type_id = 1294;
         Seat passenger{};
         passenger.type = SeatType::Passenger;
+        passenger.bone_index = 1;
         passenger.seat_local = {4.f, 0.f, 0.f};
+        passenger.bone_point[0] = 0;
+        passenger.bone_point[1] = -262144;
+        passenger.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -65536;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1576,10 +1699,18 @@ int main() {
         seats.type_id = 1294;
         Seat controller{};
         controller.type = SeatType::Controller;
+        controller.bone_index = 1;
         controller.seat_local = {1.f, 0.f, 0.f};
+        controller.bone_point[0] = 0;
+        controller.bone_point[1] = -65536;
+        controller.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {5.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -327680;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(controller);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1609,10 +1740,18 @@ int main() {
         seats.type_id = 1294;
         Seat passenger{};
         passenger.type = SeatType::Passenger;
+        passenger.bone_index = 1;
         passenger.seat_local = {5.f, 0.f, 0.f};
+        passenger.bone_point[0] = 0;
+        passenger.bone_point[1] = -327680;
+        passenger.bone_point[2] = 0;
         Seat driver{};
         driver.type = SeatType::Driver;
+        driver.bone_index = 2;
         driver.seat_local = {1.f, 0.f, 0.f};
+        driver.bone_point[0] = 0;
+        driver.bone_point[1] = -65536;
+        driver.bone_point[2] = 0;
         seats.seats.push_back(passenger);
         seats.seats.push_back(driver);
         co.item_seat_specs.push_back(seats);
@@ -1693,8 +1832,8 @@ int main() {
         }
         CHECK(walked);                       // unalerted patrol uses the walk gait
         CHECK(max_node >= 2);                // arrived at markers and advanced the route
-        CHECK(e0->pos[0] > (100 << 16));     // physically walked past marker 0
-        CHECK(e0->pos[0] < (300 << 16));     // still on the route, not teleported
+        CHECK(e0->self->position.x.q16 > (100 << 16));     // physically walked past marker 0
+        CHECK(e0->self->position.x.q16 < (300 << 16));     // still on the route, not teleported
         CHECK(held);                         // honored marker 1's movetimer hold
         CHECK(!ai.relmat_calls.empty());     // arrival recorded the relation-matrix marks
         ai.root_motion = nullptr;
@@ -1718,6 +1857,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        s.bone_point[0] = 0;
+        s.bone_point[1] = -131072;
+        s.bone_point[2] = 0;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 
@@ -1773,6 +1915,9 @@ int main() {
         Seat s{};
         s.type = SeatType::Passenger;
         s.seat_local = {2.f, 0.f, 0.f}; // seat point at (32, 0, 0)
+        s.bone_point[0] = 0;
+        s.bone_point[1] = -131072;
+        s.bone_point[2] = 0;
         seats.seats.push_back(s);
         co.item_seat_specs.push_back(seats);
 
@@ -1793,7 +1938,7 @@ int main() {
         for (int t = 0; t < 2600 && occ != nullptr && !occ->mounted; ++t) {
             // Cut displacement once inside the widened 4u ring but still outside
             // the 2u seat ring (seat at x=32 -> cut past x=29).
-            if (!cut && cai.at(0)->pos[0] > (29 << 16)) {
+            if (!cut && cai.at(0)->self->position.x.q16 > (29 << 16)) {
                 cai.root_motion = &hull_src;
 				// Inject the collision resolver's witnessed facing-push latch;
 				// zero root motion alone no longer impersonates a hull contact.

@@ -3,6 +3,7 @@
 #include <runtime/mission/mission_catalog.h>
 
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
 
 namespace godot {
@@ -58,8 +59,11 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 	if (p_root.is_null()) {
 		return out;
 	}
+	// The titles search the process's override table first (D-NET-675).
+	const std::shared_ptr<const opennova::rtxt::File> text_override =
+			RtxtStringFile::installed_text_override();
 	for (const opennova::mission_catalog::Row &row :
-			opennova::mission_catalog::build(p_root->engine_index())) {
+			opennova::mission_catalog::build(p_root->engine_index(), text_override.get())) {
 		// The session code-word stamp the retail table carries per row.
 		out.push_back(MissionCatalogRow::create(opennova::to_gd(row.file),
 				opennova::to_gd(row.title),
@@ -75,8 +79,10 @@ PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root)
 	if (p_root.is_null()) {
 		return names;
 	}
+	const std::shared_ptr<const opennova::rtxt::File> text_override =
+			RtxtStringFile::installed_text_override();
 	for (const opennova::mission_catalog::Row &row :
-			opennova::mission_catalog::build(p_root->engine_index())) {
+			opennova::mission_catalog::build(p_root->engine_index(), text_override.get())) {
 		names.push_back(opennova::to_gd(row.file));
 	}
 	return names;

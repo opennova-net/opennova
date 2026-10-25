@@ -55,6 +55,23 @@ NovaWorldError novaworld_error_from_code(int code) {
 	}
 }
 
+// [orig: CNapiGameSession_ConnectOrHost @0x4D4F10 - @0x4D55F7..0x4D569F]
+std::string novaworld_play_error_tag(int msg_code) {
+	switch (msg_code) {
+		case 3000: return "NWEC04";
+		case 3001: return "NWEC05";
+		case 3002: return "NWEC06";
+		case 3003: return "NWEC07";
+		case 3004: return "NWEC08";
+		case 3005: return "NWEC09";
+		case 3006: return "NWEC10";
+		case 200: return "NWEC11";
+		case 203: return "NWEC12";
+		case 1009: return "NWEC14";
+		default: return "NWEC13";
+	}
+}
+
 // [orig: CNapiGameSession_ConnectOrHost @0x4d4f10, the `*(this + 304)` switch @0x4d5207]
 std::string novaworld_host_error_tag(int msg_code) {
 	switch (msg_code) {
