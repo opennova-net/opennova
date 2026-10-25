@@ -395,8 +395,7 @@ struct HttpListener::Impl {
 	infra::AttentionRoutes attention;
 	// The month's AWS costs (infra/cost_routes.h).
 	infra::CostRoutes costs;
-	// The data sets', the releases' and the content store's routes over the object store
-	// (data_sets/data_set_routes.h, data_sets/release_routes.h, content/content_routes.h).
+	// The data sets', the releases' and the content store's routes (data_sets/, content/).
 	hosted::DataSetRoutes data_sets;
 	hosted::ReleaseRoutes releases;
 	content::ContentRoutes content_routes;
