@@ -111,8 +111,8 @@ For loose data without boot archives, add `--loose-root /d`. `/game <code>`
 selects `acidgambit`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
 `--resource-dir` directory is never saved. An empty `--resource-dir` prints
 usage and exits with code 2. Use `--no-update` for development runs; Editor Play
-sets it automatically. Source checkouts use exported content from the assets
-repository or an existing retail install.
+sets it automatically. Source checkouts use content exported from an OpenNova
+Editor project or an existing retail install.
 
 ## Downloads
 
@@ -120,12 +120,15 @@ CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`,
 and the small bootstrap configuration. Game content is downloaded on first run.
 Retail game data is supplied separately. Debug builds include
-the game's dev tools (Insert).
+the game's dev tools (Insert). Tagged releases also attach
+`opennova-runtime-windows-v<version>.sfs`, the same runtime packed as the update
+`update.exe` installs.
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
 OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
 with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
-Joint Operations projects today; what it edits is listed above.
+OpenNova, Joint Operations (Escalation included) and Delta Force Xtreme 2 projects
+today; what it edits is listed above.
 
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include

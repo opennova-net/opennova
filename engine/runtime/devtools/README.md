@@ -1,15 +1,18 @@
 # engine/runtime/devtools — the ImGui pass and its surfaces (ADR 0039)
 
 The engine's Dear ImGui tool UI, Godot-free. `GameDevTools` composes the game's
-F3 windows onto an `ImGuiPass`. The Godot `DevTools` node supplies the addon's
-ImGui context and calls `draw_frame` once per frame between `NewFrame` and
-`Render`, then applies the windows' requests and updates their records.
+dev-tool windows (Insert opens them) onto an `ImGuiPass`. The Godot `DevTools`
+node supplies the addon's ImGui context and calls `draw_frame` once per frame
+between `NewFrame` and `Render`, then applies the windows' requests and updates
+their records.
 
 The Game viewport and Stats window start open; the other inspection windows
 open through the Windows menu (grouped World / Simulation / Render / Network /
-Tools, ImGui's demo under Help) or a world pick. Dear ImGui, the pass and the
-windows compile only with `OPENNOVA_DEVTOOLS`, which is off for release
-GDExtensions. The frame-stats board remains available in every flavour.
+Tools, ImGui's demo under Help) or a world pick. Dear ImGui, the pass, the
+overlay canvas and the tool kit build with `OPENNOVA_IMGUI` (on when the game's
+dev tools or the OpenNova Editor's windows are); the game's windows compile only
+with `OPENNOVA_DEVTOOLS`, which is off for release GDExtensions. The frame-stats
+board remains available in every flavour.
 
 What is here:
 
@@ -34,9 +37,14 @@ the measures it takes, `tool` (a button whose tooltip says what it does, or
 while it cannot act, why not; a disabled one never acts), `check`,
 `row_tools` (a list's Add / Duplicate / Remove / Up / Down), `path_field`,
 `filter_box` (with its clear button and Ctrl+F), `Held` / `HeldText` (a
-control over a value its owner holds), `fit` / `fit_middle` / `clipped_text`
-(text cut to its cell), `tooltip` (every window's hover text, a disabled
-item's too), `empty_state` and `note`. A window never hand-rolls a disabled
+control over a value its owner holds), `fit` / `fit_middle` / `clipped_text` /
+`fitted_button` / `fitted_selectable` (text cut to its cell), `quiet_text` (a
+muted line), `tooltip` (every window's hover text, a disabled item's too, its
+citations dropped by `without_citations`; `tooltip_hovered` says whether it
+shows, `tooltip_lazy` makes its text only while it shows, `TipsAbove` shows it
+above its item), `help_mark` (a "(?)" holding a how-to), `tool_popup` (a tool
+that opens a popup), `empty_state` and `nothing_matches` (a filter that leaves
+nothing). A window never hand-rolls a disabled
 button's reason (`BeginDisabled` + `IsItemHovered` + `SetTooltip`): `tool` or
 `tooltip` carries it.
 

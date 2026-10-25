@@ -336,7 +336,7 @@ target_include_directories(threedi_volume_solid_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(threedi_volume_solid_test PRIVATE cxx_std_17)
 add_test(NAME threedi_volume_solid COMMAND threedi_volume_solid_test)
 
-# The synthetic 3DI model set fixtures/threedi/synth (eleven base models plus
+# The synthetic 3DI model set fixtures/threedi/synth (fifteen base models plus
 # the one-edit variants the GUT suite loads), minted through the parity
 # writer from tests/fixtures/minimal_3di_builder.h and byte-compared every run
 # (--write regenerates). Every 3DI consumer below reads from that directory.

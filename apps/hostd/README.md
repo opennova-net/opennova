@@ -308,8 +308,9 @@ the instance role (the task has no execution role). On the machine, `docker logs
 agent's ECS container reads them too.
 
 Reading them needs no shell on the machine: `./deploy/run.sh --deployment <deployment> fleet
-logs <machine id> [<slot>|hostd] [--since 1h] [--follow]`, and `app logs hostd` for every
-agent's (DEPLOY.md, "Hosted game servers").
+logs server <server id> [--start N]` (a start's output) or `fleet logs machine <machine id>`
+(its hostd's), each `[--since 1h] [--follow]`, and `app logs hostd` for every agent's
+(DEPLOY.md, "Hosted game servers").
 
 ## The process runtime
 
@@ -378,11 +379,11 @@ cluster, the instance attributes `machine-id` and `kind`, task IAM roles in host
 and no privileged task (never the ECS agent's cleanup of images it did not pull: it would
 delete the servers' images); ports 32768-32831 reserved out of the ephemeral range. The
 fleet cluster's daemon service brings the rest: the agent's image (the docker CLI, the AWS
-CLI v2, nft), its task role (`s3:GetObject` on `data/<deployment>/trees/*`,
-`s3:ListBucket` on that prefix, ECS Exec's channels) and its paths. The trees root
-`/opt/game` and the slots' root are made by the agent on the root volume. Never drain the
-fleet cluster through ECS: a drain stops the agent, not the servers (the service drains a
-machine itself).
+CLI v2, nft), its task role (`s3:GetObject` on `data/trees/*` of the deployment's
+operations bucket, `s3:ListBucket` on that prefix, ECS Exec's channels) and its paths. The
+trees root `/opt/game` and the slots' root are made by the agent on the root volume. Never
+drain the fleet cluster through ECS: a drain stops the agent, not the servers (the service
+drains a machine itself).
 
 ## Development and tests
 

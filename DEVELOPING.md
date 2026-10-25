@@ -92,7 +92,8 @@ ctest --test-dir build --output-on-failure -R "gate|lobby|novaworld|napi|nwu|cry
 
 ### Naming an app
 
-Every executable under `apps/` takes one name, spelled the same way everywhere (ADR 0040):
+Every executable under `apps/` takes one name, spelled the same way everywhere (ADR 0040;
+the exceptions follow the table):
 
 | | Form | Example |
 |---|---|---|
@@ -104,11 +105,13 @@ Every executable under `apps/` takes one name, spelled the same way everywhere (
 | Namespace, when it has one | `opennova::<name>` | `opennova::lan_probe` |
 | ctest names for the app itself | `opennova_<name>_*` | `opennova_3di_build` |
 
-The entry point is `main.cpp`. `apps/3di` is the one spelling exception: an identifier
+The entry point is `main.cpp`. `apps/3di` is one spelling exception: an identifier
 cannot start with a digit and `opennova::threedi` is the format library, so its namespace
-is `opennova::threedi_cli`. `scripts/package_apps.sh` lists only the directories and
-derives the rest, so a new app ships by adding its directory there and its exe to the
-`package-apps-windows.yml` smoke list.
+is `opennova::threedi_cli`. The updater's two are the others: `apps/update` and
+`apps/revupdat` ship as `update.exe` and `revupdat.exe`, the names of the retail updater
+they reimplement (`UPDATE.EXE`, `REVUPDAT.EXE`). `scripts/package_apps.sh` lists only the
+directories and derives the rest, so a new app ships by adding its directory there and its
+exe to the `package-apps-windows.yml` smoke list.
 
 ## Build the GDExtension
 
@@ -121,15 +124,16 @@ scripts/build_godot.sh DebugFull  # DebugFull -> /Od, for native debugging
 scripts/build_godot.sh Release    # Release   -> plain /O2, no symbols
 ```
 
-All three flavors produce the same `template_debug`-named artifact, the one loaded by
+All three flavors produce the same debug artifacts (on Windows `opennovad.dll` and
+`oneditord.dll`, elsewhere `template_debug`-named), the ones loaded by
 the Godot editor and source/debug runs of the game; they differ only
 in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
-against it. The `template_release` DLL that a release export loads is not produced by
-this script at all: build it with `scripts/package_godot_windows.ps1`
+against it. The release DLLs that a release export loads (`opennova.dll` and
+`oneditor.dll`, elsewhere `template_release`-named) are not produced by
+this script at all: build them with `scripts/package_godot_windows.ps1`
 (`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
-`build-gdextension-windows` `template_release` leg (master and editor-trunk pushes, and
-manual runs).
+`build-gdextension-windows` `template_release` leg (master pushes and manual runs).
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not
@@ -225,7 +229,7 @@ reach the published ports there too. It prints what to point a client at when it
 |---|---|---|
 | `novaworld-gate` | `7597/udp` | the gate: a retail client's probe, answered with the live lobby |
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
-| `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed) |
+| `novaworld-web` | `8080/tcp`; `20044`, `20556`, `21068`, `21580/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed); the update service's ports, retail `UPDATE.EXE`'s (on with `ONNET_UPDATE_HOST`) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
 | `novaworld-fleet`, `novaworld-worker`, `novaworld-data` | none | the supervisor, the jobs, the data sets' jobs; the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |
@@ -394,8 +398,9 @@ Notes:
 ## Build the switcher
 
 The OpenNova Switcher (`switcher/`, ADR 0054) is a .NET 8 WinForms tray app outside the
-CMake build. It switches retail's NovaWorld hostname (`gs.novaworld.net`) between
-OpenNova's service, NovaLogic's and a custom address through one managed block in the
+CMake build. It switches retail's NovaWorld gate hostname (`gs.novaworld.net`) and its
+updater's three gateways (`ftp.novaworld.com`, `ftp2.novaworld.com`, `ftp4.novaworld.com`)
+between OpenNova's service, NovaLogic's and a custom address through one managed block in the
 hosts file; [`switcher/README.md`](switcher/README.md) is its user guide.
 
 ```bash
@@ -459,7 +464,10 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 `git push origin v0.0.N`). `release.yml`'s `gate` job refuses a tag that is not on
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
-package jobs then build the game, Blender add-on, apps and switcher zips.
+package jobs then build the game, editor, Blender add-on, apps and switcher zips and the
+runtime's packed update, `opennova-runtime-windows-<tag>.sfs`. The opt-in
+`publish-runtime-update` job (the Actions variable `PUBLISH_RUNTIME_UPDATES` set to `true`)
+then publishes that update through the admin API.
 
 ## Troubleshooting
 

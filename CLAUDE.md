@@ -20,12 +20,15 @@ easier to relay than to rediscover.
   excluded from every export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
-  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"). `common/` is the shared
-  socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap I/O lives in
-  `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working directory.
+  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
+  `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
+  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
+  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
+  directory.
 - `switcher/` — the OpenNova Switcher (ADR 0054): a .NET 8 tray app, `opennova-switcher.exe`,
-  that switches retail's `gs.novaworld.net` between OpenNova's NovaWorld, NovaLogic's and a
-  custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
+  that switches retail's `gs.novaworld.net` and the updater's `ftp.novaworld.com`,
+  `ftp2.novaworld.com` and `ftp4.novaworld.com` between OpenNova's NovaWorld, NovaLogic's and
+  a custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service

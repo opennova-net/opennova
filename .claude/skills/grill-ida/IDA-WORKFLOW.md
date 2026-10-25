@@ -90,8 +90,8 @@ guessed → probable before a single write happens.
   global or field. After `read_struct`, `xrefs_to_field(struct, field)` lists every read/write site
   of one field — the direct offset/width/sign check against the reimpl (validators read many fields
   at once; `xrefs_to_field` pinpoints one).
-- `insn_query(func=…, mnem=…)` for scoped control-flow checks — every jump or call in a function,
-  with operand filters; pairs with `disasm` when the exact encoding matters.
+- `insn_query(queries={"func": …, "mnem": …})` for scoped control-flow checks — every jump or
+  call in a function, with operand filters; pairs with `disasm` when the exact encoding matters.
 - **Mine validation / integrity functions** — they enumerate field bounds, sentinels, and sizes,
   i.e. they are free struct documentation. Read them early. Find them among the callees of an
   anchored loader (`callees`) or by name pattern (`_validate` / `_check` / `_verify`); each bounds
@@ -140,7 +140,8 @@ confidence:
 **`set_type` / `declare_type`** — *no dry-run exists.* A wrong `set_type` silently rewrites the
 decompilation of every caller.
 - **anchored** → apply (announced). Multiple anchored edits batch through
-  `type_apply_batch(edits=[…], stop_on_error=true)`, announced as one grouped audit line.
+  `type_apply_batch(batch={"edits": […], "stop_on_error": true})`, announced as one grouped
+  audit line.
 - **probable** → propose the exact signature first; apply on OK via
   `diff_before_after(addr, action='set_type', action_args={type})` — it applies the edit *and*
   returns the before/after decompilation in one call. Inspect the after-view; if it degraded,

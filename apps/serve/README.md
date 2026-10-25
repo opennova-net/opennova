@@ -17,23 +17,26 @@ DFX2 (`/game dfx2`, on LAN and through OpenNova's NovaWorld, 2026-10-14,
 ## Usage
 
 ```text
-opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
-               [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
+opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/exp <name>]
+               [/d] [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
                [--also-master-host <gate>] [--also-master-gate-port <n>]
                [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
-               [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG]
+               [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
+               [/CONNECTLOG | /NOCONNECTLOG]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
-| `/exp <name>` | Mount that expansion (for example `revx02`). |
+| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
+| `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server speaks (below). Default `jo`. |
+| `/LAN` | Every `game.cfg` read sets `mpnovaworldhostlanonly` to 1, as retail's switch does: a NovaWorld listing advertises LAN only. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
@@ -260,6 +263,8 @@ empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
 | `game.cfg` | at the start (twice, as the game) | at the start, at every map change, at the exit, and by every admin `SET` |
 | `activesrvr.txt` | never | at the start; deleted at a clean exit |
 | `admin.cfg` | at the start | never |
+| `player.sav` | at every mission boot (the start and each map change), when present: the server's own slot runs under its current record (`game.cfg`'s `player_index`), whose name joiners see (D-NET-352) | never |
+| `weapon.sav` (`expansion/<code>/weapon.sav` with `/exp`) | at every mission boot, when present: that record's sides, its class and characters | never |
 | `admin_log.txt` | never | emptied at every launch, then one line per admin event |
 | `banned.txt` | when the session starts | at the exit, when an in-game ban added an entry |
 | `banlist.txt` | when a NovaWorld session starts (a missing one is created) | by every ban or unban on a NovaWorld session (`PLAYER BAN`, `CMD BAN`, `CMD UNBAN`) |
@@ -328,6 +333,9 @@ These logs go to the working directory, in retail's names and formats:
 | `<path>.sph` | `/PROFILE <path>` | The server log: per map of the rotation, a file of its own holding the map, the players, every eighth tick each player's position and heading, each deploy and disconnect. The extension replaces everything after the path's first dot; an existing file is not overwritten, the name counts up instead (`host.sph`, `host1.sph`, ... `host10.sph`, then `host1.sph` again). `opennova-wire` decodes it. |
 | `_PUNT.TXT` | `/PUNTLOG` or `/PUNT.TXT` | A `START` line, then one line per punted player (the weapon and ammo table checks, more than nine suicides). The switch starts the file anew. |
 | `_CHEAT.TXT` | `/CHEATLOG` | A `START` line (retail writes nothing else to it). |
+| `_NETLOG.TXT` | `/NETLOG`, or a `_DONETLOG.TXT` in the working directory | The protocol manager's net log; the remote admin's `CMD NETLOG` toggles it. |
+| `_inout.txt` | `/INOUT` | The protocol's log from the socket's open: the host and player lines the console prints (above), and each `ServerStopHosting` the NovaWorld session reads. |
+| `_connectlog.txt` | `/CONNECTLOG` (`/NOCONNECTLOG` turns it back off) | The connection debug log: a header (the exe, version, title and version pair), then its lines until the server's first new connection, which writes its disabling line and turns it off for the process. |
 
 ## Supervised runs
 
@@ -383,7 +391,7 @@ install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
 |---|---|---|
 | `/opt/game` | The game folder, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads). The entrypoint names it. | read-only (`:ro`) |
 | `/opt/game/expansion/<code>` | An expansion's folder (`<code>.pff`, `<code>L.pff`, `version.txt`) for `/exp <code>`: part of the game folder when you mount an install, a second read-only bind on a hosted machine (the expansion's own tree). | read-only (`:ro`) |
-| `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, and by convention the host file and the `--credentials` file. | a writable volume |
+| `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, `player.sav` and `weapon.sav` when you put them there, and by convention the host file and the `--credentials` file. | a writable volume |
 
 ```bash
 docker build -f apps/serve/Dockerfile -t opennova-serve .     # from the repo root

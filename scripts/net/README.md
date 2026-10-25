@@ -28,10 +28,13 @@ does not hash-bind binaries, retail trees or a corpus.
 | `diff_verdicts.py` | Compare two suites' verdicts row by row (FIXED, REGRESSED, PERSISTS, NEW, GONE, SKIP-CHANGE), with the widening report, the D-NET attribution and the minting queue. |
 | `parity-attribution.json` | The verdict-row to D-NET attribution table (`opennova.parity-attribution.v1`), transcribed from `docs/net/lan-parity-verdict.md`. |
 | `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
+| `parity-extension-cases.json` | The coverage extensions' case table (the same schema; `-CasesPath`, "The suite" below). |
+| `scenarios/` | The scenario scripts (`opennova.scenario.v1`; "Scenario parity" below). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
 | `scenario_aim.py` | The scenario `aim_at` step's look (retail's look-yaw arithmetic) and the profile's mouse sensitivity word; `test_scenario_aim.py` its unit tests. |
 | `admin_client.py` | The remote-admin protocol's client half (stdlib): the plaintext `query` status, or a login and commands, as JSON (the runner's pre-join mission cycle; the admin exercise). |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
+| `wait_capture_tag.ps1` | Wait for the first record of one tag and direction in a growing capture, at or after a capture time (a Serve Only cell's round-end S2C 0x1D, a rotation's S2C 0x25). |
 
 Shared process and path helpers live in `lib.ps1` (which dot-sources the
 opennova-game MCP client, `scripts/mcp/game_mcp.ps1`); retail instances are
@@ -63,7 +66,10 @@ Treat every `.pcap`, `.pcapng`, and `.sph` file as sensitive until reviewed.
 The launchers find Godot through `GODOT_BIN` or the repo's `.godot-bin`
 convention. Pass the retail resource directory with `-ResourceDir`
 (`-HostResourceDir`/`-JoinResourceDir` for the pair): without a `--resource-dir`
-the game boots its bundled menu and ignores the LAN launch flags (ADR 0048).
+the launch folder is the Godot binary's, which holds no `UPDATE.WIZ` and no
+content, so the game is OpenNova with nothing to boot (there is no bundled
+menu since ADR 0067 amended ADR 0048): a windowed run stops at the first-run
+content download screen, a headless one logs an error and exits 1.
 Each game starts behind every other window and never takes the foreground, and
 the console wrapper's console gets no window (`Start-OpenNovaProcess`;
 `docs/mcp.md` "Launching"); `-Front` is an ordinary start.
@@ -218,8 +224,9 @@ present; the SERVER `game.cfg` against the case table's pin, and its
 runtime; dumpcap and the Npcap loopback adapter; the three judges newer than
 their sources; a clean checkout; both template_debug DLLs in `godot\bin` equal
 to the `gdext_windows_template_debug` artifact of `-DllRunId`, a `ci.yml` run
-whose commit's `engine/` and `godot/` trees equal HEAD's (the artifact is
-fetched to `%TEMP%`); the MCP ports and the case ports free; no `Jointops.exe`
+whose commit's `engine/`, `godot/src`, `godot/game`, `godot/probes` and
+`godot/bin/opennova.gdextension` equal HEAD's (the artifact is fetched to
+`%TEMP%`); the MCP ports and the case ports free; no `Jointops.exe`
 running. `-ExpectOnHookMcpSha256`, `-ExpectOnHookProxySha256` and
 `-ExpectGodotLauncherSha256` pin those builds too.
 
@@ -231,11 +238,11 @@ powershell -File scripts\net\parity_preflight.ps1 -CorpusRoot C:\retail\corpus `
 ```
 
 The OpenNova cells run the CI build: fetch the `ci.yml` run of a commit whose
-`engine/`, `godot/src`, `godot/game` and `godot/probes` trees equal the
-checkout's (`gh run download <id> -R opennova-net/opennova -n
-gdext_windows_template_debug -D godot\bin`, then `scripts/bootstrap_godot.sh`
-and one `--headless --path godot --import`), and build the judges at the
-same commit.
+`engine/`, `godot/src`, `godot/game`, `godot/probes` and
+`godot/bin/opennova.gdextension` equal the checkout's (`gh run download <id> -R
+opennova-net/opennova -n gdext_windows_template_debug -D godot\bin`, then
+`scripts/bootstrap_godot.sh` and one `--headless --path godot --import`), and
+build the judges at the same commit.
 
 `run_parity_suite.ps1` runs the tracked case table through
 `run_parity_topology.ps1`, five cells per case with identical inputs (RunId
