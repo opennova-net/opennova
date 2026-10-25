@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import LobbyPage from './LobbyPage.vue';
 import { fetchLobbies, fetchNovaLogicLobbies } from '../api/lobbies';
 import { testRouter } from '../test/router';
-import type { LobbyResponse, NovaLogicLobbies } from '../types/lobby';
+import type { LobbyResponse, NovaLogicLobbies, NovaLogicServer } from '../types/lobby';
 
 vi.mock('../api/lobbies', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/lobbies')>()),
@@ -31,20 +31,47 @@ function ours(hosts = 0): LobbyResponse {
   };
 }
 
+function nlServer(overrides: Partial<NovaLogicServer> = {}): NovaLogicServer {
+  return {
+    id: 167782351,
+    serverName: '<c00FF00>Café © Ops</c>',
+    mission: 'AS - Kombang Valley',
+    gameType: 'AAS',
+    players: 12,
+    maxPlayers: 32,
+    locked: false,
+    password: false,
+    message: '',
+    country: 'US',
+    region: 'North America',
+    timeLeft: '29',
+    timeOfDay: 'Unknown',
+    expansion: '',
+    punkBuster: false,
+    dedicated: true,
+    tracers: true,
+    roster: [],
+    ...overrides,
+  };
+}
+
 function novalogic(overrides: Partial<NovaLogicLobbies> = {}): NovaLogicLobbies {
   return {
     enabled: true,
     servers: [
-      {
-        id: 167782351,
-        serverName: 'Café © Ops',
-        mission: 'AS - Kombang Valley',
-        gameType: 'AAS',
-        players: 12,
-        maxPlayers: 32,
-        locked: false,
-      },
-      { id: 167782352, serverName: 'Bravo', mission: '', gameType: 'TDM', players: 0, maxPlayers: 16, locked: true },
+      nlServer(),
+      nlServer({
+        id: 167782352,
+        serverName: 'Bravo',
+        mission: '',
+        gameType: 'TDM',
+        players: 0,
+        maxPlayers: 16,
+        locked: true,
+        password: true,
+        punkBuster: true,
+        expansion: 'jox01',
+      }),
     ],
     fetchedAt: '2026-10-25T11:57:00Z',
     ageSeconds: 180,
@@ -80,8 +107,9 @@ describe('LobbyPage', () => {
     readNovaLogic.mockResolvedValue(novalogic());
     const page = await open();
     expect(readNovaLogic).toHaveBeenCalled();
-    // Ours as ever.
+    // Ours as ever, each row opening its page.
     expect(page.text()).toContain('Our Server 0');
+    expect(page.get('table a').attributes('href')).toBe('/lobby/1000');
     const own = section(page);
     expect(own.exists()).toBe(true);
     expect(own.get('h2').text()).toBe("NovaLogic's NovaWorld");
@@ -89,15 +117,21 @@ describe('LobbyPage', () => {
     const rows = own.findAll('tbody tr');
     expect(rows).toHaveLength(2);
     expect(rows[0].text()).toContain('Café © Ops');
+    expect(rows[0].text()).not.toContain('c00FF00');
     expect(rows[0].text()).toContain('AS - Kombang Valley (AAS)');
     expect(rows[0].text()).toContain('12 / 32');
     expect(rows[0].text()).not.toContain('Password');
     expect(rows[1].text()).toContain('Bravo');
     expect(rows[1].text()).toContain('TDM');
     expect(rows[1].text()).toContain('Password');
+    expect(rows[1].text()).toContain('PunkBuster');
+    expect(rows[1].text()).toContain('jox01');
     expect(own.text()).toContain('Updated 3 min ago');
-    // A row is no link: the site has no page for another service's server.
-    expect(own.findAll('a')).toHaveLength(0);
+    // Each row opens the server's page.
+    expect(own.findAll('tbody a').map((a) => a.attributes('href'))).toEqual([
+      '/lobby/novalogic/167782351',
+      '/lobby/novalogic/167782352',
+    ]);
     // Player-facing copy: no em dash.
     expect(own.text()).not.toContain(String.fromCharCode(0x2014));
   });

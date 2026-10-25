@@ -112,12 +112,9 @@ void NovaLogicLobbies::refresh() {
 		}
 	}
 	if (parsed.servers.size() > kMaxServers) parsed.servers.resize(kMaxServers);
-	// The route never shows a host's address or its players' names: the list keeps neither.
-	for (GsbServerEntry &s : parsed.servers) {
-		s.ip.clear();
-		s.player_names.clear();
-		s.player_names.shrink_to_fit();
-	}
+	// The route never shows a host's address: the list keeps none. Its players' names it shows
+	// (the server's page lists them, as the game's browser does).
+	for (GsbServerEntry &s : parsed.servers) s.ip.clear();
 
 	std::lock_guard<std::mutex> lock(mu_);
 	if (!why.empty()) {
@@ -151,6 +148,22 @@ crow::json::wvalue novalogic_lobbies_json(const NovaLogicList *list) {
 			row["players"]    = s.players;
 			row["maxPlayers"] = s.max_players;
 			row["locked"]     = browser_row_is_locked(s);
+			// The server's page: the row's other columns as the game's browser has them, the
+			// game's inline markup left in for the page to draw.
+			row["password"]   = s.password == "Y";
+			row["message"]    = retail_text_to_utf8(s.msg);
+			row["country"]    = retail_text_to_utf8(s.country);
+			row["region"]     = retail_text_to_utf8(s.region);
+			row["timeLeft"]   = retail_text_to_utf8(s.time_left);
+			row["timeOfDay"]  = retail_text_to_utf8(s.time_of_day);
+			row["expansion"]  = retail_text_to_utf8(s.exp);
+			row["punkBuster"] = !s.pb_server.empty() && s.pb_server != "0";
+			row["dedicated"]  = s.dedicated == "Y";
+			row["tracers"]    = s.tracers == "Y";
+			std::vector<crow::json::wvalue> roster;
+			roster.reserve(s.player_names.size());
+			for (const std::string &name : s.player_names) roster.emplace_back(retail_text_to_utf8(name));
+			row["roster"] = std::move(roster);
 			servers.push_back(std::move(row));
 		}
 	}

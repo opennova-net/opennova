@@ -105,10 +105,12 @@ private:
 };
 
 // GET /api/lobbies/novalogic's body: {"enabled", "servers": [{"id", "serverName",
-// "mission", "gameType", "players", "maxPlayers", "locked"}], "fetchedAt" (ISO 8601 UTC,
-// null before the first good fetch), "ageSeconds" (null alike), "failing"}. `list` is null
-// with the switch off: enabled false, no servers. Text is UTF-8 (the feed's cp1252 read as
-// a stock client's host wrote it); a row's host address is left out.
+// "mission", "gameType", "players", "maxPlayers", "locked", "password", "message", "country",
+// "region", "timeLeft", "timeOfDay", "expansion", "punkBuster", "dedicated", "tracers",
+// "roster"}], "fetchedAt" (ISO 8601 UTC, null before the first good fetch), "ageSeconds"
+// (null alike), "failing"}. `list` is null with the switch off: enabled false, no servers.
+// Text is UTF-8 (the feed's cp1252 read as a stock client's host wrote it) with the game's
+// inline markup left in; the roster is the players' names; a row's host address is left out.
 crow::json::wvalue novalogic_lobbies_json(const NovaLogicList *list);
 
 } // namespace opennova::novaworld_server

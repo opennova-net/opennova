@@ -12,29 +12,7 @@
     </p>
 
     <template v-if="updatedAt !== null">
-      <div v-if="list.servers.length > 0" class="relative overflow-x-auto rounded-panel border border-border bg-panel">
-        <table class="min-w-full divide-y divide-border text-sm text-ink">
-          <thead>
-            <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-              <th scope="col" class="px-4 py-2">Server</th>
-              <th scope="col" class="hidden px-4 py-2 sm:table-cell">Mission</th>
-              <th scope="col" class="px-4 py-2 text-right">Players</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <tr v-for="(server, i) in list.servers" :key="`${server.id}-${i}`">
-              <th scope="row" class="px-4 py-2 text-left font-medium">
-                <span class="break-all">{{ server.serverName || 'Unnamed server' }}</span>
-                <span v-if="server.locked" class="ml-2 rounded-control bg-hover px-2 py-0.5 text-xs font-normal text-ink-muted">Password</span>
-                <span v-if="missionText(server)" class="mt-1 block text-xs font-normal text-ink-muted sm:hidden">{{ missionText(server) }}</span>
-              </th>
-              <td class="hidden px-4 py-2 sm:table-cell">{{ missionText(server) }}</td>
-              <td class="whitespace-nowrap px-4 py-2 text-right font-mono text-xs">{{ server.players }} / {{ server.maxPlayers }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else class="text-sm text-ink-muted">No servers are listed there right now.</p>
+      <ServerTable :rows="rows" empty="No servers are listed there right now." caption="The servers on NovaLogic's NovaWorld" />
       <p class="text-xs text-ink-muted">
         Updated <RelativeTime :value="updatedAt" :now="now" /><template v-if="list.failing">. NovaLogic's NovaWorld can't be reached right now, so this is the last list we got.</template>
       </p>
@@ -47,11 +25,13 @@
 <script setup lang="ts">
 // The Lobbies page's section for the servers on NovaLogic's NovaWorld (GET
 // /api/lobbies/novalogic): the service's copy of NovaLogic's list, with how long ago
-// it was fetched. Rows link nowhere: the site has no page for another service's server.
+// it was fetched. Each row opens the server's page (NovaLogicServerPage.vue).
+import { computed } from 'vue';
 import RelativeTime from './RelativeTime.vue';
-import type { NovaLogicLobbies, NovaLogicServer } from '../types/lobby';
+import ServerTable from './ServerTable.vue';
+import type { NovaLogicLobbies, ServerRow } from '../types/lobby';
 
-defineProps<{
+const props = defineProps<{
   list: NovaLogicLobbies;
   // When the service fetched the list (epoch ms, by the page's clock); null before the first.
   updatedAt: number | null;
@@ -59,9 +39,20 @@ defineProps<{
   now: number;
 }>();
 
-// "AS - Kombang Valley (AAS)", or the mission or the game type alone.
-function missionText(server: NovaLogicServer): string {
-  if (server.mission && server.gameType) return `${server.mission} (${server.gameType})`;
-  return server.mission || server.gameType;
-}
+const rows = computed<ServerRow[]>(() =>
+  props.list.servers.map((server, i) => ({
+    key: `${server.id}-${i}`,
+    to: `/lobby/novalogic/${server.id}`,
+    serverName: server.serverName,
+    mission: server.mission,
+    gameType: server.gameType,
+    players: server.players,
+    maxPlayers: server.maxPlayers,
+    country: server.country,
+    expansion: server.expansion,
+    password: server.password,
+    locked: server.locked,
+    punkBuster: server.punkBuster,
+  })),
+);
 </script>

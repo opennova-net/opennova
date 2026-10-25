@@ -438,8 +438,12 @@ expansion.
 `GET /api/lobbies/novalogic` (public, read-only) answers the Joint Operations servers listed
 on NovaLogic's own NovaWorld, as a stock client's browser lists them:
 `{"enabled", "servers": [{"id", "serverName", "mission", "gameType", "players",
-"maxPlayers", "locked"}], "fetchedAt", "ageSeconds", "failing"}`, the text UTF-8 and no
-host's address or player names ([`novalogic_lobbies.h`](../novaworld_web/novalogic_lobbies.h)).
+"maxPlayers", "locked", "password", "message", "country", "region", "timeLeft", "timeOfDay",
+"expansion", "punkBuster", "dedicated", "tracers", "roster"}], "fetchedAt", "ageSeconds",
+"failing"}`: the text UTF-8 with the game's inline markup left in (the page draws it as the
+game does), the roster the players' names the game's browser shows, and no host's address
+([`novalogic_lobbies.h`](../novaworld_web/novalogic_lobbies.h)). The site's Lobbies page lists
+them in its server table and each on a page of its own (`/lobby/novalogic/<id>`).
 Web reads them the way the stock client does, with no login and no cookie: one GET of JO's
 GSB feed on NovaLogic's web host, `http://207.178.209.204/jop_2.gsb?a=1` (the lobby
 SessionInit's web domain and the list load the record's live capture shows,

@@ -28,7 +28,7 @@
       <div v-if="!state.loading && !state.error" class="mt-10 space-y-10">
         <!-- The API returns a group per game even with no hosts, so guard on the
              total host count (not games.length) — otherwise an idle server renders
-             bare game headers over empty grids. -->
+             bare game headers over empty tables. -->
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted on our NovaWorld right now</p>
           <p class="mt-2 text-sm text-ink-muted">
@@ -42,12 +42,9 @@
           <div v-for="group in gamesWithServersFirst" :key="group.slug" class="space-y-4">
             <div class="flex items-center justify-between">
               <h2 class="text-2xl font-semibold text-ink">{{ group.displayName }}</h2>
-              <span class="text-sm text-ink-muted">{{ group.hosts.length }} {{ group.hosts.length === 1 ? 'server' : 'servers' }}</span>
+              <span class="text-sm text-ink-muted">{{ group.rows.length }} {{ group.rows.length === 1 ? 'server' : 'servers' }}</span>
             </div>
-            <div v-if="group.hosts.length > 0" class="grid gap-4 md:grid-cols-2">
-              <LobbyCard v-for="host in group.hosts" :key="host.id" :host="host" />
-            </div>
-            <p v-else class="text-sm text-ink-muted">No servers right now.</p>
+            <ServerTable :rows="group.rows" empty="No servers right now." :caption="`${group.displayName} servers`" />
           </div>
         </template>
       </div>
@@ -68,10 +65,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive } from 'vue';
 import { RouterLink } from 'vue-router';
-import LobbyCard from '../components/LobbyCard.vue';
 import NovaLogicServerList from '../components/NovaLogicServerList.vue';
+import ServerTable from '../components/ServerTable.vue';
 import { fetchLobbies, fetchNovaLogicLobbies } from '../api/lobbies';
-import type { LobbyGroup, NovaLogicLobbies } from '../types/lobby';
+import type { LobbyGroup, LobbyHost, NovaLogicLobbies, ServerRow } from '../types/lobby';
 
 const state = reactive({
   games: [] as LobbyGroup[],
@@ -85,11 +82,29 @@ const state = reactive({
 });
 
 const totalHosts = computed(() => state.games.reduce((n, group) => n + group.hosts.length, 0));
-// The games with servers first, each kept in the service's order.
-const gamesWithServersFirst = computed(() => [
-  ...state.games.filter((group) => group.hosts.length > 0),
-  ...state.games.filter((group) => group.hosts.length === 0),
-]);
+// The games with servers first, each kept in the service's order, with their
+// servers as the table's rows.
+const gamesWithServersFirst = computed(() =>
+  [
+    ...state.games.filter((group) => group.hosts.length > 0),
+    ...state.games.filter((group) => group.hosts.length === 0),
+  ].map((group) => ({ ...group, rows: group.hosts.map(hostRow) })),
+);
+
+// One of our listed servers as a table row, opening its page.
+function hostRow(host: LobbyHost): ServerRow {
+  return {
+    key: String(host.id),
+    to: `/lobby/${host.id}`,
+    serverName: host.serverName,
+    mission: host.mission ?? '',
+    gameType: host.gameType ?? '',
+    players: host.players,
+    maxPlayers: host.maxPlayers || 0,
+    expansion: host.expansion ?? '',
+    password: Boolean(host.locked),
+  };
+}
 
 // NovaLogic's list never holds up or breaks ours: a failed read keeps what the
 // page had.

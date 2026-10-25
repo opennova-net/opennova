@@ -160,8 +160,9 @@ int test_parse() {
 	TEST_EXPECT(list.fetched_at_ms == kNowMs && list.age_ms == 42000);
 	TEST_EXPECT(list.servers.size() == 3);
 	TEST_EXPECT(list.servers[0].rid == 0x0A0027A0 && list.servers[0].server_name == "Caf\xE9 \xA9 Ops");
-	// The list keeps no host address and no player name (the route shows neither).
-	TEST_EXPECT(list.servers[0].player_names.empty() && list.servers[0].ip.empty());
+	// The list keeps no host address (the route never shows one); its players' names it keeps.
+	TEST_EXPECT(list.servers[0].ip.empty());
+	TEST_EXPECT(list.servers[0].player_names == std::vector<std::string>({ "biggy", "Ann" }));
 
 	const std::string body = nws::novalogic_lobbies_json(&list).dump();
 	json = crow::json::load(body);
@@ -179,8 +180,14 @@ int test_parse() {
 	TEST_EXPECT(servers[1]["locked"].b()); // Password Y
 	TEST_EXPECT(servers[2]["locked"].b()); // Locked Y
 	TEST_EXPECT(str(servers[2]["mission"]).empty());
-	// No host's address, and no player's name, reaches the page.
-	for (const char *hidden : { "203.0.113.7", "198.51.100.9", "192.0.2.44", "biggy" })
+	// The server's page: the row's other columns and its roster.
+	TEST_EXPECT(!servers[0]["password"].b() && servers[1]["password"].b());
+	TEST_EXPECT(servers[0]["roster"].size() == 2 && str(servers[0]["roster"][0]) == "biggy" &&
+			str(servers[0]["roster"][1]) == "Ann");
+	TEST_EXPECT(servers[0].has("message") && servers[0].has("country") && servers[0].has("timeLeft") &&
+			servers[0].has("expansion") && servers[0].has("punkBuster") && servers[0].has("dedicated"));
+	// No host's address reaches the page.
+	for (const char *hidden : { "203.0.113.7", "198.51.100.9", "192.0.2.44" })
 		TEST_EXPECT(body.find(hidden) == std::string::npos);
 	return 0;
 }
