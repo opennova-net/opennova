@@ -49,6 +49,8 @@ struct ReleaseTools {
 
 // The release `release_id`'s build queued; the job's id, 0 when one is queued or running.
 int64_t enqueue_release_build(db::Database &db, int64_t release_id);
+// That build's job's dedupe key (jobs::job_pending: whether it is queued or running).
+std::string release_build_key(int64_t release_id);
 
 // release.build's handler over `store`, its work under `scratch_dir` (the content projects'
 // files cached there between builds).

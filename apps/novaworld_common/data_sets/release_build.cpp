@@ -8,6 +8,7 @@
 #include "jobs/job_queue.h"
 
 #include <base/content/content_manifest.h>
+#include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -100,12 +102,22 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		why = project->key + " updates no data set";
 		return false;
 	}
-	if (data_set->command_file.empty() || data_set->product_name.empty()) {
-		why = data_set->display_name +
-				" names no updater product (a command file and a product name)";
+	if (data_set->command_file.empty()) {
+		why = data_set->display_name + " names no updater product (a command file)";
 		return false;
 	}
 	plan.data_set = *data_set;
+	// A data set an admin made carries no product name: ours is named as its data set, the game
+	// run by the runtime's executable (as 0025 names the seeded ones).
+	if (plan.data_set.product_name.empty() && !plan.data_set.retail_updater) {
+		plan.data_set.product_name = plan.data_set.display_name;
+		if (plan.data_set.kind == DataSetKind::Base)
+			plan.data_set.product_exe = "opennova.exe";
+	}
+	if (plan.data_set.product_name.empty()) {
+		why = data_set->display_name + " names no updater product (a product name)";
+		return false;
+	}
 	plan.retail = project->retail;
 	if (!source_of(db, *project, release.content_revision, plan.project, why))
 		return false;
@@ -180,7 +192,16 @@ public:
 	// The package made, at package(); on a refusal or a store failure `why` says what.
 	Step run(std::string &why);
 	std::string package() const { return io::utf8_join(work_, "release.sfs"); }
-	const std::string &log() const { return log_; }
+	// The log as a text column takes it: UTF-8 (a tool's other bytes read as cp1252) with no NUL,
+	// never starting inside a character its trim cut.
+	std::string log() const {
+		size_t from = 0;
+		while (from < log_.size() && (static_cast<unsigned char>(log_[from]) & 0xC0) == 0x80)
+			++from;
+		std::string text = retail_text_to_utf8(std::string_view(log_).substr(from));
+		text.erase(std::remove(text.begin(), text.end(), '\0'), text.end());
+		return text;
+	}
 
 private:
 	void clear() {
@@ -477,11 +498,15 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 
 } // namespace
 
+std::string release_build_key(int64_t release_id) {
+	return std::string(kJobReleaseBuild) + ":" + id_text(release_id);
+}
+
 int64_t enqueue_release_build(db::Database &db, int64_t release_id) {
 	jobs::NewJob job;
 	job.kind = kJobReleaseBuild;
 	job.payload.set("release_id", io::json_number(static_cast<double>(release_id)));
-	job.dedupe_key = std::string(kJobReleaseBuild) + ":" + id_text(release_id);
+	job.dedupe_key = release_build_key(release_id);
 	job.max_attempts = kAttemptsBuild;
 	return jobs::enqueue(db, job);
 }

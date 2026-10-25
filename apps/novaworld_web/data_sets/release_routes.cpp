@@ -6,7 +6,9 @@
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
 #include "data_sets/data_set_routes.h"
+#include "data_sets/release_build.h"
 #include "http_json.h"
+#include "jobs/job_queue.h"
 
 #include <base/io/strutil.h>
 
@@ -392,7 +394,8 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 // release: its package objects removed (the upload key, which an invalid one keeps, with
 // the upload in flight aborted, and the validated key once it has a sha; a missing object
 // is no failure), the row gone, 204; 404 not_found; 409 published (retire it first),
-// validating or building (the data program is on it); 502 store_error; 503 store_unavailable.
+// validating or building (the data program is on it; a building one whose job ended may go); 502
+// store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -407,7 +410,10 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		if (release->status == ReleaseStatus::Validating)
 			return json_error(
 					409, "validating", "the data program is validating this release; wait for it");
-		if (release->status == ReleaseStatus::Building)
+		// A build whose job ended without settling its row (its attempts spent on a data task
+		// replaced mid-build) leaves it building with no one on it: that one may go.
+		if (release->status == ReleaseStatus::Building &&
+				jobs::job_pending(*db_conn, release_build_key(release->id)))
 			return json_error(
 					409, "building", "the data program is building this release; wait for it");
 		if (store_ == nullptr)
