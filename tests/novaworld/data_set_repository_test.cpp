@@ -78,7 +78,7 @@ int test_data_sets() {
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
 			!runtime->retail_updater);
-	const auto native = find_data_set(db, seeded(db, "OpenNova"));
+	const auto native = find_data_set(db, seeded(db, "OP: Acid Gambit"));
 	TEST_EXPECT(native && native->updater_login == "OPENNOVA" &&
 			native->command_file == "OPENNOVA.CMD" && !native->retail_updater);
 	const auto dfx2 = find_data_set(db, seeded(db, "Delta Force Xtreme 2"));

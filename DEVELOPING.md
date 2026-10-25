@@ -146,7 +146,7 @@ package contains the engine, its native dependencies, `update.exe`, and
 `revupdat.exe`; a standalone installation downloads OpenNova content on first run.
 
 Every product's game data is an OpenNova Editor project the maintainer keeps outside
-git: OpenNova's base game and Indigo Storm (with their Blender sources), and Joint
+git: OpenNova's base game, OP: Acid Gambit, and its expansion, OP: Nifty Package (with their Blender sources), and Joint
 Operations, Escalation and DFX2 imported from their stock installs. A release is
 built from its project and uploaded in the admin's Game data (Releases: upload,
 validate, Publish), or with `scripts/publish_update.py`:

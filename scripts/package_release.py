@@ -70,8 +70,8 @@ PRODUCTS = {
             base="JO",
         ),
         Product("DFX2", "DFX2", "DFX2.CMD", "Delta Force Xtreme 2", "dfx2.exe", True, game="dfx2"),
-        Product("OPENNOVA", "OPENNOVA", "OPENNOVA.CMD", "OpenNova", "opennova.exe", False),
-        Product("ONJO1", "ONJO1", "ONJO1.CMD", "Indigo Storm", "", False, expansion="onjo1"),
+        Product("OPENNOVA", "OPENNOVA", "OPENNOVA.CMD", "OP: Acid Gambit", "opennova.exe", False),
+        Product("ONJO1", "ONJO1", "ONJO1.CMD", "OP: Nifty Package", "", False, expansion="onjo1"),
     )
 }
 

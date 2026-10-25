@@ -318,7 +318,7 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(!str(json["games"][0]["displayName"]).empty());
 	TEST_EXPECT(str(json["games"][1]["slug"]) == "jop_2_consumer");
 	TEST_EXPECT(str(json["games"][2]["slug"]) == "opennova_0_consumer");
-	TEST_EXPECT(str(json["games"][2]["displayName"]) == "OpenNova");
+	TEST_EXPECT(str(json["games"][2]["displayName"]) == "OP: Acid Gambit");
 	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
@@ -9030,7 +9030,7 @@ int with_harness(const char *part) {
 			jo_id = data_set_named(*db, "Joint Operations");
 			jox_id = data_set_named(*db, "Escalation");
 			dfx2_id = data_set_named(*db, "Delta Force Xtreme 2");
-			on_id = data_set_named(*db, "OpenNova");
+			on_id = data_set_named(*db, "OP: Acid Gambit");
 			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
 			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
 			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });

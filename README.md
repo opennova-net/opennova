@@ -4,8 +4,8 @@ OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
 runtime, native format readers, NovaWorld-compatible services, and the project
 web portal. The minimal runtime downloads OpenNova's own game on first run:
-"Indigo Shore", a mission for single player and Co-op over LAN, and its
-"Indigo Storm" expansion. The same `opennova.exe` can run against an existing
+"OP: Acid Gambit", a mission for single player and Co-op over LAN, and its
+"OP: Nifty Package" expansion. The same `opennova.exe` can run against an existing
 Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder and run it.
 
 This is a pre-1.0 project. Implemented systems and known differences from the

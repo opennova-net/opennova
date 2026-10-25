@@ -585,8 +585,9 @@ try {
     $launchHelp = @"
 OpenNova (pre-1.0, experimental)
 
-Run opennova.exe. The first launch downloads OpenNova's content and registered
-expansions. Later launches play offline and show UPDATE only when an update exists.
+Run opennova.exe. The first launch downloads OpenNova's own game, OP: Acid Gambit,
+and its registered expansion, OP: Nifty Package. Later launches play offline and
+show UPDATE only when an update exists.
 Keep update.exe and revupdat.exe beside opennova.exe.
 
 To play Joint Operations or Delta Force Xtreme 2, put these files in that

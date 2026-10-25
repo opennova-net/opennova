@@ -36,7 +36,7 @@ INSERT INTO games (
      '1', '9013', '1', '38',
      'ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm', '[DFX2]KILLS', 3600000, 45000),
 
-    ('opennova_0_consumer', 'OpenNova',             'opennova_0_consumer', 'opennova:0', 'jo',
+    ('opennova_0_consumer', 'OP: Acid Gambit',      'opennova_0_consumer', 'opennova:0', 'jo',
      'jop_2_start.htm',  'jop_2_host1.htm',  'opennova_0.gsb?a=1',
      NULL, '3', '2345', '1', '28',
      'ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm', '', 0, 0)

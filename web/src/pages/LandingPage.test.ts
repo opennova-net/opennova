@@ -38,7 +38,8 @@ describe('LandingPage', () => {
     const text = wrapper.text();
     expect(wrapper.get('h1').text()).toBe('OpenNova');
     expect(text).toContain("A game on NovaLogic's engine, rebuilt in the open.");
-    expect(text).toContain('Indigo Shore');
+    expect(text).toContain('OP: Acid Gambit');
+    expect(text).toContain('OP: Nifty Package');
     expect(text).toContain('Online play in our own game is coming.');
     expect(text).toContain('OpenNova runs in place of Jointops.exe.');
     expect(text).toContain('It ships no retail files.');

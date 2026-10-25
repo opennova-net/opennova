@@ -353,7 +353,7 @@ int expect_opennova_row(Database &db) {
 			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
 			"WHERE slug = 'opennova_0_consumer';");
 	TEST_EXPECT(on.size() == 1);
-	TEST_EXPECT(on[0].as_text(0).value() == "OpenNova");
+	TEST_EXPECT(on[0].as_text(0).value() == "OP: Acid Gambit");
 	TEST_EXPECT(on[0].as_text(1).value() == "opennova_0_consumer");
 	TEST_EXPECT(on[0].as_text(2).value() == "opennova:0");
 	TEST_EXPECT(on[0].as_text(3).value() == "jo");

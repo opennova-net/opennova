@@ -522,7 +522,7 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 **OpenNova content**:
 OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
 repository and released as update packages: the
-"Indigo Shore" mission (single player and Co-op over LAN) and its "Indigo Storm"
+"OP: Acid Gambit" game (single player and Co-op over LAN) and its "OP: Nifty Package"
 expansion. The minimal runtime downloads it on first launch. `/game opennova`
 is the default; `/game jo` or `/game dfx2` selects an existing retail installation
 (ADR 0067). `--resource-dir` selects content separately from the runtime directory.

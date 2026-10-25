@@ -607,8 +607,8 @@ int test_native_first_release() {
 			{ { "", "", "OPENNOVA.CMD", "OpenNova", "1.0", "opennova.exe" },
 					{ "expansion/onjo1", "onjo1", "ONJO1.CMD", "OpenNova JO", "1.0", "" } }, true);
 	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft);
-	const int64_t native = rig.seeded("OpenNova");
-	const int64_t expansion = rig.seeded("OpenNova Joint Operations");
+	const int64_t native = rig.seeded("OP: Acid Gambit");
+	const int64_t expansion = rig.seeded("OP: Nifty Package");
 	TEST_EXPECT(publish_release(rig.db, id));
 	TEST_EXPECT(enqueue_release_apply(rig.db, id, native) > 0 &&
 			enqueue_release_apply(rig.db, id, expansion) > 0 && rig.run_jobs() >= 2);

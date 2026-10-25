@@ -359,7 +359,7 @@ int test_no_data() {
 	TEST_EXPECT(rig.fake.launches == 0);
 
 	// The data set row gone (its id set NULL on the server's row): named as such.
-	const int64_t on = seeded_data_set(rig.db, "OpenNova");
+	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
 	hosted::HostedSettings on_settings = valid_settings(on);
 	on_settings.missions = { "on.bms" };
@@ -402,7 +402,7 @@ int test_data_sets() {
 			offered[0].expansions[0].tree_id == rig.data.jox_tree && offered[0].expansions[0].missions.size() == 1);
 	TEST_EXPECT(offered[1].id == rig.data.dfx2 && offered[1].title == "dfx2" && offered[1].expansions.empty() &&
 			offered[1].missions.size() == 2);
-	const int64_t on = seeded_data_set(rig.db, "OpenNova");
+	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(hosted::find_offered(offered, rig.data.jo) != nullptr && hosted::find_offered(offered, on) == nullptr);
 	TEST_EXPECT(hosted::find_offered_expansion(offered[0], rig.data.jox) != nullptr &&
 			hosted::find_offered_expansion(offered[0], rig.data.jo) == nullptr);

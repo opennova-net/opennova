@@ -45,12 +45,12 @@
     <!-- Our own game: what a download plays with no retail install. -->
     <section id="game" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="game-title">
       <p class="eyebrow">Our game</p>
-      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">Indigo Shore, and more to come</h2>
+      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">OP: Acid Gambit, and more to come</h2>
       <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
         <p>
-          OpenNova comes with a small game of its own, made in the OpenNova Editor with no file from the original
-          games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN, then play it
-          again at night in a storm with the Indigo Storm expansion.
+          OpenNova comes with a small game of its own, OP: Acid Gambit, made in the OpenNova Editor with no file from
+          the original games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN,
+          then play it again at night in a storm with the OP: Nifty Package expansion.
         </p>
         <p>
           A carbine, a pistol, a knife, grenades and binoculars; rebels who patrol, stand guard and raise the alarm.
@@ -218,8 +218,8 @@
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. The game comes with OpenNova's own game; playing Joint Operations
-          needs your own purchased copy. Each release on GitHub carries these files:
+          Windows x64. Pre-1.0 and experimental. Its first launch downloads OpenNova's own game, OP: Acid Gambit;
+          playing Joint Operations needs your own purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <li v-for="item in downloads" :key="item.file" class="card p-5">
@@ -262,7 +262,7 @@ const editorFeatures = [
 const downloads = [
   {
     name: 'OpenNova',
-    body: 'The game: our own game, and a drop-in for Jointops.exe that plays the Joint Operations you own.',
+    body: 'The game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
     file: 'opennova-game-windows',
   },
   {
