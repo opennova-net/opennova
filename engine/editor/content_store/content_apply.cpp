@@ -1,7 +1,9 @@
 #include <editor/content_store/content_apply.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <system_error>
 
@@ -84,46 +86,117 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 			return false;
 		}
 	}
+	// A write whose path is a removal's with only its letters' case changed finds the removal's
+	// file at its path on Windows and macOS (one file there): the removal's check is that file's.
+	std::set<std::string> removed;
 	for (const PullItem &item : plan.items)
-		if (!unchanged_since_plan(root, item))
+		if (item.step == PullStep::Remove)
+			removed.insert(content::folded_path(item.path));
+	for (const PullItem &item : plan.items) {
+		const bool recased = item.step == PullStep::Write && !item.mine &&
+				removed.count(content::folded_path(item.path)) != 0;
+		if (!recased && !unchanged_since_plan(root, item))
 			result.changed_since.push_back(item.path);
+	}
 	if (!result.changed_since.empty()) {
 		error = std::to_string(result.changed_since.size()) +
 				" file(s) changed since the pull was planned: plan again";
 		return false;
 	}
 
-	// What the folder holds at a path the pull writes or removes goes to the trash first, in one
-	// batch.
-	std::vector<std::string> trashed;
-	for (const PullItem &item : plan.items)
-		if (fs::is_regular_file(root / path_of(item.path).make_preferred(), ec))
-			trashed.push_back(item.path);
-	if (!trashed.empty() && !trash_paths(paths, trashed, result.trash, error))
-		return false;
-
-	for (const PullItem &item : plan.items) {
-		const fs::path target = root / path_of(item.path).make_preferred();
-		if (item.step == PullStep::Remove) {
-			remove_empty_folders(root, target);
-			++result.removed;
+	// Every file the pull writes copied from its download first (one download may be several paths'
+	// file), so a copy that fails moves nothing and only renames follow the trash. Staged beside
+	// the downloads, on the folder's volume as the trash is: a write's folder may stand where a
+	// file the pull removes is until that file goes.
+	const fs::path staged_dir = system_path(join_path(content_paths.incoming_dir, "staged"));
+	std::vector<fs::path> staged(plan.items.size());
+	for (size_t i = 0; i < plan.items.size(); ++i) {
+		const PullItem &item = plan.items[i];
+		if (item.step != PullStep::Write)
 			continue;
-		}
-		fs::create_directories(target.parent_path(), ec);
-		if (ec) {
-			error = "cannot make the folder of " + item.path + ": " + ec.message();
-			return false;
-		}
-		// Copied (one download may be several paths' file) beside the target, then renamed over it.
-		const fs::path staged = fs::path(target).concat(".tmp");
-		fs::copy_file(system_path(incoming_path(content_paths, item.theirs->sha256)), staged,
+		staged[i] = staged_dir / std::to_string(i);
+		fs::create_directories(staged_dir, ec);
+		fs::copy_file(system_path(incoming_path(content_paths, item.theirs->sha256)), staged[i],
 				fs::copy_options::overwrite_existing, ec);
 		if (ec) {
 			error = "cannot write " + item.path + ": " + ec.message();
+			fs::remove_all(staged_dir, ec);
 			return false;
 		}
-		if (!io::replace_file(io::utf8_path(staged), io::utf8_path(target), error))
+	}
+
+	// What the folder holds at a path the pull writes or removes goes to the trash, in one batch: a
+	// file once, though a write's path and a removal's name it (a change of its letters' case).
+	std::vector<std::string> trashed;
+	std::map<std::string, fs::path> trashed_at; // by folded path
+	for (const PullItem &item : plan.items) {
+		const fs::path target = root / path_of(item.path).make_preferred();
+		if (!fs::is_regular_file(target, ec))
+			continue;
+		const auto [at, added] = trashed_at.emplace(content::folded_path(item.path), target);
+		if (!added && fs::equivalent(at->second, target, ec))
+			continue;
+		trashed.push_back(item.path);
+	}
+	if (!trashed.empty() && !trash_paths(paths, trashed, result.trash, error)) {
+		fs::remove_all(staged_dir, ec);
+		return false;
+	}
+
+	// The removals first: a folder one empties goes before a write puts a file in its place (a
+	// folder the revision replaced by a file), or makes it again in a write's new spelling.
+	for (const PullItem &item : plan.items) {
+		if (item.step != PullStep::Remove)
+			continue;
+		remove_empty_folders(root, root / path_of(item.path).make_preferred());
+		++result.removed;
+	}
+
+	// Then each staged file renamed into place. One that does not go brings the files it and the
+	// writes after it would replace back out of the trash; the ones written before it stay (the
+	// base is the old one, so a pull again finishes).
+	const auto put_back = [&](size_t first) {
+		fs::remove_all(staged_dir, ec);
+		const std::set<std::string> in_trash(result.trash.paths.begin(), result.trash.paths.end());
+		TrashBatch back;
+		back.id = result.trash.id;
+		for (size_t i = first; i < plan.items.size(); ++i)
+			if (plan.items[i].step == PullStep::Write && in_trash.count(plan.items[i].path))
+				back.paths.push_back(plan.items[i].path);
+		if (back.paths.empty())
+			return;
+		std::string why;
+		if (!restore_trash(paths, back, why)) {
+			error += "; the files it would replace stay in the project's trash: " + why;
+			return;
+		}
+		const std::set<std::string> restored(back.paths.begin(), back.paths.end());
+		result.trash.paths.erase(
+				std::remove_if(result.trash.paths.begin(), result.trash.paths.end(),
+						[&](const std::string &path) { return restored.count(path) != 0; }),
+				result.trash.paths.end());
+		if (result.trash.paths.empty())
+			result.trash.id = 0;
+	};
+	for (size_t i = 0; i < plan.items.size(); ++i) {
+		const PullItem &item = plan.items[i];
+		if (item.step != PullStep::Write)
+			continue;
+		const fs::path target = root / path_of(item.path).make_preferred();
+		bool placed = false;
+		fs::create_directories(target.parent_path(), ec);
+		if (ec) {
+			error = "cannot make the folder of " + item.path + ": " + ec.message();
+		} else {
+			// An empty folder in the file's place goes (the rename says why when one is not empty).
+			if (fs::is_directory(target, ec))
+				fs::remove(target, ec);
+			placed = io::replace_file(io::utf8_path(staged[i]), io::utf8_path(target), error);
+		}
+		if (!placed) {
+			put_back(i);
 			return false;
+		}
 		++result.written;
 	}
 

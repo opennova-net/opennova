@@ -935,7 +935,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 		if (ImGui::MenuItem("Discard changes", nullptr, false, discards) && discards)
 			workspace_.request(request::content_restore(entry.relative_path));
 		ui_kit::tooltip("Puts back the file as revision " + std::to_string(view.content.revision) +
-		                " has it; yours goes to the project's trash (Undo file brings it back).");
+		                " has it; yours goes to the project's trash (kept until Empty the trash).");
 	}
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");

@@ -9,7 +9,9 @@
 // way; and a pull applied into the folder (the revision's files in place, the replaced and removed
 // ones in the trash, an emptied folder gone, the base and binding written), refused while a
 // conflict stands, a download is missing or a file changed since the plan, and finished by a pull
-// planned again after one cut short.
+// planned again after one cut short; a change of a file's case, a folder replaced by a file and a
+// file by a folder, each applied; and a rename into place that does not go, the files it would
+// replace back out of the trash.
 
 #include <algorithm>
 #include <chrono>
@@ -315,6 +317,85 @@ static int test_apply() {
 	return 0;
 }
 
+// A revision that changes a file's letters' case alone (one file on Windows and macOS, never a
+// change since the plan there), replaces a folder by a file of its name and a file by a folder of
+// its name: each applied, the folder then the revision's.
+static int test_apply_renames() {
+	test_temp::TempDir dir("opennova_content_apply_renames");
+	const std::string root = dir.file("Project");
+	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
+	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	std::string error;
+	const std::vector<ContentFile> base = { file("bar", "bar"), file("defs/a.def", "a"),
+		file("foo/x.txt", "x") };
+	TEST_EXPECT(put(root + "/bar", "bar") && put(root + "/defs/a.def", "a") &&
+			put(root + "/foo/x.txt", "x"));
+	const std::vector<ContentFile> theirs = { file("bar/y.txt", "y"), file("defs/A.def", "a"),
+		file("foo", "foo") };
+	const editor::ContentScan scan = editor::scan_content(paths, "");
+	const editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
+	TEST_EXPECT(plan.items.size() == 6 && plan.conflicts() == 0);
+	for (const std::string &bytes : { std::string("y"), std::string("a"), std::string("foo") })
+		TEST_EXPECT(put(editor::incoming_path(content_paths, sha_of(bytes)), bytes));
+
+	editor::ApplyResult result;
+	TEST_EXPECT(editor::apply_pull(
+			paths, plan, theirs, { "https://example.test", "JO", 2 }, result, error));
+	TEST_EXPECT(result.written == 3 && result.removed == 3 && result.trash.paths.size() == 3);
+	TEST_EXPECT(read(root + "/bar/y.txt") == "y" && read(root + "/foo") == "foo" &&
+			read(root + "/defs/A.def") == "a");
+	const editor::ContentScan after = editor::scan_content(paths, "");
+	TEST_EXPECT(paths_of(after.files()) ==
+			(std::vector<std::string>{ "bar/y.txt", "defs/A.def", "foo" }));
+	TEST_EXPECT(editor::plan_pull(theirs, after.files(), after.unread(), theirs).items.empty());
+	std::printf("apply: a change of case, a folder replaced by a file and a file by a folder\n");
+	return 0;
+}
+
+// A rename into place that does not go (a folder that is not empty where the revision puts a
+// file): the file it and the writes after it would replace back out of the trash, the ones written
+// before it kept, the base the old one; a pull planned again finishes once the folder is empty.
+static int test_apply_put_back() {
+	test_temp::TempDir dir("opennova_content_apply_put_back");
+	const std::string root = dir.file("Project");
+	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
+	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	std::string error;
+	const std::vector<ContentFile> base = { file("a.txt", "a1"), file("z.txt", "z1") };
+	TEST_EXPECT(put(root + "/a.txt", "a1") && put(root + "/z.txt", "z1") &&
+			put(root + "/q/Thumbs.db", "windows' thumbnails"));
+	TEST_EXPECT(editor::write_content_base(content_paths, base, error));
+	const std::vector<ContentFile> theirs = { file("a.txt", "a2"), file("q", "q"),
+		file("z.txt", "z2") };
+	for (const std::string &bytes : { std::string("a2"), std::string("q"), std::string("z2") })
+		TEST_EXPECT(put(editor::incoming_path(content_paths, sha_of(bytes)), bytes));
+	const editor::ContentBinding r2{ "https://example.test", "JO", 2 };
+
+	const editor::ContentScan scan = editor::scan_content(paths, "");
+	editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
+	TEST_EXPECT(plan.items.size() == 3);
+	editor::ApplyResult result;
+	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r2, result, error));
+	TEST_EXPECT(read(root + "/a.txt") == "a2" && read(root + "/z.txt") == "z1" &&
+			result.trash.paths == std::vector<std::string>{ "a.txt" });
+	TEST_EXPECT(
+			!exists(content_paths.incoming_dir + "/staged") && !exists(content_paths.binding_file));
+	std::vector<ContentFile> kept;
+	TEST_EXPECT(editor::read_content_base(content_paths, kept, error) && kept.size() == 2);
+
+	// The folder emptied: planned again, the rest put in place, the empty folder giving way.
+	std::error_code ec;
+	fs::remove(editor::system_path(root + "/q/Thumbs.db"), ec);
+	const editor::ContentScan emptied = editor::scan_content(paths, "");
+	plan = editor::plan_pull(base, emptied.files(), emptied.unread(), theirs);
+	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.txt"));
+	TEST_EXPECT(editor::apply_pull(paths, plan, theirs, r2, result, error));
+	TEST_EXPECT(read(root + "/q") == "q" && read(root + "/z.txt") == "z2");
+	std::printf("apply: a rename refused, the files it would replace back from the trash, then "
+				"finished\n");
+	return 0;
+}
+
 static int test_resumed_pull() {
 	test_temp::TempDir dir("opennova_content_resume");
 	const std::string root = dir.file("Project");
@@ -347,6 +428,8 @@ int main() {
 	failures += test_scan();
 	failures += test_plan();
 	failures += test_apply();
+	failures += test_apply_renames();
+	failures += test_apply_put_back();
 	failures += test_resumed_pull();
 	if (failures == 0)
 		std::printf("content_store: all tests passed\n");

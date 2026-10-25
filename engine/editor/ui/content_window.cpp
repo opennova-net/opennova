@@ -217,7 +217,7 @@ void ContentWindow::draw_standing(const ContentView &c) {
 						workspace_.request(request::content_restore(change.path));
 					ImGui::EndDisabled();
 					ui_kit::tooltip("Puts back the file as revision " + std::to_string(c.revision) +
-					                " has it; yours goes to the project's trash (Undo file brings it back).");
+					                " has it; yours goes to the project's trash (kept until Empty the trash).");
 					ImGui::PopID();
 				}
 			ImGui::EndTable();
