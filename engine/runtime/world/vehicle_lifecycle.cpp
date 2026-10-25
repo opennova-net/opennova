@@ -246,10 +246,10 @@ void VehicleSystem::initialize_mission_vehicles() {
 //  Entity_InitVehicleAIFromDef @0x4686C0 (stamp @0x4686D3..0x468703, slot gate
 //  @0x46878D, re-seed @0x46885B..0x468964); Entity_InitHelicopterAIFromDef
 //  @0x4683C0 (@0x4683D4..0x468404, @0x46848E, @0x46852A..0x468692)]
-bool VehicleSystem::rerun_class_init(Entity &e) {
+void VehicleSystem::rerun_class_init(Entity &e) {
 	AiEntity *ai = world_.ai.for_handle(e.handle);
 	if (ai == nullptr)
-		return false;
+		return;
 	stamp_saved_live_pose(e);
 	AiBrain &b = ai->brain;
 	const VehicleTraits *t = traits.get(e.item_id);
@@ -292,20 +292,30 @@ bool VehicleSystem::rerun_class_init(Entity &e) {
 	world_.ai.row(b.f[AiBrain::kCurState]).enter(ctx);
 	// [orig: @0x46895A..0x468964; helo @0x468682..0x468692]
 	setup_gunner_attachments(e);
-	return true;
 }
 
 // [orig: Entity_RespawnVehicle @0x45FF40]
 void VehicleSystem::respawn(Entity &e) {
-	// The ai_function class init runs first; only when it ran do the rotor
-	// speed/rate words drop. A CHel / cpln row's init ends in its slot leg, brain or
-	// none, so an EWeap helicopter respawns with its slot bound and seeded afresh.
+	// The ai_function class init runs first; only when the def binds one do the
+	// rotor speed/rate words drop. Every vehicle row binds one, whether the row
+	// has a brain or not (a joiner's row never has), so the drop runs on every
+	// peer. A CHel / cpln row's init ends in its slot leg, brain or none, so an
+	// EWeap helicopter respawns with its slot bound and seeded afresh.
 	// [orig: `cmp [eax+148h],ebx ... call ecx` @0x45FF53..0x45FF68; +0x468/+0x460 = 0
-	//  @0x45FF6D..0x45FF73; Entity_InitHelicopterAIFromDef @0x4683C0 - the no-AI-slot leg's
-	//  jz @0x468493 and the brain leg's jmp @0x46869A, both into the call @0x4686A2]
-	const bool class_init_ran = rerun_class_init(e);
+	//  @0x45FF6D / @0x45FF73; g_EntityClassEventCallbackTable @0x813000 - the init
+	//  column (+12) of CHel @0x8132A0 (Entity_InitHelicopterAIFromDef @0x4683C0), cveh
+	//  @0x813378 (Entity_InitVehicleAIFromDef @0x4686C0), cbot @0x813390
+	//  (j_Entity_InitVehicleAIFromDef @0x474560), cpln @0x8133A8
+	//  (j_Entity_InitHelicopterAIFromDef @0x474550), ctrn @0x8133C0
+	//  (j_Entity_InitVehicleAIFromDef_0 @0x474570); Entity_InitHelicopterAIFromDef
+	//  @0x4683C0 - the no-AI-slot leg's jz @0x468493 and the brain leg's jmp
+	//  @0x46869A, both into the call @0x4686A2]
+	const VehicleTraits *vehicle_traits = traits.get(e.item_id);
+	const bool class_init = vehicle_traits != nullptr &&
+			vehicle_traits->brain_class != VehicleBrainClass::Unset;
+	rerun_class_init(e);
 	run_weapon_slot_class_init(e);
-	if (class_init_ran) {
+	if (class_init) {
 		e.veh.part_spin.rate = 0;
 		e.veh.part_spin.speed = 0;
 	}

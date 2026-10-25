@@ -474,9 +474,9 @@ private:
 	// The ai_function class init re-run at the head of respawn: the brain exists,
 	// so it re-seeds the route, ammo, speeds and turret words, re-staggers the
 	// think phase, re-enters the current state and rebuilds the gunner list.
-	// False when the entity carries no AI component (no class init ran).
+	// A row with no AI component (a joiner's) has none of this to re-run.
 	// [orig: Entity_RespawnVehicle @0x45FF53..0x45FF68 -> ItemDef+0x148]
-	bool rerun_class_init(Entity &vehicle);
+	void rerun_class_init(Entity &vehicle);
 
     World &world_;
 	struct SpawnMarker {

@@ -297,6 +297,43 @@ bool run_live_record_respawns_the_dead_client_row() {
 	return ok;
 }
 
+// The client's respawn drops the rotor speed and rate words after the def's class init, and
+// only when the def binds one: the gate is def+0x148, not the row's brain. Every vehicle row
+// binds one (here the cveh row's); a brainless client row drops them too, while a def whose
+// ai_function row binds none keeps them.
+// [orig: Entity_SerializeVehicleState @0x460560 - the Entity_RespawnVehicle call @0x460964;
+//  Entity_RespawnVehicle @0x45FF40 - the def+0x148 test @0x45FF53, +0x468 = 0 @0x45FF6D,
+//  +0x460 = 0 @0x45FF73; g_EntityClassEventCallbackTable @0x813000 - the cveh row @0x813378,
+//  its init column -> Entity_InitVehicleAIFromDef @0x4686C0]
+bool run_respawn_drops_the_rotor_words_by_the_def_class_init() {
+	bool ok = true;
+	for (const bool class_init : {true, false}) {
+		Harness h;
+		w::World &world = h.kernel->world;
+		world.ai.release(h.tank); // a client row with no brain
+		w::VehicleTraits traits = *world.vehicles.traits.get(kTankType);
+		traits.brain_class = class_init ? w::VehicleBrainClass::Ground : w::VehicleBrainClass::Unset;
+		world.vehicles.traits.set(kTankType, traits);
+		h.record(0x00, 2000);
+		h.record(0x02, 2000);
+		h.record(0x06, 0);
+		ok &= expect(((h.hull().flags | h.hull().engine_flags) & w::kEntityFlagDead) != 0,
+		             "rotor drop: the destroyed bit killed the brainless client row");
+		h.hull().veh.part_spin.speed = w::kRotorSpeedMax;
+		h.hull().veh.part_spin.rate = w::kRotorRateFull;
+		h.record(0x00, 2500);
+		ok &= expect(((h.hull().flags | h.hull().engine_flags) & w::kEntityFlagDead) == 0,
+		             "rotor drop: the live record respawns the brainless client row");
+		if (class_init)
+			ok &= expect(h.hull().veh.part_spin.speed == 0 && h.hull().veh.part_spin.rate == 0,
+			             "rotor drop: a def with a class init drops the rotor words, brain or none");
+		else
+			ok &= expect(h.hull().veh.part_spin.speed != 0,
+			             "rotor drop: a def with no class init keeps the rotor speed");
+	}
+	return ok;
+}
+
 // D-NET-NEW-L4-31 (V-ROLL-BV D1): a tilted wreck respawns level. The live form stages zero
 // Pitch / Roll words, the respawn edge copies them into the row and the respawn builds its
 // matrix from them, so the row and its mover's arming take 0 / 0, not the last dead-pose
@@ -858,6 +895,7 @@ int main() {
 	ok &= run_hull_holds_its_spawn_pose_until_its_first_compact();
 	ok &= run_destroyed_bit_kills_the_client_row();
 	ok &= run_live_record_respawns_the_dead_client_row();
+	ok &= run_respawn_drops_the_rotor_words_by_the_def_class_init();
 	ok &= run_tilted_wreck_respawns_level();
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();

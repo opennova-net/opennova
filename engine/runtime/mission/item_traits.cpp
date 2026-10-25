@@ -636,6 +636,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The chel row's world callback also hides sections by the rotor speed
+        // and the airborne flag, each section named by one byte of the def's
+        // +0x890..+0x897 run (the deathtime / door dword and the clipsize dword
+        // the rotor_parts / aux_parts keys write, low byte first).
+        // [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+        //  @0x48F3BE / @0x48F3E0 / @0x48F406 / @0x48F427 / @0x48F448 / @0x48F469)]
+        e->chel_section_bytes = {};
+        if (render == "chel") {
+            for (int i = 0; i < 4; ++i) {
+                const unsigned shift = static_cast<unsigned>(i) * 8u;
+                e->chel_section_bytes[i] = static_cast<uint8_t>(
+                        static_cast<uint32_t>(def->deathtime_ticks) >> shift);
+                e->chel_section_bytes[4 + i] = static_cast<uint8_t>(
+                        static_cast<uint32_t>(def->clipsize) >> shift);
+            }
+        }
         // The `bldg` row's world callback translates the draw of whatever it
         // draws by the negated origin, in the graphic model's COBJ, of the
         // section the byte +0x2C1 names; section 0 draws in place. A section

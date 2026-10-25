@@ -659,6 +659,18 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				// [orig: Entity_UpdateTransformAndTurret @0x440F70..0x441020;
 				//  BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 				write_present_replica_vehicle_gun(r, kernel.world, *owned, es);
+				// The cveh / chel / tank / cpln world callbacks run on every peer:
+				// each collapses the sections its own +0x138 names, and the chel
+				// row's also hides its rotor / aux sections by this client's own
+				// rotor speed and airborne flag, so a joiner publishes its row's
+				// hidden sections as the authority collector does.
+				// [orig: Entity_BuildDeathSectionTransforms @0x492AF0 (the test
+				//  @0x492C8D); Entity_BuildAndApplyBoneMatrices @0x48F210 (the test
+				//  @0x48F39D, the hides @0x48F3B2..0x48F479); Render_DestroyedSections
+				//  @0x449EF0 (the test @0x44A0CD); BoneCallback_cpln_World @0x48FE90
+				//  (the test @0x48FFFF)]
+				if (owned->death_section_pivot)
+					write_present_section_mask(r, item_hidden_sections(*owned));
 			}
 			const auto *item = owned ? kernel.world.tables.item_death_traits.get(owned->item_id) : nullptr;
 			if (owned && (owned->palm_sections || owned->item_section_piece ||

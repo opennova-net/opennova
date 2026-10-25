@@ -375,6 +375,37 @@ uint32_t palm_sector_hidden_sections(const Entity &entity) {
     default: return 0;
     }
 }
+// The chel row's world callback, after its +0x138 collapse, hides by the rotor
+// speed (+0x460, compared signed) and the airborne flag: Flags 0x2000 hides the
+// section def+0x896 names, a stopped rotor def+0x897's, a rotor faster than
+// 0x28F5C27 def+0x890's and def+0x894's, a slower one def+0x891's and
+// def+0x895's (at exactly 0x28F5C27 neither pair); a zero byte hides nothing.
+// It zeroes the named bone of whichever model it draws, a wreck's husk too. A
+// byte past this 32-bit word names no section here (no shipped def has one).
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (Flags & 0x2000
+//  @0x48F3B2..0x48F3CE; +0x460 == 0 @0x48F3D4..0x48F3F0; above 0x28F5C27
+//  @0x48F3F6..0x48F416 and @0x48F43D..0x48F458; below it @0x48F41C..0x48F437
+//  and @0x48F45E..0x48F479)]
+constexpr int32_t kChelRotorSectionSpeed = 0x28F5C27;
+uint32_t chel_rotor_hidden_sections(const Entity &entity) {
+    const std::array<uint8_t, 8> &section = entity.chel_section_bytes; // def+0x890..+0x897
+    uint32_t mask = 0;
+    const auto hide = [&mask](uint8_t index) {
+        if (index != 0 && index < 32) mask |= 1u << index;
+    };
+    if ((entity.flags & kEntityFlagInAir) != 0) hide(section[6]);
+    const int32_t speed = entity.veh.part_spin.speed;
+    if (speed == 0) hide(section[7]);
+    if (speed > kChelRotorSectionSpeed) {
+        hide(section[0]);
+        hide(section[4]);
+    }
+    if (speed < kChelRotorSectionSpeed) {
+        hide(section[1]);
+        hide(section[5]);
+    }
+    return mask;
+}
 uint32_t item_hidden_sections(const Entity &entity) {
     // The psec / cesp world callback hides the sector builder's sections and
     // nothing else [orig: BoneCallback_psec_World @ 0x53C130].
@@ -382,7 +413,7 @@ uint32_t item_hidden_sections(const Entity &entity) {
     uint32_t mask = entity.section_mask;
     if (entity.engine_flags & kEntityFlagHusk)
         mask |= entity.spawned_piece_mask;
-    return mask;
+    return mask | chel_rotor_hidden_sections(entity);
 }
 const std::array<int32_t, 3> *bldg_section_origin_q16(const World &world, const Entity &entity) {
     // The bldg row's world callback reads the byte +0x2C1 of whatever it

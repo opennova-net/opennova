@@ -17,6 +17,7 @@
 #include <runtime/world/present_rows.h>
 #include <runtime/world/player_weapon.h> // weapon_flag::kNoClipsNoDraw
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -24,6 +25,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace w = opennova::world;
@@ -1646,6 +1648,73 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 	return ok;
 }
 
+// The chel row's rotor / aux hides ride PF_SECTION_MASK on every role: the
+// host / SP collector's row and a joiner's own replica row, since the cveh /
+// chel / tank / cpln world callbacks run on every peer (each with its +0x138
+// collapse). A joiner row under no such render tag leaves the channel
+// unpublished. Sections as rotor_parts 1 2 3 4 and aux_parts 5 6 name them.
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the test @0x48F39D, the
+//  hides @0x48F3B2..0x48F479); Entity_BuildDeathSectionTransforms @0x492AF0
+//  (the test @0x492C8D)]
+bool test_rotor_hides_reach_world_and_joiner_rows() {
+	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	kernel->world.registry.configure_pool(1, 4);
+	w::Entity *helo = spawn_pool_row(*kernel, 1, 0, 1292);
+	w::Entity *crate = spawn_pool_row(*kernel, 1, 1, 1293);
+	if (!expect(helo != nullptr && crate != nullptr, "the rotor rows spawn")) return false;
+	helo->section_mask = 0;
+	helo->death_section_pivot = true;
+	helo->chel_section_bytes = {1, 2, 0, 0, 3, 4, 5, 6}; // def+0x890..+0x897
+	helo->veh.part_spin.speed = w::kRotorSpeedMax;
+	crate->section_mask = 0;
+	const auto row_for = [](const std::vector<float> &rows, const w::Entity *e) -> const float * {
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
+			if (static_cast<int>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == e->handle.packed)
+				return row_at(rows, i);
+		return nullptr;
+	};
+	const auto lo = [](const float *row) { return static_cast<int>(row[w::PF_SECTION_MASK_LO]); };
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	const float *row = row_for(rows, helo);
+	if (!expect(row != nullptr, "the world helicopter row")) return false;
+	bool ok = expect(row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x0A,
+			"a spun-up rotor hides the world row's sections 1 and 3");
+	helo->veh.part_spin.speed = 0;
+	helo->flags |= w::kEntityFlagInAir;
+	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	row = row_for(rows, helo);
+	ok = expect(row != nullptr && lo(row) == 0x74,
+			"a stopped rotor in the air hides the world row's sections 2, 4, 5 and 6") && ok;
+
+	im::ClientRuntime runtime("RotorRows");
+	for (const w::Entity *e : {helo, crate}) {
+		opennova::replication::ClientEntityState decoded;
+		decoded.handle = e->handle.packed;
+		decoded.type_id = static_cast<uint16_t>(e->item_id);
+		decoded.cls = opennova::EntityClass::Vehicle;
+		runtime.state().upsert(decoded.handle) = decoded;
+	}
+	helo->flags &= ~w::kEntityFlagInAir;
+	helo->veh.part_spin.speed = w::kRotorSpeedMax;
+	helo->engine_flags |= w::kEntityFlagHusk;
+	helo->spawned_piece_mask = 1u << 8;
+	crate->engine_flags |= w::kEntityFlagHusk;
+	crate->spawned_piece_mask = 1u << 8;
+	im::PoolPresentLifecycleMap joiner_lifecycle;
+	im::build_client_replica_present_rows({*kernel, &runtime, true}, joiner_lifecycle, rows, doors);
+	row = row_for(rows, helo);
+	ok = expect(row != nullptr && row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x10A,
+			"a joiner's helicopter row hides its flown-off section 8 and its rotor sections 1 and 3") &&
+			ok;
+	row = row_for(rows, crate);
+	ok = expect(row != nullptr && row[w::PF_SECTION_MASK_VALID] == 0.0f,
+			"a joiner row under no death-section render tag publishes no section mask") && ok;
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_bldg_section_offset_reaches_present_rows();
@@ -1678,6 +1747,7 @@ int main() {
 	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
 	ok = test_replica_rows_present_the_served_ring_entries() && ok;
 	ok = test_seated_replica_row_presents_its_channel() && ok;
+	ok = test_rotor_hides_reach_world_and_joiner_rows() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

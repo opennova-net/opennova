@@ -25,6 +25,7 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1070,17 +1071,31 @@ int main() {
 				{"TANK", false, false}, {"bldg", false, true}, {"bldgX", false, true},
 				{"Bldg", false, false}, {"BLDG", false, false},
 			};
+			// The chel row alone carries the def's +0x890..+0x897 byte run, the
+			// sections its world callback hides by rotor speed and the airborne
+			// flag: here the words rotor_parts 1 2 3 4 and aux_parts 5 6 write.
+			// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+			//  @0x48F3BE..0x48F469)]
+			truck_def->deathtime_ticks = 0x00000201;
+			truck_def->clipsize = 0x06050403;
+			const std::array<uint8_t, 8> chel_bytes = {1, 2, 0, 0, 3, 4, 5, 6};
 			for (const auto &tag : tags) {
 				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
 						"%s", tag.tag);
 				mission::resolve_item_traits(w, file, wire_class, nullptr);
 				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
 				CHECK(w.registry.get(truck_h)->bldg_section_pivot == tag.bldg);
+				const bool chel = std::strcmp(tag.tag, "chel") == 0;
+				CHECK(w.registry.get(truck_h)->chel_section_bytes ==
+						(chel ? chel_bytes : std::array<uint8_t, 8>{}));
 			}
+			truck_def->deathtime_ticks = 0;
+			truck_def->clipsize = 0;
 			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
 			mission::resolve_item_traits(w, file, wire_class, nullptr);
 			CHECK(w.registry.get(truck_h)->death_section_pivot);
 			CHECK(!w.registry.get(truck_h)->bldg_section_pivot);
+			CHECK(w.registry.get(truck_h)->chel_section_bytes == (std::array<uint8_t, 8>{}));
 		}
 	}
 

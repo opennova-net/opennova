@@ -1003,6 +1003,15 @@ struct Entity {
     // recomputed on every def resolve. The draw alone: each row's collision
     // column is BoneCallback_Simple @0x4E2600.
     bool death_section_pivot = false;
+    // The chel row's rotor / aux section draws: the def's byte run
+    // +0x890..+0x897 (rotor_parts tokens 1..4 at +0x890 / +0x891 / +0x894 /
+    // +0x895, aux_parts tokens 1 / 2 at +0x896 / +0x897), which the render
+    // tag's chel world callback hides by the rotor speed and the airborne
+    // flag (item_hidden_sections). All zero under any other render tag;
+    // recomputed on every def resolve.
+    // [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the reads
+    //  @0x48F3BE..0x48F469)]
+    std::array<uint8_t, 8> chel_section_bytes{};
     // The bldg draw: the render tag's bldg bone row, whose world callback
     // translates whatever it draws by the negated graphic-model COBJ origin of
     // the section byte +0x2C1 names (a section clone's own; 0 draws in place)

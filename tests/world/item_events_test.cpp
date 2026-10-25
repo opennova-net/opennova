@@ -947,7 +947,58 @@ int test_class_scoring_and_explosion_draws() {
     return 0;
 }
 
+// The chel row's world callback, after its +0x138 collapse, hides by the rotor
+// speed (+0x460, compared signed) and the airborne flag. A def with rotor_parts
+// 1 2 3 4 and aux_parts 5 6 names sections 1 / 2 / 3 / 4 at def+0x890 / +0x891 /
+// +0x894 / +0x895 and 5 / 6 at +0x896 / +0x897: a stopped rotor hides 2, 4 and
+// 6, a rotor faster than 0x28F5C27 hides 1 and 3, a slower one 2 and 4,
+// exactly 0x28F5C27 neither pair, and Flags 0x2000 adds 5. The hides OR with
+// the section and husk piece masks; a row under another render tag (no bytes)
+// hides nothing by them.
+// [orig: Entity_BuildAndApplyBoneMatrices @0x48F210 (the collapse test
+//  @0x48F39D; Flags & 0x2000 @0x48F3B2..0x48F3CE; +0x460 == 0
+//  @0x48F3D4..0x48F3F0; above @0x48F3F6..0x48F416 / @0x48F43D..0x48F458;
+//  below @0x48F41C..0x48F437 / @0x48F45E..0x48F479)]
+int test_chel_rotor_hidden_sections() {
+    constexpr int32_t kThreshold = 0x28F5C27; // 42949671
+    Entity e;
+    e.chel_section_bytes = {1, 2, 0, 0, 3, 4, 5, 6}; // def+0x890..+0x897
+    e.veh.part_spin.speed = 0;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4) | (1u << 6)));
+    e.veh.part_spin.speed = kThreshold + 1;
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3)));
+    e.veh.part_spin.speed = kThreshold;
+    CHECK(item_hidden_sections(e) == 0);
+    e.veh.part_spin.speed = kThreshold - 1;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4)));
+    // A signed compare: a negative word is below the threshold, not above.
+    e.veh.part_spin.speed = -1;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4)));
+    e.veh.part_spin.speed = 0;
+    e.flags |= kEntityFlagInAir;
+    CHECK(item_hidden_sections(e) == ((1u << 2) | (1u << 4) | (1u << 5) | (1u << 6)));
+    e.veh.part_spin.speed = 0x0CCCCCC0; // full rotor speed
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 5)));
+    e.flags &= ~kEntityFlagInAir;
+    e.section_mask = 1u << 9;
+    e.engine_flags |= kEntityFlagHusk;
+    e.spawned_piece_mask = 1u << 8;
+    CHECK(item_hidden_sections(e) == ((1u << 1) | (1u << 3) | (1u << 8) | (1u << 9)));
+    // A zero byte hides nothing.
+    e.chel_section_bytes = {1, 0, 0, 0, 0, 0, 0, 0};
+    e.section_mask = e.spawned_piece_mask = 0;
+    e.veh.part_spin.speed = 0;
+    CHECK(item_hidden_sections(e) == 0);
+    Entity plain;
+    plain.flags |= kEntityFlagInAir;
+    CHECK(item_hidden_sections(plain) == 0);
+    plain.veh.part_spin.speed = kThreshold + 1;
+    CHECK(item_hidden_sections(plain) == 0);
+    return 0;
+}
+
 int main() {
+    if (test_chel_rotor_hidden_sections() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
