@@ -29,6 +29,9 @@ easier to relay than to rediscover.
   that switches retail's `gs.novaworld.net` and the updater's `ftp.novaworld.com`,
   `ftp2.novaworld.com` and `ftp4.novaworld.com` between OpenNova's NovaWorld, NovaLogic's and
   a custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
+  Pitched for the original `dfx2.exe` alone (NovaLogic's DFX2 NovaWorld is down): the original
+  `Jointops.exe` finds our hosted JO servers on NovaLogic's NovaWorld (ADR 0068), though the
+  Switcher still works for it.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service

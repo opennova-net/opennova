@@ -178,6 +178,8 @@ describe('LobbyPage', () => {
     readNovaLogic.mockRejectedValue(new Error('Network Error'));
     const page = await open();
     expect(page.text()).toContain('No games are being hosted on our NovaWorld right now');
+    // The Switcher is named for the original dfx2.exe alone.
+    expect(page.text()).toContain('the original dfx2.exe through the OpenNova Switcher');
     expect(page.text()).not.toContain('Unable to load lobbies');
     expect(section(page).exists()).toBe(false);
   });

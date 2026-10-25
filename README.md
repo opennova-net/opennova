@@ -18,7 +18,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
-| `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). Only the original exes need it: `opennova.exe` reaches OpenNova's NovaWorld itself. |
+| `switcher/` | OpenNova Switcher: a Windows tray app for the original Delta Force Xtreme 2, whose NovaLogic NovaWorld is down: it points a stock install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). It works for Joint Operations too, but the original `Jointops.exe` needs no Switcher to find OpenNova's hosted servers, which can also list on NovaLogic's NovaWorld; `opennova.exe` reaches OpenNova's NovaWorld itself. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
@@ -148,11 +148,14 @@ service runs on Linux only; on Windows, run the local stack (`scripts/dev_stack.
 
 The OpenNova Switcher ships as `opennova-switcher-windows.zip` (on a PR's build
 comment) and `opennova-switcher-windows-v<version>.zip` (on tagged releases):
-`opennova-switcher.exe` and its README. It is a tray app that switches a stock
-Joint Operations install between OpenNova's NovaWorld, NovaLogic's NovaWorld and
-an address you enter, by managing one block in the Windows hosts file; the game's
-files stay stock. Only the original exes need it: `opennova.exe`'s NovaWorld screen
-reaches OpenNova's NovaWorld (`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
+`opennova-switcher.exe` and its README. It is a tray app for the original `dfx2.exe`:
+NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, and the Switcher points a stock
+install at OpenNova's NovaWorld (or NovaLogic's, or an address you enter) by managing one
+block in the Windows hosts file; the game's files stay stock. It works for a stock Joint
+Operations install too, but the original `Jointops.exe` does not need it: a hosted Joint
+Operations server can also list on NovaLogic's NovaWorld, where the game finds it as it
+is. Nor does `opennova.exe`, whose NovaWorld screen reaches OpenNova's NovaWorld
+(`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
 exe is unsigned, so releases also carry the zip's SHA-256
 (`opennova-switcher-windows-v<version>.zip.sha256`) to check before running it.
 See [switcher/README.md](switcher/README.md).

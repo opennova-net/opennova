@@ -32,7 +32,7 @@
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted on our NovaWorld right now</p>
           <p class="mt-2 text-sm text-ink-muted">
-            Host one from the game's own menu: OpenNova reaches NovaWorld as it is, and the original game
+            Host one from the game's own menu: OpenNova reaches our NovaWorld as it is, and the original dfx2.exe
             <RouterLink :to="{ path: '/', hash: '#online' }" class="link">through the OpenNova Switcher</RouterLink>.
             Or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
           </p>
