@@ -86,7 +86,7 @@ struct Run {
 std::vector<ExpansionRecord> records() {
 	return {
 		{ "jox01", { "Joint Operations: Escalation", "Kendari island." } },
-		{ "nifty", { "OpenNova: Indigo Storm", "A storm." } },
+		{ "nifty", { "OP: Nifty Package", "A storm." } },
 	};
 }
 
@@ -112,7 +112,7 @@ void test_rows() {
 	CHECK(rows.size() == 3);
 	if (rows.size() == 3) {
 		CHECK(rows[0] == kModListBaseKey);
-		CHECK(rows[1] == "Joint Operations: Escalation" && rows[2] == "OpenNova: Indigo Storm");
+		CHECK(rows[1] == "Joint Operations: Escalation" && rows[2] == "OP: Nifty Package");
 	}
 	CHECK(run.rt.selected_row(list) == 0);
 	CHECK(run.rt.get_widget_text(desc) == "AUTHORED");
