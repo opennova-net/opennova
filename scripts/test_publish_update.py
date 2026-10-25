@@ -30,6 +30,7 @@ class PublisherTest(unittest.TestCase):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 owner.requests.append((self.command, self.path, body))
                 owner.assertEqual(self.headers.get("Authorization"), "Bearer test-token")
+                owner.assertEqual(self.headers.get("User-Agent"), "opennova-publish-update/1")
                 path = urlsplit(self.path).path
                 status = 200
                 reply = {}
