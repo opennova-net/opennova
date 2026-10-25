@@ -51,7 +51,8 @@ There are three places the service runs, and nothing of one reaches another by a
 | Where | the developer's machine | its own AWS account, `opennova-staging`, in the Organization | its own AWS account, `opennova-prod` |
 | Site | `http://localhost:8000` | `https://staging.<domain>` | `https://<domain>` (and `www`) |
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
-| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` | `nw.<domain>` |
+| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` (a debug game export's own) | `nw.<domain>` (a release export's own) |
+| Update service (OpenNova's `update.exe`) | none (`update.exe --server`) | `update.staging.<domain>` (a debug game zip's `OPENNOVA.WIZ`) | `update.<domain>` (a release zip's) |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -244,8 +245,8 @@ own, change these on your fork:
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
-| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
-| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1`, `scripts/package_release.py` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` and `UPDATE.WIZ` files the packages write | `update.<domain>`, your deployment's ("The update service") |
+| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1`, `scripts/package_release.py` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` and `UPDATE.WIZ` files the packages write (a debug game zip's name staging's, `update.staging.opennova.net`) | `update.<domain>` and `update.staging.<domain>`, your deployments' ("The update service") |
 
 ## Rebuilding from the vault
 
@@ -1380,7 +1381,11 @@ switched client updates from here; with it off, `update.<domain>` (`update.<depl
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
 (web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
 does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
-`OPENNOVA.WIZ` names, else `update.opennova.net`, which the packages write there too. An
+`OPENNOVA.WIZ` names, else `update.opennova.net`. A release game zip writes prod's there,
+and a debug one (`-ExportMode debug`, what PR CI builds) staging's,
+`update.staging.opennova.net`, so a PR's zip updates from staging alone. The runtime's
+update package carries the same wizard, so an install that takes a runtime release takes
+that release's wizard and the deployment it names. An
 OpenNova product (`retail_updater` off) that no published release serves is refused, so an
 OpenNova first install fails until OpenNova's runtime and content releases are published; a
 retail one with none is answered current, from a package web writes into its cache itself.

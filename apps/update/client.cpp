@@ -27,6 +27,10 @@ namespace fs = std::filesystem;
 namespace {
 using Clock = std::chrono::steady_clock;
 
+// Prod's update service, dialed only when no OPENNOVA.WIZ names a gateway. The game zip
+// always carries that wizard, naming its export mode's deployment (prod's in a release
+// package, staging's in a debug one: scripts/package_godot_windows.ps1), so one updater
+// build serves both flavours.
 constexpr const char *kServiceHost = "update.opennova.net";
 
 fs::path named_file(const fs::path &dir, const std::string &name) {

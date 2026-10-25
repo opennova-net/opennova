@@ -143,7 +143,15 @@ if ($ExportMode -eq "debug") {
     $SHIPPED_EDITOR_DLL = $EDITOR_RELEASE_DLL
 }
 $NeedsReleaseDll = ($ExportMode -eq "release")
-Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf)) ==="
+# The deployment a package talks to is its export mode's: a release package
+# prod's, a debug one (PR CI's) staging's (DEPLOY.md "Deployments: dev, staging
+# and prod"). The exported game's NovaWorld target picks the same deployment's
+# gate by its build (godot/game/novaworld_settings.gd), and update.exe dials the
+# gateway the zip's OPENNOVA.WIZ names (apps/update/client.cpp service_gateways):
+# the zip always carries that wizard, as the runtime's update package does, so
+# the updater's compiled fallback, prod's, is never what a zip install dials.
+$UPDATE_HOST = if ($ExportMode -eq "debug") { "update.staging.opennova.net" } else { "update.opennova.net" }
+Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf); updates from $UPDATE_HOST) ==="
 
 if ($SkipBuild) {
     Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
@@ -576,11 +584,11 @@ try {
     Copy-Item -LiteralPath $UPDATE_EXE, $REVUPDAT_EXE -Destination $stagePath
     $staged.Add("update.exe")
     $staged.Add("revupdat.exe")
-    [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
+    [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=$UPDATE_HOST`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
     $staged.Add("OPENNOVA.WIZ")
     $expansion = Join-Path $stagePath "expansion\nifty"
     New-Item -ItemType Directory -Path $expansion -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=NIFTY.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=NIFTY`r`n")
+    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=NIFTY.CMD`r`nURL=$UPDATE_HOST`r`nPRODUCT_LOGIN=NIFTY`r`n")
     $staged.Add("expansion\nifty\UPDATE.WIZ")
     $launchHelp = @"
 OpenNova (pre-1.0, experimental)
@@ -601,8 +609,11 @@ With no --resource-dir, game data is read from the executable's folder.
 Updates include the OpenNova runtime, selected game's content and installed
 expansions. --no-update disables checks and installation for this launch.
 Online play: choose OpenNova in the NovaWorld menu. The OpenNova Switcher is
-only needed for the original Jointops.exe and dfx2.exe.
+only needed for the original dfx2.exe, whose NovaLogic NovaWorld is down.
 "@
+    if ($ExportMode -eq "debug") {
+        $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`n$UPDATE_HOST, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."
+    }
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
     $staged.Add("README.txt")
     Test-GodotAppBoot -ExePath $stagedExe

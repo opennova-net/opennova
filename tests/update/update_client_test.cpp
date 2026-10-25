@@ -266,14 +266,24 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "ACIDGAMBIT" && products[1].native);
 	// A completed native install also has UPDATE.WIZ. Bare launch must retain
 	// full native rows and recognize its registered expansion without an archive.
+	// The runtime's OPENNOVA.WIZ is a debug zip's, naming staging's service
+	// (package_godot_windows.ps1 -ExportMode debug), and the content's and the
+	// expansion's own wizards name prod's (package_release.py writes that): every
+	// product updates from staging alone.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/OPENNOVA.WIZ"),
+			"[HEADER]\r\nCMD=ONRUNTIME.CMD\r\nURL=update.staging.opennova.net\r\n"
+			"PRODUCT_LOGIN=ONRUNTIME\r\n"));
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/UPDATE.WIZ"),
-			"[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\nPRODUCT_LOGIN=ACIDGAMBIT\r\n"));
+			"[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\nURL=update.opennova.net\r\n"
+			"PRODUCT_LOGIN=ACIDGAMBIT\r\n"));
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/expansion/nifty/UPDATE.WIZ"),
-			"[HEADER]\r\nCMD=NIFTY.CMD\r\nPRODUCT_LOGIN=NIFTY\r\n"));
+			"[HEADER]\r\nCMD=NIFTY.CMD\r\nURL=update.opennova.net\r\nPRODUCT_LOGIN=NIFTY\r\n"));
 	TEST_EXPECT(updater::parse_options({}, temp.path / "native/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 3);
 	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "ACIDGAMBIT" && products[1].native &&
 			products[2].login == "NIFTY" && products[2].native);
+	for (const updater::Product &product : products)
+		TEST_EXPECT(product.gateways == std::vector<std::string>({"update.staging.opennova.net"}));
 	return 0;
 }
 

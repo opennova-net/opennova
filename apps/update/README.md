@@ -24,8 +24,15 @@ runtime config never replaces the retail wizard or its `version.txt`. A native
 expansion's `expansion/<name>/UPDATE.WIZ` registers it for first installation;
 retail expansion updates additionally require the installed `<name>.pff`.
 
-The default gateway is `update.opennova.net`. The existing retail protocol,
-command files, CRCs, NLZ payloads and PFF writer are shared with the service.
+Every product updates through the gateways the runtime's `OPENNOVA.WIZ` names (its
+`URL`, `URL2` and `URL3`); a product's own wizard URLs are never dialed. The game zip
+writes that wizard by its export mode: `update.opennova.net`, production's, in a release
+package, and `update.staging.opennova.net`, staging's, in a debug one (`-ExportMode
+debug`, what PR CI builds), so one updater build serves both. With no `OPENNOVA.WIZ`, or
+one naming no URL, the gateway is production's, `update.opennova.net`.
+
+The existing retail protocol, command files, CRCs, NLZ payloads and PFF writer are
+shared with the service.
 Downloads for one product are validated before installation; file failures can
 leave a partial installation, and the next run checks and retries it. There is
 no transaction journal or rollback. Updating the updater itself uses its helper;

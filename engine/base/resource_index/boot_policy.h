@@ -69,8 +69,9 @@
 //   --novaworld-host <host>     the gate the NovaWorld screen's OpenNova target
 //                               dials (a name or an address); absent = the
 //                               product's own (godot/game/novaworld_settings.gd:
-//                               nw.opennova.net in an exported build, loopback in
-//                               a source run). Never the Original target's.
+//                               nw.opennova.net in a release export,
+//                               nw.staging.opennova.net in a debug one, loopback
+//                               in a source run). Never the Original target's.
 //   --working-dir <path>        the directory the game was started in, where it
 //                               keeps the files it writes beside itself as retail
 //                               keeps its saves in its working directory

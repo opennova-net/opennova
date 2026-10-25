@@ -158,7 +158,9 @@ def pristine_export(tool: Path, product: Product, install: Path, work: Path) -> 
 def write_wizard(tree: Path, product: Product) -> None:
     """Our own product's UPDATE.WIZ in its tree, which marks the folder it installs into as that
     product's: the updater installs OpenNova content only into a folder with no game data or one its
-    wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their stock one."""
+    wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their stock one.
+    Its URL is never dialed: every product updates through the runtime's OPENNOVA.WIZ, which names
+    the zip's deployment (package_godot_windows.ps1), so one package serves staging and prod."""
     folder = tree / "expansion" / product.expansion if product.expansion else tree
     folder.mkdir(parents=True, exist_ok=True)
     lines = [
