@@ -388,7 +388,7 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (open_before_.size() <= static_cast<size_t>(i)) {
 			open_before_.resize(static_cast<size_t>(i) + 1, 1);
 		}
-		if (window.open && !open_before_[static_cast<size_t>(i)] &&
+		if (window.open && !open_before_[static_cast<size_t>(i)] && !window.focus_requested() &&
 				std::find(layout_focus_.begin(), layout_focus_.end(), window.title()) == layout_focus_.end()) {
 			layout_focus_.push_back(window.title());
 		}

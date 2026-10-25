@@ -469,9 +469,7 @@ void test_modals_one_at_a_time() {
 	ui.frames(2);
 	session.handle(request::set_workspace("{\"file_rename\": {\"path\": \"" + menu_path + "\"}}"));
 	run.settle();
-	// Files opened again comes forward in the node it shares with Content (a frame for its tab, one for
-	// its pick), then its Rename... opens.
-	ui.frames(5);
+	ui.frames(3);
 	CHECK(files->open && shown_modal(v).modal == HeldModal::FileRename &&
 	              logged_frame(ui).find("Rename main.mnu to") != std::string::npos,
 	      "Files closed: its Rename... opens it, and shows");
