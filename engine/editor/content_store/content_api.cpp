@@ -98,6 +98,30 @@ RemoteProject project_of(const io::JsonValue &json) {
 	return p;
 }
 
+// A transfer the service handed out ({method, url, headers}) as the request that makes it: a route
+// of the service's own (a URL from '/') sent as the account, with its session and the CSRF header;
+// a URL of the store's own sent as it was handed out, with its headers alone (no cookie leaves the
+// service).
+ContentRequest transfer_request(
+		const ContentAccount &account, const io::JsonValue &transfer, const char *method) {
+	ContentRequest r;
+	r.method = transfer.get_string("method", method);
+	const std::string url = transfer.get_string("url", "");
+	const bool own = !url.empty() && url[0] == '/';
+	r.url = own ? account.server + url : url;
+	if (own) {
+		if (account.signed_in())
+			r.headers.emplace_back("Cookie", account.cookie);
+		if (r.method != "GET")
+			r.headers.emplace_back(kCsrfHeader, "1");
+	}
+	if (const io::JsonValue *headers = transfer.get("headers"); headers && headers->is_object())
+		for (const io::JsonMember &header : headers->object)
+			if (header.value.is_string())
+				r.headers.emplace_back(header.key, header.value.string);
+	return r;
+}
+
 // A Set-Cookie value's name and value ("name=value"), "" for one of another cookie.
 std::string session_pair(const std::string &set_cookie, bool &deleted) {
 	const std::string pair = set_cookie.substr(0, set_cookie.find(';'));
@@ -332,23 +356,38 @@ bool read_missing(const ContentResponse &reply, const ContentAccount &account,
 		UploadTarget target;
 		target.file.sha256 = item.get_string("sha256", "");
 		target.file.size = static_cast<uint64_t>(whole(item, "size"));
-		target.request.method = upload->get_string("method", "PUT");
-		const std::string url = upload->get_string("url", "");
-		// A route of the service's own is sent as the account; a URL of the store's, as it was
-		// handed out.
-		const bool own = !url.empty() && url[0] == '/';
-		target.request.url = own ? account.server + url : url;
-		if (own) {
-			if (account.signed_in())
-				target.request.headers.emplace_back("Cookie", account.cookie);
-			target.request.headers.emplace_back(kCsrfHeader, "1");
-		}
-		if (const io::JsonValue *headers = upload->get("headers"); headers && headers->is_object())
-			for (const io::JsonMember &header : headers->object)
-				if (header.value.is_string())
-					target.request.headers.emplace_back(header.key, header.value.string);
+		target.request = transfer_request(account, *upload, "PUT");
 		if (content::is_sha256_hex(target.file.sha256) && !target.request.url.empty())
 			out.push_back(std::move(target));
+	}
+	return true;
+}
+
+ContentRequest downloads(const ContentAccount &account, const std::string &key,
+		const std::vector<std::string> &sha256s) {
+	io::JsonValue body = io::JsonValue::make_object();
+	body.set("hashes", io::json_string_array(sha256s));
+	return json_request(account, "POST", project_path(key) + "/downloads", body);
+}
+
+bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
+		std::map<std::string, ContentRequest> &out, ContentApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("downloads");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no downloads";
+		return false;
+	}
+	for (const io::JsonValue &item : list->array) {
+		if (!item.is_object())
+			continue;
+		const std::string sha = item.get_string("sha256", "");
+		ContentRequest request = transfer_request(account, item, "GET");
+		if (content::is_sha256_hex(sha) && !request.url.empty())
+			out[sha] = std::move(request);
 	}
 	return true;
 }

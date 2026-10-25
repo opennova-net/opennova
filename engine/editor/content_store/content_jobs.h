@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -132,9 +133,20 @@ public:
 	const RemoteProject &remote() const { return remote_; }
 
 private:
-	enum class Phase : uint8_t { AskHead, ReadManifest, Scan, Resolve, Download, Apply, Done };
+	enum class Phase : uint8_t {
+		AskHead,
+		ReadManifest,
+		Scan,
+		Resolve,
+		Locate,
+		Download,
+		Apply,
+		Done
+	};
 
 	bool step_downloads();
+	// Whether an earlier pull landed `file` already (its download kept by its SHA-256 at its size).
+	bool landed(const content::ContentFile &file) const;
 
 	ProjectPaths paths_;
 	ContentPaths content_paths_;
@@ -148,6 +160,8 @@ private:
 	std::unique_ptr<ContentScan> scan_;
 	PullPlan plan_;
 	std::vector<content::ContentFile> downloads_;
+	size_t next_locate_ = 0; // the first file the next downloads request names
+	std::map<std::string, ContentRequest> requests_; // each file's download, by SHA-256
 	size_t next_download_ = 0;
 	std::vector<std::pair<content::ContentFile, ContentCall>> downloading_;
 	uint64_t bytes_downloaded_ = 0;

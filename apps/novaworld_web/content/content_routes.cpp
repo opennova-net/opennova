@@ -1,5 +1,6 @@
 #include "content_routes.h"
 
+#include "content_urls.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "data_sets/content_repository.h"
@@ -102,6 +103,17 @@ std::optional<ContentProject> readable(db::Database &db, const std::string &key,
 	if (!project || (project->visibility == Visibility::Private && !admin))
 		return std::nullopt;
 	return project;
+}
+
+// A transfer as the editor makes it: {method, url, headers: {name: value}}.
+crow::json::wvalue transfer_json(const SignedTransfer &t) {
+	crow::json::wvalue out;
+	out["method"] = t.method;
+	out["url"] = t.url;
+	out["headers"] = crow::json::wvalue::object();
+	for (const auto &[name, value] : t.headers)
+		out["headers"][name] = value;
+	return out;
 }
 
 crow::json::wvalue revision_json(const ContentRevision &r) {
@@ -228,6 +240,10 @@ void ContentRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/content/projects/<string>/blobs/<string>")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key,
 										   const std::string &sha) { return blob(req, key, sha); });
+	CROW_ROUTE(app, "/api/content/projects/<string>/downloads")
+			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
+				return downloads(req, key);
+			});
 	CROW_ROUTE(app, "/api/content/projects/<string>/missing")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return missing(req, key);
@@ -444,13 +460,66 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		crow::json::wvalue entry;
 		entry["sha256"] = blob.sha256;
 		entry["size"] = blob.bytes;
-		entry["upload"]["method"] = "PUT";
-		entry["upload"]["url"] = "/api/content/projects/" + key + "/blobs/" + blob.sha256;
-		entry["upload"]["headers"]["Content-Type"] = "application/octet-stream";
+		SignedTransfer upload;
+		std::string error;
+		if (urls_ != nullptr) {
+			if (!urls_->put(blob_key(key, blob.sha256), blob.sha256, upload, error))
+				return store_failure("POST /api/content/projects/<key>/missing", error);
+		} else {
+			upload = { "PUT", "/api/content/projects/" + key + "/blobs/" + blob.sha256,
+				{ { "Content-Type", "application/octet-stream" } } };
+		}
+		entry["upload"] = transfer_json(upload);
 		list.push_back(std::move(entry));
 	}
 	crow::json::wvalue out;
 	out["missing"] = std::move(list);
+	return no_store(json_reply(200, out));
+}
+
+// POST /api/content/projects/<key>/downloads — {"hashes": [sha256]} (at most 1000): {"downloads":
+// [{"sha256", "method", "url", "headers"}]}, each file's download: the store's own signed URL, or
+// this program's blob route. Anyone who may read the project; 400 invalid_json, invalid_field; 404
+// not_found.
+crow::response ContentRoutes::downloads(const crow::request &req, const std::string &key) {
+	const bool admin = access_.caller_is_admin(req);
+	const auto body = crow::json::load(req.body);
+	if (!body || body.t() != crow::json::type::Object || !body.has("hashes") ||
+			body["hashes"].t() != crow::json::type::List)
+		return json_error(400, "invalid_json", "the body is {\"hashes\": [sha256]}");
+	std::vector<std::string> hashes;
+	for (const auto &item : body["hashes"]) {
+		if (hashes.size() == kDownloadsMax)
+			return field_error(400, "invalid_field", "hashes",
+					"at most " + std::to_string(kDownloadsMax) + " files a request");
+		if (item.t() != crow::json::type::String ||
+				!opennova::content::is_sha256_hex(std::string(item.s())))
+			return field_error(
+					400, "invalid_field", "hashes", "each hash is 64 lower-case hex digits");
+		hashes.emplace_back(item.s());
+	}
+	try {
+		if (!readable(*pool_.acquire(), key, admin))
+			return no_such_project();
+	} catch (const db::Error &e) {
+		return db_failure("POST /api/content/projects/<key>/downloads", e);
+	}
+	std::vector<crow::json::wvalue> list;
+	for (const std::string &sha : hashes) {
+		SignedTransfer download;
+		std::string error;
+		if (urls_ != nullptr) {
+			if (!urls_->get(blob_key(key, sha), download, error))
+				return store_failure("POST /api/content/projects/<key>/downloads", error);
+		} else {
+			download = { "GET", "/api/content/projects/" + key + "/blobs/" + sha, {} };
+		}
+		crow::json::wvalue entry = transfer_json(download);
+		entry["sha256"] = sha;
+		list.push_back(std::move(entry));
+	}
+	crow::json::wvalue out;
+	out["downloads"] = std::move(list);
 	return no_store(json_reply(200, out));
 }
 
@@ -546,19 +615,38 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 				return json_error(400, "unchanged", "the manifest lists the head's files");
 		}
 		// The files the store does not hold yet: each one an upload put but no request recorded (an
-		// upload through the store's own URL) is held once the store has it at its size.
+		// upload through the store's own URL) is held once the store has it at its size. A few are
+		// asked of the store one by one; more by one listing of the project's files, since each
+		// store call is a process of the AWS CLI's (a first push of a retail game names thousands).
 		std::vector<StoredBlob> listed;
 		listed.reserve(files.size());
 		for (const ContentFile &file : files)
 			listed.push_back({ file.sha256, static_cast<int64_t>(file.size) });
+		const std::vector<StoredBlob> unrecorded = missing_blobs(*db_conn, p->id, listed);
+		std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
+		if (unrecorded.size() > kHeadsAtMost) {
+			std::vector<StoredObject> objects;
+			std::string error;
+			if (!store_->list(project_prefix(p->key) + "blobs/", objects, error))
+				return store_failure(kRoute, error);
+			for (const StoredObject &object : objects)
+				stored.emplace(object.key, object.size);
+		}
 		std::vector<StoredBlob> found;
 		std::vector<std::string> absent;
-		for (const StoredBlob &blob : missing_blobs(*db_conn, p->id, listed)) {
+		for (const StoredBlob &blob : unrecorded) {
+			const std::string object = blob_key(p->key, blob.sha256);
 			bool exists = false;
 			uint64_t size = 0;
-			std::string error;
-			if (!store_->head(blob_key(p->key, blob.sha256), exists, size, error))
-				return store_failure(kRoute, error);
+			if (unrecorded.size() > kHeadsAtMost) {
+				const auto at = stored.find(object);
+				exists = at != stored.end();
+				size = exists ? at->second : 0;
+			} else {
+				std::string error;
+				if (!store_->head(object, exists, size, error))
+					return store_failure(kRoute, error);
+			}
 			if (exists && size == static_cast<uint64_t>(blob.bytes))
 				found.push_back(blob);
 			else

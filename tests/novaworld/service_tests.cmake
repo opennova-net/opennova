@@ -574,6 +574,14 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(content_routes REDIS COMMAND content_routes_test)
     set_tests_properties(content_routes PROPERTIES TIMEOUT 120)
 
+    # Presigned S3 URLs (apps/novaworld_web/content/s3_presign.h, ADR 0069 d6): AWS's own example of
+    # a presigned GET to its very signature, the session token signed, and a PUT's checksum header
+    # signed. Pure functions.
+    add_executable(s3_presign_test novaworld/s3_presign_test.cpp)
+    target_link_libraries(s3_presign_test PRIVATE opennova_novaworld_web_core)
+    target_include_directories(s3_presign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME s3_presign COMMAND s3_presign_test)
+
     # The editor's content client (engine/editor/content_store, ADR 0069) against these routes
     # over HTTP, so the contract's two halves are one: an admin signed in by the client's own
     # login, a first push, a get, a stale push pulled and pushed, and a player refused.

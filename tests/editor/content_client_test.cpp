@@ -149,10 +149,27 @@ private:
 			++downloads;
 			return r;
 		}
-		if (!admin)
-			return refusal(403, "forbidden");
 		io::JsonValue body;
 		std::string error;
+		// Where each file is downloaded from: the service's own blob route, as a store with no
+		// signed URLs of its own answers.
+		if (request.method == "POST" && rest == "/downloads" &&
+				io::json_parse(request.body, body, error)) {
+			io::JsonValue list = io::JsonValue::make_array();
+			for (const io::JsonValue &sha : body.get("hashes")->array) {
+				io::JsonValue entry = io::JsonValue::make_object();
+				entry.set("sha256", sha);
+				entry.set("method", io::json_string("GET"));
+				entry.set("url", io::json_string("/api/content/projects/MOD/blobs/" + sha.string));
+				entry.set("headers", io::JsonValue::make_object());
+				list.push(entry);
+			}
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("downloads", list);
+			return json(200, out);
+		}
+		if (!admin)
+			return refusal(403, "forbidden");
 		if (request.method == "POST" && rest == "/missing" &&
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();

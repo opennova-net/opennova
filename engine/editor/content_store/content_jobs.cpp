@@ -19,6 +19,8 @@ namespace {
 constexpr uint64_t kCallCost = 4096;
 // The files one missing request names: the service's ContentRoutes::kMissingMax.
 constexpr size_t kMissingBatch = 20000;
+// The files one downloads request names: the service's ContentRoutes::kDownloadsMax.
+constexpr size_t kDownloadsBatch = 1000;
 
 std::string count_text(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
@@ -114,7 +116,7 @@ void ContentPull::resume() {
 	if (state_ != ContentJobState::NeedsResolution || plan_.conflicts() > 0)
 		return;
 	state_ = ContentJobState::Running;
-	phase_ = Phase::Download;
+	phase_ = Phase::Locate;
 	downloads_ = plan_.downloads();
 	for (const content::ContentFile &file : downloads_)
 		bytes_to_download_ += file.size;
@@ -142,6 +144,9 @@ ContentJobProgress ContentPull::progress() const {
 		case Phase::Resolve:
 			return { count_text(plan_.conflicts(), "conflict", "conflicts") + " to settle", 0, 0,
 				false };
+		case Phase::Locate:
+			return { "Asking where " + count_text(downloads_.size(), "file is", "files are"),
+				next_locate_, downloads_.size(), false };
 		case Phase::Download:
 			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
 				bytes_downloaded_, bytes_to_download_, true };
@@ -186,18 +191,27 @@ bool ContentPull::step_downloads() {
 	while (downloading_.size() < std::max<size_t>(transport_.parallel(), 1) &&
 			next_download_ < downloads_.size()) {
 		const content::ContentFile &file = downloads_[next_download_++];
-		const std::string landed = incoming_path(content_paths_, file.sha256);
 		// A file an earlier pull landed (checked when it was named) is downloaded again by none.
-		if (fs::is_regular_file(system_path(landed), ec) &&
-				fs::file_size(system_path(landed), ec) == file.size) {
+		if (landed(file)) {
 			bytes_downloaded_ += file.size;
 			continue;
 		}
-		downloading_.emplace_back(file,
-				ContentCall(transport_,
-						content_api::blob(account_, binding_.key, file.sha256, landed + ".part")));
+		const auto located = requests_.find(file.sha256);
+		if (located == requests_.end()) {
+			fail("the service named no download of " + file.path);
+			return false;
+		}
+		ContentRequest request = located->second;
+		request.response_file = incoming_path(content_paths_, file.sha256) + ".part";
+		downloading_.emplace_back(file, ContentCall(transport_, std::move(request)));
 	}
 	return downloading_.empty() && next_download_ == downloads_.size();
+}
+
+bool ContentPull::landed(const content::ContentFile &file) const {
+	std::error_code ec;
+	const fs::path path = system_path(incoming_path(content_paths_, file.sha256));
+	return fs::is_regular_file(path, ec) && fs::file_size(path, ec) == file.size;
 }
 
 ContentJobState ContentPull::step(uint64_t budget) {
@@ -263,6 +277,35 @@ ContentJobState ContentPull::step(uint64_t budget) {
 			}
 			case Phase::Resolve:
 				return state_;
+			case Phase::Locate: {
+				// Where each file is downloaded from (the store's own URL, or the service's route),
+				// the service's kDownloadsMax at a time; a file an earlier pull landed is asked of
+				// none.
+				if (!call_.started()) {
+					std::vector<std::string> batch;
+					while (next_locate_ < downloads_.size() && batch.size() < kDownloadsBatch) {
+						const content::ContentFile &file = downloads_[next_locate_++];
+						if (!landed(file))
+							batch.push_back(file.sha256);
+					}
+					if (batch.empty()) {
+						phase_ = Phase::Download;
+						break;
+					}
+					call_ = ContentCall(
+							transport_, content_api::downloads(account_, binding_.key, batch));
+				}
+				spent += kCallCost;
+				if (!call_.poll())
+					return state_;
+				if (!note_session(call_.reply()))
+					return fail("the session ended: sign in again");
+				ContentApiError error;
+				if (!content_api::read_downloads(call_.reply(), account_, requests_, error))
+					return fail("cannot ask where the files are: " + error.line());
+				call_ = ContentCall();
+				break;
+			}
 			case Phase::Download: {
 				spent += kCallCost;
 				if (!step_downloads())

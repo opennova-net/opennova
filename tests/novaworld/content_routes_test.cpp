@@ -373,6 +373,40 @@ int test_push(Harness &h) {
 	TEST_EXPECT(json && json["revisions"].size() == 1 && json["revisions"][0]["number"].i() == 1);
 	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/JO/revisions?limit=0", { h.admin }),
 			400, "invalid_query"));
+
+	// More such files than a push asks the store of one by one: held by one listing of the store.
+	std::vector<ContentFile> many = { files[0] };
+	{
+		test_temp::TempDir scratch("content_routes_many");
+		for (int i = 0; i < 6; ++i) {
+			const std::string bytes = "many-" + std::to_string(i);
+			const std::string path = scratch.file(("m" + std::to_string(i)).c_str());
+			std::string error;
+			TEST_EXPECT(io::write_file_atomic(path, bytes, error));
+			TEST_EXPECT(h.store.put_file(content::blob_key("JO", sha_of(bytes)), path, error));
+			many.push_back(file_of("many/" + std::to_string(i) + ".def", bytes));
+		}
+	}
+	json = json_of(h.as_admin("POST", "/api/content/projects/JO/revisions",
+						   push_body(2, "Many", opennova::content::encode_manifest(many))),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 3);
+
+	// Where each file is downloaded from: this program's own blob route (a directory's store signs
+	// no URLs), an admin's alone for a private project.
+	const std::string hashes =
+			"{\"hashes\": [\"" + files[0].sha256 + "\", \"" + files[1].sha256 + "\"]}";
+	json = json_of(h.as_admin("POST", "/api/content/projects/JO/downloads", hashes), 200);
+	TEST_EXPECT(json && json["downloads"].size() == 2 &&
+			std::string(json["downloads"][0]["url"].s()) ==
+					"/api/content/projects/JO/blobs/" + files[0].sha256 &&
+			std::string(json["downloads"][0]["method"].s()) == "GET");
+	TEST_EXPECT(
+			refused(h.send("POST", "/api/content/projects/JO/downloads", { kJson, kCsrf }, hashes),
+					404, "not_found"));
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/content/projects/JO/downloads",
+								"{\"hashes\": [\"not-a-sha\"]}"),
+			400, "invalid_field"));
 	return 0;
 }
 

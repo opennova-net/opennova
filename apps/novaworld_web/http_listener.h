@@ -39,6 +39,7 @@ class ObjectStore;
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 namespace infra { class AlarmStore; class CostStore; class InfraStatus; class LogStore; class MetricsStore; }
+namespace content { class ContentUrls; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -173,6 +174,10 @@ public:
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
+	// The object store's own signed URLs (content/content_urls.h: S3's), which the content routes
+	// hand the editor in place of carrying a file's bytes. Set before start(); it must outlive the
+	// listener. Null: the routes carry the bytes (a directory's store).
+	void set_content_urls(content::ContentUrls *urls) { content_urls_ = urls; }
 
 	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -349,6 +354,8 @@ private:
 	infra::CostStore *cost_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
+	// The store's signed URLs (set_content_urls); null: none.
+	content::ContentUrls *content_urls_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;

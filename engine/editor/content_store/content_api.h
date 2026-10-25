@@ -9,6 +9,7 @@
 // (Set-Cookie on the service's cookie) is read with renewed_cookie, so the client keeps it.
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -96,6 +97,14 @@ ContentRequest blob(const ContentAccount &account, const std::string &key,
 		const std::string &sha256, const std::string &file);
 bool read_blob(
 		const ContentResponse &reply, const content::ContentFile &expected, ContentApiError &error);
+
+// POST /api/content/projects/<key>/downloads: each of `sha256s` (at most 1000) with the request
+// that downloads it (the store's own signed URL, or the service's blob route, which the account's
+// session goes to alone), keyed by SHA-256; each request's response_file the caller's.
+ContentRequest downloads(const ContentAccount &account, const std::string &key,
+		const std::vector<std::string> &sha256s);
+bool read_downloads(const ContentResponse &reply, const ContentAccount &account,
+		std::map<std::string, ContentRequest> &out, ContentApiError &error);
 
 // POST /api/content/projects/<key>/missing: the files of `files` the store lacks, each with its
 // upload.

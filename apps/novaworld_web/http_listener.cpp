@@ -508,6 +508,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->releases.set_store(object_store_);
 	impl_->releases.register_routes(impl_->app);
 	impl_->content_routes.set_store(object_store_);
+	impl_->content_routes.set_urls(content_urls_);
 	impl_->content_routes.register_routes(impl_->app);
 	if (object_store_ != nullptr)
 		std::printf("[http] game data routes over the %s object store\n", object_store_->kind());
