@@ -5,8 +5,9 @@
 // first push; a second folder getting the project, the same files; each pushing a change, the
 // second told its base is stale, then pulling (the first's change taken, its own kept) and pushing
 // both; a conflict settled by keeping one's own, pushed, and pulled by the other; a folder at its
-// base with nothing to push; a player refused; a renewed session kept by the account; and an ended
-// one signing it out. The routes themselves answer the same client over HTTP in
+// base with nothing to push; a player refused; a renewed session kept by the account; an ended
+// one signing it out; and a store reset since the folder's revision, a pull and a push each told to
+// bind again. The routes themselves answer the same client over HTTP in
 // tests/novaworld/content_client_routes_test.cpp.
 
 #include <cstdio>
@@ -291,6 +292,19 @@ static int test_bind_and_check() {
 	}
 	// Pushed from there: revision 3 is the kept folder's.
 	TEST_EXPECT(push(service, kept, "kept") == editor::PushOutcome::Pushed && service.head == 3);
+	// The store reset (a NovaWorld database reset: its head 0, the folder still at revision 3): a
+	// pull and a push each say to bind again, neither moving anything.
+	{
+		FakeService reset;
+		editor::ContentPull pull(
+				reset, account(""), editor::ProjectPaths::for_root(kept), "", binding_of(kept));
+		TEST_EXPECT(run(pull) == editor::ContentJobState::Failed &&
+				pull.error().find("bind the project again") != std::string::npos);
+		std::string error;
+		push(reset, kept, "after the reset", kAdminCookie, &error);
+		TEST_EXPECT(error.find("bind the project again") != std::string::npos && reset.head == 0 &&
+				binding_of(kept).revision == 3);
+	}
 
 	// A check whose service will not answer still reads the folder's changes.
 	TEST_EXPECT(put(kept + "/defs/b.def", "b2"));

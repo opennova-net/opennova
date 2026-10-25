@@ -62,6 +62,10 @@ public:
 	// The paths of the files it listed but could not read: in the folder, though not in files(), so
 	// no comparison takes one for a file deleted.
 	const std::vector<std::string> &unread() const { return unread_; }
+	// Why the walk stopped before it listed every file (a folder it could not enter, the folder
+	// itself among them), "" when it listed them all: files() then lacks files the folder may
+	// hold, which a push would send as deleted.
+	const std::string &incomplete() const { return incomplete_; }
 
 private:
 	enum class Phase : uint8_t { Start, Listing, Hashing, Done };
@@ -104,6 +108,7 @@ private:
 	std::vector<content::ContentFile> files_;
 	std::vector<std::string> problems_;
 	std::vector<std::string> unread_;
+	std::string incomplete_;
 	Phase phase_ = Phase::Start;
 };
 

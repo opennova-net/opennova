@@ -8,8 +8,10 @@
 // (a few at a time, each landed beside its name and kept once its SHA-256 is the file's), and
 // applies the plan. A push asks the head (a head past the folder's base is a pull first), scans the
 // folder, asks which of its files the store lacks, uploads them, and pushes the folder's manifest
-// on its base; the folder's files are then its new base. A reply that renews the session renews the
-// account the job holds; a reply that ends it (401) signs it out.
+// on its base; the folder's files are then its new base. A head before the folder's base (the store
+// reset since) fails either: the folder binds again. A push also fails on a scan that could not
+// list or read every file, which it would send as deleted. A reply that renews the session renews
+// the account the job holds; a reply that ends it (401) signs it out.
 
 #include <cstddef>
 #include <cstdint>

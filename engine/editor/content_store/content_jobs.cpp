@@ -26,6 +26,14 @@ std::string count_text(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
 }
 
+// A head before the folder's base: the store was reset (a NovaWorld database reset) since the
+// folder last pulled or pushed, so its revision numbers name other revisions now.
+std::string reset_text(const ContentBinding &binding, int64_t head) {
+	return binding.key + "'s newest revision is " + std::to_string(head) +
+			", before the folder's " + std::to_string(binding.revision) +
+			": the store was reset, so bind the project again (content_bind)";
+}
+
 } // namespace
 
 // --- ContentCall ---
@@ -262,6 +270,8 @@ ContentJobState ContentPull::step(uint64_t budget) {
 				if (!content_api::read_project(call_.reply(), remote_, head_, error))
 					return fail("cannot read " + binding_.key + ": " + error.line());
 				call_ = ContentCall();
+				if (remote_.head < binding_.revision)
+					return fail(reset_text(binding_, remote_.head));
 				if (remote_.head == 0 || remote_.head == binding_.revision) {
 					up_to_date_ = true;
 					phase_ = Phase::Done;
@@ -624,6 +634,8 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				if (!remote.can_push)
 					return fail("this account may not push " + binding_.key + ": an admin pushes");
 				head_ = remote.head;
+				if (head_ < binding_.revision)
+					return fail(reset_text(binding_, head_));
 				if (head_ != binding_.revision) {
 					outcome_ = PushOutcome::Stale;
 					phase_ = Phase::Done;
@@ -637,6 +649,9 @@ ContentJobState ContentPush::step(uint64_t budget) {
 			case Phase::Scan: {
 				if (!scan_->step(budget > spent ? budget - spent : 1))
 					return state_;
+				if (!scan_->incomplete().empty())
+					return fail("the folder could not all be listed; a push sends every file: " +
+							scan_->incomplete());
 				if (!scan_->unread().empty())
 					return fail(count_text(scan_->unread().size(), "file", "files") +
 							" of the folder could not be read; a push sends every file: " +

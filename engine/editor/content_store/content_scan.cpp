@@ -182,12 +182,13 @@ bool ContentScan::step(uint64_t budget) {
 			case Phase::Start: {
 				pass_began_ = io::file_clock_now_ticks();
 				load_cache();
+				// A folder it may not enter stops the walk (incomplete), never one passed over in
+				// silence (skip_permission_denied) whose files a push would send as deleted.
 				std::error_code ec;
-				walk_ = fs::recursive_directory_iterator(
-						root_, fs::directory_options::skip_permission_denied, ec);
+				walk_ = fs::recursive_directory_iterator(root_, ec);
 				if (ec) {
-					problems_.push_back(
-							"the folder " + paths_.root + " cannot be read: " + ec.message());
+					incomplete_ = "the folder " + paths_.root + " cannot be read: " + ec.message();
+					problems_.push_back(incomplete_);
 					phase_ = Phase::Done;
 					return true;
 				}
@@ -230,8 +231,8 @@ bool ContentScan::step(uint64_t budget) {
 				}
 				walk_.increment(ec);
 				if (ec) {
-					problems_.push_back(
-							"the walk stopped in " + utf8_of(path) + ": " + ec.message());
+					incomplete_ = "the walk stopped in " + utf8_of(path) + ": " + ec.message();
+					problems_.push_back(incomplete_);
 					walk_ = fs::recursive_directory_iterator();
 				}
 				break;
