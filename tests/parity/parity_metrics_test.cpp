@@ -3755,8 +3755,8 @@ void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
 // The final's 01tr-coop-aikill OO (LX-s37, L4-s40): the joiner died on the same 0x0A after the
 // staging on every cell, but OO's window opened one uplink period later, so its occupancy held
 // 7 samples against RR's 8 (medians 2800 against 2806) and the 8-sample floor failed it. Where
-// the recipient's own death ends the occupancy on both sides, a short subject still compares
-// its median (uplink.priority_death_slice).
+// the recipient's own death ends the occupancy on both sides, a subject one sample short still
+// compares its median (uplink.priority_death_slice).
 void test_priority_death_slice() {
 	// `sends` uplinks from the window start every 190 ms, slot 0 scored about `score`, then the
 	// recipient's S2C 0x13 at `death` (0: none), and `resumed` uplinks from 1 s after it.
