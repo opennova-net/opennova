@@ -1276,7 +1276,7 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 			r.app_id = conn.app_id;  // the game-session APPID join token (decoded CK)
 			// The PUB* identity cookies the authenticated login/NWJoin set, packed
 			// as the CD blob the 0x00 JOIN relays (host code 23).
-			r.cd_cookie = jar().build_prefixed_blob("PUB");
+			r.cd_cookie = join_cd_cookie(jar());
 			// The .joi page refreshes (JO's to jop_2_jend.htm, "10;"), and the menu browser follows
 			// it at its next frame whatever the delay: the page's delay, in seconds, is stored where
 			// the frame's test reads a GetTickCount deadline, so the test passes at once (the LN S1b

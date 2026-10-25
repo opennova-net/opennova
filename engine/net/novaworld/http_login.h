@@ -2,6 +2,7 @@
 
 #include <net/novacrypto/epask.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -279,5 +280,13 @@ private:
 //  @0x4CA235; CNapiGameSession_BuildAndCreateSession - the apply called @0x5695B8;
 //  Game_StartMission - the apply called @0x524662]
 std::string novaworld_character_name(const CookieJar &jar);
+
+// The longest CD set a join carries: a larger PUB* set goes as none.
+// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - the 0x7FE compare @0x4C4C15..0x4C4C1E]
+inline constexpr std::size_t kJoinCdCookieMax = 0x7FE;
+// The CD blob the game-session 0x00 JOIN relays: the jar's PUB* cookies (build_prefixed_blob,
+// the prefix matched without case), or none when the whole set is longer than kJoinCdCookieMax,
+// as retail's announce builder sends a set only of 1..0x7FE bytes (D-NET-1387).
+std::vector<uint8_t> join_cd_cookie(const CookieJar &jar);
 
 } // namespace opennova

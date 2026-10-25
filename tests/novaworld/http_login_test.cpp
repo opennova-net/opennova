@@ -225,6 +225,27 @@ int main() {
 			empty_jar.set("NWHANDLE", "x");
 			check(empty_jar.build_prefixed_blob("PUB").empty(),
 			      "no PUB* cookie -> empty CD blob (LAN / unauthenticated)");
+			// The glob folds case: a lower-case pub* name is in the set (D-NET-1386).
+			// [orig: the glob matcher @0x651820 - the fold @0x65190C..0x651923]
+			CookieJar folded_jar;
+			folded_jar.set("pubsquadinfo", "SQ");
+			folded_jar.set("PUBPCID", "PC");
+			check(folded_jar.build_prefixed_blob("PUB") ==
+			              std::vector<uint8_t>({'p', 'u', 'b', 's', 'q', 'u', 'a', 'd', 'i', 'n', 'f', 'o',
+			                      0, 'S', 'Q', 0, 'P', 'U', 'B', 'P', 'C', 'I', 'D', 0, 'P', 'C', 0}),
+			      "the PUB* gather matches the prefix without case");
+			// The join's CD: the set up to 0x7FE bytes, none past it (D-NET-1387).
+			// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - @0x4C4C15..0x4C4C1E]
+			CookieJar fits_jar;
+			// "PUBPCID\0" (8) + value + "\0" (1): a value of 0x7FE - 9 bytes fills the set exactly.
+			fits_jar.set("PUBPCID", std::string(kJoinCdCookieMax - 9, 'a'));
+			check(join_cd_cookie(fits_jar).size() == kJoinCdCookieMax,
+			      "a CD set of exactly 0x7FE bytes goes whole");
+			CookieJar long_jar;
+			long_jar.set("PUBPCID", std::string(kJoinCdCookieMax - 8, 'a'));
+			check(long_jar.build_prefixed_blob("PUB").size() == kJoinCdCookieMax + 1 &&
+			              join_cd_cookie(long_jar).empty(),
+			      "a CD set past 0x7FE bytes goes as none");
 		}
 
 		// Re-setting a cookie updates in place without duplicating it.
