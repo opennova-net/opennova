@@ -1330,6 +1330,43 @@ off prod), an unproxied CNAME to the balancer the deployment's apply makes with 
 packages are the published releases of the Game data page; web fetches one from the store
 the first time the updater asks for it, into its task's storage.
 
+### Listing on NovaLogic's NovaWorld
+
+An owner can have a hosted server listed on NovaLogic's NovaWorld (`gs.novaworld.net`) as
+well as this service's, so a retail player who never switched NovaWorld sees it too. It is
+off by default. NovaLogic's service is a live shared service OpenNova does not run, so
+turning it on is a decision for the maintainer, not a routine deploy.
+
+The server lists there under one project-owned NovaLogic account. NovaLogic's service hands
+out a HOSTKEY only after a login, so without the account no server lists there. The listing
+is opennova-serve's second listing (`--also-master-host`, `apps/serve/README.md` "Two
+listings"). It starts once the server's first map is up and never stops the server: a
+listing NovaLogic refuses is tried again after a backoff, and one NovaLogic stops stays off
+until that server's next start.
+
+**Turning it on:**
+
+1. **The account.** Add `novalogic_user` and `novalogic_pass` to the deployment's app item
+   (`app-<deployment>`) in the vault, then `secrets sync`. They are optional secrets
+   (`deploy/env/runtime.env.tpl`), synced only while the fields exist, and only the fleet
+   reads them.
+2. **The switch.** Set `novalogic_listing = true` in the deployment's var-file and run
+   `infra apply`. Web, the fleet and the worker then read `ONNET_NOVALOGIC_LISTING=1`;
+   `app converge` takes it. The start form then shows the box.
+3. **Check it.** The fleet's boot logs `[hosted] supervisor: a server whose owner asks also
+   lists on NovaLogic's NovaWorld (gs.novaworld.net:7597)`. If it instead logs `WARNING
+   ONNET_NOVALOGIC_LISTING is on but ONNET_NOVALOGIC_USER or ONNET_NOVALOGIC_PASS is
+   unset`, the account did not reach it: the box shows, but no server lists there. A
+   server that lists there logs `opennova-serve: also listed on NovaWorld
+   (gs.novaworld.net)`, and its other lines from that listing start with
+   `(second listing)`.
+
+**Turning it off:** `novalogic_listing = false` and `infra apply`. The box goes, and a start
+that asks for the listing is refused. A running server keeps its NovaLogic listing until it
+next starts, so to take every one down at once, also stop all from the admin fleet view
+and let the owners start again. Remove the vault fields and run `secrets sync --prune` to
+take the account off the fleet as well.
+
 ### Fleet commands
 
 ```bash

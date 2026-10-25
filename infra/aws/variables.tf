@@ -499,6 +499,12 @@ variable "fleet_idle_minutes" {
   default     = 30
 }
 
+variable "novalogic_listing" {
+  description = "Whether a hosted server's owner may have it listed on NovaLogic's NovaWorld (gs.novaworld.net, a live service OpenNova does not run) as well as this one's (ONNET_NOVALOGIC_LISTING; apps/serve/README.md \"Two listings\"). The fleet lists there with the project's NovaLogic account, the app item's novalogic_user and novalogic_pass fields (deploy/env/runtime.env.tpl); without them no server does. false (the default) offers no such box on the site. Turning it off stops each server's NovaLogic listing at its next start (DEPLOY.md, \"Listing on NovaLogic's NovaWorld\")."
+  type        = bool
+  default     = false
+}
+
 variable "fleet_ami" {
   description = "The exact name of the image the machines launch: an ECS-optimized Amazon Linux 2023 x86_64 AMI, Amazon's (fleet_agent.tf). Pinned per deployment, so a bump shows in the plan and in git: staging's first, then prod's, then `fleet roll` moves the servers of the machines on the old image (DEPLOY.md). The newest: aws ssm get-parameters --names /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_name. Required with hosted_enabled."
   type        = string

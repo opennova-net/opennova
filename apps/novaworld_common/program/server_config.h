@@ -277,6 +277,11 @@ struct ServerConfig {
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account, a backstop beside the fleet's own room.
 	int hosted_cap = 24;
+	// ONNET_NOVALOGIC_USER / ONNET_NOVALOGIC_PASS: the project's NovaLogic NovaWorld account,
+	// which the hosted servers that also list on NovaLogic's NovaWorld log in with (the fleet's
+	// alone; fleet_config.h ONNET_NOVALOGIC_LISTING offers it). Secrets: never logged.
+	std::string novalogic_user;
+	std::string novalogic_pass;
 	// The object store the hosted game data and the update packages live in
 	// (core/object_store.h, ADR 0064): ONNET_OBJECT_STORE_URL, `s3://<bucket>/data`
 	// (the deployment's own ops bucket) with ONNET_OBJECT_STORE_REGION, the

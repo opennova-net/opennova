@@ -469,6 +469,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->connections.register_routes(impl_->app, config.heartbeat_timeout_ms);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.set_address_zone(address_zone_);
+	impl_->hosted_servers.set_novalogic_listing(novalogic_listing_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->addresses.configure(addresses_on_, address_zone_, fleet_placement_.max_addresses);
 	impl_->addresses.register_routes(impl_->app);

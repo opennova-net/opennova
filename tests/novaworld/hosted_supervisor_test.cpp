@@ -307,7 +307,53 @@ int test_renders() {
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
 		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
-	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597) == args);
+	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
+
+	// The NovaLogic listing: only for an owner who asked, on a service that offers it (the
+	// gate and the project's account), with the account's file beside the server's own.
+	{
+		hosted::NovaLogicListing novalogic;
+		novalogic.gate_host = "gs.novaworld.net";
+		novalogic.gate_port = 7597;
+		novalogic.username = "opennova-project";
+		novalogic.password = "nlpass";
+		TEST_EXPECT(novalogic.offered());
+		hosted::HostedSettings asked = s;
+		asked.list_on_novalogic = true;
+		// Asked, but the service offers none: the server's own listing alone.
+		TEST_EXPECT(!hosted::lists_on_novalogic(asked, in.novalogic));
+		TEST_EXPECT(hosted::render_launch(asked, "jo", "jox01", in).serve_args == args);
+		// Offered, but not asked: the same.
+		hosted::RenderInputs offered_in = in;
+		offered_in.novalogic = novalogic;
+		const hosted::LaunchSpec not_asked = hosted::render_launch(s, "jo", "jox01", offered_in);
+		TEST_EXPECT(not_asked.serve_args == args && not_asked.files.size() == 4);
+		// Both: the second listing's arguments after the server's own, and its account's file.
+		const hosted::LaunchSpec both = hosted::render_launch(asked, "jo", "jox01", offered_in);
+		std::vector<std::string> both_args = args;
+		for (const char *arg : { "--also-master-host", "gs.novaworld.net", "--also-master-gate-port",
+					 "7597", "--also-credentials", "novalogic.txt", "--allow-public" })
+			both_args.emplace_back(arg);
+		TEST_EXPECT(both.serve_args == both_args);
+		TEST_EXPECT(hosted::render_serve_args(asked, "jo", "jox01", "203.0.113.5", 7597, novalogic) ==
+				both_args);
+		TEST_EXPECT(both.files.size() == 5);
+		const auto file = std::find_if(both.files.begin(), both.files.end(),
+				[](const hosted::LaunchFile &f) { return f.name == "novalogic.txt"; });
+		TEST_EXPECT(file != both.files.end() && file->secret);
+		if (file != both.files.end()) {
+			TEST_EXPECT(credential(file->content, "NOVAWORLD_USER") == "opennova-project");
+			TEST_EXPECT(credential(file->content, "NOVAWORLD_PASS") == "nlpass");
+		}
+		// The arguments carry no secret.
+		for (const std::string &arg : both.serve_args)
+			TEST_EXPECT(arg.find("nlpass") == std::string::npos);
+		// An unset account offers nothing.
+		hosted::NovaLogicListing no_account = novalogic;
+		no_account.password.clear();
+		TEST_EXPECT(!no_account.offered());
+		TEST_EXPECT(!hosted::lists_on_novalogic(asked, no_account));
+	}
 
 	// Each data set speaks its title (its row's); OpenNova's data speaks Joint
 	// Operations', and no expansion is no /exp.

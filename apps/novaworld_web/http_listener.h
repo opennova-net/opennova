@@ -198,6 +198,10 @@ public:
 		addresses_on_ = on;
 		address_zone_ = std::move(zone);
 	}
+	// Whether an owner may have a hosted server listed on NovaLogic's NovaWorld too
+	// (hosted/model/fleet_config.h ONNET_NOVALOGIC_LISTING): the start form's box. Set before
+	// start(); unset, off.
+	void set_novalogic_listing(bool offered) { novalogic_listing_ = offered; }
 
 	// The periodic jobs the deployment's programs schedule (the worker's
 	// worker_schedule.h and the data program's data set prune, from the same
@@ -356,6 +360,8 @@ private:
 	// The static addresses (set_addresses).
 	bool addresses_on_ = false;
 	std::string address_zone_;
+	// NovaLogic's NovaWorld as a second listing (set_novalogic_listing).
+	bool novalogic_listing_ = false;
 	// The outbound mail (set_mail_enabled).
 	bool mail_on_ = false;
 	// config.web_host, set in start() before Crow runs (host_url(game) /

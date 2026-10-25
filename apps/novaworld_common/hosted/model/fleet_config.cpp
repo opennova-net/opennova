@@ -61,6 +61,19 @@ struct Reader {
 		if (const auto value = env(name))
 			out = strutil::trim(*value);
 	}
+
+	// "1" or "0".
+	void flag(const char *name, bool &out) {
+		const auto value = env(name);
+		if (!value)
+			return;
+		const std::string text = strutil::trim(*value);
+		if (text != "1" && text != "0") {
+			errors.push_back(std::string(name) + " is neither 1 nor 0");
+			return;
+		}
+		out = text == "1";
+	}
 };
 
 } // namespace
@@ -150,6 +163,9 @@ bool parse_fleet_config(const EnvLookup &env, FleetConfig &out, std::vector<std:
 	read.text("ONNET_HOSTED_HOSTD_IMAGE", out.hostd_image);
 	read.text("ONNET_FLEET_IMAGE_ID", out.image_id);
 	read.text("ONNET_HOSTED_ADDRESS_ZONE", out.address_zone);
+	read.flag("ONNET_NOVALOGIC_LISTING", out.novalogic_listing);
+	read.text("ONNET_NOVALOGIC_GATE", out.novalogic_gate);
+	read.whole("ONNET_NOVALOGIC_GATE_PORT", 1, 65535, out.novalogic_gate_port);
 	return errors.size() == errors_before;
 }
 

@@ -5615,6 +5615,8 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
+	// Listing on NovaLogic's NovaWorld is off unless the service offers it (ONNET_NOVALOGIC_LISTING).
+	TEST_EXPECT(json.has("novalogic_listing") && !json["novalogic_listing"].b());
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
@@ -5629,6 +5631,10 @@ int test_hosted_server_routes(Harness &h) {
 		{ "{\"game_name\":\"x\",\"max_players\":99,\"missions\":[\"a.bms\"]}", "invalid_settings",
 				"max_players" },
 		{ "{\"game_name\":\"x\",\"missions\":[\"../a.bms\"]}", "invalid_settings", "missions" },
+		// A NovaLogic listing this service does not offer.
+		{ "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}", "invalid_settings",
+				"list_on_novalogic" },
+		{ "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}", "invalid_field", "" },
 		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_field", "" },
 		{ "not json", "invalid_json", "" },
 	};
@@ -5716,6 +5722,8 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_first = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
+	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
+			!json["server"]["settings"]["list_on_novalogic"].b());
 	// No data set named: the first offered, with its names; no expansion (null is
 	// the base game alone, as the start form sends it); not started yet, so no data
 	// and nothing newer.

@@ -47,6 +47,19 @@
 //                                 driver's machines run, and what the fleet's
 //                                 health holds each machine's agent against;
 //                                 "" with none
+//   ONNET_NOVALOGIC_LISTING       1 or 0 (0): whether a hosted server's owner
+//                                 may have it listed on NovaLogic's NovaWorld
+//                                 too (hosted_settings.h list_on_novalogic):
+//                                 the start form's box and the second listing
+//                                 its starts render. The operator's switch:
+//                                 0 offers none, and a server listing there
+//                                 stops doing so at its next start. The
+//                                 fleet lists there only with the project's
+//                                 account, ONNET_NOVALOGIC_USER and
+//                                 ONNET_NOVALOGIC_PASS (secrets, the fleet's
+//                                 alone: ServerConfig's)
+//   ONNET_NOVALOGIC_GATE          NovaLogic's gate (gs.novaworld.net)
+//   ONNET_NOVALOGIC_GATE_PORT     its UDP port (7597)
 //
 // Service policy, not a port.
 
@@ -87,6 +100,11 @@ struct FleetConfig {
 	// ONNET_HOSTED_ADDRESS_ZONE: the play zone the static addresses' names
 	// live in ("" when unset; the policy checks it, hosted_policy.h).
 	std::string address_zone;
+	// ONNET_NOVALOGIC_LISTING, ONNET_NOVALOGIC_GATE and ONNET_NOVALOGIC_GATE_PORT: whether an
+	// owner may have a server listed on NovaLogic's NovaWorld too, and NovaLogic's gate.
+	bool novalogic_listing = false;
+	std::string novalogic_gate = "gs.novaworld.net";
+	uint16_t novalogic_gate_port = 7597;
 };
 
 // What the agent routes (agent_route.h) are built with.

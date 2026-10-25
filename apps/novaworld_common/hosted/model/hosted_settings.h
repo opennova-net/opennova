@@ -52,6 +52,9 @@ struct HostedSettings {
 	bool team_ff = false;                 // TeamFF
 	// The rotation in play order: the first map is the one the server starts on.
 	std::vector<std::string> missions;
+	// Also list the server on NovaLogic's NovaWorld (opennova-serve's second listing,
+	// --also-master-host), at each start while the service offers it (NovaLogicListing).
+	bool list_on_novalogic = false;
 };
 
 // Why check_settings refused: the field (its JSON name) and the reason.
@@ -85,6 +88,8 @@ std::vector<std::string> split_missions(const std::string &column);
 // The working directory's file names.
 inline constexpr const char *kHostFileName = "server.host";
 inline constexpr const char *kCredentialsFileName = "credentials.txt";
+// The second listing's account (--also-credentials), the project's NovaLogic one.
+inline constexpr const char *kNovaLogicCredentialsFileName = "novalogic.txt";
 inline constexpr const char *kAdminCfgFileName = "admin.cfg";
 inline constexpr const char *kGameCfgFileName = "game.cfg";
 // The remote-admin user admin.cfg grants the service, with every verb's right
@@ -118,6 +123,21 @@ struct LaunchSpec {
 	std::vector<std::string> serve_args;
 };
 
+// NovaLogic's NovaWorld as the second listing of the servers whose owners asked
+// (HostedSettings::list_on_novalogic): its gate and the project's account there, which
+// NovaLogic's service asks for before it hands out a HOSTKEY. Unoffered (an empty gate or
+// account: the service's ONNET_NOVALOGIC_LISTING off, or its account unset) a server lists on
+// this service alone, whatever its owner asked. Service policy, not a port.
+struct NovaLogicListing {
+	std::string gate_host;
+	uint16_t gate_port = 0;
+	std::string username;
+	std::string password;
+	bool offered() const {
+		return !gate_host.empty() && gate_port != 0 && !username.empty() && !password.empty();
+	}
+};
+
 // What a start renders, beside the settings.
 struct RenderInputs {
 	int64_t server_id = 0;
@@ -127,6 +147,7 @@ struct RenderInputs {
 	std::string admin_password;   // admin.cfg's kAdminUser
 	std::string master_host;      // --master-host: where the server reaches NovaWorld
 	uint16_t master_gate_port = 0;
+	NovaLogicListing novalogic;   // the second listing, for a server whose owner asked
 };
 
 // The host file, in the host's cp1252 bytes and CR LF lines (the tokenizer
@@ -150,13 +171,21 @@ std::string render_credentials(const std::string &username, const std::string &p
 // base row's gameprofile code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
-// title, and /exp with the code. They name the working directory's files and
-// carry no secret.
+// title, and /exp with the code; for a server whose owner asked to be listed on
+// NovaLogic's NovaWorld while `novalogic` is offered, the second listing too
+// (--also-master-host, --also-master-gate-port, --also-credentials with
+// kNovaLogicCredentialsFileName, and --allow-public, which its gate under
+// novaworld.net needs). They name the working directory's files and carry no secret.
 std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,
-		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port);
+		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port,
+		const NovaLogicListing &novalogic);
+// Whether a start of `settings` lists on NovaLogic's NovaWorld: its owner asked and the
+// service offers it.
+bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic);
 // The whole start of a server speaking `title` with `expansion_code`: the four
 // files (every one but game.cfg secret: the host file carries the game
-// password) and render_serve_args.
+// password), the NovaLogic account's for a server that lists there
+// (lists_on_novalogic), and render_serve_args.
 LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 		std::string_view expansion_code, const RenderInputs &inputs);
 

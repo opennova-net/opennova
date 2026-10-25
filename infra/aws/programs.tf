@@ -525,6 +525,10 @@ locals {
   # "# optional" and "# billing" lines of deploy/env/runtime.env.tpl), which
   # its label names for a deploy to add while SSM holds them.
   billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE", "STRIPE_PRICE_STATIC_ADDRESS"]
+  # The project's NovaLogic account, the fleet's alone: the servers that also list on
+  # NovaLogic's NovaWorld log in with it (var.novalogic_listing offers the listing).
+  novalogic_secrets = ["ONNET_NOVALOGIC_USER", "ONNET_NOVALOGIC_PASS"]
+
   program_secrets = {
     gate   = ["DATABASE_PASSWORD"]
     lobby  = ["DATABASE_PASSWORD"]
@@ -537,7 +541,7 @@ locals {
     gate   = []
     lobby  = []
     web    = concat(["ONNET_BOOTSTRAP_ADMIN"], local.billing_secrets)
-    fleet  = []
+    fleet  = local.novalogic_secrets
     worker = local.billing_secrets
     data   = []
   }
