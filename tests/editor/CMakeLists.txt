@@ -677,6 +677,14 @@ opennova_add_editor_test(project_cli_session NAME project_cli_session
 # base game's project beside it. Run on Linux too, whose file names are case-sensitive.
 opennova_add_editor_test(content_export LIBS opennova_project_cli)
 
+# A project folder as a working copy of its content project (engine/editor/content_store, ADR 0069):
+# the files no store keeps, a folder scanned as the store keeps it (stepped as in one call, a warm
+# scan taking a settled file from the cache), the changes since the base, a pull planned over the
+# base, the folder and the revision for every case with each conflict settled either way, and the
+# pull applied (the replaced files trashed, the base written last), refused before anything moves,
+# and finished by a pull planned again after one cut short.
+opennova_add_editor_test(content_store)
+
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.

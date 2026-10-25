@@ -1,0 +1,87 @@
+#pragma once
+
+// What a working copy's files are to the content store's revisions (ADR 0069): its changes since
+// its base (a status), and what pulling a revision does to it, planned a path at a time over three
+// file lists: the base the folder was last made the same as, the folder as it is now
+// (ContentScan), and the revision pulled ("theirs"). A file only the revision changed is taken; a
+// file only the folder changed is kept, a change to push; a file both changed alike needs nothing;
+// and a file both changed otherwise is a conflict the author settles, keeping the folder's or
+// taking the revision's. Files are whole: nothing is merged. Two files are the same when both are
+// absent or both have one SHA-256.
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <base/content/content_manifest.h>
+
+namespace opennova::editor {
+
+enum class ContentChange : uint8_t { Added, Modified, Deleted };
+const char *content_change_name(ContentChange change); // "added", "modified", "deleted"
+
+// One file the folder changed since its base.
+struct LocalChange {
+	std::string path;
+	ContentChange change = ContentChange::Modified;
+};
+
+// The folder's changes since its base, by path. `unread` (ContentScan::unread) are files the folder
+// holds though their bytes could not be read: never taken for deleted.
+std::vector<LocalChange> local_changes(const std::vector<content::ContentFile> &base,
+		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread);
+
+// One path of a pull.
+enum class PullStep : uint8_t {
+	// The revision's file put at the path: the revision added or changed it, the folder did not.
+	Write,
+	// The folder's file removed: the revision deleted it, the folder did not change it.
+	Remove,
+	// Both changed it otherwise: the author's to settle (resolve_conflict).
+	Conflict,
+};
+
+struct PullItem {
+	std::string path;
+	PullStep step = PullStep::Write;
+	// The revision's file (none when the revision has no file at the path).
+	std::optional<content::ContentFile> theirs;
+	// The folder's file as the plan saw it (none when the folder had none): what the apply checks
+	// is still there before it moves anything.
+	std::optional<content::ContentFile> mine;
+	// What the folder and the revision each did to the base's file, for a conflict's row.
+	std::optional<ContentChange> mine_change;
+	std::optional<ContentChange> theirs_change;
+	// The folder holds a file here whose bytes the scan could not read (ContentScan::unread):
+	// `mine` is none, and the apply replaces the file as it finds it.
+	bool unread = false;
+};
+
+struct PullPlan {
+	std::vector<PullItem> items; // by path
+
+	size_t conflicts() const;
+	// The revision's files the writes put in place, each SHA-256 once: what a pull downloads.
+	std::vector<content::ContentFile> downloads() const;
+	const PullItem *find(const std::string &path) const;
+};
+
+// The pull of `theirs` into a folder whose base is `base` and whose files are `local` (with
+// `unread` held though unread: a change the revision made to one is a conflict, since the folder's
+// own change to it cannot be told).
+PullPlan plan_pull(const std::vector<content::ContentFile> &base,
+		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread,
+		const std::vector<content::ContentFile> &theirs);
+
+enum class Resolution : uint8_t {
+	// The folder's file stays as it is: a change to push over the revision's.
+	KeepMine,
+	// The revision's file put in its place (the folder's removed, when the revision has none).
+	TakeTheirs,
+};
+// The conflict at `path` settled: false when the plan holds no conflict there.
+bool resolve_conflict(PullPlan &plan, const std::string &path, Resolution resolution);
+
+} // namespace opennova::editor
