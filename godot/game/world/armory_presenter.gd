@@ -103,7 +103,7 @@ func get_menu_driver() -> MenuDriver:
 func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 	if not is_open():
 		return {}
-	var snapshot := {
+	return MenuFrameSurface.menu_state(_driver, _frame, {
 		"visible": true,
 		"surface": "armory",
 		"file": MENU_FILE,
@@ -111,10 +111,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 		"screens": _driver.get_screen_names(),
 		"in_game": true,
 		"stack_depth": _driver.get_screen_history_depth(),
-	}
-	if include_widgets:
-		snapshot["widgets"] = MenuFrameSurface.widget_rows(_driver, _frame)
-	return snapshot
+	}, include_widgets)
 
 
 func menu_press(widget_name: String) -> bool:

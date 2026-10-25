@@ -174,6 +174,15 @@ static func design_to_local(frame: MenuFrame, design_pos: Vector2) -> Vector2:
 			design_pos.y * size.y / MenuFrame.DESIGN_HEIGHT)
 
 
+## A surface's game_menu state: `head` (the surface's own fields) with, when asked, every
+## widget's row (widget_rows).
+static func menu_state(driver: MenuDriver, frame: MenuFrame, head: Dictionary,
+		include_widgets: bool) -> Dictionary:
+	if include_widgets:
+		head["widgets"] = widget_rows(driver, frame)
+	return head
+
+
 ## Every widget the frame places, in its pre-order: the design rect, kind, text and
 ## item count, and a list's rows and selected row (-1 none), read by its NAME (the
 ## driver's doc-id space is not the frame's index space).

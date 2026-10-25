@@ -51,6 +51,7 @@
     "mcp_screenshot.gd|static func tool_schema()",
     "game_render_diagnostics.gd|func to_json_value()",
     "game_mcp_adapter.gd|func runtime_status()",
+    "armory_presenter.gd|func menu_snapshot(",
     "probe_def.gd|var input_schema",
     "probe_def.gd|func to_list_entry(",
     "probe_verdict.gd|var data",

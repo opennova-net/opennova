@@ -974,9 +974,7 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 			"failed": _underlay.get_failed_count() if _underlay != null else 0,
 		},
 	}
-	if include_widgets:
-		snapshot["widgets"] = MenuFrameSurface.widget_rows(_driver, _frame)
-	return snapshot
+	return MenuFrameSurface.menu_state(_driver, _frame, snapshot, include_widgets)
 
 
 # Press+release through the real pump at the widget's design-rect center
