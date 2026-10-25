@@ -7,6 +7,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/content_window.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -59,6 +60,20 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Take it off this list; the project stays where it is.");
 	ImGui::PopID();
+}
+
+// The projects of the content store (ADR 0069): a project got from it opens. Its sign-in is the Content window's,
+// which the button shows over the welcome page.
+void draw_from_store(Workspace &workspace) {
+	const SessionView &v = workspace.view();
+	if (!v.content.available) return;
+	ImGui::Spacing();
+	ImGui::SeparatorText("Get a project from NovaWorld");
+	draw_content_projects(workspace);
+	if (v.content.signed_in) return;
+	ImGui::SameLine();
+	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "content");
+	ui_kit::tooltip("Signs in with your NovaWorld account: an admin sees the private projects too.");
 }
 
 void draw_recent(Workspace &workspace) {
@@ -234,6 +249,7 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();
 		draw_recent(workspace);
+		draw_from_store(workspace);
 		ImGui::TableNextColumn();
 		ImGui::SeparatorText("New project");
 		// A field leaves room for its label and its Browse... beside it.
@@ -247,6 +263,7 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 		form.draw(workspace);
 		ImGui::Spacing();
 		draw_recent(workspace);
+		draw_from_store(workspace);
 	}
 	if (!v.activity.status.empty() && v.activity.status != v.project.refused) {
 		ImGui::Spacing();

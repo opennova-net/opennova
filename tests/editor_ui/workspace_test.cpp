@@ -203,18 +203,20 @@ SessionView seeded_view() {
 // The windows, where each docks and lists; the layout the editor builds at 1280x720 (the
 // bottom strip first, across the whole width, a quarter of the height; Files 260 pixels on
 // the left and the Inspector 320 on the right above it; the centre 37.5% Document, 62.5%
-// Preview), Document focused and Problems the bottom's tab. Unattached nothing draws; a
+// Preview), Document focused, Files the left's tab with Content beside it, and Problems the bottom's
+// tab. Unattached nothing draws; a
 // seeded project draws every window (a catalog's tab among them) and raises nothing, the
 // import dialog too.
 void test_workspace_layout() {
 	NullBackend backend;
 	EditorWindows windows;
 	const devtools::ImGuiPass &pass = windows.pass();
-	CHECK(pass.window_count() == 6, "six windows: Files, Document, Preview, Inspector, Problems, Output");
+	CHECK(pass.window_count() == 7, "seven windows: Files, Document, Preview, Inspector, Problems, Output, Content");
 	using Placement = devtools::InitialDockPlacement;
 	const std::pair<const char *, Placement> placed[] = {
 	        {"Files", Placement::Left},      {"Document", Placement::Center}, {"Preview", Placement::CenterRight},
-	        {"Inspector", Placement::Right}, {"Problems", Placement::Bottom}, {"Output", Placement::Bottom}};
+	        {"Inspector", Placement::Right}, {"Problems", Placement::Bottom}, {"Output", Placement::Bottom},
+	        {"Content", Placement::Left}};
 	for (const auto &[title, placement] : placed) {
 		const devtools::Window *window = find_window(pass, title);
 		CHECK(window && window->initial_dock_placement() == placement, title);
@@ -224,7 +226,7 @@ void test_workspace_layout() {
 	                         "Menu preview", "Model preview"})
 		CHECK(find_window(pass, gone) == nullptr, gone);
 	CHECK(!find_window(pass, "Document")->is_closeable(), "Document is the workspace's home: never closed");
-	CHECK(pass.dock_layout().dockspace == "OpenNovaEditorWorkspace.v2" && pass.dock_layout().bottom_full_width,
+	CHECK(pass.dock_layout().dockspace == "OpenNovaEditorWorkspace.v3" && pass.dock_layout().bottom_full_width,
 	      "the editor's own dockspace: a layout saved before these windows is not found");
 	CHECK(pass.is_open(), "the workspace is open from construction");
 
@@ -244,8 +246,9 @@ void test_workspace_layout() {
 	ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
 	ImGuiWindow *problems = ImGui::FindWindowByName("Problems");
 	ImGuiWindow *output = ImGui::FindWindowByName("Output");
-	CHECK(files && document && preview && inspector && problems && output, "every window drew");
-	if (!files || !document || !preview || !inspector || !problems || !output) return;
+	ImGuiWindow *content = ImGui::FindWindowByName("Content");
+	CHECK(files && document && preview && inspector && problems && output && content, "every window drew");
+	if (!files || !document || !preview || !inspector || !problems || !output || !content) return;
 	const ImGuiViewport *viewport = ImGui::GetMainViewport();
 	const ImVec2 at = viewport->WorkPos, size = viewport->WorkSize;
 	// (The layout is built on the first frame, before the menu bar takes its line: a quarter
@@ -268,6 +271,9 @@ void test_workspace_layout() {
 	CHECK(GImGui->NavWindow == document, "Document has the focus");
 	CHECK(problems->DockNode && problems->DockNode->TabBar && problems->DockNode->TabBar->SelectedTabId == problems->TabId,
 	      "Problems is the bottom's tab");
+	CHECK(content->DockId == files->DockId && files->DockNode && files->DockNode->TabBar &&
+	              files->DockNode->TabBar->SelectedTabId == files->TabId,
+	      "Content beside Files, Files the left's tab");
 	CHECK(logged_frame(windows, 8).find("Nothing to preview.") != std::string::npos, "nothing to preview yet");
 	// No project open (the UX round's project lane): the welcome page, the workspace's whole; the other windows
 	// stand aside, open in the Windows menu.
@@ -278,6 +284,7 @@ void test_workspace_layout() {
 	CHECK(home.find("New project") != std::string::npos && home.find("OpenNova Editor") != std::string::npos,
 	      "no project: the welcome page");
 	CHECK(!files->Active && !preview->Active && !inspector->Active && !problems->Active && !output->Active &&
+	              !content->Active &&
 	              find_window(pass, "Files")->open,
 	      "the other windows stand aside, still open");
 	CHECK(near(document->Size.x, size.x, 2.0f * ImGui::GetStyle().DockingSeparatorSize + 1.0f),

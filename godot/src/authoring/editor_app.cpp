@@ -860,6 +860,9 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Make the music stream from a wave");
 			filters.push_back("*.wav ; Waves");
 			break;
+		case PickPurpose::ContentFolder:
+			picker_->set_title("Choose where the project goes (a folder of its own is made inside)");
+			break;
 		case PickPurpose::None:
 			break;
 	}

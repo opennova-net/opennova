@@ -459,6 +459,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/file_page_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/content_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_inspector.cpp

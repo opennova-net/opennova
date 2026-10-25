@@ -869,5 +869,8 @@ void run_space_tests();
 void run_live_tests();
 // ADR 0046 S25, the terrain tools in the views (terrain_test.cpp).
 void run_terrain_tests();
+// ADR 0069, the content store's window, its words on the status bar and its projects on the welcome page
+// (content_test.cpp).
+void run_content_tests();
 
 } // namespace editor_ui_test

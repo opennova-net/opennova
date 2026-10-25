@@ -21,6 +21,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/ui/content_window.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_window.h>
@@ -118,18 +119,19 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 // above it Files 260 pixels of a 1280-wide window and the Inspector 320, kept as shares of
 // the width a window has when the layout is built (each ratio of the node it splits: the
 // Inspector's of what Files leaves); the centre 37.5% Document, 62.5% Preview. Once
-// built, Document has the focus and Problems is the bottom's tab. The dockspace id is the
-// editor's own: a layout saved before the workspace had these windows is not found, so this
-// one is built once, and the user's docking persists after.
+// built, Document has the focus, Files is the left's tab (Content beside it) and Problems the
+// bottom's. The dockspace id is the editor's own: a layout saved before the workspace had these
+// windows (v2's had no Content) is not found, so this one is built once, and the user's docking
+// persists after.
 devtools::DockLayout editor_layout() {
 	devtools::DockLayout layout;
-	layout.dockspace = "OpenNovaEditorWorkspace.v2";
+	layout.dockspace = "OpenNovaEditorWorkspace.v3";
 	layout.bottom_full_width = true;
 	layout.bottom = 0.25f;
 	layout.left = 260.0f / 1280.0f;
 	layout.right = 320.0f / (1280.0f - 260.0f);
 	layout.center_right = 1.0f - kDocumentShare;
-	layout.focus = {"Document", "Problems"};
+	layout.focus = {"Document", "Problems", "Files"};
 	return layout;
 }
 
@@ -188,6 +190,7 @@ EditorWindows::EditorWindows() {
 		pass_.register_window(std::move(problems));
 	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
+	pass_.register_window(std::make_unique<ContentWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
 	pass_.set_open(true); // the editor's workspace has no closed state
@@ -229,6 +232,11 @@ void EditorWindows::request(EditorRequest request) {
 			if (key == "stream") stream_pick_.place = value;
 		request.path.clear();
 		request.values.clear();
+	}
+	// A content project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
+	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::ContentFolder) {
+		content_get_key_ = request.project_key;
+		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
@@ -477,6 +485,14 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::MusicStreamWave:
 		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
 		stream_pick_ = StreamPick();
+		break;
+	case PickPurpose::ContentFolder:
+		// Into a folder of its key's name inside the one picked, as a clone makes one.
+		if (!content_get_key_.empty()) {
+			const bool slash = path.back() == '/' || path.back() == '\\';
+			request(request::content_get(content_get_key_, path + (slash ? "" : "/") + content_get_key_));
+		}
+		content_get_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}
@@ -1039,27 +1055,32 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// Each part's width, left to right: the unsaved files, the problem counts, the state and
-	// the buttons (the bar's layout puts an item spacing between items), from the end of the
-	// menus to the end of the bar's content.
+	// The project's standing in the content store (ADR 0069): "OPENNOVA r41, 3 changed, 2 incoming".
+	const std::string content_text = content_status_text(v.content);
+
+	// Each part's width, left to right: the content store's standing, the unsaved files, the problem
+	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the
+	// end of the menus to the end of the bar's content.
 	const float gap = ImGui::GetStyle().ItemSpacing.x;
-	float widths[4] = {};
-	if (!unsaved.empty()) widths[0] = ui_kit::unsaved_dot_width() + gap + ui_kit::text_width(unsaved_text.c_str());
-	widths[1] = ui_kit::severity_count_width(errors) + gap + ui_kit::severity_count_width(warnings);
-	if (!state.empty()) widths[2] = ui_kit::text_width(state.c_str());
-	if (cancel) widths[2] += gap + ui_kit::button_width("Cancel");
-	widths[3] = ui_kit::button_width("Build") + gap + ui_kit::button_width("Play") + gap + ui_kit::button_width("Stop");
+	constexpr size_t kParts = 5;
+	float widths[kParts] = {};
+	if (!content_text.empty()) widths[0] = ui_kit::text_width(content_text.c_str());
+	if (!unsaved.empty()) widths[1] = ui_kit::unsaved_dot_width() + gap + ui_kit::text_width(unsaved_text.c_str());
+	widths[2] = ui_kit::severity_count_width(errors) + gap + ui_kit::severity_count_width(warnings);
+	if (!state.empty()) widths[3] = ui_kit::text_width(state.c_str());
+	if (cancel) widths[3] += gap + ui_kit::button_width("Cancel");
+	widths[4] = ui_kit::button_width("Build") + gap + ui_kit::button_width("Play") + gap + ui_kit::button_width("Stop");
 	const float left = ImGui::GetCursorPosX();
 	const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
 	size_t first = 0; // the leftmost part shown
 	float total = 0.0f;
-	for (; first < 4; ++first) {
+	for (; first < kParts; ++first) {
 		total = 0.0f;
-		for (size_t part = first; part < 4; ++part)
+		for (size_t part = first; part < kParts; ++part)
 			if (widths[part] > 0.0f) total += (total > 0.0f ? gap : 0.0f) + widths[part];
 		if (right - total >= left) break;
 	}
-	if (first == 4) return;
+	if (first == kParts) return;
 	// Before them, what the session last said, in the room the parts leave (up to a line of
 	// a few words, and none in less than a word's room): cut to fit, whole in its tooltip
 	// with the project's folder under it (Output names the project's files from its folder).
@@ -1085,8 +1106,14 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ImGui::SetCursorPosX(x);
 		return clicked;
 	};
-	if (first == 0 && !unsaved.empty()) {
-		if (clickable("##unsaved", widths[0], "Files with unsaved changes.")) ImGui::OpenPopup("unsaved");
+	if (first == 0 && !content_text.empty()) {
+		if (clickable("##content", widths[0], "The project in the content store: its revision, your changes and "
+		                                     "what others pushed since. Shows the Content window."))
+			window_requests::focus(*this, "content");
+		ImGui::TextUnformatted(content_text.c_str());
+	}
+	if (first <= 1 && !unsaved.empty()) {
+		if (clickable("##unsaved", widths[1], "Files with unsaved changes.")) ImGui::OpenPopup("unsaved");
 		ui_kit::unsaved_dot(height);
 		ImGui::TextUnformatted(unsaved_text.c_str());
 		if (ImGui::BeginPopup("unsaved")) {
@@ -1099,7 +1126,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 			ImGui::EndPopup();
 		}
 	}
-	if (first <= 1) {
+	if (first <= 2) {
 		std::string tip = std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
 		                  (warnings == 1 ? " warning, " : " warnings, ") + std::to_string(infos) + " info.";
 		if (original) tip += " " + std::to_string(original) + " more in the game's own data (also in the original).";
@@ -1108,11 +1135,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
-		if (clickable("##problems", widths[1], tip)) window_requests::focus(*this, "problems");
+		if (clickable("##problems", widths[2], tip)) window_requests::focus(*this, "problems");
 		ui_kit::severity_count(DiagnosticSeverity::Error, errors, height);
 		ui_kit::severity_count(DiagnosticSeverity::Warning, warnings, height);
 	}
-	if (first <= 2 && !state.empty()) {
+	if (first <= 3 && !state.empty()) {
 		// The last build's state: a click shows what it came to (the build panel); a refused build's, Problems
 		// with only what refuses it.
 		const bool built = !v.activity.operation.running() && !v.activity.validation.running &&

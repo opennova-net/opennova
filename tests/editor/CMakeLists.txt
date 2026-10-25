@@ -614,7 +614,7 @@ opennova_add_editor_test(font_import)
 # navigation_test.cpp's; the jumps' keys and menus (DI-18: Go to file and name, Go to definition, Find usages, the Go
 # menu, the right-click menus) shortcuts_test.cpp's; the mission logic (ADR 0046 S24: the Event board, the logic in
 # the views, the live logic during Play) board_test.cpp's, space_test.cpp's and live_test.cpp's; the terrain tools in
-# the views (ADR 0046 S25) terrain_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# the views (ADR 0046 S25) terrain_test.cpp's; the content store's window (ADR 0069) content_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -627,13 +627,13 @@ if(OPENNOVA_IMGUI)
                                    model_test.cpp project_test.cpp
                                    navigation_test.cpp shortcuts_test.cpp
                                    board_test.cpp space_test.cpp live_test.cpp
-                                   terrain_test.cpp)
+                                   terrain_test.cpp content_test.cpp)
     list(TRANSFORM OPENNOVA_EDITOR_UI_SOURCES PREPEND ${OPENNOVA_EDITOR_UI_DIR}/)
     opennova_add_editor_executable(editor_ui_test SOURCES ${OPENNOVA_EDITOR_UI_SOURCES}
                                    LIBS opennova_editor opennova_imgui)
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project navigation shortcuts board space live terrain)
+                                  project navigation shortcuts board space live terrain content)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group}
                  WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})

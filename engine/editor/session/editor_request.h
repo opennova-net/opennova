@@ -152,7 +152,8 @@ enum class PickPurpose {
 	ImportFiles,
 	NewProjectInstall, // the New project form's game install
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
-	MusicStreamWave // a music bank stream's audio from a wave...: the wave it is made from
+	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
+	ContentFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
