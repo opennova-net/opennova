@@ -16,7 +16,7 @@ extends GutTest
 #   (PRE_ENUMSESSION), and ABORT_CANCEL there abandons it back to the menus.
 
 const TMP_DIR := "res://.godot/join_screen_probe_test"
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""

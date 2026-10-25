@@ -6,7 +6,7 @@ extends GutTest
 # and terrain, then the objects and the runtime) in GameWorld.last_load_timeline()'s order, each one
 # closed, with the two clocks at the read.
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""
