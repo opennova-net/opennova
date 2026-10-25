@@ -6,7 +6,7 @@ import { address } from '../test/addressFixtures';
 import { DFX2, JO, hostedServer, settings } from '../test/hostedFixtures';
 import type { Address } from '../types/addresses';
 import type { HostedDataSet, HostedSettings } from '../types/hostedServer';
-import { MISSIONS_MAX } from '../utils/hostedSettings';
+import { FIELD_RULES, MISSIONS_MAX } from '../utils/hostedSettings';
 
 vi.mock('../api/hostedServer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/hostedServer')>()),
@@ -26,6 +26,7 @@ function mountForm(
     previousOwnMachine?: boolean;
     addresses?: Address[];
     preferredAddressId?: number | null;
+    novalogicListing?: boolean;
   } = {},
 ) {
   return mount(HostedSettingsForm, { props: { previous, dataSets, ...extra } });
@@ -275,6 +276,61 @@ describe('HostedSettingsForm', () => {
     const withExpansion = mountForm([JO, DFX2], settings({ expansion_id: ESCALATION, missions: ['jox_one.bms'] }));
     expect((radio(withExpansion, 'expansion_id', String(ESCALATION)).element as HTMLInputElement).checked).toBe(true);
     expect(rotation(withExpansion)).toEqual(['Escalation Point']);
+  });
+
+  it("offers the listing on NovaLogic's NovaWorld only while the service does, and sends it", async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    // Not offered: no box, and the start sends it off, even when the last
+    // server had it on.
+    const unoffered = mountForm([JO], settings({ list_on_novalogic: true }));
+    expect(unoffered.find('#hosted-settings-list_on_novalogic').exists()).toBe(false);
+    expect(unoffered.text()).not.toContain("NovaLogic's NovaWorld");
+    await unoffered.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.lastCall?.[0]).toMatchObject({ list_on_novalogic: false });
+
+    // Offered: the box with its hint, off by default; ticked, it goes on.
+    const offered = mountForm([JO], null, { novalogicListing: true });
+    const box = offered.get('#hosted-settings-list_on_novalogic');
+    expect(box.element.closest('label')?.textContent?.trim()).toBe("Also list on NovaLogic's NovaWorld");
+    expect(offered.get('#hosted-settings-list_on_novalogic-hint').text()).toBe(
+      "Players using the original game's server list can find your server too.",
+    );
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    await offered.get('#hosted-settings-game_name').setValue('Night Ops');
+    await offered.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.lastCall?.[0]).toMatchObject({ list_on_novalogic: false });
+    await box.setValue(true);
+    await offered.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.lastCall?.[0]).toMatchObject({ game_name: 'Night Ops', list_on_novalogic: true });
+
+    // Started again from a server that had it on: ticked from the start.
+    const again = mountForm([JO], settings({ list_on_novalogic: true }), { novalogicListing: true });
+    expect((again.get('#hosted-settings-list_on_novalogic').element as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("marks the box when the backend refuses the listing on NovaLogic's NovaWorld", async () => {
+    start.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'invalid_settings',
+        status: 400,
+        message: `The server refused the settings. ${FIELD_RULES.list_on_novalogic}`,
+        field: 'list_on_novalogic',
+      },
+    });
+    const wrapper = mountForm([JO], settings({ list_on_novalogic: true }), { novalogicListing: true });
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.get('#hosted-settings-list_on_novalogic-error').text()).toBe(FIELD_RULES.list_on_novalogic);
+    const box = wrapper.get('#hosted-settings-list_on_novalogic');
+    expect(box.attributes('aria-describedby')).toContain('hosted-settings-list_on_novalogic-error');
+    expect(wrapper.emitted('refused')).toHaveLength(1);
+    // Unticked, the mark goes.
+    await box.setValue(false);
+    expect(wrapper.find('#hosted-settings-list_on_novalogic-error').exists()).toBe(false);
   });
 
   it("says so when the last server's game is no longer offered", () => {

@@ -70,6 +70,7 @@ export function settings(overrides: Partial<HostedSettings> = {}): HostedSetting
     respawn: 5,
     start_delay: 0,
     team_ff: false,
+    list_on_novalogic: false,
     missions: ['jo_one.bms'],
     ...overrides,
   };
@@ -140,6 +141,7 @@ export function serversResponse(
     enabled: true,
     full: false,
     data_sets: [JO, DFX2],
+    novalogic_listing: false,
     servers,
     ...rest,
     entitlement: entitlement({ used: live.length, shared_used: live.length - ownUsed, own_used: ownUsed, ...e }),

@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
   respawn: 5,
   start_delay: 0,
   team_ff: false,
+  list_on_novalogic: false,
   missions: [],
 };
 
@@ -63,6 +64,7 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
   respawn: 'Respawn time',
   start_delay: 'Pre-round delay',
   team_ff: 'Friendly fire',
+  list_on_novalogic: "Also list on NovaLogic's NovaWorld",
   missions: 'Mission rotation',
 };
 
@@ -82,6 +84,7 @@ export const FIELD_RULES: Record<SettingsField, string> = {
   respawn: 'The respawn time is a whole number of seconds in the range the game allows.',
   start_delay: 'The pre-round delay is a whole number of seconds in the range the game allows.',
   team_ff: 'Friendly fire is on or off.',
+  list_on_novalogic: "Listing on NovaLogic's NovaWorld is not available right now. Untick the box to start your server.",
   missions: `A rotation is 1 to ${MISSIONS_MAX} missions of the game and its expansion. Pick them from the list.`,
 };
 
@@ -208,6 +211,7 @@ export interface SettingsForm {
   respawn: number | string;
   start_delay: number | string;
   team_ff: boolean;
+  list_on_novalogic: boolean;
   missions: string[];
 }
 
@@ -228,6 +232,7 @@ export function formFrom(settings: HostedSettings | null, dataSet: HostedDataSet
     respawn: base.respawn,
     start_delay: base.start_delay,
     team_ff: base.team_ff,
+    list_on_novalogic: base.list_on_novalogic === true,
     missions: [...missions],
   };
 }
@@ -321,8 +326,13 @@ export interface CheckedSettings {
 
 // Every field against the backend's rule, in the form's order: the game one
 // of `dataSets`, and the ranges, the expansion and the missions that game's
-// own.
-export function checkSettings(form: SettingsForm, dataSets: readonly HostedDataSet[]): CheckedSettings {
+// own. The listing on NovaLogic's NovaWorld goes as the form has it only
+// while the service offers it (`novalogicListing`); else it goes false.
+export function checkSettings(
+  form: SettingsForm,
+  dataSets: readonly HostedDataSet[],
+  novalogicListing = false,
+): CheckedSettings {
   const errors: SettingsErrors = {};
   const dataSet = findDataSet(dataSets, form.data_set_id);
   if (!dataSet) errors.data_set_id = FIELD_RULES.data_set_id;
@@ -354,6 +364,7 @@ export function checkSettings(form: SettingsForm, dataSets: readonly HostedDataS
       game_password: form.game_password,
       ...numbers,
       team_ff: form.team_ff,
+      list_on_novalogic: novalogicListing && form.list_on_novalogic,
       missions: [...form.missions],
     },
   };

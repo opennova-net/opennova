@@ -59,6 +59,10 @@
       <dd class="text-ink">{{ server.settings.start_delay }} seconds</dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.team_ff }}</dt>
       <dd class="text-ink">{{ server.settings.team_ff ? 'On' : 'Off' }}</dd>
+      <template v-if="server.settings.list_on_novalogic || novalogicListing">
+        <dt class="text-ink-muted">{{ FIELD_LABELS.list_on_novalogic }}</dt>
+        <dd class="text-ink">{{ server.settings.list_on_novalogic ? 'On' : 'Off' }}</dd>
+      </template>
       <dt class="text-ink-muted">{{ FIELD_LABELS.missions }}</dt>
       <dd class="min-w-0 text-ink">
         <ol class="list-inside list-decimal space-y-0.5">
@@ -78,6 +82,8 @@
 // A hosted server page's settings tab (the owner's Settings, the admin's Game
 // settings): the game settings it was started with (and the static address it
 // runs at), and for the owner a new start from them (/me/servers/new?from=<id>).
+// The listing on NovaLogic's NovaWorld shows while it is on, or for the owner
+// while the service offers it.
 import { onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchMyServers } from '../../api/hostedServer';
@@ -102,10 +108,13 @@ const showPassword = ref(false);
 // Each mission's title, as the games the owner may start name them (the
 // admin's view lists the files).
 const titles = ref(new Map<string, string>());
+// The service offers the listing on NovaLogic's NovaWorld (the owner's view).
+const novalogicListing = ref(false);
 onMounted(async () => {
   if (props.scope !== 'owner') return;
   const result = await fetchMyServers();
   if (!result.ok) return;
+  novalogicListing.value = result.value.novalogic_listing;
   const named = new Map<string, string>();
   for (const game of result.value.data_sets) {
     for (const m of [...game.missions, ...game.expansions.flatMap((e) => e.missions)]) {
