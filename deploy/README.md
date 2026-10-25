@@ -24,21 +24,21 @@ the whole bring-up.
     applies the plan it saved, refuses one that destroys or replaces an Elastic IP or its
     association, the load balancer, the cluster or a program's service, the database,
     the cache or a bucket unless `--allow-destroy`;
-  - `org plan|apply|import|output|list`: the Organization (`infra/org`), as the management
-    account's `opennova-org` user (vault item `aws-org`), no deployment: the member
+  - `org plan|apply|import|state-rm|output|list`: the Organization (`infra/org`), as the
+    management account's `opennova-org` user (vault item `aws-org`), no deployment: the member
     accounts (each deployment's and the CI runners'), and in each deployment's account,
     through its `OrganizationAccountAccessRole`, the Terraform state bucket, the
     role boundary and the machine boundary, the deploy user `opennova-deploy` and its
     key, and the GitHub deploy role; its state in prod's state bucket; an apply writes
     each deployment's bucket, key and role into its vault item `aws-<deployment>`;
-  - `zone plan|apply|import|output|list`: the Cloudflare zone's shared settings
+  - `zone plan|apply|import|state-rm|output|list`: the Cloudflare zone's shared settings
     (`infra/zone`: Full (strict), each deployment's edge authentication rule, the Stripe
     webhook's rule, Email Routing), no deployment, its state in prod's state bucket;
-  - `github plan|apply|import|output|list`: the GitHub organization (`infra/github`;
+  - `github plan|apply|import|state-rm|output|list`: the GitHub organization (`infra/github`;
     DEPLOY.md, "GitHub"): its settings, members, repositories, the deploy environments,
     branch protection and Actions secrets, no deployment, its state in prod's state
     bucket;
-  - `ci plan|apply|import|output|list`: the CI runners (`infra/ci`; DEPLOY.md, "CI
+  - `ci plan|apply|import|state-rm|output|list`: the CI runners (`infra/ci`; DEPLOY.md, "CI
     runners"): RunsOn in the ci account (vault item `aws-ci`), as `opennova-org` through
     that account's `OrganizationAccountAccessRole`, no deployment, its state in prod's
     state bucket;

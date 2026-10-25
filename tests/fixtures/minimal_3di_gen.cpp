@@ -1,5 +1,5 @@
 // Generator + guard for the synthetic 3DI model set fixtures/threedi/synth
-// (fixtures/README.md): eleven base models and the one-edit variants the GUT
+// (fixtures/README.md): fifteen base models and the one-edit variants the GUT
 // suite loads, authored from small integer-friendly data in
 // minimal_3di_builder.h and minted through our own parity writer
 // (threedi_3di3_write), so every file is reproduced byte-for-byte on every

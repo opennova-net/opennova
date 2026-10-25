@@ -30,10 +30,15 @@ installation is needed. Its dedicated build directory is `build/blender-addon`.
 ## Importing
 
 File > Import > NovaLogic 3DI (.3di), or Import .3di in the OpenNova sidebar.
-Select one or more loose `.3di` files; their textures are looked up beside
-them the way the game does (the stored name first, then the same name with
-`.tga`, `.dds`, `.mdt`, `.pcx`, `.png`, `.jpg` or `.bmp`, any case, so a
-`.tga` reference finds the `.dds` retail ships). Each model comes into the
+Select one or more loose `.3di` files; each texture row loads the one file
+beside them, matched in any case, that the game's loader for the row's type
+opens (`opennova-3di scene` names it in a `texfile` record; the rule per type
+is `material_texture_source` in `engine/runtime/renderer/material_texture.h`).
+A diffuse row, for example, takes its name's `.dds` sibling when there is one,
+so a `.tga` reference finds the `.dds` retail ships, else the `.tga`, `.mdt` or
+`.pcx` it names; a type-1 row only the `.tga`, `.mdt` or `.pcx` it names. No
+file outside that rule is tried (no `.png`, `.jpg` or `.bmp` stand-in), and a
+row whose file is missing is reported. Each model comes into the
 current scene under a model root of its own, laid out in the scene shape
 below, with LOD 1 and up hidden, and its output path named after the
 imported file. A static model's parts come in as `PN##` empties, a skinned

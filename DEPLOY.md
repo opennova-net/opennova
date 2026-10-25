@@ -24,7 +24,7 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 |---|---|---|---|
 | gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
-| web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082) |
+| web | the retail HTTP routes and the website's API (8080), the update service (20044, 20556, 21068 and 21580) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082), the four update ports from everyone (each to web's 20044) |
 | fleet | the fleet's reconcile pass, the admin links, the console drain, the machines' internal listener (8070); no job and no cloud call | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `fleet.<deployment>.opennova.internal`, its Cloud Map name |
 | worker | the background jobs and their schedules (the fleet's AWS calls, billing sync, mail, prunes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | nothing inbound |
 | data | the data sets' jobs over the game data's store (a tree's finalize, a release's validate and apply, the prune) | 1 (fixed: its jobs' caps are global), 0.25 vCPU / 1 GiB and 40 GiB of task storage | nothing inbound |
@@ -80,8 +80,8 @@ and rule, its database's dumps (`backup restore` takes the deployment's own alon
   `org` stack (`opennova-org`, which may read the Organization, make accounts and enter
   each member account's `OrganizationAccountAccessRole`, and nothing else).
 - The 1Password vault, with separate items per deployment (above) and a few shared ones:
-  `aws-org`, `cloudflare`, `alerts`, `email`, `stripe-test`, `stripe-live`,
-  `github-terraform`.
+  `aws-org`, `aws-ci`, `runs-on`, `cloudflare`, `alerts`, `email`, `stripe-test`,
+  `stripe-live`, `github-terraform`.
 - The Cloudflare zone: one zone holds every deployment's records. Its zone-wide settings,
   its rulesets (each deployment's edge authentication rule with that deployment's own
   secret, the Stripe webhook's rule) and Email Routing are one stack, `infra/zone`; each
@@ -212,8 +212,10 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
     `./deploy/run.sh $D app deploy --tag sha-<programs> --serve-tag sha-<serve>
     --hostd-tag sha-<serve>` (both images come from one `serve-image.yml` run, so one
     tag); the first site admin (section 4, "The first site admin"); the game data on the
-    site's Game data page (section 7, "Turning it on"); Stripe's "Send test webhook";
-    the smoke tests ("Smoke tests").
+    site's Game data page (section 7, "Turning it on", step 6: the retail baselines
+    uploaded, and OpenNova's runtime and content releases published, without which an
+    OpenNova first install fails); Stripe's "Send test webhook"; the smoke tests ("Smoke
+    tests").
 12. **Prod**, with `P='--deployment prod'`: its gate's Elastic IP, made once in the prod
     account (`./deploy/run.sh $P aws ec2 allocate-address --domain vpc
     --tag-specifications 'ResourceType=elastic-ip,Tags=[{Key=opennova:deployment,Value=opennova-prod}]'`),
@@ -242,6 +244,7 @@ own, change these on your fork:
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
 | the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1`, `scripts/package_release.py` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` and `UPDATE.WIZ` files the packages write | `update.<domain>`, your deployment's ("The update service") |
 
 ## Rebuilding from the vault
 
@@ -324,8 +327,10 @@ a value:
 | `rds-<deployment>` | `master_password` | random |
 | `aws-<deployment>` | `account_id`, `root_email` | `REPLACE_ME` |
 | `aws-<deployment>` | `account_name`, `region` | `opennova-<deployment>`, `us-east-1` |
-| `aws-org` | `account_id`, `organization_id` | `REPLACE_ME` |
+| `aws-org` | `account_id`, `organization_id`, `sso_given_name`, `sso_family_name`, `sso_email` | `REPLACE_ME` |
 | `aws-org` | `region` | `us-east-1` |
+| `aws-ci` | `account_id`, `root_email` | `REPLACE_ME` |
+| `aws-ci` | `account_name`, `region` | `opennova-ci`, `us-east-1` |
 | `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine`, `price_static_address` | `REPLACE_ME` |
 | `stripe-test` | `restricted_key` (the local stack's and CI's key: "GitHub" below) | `REPLACE_ME` |
 | `alerts` | `email` | `REPLACE_ME` |
@@ -345,9 +350,9 @@ of the hosted servers' game data is in the vault (section 7: the site's Game dat
 it, in the deployment's operations bucket).
 
 The `op://` references the toolbox reads are listed in `deploy/env/`: `terraform.env.tpl`
-(a deployment stack's), `org.env.tpl`, `zone.env.tpl` and `github.env.tpl` (the shared
-stacks'), `aws.env.tpl` (whose access key a command acts with) and `runtime.env.tpl` (the
-service's runtime secrets).
+(a deployment stack's), `org.env.tpl`, `zone.env.tpl`, `github.env.tpl` and `ci.env.tpl`
+(the shared stacks'), `aws.env.tpl` (whose access key a command acts with) and
+`runtime.env.tpl` (the service's runtime secrets).
 
 ## 2. Mint the service-account token
 
@@ -402,12 +407,14 @@ besides its one `op whoami` (`deploy/bin/tests/vault_requests_test.sh` counts th
 | `app`, `fleet`, `backup` and `aws` commands | 4 (5 for `app deploy --promote staging` and `backup import --from-deployment prod`, which read the other deployment's item) |
 | `db bootstrap`, `db reset-db` | 5 |
 | `secrets sync` | 6 |
-| `secrets check` | 12 |
+| `secrets check` | 12 (13 on prod, which also reads `aws-ci`) |
 | `stripe check` | 5 |
-| `infra plan`, `infra apply` | 9 |
-| `org plan` | 6 |
-| `org apply` | 9, and its 3 writes |
-| `zone plan`, `github plan` | 8 |
+| `infra plan`, `infra apply` | 9 (10 on prod, which also reads `aws-ci`) |
+| `org plan` | 7 |
+| `org apply` | 10, and its 3 writes |
+| `zone plan` | 8 |
+| `github plan` | 7 |
+| `ci plan` | 8 |
 
 `op service-account ratelimit` (with the token in `OP_SERVICE_ACCOUNT_TOKEN`) shows what
 is left of the hour and the day.
@@ -519,7 +526,8 @@ with `--deployment prod`.
 ### The var-file
 
 The non-secret knobs live in `infra/aws/<deployment>.tfvars` (`prod.tfvars`,
-`staging.tfvars`; `deployment.tfvars.example` names them all). It holds no secret and no
+`staging.tfvars`; `deployment.tfvars.example` names the usual ones, `variables.tf` declares
+every one). It holds no secret and no
 identifier of an account, so committing it keeps every operator on the same knobs. Never
 name one `terraform.tfvars` or `*.auto.tfvars` (or their `.json` forms): Terraform loads
 those into every run, so the toolbox refuses to run while one exists in `infra/aws/`.
@@ -578,7 +586,8 @@ What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the tasks, the lo
 balancer and the machines, private a/b with no route out for the database and the
 cache); the ECS cluster; per program a security group (the gate: its UDP port and its
 health port from the load balancer alone; the lobby: its UDP port to everyone and its
-health port from the load balancer; web: 443 and 8082 from the load balancer alone; the
+health port from the load balancer; web: 443, 8082 and 20044 (the update service) from the
+load balancer alone; the
 fleet: the internal port from the machines alone; the worker and data: nothing; no 22, no
 80 anywhere), a task role holding what
 that program needs alone, a task definition (the template every deploy clones), an ECS
@@ -714,10 +723,11 @@ Retail clients find the gate by its Elastic IP alone. It is the public network l
 balancer's address in zone a (its subnet mapping there; zone b has an address of its
 own), cross-zone, so it reaches the tasks in either zone: the gate's UDP port (7597,
 its target group checking each task's `/livez` on the health port, 8081), the lobby's
-UDP port (64206, checked the same way) and web's retail HTTP port (8080, to the portal
+UDP port (64206, checked the same way), web's retail HTTP port (8080, to the portal
 nginx's retail server on 8082, which caps each request's body and hands it to web's
-server with the client's address; checked on `/healthz` through it), all to IP targets
-that keep each client's own address and port, and 443
+server with the client's address; checked on `/healthz` through it) and the update
+service's four ports (each to web's 20044, section 7, "The update service"), all to IP
+targets that keep each client's own address and port, and 443
 (the portal's nginx, from Cloudflare's ranges alone; with proxied records only, since
 without them there is no origin certificate and nginx listens on 80). Deletion
 protection is on: the balancer holds the gate's address.
@@ -741,7 +751,7 @@ fleet program's tasks register in Cloud Map as `fleet.<deployment>.opennova.inte
 where the machines' hostd and `ONNET_INTERNAL_URL` reach it.
 
 Every task answers `/livez` (its program's stall watchdog) on the health port (web on 8080
-as well), which its container health check asks; ECS replaces a task that fails it, and a
+instead), which its container health check asks; ECS replaces a task that fails it, and a
 deployment counts a new task only once it passes (and, behind the balancer, once the
 balancer's check does). Web's `/healthz` also fails while the cache does not answer: the
 balancer routes around it, and no task is replaced for it, since `/livez` is what ECS
@@ -828,7 +838,7 @@ a second value, `EDGE_AUTH_SECRET_PREVIOUS`, during a rotation.
 ### Email (support@<domain>)
 
 Mail to `support@<domain>`, to each local part in `email_routes` (default `support`,
-`aws-prod`, `aws-staging`: the member accounts' root addresses) reaches one mailbox of
+`aws-prod`, `aws-staging`, `aws-ci`: the member accounts' root addresses) reaches one mailbox of
 yours through Cloudflare Email Routing (`infra/zone/email.tf`, the zone's):
 
 1. In the vault, item `email`, set `forward_to` to the destination address (`secrets
@@ -1082,8 +1092,10 @@ Two independent layers:
 database as it stands (a `novaworld-pre-restore-<ts>` copy) and restores the dump in one
 transaction (`pg_restore --clean --if-exists --single-transaction`), then starts every
 program again (`app up`), whose boot applies any migration the dump predates (a failed
-restore starts them again too). A program older than the dump refuses an edited or
-unknown migration rather than run on it. The task reads its own deployment's dumps
+restore starts them again too). A program refuses to boot on a migration the dump recorded
+whose file it holds edited since (until 1.0 that takes a reset: "Resetting the service
+database", below), and one older than the dump ignores the migrations it does not have. The
+task reads its own deployment's dumps
 alone; another deployment's dump comes in by `backup import` first, and only one way: prod's
 into staging (`--from-deployment prod`), never staging's into prod. On prod the restore
 asks for `prod` besides `--yes-overwrite-database`.
@@ -1103,31 +1115,60 @@ other's bucket.
 
 ### Resetting the service database
 
-Once billing is live the database is durable: migrations are append-only, and `db
-reset-db` refuses while any subscription that grants hosting (active, trialing, past_due)
-is recorded:
+Until 1.0 the service database is disposable: a migration is edited in place, and a
+deployment whose database applied the old file is reset when it takes the change. The boot
+still refuses a recorded migration whose SHA-256 changed, which is how a database that needs
+the reset shows, and ignores a recorded one the program does not have (`backend/README.md`,
+"Migrations until 1.0"). `db reset-db` takes `--yes-drop-database [--orphan-subscriptions]
+[--no-backup] [--yes]`:
 
 ```bash
 ./deploy/run.sh --deployment staging db reset-db --yes-drop-database
 ```
 
-It dumps the database first (`--no-backup` skips it), stops every program, drops the
+It first counts, in a one-off task that changes nothing, the subscriptions that grant
+hosting (active, trialing, past_due), and refuses while one is recorded;
+`--orphan-subscriptions` resets anyway: those customers keep paying with no account linked
+here, so cancel them in Stripe first. Then it dumps the database (unless `--no-backup`; a
+failed dump stops it, nothing changed), stops every program (`app down`), drops the
 database and makes it again in a one-off task (the same `CREATE DATABASE` as `db
-bootstrap`), and starts every program again, the first to boot applying every migration.
-`--orphan-subscriptions` resets anyway: those customers keep paying with no account
-linked here, so cancel them in Stripe first. Everything goes with the reset: accounts,
-sessions, host keys, CD keys, DFX2 activations, billing links; make the first site admin
-again (section 4). On prod it asks for `prod` besides `--yes-drop-database`.
+bootstrap`), and starts every program again (`app up`), the first to boot applying every
+migration. Every row goes with the reset: accounts, sessions, host keys, CD keys, DFX2
+activations, billing links, the hosted servers, machines and static addresses, the game
+data's trees and releases; make the first site admin again (section 4). On prod it asks for
+`prod` besides `--yes-drop-database`. The reset drops the database alone: the next
+`fleet.sweep` terminates every machine no row names (so every hosted server ends) and
+records the static addresses the cloud still holds as orphans, never releasing them, and
+the trees' files stay in the ops bucket under `data/trees/<id>/` while the new database
+numbers its trees from 1 again. A new tree empties its prefix before it takes files (a
+baseline upload at its start, a release's at its apply), so a reused id never mixes an
+earlier tree's files in; the files of ids the new database does not reach stay until
+removed by hand.
+
+A release that changed a migration goes out in this order (staging's, for #1253):
+
+```bash
+D='--deployment staging'
+./deploy/run.sh $D app down
+./deploy/run.sh $D app deploy --tag sha-<commit>
+./deploy/run.sh $D db reset-db --yes-drop-database
+```
+
+The deploy finds the programs down and moves them to the release at no task (on the old
+database their boot would refuse the edited file); the reset starts them on the empty one.
+Then make the first site admin again (`ONNET_BOOTSTRAP_ADMIN`: section 4, "The first site
+admin") and publish OpenNova's runtime and content releases ("The update service", section
+7); the retail baselines are uploaded again too, since the reset took the game data's rows.
 
 ## 7. Hosted game servers
 
 An account with a hosting entitlement (a monthly support tier, a dedicated machine, or an
 admin's comp grant of shared servers and dedicated machines, the admin user page) starts
 servers from the site's My servers page, picking a data set
-(JO, DFX2 or OpenNova: a product's game files, which admins upload on the site's Game
-data page, below) and, for JO, its Escalation expansion. The server is always the public
-`opennova-serve` image, started with `/game <title>` (and `/exp <code>`) over the data
-set's files, which its machine fetches from the store.
+(JO, DFX2 or OpenNova: a product's game files, which admins put on the site's Game
+data page, below) and an expansion of it (JO's Escalation, OpenNova's `onjo1`). The
+server is always the public `opennova-serve` image, started with `/game <title>` (and
+`/exp <code>`) over the data set's files, which its machine fetches from the store.
 
 The service places each server on a machine it launches itself (its EC2 machine driver,
 in the worker's jobs, with the worker's task role), in either public subnet:
@@ -1162,10 +1203,12 @@ attention list shows the shortfall.
 
 ### The game data
 
-Admins create and upload data sets on the admin page **Game data** (`/admin/data-sets`;
-ADR 0064). A data set is one product: of kind base (JO, DFX2, OpenNova: its title and the
-lobby it lists in) or expansion (Escalation, code `jox01`, under JO), with the login and
-command file retail `UPDATE.EXE` asks for when OpenNova's update service serves it. Its
+Admins fill the data sets on the admin page **Game data** (`/admin/data-sets`; ADR 0064);
+migrations 0011 and 0013 seed the catalog's rows, and an admin may create more. A data set
+is one product: of kind base (JO, DFX2, OpenNova: its title and the lobby it lists in),
+expansion (Escalation, code `jox01`, under JO; `onjo1` under OpenNova) or update (OpenNova's
+runtime, `ONRUNTIME`: an updater product with no tree, shown under Releases alone), with the
+login and command file the updater asks for when OpenNova's update service serves it. Its
 data is a **tree**, one immutable version of its files: **Upload data** takes an install's folder
 from a folder picker, keeps only the files `opennova-serve` reads, sends them through the
 site in 32 MiB parts (each a request to web, which puts it in the bucket; the bucket needs
@@ -1184,8 +1227,10 @@ the trees it started on until its owner presses **Update** on its page (the page
 update waits), or an admin's **Update servers** does it for every server of the data set,
 and a crash restart or a fleet roll keeps the pins. A **release** (a 1SFS package built
 with `opennova-update-tool build`, uploaded on the same page) validated and published is
-applied to the data set's baseline tree, which makes its next current tree, and the update
-service serves the package to retail `UPDATE.EXE` ("The update service", below).
+applied to the data set's baseline tree (an OpenNova or `onjo1` section, a complete package,
+is built from empty instead, and an `update` row's gets no tree), which makes its next
+current tree, and the update service serves the package to the updater ("The update
+service", below).
 
 The store is the deployment's operations bucket under `data/` (one bucket per deployment,
 so the prefix carries no deployment): `trees/<tree id>/<file>` with its `manifest.json`
@@ -1249,12 +1294,17 @@ deployment's admins upload it on its own site, into its own bucket.
    join ECS cluster opennova-<deployment>-fleet` (a worker whose driver settings are
    incomplete does not boot: `app logs worker` names what is missing).
 
-6. **Upload the data.** On Game data, make the data sets (JO in `jop_2_consumer`,
-   Escalation `jox01` under it, DFX2, OpenNova); **Upload data** on each from its install's
-   folder, then **Finalize**. A data set is offered to owners once its current tree is
-   ready; until then a server of it fails with "its data set has no data" (not counted as
-   a crash). Each deployment's admins upload into that deployment alone: staging's data
-   never reaches prod's bucket, nor the other way.
+6. **Upload the data.** The data sets are there already: migrations 0011 and 0013 seed
+   JO, its Escalation (`jox01`), DFX2, OpenNova, its `onjo1` and the runtime's `update`
+   row, with their updater logins (make none again: a second base is a duplicate row, and
+   an expansion code or updater login already held is refused, 409 `duplicate_expansion`
+   or `duplicate_login`). On Game data, **Upload data** on each retail one (JO,
+   Escalation, DFX2) from its install's folder, then **Finalize**. OpenNova's and
+   `onjo1`'s trees come from their published full releases instead: publish OpenNova's
+   runtime and content releases ("The update service", below). A data set is offered to
+   owners once its current tree is ready; until then a server of it fails with "its data
+   set has no data" (not counted as a crash). Each deployment's admins upload into that
+   deployment alone: staging's data never reaches prod's bucket, nor the other way.
 
 7. **The machines' AMI.** `fleet_ami` in the var-file names the exact image (Amazon's
    ECS-optimized AL2023, x86_64, its full name), so a new one shows in the plan and in
@@ -1317,7 +1367,8 @@ deployment's admins upload it on its own site, into its own bucket.
 
 ### The update service
 
-Web serves retail `UPDATE.EXE` (ADR 0061) on the updater's four TCP ports (20044, 20556,
+Web serves retail `UPDATE.EXE` (ADR 0061) and OpenNova's own `update.exe` (ADR 0067: its
+runtime, content and expansion) on the updater's four TCP ports (20044, 20556,
 21068 and 21580: `update_ports`, hardcoded in the updater) behind the load balancer, from
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
@@ -1326,7 +1377,18 @@ data set's: with `retail_updater` on, its SERVER.LST names `ftp.novaworld.com`, 
 Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
 switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
-(web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off). The
+(web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
+does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
+`OPENNOVA.WIZ` names, else `update.opennova.net`, which the packages write there too. An
+OpenNova product (`retail_updater` off) that no published release serves is refused, so an
+OpenNova first install fails until OpenNova's runtime and content releases are published; a
+retail one with none is answered current, from a package web writes into its cache itself.
+A content package is `scripts/package_release.py`'s, built from the product's OpenNova
+Editor project; the runtime's is each tagged release's `opennova-runtime-windows-<tag>.sfs`
+(`release.yml` publishes it itself where `PUBLISH_RUNTIME_UPDATES` is set). Either is
+published on the Game data page's Releases (upload, validate, **Publish**) or with
+`scripts/publish_update.py`, which does the same through the admin API (without
+`--publish` the release stays a draft). The
 packages are the published releases of the Game data page; web fetches one from the store
 the first time the updater asks for it, into its task's storage.
 
@@ -1379,7 +1441,8 @@ game data stays in the bucket).
   `fleet_ami` names (Amazon's ECS-optimized Amazon Linux 2023, x86_64, by its exact name,
   owner `amazon`), and the worker may launch that image alone. It carries docker and the
   ECS agent; a machine's user data writes its token, its id and the ECS agent's settings
-  (its cluster, its `machine-id` and `kind` attributes) and nothing else, and the ECS
+  (its cluster, its `machine-id` and `kind` attributes) and reserves the slots' ports
+  (32768-32831) out of Linux's ephemeral range (sysctl), nothing else, and the ECS
   agent starts the machine's hostd task once it registers. `fleet status` names
   Amazon's newest image beside the pinned one. To move to it: the new name in
   `staging.tfvars`, `infra apply` (the launch templates' new version; new machines boot
@@ -1788,13 +1851,17 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a run takes 80 vCPUs at once (five 16-vCPU legs). The
-   quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T, Z) Spot
-   Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I, M, R,
-   T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:
-   two runs at once. A leg past them waits for an earlier run's instances to end, or
-   takes on-demand capacity when spot alone is full. A new account's can be lower than
-   one run (OpenNova's spot quota started at 96): check both.
+   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 80 vCPUs at once
+   (five 16-vCPU legs), a `master` push's 112 (seven: both gdext builds make debug and
+   release), and `serve-image.yml` and `novaworld-images.yml` each add a 16-vCPU leg
+   (`net-linux.yml`) when a change touches their paths.
+   The quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T,
+   Z) Spot Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I,
+   M, R, T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:
+   two pull requests' `ci.yml` runs at once. A leg past them waits
+   for an earlier run's instances to end, or takes on-demand capacity when spot alone is
+   full. A new account's can be lower than one run (OpenNova's spot quota started at 96,
+   under a push's 112): check both.
 5. **The stack:**
 
    ```bash

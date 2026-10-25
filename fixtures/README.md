@@ -56,7 +56,8 @@ came from a retail install was replaced by a minted or authored file.
 `game/` holds small authored menu, stylesheet, string-table and HUD-layout samples
 retained from OpenNova's game when its content left the engine repository.
 The native and Godot menu tests read these samples with generated fonts,
-images and game resources; they never require the authored game checkout.
+images and game resources; they never require OpenNova's game data, which no
+repository holds.
 
 `def/items.def` (test rows 106100..), `def/weapon.def` and `def/ammo.def` (the armory the native weapon-table, handshake and
 round-trail tests read: the shipped JO:CA weapon.def's 94 weapons in the shipped order, the rows
@@ -79,9 +80,10 @@ make among them: the menu format sweeps' variant fixture), `mnu/render_cases.mnu
 `terrain/forms/line_forms16.trn` / `line_forms8.trn` (the line forms the shipped `.env`
 and `.trn` files take, the `env_shipped_forms` and `trn_mission_load` ctests'),
 `score/score_sample.ini`,
-`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`, and
-`weapon_timing.txt`, the `opennova-3di weapon timing` input the Blender packaging
-workflow runs),
+`anim/idle.bad` and `anim/walk.bad` (the one-bone clips), `anim/soldier.adm`,
+`anim/US01.adm`, `anim/forms.adm` (every line form the shipped tables use, their trailing
+NUL included: `anim_rewrite`'s) and `anim/weapon_timing.txt` (the `opennova-3di weapon
+timing` input the Blender packaging workflow runs; the rest of `anim/` is minted, below),
 `configfile/pool_at_line.def` and `configfile/pool_past_line.def` (two
 charattr-shaped ConfigFile texts on either side of the text reader's data-strings
 pool: 64 values and 65 over a 64-byte pool, the `configfile_data_strings_pool` and
@@ -94,15 +96,15 @@ rig; `grm_roundtrip` pins it byte-for-byte through the writer),
 `threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
 the Blender add-on's package smoke test build), `wac/text_document.wac` (a script
 naming an effect, a sound set, two ammo and a text key, the editor's text document
-test's), the
-`novaworld/run_*/manifest.txt` records, and this README.
+test's), `wac/forms.wac` (every lexical and statement form the shipped scripts use, the
+`wac_corpus` ctest's), and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)
 
 `tests/fixtures/minimal_3di_gen.cpp` authors every model in memory
 (`tests/fixtures/minimal_3di_builder.h`, mission axes: x forward, y left, z up,
 origin on the ground unless noted) and writes it through `threedi_3di3_write`.
-Eleven base models stand in for the retail models the tests once loaded, shaped
+Fifteen base models stand in for the retail models the tests once loaded, shaped
 after what those tests key on:
 
 | Model | Shape |
@@ -118,6 +120,10 @@ after what those tests key on:
 | `mount` | base + cradle + gun; CTRL `HEAT_GLOW`, `EWEAP_GUNYAW`, `EWEAP_GUNPITCH`; the cradle yaws on register 1, the gun yaws on 1 and pitches on 2; user points `BCasing`, `Bullet`, `Camera`, `heat`, `MFlash01`, `Usegun` (row 6); one CB per part |
 | `carrier` | hull + cabin; the dsuv1 user-point order (`ctrlx13` first, then `ewep01`, `sitex00d`, `sitex08c`, `FX01`, `ground`, `sitex06b`, `sitex12a`); CTRL `VEHICLE_STEERING`, `VEHICLE_WHEELS`, `VEHICLE_TIRE00..03`; the cabin COBJ owns its own CVRT run and the sole CXLT (2, 0, 1/2) |
 | `tank` | hull + turret; `ctrlx25` (row 1), `ewep01` on the turret, `fx00`, `ground`; the turret yaws on `VEHICLE_GUNYAW`; two CP track volumes |
+| `vm40` | the first-person viewmodel: forty skinned parts on the stock first-person rig's 40 bones (`tests/fixtures/vm40_rig.h`: two arms of five fingers, the receiver, magazine and bolt), each part a cube on its bone and a collision section of its own carrying one face quad on its pivot, the fingers' quads under the 8.8 grid's step; the arms on a material of two camouflage frames CTRL `TEX_CAMO1` picks; `bullet` and `MFlash01` on the receiver; the `anim/vm40*` clips play on it |
+| `heli` | Dblkhwk1's layout: tangent frames on every vertex (vflags 0x15), a hull, a main rotor and its blur sharing one pivot, a tail rotor and its blur on MTRX frame 1 (its axes turned a quarter about z), the rotors on `HELO_ROTOR` and `HELO_TAILROTOR`; three LODs, the last holding no part; `ground`; the hull's face box and one CB volume |
+| `person_slot2` | the person with every limb skinned to two bones by a strip bone table (vflags 0x55, tangents too), each vertex naming a third slot past its strip's two-entry table with no weight on it (FSldr03's), and a CXLT table whose rows are not its sections' offsets (US01's, ArmsG's, Mp5b_1st's) |
+| `person_rest4` | the same with an eighth of each vertex's weight, the remainder the fourth slot takes, on that slot past the table (SASBODY1's and sasmg's) |
 
 The variants are one authored edit each over a base, spelled the way the
 retired `ObjectData` editing surface spelled them ("delete rows" clears the
@@ -152,6 +158,27 @@ control register 0, values 0..4, no speed):
 | `pump_lod0_inert_lod1_sine_rotz` | pump | LOD0: one inert row on part 0; LOD1: one rotation z sine row | simulation effective LOD0 collision |
 | `pump_lod20`, `pump_lod80` | pump | LOD0 RMDL threshold 20 or 80 (integer pixels, retail's authored form: LOD0 draws above it, LOD1 below); original geometry, GHDR and CMDL retained | entity projection sphere, fallback/composed persons and primary-sphere husk LOD selection |
 | `panm_live_01_spinner` .. `panm_inert_10_rotrev` | shed | delete rows; one row on part 0 with flags F and every track control 0 except the live tracks (control 0x10). (F, live): 01 `1<<8` none; 02 `3<<8` none; 03 `4<<8` none; 04 `2<<8` rotation z; 05 `2<<8` scale x; 06 `1` scale y; 07 `1` scale x; 08 `2` scale y; 09 `1<<24` translation; 10 `1<<16` none | simulation PANM liveness family |
+| `crate_cfac_pad` | crate | the collision faces' pad bytes not zero (most shipped faces') | `threedi_rewrite`; the editor's model rows |
+| `armory_cfac_flags` | armory | faces 0..5 flagged 0x100, 0x101, 0x400, 0x401, 0x500, 0x501 (Dblkhwk1's and Armry02's, among others) | `threedi_rewrite`; the editor's model rows |
+| `pump_panm_empty_lod1` | pump | LOD1's PANM chunk there and empty beside LOD0's rows (CNet01's, Flsh_1st's) | `threedi_rewrite`; the editor's model rows |
+| `pump_lod1_empty` | pump | LOD1 with no part, strip or vertex (CNet01's) | `threedi_rewrite`; the editor's model rows |
+| `house_strip_material_past` | house | LOD0 strip 2 names the material one past the table's end (Tent1's) | `threedi_rewrite`; the editor's model rows |
+| `crate_texture_unnamed` | crate | material 0's texture row with an empty name (Det_1st's) | `threedi_rewrite`; the editor's model rows |
+| `mount_mtrx_translated` | mount | MTRX rows with -0 words and a translation, row 0 not the identity's bytes (B50Cal's) | `threedi_rewrite`; the editor's model rows |
+| `person_mtrx_nan` | person | one more MTRX row, of NaN words (US01's) | `threedi_rewrite`; the editor's model rows |
+| `shed_lght_omni_flags` | shed | ten omni lights flagged 2, 3, 6, 16, 18, 64, 65, 66, 146 and 160, light 0's first axis word -0.0 (CmpFire1's) | `threedi_rewrite`; the editor's model rows |
+| `armory_bvol_flags_high` | armory | two blink boxes' volume flags above 0x3E, 0x6E and 0x12E (Armry02's) | `threedi_rewrite`; the editor's model rows |
+| `person_flipbook_register` | person | material 0 a flipbook on the register clock (CTRL `TEX_CAMO1`): four diffuse and four detail frames, flagged and framed, and a `.mdt` normal map (ArmGlove's) | `threedi_rewrite`; the editor's model rows |
+| `crate_bvol_types` | crate | volumes of types 0, 5, 9, 10, 12, 13 and 16 beside the crate's own (farp_lnd's 13, FAH6a's 16) | `threedi_rewrite`; the editor's model rows |
+| `crate_usrp_no_part` | crate | user point 0 on part -1 (Bed01's) | `threedi_rewrite`; the editor's model rows |
+| `shed_mtrl1_ab_lum_uv` | shed | material 1 (the bulb) as `FF_ST_AB_LUM#UV`, emissive full, U scrolling (style 16, rate 1.0) | `threedi_rewrite` |
+| `crate_alphagen24` | crate | material 0 a two-sided `FF_ST_OP` with a constant AlphaGen (style 24, register -1, start 128), no alpha test (SCrate1's) | `threedi_material_facts`; `terrain_static_shadow_runtime_test.gd` projected-shadow witness |
+
+The rows from `crate_cfac_pad` on hold a form the shipped models carry (the shipped model
+it was witnessed in, in parentheses, where one is named), most of them written into the
+minted file past what an author states; the editor's model rows are the model tests over
+`tests/editor/model_variant_files.h`. `crate_alphagen24` is minted beside the set, as
+`fixtures/threedi/crate_alphagen24.3di`.
 
 Every consumer that pins a number pins the authored one: the bird's 18 faces,
 the armory's 24 collision faces (COBJ 1's 8 faces = 24 vertices move under a
@@ -173,6 +200,23 @@ slide, the other 48 stay), the person's head sphere.
   `VEHICLE_GUNYAW` ring). The guns pitch with the shipped sign (a positive
   `EWEAP_GUNPITCH` dips the muzzle). Their item, weapon, ammo, HUD and AI rows are
   authored in `godot/tests/support/vehicle_fixture.gd`.
+- `anim/rig19*`, `anim/vm40*` — `tests/fixtures/minimal_bad_gen.cpp`, through the clip
+  construction seam (`formats/bad/bad_build.h`) and the `.bad` writer: a 19-bone person
+  rig's table and clips on `threedi/synth/person.3di`'s rig (`tests/fixtures/person_rig.h`:
+  the reset, the idle and its weapon-channel twist, a crouch, two reloads, the four torso
+  deaths and a walk loop with footsteps), a 40-bone first-person rig's on
+  `threedi/synth/vm40.3di` (`vm40.adm`: the reset and the eight weapon slots in the stock
+  order; `vm40_brk.bad`, the reset with the stock exporter's X-triplicated dead positions),
+  and one clip per form the shipped clips take that the sets do not (`rig19_short`,
+  `rig19_sprs`, `rig19_v0`, `rig19_junk`, `rig19_b3`, `vm40_long`, `vm40_nopad`,
+  `vm40_b3lp`), which `anim_rewrite` reads back.
+- `threedi_gp/synth_gpm.3di`, `threedi_gp/synth_gps.3di`, `threedi_gp/synth_gpp.3di` —
+  `tests/fixtures/minimal_gp_gen.cpp`, through our own GP writer: one Black Hawk Down GP
+  model per kind (a rigid GPM, the GPS kind, a skinned GPP), between them every construct
+  BHD's 677 GP models use; `threedi_gp` migrates them and the editor's model rows open them.
+- `grm/face108.grm` — `tests/fixtures/minimal_grm_gen.cpp`: a facial texture mesh at the
+  scale of the faces BHD ships (108 vertices, 143 triangles, nine gestures of 22 parameters,
+  the tool's absolute texture paths), through our own GRM writer.
 - `terrain/tmap` — `tests/fixtures/minimal_terrain_gen.cpp`.
 - `terrain/variants` — `tests/fixtures/terrain_variants_gen.cpp`: one file per form the
   shipped terrain files take (the char, foliage, picture, sky and 24-bit PCX; the
@@ -206,13 +250,22 @@ slide, the other 48 stay), the person's head sphere.
   CR LF) and `banlist::write_address_list` (`%20s   "%s"`, CR LF) from
   `tests/banlist/banlist_synth.h`: invented PCIDs (one repeated, one nameless), addresses and
   names. No retail file stands behind them: a server writes both on its operator's machine.
-- `sbf/synth_gamemus.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`.
-- `mus/synth_gamemus.bin`, `mus/synth_menumus.bin`, `mus/golden_synth_gamemus.mus.txt` —
-  `tests/fixtures/synth_mus_gen.cpp`: two music-director programs authored in the
+- `sbf/synth_gamemus.sbf`, `sbf/tool_bank.sbf` — `tests/fixtures/minimal_sbf_gen.cpp`: the
+  thirteen-entry test bank, and a bank our writer writes, then left as the retail encoder
+  leaves every shipped bank (one reserved pair in every chunk header, each stream's last
+  chunk partial over the encoder's reused buffer).
+- `mus/synth_gamemus.bin`, `mus/synth_menumus.bin`, `mus/golden_synth_gamemus.mus.txt`,
+  `mus/synth_forms.bin`, `mus/golden_synth_forms.mus.txt` —
+  `tests/fixtures/synth_mus_gen.cpp`: three music-director programs authored in the
   MDEdit source dialect through `mus_compile` + `mus_encode_file` (the gamescript
   in the shipped eight-section routing shape, the menuscript a Var02-dispatched
-  state machine) and the decompiler's own golden over the gamescript.
-- `lwf/menu.lwf`, `lwf/tone.wav` — `tests/fixtures/minimal_lwf_gen.cpp`.
+  state machine, the forms program a menuscript in the form the shipped menu programs
+  take) and the decompiler's own goldens over the gamescript and the forms program.
+- `lwf/menu.lwf`, `lwf/tone.wav`, `lwf/stale.lwf`, `lwf/ima_adpcm.wav`,
+  `lwf/ima_adpcm_512.wav` — `tests/fixtures/minimal_lwf_gen.cpp`: the three-set menu bank
+  and the tone its members point at; a bank our writer writes, then filled where the
+  authoring tools leave stale memory, as the shipped banks hold it; and the two forms every
+  shipped IMA ADPCM wave takes, encoded from an integer signal.
 - `avatars/synth_avatars.def` — `tests/fixtures/minimal_avatars_gen.cpp`: the avatar
   table through `avatars_write` (26 parts, eight nationalities of divisions and
   combos with both `skipdemo` flag levels, four good and four evil).
@@ -241,6 +294,11 @@ slide, the other 48 stay), the person's head sphere.
   every optional member the `.mis` export writes only when set (a name index, a team budget, a
   terrain-tool index, a colour override, a deploy group and a generator string) set on the first
   record of each pool; `mission_mis_idempotency` round-trips it through `.mis`.
+- `editor/missions/logic.bms`, `records.bms`, `scale.bms` — `tests/fixtures/editor_missions_gen.cpp`:
+  the missions the editor's mission rows sweep (`tests/editor/mission_sweep.h`) in place of
+  the shipped ones, through the `bms_edit` free functions and `bms::write`: every trigger and
+  action type in each form its parameters take, every record kind and field form the shipped
+  records hold, and every table at the most records a shipped mission holds in it.
 - `mission_set/` — `tests/fixtures/mission_set_gen.cpp` and authored text: a loose game root the
   world and mission tests mount in place of the training missions they once booted (see its section
   below).
@@ -249,8 +307,17 @@ slide, the other 48 stay), the person's head sphere.
   seven effects over a blank particle, a three-layer particle with curves and
   per-layer colours, and the `Buildup` effect the authored `gorehit.ptu` also
   references).
-- `dbf/synth_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven dialog groups
-  through `encode_dbf`.
+- `dbf/synth_bank.dbf`, `dbf/stale_bank.dbf` — `tests/fixtures/minimal_dbf_gen.cpp`: eleven
+  dialog groups through `encode_dbf`, and a bank the writer writes, then left as the tools
+  left 04TR.DBF (its lines' sequences "##" over the older "_0000N" each once held).
+- `dfx2_wire/s2c_0a_coop_objective.bin`, `dfx2_wire/c2s_00_join_lan.bin` —
+  `tests/fixtures/dfx2_wire_gen.cpp`: two Delta Force Xtreme 2 in-match bodies our own
+  encoders write from the values a retail DFX2 LAN pair put on the wire (a co-op host's
+  S2C 0x0A, a LAN joiner's C2S 0x00 JOIN), which `nw_dfx2_frame` pins.
+- `update/synth_update.sfs` — `tests/fixtures/minimal_update_gen.cpp`: a packed update
+  (1SFS) through `sfs_write` from invented files in retail's shapes: the base product's
+  section (its command file, a loose `version.txt`, a COPY into `resource.pff` and a
+  REMOVE, each payload a 1ZLN file) and a PACKAGEBREAK section for the jox01 expansion.
 - `gut/armory_floor.3di`, `gut/door_block.3di`, `gut/light_post.3di` —
   `tests/fixtures/gut_world_gen.cpp`, through the synthetic model builder and the
   parity writer: the synthetic armory's floor plan, blink boxes (each 0.1 below the

@@ -39,11 +39,11 @@ switcher.
 `opennova-switcher.exe` carries no code signature. The first run may show SmartScreen's
 "Windows protected your PC" (**More info**, then **Run anyway**), and the UAC prompt
 names an unknown publisher. Since it runs as administrator, check the download first: a
-tagged release lists `opennova-switcher-windows-<version>.zip.sha256` beside the zip, and
+tagged release lists `opennova-switcher-windows-v<version>.zip.sha256` beside the zip, and
 in PowerShell
 
 ```powershell
-Get-FileHash .\opennova-switcher-windows-<version>.zip -Algorithm SHA256
+Get-FileHash .\opennova-switcher-windows-v<version>.zip -Algorithm SHA256
 ```
 
 must print the same hash. A PR build's hashes are in its CI log (the package step).
@@ -123,7 +123,7 @@ on OpenNova, it asks again and rewrites the block if the address moved.
 
 **OpenNova service URL...** points the switcher at another OpenNova service. It takes an
 https URL, or http only to this computer or a private network address, for example
-`http://127.0.0.1:8080` for a local stack (the switcher adds `/api/server-info`); never a
+`http://localhost:8000` for a local stack (the switcher adds `/api/server-info`); never a
 user name or password. A service other than the default shows in the menu. Only a
 service on this computer or a private network may answer a loopback, private or
 link-local address: from any other, the switcher refuses one.

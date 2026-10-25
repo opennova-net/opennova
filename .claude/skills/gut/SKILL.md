@@ -99,5 +99,6 @@ sed/perl, not PowerShell (root CLAUDE.md).
 ## Done
 
 Wrapper exits 0 with no parse/drop lines, and every failure you saw was either
-reproduced in isolation or explained by an identified state leak. The CI
-`godot-tests` job runs this same wrapper.
+reproduced in isolation or explained by an identified state leak. CI runs this
+same wrapper in `godot-tests-core` (its `shells` and `world` shards, Windows) and
+`godot-tests-linux`; `godot-tests` is the required check over the Windows shards.

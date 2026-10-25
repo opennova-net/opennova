@@ -602,6 +602,22 @@ crow::response DataSetRoutes::begin_tree(const crow::request &req, uint64_t id) 
 						"a tree of this data set is uploading or finalizing; delete it or wait");
 		const int64_t tree_id = create_tree(*db_conn, row->id, TreeSource::Baseline,
 				TreeState::Uploading, std::nullopt, std::nullopt, creator_of(caller));
+		// A reset database numbers its trees from 1 again over a bucket that may still hold an
+		// earlier database's tree at this id (DEPLOY.md "Resetting the service database"), and
+		// the finalize takes every object under the prefix: empty it first, as release.apply
+		// does for the tree it builds.
+		{
+			std::string error;
+			if (!store_->abort_uploads_under(tree_prefix(tree_id), error) ||
+					!store_->remove_prefix(tree_prefix(tree_id), error)) {
+				std::fprintf(stderr,
+						"[http] POST /api/admin/data-sets/<id>/trees: the object store kept "
+						"tree %lld's earlier objects: %s\n",
+						static_cast<long long>(tree_id), error.c_str());
+				mark_tree_pruned(*db_conn, tree_id);
+				return json_error(503, "store_unavailable", "the object store took no upload");
+			}
+		}
 		std::vector<crow::json::wvalue> uploads;
 		for (const std::string &name : names) {
 			const std::string key = tree_file_key(tree_id, name);
