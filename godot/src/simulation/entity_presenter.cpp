@@ -1601,7 +1601,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
-			// Flags&4 husk pick @ 0x413086].
+			// Render_SectorEntity @ 0x5C4190, its Flags&4 husk pick @ 0x5C41A0].
 			// Two-bit visibility ownership: this walk owns the model's
 			// present bit (the sim's intent), the render-occlusion frame owns
 			// its occlusion-hidden bit, and the node's visible flag is their

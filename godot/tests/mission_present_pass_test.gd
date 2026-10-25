@@ -1298,8 +1298,8 @@ func test_visibility_from_hidden_and_alive() -> void:
 	assert_false(hidden.visible, "hidden entity is hidden")
 	# A dead non-organic RENDERS: the destruction pass swaps its model to the
 	# husk, and a def with no husk keeps the graphic standing — the witnessed
-	# render pick [orig: Flags&4 && huskModel ? husk : graphic @0x413086;
-	# world-wac-ai-re §24.6].
+	# render pick [orig: Render_SectorEntity @0x5C4190, Flags&4 && huskModel ?
+	# husk : graphic @0x5C41A0..0x5C41AB; world-wac-ai-re §24.6].
 	assert_true(dead.visible, "a dead non-organic renders (husk swap / graphic fallback)")
 	assert_true(corpse.visible, "a dead organic renders as a corpse")
 	assert_false(despawned.visible, "the sim ends the corpse via PF_HIDDEN")

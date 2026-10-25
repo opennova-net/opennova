@@ -54,7 +54,8 @@ class Simulation;
 //
 // [orig map — docs/world/world-wac-ai-re.md §24:
 //  husk swap: Flags & 4 switches render + collision to the def husk model
-//    (Entity_RaycastCollisionModel @ 0x413086 pick; no husk -> the graphic keeps
+//    (render: Render_SectorEntity @ 0x5C41A0 pick; collision:
+//    Entity_RaycastCollisionModel @ 0x413086 pick; no husk -> the graphic keeps
 //    standing, the witnessed fallback);
 //  pieces: Entity_SpawnDeathPieces @ 0x493400 -> the 256-slot pool ticked by
 //    DeathPiece_TickAll @ 0x57b900 (each piece renders ONE husk section with a
