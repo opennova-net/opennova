@@ -33,10 +33,12 @@ this directory's.
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
-  `backend/migrations/0011_data_sets.sql`). A data set is a row an admin makes: a **base**
+  `backend/migrations/0011_data_sets.sql`). A data set is a row (migrations 0011 and 0013
+  seed the catalog's, and an admin may make more): a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
   `dfx2`, and its `game`, the `games` row whose lobby it lists in) or an **expansion** of a
-  base (its `expansion_code`, `/exp jox01`). Its data lives in the object store
+  base (its `expansion_code`, `/exp jox01`); a third kind, `update`, is an updater product
+  with no tree ("Game data" below). Its data lives in the object store
   (`ONNET_OBJECT_STORE_URL`) as **trees**, each one immutable version of the data set's
   files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
   applying a published update release, with the multiplayer missions its archives list. A
@@ -177,8 +179,9 @@ this directory's.
   `launch_failures`.
 - **No lobby live.** While no lobby instance takes clients (`lobbydb::live_lobbies`: a
   lobby outage, or a deployment's first release, whose fleet program rolls before any
-  lobby), a gate hands a starting `opennova-serve` no lobby and it exits past its 30 s
-  probe (retail's). So the supervisor starts nothing then: a server due to be placed waits
+  lobby), a gate hands a starting `opennova-serve` no lobby and it gives up 20 s into its
+  gate wait and exits (retail's dedicated host's; the probe itself stops at 10 s). So the
+  supervisor starts nothing then: a server due to be placed waits
   in `provisioning` (`[hosted] server <id> waits for a live lobby`), an exit places the
   server again with no restart counted, and the listing's clocks wait. Once a lobby is
   live the waiting servers start, and an exit counts again.
@@ -587,11 +590,11 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every data set with its trees |
+| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every data set but the `update` rows, with its trees |
 | `POST /api/admin/data-sets` | a base (a title, a `games` slug) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, and `retail_updater` (names `ftp.novaworld.com` in the updater's SERVER.LST instead of `ONNET_UPDATE_HOST`): 201; 400; 409 `duplicate_login`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/data-sets/<id>` | the name, a base's lobby, the updater's fields: 200; 400; 404; 409 `duplicate_login` |
 | `DELETE /api/admin/data-sets/<id>` | the data set and its trees' objects: 204; 404; 409 `in_use`; 503 |
-| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`; 503 |
+| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree, its prefix emptied first (a reset database reuses tree ids), and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`, `update_only` (an `update` row); 503 |
 | `PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`; 413; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete` | `{"upload_id", "parts"}`: the file's upload completed: 200; 400; 404; 409; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/finalize` | the tree `finalizing` and its `tree.finalize` job: 202; 404; 409 `not_uploading` |
@@ -638,8 +641,11 @@ release that carries its command file, the package fetched into the cache and th
 unpacked beside it, streamed from disk (a connection's next replies are made only while
 less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a data
 set marked `retail_updater` (a retail install reaches it through the Switcher's hosts
-block), else `ONNET_UPDATE_HOST`. A login no published release serves is refused. Logged
-under `[update]`.
+block), else `ONNET_UPDATE_HOST`. A login no published release serves is refused when it
+is OpenNova's own (`retail_updater` off), so a first install fails rather than finding
+nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
+a package of its command file alone that the catalog writes into its cache. Logged under
+`[update]`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

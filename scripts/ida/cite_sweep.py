@@ -96,7 +96,7 @@ DEFAULT_URL = "http://127.0.0.1:13337/mcp"
 URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
 CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/probes", "godot/shaders", "godot/tests",
-              "apps", "tests", "assets", "fixtures")
+              "apps", "tests", "fixtures")
 DOC_ROOTS = ("docs",)
 # every tracked text form a marker has been written in: sources, shaders, the engine-side
 # .md records, CMake lists

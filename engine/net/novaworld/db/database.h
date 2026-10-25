@@ -372,8 +372,9 @@ private:
 // row (file name and SHA-256) and with no statement timeout (a file runs as
 // long as it takes), and holds kMigrationLock for the whole run, so
 // two processes booting on one database apply each file once. A recorded file
-// whose SHA-256 no longer matches the file fails the run: migrations are
-// append-only, a fix is a new file. A missing directory applies nothing.
+// whose SHA-256 no longer matches the file fails the run: until 1.0 a migration
+// is edited in place and a database that applied it is reset (backend/README.md).
+// A missing directory applies nothing.
 //
 // Naming: NNNN_descriptive_name.sql (0001_baseline.sql, 0002_billing.sql).
 //

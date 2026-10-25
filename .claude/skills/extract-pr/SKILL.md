@@ -37,8 +37,9 @@ All commands are Git Bash, inside the current worktree only.
     bash scripts/build_godot.sh              # GDExtension (if godot/ touched)
     bash scripts/test_godot.sh               # GUT (use the gut skill's GODOT_BIN setup)
     for c in ratchet_counts maturity_lint link_graph_check include_graph_check \
-             orphan_header_check cite_census fixture_lint env_lint conventions_lint; do
+             godot_cpp_profile orphan_header_check cite_census env_lint conventions_lint; do
         python scripts/lint/$c.py --enforce; done   # the CI lint gates
+    python scripts/lint/fixture_lint.py --enforce --require-pulled  # as CI runs it
     python scripts/ci/test_suites.py --check-layout  # no test reads retail data (same CI step)
     python docs/tools/ledger_check.py --check        # the ledger scoreboard (docs repo)
 
@@ -54,11 +55,14 @@ A slice that moves the `docs/` pointer must name a commit already on docs `maste
   comments. Do not merge — the maintainer merges.
 - CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
   PRs build the `template_debug` GDExtension; master and manual runs also build
-  `template_release`. Packaging publishes three Windows zips (`package-godot-windows`,
-  `package-blender-windows`, `package-apps-windows`): the minimal game runtime with
-  its content updater (ADR 0067; retail data is selected with `/game` and
-  `--resource-dir`), the Blender add-on (that workflow also runs `tests/blender/*_test.py` under
-  Blender against the packaged add-on), and the native apps. PRs package debug-mode exports.
+  `template_release`. Packaging runs four Windows jobs: `package-godot-windows` (the
+  game zip, the minimal runtime with its content updater, ADR 0067, retail data selected
+  with `/game` and `--resource-dir`; the editor zip; the full runtime update `.sfs`),
+  `package-blender-windows` (the Blender add-on; that workflow also runs
+  `tests/blender/*_test.py` under Blender against the packaged add-on),
+  `package-apps-windows` (the native apps) and `package-switcher-windows` (the
+  Switcher's xunit suite, then `opennova-switcher.exe` in its zip). PRs package
+  debug-mode exports.
 
 ## 5. Advance the train
 

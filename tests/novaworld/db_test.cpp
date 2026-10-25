@@ -700,7 +700,7 @@ int test_migrations() {
 		TEST_EXPECT(db.query("SELECT COUNT(*) FROM _schema_migrations;")[0].as_int(0) == 3);
 	}
 	std::filesystem::remove(migrations / "0004_bad.sql");
-	// An applied file that changed fails the run: migrations are append-only.
+	// An applied file that changed fails the run: its database must be reset.
 	write_file(migrations / "0002_expansions.sql", "CREATE TABLE expansions (slug text PRIMARY KEY);");
 	{
 		Database db = scratch.open();

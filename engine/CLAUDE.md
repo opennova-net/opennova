@@ -11,19 +11,23 @@
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
-    environment, hud, menu, assets, and devtools (the Dear ImGui pass, ADR
+    environment, hud, menu, assets, profile (the player profile: `player.sav` and
+    `weapon.sav` in memory), ragdoll (the opt-in ragdoll corpses, ADR 0060), and
+    devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the frame-stats board builds in every flavour; Dear ImGui, the pass
     and the tool kit both products' windows draw with (`devtools/ui_kit.h`) build with
-    `OPENNOVA_IMGUI` (either product), the game's F3 windows only with
+    `OPENNOVA_IMGUI` (either product), the game's dev tools windows (Insert) only with
     `OPENNOVA_DEVTOOLS` — off for the release GDExtension flavour;
     ImGui headers stay in the group and `editor/ui`, the shell hands the context over
     as plain pointers via `devtools/imgui_abi.h`).
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
     wire): novacrypto, napi, npwire (the in-game codec, the NWU session
     framing, capture decode, the LAN discovery codec, the datagram-socket
-    seam), novaworld (the session/gate legs + the service) and admin (the
-    game server's remote-admin TCP protocol). Nothing under
+    seam), novaworld (the session/gate legs + the service), admin (the
+    game server's remote-admin TCP protocol), title (each title's wire and
+    NovaWorld identity, keyed by gameprofile's GameId) and update (the
+    updater's wire, ADR 0061). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (`session.*` owns lifecycle, role policy, fixed-tick banking and input consumption
@@ -39,7 +43,8 @@
     link it (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
     child never carry it. Five of its libraries are ranked, model < documents < graph <
     session < ui (`include_graph_check.py`'s editor rank): a ranked library includes only
-    its own rank and below, `graph/reference_kinds.h` being a seam header any may include;
+    its own rank and below, `graph/reference_kinds.h` and `graph/graph_edge.h` being seam
+    headers any may include;
     an upward include is a listed lint exception naming the slice that removes it, and an
     exception the tree no longer makes fails the lint. The other editor libraries stay
     unranked. Only `editor/ui` and `runtime/devtools` may include an ImGui header. Tooling,
@@ -87,8 +92,8 @@
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
   partition acyclic), `opennova_base` (vfs, resource_index, gameprofile, pcapio, os_random,
-  proc), `opennova_net` (novacrypto, napi, npwire, admin and the novaworld session/gate: the
-  wire), `opennova_runtime` (the rest of runtime/, `inmatch` and `replication` included),
+  proc), `opennova_net` (novacrypto, napi, npwire, admin, title, update and the novaworld
+  session/gate: the wire), `opennova_runtime` (the rest of runtime/, `inmatch` and `replication` included),
   `opennova_novaworld_service` (the service alone, only with the root option
   `OPENNOVA_NOVAWORLD_SERVICE`, the ONLY target linking `opennova_pq`, the INTERFACE target
   over the system libpq) and `opennova_editor` (linked only by the editor-enabled
@@ -172,18 +177,19 @@
   form the shipped corpus takes (minted, FNV-pinned) + a ledgered D-entry when output
   legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
-  `engine/net/admin`) and the
+  `engine/net/admin`, `engine/net/update`) and the
   replication seam (`engine/runtime/replication`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
-  encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.
+  encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md
+  (the updater's, docs/update/updater-re.md).
 - Size ratchet: no `engine/`/`apps/`/`godot/src` `.cpp` or `.h` past 2500 lines — split
   by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
   anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
   Exception: in `engine/editor`, a document type's, a view's, a viewport view's or a session
   operation's own TU pair stays its own whatever its size, its one includer the registry or
-  owner that lists it (`document_types.cpp`, `ui/document_views.cpp`, `ui/viewport_views.cpp`;
+  owner that lists it (`documents/document_types.cpp`, `ui/document_views.cpp`, `ui/viewport_views.cpp`;
   the operations' `session/session_core.cpp` and `session/rename_controller.cpp`); one type
   per TU pair is how the editor is laid out.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.

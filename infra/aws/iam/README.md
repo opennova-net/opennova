@@ -102,8 +102,9 @@ aside, counted as the org stack renders it (the account's id and region filled i
 boundary is the one near the limit (5,973 characters with the costs view's reads), so it is
 kept compact: the actions it allows on every resource, under no condition, share one
 statement (`Unscoped`), its statement ids are short, and two statements of the same action
-and resource are one (`PassRoles` names the three services). Compacting never widens a
-scoped resource and never drops or loosens a condition: two statements become one only when
+and resource are one (one `iam:PassRole` statement, with no Sid, names the three
+services). Compacting never widens a scoped resource and never drops or loosens a
+condition: two statements become one only when
 the one grants exactly what the two did. Statements under the same conditions share one
 where no action of one applies to the other's resources (`LaunchTagged`: `ec2:RunInstances`
 makes instances, never Elastic IPs, and `ec2:AllocateAddress` the reverse; `TagAtLaunch`: a
@@ -138,9 +139,9 @@ administrator's, as above.
 The tests plan against mock providers; only a real run proves these (each would show as an
 AccessDenied naming the action):
 
-- the org stack: the import of the organization and both accounts as `opennova-org`, its
-  `sts:AssumeRole` into each `OrganizationAccountAccessRole`, the backend's `assume_role`
-  into prod's for `org/terraform.tfstate`;
+- the org stack: the import of the organization and the three member accounts as
+  `opennova-org`, its `sts:AssumeRole` into each `OrganizationAccountAccessRole`, the
+  backend's `assume_role` into prod's for `org/terraform.tfstate`;
 - each account's first `infra apply` as its deploy user: the S3 backend's lock file
   (`s3:DeleteObject` on it alone), every service-linked role made on first use, the cluster
   and its services under the deployment's tag, Cloud Map's private namespace, the backup
@@ -157,7 +158,7 @@ AccessDenied naming the action):
 - the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
   the first upload on the Game data page, web's `s3:PutObject` of the parts the browser
   sends it (as its task role, under the role boundary); at the first tree deleted on the page or
-  pruned by the worker, `s3:ListBucketMultipartUploads` (no prefix condition: the action's
+  pruned by the data program, `s3:ListBucketMultipartUploads` (no prefix condition: the action's
   context carries none) and `s3:DeleteObject`; at the first server, hostd's task role's
   `aws s3 sync` of a tree (`s3:ListBucket` with `s3:prefix` `data/trees/*`, `s3:GetObject`);
 - a worker's first machine launch under the role boundary (the pinned image, by `ec2:ImageID`),

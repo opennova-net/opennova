@@ -33,8 +33,10 @@ divergences in its §8 catalog):
   body codec registry (`engine/net/npwire/ingame_body_codec.h`).
 - `.agents/retail-lan-parity.md` — onHook-first four-topology retail/OpenNova LAN
   probing without the retired generated Python parity matrix. onHook is an
-  external `opennova-int` executable passed as `-OnHookMcpPath`, never a
-  registered MCP server: without it, report the parity leg as blocked.
+  external `opennova-int` executable passed as `-OnHookMcpPath`; the repository
+  registers no onHook MCP server, and the runner never needs a user-level one
+  (that runbook's opening): without the executable, report the parity leg as
+  blocked.
 - `docs/mcp.md` — the game's own `opennova-game` MCP (launch with `--mcp-port`,
   `scripts/mcp/game_mcp.py` / `game_mcp.ps1`, the tool catalog, the `game_probe`
   runtime probes, the `parity_joiner_*` witnesses the runner classifies).

@@ -9,7 +9,7 @@ behavior.
 - Confirm `GODOT_BIN --version` for Godot/GUT work.
 - Confirm LFS/submodules are materialized before asset or fixture work.
 - Confirm free ports before server work: `7597/udp`, `64206/udp`, `8080/tcp`,
-  and `5173/tcp`.
+  `8000/tcp`, and `5173/tcp`.
 - Confirm `ADMIN_API_TOKEN` before using admin endpoints.
 - Confirm `tshark`/Npcap only when converting or acquiring captures outside
   the native `opennova-wire` reader.
@@ -60,11 +60,16 @@ install for `--resource-dir`) is a tool argument, never an environment variable.
 
 ## Logs and Cleanup
 
-- Docker dev: collect `docker compose ... logs --tail=200 novaworld web`,
+- Docker dev: collect `scripts/dev_stack.sh logs --tail=200 novaworld-gate
+  novaworld-lobby novaworld-web` (the services: DEVELOPING.md "Run the NovaWorld
+  servers locally") and, through the portal at `http://localhost:8000` (the stack's
+  `/api` answers there, and on Vite's `:5173` with `dev_stack.sh up --vite`),
   `/api/health`, `/api/hosts`, `/api/lobbies`, and `/api/unknowns` (`/api/hosts` and
   `/api/unknowns` take the Bearer `ADMIN_API_TOKEN`).
-- Native server: collect stdout/stderr. It clears active hosts and active user
-  sessions at boot and sweeps stale hosts.
+- Programs run without Docker: collect each one's stdout/stderr. Either way, a lobby
+  instance at boot reaps stale instances and deletes only the listings and sessions no
+  instance holds; the worker's jobs prune stale listings and evict idle retail logins
+  (`jobs/maintenance_jobs.h`, `accounts/account_jobs.cpp` under `apps/novaworld_common/`).
 - Godot: fully close the editor after GDExtension rebuilds. If GUT reports odd
   failures, rerun the single test file before trusting full-suite noise.
 - Visual Studio multi-config generators IGNORE `CMAKE_BUILD_TYPE`: judge a build's

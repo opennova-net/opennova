@@ -74,8 +74,10 @@
   (the brain test is read at spawn).
 - Every 3DI model the suite loads is synthetic: `fixtures/threedi/synth/*.3di` are
   minted by `tests/fixtures/minimal_3di_gen.cpp` through the engine's parity writer
-  (eleven base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material
-  fields) and byte-compared by the `minimal_3di_gen` ctest every run. Change the
+  (fifteen base models plus the one-edit variants: CTRL names, PANM rows, LGHT/material
+  fields) and byte-compared by the `minimal_3di_gen` ctest every run; the vehicle and
+  world sets, `fixtures/gut/*.3di`, likewise by `gut_vehicle_gen.cpp` and
+  `gut_world_gen.cpp` (ctests `gut_vehicle_gen`, `gut_world_gen`). Change the
   generator, run it with `--write`, commit the files. A test that needs an authored
   variant loads one of these and asserts its content with the read-back getters; the
   model and variant tables are in `fixtures/README.md`. No retail model lives in the
