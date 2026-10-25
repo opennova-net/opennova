@@ -130,7 +130,8 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	# Connected after the presenter's handler, so it reads what that handler left.
 	world.hud_pipeline_warm.connect(func(drawing: bool) -> void:
 		var overlay := hud.get_game_hud()
-		warm_frames.append([drawing, overlay != null and overlay.is_inside_tree()]))
+		warm_frames.append([drawing, overlay != null and overlay.is_inside_tree(),
+				hud.has_warm_draw()]))
 	world.hud_pipeline_warm.connect(func(drawing: bool) -> void:
 		if drawing:
 			frame_state["visible"] = world.visible
@@ -174,8 +175,12 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 				"the body and the staged kit's view model drew in the frame: %s" % [names])
 	assert_null(world.get_node_or_null("PersonPipelineWarm"),
 			"the warm's models are freed inside the load")
-	assert_eq(warm_frames, [[true, true], [false, false]],
-			"the HUD is on the tree for the forced frame alone")
+	# The frame's draws leave with it: the overlay's item and the veil's are cleared at its end, as
+	# Godot clears an item at a redraw only once it drew the item itself, so a warm draw left there
+	# would stand under the first live one (the veil's static rect blended twice all mission).
+	assert_eq(warm_frames, [[true, true, true], [false, false, false]],
+			"the HUD is on the tree, and its warm draws on its items, for the forced frame alone")
+	assert_false(hud.has_warm_draw(), "no draw of the forced frame outlives the load")
 	var overlay := hud.get_game_hud()
 	assert_not_null(overlay, "the load's HUD legs built the overlay")
 	if overlay != null:

@@ -231,6 +231,15 @@ func submit_draw_now() -> void:
 			_sun_veil.color)
 
 
+## The forced frame's end takes that quad back off the veil's item (GameHudPresenter's
+## hud_pipeline_warm(false)): Godot clears an item at a redraw only once it drew the item itself, so
+## the first live redraw would add its quad to this one, and the static rect, which nothing redraws,
+## would blend the veil twice all mission.
+func release_warm_draw() -> void:
+	if _sun_veil != null:
+		RenderingServer.canvas_item_clear(_sun_veil.get_canvas_item())
+
+
 func _draw() -> void:
 	# The view effects are the original's window coordinates, D3D9 pixel
 	# centres on the integers (HudPos.d3d9_screen_offset).

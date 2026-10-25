@@ -68,6 +68,8 @@ var _game_hud: HudOverlay = null
 # Whether the load's forced frame mounted the overlay (_on_hud_pipeline_warm), which the
 # frame's end takes off the tree again.
 var _hud_warm_mounted := false
+# Whether the forced frame's draws stand on the overlay's own item and the veil's (has_warm_draw).
+var _hud_warm_drawn := false
 # The canvas programs the load's HUD leg made (_make_canvas_programs).
 var _load_canvas_programs: Array[RID] = []
 # The HUD's process words across the per-mission overlay rebuild (the item flash timers, the
@@ -235,6 +237,7 @@ func teardown(restart := false) -> void:
 		_game_hud.queue_free()
 		_game_hud = null
 	_hud_warm_mounted = false
+	_hud_warm_drawn = false
 	if _world != null:
 		_world.set_inset_scope(null)
 	_inset_scope = null
@@ -415,8 +418,11 @@ func _on_hud_textures_load(full_arm: bool) -> void:
 ## draw, false once it drained): the overlay the two legs above built and loaded mounts for
 ## that frame alone and submits its draw at once (the SceneTree is blocked, so a queued
 ## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
-## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again: the
-## first frame with a local player mounts it as before (ensure_game_hud).
+## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again, and the
+## frame's draws leave with it: Godot clears an item at a redraw only once it drew the item itself,
+## so the real mount's first redraw would add to what the frame submitted, and the veil's static
+## rect blended its quad twice all mission. The first frame with a local player mounts it as before
+## (ensure_game_hud).
 func _on_hud_pipeline_warm(drawing: bool) -> void:
 	if drawing:
 		if _game_hud == null or not _game_hud.is_configured() or _game_hud.is_inside_tree():
@@ -428,12 +434,23 @@ func _on_hud_pipeline_warm(drawing: bool) -> void:
 		_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_game_hud.submit_draw_now()
 		_view_effects.submit_draw_now()
+		_hud_warm_drawn = true
 		return
 	if not _hud_warm_mounted:
 		return
 	_hud_warm_mounted = false
-	if _game_hud != null and _game_hud.is_inside_tree():
-		_game_hud.get_parent().remove_child(_game_hud)
+	if _game_hud != null:
+		RenderingServer.canvas_item_clear(_game_hud.get_canvas_item())
+		_view_effects.release_warm_draw()
+		_hud_warm_drawn = false
+		if _game_hud.is_inside_tree():
+			_game_hud.get_parent().remove_child(_game_hud)
+
+
+## Whether the load's forced frame's draws still stand on the overlay's item and the veil's (a read
+## seam for the load pins: none outlives the frame).
+func has_warm_draw() -> bool:
+	return _hud_warm_drawn
 
 
 # The overlay system's init: the overlay and its child controls, the hudpos.def
