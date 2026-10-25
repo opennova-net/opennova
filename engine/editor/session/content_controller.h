@@ -72,7 +72,7 @@ public:
 private:
 	// Whether a request may run now; refused (content.refused, with why) when not: no transport;
 	// for `admin`, an admin signed in; for `project`, a project open; for `bound`, the project a
-	// working copy of a content project.
+	// working copy of a content project on the account's service (its binding's server).
 	bool ready(bool admin, bool project, bool bound);
 	void refuse(const std::string &why);
 	// `job` started as the operation `kind` (its row's holds), the content concern touched.

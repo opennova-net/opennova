@@ -136,6 +136,16 @@ bool ContentController::ready(bool admin, bool project, bool bound) {
 		refuse("The project is no working copy of a content project yet: bind it first.");
 		return false;
 	}
+	// A working copy is of one service's project (a debug build signs in to staging, a release
+	// build to the live service): another service's revisions are not its.
+	ContentBinding binding;
+	std::string error;
+	if (bound && read_content_binding(ContentPaths::for_project(core_.paths()), binding, error) &&
+			binding.server != account_.server) {
+		refuse("The project is a working copy of " + binding.key + " on " + binding.server +
+				": sign in there first.");
+		return false;
+	}
 	return true;
 }
 
@@ -196,7 +206,7 @@ void ContentController::check() {
 		return;
 	}
 	list_projects();
-	if (!core_.view().project.open || !core_.view().content.bound)
+	if (!core_.view().project.open || !core_.view().content.bound || !ready(false, true, true))
 		return;
 	ContentBinding binding;
 	std::string error;
@@ -227,6 +237,7 @@ void ContentController::get(const EditorRequest &request) {
 		if (project.key == request.project_key)
 			get_base_key_ = project.base;
 	paused_.reset();
+	show_conflicts();
 	start(OperationKind::ContentPull,
 			std::make_unique<ContentPull>(
 					*transport_, account_, ProjectPaths::for_root(request.dir), "", binding));
@@ -493,6 +504,9 @@ void ContentController::forget_project() {
 	view.head_known = false;
 	view.changes.clear();
 	view.problems.clear();
+	history_ = ContentCall(); // a list in flight is the closed project's
+	view.history.clear();
+	view.history_error.clear();
 	show_conflicts();
 }
 
@@ -509,6 +523,7 @@ void ContentController::finish_pull(ContentPull &pull) {
 								" has it: a change to push.";
 		core_.note("Content store: " + view.last);
 		view.checked = false; // the changes are counted again by the next check
+		view.changes.clear();
 	} else {
 		if (pull.up_to_date()) {
 			view.last = "The project is at the head, revision " + std::to_string(pull.revision()) + ".";
@@ -521,6 +536,8 @@ void ContentController::finish_pull(ContentPull &pull) {
 		core_.note("Content store: " + view.last);
 		view.head = pull.revision();
 		view.head_known = true;
+		view.checked = false; // the changes are counted again by the next check
+		view.changes.clear();
 		if (!get_dir_.empty()) {
 			std::string dir = std::move(get_dir_);
 			get_dir_.clear();

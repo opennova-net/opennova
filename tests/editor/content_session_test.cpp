@@ -6,8 +6,10 @@
 // project with no revision and pushed as its first; a get into an empty folder, the project opened
 // there with its files, and a folder that holds files refused; a change pushed from one and pulled
 // into the other, its file read again; a push on a stale base refused until a pull; a conflict
-// stopping a pull, settled by taking theirs, the pull going on; a check's standing; and the content
-// section's JSON, which holds no session.
+// stopping a pull, settled by taking theirs, the pull going on, its standing counted again by the
+// next check; a get given up on taking a waiting pull's conflicts with it; a working copy of
+// another service's project refused; the history gone with the project; a check's standing; and the
+// content section's JSON, which holds no session.
 
 #include <cstdio>
 #include <string>
@@ -176,17 +178,27 @@ static int test_share_through_sessions() {
 	TEST_EXPECT(put(dir.file("First") + "/defs/a.def", "a-first"));
 	first.send(request::content_push("a first"));
 	TEST_EXPECT(put(dir.file("Second") + "/defs/a.def", "a-second"));
+	second.send(request::content_check());
+	TEST_EXPECT(second.content().checked && second.content().changes.size() == 1);
 	second.send(request::content_pull());
 	TEST_EXPECT(second.content().conflicts.size() == 1 &&
 			second.content().conflicts[0].path == "defs/a.def" &&
 			second.content().last.find("stopped") != std::string::npos);
 	second.send(request::content_pull());
 	TEST_EXPECT(second.refused("content.refused") && second.content().conflicts.size() == 1);
+	// A get given up on (a project the store lacks) took the waiting pull's place: its conflicts go
+	// with it, and a pull plans again.
+	second.send(request::content_get("NOPE", dir.file("Third")));
+	TEST_EXPECT(second.content().conflicts.empty());
+	second.send(request::content_pull());
+	TEST_EXPECT(second.content().conflicts.size() == 1);
 	second.send(request::content_resolve("defs/a.def", editor::Resolution::TakeTheirs));
 	TEST_EXPECT(second.content().conflicts.empty());
 	second.send(request::content_pull());
 	TEST_EXPECT(second.content().revision == 5 && second.read("defs/a.def") == "a-first" &&
 			second.read("defs/c.def") == "c");
+	// The check's changes went with the pull that took theirs: counted again by the next check.
+	TEST_EXPECT(!second.content().checked && second.content().changes.empty());
 	// The JSON's standing and pull.
 	const opennova::io::JsonValue section = editor::content_section(second.session.view());
 	TEST_EXPECT(section.get("binding")->get_string("key", "") == "MOD" &&
@@ -212,6 +224,19 @@ static int test_share_through_sessions() {
 	second.send(request::content_history());
 	TEST_EXPECT(second.content().history.size() == 5 && second.content().history[0].number == 5 &&
 			second.content().history[4].message == "r1");
+	// A working copy of another service's project (a release build's folder opened in a debug
+	// build): refused; and the history goes with the project as it closes.
+	const editor::ContentPaths second_state =
+			editor::ContentPaths::for_project(editor::ProjectPaths::for_root(dir.file("Second")));
+	editor::ContentBinding elsewhere;
+	std::string error;
+	TEST_EXPECT(editor::read_content_binding(second_state, elsewhere, error));
+	elsewhere.server = "https://elsewhere.test";
+	TEST_EXPECT(editor::write_content_binding(second_state, elsewhere, error));
+	second.send(request::content_pull());
+	TEST_EXPECT(second.refused("content.refused") && second.content().revision == 5);
+	second.send(request::close_project());
+	TEST_EXPECT(!second.session.view().project.open && second.content().history.empty());
 	std::printf("share: bound and pushed, got and opened, pulled, a stale push refused, a conflict "
 				"taken, a release asked for, a change discarded and a file restored, the history\n");
 	return 0;
