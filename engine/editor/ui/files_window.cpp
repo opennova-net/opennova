@@ -232,6 +232,13 @@ void FilesWindow::refresh(const SessionView &view) {
 		make_counts(view);
 	}
 	if (tree_moved || counts_moved) ++rebuilds_;
+	// The content store's changes (ADR 0069), apart from the rows' own rebuild.
+	const uint64_t content = view.revisions.of(ViewConcern::Content);
+	if (another || content != content_revision_ || view.content.changes.size() != content_changes_.size()) {
+		content_revision_ = content;
+		content_changes_.clear();
+		for (const LocalChange &change : view.content.changes) content_changes_[change.path] = change.change;
+	}
 }
 
 void FilesWindow::make_tree(const SessionView &view) {
@@ -839,6 +846,13 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	if (dirty) marks += spacing + ui_kit::unsaved_dot_width();
 	if (counts.errors) marks += spacing + ui_kit::severity_count_width(counts.errors);
 	if (counts.warnings) marks += spacing + ui_kit::severity_count_width(counts.warnings);
+	// Its change since the project's revision in the content store (ADR 0069): A added, M changed.
+	const auto content = content_changes_.find(entry.relative_path);
+	const bool added = content != content_changes_.end() && content->second == ContentChange::Added;
+	const char *letter = content == content_changes_.end() || content->second == ContentChange::Deleted ? nullptr
+	                     : added                                                                        ? "A"
+	                                                                                                    : "M";
+	if (letter) marks += spacing + ui_kit::text_width(letter);
 	// A file the filter found by a record naming it: that record after its name, muted ("Dblkhwk1.3di
 	// Flyable Blackhawk").
 	const auto via = in_tree ? via_.end() : via_.find(entry.relative_path);
@@ -863,6 +877,13 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	if (counts.warnings) {
 		ImGui::SameLine(0.0f, spacing);
 		ui_kit::severity_count(DiagnosticSeverity::Warning, counts.warnings);
+	}
+	if (letter) {
+		ImGui::SameLine(0.0f, spacing);
+		ImGui::TextColored(ui_kit::change_color(added ? Document::RecordChange::Added : Document::RecordChange::Changed),
+		                   "%s", letter);
+		ui_kit::tooltip(std::string(added ? "Added" : "Changed") + " since revision " +
+		                std::to_string(view.content.revision) + ": in the next push.");
 	}
 	if (ImGui::TableNextColumn()) ui_kit::clipped_text(asset_kind_label(entry.kind));
 	// The size, right-aligned; listed by cost, what the game's textures of it take (none: blank).
@@ -908,6 +929,14 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	draw_move_menu(view, entry);
 	draw_chore_entries(view, entry);
+	// A file changed since the project's revision in the content store (ADR 0069): the revision's file back.
+	if (content_changes_.count(entry.relative_path)) {
+		const bool discards = view.allows(EditorRequestKind::ContentRestore);
+		if (ImGui::MenuItem("Discard changes", nullptr, false, discards) && discards)
+			workspace_.request(request::content_restore(entry.relative_path));
+		ui_kit::tooltip("Puts back the file as revision " + std::to_string(view.content.revision) +
+		                " has it; yours goes to the project's trash (Undo file brings it back).");
+	}
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));
 	ui_kit::tooltip("What it is, where a build puts it, what it names and who names it.");
 	// Who names it (DI-18): the project's finder on its uses, each a Go to.

@@ -63,6 +63,11 @@ public:
 	// The last release asked for: its version and revision.
 	std::string release_version;
 	int64_t release_revision = 0;
+	// A second project, EXP, an expansion of MOD (its base), while `expansion` is set: its head and its
+	// manifests (its files `blobs`').
+	bool expansion = false;
+	int64_t expansion_head = 0;
+	std::map<int64_t, std::string> expansion_manifests;
 
 	uint64_t start(editor::ContentRequest request) override {
 		const uint64_t id = next_++;
@@ -98,12 +103,13 @@ private:
 		return reply;
 	}
 
-	io::JsonValue project_json(bool admin) {
+	io::JsonValue project_json(bool admin, const char *key, int64_t at, const char *base) {
 		io::JsonValue project = io::JsonValue::make_object();
-		project.set("key", io::json_string("MOD"));
-		project.set("title", io::json_string("A mod"));
+		project.set("key", io::json_string(key));
+		project.set("title", io::json_string(*base ? "An expansion" : "A mod"));
 		project.set("visibility", io::json_string("public"));
-		project.set("head", io::json_number(double(head)));
+		project.set("base", *base ? io::json_string(base) : io::JsonValue::make_null());
+		project.set("head", io::json_number(double(at)));
 		project.set("can_push", io::JsonValue::make_bool(admin));
 		return project;
 	}
@@ -128,7 +134,9 @@ private:
 		if (request.method == "GET" &&
 				request.url == std::string(kServer) + "/api/content/projects") {
 			io::JsonValue list = io::JsonValue::make_array();
-			list.push(project_json(admin));
+			list.push(project_json(admin, "MOD", head, ""));
+			if (expansion)
+				list.push(project_json(admin, "EXP", expansion_head, "MOD"));
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", list);
 			return json(200, out);
@@ -149,18 +157,29 @@ private:
 			out.set("release", release);
 			return json(201, out);
 		}
-		const std::string prefix = std::string(kServer) + "/api/content/projects/MOD";
-		if (request.url.rfind(prefix, 0) != 0)
+		// The project the route names: MOD, or EXP while the expansion is there.
+		const std::string projects = std::string(kServer) + "/api/content/projects/";
+		if (request.url.rfind(projects, 0) != 0)
 			return refusal(404, "not_found");
-		const std::string rest = request.url.substr(prefix.size());
+		const std::string named = request.url.substr(projects.size());
+		const auto names = [&](const char *key) {
+			return named.rfind(key, 0) == 0 && (named.size() == 3 || named[3] == '/' || named[3] == '?');
+		};
+		const bool exp = expansion && names("EXP");
+		if (!exp && !names("MOD"))
+			return refusal(404, "not_found");
+		const std::string key = exp ? "EXP" : "MOD";
+		int64_t &at = exp ? expansion_head : head;
+		std::map<int64_t, std::string> &kept = exp ? expansion_manifests : manifests;
+		const std::string rest = named.substr(3);
 		if (request.method == "GET" && rest.empty()) {
 			io::JsonValue out = io::JsonValue::make_object();
-			out.set("project", project_json(admin));
-			if (head > 0) {
+			out.set("project", project_json(admin, key.c_str(), at, exp ? "MOD" : ""));
+			if (at > 0) {
 				io::JsonValue revision = io::JsonValue::make_object();
-				revision.set("number", io::json_number(double(head)));
+				revision.set("number", io::json_number(double(at)));
 				revision.set("manifest_sha256",
-						io::json_string(opennova::content::manifest_sha256(manifests[head])));
+						io::json_string(opennova::content::manifest_sha256(kept[at])));
 				out.set("head_revision", revision);
 			}
 			return json(200, out);
@@ -169,20 +188,20 @@ private:
 			const int64_t number = std::strtoll(rest.c_str() + 11, nullptr, 10);
 			editor::ContentResponse r;
 			r.transport_ok = true;
-			r.status = manifests.count(number) ? 200 : 404;
-			r.body = manifests[number];
+			r.status = kept.count(number) ? 200 : 404;
+			r.body = kept[number];
 			return r;
 		}
 		// The history, newest first.
 		if (request.method == "GET" && (rest == "/revisions" || rest.rfind("/revisions?", 0) == 0)) {
 			io::JsonValue list = io::JsonValue::make_array();
-			for (int64_t number = head; number >= 1; --number) {
+			for (int64_t number = at; number >= 1; --number) {
 				io::JsonValue revision = io::JsonValue::make_object();
 				revision.set("number", io::json_number(double(number)));
 				revision.set("author", io::json_string("taylor"));
 				revision.set("message", io::json_string("r" + std::to_string(number)));
 				revision.set("manifest_sha256",
-						io::json_string(opennova::content::manifest_sha256(manifests[number])));
+						io::json_string(opennova::content::manifest_sha256(kept[number])));
 				revision.set("file_count", io::json_number(1));
 				revision.set("bytes", io::json_number(1));
 				revision.set("created_at", io::json_string("2026-10-25 12:00:00"));
@@ -214,7 +233,7 @@ private:
 				io::JsonValue entry = io::JsonValue::make_object();
 				entry.set("sha256", sha);
 				entry.set("method", io::json_string("GET"));
-				entry.set("url", io::json_string("/api/content/projects/MOD/blobs/" + sha.string));
+				entry.set("url", io::json_string("/api/content/projects/" + key + "/blobs/" + sha.string));
 				entry.set("headers", io::JsonValue::make_object());
 				list.push(entry);
 			}
@@ -233,7 +252,7 @@ private:
 					continue;
 				io::JsonValue upload = io::JsonValue::make_object();
 				upload.set("method", io::json_string("PUT"));
-				upload.set("url", io::json_string("/api/content/projects/MOD/blobs/" + sha));
+				upload.set("url", io::json_string("/api/content/projects/" + key + "/blobs/" + sha));
 				io::JsonValue entry = io::JsonValue::make_object();
 				entry.set("sha256", io::json_string(sha));
 				entry.set("size", *item.get("size"));
@@ -258,10 +277,10 @@ private:
 				io::json_parse(request.body, body, error)) {
 			const int64_t parent = int64_t(body.get_number("parent", -1));
 			const std::string text = body.get_string("manifest", "");
-			if (parent != head) {
+			if (parent != at) {
 				io::JsonValue stale = io::JsonValue::make_object();
 				stale.set("error", io::json_string("stale"));
-				stale.set("head", io::json_number(double(head)));
+				stale.set("head", io::json_number(double(at)));
 				return json(409, stale);
 			}
 			std::vector<ContentFile> files;
@@ -270,9 +289,9 @@ private:
 			for (const ContentFile &file : files)
 				if (!blobs.count(file.sha256))
 					return refusal(400, "missing_blobs");
-			manifests[++head] = text;
+			kept[++at] = text;
 			io::JsonValue out = io::JsonValue::make_object();
-			out.set("head", io::json_number(double(head)));
+			out.set("head", io::json_number(double(at)));
 			return json(201, out);
 		}
 		return refusal(404, "not_found");

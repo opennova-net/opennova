@@ -13,9 +13,12 @@
 #include <string>
 #include <vector>
 
+#include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
+#include <base/io/sha256.h>
 #include <editor/content_store/content_account.h>
+#include <editor/content_store/content_state.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/content_json.h>
 #include <editor/session/preferences_store.h>
@@ -214,11 +217,51 @@ static int test_share_through_sessions() {
 	return 0;
 }
 
+// An expansion's project got: its base game's project comes along where its project file names it
+// (base_project "../MOD"), each folder a working copy of its own project.
+static int test_get_expansion() {
+	test_temp::TempDir dir("opennova_content_session_expansion");
+	FakeService service;
+	const auto file_of = [&](const char *path, const std::string &bytes) {
+		const std::string sha = opennova::io::sha256_hex(bytes.data(), bytes.size());
+		service.blobs[sha] = bytes;
+		return ContentFile{ path, sha, bytes.size() };
+	};
+	service.manifests[1] = opennova::content::encode_manifest({ file_of("defs/a.def", "base") });
+	service.head = 1;
+	service.expansion = true;
+	service.expansion_manifests[1] = opennova::content::encode_manifest(
+			{ file_of("project.opennova", "{\"expansion\": {\"base_project\": \"../MOD\"}}"),
+					file_of("defs/e.def", "expansion") });
+	service.expansion_head = 1;
+	Session s(&service);
+	s.send(request::content_sign_in(kServer, "taylor", "pw"));
+	TEST_EXPECT(s.content().projects.size() == 2 && s.content().projects[1].base == "MOD");
+	s.send(request::content_get("EXP", dir.file("work/EXP")));
+	std::string text, error;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("work/EXP/defs/e.def"), text, error) &&
+			text == "expansion");
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("work/MOD/defs/a.def"), text, error) &&
+			text == "base");
+	for (const auto &[folder, key] : { std::pair<const char *, const char *>{ "work/EXP", "EXP" },
+				 { "work/MOD", "MOD" } }) {
+		editor::ContentBinding binding;
+		TEST_EXPECT(editor::read_content_binding(
+							editor::ContentPaths::for_project(
+									editor::ProjectPaths::for_root(dir.file(folder))),
+							binding, error) &&
+				binding.key == key && binding.revision == 1);
+	}
+	std::printf("expansion: got with its base game's project beside it\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_offline();
 	failures += test_sign_in();
 	failures += test_share_through_sessions();
+	failures += test_get_expansion();
 	if (failures == 0)
 		std::printf("content_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

@@ -5,6 +5,9 @@
 #include <utility>
 
 #include <base/content/content_manifest.h>
+#include <base/io/file_io.h>
+#include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/import/import_run.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
@@ -57,6 +60,23 @@ bool release_version(const std::string &version) {
 		digits = 0;
 	}
 	return digits > 0 && dots < 4;
+}
+
+// Where the expansion's project at `dir` finds its base game's project: its project file's
+// expansion.base_project resolved against `dir`; false when it names none.
+bool base_project_folder(const std::string &dir, std::string &out) {
+	std::string text, error;
+	io::JsonValue document;
+	if (!io::read_file_text(dir + "/" + kProjectFileName, text, error) ||
+			!io::json_parse(text, document, error) || !document.is_object())
+		return false;
+	const io::JsonValue *expansion = document.get("expansion");
+	const std::string named =
+			expansion && expansion->is_object() ? expansion->get_string("base_project", "") : std::string();
+	if (named.empty())
+		return false;
+	out = io::utf8_generic_path((io::os_path(dir) / io::os_path(named)).lexically_normal());
+	return true;
 }
 
 } // namespace
@@ -200,6 +220,12 @@ void ContentController::get(const EditorRequest &request) {
 	}
 	ContentBinding binding{ account_.server, request.project_key, 0 };
 	get_dir_ = request.dir;
+	get_open_after_.clear();
+	// An expansion's project builds on its base game's, which comes along beside it.
+	get_base_key_.clear();
+	for (const RemoteProject &project : core_.view().content.projects)
+		if (project.key == request.project_key)
+			get_base_key_ = project.base;
 	paused_.reset();
 	start(OperationKind::ContentPull,
 			std::make_unique<ContentPull>(
@@ -496,8 +522,29 @@ void ContentController::finish_pull(ContentPull &pull) {
 		view.head = pull.revision();
 		view.head_known = true;
 		if (!get_dir_.empty()) {
-			const std::string dir = std::move(get_dir_);
+			std::string dir = std::move(get_dir_);
 			get_dir_.clear();
+			if (!get_open_after_.empty()) {
+				// The base an expansion builds on landed beside it: the expansion opens.
+				dir = std::move(get_open_after_);
+				get_open_after_.clear();
+			} else if (!get_base_key_.empty()) {
+				// An expansion's: its base game's project got where its project file names it, unless a
+				// project is there already.
+				const std::string base_key = std::move(get_base_key_);
+				get_base_key_.clear();
+				std::string base_dir;
+				if (base_project_folder(dir, base_dir) && empty_folder(base_dir)) {
+					get_dir_ = base_dir;
+					get_open_after_ = dir;
+					view.last += " Getting its base game's project, " + base_key + ", into " + base_dir + ".";
+					start(OperationKind::ContentPull,
+							std::make_unique<ContentPull>(*transport_, account_,
+									ProjectPaths::for_root(base_dir), "",
+									ContentBinding{ account_.server, base_key, 0 }));
+					return;
+				}
+			}
 			core_.open_project(dir);
 			return;
 		}
@@ -562,8 +609,11 @@ OperationOutcome ContentController::finish_job(
 			outcome.end = OperationEnd::Failed;
 			outcome.findings.push_back(failed);
 			view.last = failed.message;
-			if (kind == OperationKind::ContentPull)
+			if (kind == OperationKind::ContentPull) {
 				get_dir_.clear();
+				get_base_key_.clear();
+				get_open_after_.clear();
+			}
 			break;
 		}
 		case ContentJobState::Cancelled:

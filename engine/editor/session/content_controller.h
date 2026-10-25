@@ -109,6 +109,10 @@ private:
 	// ("" a pull of the open project).
 	std::unique_ptr<ContentPull> paused_;
 	std::string get_dir_;
+	// A get of an expansion's project: its base game's project's key, got next where the expansion's
+	// project file names it; and the expansion's folder, opened once its base has landed.
+	std::string get_base_key_;
+	std::string get_open_after_;
 };
 
 } // namespace opennova::editor

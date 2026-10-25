@@ -143,7 +143,11 @@ stage_prebuilt() {
         cp "$tree/apps/novaworld_$program/opennova-novaworld-$program" "$ctx/src/build/apps/novaworld_$program/"
     done
     mkdir -p "$ctx/src/build/apps/serve" "$ctx/src/build/apps/hostd" "$ctx/src/build/tests" \
+        "$ctx/src/build/apps/project" "$ctx/src/build/apps/update_tool" \
         "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/cloud/machine"
+    # The data program's release build runs these two (data_sets/release_build.h).
+    cp "$tree/apps/project/opennova-project" "$ctx/src/build/apps/project/"
+    cp "$tree/apps/update_tool/opennova-update-tool" "$ctx/src/build/apps/update_tool/"
     cp "$tree/apps/serve/opennova-serve" "$ctx/src/build/apps/serve/"
     cp "$tree/apps/hostd/opennova-hostd" "$ctx/src/build/apps/hostd/"
     cp "$tree/tests/opennova-novaworld-stack-smoke" "$ctx/src/build/tests/"
