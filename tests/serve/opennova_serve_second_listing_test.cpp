@@ -174,6 +174,16 @@ int main() {
 				options, error) == 1);
 		CHECK(error.find("--master-host") != std::string::npos);
 	}
+	// ...and another service: the first's own gate twice is refused.
+	{
+		serve::ServeOptions options;
+		std::string error;
+		CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/HOST",
+				(dir / "test.host").string(), "--master-host", "NW.Example", "--also-master-host",
+				"nw.example"},
+				options, error) == 1);
+		CHECK(error.find("another service") != std::string::npos);
+	}
 
 	std::string error;
 	serve::ServeOptions options;

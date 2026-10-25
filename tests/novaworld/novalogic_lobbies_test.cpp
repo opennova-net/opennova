@@ -10,7 +10,7 @@
 //     fetches once, reads from many threads while a fetch is in flight start no
 //     second one, and no read waits on the fetch;
 //   - failures (no reply, a status other than 200, bytes that are no server list, a
-//     feed cut before its end, a fetch that throws): the last good list kept with its
+//     feed cut before its end, a reply past kMaxReplyBytes, a fetch that throws): the last good list kept with its
 //     time, `failing` set, the next fetch a kRefreshMs on; a first fetch that fails
 //     answers no list;
 //   - the switch: ONNET_NOVALOGIC_LOBBIES off unless set, and the route's body with it
@@ -160,7 +160,8 @@ int test_parse() {
 	TEST_EXPECT(list.fetched_at_ms == kNowMs && list.age_ms == 42000);
 	TEST_EXPECT(list.servers.size() == 3);
 	TEST_EXPECT(list.servers[0].rid == 0x0A0027A0 && list.servers[0].server_name == "Caf\xE9 \xA9 Ops");
-	TEST_EXPECT(list.servers[0].player_names.size() == 2);
+	// The list keeps no host address and no player name (the route shows neither).
+	TEST_EXPECT(list.servers[0].player_names.empty() && list.servers[0].ip.empty());
 
 	const std::string body = nws::novalogic_lobbies_json(&list).dump();
 	json = crow::json::load(body);
@@ -258,7 +259,9 @@ int test_failures() {
 	ScriptedFeed feed;
 	feed.replies = { answer(good), no_answer("connect to 207.178.209.204:80 failed"),
 		answer(std::vector<uint8_t>(junk.begin(), junk.end()), 503),
-		answer(std::vector<uint8_t>(junk.begin(), junk.end())), answer(cut), answer({}) };
+		answer(std::vector<uint8_t>(junk.begin(), junk.end())), answer(cut), answer({}),
+		// A reply past the cap is refused before its parse.
+		answer(std::vector<uint8_t>(NovaLogicLobbies::kMaxReplyBytes + 1, 0)) };
 	Clocks clocks;
 	NovaLogicLobbies lobbies(feed.fetch(), clocks.wall_clock(), clocks.steady_clock());
 	lobbies.read();

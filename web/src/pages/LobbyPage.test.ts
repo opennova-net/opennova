@@ -129,12 +129,14 @@ describe('LobbyPage', () => {
     let page = await open();
     expect(section(page).findAll('tbody tr')).toHaveLength(2);
     expect(section(page).text()).toContain('Updated 2 hours ago');
+    expect(section(page).text()).toContain('this is the last list we got');
     wrapper?.unmount();
 
     readNovaLogic.mockResolvedValue(novalogic({ servers: [], ageSeconds: 10 }));
     page = await open();
     expect(section(page).text()).toContain('No servers are listed there right now.');
     expect(section(page).text()).toContain('Updated just now');
+    expect(section(page).text()).not.toContain('the last list we got');
   });
 
   it("never lets NovaLogic's list break ours", async () => {

@@ -33,7 +33,7 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	};
 	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
 	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock), and the second
-	// listing's beside it.
+	// listing's beside it (D-NET-1385, none of retail's).
 	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
 	ctx.on_update_server_info = [this]() {
 		if (lister_ != nullptr) lister_->host_role().update_server_info();
@@ -218,9 +218,24 @@ bool ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
 	return true;
 }
 
-// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
 void ServeListing::on_player_enter_result(const ClientSession::PlayerEnterResult &result) {
+	apply_player_enter_result(result, 0);
+}
+
+// [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
+void ServeListing::apply_player_enter_result(const ClientSession::PlayerEnterResult &result,
+                                             uint8_t listing) {
 	if (role_ == nullptr) return;
+	// One session per listing (D-NET-1385, none of retail's): a result names a joiner of the
+	// listing whose service answered, never one the other service sent.
+	for (const inmatch::NapiNPConnection &conn : role_->state.host_owner.ctx.np_protocol.connection_list) {
+		if (conn.type == inmatch::NapiNPConnection::kTypeServerSide &&
+				conn.connection_id == result.connection_id && conn.novaworld_listing != listing) {
+			io::logf(LogLevel::kDebug, "[host] ServerPlayerEnterResult for connection %u from the other "
+			         "listing's service; ignored", result.connection_id);
+			return;
+		}
+	}
 	if (!inmatch::Server_ApplyPlayerEnterResult(role_->state.host_owner.ctx, result.connection_id,
 	                                            result.success != 0, result.msg_code,
 	                                            role_->state.host_owner.now_tick)) {

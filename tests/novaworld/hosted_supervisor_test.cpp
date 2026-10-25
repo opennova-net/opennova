@@ -127,7 +127,7 @@ int test_settings_rules() {
 		return c;
 	};
 	// The NovaLogic listing: Joint Operations' lobby alone (DFX2's NovaLogic NovaWorld is down,
-	// and OpenNova's own data's lobby is only OpenNova's).
+	// and OP: Acid Gambit's lobby is only OpenNova's).
 	TEST_EXPECT(!check(with([](auto &c) { c.list_on_novalogic = true; })));
 	{
 		const std::vector<std::string> dfx2_rotation = { "servetst.bms" };

@@ -111,7 +111,7 @@ public:
 	bool stopped_by_service() const { return stopped_by_service_; }
 	// The lister finished on the service's refusal, its decision rather than a fault on the way:
 	// a login or HOSTKEY page it answered and refused, a host request refused with a MsgCode
-	// (NWEC53..60), a refused session join (NWEC43), or an account or lobby the leg cannot use.
+	// (NWEC53..58, NWEC60), a refused session join (NWEC43), or an account or lobby the leg cannot use.
 	// A gate or session that did not answer, a request that never reached it or a 60 s host poll
 	// is not one.
 	bool refused() const { return refused_; }

@@ -82,6 +82,9 @@ public:
 	std::vector<HostPlayerSlot> wanted_roster(const std::map<int, HostPlayerSlot> &current) const override;
 	void on_command(const ServerCommand &command) override;
 	void on_player_enter_result(const ClientSession::PlayerEnterResult &result) override;
+	// A ServerPlayerEnterResult from `listing`'s service (0 the first, 1 the second): applied only
+	// to a joiner that listing's service sent, since only it issued that joiner's ticket.
+	void apply_player_enter_result(const ClientSession::PlayerEnterResult &result, uint8_t listing);
 	// A ServerCommand from `issuer`'s service, run on the match; a stop it asks for (PuntPlayer at
 	// the server's own slot) leaves `issuer`'s hosting, and returns true.
 	bool run_command(const ServerCommand &command, Lister *issuer);
@@ -131,7 +134,7 @@ public:
 		if (first_.run_command(command, lister_)) command_stopped_ = true;
 	}
 	void on_player_enter_result(const ClientSession::PlayerEnterResult &result) override {
-		first_.on_player_enter_result(result);
+		first_.apply_player_enter_result(result, 1);
 	}
 
 private:

@@ -30,6 +30,7 @@
 
 #include <crow/json.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <future>
@@ -56,8 +57,12 @@ public:
 	static constexpr const char *kUserAgent = "User-Agent: OpenNova NovaWorld web (Lobbies page)";
 	// A list this old is fetched again at the next read.
 	static constexpr int64_t kRefreshMs = 5LL * 60 * 1000;
-	// Each connect, send and recv of a fetch waits at most this long.
+	// Each connect, send and recv of a fetch waits at most this long, the whole reply at most
+	// kFetchTotalMs, and a reply past kMaxReplyBytes is refused: the live feed is a few KiB, and
+	// its parse grows a large body many times over (a row's strings), so the cap goes before it.
 	static constexpr int kFetchTimeoutMs = 5000;
+	static constexpr int kFetchTotalMs = 20000;
+	static constexpr size_t kMaxReplyBytes = 256u * 1024u;
 
 	// One fetch of the feed: the HTTP reply (apps/common/net_http.h).
 	using Fetch = std::function<net::HttpReply()>;
@@ -68,7 +73,7 @@ public:
 	static net::HttpReply fetch_novalogic();
 
 	explicit NovaLogicLobbies(Fetch fetch = fetch_novalogic, Clock wall_ms = {}, Clock steady_ms = {});
-	// Waits for the fetch in flight, if any (each of its waits bounded by kFetchTimeoutMs).
+	// Waits for the fetch in flight, if any (bounded by kFetchTotalMs past its connect).
 	~NovaLogicLobbies();
 	NovaLogicLobbies(const NovaLogicLobbies &) = delete;
 	NovaLogicLobbies &operator=(const NovaLogicLobbies &) = delete;

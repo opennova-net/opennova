@@ -226,7 +226,7 @@ int main() {
 			check(empty_jar.build_prefixed_blob("PUB").empty(),
 			      "no PUB* cookie -> empty CD blob (LAN / unauthenticated)");
 			// The glob folds case: a lower-case pub* name is in the set (D-NET-1386).
-			// [orig: the glob matcher @0x651820 - the fold @0x65190C..0x651923]
+			// [orig: String_WildcardMatchCaseInsensitive_0 @0x651820 - the fold @0x65190C..0x651923]
 			CookieJar folded_jar;
 			folded_jar.set("pubsquadinfo", "SQ");
 			folded_jar.set("PUBPCID", "PC");
@@ -235,7 +235,7 @@ int main() {
 			                      0, 'S', 'Q', 0, 'P', 'U', 'B', 'P', 'C', 'I', 'D', 0, 'P', 'C', 0}),
 			      "the PUB* gather matches the prefix without case");
 			// The join's CD: the set up to 0x7FE bytes, none past it (D-NET-1387).
-			// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - @0x4C4C15..0x4C4C1E]
+			// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - the PUB* set's 1..0x7FE test @0x4C4C49..0x4C4C58]
 			CookieJar fits_jar;
 			// "PUBPCID\0" (8) + value + "\0" (1): a value of 0x7FE - 9 bytes fills the set exactly.
 			fits_jar.set("PUBPCID", std::string(kJoinCdCookieMax - 9, 'a'));

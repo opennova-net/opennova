@@ -282,7 +282,7 @@ private:
 std::string novaworld_character_name(const CookieJar &jar);
 
 // The longest CD set a join carries: a larger PUB* set goes as none.
-// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - the 0x7FE compare @0x4C4C15..0x4C4C1E]
+// [orig: NetPacket_BuildAnnouncePayload @0x4C4BF0 - the PUB* set's 1..0x7FE test @0x4C4C49..0x4C4C58]
 inline constexpr std::size_t kJoinCdCookieMax = 0x7FE;
 // The CD blob the game-session 0x00 JOIN relays: the jar's PUB* cookies (build_prefixed_blob,
 // the prefix matched without case), or none when the whole set is longer than kJoinCdCookieMax,

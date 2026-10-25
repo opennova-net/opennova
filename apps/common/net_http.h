@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -27,9 +28,12 @@ using HttpResolver = std::function<bool(const std::string &host, Endpoint &out)>
 // they carry one), the request line and Host first (the URL's authority, unless the given lines
 // carry a Host line of their own), then the "Name: value" header lines as given,
 // then the reply read to the server's close or to its Content-Length. http://
-// only. Every connect, send and recv waits at most `timeout_ms`.
+// only. Every connect, send and recv waits at most `timeout_ms`; a reply past `max_reply_bytes`
+// is refused, and with `total_ms` > 0 so is one still arriving `total_ms` after the send (a
+// peer that trickles bytes inside each recv's wait).
+inline constexpr size_t kHttpMaxReplyBytes = 8u * 1024u * 1024u;
 HttpReply http_exchange(const std::string &method, const std::string &url,
 		const std::vector<std::string> &headers, const std::string &body, int timeout_ms,
-		const HttpResolver &resolve);
+		const HttpResolver &resolve, size_t max_reply_bytes = kHttpMaxReplyBytes, int total_ms = 0);
 
 } // namespace opennova::net

@@ -144,11 +144,15 @@ The second listing:
   first listing go on, and the second listing is not tried again until the server
   restarts, as a stock host's listing that does not host ends.
 - **Retries only faults.** A gate that does not answer or resolve, a request that never
-  reached the service, or a listing still not hosting 3 minutes after its start is tried
-  again after a minute, then after twice as long each time up to 15 minutes, at most 5
-  tries in a run.
+  reached the service, a web page its host failed (5xx) or moved (3xx), a session that
+  dropped before the service answered, or a listing still not hosting 3 minutes after its
+  start is tried again after a minute, then after twice as long each time up to 15 minutes,
+  at most 5 tries in a run. A gate the destination rule refuses (NovaLogic's without
+  `--allow-public`) is not tried at all, and `--also-master-host` may not name the
+  `--master-host` gate (two sessions with one service would share its datagrams).
 - **Deregisters as a stock host does.** Whatever stops the server, a second listing still
-  hosting sends `ClientStopHosting` and then the goodbye.
+  hosting sends `ClientStopHosting` and then the goodbye (the goodbye alone at the reset
+  exit, as the first's).
 - **Never holds up the match.** Its gate's name is looked up on a worker thread, and a try
   that ends with a web request still out leaves it to finish on its own.
 

@@ -12,6 +12,7 @@
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
+#include <cstring>
 #include <optional>
 
 namespace opennova::serve {
@@ -19,6 +20,13 @@ namespace opennova::serve {
 using io::LogLevel;
 
 namespace {
+
+// Whether a web page that failed the flow is the service's answer: a page it served (200, a
+// content refusal) or a client error it chose (4xx). A request that never reached it, a page its
+// web host failed (5xx) or one moved elsewhere (3xx) is a fault, which a second listing retries.
+bool answered_by_service(const net::HttpReply &reply) {
+	return reply.transport_ok && (reply.code == 200 || (reply.code >= 400 && reply.code < 500));
+}
 
 // The operator's gloss on the connect's NWEC tags this driver reports (the game shows menutxt's
 // text; these lines are the lister's own).
@@ -149,9 +157,14 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 				io::logf(LogLevel::kError, "%s[host] the host request failed: %s", who(),
 					tag.c_str());
 				source_.on_host_result(false, tag);
-				// NWEC53..60 are the service's MsgCode refusals (too many servers, the name not
-				// accepted, ...); NWEC51 (not queued) and NWEC52 (no reply in 60 s) are not.
-				end(kExitFailed, /*refused=*/tag != "NWEC51" && tag != "NWEC52");
+				// NWEC53..58 and NWEC60 are the service's MsgCode refusals (too many servers, the
+				// name not accepted, ...; NWEC58 one outside the table). NWEC51 (not queued), NWEC52
+				// (no reply in 60 s) and NWEC58 over no word (0: the session left state 5/6 with
+				// no answer, a reap or a reconnect) are faults, not its decision.
+				const ClientSession *session = lobby_.session();
+				const bool no_word = session == nullptr || session->server_msg_code() == 0;
+				end(kExitFailed, /*refused=*/tag != "NWEC51" && tag != "NWEC52" &&
+						!(tag == "NWEC58" && no_word));
 			};
 			// ServerStopHosting drops the session to verified and sends nothing; the session
 			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
@@ -341,8 +354,8 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (r.kind == LoginResult::Kind::Failed) {
 			io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), r.reason.c_str());
 			// A login the service answered and refused is its decision; a request that never
-			// reached it is not.
-			end(kExitFailed, /*refused=*/reply.transport_ok);
+			// reached it, or a page its web host failed (5xx) or moved (3xx), is not.
+			end(kExitFailed, /*refused=*/answered_by_service(reply));
 			return;
 		}
 		add_log_secret(r.nwhandle);
@@ -369,7 +382,7 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (r.kind == HostKeyResult::Kind::Failed) {
 			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
 					r.reason.c_str());
-			end(kExitFailed, /*refused=*/reply.transport_ok);
+			end(kExitFailed, /*refused=*/answered_by_service(reply));
 			return;
 		}
 		host_key_ = r.host_key;
@@ -440,7 +453,9 @@ void Lister::request_host() {
 	                                       true, gate.lobby_name);
 	if (refusal != nullptr) {
 		io::logf(LogLevel::kError, "%s[host] cannot host: %s", who(), refusal);
-		end(kExitFailed, /*refused=*/true); // the gate's reply names no lobby to host in
+		// Only the gate's reply naming no lobby to host in is the service's word; a session not
+		// set up or out of state (a reconnect during the web leg) is a fault.
+		end(kExitFailed, /*refused=*/std::strcmp(refusal, NWEC_HOST_GATE_NOT_OK) == 0);
 		return;
 	}
 	phase_ = Phase::Requesting;

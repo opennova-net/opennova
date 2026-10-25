@@ -1341,7 +1341,7 @@ does, its players' names and addresses among them (the site's privacy notice say
 
 The server lists there under one project-owned NovaLogic account. NovaLogic's service hands
 out a HOSTKEY only after a login, so without the account no server lists there. Only Joint
-Operations servers can: NovaLogic's DFX2 NovaWorld is down, and Acid Gambit's lobby is ours
+Operations servers can: NovaLogic's DFX2 NovaWorld is down, and OP: Acid Gambit's lobby is ours
 alone, so the form shows the box for Joint Operations data sets and a start of any other
 that asks is refused. The listing is opennova-serve's second listing (`--also-master-host`,
 `apps/serve/README.md` "Two listings"). It starts once the server's first map is up and

@@ -324,11 +324,6 @@ export interface CheckedSettings {
   settings: HostedSettings | null;
 }
 
-// Every field against the backend's rule, in the form's order: the game one
-// of `dataSets`, and the ranges, the expansion and the missions that game's
-// own. The listing on NovaLogic's NovaWorld goes as the form has it only
-// while the service offers it (`novalogicListing`) and the data set takes it
-// (offersNovaLogicListing); else it goes false.
 // Whether a start on `dataSet` may also list on NovaLogic's NovaWorld: the
 // service offers it and the data set takes it (Joint Operations alone).
 export function offersNovaLogicListing(
@@ -338,6 +333,11 @@ export function offersNovaLogicListing(
   return novalogicListing && dataSet?.novalogic_listing === true;
 }
 
+// Every field against the backend's rule, in the form's order: the game one
+// of `dataSets`, and the ranges, the expansion and the missions that game's
+// own. The listing on NovaLogic's NovaWorld goes as the form has it only
+// while the service offers it (`novalogicListing`) and the data set takes it
+// (offersNovaLogicListing); else it goes false.
 export function checkSettings(
   form: SettingsForm,
   dataSets: readonly HostedDataSet[],

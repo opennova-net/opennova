@@ -35,7 +35,9 @@
         </table>
       </div>
       <p v-else class="text-sm text-ink-muted">No servers are listed there right now.</p>
-      <p class="text-xs text-ink-muted">Updated <RelativeTime :value="updatedAt" :now="now" /></p>
+      <p class="text-xs text-ink-muted">
+        Updated <RelativeTime :value="updatedAt" :now="now" /><template v-if="list.failing">. NovaLogic's NovaWorld can't be reached right now, so this is the last list we got.</template>
+      </p>
     </template>
     <p v-else-if="list.failing" class="text-sm text-ink-muted">NovaLogic's NovaWorld can't be reached right now.</p>
     <p v-else class="text-sm text-ink-muted">Checking NovaLogic's NovaWorld...</p>

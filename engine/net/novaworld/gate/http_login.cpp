@@ -332,8 +332,8 @@ const std::string *CookieJar::find(const std::string &name) const {
 }
 
 // The glob compares the literal after a CRT case fold, so "pubpcid" matches "PUB*" as "PUBPCID"
-// does (D-NET-1386) [orig: Config_QueryMatchingEntries @0x64EB70 - the glob matcher @0x651820,
-// the fold @0x65190C..0x651923].
+// does (D-NET-1386) [orig: Config_QueryMatchingEntries @0x64EB70 - the matcher call @0x64EC6F;
+// String_WildcardMatchCaseInsensitive_0 @0x651820 - the fold @0x65190C..0x651923].
 std::vector<uint8_t> CookieJar::build_prefixed_blob(const std::string &prefix) const {
 	std::vector<uint8_t> blob;
 	for (const CookieEntry &entry : entries_) {
@@ -352,7 +352,7 @@ std::vector<uint8_t> CookieJar::build_prefixed_blob(const std::string &prefix) c
 // one sends no CD, which the host refuses with code 23 (D-NET-1387) [orig:
 // Game_ApplySessionSettingsToGlobals @0x551500 - the "PUB*" gather @0x551B0C into a 0x800-byte
 // buffer, Config_QueryMatchingEntries returning every match's length; NetPacket_BuildAnnouncePayload
-// @0x4C4BF0 - the size test @0x4C4C15..0x4C4C1E].
+// @0x4C4BF0 - the PUB* set's 1..0x7FE test @0x4C4C49..0x4C4C58].
 std::vector<uint8_t> join_cd_cookie(const CookieJar &jar) {
 	std::vector<uint8_t> cd = jar.build_prefixed_blob("PUB");
 	if (cd.size() > kJoinCdCookieMax) cd.clear();

@@ -34,7 +34,8 @@ int64_t steady_now_ms() { return static_cast<int64_t>(Watchdog::steady_now_ms())
 
 net::HttpReply NovaLogicLobbies::fetch_novalogic() {
 	return net::http_exchange("GET", kUrl, { kUserAgent }, {}, kFetchTimeoutMs,
-			[](const std::string &host, net::Endpoint &out) { return net::resolve_ipv4(host, out); });
+			[](const std::string &host, net::Endpoint &out) { return net::resolve_ipv4(host, out); },
+			kMaxReplyBytes, kFetchTotalMs);
 }
 
 NovaLogicLobbies::NovaLogicLobbies(Fetch fetch, Clock wall_ms, Clock steady_ms) :
@@ -99,9 +100,24 @@ void NovaLogicLobbies::refresh() {
 		why = reply.error.empty() ? "no reply" : reply.error;
 	else if (reply.code != 200)
 		why = "HTTP " + std::to_string(reply.code);
-	else if (!gsb_parse_response(reply.body.data(), reply.body.size(), parsed))
-		why = "the reply is no server list (" + std::to_string(reply.body.size()) + " bytes)";
+	else if (reply.body.size() > kMaxReplyBytes)
+		why = "the reply is too large (" + std::to_string(reply.body.size()) + " bytes)";
+	else {
+		try {
+			if (!gsb_parse_response(reply.body.data(), reply.body.size(), parsed))
+				why = "the reply is no server list (" + std::to_string(reply.body.size()) + " bytes)";
+		} catch (...) {
+			// Whatever the parse throws (an allocation) is a failed fetch, never the reader's.
+			why = "the reply did not parse";
+		}
+	}
 	if (parsed.servers.size() > kMaxServers) parsed.servers.resize(kMaxServers);
+	// The route never shows a host's address or its players' names: the list keeps neither.
+	for (GsbServerEntry &s : parsed.servers) {
+		s.ip.clear();
+		s.player_names.clear();
+		s.player_names.shrink_to_fit();
+	}
 
 	std::lock_guard<std::mutex> lock(mu_);
 	if (!why.empty()) {

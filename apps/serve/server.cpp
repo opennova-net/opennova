@@ -289,6 +289,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		error = "--also-master-host needs --master-host: the second listing lists beside the first";
 		return 1;
 	}
+	// Two sessions with one service would share its session server's datagrams on the one socket.
+	if (!out.also_master_host.empty() && strutil::iequals(out.also_master_host, out.master_host) &&
+			out.also_master_gate_port == out.master_gate_port) {
+		error = "--also-master-host names the --master-host gate: the second listing lists on another service";
+		return 1;
+	}
 	return 0;
 }
 
@@ -956,7 +962,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	});
 	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
 	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), and on the second
-	// listing's beside it [orig: Server_HandlePlayerDisconnect @0x51B5C0 -
+	// listing's beside it (D-NET-1385, none of retail's) [orig: Server_HandlePlayerDisconnect @0x51B5C0 -
 	//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3].
 	client_process_.nwu_player_removed = [this](int player_number) {
 		if (lister_ != nullptr) lister_->host_role().clear_player_slot(player_number);
@@ -1034,6 +1040,15 @@ bool Server::second_listing_wanted() const {
 
 void Server::begin_second_try() {
 	if (second_resolve_.valid() || second_lister_ != nullptr || second_stopped_) return;
+	// The destination rule is the run's own, the same at every try: a gate it refuses is final.
+	if (!destination_permitted(options_.also_master_host, options_.allow_public)) {
+		io::logf(io::LogLevel::kWarn,
+				"opennova-serve: the second listing's gate %s needs --allow-public; it is not tried "
+				"this run",
+				options_.also_master_host.c_str());
+		second_stopped_ = true;
+		return;
+	}
 	// The destination rule by name, as the listing's own lookups apply it (destination_policy.h);
 	// the try then probes the dotted address, which the rule passes.
 	second_resolve_ = std::async(std::launch::async,
@@ -1311,12 +1326,12 @@ void Server::stop() {
 	//  CNapiNPConnection_Destroy -> SendDisconnectPacket @0x61F2A0 -> sendto;
 	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
 	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
-	// The second listing goes the same way as the first, ahead of it; a try's gate lookup and the
-	// torn-down tries' web exchanges still out are waited out here, at the exit.
+	// The second listing goes the same way as the first, ahead of it. A try's gate lookup and the
+	// torn-down tries' web exchanges still out are waited out after the first listing's own
+	// deregistration (each holds copies alone, no lister or lane), so a hung exchange never holds
+	// it back past a container's stop grace.
 	end_second_listing(/*stop_hosting=*/!reset_exit_);
 	second_source_.reset();
-	second_resolve_ = {};
-	second_http_left_.clear();
 	if (lister_) {
 		if (reset_exit_)
 			lister_->disconnect();
@@ -1325,6 +1340,8 @@ void Server::stop() {
 		last_lister_exit_ = lister_->exit_code();
 		lister_.reset();
 	}
+	second_resolve_ = {};
+	second_http_left_.clear();
 	listing_.reset();
 	demux_.reset();
 	datagrams_.reset();
