@@ -692,6 +692,27 @@ inline constexpr Normalization kNormalizations[] = {
 			"or without that death on both sides, the shortfall is not comparable, as before. "
 			"The slice is a subject row's: the A/A row keeps the floor, so an RR-aa short of 8 "
 			"still excuses a short subject (x5's 01tr-coop-aikill: RR 11, RR-aa 7, OO 6 samples)" },
+	{ "uplink.death_tail", MaskKind::Field, 'C', 0x00C, "position sequence end", 0,
+			"the recipient's uplinks stop at its own death (NapiNPClientMsg_EntityDeath "
+			"@0x42EB50 zeroes Health @0x42EBD6; Player_BuildTag0CInputBody @0x42A550 refuses it "
+			"@0x42A58F), and its client samples the body once per send boundary "
+			"(Client_ProcessNetworkFrame @0x42C180: the countdown gate @0x42C3DD, the build "
+			"called @0x42C482), about every 0.19 s. A move from rest that the death ends (the "
+			"self-grenade's knockback, ahead of the host's 0x13) reaches the uplinks in as many "
+			"samples as boundaries fall between its start and the 0x13: the final's "
+			"tdh-i3a-tdm-swap RR sent it in two (+7.42 / +7.62 s, the 0x13 at +7.65 s), RR-aa and "
+			"OR in one, which state.transient_tail drops, so the A/A pair parted on "
+			"uplink_motion, range and step (widened in 9 stored cases under today's judge: "
+			"selfnade x8..x11, permdeath x5 / x8 / x10 / x11, the final's swap). Of the 177 "
+			"stored runs whose uplinks a death "
+			"ended, 64 held such a move: 48 in one sample, 16 in two, none in more. So where a "
+			"run's own S2C 0x13 has no steady uplink after it, the position sequence holding its "
+			"last uplink (uplink_motion and the uplink_position rows, every row the A/A one "
+			"included) drops a closing run of up to two changes, each differing from the sample "
+			"before, after a rest. It hides a position change only in the last two uplinks "
+			"before the recipient's own death, after two equal samples; a move of three or more "
+			"samples, a move earlier in the window, a death the uplinks resume after, and the "
+			"orientation and analog sequences still compare" },
 	{ "frame.carried", MaskKind::Field, 'S', 0x00A, "carried", 0,
 			"the carried object handle is session-local: compared as none/bound" },
 	{ "frame.mount_handle", MaskKind::Field, 'S', 0x00A, "mount_handle", 0,

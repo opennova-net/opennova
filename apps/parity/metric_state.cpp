@@ -12,7 +12,8 @@
 //   field population   per entity class, the fields RR ever fills (diff_0a)
 //   dynamic vectors    origin-normalized range, displacement and step p90
 //                      (nearest rank) within 1/8x..8x of RR, each sequence past a
-//                      lone transient lead and short of a lone tail, entity positions in
+//                      lone transient lead and short of a lone tail (an uplink position
+//                      tail its own death cut, up to two samples), entity positions in
 //                      world units (a move within the records' compressed steps none),
 //                      entity and uplink positions one sequence per carrier frame;
 //                      priority scores' per-slot median likewise;
@@ -120,15 +121,25 @@ double wrapped(double delta, double modulus) {
 // baseline (state.transient_lead). Its last sample is one when it differs from the one
 // before while that one repeats its own predecessor: a change its end cut, the window's
 // end or its source's (a joiner's uplinks stop at its death) (state.transient_tail).
+// `tail_run` is the longest such closing run of changes, each differing from the sample
+// before, that the end drops after a rest: 1, or kDeathTailRun for an uplink position
+// sequence its source's own death cut (uplink.death_tail).
 template <typename T, typename Same>
-std::pair<size_t, size_t> sequence_span(const std::vector<T> &seq, Same same) {
+std::pair<size_t, size_t> sequence_span(const std::vector<T> &seq, Same same, size_t tail_run = 1) {
 	static_assert(has_normalization("state.transient_lead"));
 	static_assert(has_normalization("state.transient_tail"));
 	size_t begin = 0, end = seq.size();
 	if (seq.size() >= 3 && !same(seq[0], seq[1]) && same(seq[1], seq[2]))
 		begin = 1;
-	if (end - begin >= 3 && !same(seq[end - 1], seq[end - 2]) && same(seq[end - 2], seq[end - 3]))
-		--end;
+	if (end - begin >= 3) {
+		size_t run = 0;
+		while (end - run - 1 > begin && !same(seq[end - run - 1], seq[end - run - 2]))
+			++run;
+		// The count stopped short of the start at a rest: the sample before the run repeats
+		// its own predecessor.
+		if (run >= 1 && run <= tail_run && end - run - 1 > begin)
+			end -= run;
+	}
 	return { begin, end };
 }
 
@@ -161,8 +172,24 @@ bool same_sample(const Sample &x, const Sample &y, double modulus) {
 	return true;
 }
 
-// `samples` in capture order.
-VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
+// The recipient's uplinks stop at its own death: the S2C 0x13 naming its body zeroes the body's
+// Health [orig: NapiNPClientMsg_EntityDeath @0x42EB50 (the store @0x42EBD6)] and the uplink
+// builder refuses a Health of 0 [orig: Player_BuildTag0CInputBody @0x42A550 (@0x42A58F)]. Its
+// client samples the body once per send boundary [orig: Client_ProcessNetworkFrame @0x42C180
+// (the countdown gate @0x42C3DD, the build called @0x42C482)], about every 0.19 s, so a move
+// from rest that the death ends (a self-grenade's knockback, ahead of the host's 0x13) reaches
+// the uplinks in as many samples as boundaries fall between its start and the 0x13: the
+// final's tdh-i3a-tdm-swap RR sent it in two (+7.42 / +7.62 s, the 0x13 at +7.65 s), RR-aa and
+// OR in one, which the one-sample trim drops. Of the 177 stored runs whose uplinks a death
+// ended, 64 held such a move (selfnade, permdeath, swap): 48 in one sample, 16 in two, none in
+// more. So the position sequence holding the last uplink of a run its own death ended drops a
+// closing run of up to two changes after a rest (uplink.death_tail).
+constexpr size_t kDeathTailRun = 2;
+
+// `samples` in capture order; `death_cut`: the source's own death ended them, so the sequence
+// holding the last sample drops a closing run of up to kDeathTailRun changes.
+VectorStats vector_stats(
+		const std::vector<Sample> &samples, double modulus, bool death_cut = false) {
 	VectorStats stats;
 	stats.samples = samples.size();
 	std::map<std::string, std::vector<const Sample *>> groups;
@@ -170,10 +197,14 @@ VectorStats vector_stats(const std::vector<Sample> &samples, double modulus) {
 		groups[sample.group].push_back(&sample);
 	std::vector<double> ranges, displacements, steps, step_quanta;
 	for (const auto &group : groups) {
-		const std::pair<size_t, size_t> span = sequence_span(group.second,
+		const size_t tail_run =
+				death_cut && group.first == samples.back().group ? kDeathTailRun : 1;
+		const std::pair<size_t, size_t> span = sequence_span(
+				group.second,
 				[modulus](const Sample *x, const Sample *y) {
 					return same_sample(*x, *y, modulus);
-				});
+				},
+				tail_run);
 		const std::vector<const Sample *> seq(group.second.begin() + std::ptrdiff_t(span.first),
 				group.second.begin() + std::ptrdiff_t(span.second));
 		if (group.first == samples.front().group)
@@ -225,12 +256,14 @@ constexpr size_t kDynamicMinSamples = 8;
 constexpr double kDynamicRatioFloor = 3.0; // log2(8): the 1/8x..8x band
 constexpr double kBaselineFloorFixed16 = 4194304.0; // 64 world units in 16.16
 
+// `cut_a` / `cut_b`: each side's samples end at its source's own death (vector_stats).
 void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string &label,
-		const std::vector<Sample> &a, const std::vector<Sample> &b, double modulus, bool baseline) {
+		const std::vector<Sample> &a, const std::vector<Sample> &b, double modulus, bool baseline,
+		bool cut_a = false, bool cut_b = false) {
 	static_assert(has_normalization("state.position"));
 	if (a.size() < kDynamicMinSamples || b.size() < kDynamicMinSamples)
 		return;
-	const VectorStats sa = vector_stats(a, modulus), sb = vector_stats(b, modulus);
+	const VectorStats sa = vector_stats(a, modulus, cut_a), sb = vector_stats(b, modulus, cut_b);
 	if (baseline && sa.baseline.size() == sb.baseline.size()) {
 		double worst = 0.0;
 		for (size_t i = 0; i < sa.baseline.size(); ++i)
@@ -296,17 +329,21 @@ void dynamic_metrics(std::vector<MetricValue> &out, char dir, const std::string 
 // Sequences whose key changes over the samples (a moving or turning entity), each
 // sequence's keys past its lone transients (sequence_span). A sequence is one handle's
 // records in one frame of reference (`sequence`: the handle and its carrier word).
+// `death_cut`: the source's own death ended the records, so the sequence holding the last
+// one drops a closing run of up to kDeathTailRun changes (uplink.death_tail).
 template <typename T>
 size_t changing_handles(const std::vector<const T *> &records,
 		const std::function<std::string(const T &)> &sequence,
-		const std::function<std::string(const T &)> &key) {
+		const std::function<std::string(const T &)> &key, bool death_cut = false) {
 	std::map<std::string, std::vector<std::string>> seen;
 	for (const T *record : records)
 		seen[sequence(*record)].push_back(key(*record));
+	const std::string cut = death_cut && !records.empty() ? sequence(*records.back()) : "";
 	size_t changing = 0;
 	for (const auto &entry : seen) {
 		const std::pair<size_t, size_t> span = sequence_span(
-				entry.second, [](const std::string &x, const std::string &y) { return x == y; });
+				entry.second, [](const std::string &x, const std::string &y) { return x == y; },
+				death_cut && entry.first == cut ? kDeathTailRun : 1);
 		const std::set<std::string> keys(entry.second.begin() + std::ptrdiff_t(span.first),
 				entry.second.begin() + std::ptrdiff_t(span.second));
 		changing += keys.size() > 1 ? 1 : 0;
@@ -562,7 +599,8 @@ void compare_uplinks(
 	// Retail's own window-to-death spans part by more than the witnessed one period (x5's
 	// 01tr-coop-aikill: RR 11, RR-aa 7 samples), and a death-cut A/A made comparable would
 	// take that excuse from a subject two short (x5's OO, 6).
-	const bool death_slice = !aa && occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
+	const bool rr_death = occupancy_ends_at_death(rr), other_death = occupancy_ends_at_death(other);
+	const bool death_slice = !aa && rr_death && other_death;
 	for (int slot = 0; slot < 4; ++slot) {
 		auto scores = [&occupied, slot](const std::vector<const U *> &states) {
 			std::vector<double> out;
@@ -600,9 +638,12 @@ void compare_uplinks(
 		return std::to_string(s.pos_x) + "," + std::to_string(s.pos_y) + "," +
 				std::to_string(s.pos_z);
 	};
+	// A run its own death ended drops a position tail of up to two changes after a rest, on
+	// every row the A/A one included: the death's send phase (uplink.death_tail).
+	static_assert(has_normalization("uplink.death_tail"));
 	fill_metric(out, 'C', "uplink_motion", "UPLINK_CONSTANT",
-			changing_handles(a, sequence, position) > 0,
-			changing_handles(b, sequence, position) > 0);
+			changing_handles(a, sequence, position, rr_death) > 0,
+			changing_handles(b, sequence, position, other_death) > 0);
 
 	auto samples = [](const std::vector<const U *> &states, int which) {
 		std::vector<Sample> out;
@@ -623,7 +664,8 @@ void compare_uplinks(
 		}
 		return out;
 	};
-	dynamic_metrics(out, 'C', "uplink_position", samples(a, 0), samples(b, 0), 0.0, true);
+	dynamic_metrics(out, 'C', "uplink_position", samples(a, 0), samples(b, 0), 0.0, true, rr_death,
+			other_death);
 	dynamic_metrics(out, 'C', "uplink_orientation", samples(a, 1), samples(b, 1), 65536.0, false);
 	dynamic_metrics(out, 'C', "uplink_analog", samples(a, 2), samples(b, 2), 0.0, false);
 }

@@ -3852,6 +3852,72 @@ void test_priority_death_slice() {
 			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
 }
 
+// The final's tdh-i3a-tdm-swap (LX-s38): every joiner stood still and moved once more before its
+// self-grenade death, and its uplinks stopped at the death's S2C 0x13. RR's uplinks caught the
+// move in two samples (+7.42 / +7.62 s, the 0x13 at +7.65 s), RR-aa's and OR's in one, which
+// state.transient_tail drops, so the A/A pair parted on uplink_motion, range and step. A run its
+// own death ended drops a closing position run of up to two changes after a rest
+// (uplink.death_tail).
+void test_uplink_death_tail() {
+	// The joiner still at one spot, its uplinks ending 3 s into the window with the last
+	// `moved` each a step further, then its S2C 0x13 50 ms after the last (`death`) or none.
+	auto run = [](uint32_t seed, int moved, bool death) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<wire::ParityUplinkState> kept;
+		for (wire::ParityUplinkState u : trace.uplinks) {
+			if (u.ts_ns > kSteadyStart + 3 * kSec)
+				break;
+			u.pos_x = 1000 * 65536;
+			u.pos_y = 2000 * 65536;
+			u.pos_z = 50 * 65536;
+			kept.push_back(u);
+		}
+		for (int k = 0; k < moved; ++k)
+			kept[kept.size() - 1 - size_t(k)].pos_x += (moved - k) * 32768;
+		const uint64_t last = kept.back().ts_ns;
+		trace.uplinks = std::move(kept);
+		if (death)
+			splice(trace, 'S', 0x013, last + 50 * kMs, bytes({ 0x00, 0x10, 0x00, 0x00 }));
+		return trace;
+	};
+	auto absent = [](const Case &c, const char *name) {
+		check(find_row(c.verdict.rows, 'C', name) == nullptr,
+				std::string("C ") + name + " has no row: RR's death-cut tail is no motion");
+	};
+	{
+		// RR and RR-aa caught the move in two samples, the subject in one: without the rule RR's
+		// two changes are motion the subject never shows.
+		const Case c = judge_case(run(1, 2, true), run(2, 2, true), run(3, 1, true), "OR");
+		expect_row(c, 'C', "uplink_motion", "", "pass");
+		absent(c, "uplink_position_range_p90");
+		absent(c, "uplink_position_step_p90");
+	}
+	{
+		// The final's shape: the A/A row compares the trimmed RR and RR-aa too, so it no longer
+		// widens the subject's threshold.
+		const Case c = judge_case(run(1, 2, true), run(2, 1, true), run(3, 1, true), "OR");
+		expect_row(c, 'C', "uplink_motion", "", "pass");
+		const VerdictRow *aa = find_row(c.verdict.aa, 'C', "uplink_motion");
+		check(aa && aa->status == "pass", "the A/A uplink_motion row does not widen");
+		const VerdictRow *row = find_row(c.verdict.rows, 'C', "uplink_motion");
+		check(row && row->threshold == row->value.floor, "the subject's threshold is the floor");
+	}
+	{
+		// A move of three samples before the death is more than the death's phase: it counts.
+		const Case c = judge_case(run(1, 3, true), run(2, 3, true), run(3, 0, true), "OR");
+		expect_row(c, 'C', "uplink_motion", "", "fail", "UPLINK_CONSTANT");
+		expect_row(c, 'C', "uplink_position_range_p90", "", "fail", "DYNAMIC_RANGE_MISMATCH");
+	}
+	{
+		// Uplinks that stop with no death of their own keep the one-sample trim: two closing
+		// changes count, one does not.
+		expect_row(judge_case(run(1, 2, false), run(2, 2, false), run(3, 1, false), "OR"), 'C',
+				"uplink_motion", "", "fail", "UPLINK_CONSTANT");
+		expect_row(judge_case(run(1, 1, false), run(2, 1, false), run(3, 0, false), "OR"), 'C',
+				"uplink_motion", "", "pass");
+	}
+}
+
 // The final's tdh-i3a-tdm-round OO (LX-s37): in the round end's linger the host acks the
 // joiner's 5 s C2S 0x4C at its first open boundary, header-only unless a reliable message
 // (the 0x16) is queued there, which is the joiner's send phase against the host's: two of OO's
@@ -4559,6 +4625,7 @@ int main() {
 	test_entity_mission_split();
 	test_header_only_acks();
 	test_priority_death_slice();
+	test_uplink_death_tail();
 	test_initial_0x22_grouping();
 	test_entity_motion_floor();
 	test_round_target();
