@@ -21,6 +21,11 @@ struct ImportResult {
 	// failed before publishing (then it wrote nothing).
 	std::vector<std::string> not_imported;
 	std::vector<Diagnostic> diagnostics;
+	// The archive each file of the game install it copied came from, by normalized name, where the project
+	// builds into that archive's set (a standalone project the base game's three, an expansion its pair):
+	// the files it published, and those the project held with the same bytes (ProjectDocument::archives,
+	// which the session merges it into).
+	ArchiveRecord archives;
 };
 
 // Expand selected PFFs into selectable members; loose files stay single choices. `facts`, when given,
@@ -45,6 +50,14 @@ std::vector<std::string> list_install_loose_files(const std::string &retail_root
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics,
                                                     std::vector<ImportChoiceFacts> *facts = nullptr);
+// For an expansion project, the files of the install's installed expansion `expansion` as the project
+// imports them as its own (installed_expansion_spec's view: its two archives' files and its folder's, renamed to
+// the project's expansion, its version text where the project is that expansion), each a choice that names
+// the expansion. None, with a finding, for a standalone project or an install that does not mount it.
+std::vector<ImportChoice> list_installed_expansion_choices(const std::string &install, const ProjectDocument &document,
+                                                          const std::string &expansion,
+                                                          std::vector<Diagnostic> &diagnostics,
+                                                          std::vector<ImportChoiceFacts> *facts = nullptr);
 // The names the project gets of a game install's files (the same view), sorted by their normalized
 // form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);

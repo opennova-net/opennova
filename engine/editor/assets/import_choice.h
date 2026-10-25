@@ -32,12 +32,16 @@ struct ImportChoice {
 	// a file the game reads by an expansion's name, under the project's expansion's): that name, "" for
 	// the member's own.
 	std::string as;
+	// An install's file of its installed expansion of this name, which an expansion project imports as its
+	// own (installed_expansion_spec's view); "" for the install as the project imports it (install_spec).
+	std::string expansion;
 	// The name the project gets: `as`, else the member's, else the loose file's.
 	std::string name() const;
 };
 
 inline bool operator==(const ImportChoice &a, const ImportChoice &b) {
-	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native && a.as == b.as;
+	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native && a.as == b.as &&
+	       a.expansion == b.expansion;
 }
 inline bool operator!=(const ImportChoice &a, const ImportChoice &b) { return !(a == b); }
 // An order over the same members, so a set of choices looks one up in log time (a whole install's
@@ -47,7 +51,8 @@ inline bool operator<(const ImportChoice &a, const ImportChoice &b) {
 	if (a.entry != b.entry) return a.entry < b.entry;
 	if (a.install != b.install) return b.install;
 	if (a.native != b.native) return b.native;
-	return a.as < b.as;
+	if (a.as != b.as) return a.as < b.as;
+	return a.expansion < b.expansion;
 }
 
 // What a list of choices says of each beside its name (the UX round's project lane: the import

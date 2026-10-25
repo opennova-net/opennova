@@ -18,6 +18,7 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
@@ -968,6 +969,66 @@ static int test_override_table() {
 	return 0;
 }
 
+// An expansion project's import of an installed expansion (2026-10-24): the expansion's own files alone (its two
+// archives' and its folder's: no base game's file, none the folder holds that the game never reads there, no
+// player's file such as its gt.ssc), each choice naming the expansion; its names renamed to the project's expansion; its version
+// text only where the project is that expansion, which keeps it as the install has it. The import records the
+// archive of the pair each came from (ProjectDocument::archives).
+static int test_installed_expansion_import() {
+	test_temp::TempDir dir("opennova_editor_expansion_import");
+	const std::string root = dir.file("install");
+	TEST_EXPECT(make_install(root));
+	ProjectDocument document;
+	std::vector<Diagnostic> diagnostics;
+	// A standalone project imports no expansion; an install without it is refused, never the base game.
+	TEST_EXPECT(list_installed_expansion_choices(root, document, "x1", diagnostics).empty() && diagnostics.size() == 1 &&
+	            diagnostics[0].code() == "import.install");
+	document.expansion = { "x1", "" };
+	diagnostics.clear();
+	TEST_EXPECT(list_installed_expansion_choices(root, document, "x2", diagnostics).empty() && diagnostics.size() == 1);
+	const auto names_of = [](const std::vector<ImportChoice> &choices) {
+		std::vector<std::string> names;
+		for (const ImportChoice &choice : choices) names.push_back(choice.name());
+		std::sort(names.begin(), names.end());
+		return names;
+	};
+	diagnostics.clear();
+	const std::vector<ImportChoice> own = list_installed_expansion_choices(root, document, "x1", diagnostics);
+	TEST_EXPECT(diagnostics.empty());
+	TEST_EXPECT(names_of(own) == (std::vector<std::string>{ "Mx1.bin", "Mx1.sbf", "header.bik", "shared.txt", "version.txt",
+	                                                        "x1.bin", "x1L.lwf", "x1only.txt" }));
+	for (const ImportChoice &choice : own) TEST_EXPECT(choice.install && choice.path == root && choice.expansion == "x1");
+	// Another expansion's project gets the expansion's names as its own, and makes its own version text.
+	ProjectDocument other = document;
+	other.expansion = { "jxm", "" };
+	TEST_EXPECT(names_of(list_installed_expansion_choices(root, other, "x1", diagnostics)) ==
+	            (std::vector<std::string>{ "Mjxm.bin", "Mjxm.sbf", "header.bik", "jxm.bin", "jxmL.lwf", "shared.txt",
+	                                       "x1only.txt" }));
+	// Imported: the expansion's bytes, its folder's version text as the install has it (not the archived
+	// copy), and the archive of each archived file recorded.
+	ProjectDocument made;
+	Diagnostic error;
+	const std::string project = dir.file("x1");
+	TEST_EXPECT(create_project(project, "X1", "jo", made, error, ProjectExpansion{ "x1", "" }));
+	const ProjectPaths paths = ProjectPaths::for_root(project);
+	const ImportResult result = import_assets(own, paths, made, true);
+	for (const Diagnostic &d : result.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(result.not_imported.empty() && result.imported.size() == own.size());
+	const AssetScan scan = scan_project_assets(paths, made);
+	std::string text, message;
+	const auto text_in = [&](const char *name) {
+		const AssetEntry *entry = scan.find(name);
+		return entry && opennova::io::read_file_text(paths.root + "/" + entry->relative_path, text, message) ? text : "<none>";
+	};
+	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("shared.txt") == "expansion" && text_in("x1.bin") == "x1 table");
+	TEST_EXPECT(result.archives.size() == 5 && result.archives.at("X1.BIN") == ArchiveSlot::Language &&
+	            result.archives.at("X1L.LWF") == ArchiveSlot::Language && result.archives.at("MX1.BIN") == ArchiveSlot::Language &&
+	            result.archives.at("SHARED.TXT") == ArchiveSlot::Localres &&
+	            result.archives.at("X1ONLY.TXT") == ArchiveSlot::Localres && !result.archives.count("VERSION.TXT") &&
+	            !result.archives.count("GT.SSC"));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_name_rule();
@@ -980,6 +1041,7 @@ int main() {
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
 	failures += test_install_view();
+	failures += test_installed_expansion_import();
 	failures += test_fold_follows_the_view();
 	failures += test_session();
 	failures += test_override_table();

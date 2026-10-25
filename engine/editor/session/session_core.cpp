@@ -1623,6 +1623,8 @@ BuildTarget SessionCore::build_target() const {
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
 	target.game = view_.project.document->target_game;
+	// The record, kept alive by the document it is part of.
+	target.archives = std::shared_ptr<const ArchiveRecord>(view_.project.document, &view_.project.document->archives);
 	return target;
 }
 

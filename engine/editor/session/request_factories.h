@@ -314,6 +314,15 @@ inline EditorRequest import_whole_install() {
 	return request;
 }
 
+// An expansion project's import of every file of the installed expansion `expansion` of `install` ("" the
+// project's game install), chosen at once as import_whole_install chooses (list_installed_expansion_choices).
+inline EditorRequest import_installed_expansion(std::string expansion, std::string install = std::string()) {
+	EditorRequest request = import_whole_install();
+	request.expansion = std::move(expansion);
+	request.game_install = std::move(install);
+	return request;
+}
+
 // --- the build and Play ------------------------------------------------------------------------
 
 // The project packed into a build under `out_dir` ("" the project's .opennova/build/play); with

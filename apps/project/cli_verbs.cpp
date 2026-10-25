@@ -651,7 +651,11 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const bool with_dependencies = args.has("--with-dependencies"), dry_run = args.has("--dry-run");
 	const bool all = args.has("--all");
 	JsonValue planned;
-	if (all) {
+	if (all && args.has("--expansion")) {
+		// Every file of an installed expansion, the expansion project's own (of the install the source names,
+		// else the project's).
+		planned = send(cli, editor::request::import_installed_expansion(args.value("--expansion"), source));
+	} else if (all) {
 		// Every file of the game install, chosen at once with no walk (ADR 0046 S14).
 		planned = send(cli, editor::request::import_whole_install());
 	} else if (!source.empty()) {
@@ -1069,6 +1073,13 @@ bool check_query(const CliArgs &args, std::string &why) {
 // --entry too.
 bool check_import(const CliArgs &args, std::string &why) {
 	const bool source = args.positional.size() > 1;
+	if (args.has("--expansion")) {
+		if (args.has("--all") && !args.has("--entry") && !args.has("--with-dependencies") && !args.value("--expansion").empty())
+			return true;
+		why = "--expansion <name> imports every file of that installed expansion with --all (its source the game "
+		      "install that holds it, else the project's): it takes no --entry and no --with-dependencies";
+		return false;
+	}
 	if (args.has("--all")) {
 		if (!source && !args.has("--entry") && !args.has("--with-dependencies")) return true;
 		why = "--all imports every file of the game install, with no walk: it takes no source, no --entry and no "
@@ -1181,6 +1192,7 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
 	                                     { "--with-dependencies" },
 	                                     { "--all" },
+	                                     { "--expansion", "an installed expansion" },
 	                                     { "--dry-run" },
 	                                     { "--rows" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
@@ -1230,7 +1242,7 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Import, "import",
 	     "<dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]\n"
-	     "                               [--all] [--dry-run [--rows]]",
+	     "                               [--all [--expansion <name>]] [--dry-run [--rows]]",
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
@@ -1241,7 +1253,12 @@ constexpr VerbRow kRows[] = {
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
 	     "the loose files the game ships beside them), with no walk and nothing else named:\n"
-	     "the default for a project that holds missions;\n"
+	     "the default for a project that holds missions; with --expansion <name>, an expansion\n"
+	     "project's import of that installed expansion's own files (its archives' and its\n"
+	     "folder's, under the project's expansion name, its version.txt when the project is\n"
+	     "that expansion) from <source>, the game install holding it, else the project's;\n"
+	     "an import from the game install records the archive each file came from, which the\n"
+	     "build packs it into;\n"
 	     "--dry-run prints the plan (what is not found, the files by kind, the plan's line;\n"
 	     "--rows each file too) and writes nothing (no import pass either; --install is that\n"
 	     "run's alone) (--json: the import_preview query, the plan)")

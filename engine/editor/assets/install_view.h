@@ -36,7 +36,8 @@ namespace opennova::editor {
 // expansion's own name are listed under the project's (expansion_files.h): the installed expansion's
 // (<e>.bin, M<e>.*, G<e>.*, <e>L.lwf, <e>.lwf) as <b>.bin, M<b>.*, ...; on the base game its music pairs
 // as M<b>.* and G<b>.*, which the game reads in their place under /exp <b>. The expansion's version
-// text is never listed (a build makes its own), nor the player's own files (gameprofile/player_files.h).
+// text is listed only where the project is that expansion (installed_expansion_spec: it keeps the install's),
+// a project of another expansion making its own; the player's own files never (gameprofile/player_files.h).
 struct InstallSpec {
 	std::string root;              // the install's folder
 	std::string game;              // the gameprofile code its archives are keyed by
@@ -55,6 +56,12 @@ struct InstallSpec {
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document);
 // The base game's view of the same install: no expansion, no renames.
 InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document);
+// The view an expansion project imports an installed expansion of the install from (2026-10-24): `/exp
+// <expansion>`, its files renamed to the project's expansion. Where the project is that expansion (the same
+// name), the view lists the expansion's version text too, which the project then keeps as the install has it
+// (the CRC a joiner must match, vfs_expansion_version_checksum), where every other view leaves it out.
+InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,
+                                     const std::string &expansion);
 
 struct InstallFile {
 	enum class Layer { Base, Expansion };
@@ -62,6 +69,9 @@ struct InstallFile {
 	std::string member;     // the name the install serves it by (an archive's member, a loose file's)
 	Layer layer = Layer::Base;
 	std::string loose_path; // a loose file's path on the disk; "" for an archive's member
+	// The archive that serves it (ProjectDocument::archives' slots: an expansion's <e>L.pff Language, its
+	// <e>.pff Localres); None for a loose file.
+	ArchiveSlot archive = ArchiveSlot::None;
 };
 
 class InstallView {
@@ -95,7 +105,8 @@ private:
 
 // The import choice of an install's file (ImportChoice::install): the member it is served by, and the
 // name the project gets where it differs (ImportChoice::as).
-ImportChoice install_choice(const std::string &root, const InstallFile &file);
+ImportChoice install_choice(const std::string &root, const InstallFile &file,
+                            const std::string &expansion = std::string());
 
 // An install's files as a FileSource, by the name the project gets (a path names its file by its last part): what
 // the fold of the game's own data validates (session/original_files), and an expansion project's base game under its

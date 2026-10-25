@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <tuple>
 #include <memory>
 #include <set>
 #include <system_error>
@@ -54,9 +55,11 @@ std::string import_need_text(const ImportNeed &need) {
 	return out;
 }
 
-bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
+bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error,
+                        const std::string &expansion) {
 	kind_ = kind;
 	path_ = path;
+	expansion_ = kind == Kind::GameInstall ? expansion : std::string();
 	names_.clear();
 	kinds_.clear();
 	vfs_.clear();
@@ -79,7 +82,10 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 	if (kind == Kind::GameInstall) {
 		// The install as the project imports it (assets/install_view.h): each file by the name the
 		// project gets.
-		if (!install_.open(install_spec(path, document), error)) return false;
+		if (!install_.open(expansion_.empty() ? install_spec(path, document)
+		                                      : installed_expansion_spec(path, document, expansion_),
+		                   error))
+			return false;
 		for (const InstallFile &file : install_.files()) names_.emplace(pff::normalized_logical_name(file.name), file.name);
 		return true;
 	}
@@ -154,7 +160,12 @@ ImportChoice ImportOrigin::source(const std::string &name) const {
 		out.native = true;
 	} else if (kind_ == Kind::GameInstall) {
 		const InstallFile *file = install_.find(name);
-		out = file ? install_choice(path_, *file) : ImportChoice{ path_, name, true };
+		if (file) {
+			out = install_choice(path_, *file, expansion_);
+		} else {
+			out = ImportChoice{ path_, name, true };
+			out.expansion = expansion_;
+		}
 	} else {
 		out.path = path_;
 		out.entry = name;
@@ -191,7 +202,7 @@ std::string first_candidate(const ImportNeed &need, const Exists &exists) {
 // Two sources of one file: the same member of the same archive or install, or the same
 // file of the same folder (names without case, as the folder's listing compares them).
 bool same_file(const ImportChoice &a, const ImportChoice &b) {
-	if (a.install != b.install || a.entry.empty() != b.entry.empty()) return false;
+	if (a.install != b.install || a.entry.empty() != b.entry.empty() || a.expansion != b.expansion) return false;
 	if (!a.entry.empty()) return path_of(a.path) == path_of(b.path) && key(a.entry) == key(b.entry);
 	const fs::path x = path_of(a.path), y = path_of(b.path);
 	return x.parent_path() == y.parent_path() && key(utf8_of(x.filename())) == key(utf8_of(y.filename()));
@@ -335,13 +346,16 @@ private:
 	};
 
 	// The place of a kind at a path, opened once; null (with `error`) when it does not open.
-	const ImportOrigin *origin(ImportOrigin::Kind kind, const std::string &path, std::string &error) {
-		auto found = origins_.find({kind, path});
+	// `expansion`: a game install's installed expansion the origin is the view of (ImportOrigin::open).
+	const ImportOrigin *origin(ImportOrigin::Kind kind, const std::string &path, std::string &error,
+	                           const std::string &expansion = std::string()) {
+		const OriginKey key{kind, path, expansion};
+		auto found = origins_.find(key);
 		if (found == origins_.end()) {
 			Opened opened;
 			auto made = std::make_shared<ImportOrigin>();
-			if (made->open(kind, path, document_, opened.error)) opened.origin = std::move(made);
-			found = origins_.emplace(std::make_pair(kind, path), std::move(opened)).first;
+			if (made->open(kind, path, document_, opened.error, expansion)) opened.origin = std::move(made);
+			found = origins_.emplace(key, std::move(opened)).first;
 		}
 		error = found->second.error;
 		return found->second.origin.get();
@@ -350,7 +364,7 @@ private:
 	void set_install(const ImportOrigin *install) { install_ = install; }
 	// The place of a kind at a path, opened already (the game install a caller mounted).
 	void adopt(ImportOrigin::Kind kind, const std::string &path, std::shared_ptr<const ImportOrigin> origin) {
-		origins_[{kind, path}] = Opened{std::move(origin), std::string()};
+		origins_[OriginKey{kind, path, std::string()}] = Opened{std::move(origin), std::string()};
 	}
 
 	// A selected source, as import_assets takes it; what a converter makes of it, each output a
@@ -374,7 +388,8 @@ private:
 		std::vector<uint8_t> bytes;
 		bool loaded = false; // the source's bytes are in hand
 		if (source.install || !source.entry.empty()) {
-			from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error);
+			from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error,
+			              source.expansion);
 			if (!from) {
 				fail(source.install ? CoreFinding::ImportInstall : CoreFinding::ImportArchive, error);
 				return;
@@ -871,7 +886,7 @@ private:
 			read = io::read_file_bytes(source.path, out, error);
 		} else {
 			const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
-			                                  source.path, error);
+			                                  source.path, error, source.expansion);
 			read = from && from->read(source.name(), out);
 		}
 		if (read) cost_ += out.size();
@@ -1255,7 +1270,8 @@ private:
 	size_t next_source_ = 0; // the next chosen source to take
 	uint64_t cost_ = 0;      // the bytes this step read
 	size_t known_ = 0;       // the most files known of at the end of a step
-	std::map<std::pair<ImportOrigin::Kind, std::string>, Opened> origins_;
+	using OriginKey = std::tuple<ImportOrigin::Kind, std::string, std::string>; // kind, path, expansion
+	std::map<OriginKey, Opened> origins_;
 	const ImportOrigin *install_ = nullptr;
 	std::deque<PlanNode> queue_;
 	// The closure's own books (import_plan.h): the missions planned and their places, one brought

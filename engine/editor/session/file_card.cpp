@@ -245,7 +245,8 @@ FileCard file_card(const SessionView &view, const std::string &path, const FileC
 	// Where a build puts it, by the plan's own rule (build_place_words: its word on the file first, then the
 	// archive, the expansion's archive or folder, or nowhere), and what the editor does with it.
 	const BuildPlaceWords place =
-	        build_place_words(*entry, view.project.document ? view.project.document->expansion.name : std::string());
+	        build_place_words(*entry, view.project.document ? view.project.document->expansion.name : std::string(),
+	                          view.project.document ? &view.project.document->archives : nullptr);
 	card.build = place.words;
 	card.editor = editor_words(*entry, place.packed);
 	card.imported_from = entry->imported_from;

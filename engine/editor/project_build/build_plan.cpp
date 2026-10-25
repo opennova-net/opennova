@@ -34,11 +34,11 @@ struct Placement {
 Placement place(const AssetEntry &asset, const BuildTarget &target) {
 	Placement out;
 	if (!target.is_expansion()) {
-		out.slot = route_asset(asset);
+		out.slot = route_asset(asset, target.archives.get());
 		if (out.slot == ArchiveSlot::Loose) out.loose_path = asset.logical_name;
 		return out;
 	}
-	switch (route_for_expansion(asset, target.expansion)) {
+	switch (route_for_expansion(asset, target.expansion, target.archives.get())) {
 	case ExpansionPlace::LanguageArchive: out.slot = ArchiveSlot::Language; break;
 	case ExpansionPlace::Archive: out.slot = ArchiveSlot::Localres; break; // <b>.pff, the plan's Localres archive
 	case ExpansionPlace::Folder:
@@ -151,7 +151,7 @@ static bool plan_file_finding(const AssetEntry &asset, const std::string &expans
 	return own_finding(asset, target, out);
 }
 
-BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion) {
+BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &expansion, const ArchiveRecord *archives) {
 	BuildPlaceWords out;
 	Diagnostic own;
 	if (plan_file_finding(asset, expansion, own)) {
@@ -168,6 +168,7 @@ BuildPlaceWords build_place_words(const AssetEntry &asset, const std::string &ex
 	}
 	BuildTarget target;
 	target.expansion = expansion;
+	if (archives) target.archives = std::shared_ptr<const ArchiveRecord>(std::shared_ptr<const ArchiveRecord>(), archives);
 	const Placement placement = place(asset, target);
 	if (placement.root_only) {
 		out.words = "Left out of the build: the game reads it from the install's own folder, which an expansion cannot change.";

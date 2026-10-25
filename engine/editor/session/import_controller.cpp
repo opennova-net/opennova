@@ -112,8 +112,13 @@ void ImportController::preview_install(const EditorRequest &request) {
 		                        "\"with_dependencies\".");
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportChoiceFacts> facts;
+	// With an expansion, an installed expansion's own files (an expansion project's import of it), from the
+	// install the request names, else the project's.
+	const std::string install = request.game_install.empty() ? core_.base_game() : request.game_install;
 	std::vector<ImportChoice> sources =
-	        list_retail_import_choices(core_.base_game(), *view_.project.document, diagnostics, &facts);
+	        request.expansion.empty()
+	                ? list_retail_import_choices(core_.base_game(), *view_.project.document, diagnostics, &facts)
+	                : list_installed_expansion_choices(install, *view_.project.document, request.expansion, diagnostics, &facts);
 	// Everything: every file chosen, none to choose from, no walk (the closure of everything is
 	// everything: nothing a walk could find is not chosen already).
 	if (request.all) {
@@ -943,6 +948,11 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 		return outcome;
 	}
 	const ImportResult &imported = operation.result();
+	// The project file with the archives of the install's files recorded (saved by the operation).
+	if (operation.recorded()) {
+		view_.project.document = std::make_shared<const ProjectDocument>(operation.document());
+		core_.touch(ViewConcern::Project);
+	}
 	// What it wrote and what it did not reach are what the import came to (S13 A7's lists, the
 	// operation's since the write is one, S13 A3), besides Output.
 	outcome.imported = imported.imported;

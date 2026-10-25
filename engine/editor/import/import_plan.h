@@ -75,7 +75,10 @@ public:
 	enum class Kind { Folder, Archive, GameInstall };
 	// False, with `error` saying why, when the folder cannot be listed, the archive does not
 	// open or the folder holds none of the game's archives.
-	bool open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error);
+	// `expansion`, for a game install: its installed expansion an expansion project imports as its own
+	// (installed_expansion_spec), "" the install as the project imports it.
+	bool open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error,
+	          const std::string &expansion = std::string());
 	Kind kind() const { return kind_; }
 	const std::string &path() const { return path_; }
 	// The origin's own spelling of its file of `name`; "" when it has none.
@@ -105,6 +108,7 @@ public:
 private:
 	Kind kind_ = Kind::Folder;
 	std::string path_;
+	std::string expansion_; // the installed expansion a game install's view is of ("" the project's view)
 	Vfs vfs_;                                        // the archive
 	InstallView install_;                            // the game install
 	std::map<std::string, std::string> names_;       // normalized name -> the origin's spelling

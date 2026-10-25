@@ -130,6 +130,23 @@ int main() {
         bad_free(&back);
         std::printf("from-scratch clip: write -> parse field-equal, re-write byte-equal (%zu bytes)\n", bytes.size());
 
+        // A clip that stops one row short, at row frame_count - 1 (DFX2's Crc_Atk3: 88 rows for
+        // 88 frames), reads with the last stored row repeated as its fence post; one more row
+        // short is no clip (D-ANIM-8).
+        {
+            const size_t row = 2 * 12;
+            std::vector<uint8_t> short_clip(bytes.begin(), bytes.end() - 2 * row);
+            BadFile held = {};
+            TEST_EXPECT(bad_parse_buffer(short_clip.data(), short_clip.size(), &held) == 0);
+            TEST_EXPECT(held.num_translations == 8);
+            for (int k = 0; k < 6; ++k)
+                TEST_EXPECT(same_float(held.translations[6 + k / 3][k % 3], scratch.translations[4 + k / 3][k % 3]));
+            bad_free(&held);
+            short_clip.resize(short_clip.size() - row);
+            BadFile shorter = {};
+            TEST_EXPECT(bad_parse_buffer(short_clip.data(), short_clip.size(), &shorter) == -1);
+        }
+
         // A translation block shorter than bone_count x (frame_count + 1) cannot be represented.
         scratch.file.num_translations = 7;
         TEST_EXPECT(bad_write_buffer(&scratch.file, bytes) == -1);

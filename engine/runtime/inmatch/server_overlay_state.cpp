@@ -83,13 +83,17 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 		ring.queue(conn, entry);
 	};
 
+	// The pool-2 scan and the pool-1 visits pass over a NotOnMap placement (the
+	// spawn's entity+0x2C bit 0x80); the spawn points' pass does not test it
+	// [orig: Server_BuildOverlayStateForPlayer @0x51809B, @0x51849C].
 	if (reply.minimap_initial_scan_pending) {
 		const size_t capacity = world.registry.pool_capacity(2);
 		for (size_t slot = 0; slot < capacity; ++slot) {
 			const world::Entity *e = world.registry.get(
 					world::EntityHandle::make(2, static_cast<int>(slot)));
 			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
-					(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
+					(e->item_attrib & world::kItemAttribSpawnPoint) != 0 ||
+					(e->cause_flags & world::kCauseFlagNotOnMap) != 0)
 				continue;
 			append(*e, true);
 		}
@@ -135,7 +139,8 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 		const world::Entity *e = world.registry.get(
 				world::EntityHandle::make(1, static_cast<int>(slot)));
 		if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
-				(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
+				(e->item_attrib & world::kItemAttribSpawnPoint) != 0 ||
+				(e->cause_flags & world::kCauseFlagNotOnMap) != 0)
 			continue;
 		// In a live MP session retail suppresses occupied enemy vehicles: a
 		// teamed one whose team byte, sign-extended, is not the recipient

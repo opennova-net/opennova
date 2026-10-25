@@ -239,6 +239,12 @@ constexpr ChoiceWords kChoiceWords[] = {
 	 "skips it, whatever its item (the item's own NoShadow skips every placement of it). A person's or "
 	 "a DynamicShadow item's moving shadow still draws, and its own lighting is unchanged. "
 	 "[orig: Entity_SpawnFromBMSRecord @ 0x40ED2E; Terrain_CollectAndRenderTileModels @ 0x60D42F]"},
+	// The spawn sets bit 0x80 of the entity's +0x2C dword, which the server's minimap overlay visits
+	// skip (bms.h NotOnMap).
+	{MissionRecord::Entity, "ai_flags", "NotOnMap", "Not on the map",
+	 "The game shows no map mark for this placement: the host's map overlay leaves it out of every "
+	 "player's map, as it leaves out a hidden one. DFX2's Astrp missions set it on buildings. "
+	 "[orig: Entity_SpawnFromBMSRecord @ 0x40ED3B; Server_BuildOverlayStateForPlayer @ 0x51809B, @ 0x51849C]"},
 };
 
 const ChoiceWords *choice_words_of(MissionRecord record, const char *key, const char *name) {

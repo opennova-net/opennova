@@ -697,7 +697,12 @@ void BuildRun::compare_base(uint64_t budget) {
 		        archived ? plan_.archives[group].entries[index - group_base_[group]] : plan_.loose[index - group_base_[group]];
 		BaseCopy copy;
 		uint64_t read = 0;
-		const bool found = archived ? base_->archive_copy(entry.logical_name, copy, read)
+		// A file the install packed in the expansion's pair stays there, however like the base's
+		// (ProjectDocument::archives): under /exp its copy stands over the base's, so the expansion keeps
+		// the layout its players have, and a later change to the base's file is not what they read.
+		const bool recorded = archived && plan_.target.archives && plan_.target.archives->count(entry.key) != 0;
+		const bool found = recorded ? false
+		                   : archived ? base_->archive_copy(entry.logical_name, copy, read)
 		                   : entry.kind == AssetKind::Video ? base_->root_copy(entry.logical_name, copy, read)
 		                                                    : false;
 		const Stamp &stamp = stamps_[index];

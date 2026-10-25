@@ -1,9 +1,11 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 
 #include <base/io/json.h>
+#include <base/resource_index/file_kind.h>
 #include <base/vfs/file_source.h>
 #include <editor/model/diagnostic.h>
 
@@ -63,6 +65,18 @@ struct ProjectExpansion {
 	bool operator!=(const ProjectExpansion &other) const { return !(*this == other); }
 };
 
+// The archive each of the game's own files came from (2026-10-24): an import of a game install records,
+// for each archive member it copies, the archive that served it, and a build packs the file there rather
+// than where its kind's row would (archive_routing.h). Keyed by the normalized logical name
+// (pff::normalized_logical_name); Language, Localres or Resource, an expansion's Language its <b>L.pff and
+// the others its <b>.pff. The game finds a name in any of its archives, the first that holds it
+// [orig: FileSystem_OpenFile @ 0x75b1c0 over the slots PFF_OpenAllArchives @ 0x4a4310 fills], so what the
+// record keeps is the install's own layout, for what reads a file by its archive: a retail patch writes a
+// file into the archive a stock install holds it in, and a copy in another archive stands behind the stock
+// one where that archive comes first (NovaLogic packs a kind across archives: JO:CA's voice lines in
+// language.pff, its other waves in localres.pff). A file the project adds goes by its kind.
+using ArchiveRecord = std::map<std::string, ArchiveSlot>;
+
 struct ProjectDocument {
 	int schema_version = kProjectSchemaVersion;
 	std::string project_id;   // a UUID minted at creation, stable for the project's life
@@ -71,6 +85,8 @@ struct ProjectDocument {
 	ProjectFeatures features;
 	ProjectExportSettings export_settings;
 	ProjectExpansion expansion; // `"expansion": {"name", "builds_on", "base_project"?}`, absent when standalone
+	// `"archives": {"language": [names], "localres": [...], "resource": [...]}`, absent when empty
+	ArchiveRecord archives;
 };
 
 // Where a project keeps things, derived from its root. `cache_dir` and everything

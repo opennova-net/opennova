@@ -13,6 +13,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
+#include <formats/pff/pff.h>
 
 namespace fs = std::filesystem;
 
@@ -28,6 +29,17 @@ bool fail(Diagnostic &error, CoreFinding code, std::string message) {
 	error = make_finding(code, DiagnosticSeverity::Error, std::move(message));
 	return false;
 }
+
+// The record's three lists, by the archive each names.
+struct RecordList {
+	ArchiveSlot slot;
+	const char *key;
+};
+constexpr RecordList kRecordLists[] = {
+	{ArchiveSlot::Language, "language"},
+	{ArchiveSlot::Localres, "localres"},
+	{ArchiveSlot::Resource, "resource"},
+};
 
 } // namespace
 
@@ -87,6 +99,17 @@ io::JsonValue project_document_to_json(const ProjectDocument &doc) {
 		if (doc.expansion.on_base_project())
 			expansion.set("base_project", io::JsonValue::make_string(doc.expansion.base_project));
 		json.set("expansion", std::move(expansion));
+	}
+	// Each archive's list of names, in their order; a list of none and a record of none left out.
+	if (!doc.archives.empty()) {
+		io::JsonValue archives = io::JsonValue::make_object();
+		for (const RecordList &list : kRecordLists) {
+			io::JsonValue names = io::JsonValue::make_array();
+			for (const auto &[name, slot] : doc.archives)
+				if (slot == list.slot) names.push(io::JsonValue::make_string(name));
+			if (!names.array.empty()) archives.set(list.key, std::move(names));
+		}
+		json.set("archives", std::move(archives));
 	}
 	return json;
 }
@@ -149,6 +172,28 @@ bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out,
 			            "\"expansion\" names no expansion: give it a \"name\", or leave the object out for a "
 			            "standalone project.");
 		if (!check_project_expansion(doc.target_game, doc.expansion, error)) return false;
+	}
+	if (const io::JsonValue *archives = json.get("archives")) {
+		std::string unknown;
+		if (!archives->is_object() || !io::json_members_known(*archives, {"language", "localres", "resource"}, "\"archives\"", unknown))
+			return fail(error, CoreFinding::ProjectFieldInvalid,
+			            "\"archives\" must be an object of the lists \"language\", \"localres\" and \"resource\"." +
+			                    (unknown.empty() ? std::string() : " " + unknown));
+		for (const RecordList &list : kRecordLists) {
+			const io::JsonValue *names = archives->get(list.key);
+			if (!names) continue;
+			if (!names->is_array())
+				return fail(error, CoreFinding::ProjectFieldInvalid,
+				            std::string("\"archives\".\"") + list.key + "\" must be a list of file names.");
+			for (const io::JsonValue &name : names->array) {
+				if (!name.is_string() || !pff::logical_name_fits_archive(name.string))
+					return fail(error, CoreFinding::ProjectFieldInvalid,
+					            std::string("\"archives\".\"") + list.key + "\" holds an entry that is no name an archive stores.");
+				if (!doc.archives.emplace(pff::normalized_logical_name(name.string), list.slot).second)
+					return fail(error, CoreFinding::ProjectFieldInvalid,
+					            "\"archives\" names " + name.string + " in two lists: a file came from one archive.");
+			}
+		}
 	}
 	out = std::move(doc);
 	return true;

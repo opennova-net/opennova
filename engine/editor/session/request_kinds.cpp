@@ -1040,8 +1040,11 @@ constexpr RequestKindRow kRows[] = {
 			"(their "
 			"sources carry install: true); planned as preview_import plans. With all, every file "
 			"chosen at once (the archives' and the loose files the game ships beside them), with no "
-			"walk: import_files with planned then takes them.")
-			.takes(request_params({}, { F::Names, F::WithDependencies, F::All }))
+			"walk: import_files with planned then takes them. With expansion, an expansion project's "
+			"import of that installed expansion's own files (its archives' and its folder's, renamed to the "
+			"project's expansion, its version text when the project is that expansion), from game_install "
+			"when given, else the project's game install.")
+			.takes(request_params({}, { F::Names, F::WithDependencies, F::All, F::Expansion, F::GameInstall }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
 			.ends_edit_groups()
 			.row,
