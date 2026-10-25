@@ -195,16 +195,32 @@ void ContentWindow::draw_standing(const ContentView &c) {
 		ui_kit::empty_state("No changes.", "What you change in the project's files lists here.");
 		message_[0] = '\0'; // nothing left to push: the message went with the last push
 	} else {
-		// Up to twelve lines high, scrolled past that.
-		const float lines = std::min(float(c.changes.size()), 12.0f);
-		if (ImGui::BeginChild("changes", ImVec2(0.0f, lines * ImGui::GetTextLineHeightWithSpacing() + 4.0f))) {
+		// Up to twelve rows high, scrolled past that; each change with its Discard (the base's file put back).
+		const float rows = std::min(float(c.changes.size()), 12.0f);
+		const bool restores = v.allows(EditorRequestKind::ContentRestore);
+		if (ImGui::BeginChild("changes", ImVec2(0.0f, rows * ImGui::GetFrameHeightWithSpacing() + 4.0f)) &&
+		    ImGui::BeginTable("changes_table", 2, ImGuiTableFlags_SizingStretchProp)) {
+			ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("##discard", ImGuiTableColumnFlags_WidthFixed);
 			ImGuiListClipper clipper;
 			clipper.Begin(static_cast<int>(c.changes.size()));
 			while (clipper.Step())
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 					const LocalChange &change = c.changes[size_t(i)];
+					ImGui::PushID(change.path.c_str());
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
 					ui_kit::clipped_text(std::string(content_change_name(change.change)) + "  " + change.path);
+					ImGui::TableNextColumn();
+					ImGui::BeginDisabled(!restores);
+					if (ImGui::SmallButton("Discard") && restores)
+						workspace_.request(request::content_restore(change.path));
+					ImGui::EndDisabled();
+					ui_kit::tooltip("Puts back the file as revision " + std::to_string(c.revision) +
+					                " has it; yours goes to the project's trash (Undo file brings it back).");
+					ImGui::PopID();
 				}
+			ImGui::EndTable();
 		}
 		ImGui::EndChild();
 	}
@@ -282,6 +298,25 @@ void ContentWindow::draw_conflicts(const ContentView &c) {
 	ImGui::EndTable();
 }
 
+void ContentWindow::draw_history(const ContentView &c) {
+	const SessionView &v = workspace_.view();
+	ImGui::SeparatorText("History");
+	ui_kit::WrapRow row;
+	if (ui_kit::tool(row, c.history.empty() ? "Show history" : "Refresh history",
+	                 v.allows(EditorRequestKind::ContentHistory) && !c.calling,
+	                 "Lists the project's revisions, newest first."))
+		workspace_.request(request::content_history());
+	if (!c.history_error.empty()) ui_kit::refusal_text(c.history_error);
+	for (const RemoteRevision &revision : c.history) {
+		ImGui::PushID(static_cast<int>(revision.number));
+		ui_kit::clipped_text("r" + std::to_string(revision.number) + "  " + revision.author + ": " + revision.message,
+		                     "r" + std::to_string(revision.number) + " by " + revision.author + ", " +
+		                             counted(size_t(revision.file_count), "file") + ", " + revision.created_at + "\n" +
+		                             revision.message);
+		ImGui::PopID();
+	}
+}
+
 void ContentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
 	const ContentView &c = v.content;
@@ -296,6 +331,7 @@ void ContentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	else {
 		draw_standing(c);
 		draw_conflicts(c);
+		draw_history(c);
 	}
 	if (!c.last.empty()) {
 		ImGui::Spacing();

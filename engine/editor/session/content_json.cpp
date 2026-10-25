@@ -73,6 +73,19 @@ JsonValue content_section(const SessionView &view) {
 	}
 	pull.set("conflicts", conflicts);
 	out.set("pull", pull);
+	JsonValue history = JsonValue::make_array();
+	for (const RemoteRevision &revision : content.history) {
+		JsonValue row = JsonValue::make_object();
+		row.set("number", json_number(double(revision.number)));
+		row.set("author", json_string(revision.author));
+		row.set("message", json_string(revision.message));
+		row.set("files", json_number(double(revision.file_count)));
+		row.set("bytes", json_number(double(revision.bytes)));
+		row.set("created_at", json_string(revision.created_at));
+		history.push(std::move(row));
+	}
+	out.set("history", history);
+	out.set("history_error", json_string(content.history_error));
 	out.set("last", json_string(content.last));
 	return out;
 }

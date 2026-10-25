@@ -861,6 +861,15 @@ inline EditorRequest content_push(std::string message) {
 	request.message = std::move(message);
 	return request;
 }
+inline EditorRequest content_restore(std::string path, int64_t revision = 0) {
+	EditorRequest request = of(EditorRequestKind::ContentRestore);
+	request.path = std::move(path);
+	request.revision = revision;
+	return request;
+}
+inline EditorRequest content_history() {
+	return of(EditorRequestKind::ContentHistory);
+}
 inline EditorRequest content_release(std::string version) {
 	EditorRequest request = of(EditorRequestKind::ContentRelease);
 	request.version = std::move(version);

@@ -108,6 +108,15 @@ ContentPull::ContentPull(ContentTransport &transport, ContentAccount account, Pr
 		export_dir_(std::move(export_dir)),
 		binding_(std::move(binding)) {}
 
+ContentPull::ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+		std::string export_dir, ContentBinding binding, ContentRestore restore) :
+		ContentPull(transport, std::move(account), std::move(paths), std::move(export_dir),
+				std::move(binding)) {
+	restore_ = std::move(restore);
+	remote_.key = binding_.key;
+	remote_.head = restore_->revision > 0 ? restore_->revision : binding_.revision;
+}
+
 bool ContentPull::resolve(const std::string &path, Resolution resolution) {
 	return state_ == ContentJobState::NeedsResolution && resolve_conflict(plan_, path, resolution);
 }
@@ -132,6 +141,8 @@ void ContentPull::cancel() {
 ContentJobProgress ContentPull::progress() const {
 	switch (phase_) {
 		case Phase::AskHead:
+			if (restore_)
+				return { "Reading the base's files", 0, 0, false };
 			return { "Asking " + binding_.key + "'s newest revision", 0, 0, false };
 		case Phase::ReadManifest:
 			return { "Reading revision " + std::to_string(remote_.head) + "'s files", 0, 0, false };
@@ -151,10 +162,14 @@ ContentJobProgress ContentPull::progress() const {
 			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
 				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Apply:
+			if (restore_)
+				return { "Putting " + count_text(restore_->paths.size(), "file", "files") +
+								 " back as revision " + std::to_string(remote_.head) + " has them",
+					0, 0, false };
 			return { "Putting revision " + std::to_string(remote_.head) + " in place", 0, 0,
 				false };
 		case Phase::Done:
-			return { "Pulled", 0, 0, false };
+			return { restore_ ? "Restored" : "Pulled", 0, 0, false };
 	}
 	return {};
 }
@@ -221,6 +236,21 @@ ContentJobState ContentPull::step(uint64_t budget) {
 	do {
 		switch (phase_) {
 			case Phase::AskHead: {
+				if (restore_) {
+					// A restore asks no head: its revision is the base's (read here) or the one
+					// asked, whose manifest is read next.
+					std::string error;
+					if (!read_content_base(content_paths_, base_, error))
+						return fail(error);
+					if (remote_.head == binding_.revision) {
+						theirs_ = base_;
+						scan_ = std::make_unique<ContentScan>(paths_, export_dir_);
+						phase_ = Phase::Scan;
+					} else {
+						phase_ = Phase::ReadManifest;
+					}
+					break;
+				}
 				if (!call_.started())
 					call_ = ContentCall(transport_, content_api::project(account_, binding_.key));
 				spent += kCallCost;
@@ -267,7 +297,9 @@ ContentJobState ContentPull::step(uint64_t budget) {
 				std::string error;
 				if (!read_content_base(content_paths_, base, error))
 					return fail(error);
-				plan_ = plan_pull(base, scan_->files(), scan_->unread(), theirs_);
+				plan_ = restore_ ? plan_restore(scan_->files(), scan_->unread(), theirs_,
+										   restore_->paths)
+								 : plan_pull(base, scan_->files(), scan_->unread(), theirs_);
 				phase_ = Phase::Resolve;
 				state_ = ContentJobState::NeedsResolution;
 				if (plan_.conflicts() > 0)
@@ -314,9 +346,18 @@ ContentJobState ContentPull::step(uint64_t budget) {
 				break;
 			}
 			case Phase::Apply: {
+				std::string error;
+				if (restore_) {
+					// The base and the binding stay: a file put back as an older revision has it is
+					// a change to push, one put back as the base's no change at all.
+					if (!apply_pull(paths_, plan_, base_, binding_, applied_, error))
+						return fail(error);
+					phase_ = Phase::Done;
+					state_ = ContentJobState::Done;
+					return state_;
+				}
 				ContentBinding pulled = binding_;
 				pulled.revision = remote_.head;
-				std::string error;
 				if (!apply_pull(paths_, plan_, theirs_, pulled, applied_, error))
 					return fail(error);
 				binding_ = pulled;

@@ -145,6 +145,30 @@ PullPlan plan_pull(const std::vector<ContentFile> &base, const std::vector<Conte
 	return plan;
 }
 
+PullPlan plan_restore(const std::vector<ContentFile> &local, const std::vector<std::string> &unread,
+		const std::vector<ContentFile> &revision, const std::vector<std::string> &paths) {
+	const Files local_files = by_path(local), their_files = by_path(revision);
+	const std::unordered_set<std::string> unread_paths(unread.begin(), unread.end());
+	const std::set<std::string> asked(paths.begin(), paths.end());
+	PullPlan plan;
+	for (const std::string &path : asked) {
+		const ContentFile *l = at(local_files, path), *t = at(their_files, path);
+		const bool held_unread = unread_paths.count(path) != 0;
+		if (!held_unread && same(l, t))
+			continue; // the folder holds the revision's file already
+		if (!t && !l && !held_unread)
+			continue; // neither has a file there
+		PullItem item;
+		item.path = path;
+		item.theirs = copy_of(t);
+		item.mine = copy_of(l);
+		item.unread = held_unread;
+		item.step = t ? PullStep::Write : PullStep::Remove;
+		plan.items.push_back(std::move(item));
+	}
+	return plan;
+}
+
 bool resolve_conflict(PullPlan &plan, const std::string &path, Resolution resolution) {
 	const auto it = std::find_if(plan.items.begin(), plan.items.end(), [&](const PullItem &item) {
 		return item.path == path && item.step == PullStep::Conflict;

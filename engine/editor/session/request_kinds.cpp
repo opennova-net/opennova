@@ -292,6 +292,12 @@ void serve_content_push(SessionCore &core, const EditorRequest &request) {
 void serve_content_release(SessionCore &core, const EditorRequest &request) {
 	core.content().release(request);
 }
+void serve_content_restore(SessionCore &core, const EditorRequest &request) {
+	core.content().restore(request);
+}
+void serve_content_history(SessionCore &core, const EditorRequest &) {
+	core.content().history();
+}
 void serve_content_cancel(SessionCore &core, const EditorRequest &) {
 	core.content().cancel();
 }
@@ -1511,6 +1517,24 @@ constexpr RequestKindRow kRows[] = {
 			"in the web admin's Game data; for an expansion's project, on its base game's newest revision. An "
 			"admin's alone.")
 			.takes(request_params({ F::Version }, {}))
+			.row,
+	// A restore is a pull of one file (an operation of the pull's kind), the base left as it is; the history a
+	// call as a release is.
+	Request(K::ContentRestore, "content_restore", serve_content_restore,
+			"The open project's file at path put back as revision of its content project has it, an operation: "
+			"left out (0), as the folder's base has it, which discards the folder's changes to it (a file the base "
+			"lacks removed); an older revision's file is a change to push. The file it replaces goes to the "
+			"project's trash (Undo file brings it back); unsaved edits to it wait on the prompt first.")
+			.takes(request_params({ F::Path }, { F::Revision }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.guarded(GuardScope::Document, "Restore %s", "Save")
+			.can_discard()
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	Request(K::ContentHistory, "content_history", serve_content_history,
+			"The open project's content project's revisions listed, newest first (the content section's "
+			"history: each one's number, author, message, files and time).")
 			.row,
 	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
 	// its conflicts.

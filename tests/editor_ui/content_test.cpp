@@ -4,6 +4,7 @@
 // mine; an admin's Bind of an unbound project; the sign-in's form raising content_sign_in with what was typed; the
 // store's projects listed with no project open, Get... asking for a folder and the pick getting the project into
 // a folder of its key's name; the welcome page's section; nothing past its room.
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -86,6 +87,30 @@ void test_bound_project() {
 	raised = ui.drain();
 	const EditorRequest *release = one(raised, EditorRequestKind::ContentRelease);
 	CHECK(release && release->version == "0.2.0", "Release r3: one content_release of the version");
+
+	// A change's Discard: the file put back as the revision has it (in the changes' own child window).
+	{
+		char name[96];
+		std::snprintf(name, sizeof(name), "Content/changes_%08X", content_item({"changes"}));
+		ui.activate(item_id(Ui::window_id(name), {"changes_table", "defs/a.def", "Discard"}));
+		raised = ui.drain();
+		const EditorRequest *discard = one(raised, EditorRequestKind::ContentRestore);
+		CHECK(discard && discard->path == "defs/a.def" && discard->revision == 0,
+		      "Discard: one content_restore of the file to the base");
+	}
+
+	// The history, newest first, and Refresh history.
+	RemoteRevision r5;
+	r5.number = 5;
+	r5.author = "alex";
+	r5.message = "More rifles";
+	r5.file_count = 2;
+	v.content.history = {r5};
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("r5  alex: More rifles") != std::string::npos, "the history listed");
+	ui.activate(content_item({"Refresh history"}));
+	CHECK(one(ui.drain(), EditorRequestKind::ContentHistory), "Refresh history: one content_history");
 
 	// Check and Pull.
 	ui.activate(content_item({"Check"}));

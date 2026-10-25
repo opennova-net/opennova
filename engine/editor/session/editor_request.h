@@ -137,6 +137,8 @@ enum class EditorRequestKind {
 	ContentResolve,
 	ContentPush,
 	ContentRelease,
+	ContentRestore,
+	ContentHistory,
 	ContentCancel,
 	kCount,
 };
@@ -464,7 +466,8 @@ struct EditorRequest {
 	// The content store (ADR 0069, session/content_controller.h): the service and the account a sign-in
 	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
 	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
-	// pull's conflict at `path` is settled; a release's version.
+	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`
+	// back as (0: the folder's base, Discard changes).
 	std::string server;
 	std::string username;
 	std::string password;
@@ -472,6 +475,7 @@ struct EditorRequest {
 	std::string message;
 	std::optional<Resolution> resolution;
 	std::string version;
+	int64_t revision = 0;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -500,7 +504,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.variable == b.variable && a.value == b.value && a.stroke == b.stroke && a.gesture == b.gesture &&
 			a.cancel == b.cancel && a.terrain_view == b.terrain_view && a.server == b.server &&
 			a.username == b.username && a.password == b.password && a.project_key == b.project_key &&
-			a.message == b.message && a.resolution == b.resolution && a.version == b.version;
+			a.message == b.message && a.resolution == b.resolution && a.version == b.version &&
+			a.revision == b.revision;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

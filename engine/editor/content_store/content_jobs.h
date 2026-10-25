@@ -108,10 +108,21 @@ protected:
 
 // A pull of the project's head into the folder `paths.root` (an empty one getting a project, its
 // binding then at revision 0).
+// A restore (ContentPull's second form): `paths` put back as `revision` has them (0: the folder's
+// base, what Discard changes puts back), the base and the binding left as they are.
+struct ContentRestore {
+	std::vector<std::string> paths;
+	int64_t revision = 0;
+};
+
 class ContentPull : public ContentJob {
 public:
 	ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
 			std::string export_dir, ContentBinding binding);
+	// A restore of `restore.paths` (plan_restore), downloaded and applied as a pull's files are,
+	// the replaced files to the trash.
+	ContentPull(ContentTransport &transport, ContentAccount account, ProjectPaths paths,
+			std::string export_dir, ContentBinding binding, ContentRestore restore);
 
 	ContentJobState step(uint64_t budget) override;
 	ContentJobProgress progress() const override;
@@ -128,6 +139,10 @@ public:
 	bool up_to_date() const { return up_to_date_; }
 	const ApplyResult &applied() const { return applied_; }
 	const RemoteProject &remote() const { return remote_; }
+	// A restore's ask, null for a pull.
+	const ContentRestore *restore() const { return restore_ ? &*restore_ : nullptr; }
+	// The revision a restore put its files back as (the base's number for Discard changes).
+	int64_t restored_revision() const { return remote_.head; }
 
 private:
 	enum class Phase : uint8_t {
@@ -165,6 +180,8 @@ private:
 	uint64_t bytes_to_download_ = 0;
 	ApplyResult applied_;
 	bool up_to_date_ = false;
+	std::optional<ContentRestore> restore_;
+	std::vector<content::ContentFile> base_; // a restore's: the base, which its apply keeps
 };
 
 // The folder's standing against its content project: the project's head (asked of the service) and

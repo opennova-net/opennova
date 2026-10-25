@@ -346,6 +346,9 @@ constexpr RequestField kFields[] = {
 	{ F::Version, "version", J::String,
 			"content_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
 			"\"1.7.5.8\")." },
+	{ F::Revision, "revision", J::Integer,
+			"content_restore's revision of the content project, whose file at path is put back (left out, 0: "
+			"the folder's base, which discards its changes to the file)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

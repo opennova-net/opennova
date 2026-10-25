@@ -42,10 +42,12 @@ std::string content_status_text(const ContentView &content);
 // The Content window (ADR 0069), a tab beside Files: the account (who is signed in, and where; Sign in... and
 // Sign out), then the open project's place in the store. A project the store does not hold says so, and an admin
 // binds it to a project of the store (Bind). One it holds shows its revision and the store's newest, Check and
-// Pull, its changes since its revision (what each did to the file), what kept a file out of them, and for an admin
+// Pull, its changes since its revision (what each did to the file, and Discard, which puts the revision's file
+// back), what kept a file out of them, and for an admin
 // a message and Push, which sends every change, and a version and Release rN, which the service builds the
 // release of the revision from (ADR 0069 d7). A pull stopped on conflicts lists them, each with Keep mine and
-// Take theirs, and Pull goes on once none is left. Then what the last content job came to. With no project open
+// Take theirs, and Pull goes on once none is left. Its history lists the project's revisions, newest first. Then
+// what the last content job came to. With no project open
 // it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
 class ContentWindow : public devtools::Window {
 public:
@@ -66,6 +68,7 @@ private:
 	void draw_binding(const ContentView &content);
 	void draw_standing(const ContentView &content);
 	void draw_conflicts(const ContentView &content);
+	void draw_history(const ContentView &content);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask

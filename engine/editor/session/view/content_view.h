@@ -53,6 +53,10 @@ struct ContentView {
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.
 	int64_t pull_revision = 0;
 	std::vector<ContentConflictView> conflicts;
+	// The project's revisions as last listed (content_history), newest first, and why the last list
+	// failed.
+	std::vector<RemoteRevision> history;
+	std::string history_error;
 	// What the last content job or call came to, one line ("Pushed revision 42.").
 	std::string last;
 };

@@ -195,8 +195,22 @@ static int test_share_through_sessions() {
 	second.send(request::content_release("0.2.0"));
 	TEST_EXPECT(service.release_version == "0.2.0" && service.release_revision == 5 &&
 			second.content().last.find("MOD 0.2.0") != std::string::npos);
+	// A change discarded, then the file back as revision 1 has it: a change to push.
+	TEST_EXPECT(put(dir.file("Second") + "/defs/a.def", "a-mine"));
+	second.send(request::content_restore("defs/a.def"));
+	TEST_EXPECT(second.read("defs/a.def") == "a-first" &&
+			second.content().last.find("Discarded the changes to defs/a.def") != std::string::npos);
+	second.send(request::content_restore("defs/a.def", 1));
+	TEST_EXPECT(second.read("defs/a.def") == "a1" && second.content().revision == 5 &&
+			second.content().last.find("back as revision 1") != std::string::npos);
+	second.send(request::content_restore("../outside.def"));
+	TEST_EXPECT(second.refused("content.refused"));
+	// The history, newest first.
+	second.send(request::content_history());
+	TEST_EXPECT(second.content().history.size() == 5 && second.content().history[0].number == 5 &&
+			second.content().history[4].message == "r1");
 	std::printf("share: bound and pushed, got and opened, pulled, a stale push refused, a conflict "
-				"taken, a release asked for\n");
+				"taken, a release asked for, a change discarded and a file restored, the history\n");
 	return 0;
 }
 

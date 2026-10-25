@@ -51,6 +51,8 @@ public:
 	void resolve(const EditorRequest &request);
 	void push(const EditorRequest &request);
 	void release(const EditorRequest &request);
+	void restore(const EditorRequest &request);
+	void history();
 	void cancel();
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, a release) stepped, each
@@ -100,6 +102,7 @@ private:
 	ContentCall projects_;
 	ContentCall logout_;
 	ContentCall release_;
+	ContentCall history_;
 	std::string release_server_; // the service a release was asked of, for its words
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands

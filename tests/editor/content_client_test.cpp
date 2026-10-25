@@ -20,6 +20,7 @@
 #include <base/content/content_manifest.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <editor/content_store/content_account.h>
 #include <editor/content_store/content_api.h>
@@ -173,6 +174,48 @@ static int test_share_and_pull() {
 	return 0;
 }
 
+// A restore: changes discarded (the base's file back, the folder's own new file gone, a deleted one
+// back), and a file put back as an older revision has it, the base and the binding untouched (a
+// change to push); every file it replaced in the project's trash.
+static int test_restore() {
+	test_temp::TempDir dir("opennova_content_client_restore");
+	const std::string root = dir.file("Folder");
+	FakeService service;
+	TEST_EXPECT(put(root + "/project.opennova", "{}") && put(root + "/defs/a.def", "a1") &&
+			put(root + "/defs/b.def", "b1"));
+	TEST_EXPECT(push(service, root, "r1") == editor::PushOutcome::Pushed);
+	TEST_EXPECT(put(root + "/defs/a.def", "a2"));
+	TEST_EXPECT(push(service, root, "r2") == editor::PushOutcome::Pushed && service.head == 2);
+	const auto restore = [&](std::vector<std::string> paths, int64_t revision) {
+		editor::ContentPull job(service, account(kAdminCookie), editor::ProjectPaths::for_root(root),
+				"", binding_of(root), editor::ContentRestore{ std::move(paths), revision });
+		const editor::ContentJobState state = run(job);
+		if (state != editor::ContentJobState::Done)
+			std::fprintf(stderr, "restore: %s\n", job.error().c_str());
+		return state == editor::ContentJobState::Done ? job.applied().trash.id : uint64_t(-1);
+	};
+
+	// Discard: a's change undone, the new c gone, the deleted b back.
+	TEST_EXPECT(put(root + "/defs/a.def", "a3") && put(root + "/defs/c.def", "c"));
+	std::error_code ec;
+	std::filesystem::remove(io::os_path(root + "/defs/b.def"), ec);
+	const uint64_t trashed = restore({ "defs/a.def", "defs/b.def", "defs/c.def" }, 0);
+	TEST_EXPECT(trashed != uint64_t(-1) && trashed != 0);
+	std::map<std::string, std::string> files = files_of(root);
+	TEST_EXPECT(files["defs/a.def"] == "a2" && files["defs/b.def"] == "b1" && !files.count("defs/c.def"));
+	TEST_EXPECT(binding_of(root).revision == 2);
+
+	// a as revision 1 has it: a change to push, the base still r2's.
+	TEST_EXPECT(restore({ "defs/a.def" }, 1) != uint64_t(-1));
+	files = files_of(root);
+	TEST_EXPECT(files["defs/a.def"] == "a1" && binding_of(root).revision == 2);
+	TEST_EXPECT(push(service, root, "a back") == editor::PushOutcome::Pushed && service.head == 3);
+	// Nothing to put back: no trash batch.
+	TEST_EXPECT(restore({ "defs/a.def" }, 0) == 0);
+	std::printf("restore: changes discarded, a file back as revision 1 has it, then pushed\n");
+	return 0;
+}
+
 static int test_accounts() {
 	test_temp::TempDir dir("opennova_content_client_accounts");
 	const std::string root = dir.file("Folder");
@@ -317,6 +360,7 @@ static int test_api_shapes() {
 int main() {
 	int failures = 0;
 	failures += test_share_and_pull();
+	failures += test_restore();
 	failures += test_accounts();
 	failures += test_bind_and_check();
 	failures += test_api_shapes();

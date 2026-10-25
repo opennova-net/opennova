@@ -1130,6 +1130,10 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::ProjectKey: return text_of(json, token, request.project_key, error);
 	case F::Message: return text_of(json, token, request.message, error);
 	case F::Version: return text_of(json, token, request.version, error);
+	case F::Revision:
+		if (io::json_exact_whole_in(json, 0.0, 9007199254740991.0, request.revision)) return true;
+		error = std::string("\"") + token + "\" must be a whole number, 0 or more.";
+		return false;
 	case F::Resolution: {
 		Resolution resolution = Resolution::KeepMine;
 		if (json.is_string() && content_resolution_from_token(json.string, resolution)) {
@@ -1276,6 +1280,7 @@ bool field_to_json(
 	case F::ProjectKey: out = json_string(request.project_key); return !request.project_key.empty();
 	case F::Message: out = json_string(request.message); return !request.message.empty();
 	case F::Version: out = json_string(request.version); return !request.version.empty();
+	case F::Revision: out = json_number(double(request.revision)); return request.revision > 0;
 	case F::Resolution:
 		out = json_string(content_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
 		return request.resolution.has_value();

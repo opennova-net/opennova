@@ -877,6 +877,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Message: out.message = "A change"; break;
 		case F::Resolution: out.resolution = Resolution::TakeTheirs; break;
 		case F::Version: out.version = "0.2.0"; break;
+		case F::Revision: out.revision = 4; break;
 		case F::kCount: break;
 		}
 	}

@@ -303,6 +303,39 @@ void ContentController::release(const EditorRequest &request) {
 	core_.touch(ViewConcern::Content);
 }
 
+void ContentController::restore(const EditorRequest &request) {
+	if (!ready(false, true, true))
+		return;
+	std::string why;
+	if (!content::is_content_path(request.path, why)) {
+		refuse("A restore names one of the project's files: " + why);
+		return;
+	}
+	if (paused_) {
+		refuse("A pull waits on its conflicts: settle them and pull first.");
+		return;
+	}
+	ContentBinding binding;
+	std::string error;
+	if (!read_content_binding(ContentPaths::for_project(core_.paths()), binding, error)) {
+		refuse(error.empty() ? "The project's binding is gone: bind it again." : error);
+		return;
+	}
+	start(OperationKind::ContentPull,
+			std::make_unique<ContentPull>(*transport_, account_, core_.paths(), export_dir(), binding,
+					ContentRestore{ { request.path }, request.revision }));
+}
+
+void ContentController::history() {
+	if (!ready(false, true, true))
+		return;
+	if (history_.started())
+		return; // the list in flight answers this ask too
+	history_ = ContentCall(*transport_, content_api::revisions(account_, core_.view().content.key, 0, 50));
+	core_.view().content.calling = true;
+	core_.touch(ViewConcern::Content);
+}
+
 void ContentController::cancel() {
 	// A content job running gave way to this request at the gate (its row's superseded_by); a pull
 	// kept for its conflicts goes too.
@@ -366,7 +399,20 @@ void ContentController::poll() {
 		release_ = ContentCall();
 		core_.touch(ViewConcern::Content);
 	}
-	const bool calling = login_.started() || projects_.started() || release_.started();
+	if (history_.started() && history_.poll()) {
+		ContentApiError error;
+		std::vector<RemoteRevision> revisions;
+		if (content_api::read_revisions(history_.reply(), revisions, error)) {
+			view.history = std::move(revisions);
+			view.history_error.clear();
+		} else {
+			view.history_error = error.line();
+		}
+		history_ = ContentCall();
+		core_.touch(ViewConcern::Content);
+	}
+	const bool calling =
+			login_.started() || projects_.started() || release_.started() || history_.started();
 	if (view.calling != calling) {
 		view.calling = calling;
 		core_.touch(ViewConcern::Content);
@@ -374,7 +420,7 @@ void ContentController::poll() {
 }
 
 bool ContentController::busy() const {
-	return login_.started() || projects_.started() || release_.started();
+	return login_.started() || projects_.started() || release_.started() || history_.started();
 }
 
 void ContentController::show_binding() {
@@ -426,22 +472,35 @@ void ContentController::forget_project() {
 
 void ContentController::finish_pull(ContentPull &pull) {
 	ContentView &view = core_.view().content;
-	if (pull.up_to_date()) {
-		view.last = "The project is at the head, revision " + std::to_string(pull.revision()) + ".";
-		show_binding();
-		return;
-	}
-	view.last = "Pulled revision " + std::to_string(pull.revision()) + ": " +
-			count_text(pull.applied().written, "file written", "files written") + ", " +
-			count_text(pull.applied().removed, "removed", "removed") + ".";
-	core_.note("Content store: " + view.last);
-	view.head = pull.revision();
-	view.head_known = true;
-	if (!get_dir_.empty()) {
-		const std::string dir = std::move(get_dir_);
-		get_dir_.clear();
-		core_.open_project(dir);
-		return;
+	if (const ContentRestore *restore = pull.restore()) {
+		const std::string what = restore->paths.size() == 1
+				? restore->paths.front()
+				: count_text(restore->paths.size(), "file", "files");
+		const std::string revision = std::to_string(pull.restored_revision());
+		view.last = pull.plan().items.empty() ? "Nothing to restore: " + what + " is as revision " + revision + " has it."
+				: pull.restored_revision() == view.revision ? "Discarded the changes to " + what + "."
+															: what + " is back as revision " + revision +
+								" has it: a change to push.";
+		core_.note("Content store: " + view.last);
+		view.checked = false; // the changes are counted again by the next check
+	} else {
+		if (pull.up_to_date()) {
+			view.last = "The project is at the head, revision " + std::to_string(pull.revision()) + ".";
+			show_binding();
+			return;
+		}
+		view.last = "Pulled revision " + std::to_string(pull.revision()) + ": " +
+				count_text(pull.applied().written, "file written", "files written") + ", " +
+				count_text(pull.applied().removed, "removed", "removed") + ".";
+		core_.note("Content store: " + view.last);
+		view.head = pull.revision();
+		view.head_known = true;
+		if (!get_dir_.empty()) {
+			const std::string dir = std::move(get_dir_);
+			get_dir_.clear();
+			core_.open_project(dir);
+			return;
+		}
 	}
 	show_binding();
 	// The files the pull wrote and removed, read again as an outside change is; a changed project

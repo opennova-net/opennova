@@ -75,6 +75,14 @@ PullPlan plan_pull(const std::vector<content::ContentFile> &base,
 		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread,
 		const std::vector<content::ContentFile> &theirs);
 
+// Each of `paths` put back as `revision` has it, whatever the folder did to it: the revision's file
+// written where the folder's differs (an unread one included), the folder's removed where the
+// revision has none. No conflict: a restore is the author's own ask (Discard changes is a restore
+// to the folder's base; an older revision's file, restored, is a change to push).
+PullPlan plan_restore(const std::vector<content::ContentFile> &local,
+		const std::vector<std::string> &unread, const std::vector<content::ContentFile> &revision,
+		const std::vector<std::string> &paths);
+
 enum class Resolution : uint8_t {
 	// The folder's file stays as it is: a change to push over the revision's.
 	KeepMine,

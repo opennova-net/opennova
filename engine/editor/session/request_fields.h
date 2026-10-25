@@ -83,6 +83,7 @@ enum class RequestFieldId : uint8_t {
 	Message,
 	Resolution,
 	Version,
+	Revision,
 	kCount,
 };
 

@@ -173,6 +173,25 @@ private:
 			r.body = manifests[number];
 			return r;
 		}
+		// The history, newest first.
+		if (request.method == "GET" && (rest == "/revisions" || rest.rfind("/revisions?", 0) == 0)) {
+			io::JsonValue list = io::JsonValue::make_array();
+			for (int64_t number = head; number >= 1; --number) {
+				io::JsonValue revision = io::JsonValue::make_object();
+				revision.set("number", io::json_number(double(number)));
+				revision.set("author", io::json_string("taylor"));
+				revision.set("message", io::json_string("r" + std::to_string(number)));
+				revision.set("manifest_sha256",
+						io::json_string(opennova::content::manifest_sha256(manifests[number])));
+				revision.set("file_count", io::json_number(1));
+				revision.set("bytes", io::json_number(1));
+				revision.set("created_at", io::json_string("2026-10-25 12:00:00"));
+				list.push(revision);
+			}
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("revisions", list);
+			return json(200, out);
+		}
 		if (request.method == "GET" && rest.rfind("/blobs/", 0) == 0) {
 			const auto blob = blobs.find(rest.substr(7));
 			if (blob == blobs.end())
