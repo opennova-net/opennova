@@ -17,15 +17,16 @@ namespace opennova {
 NwuHostRole::NwuHostRole(NwuLobbySession &lobby, Hooks hooks)
 	: lobby_(lobby), hooks_(std::move(hooks)) {}
 
-bool NwuHostRole::request(const HostRegistration &cfg, uint32_t match_app_id) {
+bool NwuHostRole::request(const HostRegistration &cfg, uint32_t taken_app_id) {
 	cfg_ = cfg;
 	players_.clear();
 	// BuildHostVarLists mints the per-registration AppId first: (tick + rand) folded into
 	// [1000, 9999]. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b6e ->
 	//  CNapiNetwork_RandomizeTimeout @0x4c4d80]
-	cfg_.app_id = match_app_id != 0
-			? match_app_id
-			: make_session_app_id(lobby_.clock_ms(), static_cast<int>(lobby_.random_u32() & 0x7FFFu));
+	do {
+		cfg_.app_id = make_session_app_id(
+				lobby_.clock_ms(), static_cast<int>(lobby_.random_u32() & 0x7FFFu));
+	} while (taken_app_id != 0 && cfg_.app_id == taken_app_id);
 	// A fresh host sends CurrentlyHosting = 0 (ConnectOrHost's StartHostingSession(ctx, 0)).
 	send_host_request(/*currently_hosting=*/0);
 	if (phase_ != Phase::Requested) {

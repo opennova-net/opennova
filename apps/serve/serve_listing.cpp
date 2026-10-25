@@ -23,10 +23,13 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	// ServerPlayerEnterResult answers (on_player_enter_result) or the ticket deadline reaps it.
 	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — the arm @0x4C8B88,
 	//  CNapiGameSession_SendPlayEnterRequest @0x4C8BC1]
+	// A joiner the second listing's service sent (its APPID that listing's, D-NET-1385) goes to
+	// that listing's session, whose service issued its ticket.
 	ctx.on_player_enter_request = [this](const inmatch::NapiNPServerCtx::PlayerEnterRequest &request) {
-		if (lister_ == nullptr) return;
-		lister_->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
-		                                          request.join_ticket);
+		Lister *lister = request.listing == 1 ? second_ : lister_;
+		if (lister == nullptr) return;
+		lister->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
+		                                         request.join_ticket);
 	};
 	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
 	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock), and the second
@@ -69,6 +72,19 @@ void ServeListing::set_second(Lister *second) {
 	if (second_ != nullptr && second_ != second) second_->host_role().set_column_source(nullptr);
 	second_ = second;
 	if (second_ != nullptr && role_ != nullptr) install_column_source(*second_);
+	sync_second();
+}
+
+// The second listing's facts on the server context while it hosts: its own registration's AppId,
+// the one its service's joiners carry (the code-9 leg's second AppId), and its ticket arm. None
+// once it goes, so a joiner still carrying its AppId is refused 9, as retail refuses one whose
+// .joi predates a fresh host request.
+void ServeListing::sync_second() {
+	if (role_ == nullptr) return;
+	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+	const bool hosting = second_ != nullptr && second_->hosting();
+	ctx.novaworld_second_app_id = hosting ? static_cast<uint32_t>(second_->host_role().app_id()) : 0u;
+	ctx.novaworld_second_join_tickets_armed = hosting && second_->host_role().requires_join_ticket();
 }
 
 void ServeListing::unbind() {
@@ -82,6 +98,8 @@ void ServeListing::unbind() {
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();
 		ctx.novaworld_app_id = 0;
+		ctx.novaworld_second_app_id = 0;
+		ctx.novaworld_second_join_tickets_armed = false;
 	}
 	role_ = nullptr;
 	kernel_ = nullptr;
@@ -103,6 +121,7 @@ void ServeListing::sync_session() {
 	ctx.novaworld_app_id = static_cast<uint32_t>(host.app_id());
 	inmatch::set_novaworld_account_facts(ctx, std::string());
 	ctx.novaworld_join_tickets_armed = host.requires_join_ticket();
+	sync_second();
 	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
 	ctx.nwu_in_use = facts.in_use;
 	ctx.nwu_session_role = facts.role;

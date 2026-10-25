@@ -18,10 +18,14 @@
 // none of retail's: a stock host lists on one; D-NET-1385, ADR 0068) lists the same match there through
 // SecondListing: the second lister's host role reads the same columns and runs
 // the same server-info refresh (set_second), and its ServerCommands run on the
-// match. The match's own NovaWorld facts stay the first listing's: its GSID is
-// the 0x81's SUS1, its join-ticket arm and enter requests the match's, and its
-// session word the one the match's NovaWorld exit reads, so the second service
-// stopping its listing never ends the match.
+// match. It registers under an AppId of its own, which the server context
+// carries beside the first's with the second's ticket arm (sync_second): a
+// joiner the second service sent carries that AppId, so the match tags it as the
+// second listing's, holds it to that listing's ticket rule, and its
+// ClientPlayerEnterRequest goes to that listing's session. The rest of the
+// match's NovaWorld facts stay the first listing's: its GSID is the 0x81's SUS1,
+// and its session word the one the match's NovaWorld exit reads, so the second
+// service stopping its listing never ends the match.
 
 #include "listing_source.h"
 
@@ -85,6 +89,9 @@ public:
 private:
 	// `lister`'s host role reads the match's columns at each server-info update.
 	void install_column_source(Lister &lister);
+	// The second listing's AppId and ticket arm onto the server context (none while it does
+	// not host).
+	void sync_second();
 
 	HostRegistration base_;
 	Seams seams_;
@@ -96,8 +103,8 @@ private:
 
 // The second listing's source (ServeOptions::also_master_host): the first's live match, read the
 // same way (its columns and roster), its ServerCommands run on it (ServeListing::run_command), a
-// stop it asks for leaving only its own hosting. The match's join tickets stay the first
-// listing's, so it announces no joiner and takes no ServerPlayerEnterResult.
+// stop it asks for leaving only its own hosting, and its service's ServerPlayerEnterResults
+// applied to the match's joiners it sent (by connection id, the match's own).
 class SecondListing final : public ListingSource {
 public:
 	explicit SecondListing(ServeListing &first) : first_(first) {}
@@ -122,6 +129,9 @@ public:
 	}
 	void on_command(const ServerCommand &command) override {
 		if (first_.run_command(command, lister_)) command_stopped_ = true;
+	}
+	void on_player_enter_result(const ClientSession::PlayerEnterResult &result) override {
+		first_.on_player_enter_result(result);
 	}
 
 private:
