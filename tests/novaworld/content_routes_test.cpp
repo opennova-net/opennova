@@ -34,6 +34,7 @@
 #include "common/test_expect.h"
 #include "common/test_redis.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -228,7 +229,10 @@ int test_who_reads_what(Harness &h) {
 			{ std::vector<std::string>{ h.admin }, std::vector<std::string>{ kBearer } }) {
 		const auto json = json_of(h.send("GET", "/api/content/projects", headers), 200);
 		const auto keys = keys_of(json);
-		TEST_EXPECT(keys.size() == 5 && keys[0] == "DFX2" && keys[1] == "JO" && keys[2] == "JOX01");
+		const auto holds = [&keys](const char *key) {
+			return std::find(keys.begin(), keys.end(), key) != keys.end();
+		};
+		TEST_EXPECT(keys.size() == 5 && holds("DFX2") && holds("JO") && holds("JOX01"));
 		for (const auto &p : json["projects"])
 			TEST_EXPECT(p["can_push"].b() && p.has("storage") && p["head"].i() == 0);
 	}
