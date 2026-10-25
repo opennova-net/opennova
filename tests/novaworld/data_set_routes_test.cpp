@@ -271,8 +271,8 @@ int test_list(Harness &h) {
 	TEST_EXPECT(str(json["store"]["kind"]) == "local");
 	TEST_EXPECT(json["titles"].size() == 2 && str(json["titles"][0]) == "jo" &&
 			str(json["titles"][1]) == "dfx2");
-	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][1]["slug"]) == "jop_2_consumer" &&
-			!str(json["games"][1]["display_name"]).empty());
+	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
+			!str(json["games"][2]["display_name"]).empty());
 	TEST_EXPECT(json["data_sets"].size() == 5);
 	TEST_EXPECT(str(json["data_sets"][0]["kind"]) == "base" &&
 			str(json["data_sets"][3]["kind"]) == "expansion");

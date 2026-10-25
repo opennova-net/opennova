@@ -158,21 +158,21 @@ int test_seed_populates_games() {
 	auto games =
 			db.query("SELECT slug, gate_tag, title, lobby_name, pfid FROM games ORDER BY slug;");
 	TEST_EXPECT(games.size() == 3);
-	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(games[0].as_text(1).value() == "dfx2:0:cus:buffy");
-	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
-	TEST_EXPECT(games[0].as_text(3).value() == "dfx2_0_consumer");
-	TEST_EXPECT(games[0].as_text(4).value() == "38");
-	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
-	TEST_EXPECT(games[1].as_text(1).value() == "jop:cus2");
-	TEST_EXPECT(games[1].as_text(2).value() == "jo");
-	TEST_EXPECT(games[1].as_text(3).value() == "jop_2_consumer");
-	TEST_EXPECT(games[1].as_text(4).value() == "28");
-	TEST_EXPECT(games[2].as_text(0).value() == "acidgambit_0_consumer");
-	TEST_EXPECT(games[2].as_text(1).value() == "acidgambit:0");
+	TEST_EXPECT(games[1].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(games[1].as_text(1).value() == "dfx2:0:cus:buffy");
+	TEST_EXPECT(games[1].as_text(2).value() == "dfx2");
+	TEST_EXPECT(games[1].as_text(3).value() == "dfx2_0_consumer");
+	TEST_EXPECT(games[1].as_text(4).value() == "38");
+	TEST_EXPECT(games[2].as_text(0).value() == "jop_2_consumer");
+	TEST_EXPECT(games[2].as_text(1).value() == "jop:cus2");
 	TEST_EXPECT(games[2].as_text(2).value() == "jo");
-	TEST_EXPECT(games[2].as_text(3).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[2].as_text(3).value() == "jop_2_consumer");
 	TEST_EXPECT(games[2].as_text(4).value() == "28");
+	TEST_EXPECT(games[0].as_text(0).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[0].as_text(1).value() == "acidgambit:0");
+	TEST_EXPECT(games[0].as_text(2).value() == "jo");
+	TEST_EXPECT(games[0].as_text(3).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[0].as_text(4).value() == "28");
 
 	auto players = db.query(
 		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
@@ -378,19 +378,19 @@ int expect_gate_rows(Database &db) {
 							   "glsvss_rims, glsvss_agrms, start_page FROM games ORDER BY slug;");
 	TEST_EXPECT(rows.size() == 3);
 	const std::string jo_query = "ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
-	TEST_EXPECT(rows[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(rows[0].as_text(1).value() == "dfx2_0_consumer");
-	TEST_EXPECT(rows[0].as_text(2).value() ==
+	TEST_EXPECT(rows[1].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(rows[1].as_text(1).value() == "dfx2_0_consumer");
+	TEST_EXPECT(rows[1].as_text(2).value() ==
 			"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm");
-	TEST_EXPECT(rows[0].as_text(3).value() == "[DFX2]KILLS");
-	TEST_EXPECT(rows[0].as_int(4).value() == 3600000 && rows[0].as_int(5).value() == 45000);
-	TEST_EXPECT(rows[1].as_text(1).value() == "jop_2_consumer");
-	TEST_EXPECT(rows[1].as_text(2).value() == jo_query);
-	TEST_EXPECT(rows[1].as_text(3).value().empty());
-	TEST_EXPECT(rows[1].as_int(4).value() == 0 && rows[1].as_int(5).value() == 0);
-	TEST_EXPECT(rows[2].as_text(1).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(rows[1].as_text(3).value() == "[DFX2]KILLS");
+	TEST_EXPECT(rows[1].as_int(4).value() == 3600000 && rows[1].as_int(5).value() == 45000);
+	TEST_EXPECT(rows[2].as_text(1).value() == "jop_2_consumer");
 	TEST_EXPECT(rows[2].as_text(2).value() == jo_query);
 	TEST_EXPECT(rows[2].as_text(3).value().empty());
+	TEST_EXPECT(rows[2].as_int(4).value() == 0 && rows[2].as_int(5).value() == 0);
+	TEST_EXPECT(rows[0].as_text(1).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(rows[0].as_text(2).value() == jo_query);
+	TEST_EXPECT(rows[0].as_text(3).value().empty());
 	for (const auto &row : rows) {
 		const std::string query = row.as_text(2).value();
 		const std::string tail = "&url=" + row.as_text(6).value();

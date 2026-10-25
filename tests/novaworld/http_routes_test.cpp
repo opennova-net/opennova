@@ -314,14 +314,14 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json.has("games"));
 	TEST_EXPECT(json["games"].size() == 3);
-	TEST_EXPECT(str(json["games"][0]["slug"]) == "dfx2_consumer");
-	TEST_EXPECT(!str(json["games"][0]["displayName"]).empty());
-	TEST_EXPECT(str(json["games"][1]["slug"]) == "jop_2_consumer");
-	TEST_EXPECT(str(json["games"][2]["slug"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(json["games"][2]["displayName"]) == "OP: Acid Gambit");
-	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
+	TEST_EXPECT(str(json["games"][1]["slug"]) == "dfx2_consumer");
+	TEST_EXPECT(!str(json["games"][1]["displayName"]).empty());
+	TEST_EXPECT(str(json["games"][2]["slug"]) == "jop_2_consumer");
+	TEST_EXPECT(str(json["games"][0]["slug"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(json["games"][0]["displayName"]) == "OP: Acid Gambit");
 	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
+	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
 
 	{
 		opennova::hostdb::HostRow on;
@@ -336,9 +336,9 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 		TEST_EXPECT(reply.transport_ok && reply.code == 200);
 		json = crow::json::load(body_text(reply));
 		TEST_EXPECT(json && json["games"].size() == 3);
-		TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
-		TEST_EXPECT(json["games"][2]["hosts"].size() == 1);
-		TEST_EXPECT(str(json["games"][2]["hosts"][0]["serverName"]) == "Harness ON Srv");
+		TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
+		TEST_EXPECT(json["games"][0]["hosts"].size() == 1);
+		TEST_EXPECT(str(json["games"][0]["hosts"][0]["serverName"]) == "Harness ON Srv");
 		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), 1001);
 	}
 
@@ -365,9 +365,9 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json["games"].size() == 3);
+	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
-	TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
-	const auto &hosts = json["games"][1]["hosts"];
+	const auto &hosts = json["games"][2]["hosts"];
 	TEST_EXPECT(hosts.size() == 1);
 	TEST_EXPECT(hosts[0]["id"].i() == 1000);
 	TEST_EXPECT(str(hosts[0]["serverName"]) == "Harness Srv");
@@ -2040,11 +2040,11 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const auto games = crow::json::load(body_text(reply));
 	TEST_EXPECT(games && games["games"].size() == 3);
-	TEST_EXPECT(str(games["games"][2]["slug"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(games["games"][2]["gateTag"]) == "acidgambit:0");
-	TEST_EXPECT(str(games["games"][2]["lobbyName"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(games["games"][2]["title"]) == "jo");
-	TEST_EXPECT(str(games["games"][0]["title"]) == "dfx2");
+	TEST_EXPECT(str(games["games"][0]["slug"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(games["games"][0]["gateTag"]) == "acidgambit:0");
+	TEST_EXPECT(str(games["games"][0]["lobbyName"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(games["games"][0]["title"]) == "jo");
+	TEST_EXPECT(str(games["games"][1]["title"]) == "dfx2");
 
 	// One host per lobby, none reporting VER1 or Expbits.
 	struct Listed {
