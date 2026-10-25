@@ -4,7 +4,7 @@
 replaces `update.new` after the running updater exits and relaunches it.
 
 ```text
-update.exe --check /game opennova --runtime-dir <runtime> --resource-dir <content>
+update.exe --check /game acidgambit --runtime-dir <runtime> --resource-dir <content>
 update.exe /game jo --runtime-dir <runtime> --resource-dir <retail> /RUN
 ```
 
@@ -18,7 +18,7 @@ the game to exit before files are changed. `--server` and `--port` select a loca
 test server; `--no-runtime` checks/applies only the selected content products.
 
 The runtime product defaults to `ONRUNTIME` / `ONRUNTIME.CMD`, configured by
-`OPENNOVA.WIZ`. OpenNova content is `OPENNOVA` / `OPENNOVA.CMD`. JO/DFX2 content
+`OPENNOVA.WIZ`. OpenNova content is `ACIDGAMBIT` / `ACIDGAMBIT.CMD`. JO/DFX2 content
 uses the existing `UPDATE.WIZ`, including its territory substitution. OpenNova's
 runtime config never replaces the retail wizard or its `version.txt`. A native
 expansion's `expansion/<name>/UPDATE.WIZ` registers it for first installation;

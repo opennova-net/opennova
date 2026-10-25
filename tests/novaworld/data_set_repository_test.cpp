@@ -79,15 +79,15 @@ int test_data_sets() {
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
 			!runtime->retail_updater);
 	const auto native = find_data_set(db, seeded(db, "OP: Acid Gambit"));
-	TEST_EXPECT(native && native->updater_login == "OPENNOVA" &&
-			native->command_file == "OPENNOVA.CMD" && !native->retail_updater);
+	TEST_EXPECT(native && native->updater_login == "ACIDGAMBIT" &&
+			native->command_file == "ACIDGAMBIT.CMD" && !native->retail_updater);
 	const auto dfx2 = find_data_set(db, seeded(db, "Delta Force Xtreme 2"));
 	TEST_EXPECT(dfx2 && dfx2->updater_login == "DFX2" && dfx2->command_file == "DFX2.CMD" &&
 			dfx2->retail_updater);
 	const auto native_expansions = list_expansions_of(db, native->id);
-	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "onjo1" &&
-			native_expansions[0].updater_login == "ONJO1" &&
-			native_expansions[0].command_file == "ONJO1.CMD");
+	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "nifty" &&
+			native_expansions[0].updater_login == "NIFTY" &&
+			native_expansions[0].command_file == "NIFTY.CMD");
 	TEST_EXPECT(tree_file_rules(DataSetKind::Update, "").empty());
 
 	// A new base, a new expansion of it, and the refusals.
@@ -129,9 +129,9 @@ int test_data_sets() {
 	steal.updater_login = "JOTRUS";
 	TEST_EXPECT(update_data_set(db, bhd_id, steal) == DataSetOutcome::DuplicateLogin);
 	DataSetPatch lobby;
-	lobby.game = "opennova_0_consumer";
+	lobby.game = "acidgambit_0_consumer";
 	TEST_EXPECT(update_data_set(db, bhd_id, lobby) == DataSetOutcome::Ok);
-	TEST_EXPECT(find_data_set(db, bhd_id)->game == "opennova_0_consumer");
+	TEST_EXPECT(find_data_set(db, bhd_id)->game == "acidgambit_0_consumer");
 	// An expansion lists in its parent's lobby: a game patched onto it changes nothing.
 	TEST_EXPECT(update_data_set(db, ts_id, lobby) == DataSetOutcome::Ok);
 	TEST_EXPECT(find_data_set(db, ts_id)->game.empty());

@@ -153,8 +153,8 @@ validate, Publish), or with `scripts/publish_update.py`:
 
 ```sh
 # Our own game: a full package, carrying the last published one's removals.
-python scripts/package_release.py --product OPENNOVA --project PROJECTS/OPENNOVA \
-    --version 0.2.0 --previous PROJECTS/RELEASES/OPENNOVA-0.1.0.sfs
+python scripts/package_release.py --product ACIDGAMBIT --project PROJECTS/ACIDGAMBIT \
+    --version 0.2.0 --previous PROJECTS/RELEASES/ACIDGAMBIT-0.1.0.sfs
 # A retail game: a patch of only what its project changed against the stock install.
 python scripts/package_release.py --product JO --project PROJECTS/JO \
     --install "<the Joint Operations install>" --version 1.7.5.8
@@ -166,9 +166,9 @@ of the stock install's), so only changed files get rows, each into the archive t
 stock install holds it in. Its hosted tree is built on publish from the data set's
 stock baseline, uploaded once with "Upload data".
 
-The game product is `/game opennova`, `/game jo` or `/game dfx2`. Without `/game`,
+The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
-`OPENNOVA.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
+`ACIDGAMBIT.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
 another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
 updater refuses a product the folder's wizard does not name, and installs OpenNova
 content only into OpenNova's own folder or an empty one. The selected product

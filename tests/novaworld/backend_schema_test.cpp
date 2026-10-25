@@ -168,10 +168,10 @@ int test_seed_populates_games() {
 	TEST_EXPECT(games[1].as_text(2).value() == "jo");
 	TEST_EXPECT(games[1].as_text(3).value() == "jop_2_consumer");
 	TEST_EXPECT(games[1].as_text(4).value() == "28");
-	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
-	TEST_EXPECT(games[2].as_text(1).value() == "opennova:0");
+	TEST_EXPECT(games[2].as_text(0).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[2].as_text(1).value() == "acidgambit:0");
 	TEST_EXPECT(games[2].as_text(2).value() == "jo");
-	TEST_EXPECT(games[2].as_text(3).value() == "opennova_0_consumer");
+	TEST_EXPECT(games[2].as_text(3).value() == "acidgambit_0_consumer");
 	TEST_EXPECT(games[2].as_text(4).value() == "28");
 
 	auto players = db.query(
@@ -351,15 +351,15 @@ int expect_opennova_row(Database &db) {
 	const auto on = db.query(
 			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
 			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
-			"WHERE slug = 'opennova_0_consumer';");
+			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(on.size() == 1);
 	TEST_EXPECT(on[0].as_text(0).value() == "OP: Acid Gambit");
-	TEST_EXPECT(on[0].as_text(1).value() == "opennova_0_consumer");
-	TEST_EXPECT(on[0].as_text(2).value() == "opennova:0");
+	TEST_EXPECT(on[0].as_text(1).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(on[0].as_text(2).value() == "acidgambit:0");
 	TEST_EXPECT(on[0].as_text(3).value() == "jo");
 	TEST_EXPECT(on[0].as_text(4).value() == "jop_2_start.htm");
 	TEST_EXPECT(on[0].as_text(5).value() == "jop_2_host1.htm");
-	TEST_EXPECT(on[0].as_text(6).value() == "opennova_0.gsb?a=1");
+	TEST_EXPECT(on[0].as_text(6).value() == "acidgambit_0.gsb?a=1");
 	TEST_EXPECT(on[0].as_int(7).value() == 1);
 	TEST_EXPECT(on[0].as_text(8).value() == "3");
 	TEST_EXPECT(on[0].as_text(9).value() == "2345");
@@ -388,7 +388,7 @@ int expect_gate_rows(Database &db) {
 	TEST_EXPECT(rows[1].as_text(2).value() == jo_query);
 	TEST_EXPECT(rows[1].as_text(3).value().empty());
 	TEST_EXPECT(rows[1].as_int(4).value() == 0 && rows[1].as_int(5).value() == 0);
-	TEST_EXPECT(rows[2].as_text(1).value() == "opennova_0_consumer");
+	TEST_EXPECT(rows[2].as_text(1).value() == "acidgambit_0_consumer");
 	TEST_EXPECT(rows[2].as_text(2).value() == jo_query);
 	TEST_EXPECT(rows[2].as_text(3).value().empty());
 	for (const auto &row : rows) {

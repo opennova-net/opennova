@@ -401,9 +401,9 @@ int test_create_patch_delete(Harness &h) {
 			"PATCH", "/api/admin/data-sets/" + std::to_string(ts), R"({"game":"dfx2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "game");
 	json = json_of(h.admin("PATCH", "/api/admin/data-sets/" + std::to_string(bhd),
-						   R"({"game":"opennova_0_consumer"})"),
+						   R"({"game":"acidgambit_0_consumer"})"),
 			200);
-	TEST_EXPECT(json && str(json["data_set"]["game"]) == "opennova_0_consumer");
+	TEST_EXPECT(json && str(json["data_set"]["game"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/data-sets/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
 

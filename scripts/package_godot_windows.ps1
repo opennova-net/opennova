@@ -503,7 +503,7 @@ function Test-UpdaterBoot {
         Assert-StageHoldsOnly -StageDir $bare -Staged @("OPENNOVA.WIZ")
         # OpenNova content never targets another game's folder: refused before any row.
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
-            -Arguments "--check /game opennova --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+            -Arguments "--check /game acidgambit --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
         $server.Kill()
         $server.WaitForExit()
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
@@ -578,10 +578,10 @@ try {
     $staged.Add("revupdat.exe")
     [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
     $staged.Add("OPENNOVA.WIZ")
-    $expansion = Join-Path $stagePath "expansion\onjo1"
+    $expansion = Join-Path $stagePath "expansion\nifty"
     New-Item -ItemType Directory -Path $expansion -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=ONJO1.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONJO1`r`n")
-    $staged.Add("expansion\onjo1\UPDATE.WIZ")
+    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=NIFTY.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=NIFTY`r`n")
+    $staged.Add("expansion\nifty\UPDATE.WIZ")
     $launchHelp = @"
 OpenNova (pre-1.0, experimental)
 
@@ -596,7 +596,7 @@ it holds. To choose a game and folder yourself:
   opennova.exe -- /game jo --resource-dir "C:\Games\Joint Operations"
   opennova.exe -- /game dfx2 --resource-dir "C:\Games\Delta Force Xtreme 2"
 With no --resource-dir, game data is read from the executable's folder.
-  opennova.exe -- /exp onjo1
+  opennova.exe -- /exp nifty
 
 Updates include the OpenNova runtime, selected game's content and installed
 expansions. --no-update disables checks and installation for this launch.

@@ -103,7 +103,7 @@ std::vector<hosted::OfferedDataSet> offered_for_rules() {
 	on.id = 4;
 	on.display_name = "OpenNova";
 	on.title = "jo";
-	on.game = "opennova_0_consumer";
+	on.game = "acidgambit_0_consumer";
 	on.tree_id = 13;
 	on.missions = dfx2.missions;
 	out.push_back(on);
@@ -365,7 +365,7 @@ int test_no_data() {
 	on_settings.missions = { "on.bms" };
 	const int64_t orphan = rig.request("gone_row_owner", on_settings);
 	TEST_EXPECT(orphan > 0);
-	// Seeded OpenNova includes ONJO1. Remove the unused child first so this
+	// Seeded OpenNova includes NIFTY. Remove the unused child first so this
 	// fixture can exercise a missing base row without violating its parent FK.
 	rig.db.exec("DELETE FROM data_sets WHERE parent_id = $1;", { BindValue(on) });
 	rig.db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(on) });

@@ -8,7 +8,7 @@
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
-//   /game <code>  the product: "opennova", "jo" or "dfx2". Without it the launch
+//   /game <code>  the product: "acidgambit", "jo" or "dfx2". Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
 //                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
 //   --no-update  disable update checks and installation (editor Play and tests).
@@ -310,7 +310,7 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
 // The product a game folder holds, from its UPDATE.WIZ's CMD (the file found
 // case-insensitively; formats/update/update_wizard.h wizard_product): "jo",
-// "dfx2" or "opennova"; "" for a folder with no wizard (a fresh download, an
+// "dfx2" or "acidgambit"; "" for a folder with no wizard (a fresh download, an
 // authoring export, a test root); kForeignFolder for a wizard naming another
 // game (BHD's DFBHD.CMD). ADR 0067 d2.
 inline constexpr const char *kForeignFolder = "foreign";

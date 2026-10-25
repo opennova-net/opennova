@@ -29,7 +29,7 @@ func after_each() -> void:
 
 
 func test_product_defaults_to_opennova_using_jo_compatibility() -> void:
-	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.product(), "acidgambit")
 	assert_eq(LaunchFlags.game(), "jo")
 
 
@@ -41,7 +41,7 @@ func test_explicit_retail_game_selects_its_compatibility_profile() -> void:
 
 func test_saved_game_is_ignored_by_the_next_launch() -> void:
 	ConfigStore.write(STATE_CONFIG_PATH, "resources", "game", "dfx2")
-	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.product(), "acidgambit")
 	assert_eq(LaunchFlags.game(), "jo")
 
 

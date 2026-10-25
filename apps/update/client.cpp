@@ -60,7 +60,7 @@ bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 	product.command = wizard.cmd;
 	product.login = wizard.product_login;
 	product.native = product.native || strutil::iequals(product.login, "ONRUNTIME") ||
-			strutil::iequals(product.login, "OPENNOVA");
+			strutil::iequals(product.login, "ACIDGAMBIT");
 	return true;
 }
 
@@ -375,9 +375,9 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 			error = "This folder's UPDATE.WIZ names a game OpenNova does not update.";
 			return false;
 		}
-		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("opennova") : folder);
-		if (product == "opennova") {
-			if (!folder.empty() && folder != "opennova") {
+		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("acidgambit") : folder);
+		if (product == "acidgambit") {
+			if (!folder.empty() && folder != "acidgambit") {
 				error = "This folder holds another game (its UPDATE.WIZ). OpenNova content installs only into its own folder.";
 				return false;
 			}
@@ -396,7 +396,7 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 	}
 	if (native_content) {
-		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {}, true});
+		out.push_back({o.resource_dir, "ACIDGAMBIT", "ACIDGAMBIT.CMD", {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;

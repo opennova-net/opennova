@@ -2029,7 +2029,7 @@ void sweep_install_mount(const std::string &install, const std::string &expansio
 }
 
 // Every .mnu a packed install serves, the base mount's and then each expansion's, through MnuDocument: the install
-// minted from our own game (minted_install.h: the base game's project and the onjo1 expansion through our PFF
+// minted from our own game (minted_install.h: the base game's project and the nifty expansion through our PFF
 // writer), the expansion carrying its own main.mnu (variant_fixtures::expansion_main_menu), so its mount serves one
 // menu of a base game's name with other bytes (swept) and the rest again unchanged (counted, not swept twice).
 int install_sweep() {

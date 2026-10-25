@@ -108,7 +108,7 @@ opennova.exe -- /game dfx2 --resource-dir "C:/Games/Delta Force Xtreme 2"
 ```
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
-selects `opennova`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
+selects `acidgambit`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
 `--resource-dir` directory is never saved. An empty `--resource-dir` prints
 usage and exits with code 2. Use `--no-update` for development runs; Editor Play
 sets it automatically. Source checkouts use exported content from the assets

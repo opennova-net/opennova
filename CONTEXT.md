@@ -523,7 +523,7 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
 repository and released as update packages: the
 "OP: Acid Gambit" game (single player and Co-op over LAN) and its "OP: Nifty Package"
-expansion. The minimal runtime downloads it on first launch. `/game opennova`
+expansion. The minimal runtime downloads it on first launch. `/game acidgambit`
 is the default; `/game jo` or `/game dfx2` selects an existing retail installation
 (ADR 0067). `--resource-dir` selects content separately from the runtime directory.
 _Avoid_: fixtures (test-only data), retail data

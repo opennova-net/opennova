@@ -317,7 +317,7 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(str(json["games"][0]["slug"]) == "dfx2_consumer");
 	TEST_EXPECT(!str(json["games"][0]["displayName"]).empty());
 	TEST_EXPECT(str(json["games"][1]["slug"]) == "jop_2_consumer");
-	TEST_EXPECT(str(json["games"][2]["slug"]) == "opennova_0_consumer");
+	TEST_EXPECT(str(json["games"][2]["slug"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(str(json["games"][2]["displayName"]) == "OP: Acid Gambit");
 	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
@@ -327,7 +327,7 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 		opennova::hostdb::HostRow on;
 		on.rid = 1001;
 		on.gsid = "GSID-HARNESS-ON";
-		on.game = "opennova_0_consumer";
+		on.game = "acidgambit_0_consumer";
 		on.server_name = "Harness ON Srv";
 		on.host_ip = "10.0.0.8";
 		on.host_port = 32768;
@@ -2040,9 +2040,9 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const auto games = crow::json::load(body_text(reply));
 	TEST_EXPECT(games && games["games"].size() == 3);
-	TEST_EXPECT(str(games["games"][2]["slug"]) == "opennova_0_consumer");
-	TEST_EXPECT(str(games["games"][2]["gateTag"]) == "opennova:0");
-	TEST_EXPECT(str(games["games"][2]["lobbyName"]) == "opennova_0_consumer");
+	TEST_EXPECT(str(games["games"][2]["slug"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(games["games"][2]["gateTag"]) == "acidgambit:0");
+	TEST_EXPECT(str(games["games"][2]["lobbyName"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(str(games["games"][2]["title"]) == "jo");
 	TEST_EXPECT(str(games["games"][0]["title"]) == "dfx2");
 
@@ -2055,7 +2055,7 @@ int test_lobby_per_title(Harness &h) {
 	const Listed listed[] = {
 		{ 3101, "jop_2_consumer", "Title JO" },
 		{ 3102, "dfx2_0_consumer", "Title DFX2" },
-		{ 3103, "opennova_0_consumer", "Title ON" },
+		{ 3103, "acidgambit_0_consumer", "Title ON" },
 	};
 	for (const Listed &l : listed) {
 		opennova::hostdb::HostRow row;
@@ -2077,7 +2077,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "/jop_2.gsb", "Title JO", "3", "3" },
 		{ "/jop_2.gsb?a=1", "Title JO", "3", "3" },
 		{ "/dfx2_0.gsb", "Title DFX2", "1", "1" },
-		{ "/opennova_0.gsb?a=1", "Title ON", "3", "1" },
+		{ "/acidgambit_0.gsb?a=1", "Title ON", "3", "1" },
 	};
 	for (const Route &r : routes) {
 		const auto gsb = h.send("GET", r.path);
@@ -2117,7 +2117,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "jop:cus2", "/jop_2.gsb" },
 		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
-		{ "opennova:0", "/opennova_0.gsb" },
+		{ "acidgambit:0", "/acidgambit_0.gsb" },
 		{ "nobody:1", "/jop_2.gsb" },
 	};
 	for (const Prepared &p : prepared) {
@@ -2141,8 +2141,8 @@ int test_lobby_per_title(Harness &h) {
 		const char *gsb;
 	};
 	const Later later[] = {
-		{ "GT=opennova:0", "urls.htm", "/opennova_0.gsb" },
-		{ "GT=opennova:0", "dfx2_0_urls.htm", "/opennova_0.gsb" },
+		{ "GT=acidgambit:0", "urls.htm", "/acidgambit_0.gsb" },
+		{ "GT=acidgambit:0", "dfx2_0_urls.htm", "/acidgambit_0.gsb" },
 		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
@@ -2170,7 +2170,7 @@ int test_lobby_per_title(Harness &h) {
 	const std::string jo_start = start_of("url=jop_2_start.htm");
 	TEST_EXPECT(!dfx2_start.empty() && dfx2_start != jo_start);
 	TEST_EXPECT(start_of("gt=dfx2:0:cus:buffy") == dfx2_start);
-	TEST_EXPECT(start_of("gt=opennova:0") == jo_start);
+	TEST_EXPECT(start_of("gt=acidgambit:0") == jo_start);
 	TEST_EXPECT(start_of("gt=jop:cus2") == jo_start);
 	return 0;
 }

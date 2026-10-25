@@ -605,7 +605,7 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`; 502; 503 |
 
 The seeded updater products include `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
-`OPENNOVA` / `OPENNOVA.CMD` (its content), `ONJO1` / `ONJO1.CMD` (its `onjo1` expansion),
+`ACIDGAMBIT` / `ACIDGAMBIT.CMD` (its content), `NIFTY` / `NIFTY.CMD` (its `nifty` expansion),
 and `DFX2` / `DFX2.CMD`, alongside the existing `JOTRus` and `JOEus` products. The runtime
 uses a standalone `update` row: it appears in Releases but has no hosted game tree and
 does not appear among Game data or hosted-server choices. OpenNova content releases are

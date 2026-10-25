@@ -1768,7 +1768,7 @@ void HttpListener::register_legacy_host_join_routes(
 	// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
 	//
 	// One route per games row, at its gsb_path (/jop_2.gsb, /dfx2_0.gsb,
-	// /opennova_0.gsb), listing the hosts registered under its LobbyName; a
+	// /acidgambit_0.gsb), listing the hosts registered under its LobbyName; a
 	// column a host reported nothing for shows its game's VER1 / Expbits.
 	auto handle_gsb = [this](const catalog::GameRow &game) {
 		// Phase I.2: backed by active_hosts, filtered to the requested game

@@ -374,7 +374,7 @@ int test_try_lists_the_mods() {
 	if (!project.made) return 1;
 	// The game install the project plays over: two expansion folders, one named by its loose <n>.bin.
 	const std::string install = project.dir.file("install");
-	bool ok = test_io::write_file(install + "/expansion/onjo1/onjo1.bin", exp_info("OpenNova: Indigo Storm", "A storm."));
+	bool ok = test_io::write_file(install + "/expansion/nifty/nifty.bin", exp_info("OpenNova: Indigo Storm", "A storm."));
 	ok = ok && test_io::write_file(install + "/expansion/jox01/version.txt", { '1' });
 	const std::string mods = screen("OPTIONS",
 			button("list", "AVAIL_LIST", 100, 100, 390, 300,
@@ -410,7 +410,7 @@ int test_try_lists_the_mods() {
 	TEST_EXPECT(project.item("MOD_DESC").get_string("text", "") == "A storm.");
 	TEST_EXPECT(project.click(600, 420));
 	TEST_EXPECT(project.last_outcome() ==
-	            "apply_expansion: the game would switch to OpenNova: Indigo Storm (expansion\\onjo1) for this run, "
+	            "apply_expansion: the game would switch to OpenNova: Indigo Storm (expansion\\nifty) for this run, "
 	            "reloading everything and showing its main menu");
 	return 0;
 }

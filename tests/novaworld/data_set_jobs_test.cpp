@@ -601,11 +601,11 @@ int test_validate() {
 int test_native_first_release() {
 	Rig rig("data_set_jobs_native_first");
 	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
-	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/onjo1"), true, "onjo1"));
+	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/nifty"), true, "nifty"));
 	update::SfsPackage package;
 	const int64_t id = rig.upload_release(rig.temp.root(), "native first", package,
-			{ { "", "", "OPENNOVA.CMD", "OpenNova", "1.0", "opennova.exe" },
-					{ "expansion/onjo1", "onjo1", "ONJO1.CMD", "OpenNova JO", "1.0", "" } }, true);
+			{ { "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" },
+					{ "expansion/nifty", "nifty", "NIFTY.CMD", "OpenNova JO", "1.0", "" } }, true);
 	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft);
 	const int64_t native = rig.seeded("OP: Acid Gambit");
 	const int64_t expansion = rig.seeded("OP: Nifty Package");
@@ -623,12 +623,12 @@ int test_native_first_release() {
 	const auto installed_expansion = find_data_set(rig.db, expansion);
 	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id &&
 			!installed_expansion->baseline_tree_id);
-	for (const char *name : { "onjo1.pff", "onjo1L.pff" }) {
-		const std::string canonical = canonical_tree_file(DataSetKind::Expansion, "onjo1", name);
+	for (const char *name : { "nifty.pff", "niftyL.pff" }) {
+		const std::string canonical = canonical_tree_file(DataSetKind::Expansion, "nifty", name);
 		const std::string installed =
 				rig.store.path_of(tree_prefix(*installed_expansion->current_tree_id) + canonical);
 		TEST_EXPECT(archive_entries(installed) ==
-				archive_entries(rig.temp.file("to/expansion/onjo1") + "/" + name));
+				archive_entries(rig.temp.file("to/expansion/nifty") + "/" + name));
 	}
 	return 0;
 }

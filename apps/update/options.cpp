@@ -21,7 +21,7 @@ bool number(const std::string &s, uint64_t &out) {
 }
 
 const char *usage() {
-	return "update.exe [--check] /game <opennova|jo|dfx2> [--runtime-dir <dir>]\n"
+	return "update.exe [--check] /game <acidgambit|jo|dfx2> [--runtime-dir <dir>]\n"
 			"  [--resource-dir <dir>] [--no-runtime] [--server <host>] [--port <n>]\n"
 			"  [--parent-pid <pid>] [/RUN] [--run-arg <argument>]... [/VERBOSE]\n"
 			"Legacy: update.exe <window-handle> /DIR <install> /RUN /VERBOSE\n"
@@ -75,8 +75,8 @@ bool parse_options(const std::vector<std::string> &args,
 			}
 		}
 	}
-	if (o.game != "opennova" && o.game != "jo" && o.game != "dfx2") {
-		error = "/game must be opennova, jo or dfx2"; return false;
+	if (o.game != "acidgambit" && o.game != "jo" && o.game != "dfx2") {
+		error = "/game must be acidgambit, jo or dfx2"; return false;
 	}
 	if (explicit_game) o.legacy = false;
 	o.game_explicit = explicit_game;

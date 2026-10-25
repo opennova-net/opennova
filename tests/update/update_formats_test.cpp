@@ -86,7 +86,7 @@ int test_wizard() {
 	// content's; any other (BHD's, an expansion's) none.
 	TEST_EXPECT(wizard_product(wizard.cmd) == "jo");
 	TEST_EXPECT(wizard_product(" dfx2.cmd ") == "dfx2");
-	TEST_EXPECT(wizard_product("OPENNOVA.CMD") == "opennova");
+	TEST_EXPECT(wizard_product("ACIDGAMBIT.CMD") == "acidgambit");
 	TEST_EXPECT(wizard_product("DFBHD.CMD").empty() && wizard_product("JOEPTR.CMD").empty() &&
 			wizard_product("").empty());
 
