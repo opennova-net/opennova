@@ -83,7 +83,7 @@ opennova-update-tool.exe
     the install to update it to, inspects one, and serves packed updates
     over NovaLogic's updater protocol, so a stock UPDATE.EXE (or OpenNova's)
     updates from it: "opennova-update-tool build --from <baseline> --to
-    <new> --out update.sfs --base JOPTR.CMD [--expansion jox01=JOEPTR.CMD]".
+    <new> --out update.sfs --base JOPTR.CMD --version <v> [--expansion jox01=JOEPTR.CMD]".
 
 opennova-wire.exe
     Decodes NovaWorld in-game traffic from a .pcap/.pcapng capture, a .sph

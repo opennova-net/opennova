@@ -43,7 +43,7 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(parse_launch_flags({}).resource_dir.empty());
     CHECK(!parse_launch_flags({}).resource_dir_given);
     // The flag with no value is present but empty: the shell's usage error,
-    // distinct from no flag at all (the bundled assets/ boot).
+    // distinct from no flag at all (the executable directory).
     const LaunchFlags bare = parse_launch_flags({"game.exe", "--resource-dir"});
     CHECK(bare.resource_dir.empty() && bare.resource_dir_given);
     // /NOHUD: the whole token in any case; a prefix or suffix is no match
@@ -254,6 +254,24 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_game(none, " DFX ") == "dfx");
     CHECK(launch_game(none, "") == "jo");
     CHECK(none.resource_dir.empty());
+    // No /game: the folder's product, a folder with no wizard OpenNova's, a foreign one none.
+    CHECK(launch_product(none, "") == "opennova" && launch_product_supported(none, ""));
+    CHECK(launch_product(none, "dfx2") == "dfx2" && launch_product_supported(none, "dfx2"));
+    CHECK(launch_product(none, kForeignFolder).empty() && !launch_product_supported(none, kForeignFolder));
+    CHECK(launch_game(none, launch_product(none, "jo")) == "jo");
+    CHECK(launch_game(none, launch_product(none, "dfx2")) == "dfx2");
+    CHECK(launch_game(none, launch_product(none, kForeignFolder)) == "jo");
+    // /game wins over the folder, a foreign one too.
+    CHECK(launch_product(parse_launch_flags({"/game", "Jo"}), "dfx2") == "jo");
+    CHECK(launch_product_supported(parse_launch_flags({"/game", "jo"}), kForeignFolder));
+    CHECK(launch_game(parse_launch_flags({"/game", "OPENNOVA"}), "dfx2") == "jo");
+    CHECK(launch_game(parse_launch_flags({"/game", "DFX2"}), "opennova") == "dfx2");
+    CHECK(!launch_product_supported(parse_launch_flags({"/game", "missing"}), ""));
+    CHECK(!launch_product_supported(parse_launch_flags({"/game", "dfx"}), ""));
+    CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
+    CHECK(!launch_product_supported(parse_launch_flags({"/game"}), "jo"));
+    CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
+    CHECK(parse_launch_flags({"--", "--after-update"}).after_update && !none.after_update);
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
     CHECK(launch_expansion(set, "revx02") == "jox01");
     CHECK(launch_game(set, "dfx") == "jodemo");
@@ -276,6 +294,39 @@ void test_path_join() {
     CHECK(boot_path_join("C:/exe", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:/exe/", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:\\exe\\", "assets") == "C:\\exe\\assets");
+}
+
+// The product a folder holds, from its UPDATE.WIZ (found case-insensitively): JO:CA's and
+// the Steam DFX2's wizards name theirs, OpenNova content's its own; a folder with no wizard
+// none; a wizard naming any other game (BHD's DFBHD.CMD) a foreign folder. ADR 0067 d2.
+void test_folder_product() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(test_paths_temp_dir()) /
+            ("opennova_folder_product_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct TempRoot {
+        fs::path path;
+        ~TempRoot() {
+            std::error_code ignored;
+            fs::remove_all(path, ignored);
+        }
+    } const cleanup{root};
+    const auto folder = [&](const char *name, const char *wizard_name, const char *text) {
+        const fs::path dir = root / name;
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        if (wizard_name) std::ofstream((dir / wizard_name).string(), std::ios::binary) << text;
+        return dir.string();
+    };
+    CHECK(folder_product(folder("jo", "UPDATE.WIZ",
+            "[HEADER]\r\nCMD=JOPTR.CMD\r\nURL=ftp.novaworld.com\r\nPRODUCT_LOGIN=JOTRqq\r\n")) == "jo");
+    CHECK(folder_product(folder("dfx2", "update.wiz", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n")) ==
+          "dfx2");
+    CHECK(folder_product(folder("opennova", "UPDATE.WIZ", "[HEADER]\r\nCMD=OPENNOVA.CMD\r\n")) == "opennova");
+    CHECK(folder_product(folder("bhd", "Update.Wiz", "[HEADER]\r\nCMD=DFBHD.CMD\r\n")) == kForeignFolder);
+    CHECK(folder_product(folder("unread", "UPDATE.WIZ", "")) == kForeignFolder);
+    CHECK(folder_product(folder("fresh", nullptr, "")).empty());
+    CHECK(folder_product((root / "absent").string()).empty());
+    CHECK(folder_product("").empty());
 }
 
 // An install mounts as a launch with the flags mounts it: a stock launch reads the
@@ -348,6 +399,7 @@ int main() {
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();
     test_repeated_flags_take_the_last_value();
     test_path_join();
+    test_folder_product();
     test_mount_install();
     if (failures == 0) std::printf("boot_policy_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

@@ -582,7 +582,7 @@ def cmd_launch(args: argparse.Namespace) -> int:
         if value not in (None, ""):
             argv += [flag, str(value)]
     argv += list(args.game_args or [])
-    argv += ["--mcp-port", str(port)]
+    argv += ["--no-update", "--mcp-port", str(port)]
 
     stdout_log = Path(args.stdout_log) if args.stdout_log else \
         Path(tempfile.gettempdir()) / f"opennova-game-mcp-{port}.log"
@@ -983,9 +983,9 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.add_argument("--loose", action="store_true", help="/d: loose files beside the archives override them")
     launch.add_argument("--loose-root", action="store_true", help="--loose-root: mount an archive-less directory as loose files")
-    launch.add_argument("--resource-dir", default=None, help="game data directory (default: the base game, assets/)")
+    launch.add_argument("--resource-dir", default=None, help="exported OpenNova content or an existing retail install")
     launch.add_argument("--exp", default=None, help="/exp <name>: mount an expansion")
-    launch.add_argument("--game", default=None, help="/game <code>: jo, jodemo, ...")
+    launch.add_argument("--game", default=None, help="/game <code>: opennova, jo or dfx2 (default: the folder's UPDATE.WIZ)")
     launch.add_argument("--loose-mission", default=None, help="boot this loose .bms from --resource-dir")
     launch.add_argument("--mission", default=None, help="boot straight into this single-player mission")
     launch.add_argument("--lan-host", default=None, metavar="MISSION", help="host this mission as a LAN listen host")

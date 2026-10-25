@@ -5206,8 +5206,8 @@ int test_login_row_kept_alive(Harness &h) {
 		nws::jobs::NewJob prune;
 		prune.kind = nws::jobs::kJobActiveSessionsPrune;
 		prune.dedupe_key = prune.kind;
-		if (nws::jobs::enqueue(*h.pool.acquire(), prune) <= 0 ||
-				nws::jobs::run_due(h.pool, prunes) != 1)
+		const auto enqueued = nws::jobs::enqueue(*h.pool.acquire(), prune);
+		if (enqueued <= 0 || nws::jobs::run_due(h.pool, prunes) != 1)
 			return -1;
 		return static_cast<int64_t>(
 				h.pool.acquire()
@@ -7829,8 +7829,8 @@ int test_billing_routes(Harness &h) {
 	reply = post("/api/billing/checkout/cancel", hal_s);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["released"].b());
-	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), hal).empty() &&
-			billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session.empty());
+	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), hal).empty());
+	TEST_EXPECT(billing::customer_of(*h.pool.acquire(), hal)->open_checkout_session.empty());
 	{
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		TEST_EXPECT(h.stripe->checkout_sessions[hal_session].status == "expired");
@@ -8033,8 +8033,9 @@ int test_billing_capacity(Harness &h) {
 	// `n` servers granted between Kim and Pat (16 each at most).
 	const auto grant_shared = [&h, kim, pat](int64_t n) {
 		const int to_kim = static_cast<int>(std::min<int64_t>(n, 16));
-		return billing::set_comp_grants(*h.pool.acquire(), kim, { to_kim, 0 }) &&
-				billing::set_comp_grants(*h.pool.acquire(), pat, { static_cast<int>(n - to_kim), 0 });
+		auto db = h.pool.acquire();
+		return billing::set_comp_grants(*db, kim, { to_kim, 0 }) &&
+				billing::set_comp_grants(*db, pat, { static_cast<int>(n - to_kim), 0 });
 	};
 	auto checkout = [&h](const std::string &session, const char *item) {
 		return h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(session) },
@@ -8110,11 +8111,12 @@ int test_billing_capacity(Harness &h) {
 	reply = checkout(mo_s, "tier1");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "sold_out");
 	// Her session expires unpaid: its event drops the reservation, and Mo's goes through.
+	const auto lee_customer = billing::customer_of(*h.pool.acquire(), lee);
 	const std::string expired = "{\"id\":\"evt_cap_expired\",\"object\":\"event\",\"type\":\"checkout.session.expired\","
 								"\"livemode\":false,\"created\":" +
-			std::to_string(billing::unix_now()) + ",\"data\":{\"object\":{\"id\":\"" + open_session(lee) +
+			std::to_string(billing::unix_now()) + ",\"data\":{\"object\":{\"id\":\"" + lee_customer->open_checkout_session +
 			"\",\"object\":\"checkout.session\",\"customer\":\"" +
-			billing::customer_of(*h.pool.acquire(), lee)->stripe_customer_id + "\"}}}";
+			lee_customer->stripe_customer_id + "\"}}}";
 	reply = h.send("POST", "/api/billing/webhook", { kJson, stripe_signature(expired, billing::unix_now()) }, expired);
 	TEST_EXPECT(reply.code == 200 && billing::live_reservations_of(*h.pool.acquire(), lee).empty());
 	reply = checkout(mo_s, "tier1");

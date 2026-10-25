@@ -11,12 +11,12 @@ const MenuShellScript := preload("res://game/menu_shell.gd")
 const MAIN_FIXTURE := "mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
-# Our own base game's menus (assets/, ADR 0048): they author the controls the
+# Focused menu-contract fixtures: they author the controls the
 # shipped jo_options / jo_game / jo_sp screens carry, under the shipped names, so
 # the shell's per-control policy runs over a whole real screen.
-const ASSET_OPTIONS := "res://../assets/options.mnu"  # OPTIONS, MUSICVAR 9: sliders, video, crosshair, Mods, remap
-const ASSET_GAME := "res://../assets/game.mnu"  # INGAME: the pause menu with its inline OPTIONS_WRAPPER
-const ASSET_SP := "res://../assets/sp.mnu"  # SINGLE_PLAYER: the IA_LIST mission list + BRIEFING + ACCEPT
+const ASSET_OPTIONS := "res://../fixtures/game/options.mnu"  # OPTIONS, MUSICVAR 9: sliders, video, crosshair, Mods, remap
+const ASSET_GAME := "res://../fixtures/game/game.mnu"  # INGAME: the pause menu with its inline OPTIONS_WRAPPER
+const ASSET_SP := "res://../fixtures/game/sp.mnu"  # SINGLE_PLAYER: the IA_LIST mission list + BRIEFING + ACCEPT
 # A menu music pair the shell opens as MENUMUS.BIN / MENUMUS.SBF (the synthetic script and bank).
 const MENU_MUSIC_SCRIPT_FIXTURE := "res://../fixtures/mus/synth_menumus.bin"
 const MENU_MUSIC_BANK_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"
@@ -45,7 +45,7 @@ class _MissingBankMusicRoot extends RefCounted:
 		return PackedByteArray([1])
 
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _state_config: TestFs.Snapshot
 var _run_dir := ""
@@ -106,7 +106,7 @@ func _copy(source: String, dst: String) -> void:
 	TestFs.write_bytes(self, dst, _fixture_bytes(source))
 
 
-# The bytes of a fixture: a res:// path reads directly (an assets/ menu, the
+# The bytes of a fixture: a res:// path reads directly (a contract menu, the
 # synthetic music pair); a fixture name above is the synthetic screen it keys.
 func _fixture_bytes(source: String) -> PackedByteArray:
 	if source.begins_with("res://"):
@@ -1636,7 +1636,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 func _persisted_expansion_key() -> bool:
 	var config := ConfigFile.new()
 	return config.load(STATE_CONFIG_PATH) == OK \
-			and config.has_section_key(ResourceDirSettings.SECTION, "expansion")
+			and config.has_section_key("resources", "expansion")
 
 
 # D-MNU-14: the SP mission list rides the catalog — Co-op-family rows only,

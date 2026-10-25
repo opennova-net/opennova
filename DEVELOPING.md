@@ -139,8 +139,53 @@ deferred. A stale DLL shows up as GDScript "class not found" errors for classes 
 
 ## Run the game
 
+### Runtime and content distribution
+
+The engine repository and its CI hold and ship no game data. The Windows runtime
+package contains the engine, its native dependencies, `update.exe`, and
+`revupdat.exe`; a standalone installation downloads OpenNova content on first run.
+
+Every product's game data is an OpenNova Editor project the maintainer keeps outside
+git: OpenNova's base game and Indigo Storm (with their Blender sources), and Joint
+Operations, Escalation and DFX2 imported from their stock installs. A release is
+built from its project and uploaded in the admin's Game data (Releases: upload,
+validate, Publish), or with `scripts/publish_update.py`:
+
+```sh
+# Our own game: a full package, carrying the last published one's removals.
+python scripts/package_release.py --product OPENNOVA --project PROJECTS/OPENNOVA \
+    --version 0.2.0 --previous PROJECTS/RELEASES/OPENNOVA-0.1.0.sfs
+# A retail game: a patch of only what its project changed against the stock install.
+python scripts/package_release.py --product JO --project PROJECTS/JO \
+    --install "<the Joint Operations install>" --version 1.7.5.8
+```
+
+The version goes into the package's command file; no version file is read or written.
+A retail patch diffs two exports by our own writer (the project's and a fresh import
+of the stock install's), so only changed files get rows, each into the archive the
+stock install holds it in. Its hosted tree is built on publish from the data set's
+stock baseline, uploaded once with "Upload data".
+
+The game product is `/game opennova`, `/game jo` or `/game dfx2`. Without `/game`,
+the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
+`OPENNOVA.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
+another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
+updater refuses a product the folder's wizard does not name, and installs OpenNova
+content only into OpenNova's own folder or an empty one. The selected product
+and its installed expansions update independently of the OpenNova runtime. A retail
+selection requires existing game data; it does not download OpenNova's game into a
+retail installation. `--resource-dir` selects the content directory; otherwise an
+exported runtime uses its executable's directory.
+
+Startup checks do not block an installed game. An available update reveals the main
+menu's UPDATE control, which launches the updater and preserves the launch arguments
+when restarting. Editor Play uses `--no-update` so a temporary project run is never
+an update target. The delivery remains NovaLogic's wizard, command, SFS, NLZ, and TCP
+formats, with their existing checksums; no signature manifest or ownership database
+is part of this first implementation.
+
 ```bash
-$GODOT_BIN --path godot -- --resource-dir "C:/Games/Joint Operations"
+$GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" --no-update
 ```
 
 On a fresh checkout, import the resources once before the first run:
@@ -150,12 +195,11 @@ $GODOT_BIN --headless --path godot --import
 ```
 
 The import can crash on a cold cache; retry it as CI does. The main scene is
-the runtime game. With no arguments it boots the bundled placeholder menu from
-`assets/` (ADR 0048), whose PLAY RETAIL picks and remembers a retail install;
-pass `--resource-dir <dir>` to boot a game-data directory directly, with
-`--loose-root /d` for an extracted loose tree. The repository and downloads
-contain no retail game data. See [README.md](README.md) for packaged launch
-examples and exit codes.
+the runtime game. A source checkout needs `--resource-dir <dir>` pointing to
+exported OpenNova content or an existing retail install; add `--loose-root /d`
+for an extracted loose tree. Select the product with `/game` and use `--no-update`
+for development runs. The repository and downloads contain no retail game data.
+See [README.md](README.md) for packaged launch examples.
 
 ## Run the NovaWorld servers locally
 
@@ -369,8 +413,7 @@ Its **OpenNova service URL...** setting points it at a local stack, `http://loca
 ## Test with our Godot game
 
 1. Build the GDExtension (above) and run the project:
-   `$GODOT_BIN --path godot -- --resource-dir <game dir>`, or run it with no arguments and
-   press **PLAY RETAIL** on the placeholder menu.
+   `$GODOT_BIN --path godot -- /game jo --resource-dir <game dir> --no-update`.
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
    `NovaWorldClient` whose OpenNova target probes the local gate at `127.0.0.1:7597` in a
    source run (`NovaWorldSettings.opennova_host`; an exported build dials the live service,

@@ -625,7 +625,7 @@ const char *const kStaleBank = "fixtures/lwf/stale.lwf";
 // same (each member on the wave of the same name).
 int test_every_bank() {
 	std::vector<variant_fixtures::Input> inputs;
-	const bool all = variant_fixtures::inputs({"fixtures/lwf", "assets"}, ".lwf", {kStaleBank}, inputs);
+	const bool all = variant_fixtures::inputs({"fixtures/lwf", "fixtures/game"}, ".lwf", {kStaleBank}, inputs);
 	size_t banks = 0;
 	for (const variant_fixtures::Input &input : inputs) {
 		const std::string &name = input.label;
@@ -718,7 +718,7 @@ const char *const kShippedShapes =
 // walk reads, written from scratch and read back as the same profiles; the set-alone slot line keeps the 1.2 its
 // longer neighbour left in the third column (78643 in 16.16) and a second column of 0, as the game reads them.
 int test_profiles_round_trip() {
-	const std::string ours = test_io::read_file_text(repo() + "/assets/SndProf.def");
+	const std::string ours = "begin \"default\" default\nend\n";
 	TEST_EXPECT(!ours.empty());
 	for (const std::string &text : {std::string(kShippedShapes), ours}) {
 		audio::SoundProfileTable read;
@@ -747,10 +747,10 @@ int test_profiles_round_trip() {
 int test_install_import_follows_sounds() {
 	test_temp::TempDir dir("opennova_editor_sound_import_plan");
 	const std::string install = dir.file("install");
-	const auto asset = [](const char *name) { return test_io::read_file_text(repo() + "/assets/" + name); };
-	TEST_EXPECT(import_test::write_pff(install + "/localres.pff", {{"ammo.def", asset("ammo.def")},
-	                                                               {"game.lwf", asset("game.lwf")},
-	                                                               {"menu.lwf", asset("menu.lwf")}}));
+	const auto packed_bank = bank_bytes({"tone"}, "TEST_IMPACT", lwf::kFlagInternal | lwf::kFlagExternal);
+	TEST_EXPECT(import_test::write_pff(install + "/localres.pff",
+			{{"ammo.def", "ammo TEST_AMMO\nkz_sound TEST_IMPACT\nend\n"},
+			 {"game.lwf", std::string(packed_bank.begin(), packed_bank.end())}}));
 	// A project of no bank of its own (one of the name would keep its copy: ImportPlan::shadowed).
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;

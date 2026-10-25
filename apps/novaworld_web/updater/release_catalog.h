@@ -14,7 +14,11 @@
 // so the refresh runs on a thread of its own beside the listener's pump. SERVER.LST names
 // one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a data set served
 // through the Switcher's hosts block (retail_updater), else the deployment's update host
-// (ONNET_UPDATE_HOST). Service policy, not a port.
+// (ONNET_UPDATE_HOST). A retail updater product (retail_updater) with no published release
+// is served as current: a package of one section holding its command file with no rows (its
+// EXE the title's executable, so a stock /RUN still restarts the game),
+// written into the cache under its sha, so a check finds nothing to fetch until a release is
+// published (ADR 0067). Service policy, not a port.
 
 #include "data_sets/data_set_repository.h"
 
@@ -88,6 +92,11 @@ private:
 	// The product for `section`: its package in the cache (fetched when missing), its
 	// section unpacked (when missing), its files listed. False with `why`.
 	bool load_section(ObjectStore &store, const hosted::PublishedSection &section, Product &product,
+			std::string &why);
+	// The current package of `row`, a retail product with no published release: one section
+	// holding its command file with no rows, written into the cache under its sha (kept
+	// there while it is live), and the section that names it. False with `why`.
+	bool current_section(const hosted::DataSetRow &row, hosted::PublishedSection &section,
 			std::string &why);
 	// The package's section keys, from the memo or the package read once; `read` whether
 	// the package's bytes were read into `bytes` (left empty otherwise).

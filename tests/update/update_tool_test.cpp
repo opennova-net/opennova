@@ -15,6 +15,7 @@
 #include <base/io/file_io.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
+#include <formats/update/apply.h>
 #include <formats/update/nlz.h>
 #include <formats/update/update_crc.h>
 #include <net/update/update_wire.h>
@@ -47,8 +48,8 @@ int test_build(const test_temp::TempDir &dir, update::SfsPackage &package) {
 	spec.from = io::os_path(dir.file("from"));
 	spec.to = io::os_path(dir.file("to"));
 	spec.package_product = "Synthetic Product";
-	spec.products.push_back({ "", "", "SYNPTR.CMD", "", "", "" });
-	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "", "", "" });
+	spec.products.push_back({ "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" });
+	spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "Synthetic Expansion", "1.0.0.11", "" });
 	std::vector<update_tool::ProductReport> report;
 	std::string error;
 	TEST_EXPECT(update_tool::build_update_package(spec, package, report, error));
@@ -65,7 +66,8 @@ int test_build(const test_temp::TempDir &dir, update::SfsPackage &package) {
 	TEST_EXPECT(cmd.has_value());
 	if (!cmd)
 		return 1;
-	// The header from version.txt; the loose rows and removes at the root, then the archive's.
+	// The header the release names (no version file read: version.txt is a loose file like any); the
+	// loose rows and removes at the root, then the archive's.
 	TEST_EXPECT(cmd->product == "Synthetic Product" && cmd->version == "1.0.0.10");
 	TEST_EXPECT(row(*cmd, "same.txt") == nullptr && row(*cmd, "update.log") == nullptr);
 	const update::CommandRow *version = row(*cmd, "version.txt");
@@ -179,6 +181,88 @@ bool exchange(net::Socket &socket, const std::string &request, size_t count,
 	return true;
 }
 
+int test_history(const test_temp::TempDir &dir) {
+	const std::string base = dir.file("history-base"), first = dir.file("history-first"), latest = dir.file("history-latest");
+	TEST_EXPECT(write_text(base + "/state.txt", "baseline value"));
+	TEST_EXPECT(make_archive(base + "/res.pff", {{"base.def", bytes("baseline entry"), 1700000000}}));
+	TEST_EXPECT(write_text(first + "/state.txt", "first release value"));
+	TEST_EXPECT(write_text(first + "/temporary.txt", "removed next release"));
+	TEST_EXPECT(make_archive(first + "/res.pff", {{"base.def", bytes("changed entry"), 1700000001},
+			{"temp.def", bytes("removed next release"), 1700000001}}));
+	TEST_EXPECT(write_text(latest + "/state.txt", "baseline value"));
+	TEST_EXPECT(make_archive(latest + "/res.pff", {{"base.def", bytes("baseline entry"), 1700000000}}));
+	update_tool::BuildSpec spec;
+	spec.from = io::os_path(base);
+	spec.to = io::os_path(first);
+	spec.full = true;
+	spec.products.push_back({"", "", "HISTORY.CMD", "Synthetic history", "1", ""});
+	std::vector<update_tool::ProductReport> report;
+	std::string error;
+	update::SfsPackage p1, p2, p3;
+	TEST_EXPECT(update_tool::build_update_package(spec, p1, report, error));
+	spec.to = io::os_path(latest);
+	spec.previous = p1;
+	spec.products[0].version = "2";
+	TEST_EXPECT(update_tool::build_update_package(spec, p2, report, error));
+	spec.previous = p2;
+	spec.products[0].version = "3";
+	TEST_EXPECT(update_tool::build_update_package(spec, p3, report, error));
+	const auto cmd = update::read_command_file(std::string(p3.sections[0].entries[0].data.begin(), p3.sections[0].entries[0].data.end()));
+	TEST_EXPECT(cmd && row(*cmd, "state.txt") && row(*cmd, "base.def"));
+	TEST_EXPECT(row(*cmd, "temporary.txt") && row(*cmd, "temporary.txt")->type == update::CommandType::Remove);
+	TEST_EXPECT(row(*cmd, "temp.def") && row(*cmd, "temp.def")->type == update::CommandType::Remove);
+	update::ApplyReport applied;
+	for (const char *name : {"history-skip", "history-fresh"}) {
+		const fs::path installed = io::os_path(dir.file(name));
+		if (std::string(name) == "history-skip")
+			TEST_EXPECT(update::apply_section(p1.sections[0], "HISTORY.CMD", installed, applied, error));
+		TEST_EXPECT(write_text(io::utf8_path(installed / "player.sav"), "a player's file"));
+		TEST_EXPECT(update::apply_section(p3.sections[0], "HISTORY.CMD", installed, applied, error));
+		std::string text;
+		TEST_EXPECT(io::read_file_text(io::utf8_path(installed / "state.txt"), text, error) && text == "baseline value");
+		TEST_EXPECT(!fs::exists(installed / "temporary.txt") && fs::exists(installed / "player.sav"));
+		pff::PffArchive archive{};
+		TEST_EXPECT(pff::pff_open(&archive, io::utf8_path(installed / "res.pff").c_str()) == 0);
+		const pff::PffEntry *entry = pff::pff_find(&archive, "base.def");
+		bool correct = entry != nullptr && pff::pff_find(&archive, "temp.def") == nullptr;
+		std::vector<uint8_t> data(entry ? entry->size : 0);
+		if (entry) correct = correct && pff::pff_extract(&archive, entry, data.data(), data.size()) == 0 && data == bytes("baseline entry");
+		pff::pff_close(&archive);
+		TEST_EXPECT(correct);
+	}
+	// The runtime's header is the release's alone: a version text in its tree is read for nothing.
+	TEST_EXPECT(write_text(latest + "/version.txt", "OpenNova Runtime, V9.9.9;"));
+	spec.previous.reset();
+	spec.products[0] = {"", "", "ONRUNTIME.CMD", "OpenNova Runtime", "3.2.1", "opennova.exe"};
+	TEST_EXPECT(update_tool::build_update_package(spec, p3, report, error));
+	const auto runtime = update::read_command_file(std::string(p3.sections[0].entries[0].data.begin(), p3.sections[0].entries[0].data.end()));
+	TEST_EXPECT(runtime && runtime->product == "OpenNova Runtime" && runtime->version == "3.2.1");
+	TEST_EXPECT(row(*runtime, "version.txt") != nullptr);
+	// An archive removed for a release and then recreated keeps its member history.
+	// A client skipping that absent release must lose the old member too.
+	const std::string absent = dir.file("history-absent"), recreated = dir.file("history-recreated");
+	TEST_EXPECT(write_text(absent + "/state.txt", "archive absent"));
+	TEST_EXPECT(write_text(recreated + "/state.txt", "archive restored"));
+	TEST_EXPECT(make_archive(recreated + "/res.pff", {{"replacement.def", bytes("new member"), 1700000010}}));
+	spec.products[0] = {"", "", "HISTORY.CMD", "Synthetic history", "4", ""};
+	spec.previous = p1;
+	spec.to = io::os_path(absent);
+	TEST_EXPECT(update_tool::build_update_package(spec, p2, report, error));
+	spec.previous = p2;
+	spec.to = io::os_path(recreated);
+	TEST_EXPECT(update_tool::build_update_package(spec, p3, report, error));
+	const fs::path skipped = io::os_path(dir.file("history-archive-skip"));
+	TEST_EXPECT(update::apply_section(p1.sections[0], "HISTORY.CMD", skipped, applied, error));
+	TEST_EXPECT(update::apply_section(p3.sections[0], "HISTORY.CMD", skipped, applied, error));
+	pff::PffArchive archive{};
+	TEST_EXPECT(pff::pff_open(&archive, io::utf8_path(skipped / "res.pff").c_str()) == 0);
+	const bool recreated_cleanly = pff::pff_find(&archive, "replacement.def") &&
+			!pff::pff_find(&archive, "base.def") && !pff::pff_find(&archive, "temp.def");
+	pff::pff_close(&archive);
+	TEST_EXPECT(recreated_cleanly);
+	return 0;
+}
+
 int test_serve(const update::SfsPackage &package) {
 	update_tool::PackageCatalog catalog({ "ftp.novaworld.com" });
 	std::string error;
@@ -242,6 +326,8 @@ int main() {
 	if (int rc = test_build(dir, package))
 		return rc;
 	if (int rc = test_serve(package))
+		return rc;
+	if (int rc = test_history(dir))
 		return rc;
 	std::printf("update_tool: ok\n");
 	return 0;

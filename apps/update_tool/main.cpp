@@ -13,6 +13,7 @@
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <formats/update/command_file.h>
 #include <formats/update/nlz.h>
 #include <formats/update/sfs.h>
@@ -36,8 +37,10 @@ using namespace opennova;
 const char kUsage[] =
 		"usage:\n"
 		"  opennova-update-tool build --from <dir> --to <dir> --out <file.sfs>\n"
-		"      --base <CMD> [--expansion <name>=<CMD>]... [--product-name <registry name>]\n"
-		"      [--exe <file>] [--exclude <path|dir/>]... [--no-remove] [--prefix <update.exe>]\n"
+		"      --base <CMD> [--expansion <name>=<CMD>]... --version <version> [--product <name>]\n"
+		"      [--product-name <registry name>] [--exe <file>] [--exclude <path|dir/>]...\n"
+		"      [--no-remove] [--prefix <update.exe>] [--full [--previous <file.sfs>]]\n"
+		"      [--command-out <file>]\n"
 		"  opennova-update-tool inspect <file.sfs>\n"
 		"  opennova-update-tool serve --package <file.sfs>... --product <LOGIN>=<CMD>...\n"
 		"      [--server-host <name>]... [--port <n>]... [--loopback]\n";
@@ -69,7 +72,7 @@ bool read_package(const std::string &path, update::SfsPackage &package, std::str
 
 int run_build(int argc, char **argv) {
 	update_tool::BuildSpec spec;
-	std::string out, prefix, base_cmd, exe;
+	std::string out, prefix, base_cmd, exe, previous, command_out, product, version;
 	std::vector<std::pair<std::string, std::string>> expansions;
 	for (int i = 0; i < argc; ++i) {
 		const std::string arg = argv[i];
@@ -77,6 +80,8 @@ int run_build(int argc, char **argv) {
 		const char *v = nullptr;
 		if (arg == "--no-remove") {
 			spec.removes = false;
+		} else if (arg == "--full") {
+			spec.full = true;
 		} else if ((v = value()) == nullptr) {
 			return usage_error(("missing a value after " + arg).c_str());
 		} else if (arg == "--from") {
@@ -100,6 +105,14 @@ int run_build(int argc, char **argv) {
 			spec.excludes.push_back(v);
 		} else if (arg == "--prefix") {
 			prefix = v;
+		} else if (arg == "--previous") {
+			previous = v;
+		} else if (arg == "--product") {
+			product = v;
+		} else if (arg == "--version") {
+			version = v;
+		} else if (arg == "--command-out") {
+			command_out = v;
 		} else {
 			return usage_error(("unknown option " + arg).c_str());
 		}
@@ -108,14 +121,26 @@ int run_build(int argc, char **argv) {
 		return usage_error("build needs --from, --to and --out");
 	if (base_cmd.empty() && expansions.empty())
 		return usage_error("build needs --base or an --expansion");
+	if (!command_out.empty() && base_cmd.empty())
+		return usage_error("--command-out writes the --base product's command file");
+	// The release's version and product name, in every command file it writes: no version file is
+	// read (ADR 0067).
+	if (version.empty())
+		return usage_error("build needs --version, the release's version");
 	if (!base_cmd.empty())
-		spec.products.push_back({ "", "", base_cmd, "", "", exe });
+		spec.products.push_back({ "", "", base_cmd, product, version, exe });
 	for (const auto &[name, cmd] : expansions)
-		spec.products.push_back({ "expansion/" + name, name, cmd, "", "", "" });
+		spec.products.push_back({ "expansion/" + name, name, cmd, product, version, "" });
 
 	update::SfsPackage package;
 	std::vector<update_tool::ProductReport> report;
 	std::string error;
+	if (!previous.empty()) {
+		spec.previous.emplace();
+		if (!read_package(previous, *spec.previous, error)) {
+			std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str()); return 1;
+		}
+	}
 	if (!update_tool::build_update_package(spec, package, report, error)) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
@@ -130,6 +155,22 @@ int run_build(int argc, char **argv) {
 	if (!io::write_file_atomic(out, bytes.data(), bytes.size(), error)) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
+	}
+	// The base product's command file as the package carries it: shipped beside the files it
+	// lists, an install already holds it, so the updater's first check sees them current.
+	if (!command_out.empty()) {
+		const update::SfsEntry *command = nullptr;
+		for (const update::SfsSection &section : package.sections)
+			if (section.expansion.empty())
+				for (const update::SfsEntry &entry : section.entries)
+					if (strutil::iequals(entry.name, base_cmd))
+						command = &entry;
+		if (command == nullptr ||
+				!io::write_file_atomic(command_out, command->data.data(), command->data.size(), error)) {
+			std::fprintf(stderr, "opennova-update-tool: cannot write %s: %s\n", command_out.c_str(),
+					command ? error.c_str() : "the package carries no base command file");
+			return 1;
+		}
 	}
 	for (const update_tool::ProductReport &line : report)
 		std::printf("%s: %zu loose, %zu copy, %zu remove, %zu bytes of blobs\n",

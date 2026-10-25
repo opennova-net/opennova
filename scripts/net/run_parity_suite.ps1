@@ -631,8 +631,8 @@ if ($ReferencePrefix) {
 $suiteDir = Join-Path $Repo ".scratch\parity-suites\$Prefix"
 New-Item -ItemType Directory -Force -Path $suiteDir | Out-Null
 $repoCommit = [string] (& git -C $Repo rev-parse HEAD 2>$null)
-$dllRuntime = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll")
-$dllEditor = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\libopennova_editor.windows.template_debug.x86_64.dll")
+$dllRuntime = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\opennovad.dll")
+$dllEditor = Get-Sha256OrEmpty (Join-Path $Repo "godot\bin\oneditord.dll")
 Write-Host "PARITY_SUITE_PREFIX=$Prefix"
 Write-Host ("PARITY_SUITE_DLL runtime=$(if ($dllRuntime) { $dllRuntime } else { 'absent' })" +
     " editor=$(if ($dllEditor) { $dllEditor } else { 'absent' }) commit=$repoCommit")

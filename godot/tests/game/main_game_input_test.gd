@@ -9,7 +9,7 @@ extends GutTest
 # friendly-tag mode, declutter level and color index, the sim's local view
 # (NVG), and the shell's own state.
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""

@@ -179,6 +179,8 @@ jobs:
           # The scripted game launch starts behind every window and never takes
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
+          python -B -m unittest discover -s scripts -p test_publish_update.py
+          python -B -m unittest discover -s scripts -p test_package_release.py
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
 
@@ -745,6 +747,8 @@ jobs:
           # is < 3.25).
           cmake -S godot/src -B $buildDir -G Ninja `
             "-DGODOTCPP_TARGET=$env:GODOTCPP_TARGET" `
+            "-DGODOTCPP_USE_STATIC_CPP=ON" `
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" `
             "-DCMAKE_BUILD_TYPE=$buildType" `
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
             "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
@@ -753,8 +757,8 @@ jobs:
           # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
           cmake --build $buildDir --target opennova opennova_editor_gdext
           if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }
-          foreach ($dll in @("godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll",
-                             "godot/bin/libopennova_editor.windows.$env:GODOTCPP_TARGET.x86_64.dll")) {
+          $suffix = if ($env:GODOTCPP_TARGET -eq "template_debug") { "d" } else { "" }
+          foreach ($dll in @("godot/bin/opennova$suffix.dll", "godot/bin/oneditor$suffix.dll")) {
             if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
           }
 
@@ -775,8 +779,8 @@ jobs:
           name: gdext_windows_${{ matrix.target }}
           if-no-files-found: error
           path: |
-            godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
-            godot/bin/libopennova_editor.windows.${{ matrix.target }}.x86_64.dll
+            godot/bin/opennova${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
+            godot/bin/oneditor${{ matrix.target == 'template_debug' && 'd' || '' }}.dll
 
   # The Godot suite on Windows as two shards, each on a runner of its own
   # (scripts/ci/test_suites.py GODOT_SHARDS: `shells` the scripts under
@@ -917,38 +921,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the package reads assets/ and expansions/ only
+          lfs: false   # the minimal package reads no game content
           submodules: recursive
-
-      # The models, clips and textures in assets/ ride LFS. Their objects are
-      # cached by the pointer set, so a run restores them instead of
-      # spending LFS bandwidth on every package. Like every large cache here,
-      # only master saves it: a PR-scoped copy is readable by that PR alone
-      # and crowds the repository's 10 GB cache.
-      - name: Key the bundled LFS assets
-        id: assets-lfs
-        shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the bundled LFS assets
-        id: assets-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
-
-      - name: Pull Git LFS assets (assets/ and expansions/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="assets/**,expansions/**"
-
-      - name: Save the bundled LFS assets
-        if: github.ref == 'refs/heads/master' && steps.assets-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
 
       - name: Cache Godot binary
         uses: actions/cache@v4
@@ -977,10 +951,7 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
-      # The game zip ships the OpenNova Editor's export of assets/ (ADR 0048
-      # d8), which the package script makes with opennova-project, built here
-      # from the root project as the test job builds it (Ninja + sccache over
-      # its win-root cache, read only: that job saves it).
+      # Build the updater executables and full runtime package with the root cache.
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -1026,6 +997,13 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-editor-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the full runtime update
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-runtime-windows-v*.sfs
           archive: false
           if-no-files-found: error
 

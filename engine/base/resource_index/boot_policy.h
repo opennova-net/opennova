@@ -8,8 +8,13 @@
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
-//   /game <code>  which game the data is from (e.g. "jo", "jodemo"); selects
-//                 the SCR decode key. Defaults to "jo" when absent.
+//   /game <code>  the product: "opennova", "jo" or "dfx2". Without it the launch
+//                 folder's UPDATE.WIZ names it (folder_product below); a folder
+//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
+//   --no-update  disable update checks and installation (editor Play and tests).
+//   --after-update
+//                 the launch update.exe relaunches after a first-run install: a game
+//                 that still finds no content stops instead of installing again.
 //   /LAN          every game.cfg read forces mpnovaworldhostlanonly on: a
 //                 NovaWorld host advertises LAN only.
 //   /POSTIPADDRESS <address>, /POSTPORTNUMBER <n>
@@ -24,7 +29,7 @@
 //                 override the gate response's USEJUNCTION / CLEARJUNCTION.
 //   --resource-dir <absolute path>
 //                 the game-data directory for this process. Without the flag
-//                 the shell boots its bundled assets/ (ADR 0048); the flag
+//                 the shell uses the executable's directory; the flag
 //                 with no value is a usage error.
 //   --loose-mission <name.bms>
 //                 boot the exact top-level loose BMS from --resource-dir.
@@ -95,6 +100,8 @@ namespace opennova {
 inline constexpr const char *kLaunchFlagLooseOverride = "/d";
 inline constexpr const char *kLaunchFlagExpansion = "/exp";
 inline constexpr const char *kLaunchFlagGame = "/game";
+inline constexpr const char *kLaunchFlagNoUpdate = "--no-update";
+inline constexpr const char *kLaunchFlagAfterUpdate = "--after-update";
 inline constexpr const char *kLaunchFlagResourceDir = "--resource-dir";
 inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
 inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
@@ -165,6 +172,9 @@ struct LaunchFlags {
     bool loose_override = false;   // /d
     std::string expansion;         // /exp or /mod <name>: the last one, its first 32 bytes
     std::string game;              // /game <code>, lowercased
+    bool game_given = false;
+    bool no_update = false;        // editor Play and tests never check or install updates
+    bool after_update = false;     // relaunched by update.exe after a first-run install
     std::string resource_dir;      // --resource-dir <path>
     bool resource_dir_given = false; // --resource-dir present, even without a value
     std::string loose_mission;     // --loose-mission <name.bms>
@@ -294,10 +304,24 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// Lowercased; the persisted fallback next, then "jo" — the absence of any
-// choice is the JO default. An unknown code resolves to the JO default
-// downstream (gameprofile_scr_policy_for_code).
+// The engine compatibility profile: OpenNova uses JO. The runtime passes the
+// launch's product (launch_product) as the fallback; format/tool callers pass
+// their own.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
+// The product a game folder holds, from its UPDATE.WIZ's CMD (the file found
+// case-insensitively; formats/update/update_wizard.h wizard_product): "jo",
+// "dfx2" or "opennova"; "" for a folder with no wizard (a fresh download, an
+// authoring export, a test root); kForeignFolder for a wizard naming another
+// game (BHD's DFBHD.CMD). ADR 0067 d2.
+inline constexpr const char *kForeignFolder = "foreign";
+std::string folder_product(const std::string &dir);
+// The selected distribution product: `/game` when given, else the folder's
+// (folder_product of the launch directory), a folder with no wizard being
+// OpenNova's; "" for a foreign folder. Nothing persisted ever selects it.
+std::string launch_product(const LaunchFlags &flags, const std::string &folder);
+// Whether the launch can run: a known `/game`, or no `/game` and a folder that
+// is not foreign.
+bool launch_product_supported(const LaunchFlags &flags, const std::string &folder);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);

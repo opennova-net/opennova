@@ -15,7 +15,11 @@ ALTER TABLE data_sets
     ADD COLUMN retail_updater       boolean NOT NULL DEFAULT false,
     ADD COLUMN baseline_tree_id     bigint,
     ADD COLUMN published_release_id bigint,
-    ADD CONSTRAINT data_sets_updater_check CHECK ((updater_login = '') = (command_file = ''));
+    ADD CONSTRAINT data_sets_updater_check CHECK ((updater_login = '') = (command_file = '')),
+    -- A standalone updater product: a login and its command file, and nothing a game has.
+    ADD CONSTRAINT data_sets_update_check CHECK (kind <> 'update' OR (
+        parent_id IS NULL AND expansion_code = '' AND title = '' AND game = '' AND
+        updater_login <> '' AND current_tree_id IS NULL AND baseline_tree_id IS NULL));
 CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE updater_login <> '';
 
 -- A tree is a baseline the admin uploaded (source 'baseline'), or a published release
@@ -88,3 +92,17 @@ UPDATE data_sets d SET updater_login = 'JOEus', command_file = 'JOEPTR.CMD', ret
 FROM data_sets b
 WHERE d.kind = 'expansion' AND d.expansion_code = 'jox01' AND d.parent_id = b.id
   AND b.kind = 'base' AND b.game = 'jop_2_consumer';
+-- Delta Force Xtreme 2's, as the Steam DFX2's UPDATE.WIZ names it (CMD=DFX2.CMD,
+-- PRODUCT_LOGIN=DFX2).
+UPDATE data_sets SET updater_login = 'DFX2', command_file = 'DFX2.CMD', retail_updater = true
+WHERE kind = 'base' AND game = 'dfx2_consumer';
+
+-- OpenNova's own products (ADR 0067): its runtime, a standalone updater product; its content
+-- and its onjo1 expansion's, complete packages served at the deployment's update host.
+INSERT INTO data_sets (display_name, kind, updater_login, command_file)
+VALUES ('OpenNova runtime', 'update', 'ONRUNTIME', 'ONRUNTIME.CMD');
+UPDATE data_sets SET updater_login = 'OPENNOVA', command_file = 'OPENNOVA.CMD'
+WHERE kind = 'base' AND game = 'opennova_0_consumer';
+INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file)
+SELECT 'OpenNova Joint Operations', 'expansion', id, 'onjo1', 'ONJO1', 'ONJO1.CMD'
+FROM data_sets WHERE kind = 'base' AND game = 'opennova_0_consumer';

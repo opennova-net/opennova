@@ -10,7 +10,7 @@ namespace {
 
 using db::BindValue;
 
-constexpr std::array<const char *, 2> kKindNames = { "base", "expansion" };
+constexpr std::array<const char *, 3> kKindNames = { "base", "expansion", "update" };
 constexpr std::array<const char *, 6> kTreeStateNames = { "uploading", "finalizing", "building",
 	"ready", "failed", "pruned" };
 constexpr std::array<const char *, 2> kTreeSourceNames = { "baseline", "release" };
@@ -252,7 +252,7 @@ std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id) {
 }
 
 std::vector<DataSetRow> list_data_sets(db::Database &db) {
-	return query_data_sets(db, "ORDER BY (kind = 'expansion'), id", {});
+	return query_data_sets(db, "ORDER BY (kind = 'update'), (kind = 'expansion'), id", {});
 }
 
 std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id) {
@@ -272,7 +272,7 @@ std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.game, "
 			"t.id, t.version_text, t.missions::text "
 			"FROM data_sets d JOIN data_set_trees t ON t.id = d.current_tree_id "
-			"WHERE t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
+			"WHERE d.kind <> 'update' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
 	for (const auto &r : rows) {
 		const bool base = r.as_text(2).value_or("") == "base";
 		if (base) {

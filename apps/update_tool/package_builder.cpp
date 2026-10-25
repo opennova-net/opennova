@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
+#include <formats/update/apply.h>
 #include <formats/update/nlz.h>
 #include <formats/update/update_crc.h>
 
@@ -135,6 +136,57 @@ bool claim_name(std::set<std::string> &names, const std::string &name, std::stri
 	return true;
 }
 
+// Carry the preceding complete package's removals and any names that disappeared from
+// it. The package itself is the history; there is no install ownership database.
+bool carry_previous(const BuildSpec &spec, const ProductSpec &product,
+		const std::map<std::string, fs::path> &archives, CommandFile &cmd,
+		ProductReport &report, std::string &error) {
+	if (!spec.previous || !spec.removes) return true;
+	const update::SfsEntry *previous = nullptr;
+	for (const auto &section : spec.previous->sections) {
+		if (!strutil::iequals(section.expansion, product.expansion)) continue;
+		for (const auto &entry : section.entries)
+			if (strutil::iequals(entry.name, product.command_file)) previous = &entry;
+	}
+	if (!previous) return true; // a newly registered product
+	const auto old = update::read_command_file(std::string(previous->data.begin(), previous->data.end()));
+	if (!old || !update::validate_commands(*old, error)) {
+		if (!old) error = "the previous command file cannot be read";
+		return false;
+	}
+	using Key = std::pair<std::string, std::string>;
+	std::set<Key> present, removed;
+	std::string target = ".";
+	for (const auto &row : cmd.rows) {
+		if (row.type == CommandType::Target) { target = strutil::to_lower(row.name); continue; }
+		(row.type == CommandType::Remove ? removed : present).insert({target, strutil::to_lower(row.name)});
+	}
+	for (const auto &[name, path] : archives) present.insert({".", name});
+	std::map<Key, CommandRow> carry;
+	target = ".";
+	for (const auto &row : old->rows) {
+		if (row.type == CommandType::Target) { target = strutil::to_lower(row.name); continue; }
+		Key key{target, strutil::to_lower(row.name)};
+		// Keep the member tombstones even while the entire archive is absent. If a
+		// later release recreates it, a client skipping the absent release must still
+		// remove its former members. Removing members of a missing archive is a no-op.
+		if (is_pff(target) && !archives.count(target) && !removed.count({".", target}))
+			carry[{".", target}] = {"REMOVE", CommandType::Remove, target, 0, 0, std::nullopt};
+		if (!present.count(key) && !removed.count(key))
+			carry[key] = {"REMOVE", CommandType::Remove, row.name, 0, 0, std::nullopt};
+	}
+	std::string last;
+	for (const auto &[key, row] : carry) {
+		if (last != key.first) {
+			cmd.rows.push_back({"TARGET", CommandType::Target, key.first, 0, 0, std::nullopt});
+			last = key.first;
+		}
+		cmd.rows.push_back(row);
+		++report.remove_rows;
+	}
+	return true;
+}
+
 bool build_product(const BuildSpec &spec, const ProductSpec &product, update::SfsSection &section,
 		ProductReport &report, std::string &error) {
 	const fs::path from_root = spec.from / io::os_path(product.subdir);
@@ -152,12 +204,12 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 	list_tree(from_root, excludes, base, from_files, from_archives, from_nested);
 	list_tree(to_root, excludes, base, to_files, to_archives, to_nested);
 	for (const std::string &rel : to_nested) {
-		bool changed = true;
+		bool same = false;
 		const fs::path before = from_root / io::os_path(rel);
 		if (fs::exists(before, ec) &&
-				!same_bytes(before, to_root / io::os_path(rel), changed, error))
+				!same_bytes(before, to_root / io::os_path(rel), same, error))
 			return false;
-		if (changed) {
+		if (!same) {
 			error = rel +
 					" differs, but UPDATE.EXE installs loose files at its product's root only";
 			return false;
@@ -186,13 +238,13 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 			std::vector<uint8_t> old;
 			if (!read_bytes(before->second, old, error))
 				return false;
-			if (old == content)
+			if (old == content && !spec.full)
 				continue;
 			// The precheck sees a loose file only through its size and the defective file CRC,
 			// which reads the first size/4 + size%4 bytes: a change past them at the same size
 			// never installs (witnessed 2026-10-15: a version.txt bump of its last digit).
 			// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the loose case]
-			if (old.size() == content.size() &&
+			if (!spec.full && old.size() == content.size() &&
 					update::file_crc(old.data(), old.size()) ==
 							update::file_crc(content.data(), content.size())) {
 				error = io::utf8_path(path.filename()) +
@@ -223,21 +275,6 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 						update::crc_as_signed(update::file_crc(content.data(), content.size())) });
 		add_blob(name, content);
 		++report.loose_rows;
-	}
-	if (cmd.product.empty() || cmd.version.empty()) {
-		std::vector<uint8_t> text;
-		const fs::path version = to_root / "version.txt";
-		std::string ignored;
-		if (fs::exists(version, ec) && read_bytes(version, text, ignored)) {
-			std::string product_text, version_text;
-			if (split_version_text(
-						std::string(text.begin(), text.end()), product_text, version_text)) {
-				if (cmd.product.empty())
-					cmd.product = product_text;
-				if (cmd.version.empty())
-					cmd.version = version_text;
-			}
-		}
 	}
 	if (spec.removes) {
 		for (const auto &[key, path] : from_files) {
@@ -271,7 +308,7 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 		std::vector<CommandRow> rows;
 		for (const auto &[entry_key, entry] : after) {
 			const auto old = before.find(entry_key);
-			if (old != before.end() && old->second.content == entry.content)
+			if (!spec.full && old != before.end() && old->second.content == entry.content)
 				continue;
 			if (!claim_name(names, entry.name, error))
 				return false;
@@ -298,6 +335,20 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 		cmd.rows.insert(cmd.rows.end(), rows.begin(), rows.end());
 	}
 
+	if (spec.full && spec.removes) {
+		for (const auto &[key, path] : from_archives) {
+			if (to_archives.count(key)) continue;
+			std::map<std::string, ArchiveEntry> before;
+			if (!read_archive(path, before, error)) return false;
+			if (before.empty()) continue;
+			cmd.rows.push_back({"TARGET", CommandType::Target, io::utf8_path(path.filename()), 0, 0, std::nullopt});
+			for (const auto &[name, entry] : before) {
+				cmd.rows.push_back({"REMOVE", CommandType::Remove, entry.name, 0, 0, std::nullopt});
+				++report.remove_rows;
+			}
+		}
+	}
+	if (!carry_previous(spec, product, to_archives, cmd, report, error)) return false;
 	const std::string text = update::write_command_file(cmd);
 	if (text.empty()) {
 		error = "the command file " + product.command_file +
@@ -317,23 +368,13 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 
 } // namespace
 
-bool split_version_text(std::string_view text, std::string &product, std::string &version) {
-	const size_t marker = text.find(", V");
-	if (marker == std::string_view::npos)
-		return false;
-	product = std::string(text.substr(0, marker));
-	std::string_view rest = text.substr(marker + 3);
-	const size_t end = rest.find_first_of(";\r\n");
-	version = std::string(rest.substr(0, end));
-	return !product.empty() && !version.empty();
-}
-
 bool build_update_package(const BuildSpec &spec, update::SfsPackage &out,
 		std::vector<ProductReport> &report, std::string &error) {
 	if (spec.products.empty()) {
 		error = "no product to build";
 		return false;
 	}
+	if (spec.previous && !spec.full) { error = "a previous package requires --full"; return false; }
 	update::SfsPackage package;
 	package.product = spec.package_product;
 	report.clear();

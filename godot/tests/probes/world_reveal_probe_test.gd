@@ -5,7 +5,7 @@ extends GutTest
 # dismissed (a headless shell never raises the start-mission splash: loading_screen_splash_test.gd's
 # test_maybe_begin_never_raises_headless; the splash's programmatic dismissal it calls is pinned there too).
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""

@@ -627,7 +627,7 @@ func test_the_shell_runs_the_death_screens_input_frame_over_its_key_ring() -> vo
 	var pair := _join_pair_with_pending_pick()
 	# The shell's process state, as the shell suites keep it: the config file,
 	# the cfg block and the launch flags come back as they were.
-	var config := TestFs.snapshot(ResourceDirSettings.CONFIG_PATH)
+	var config := TestFs.snapshot("user://opennova.cfg")
 	GameCfgStore.reset()
 	LaunchFlags.set_args_override(PackedStringArray([]))
 	var shell: MainGame = await WorldFixture.boot_shell(self)

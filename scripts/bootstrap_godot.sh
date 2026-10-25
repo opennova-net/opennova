@@ -11,7 +11,14 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 src="$root/third_party/gut"
 dst="$root/godot/addons/gut"
 
-git -C "$root" submodule update --init --recursive -- "third_party/gut"
+# A linked checkout may use a detached Git worktree of the existing submodule.
+# Running submodule update on that already-correct checkout rewrites the shared
+# core.worktree path and breaks the main checkout. Initialize only when needed.
+pinned="$(git -C "$root" rev-parse :third_party/gut)"
+current="$(git -C "$src" rev-parse HEAD 2>/dev/null || true)"
+if [[ "$current" != "$pinned" ]]; then
+  git -C "$root" submodule update --init --recursive -- "third_party/gut"
+fi
 
 if [[ ! -f "$src/addons/gut/plugin.cfg" ]]; then
   echo "error: GUT submodule missing expected plugin.cfg at $src/addons/gut/" >&2

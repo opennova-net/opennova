@@ -810,8 +810,7 @@ bool env_written_again(const std::string &file, const std::vector<uint8_t> &byte
 // JO:CA's ten FULL_*.ENV), and the base game's and its expansion's own. A fixture missing fails.
 int test_fixtures(const std::string &repo) {
 	size_t files = 0, issues = 0, failed = 0;
-	for (const char *file : {"fixtures/env/synth_full.env", "fixtures/env/line_forms.env", "assets/onisle1.env", "assets/onrain1.env",
-	                         "expansions/onjo1/terrain/onstorm1.env"}) {
+	for (const char *file : {"fixtures/env/synth_full.env", "fixtures/env/line_forms.env"}) {
 		const std::vector<uint8_t> bytes = test_io::read_file(repo + "/" + file);
 		if (bytes.empty()) std::fprintf(stderr, "FAIL: %s: missing\n", file);
 		if (bytes.empty() || !env_written_again(file, bytes, issues)) {

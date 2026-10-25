@@ -70,41 +70,22 @@ jobs:
 
   # Tagged releases ship the runtime, the editor with its own copy of the
   # runtime, the Blender authoring add-on, the apps and the switcher. The game carries
-  # OpenNova's own game beside the executable, and no retail data.
+  # the updater beside the executable; game content downloads on first launch.
   package-godot-windows:
     needs: gate
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
       editor_artifact_id: ${{ steps.upload_editor.outputs.artifact-id }}
+      runtime_artifact_id: ${{ steps.upload_runtime.outputs.artifact-id }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the package reads assets/ and expansions/ only
+          lfs: false   # the minimal package reads no game content
           submodules: recursive
-
-      # The models, clips and textures in assets/ ride LFS. Their objects are
-      # cached by the pointer set, so a run restores them instead of
-      # spending LFS bandwidth on every package.
-      - name: Key the bundled LFS assets
-        id: assets-lfs
-        shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache the bundled LFS assets
-        uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: ${{ steps.assets-lfs.outputs.key }}
-
-      - name: Pull Git LFS assets (assets/ and expansions/ only)
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull --include="assets/**,expansions/**"
 
       - name: Cache Godot binary
         uses: actions/cache@v4
@@ -118,9 +99,29 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      - name: Download the preceding full runtime package
+        id: previous
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $previous = gh release view --repo $env:GITHUB_REPOSITORY --json assets,tagName | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect the preceding release" }
+          $packages = @($previous.assets | Where-Object { $_.name -like 'opennova-runtime-windows-*.sfs' })
+          if ($packages.Count -gt 1) { throw "The preceding release has multiple runtime packages" }
+          if ($packages.Count -eq 1) {
+            $folder = Join-Path $env:RUNNER_TEMP 'previous-runtime'
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            gh release download $previous.tagName --repo $env:GITHUB_REPOSITORY --pattern $packages[0].name --dir $folder
+            if ($LASTEXITCODE -ne 0) { throw "Could not download the preceding runtime package" }
+            "package=$(Join-Path $folder $packages[0].name)" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Package Godot Windows apps
         shell: pwsh
-        run: scripts/package_godot_windows.ps1
+        env:
+          PREVIOUS_RUNTIME_PACKAGE: ${{ steps.previous.outputs.package }}
+        run: scripts/package_godot_windows.ps1 -PreviousRuntimePackage $env:PREVIOUS_RUNTIME_PACKAGE
 
       - name: Upload OpenNova Windows game zip
         id: upload_game
@@ -135,6 +136,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-editor-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload the full runtime update
+        id: upload_runtime
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-runtime-windows-v*.sfs
           archive: false
           if-no-files-found: error
 
@@ -173,7 +182,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-godot-windows.outputs.runtime_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -196,6 +205,15 @@ jobs:
               mv -- "${zips[0]}" "$release_zip"
             fi
           done
+          updates=(dist/opennova-runtime-windows-v*.sfs)
+          if [[ ${#updates[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one runtime update, found ${#updates[@]}"
+            exit 1
+          fi
+          release_update="dist/opennova-runtime-windows-${GITHUB_REF_NAME}.sfs"
+          if [[ "${updates[0]}" != "$release_update" ]]; then
+            mv -- "${updates[0]}" "$release_update"
+          fi
           mv -- dist/opennova-blender-addon-windows.zip "dist/opennova-blender-addon-windows-${GITHUB_REF_NAME}.zip"
           mv -- dist/opennova-apps-windows.zip "dist/opennova-apps-windows-${GITHUB_REF_NAME}.zip"
           mv -- dist/opennova-switcher-windows.zip "dist/opennova-switcher-windows-${GITHUB_REF_NAME}.zip"
@@ -216,9 +234,42 @@ jobs:
           files: |
             dist/opennova-game-windows-${{ github.ref_name }}.zip
             dist/opennova-editor-windows-${{ github.ref_name }}.zip
+            dist/opennova-runtime-windows-${{ github.ref_name }}.sfs
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip
             dist/opennova-apps-windows-${{ github.ref_name }}.zip
             dist/opennova-switcher-windows-${{ github.ref_name }}.zip
             dist/opennova-switcher-windows-${{ github.ref_name }}.zip.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  # Opt in only after the existing admin API token and portal URL are configured.
+  # The helper uploads, waits for validation, then publishes through the admin API.
+  publish-runtime-update:
+    needs: release
+    if: vars.PUBLISH_RUNTIME_UPDATES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Download and publish the released runtime update
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
+          UPDATE_PUBLISH_URL: ${{ vars.UPDATE_PUBLISH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_API_TOKEN" || { echo '::error::ADMIN_API_TOKEN is required for update publication'; exit 1; }
+          test -n "$UPDATE_PUBLISH_URL" || { echo '::error::UPDATE_PUBLISH_URL is required for update publication'; exit 1; }
+          gh release download "$GITHUB_REF_NAME" --pattern "opennova-runtime-windows-${GITHUB_REF_NAME}.sfs" --dir dist
+          umask 077
+          token_file="$(mktemp)"
+          trap 'rm -f "$token_file"' EXIT
+          printf '%s' "$ADMIN_API_TOKEN" > "$token_file"
+          unset ADMIN_API_TOKEN
+          python scripts/publish_update.py --url "$UPDATE_PUBLISH_URL" --token-file "$token_file" \
+            --package "dist/opennova-runtime-windows-${GITHUB_REF_NAME}.sfs" \
+            --name "OpenNova runtime ${GITHUB_REF_NAME}" --publish

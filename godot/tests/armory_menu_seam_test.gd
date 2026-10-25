@@ -14,10 +14,10 @@ extends GutTest
 
 # ArmoryFixture authors the catalog and strings. The shipped-value pins at the end
 # read ArmoryFixture's loadout catalog (authored rows carrying the shipped weapon.def
-# values those pins name) and our base game's assets/weapon.mnu (the authored WEAPON
+# values those pins name) and fixtures/game/weapon.mnu (the authored WEAPON
 # screen).
 
-const ASSETS_WEAPON_MNU := "res://../assets/weapon.mnu"
+const ASSETS_WEAPON_MNU := "res://../fixtures/game/weapon.mnu"
 # The shipped gametext.bin WepDes round labels the ammo rows resolve
 # [orig: WeaponDef_ParseProperty @0x54d730 resolves through GameText_GetString("WepDes", ...)]:
 # WepDes/AMMO_CAR15_556MM and WepDes/GRENADEFB.
@@ -509,7 +509,7 @@ func _load_loadout_catalog() -> WeaponDatabase:
 func _assets_weapon_driver() -> MenuDriver:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(ASSETS_WEAPON_MNU)), OK,
-			"assets/weapon.mnu loads")
+			"fixture weapon.mnu loads")
 	return MenuDriverFixture.driver_over(self, doc, "weapon.mnu", "WEAPON")
 
 
@@ -535,7 +535,7 @@ func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 			"grenade count rows keep the localized label")
 
 
-# End-to-end against the authored WEAPON screen (assets/weapon.mnu), so population
+# End-to-end against the authored WEAPON fixture, so population
 # runs through the same document the runtime opens [orig: the WEAPON screen of
 # weapon.mnu, a boot resource @0x49b3b1 family].
 func test_real_weapon_mnu_populates() -> void:

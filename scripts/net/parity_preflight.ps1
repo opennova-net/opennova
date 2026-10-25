@@ -89,8 +89,8 @@ $PinnedJox01ExeSha256 = "9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a9
 $GodotConsoleName = "Godot_v4.6.1-stable_win64_console.exe"
 $GodotRuntimeName = "Godot_v4.6.1-stable_win64.exe"
 $DllNames = @(
-    "libopennova.windows.template_debug.x86_64.dll",
-    "libopennova_editor.windows.template_debug.x86_64.dll"
+    "opennovad.dll",
+    "oneditord.dll"
 )
 # The trees a GDExtension build and a source run's scripts come from.
 $DllTrees = @("engine", "godot/src", "godot/game", "godot/probes", "godot/bin/opennova.gdextension")

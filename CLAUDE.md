@@ -30,18 +30,13 @@ easier to relay than to rediscover.
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
-- `assets/` — the game's own base game (no retail bytes): an OpenNova Editor project
-  (`project.opennova`, files flat at the top level) shipped beside `opennova.exe` and
-  mounted when no `--resource-dir` is given: the placeholder main menu whose PLAY
-  RETAIL picks and remembers a retail install, every file the retail boot manifest
-  requires, plus the add-on's exports of `art/` (ADR 0048 d7; `assets/README.md`). The
-  editor's Build of it must boot in an unmodified `Jointops.exe` as well as OpenNova.
-  Models, clips and textures ride LFS.
-- `expansions/` — OpenNova's own expansions (today `onjo1`), each an OpenNova Editor expansion
-  project whose base game is the project in `assets/` (ADR 0046 T5); the game zip ships each
-  one's export in `expansion/<name>/` (ADR 0048 d8; `expansions/README.md`).
-- `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
-  land in `assets/`.
+- No repository holds game data (ADR 0067). Every product's OpenNova Editor project (our own
+  game and its expansion, the retail games' imports) is kept by the maintainer outside git;
+  its release is `scripts/package_release.py`'s package, uploaded in the admin's Game data.
+  CI ships only the runtime: `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies
+  and bootstrap configuration. First standalone launch downloads content. `/game` selects
+  `opennova`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
+  (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `OPENNOVA.CMD` or no wizard OpenNova; ADR 0067 d2).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;
@@ -99,7 +94,7 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
 - One suite, and no test reads retail data: a test's inputs are minted or authored
-  fixtures and the tree's own `assets/`, and a witnessed retail value is pinned as a cited
+  fixtures under `fixtures/`, and a witnessed retail value is pinned as a cited
   constant (prove once, pin; [docs/test-suite.md](docs/test-suite.md));
   `scripts/ci/test_suites.py --check-layout` fails a test that names a retail root. No
   test reads a machine-local capture (the wire fixtures live in `fixtures/novaworld/`),

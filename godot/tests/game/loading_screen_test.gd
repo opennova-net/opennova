@@ -287,12 +287,12 @@ func _server_mode(target: SubViewport) -> int:
 	return RenderingServer.viewport_get_update_mode(target.get_viewport_rid())
 
 
-# Our own base game's gametext.bin (assets/, ADR 0048), whose table carries the
+# The menu-contract gametext.bin fixture, whose table carries the
 # LTGT_* game-type labels the loading screen's session line reads.
 func _register_gametext() -> void:
 	var table := RtxtStringFile.new()
 	assert_eq(table.load_from_byte_array(FileAccess.get_file_as_bytes(
-			"res://../assets/gametext.bin")), OK, "assets/gametext.bin loads")
+			"res://../fixtures/game/gametext.bin")), OK, "fixture gametext.bin loads")
 	Strings.register_table("gametext", table)
 
 

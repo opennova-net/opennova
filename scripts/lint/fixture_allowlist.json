@@ -44,7 +44,8 @@
     "fixtures/terrain/tmap/items.def",
     "fixtures/threedi/o3d/*.o3d",
     "fixtures/wac/forms.wac",
-    "fixtures/wac/text_document.wac"
+    "fixtures/wac/text_document.wac",
+    "fixtures/game/*"
   ],
   "keep": [
     "fixtures/novaworld/*.gsb",

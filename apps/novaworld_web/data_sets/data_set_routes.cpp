@@ -270,7 +270,8 @@ crow::response DataSetRoutes::list(const crow::request &req) {
 		out["games"] = std::move(games);
 		std::vector<crow::json::wvalue> data_sets;
 		for (const DataSetRow &d : list_data_sets(*db_conn))
-			data_sets.push_back(data_set_json(*db_conn, d));
+			if (d.kind != DataSetKind::Update)
+				data_sets.push_back(data_set_json(*db_conn, d));
 		out["data_sets"] = std::move(data_sets);
 	} catch (const db::Error &e) {
 		return db_failure("GET /api/admin/data-sets", e);
@@ -324,7 +325,7 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		return field_error(400, "invalid_field", "display_name",
 				"display_name is 1 to 64 characters with no control characters");
 	const auto kind = data_set_kind_from_name(*kind_name);
-	if (!kind)
+	if (!kind || *kind == DataSetKind::Update)
 		return field_error(400, "invalid_field", "kind", "kind is base or expansion");
 
 	NewDataSet data_set;
@@ -568,6 +569,8 @@ crow::response DataSetRoutes::begin_tree(const crow::request &req, uint64_t id) 
 		if (!row)
 			return no_such_data_set();
 		std::vector<std::string> names;
+		if (row->kind == DataSetKind::Update)
+			return json_error(409, "update_only", "this updater product has no game data tree");
 		std::vector<std::string> unexpected;
 		std::set<std::string> seen;
 		for (const auto &[name, size] : files) {

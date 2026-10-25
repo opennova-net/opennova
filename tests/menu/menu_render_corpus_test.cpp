@@ -19,8 +19,8 @@
 //     grill's 217). Its FORMS screen draws the forms the shipped screens also hold: a
 //     label at the right of its rect, a PASSWORD edit, and a spin list's IMAGE item whose
 //     texture does not load (the load note naming the item row).
-//  3. Every screen of the base game's menus (assets/) compiles with the base game's
-//     files beside it, as an install serves its menus.
+//  3. Every retained game menu (fixtures/game/) compiles with the focused menu
+//     samples and generated fonts, as an install serves its menus.
 // [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60; CUIStringTable_LookupString
 //  @ 0x6527c0; CFontCache_LoadOrGetFont @ 0x652f70; CTextureManager_LoadOrFindTexture
 //  @ 0x654980; CWnd_ProcessMouseEvent @ 0x647a00 (the state fallback
@@ -195,6 +195,11 @@ public:
 		for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
 			if (entry.is_regular_file(ec))
 				paths_[repo_menus::lower(entry.path().filename().string())] = entry.path().generic_string();
+		// Menu rendering tests use the generated font fixture, independently of the authored game.
+		for (const char *font : {"opennova.fnt", "onmnu19.fnt", "onmnub23.fnt", "onttl40.fnt",
+		         "arial12b.fnt", "arial14b.fnt", "arial14n.fnt", "arial16b.fnt", "arial16n.fnt",
+		         "arial22.fnt", "arials18.fnt", "couri20b.fnt", "impac22b.fnt", "impac38b.fnt"})
+			paths_[font] = repo_menus::path("fixtures/fnt/synth_1page.fnt");
 	}
 	void add(const std::string &name, std::vector<uint8_t> bytes) { cache_[repo_menus::lower(name)] = std::move(bytes); }
 	AssetSource source() {
@@ -573,7 +578,7 @@ std::vector<uint8_t> minted_strip(uint32_t width, uint32_t height, uint32_t band
 // and menu_style.mns) and its strips minted here: four bands each, band20.tga 20 texels a
 // band, band24.tga 24, arrows.tga 16; arrowup.tga one 16-texel image.
 int cases_leg(Totals &totals) {
-	LooseFiles files(repo_menus::path("assets"));
+	LooseFiles files(repo_menus::path("fixtures/game"));
 	files.add("band20.tga", minted_strip(32, 80, 20));
 	files.add("band24.tga", minted_strip(32, 96, 24));
 	files.add("arrows.tga", minted_strip(16, 64, 16));
@@ -659,8 +664,8 @@ int main() {
 		return 1;
 	}
 	std::printf("the base game's menus, with its files:\n");
-	const std::vector<std::string> base = repo_menus::files("assets", ".mnu");
-	LooseFiles files(repo_menus::path("assets"));
+	const std::vector<std::string> base = repo_menus::files("fixtures/game", ".mnu");
+	LooseFiles files(repo_menus::path("fixtures/game"));
 	const AssetSource assets = files.source();
 	sweep_menus(base, &assets, style_vars(assets), totals);
 	if (totals.failures != 0) {
@@ -668,7 +673,7 @@ int main() {
 		return 1;
 	}
 	if (base.empty()) {
-		std::fprintf(stderr, "\nassets/ holds no .mnu\n");
+		std::fprintf(stderr, "\nfixtures/game/ holds no .mnu\n");
 		return 1;
 	}
 	std::printf("%zu authored and %zu base game menu(s), %d screen(s) compiled\n", authored.size(), base.size(),

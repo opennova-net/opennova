@@ -661,7 +661,7 @@ int variant_files() {
 		TEST_EXPECT(saved.ok() && same_rows(model_variants::bytes_of(path), std::vector<uint8_t>(saved.text.begin(), saved.text.end())));
 		++table_count;
 	}
-	TEST_EXPECT(clip_count >= 2 && table_count >= 10);
+	TEST_EXPECT(clip_count >= 2 && table_count == maps.paths.size() && table_count >= maps.required.size());
 	std::printf("variants: %zu clips save field for field, %zu tables in their canonical form\n", clip_count, table_count);
 	return model_variants::report_missing(clips) + model_variants::report_missing(maps) == 0 ? 0 : 1;
 }

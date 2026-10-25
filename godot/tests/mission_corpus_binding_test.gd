@@ -1,13 +1,12 @@
 extends GutTest
 
 # Exercise real file I/O through MissionData over committed missions: every
-# minted mission under fixtures/bms (minimal_bms_gen) and our base game's
-# assets/onjo_m1.bms. The native mission tests cover parsing, writer fidelity,
+# minted mission under fixtures/bms (minimal_bms_gen).
+# The native mission tests cover parsing, writer fidelity,
 # waypoint clamping and the shipped variants; this suite checks document
 # loading and saving through Godot paths.
 
 const FIXTURE_DIR := "res://../fixtures/bms"
-const BASE_GAME_MISSION := "res://../assets/onjo_m1.bms"
 const KINDS := [
 	MissionData.KIND_MARKER, MissionData.KIND_ITEM,
 	MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC,
@@ -21,13 +20,12 @@ func _missions() -> PackedStringArray:
 		if f.to_lower().ends_with(".bms"):
 			out.append(dir.path_join(f))
 	out.sort()
-	out.append(ProjectSettings.globalize_path(BASE_GAME_MISSION))
 	return out
 
 
 func test_committed_missions_open_and_are_sane_through_the_binding() -> void:
 	var files := _missions()
-	assert_gt(files.size(), 1, "the fixture set and the base game carry missions")
+	assert_gt(files.size(), 1, "the synthetic fixture set carries several missions")
 	var problems := PackedStringArray()
 	var checked := 0
 	for path in files:

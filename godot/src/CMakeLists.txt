@@ -336,6 +336,13 @@ target_link_libraries(opennova_bindings PUBLIC
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)
 
+# The Windows updater's retail 1SFS field holds at most 15 filename bytes.
+# Keep distinct debug/release files while using normal GDExtension library rows.
+set(OPENNOVA_WINDOWS_SUFFIX "d")
+if(GODOTCPP_TARGET STREQUAL "template_release")
+    set(OPENNOVA_WINDOWS_SUFFIX "")
+endif()
+
 set(OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../bin/")
 
 # gersemi: off
@@ -450,4 +457,11 @@ if(OPENNOVA_EDITOR)
             FOLDER "opennova"
     )
     # gersemi: on
+endif()
+
+if(WIN32)
+    set_target_properties(opennova PROPERTIES PREFIX "" OUTPUT_NAME "opennova${OPENNOVA_WINDOWS_SUFFIX}")
+    if(OPENNOVA_EDITOR)
+        set_target_properties(opennova_editor_gdext PROPERTIES PREFIX "" OUTPUT_NAME "oneditor${OPENNOVA_WINDOWS_SUFFIX}")
+    endif()
 endif()

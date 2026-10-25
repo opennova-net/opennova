@@ -8,10 +8,10 @@ const ShellPresentationSessionScript := preload(
 		"res://game/shell_presentation_session.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 static var FIXTURE_DIR := RuntimeFixture.directory()
 const POLICY_FILE := "policy.bin"
-const POLICY_PLAIN := "persisted game profile reached the mounted root"
+const POLICY_PLAIN := "explicit game profile reached the mounted root"
 const SCR_KEY_DEFAULT := 0xabee_face
 
 var _config: TestFs.Snapshot
@@ -376,7 +376,7 @@ func test_root_render_measurement_releases_on_capture_close_and_tree_exit() -> v
 	board.set_capture_active(false)
 
 
-func test_runtime_root_honors_the_persisted_game_profile() -> void:
+func test_runtime_root_honors_the_explicit_game_profile() -> void:
 	_shell = await _make_packed_shell("jodemo")
 	if _shell == null:
 		return
@@ -389,7 +389,7 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	assert_not_null(root, "the live menu exposes its mounted runtime root")
 	if root != null:
 		assert_eq(root.read_file(POLICY_FILE).get_string_from_utf8(), POLICY_PLAIN,
-				"the persisted /game profile selects the root's SCR policy")
+				"the explicit /game profile selects the root's SCR policy")
 
 
 func test_mission_text_effect_reaches_hud_objective() -> void:
@@ -628,8 +628,8 @@ func _make_packed_shell(game_code: String):
 	})
 	WorldFixture.write_pff(self, _temp_dir.path_join("resource.pff"), entries)
 
-	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
-	ResourceDirSettings.set_game(game_code)
+	LaunchFlags.set_args_override(PackedStringArray([
+			"--no-update", "--resource-dir", _temp_dir, "/game", game_code]))
 	var shell = MainGameScene.instantiate()
 	assert_not_null(shell)
 	if shell == null:

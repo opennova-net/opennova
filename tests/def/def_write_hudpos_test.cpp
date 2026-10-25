@@ -4,7 +4,7 @@
 // writer writes (a quoted name, a fractional ALPHAFADE, the HUDLS block, the stances, the declutter rows,
 // two static frames, the icons, vehicle blocks) beside lines the model holds nothing of; the authored
 // fixtures/def/hudpos.def (the spellings JO:CA's two layouts use, with and without their trailing NUL) and
-// the base game's assets/hudpos.def round-trip, the authored layout's written form pinned by its FNV-1a64.
+// the base game's fixtures/game/hudpos.def round-trip, the authored layout's written form pinned by its FNV-1a64.
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -225,7 +225,7 @@ int name_tokens_and_colour_channels() {
 // The layouts the game's reader is handed: the authored fixtures/def/hudpos.def (JO's spellings: a bare
 // `fonthud1`, blanks around a comma, leading zeros, trailing tabs, `emplace 1 35,206`, a block of seven seats),
 // once as written and once ending in the NUL JO:CA's two hudpos.def files end in (the walk drops it), and the
-// base game's own assets/hudpos.def.
+// base game's own fixtures/game/hudpos.def.
 struct Layout {
 	std::string what;
 	std::string text;
@@ -234,11 +234,11 @@ struct Layout {
 std::vector<Layout> layouts() {
 	const std::string root = test_paths_repo_root(__FILE__);
 	const std::vector<uint8_t> authored = test_io::read_file(root + "/fixtures/def/hudpos.def");
-	const std::vector<uint8_t> base_game = test_io::read_file(root + "/assets/hudpos.def");
+	const std::vector<uint8_t> base_game = test_io::read_file(root + "/fixtures/game/hudpos.def");
 	std::vector<Layout> out;
 	out.push_back({ "fixtures/def/hudpos.def", std::string(authored.begin(), authored.end()) });
 	out.push_back({ "fixtures/def/hudpos.def + NUL", std::string(authored.begin(), authored.end()) + '\0' });
-	out.push_back({ "assets/hudpos.def", std::string(base_game.begin(), base_game.end()) });
+	out.push_back({ "fixtures/game/hudpos.def", std::string(base_game.begin(), base_game.end()) });
 	return out;
 }
 

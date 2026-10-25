@@ -253,16 +253,34 @@ int test_viewport() {
 	return 0;
 }
 
-// Every font of the format's fixtures and of the base game through the document and back, byte for byte, with
-// nothing the save leaves out. Among them the shapes the shipped fonts take (JO:CA's thirty: 800 wide, one to three
-// pages, a spacing of 0, -2 or -3, white pages and coloured ones): a font of each is met.
+// The format fixtures and generated layout variants through the document byte for byte. Cover the page counts,
+// spacing and coloured texels the runtime supports without requiring a game content checkout.
 int test_every_font() {
-	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/fnt", "assets"}, {".fnt"});
+	const editor_test::VariantFiles variants = editor_test::variant_files({"fixtures/fnt", "fixtures/game"}, {".fnt"});
 	int failures = editor_test::report_missing(variants);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> cases;
+	for (const std::string &path : variants.files) cases.emplace_back(path, editor_test::repo_bytes(path));
+	for (uint32_t count : {2u, 3u}) {
+		fnt::fnt_font_t generated{};
+		TEST_EXPECT(fnt::fnt_init_blank(&generated, count, -int32_t(count)) == fnt::FNT_OK);
+		generated.keep_page_rgb = 1;
+		for (uint32_t page = 0; page < count; ++page) {
+			uint8_t *pixel = generated.pages + page * fnt::FNT_TEXTURE_SIZE;
+			pixel[0] = uint8_t(40 + page);
+			pixel[1] = 90;
+			pixel[2] = 180;
+			pixel[3] = 255;
+		}
+		std::vector<uint8_t> bytes(fnt::fnt_calculate_file_size(count));
+		size_t written = 0;
+		const auto result = fnt::fnt_write(&generated, bytes.data(), bytes.size(), &written);
+		fnt::fnt_free(&generated);
+		TEST_EXPECT(result == fnt::FNT_OK && written == bytes.size());
+		cases.emplace_back("generated_" + std::to_string(count) + "page.fnt", std::move(bytes));
+	}
 	size_t fonts = 0, coloured = 0, white = 0;
 	bool pages[4] = {false, false, false, false}, spacing[3] = {false, false, false}; // spacing 0, -2, -3
-	for (const std::string &path : variants.files) {
-		const std::vector<uint8_t> bytes = editor_test::repo_bytes(path);
+	for (const auto &[path, bytes] : cases) {
 		FontDocument font;
 		Diagnostic error;
 		TEST_EXPECT(load(font, bytes, error) && font.font_row());

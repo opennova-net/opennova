@@ -96,6 +96,8 @@ add_subdirectory(apps/parity)
 add_subdirectory(apps/project)
 add_subdirectory(apps/serve)
 add_subdirectory(apps/update_tool)
+add_subdirectory(apps/update)
+add_subdirectory(apps/revupdat)
 add_subdirectory(apps/wire)
 
 enable_testing()

@@ -600,9 +600,31 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `POST /api/admin/releases` | `{"name"?, "size"}`: a release `uploading` and its package's multipart upload: 201; 400; 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | as a tree's parts |
 | `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `validating` with its `release.validate` job: 202; 400; 404; 409; 502; 503 |
-| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's data set named before retired once none names it) with one `release.apply` job per section: 202; 404; 409 `not_draft` |
+| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's data set named before retired once none names it) with one `release.apply` job per game-data section: 202; 404; 409 `not_draft` |
 | `POST /api/admin/releases/<id>/retire` | 202; 404; 409 `not_published` |
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`; 502; 503 |
+
+The seeded updater products include `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
+`OPENNOVA` / `OPENNOVA.CMD` (its content), `ONJO1` / `ONJO1.CMD` (its `onjo1` expansion),
+and `DFX2` / `DFX2.CMD`, alongside the existing `JOTRus` and `JOEus` products. The runtime
+uses a standalone `update` row: it appears in Releases but has no hosted game tree and
+does not appear among Game data or hosted-server choices. OpenNova content releases are
+complete packages built with `--full`; their hosted trees are also built
+from empty, so their first publication needs no separate baseline upload. Retail
+releases continue to apply to their uploaded baselines.
+
+CI and operators can use the same multipart upload API without direct object-store
+credentials:
+
+```sh
+python scripts/publish_update.py --url https://opennova.net --token-file admin.token \
+    --package runtime.sfs --name "OpenNova runtime v0.1.0" --publish
+```
+
+The token file contains the existing admin bearer token. The script waits for the data
+worker to validate the package before publishing it. Omit `--publish` to leave a draft
+for review. Runtime and content packages are uploaded independently; each carries its
+own product's command file.
 
 ## The update listener
 

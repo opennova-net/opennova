@@ -20,10 +20,9 @@ var _had_config := false
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(ResourceDirSettings.CONFIG_PATH)
+	_had_config = FileAccess.file_exists("user://opennova.cfg")
 	if _had_config:
-		_saved_config = FileAccess.get_file_as_bytes(ResourceDirSettings.CONFIG_PATH)
-	ResourceDirSettings.set_game("jo")
+		_saved_config = FileAccess.get_file_as_bytes("user://opennova.cfg")
 
 
 func after_each() -> void:
@@ -31,11 +30,11 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(dir)
 	_dirs.clear()
 	if _had_config:
-		var config := FileAccess.open(ResourceDirSettings.CONFIG_PATH, FileAccess.WRITE)
+		var config := FileAccess.open("user://opennova.cfg", FileAccess.WRITE)
 		config.store_buffer(_saved_config)
 		config.close()
-	elif FileAccess.file_exists(ResourceDirSettings.CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(ResourceDirSettings.CONFIG_PATH))
+	elif FileAccess.file_exists("user://opennova.cfg"):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("user://opennova.cfg"))
 
 
 static func _find_cli() -> String:
@@ -62,6 +61,7 @@ func _launch_runtime(args: PackedStringArray, expected_exit: int) -> String:
 		"--disable-render-loop", "--disable-crash-handler", "--quit-after", "10", "--",
 	])
 	command.append_array(args)
+	command.append_array(PackedStringArray(["--no-update", "/game", "jo"]))
 	var status := OS.execute(OS.get_executable_path(), command, output, true)
 	var log_text := "\n".join(output)
 	assert_eq(status, expected_exit, log_text)

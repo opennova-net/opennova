@@ -27,7 +27,7 @@ extends GutTest
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 static var FIXTURE_DIR := RuntimeFixture.directory()
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 # What JoinerConnection composes for the captured punt: the DPC/DC codes the client's own
 # exit-reason switch keys on, plus the sender's tag and formatted mismatch type.
 const PUNT_REASON := "the host closed the session (GDC033; reason 33, class 2): LogPuntEvent t35"
@@ -251,7 +251,6 @@ func _make_menu_shell():
 	WorldFixture.write_pff(self, _temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	WorldFixture.write_pff(self, _temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _temp_dir]))
-	ResourceDirSettings.set_game("jo")
 	var shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(shell)
 	if shell == null:

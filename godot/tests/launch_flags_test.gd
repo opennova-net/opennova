@@ -10,6 +10,56 @@ func after_each() -> void:
 	LaunchFlags.clear_args_override()
 
 
+func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() -> void:
+	LaunchFlags.set_args_override(PackedStringArray([]))
+	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.game(), "jo")
+	assert_true(LaunchFlags.product_supported())
+	assert_false(LaunchFlags.no_update())
+	assert_false(LaunchFlags.after_update())
+	LaunchFlags.set_args_override(PackedStringArray(["--after-update"]))
+	assert_true(LaunchFlags.after_update())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "DFX2", "--no-update"]))
+	assert_eq(LaunchFlags.product(), "dfx2")
+	assert_eq(LaunchFlags.game(), "dfx2")
+	assert_true(LaunchFlags.no_update())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "opennova"]))
+	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.game(), "jo")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "unknown"]))
+	assert_false(LaunchFlags.product_supported())
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx"]))
+	assert_false(LaunchFlags.product_supported())
+	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other engine profiles")
+	LaunchFlags.set_args_override(PackedStringArray(["/game"]))
+	assert_false(LaunchFlags.product_supported())
+
+
+# ADR 0067 d2: without /game the launch directory's UPDATE.WIZ names the product
+# by its CMD (JO:CA's, the Steam DFX2's, OpenNova content's own); a wizard naming
+# another game leaves none, and /game always wins.
+func test_a_launch_without_game_takes_its_folders_wizard() -> void:
+	var dir := TestFs.cache_dir(self, "launch_wizard")
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.launch_directory(), dir)
+	assert_eq(LaunchFlags.product(), "opennova", "no wizard: OpenNova's own folder")
+	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["OPENNOVA.CMD", "opennova", "jo"]]:
+		TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=%s\r\n" % row[0])
+		assert_eq(LaunchFlags.product(), row[1], row[0])
+		assert_eq(LaunchFlags.game(), row[2], row[0])
+		assert_true(LaunchFlags.product_supported(), row[0])
+	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=DFBHD.CMD\r\n")
+	assert_eq(LaunchFlags.product(), "")
+	assert_false(LaunchFlags.product_supported())
+	assert_false(LaunchFlags.game_given())
+	assert_eq(LaunchFlags.game(), "jo", "a foreign folder still resolves an engine profile")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "jo", "--resource-dir", dir]))
+	assert_true(LaunchFlags.game_given())
+	assert_eq(LaunchFlags.product(), "jo")
+	assert_true(LaunchFlags.product_supported())
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_runtime_flags_read_through_the_override() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([
 		"--mission", "00TRa.bms", "--lan-host", "ASH_I5A.BMS",
@@ -77,7 +127,7 @@ func test_lan_join_browse_names_no_address() -> void:
 
 
 func test_resource_dir_without_a_value_is_given_but_empty() -> void:
-	# The shell's usage error, distinct from no flag (the bundled assets/ boot).
+	# The shell's usage error, distinct from no flag (the executable directory).
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir"]))
 	assert_eq(LaunchFlags.resource_dir(), "")
 	assert_true(LaunchFlags.resource_dir_given())

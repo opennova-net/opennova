@@ -207,7 +207,7 @@ int test_query() {
 // owns: each read by the game's reader into blocks, each key's text at its span its value.
 int test_variants() {
 	const editor_test::VariantFiles variants =
-			editor_test::variant_files({"fixtures/particle", "assets"}, {".ptl", ".ptu", ".ptg"});
+			editor_test::variant_files({"fixtures/particle", "fixtures/game"}, {".ptl", ".ptu", ".ptg"});
 	int failures = editor_test::report_missing(variants);
 	size_t files = 0, blocks = 0, keys = 0;
 	for (const std::string &path : variants.files) {

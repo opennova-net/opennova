@@ -40,6 +40,7 @@ namespace {
 
 void append_game_flags(LaunchPlan &plan, const std::string &game_code, const std::string &mission) {
 	plan.args.push_back("--");
+	plan.args.push_back("--no-update");
 	plan.args.push_back(kLaunchFlagResourceDir);
 	plan.args.push_back(plan.resource_dir);
 	if (!plan.expansion.empty()) {

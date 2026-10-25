@@ -34,3 +34,28 @@ func test_embedding_decision_preserves_direct_runtime_fallbacks() -> void:
 			"headless probes keep their direct MainGame arrangement")
 	assert_false(script.should_embed_game_view(true, "windows", false),
 			"a missing ImGui addon never blocks normal startup")
+
+
+func test_bootstrap_requires_a_complete_packed_boot_set() -> void:
+	var dir := TestFs.cache_dir(self, "bootstrap_content")
+	assert_false(GameRuntimeRoot.has_content(dir), "a minimal download contains no game data yet")
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [])
+	assert_false(GameRuntimeRoot.has_content(dir), "one partial archive does not complete installation")
+	WorldFixture.stage_shell_archives(self, dir, false)
+	assert_true(GameRuntimeRoot.has_content(dir), "installed boot resources permit offline play")
+	TestFs.remove_dir_recursive(dir)
+
+
+func test_bootstrap_accepts_an_explicitly_permitted_loose_boot_set() -> void:
+	var dir := TestFs.cache_dir(self, "bootstrap_loose_content")
+	var names := WorldFixture.SHELL_LANGUAGE_FILES + WorldFixture.SHELL_LOCALRES_FILES \
+			+ WorldFixture.SHELL_RESOURCE_FILES
+	for entry in WorldFixture.shell_archive_entries(self, names):
+		var file := FileAccess.open(dir.path_join(entry.name), FileAccess.WRITE)
+		assert_not_null(file)
+		file.store_buffer(entry.bytes)
+		file.close()
+	assert_false(GameRuntimeRoot.has_content(dir), "loose content is not a packed installation")
+	assert_false(GameRuntimeRoot.has_content(dir, true), "/d alone still requires an archive")
+	assert_true(GameRuntimeRoot.has_content(dir, true, true), "--loose-root /d permits authored content")
+	TestFs.remove_dir_recursive(dir)

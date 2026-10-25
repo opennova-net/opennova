@@ -150,7 +150,7 @@ bool make_base_tree(const std::string &dir, bool updated) {
 
 // The jox01 expansion's tree at `dir`: its pair and version.txt; `updated` adds a mission and
 // bumps the version.
-bool make_expansion_tree(const std::string &dir, bool updated) {
+bool make_expansion_tree(const std::string &dir, bool updated, const std::string &code = "jox01") {
 	std::vector<pff::PffEditEntry> missions = { { "exp.bms", bms_blob("Exp Header", kCoop),
 			1100000000 } };
 	std::vector<pff::PffEditEntry> texts = { { "exp.bin",
@@ -159,7 +159,8 @@ bool make_expansion_tree(const std::string &dir, bool updated) {
 		missions.push_back({ "delta.bms", bms_blob("Delta Header", kCoop), 1700000004 });
 		texts.push_back({ "delta.bin", info_bin("Delta Op", ""), 1700000005 });
 	}
-	return make_archive(dir + "/jox01.pff", missions) && make_archive(dir + "/jox01L.pff", texts) &&
+	return make_archive(dir + "/" + code + ".pff", missions) &&
+			make_archive(dir + "/" + code + "L.pff", texts) &&
 			write_text(dir + "/version.txt", updated ? kExpVersionUpdated : kExpVersion);
 }
 
@@ -316,14 +317,15 @@ struct Rig {
 	// The package built from `root`'s from and to trees, uploaded as a new release and
 	// validated by the job: its id; `package` the package as built.
 	int64_t upload_release(const std::string &root, const char *name, update::SfsPackage &package,
-			std::vector<update_tool::ProductSpec> products = {}) {
+			std::vector<update_tool::ProductSpec> products = {}, bool full = false) {
 		update_tool::BuildSpec spec;
+		spec.full = full;
 		spec.from = io::os_path(root + "/from");
 		spec.to = io::os_path(root + "/to");
 		spec.package_product = "Synthetic Product";
 		if (products.empty()) {
-			spec.products.push_back({ "", "", "SYNPTR.CMD", "", "", "" });
-			spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "", "", "" });
+			spec.products.push_back({ "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" });
+			spec.products.push_back({ "expansion/jox01", "jox01", "SYNEPTR.CMD", "Synthetic Expansion", "1.0.0.11", "" });
 		} else {
 			spec.products = std::move(products);
 		}
@@ -596,6 +598,62 @@ int test_validate() {
 	return 0;
 }
 
+int test_native_first_release() {
+	Rig rig("data_set_jobs_native_first");
+	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
+	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/onjo1"), true, "onjo1"));
+	update::SfsPackage package;
+	const int64_t id = rig.upload_release(rig.temp.root(), "native first", package,
+			{ { "", "", "OPENNOVA.CMD", "OpenNova", "1.0", "opennova.exe" },
+					{ "expansion/onjo1", "onjo1", "ONJO1.CMD", "OpenNova JO", "1.0", "" } }, true);
+	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft);
+	const int64_t native = rig.seeded("OpenNova");
+	const int64_t expansion = rig.seeded("OpenNova Joint Operations");
+	TEST_EXPECT(publish_release(rig.db, id));
+	TEST_EXPECT(enqueue_release_apply(rig.db, id, native) > 0 &&
+			enqueue_release_apply(rig.db, id, expansion) > 0 && rig.run_jobs() >= 2);
+	const auto current = find_data_set(rig.db, native);
+	TEST_EXPECT(current && current->current_tree_id && !current->baseline_tree_id);
+	const auto tree = find_tree(rig.db, *current->current_tree_id);
+	TEST_EXPECT(tree && tree->state == TreeState::Ready && !tree->baseline_tree_id);
+	for (const char *name : { "resource.pff", "localres.pff", "language.pff" }) {
+		const std::string installed = rig.store.path_of(tree_prefix(tree->id) + name);
+		TEST_EXPECT(archive_entries(installed) == archive_entries(rig.temp.file("to") + "/" + name));
+	}
+	const auto installed_expansion = find_data_set(rig.db, expansion);
+	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id &&
+			!installed_expansion->baseline_tree_id);
+	for (const char *name : { "onjo1.pff", "onjo1L.pff" }) {
+		const std::string canonical = canonical_tree_file(DataSetKind::Expansion, "onjo1", name);
+		const std::string installed =
+				rig.store.path_of(tree_prefix(*installed_expansion->current_tree_id) + canonical);
+		TEST_EXPECT(archive_entries(installed) ==
+				archive_entries(rig.temp.file("to/expansion/onjo1") + "/" + name));
+	}
+	return 0;
+}
+
+int test_runtime_release() {
+	Rig rig("data_set_jobs_runtime");
+	TEST_EXPECT(write_text(rig.temp.file("to") + "/opennova.exe", "synthetic runtime"));
+	update::SfsPackage package;
+	const int64_t id = rig.upload_release(rig.temp.root(), "runtime", package,
+			{ { "", "", "ONRUNTIME.CMD", "OpenNova runtime", "1.0", "opennova.exe" } }, true);
+	TEST_EXPECT(id != 0);
+	const auto release = find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == ReleaseStatus::Draft);
+	const auto sections = list_sections(rig.db, id);
+	const int64_t runtime = rig.seeded("OpenNova runtime");
+	TEST_EXPECT(sections.size() == 1 && sections[0].data_set_id == runtime &&
+			sections[0].command_file == "ONRUNTIME.CMD");
+	TEST_EXPECT(publish_release(rig.db, id));
+	TEST_EXPECT(enqueue_release_apply(rig.db, id, runtime) == 0);
+	TEST_EXPECT(list_trees(rig.db, runtime).empty());
+	const auto served = published_sections(rig.db);
+	TEST_EXPECT(served.size() == 1 && served[0].updater_login == "ONRUNTIME");
+	return 0;
+}
+
 // A published release applied: a release tree per section built from its baseline, equal to
 // the updated tree; a run again on a building tree continues on its row.
 int test_apply() {
@@ -666,7 +724,8 @@ int test_apply() {
 			!rig.has(tree_prefix(building) + "readme.txt"));
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
-	TEST_EXPECT(tree->version_text == kBaseVersionUpdated);
+	// The release's version, its command file's (no version file read for a release, ADR 0067).
+	TEST_EXPECT(tree->version_text == "1.0.0.10");
 	TEST_EXPECT(tree->missions.size() == 3);
 	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "ALPHA.BMS" &&
 			tree->missions[1].file == "BRAVO.BMS" && tree->missions[2].file == "CHARLIE.BMS" &&
@@ -687,7 +746,7 @@ int test_apply() {
 			std::fprintf(stderr, "  tree: %s\n", tree->error.c_str());
 		return 1;
 	}
-	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == kExpVersionUpdated);
+	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
 	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "DELTA.BMS" &&
 			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "EXP.BMS");
 	for (const char *archive : { "jox01.pff", "jox01L.pff" }) {
@@ -810,6 +869,8 @@ int main(int argc, char **argv) {
 		{ "finalize_refusals", test_finalize_refusals },
 		{ "finalize_expansion", test_finalize_expansion },
 		{ "validate", test_validate },
+		{ "runtime_release", test_runtime_release },
+		{ "native_first_release", test_native_first_release },
 		{ "apply", test_apply },
 		{ "apply_without_baseline", test_apply_without_baseline },
 		{ "prune", test_prune },

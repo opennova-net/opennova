@@ -519,12 +519,13 @@ panels Dear ImGui windows (ADR 0039). "The editor" in prose means this product; 
 Godot editor is always "the Godot editor".
 _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
-**Bundled assets**:
-The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
-authored from scratch: OpenNova's own small game, the "Indigo Shore" mission
-(single player and Co-op over LAN) and its "Indigo Storm" expansion, whose main
-menu also offers **PLAY RETAIL**. The game mounts it when no `--resource-dir` is
-given (ADR 0048).
+**OpenNova content**:
+OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
+repository and released as update packages: the
+"Indigo Shore" mission (single player and Co-op over LAN) and its "Indigo Storm"
+expansion. The minimal runtime downloads it on first launch. `/game opennova`
+is the default; `/game jo` or `/game dfx2` selects an existing retail installation
+(ADR 0067). `--resource-dir` selects content separately from the runtime directory.
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:

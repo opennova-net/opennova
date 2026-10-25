@@ -25,8 +25,9 @@
 //   release.validate  {release_id}, cap 1. The package at updates/upload-<id>.sfs: the release
 //                     must be validating. Its SHA-256 (another release's: invalid), read as
 //                     1SFS, each section mapped to one data set by the command file it carries
-//                     (a base section to a base data set, an expansion section to an expansion
-//                     of that code under the package's base), every row of each command file
+//                     (a base section to a base data set or standalone updater product, an
+//                     expansion section to an expansion of that code under the package's
+//                     base), every row of each command file
 //                     checked as the apply library checks it (its blob there, inflating to its
 //                     size, its crc, a safe name, a TARGET "." or a .pff); the object copied to
 //                     updates/<sha>.sfs and the row made draft with its sections
@@ -42,7 +43,9 @@
 //                     formats/update/apply.h, each changed file sized and uploaded and each
 //                     deleted one removed, the manifest, the version and the missions redone,
 //                     the row made ready (the data set's current tree). No ready baseline: the
-//                     tree fails "no baseline uploaded". A refusal fails the tree with the
+//                     tree fails "no baseline uploaded". OpenNova content and its expansions
+//                     are complete installs and build from empty instead; standalone updater
+//                     products queue no apply job. A refusal fails the tree with the
 //                     error; the release stays published (the admin retires it).
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, its
 //                     uploads in flight aborted, the row marked pruned. Hourly
@@ -84,6 +87,7 @@ inline constexpr int64_t kPruneAbandonedUploadS = 7 * 24 * 60 * 60;
 
 int64_t enqueue_tree_finalize(db::Database &db, int64_t tree_id);
 int64_t enqueue_release_validate(db::Database &db, int64_t release_id);
+// Standalone updater products have no hosted tree and queue no apply job (returns 0).
 int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data_set_id);
 int64_t enqueue_tree_prune(db::Database &db);
 

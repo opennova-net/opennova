@@ -3,7 +3,7 @@ extends GutTest
 # Full runtime-shell regression: retail-shaped packed boot resources, public menu intents, and
 # the real blocking GameWorld load. It never relies on the test process having /d.
 
-const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
+const STATE_CONFIG_PATH := "user://opennova.cfg"
 static var FIXTURE_DIR := RuntimeFixture.directory()
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 # The packed shell recipe (the retail-shaped archive layout, the baked Tmap
@@ -313,7 +313,6 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	# fixture does — a partial runtime install would report missing boot
 	# resources as engine errors and fail this test about mounting.
 	WorldFixture.stage_shell_archives(self, packed_dir, false)
-	ResourceDirSettings.set_game("jo")
 
 	assert_null(BootRootMount.mount(loose_dir, false),
 			"without the flag a loose-only dir keeps retail's fatal mount error")

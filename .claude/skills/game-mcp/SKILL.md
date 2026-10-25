@@ -21,9 +21,9 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
 - `--headless` when no window is needed (window probes then report
   `available: false`); `--windowed` otherwise (never rely on the project's
   fullscreen default under automation).
-- `--resource-dir` names the game data, a retail install on this machine (a
-  machine-local path: never guess or commit one); without it the game boots
-  its own base game (`assets/`). `GODOT_BIN` names
+- `--resource-dir` names the built game data or a retail install on this machine
+  (a machine-local path: never guess or commit one); select retail with `/game jo`
+  or `/game dfx2`. Source/probe launches use `--no-update`. `GODOT_BIN` names
   the binary (else the main checkout's `.godot-bin/`).
 - A `--mission` launch parks under the start splash with the world un-ticked:
   every mission probe begins with `wait_for_local_player`.

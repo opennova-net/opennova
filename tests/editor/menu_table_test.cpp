@@ -927,7 +927,7 @@ bool test_install_menus() {
 	const std::string install = dir.file("install");
 	std::string minted;
 	std::vector<uint8_t> patched;
-	CHECK(variant_fixtures::expansion_main_menu(patched), "assets/main.mnu holds MUSICVAR 1");
+	CHECK(variant_fixtures::expansion_main_menu(patched), "fixtures/game/main.mnu holds MUSICVAR 1");
 	CHECK(minted_install::mint_with(install, {{"main.mnu", minted_install::share(patched)}}, minted),
 	      "the install mints: " << minted);
 	std::map<std::string, std::vector<uint8_t>> seen;

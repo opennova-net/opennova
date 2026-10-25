@@ -360,6 +360,8 @@ func _assemble_assets() -> void:
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
 	_driver.sound_requested.connect(_on_sound_requested)
+	if not RuntimeUpdates.availability_changed.is_connected(_on_update_availability_changed):
+		RuntimeUpdates.availability_changed.connect(_on_update_availability_changed)
 	if _player_options == null:
 		_player_options = PlayerOptions.new()
 	_options_controller = OptionsMenuController.new()
@@ -511,7 +513,22 @@ func _refresh_underlay() -> void:
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
+	_refresh_update_control()
 	screen_activated.emit(screen_name)
+
+
+func _on_update_availability_changed(_available: bool) -> void:
+	_refresh_update_control()
+
+
+func _refresh_update_control() -> void:
+	if _driver == null or _current_file.get_file().to_lower() != "main.mnu":
+		return
+	var id := _driver.widget_id("UPDATE")
+	if id >= 0:
+		_driver.set_widget_shown(id, RuntimeUpdates.available
+				and _driver.get_current_screen().to_upper() == "STARTUP")
+		_driver.set_widget_disabled(id, not RuntimeUpdates.available)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.
@@ -529,6 +546,7 @@ func _on_screen_changed(screen_name: String) -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
+	_refresh_update_control()
 	_driver.clear_mission_rows()
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
@@ -587,6 +605,15 @@ func _connect_named(names: PackedStringArray, handler: Callable) -> void:
 
 
 func _on_widget_activated(_id: int, widget_name: String) -> void:
+	# The update control is shared by authored and retail main menus, including
+	# documents whose other buttons are owned by a companion.
+	if widget_name.to_upper() == "UPDATE" and _current_file.get_file().to_lower() == "main.mnu" \
+			and _driver.get_current_screen().to_upper() == "STARTUP" and RuntimeUpdates.available:
+		if RuntimeUpdates.launch_update():
+			exit_to_desktop_requested.emit()
+		else:
+			OS.alert(RuntimeUpdates.last_error, "OpenNova Update")
+		return
 	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
 		handler.call()

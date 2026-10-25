@@ -22,7 +22,8 @@
 //
 // Before a row is applied its blob must be in the section, inflate to the row's size and, when
 // the row carries a crc, match it (update_crc.h file_crc), and every name must be a bare file
-// name (no separator, no "." or ".."; D-UPD-3's hardening): one bad row applies nothing.
+// name (no separator, no "." or ".." except TARGET=.; D-UPD-3's hardening): one bad row
+// applies nothing.
 
 #include "command_file.h"
 #include "sfs.h"
@@ -56,5 +57,9 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 // Whether `name` may name a file or entry of the tree: not empty, no '/', '\\' or ':', not "."
 // or "..", at most kCommandNameBytes - 1 bytes.
 bool is_safe_row_name(std::string_view name);
+
+// Validate all names and TARGET/row combinations before touching the installation.
+// TARGET=. returns to the root; COPY requires a PFF target, loose rows a directory.
+bool validate_commands(const CommandFile &commands, std::string &error);
 
 } // namespace opennova::update

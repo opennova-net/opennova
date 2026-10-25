@@ -631,10 +631,10 @@ $RepoDirty = [bool] (& git -C $Repo status --porcelain --untracked-files=no 2>$n
 if ($RepoDirty -and -not $AllowDirtyRepo) {
     throw "The checkout has uncommitted tracked changes; a run is evidence for repo_commit alone (-AllowDirtyRepo for a diagnostic run)."
 }
-$GdextensionDll = Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
+$GdextensionDll = Join-Path $Repo "godot\bin\opennovad.dll"
 # A `--path godot` source run loads the editor variant (bin/opennova.gdextension's
 # plain windows.debug.x86_64 row), so both variants are recorded.
-$GdextensionEditorDll = Join-Path $Repo "godot\bin\libopennova_editor.windows.template_debug.x86_64.dll"
+$GdextensionEditorDll = Join-Path $Repo "godot\bin\oneditord.dll"
 # The onHook proxy (binkw32.dll, forwarding to the renamed original) in both
 # copies is one build, recorded as the run's hook identity with the MCP exe.
 $OnHookProxySha256 = Get-FileSha256OrNull (Join-Path $ServerDir "binkw32.dll")
