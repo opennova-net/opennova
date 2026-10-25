@@ -133,6 +133,7 @@ describe('OverviewSection', () => {
               hosted_server_id: null,
               server_kind: 'anonymous',
               dedicated: true,
+              novalogic_players: null,
             },
             playing: null,
           },

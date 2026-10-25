@@ -1412,7 +1412,9 @@ never stops the server. Anything NovaLogic refuses or stops stays off until that
 next start; only faults on the way (no answer, a request that never arrived) are tried
 again, at most 5 times. Whether one account may hold several listings at once is not yet
 witnessed; a refusal (MsgCode 1008, too many servers) would show as the extra servers' second
-listings ending, in each server's log.
+listings ending, in each server's log and on its page (its Overview's NovaLogic's NovaWorld
+line: listed, retrying or not listed and why; its console marks the players who came through
+it, and the admin's NovaWorld sessions count them per hosted server).
 
 **The switch** is `novalogic_listing` in the var-file, `true` unless a deployment sets it.
 With it on, web, the fleet and the worker read `ONNET_NOVALOGIC_LISTING=1` (`infra apply`,

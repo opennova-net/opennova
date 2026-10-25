@@ -24,6 +24,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
                [--also-master-host <gate>] [--also-master-gate-port <n>]
                [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
+               [--second-listing-file <file>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
                [/CONNECTLOG | /NOCONNECTLOG]
 ```
@@ -50,6 +51,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
 | `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
 | `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
+| `--second-listing-file <file>` | Rewrite the file whenever the second listing's state changes ("Supervised runs" below). |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
 | `/CHEATLOG` | Start `_CHEAT.TXT` (below). |
@@ -145,7 +147,8 @@ The second listing:
   punt, a refused login, a refused host request (too many servers, the name not accepted,
   ...) or a refused re-host delists the server there and nowhere else: the match and the
   first listing go on, and the second listing is not tried again until the server
-  restarts, as a stock host's listing that does not host ends.
+  restarts, as a stock host's listing that does not host ends. Its console line says why,
+  and so does `--second-listing-file` ("Supervised runs").
 - **Retries only faults.** A gate that does not answer or resolve, a request that never
   reached the service, a web page its host failed (5xx) or moved (3xx), a session that
   dropped before the service answered, or a listing still not hosting 3 minutes after its
@@ -324,7 +327,12 @@ install's `gametext.bin`. `--status-page off` prints no page and reads no standa
 
 The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
 STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
-`SERVER PLAYER REMOVED` per connection.
+`SERVER PLAYER REMOVED` per connection. None of them names the way a player came, so the
+server adds a line of its own per player it adds: `opennova-serve: [join] "<name>" via
+NovaLogic's NovaWorld (<gate>:<port>)` for a gate under `novaworld.net`, `via OpenNova's
+NovaWorld (<gate>:<port>)` for any other, the gate the listing whose AppId the joiner carried
+lists on ("Two listings"), or `on the LAN`. Retail's lines, `_inout.txt` and
+`_connectlog.txt` stay as retail writes them.
 
 These logs go to the working directory, in retail's names and formats:
 
@@ -339,8 +347,8 @@ These logs go to the working directory, in retail's names and formats:
 
 ## Supervised runs
 
-Whatever runs the server for others (a hosted server's machine agent, ADR 0053) reads two
-files of its own, neither retail's, and turns the status page off (`--status-page off`):
+Whatever runs the server for others (a hosted server's machine agent, ADR 0053) reads
+files of its own, none of them retail's, and turns the status page off (`--status-page off`):
 the page reprints whenever a slot or a chat line changes, which a log pipeline would carry
 line by line.
 
@@ -355,6 +363,18 @@ line by line.
   logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
   host: ...`), so its supervisor can say why without reading its log. A clean exit (0)
   writes nothing.
+- **`--second-listing-file <file>`**: the second listing's state ("Two listings" above), so
+  its supervisor can show whether and why the server is listed there without reading its
+  log. The server rewrites the file (a new file renamed over the old) whenever the state
+  changes, one JSON line: `{"state"}`, one of `off` (the run has no second listing),
+  `trying`, `listed`, `retrying` and `not_listed` (over for the run), with `"try"` and
+  `"tries"` (the try under way or the next, of the 5) while trying or retrying,
+  `"next_try_at"` (Unix seconds) while retrying, `"reason"` while retrying or not listed
+  (in plain words: `the service did not accept the server name`, `the gate did not answer`,
+  `it did not host in 5 tries; the last: ...`) with `"tag"`, the NWEC tag behind it, when
+  there is one, and `"slots"`, the PlayerList slots (the remote admin's `PLAYER LIST`
+  numbers) of the players in the match the second listing's service sent, while there are
+  any. No account name or password is in it.
 
 ## Exit codes
 

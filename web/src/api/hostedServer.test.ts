@@ -200,6 +200,30 @@ describe('fetchMyServers', () => {
     expect(bare.ok && bare.value.servers[0].phase).toBeNull();
     expect(bare.ok && bare.value.servers[0].stopped_because).toBeNull();
   });
+
+  it("reads a server's listing on NovaLogic's NovaWorld, each member only when it is well formed", async () => {
+    const retrying = hostedServer(3, {
+      novalogic: {
+        state: 'retrying',
+        try: 2,
+        tries: 5,
+        next_try_at: '2026-10-25T13:05:00Z',
+        reason: 'the gate did not answer',
+        tag: 'NWEC15',
+        player_slots: [2, 5],
+      },
+    });
+    const listed = hostedServer(4, { novalogic: { state: 'listed', try: -1, reason: '', player_slots: [3, 'x', -1, 1.5] as never } });
+    // A reply that leaves it out (a service from before it), or one with no state: none.
+    const missing = hostedServer(5, { novalogic: undefined as never });
+    const stateless = hostedServer(6, { novalogic: { player_slots: [1] } as never });
+    get.mockResolvedValue(reply(serversResponse([retrying, listed, missing, stateless])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0].novalogic).toEqual(retrying.novalogic);
+    expect(result.ok && result.value.servers[1].novalogic).toEqual({ state: 'listed', player_slots: [3] });
+    expect(result.ok && result.value.servers[2].novalogic).toBeNull();
+    expect(result.ok && result.value.servers[3].novalogic).toBeNull();
+  });
 });
 
 describe('the start, the stop and one server', () => {

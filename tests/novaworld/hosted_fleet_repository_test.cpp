@@ -729,7 +729,44 @@ int test_slots() {
 					777) }));
 	const auto of_a = hosted::slot_report_of(db, a);
 	TEST_EXPECT(of_a && of_a->slot == 0 && of_a->egress_bytes == 777);
+	TEST_EXPECT(!of_a->second_listing);
 	TEST_EXPECT(!hosted::slot_report_of(db, c) && !hosted::slot_report_of(db, a + 1000));
+	// Its server's second listing (0024_second_listing_reports.sql): kept as reported, each
+	// state's members alone, and gone again with a report that carries none.
+	{
+		hosted::ContainerReport listed =
+				report("srv-" + std::to_string(a) + "-g1", 0, hosted::ContainerState::Running, 777);
+		hosted::SecondListingStatus retrying;
+		retrying.state = hosted::SecondListingState::Retrying;
+		retrying.attempt = 3;
+		retrying.attempts = 5;
+		retrying.next_try_at = 1792000120;
+		retrying.reason = "the gate did not answer";
+		retrying.tag = "NWEC15";
+		retrying.slots = { 4, 11 };
+		listed.second_listing = retrying;
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { listed }));
+		auto read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && read->second_listing);
+		const hosted::SecondListingStatus &got = *read->second_listing;
+		TEST_EXPECT(got.state == hosted::SecondListingState::Retrying && got.attempt == 3 &&
+				got.attempts == 5 && got.next_try_at == std::optional<int64_t>(1792000120) &&
+				got.reason == "the gate did not answer" && got.tag == "NWEC15" &&
+				got.slots == std::vector<int>({ 4, 11 }));
+		hosted::SecondListingStatus listed_state;
+		listed_state.state = hosted::SecondListingState::Listed;
+		listed.second_listing = listed_state;
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { listed }));
+		read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && read->second_listing &&
+				read->second_listing->state == hosted::SecondListingState::Listed &&
+				read->second_listing->attempt == 0 && !read->second_listing->next_try_at &&
+				read->second_listing->reason.empty() && read->second_listing->slots.empty());
+		listed.second_listing.reset();
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { listed }));
+		read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && !read->second_listing);
+	}
 
 	// Placement reads every live machine with the slots its live servers hold.
 	const hosted::CreatedMachine own =

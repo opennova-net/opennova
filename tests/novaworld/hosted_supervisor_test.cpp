@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>
@@ -346,17 +347,22 @@ int test_renders() {
 		TEST_EXPECT(novalogic.offered());
 		hosted::HostedSettings asked = s;
 		asked.list_on_novalogic = true;
-		// Asked, but the service offers none: the server's own listing alone.
+		// Asked, but the service offers none: the server's own listing alone, and the second
+		// listing's state file, which then says off, so the owner's page says why.
+		std::vector<std::string> asked_args = args;
+		for (const char *arg : { "--second-listing-file", "second-listing.json" })
+			asked_args.emplace_back(arg);
 		TEST_EXPECT(!hosted::lists_on_novalogic(asked, in.novalogic));
-		TEST_EXPECT(hosted::render_launch(asked, "jo", "jox01", in).serve_args == args);
+		TEST_EXPECT(hosted::render_launch(asked, "jo", "jox01", in).serve_args == asked_args);
 		// Offered, but not asked: the same.
 		hosted::RenderInputs offered_in = in;
 		offered_in.novalogic = novalogic;
 		const hosted::LaunchSpec not_asked = hosted::render_launch(s, "jo", "jox01", offered_in);
 		TEST_EXPECT(not_asked.serve_args == args && not_asked.files.size() == 4);
-		// Both: the second listing's arguments after the server's own, and its account's file.
+		// Both: the second listing's arguments after the server's own and its state file, and its
+		// account's file.
 		const hosted::LaunchSpec both = hosted::render_launch(asked, "jo", "jox01", offered_in);
-		std::vector<std::string> both_args = args;
+		std::vector<std::string> both_args = asked_args;
 		for (const char *arg : { "--also-master-host", "gs.novaworld.net", "--also-master-gate-port",
 					 "7597", "--also-credentials", "novalogic.txt", "--allow-public" })
 			both_args.emplace_back(arg);
@@ -387,7 +393,7 @@ int test_renders() {
 			hosted::RenderInputs placeholder_in = in;
 			placeholder_in.novalogic = placeholder;
 			const hosted::LaunchSpec unoffered = hosted::render_launch(asked, "jo", "jox01", placeholder_in);
-			TEST_EXPECT(unoffered.serve_args == args && unoffered.files.size() == 4);
+			TEST_EXPECT(unoffered.serve_args == asked_args && unoffered.files.size() == 4);
 		}
 	}
 
@@ -910,6 +916,14 @@ int test_novalogic_listing() {
 	TEST_EXPECT(tail(asked_c->desired.args, second.size()) == second);
 	TEST_EXPECT(std::find(plain_c->desired.args.begin(), plain_c->desired.args.end(),
 			"--also-master-host") == plain_c->desired.args.end());
+	// The second listing's state file rides the server that asked alone.
+	const auto state_file = std::find(
+			asked_c->desired.args.begin(), asked_c->desired.args.end(), "--second-listing-file");
+	TEST_EXPECT(state_file != asked_c->desired.args.end() &&
+			std::next(state_file) != asked_c->desired.args.end() &&
+			*std::next(state_file) == "second-listing.json");
+	TEST_EXPECT(std::find(plain_c->desired.args.begin(), plain_c->desired.args.end(),
+						"--second-listing-file") == plain_c->desired.args.end());
 	const std::string account = file_of(rig, id, "novalogic.txt");
 	TEST_EXPECT(credential(account, "NOVAWORLD_USER") == "opennova-project");
 	TEST_EXPECT(credential(account, "NOVAWORLD_PASS") == "nlpass");

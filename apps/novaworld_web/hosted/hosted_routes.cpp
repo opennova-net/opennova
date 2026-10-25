@@ -9,6 +9,7 @@
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/host_limits.h"
 #include "hosted/model/server_phase.h"
+#include "hosted/model/stats_repository.h" // iso_utc
 #include "http_json.h"
 #include "program/server_config.h"
 
@@ -281,6 +282,33 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	text_or_null(e, "running_at", s.running_at);
 	text_or_null(e, "ended_at", s.ended_at);
 	put_listing(e, db, s, admin);
+	// Its listing on NovaLogic's NovaWorld, for an owner who asked: the owner's words without
+	// the NWEC tag, which an admin's view carries.
+	if (const auto novalogic = live_second_listing(db, s)) {
+		crow::json::wvalue n;
+		n["state"] = second_listing_state_text(novalogic->state);
+		if (novalogic->state == SecondListingState::Trying ||
+				novalogic->state == SecondListingState::Retrying) {
+			n["try"] = novalogic->attempt;
+			n["tries"] = novalogic->attempts;
+		}
+		if (novalogic->state == SecondListingState::Retrying && novalogic->next_try_at)
+			n["next_try_at"] = iso_utc(*novalogic->next_try_at);
+		if (!novalogic->reason.empty())
+			n["reason"] = novalogic->reason;
+		if (admin && !novalogic->tag.empty())
+			n["tag"] = novalogic->tag;
+		std::vector<crow::json::wvalue> slots;
+		for (const int slot : novalogic->slots) {
+			crow::json::wvalue item;
+			item = slot;
+			slots.push_back(std::move(item));
+		}
+		n["player_slots"] = std::move(slots);
+		e["novalogic"] = std::move(n);
+	} else {
+		e["novalogic"] = nullptr;
+	}
 	if (!admin) put_phase(e, db, s, billing::unix_now() * 1000, false);
 	if (admin) {
 		put_owner(e, db, s.owner_user_id);
@@ -319,6 +347,15 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		}
 	}
 	return e;
+}
+
+std::optional<SecondListingStatus> live_second_listing(db::Database &db, const HostedServer &s) {
+	if (!s.settings.list_on_novalogic || !is_live(s.state))
+		return std::nullopt;
+	const auto report = slot_report_of(db, s.id);
+	if (!report || report->container != s.container)
+		return std::nullopt;
+	return report->second_listing;
 }
 
 void put_phase(crow::json::wvalue &e, db::Database &db, const HostedServer &s, int64_t now_ms,

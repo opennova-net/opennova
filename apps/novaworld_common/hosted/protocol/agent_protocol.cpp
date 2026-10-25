@@ -215,6 +215,82 @@ bool read_tick(const JsonValue &v, TickHealth &out, std::string &error) {
 			read_count(v, "late", out.late, error);
 }
 
+// An NWEC tag: "NWEC" and 1..4 digits.
+bool is_nwec_tag(std::string_view tag) {
+	return tag.size() >= 5 && tag.size() <= 8 && tag.substr(0, 4) == "NWEC" &&
+			all_of(tag.substr(4), [](char c) { return c >= '0' && c <= '9'; });
+}
+
+// Each member where its state has it and nowhere else (agent_protocol.h SecondListingStatus).
+bool read_second_listing(const JsonValue &v, SecondListingStatus &out, std::string &error) {
+	if (!v.is_object())
+		return fail(error, "a second listing is no object");
+	if (!io::json_members_known(v,
+				{ "state", "try", "tries", "next_try_at", "reason", "tag", "slots" },
+				"second listing", error))
+		return false;
+	std::string state;
+	if (!read_string(v, "state", state, error))
+		return false;
+	const auto parsed = parse_second_listing_state(state);
+	if (!parsed)
+		return fail(error,
+				"a second listing's state is not off, trying, listed, retrying or not_listed");
+	out = SecondListingStatus{};
+	out.state = *parsed;
+	const bool counted =
+			out.state == SecondListingState::Trying || out.state == SecondListingState::Retrying;
+	const bool explained =
+			out.state == SecondListingState::Retrying || out.state == SecondListingState::NotListed;
+	if (counted) {
+		int64_t attempts = 0;
+		int64_t attempt = 0;
+		if (!read_whole(v, "tries", 1, kMaxSecondListingTries, attempts, error) ||
+				!read_whole(v, "try", 1, static_cast<double>(attempts), attempt, error))
+			return false;
+		out.attempt = static_cast<int>(attempt);
+		out.attempts = static_cast<int>(attempts);
+	} else if (v.get("try") || v.get("tries")) {
+		return fail(error, "a second listing counts its tries while trying or retrying alone");
+	}
+	if (out.state == SecondListingState::Retrying) {
+		int64_t at = 0;
+		if (!read_whole(v, "next_try_at", 0, io::kJsonSafeWholeMax, at, error))
+			return false;
+		out.next_try_at = at;
+	} else if (v.get("next_try_at")) {
+		return fail(error, "a second listing's next try comes with a retry alone");
+	}
+	const JsonValue *reason = v.get("reason");
+	const JsonValue *tag = v.get("tag");
+	if (explained) {
+		if (!reason || !is_reason_text(*reason))
+			return fail(error, "a second listing's reason is not a short line");
+		out.reason = reason->string;
+		if (tag) {
+			if (!tag->is_string() || !is_nwec_tag(tag->string))
+				return fail(error, "a second listing's tag is no NWEC tag");
+			out.tag = tag->string;
+		}
+	} else if (reason || tag) {
+		return fail(error, "a second listing's reason comes with a retry or its end alone");
+	}
+	if (const JsonValue *slots = v.get("slots")) {
+		if (!slots->is_array() ||
+				slots->array.size() > static_cast<size_t>(kMaxSecondListingSlot) + 1)
+			return fail(error, "a second listing's slots is no list of slots");
+		for (const JsonValue &entry : slots->array) {
+			int64_t slot = 0;
+			if (!io::json_exact_whole_in(entry, 0, kMaxSecondListingSlot, slot))
+				return fail(error, "a second listing's slot is no PlayerList slot");
+			if (!out.slots.empty() && slot <= out.slots.back())
+				return fail(error, "a second listing's slots are not ascending, each once");
+			out.slots.push_back(static_cast<int>(slot));
+		}
+	}
+	return true;
+}
+
 bool read_machine_stats(const JsonValue &v, MachineStats &out, std::string &error) {
 	if (!v.is_object())
 		return fail(error, "machine is no object");
@@ -280,7 +356,8 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 		return fail(error, "a container is no object");
 	if (!io::json_members_known(v,
 				{ "name", "slot", "state", "waiting", "exit_code", "oom", "started_at", "reason",
-						"cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes", "tick" },
+						"cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes", "tick",
+						"second_listing" },
 				"container", error))
 		return false;
 	if (!read_string(v, "name", out.name, error))
@@ -339,7 +416,40 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 			return false;
 		out.tick = read;
 	}
+	out.second_listing.reset();
+	if (const JsonValue *listing = v.get("second_listing")) {
+		if (out.state != ContainerState::Running)
+			return fail(error, "a container's second listing comes with a running one alone");
+		SecondListingStatus read;
+		if (!read_second_listing(*listing, read, error))
+			return false;
+		out.second_listing = std::move(read);
+	}
 	return true;
+}
+
+// A second listing's member, as read_second_listing reads it.
+JsonValue second_listing_json(const SecondListingStatus &s) {
+	JsonValue v = JsonValue::make_object();
+	v.set("state", io::json_string(second_listing_state_text(s.state)));
+	if (s.state == SecondListingState::Trying || s.state == SecondListingState::Retrying) {
+		v.set("try", json_int(s.attempt));
+		v.set("tries", json_int(s.attempts));
+	}
+	if (s.state == SecondListingState::Retrying)
+		v.set("next_try_at", json_int(s.next_try_at.value_or(0)));
+	if (s.state == SecondListingState::Retrying || s.state == SecondListingState::NotListed) {
+		v.set("reason", io::json_string(s.reason));
+		if (!s.tag.empty())
+			v.set("tag", io::json_string(s.tag));
+	}
+	if (!s.slots.empty()) {
+		JsonValue slots = JsonValue::make_array();
+		for (const int slot : s.slots)
+			slots.push(json_int(slot));
+		v.set("slots", std::move(slots));
+	}
+	return v;
 }
 
 bool read_args(const JsonValue &v, std::vector<std::string> &out, std::string &error) {
@@ -677,6 +787,37 @@ std::optional<TreeReportState> parse_tree_report_state(std::string_view text) {
 	return std::nullopt;
 }
 
+const char *second_listing_state_text(SecondListingState state) {
+	switch (state) {
+		case SecondListingState::Off:
+			return "off";
+		case SecondListingState::Trying:
+			return "trying";
+		case SecondListingState::Listed:
+			return "listed";
+		case SecondListingState::Retrying:
+			return "retrying";
+		case SecondListingState::NotListed:
+			return "not_listed";
+	}
+	return "off";
+}
+
+std::optional<SecondListingState> parse_second_listing_state(std::string_view text) {
+	for (const SecondListingState state :
+			{ SecondListingState::Off, SecondListingState::Trying, SecondListingState::Listed,
+					SecondListingState::Retrying, SecondListingState::NotListed }) {
+		if (text == second_listing_state_text(state))
+			return state;
+	}
+	return std::nullopt;
+}
+
+bool decode_second_listing(std::string_view json, SecondListingStatus &out, std::string &error) {
+	JsonValue v;
+	return parse_object(json, v, error) && read_second_listing(v, out, error);
+}
+
 // --- the bootstrap ----------------------------------------------------------------
 
 std::string encode_agent_hello(const AgentHello &hello) {
@@ -785,6 +926,9 @@ std::string encode_sync_request(const SyncRequest &request) {
 			tick.set("late", json_count(c.tick->late));
 			entry.set("tick", std::move(tick));
 		}
+		// Present only on a running one whose server reports a second listing.
+		if (c.second_listing)
+			entry.set("second_listing", second_listing_json(*c.second_listing));
 		containers.push(std::move(entry));
 	}
 	v.set("containers", std::move(containers));

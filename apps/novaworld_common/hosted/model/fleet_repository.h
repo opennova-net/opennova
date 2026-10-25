@@ -334,6 +334,9 @@ struct SlotReport {
 	uint64_t egress_bytes = 0; // the slot's, since the machine booted
 	uint64_t net_in_bytes = 0;
 	std::optional<TickHealth> tick;
+	// Its server's second listing (a hosted server's on NovaLogic's NovaWorld), when its agent
+	// reported one (0024_second_listing_reports.sql).
+	std::optional<SecondListingStatus> second_listing;
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };
 

@@ -228,6 +228,32 @@ export interface StoppedBecause {
   line: string;
 }
 
+// Where a hosted server's listing on NovaLogic's NovaWorld stands (ADR 0068):
+// 'off' while the service offers none (its next start tries again), 'trying',
+// 'listed', 'retrying' after a fault on the way, or 'not_listed' for the rest
+// of the run (NovaLogic refused or stopped it, or its tries ran out).
+export type NovaLogicListingState = 'off' | 'trying' | 'listed' | 'retrying' | 'not_listed';
+
+// A hosted server's listing on NovaLogic's NovaWorld, for an owner who asked
+// (HostedSettings.list_on_novalogic), as the server last reported it.
+export interface NovaLogicListing {
+  state: NovaLogicListingState | (string & {});
+  // trying and retrying: the try under way or the next, of the run's most.
+  try?: number;
+  tries?: number;
+  // retrying: when the next try starts, ISO 8601 UTC.
+  next_try_at?: string;
+  // retrying and not_listed: why, in the server's words ("the service did not
+  // accept the server name").
+  reason?: string;
+  // An admin's view alone: the NovaWorld error tag behind the reason
+  // ("NWEC57").
+  tag?: string;
+  // The console's player slots (PLAYER LIST) of the players who came through
+  // NovaLogic's NovaWorld.
+  player_slots: number[];
+}
+
 // A hosted server, as its owner sees it. Times are UTC 'YYYY-MM-DD HH:MM:SS'.
 export interface HostedServer {
   id: number;
@@ -264,6 +290,9 @@ export interface HostedServer {
   running_at: string | null;
   ended_at: string | null;
   listing: HostedListing | null;
+  // Its listing on NovaLogic's NovaWorld while it is live and its owner asked;
+  // null otherwise, and while the server reports none.
+  novalogic: NovaLogicListing | null;
   // Where its start stands; null where the reply carries none (the admin's
   // fleet list).
   phase: ServerPhase | null;

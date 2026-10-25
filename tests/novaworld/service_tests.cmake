@@ -1041,7 +1041,9 @@ opennova_off_bakes(opennova_serve_novaworld)
 # NwUdpListeners behind in-test gates. The second hosts once the map is up on the same game socket
 # with the same match's columns and PCIDKey, its ServerCommands run on the match, its service's
 # ServerStopHosting delists it there alone (the first listing and the match go on, no retry), and
-# a second listing that does not host leaves the server serving with its next try scheduled.
+# a second listing that does not host leaves the server serving with its next try scheduled; its
+# state as a supervisor reads it at each step (--second-listing-file), and the console's [join]
+# line naming the service a joiner came through.
 add_executable(opennova_serve_second_listing_test serve/opennova_serve_second_listing_test.cpp)
 target_link_libraries(opennova_serve_second_listing_test PRIVATE
     opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)

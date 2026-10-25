@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstring>
 #include <optional>
+#include <utility>
 
 namespace opennova::serve {
 
@@ -28,19 +29,61 @@ bool answered_by_service(const net::HttpReply &reply) {
 	return reply.transport_ok && (reply.code == 200 || (reply.code >= 400 && reply.code < 500));
 }
 
-// The operator's gloss on the host request's NWEC tags: the service's MsgCode names
-// [orig: the NWUSERVERMSGCODE_ name table, {code, name} pairs from @0x7CB960; ConnectOrHost's
-// MsgCode switch @0x4D5207 picks the tag], or the listing's own fault.
-const char *host_tag_meaning(const std::string &tag) {
-	if (tag == "NWEC51") return "the request was not queued";
-	if (tag == "NWEC52") return "the service did not answer within 60 s";
-	if (tag == "NWEC53") return "the service wants a server name (MISSINGSERVERNAME)";
-	if (tag == "NWEC54") return "the service rejected the hosting options (REJECTEDHOSTINGINFO)";
-	if (tag == "NWEC55") return "the service rejected the server name (BADSERVERNAME)";
-	if (tag == "NWEC56") return "the service counts too many servers running (TOOMANYSERVERSRUNNING)";
-	if (tag == "NWEC57") return "the service did not accept the server name (SERVERNAMENOTACCEPTED)";
-	if (tag == "NWEC60") return "the service did not accept the server message (MSGNOTACCEPTED)";
-	return "another refusal, or the session left before the service answered";
+// The gloss on the host request's NWEC tags: what each says in plain words, and the service's
+// MsgCode name behind it [orig: the NWUSERVERMSGCODE_ name table, {code, name} pairs from
+// @0x7CB960; ConnectOrHost's MsgCode switch @0x4D5207 picks the tag] (null for the listing's own
+// fault). The plain words are a second listing's reported reason (Lister::failure).
+struct HostTagGloss {
+	const char *text;
+	const char *msg_code;
+};
+HostTagGloss host_tag_gloss(const std::string &tag) {
+	if (tag == "NWEC51")
+		return { "the request was not queued", nullptr };
+	if (tag == "NWEC52")
+		return { "the service did not answer within 60 s", nullptr };
+	if (tag == "NWEC53")
+		return { "the service wants a server name", "MISSINGSERVERNAME" };
+	if (tag == "NWEC54")
+		return { "the service rejected the hosting options", "REJECTEDHOSTINGINFO" };
+	if (tag == "NWEC55")
+		return { "the service rejected the server name", "BADSERVERNAME" };
+	if (tag == "NWEC56")
+		return { "the service counts too many servers running", "TOOMANYSERVERSRUNNING" };
+	if (tag == "NWEC57")
+		return { "the service did not accept the server name", "SERVERNAMENOTACCEPTED" };
+	if (tag == "NWEC60")
+		return { "the service did not accept the server message", "MSGNOTACCEPTED" };
+	return { "another refusal, or the session left before the service answered", nullptr };
+}
+
+// The operator's gloss on a host request's tag: the plain words with the MsgCode name.
+std::string host_tag_meaning(const std::string &tag) {
+	const HostTagGloss gloss = host_tag_gloss(tag);
+	return gloss.msg_code != nullptr ? std::string(gloss.text) + " (" + gloss.msg_code + ")"
+									 : std::string(gloss.text);
+}
+
+// An NWEC tag ("NWEC57"), as the connect and the host request report one: the tag a second
+// listing's state carries beside its reason (a session's other failure texts are none).
+bool is_nwec_tag(const std::string &text) {
+	if (text.size() < 5 || text.size() > 8 || text.compare(0, 4, "NWEC") != 0)
+		return false;
+	for (std::size_t i = 4; i < text.size(); ++i)
+		if (text[i] < '0' || text[i] > '9')
+			return false;
+	return true;
+}
+
+// The hosting leg's own refusals ahead of its request (host_leg_refusal's tags), in plain words.
+const char *host_leg_meaning(const char *tag) {
+	if (std::strcmp(tag, NWEC_SESSION_NOT_SET_UP) == 0)
+		return "the session was not set up";
+	if (std::strcmp(tag, NWEC_WRONG_SESSION_STATE) == 0)
+		return "the session was not in a state to host";
+	if (std::strcmp(tag, NWEC_HOST_GATE_NOT_OK) == 0)
+		return "the gate named no lobby to host in";
+	return "the session could not host";
 }
 
 // The operator's gloss on the connect's NWEC tags this driver reports (the game shows menutxt's
@@ -125,7 +168,9 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 									session->join_fail_string().c_str());
 						// The session server's refusal is its decision; the other tags are a
 						// gate or a session that did not answer.
-						end(kExitFailed, /*refused=*/message == "NWEC43");
+						end(kExitFailed, /*refused=*/message == "NWEC43",
+								meaning != nullptr ? meaning : "the NovaWorld session failed",
+								is_nwec_tag(message) ? message : std::string());
 					};
 					hooks.on_soft_error = [this](const std::string &message) {
 						io::logf(LogLevel::kDebug, "%s[gate] %s", who(), message.c_str());
@@ -135,7 +180,8 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 						io::logf(LogLevel::kError,
 								"%s[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)",
 								who());
-						end(kExitFailed);
+						end(kExitFailed, /*refused=*/false,
+								"the gate named no NovaWorld session server");
 					};
 					// The gate and connect lines to the server's _connectlog.txt.
 					hooks.connect_log_on = [this]() {
@@ -170,7 +216,7 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 			};
 			hooks.on_failed = [this](const std::string &tag) {
 				io::logf(LogLevel::kError, "%s[host] the host request failed: %s (%s)", who(),
-					tag.c_str(), host_tag_meaning(tag));
+						tag.c_str(), host_tag_meaning(tag).c_str());
 				source_.on_host_result(false, tag);
 				// NWEC53..58 and NWEC60 are the service's MsgCode refusals (too many servers, the
 				// name not accepted, ...; NWEC58 one outside the table). NWEC51 (not queued), NWEC52
@@ -179,7 +225,8 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 				const ClientSession *session = lobby_.session();
 				const bool no_word = session == nullptr || session->server_msg_code() == 0;
 				end(kExitFailed, /*refused=*/tag != "NWEC51" && tag != "NWEC52" &&
-						!(tag == "NWEC58" && no_word));
+								!(tag == "NWEC58" && no_word),
+						host_tag_gloss(tag).text, is_nwec_tag(tag) ? tag : std::string());
 			};
 			// ServerStopHosting drops the session to verified and sends nothing; the session
 			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
@@ -277,7 +324,7 @@ bool Lister::tick(uint32_t now_ms) {
 			if (notice.kind == ClientSession::Notice::Kind::LeaveNovaWorld) {
 				io::logf(LogLevel::kError, "%s[session] the service ended the session (MsgCode %d)",
 				         who(), notice.fields.msg_code);
-				end(kExitStoppedByService);
+				end(kExitStoppedByService, /*refused=*/false, "the service ended the session");
 			}
 		}
 	}
@@ -345,7 +392,8 @@ void Lister::on_verified() {
 	const LoginResult first = flow_.login(options_.credentials.user, options_.credentials.pass);
 	if (first.kind != LoginResult::Kind::NeedRequest) {
 		io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), first.reason.c_str());
-		end(kExitFailed, /*refused=*/true); // nothing a later try would change
+		// Nothing a later try would change.
+		end(kExitFailed, /*refused=*/true, "the sign-in could not start");
 		return;
 	}
 	phase_ = Phase::LoggingIn;
@@ -370,7 +418,10 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 			io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), r.reason.c_str());
 			// A login the service answered and refused is its decision; a request that never
 			// reached it, or a page its web host failed (5xx) or moved (3xx), is not.
-			end(kExitFailed, /*refused=*/answered_by_service(reply));
+			const bool answered = answered_by_service(reply);
+			end(kExitFailed, /*refused=*/answered,
+					answered ? "the service refused the sign-in"
+							 : "the sign-in page did not answer");
 			return;
 		}
 		add_log_secret(r.nwhandle);
@@ -381,7 +432,7 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (first.kind != HostKeyResult::Kind::NeedRequest) {
 			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
 					first.reason.c_str());
-			end(kExitFailed, /*refused=*/true);
+			end(kExitFailed, /*refused=*/true, "the hosting page could not start");
 			return;
 		}
 		phase_ = Phase::FetchingHostKey;
@@ -397,7 +448,10 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 		if (r.kind == HostKeyResult::Kind::Failed) {
 			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
 					r.reason.c_str());
-			end(kExitFailed, /*refused=*/answered_by_service(reply));
+			const bool answered = answered_by_service(reply);
+			end(kExitFailed, /*refused=*/answered,
+					answered ? "the service refused the hosting page"
+							 : "the hosting page did not answer");
 			return;
 		}
 		host_key_ = r.host_key;
@@ -470,7 +524,8 @@ void Lister::request_host() {
 		io::logf(LogLevel::kError, "%s[host] cannot host: %s", who(), refusal);
 		// Only the gate's reply naming no lobby to host in is the service's word; a session not
 		// set up or out of state (a reconnect during the web leg) is a fault.
-		end(kExitFailed, /*refused=*/std::strcmp(refusal, NWEC_HOST_GATE_NOT_OK) == 0);
+		end(kExitFailed, /*refused=*/std::strcmp(refusal, NWEC_HOST_GATE_NOT_OK) == 0,
+				host_leg_meaning(refusal), refusal);
 		return;
 	}
 	phase_ = Phase::Requesting;
@@ -550,10 +605,12 @@ void Lister::sync_roster() {
 	role_.sync_roster(source_.wanted_roster(role_.roster()));
 }
 
-void Lister::end(int code, bool refused) {
+void Lister::end(int code, bool refused, std::string why, std::string tag) {
 	if (ending_ || phase_ == Phase::Done) return;
 	ending_ = true;
 	refused_ = refused;
+	failure_ = std::move(why);
+	failure_tag_ = std::move(tag);
 	exit_code_ = stopped_by_service_ ? kExitStoppedByService : code;
 }
 

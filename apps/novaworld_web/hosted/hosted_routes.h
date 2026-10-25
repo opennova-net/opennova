@@ -20,6 +20,7 @@
 // its HostRoutes.
 
 #include "hosted/model/hosted_repository.h"
+#include "hosted/protocol/agent_protocol.h" // SecondListingStatus
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -29,6 +30,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,8 +49,18 @@ namespace hosted {
 // (`tick`: {p99_ms, late} from its slot's report, null with none) and its
 // listing's players besides. Never its admin password. Without its events. The owner's
 // views carry its phase and why its last run ended besides (phase_json).
-// With `zone` (the play zone, "" for none), its address's hostname too.
+// With `zone` (the play zone, "" for none), its address's hostname too. Every
+// view carries its listing on NovaLogic's NovaWorld (`novalogic`: {state, try and
+// tries while trying or retrying, next_try_at (ISO 8601) while retrying, reason
+// while retrying or not listed, player_slots}, and for an admin its NWEC `tag`;
+// null unless live_second_listing has one).
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
+
+// A live server's listing on NovaLogic's NovaWorld (ADR 0068) as its own container's slot
+// report last carried it (fleet_repository.h SlotReport::second_listing), for a server whose
+// owner asked (list_on_novalogic); nullopt for any other, and while its agent or its server
+// reports none (one from before the state was carried: nothing is shown).
+std::optional<SecondListingStatus> live_second_listing(db::Database &db, const HostedServer &s);
 
 // Where server `s`'s start stands and why its last run ended (server_phase.h),
 // read from its rows at `now_ms` (Unix milliseconds: the launch backoff's

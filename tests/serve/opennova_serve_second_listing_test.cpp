@@ -9,7 +9,9 @@
 // second service's ServerStopHosting delists the server there alone: the goodbye burst drops its
 // row, the first listing and the match go on, and the second is not tried again. A second
 // listing whose gate names no session server does not host and leaves the server serving, its
-// next try scheduled.
+// next try scheduled. Throughout, its state as a supervisor reads it (--second-listing-file:
+// trying, listed, not listed or retrying, with why, the next try and the slots of its service's
+// players), and the console's line naming the service each joiner came through.
 #include "server.h"
 #include <base/gameprofile/gameprofile.h>
 #include <net/title/title_identity.h>
@@ -35,12 +37,16 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 
+#include <base/io/log.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -67,6 +73,25 @@ int failures = 0;
 
 std::string var(const VarList &list, const char *name) {
 	return var_has(list, name) ? var_value(list, name) : std::string("<absent>");
+}
+
+// The log lines the run wrote, for its own console lines (the joins' sources); printed too.
+std::mutex g_log_mu;
+std::vector<std::string> g_log;
+void log_sink(io::LogLevel level, const char *message) {
+	{
+		std::lock_guard<std::mutex> lock(g_log_mu);
+		g_log.emplace_back(message);
+	}
+	if (level != io::LogLevel::kDebug)
+		std::printf("%s\n", message);
+}
+bool logged(const std::string &text) {
+	std::lock_guard<std::mutex> lock(g_log_mu);
+	for (const std::string &line : g_log)
+		if (line.find(text) != std::string::npos)
+			return true;
+	return false;
 }
 
 // One NovaWorld service on loopback: the lobby listener and the gate that names it.
@@ -140,6 +165,7 @@ constexpr double kFrame = 1.0 / 62.5;
 } // namespace
 
 int main() {
+	io::set_log_sink(&log_sink);
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 
 	Service first;
@@ -185,6 +211,14 @@ int main() {
 		CHECK(error.find("another service") != std::string::npos);
 	}
 
+	// A run with no second listing reports it off.
+	{
+		serve::ServeOptions lan;
+		const serve::Server idle(lan);
+		CHECK(idle.second_listing_report() == serve::SecondListingReport{});
+		CHECK(serve::second_listing_json(idle.second_listing_report()) == "{\"state\":\"off\"}\n");
+	}
+
 	std::string error;
 	serve::ServeOptions options;
 	CHECK(serve::parse_serve_options(
@@ -203,6 +237,12 @@ int main() {
 	// (its gate lookup on a worker: its lister comes in a frame once that lands).
 	CHECK(server.lister() != nullptr && server.lister()->hosting());
 	CHECK(!server.second_listing_stopped());
+	// Its state for the supervisor (--second-listing-file): its first try under way.
+	{
+		const serve::SecondListingReport r = server.second_listing_report();
+		CHECK(r.state == serve::SecondListingState::Trying && r.attempt == 1 &&
+				r.attempts == serve::kSecondListingTriesMax && r.reason.empty() && r.slots.empty());
+	}
 
 	// --- The second hosts on the game socket and publishes its first full lists at once.
 	std::optional<LobbyState> a;
@@ -224,6 +264,11 @@ int main() {
 	CHECK(var(b->last_host_update["Host"], "Dedicated") == "Yes");
 	CHECK(var(b->last_host_update["Host"], "MaxPlayers") == "8");
 	CHECK(var(b->last_host_update["Host"], "GameType") == "DM");
+	{
+		serve::SecondListingReport listed;
+		listed.state = serve::SecondListingState::Listed;
+		CHECK(server.second_listing_report() == listed);
+	}
 
 	// --- The same match: once the round's refresh advanced the cookie-key ring, both services
 	// carry its current key, the one every joiner's CD cookie decrypts under, whichever service
@@ -329,10 +374,20 @@ int main() {
 		}
 		// The match tagged the joiner as the second listing's: its APPID was that listing's.
 		bool tagged = false;
+		int joiner_slot = -1;
 		for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
-			if (conn.type == inmatch::NapiNPConnection::kTypeServerSide && conn.peer.port == joiner_port)
+			if (conn.type == inmatch::NapiNPConnection::kTypeServerSide &&
+					conn.peer.port == joiner_port) {
 				tagged = conn.novaworld_listing == 1;
+				joiner_slot = static_cast<int>(conn.reply.player_slot);
+			}
 		CHECK(tagged);
+		// The supervisor's state names its slot among the second listing's players, and the
+		// console named the service it came through (none of the retail lines does).
+		CHECK(server.second_listing_report().state == serve::SecondListingState::Listed);
+		CHECK(server.second_listing_report().slots == std::vector<int>{ joiner_slot });
+		CHECK(logged("[join] \"SecondJoiner\" via OpenNova's NovaWorld (127.0.0.1:" +
+				std::to_string(second.gate_port) + ")"));
 	}
 
 	// --- A ServerCommand from the second service runs on the match, saved as the first's are.
@@ -352,6 +407,13 @@ int main() {
 		CHECK(server.frame(kFrame));
 		CHECK(server.second_lister() == nullptr);
 		CHECK(server.second_listing_stopped());
+		// Not listed for the run, saying why; its service's joiner is still in the match.
+		{
+			const serve::SecondListingReport r = server.second_listing_report();
+			CHECK(r.state == serve::SecondListingState::NotListed &&
+					r.reason == "the service stopped the hosting" && r.tag.empty());
+			CHECK(r.slots.size() == 1);
+		}
 		// Its goodbye burst reached the second service, which drops the row.
 		bool dropped = false;
 		for (int i = 0; i < 100 && !dropped; ++i) {
@@ -418,6 +480,11 @@ int main() {
 				CHECK(rehost->frame(kFrame));
 				CHECK(rehost->second_lister() == nullptr);
 				CHECK(rehost->second_listing_stopped());
+				CHECK(rehost->second_listing_report().state ==
+								serve::SecondListingState::NotListed &&
+						rehost->second_listing_report().reason ==
+								"the service refused the hosting again after its session "
+								"reconnected");
 				CHECK(rehost->running());
 				CHECK(rehost->lister() != nullptr && rehost->lister()->hosting());
 			}
@@ -460,6 +527,19 @@ int main() {
 			CHECK(bare->second_lister() == nullptr);
 			CHECK(!bare->second_listing_stopped());
 			CHECK(bare->second_listing_retry_at_ms() != 0);
+			// Retrying: the next try's number and time (a minute on), and the fault's reason.
+			{
+				const serve::SecondListingReport r = bare->second_listing_report();
+				const int64_t now = static_cast<int64_t>(std::time(nullptr));
+				CHECK(r.state == serve::SecondListingState::Retrying && r.attempt == 2 &&
+						r.attempts == serve::kSecondListingTriesMax);
+				CHECK(r.next_try_at >= now + 50 && r.next_try_at <= now + 61);
+				// A gate reply with no session server and no POST pair: the gate's state -9.
+				CHECK(r.reason ==
+								"the gate named no session server and lacks its POST address or "
+								"port" &&
+						r.tag == "NWEC25");
+			}
 			CHECK(bare->running());
 			CHECK(bare->lister() != nullptr && bare->lister()->hosting());
 			// The backoff holds the next try.
@@ -482,6 +562,7 @@ int main() {
 	std::error_code ec;
 	fs::remove_all(dir, ec);
 	fs::remove_all(work, ec);
+	io::set_log_sink(nullptr);
 	if (failures != 0) {
 		std::printf("opennova_serve_second_listing: %d failure(s)\n", failures);
 		return 1;

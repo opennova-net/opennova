@@ -226,6 +226,10 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);
 	}
+	// An owner who asked sees the listing's state on the server's page: the second listing's
+	// file for the agent, which says off when the service offers no listing this start.
+	if (settings.list_on_novalogic)
+		args.insert(args.end(), { "--second-listing-file", kSecondListingFileName });
 	if (lists_on_novalogic(settings, novalogic)) {
 		args.insert(args.end(), { "--also-master-host", novalogic.gate_host,
 				"--also-master-gate-port", std::to_string(novalogic.gate_port), "--also-credentials",

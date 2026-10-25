@@ -5,7 +5,7 @@ import { fetchDataSets } from '../../api/dataSets';
 import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
 import { listMyServers } from '../../api/myServers';
 import { dataSetsResponse, JO_SET } from '../../test/dataSetFixtures';
-import { hostedServer, JO, serversResponse } from '../../test/hostedFixtures';
+import { hostedServer, JO, serversResponse, settings } from '../../test/hostedFixtures';
 import { testRouter } from '../../test/router';
 import type { HostedServer } from '../../types/hostedServer';
 
@@ -195,6 +195,41 @@ describe('ServerOverviewTab', () => {
       hostedServer(1, { state: 'stopped', stopped_because: { cause: 'admin_stop', limit: null, exit_code: 0, oom: false, line: '' } }),
     );
     expect(page.get('.server-stopped-because').text()).toContain('An admin stopped it.');
+  });
+
+  it("says where its listing on NovaLogic's NovaWorld stands, for an owner who asked", async () => {
+    const asked = settings({ game_name: 'Server 1', list_on_novalogic: true });
+    const refused = {
+      state: 'not_listed',
+      reason: 'the service did not accept the server name',
+      tag: 'NWEC57',
+      player_slots: [3, 4],
+    };
+    // Asked, but the server reports nothing (one from before the state): no line.
+    let page = await mountTab(hostedServer(1, { settings: asked }));
+    expect(page.find('.server-novalogic').exists()).toBe(false);
+    wrapper?.unmount();
+    page = await mountTab(hostedServer(1, { settings: asked, novalogic: refused }));
+    const line = page.get('.server-novalogic');
+    expect(line.text()).toContain("NovaLogic's NovaWorld");
+    expect(line.text()).toContain('Not listed for this run: NovaLogic did not accept the server name.');
+    expect(line.findAll('p')[1].classes()).toContain('text-danger');
+    expect(line.get('.server-novalogic-players').text()).toBe("2 players on it came through NovaLogic's NovaWorld.");
+    // The NovaWorld error tag is the admin's alone.
+    expect(line.text()).not.toContain('NWEC57');
+    wrapper?.unmount();
+    page = await mountTab(hostedServer(1, { settings: asked, novalogic: refused }), 'admin');
+    expect(page.get('.server-novalogic').text()).toContain('NWEC57');
+    wrapper?.unmount();
+    // Listed, with no one through it yet.
+    page = await mountTab(hostedServer(1, { settings: asked, novalogic: { state: 'listed', player_slots: [] } }));
+    expect(page.get('.server-novalogic').text()).toContain("Listed. Players find it in NovaLogic's server browser too.");
+    expect(page.find('.server-novalogic-players').exists()).toBe(false);
+    expect(page.get('.server-novalogic').findAll('p')[1].classes()).toContain('text-online');
+    wrapper?.unmount();
+    // Not asked: no line, whatever the reply carries.
+    page = await mountTab(hostedServer(1, { novalogic: { state: 'listed', player_slots: [] } }));
+    expect(page.find('.server-novalogic').exists()).toBe(false);
   });
 
   it('says which hosting limit stopped it', async () => {

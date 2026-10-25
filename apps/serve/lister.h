@@ -115,6 +115,12 @@ public:
 	// A gate or session that did not answer, a request that never reached it or a 60 s host poll
 	// is not one.
 	bool refused() const { return refused_; }
+	// Why the lister finished on a refusal or a fault, in plain words ("the service did not accept
+	// the server name", "the gate did not answer"; "" for a stop, or none known), and the NWEC tag
+	// the session or the host request named for it ("" for none): a second listing's state
+	// (Server::second_listing_report). Never an account name, a password or a page's text.
+	const std::string &failure() const { return failure_; }
+	const std::string &failure_tag() const { return failure_tag_; }
 	// The web exchange still out (invalid when none), handed over so a finished lister can go
 	// without its destructor waiting on it; the exchange's worker reads nothing of the lister's.
 	std::future<net::HttpReply> release_http() { return std::move(http_); }
@@ -138,8 +144,9 @@ private:
 	HostRegistration registration() const;
 	void sync_roster();
 	// Record the outcome; the teardown runs at the end of the tick, outside the driver's hooks.
-	// `refused`: the service's refusal ended it (refused()).
-	void end(int code, bool refused = false);
+	// `refused`: the service's refusal ended it (refused()); `why` and `tag`: failure()'s and
+	// failure_tag()'s. The first outcome stands.
+	void end(int code, bool refused = false, std::string why = {}, std::string tag = {});
 	// `stop_hosting`: ClientStopHosting ahead of the goodbye burst (stop), or the burst alone
 	// (disconnect).
 	void teardown(bool stop_hosting);
@@ -156,6 +163,8 @@ private:
 	// (the embedder's stop at the match's NovaWorld exit) finishes with kExitStoppedByService.
 	bool stopped_by_service_ = false;
 	bool refused_ = false; // end()'s, refused()
+	std::string failure_; // end()'s, failure()
+	std::string failure_tag_; // end()'s, failure_tag()
 	int exit_code_ = kExitStopped;
 	uint32_t now_ms_ = 0;      // the session's clock: the embedder's, from the first pass
 	uint32_t clock_origin_ = 0;

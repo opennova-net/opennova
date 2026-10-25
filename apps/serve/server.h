@@ -55,6 +55,7 @@
 
 #include "admin_tcp_server.h"
 #include "credentials.h"
+#include "run_reports.h" // SecondListingReport
 #include "net_datagram_socket.h"
 #include "net_http.h"
 #include "net_sockets.h"
@@ -64,6 +65,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -120,11 +122,13 @@ struct ServeOptions {
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG, /NETLOG, /INOUT
 	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
 	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
-	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file)
-	// and the error a non-zero exit ends on (--exit-file); "" writes neither file.
+	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file),
+	// the error a non-zero exit ends on (--exit-file) and the second listing's state, rewritten
+	// whenever it changes (--second-listing-file; off for a run with none); "" writes no file.
 	bool status_page = true;
 	std::string stats_file;
 	std::string exit_file;
+	std::string second_listing_file;
 	// The primary desktop's width and height, the display size game.cfg's defaults take ahead of
 	// its video_res line and the renderer's desktop NWHWI prints [orig: Config_SetDefaults
 	// @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into outWidth @0x54D0F6;
@@ -244,6 +248,11 @@ public:
 	bool second_listing_stopped() const { return second_stopped_; }
 	// When the next try of a second listing that did not host starts (wall_ms; 0: none waiting).
 	uint32_t second_listing_retry_at_ms() const { return second_lister_ ? 0u : second_retry_at_ms_; }
+	// The second listing's state as a supervisor shows it (run_reports.h, --second-listing-file):
+	// off without one, trying, listed, retrying after a fault (the next try's number and time, the
+	// fault's reason), or not listed for the rest of the run (why), with the PlayerList slots of
+	// the players in the match its service sent (NapiNPConnection::novaworld_listing 1).
+	SecondListingReport second_listing_report() const;
 	// The exit code the lister finished with when stop() tore it down (stop()'s own finish
 	// included: a ServerStopHosting keeps the lister up until the match's NovaWorld exit stops
 	// the server), -1 when there was none: the lister is gone before the caller can read it.
@@ -289,14 +298,20 @@ private:
 	// The second listing (ServeOptions::also_master_host) on the socket's second session lane:
 	// whether the run has one; a try's gate lookup, off the frame thread; its start at the address
 	// that lookup found; its pass each frame (the publish once it hosts, the retry once it did not,
-	// the teardown once its service stopped it); the next try's schedule; and its teardown, with
-	// ClientStopHosting or the goodbye burst alone, as the first listing's.
+	// the teardown once its service stopped it); the next try's schedule after a fault (`why` and
+	// `tag` its reason, second_listing_report's); and its teardown, with ClientStopHosting or the
+	// goodbye burst alone, as the first listing's.
 	bool second_listing_wanted() const;
 	void begin_second_try();
 	void start_second_listing(const std::string &gate_address, uint32_t now_ms);
 	void tick_second_listing();
-	void schedule_second_retry(uint32_t now_ms, const char *why);
+	void schedule_second_retry(
+			uint32_t now_ms, const std::string &why, const std::string &tag = {});
 	void end_second_listing(bool stop_hosting);
+	// One console line per player the match added, naming the way it came (the NovaWorld service
+	// whose listing sent it, or the LAN), none of retail's: its own SERVER PLAYER ADDED line names
+	// none (NapiNPConnection::novaworld_listing). Each connection once, by its id.
+	void announce_joins();
 	// The mission start's server-info update inside the host boot (HostBootRequest::
 	// mission_start_update), ahead of the load: the starting map's or the next one's columns as
 	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
@@ -368,6 +383,13 @@ private:
 	uint32_t second_backoff_ms_ = 0;
 	uint32_t second_started_ms_ = 0; // the running try's start (its hosting deadline's)
 	int second_faults_ = 0;          // the tries that ended on a fault since it last hosted
+	// Why the last try did not host, or why the listing is over (second_listing_report), with the
+	// NWEC tag behind it ("" for none), and the next try's start in Unix seconds.
+	std::string second_reason_;
+	std::string second_tag_;
+	int64_t second_retry_at_unix_ = 0;
+	// The connections announce_joins has named, while they stay.
+	std::set<uint32_t> announced_joins_;
 	// A try's gate lookup (the gate's dotted address, or none when it did not resolve), which
 	// runs off the frame thread: the name's DNS lookup could hold the match up for seconds.
 	std::future<std::optional<std::string>> second_resolve_;

@@ -2,11 +2,19 @@
 // names (the service's own, and the owner's plainer ones), what each means to
 // the owner, the start's progression, and a badge; then where a start stands
 // within them (its phase, hosted/model/server_phase.h) and why a server's last run
-// ended, in its owner's words. An owner never sees a raw log or a machine's
-// figures: the phase and the server's own last line are all.
+// ended, in its owner's words, and where its listing on NovaLogic's NovaWorld
+// stands. An owner never sees a raw log or a machine's figures: the phase, the
+// server's own last line and its listing's reason are all.
 
-import { timeMs } from './format';
-import type { HostedServer, HostedState, ServerPhase, StopLimit, StoppedBecause } from '../types/hostedServer';
+import { formatDuration, timeMs } from './format';
+import type {
+  HostedServer,
+  HostedState,
+  NovaLogicListing,
+  ServerPhase,
+  StopLimit,
+  StoppedBecause,
+} from '../types/hostedServer';
 
 export const STATE_LABELS: Record<HostedState, string> = {
   requested: 'Requested',
@@ -255,4 +263,40 @@ function limitsText(limit: StopLimit | null, owner: boolean): string {
   return owner
     ? 'Your hosting limit no longer covers it (your support tier, dedicated machine or admin grant ended or changed), so it was stopped.'
     : "Its owner's hosting limit no longer covers it (their support tier, dedicated machine or admin grant ended or changed), so it was stopped.";
+}
+
+// A reason in the server's words names "the service" whose listing it is: on
+// these pages that is NovaLogic's ("NovaLogic did not accept the server name").
+function novalogicReason(reason: string | undefined): string {
+  return (reason || 'no reason was given').replace(/^the service\b/, 'NovaLogic');
+}
+
+// Where a server's listing on NovaLogic's NovaWorld stands, in its owner's
+// words, at `now` (ms): a retry's wait counts down to its next try.
+export function novalogicListingText(listing: NovaLogicListing, now: number): string {
+  const count = listing.try !== undefined && listing.tries !== undefined ? ` (try ${listing.try} of ${listing.tries})` : '';
+  switch (listing.state) {
+    case 'off':
+      return 'Not listed: the service does not offer it right now. The next start of the server tries again.';
+    case 'trying':
+      return `Signing in and listing${count}.`;
+    case 'listed':
+      return "Listed. Players find it in NovaLogic's server browser too.";
+    case 'retrying': {
+      const at = listing.next_try_at ? timeMs(listing.next_try_at) : Number.NaN;
+      const when = Number.isNaN(at) || at <= now ? 'shortly' : `in ${formatDuration(at - now)}`;
+      return `Not listed yet: ${novalogicReason(listing.reason)}. It tries again ${when}${count}.`;
+    }
+    case 'not_listed':
+      return `Not listed for this run: ${novalogicReason(listing.reason)}. The next start of the server tries again.`;
+    default:
+      return '';
+  }
+}
+
+// Whether the listing is up, failed for the run, or on its way.
+export function novalogicListingTone(listing: NovaLogicListing): 'good' | 'bad' | 'pending' {
+  if (listing.state === 'listed') return 'good';
+  if (listing.state === 'not_listed' || listing.state === 'off') return 'bad';
+  return 'pending';
 }

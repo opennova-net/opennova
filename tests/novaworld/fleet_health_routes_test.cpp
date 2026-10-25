@@ -14,7 +14,10 @@
 //     holders without), its moves oldest first (the row's making's `from` null, a log
 //     stream's note), its trees with their manifests' totals (null for a tree the service
 //     does not hold);
-//   - a server's `tick` in the admin's fleet view, never in its owner's JSON;
+//   - a server's `tick` in the admin's fleet view, never in its owner's JSON; its listing on
+//     NovaLogic's NovaWorld (`novalogic`) in both, for an owner who asked and from its agent's
+//     report (refused with why, a retry's try and time, the players that service sent), the
+//     NWEC tag the admin's alone, nothing without a report;
 //   - GET /api/admin/attention: refused without an admin; the findings over these rows in
 //     their order with their links (no lobby the danger until one registers; a server
 //     whose data could not be fetched at its last starts, until one runs), no alarm
@@ -26,6 +29,7 @@
 #include "accounts/auth.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/model/fleet_repository.h"
+#include "hosted/model/stats_repository.h" // iso_utc
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "net_http.h"
@@ -48,6 +52,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace net = opennova::net;
@@ -282,6 +287,64 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 	const auto owner = crow::json::load(hosted::server_json(*db, *server, false).dump());
 	const auto admin = crow::json::load(hosted::server_json(*db, *server, true).dump());
 	TEST_EXPECT(owner && admin && !owner.has("tick") && admin.has("tick"));
+	// Not asked to list on NovaLogic's NovaWorld: no state of it, whatever its agent reports.
+	TEST_EXPECT(is_null(owner["novalogic"]) && is_null(admin["novalogic"]));
+
+	// Asked, and its agent reporting the second listing (its ticks kept as planted): the
+	// owner's view says whether and why, with the players that service sent; the NWEC tag is
+	// the admin's alone.
+	db->exec("UPDATE hosted_servers SET list_on_novalogic = true WHERE id = $1;",
+			{ BindValue(h.rows.server) });
+	hosted::ContainerReport running;
+	running.name = "srv-ticks-g1";
+	running.slot = 0;
+	running.state = hosted::ContainerState::Running;
+	running.tick = hosted::TickHealth{ 2.5, 14.25, 30.0, 42 };
+	const auto views = [&](const hosted::SecondListingStatus &listing) {
+		running.second_listing = listing;
+		hosted::record_sync(*db, h.rows.reporting, "test-agent", { running }, kHostd);
+		const auto asked = hosted::find_server(*db, h.rows.server);
+		return std::make_pair(crow::json::load(hosted::server_json(*db, *asked, false).dump()),
+				crow::json::load(hosted::server_json(*db, *asked, true).dump()));
+	};
+	hosted::SecondListingStatus refused;
+	refused.state = hosted::SecondListingState::NotListed;
+	refused.reason = "the service did not accept the server name";
+	refused.tag = "NWEC57";
+	refused.slots = { 3 };
+	const auto first = views(refused);
+	const auto &mine = first.first;
+	const auto &theirs = first.second;
+	TEST_EXPECT(mine && theirs);
+	TEST_EXPECT(str(mine["novalogic"]["state"]) == "not_listed" &&
+			str(mine["novalogic"]["reason"]) == "the service did not accept the server name");
+	TEST_EXPECT(!mine["novalogic"].has("tag") && !mine["novalogic"].has("try") &&
+			!mine["novalogic"].has("next_try_at"));
+	TEST_EXPECT(mine["novalogic"]["player_slots"].size() == 1 &&
+			mine["novalogic"]["player_slots"][0].i() == 3);
+	TEST_EXPECT(str(theirs["novalogic"]["tag"]) == "NWEC57");
+	hosted::SecondListingStatus retrying;
+	retrying.state = hosted::SecondListingState::Retrying;
+	retrying.attempt = 2;
+	retrying.attempts = 5;
+	retrying.next_try_at = 1792000060;
+	retrying.reason = "the gate did not answer";
+	const auto second = views(retrying);
+	const auto &retry = second.first;
+	TEST_EXPECT(retry && str(retry["novalogic"]["state"]) == "retrying" &&
+			retry["novalogic"]["try"].i() == 2 && retry["novalogic"]["tries"].i() == 5 &&
+			str(retry["novalogic"]["next_try_at"]) == hosted::iso_utc(1792000060) &&
+			str(retry["novalogic"]["reason"]) == "the gate did not answer" &&
+			retry["novalogic"]["player_slots"].size() == 0);
+	TEST_EXPECT(second.second && !second.second["novalogic"].has("tag"));
+	// An agent or a server from before the state (a report without it): nothing shown.
+	running.second_listing.reset();
+	hosted::record_sync(*db, h.rows.reporting, "test-agent", { running }, kHostd);
+	const auto before = hosted::find_server(*db, h.rows.server);
+	TEST_EXPECT(is_null(
+			crow::json::load(hosted::server_json(*db, *before, false).dump())["novalogic"]));
+	db->exec("UPDATE hosted_servers SET list_on_novalogic = false WHERE id = $1;",
+			{ BindValue(h.rows.server) });
 	return 0;
 }
 

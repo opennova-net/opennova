@@ -2,8 +2,9 @@
 // hand-stepped clock: a minute of 62.5 Hz frames summed up as their p50, p99 and longest frame
 // time and the late frames (a frame that starts past its own end's deadline), nothing before the
 // minute is out, the window starting over after it; the nearest-rank quantile; the
-// --stats-file's JSON line and the --exit-file's one line; and the three flags on the command
-// line (--status-page on|off, --stats-file, --exit-file).
+// --stats-file's JSON line, the --exit-file's one line and the --second-listing-file's JSON line
+// in each state; and the four flags on the command line (--status-page on|off, --stats-file,
+// --exit-file, --second-listing-file).
 
 #include "run_reports.h"
 #include "server.h"
@@ -121,21 +122,66 @@ void files() {
 	std::printf("  the --stats-file line and the --exit-file line\n");
 }
 
+void second_listing_lines() {
+	using State = serve::SecondListingState;
+	serve::SecondListingReport r;
+	// Off: a run with no second listing; listed: nothing more to say.
+	CHECK(serve::second_listing_json(r) == "{\"state\":\"off\"}\n");
+	r.state = State::Listed;
+	CHECK(serve::second_listing_json(r) == "{\"state\":\"listed\"}\n");
+	// Trying: the try under way of the run's most, and no reason.
+	r.state = State::Trying;
+	r.attempt = 1;
+	r.attempts = 5;
+	r.reason = "left over";
+	CHECK(serve::second_listing_json(r) == "{\"state\":\"trying\",\"try\":1,\"tries\":5}\n");
+	// Retrying: the next try, when it starts, why and the tag behind it.
+	r.state = State::Retrying;
+	r.attempt = 2;
+	r.next_try_at = 1792000060;
+	r.reason = "the gate did not answer";
+	r.tag = "NWEC15";
+	CHECK(serve::second_listing_json(r) ==
+			"{\"state\":\"retrying\",\"try\":2,\"tries\":5,\"next_try_at\":1792000060,"
+			"\"reason\":\"the gate did not answer\",\"tag\":\"NWEC15\"}\n");
+	// Not listed: why, as one line of escaped text, and the players its service sent.
+	r.state = State::NotListed;
+	r.reason = "the service did not accept the \"name\"\n";
+	r.tag = "NWEC57";
+	r.slots = { 2, 5 };
+	CHECK(serve::second_listing_json(r) ==
+			"{\"state\":\"not_listed\",\"reason\":\"the service did not accept the \\\"name\\\" \","
+			"\"tag\":\"NWEC57\",\"slots\":[2,5]}\n");
+	r.tag.clear();
+	r.slots.clear();
+	r.reason = "its gate needs --allow-public";
+	CHECK(serve::second_listing_json(r) ==
+			"{\"state\":\"not_listed\",\"reason\":\"its gate needs --allow-public\"}\n");
+	// The write-on-change test: every member counts.
+	serve::SecondListingReport a = r;
+	CHECK(a == r);
+	a.slots = { 1 };
+	CHECK(a != r);
+	CHECK(std::string(serve::second_listing_state_text(State::NotListed)) == "not_listed");
+	std::printf("  the --second-listing-file line in each state\n");
+}
+
 void flags() {
 	const std::vector<std::string> base = { "--resource-dir", "/opt/game", "/HOST", "server.host" };
 	serve::ServeOptions defaults;
 	std::string error;
 	CHECK(serve::parse_serve_options(base, defaults, error) == 0);
-	CHECK(defaults.status_page && defaults.stats_file.empty() && defaults.exit_file.empty());
+	CHECK(defaults.status_page && defaults.stats_file.empty() && defaults.exit_file.empty() &&
+			defaults.second_listing_file.empty());
 
 	std::vector<std::string> args = base;
 	args.insert(args.end(),
-			{ "--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file",
-					"exit.txt" });
+			{ "--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
+					"--second-listing-file", "second-listing.json" });
 	serve::ServeOptions hosted;
 	CHECK(serve::parse_serve_options(args, hosted, error) == 0);
 	CHECK(!hosted.status_page && hosted.stats_file == "tick-stats.json" &&
-			hosted.exit_file == "exit.txt");
+			hosted.exit_file == "exit.txt" && hosted.second_listing_file == "second-listing.json");
 
 	args = base;
 	args.insert(args.end(), { "--status-page", "on" });
@@ -149,14 +195,16 @@ void flags() {
 		CHECK(serve::parse_serve_options(args, refused, error) == 1);
 		CHECK(error == "--status-page takes on or off");
 	}
-	for (const char *flag : { "--status-page", "--stats-file", "--exit-file" }) {
+	for (const char *flag :
+			{ "--status-page", "--stats-file", "--exit-file", "--second-listing-file" }) {
 		args = base;
 		args.push_back(flag);
 		serve::ServeOptions refused;
 		CHECK(serve::parse_serve_options(args, refused, error) == 1);
 		CHECK(error == std::string(flag) + " needs a value");
 	}
-	std::printf("  the command line: --status-page on|off, --stats-file, --exit-file\n");
+	std::printf("  the command line: --status-page on|off, --stats-file, --exit-file, "
+				"--second-listing-file\n");
 }
 
 } // namespace
@@ -166,6 +214,7 @@ int main() {
 	late_frames();
 	quantiles();
 	files();
+	second_listing_lines();
 	flags();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

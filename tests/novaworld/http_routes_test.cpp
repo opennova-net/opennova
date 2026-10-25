@@ -3625,6 +3625,9 @@ int test_admin_sessions(Harness &h) {
 			str((*row)["title"]["display_name"]) == "Joint Operations");
 	TEST_EXPECT(str(listing["server_kind"]) == "owned");
 	TEST_EXPECT(listing["dedicated"].t() == crow::json::type::True);
+	// No hosted server: no count of players another service sent it.
+	TEST_EXPECT(listing.has("novalogic_players") &&
+			listing["novalogic_players"].t() == crow::json::type::Null);
 	const int64_t host_rid = listing["rid"].i();
 
 	// The client plays on that server instead (its join address: where the host sends from):
@@ -5810,6 +5813,9 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
 	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
 			!json["server"]["settings"]["list_on_novalogic"].b());
+	// Not asked to list on NovaLogic's NovaWorld: no state of one.
+	TEST_EXPECT(json["server"].has("novalogic") &&
+			json["server"]["novalogic"].t() == crow::json::type::Null);
 	// No data set named: the first offered, with its names; no expansion (null is
 	// the base game alone, as the start form sends it); not started yet, so no data
 	// and nothing newer.
@@ -6156,7 +6162,9 @@ int test_hosted_server_routes(Harness &h) {
 // it (a key /NWHost.dll recorded for that account, presented by a hand-driven
 // host), and its owner's GET /api/me/hosts carries it with its hosted server,
 // the owner's ServerCommand reaches it while another account's is a 404, and
-// the admin view names the owner. An admin withdraws the owner's comp grant
+// the admin view names the owner; the admin's NovaWorld sessions count the
+// players NovaLogic's NovaWorld sent it once its agent reports them (a planted
+// slot report, null before and after). An admin withdraws the owner's comp grant
 // through the route and one supervisor pass (a fake machine driver) moves the server
 // to stopping; a stopping server takes no command (409 server_stopping), and
 // the owner's and the admin's stop on the listing are the hosted server's stop
@@ -6243,6 +6251,62 @@ int test_hosted_listing_owner(Harness &h) {
 		TEST_EXPECT(e["hosted_server_id"].i() == server_id);
 	}
 	TEST_EXPECT(seen);
+
+	// The admin's NovaWorld sessions: the hosted server's own session, and the players
+	// NovaLogic's NovaWorld sent it (who hold no session here) once its agent reports them, none
+	// before (-1: null; -2: no row). Its slot and its agent's report are planted as the fleet
+	// leaves them for a server whose owner asked, then taken away again.
+	const auto novalogic_players = [&h, rid]() -> int64_t {
+		const auto sessions =
+				crow::json::load(body_text(h.send("GET", "/api/admin/connections", { kBearer })));
+		for (const auto &e : sessions["connections"]) {
+			if (e["host"].t() != crow::json::type::Object ||
+					e["host"]["rid"].i() != static_cast<int64_t>(rid))
+				continue;
+			const auto &players = e["host"]["novalogic_players"];
+			return players.t() == crow::json::type::Null ? -1 : players.i();
+		}
+		return -2;
+	};
+	TEST_EXPECT(wait_until([&] { return novalogic_players() == -1; }));
+	int64_t novalogic_machine = 0;
+	{
+		auto db = h.pool.acquire();
+		novalogic_machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+									.id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-novalogic-1";
+		launched.private_address = "10.52.0.40";
+		launched.public_address = "198.51.100.40";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, novalogic_machine, launched));
+		const std::string container = hosted::hosted_container_name(server_id, 1);
+		db->exec("UPDATE hosted_servers SET machine_ref = $1, slot = 0, machine_id = $2, "
+				 "list_on_novalogic = true WHERE id = $3;",
+				{ opennova::db::BindValue(novalogic_machine), opennova::db::BindValue(container),
+						opennova::db::BindValue(server_id) });
+		hosted::ContainerReport running;
+		running.name = container;
+		running.slot = 0;
+		running.state = hosted::ContainerState::Running;
+		hosted::SecondListingStatus listed;
+		listed.state = hosted::SecondListingState::Listed;
+		listed.slots = { 2, 5 };
+		running.second_listing = listed;
+		TEST_EXPECT(
+				hosted::record_sync(*db, novalogic_machine, "test-agent", { running }).has_value());
+	}
+	TEST_EXPECT(novalogic_players() == 2);
+	{
+		auto db = h.pool.acquire();
+		db->exec("UPDATE hosted_servers SET machine_ref = NULL, slot = NULL, machine_id = '', "
+				 "list_on_novalogic = false WHERE id = $1;",
+				{ opennova::db::BindValue(server_id) });
+		db->exec("DELETE FROM fleet_machines WHERE id = $1;",
+				{ opennova::db::BindValue(novalogic_machine) });
+	}
+	TEST_EXPECT(novalogic_players() == -1);
 
 	// An admin withdraws the owner's comp grant (the route), and the supervisor's
 	// next pass (here one hand-driven pass over a fake machine driver) stops the server.

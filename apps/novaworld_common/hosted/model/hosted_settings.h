@@ -194,8 +194,9 @@ std::string render_credentials(const std::string &username, const std::string &p
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
 // title, and /exp with the code; for a server whose owner asked to be listed on
-// NovaLogic's NovaWorld while `novalogic` is offered, the second listing too
-// (--also-master-host, --also-master-gate-port, --also-credentials with
+// NovaLogic's NovaWorld, the second listing's state file (--second-listing-file,
+// off while the service offers none), and while `novalogic` is offered the second
+// listing too (--also-master-host, --also-master-gate-port, --also-credentials with
 // kNovaLogicCredentialsFileName, and --allow-public, which its gate under
 // novaworld.net needs). They name the working directory's files and carry no secret.
 std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,

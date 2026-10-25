@@ -61,4 +61,63 @@ std::string exit_file_text(const std::string &error) {
 	return line + "\n";
 }
 
+namespace {
+
+// `text` as a JSON string: quoted, its quotes and backslashes escaped, every
+// control character a space.
+std::string json_text(const std::string &text) {
+	std::string out = "\"";
+	for (const char c : text) {
+		if (c == '"' || c == '\\')
+			out += '\\';
+		out += static_cast<unsigned char>(c) < 0x20 || c == 0x7F ? ' ' : c;
+	}
+	return out + "\"";
+}
+
+} // namespace
+
+const char *second_listing_state_text(SecondListingState state) {
+	switch (state) {
+		case SecondListingState::Off:
+			return "off";
+		case SecondListingState::Trying:
+			return "trying";
+		case SecondListingState::Listed:
+			return "listed";
+		case SecondListingState::Retrying:
+			return "retrying";
+		case SecondListingState::NotListed:
+			return "not_listed";
+	}
+	return "off";
+}
+
+bool operator==(const SecondListingReport &a, const SecondListingReport &b) {
+	return a.state == b.state && a.attempt == b.attempt && a.attempts == b.attempts &&
+			a.next_try_at == b.next_try_at && a.reason == b.reason && a.tag == b.tag &&
+			a.slots == b.slots;
+}
+
+std::string second_listing_json(const SecondListingReport &r) {
+	using State = SecondListingState;
+	std::string out = std::string("{\"state\":\"") + second_listing_state_text(r.state) + "\"";
+	if (r.state == State::Trying || r.state == State::Retrying)
+		out += ",\"try\":" + std::to_string(r.attempt) + ",\"tries\":" + std::to_string(r.attempts);
+	if (r.state == State::Retrying)
+		out += ",\"next_try_at\":" + std::to_string(r.next_try_at);
+	if (r.state == State::Retrying || r.state == State::NotListed) {
+		out += ",\"reason\":" + json_text(r.reason);
+		if (!r.tag.empty())
+			out += ",\"tag\":" + json_text(r.tag);
+	}
+	if (!r.slots.empty()) {
+		out += ",\"slots\":[";
+		for (size_t i = 0; i < r.slots.size(); ++i)
+			out += (i == 0 ? "" : ",") + std::to_string(r.slots[i]);
+		out += "]";
+	}
+	return out + "}\n";
+}
+
 } // namespace opennova::serve
