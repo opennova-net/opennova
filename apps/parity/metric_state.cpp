@@ -325,8 +325,8 @@ double median(std::vector<double> values) {
 // C2S 0x0C
 
 // `death_slice`: both runs' occupancy ends at the recipient's own death inside the window
-// (uplink.priority_death_slice), so a subject short of 8 samples is the window's phase and
-// its median still compares.
+// (uplink.priority_death_slice), so a subject one sample short of the floor is the window's
+// phase and its median still compares.
 void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::vector<double> &a,
 		const std::vector<double> &b, bool death_slice) {
 	static_assert(has_normalization("uplink.priority_score"));
@@ -337,7 +337,11 @@ void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::v
 			"UPLINK_PRIORITY_MISMATCH");
 	value.floor = kDynamicRatioFloor;
 	value.reference = render_number(ma);
-	if (b.size() < kDynamicMinSamples && !(death_slice && !b.empty())) {
+	// The death-cut slice is the witnessed one-sample phase (one more at-rest read moves the
+	// window one uplink period): a subject two or more samples short still fails the floor.
+	const bool one_short =
+			death_slice && !b.empty() && b.size() + 1 >= std::min(a.size(), kDynamicMinSamples);
+	if (b.size() < kDynamicMinSamples && !one_short) {
 		value.comparable = false;
 		value.subject = std::to_string(b.size()) + " samples";
 		value.detail = "fewer than 8 occupied samples";

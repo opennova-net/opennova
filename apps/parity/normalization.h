@@ -675,8 +675,9 @@ inline constexpr Normalization kNormalizations[] = {
 			"uplink period later (its at-rest wait took a third read), and its 7 samples "
 			"(medians 2800 / 2022 / 1954 / 1927 against RR's 2806 / 2024 / 1954 / 1925) failed "
 			"the 8-sample floor (L4-s40). Where that death ends the occupancy on both RR and the "
-			"subject, a subject short of 8 samples still compares its slot's median (any sample "
-			"at all); without it the shortfall is not comparable, as before" },
+			"subject, a subject one sample short (its samples + 1 at least min(RR's, 8), the "
+			"witnessed one-period phase) still compares its slot's median; two or more short, "
+			"or without that death on both sides, the shortfall is not comparable, as before" },
 	{ "frame.carried", MaskKind::Field, 'S', 0x00A, "carried", 0,
 			"the carried object handle is session-local: compared as none/bound" },
 	{ "frame.mount_handle", MaskKind::Field, 'S', 0x00A, "mount_handle", 0,

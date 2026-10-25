@@ -3759,8 +3759,8 @@ void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
 // its median (uplink.priority_death_slice).
 void test_priority_death_slice() {
 	// `sends` uplinks from the window start every 190 ms, slot 0 scored about `score`, then the
-	// recipient's S2C 0x13 at `death` (0: none) and no uplink after.
-	auto run = [](uint32_t seed, size_t sends, uint64_t death, int score) {
+	// recipient's S2C 0x13 at `death` (0: none), and `resumed` uplinks from 1 s after it.
+	auto run = [](uint32_t seed, size_t sends, uint64_t death, int score, size_t resumed = 0) {
 		wire::ParityTrace trace = scripted(seed);
 		std::vector<wire::ParityUplinkState> kept;
 		wire::ParityUplinkState model;
@@ -3770,8 +3770,9 @@ void test_priority_death_slice() {
 			else
 				model = u;
 		}
-		for (size_t k = 0; k < sends; ++k) {
-			model.ts_ns = kSteadyStart + 50 * kMs + k * 190 * kMs;
+		for (size_t k = 0; k < sends + resumed; ++k) {
+			model.ts_ns = k < sends ? kSteadyStart + 50 * kMs + k * 190 * kMs
+									: kSteadyStart + death + kSec + (k - sends) * 190 * kMs;
 			model.priority_score[0] = uint32_t(score + int(k % 3));
 			kept.push_back(model);
 		}
@@ -3796,6 +3797,19 @@ void test_priority_death_slice() {
 	// The medians still compare at the 1/8x..8x band.
 	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
 					   run(3, 7, 1390 * kMs, 280), "OO"),
+			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+	// Two samples short is no one-period phase: the floor still fails it.
+	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
+					   run(3, 6, 1200 * kMs, 2800), "OO"),
+			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+	// RR's occupancy not cut by its death: the floor holds.
+	expect_row(judge_case(run(1, 8, 0, 2800), run(2, 9, 1770 * kMs, 2800),
+					   run(3, 7, 1390 * kMs, 2800), "OO"),
+			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+	// Uplinks that resume after the 0x13 (a respawn) leave the occupancy uncut: 5 + 2 samples
+	// still fail.
+	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
+					   run(3, 5, 1000 * kMs, 2800, 2), "OO"),
 			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
 }
 
