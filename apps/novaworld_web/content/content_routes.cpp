@@ -128,6 +128,39 @@ std::optional<ContentProject> readable(db::Database &db, const std::string &key,
 	return project;
 }
 
+// The files of `unrecorded` the project's store holds at their sizes (each an upload through the
+// store's own URL, which no request records) into `found`, the rest into `absent`; false with
+// `error` when the store fails. A few are asked of the store one by one; more by one listing of
+// the project's files, since each store call is a process of the AWS CLI's (a first push of a
+// retail game names thousands).
+bool sort_by_store(ObjectStore &store, const std::string &key,
+		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
+		std::vector<StoredBlob> &absent, std::string &error) {
+	const bool listing = unrecorded.size() > ContentRoutes::kHeadsAtMost;
+	std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
+	if (listing) {
+		std::vector<StoredObject> objects;
+		if (!store.list(project_prefix(key) + "blobs/", objects, error))
+			return false;
+		for (const StoredObject &object : objects)
+			stored.emplace(object.key, object.size);
+	}
+	for (const StoredBlob &blob : unrecorded) {
+		const std::string object = blob_key(key, blob.sha256);
+		bool exists = false;
+		uint64_t size = 0;
+		if (listing) {
+			const auto at = stored.find(object);
+			exists = at != stored.end();
+			size = exists ? at->second : 0;
+		} else if (!store.head(object, exists, size, error)) {
+			return false;
+		}
+		(exists && size == static_cast<uint64_t>(blob.bytes) ? found : absent).push_back(blob);
+	}
+	return true;
+}
+
 // A transfer as the editor makes it: {method, url, headers: {name: value}}.
 crow::json::wvalue transfer_json(const SignedTransfer &t) {
 	crow::json::wvalue out;
@@ -420,6 +453,17 @@ crow::response ContentRoutes::blob(
 	if (!p)
 		return no_such_project();
 	const std::string object = blob_key(p->key, sha);
+	if (urls_ != nullptr) {
+		// No file passes through this program when the store signs its own URLs (ADR 0069 d6).
+		SignedTransfer download;
+		std::string error;
+		if (!urls_->get(object, download, error))
+			return store_failure("GET /api/content/projects/<key>/blobs/<sha256>", error);
+		crow::response res(302);
+		res.set_header("Location", download.url);
+		res.set_header("Cache-Control", "no-store");
+		return res;
+	}
 	bool exists = false;
 	uint64_t size = 0;
 	std::string error;
@@ -479,6 +523,17 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		if (!p)
 			return no_such_project();
 		absent = missing_blobs(*db_conn, p->id, wanted);
+		// A file an earlier push uploaded through the store's own URL but never committed (an
+		// upload past its URL's hour, a push that failed) is held once the store has it, so a push
+		// again uploads only the rest.
+		if (store_ != nullptr && !absent.empty()) {
+			std::vector<StoredBlob> found, still;
+			std::string error;
+			if (!sort_by_store(*store_, p->key, absent, found, still, error))
+				return store_failure("POST /api/content/projects/<key>/missing", error);
+			record_blobs(*db_conn, p->id, found);
+			absent = std::move(still);
+		}
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/content/projects/<key>/missing", e);
 	}
@@ -642,54 +697,27 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 				return json_error(400, "unchanged", "the manifest lists the head's files");
 		}
 		// The files the store does not hold yet: each one an upload put but no request recorded (an
-		// upload through the store's own URL) is held once the store has it at its size. A few are
-		// asked of the store one by one; more by one listing of the project's files, since each
-		// store call is a process of the AWS CLI's (a first push of a retail game names thousands).
+		// upload through the store's own URL) is held once the store has it at its size.
 		std::vector<StoredBlob> listed;
 		listed.reserve(files.size());
 		for (const ContentFile &file : files)
 			listed.push_back({ file.sha256, static_cast<int64_t>(file.size) });
-		const std::vector<StoredBlob> unrecorded = missing_blobs(*db_conn, p->id, listed);
-		std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
-		if (unrecorded.size() > kHeadsAtMost) {
-			std::vector<StoredObject> objects;
-			std::string error;
-			if (!store_->list(project_prefix(p->key) + "blobs/", objects, error))
-				return store_failure(kRoute, error);
-			for (const StoredObject &object : objects)
-				stored.emplace(object.key, object.size);
-		}
-		std::vector<StoredBlob> found;
-		std::vector<std::string> absent;
-		for (const StoredBlob &blob : unrecorded) {
-			const std::string object = blob_key(p->key, blob.sha256);
-			bool exists = false;
-			uint64_t size = 0;
-			if (unrecorded.size() > kHeadsAtMost) {
-				const auto at = stored.find(object);
-				exists = at != stored.end();
-				size = exists ? at->second : 0;
-			} else {
-				std::string error;
-				if (!store_->head(object, exists, size, error))
-					return store_failure(kRoute, error);
-			}
-			if (exists && size == static_cast<uint64_t>(blob.bytes))
-				found.push_back(blob);
-			else
-				absent.push_back(blob.sha256);
-		}
+		std::vector<StoredBlob> found, absent;
+		std::string held_error;
+		if (!sort_by_store(*store_, p->key, missing_blobs(*db_conn, p->id, listed), found, absent,
+					held_error))
+			return store_failure(kRoute, held_error);
+		record_blobs(*db_conn, p->id, found);
 		if (!absent.empty()) {
 			crow::json::wvalue refusal;
 			refusal["error"] = "missing_blobs";
 			refusal["message"] = "the store does not hold every file the manifest lists";
 			std::vector<crow::json::wvalue> hashes;
-			for (const std::string &sha : absent)
-				hashes.emplace_back(sha);
+			for (const StoredBlob &blob : absent)
+				hashes.emplace_back(blob.sha256);
 			refusal["hashes"] = std::move(hashes);
 			return json_reply(400, refusal);
 		}
-		record_blobs(*db_conn, p->id, found);
 		std::string error;
 		const std::string scratch = scratch_file("manifest", error);
 		if (scratch.empty() ||

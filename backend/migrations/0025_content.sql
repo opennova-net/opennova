@@ -57,10 +57,11 @@ CREATE TABLE content_blobs (
 -- The products' projects, each on its data set and titled as it is. Our own game and its
 -- expansion are public, each keyed by its updater product's login; the retail games are
 -- private, found by the command files their stock installs ship (JOPTR.CMD, JOEPTR.CMD,
--- DFX2.CMD). An expansion's project builds on its base game's.
+-- DFX2.CMD). An expansion's project builds on its base game's. A login that is no project key
+-- leaves its project for an admin to make.
 INSERT INTO content_projects (key, title, visibility, retail, data_set_id)
 SELECT updater_login, display_name, 'public', false, id FROM data_sets
-WHERE kind = 'base' AND updater_login <> '' AND NOT retail_updater;
+WHERE kind = 'base' AND updater_login ~ '^[A-Z0-9_]{1,16}$' AND NOT retail_updater;
 INSERT INTO content_projects (key, title, visibility, retail, data_set_id)
 SELECT 'JO', display_name, 'private', true, id FROM data_sets
 WHERE kind = 'base' AND command_file = 'JOPTR.CMD';
@@ -70,7 +71,7 @@ WHERE kind = 'base' AND command_file = 'DFX2.CMD';
 INSERT INTO content_projects (key, title, visibility, retail, data_set_id, base_project_id)
 SELECT d.updater_login, d.display_name, 'public', false, d.id, p.id
 FROM data_sets d JOIN content_projects p ON p.data_set_id = d.parent_id
-WHERE d.kind = 'expansion' AND d.updater_login <> '' AND NOT d.retail_updater;
+WHERE d.kind = 'expansion' AND d.updater_login ~ '^[A-Z0-9_]{1,16}$' AND NOT d.retail_updater;
 INSERT INTO content_projects (key, title, visibility, retail, data_set_id, base_project_id)
 SELECT 'JOX01', d.display_name, 'private', true, d.id, p.id
 FROM data_sets d JOIN content_projects p ON p.data_set_id = d.parent_id

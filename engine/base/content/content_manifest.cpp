@@ -129,6 +129,8 @@ std::string folded_path(std::string_view path) {
 bool check_files(const std::vector<ContentFile> &files, std::string &why) {
 	std::unordered_map<std::string, const ContentFile *> folded;
 	folded.reserve(files.size());
+	std::unordered_map<std::string_view, uint64_t> sizes; // sha256 -> size
+	sizes.reserve(files.size());
 	for (const ContentFile &file : files) {
 		std::string bad;
 		if (!is_content_path(file.path, bad)) {
@@ -149,6 +151,25 @@ bool check_files(const std::vector<ContentFile> &files, std::string &why) {
 												: "\"" + file.path + "\" and \"" +
 							at->second->path + "\": one file on Windows and macOS";
 			return false;
+		}
+		const auto [held, fresh] = sizes.emplace(file.sha256, file.size);
+		if (!fresh && held->second != file.size) {
+			why = "\"" + file.path + "\": its sha256 is listed at another size too";
+			return false;
+		}
+	}
+	// A file is never a folder of another path's: one of the two could not be laid out (and
+	// "Maps" beside "maps/a.bms" is the same clash on Windows and macOS).
+	for (const ContentFile &file : files) {
+		const std::string path = folded_path(file.path);
+		for (size_t slash = path.find('/'); slash != std::string::npos;
+				slash = path.find('/', slash + 1)) {
+			const auto at = folded.find(path.substr(0, slash));
+			if (at != folded.end()) {
+				why = "\"" + at->second->path + "\" is a file, and a folder of \"" + file.path +
+						"\"";
+				return false;
+			}
 		}
 	}
 	return true;

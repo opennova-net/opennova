@@ -51,8 +51,8 @@ bool is_content_path(std::string_view path, std::string &why);
 std::string folded_path(std::string_view path);
 
 // Whether `files` is a revision's file list: every path a content path, every sha a SHA-256, every
-// size within kMaxFileBytes, and no two paths the same once folded. False with `why`, which names
-// the first file at fault.
+// size within kMaxFileBytes, no two paths the same once folded, no sha at two sizes, and no file a
+// folder of another path (once folded). False with `why`, which names the first file at fault.
 bool check_files(const std::vector<ContentFile> &files, std::string &why);
 
 // The canonical text of a revision's files (sorted by their paths' bytes): a JSON object

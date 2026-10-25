@@ -77,6 +77,15 @@ static int test_files() {
 	TEST_EXPECT(!check_files({ { "a.def", "ABC", 1 } }, why));
 	TEST_EXPECT(!check_files({ { "a.def", std::string(64, 'A'), 1 } }, why)); // upper case
 	TEST_EXPECT(!check_files({ { "a.def", kShaA, kMaxFileBytes + 1 } }, why));
+	// One SHA-256 at one size: the same bytes under two paths, never two sizes.
+	TEST_EXPECT(check_files({ { "a.def", kShaA, 5 }, { "b.def", kShaA, 5 } }, why));
+	TEST_EXPECT(!check_files({ { "a.def", kShaA, 5 }, { "b.def", kShaA, 999 } }, why) &&
+			why.find("another size") != std::string::npos);
+	// A file is no folder of another path's, folded or not.
+	TEST_EXPECT(!check_files({ { "maps", kShaA, 1 }, { "maps/a.bms", kShaB, 2 } }, why) &&
+			why.find("is a file, and a folder of") != std::string::npos);
+	TEST_EXPECT(!check_files({ { "Maps", kShaA, 1 }, { "maps/x/a.bms", kShaB, 2 } }, why));
+	TEST_EXPECT(check_files({ { "maps.txt", kShaA, 1 }, { "maps/a.bms", kShaB, 2 } }, why));
 	TEST_EXPECT(total_bytes({ { "a", kShaA, 3 }, { "b", kShaB, 4 } }) == 7);
 	std::printf("files: one file per path once folded, a SHA-256 each, 4 GiB at most\n");
 	return 0;
