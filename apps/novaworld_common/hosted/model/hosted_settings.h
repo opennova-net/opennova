@@ -123,19 +123,30 @@ struct LaunchSpec {
 	std::vector<std::string> serve_args;
 };
 
+// The value the vault's NovaLogic account fields hold until the real account goes in
+// (deploy/env/runtime.env.tpl: an optional field must exist with a value to sync). An account
+// holding it is unset, so a deployment whose switch is on never logs in to NovaLogic's live
+// service with a placeholder.
+inline constexpr const char *kNovaLogicAccountPlaceholder = "REPLACE_ME";
+
 // NovaLogic's NovaWorld as the second listing of the servers whose owners asked
 // (HostedSettings::list_on_novalogic): its gate and the project's account there, which
-// NovaLogic's service asks for before it hands out a HOSTKEY. Unoffered (an empty gate or
-// account: the service's ONNET_NOVALOGIC_LISTING off, or its account unset) a server lists on
-// this service alone, whatever its owner asked. Service policy, not a port.
+// NovaLogic's service asks for before it hands out a HOSTKEY. Unoffered (an empty gate, or an
+// account unset or the placeholder: the service's ONNET_NOVALOGIC_LISTING off, or its account
+// not filled in) a server lists on this service alone, whatever its owner asked. Service
+// policy, not a port.
 struct NovaLogicListing {
 	std::string gate_host;
 	uint16_t gate_port = 0;
 	std::string username;
 	std::string password;
-	bool offered() const {
-		return !gate_host.empty() && gate_port != 0 && !username.empty() && !password.empty();
+	bool account_set() const {
+		const auto set = [](const std::string &v) {
+			return !v.empty() && v != kNovaLogicAccountPlaceholder;
+		};
+		return set(username) && set(password);
 	}
+	bool offered() const { return !gate_host.empty() && gate_port != 0 && account_set(); }
 };
 
 // What a start renders, beside the settings.

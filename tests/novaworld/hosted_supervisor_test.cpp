@@ -348,11 +348,21 @@ int test_renders() {
 		// The arguments carry no secret.
 		for (const std::string &arg : both.serve_args)
 			TEST_EXPECT(arg.find("nlpass") == std::string::npos);
-		// An unset account offers nothing.
+		// An unset account offers nothing, nor one still the vault's placeholder.
 		hosted::NovaLogicListing no_account = novalogic;
 		no_account.password.clear();
 		TEST_EXPECT(!no_account.offered());
 		TEST_EXPECT(!hosted::lists_on_novalogic(asked, no_account));
+		for (const bool user_placeholder : { true, false }) {
+			hosted::NovaLogicListing placeholder = novalogic;
+			(user_placeholder ? placeholder.username : placeholder.password) =
+					hosted::kNovaLogicAccountPlaceholder;
+			TEST_EXPECT(!placeholder.account_set() && !placeholder.offered());
+			hosted::RenderInputs placeholder_in = in;
+			placeholder_in.novalogic = placeholder;
+			const hosted::LaunchSpec unoffered = hosted::render_launch(asked, "jo", "jox01", placeholder_in);
+			TEST_EXPECT(unoffered.serve_args == args && unoffered.files.size() == 4);
+		}
 	}
 
 	// Each data set speaks its title (its row's); OpenNova's data speaks Joint

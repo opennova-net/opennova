@@ -94,18 +94,21 @@ int run(const program::Boot &boot) {
 		// gate sees it).
 		hosted_config.master_host = config.public_host;
 		hosted_config.master_gate_port = config.gate_udp_port;
-		// NovaLogic's NovaWorld, while the policy offers it and the project's account is set.
+		// NovaLogic's NovaWorld, while the policy offers it and the project's account is set (not
+		// the vault's placeholder: NovaLogicListing::account_set).
 		if (fleet.novalogic_listing) {
-			if (config.novalogic_user.empty() || config.novalogic_pass.empty()) {
+			hosted::NovaLogicListing novalogic;
+			novalogic.gate_host = fleet.novalogic_gate;
+			novalogic.gate_port = fleet.novalogic_gate_port;
+			novalogic.username = config.novalogic_user;
+			novalogic.password = config.novalogic_pass;
+			if (novalogic.account_set())
+				hosted_config.novalogic = std::move(novalogic);
+			else
 				std::fprintf(stderr,
 						"[hosted] WARNING ONNET_NOVALOGIC_LISTING is on but ONNET_NOVALOGIC_USER or "
-						"ONNET_NOVALOGIC_PASS is unset: no server lists on NovaLogic's NovaWorld\n");
-			} else {
-				hosted_config.novalogic.gate_host = fleet.novalogic_gate;
-				hosted_config.novalogic.gate_port = fleet.novalogic_gate_port;
-				hosted_config.novalogic.username = config.novalogic_user;
-				hosted_config.novalogic.password = config.novalogic_pass;
-			}
+						"ONNET_NOVALOGIC_PASS is unset or still the vault's placeholder: no server "
+						"lists on NovaLogic's NovaWorld\n");
 		}
 		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
 		// a pure function of the store's config (the fleet holds no store).

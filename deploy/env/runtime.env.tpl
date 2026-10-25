@@ -25,6 +25,7 @@ ONNET_REDIS_PASSWORD=op://@VAULT@/@APP_ITEM@/redis_password
 ONNET_BOOTSTRAP_ADMIN=op://@VAULT@/@APP_ITEM@/bootstrap_admin # optional
 # The project's NovaLogic NovaWorld account, which the hosted servers that also list on
 # NovaLogic's NovaWorld log in with (the fleet's; infra/aws's novalogic_listing offers it).
+# Until the real account goes in, both fields hold REPLACE_ME, which the fleet takes as unset.
 ONNET_NOVALOGIC_USER=op://@VAULT@/@APP_ITEM@/novalogic_user # optional
 ONNET_NOVALOGIC_PASS=op://@VAULT@/@APP_ITEM@/novalogic_pass # optional
 STRIPE_SECRET_KEY=op://@VAULT@/@STRIPE_ITEM@/secret_key # billing

@@ -500,9 +500,9 @@ variable "fleet_idle_minutes" {
 }
 
 variable "novalogic_listing" {
-  description = "Whether a hosted server's owner may have it listed on NovaLogic's NovaWorld (gs.novaworld.net, a live service OpenNova does not run) as well as this one's (ONNET_NOVALOGIC_LISTING; apps/serve/README.md \"Two listings\"). The fleet lists there with the project's NovaLogic account, the app item's novalogic_user and novalogic_pass fields (deploy/env/runtime.env.tpl); without them no server does. false (the default) offers no such box on the site. Turning it off stops each server's NovaLogic listing at its next start (DEPLOY.md, \"Listing on NovaLogic's NovaWorld\")."
+  description = "Whether a hosted server's owner may have it listed on NovaLogic's NovaWorld (gs.novaworld.net, a live service OpenNova does not run) as well as this one's (ONNET_NOVALOGIC_LISTING; apps/serve/README.md \"Two listings\"). On by default (the maintainer's decision, 2026-10-25): the site shows the box. The fleet lists there with the project's NovaLogic account, the app item's novalogic_user and novalogic_pass fields (deploy/env/runtime.env.tpl); while they are unset or the vault's placeholder (REPLACE_ME) no server does. false offers no such box, and turning it off stops each server's NovaLogic listing at its next start (DEPLOY.md, \"Listing on NovaLogic's NovaWorld\")."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "fleet_ami" {
