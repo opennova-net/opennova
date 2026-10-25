@@ -136,6 +136,7 @@ enum class EditorRequestKind {
 	ContentPull,
 	ContentResolve,
 	ContentPush,
+	ContentRelease,
 	ContentCancel,
 	kCount,
 };
@@ -463,13 +464,14 @@ struct EditorRequest {
 	// The content store (ADR 0069, session/content_controller.h): the service and the account a sign-in
 	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
 	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
-	// pull's conflict at `path` is settled.
+	// pull's conflict at `path` is settled; a release's version.
 	std::string server;
 	std::string username;
 	std::string password;
 	std::string project_key;
 	std::string message;
 	std::optional<Resolution> resolution;
+	std::string version;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -498,7 +500,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.variable == b.variable && a.value == b.value && a.stroke == b.stroke && a.gesture == b.gesture &&
 			a.cancel == b.cancel && a.terrain_view == b.terrain_view && a.server == b.server &&
 			a.username == b.username && a.password == b.password && a.project_key == b.project_key &&
-			a.message == b.message && a.resolution == b.resolution;
+			a.message == b.message && a.resolution == b.resolution && a.version == b.version;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

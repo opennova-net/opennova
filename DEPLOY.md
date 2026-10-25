@@ -245,7 +245,7 @@ own, change these on your fork:
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
 | the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
 | `godot/src/authoring/editor_app.cpp` | the content store the OpenNova Editor reaches with no account kept (ADR 0069): `https://staging.opennova.net` in a debug build, `https://opennova.net` in a release build | `staging.<domain>` and `<domain>`, your deployment's |
-| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1`, `scripts/package_release.py` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` and `UPDATE.WIZ` files the packages write | `update.<domain>`, your deployment's ("The update service") |
+| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` the runtime's package writes (a content release's `UPDATE.WIZ` names the deployment's own `ONNET_UPDATE_HOST`) | `update.<domain>`, your deployment's ("The update service") |
 
 ## Rebuilding from the vault
 
@@ -1384,12 +1384,15 @@ does without an object store, hosting off). OpenNova's `update.exe` dials the ga
 OpenNova product (`retail_updater` off) that no published release serves is refused, so an
 OpenNova first install fails until OpenNova's runtime and content releases are published; a
 retail one with none is answered current, from a package web writes into its cache itself.
-A content package is `scripts/package_release.py`'s, built from the product's OpenNova
-Editor project; the runtime's is each tagged release's `opennova-runtime-windows-<tag>.sfs`
-(`release.yml` publishes it itself where `PUBLISH_RUNTIME_UPDATES` is set). Either is
-published on the Game data page's Releases (upload, validate, **Publish**) or with
-`scripts/publish_update.py`, which does the same through the admin API (without
-`--publish` the release stays a draft). The
+A content package is built by the data program from a revision of the product's content
+project (ADR 0069 d7: the editor's **Build > Release...** or the admin's Content page start it,
+`POST /api/admin/content/projects/<key>/releases`; the data program's `release.build` exports
+and packs it, then validates it as an upload); the runtime's is each tagged release's
+`opennova-runtime-windows-<tag>.sfs` (`release.yml` publishes it itself where
+`PUBLISH_RUNTIME_UPDATES` is set). Either is published on the Game data page's Releases
+(**Publish**; a package built elsewhere is uploaded there and validated) or with
+`scripts/publish_update.py`, which does the same through the admin API (without `--publish` the
+release stays a draft). The
 packages are the published releases of the Game data page; web fetches one from the store
 the first time the updater asks for it, into its task's storage.
 

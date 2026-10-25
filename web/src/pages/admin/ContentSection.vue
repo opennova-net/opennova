@@ -61,6 +61,15 @@
                   <button type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="toggleHistory(p)">
                     {{ history?.key === p.key ? 'Hide history' : 'History' }}<span class="sr-only"> of {{ p.key }}</span>
                   </button>
+                  <button
+                    v-if="p.data_set_id !== null && p.head > 0"
+                    type="button"
+                    :disabled="busy"
+                    class="text-accent hover:text-ink-bright disabled:opacity-40"
+                    @click="beginRelease(p)"
+                  >
+                    Release…<span class="sr-only"> {{ p.key }}</span>
+                  </button>
                   <button type="button" :disabled="busy" class="text-ink hover:text-ink-bright disabled:opacity-40" @click="toggleVisibility(p)">
                     {{ p.visibility === 'public' ? 'Make private' : 'Make public' }}<span class="sr-only"> {{ p.key }}</span>
                   </button>
@@ -92,6 +101,54 @@
                       </button>
                       <button type="button" :disabled="busy" :class="secondaryButton" @click="renaming = null">Cancel</button>
                     </div>
+                  </form>
+                </td>
+              </tr>
+              <tr v-if="releasing === p.key">
+                <td colspan="7" class="px-4 py-3">
+                  <form class="space-y-2" novalidate @submit.prevent="confirmRelease(p)">
+                    <p class="text-sm text-ink">
+                      The data program builds a release of {{ p.title }} from a revision: a draft on Game data's Releases
+                      once it is packed and checked, for you to publish there.
+                    </p>
+                    <div class="flex flex-wrap items-end gap-3">
+                      <div class="space-y-1">
+                        <label :for="`content-release-version-${p.key}`" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">
+                          Version
+                        </label>
+                        <input
+                          :id="`content-release-version-${p.key}`"
+                          v-model="releaseVersion"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder="0.2.0"
+                          maxlength="32"
+                          :aria-invalid="versionProblem ? 'true' : undefined"
+                          class="w-32 rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none aria-[invalid=true]:border-danger"
+                        />
+                      </div>
+                      <div class="space-y-1">
+                        <label :for="`content-release-revision-${p.key}`" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">
+                          Revision
+                        </label>
+                        <input
+                          :id="`content-release-revision-${p.key}`"
+                          v-model.number="releaseRevision"
+                          type="number"
+                          min="1"
+                          :max="p.head"
+                          class="w-24 rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none"
+                        />
+                      </div>
+                      <button type="submit" :disabled="busy || !releaseVersion.trim()" :class="primaryButton">
+                        {{ busy ? 'Starting…' : 'Build release' }}
+                      </button>
+                      <button type="button" :disabled="busy" :class="secondaryButton" @click="releasing = null">Cancel</button>
+                    </div>
+                    <p class="text-xs" :class="versionProblem ? 'text-danger' : 'text-ink-muted'">
+                      {{ versionProblem || `One to four numbers between dots. Revision ${p.head} is the newest.` }}
+                    </p>
                   </form>
                 </td>
               </tr>
@@ -236,6 +293,7 @@ import RelativeTime from '../../components/RelativeTime.vue';
 import { computed, reactive, ref } from 'vue';
 import {
   REVISIONS_PAGE,
+  buildContentRelease,
   createContentProject,
   deleteContentProject,
   fetchContentProjects,
@@ -272,6 +330,15 @@ const renaming = ref<string | null>(null);
 const newTitle = ref('');
 const deleting = ref<string | null>(null);
 const typedKey = ref('');
+// The project whose release form is open, and its version and revision.
+const releasing = ref<string | null>(null);
+const releaseVersion = ref('');
+const releaseRevision = ref(0);
+const releaseTried = ref(false);
+const VERSION_RULE = /^[0-9]+(\.[0-9]+){0,3}$/;
+const versionProblem = computed(() =>
+  releaseTried.value && !VERSION_RULE.test(releaseVersion.value.trim()) ? 'A version is one to four numbers between dots.' : '',
+);
 // The history shown: its project, the revisions read so far, and whether older ones remain.
 const history = ref<{ key: string; revisions: ContentRevision[]; more: boolean; loading: boolean } | null>(null);
 let errorFromLoad = false;
@@ -366,7 +433,33 @@ function olderRevisions() {
   if (shown && last) void readHistory(shown.key, last.number);
 }
 
+function beginRelease(p: ContentProject) {
+  renaming.value = null;
+  deleting.value = null;
+  releasing.value = p.key;
+  releaseVersion.value = '';
+  releaseRevision.value = p.head;
+  releaseTried.value = false;
+}
+
+async function confirmRelease(p: ContentProject) {
+  if (busy.value) return;
+  releaseTried.value = true;
+  const version = releaseVersion.value.trim();
+  if (!VERSION_RULE.test(version)) return;
+  busy.value = true;
+  const result = await buildContentRelease(p.key, { version, revision: releaseRevision.value || p.head });
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  releasing.value = null;
+  flash(`${result.value.name} is building: Game data's Releases shows it, a draft to publish once it is checked.`);
+}
+
 function beginRename(p: ContentProject) {
+  releasing.value = null;
   deleting.value = null;
   renaming.value = p.key;
   newTitle.value = p.title;
@@ -374,6 +467,7 @@ function beginRename(p: ContentProject) {
 
 function beginDelete(p: ContentProject) {
   renaming.value = null;
+  releasing.value = null;
   deleting.value = p.key;
   typedKey.value = '';
 }

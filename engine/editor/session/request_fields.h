@@ -82,6 +82,7 @@ enum class RequestFieldId : uint8_t {
 	ProjectKey,
 	Message,
 	Resolution,
+	Version,
 	kCount,
 };
 

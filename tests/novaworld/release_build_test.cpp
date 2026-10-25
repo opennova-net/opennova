@@ -8,6 +8,7 @@
 // product. And the refusals: a project that updates no data set, and a revision that is no project
 // (its export fails, what the tool said kept as the build's log).
 
+#include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"

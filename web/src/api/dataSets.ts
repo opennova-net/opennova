@@ -21,6 +21,7 @@ import type {
   PublishedRelease,
   Release,
   ReleaseSection,
+  ReleaseSource,
   Tree,
   TreeUpload,
   TreeUploadFile,
@@ -143,7 +144,16 @@ function pickRelease(value: unknown): Release | null {
     created_at: text(v.created_at),
     published_at: timeOrNull(v.published_at),
     retired_at: timeOrNull(v.retired_at),
+    source: pickSource(v.source),
+    version: text(v.version),
+    build_log: text(v.build_log),
   };
+}
+
+function pickSource(value: unknown): ReleaseSource | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.project !== 'string' || !isCount(v.revision)) return null;
+  return { project: v.project, revision: v.revision, base_revision: isCount(v.base_revision) ? v.base_revision : null };
 }
 
 function pickDataSetReply(data: unknown): DataSet | null {

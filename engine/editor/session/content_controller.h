@@ -12,7 +12,8 @@
 // both sides changed stops with its plan kept here for the author (content_resolve settles each
 // conflict, content_pull goes on), so no operation waits on a person. A pull's files written, the
 // project reads them again as an outside change (start_changed_refresh), or opens again when its
-// project file changed; a get's opens its folder. Single-threaded, like the session.
+// project file changed; a get's opens its folder. A release is a call too: the service builds it
+// from the project's revision (ADR 0069 d7). Single-threaded, like the session.
 
 #include <cstdint>
 #include <memory>
@@ -49,10 +50,11 @@ public:
 	void pull();
 	void resolve(const EditorRequest &request);
 	void push(const EditorRequest &request);
+	void release(const EditorRequest &request);
 	void cancel();
 
-	// The poll's: the calls outside the slot (a sign-in, a project list) stepped, each reply taken
-	// in.
+	// The poll's: the calls outside the slot (a sign-in, a project list, a release) stepped, each
+	// reply taken in.
 	void poll();
 	// Whether a call outside the slot is in flight (the Shell's frames keep coming while it is).
 	bool busy() const;
@@ -97,6 +99,8 @@ private:
 	std::string login_username_;
 	ContentCall projects_;
 	ContentCall logout_;
+	ContentCall release_;
+	std::string release_server_; // the service a release was asked of, for its words
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands
 	// ("" a pull of the open project).

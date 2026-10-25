@@ -92,8 +92,8 @@ ALTER TABLE releases
     ADD COLUMN version            text NOT NULL DEFAULT '',
     ADD COLUMN build_log          text NOT NULL DEFAULT '';
 
--- A data set's updater product as its packages name it (the release build's, which
--- scripts/package_release.py's table was): the command file's PRODUCT and the executable its DONE
+-- A data set's updater product as its packages name it (the release build's): the command
+-- file's PRODUCT and the executable its DONE
 -- runs ('' for an expansion). Each by its login, as the seeds above find our own.
 ALTER TABLE data_sets
     ADD COLUMN product_name text NOT NULL DEFAULT '',

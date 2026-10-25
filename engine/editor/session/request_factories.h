@@ -861,6 +861,11 @@ inline EditorRequest content_push(std::string message) {
 	request.message = std::move(message);
 	return request;
 }
+inline EditorRequest content_release(std::string version) {
+	EditorRequest request = of(EditorRequestKind::ContentRelease);
+	request.version = std::move(version);
+	return request;
+}
 inline EditorRequest content_cancel() {
 	return of(EditorRequestKind::ContentCancel);
 }

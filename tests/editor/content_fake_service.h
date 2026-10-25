@@ -60,6 +60,9 @@ public:
 	std::map<std::string, std::string> blobs; // by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	size_t uploads = 0, downloads = 0;
+	// The last release asked for: its version and revision.
+	std::string release_version;
+	int64_t release_revision = 0;
 
 	uint64_t start(editor::ContentRequest request) override {
 		const uint64_t id = next_++;
@@ -129,6 +132,22 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", list);
 			return json(200, out);
+		}
+		if (request.method == "POST" &&
+				request.url == std::string(kServer) + "/api/admin/content/projects/MOD/releases") {
+			if (!admin)
+				return refusal(403, "forbidden");
+			if (!io::json_parse(request.body, body, error))
+				return refusal(400, "invalid_json");
+			release_version = body.get_string("version", "");
+			release_revision = int64_t(body.get_number("revision", 0));
+			io::JsonValue release = io::JsonValue::make_object();
+			release.set("id", io::json_number(7));
+			release.set("name", io::json_string("MOD " + release_version));
+			release.set("status", io::json_string("building"));
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("release", release);
+			return json(201, out);
 		}
 		const std::string prefix = std::string(kServer) + "/api/content/projects/MOD";
 		if (request.url.rfind(prefix, 0) != 0)

@@ -290,6 +290,16 @@ describe('the releases', () => {
     const result = await fetchReleases();
     expect(get).toHaveBeenCalledWith('/releases', expect.anything());
     expect(result).toEqual({ ok: true, value: list });
+    // A built release: its source, version and the build's log.
+    const built = release(3, {
+      status: 'building',
+      sections: [],
+      source: { project: 'JO', revision: 4, base_revision: null },
+      version: '1.7.5.3',
+      build_log: '$ opennova-project export\n',
+    });
+    get.mockResolvedValue(reply({ releases: [built] }));
+    expect(await fetchReleases()).toEqual({ ok: true, value: [built] });
     get.mockResolvedValue(reply({ releases: [{ id: 1 }] }));
     expect((await fetchReleases()).ok).toBe(false);
   });

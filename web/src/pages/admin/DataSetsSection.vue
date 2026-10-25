@@ -438,6 +438,14 @@
               <td class="px-4 py-3">
                 <span :class="releaseStatusClass(r.status)">{{ releaseStatusLabel(r.status) }}</span>
                 <span v-if="r.error" class="block max-w-xs whitespace-normal text-xs text-danger">{{ r.error }}</span>
+                <span v-if="r.source" class="ds-release-source block text-xs text-ink-muted">
+                  Built from <span class="font-mono">{{ r.source.project }} r{{ r.source.revision }}</span
+                  ><template v-if="r.source.base_revision"> on its base's r{{ r.source.base_revision }}</template>
+                </span>
+                <details v-if="r.build_log" class="ds-release-log mt-1 max-w-md text-xs">
+                  <summary class="cursor-pointer text-accent hover:text-ink-bright">Build log</summary>
+                  <pre class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-control border border-border bg-surface p-2 font-mono text-ink">{{ r.build_log }}</pre>
+                </details>
                 <span v-if="r.published_at" class="block text-xs text-ink-muted">published <RelativeTime :value="r.published_at" :now="now" /></span>
                 <span v-if="r.retired_at" class="block text-xs text-ink-muted">retired <RelativeTime :value="r.retired_at" :now="now" /></span>
               </td>
@@ -571,7 +579,7 @@ function fail(text: string) {
 const working = computed(() => {
   const trees = (data.value?.data_sets ?? []).some((d) => d.trees.some((t) => t.state === 'finalizing' || t.state === 'building'));
   const validating = (releases.value ?? []).some(
-    (r) => r.status === 'validating' || r.sections.some((s) => s.tree?.state === 'building'),
+    (r) => r.status === 'building' || r.status === 'validating' || r.sections.some((s) => s.tree?.state === 'building'),
   );
   return trees || validating || uploader.value?.phase === 'finalizing';
 });
@@ -652,7 +660,15 @@ function treeStateClass(state: string): string {
 
 function releaseStatusLabel(status: string): string {
   return (
-    { uploading: 'Uploading', validating: 'Validating', invalid: 'Invalid', draft: 'Draft', published: 'Published', retired: 'Retired' } as Record<string, string>
+    {
+      uploading: 'Uploading',
+      building: 'Building',
+      validating: 'Validating',
+      invalid: 'Invalid',
+      draft: 'Draft',
+      published: 'Published',
+      retired: 'Retired',
+    } as Record<string, string>
   )[status] ?? status;
 }
 

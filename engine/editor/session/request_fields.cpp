@@ -343,6 +343,9 @@ constexpr RequestField kFields[] = {
 			"content_resolve's settling of the pull's conflict at path: keep_mine (the folder's file stays, a change "
 			"to push over the revision's) or take_theirs (the revision's file put in its place, or the folder's "
 			"removed where the revision has none)." },
+	{ F::Version, "version", J::String,
+			"content_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
+			"\"1.7.5.8\")." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

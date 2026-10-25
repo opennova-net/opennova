@@ -149,26 +149,22 @@ The engine repository and its CI hold and ship no game data. The Windows runtime
 package contains the engine, its native dependencies, `update.exe`, and
 `revupdat.exe`; a standalone installation downloads OpenNova content on first run.
 
-Every product's game data is an OpenNova Editor project the maintainer keeps outside
-git: OpenNova's base game and Indigo Storm (with their Blender sources), and Joint
-Operations, Escalation and DFX2 imported from their stock installs. A release is
-built from its project and uploaded in the admin's Game data (Releases: upload,
-validate, Publish), or with `scripts/publish_update.py`:
-
-```sh
-# Our own game: a full package, carrying the last published one's removals.
-python scripts/package_release.py --product OPENNOVA --project PROJECTS/OPENNOVA \
-    --version 0.2.0 --previous PROJECTS/RELEASES/OPENNOVA-0.1.0.sfs
-# A retail game: a patch of only what its project changed against the stock install.
-python scripts/package_release.py --product JO --project PROJECTS/JO \
-    --install "<the Joint Operations install>" --version 1.7.5.8
-```
+Every product's game data is an OpenNova Editor project in the NovaWorld content store
+(ADR 0069), never in a repository: OpenNova's base game and Indigo Storm (with their
+Blender sources) are public, and Joint Operations, Escalation and DFX2, imported from
+their stock installs (each one's revision 1 the stock import), are private. The editor's
+Content window gets, pulls and pushes a project; admins alone push, and a push is not a
+release. A release is built on the server from a revision: the editor's
+**Build > Release...** or the admin's Content page starts it, the data program exports
+and packs it, and the admin's Game data (Releases) publishes it. Our own game's is a full
+package carrying the last published one's removals; a retail game's is a patch of only
+what changed since its stock revision.
 
 The version goes into the package's command file; no version file is read or written.
-A retail patch diffs two exports by our own writer (the project's and a fresh import
-of the stock install's), so only changed files get rows, each into the archive the
-stock install holds it in. Its hosted tree is built on publish from the data set's
-stock baseline, uploaded once with "Upload data".
+A retail patch diffs two exports by our own writer (the revision's and the stock
+revision's), so only changed files get rows, each into the archive the stock install
+holds it in. Its hosted tree is built on publish from the data set's stock baseline,
+uploaded once with "Upload data".
 
 The game product is `/game opennova`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,

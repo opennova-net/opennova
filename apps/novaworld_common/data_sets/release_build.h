@@ -2,7 +2,7 @@
 
 // A release built from a content project's revision (ADR 0069 d7; content_repository.h): the
 // data program's release.build job, which the content store's release route enqueues in the
-// transaction that makes the release (building). It replaces scripts/package_release.py:
+// transaction that makes the release (building):
 //
 //   release.build  {release_id}, cap 1. The release must be building. Its project's revision
 //                  is laid out from the store (every file by its SHA-256 from the program's own

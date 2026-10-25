@@ -103,6 +103,9 @@ export type AdminErrorCode =
   | 'no_such_data_set'
   | 'no_such_base'
   | 'has_expansion'
+  | 'no_data_set'
+  | 'no_revision'
+  | 'building'
   // The log route (logs.ts).
   | 'no_log_store'
   | 'logs_unavailable'
@@ -178,6 +181,9 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'no_such_data_set',
   'no_such_base',
   'has_expansion',
+  'no_data_set',
+  'no_revision',
+  'building',
   'no_log_store',
   'logs_unavailable',
 ]);
@@ -297,6 +303,12 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'No content project has that base key.';
     case 'has_expansion':
       return "An expansion's content project builds on this one. Delete the expansion's first.";
+    case 'no_data_set':
+      return "That content project's releases update no data set. Make it a data set's first.";
+    case 'no_revision':
+      return 'That project has no such revision. Push one from the editor first.';
+    case 'building':
+      return 'The data program is building that release. Wait for it to be a draft or to fail.';
     case 'no_log_store':
       return 'This NovaWorld service reads no log store (ONNET_LOG_STORE is unset or malformed: the boot log says which).';
     case 'logs_unavailable':

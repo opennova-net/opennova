@@ -229,6 +229,26 @@ void ContentWindow::draw_standing(const ContentView &c) {
 	                                           "only once an admin releases it.";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::content_push(message_));
+
+	// A release of the revision the folder is at, built on the service (ADR 0069 d7): a draft once the
+	// service has packed and checked it, published in the web admin's Game data.
+	ImGui::SeparatorText("Release");
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
+	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
+	ui_kit::tooltip("The release's version: one to four numbers between dots.");
+	ImGui::SameLine();
+	const bool releases = v.allows(EditorRequestKind::ContentRelease) && version_[0] && c.revision > 0 && !c.calling;
+	ImGui::BeginDisabled(!releases);
+	const bool released = ImGui::Button(("Release r" + std::to_string(c.revision) + "###release").c_str()) && releases;
+	ImGui::EndDisabled();
+	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision of the store's."
+	                : !version_[0]  ? "Name its version first."
+	                                : "Builds a release of r" + std::to_string(c.revision) +
+	                                          " on the service; publish it in the web admin's Game data once it is a draft.");
+	if (released) {
+		workspace_.request(request::content_release(version_));
+		version_[0] = '\0';
+	}
 }
 
 void ContentWindow::draw_conflicts(const ContentView &c) {

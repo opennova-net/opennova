@@ -98,6 +98,25 @@ export function updateContentProject(
   return adminCall(() => adminClient.patch<unknown>(`/content/projects/${encodeURIComponent(key)}`, change), pickProject);
 }
 
+// POST /api/admin/content/projects/<key>/releases {version, revision?, base_revision?}: a release
+// the data program builds from the revision (the head when none is named; an expansion's on its
+// base game's head), building (201); 400 invalid_field, no_data_set, no_revision. Game data's
+// Releases shows it, a draft to publish once it is built and checked.
+export function buildContentRelease(
+  key: string,
+  build: { version: string; revision?: number; base_revision?: number },
+): Promise<AdminResult<{ id: number; name: string }>> {
+  return adminCall(
+    () => adminClient.post<unknown>(`/content/projects/${encodeURIComponent(key)}/releases`, build),
+    (data) => {
+      const release = (data as { release?: Record<string, unknown> } | null)?.release;
+      return release && Number.isInteger(release.id) && typeof release.name === 'string'
+        ? { id: release.id as number, name: release.name }
+        : null;
+    },
+  );
+}
+
 // DELETE /api/admin/content/projects/<key>: the project, its history and its files gone (204);
 // 409 has_expansion while an expansion's project builds on it.
 export function deleteContentProject(key: string): Promise<AdminResult<true>> {

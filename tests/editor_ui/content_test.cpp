@@ -76,6 +76,17 @@ void test_bound_project() {
 	const EditorRequest *push = one(raised, EditorRequestKind::ContentPush);
 	CHECK(push && push->message == "Fix the armory", "Push: one content_push with the message");
 
+	// Release r3 waits for a version; typed, it raises content_release with it.
+	ui.activate(content_item({"###release"}));
+	CHECK(ui.drain().empty(), "no version: Release raises nothing");
+	ui.activate(content_item({"##version"}));
+	ImGui::GetIO().AddInputCharactersUTF8("0.2.0");
+	ui.frames(2);
+	ui.activate(content_item({"###release"}));
+	raised = ui.drain();
+	const EditorRequest *release = one(raised, EditorRequestKind::ContentRelease);
+	CHECK(release && release->version == "0.2.0", "Release r3: one content_release of the version");
+
 	// Check and Pull.
 	ui.activate(content_item({"Check"}));
 	CHECK(one(ui.drain(), EditorRequestKind::ContentCheck), "Check: one content_check");

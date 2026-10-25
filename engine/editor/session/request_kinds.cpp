@@ -289,6 +289,9 @@ void serve_content_resolve(SessionCore &core, const EditorRequest &request) {
 void serve_content_push(SessionCore &core, const EditorRequest &request) {
 	core.content().push(request);
 }
+void serve_content_release(SessionCore &core, const EditorRequest &request) {
+	core.content().release(request);
+}
 void serve_content_cancel(SessionCore &core, const EditorRequest &) {
 	core.content().cancel();
 }
@@ -1500,6 +1503,14 @@ constexpr RequestKindRow kRows[] = {
 			.guarded(GuardScope::AllDirty, "Push", "Save all and push")
 			.acts_on_saved()
 			.ends_edit_groups()
+			.row,
+	// A call the poll takes the reply of, as a sign-in's: the service builds the release (ADR 0069 d7).
+	Request(K::ContentRelease, "content_release", serve_content_release,
+			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
+			"the service as version, a draft once the service's data program has packed and checked it, published "
+			"in the web admin's Game data; for an expansion's project, on its base game's newest revision. An "
+			"admin's alone.")
+			.takes(request_params({ F::Version }, {}))
 			.row,
 	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
 	// its conflicts.

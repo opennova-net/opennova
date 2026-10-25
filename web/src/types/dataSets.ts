@@ -144,8 +144,18 @@ export interface UploadedPart {
   etag: string;
 }
 
-// uploading -> validating -> draft | invalid; draft -> published -> retired.
-export type ReleaseStatus = 'uploading' | 'validating' | 'invalid' | 'draft' | 'published' | 'retired';
+// uploading -> validating -> draft | invalid; draft -> published -> retired. A
+// release built from a content project's revision (ADR 0069 d7) starts
+// building, and validates as an upload does once its package is made.
+export type ReleaseStatus = 'uploading' | 'building' | 'validating' | 'invalid' | 'draft' | 'published' | 'retired';
+
+// A built release's source: the content project's key and the revision built
+// (an expansion's on its base game's revision).
+export interface ReleaseSource {
+  project: string;
+  revision: number;
+  base_revision: number | null;
+}
 
 // One section of a release: one product's update, mapped to a data set by its
 // command file.
@@ -177,6 +187,11 @@ export interface Release {
   created_at: string;
   published_at: string | null;
   retired_at: string | null;
+  // A built release's source, null for an upload; its version; what the build's
+  // tools said ('' for an upload).
+  source: ReleaseSource | null;
+  version: string;
+  build_log: string;
 }
 
 // POST /api/admin/releases's body.

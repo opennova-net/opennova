@@ -189,8 +189,14 @@ static int test_share_through_sessions() {
 	TEST_EXPECT(section.get("binding")->get_string("key", "") == "MOD" &&
 			int(section.get("binding")->get_number("revision", 0)) == 5 &&
 			section.get("pull")->get("conflicts")->array.empty());
+	// A release of the second's revision, built on the service; a version that is none refused.
+	second.send(request::content_release("x.y"));
+	TEST_EXPECT(second.refused("content.refused") && service.release_version.empty());
+	second.send(request::content_release("0.2.0"));
+	TEST_EXPECT(service.release_version == "0.2.0" && service.release_revision == 5 &&
+			second.content().last.find("MOD 0.2.0") != std::string::npos);
 	std::printf("share: bound and pushed, got and opened, pulled, a stale push refused, a conflict "
-				"taken\n");
+				"taken, a release asked for\n");
 	return 0;
 }
 

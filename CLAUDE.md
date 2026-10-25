@@ -34,8 +34,10 @@ easier to relay than to rediscover.
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
 - No repository holds game data (ADR 0067). Every product's OpenNova Editor project (our own
-  game and its expansion, the retail games' imports) is kept by the maintainer outside git;
-  its release is `scripts/package_release.py`'s package, uploaded in the admin's Game data.
+  game and its expansion, the retail games' imports) lives in the NovaWorld content store
+  (ADR 0069): the editor's Content window gets, pulls and pushes it (admins push); its release
+  is built on the server from a revision (Build > Release..., or the admin's Content page) and
+  published in the admin's Game data.
   CI ships only the runtime: `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies
   and bootstrap configuration. First standalone launch downloads content. `/game` selects
   `opennova`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game

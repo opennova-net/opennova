@@ -444,6 +444,29 @@ PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<st
 	return PushAnswer::Refused;
 }
 
+ContentRequest release(const ContentAccount &account, const std::string &key,
+		const std::string &version, int64_t revision) {
+	io::JsonValue body = io::JsonValue::make_object();
+	body.set("version", io::json_string(version));
+	body.set("revision", io::json_number(static_cast<double>(revision)));
+	return json_request(account, "POST", "/api/admin/content/projects/" + key + "/releases", body);
+}
+
+bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, ContentApiError &error) {
+	io::JsonValue json;
+	if (!json_reply(reply, 201, json, error))
+		return false;
+	const io::JsonValue *release = json.get("release");
+	if (!release || !release->is_object()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply names no release";
+		return false;
+	}
+	id = whole(*release, "id");
+	name = release->get_string("name", "");
+	return true;
+}
+
 } // namespace content_api
 
 } // namespace opennova::editor

@@ -106,6 +106,9 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
     created_at: '2026-10-16 11:00:00',
     published_at: status === 'published' || status === 'retired' ? '2026-10-16 11:30:00' : null,
     retired_at: status === 'retired' ? '2026-10-16 12:00:00' : null,
+    source: null,
+    version: '',
+    build_log: '',
     ...overrides,
   };
 }

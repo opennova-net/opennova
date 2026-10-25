@@ -39,6 +39,26 @@ bool empty_folder(const std::string &dir) {
 	return !ec;
 }
 
+// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as the service's
+// route takes it (apps/novaworld_web/content/content_routes.cpp valid_version).
+bool release_version(const std::string &version) {
+	if (version.empty() || version.size() > 32)
+		return false;
+	int dots = 0;
+	size_t digits = 0;
+	for (const char c : version) {
+		if (c >= '0' && c <= '9') {
+			++digits;
+			continue;
+		}
+		if (c != '.' || digits == 0)
+			return false;
+		++dots;
+		digits = 0;
+	}
+	return digits > 0 && dots < 4;
+}
+
 } // namespace
 
 ContentController::ContentController(SessionCore &core) : core_(core), accounts_(&memory_) {}
@@ -260,6 +280,29 @@ void ContentController::push(const EditorRequest &request) {
 					*transport_, account_, core_.paths(), export_dir(), binding, request.message));
 }
 
+void ContentController::release(const EditorRequest &request) {
+	if (!ready(true, true, true))
+		return;
+	const ContentView &view = core_.view().content;
+	if (!release_version(request.version)) {
+		refuse("A release names its version: one to four numbers between dots (0.2.0).");
+		return;
+	}
+	if (view.revision <= 0) {
+		refuse("Push the project first: a release is built from a revision of the store's.");
+		return;
+	}
+	if (release_.started()) {
+		refuse("A release is being asked for already.");
+		return;
+	}
+	release_server_ = account_.server;
+	release_ = ContentCall(*transport_,
+			content_api::release(account_, view.key, request.version, view.revision));
+	core_.view().content.calling = true;
+	core_.touch(ViewConcern::Content);
+}
+
 void ContentController::cancel() {
 	// A content job running gave way to this request at the gate (its row's superseded_by); a pull
 	// kept for its conflicts goes too.
@@ -307,7 +350,23 @@ void ContentController::poll() {
 		projects_ = ContentCall();
 		core_.touch(ViewConcern::Content);
 	}
-	const bool calling = login_.started() || projects_.started();
+	if (release_.started() && release_.poll()) {
+		ContentApiError error;
+		int64_t id = 0;
+		std::string name;
+		if (content_api::read_release(release_.reply(), id, name, error)) {
+			view.last = "Release " + name + " is building on " + release_server_ +
+					": publish it in the web admin's Game data once it is a draft.";
+			core_.note("Content store: " + view.last);
+		} else {
+			view.last = "The release was refused: " + error.line();
+			core_.refuse_request(make_finding(
+					CoreFinding::ContentFailed, DiagnosticSeverity::Warning, view.last));
+		}
+		release_ = ContentCall();
+		core_.touch(ViewConcern::Content);
+	}
+	const bool calling = login_.started() || projects_.started() || release_.started();
 	if (view.calling != calling) {
 		view.calling = calling;
 		core_.touch(ViewConcern::Content);
@@ -315,7 +374,7 @@ void ContentController::poll() {
 }
 
 bool ContentController::busy() const {
-	return login_.started() || projects_.started();
+	return login_.started() || projects_.started() || release_.started();
 }
 
 void ContentController::show_binding() {

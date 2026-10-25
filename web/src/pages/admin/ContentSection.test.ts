@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContentSection from './ContentSection.vue';
 import {
+  buildContentRelease,
   createContentProject,
   deleteContentProject,
   fetchContentProjects,
@@ -15,6 +16,7 @@ import type { ContentProject } from '../../types/content';
 vi.mock('../../api/content', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/content')>()),
   fetchContentProjects: vi.fn(),
+  buildContentRelease: vi.fn(),
   fetchContentRevisions: vi.fn(),
   createContentProject: vi.fn(),
   updateContentProject: vi.fn(),
@@ -31,6 +33,7 @@ const create = vi.mocked(createContentProject);
 const update = vi.mocked(updateContentProject);
 const remove = vi.mocked(deleteContentProject);
 const dataSets = vi.mocked(fetchDataSets);
+const release = vi.mocked(buildContentRelease);
 
 function project(key: string, extra: Partial<ContentProject> = {}): ContentProject {
   return {
@@ -138,6 +141,24 @@ describe('ContentSection', () => {
     await page.findAll('form').find((f) => f.find('#content-delete-JO').exists())!.trigger('submit');
     await flushPromises();
     expect(remove).toHaveBeenCalledWith('JO');
+  });
+
+  it('builds a release of a revision, its version checked first', async () => {
+    release.mockResolvedValue({ ok: true, value: { id: 9, name: 'JO 1.0.1' } });
+    const page = await mountSection();
+    const begin = page.findAll('button').find((b) => b.text().startsWith('Release') && b.text().includes('JO') && !b.text().includes('OPENNOVA'));
+    await begin!.trigger('click');
+    const form = () => page.findAll('form').find((f) => f.find('#content-release-version-JO').exists())!;
+    await page.get('#content-release-version-JO').setValue('1.x');
+    await form().trigger('submit');
+    await flushPromises();
+    expect(release).not.toHaveBeenCalled();
+    expect(form().text()).toContain('one to four numbers');
+    await page.get('#content-release-version-JO').setValue('1.0.1');
+    await form().trigger('submit');
+    await flushPromises();
+    expect(release).toHaveBeenCalledWith('JO', { version: '1.0.1', revision: 3 });
+    expect(page.get('[role="status"]').text()).toContain('JO 1.0.1 is building');
   });
 
   it('says why a read failed', async () => {

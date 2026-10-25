@@ -180,7 +180,6 @@ jobs:
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
           python -B -m unittest discover -s scripts -p test_publish_update.py
-          python -B -m unittest discover -s scripts -p test_package_release.py
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
 
