@@ -313,8 +313,10 @@ int test_push(Harness &h) {
 	const auto lacking = h.as_admin("POST", "/api/content/projects/JO/revisions",
 			push_body(1, "More", opennova::content::encode_manifest(more)));
 	TEST_EXPECT(refused(lacking, 400, "missing_blobs"));
-	const auto hashes = crow::json::load(body_text(lacking))["hashes"];
-	TEST_EXPECT(hashes.size() == 1 && std::string(hashes[0].s()) == more[2].sha256);
+	// The reply kept whole: a member read off a temporary document outlives what it points into.
+	const auto lacked = crow::json::load(body_text(lacking));
+	TEST_EXPECT(lacked && lacked["hashes"].size() == 1 &&
+			std::string(lacked["hashes"][0].s()) == more[2].sha256);
 	std::string spaced = manifest;
 	spaced.insert(spaced.find('\n'), " ");
 	TEST_EXPECT(refused(h.as_admin("POST", "/api/content/projects/JO/revisions",
