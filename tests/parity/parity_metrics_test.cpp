@@ -4095,6 +4095,67 @@ void test_sub_quantum_step() {
 	}
 }
 
+// The final's ash-i5a-aas-capture RO (LX-s37, Q-LX-s37-8): the host body's deploy settle, 8
+// records on a base, held three samples of its fall in RR's window and only the last step in
+// RO's (a lone lead), so entity_motion read RR moving and RO, a retail host, still. The motion
+// row takes the dynamic rows' 16-record floor (entity.sparse_sequence).
+void test_entity_motion_floor() {
+	// Ten still soldiers in every steady frame, and soldier 0x0060 with `n` records from the
+	// window start whose z falls half a unit a record over its first `moving` records, then
+	// holds; all carrier-local (world = the exact offset).
+	auto run = [](uint32_t seed, size_t n, size_t moving) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<const wire::ParityFrameState *> steady;
+		for (const wire::ParityFrameState &f : trace.frames)
+			if (f.ts_ns >= kSteadyStart && f.ts_ns <= kSteadyStart + uint64_t(kSteadySeconds * 1e9))
+				steady.push_back(&f);
+		auto soldier = [](const wire::ParityFrameState &f, uint32_t handle, int32_t z) {
+			wire::ParityEntity e;
+			e.frame = f.frame;
+			e.ts_ns = f.ts_ns;
+			e.session = f.session;
+			e.cls = 'I';
+			e.handle = handle;
+			e.type_id = 2070;
+			e.carrier_local = true;
+			e.carrier = 0x3000;
+			e.pos_x = network_compress_fixedpoint(int32_t(handle) * 65536);
+			e.pos_y = network_compress_fixedpoint(8 * 65536);
+			e.pos_z = network_compress_fixedpoint(z);
+			e.offset_x = network_decompress_fixedpoint(uint16_t(e.pos_x));
+			e.offset_y = network_decompress_fixedpoint(uint16_t(e.pos_y));
+			e.offset_z = network_decompress_fixedpoint(uint16_t(e.pos_z));
+			e.world_x = e.offset_x;
+			e.world_y = e.offset_y;
+			e.world_z = e.offset_z;
+			e.orient_a = 0xC0;
+			e.state_b = 0x2B;
+			return e;
+		};
+		std::vector<wire::ParityEntity> added;
+		for (size_t i = 0; i < steady.size(); ++i) {
+			for (uint32_t h = 0; h < 10; ++h)
+				added.push_back(soldier(*steady[i], 0x0040 + h, 4 * 65536));
+			if (i < n)
+				added.push_back(soldier(
+						*steady[i], 0x0060, 4 * 65536 - int32_t(std::min(i, moving)) * 32768));
+		}
+		trace.entities.insert(trace.entities.end(), added.begin(), added.end());
+		std::stable_sort(trace.entities.begin(), trace.entities.end(),
+				[](const wire::ParityEntity &x, const wire::ParityEntity &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		return trace;
+	};
+	// RR's 8 records fall twice, the run's once (a lone lead): without the floor RR moves and
+	// the run does not.
+	expect_row(judge_case(run(1, 8, 2), run(2, 8, 2), run(3, 8, 1), "RO"), 'S', "entity_motion",
+			"I", "pass");
+	// A mover with 16 records or more still fails against a still run.
+	expect_row(judge_case(run(1, 40, 20), run(2, 40, 20), run(3, 40, 0), "RO"), 'S',
+			"entity_motion", "I", "fail", "FRAME_ENTITY_CONSTANT");
+}
+
 // The final run's 03tr-dm OO (LX-s37): the far rows' age sweep sent the Downed Pilot 0x0039
 // (I:2075) once a capture on every cell, 17.7..19.1 s after the game start, and OO's window
 // opened 19.0 s after it where the other four opened at 13.3..15.0 s, so its one record fell
@@ -4489,6 +4550,7 @@ int main() {
 	test_header_only_acks();
 	test_priority_death_slice();
 	test_initial_0x22_grouping();
+	test_entity_motion_floor();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

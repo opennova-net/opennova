@@ -1208,9 +1208,26 @@ void compare_entities(
 			return std::to_string(e.world_x) + "," + std::to_string(e.world_y) + "," +
 					std::to_string(e.world_z);
 		};
+		// The motion row takes the dynamic rows' floor (entity.sparse_sequence): a sequence
+		// under 16 records in the window is a slice of its motion whose share of the window is
+		// its phase. The final's ash-i5a-aas-capture: the host body's deploy settle on base
+		// 0x1033, 8 records on RR and RO alike, held three samples of its 0.5-unit fall in RR's
+		// window and only the last step in RO's (a lone lead the trim drops), so RR moved and
+		// RO, a retail host, never did.
+		auto dense = [min_records = kMotionWindowFrames](const std::vector<const E *> &records,
+							 const std::function<std::string(const E &)> &sequence) {
+			std::map<std::string, size_t> count;
+			for (const E *e : records)
+				++count[sequence(*e)];
+			std::vector<const E *> out;
+			for (const E *e : records)
+				if (count[sequence(*e)] >= min_records)
+					out.push_back(e);
+			return out;
+		};
 		fill_metric(out, 'S', "entity_motion", "FRAME_ENTITY_CONSTANT",
-				changing_handles(ca, sequence_a, position) > 0,
-				changing_handles(cb, sequence_b, position) > 0, key);
+				changing_handles(dense(ca, sequence_a), sequence_a, position) > 0,
+				changing_handles(dense(cb, sequence_b), sequence_b, position) > 0, key);
 		// A sequence under 16 records in the window holds a slice of its entity's motion, as
 		// a window under 16 frames does, and which slice is the window's phase. Either the
 		// priority list sends the entity only when its age byte wins the budget [orig:
