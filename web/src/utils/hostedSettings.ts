@@ -338,6 +338,10 @@ export function offersNovaLogicListing(
 // own. The listing on NovaLogic's NovaWorld goes as the form has it only
 // while the service offers it (`novalogicListing`) and the data set takes it
 // (offersNovaLogicListing); else it goes false.
+// The game_name error for a NovaLogic listing over a name holding "Nova".
+export const NOVA_NAME_RULE =
+  "NovaLogic's NovaWorld does not accept a server name with \"Nova\" in it. Rename the server or untick the NovaLogic box.";
+
 export function checkSettings(
   form: SettingsForm,
   dataSets: readonly HostedDataSet[],
@@ -348,6 +352,11 @@ export function checkSettings(
   if (!dataSet) errors.data_set_id = FIELD_RULES.data_set_id;
   const name = nameProblem(form.game_name);
   if (name) errors.game_name = name;
+  // NovaLogic's NovaWorld refuses a server name holding "Nova" (any case), so a box ticked
+  // over one would list nowhere there: the start asks for another name, as the service does.
+  else if (offersNovaLogicListing(dataSet, novalogicListing) && form.list_on_novalogic &&
+      /nova/i.test(form.game_name))
+    errors.game_name = NOVA_NAME_RULE;
   const password = passwordProblem(form.game_password);
   if (password) errors.game_password = password;
   const numbers = {} as Record<IntField, number>;

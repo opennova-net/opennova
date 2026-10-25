@@ -129,6 +129,16 @@ int test_settings_rules() {
 	// The NovaLogic listing: Joint Operations' lobby alone (DFX2's NovaLogic NovaWorld is down,
 	// and OP: Acid Gambit's lobby is only OpenNova's).
 	TEST_EXPECT(!check(with([](auto &c) { c.list_on_novalogic = true; })));
+	// NovaLogic's service refuses a name holding "Nova" (any case): with the box, the start does.
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.list_on_novalogic = true;
+		c.game_name = "[OPENNOVA.NET] Joint Ops";
+	}), "game_name"));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.list_on_novalogic = true;
+		c.game_name = "my nova server";
+	}), "game_name"));
+	TEST_EXPECT(!check(with([](auto &c) { c.game_name = "OpenNova Test"; })));
 	{
 		const std::vector<std::string> dfx2_rotation = { "servetst.bms" };
 		hosted::HostedSettings dfx2 = valid_settings(3);

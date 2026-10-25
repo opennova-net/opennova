@@ -12,6 +12,7 @@ import {
   initialRotation,
   MISSIONS_MAX,
   missionLabel,
+  NOVA_NAME_RULE,
   offersNovaLogicListing,
   type SettingsForm,
 } from './hostedSettings';
@@ -95,6 +96,17 @@ describe('checkSettings', () => {
     expect(unoffered.errors).toEqual({});
     expect(unoffered.settings?.list_on_novalogic).toBe(false);
     expect(checkSettings(form({ list_on_novalogic: true }), BOTH).settings?.list_on_novalogic).toBe(false);
+  });
+
+  it("refuses a name holding Nova while the listing on NovaLogic's NovaWorld is ticked", () => {
+    const ticked = checkSettings(form({ list_on_novalogic: true, game_name: '[OPENNOVA.NET] Joint Ops' }), BOTH, true);
+    expect(ticked.errors.game_name).toBe(NOVA_NAME_RULE);
+    expect(ticked.settings).toBeNull();
+    expect(checkSettings(form({ list_on_novalogic: true, game_name: 'my nova server' }), BOTH, true).errors.game_name)
+      .toBe(NOVA_NAME_RULE);
+    // Unticked, or not offered: the name is fine.
+    expect(checkSettings(form({ list_on_novalogic: false, game_name: 'OpenNova Test' }), BOTH, true).errors).toEqual({});
+    expect(checkSettings(form({ list_on_novalogic: true, game_name: 'OpenNova Test' }), BOTH, false).errors).toEqual({});
   });
 
   it("sends the listing on NovaLogic's NovaWorld only for a game it lists", () => {

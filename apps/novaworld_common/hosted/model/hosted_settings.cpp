@@ -72,6 +72,13 @@ std::optional<SettingsRefusal> check_settings(
 		if (bytes.size() > kGameNameMaxBytes)
 			return SettingsRefusal{ "game_name",
 				"is longer than " + std::to_string(kGameNameMaxBytes) + " characters" };
+		// NovaLogic's service refuses a server name holding "nova" in any case with 1009,
+		// SERVERNAMENOTACCEPTED (witnessed live 2026-10-25, ADR 0068), so a listing there
+		// asked over one would list nowhere: the start asks for another name.
+		if (s.list_on_novalogic && strutil::ifind(s.game_name, "nova") != std::string_view::npos)
+			return SettingsRefusal{ "game_name",
+				"holds \"Nova\", which NovaLogic's NovaWorld does not accept in a server name: "
+				"rename the server or untick the NovaLogic box" };
 	}
 	if (s.game_password.size() > kGamePasswordMaxBytes)
 		return SettingsRefusal{ "game_password",
