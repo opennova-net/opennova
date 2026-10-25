@@ -3831,6 +3831,16 @@ void test_priority_death_slice() {
 	expect_row(judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 9, 1770 * kMs, 2800),
 					   run(3, 6, 1200 * kMs, 2800), "OO"),
 			'C', "uplink_priority_score_p50", "0", "fail", "UPLINK_PRIORITY_MISMATCH");
+	{
+		// The slice is a subject row's: an RR-aa one short keeps the A/A row short, so the
+		// subject two short passes on the short A/A, as before the rule (x5's 01tr-coop-aikill:
+		// RR 11, RR-aa 7, OO 6). A death-cut A/A made comparable would fail it.
+		const Case c = judge_case(run(1, 8, 1580 * kMs, 2800), run(2, 7, 1390 * kMs, 2800),
+				run(3, 6, 1200 * kMs, 2800), "OO");
+		expect_row(c, 'C', "uplink_priority_score_p50", "0", "pass");
+		const VerdictRow *aa = find_row(c.verdict.aa, 'C', "uplink_priority_score_p50", "0");
+		check(aa && !aa->value.comparable, "the A/A row keeps the 8-sample floor");
+	}
 	// RR's occupancy not cut by its death: the floor holds.
 	expect_row(judge_case(run(1, 8, 0, 2800), run(2, 9, 1770 * kMs, 2800),
 					   run(3, 7, 1390 * kMs, 2800), "OO"),

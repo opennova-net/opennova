@@ -502,7 +502,8 @@ std::vector<const wire::ParityUplinkState *> without_echo_frames(
 	return kept;
 }
 
-void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+void compare_uplinks(
+		const RunFacts &rr, const RunFacts &other, bool aa, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("uplink.carrier"));
 	static_assert(has_normalization("uplink.priority_handle"));
 	const auto a = steady_uplinks(rr), b = steady_uplinks(other);
@@ -556,8 +557,13 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 		return key;
 	});
 	// The scores are continuous distance/view weights (uplink.priority_score): each
-	// slot's median within the 1/8x..8x band of RR's.
-	const bool death_slice = occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
+	// slot's median within the 1/8x..8x band of RR's. The death slice is a subject row's: the
+	// A/A row (`aa`) keeps the floor, so an RR-aa short of 8 still excuses a short subject.
+	// Retail's own window-to-death spans part by more than the witnessed one period (x5's
+	// 01tr-coop-aikill: RR 11, RR-aa 7 samples), and a death-cut A/A made comparable would
+	// take that excuse from a subject two short (x5's OO, 6).
+	const bool death_slice =
+			!aa && occupancy_ends_at_death(rr) && occupancy_ends_at_death(other);
 	for (int slot = 0; slot < 4; ++slot) {
 		auto scores = [&occupied, slot](const std::vector<const U *> &states) {
 			std::vector<double> out;
@@ -1536,7 +1542,7 @@ void compare_rounds(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 
 void compare_state(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
 		std::vector<MetricValue> &out) {
-	compare_uplinks(rr, other, out);
+	compare_uplinks(rr, other, options.aa, out);
 	compare_frames(rr, other, out);
 	compare_entities(rr, other, options.aa, out);
 	compare_self_offset(rr, other, out);

@@ -689,7 +689,9 @@ inline constexpr Normalization kNormalizations[] = {
 			"the 8-sample floor (L4-s40). Where that death ends the occupancy on both RR and the "
 			"subject, a subject one sample short (its samples + 1 at least min(RR's, 8), the "
 			"witnessed one-period phase) still compares its slot's median; two or more short, "
-			"or without that death on both sides, the shortfall is not comparable, as before" },
+			"or without that death on both sides, the shortfall is not comparable, as before. "
+			"The slice is a subject row's: the A/A row keeps the floor, so an RR-aa short of 8 "
+			"still excuses a short subject (x5's 01tr-coop-aikill: RR 11, RR-aa 7, OO 6 samples)" },
 	{ "frame.carried", MaskKind::Field, 'S', 0x00A, "carried", 0,
 			"the carried object handle is session-local: compared as none/bound" },
 	{ "frame.mount_handle", MaskKind::Field, 'S', 0x00A, "mount_handle", 0,
