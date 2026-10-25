@@ -389,6 +389,23 @@ inline constexpr Normalization kNormalizations[] = {
 			"(LEN8 0x20 below 256 bytes, else LEN16 0x40: NapiNPMessage_Create "
 			"@0x628304..0x62831B), so a grouping keys neither: c2's ASH last S2C 0x10 page is "
 			"290 B (0x40) on retail against 238 B (0x20) on ours, the residue's radius words" },
+	{ "session.header_only_acks", MaskKind::Field, 'S', 0, "header-only packet cadence", 0,
+			"an admitted C2S packet with messages owes an ack (CNapiNPConnection_ParseMessages "
+			"@0x625BC0, has_pending_out set @0x625DFF), and the first open send boundary builds "
+			"(CNapiNPConnection_PumpEnumeratorAndSend @0x629240: the open boundary @0x62927B, "
+			"the queue test @0x62929A, the owed test @0x6292A9, the build @0x6292B4; "
+			"BuildOutgoingPackets clears it @0x628629), header-only exactly when nothing was "
+			"queued, the holdoff 12 ticks in LAN mode 1 (NapiNPServer_GetSendHoldoffTicks "
+			"@0x4C4ADB). In an idle stretch whether a reliable message is queued at that "
+			"boundary is the phase of the joiner's sends against the host's: the final's "
+			"tdh-i3a-tdm-round linger (0x79 then 0x16 two or three boundaries later, every 5 s, "
+			"on every host) took the joiner's 5 s 0x4C at 1.13 s after the 0x79 on RR, 1.70 on "
+			"RO, 2.57 on OR, all acked header-only 0.0..0.22 s later, and at 0.03..0.25 s on OO, "
+			"where two acks rode the 0x16 (OO 6 header-only against RR's 9). So the S header-only "
+			"count also takes each steady S packet that carries no 0x0A and is the first to ack "
+			"a C2S packet with records; a gameplay ack rides the 0x0A and counts nothing, and "
+			"before the window nothing changes (the final's round: RR 15, RR-aa 15, RO 16, OR "
+			"15, OO 16)" },
 	{ "group.S.0x57.reply", MaskKind::GroupReply, 'S', 0x057, "RTT_ECHO", 0,
 			"the host answers each client ping (queued every client frame, "
 			"Client_ProcessNetworkFrame @0x42c41c) from its receive pump, and the reply rides "

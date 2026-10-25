@@ -3752,6 +3752,94 @@ void add_tag_at(wire::ParityTrace &trace, uint64_t at, uint16_t identity) {
 	}
 }
 
+// The final's tdh-i3a-tdm-round OO (LX-s37): in the round end's linger the host acks the
+// joiner's 5 s C2S 0x4C at its first open boundary, header-only unless a reliable message
+// (the 0x16) is queued there, which is the joiner's send phase against the host's: two of OO's
+// acks rode the 0x16 (6 header-only against RR's 9). A steady S packet with no 0x0A that
+// first-acks a C2S packet with records counts as header-only (session.header_only_acks).
+void test_header_only_acks() {
+	// The stream from `from` to `from` + 2.9 s replaced by an idle stretch: every 0.7 s the
+	// joiner's C2S packet with a 0x4C record, and the host's ack 150 ms later, header-only or
+	// riding `ride` per `rides`; `again` adds a second S 0x16 packet acking the same C2S packet.
+	auto idle = [](uint32_t seed, uint64_t from, const std::vector<bool> &rides,
+						uint16_t ride = 0x016, bool again = false) {
+		wire::ParityTrace trace = scripted(seed);
+		std::vector<wire::ParityPacket> kept;
+		uint32_t c_seq = 0, s_seq = 0;
+		for (const wire::ParityPacket &p : trace.packets) {
+			if (p.ts_ns >= from && p.ts_ns < from + 2900 * kMs) {
+				if (p.dir == 'C' && c_seq == 0)
+					c_seq = p.seq;
+				if (p.dir == 'S' && s_seq == 0)
+					s_seq = p.seq;
+				continue;
+			}
+			kept.push_back(p);
+		}
+		auto packet = [](uint64_t at, char dir, uint32_t seq, uint32_t ack, int frame,
+							  std::vector<uint16_t> tags) {
+			wire::ParityPacket p;
+			p.frame = frame;
+			p.ts_ns = at;
+			p.dir = dir;
+			p.session = kClientPort;
+			p.seq = seq;
+			p.ack = ack;
+			p.flags = tags.empty() ? 0x00 : 0x01;
+			for (const uint16_t tag : tags) {
+				wire::ParityWireRecord r;
+				r.full_tag = tag;
+				r.raw_flags = 0x20;
+				r.encoded_length = 4;
+				p.records.push_back(r);
+			}
+			p.tags = std::move(tags);
+			return p;
+		};
+		for (uint32_t k = 0; k < rides.size(); ++k) {
+			const uint64_t at = from + k * 700 * kMs;
+			kept.push_back(packet(at, 'C', c_seq + k, s_seq + k, 900000 + int(k) * 3, { 0x04C }));
+			kept.push_back(packet(at + 150 * kMs, 'S', s_seq + k, c_seq + k, 900001 + int(k) * 3,
+					rides[k] ? std::vector<uint16_t>{ ride } : std::vector<uint16_t>{}));
+			if (again)
+				kept.push_back(packet(at + 300 * kMs, 'S', s_seq + k, c_seq + k,
+						900002 + int(k) * 3, { 0x016 }));
+		}
+		std::stable_sort(kept.begin(), kept.end(),
+				[](const wire::ParityPacket &x, const wire::ParityPacket &y) {
+					return x.ts_ns < y.ts_ns;
+				});
+		trace.packets = std::move(kept);
+		return trace;
+	};
+	const std::vector<bool> none = { false, false, false, false };
+	const std::vector<bool> two = { false, false, true, true };
+	{
+		// Without the rule the subject's 2 against RR's 4 is beyond the floor of 1.
+		const Case c = judge_case(idle(1, 10 * kSec, none), idle(2, 10 * kSec, none),
+				idle(3, 10 * kSec, two), "OO");
+		expect_row(c, 'S', "packet_cadence", "header_only", "pass");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "packet_cadence", "header_only");
+		check(row && row->value.subject == "4" && row->value.reference == "4",
+				"two acks riding a 0x16 count with the two header-only ones");
+	}
+	// An ack riding a 0x0A is a gameplay ack: uncounted, 2 against 4.
+	expect_row(judge_case(idle(1, 10 * kSec, none), idle(2, 10 * kSec, none),
+					   idle(3, 10 * kSec, two, 0x00A), "OO"),
+			'S', "packet_cadence", "header_only", "fail", "SESSION_PACKET_CADENCE");
+	{
+		// A second packet acking the same C2S packet counts nothing more.
+		const Case c = judge_case(idle(1, 10 * kSec, none), idle(2, 10 * kSec, none),
+				idle(3, 10 * kSec, two, 0x016, true), "OO");
+		const VerdictRow *row = find_row(c.verdict.rows, 'S', "packet_cadence", "header_only");
+		check(row && row->value.subject == "4", "one count per acked C2S packet");
+	}
+	// Before the window (steady from 5 s) only the header-only packets count, as before.
+	expect_row(judge_case(idle(1, 2 * kSec, none), idle(2, 2 * kSec, none),
+					   idle(3, 2 * kSec, two), "OO"),
+			'S', "packet_cadence", "header_only", "fail", "SESSION_PACKET_CADENCE");
+}
+
 // The final's tdh-i3a-tdm-round (LX-s37): after the rotation's teardown (S2C 0x25) the next
 // mission's first S2C 0x0F refills the pools, so handle 0x1000 named V:1213, then V:74, and
 // one sequence per handle read a cross-mission step of hundreds of units (RO's V step p90
@@ -4293,6 +4381,7 @@ int main() {
 	test_tick_seed_form();
 	test_sub_quantum_step();
 	test_entity_mission_split();
+	test_header_only_acks();
 	test_round_target();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
