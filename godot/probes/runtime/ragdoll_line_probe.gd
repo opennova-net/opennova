@@ -67,18 +67,18 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		var handle := target.get_wire_handle()
 		var before := Array(world.get_ragdoll_counts())
 		for _f in range(4):
-			_aim(sim, camera, handle, height)
+			ProbeAim.at(sim, camera, handle, height)
 			await ctx.wait_frames(1)
 		sim.debug_set_entity_health(target.get_ai_index(), 1)
 		ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
 		for _f in range(burst):
-			_aim(sim, camera, handle, height)
+			ProbeAim.at(sim, camera, handle, height)
 			await ctx.wait_frames(1)
 		ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 		var died := false
 		for f in range(watch + 1):
-			_aim(sim, camera, handle, -0.6)
-			var row := _row(sim, handle)
+			ProbeAim.at(sim, camera, handle, -0.6)
+			var row := ProbeAim.row(sim, handle)
 			if row != null and not row.is_alive():
 				died = true
 			if f % every == 0:
@@ -135,21 +135,6 @@ func _line_up(sim: Simulation, targets: Array, standoff: float, spacing: float) 
 		sim.debug_set_entity_position((targets[i] as EntityRow).get_ai_index(), at)
 
 
-# The view set straight onto the target point (the debug teleport at the body's
-# own position, the yaw/pitch solved from the camera: Godot (x, y up, z) ->
-# mission (x east, y north = -z, z up)).
-func _aim(sim: Simulation, camera: Camera3D, handle: int, height: float) -> void:
-	var row := _row(sim, handle)
-	if row == null:
-		return
-	var point: Vector3 = row.get_world_position() + Vector3(0.0, height, 0.0)
-	var to := point - camera.global_position
-	var yaw := rad_to_deg(atan2(to.x, -to.z))
-	var pitch := rad_to_deg(atan2(to.y, Vector2(to.x, to.z).length()))
-	var body := sim.get_local_player_position()
-	sim.debug_teleport_local_player(Vector3(body.x, -body.z, body.y), yaw, pitch)
-
-
 func _local_player_row(sim: Simulation) -> EntityRow:
 	for row_v in sim.entity_directory():
 		var row := row_v as EntityRow
@@ -176,11 +161,3 @@ func _targets(sim: Simulation, count: int) -> Array:
 		return a.get_world_position().distance_squared_to(player) \
 				< b.get_world_position().distance_squared_to(player))
 	return rows.slice(0, count)
-
-
-func _row(sim: Simulation, handle: int) -> EntityRow:
-	for row_v in sim.entity_directory():
-		var row := row_v as EntityRow
-		if row != null and row.get_wire_handle() == handle:
-			return row
-	return null
