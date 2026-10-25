@@ -277,6 +277,12 @@ variable "mail_sender" {
   }
 }
 
+variable "novalogic_lobbies" {
+  description = "Whether the site's Lobbies page also lists the Joint Operations servers on NovaLogic's NovaWorld (a live service OpenNova does not run), as the original game's server browser shows them (ONNET_NOVALOGIC_LOBBIES, web's; apps/novaworld_web/novalogic_lobbies.h). On by default (the maintainer's request, 2026-10-25): each web task fetches NovaLogic's list, with no login, at most once every 5 minutes while visitors look, and keeps the last good one through a failure. false: no section and no fetch."
+  type        = bool
+  default     = true
+}
+
 # ---------------------------------------------------------------------------
 # The database (database.tf)
 # ---------------------------------------------------------------------------

@@ -151,8 +151,8 @@ resource "aws_security_group" "program" {
   })
 }
 
-# Out: the image pulls (ghcr.io), the AWS APIs, Stripe, the database and the
-# cache.
+# Out: the image pulls (ghcr.io), the AWS APIs, Stripe, the database, the
+# cache and NovaLogic's server list (web's, var.novalogic_lobbies).
 resource "aws_vpc_security_group_egress_rule" "program_all" {
   for_each = local.programs
 
@@ -469,6 +469,9 @@ locals {
     ONNET_API_PROXY_ONLY  = "1"
     ONNET_RETAIL_PROXY    = "127.0.0.2"
     ONNET_LOG_STORE       = "cloudwatch:${local.log_group_prefix}"
+    # The Lobbies page's list of the servers on NovaLogic's NovaWorld, fetched
+    # from NovaLogic's live service (var.novalogic_lobbies).
+    ONNET_NOVALOGIC_LOBBIES = var.novalogic_lobbies ? "1" : "0"
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):

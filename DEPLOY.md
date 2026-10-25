@@ -1969,6 +1969,13 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 - **Changing a secret.** Edit the deployment's vault item, `secrets sync`, `app converge`. A new
   `database_password` takes `db bootstrap` (it sets the role's password) between the sync
   and the converge.
+- **NovaLogic's servers on the Lobbies page.** On by default (`novalogic_lobbies`, web's
+  `ONNET_NOVALOGIC_LOBBIES`): each web task fetches the Joint Operations list from NovaLogic's
+  live NovaWorld, with no login, at most once every 5 minutes while the page is open
+  somewhere, and keeps the last good list through a failure (web's log names each failed
+  fetch). `novalogic_lobbies = false` in the var-file, `infra apply` and `app converge`
+  turn it off: no section, no fetch (apps/novaworld_common/README.md, "NovaLogic's servers
+  on the Lobbies page").
 
 ### Cost
 

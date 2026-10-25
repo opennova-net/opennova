@@ -553,6 +553,13 @@ run "environments" {
     error_message = "web alone serves the update service: at the update record's name, on the updater's four ports"
   }
   assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_NOVALOGIC_LOBBIES"] == "1" &&
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_NOVALOGIC_LOBBIES")])
+    )
+    error_message = "web alone lists NovaLogic's servers on the Lobbies page, on by default"
+  }
+  assert {
     condition = (alltrue([
       for p in ["web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
