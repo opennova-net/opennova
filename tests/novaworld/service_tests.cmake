@@ -1024,6 +1024,18 @@ target_include_directories(opennova_serve_novaworld_test PRIVATE ${CMAKE_CURRENT
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 opennova_loopback_e2e(opennova_serve_novaworld)
 opennova_off_bakes(opennova_serve_novaworld)
+# opennova-serve listed on two services at once (--also-master-host, none of retail's): two real
+# NwUdpListeners behind in-test gates. The second hosts once the map is up on the same game socket
+# with the same match's columns and PCIDKey, its ServerCommands run on the match, its service's
+# ServerStopHosting delists it there alone (the first listing and the match go on, no retry), and
+# a second listing that does not host leaves the server serving with its next try scheduled.
+add_executable(opennova_serve_second_listing_test serve/opennova_serve_second_listing_test.cpp)
+target_link_libraries(opennova_serve_second_listing_test PRIVATE
+    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
+target_include_directories(opennova_serve_second_listing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_second_listing COMMAND opennova_serve_second_listing_test)
+opennova_loopback_e2e(opennova_serve_second_listing)
+opennova_off_bakes(opennova_serve_second_listing)
 # The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup,
 # over a migrated database: each push a command for the listener, lobby_repository.h): a pushed
 # SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map, a pushed

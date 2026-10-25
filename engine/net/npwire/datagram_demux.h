@@ -34,11 +34,17 @@
 //  0 @0x626dcb]
 //
 // This class is that dispatch over one embedder socket: it drains the socket
-// and queues each datagram for the session (when the session's claim takes it)
+// and queues each datagram for a session (when that session's claim takes it)
 // or for the game (when a game protocol is attached; else it is dropped). The
-// two views are the IDatagramSocket each side pumps; a recv on either drains
-// the socket first, so neither side starves the other. Sends pass straight
-// through: both protocols send from the one socket.
+// views are the IDatagramSocket each side pumps; a recv on any of them drains
+// the socket first, so no side starves another. Sends pass straight through:
+// every protocol sends from the one socket.
+//
+// Retail's manager carries one lobby session. A demux built with more session
+// lanes carries one NovaWorld session per lane, offered in lane order ahead of
+// the game, as the manager walks its list: opennova-serve's second listing
+// (ServeOptions::also_master_host, a session to a second service beside the
+// first's, none of retail's) rides lane 1.
 
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
@@ -47,32 +53,38 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace opennova {
 
 class DatagramDemux {
 public:
-	// Whether the lobby session's protocol takes a datagram (its handlers'
-	// acceptance, NwuLobbySession::claims). Unset: the socket carries no
-	// session and every datagram is the game's.
+	// Whether a lobby session's protocol takes a datagram (its handlers'
+	// acceptance, NwuLobbySession::claims). Unset: the lane carries no
+	// session and takes nothing.
 	using Claim = std::function<bool(const PeerAddr &from, const uint8_t *data, std::size_t len)>;
 
-	explicit DatagramDemux(IDatagramSocket &socket);
+	// `session_lanes`: how many lobby sessions the socket carries (at least one).
+	explicit DatagramDemux(IDatagramSocket &socket, std::size_t session_lanes = 1);
 	DatagramDemux(const DatagramDemux &) = delete;
 	DatagramDemux &operator=(const DatagramDemux &) = delete;
 
-	void set_session_claim(Claim claim) { claim_ = std::move(claim); }
+	// Lane `lane`'s claim (below session_lanes()). Setting or clearing it
+	// starts the lane's queue empty, as attaching the game starts the game's: a
+	// new session never reads what its predecessor's claim took.
+	void set_session_claim(Claim claim, std::size_t lane = 0);
 	// Whether a game protocol is on the manager's list. Detached, a datagram
-	// the session does not claim reaches no handler and is dropped, as retail's
+	// no session claims reaches no handler and is dropped, as retail's
 	// manager drops what no protocol takes (before the session is created, or
 	// after it is destroyed); attaching starts the game's queue empty.
 	void set_game_attached(bool attached);
 	bool game_attached() const { return game_attached_; }
 
-	// The lobby session's socket and the game's.
-	IDatagramSocket &session() { return session_view_; }
+	// Lane `lane`'s lobby session socket, and the game's.
+	IDatagramSocket &session(std::size_t lane = 0);
 	IDatagramSocket &game() { return game_view_; }
+	std::size_t session_lanes() const { return lanes_.size(); }
 
 	// Drain every pending datagram off the socket and route it.
 	void pump();
@@ -95,13 +107,18 @@ private:
 		DatagramDemux &owner_;
 		std::deque<Datagram> &queue_;
 	};
+	// One lobby session's claim, queue and socket view (the view reads the lane's queue).
+	struct Lane {
+		explicit Lane(DatagramDemux &owner) : view(owner, queue) {}
+		Claim claim;
+		std::deque<Datagram> queue;
+		View view;
+	};
 
 	IDatagramSocket &socket_;
-	Claim claim_;
+	std::vector<std::unique_ptr<Lane>> lanes_;
 	bool game_attached_ = true;
-	std::deque<Datagram> session_queue_;
 	std::deque<Datagram> game_queue_;
-	View session_view_;
 	View game_view_;
 	uint64_t dropped_ = 0;
 };

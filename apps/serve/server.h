@@ -68,6 +68,7 @@
 namespace opennova::serve {
 
 class Lister;
+struct ListerOptions;
 
 // The display width a host takes when its platform reports none (opennova-serve off Windows,
 // as on the hosted servers' Linux machines, or a failed GetSystemMetrics): a representative
@@ -103,6 +104,17 @@ struct ServeOptions {
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
 	Credentials credentials; // main() loads it and masks every value
+	// A second NovaWorld listing of the same match beside the first (none of retail's, whose host
+	// lists on one service: a hosted server's listing on NovaLogic's NovaWorld as well as
+	// OpenNova's): its gate, the gate's port and its account, as the first listing's three. It
+	// needs --master-host, and its gate is held to the same destination rule (--allow-public for
+	// a host under novaworld.net). It hosts once the starting map is up, never holds up or ends
+	// the server, and is tried again after a backoff when it does not host (Server's
+	// tick_second_listing).
+	std::string also_master_host;                       // --also-master-host (empty: none)
+	uint16_t also_master_gate_port = GATE_DEFAULT_PORT; // --also-master-gate-port
+	std::string also_credentials_path;                  // --also-credentials FILE
+	Credentials also_credentials; // main() loads it and masks every value
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG, /NETLOG, /INOUT
 	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
 	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
@@ -126,6 +138,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 const char *serve_usage();
 
 class ServeListing;
+class SecondListing;
+
+// The second listing's retry after a listing that did not host: the first wait, doubled at each
+// further failure up to the longest. OpenNova policy, none of retail's (a stock host lists once).
+inline constexpr uint32_t kSecondListingRetryFirstMs = 60u * 1000u;
+inline constexpr uint32_t kSecondListingRetryMaxMs = 15u * 60u * 1000u;
 
 class Server {
 public:
@@ -206,6 +224,14 @@ public:
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	Lister *lister() { return lister_.get(); }
+	// The second listing's lister (ServeOptions::also_master_host): null when there is none, before
+	// the starting map is up, between a failed try and the next, and once its service stopped it.
+	Lister *second_lister() { return second_lister_.get(); }
+	// The second listing's service stopped it (ServerStopHosting, its punt, or a ServerCommand's
+	// stop): it is not tried again this run.
+	bool second_listing_stopped() const { return second_stopped_; }
+	// When the next try of a second listing that did not host starts (wall_ms; 0: none waiting).
+	uint32_t second_listing_retry_at_ms() const { return second_lister_ ? 0u : second_retry_at_ms_; }
 	// The exit code the lister finished with when stop() tore it down (stop()'s own finish
 	// included: a ServerStopHosting keeps the lister up until the match's NovaWorld exit stops
 	// the server), -1 when there was none: the lister is gone before the caller can read it.
@@ -244,6 +270,18 @@ private:
 	bool route_mission_exit(int32_t reason);
 	bool open_socket(std::string &error);
 	bool host_on_novaworld(std::string &error, const std::atomic<bool> *cancel);
+	// What both listings' listers share (the title, the destination rule, the gate scan, the
+	// verify identity), and a new lister's lobby text.
+	ListerOptions base_lister_options() const;
+	void set_lobby_text(Lister &lister);
+	// The second listing (ServeOptions::also_master_host) on the socket's second session lane:
+	// whether the run has one, its start, its pass each frame (the publish once it hosts, the
+	// retry once it did not, the teardown once its service stopped it), and its teardown, with
+	// ClientStopHosting or the goodbye burst alone, as the first listing's.
+	bool second_listing_wanted() const;
+	void start_second_listing();
+	void tick_second_listing();
+	void end_second_listing(bool stop_hosting);
 	// The mission start's server-info update inside the host boot (HostBootRequest::
 	// mission_start_update), ahead of the load: the starting map's or the next one's columns as
 	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
@@ -305,6 +343,14 @@ private:
 	std::unique_ptr<ServeListing> listing_;
 	std::unique_ptr<Lister> lister_;
 	int last_lister_exit_ = -1;
+	// The second listing: its source over the first's match, its lister while one runs, whether
+	// its first full lists went out, its service's stop, and the retry clock.
+	std::unique_ptr<SecondListing> second_source_;
+	std::unique_ptr<Lister> second_lister_;
+	bool second_published_ = false;
+	bool second_stopped_ = false;
+	uint32_t second_retry_at_ms_ = 0;
+	uint32_t second_backoff_ms_ = 0;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool begun_ = false;

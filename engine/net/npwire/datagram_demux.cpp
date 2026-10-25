@@ -1,13 +1,28 @@
 #include <net/npwire/datagram_demux.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <utility>
 
 namespace opennova {
 
-DatagramDemux::DatagramDemux(IDatagramSocket &socket)
-	: socket_(socket), session_view_(*this, session_queue_), game_view_(*this, game_queue_) {}
+DatagramDemux::DatagramDemux(IDatagramSocket &socket, std::size_t session_lanes)
+	: socket_(socket), game_view_(*this, game_queue_) {
+	const std::size_t lanes = std::max<std::size_t>(session_lanes, 1);
+	for (std::size_t i = 0; i < lanes; ++i) lanes_.push_back(std::make_unique<Lane>(*this));
+}
+
+void DatagramDemux::set_session_claim(Claim claim, std::size_t lane) {
+	assert(lane < lanes_.size());
+	lanes_[lane]->claim = std::move(claim);
+	lanes_[lane]->queue.clear();
+}
+
+IDatagramSocket &DatagramDemux::session(std::size_t lane) {
+	assert(lane < lanes_.size());
+	return lanes_[lane]->view;
+}
 
 void DatagramDemux::set_game_attached(bool attached) {
 	game_attached_ = attached;
@@ -15,8 +30,8 @@ void DatagramDemux::set_game_attached(bool attached) {
 }
 
 // The manager's receive pump: each datagram to the first protocol that takes
-// it, the session's claim first, then the game protocol when one is on the
-// list; nothing else takes it.
+// it, the sessions' claims first in lane order, then the game protocol when one
+// is on the list; nothing else takes it.
 // [orig: NapiNPManager_PumpReceive @0x623010 -> NapiNPManager_HandlePacket
 //  @0x622f10 — the walk @0x622f6c..0x622fac, cb_on_error(4) @0x622fdc]
 void DatagramDemux::pump() {
@@ -27,11 +42,13 @@ void DatagramDemux::pump() {
 		if (n <= 0) return;
 		const std::size_t len = static_cast<std::size_t>(n);
 		std::deque<Datagram> *queue = nullptr;
-		if (claim_ && claim_(from, buf, len)) {
-			queue = &session_queue_;
-		} else if (game_attached_) {
-			queue = &game_queue_;
+		for (const std::unique_ptr<Lane> &lane : lanes_) {
+			if (lane->claim && lane->claim(from, buf, len)) {
+				queue = &lane->queue;
+				break;
+			}
 		}
+		if (queue == nullptr && game_attached_) queue = &game_queue_;
 		if (queue == nullptr) {
 			++dropped_;
 			continue;

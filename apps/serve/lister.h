@@ -54,6 +54,12 @@ struct ListerOptions {
 	bool extended_metrics = gamecfg::defaults().mp_extract_extended_metric_information != 0;
 	// The verify Cookie's NWHWI, the server's make_nwhwi over this machine and its game.cfg.
 	std::string hardware_identity;
+	// What every console line of this listing starts with, so a server's second listing
+	// (ServeOptions::also_master_host) is told apart from its first ("": nothing, the first's).
+	std::string label;
+	// The AppId the host request registers under (NwuHostRole::request): a second listing's is
+	// the match's, the first listing's (0: the request mints its own, as retail's does).
+	uint32_t match_app_id = 0;
 };
 
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
@@ -100,6 +106,9 @@ public:
 	uint16_t gate_port() const { return gate_port_; }
 	bool hosting() const { return role_.is_hosting(); }
 	bool finished() const { return phase_ == Phase::Done; }
+	// The service's ServerStopHosting stopped the hosting (the session stays up until the embedder
+	// ends it, as a stock host's stays up until its match's NovaWorld exit).
+	bool stopped_by_service() const { return stopped_by_service_; }
 	// The session and its host leg, for the source behind a live server (the GSID, the join
 	// tickets, the match facts) and the shared socket's claim.
 	NwuLobbySession &lobby() { return lobby_; }
@@ -124,8 +133,11 @@ private:
 	// `stop_hosting`: ClientStopHosting ahead of the goodbye burst (stop), or the burst alone
 	// (disconnect).
 	void teardown(bool stop_hosting);
+	// The label ahead of every console line (ListerOptions::label, with its separator).
+	const char *who() const { return log_prefix_.c_str(); }
 
 	ListerOptions options_;
+	std::string log_prefix_; // options_.label and a space, or ""
 	ListingSource &source_;
 	IDatagramSocket *shared_session_socket_ = nullptr;
 	Phase phase_ = Phase::Connecting;

@@ -71,7 +71,11 @@ public:
 	// (host_leg_refusal, connect_or_host.h): the per-registration AppId, the host var lists,
 	// ClientHostRequest (CurrentlyHosting = 0) and the 60 s poll. False when the request could
 	// not be queued (NWEC51, reported through on_failed).
-	bool request(const HostRegistration &cfg);
+	// A nonzero `match_app_id` registers under that AppId instead of minting one: a second
+	// listing of a match already registered on another service (opennova-serve's
+	// --also-master-host, none of retail's) takes the match's, the one its joiners' APPID must
+	// carry whichever service sent them (inmatch's join check, code 9).
+	bool request(const HostRegistration &cfg, uint32_t match_app_id = 0);
 	// ClientStopHosting (states 5/6 back to 4), the NovaWorld menu's re-entry after a match and
 	// the session's teardown. Clears the roster.
 	void stop();

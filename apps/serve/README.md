@@ -18,6 +18,8 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
                [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
+               [--also-master-host <gate>] [--also-master-gate-port <n>]
+               [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG]
 ```
@@ -36,6 +38,9 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
 | `--allow-public` | Allow NovaLogic's NovaWorld (`novaworld.net` and every host under it), a live shared service. Loopback and any other host, an OpenNova service among them, need no flag. |
+| `--also-master-host <gate>` | A second NovaWorld gate to list the same server on, beside `--master-host`'s ("Two listings" below). Needs `--master-host`. |
+| `--also-master-gate-port <n>` | The second gate's UDP port (default 7597). |
+| `--also-credentials <file>` | The second listing's account, in the `--credentials` file's form. |
 | `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
 | `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
 | `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
@@ -104,6 +109,39 @@ is deployed, can be listed on without a flag. A host that is `novaworld.net` or 
 (`gs.novaworld.net`, NovaLogic's live master) is refused, unresolved, unless `--allow-public`
 is given; a live master is a shared service, so use it sparingly. Account names, passwords and
 session tags are masked in the log.
+
+### Two listings
+
+`--also-master-host` lists the same server on a second NovaWorld service as well, for
+example NovaLogic's `gs.novaworld.net` beside OpenNova's (with `--allow-public`, and
+`--also-credentials` naming a NovaLogic account, since NovaLogic's service hands out a
+HOSTKEY only after a login). Retail has no such thing: a stock host lists on one service.
+The second listing:
+
+- **Starts once the starting map is up.** The first listing still hosts before the boot and
+  still stops the start when it does not host; the second never holds up or stops the
+  server.
+- **Rides the game socket.** Its NovaWorld session shares the one socket with the first's
+  and with the game, so its service lists the server at the address joiners reach.
+- **Lists the same match.** It carries the same columns and players and the same cookie-key
+  ring, so a joiner from either service is admitted the same way. It publishes its first
+  full Host list the moment it hosts, and every mission start's after that.
+- **Runs its service's commands on the match.** A rename or message change from either
+  service renames the server on both. A `PuntPlayer` at the server's own slot from the
+  second service ends only the second listing.
+- **Is stopped by its own service only.** That service's `ServerStopHosting` or punt
+  delists the server there and nowhere else: the match and the first listing go on, and
+  the second listing is not tried again until the server restarts.
+- **Is retried when it does not host.** A gate that does not answer, a failed login or a
+  refused host request is tried again after a minute, then after twice as long each time,
+  up to 15 minutes.
+
+What stays the first listing's: the match's GSID (the LAN reply's `SUS1`), its join tickets
+(a second service that asks for them is logged, and its joiners are admitted without them),
+its METPROTOCOL gate reports after the first mission's `ID` report, and the `_connectlog.txt`
+and `_inout.txt` lines. The second listing's console lines start with `(second listing)`.
+Both services see every player in the PlayerList, with the PCID that player's own service
+gave it.
 
 ## The host file
 
@@ -297,7 +335,7 @@ line by line.
 |---|---|
 | 0 | `--help`, stopped by Ctrl+C or SIGTERM (one that arrives during the start stops the server once the mission has booted, except on a listed server before its listing hosted: 1), `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), the mission did not boot, or, on a listed server, a Ctrl+C or SIGTERM arrived before the NovaWorld listing hosted. |
-| 2 | A usage error, or the `--credentials` file did not open. |
+| 2 | A usage error, or the `--credentials` or `--also-credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting (its `ServerStopHosting`, an admin's or owner's stop from the site among them). |
 
 So a code alone does not tell a stop someone asked for from a fault: a stop through the

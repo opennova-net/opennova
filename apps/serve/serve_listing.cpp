@@ -29,23 +29,15 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 		                                          request.join_ticket);
 	};
 	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
-	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock).
+	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock), and the second
+	// listing's beside it.
 	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
 	ctx.on_update_server_info = [this]() {
 		if (lister_ != nullptr) lister_->host_role().update_server_info();
+		if (second_ != nullptr) second_->host_role().update_server_info();
 	};
-	// The update reads the match's columns as it runs, as the game's does (SessionDrive::
-	// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
-	// and the net-quality window as that tick left them, where the lister's per-pass columns stand
-	// a pass behind the tick (D-NET-NEW-L9-53).
-	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
-	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
-	//  current key @0x4FF191..0x4FF196]
-	lister.host_role().set_column_source([this](HostRegistration &r) {
-		if (role_ == nullptr) return false;
-		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
-		return true;
-	});
+	install_column_source(lister);
+	if (second_ != nullptr) install_column_source(*second_);
 	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
 	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
 	ctx.gate_metrics.host = [this]() {
@@ -58,8 +50,30 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	sync_session();
 }
 
+// The update reads the match's columns as it runs, as the game's does (SessionDrive::
+// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
+// and the net-quality window as that tick left them, where the lister's per-pass columns stand
+// a pass behind the tick (D-NET-NEW-L9-53).
+// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
+//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
+//  current key @0x4FF191..0x4FF196]
+void ServeListing::install_column_source(Lister &lister) {
+	lister.host_role().set_column_source([this](HostRegistration &r) {
+		if (role_ == nullptr) return false;
+		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
+		return true;
+	});
+}
+
+void ServeListing::set_second(Lister *second) {
+	if (second_ != nullptr && second_ != second) second_->host_role().set_column_source(nullptr);
+	second_ = second;
+	if (second_ != nullptr && role_ != nullptr) install_column_source(*second_);
+}
+
 void ServeListing::unbind() {
 	if (lister_ != nullptr) lister_->host_role().set_column_source(nullptr);
+	if (second_ != nullptr) second_->host_role().set_column_source(nullptr);
 	if (role_ != nullptr) {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
@@ -163,7 +177,9 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 //  CNapiGameSession_DispatchServerStatement @0x4D18A0 (no state test, the name table
 //  @0x82C0C8); Game_HostMultiplayerSession's SetConnectionMode(1) @0x4A661F ahead of its hosting
 //  wait @0x4A6725..0x4A6735]
-void ServeListing::on_command(const ServerCommand &command) {
+void ServeListing::on_command(const ServerCommand &command) { run_command(command, lister_); }
+
+void ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
 	const bool bound = role_ != nullptr && kernel_ != nullptr;
 	const inmatch::ServerCommandOutcome outcome =
 			inmatch::run_host_server_command(bound ? &role_->state.host_owner.ctx : nullptr,
@@ -178,7 +194,7 @@ void ServeListing::on_command(const ServerCommand &command) {
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
 	if (outcome.config_changed && seams_.save_config)
 		seams_.save_config();
-	if (outcome.stop_hosting && lister_ != nullptr) lister_->host_role().stop();
+	if (outcome.stop_hosting && issuer != nullptr) issuer->host_role().stop();
 }
 
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
