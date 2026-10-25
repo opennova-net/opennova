@@ -382,9 +382,10 @@ int test_migration_mapping() {
 	const fs::path staged = fs::temp_directory_path() / test_paths_unique("opennova_ds_migrations");
 	fs::remove_all(staged);
 	fs::create_directories(staged);
+	// 0023 (the content store) seeds its projects from the data sets, so it waits for them too.
 	for (const auto &entry : fs::directory_iterator(all)) {
 		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0)
+		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 && name.rfind("0023", 0) != 0)
 			fs::copy_file(entry.path(), staged / name);
 	}
 	db::run_migrations(db, staged);
@@ -396,6 +397,7 @@ int test_migration_mapping() {
 			"VALUES ('stopped', 'old2', 32, 30, 50, 5, 5, 0, 'a.bms', 'dfx2_consumer', '');");
 	fs::copy_file(all / "0011_data_sets.sql", staged / "0011_data_sets.sql");
 	fs::copy_file(all / "0013_releases.sql", staged / "0013_releases.sql");
+	fs::copy_file(all / "0023_content.sql", staged / "0023_content.sql");
 	db::run_migrations(db, staged);
 	fs::remove_all(staged);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");

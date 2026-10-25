@@ -1,8 +1,5 @@
 #pragma once
 
-// STAGED, NOT WIRED: the content routes (apps/novaworld_web/content/content_routes.cpp, ADR 0069's
-// second slice) check a push by it, and the editor's content_store library reads and writes it.
-
 // The content store's manifest (ADR 0069): one revision of a content project, the project's own
 // files (never the machine's `.opennova/`) each by its path, its SHA-256 and its size, in one
 // canonical text whose own SHA-256 names the revision in the store
@@ -36,6 +33,10 @@ struct ContentFile {
 
 // Whether `text` is a SHA-256 as the store names a file: 64 lower-case hex digits.
 bool is_sha256_hex(std::string_view text);
+
+// Whether `text` is well-formed UTF-8: no stray continuation byte, no overlong form, no surrogate,
+// nothing past U+10FFFF. A path's rule, and a revision's message's.
+bool is_utf8(std::string_view text);
 
 // Whether `path` is a path a project's file may have: non-empty, at most kMaxPathBytes, valid
 // UTF-8, its parts '/'-separated (none empty, "." or "..", none past kMaxPartBytes), no backslash,

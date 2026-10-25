@@ -103,13 +103,20 @@ std::optional<ContentRevision> find_revision(db::Database &db, int64_t project_i
 
 // --- the files the store holds ---
 
+// The object store's keys for a project's files and manifests: `content/<key>/blobs/<sha256>` and
+// `content/<key>/manifests/<sha256>.json`; `content/<key>/` holds every object of the project.
+std::string blob_key(std::string_view project_key, std::string_view sha256);
+std::string manifest_key(std::string_view project_key, std::string_view sha256);
+std::string project_prefix(std::string_view project_key);
+
 struct StoredBlob {
 	std::string sha256;
 	int64_t bytes = 0;
 };
-// Of `sha256s`, the ones the project's store does not hold, each once, in their first order.
-std::vector<std::string> missing_blobs(
-		db::Database &db, int64_t project_id, const std::vector<std::string> &sha256s);
+// Of `wanted`, the ones the project's store does not hold at that size, each once, in their first
+// order (a file the store holds at another size is no file a manifest may name).
+std::vector<StoredBlob> missing_blobs(
+		db::Database &db, int64_t project_id, const std::vector<StoredBlob> &wanted);
 // `blobs` recorded as held (each put in the store and its size checked by the caller); one held
 // already is kept as it was.
 void record_blobs(db::Database &db, int64_t project_id, const std::vector<StoredBlob> &blobs);

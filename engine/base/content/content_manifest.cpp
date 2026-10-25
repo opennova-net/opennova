@@ -12,9 +12,32 @@ namespace opennova::content {
 
 namespace {
 
-// Whether `text` is well-formed UTF-8: no stray continuation byte, no overlong form, no surrogate,
-// nothing past U+10FFFF.
-bool valid_utf8(std::string_view text) {
+// Whether `part` (a path's part, its extension included) is a name Windows keeps for a device.
+bool is_device_name(std::string_view part) {
+	const std::string stem = strutil::to_lower(part.substr(0, part.find('.')));
+	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul")
+		return true;
+	return stem.size() == 4 && (stem.compare(0, 3, "com") == 0 || stem.compare(0, 3, "lpt") == 0) &&
+			stem[3] >= '0' && stem[3] <= '9';
+}
+
+bool is_refused_char(unsigned char c) {
+	return c < 0x20 || c == 0x7F || c == '\\' || c == '<' || c == '>' || c == ':' || c == '"' ||
+			c == '|' || c == '?' || c == '*';
+}
+
+} // namespace
+
+bool is_sha256_hex(std::string_view text) {
+	if (text.size() != 64)
+		return false;
+	for (const char c : text)
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+			return false;
+	return true;
+}
+
+bool is_utf8(std::string_view text) {
 	for (size_t i = 0; i < text.size();) {
 		const unsigned char lead = static_cast<unsigned char>(text[i]);
 		if (lead < 0x80) {
@@ -51,31 +74,6 @@ bool valid_utf8(std::string_view text) {
 	return true;
 }
 
-// Whether `part` (a path's part, its extension included) is a name Windows keeps for a device.
-bool is_device_name(std::string_view part) {
-	const std::string stem = strutil::to_lower(part.substr(0, part.find('.')));
-	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul")
-		return true;
-	return stem.size() == 4 && (stem.compare(0, 3, "com") == 0 || stem.compare(0, 3, "lpt") == 0) &&
-			stem[3] >= '0' && stem[3] <= '9';
-}
-
-bool is_refused_char(unsigned char c) {
-	return c < 0x20 || c == 0x7F || c == '\\' || c == '<' || c == '>' || c == ':' || c == '"' ||
-			c == '|' || c == '?' || c == '*';
-}
-
-} // namespace
-
-bool is_sha256_hex(std::string_view text) {
-	if (text.size() != 64)
-		return false;
-	for (const char c : text)
-		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-			return false;
-	return true;
-}
-
 bool is_content_path(std::string_view path, std::string &why) {
 	if (path.empty()) {
 		why = "a file's path is empty";
@@ -85,7 +83,7 @@ bool is_content_path(std::string_view path, std::string &why) {
 		why = "a path is longer than " + std::to_string(kMaxPathBytes) + " bytes";
 		return false;
 	}
-	if (!valid_utf8(path)) {
+	if (!is_utf8(path)) {
 		why = "the path is not UTF-8";
 		return false;
 	}

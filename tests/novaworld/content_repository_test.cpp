@@ -3,8 +3,9 @@
 // (the retail ones private, each expansion on its base game's project) and who may list them; a
 // project created, changed and refused (a duplicate key, a data set another project updates, no
 // such data set or base), and one an expansion builds on kept from deletion; the files a store
-// holds, each once; pushes moving the head one at a time, the push that lost told the head that
-// won; the history newest first, a page of it, and an author's name kept past their account.
+// holds, each once and at its size; pushes moving the head one at a time, the push that lost told
+// the head that won; the history newest first, a page of it, and an author's name kept past their
+// account.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -155,14 +156,24 @@ static int test_blobs() {
 	TestDatabase tdb;
 	Database db = tdb.open();
 	const int64_t jo = find_project(db, "JO")->id, dfx2 = find_project(db, "DFX2")->id;
+	const StoredBlob a{ kShaA, 10 }, b{ kShaB, 20 };
+	const auto shas = [](const std::vector<StoredBlob> &blobs) {
+		std::vector<std::string> out;
+		for (const StoredBlob &blob : blobs)
+			out.push_back(blob.sha256);
+		return out;
+	};
 	TEST_EXPECT(missing_blobs(db, jo, {}).empty());
-	TEST_EXPECT((missing_blobs(db, jo, { kShaA, kShaB, kShaA }) ==
-			std::vector<std::string>{ kShaA, kShaB }));
-	record_blobs(db, jo, { { kShaA, 10 } });
-	TEST_EXPECT((missing_blobs(db, jo, { kShaB, kShaA }) == std::vector<std::string>{ kShaB }));
-	record_blobs(db, jo, { { kShaA, 10 }, { kShaB, 20 } }); // the one held already kept
-	TEST_EXPECT(missing_blobs(db, jo, { kShaA, kShaB }).empty());
-	TEST_EXPECT(missing_blobs(db, dfx2, { kShaA }).size() == 1); // each project's store its own
+	TEST_EXPECT(
+			(shas(missing_blobs(db, jo, { a, b, a })) == std::vector<std::string>{ kShaA, kShaB }));
+	record_blobs(db, jo, { a });
+	TEST_EXPECT((shas(missing_blobs(db, jo, { b, a })) == std::vector<std::string>{ kShaB }));
+	// Held, but at another size: no file a manifest may name.
+	TEST_EXPECT(
+			(shas(missing_blobs(db, jo, { { kShaA, 11 } })) == std::vector<std::string>{ kShaA }));
+	record_blobs(db, jo, { a, b }); // the one held already kept
+	TEST_EXPECT(missing_blobs(db, jo, { a, b }).empty());
+	TEST_EXPECT(missing_blobs(db, dfx2, { a }).size() == 1); // each project's store its own
 	const ProjectStorage storage = project_storage(db, jo);
 	TEST_EXPECT(storage.blobs == 2 && storage.bytes == 30);
 	TEST_EXPECT(project_storage(db, dfx2).blobs == 0 && project_storage(db, dfx2).bytes == 0);
@@ -219,7 +230,8 @@ static int test_pushes() {
 	return 0;
 }
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	int failures = 0;
 	failures += test_seeded_projects();
 	failures += test_project_writes();

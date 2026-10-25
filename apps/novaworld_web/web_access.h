@@ -158,6 +158,12 @@ public:
 	// actor and the reply's status (AccessMiddleware).
 	RouteAccess require_admin(const crow::request &req);
 
+	// Whether a read's caller is an admin, refusing no one: the Bearer ADMIN_API_TOKEN, or an
+	// admin-role session (a dead or a player's one, or none, is no admin). What a route that
+	// anyone may read shows an admin more of (the content store's private projects,
+	// content/content_routes.h). Never for a state change: it takes no CSRF header.
+	bool caller_is_admin(const crow::request &req);
+
 	// The login brake both logins run. take_login_address draws the attempt
 	// from the route's address bucket (0, else the Retry-After seconds).
 	// begin_password_check draws one token from the route's (username,

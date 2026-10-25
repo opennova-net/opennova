@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace opennova::novaworld_server::content {
@@ -196,25 +197,42 @@ std::optional<ContentRevision> find_revision(db::Database &db, int64_t project_i
 	return row_to_revision(rows.front());
 }
 
-std::vector<std::string> missing_blobs(
-		db::Database &db, int64_t project_id, const std::vector<std::string> &sha256s) {
-	std::vector<std::string> unique;
+std::string blob_key(std::string_view project_key, std::string_view sha256) {
+	return project_prefix(project_key) + "blobs/" + std::string(sha256);
+}
+
+std::string manifest_key(std::string_view project_key, std::string_view sha256) {
+	return project_prefix(project_key) + "manifests/" + std::string(sha256) + ".json";
+}
+
+std::string project_prefix(std::string_view project_key) {
+	return "content/" + std::string(project_key) + "/";
+}
+
+std::vector<StoredBlob> missing_blobs(
+		db::Database &db, int64_t project_id, const std::vector<StoredBlob> &wanted) {
+	std::vector<StoredBlob> unique;
+	std::vector<std::string> shas;
 	std::unordered_set<std::string> seen;
-	for (const std::string &sha : sha256s)
-		if (seen.insert(sha).second)
-			unique.push_back(sha);
+	for (const StoredBlob &blob : wanted)
+		if (seen.insert(blob.sha256).second) {
+			unique.push_back(blob);
+			shas.push_back(blob.sha256);
+		}
 	if (unique.empty())
 		return {};
-	const auto rows = db.query(
-			"SELECT sha256 FROM content_blobs WHERE project_id = $1 AND sha256 = ANY($2::text[]);",
-			{ BindValue(project_id), BindValue(sha_array(unique)) });
-	std::unordered_set<std::string> held;
+	const auto rows = db.query("SELECT sha256, bytes FROM content_blobs "
+							   "WHERE project_id = $1 AND sha256 = ANY($2::text[]);",
+			{ BindValue(project_id), BindValue(sha_array(shas)) });
+	std::unordered_map<std::string, int64_t> held;
 	for (const auto &r : rows)
-		held.insert(r.as_text(0).value_or(""));
-	std::vector<std::string> missing;
-	for (const std::string &sha : unique)
-		if (!held.count(sha))
-			missing.push_back(sha);
+		held.emplace(r.as_text(0).value_or(""), r.as_int(1).value_or(-1));
+	std::vector<StoredBlob> missing;
+	for (const StoredBlob &blob : unique) {
+		const auto at = held.find(blob.sha256);
+		if (at == held.end() || at->second != blob.bytes)
+			missing.push_back(blob);
+	}
 	return missing;
 }
 

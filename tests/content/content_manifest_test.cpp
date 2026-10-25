@@ -56,6 +56,12 @@ static int test_paths() {
 	TEST_EXPECT(path_ok("art/.opennova/x")); // only the project's own top folder is the machine's
 	TEST_EXPECT(path_refused("bad\xff.def") && path_refused("\xc0\xaf") &&
 			path_refused("\xed\xa0\x80"));
+	// UTF-8 alone: each length's sequence, and an overlong form, a surrogate, a cut sequence and
+	// a code point past U+10FFFF refused.
+	TEST_EXPECT(is_utf8("") && is_utf8("ascii") && is_utf8("\xc3\xa9") && is_utf8("\xe2\x82\xac") &&
+			is_utf8("\xf0\x9f\x8e\xae"));
+	TEST_EXPECT(!is_utf8("\xc0\xaf") && !is_utf8("\xed\xa0\x80") && !is_utf8("\xe2\x82") &&
+			!is_utf8("\xf4\x90\x80\x80") && !is_utf8("\x80"));
 	TEST_EXPECT(path_refused(std::string(256, 'x')) && path_refused(std::string(1025, 'x')));
 	std::printf("paths: the Windows rules, the machine's own folder and UTF-8\n");
 	return 0;

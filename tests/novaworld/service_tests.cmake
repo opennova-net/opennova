@@ -559,6 +559,21 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
 
+    # The content store's routes (apps/novaworld_web/content/content_routes.h, ADR 0069) on the
+    # in-process listener over a migrated database, a Redis namespace and a local object store:
+    # who reads what (a private project an admin's alone), who may push (no Bearer token, no
+    # player, no session without the CSRF header), a push from nothing (the missing files, each
+    # upload checked by its SHA-256, a stale push told the head, the head's files, a missing file
+    # and a manifest out of its form refused), the history, manifest and files read back, a file
+    # the store got directly held once a push names it, and the admin's projects.
+    add_executable(content_routes_test novaworld/content_routes_test.cpp)
+    target_link_libraries(content_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(content_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(content_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(content_routes REDIS COMMAND content_routes_test)
+    set_tests_properties(content_routes PROPERTIES TIMEOUT 120)
+
     # The update listener (apps/novaworld_web/updater/update_listener.h) over a migrated database
     # and a local object store: a packed update built from the synthetic trees
     # (opennova-update-tool's builder) as two data sets' published release, fetched and

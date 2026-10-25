@@ -203,6 +203,15 @@ RouteAccess WebAccess::require_admin(const crow::request &req) {
 	return access;
 }
 
+bool WebAccess::caller_is_admin(const crow::request &req) {
+	if (bearer_authorized(req))
+		return true;
+	if (is_state_changing(req) || session_token(req).empty())
+		return false;
+	const RouteAccess access = require_user(req);
+	return !access.refusal && access.user && access.user->role == "admin";
+}
+
 int64_t WebAccess::take_login_address(LoginRoute route, const std::string &ip) {
 	return login_per_ip_.take(route_prefix(route) + address_key(ip, kAddressV6Bits),
 	                          RateLimiter::Clock::now());

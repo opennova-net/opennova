@@ -83,6 +83,9 @@ namespace infra { class AlarmStore; class CostStore; class InfraStatus; class Lo
 //                         hosted data sets, their tree uploads into the object
 //                         store and the update releases, each part through
 //                         this program (ADR 0064)
+//   content store       — ContentRoutes (content/): the content projects'
+//                         revisions, manifests and files, the editor's
+//                         pushes, and the admin's projects (ADR 0069)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
