@@ -22,7 +22,7 @@ bool NwuHostRole::request(const HostRegistration &cfg, uint32_t taken_app_id) {
 	players_.clear();
 	// BuildHostVarLists mints the per-registration AppId first: (tick + rand) folded into
 	// [1000, 9999]. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b6e ->
-	//  CNapiNetwork_RandomizeTimeout @0x4c4d80]
+	//  CNapiNetwork_MintAppId @0x4c4d80]
 	do {
 		cfg_.app_id = make_session_app_id(
 				lobby_.clock_ms(), static_cast<int>(lobby_.random_u32() & 0x7FFFu));

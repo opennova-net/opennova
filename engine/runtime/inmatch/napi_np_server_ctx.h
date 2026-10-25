@@ -685,7 +685,7 @@ struct NapiNPServerCtx {
 	// value, net/napi/session.h make_session_app_id), installed by the
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
 	// authority's status page shows it on its NovaWorld server line.
-	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
+	// [orig: ctx+0x1194 — CNapiNetwork_MintAppId @0x4c4da3, read back
 	//  by CNapiNPCtx_GetAppId @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
 	uint32_t novaworld_app_id = 0;
 	// The host's own CD-key ids, the wire forms its registry key decodes to: a DFX2 LAN host

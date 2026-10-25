@@ -332,7 +332,7 @@ LobbySession::LobbySession()
 // browser row carries and the `rid=` the join URL echoes, so two live hosts
 // must never share one. The host's AppId cannot serve: retail draws it per
 // session from (GetTickCount + rand) % 9000 + 1000 [orig:
-// CNapiNetwork_RandomizeTimeout @0x4c4d9a, sole caller
+// CNapiNetwork_MintAppId @0x4c4d9a, sole caller
 // CNapiGameSession_BuildHostVarLists @0x4d0c6a], so two retail hosts can
 // present the same value. Several lobby instances list into one table, so the
 // suffix under the 0x0A prefix comes from one database sequence
