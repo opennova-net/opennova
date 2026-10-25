@@ -23,29 +23,24 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	// ServerPlayerEnterResult answers (on_player_enter_result) or the ticket deadline reaps it.
 	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — the arm @0x4C8B88,
 	//  CNapiGameSession_SendPlayEnterRequest @0x4C8BC1]
+	// A joiner the second listing's service sent (its APPID that listing's, D-NET-1385) goes to
+	// that listing's session, whose service issued its ticket.
 	ctx.on_player_enter_request = [this](const inmatch::NapiNPServerCtx::PlayerEnterRequest &request) {
-		if (lister_ == nullptr) return;
-		lister_->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
-		                                          request.join_ticket);
+		Lister *lister = request.listing == 1 ? second_ : lister_;
+		if (lister == nullptr) return;
+		lister->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
+		                                         request.join_ticket);
 	};
 	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
-	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock).
+	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock), and the second
+	// listing's beside it (D-NET-1385, none of retail's).
 	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
 	ctx.on_update_server_info = [this]() {
 		if (lister_ != nullptr) lister_->host_role().update_server_info();
+		if (second_ != nullptr) second_->host_role().update_server_info();
 	};
-	// The update reads the match's columns as it runs, as the game's does (SessionDrive::
-	// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
-	// and the net-quality window as that tick left them, where the lister's per-pass columns stand
-	// a pass behind the tick (D-NET-NEW-L9-53).
-	// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
-	//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
-	//  current key @0x4FF191..0x4FF196]
-	lister.host_role().set_column_source([this](HostRegistration &r) {
-		if (role_ == nullptr) return false;
-		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
-		return true;
-	});
+	install_column_source(lister);
+	if (second_ != nullptr) install_column_source(*second_);
 	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
 	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-NEW-L9-22).
 	ctx.gate_metrics.host = [this]() {
@@ -58,8 +53,43 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 	sync_session();
 }
 
+// The update reads the match's columns as it runs, as the game's does (SessionDrive::
+// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
+// and the net-quality window as that tick left them, where the lister's per-pass columns stand
+// a pass behind the tick (D-NET-NEW-L9-53).
+// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
+//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
+//  current key @0x4FF191..0x4FF196]
+void ServeListing::install_column_source(Lister &lister) {
+	lister.host_role().set_column_source([this](HostRegistration &r) {
+		if (role_ == nullptr) return false;
+		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
+		return true;
+	});
+}
+
+void ServeListing::set_second(Lister *second) {
+	if (second_ != nullptr && second_ != second) second_->host_role().set_column_source(nullptr);
+	second_ = second;
+	if (second_ != nullptr && role_ != nullptr) install_column_source(*second_);
+	sync_second();
+}
+
+// The second listing's facts on the server context while it hosts: its own registration's AppId,
+// the one its service's joiners carry (the code-9 leg's second AppId), and its ticket arm. None
+// once it goes, so a joiner still carrying its AppId is refused 9, as retail refuses one whose
+// .joi predates a fresh host request.
+void ServeListing::sync_second() {
+	if (role_ == nullptr) return;
+	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+	const bool hosting = second_ != nullptr && second_->hosting();
+	ctx.novaworld_second_app_id = hosting ? static_cast<uint32_t>(second_->host_role().app_id()) : 0u;
+	ctx.novaworld_second_join_tickets_armed = hosting && second_->host_role().requires_join_ticket();
+}
+
 void ServeListing::unbind() {
 	if (lister_ != nullptr) lister_->host_role().set_column_source(nullptr);
+	if (second_ != nullptr) second_->host_role().set_column_source(nullptr);
 	if (role_ != nullptr) {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
@@ -68,6 +98,8 @@ void ServeListing::unbind() {
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();
 		ctx.novaworld_app_id = 0;
+		ctx.novaworld_second_app_id = 0;
+		ctx.novaworld_second_join_tickets_armed = false;
 	}
 	role_ = nullptr;
 	kernel_ = nullptr;
@@ -89,6 +121,7 @@ void ServeListing::sync_session() {
 	ctx.novaworld_app_id = static_cast<uint32_t>(host.app_id());
 	inmatch::set_novaworld_account_facts(ctx, std::string());
 	ctx.novaworld_join_tickets_armed = host.requires_join_ticket();
+	sync_second();
 	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
 	ctx.nwu_in_use = facts.in_use;
 	ctx.nwu_session_role = facts.role;
@@ -163,7 +196,9 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 //  CNapiGameSession_DispatchServerStatement @0x4D18A0 (no state test, the name table
 //  @0x82C0C8); Game_HostMultiplayerSession's SetConnectionMode(1) @0x4A661F ahead of its hosting
 //  wait @0x4A6725..0x4A6735]
-void ServeListing::on_command(const ServerCommand &command) {
+void ServeListing::on_command(const ServerCommand &command) { (void)run_command(command, lister_); }
+
+bool ServeListing::run_command(const ServerCommand &command, Lister *issuer) {
 	const bool bound = role_ != nullptr && kernel_ != nullptr;
 	const inmatch::ServerCommandOutcome outcome =
 			inmatch::run_host_server_command(bound ? &role_->state.host_owner.ctx : nullptr,
@@ -173,17 +208,34 @@ void ServeListing::on_command(const ServerCommand &command) {
 	if (!outcome.handled) {
 		io::logf(LogLevel::kInfo, "[host] ServerCommand %s was not executed%s", command.command.c_str(),
 		         bound ? "" : " (no session yet)");
-		return;
+		return false;
 	}
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
 	if (outcome.config_changed && seams_.save_config)
 		seams_.save_config();
-	if (outcome.stop_hosting && lister_ != nullptr) lister_->host_role().stop();
+	if (!outcome.stop_hosting || issuer == nullptr) return false;
+	issuer->host_role().stop();
+	return true;
+}
+
+void ServeListing::on_player_enter_result(const ClientSession::PlayerEnterResult &result) {
+	apply_player_enter_result(result, 0);
 }
 
 // [orig: CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
-void ServeListing::on_player_enter_result(const ClientSession::PlayerEnterResult &result) {
+void ServeListing::apply_player_enter_result(const ClientSession::PlayerEnterResult &result,
+                                             uint8_t listing) {
 	if (role_ == nullptr) return;
+	// One session per listing (D-NET-1385, none of retail's): a result names a joiner of the
+	// listing whose service answered, never one the other service sent.
+	for (const inmatch::NapiNPConnection &conn : role_->state.host_owner.ctx.np_protocol.connection_list) {
+		if (conn.type == inmatch::NapiNPConnection::kTypeServerSide &&
+				conn.connection_id == result.connection_id && conn.novaworld_listing != listing) {
+			io::logf(LogLevel::kDebug, "[host] ServerPlayerEnterResult for connection %u from the other "
+			         "listing's service; ignored", result.connection_id);
+			return;
+		}
+	}
 	if (!inmatch::Server_ApplyPlayerEnterResult(role_->state.host_owner.ctx, result.connection_id,
 	                                            result.success != 0, result.msg_code,
 	                                            role_->state.host_owner.now_tick)) {

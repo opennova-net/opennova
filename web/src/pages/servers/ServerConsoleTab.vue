@@ -14,6 +14,7 @@
       :target="{ kind: scope, id: server.id }"
       :mode="scope"
       :server-name="server.listing?.server_name || server.settings.game_name"
+      :novalogic-slots="server.novalogic?.player_slots ?? []"
       :heading-level="2"
       :log-only="mode !== 'live'"
       :follow="mode !== 'ended'"

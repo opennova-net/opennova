@@ -5,7 +5,7 @@
 // tallies, the team records, the clocks and the total logins — the host's
 // own connection and every joined remote counting one.
 // [orig: Server_DrawStatusScreen @0x50a2d0; NapiNPServer_HandleNewConnection
-//  @0x4c8203; CNapiNetwork_RandomizeTimeout @0x4c4da3]
+//  @0x4c8203; CNapiNetwork_MintAppId @0x4c4da3]
 #include "npruntime/conn_fixture.h"
 #include "npruntime/host_test_setup.h"
 

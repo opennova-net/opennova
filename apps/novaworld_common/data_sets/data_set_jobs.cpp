@@ -33,7 +33,7 @@ namespace {
 
 // The games slug of OpenNova's own base data set (backend/migrations/0011_data_sets.sql), whose
 // releases and its expansions' are complete installs (ADR 0067 d7).
-constexpr const char *kOpenNovaGame = "opennova_0_consumer";
+constexpr const char *kAcidGambitGame = "acidgambit_0_consumer";
 
 namespace fs = std::filesystem;
 
@@ -777,7 +777,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		// OpenNova's own content packages are complete installs, including first launch.
 		// Build those from empty on every release; retail packages still patch a baseline.
 		const auto base = data_set->parent_id ? find_data_set(db, *data_set->parent_id) : data_set;
-		full_content = base && base->game == kOpenNovaGame;
+		full_content = base && base->game == kAcidGambitGame;
 		for (const ReleaseSection &s : list_sections(db, release_id))
 			if (s.data_set_id == data_set_id)
 				section = s;

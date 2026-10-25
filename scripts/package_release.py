@@ -6,8 +6,8 @@ maintainer's disk, and its release is this script's package, uploaded in the adm
 (Releases: upload, validate, Publish) or with publish_update.py.
 
   Our own game, a full package carrying the last published one's removals:
-    python scripts/package_release.py --product OPENNOVA --project PROJECTS/OPENNOVA \
-        --version 0.2.0 --previous PROJECTS/RELEASES/OPENNOVA-0.1.0.sfs
+    python scripts/package_release.py --product ACIDGAMBIT --project PROJECTS/ACIDGAMBIT \
+        --version 0.2.0 --previous PROJECTS/RELEASES/ACIDGAMBIT-0.1.0.sfs
   A retail game's patch, only what the project changed against the stock install:
     python scripts/package_release.py --product JO --project PROJECTS/JO \
         --install "D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms" --version 1.7.5.8
@@ -70,8 +70,8 @@ PRODUCTS = {
             base="JO",
         ),
         Product("DFX2", "DFX2", "DFX2.CMD", "Delta Force Xtreme 2", "dfx2.exe", True, game="dfx2"),
-        Product("OPENNOVA", "OPENNOVA", "OPENNOVA.CMD", "OpenNova", "opennova.exe", False),
-        Product("ONJO1", "ONJO1", "ONJO1.CMD", "Indigo Storm", "", False, expansion="onjo1"),
+        Product("ACIDGAMBIT", "ACIDGAMBIT", "ACIDGAMBIT.CMD", "OP: Acid Gambit", "opennova.exe", False),
+        Product("NIFTY", "NIFTY", "NIFTY.CMD", "OP: Nifty Package", "", False, expansion="nifty"),
     )
 }
 
@@ -158,7 +158,9 @@ def pristine_export(tool: Path, product: Product, install: Path, work: Path) -> 
 def write_wizard(tree: Path, product: Product) -> None:
     """Our own product's UPDATE.WIZ in its tree, which marks the folder it installs into as that
     product's: the updater installs OpenNova content only into a folder with no game data or one its
-    wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their stock one."""
+    wizard names (apps/update client.cpp, ADR 0067 d2). A retail product's players keep their stock one.
+    Its URL is never dialed: every product updates through the runtime's OPENNOVA.WIZ, which names
+    the zip's deployment (package_godot_windows.ps1), so one package serves staging and prod."""
     folder = tree / "expansion" / product.expansion if product.expansion else tree
     folder.mkdir(parents=True, exist_ok=True)
     lines = [

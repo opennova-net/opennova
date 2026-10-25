@@ -622,13 +622,15 @@ std::string join_ticket_for(const NapiNPServerCtx &ctx, const NapiNPConnection &
 void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 	if (!ctx.is_authority) return;
 	const uint32_t host_ms = host_tick_count_ms(ctx);
-	const bool armed = ctx.novaworld_join_tickets_armed;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide ||
 				!conn.join_ticket_validation || // [orig: @0x4C8B7C, @0x4C8BD4]
 				conn.phase >= ConnectionPhase::PlayerAdded ||
 				conn.host_disconnect_sent)
 			continue;
+		// The arm of the listing that sent the joiner: retail's one, or a second listing's
+		// (D-NET-1385).
+		const bool armed = join_tickets_armed_for(ctx, conn);
 		const bool expired = host_ms - conn.join_validated_host_ms > 0x1D4C0u;
 		DisconnectEvent event;
 		event.ds = 1;
@@ -640,6 +642,7 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 					request.connection_id = conn.connection_id;
 					request.peer = conn.peer;
 					request.join_ticket = join_ticket_for(ctx, conn);
+					request.listing = conn.novaworld_listing;
 					ctx.on_player_enter_request(request);
 				}
 				// State 4's entry restamps +0xA4: its 120 s run from the request.

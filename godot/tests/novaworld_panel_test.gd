@@ -76,17 +76,29 @@ func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
 
 
 # The OpenNova target dials our service's gate (ADR 0010 d2): a source run (this
-# suite) reaches the local stack on loopback, never the live service.
+# suite) reaches the local stack on loopback, never a live service.
 func test_opennova_target_dials_loopback_in_a_source_run() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.client_for_test().host, NovaWorldSettings.LOCAL_NOVAWORLD_HOST)
 
 
-func test_opennova_host_is_the_live_gate_in_an_exported_build() -> void:
-	assert_eq(NovaWorldSettings.opennova_host_for("", true), "nw.opennova.net")
-	assert_eq(NovaWorldSettings.opennova_host_for("", false), "127.0.0.1")
-	assert_eq(NovaWorldSettings.opennova_host_for("nw.staging.opennova.net", true),
-			"nw.staging.opennova.net", "the flag beats the build's own")
+# An export dials its flavour's deployment: a release export prod's gate, a debug
+# export (PR CI's zip) staging's, as their OPENNOVA.WIZ names that deployment's
+# update service.
+func test_opennova_host_is_the_export_flavours_deployment() -> void:
+	assert_eq(NovaWorldSettings.opennova_host_for("", true, false), "nw.opennova.net",
+			"a release export: prod's gate")
+	assert_eq(NovaWorldSettings.opennova_host_for("", true, true), "nw.staging.opennova.net",
+			"a debug export: staging's gate")
+	assert_eq(NovaWorldSettings.opennova_host_for("", false, true), "127.0.0.1",
+			"a source run: loopback")
+	assert_eq(NovaWorldSettings.opennova_host_for("", false, false), "127.0.0.1",
+			"a source run of a release editor binary: loopback too")
+	assert_eq(NovaWorldSettings.opennova_host_for("nw.example.test", true, false),
+			"nw.example.test", "the flag beats a release export's own")
+	assert_eq(NovaWorldSettings.opennova_host_for("nw.example.test", true, true),
+			"nw.example.test", "and a debug export's")
+	assert_eq(NovaWorldSettings.opennova_host_for("127.0.0.1", false, true), "127.0.0.1")
 
 
 func test_novaworld_host_flag_moves_the_opennova_target_alone() -> void:

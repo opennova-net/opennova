@@ -282,6 +282,9 @@ struct SupervisorConfig {
 	// (ONNET_PUBLIC_HOST; a test's own gate).
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
+	// NovaLogic's NovaWorld, the second listing of the servers whose owners asked
+	// (hosted_settings.h NovaLogicListing; unoffered, the default: none lists there).
+	NovaLogicListing novalogic;
 	// Where a machine's agent fetches tree `tree_id` from: the object store's
 	// URL of trees/<id>/ (core/object_store.h url_of; the fleet holds no store,
 	// only this pure function of its config). Unset, the replies name no URL.

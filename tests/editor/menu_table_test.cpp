@@ -920,7 +920,7 @@ bool test_variant_menus() {
 
 // Every .mnu a packed install serves (the base game's, then each expansion's, a later layer's copy of the same bytes
 // counted once: the menus editor_menus sweeps through MnuDocument), each rebuilt through the table alone. The install
-// is minted from our own game (minted_install.h: the base game's project and the onjo1 expansion, carrying its own
+// is minted from our own game (minted_install.h: the base game's project and the nifty expansion, carrying its own
 // main.mnu, variant_fixtures::expansion_main_menu).
 bool test_install_menus() {
 	test_temp::TempDir dir("opennova_menu_table_install");

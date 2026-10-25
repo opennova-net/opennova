@@ -143,7 +143,15 @@ if ($ExportMode -eq "debug") {
     $SHIPPED_EDITOR_DLL = $EDITOR_RELEASE_DLL
 }
 $NeedsReleaseDll = ($ExportMode -eq "release")
-Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf)) ==="
+# The deployment a package talks to is its export mode's: a release package
+# prod's, a debug one (PR CI's) staging's (DEPLOY.md "Deployments: dev, staging
+# and prod"). The exported game's NovaWorld target picks the same deployment's
+# gate by its build (godot/game/novaworld_settings.gd), and update.exe dials the
+# gateway the zip's OPENNOVA.WIZ names (apps/update/client.cpp service_gateways):
+# the zip always carries that wizard, as the runtime's update package does, so
+# the updater's compiled fallback, prod's, is never what a zip install dials.
+$UPDATE_HOST = if ($ExportMode -eq "debug") { "update.staging.opennova.net" } else { "update.opennova.net" }
+Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf); updates from $UPDATE_HOST) ==="
 
 if ($SkipBuild) {
     Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
@@ -503,7 +511,7 @@ function Test-UpdaterBoot {
         Assert-StageHoldsOnly -StageDir $bare -Staged @("OPENNOVA.WIZ")
         # OpenNova content never targets another game's folder: refused before any row.
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
-            -Arguments "--check /game opennova --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+            -Arguments "--check /game acidgambit --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
         $server.Kill()
         $server.WaitForExit()
         Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
@@ -576,17 +584,18 @@ try {
     Copy-Item -LiteralPath $UPDATE_EXE, $REVUPDAT_EXE -Destination $stagePath
     $staged.Add("update.exe")
     $staged.Add("revupdat.exe")
-    [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
+    [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), "[HEADER]`r`nCMD=ONRUNTIME.CMD`r`nURL=$UPDATE_HOST`r`nPRODUCT_LOGIN=ONRUNTIME`r`n")
     $staged.Add("OPENNOVA.WIZ")
-    $expansion = Join-Path $stagePath "expansion\onjo1"
+    $expansion = Join-Path $stagePath "expansion\nifty"
     New-Item -ItemType Directory -Path $expansion -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=ONJO1.CMD`r`nURL=update.opennova.net`r`nPRODUCT_LOGIN=ONJO1`r`n")
-    $staged.Add("expansion\onjo1\UPDATE.WIZ")
+    [IO.File]::WriteAllText((Join-Path $expansion "UPDATE.WIZ"), "[HEADER]`r`nCMD=NIFTY.CMD`r`nURL=$UPDATE_HOST`r`nPRODUCT_LOGIN=NIFTY`r`n")
+    $staged.Add("expansion\nifty\UPDATE.WIZ")
     $launchHelp = @"
 OpenNova (pre-1.0, experimental)
 
-Run opennova.exe. The first launch downloads OpenNova's content and registered
-expansions. Later launches play offline and show UPDATE only when an update exists.
+Run opennova.exe. The first launch downloads OpenNova's own game, OP: Acid Gambit,
+and its registered expansion, OP: Nifty Package. Later launches play offline and
+show UPDATE only when an update exists.
 Keep update.exe and revupdat.exe beside opennova.exe.
 
 To play Joint Operations or Delta Force Xtreme 2, put these files in that
@@ -595,13 +604,16 @@ it holds. To choose a game and folder yourself:
   opennova.exe -- /game jo --resource-dir "C:\Games\Joint Operations"
   opennova.exe -- /game dfx2 --resource-dir "C:\Games\Delta Force Xtreme 2"
 With no --resource-dir, game data is read from the executable's folder.
-  opennova.exe -- /exp onjo1
+  opennova.exe -- /exp nifty
 
 Updates include the OpenNova runtime, selected game's content and installed
 expansions. --no-update disables checks and installation for this launch.
 Online play: choose OpenNova in the NovaWorld menu. The OpenNova Switcher is
-only needed for the original Jointops.exe and dfx2.exe.
+only needed for the original dfx2.exe, whose NovaLogic NovaWorld is down.
 "@
+    if ($ExportMode -eq "debug") {
+        $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`n$UPDATE_HOST, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."
+    }
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
     $staged.Add("README.txt")
     Test-GodotAppBoot -ExePath $stagedExe

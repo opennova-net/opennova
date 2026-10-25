@@ -61,13 +61,13 @@ UpdateWizard with_territory(UpdateWizard wizard, const Territory &territory);
 
 // The command files of the products a game folder's stock wizard names (ADR 0067 d2): JO's, as
 // JO:CA's UPDATE.WIZ ships it (§2), DFX2's, as the Steam DFX2 install's UPDATE.WIZ ships it
-// (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), and OpenNova content's own (the content repository's
-// generated wizard). A CMD names no territory placeholder, so the territory never changes it.
+// (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), and OP: Acid Gambit's own (the wizard package_release.py
+// writes into its package). A CMD names no territory placeholder, so the territory never changes it.
 inline constexpr std::string_view kJoCommandFile = "JOPTR.CMD";
 inline constexpr std::string_view kDfx2CommandFile = "DFX2.CMD";
-inline constexpr std::string_view kOpenNovaCommandFile = "OPENNOVA.CMD";
+inline constexpr std::string_view kAcidGambitCommandFile = "ACIDGAMBIT.CMD";
 
-// The product a wizard's CMD names: "jo", "dfx2" or "opennova" (ASCII case-blind, as the
+// The product a wizard's CMD names: "jo", "dfx2" or "acidgambit" (ASCII case-blind, as the
 // updater opens the file); "" for any other (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD).
 std::string wizard_product(std::string_view cmd);
 

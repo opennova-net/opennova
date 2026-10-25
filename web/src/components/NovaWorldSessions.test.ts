@@ -48,6 +48,7 @@ function host(rid: number, over: Partial<AdminConnectionHost> = {}): AdminConnec
     hosted_server_id: null,
     server_kind: 'owned',
     dedicated: false,
+    novalogic_players: null,
     ...over,
   };
 }
@@ -235,6 +236,24 @@ describe('NovaWorldSessions', () => {
     expect(garage.get('.session-players').text()).toBe('None listed');
     expect(garage.get('.session-game').text()).toContain('Not known');
     expect(fleet.text()).toContain('Stop server');
+  });
+
+  it("counts a hosted server's players who came through NovaLogic's NovaWorld apart from the sessions here", async () => {
+    const page = await mountSection([
+      server(12, host(167772161, { server_kind: 'hosted', hosted_server_id: 4, players: 3, novalogic_players: 2 }), {
+        created_ms: NOW - 60_000,
+      }),
+      server(13, host(167772162, { server_kind: 'hosted', hosted_server_id: 5, novalogic_players: 0 }), { created_ms: NOW - 120_000 }),
+      server(14, host(167772163), { created_ms: NOW - 180_000 }),
+    ]);
+    const [listed, none, owned] = serverRows();
+    expect(listed.get('.session-players').text()).toContain('3 of 32');
+    expect(listed.get('.session-novalogic').text()).toBe("2 players through NovaLogic's NovaWorld (no session here)");
+    expect(none.find('.session-novalogic').exists()).toBe(false);
+    expect(owned.find('.session-novalogic').exists()).toBe(false);
+    expect(page.get('.sessions-summary').text()).toContain(
+      "keepalive. 2 players on hosted servers came through NovaLogic's NovaWorld and hold no session here.",
+    );
   });
 
   it('sorts both tables by a header, the same header again reversing it', async () => {

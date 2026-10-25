@@ -86,7 +86,7 @@ struct Run {
 std::vector<ExpansionRecord> records() {
 	return {
 		{ "jox01", { "Joint Operations: Escalation", "Kendari island." } },
-		{ "onjo1", { "OpenNova: Indigo Storm", "A storm." } },
+		{ "nifty", { "OP: Nifty Package", "A storm." } },
 	};
 }
 
@@ -112,13 +112,13 @@ void test_rows() {
 	CHECK(rows.size() == 3);
 	if (rows.size() == 3) {
 		CHECK(rows[0] == kModListBaseKey);
-		CHECK(rows[1] == "Joint Operations: Escalation" && rows[2] == "OpenNova: Indigo Storm");
+		CHECK(rows[1] == "Joint Operations: Escalation" && rows[2] == "OP: Nifty Package");
 	}
 	CHECK(run.rt.selected_row(list) == 0);
 	CHECK(run.rt.get_widget_text(desc) == "AUTHORED");
 
 	// The running expansion, named without case: its row selected, its description shown.
-	modlist.populate(run.rt, list, "ONJO1");
+	modlist.populate(run.rt, list, "NIFTY");
 	CHECK(run.rt.selected_row(list) == 2);
 	CHECK(run.rt.get_widget_text(desc) == "A storm.");
 
@@ -158,7 +158,7 @@ void test_select_and_pick() {
 	CHECK(run.rt.get_widget_text(desc).empty());
 
 	run.rt.select_row(list, 2, false);
-	CHECK(modlist.pick(run.rt, list) == "onjo1");
+	CHECK(modlist.pick(run.rt, list) == "nifty");
 	run.rt.select_row(list, 0, false);
 	CHECK(modlist.pick(run.rt, list).empty());
 	// Nothing selected: the game reads the value 0, the first record.
@@ -178,7 +178,7 @@ void test_accept_compare() {
 	CHECK(flow.request_expansion("", "jox01", true) == Pick::Queued);
 	CHECK(flow.has_pending_expansion());
 	CHECK(flow.take_expansion_reload().empty() && !flow.has_pending_expansion());
-	CHECK(flow.request_expansion("onjo1", "", true) == Pick::Queued);
+	CHECK(flow.request_expansion("nifty", "", true) == Pick::Queued);
 	CHECK(flow.request_expansion("", "", true) == Pick::Ignored);
 	CHECK(!flow.has_pending_expansion());
 }

@@ -283,7 +283,7 @@ public:
 	// The host RID is minted by the service alone (see mint_rid: the
 	// database's sequence, shared by every lobby instance); tests may pin it. The generator takes
 	// no input on purpose: nothing the host sends is a uniqueness source (its AppId is a
-	// per-session random in [1000, 9999] [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]).
+	// per-session random in [1000, 9999] [orig: CNapiNetwork_MintAppId @0x4c4d80]).
 	void set_rid_generator(std::function<uint32_t()> g) { rid_gen_ = std::move(g); }
 
 private:

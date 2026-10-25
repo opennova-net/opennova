@@ -45,6 +45,10 @@ export interface AdminConnectionHost {
   // Its listing's Dedicated column: true for a Serve Only host, false for a
   // listen host (it plays on its own server too); null while it is not listed.
   dedicated: boolean | null;
+  // A hosted server listed on NovaLogic's NovaWorld too: the players on it that
+  // service sent, who hold no session here though `players` counts them; null
+  // for any other server, and while it reports none.
+  novalogic_players: number | null;
 }
 
 // The server a session plays on: its latest play request's address, and the

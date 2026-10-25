@@ -40,4 +40,31 @@ describe('ServerSettingsTab', () => {
     expect(text).toContain('smoke.play.opennova.net 203.0.113.9:32768');
     page.unmount();
   });
+
+  it("shows the listing on NovaLogic's NovaWorld while it is on, or while the service offers it", async () => {
+    const label = "Also list on NovaLogic's NovaWorld";
+    async function listingRow(server: ReturnType<typeof hostedServer>, scope: 'owner' | 'admin') {
+      const router = await testRouter('/me/servers/1/settings');
+      const page = mount(ServerSettingsTab, { props: { server, scope, now: 0 }, global: { plugins: [router] } });
+      await flushPromises();
+      const terms = page.findAll('dt');
+      const term = terms.find((dt) => dt.text() === label);
+      const value = term ? (term.element.nextElementSibling?.textContent ?? '').trim() : null;
+      page.unmount();
+      return value;
+    }
+
+    // Not offered and off: no row.
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO] }) });
+    expect(await listingRow(hostedServer(1), 'owner')).toBeNull();
+    // Offered: the owner sees it off.
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [JO], novalogic_listing: true }) });
+    expect(await listingRow(hostedServer(1), 'owner')).toBe('Off');
+    // On: shown to the owner and the admin alike.
+    const listed = hostedServer(1);
+    listed.settings.list_on_novalogic = true;
+    expect(await listingRow(listed, 'owner')).toBe('On');
+    expect(await listingRow(listed, 'admin')).toBe('On');
+    expect(await listingRow(hostedServer(1), 'admin')).toBeNull();
+  });
 });

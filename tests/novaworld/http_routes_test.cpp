@@ -58,6 +58,7 @@
 #include "jobs/worker_pool.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "novalogic_lobbies.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
@@ -314,20 +315,20 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json.has("games"));
 	TEST_EXPECT(json["games"].size() == 3);
-	TEST_EXPECT(str(json["games"][0]["slug"]) == "dfx2_consumer");
-	TEST_EXPECT(!str(json["games"][0]["displayName"]).empty());
-	TEST_EXPECT(str(json["games"][1]["slug"]) == "jop_2_consumer");
-	TEST_EXPECT(str(json["games"][2]["slug"]) == "opennova_0_consumer");
-	TEST_EXPECT(str(json["games"][2]["displayName"]) == "OpenNova");
-	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
+	TEST_EXPECT(str(json["games"][1]["slug"]) == "dfx2_consumer");
+	TEST_EXPECT(!str(json["games"][1]["displayName"]).empty());
+	TEST_EXPECT(str(json["games"][2]["slug"]) == "jop_2_consumer");
+	TEST_EXPECT(str(json["games"][0]["slug"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(json["games"][0]["displayName"]) == "OP: Acid Gambit");
 	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
+	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
 
 	{
 		opennova::hostdb::HostRow on;
 		on.rid = 1001;
 		on.gsid = "GSID-HARNESS-ON";
-		on.game = "opennova_0_consumer";
+		on.game = "acidgambit_0_consumer";
 		on.server_name = "Harness ON Srv";
 		on.host_ip = "10.0.0.8";
 		on.host_port = 32768;
@@ -336,9 +337,9 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 		TEST_EXPECT(reply.transport_ok && reply.code == 200);
 		json = crow::json::load(body_text(reply));
 		TEST_EXPECT(json && json["games"].size() == 3);
-		TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
-		TEST_EXPECT(json["games"][2]["hosts"].size() == 1);
-		TEST_EXPECT(str(json["games"][2]["hosts"][0]["serverName"]) == "Harness ON Srv");
+		TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
+		TEST_EXPECT(json["games"][0]["hosts"].size() == 1);
+		TEST_EXPECT(str(json["games"][0]["hosts"][0]["serverName"]) == "Harness ON Srv");
 		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), 1001);
 	}
 
@@ -365,9 +366,9 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json["games"].size() == 3);
+	TEST_EXPECT(json["games"][1]["hosts"].size() == 0);
 	TEST_EXPECT(json["games"][0]["hosts"].size() == 0);
-	TEST_EXPECT(json["games"][2]["hosts"].size() == 0);
-	const auto &hosts = json["games"][1]["hosts"];
+	const auto &hosts = json["games"][2]["hosts"];
 	TEST_EXPECT(hosts.size() == 1);
 	TEST_EXPECT(hosts[0]["id"].i() == 1000);
 	TEST_EXPECT(str(hosts[0]["serverName"]) == "Harness Srv");
@@ -2040,11 +2041,11 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	const auto games = crow::json::load(body_text(reply));
 	TEST_EXPECT(games && games["games"].size() == 3);
-	TEST_EXPECT(str(games["games"][2]["slug"]) == "opennova_0_consumer");
-	TEST_EXPECT(str(games["games"][2]["gateTag"]) == "opennova:0");
-	TEST_EXPECT(str(games["games"][2]["lobbyName"]) == "opennova_0_consumer");
-	TEST_EXPECT(str(games["games"][2]["title"]) == "jo");
-	TEST_EXPECT(str(games["games"][0]["title"]) == "dfx2");
+	TEST_EXPECT(str(games["games"][0]["slug"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(games["games"][0]["gateTag"]) == "acidgambit:0");
+	TEST_EXPECT(str(games["games"][0]["lobbyName"]) == "acidgambit_0_consumer");
+	TEST_EXPECT(str(games["games"][0]["title"]) == "jo");
+	TEST_EXPECT(str(games["games"][1]["title"]) == "dfx2");
 
 	// One host per lobby, none reporting VER1 or Expbits.
 	struct Listed {
@@ -2055,7 +2056,7 @@ int test_lobby_per_title(Harness &h) {
 	const Listed listed[] = {
 		{ 3101, "jop_2_consumer", "Title JO" },
 		{ 3102, "dfx2_0_consumer", "Title DFX2" },
-		{ 3103, "opennova_0_consumer", "Title ON" },
+		{ 3103, "acidgambit_0_consumer", "Title ON" },
 	};
 	for (const Listed &l : listed) {
 		opennova::hostdb::HostRow row;
@@ -2077,7 +2078,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "/jop_2.gsb", "Title JO", "3", "3" },
 		{ "/jop_2.gsb?a=1", "Title JO", "3", "3" },
 		{ "/dfx2_0.gsb", "Title DFX2", "1", "1" },
-		{ "/opennova_0.gsb?a=1", "Title ON", "3", "1" },
+		{ "/acidgambit_0.gsb?a=1", "Title ON", "3", "1" },
 	};
 	for (const Route &r : routes) {
 		const auto gsb = h.send("GET", r.path);
@@ -2117,7 +2118,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "jop:cus2", "/jop_2.gsb" },
 		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
-		{ "opennova:0", "/opennova_0.gsb" },
+		{ "acidgambit:0", "/acidgambit_0.gsb" },
 		{ "nobody:1", "/jop_2.gsb" },
 	};
 	for (const Prepared &p : prepared) {
@@ -2141,8 +2142,8 @@ int test_lobby_per_title(Harness &h) {
 		const char *gsb;
 	};
 	const Later later[] = {
-		{ "GT=opennova:0", "urls.htm", "/opennova_0.gsb" },
-		{ "GT=opennova:0", "dfx2_0_urls.htm", "/opennova_0.gsb" },
+		{ "GT=acidgambit:0", "urls.htm", "/acidgambit_0.gsb" },
+		{ "GT=acidgambit:0", "dfx2_0_urls.htm", "/acidgambit_0.gsb" },
 		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
@@ -2170,7 +2171,7 @@ int test_lobby_per_title(Harness &h) {
 	const std::string jo_start = start_of("url=jop_2_start.htm");
 	TEST_EXPECT(!dfx2_start.empty() && dfx2_start != jo_start);
 	TEST_EXPECT(start_of("gt=dfx2:0:cus:buffy") == dfx2_start);
-	TEST_EXPECT(start_of("gt=opennova:0") == jo_start);
+	TEST_EXPECT(start_of("gt=acidgambit:0") == jo_start);
 	TEST_EXPECT(start_of("gt=jop:cus2") == jo_start);
 	return 0;
 }
@@ -3624,6 +3625,9 @@ int test_admin_sessions(Harness &h) {
 			str((*row)["title"]["display_name"]) == "Joint Operations");
 	TEST_EXPECT(str(listing["server_kind"]) == "owned");
 	TEST_EXPECT(listing["dedicated"].t() == crow::json::type::True);
+	// No hosted server: no count of players another service sent it.
+	TEST_EXPECT(listing.has("novalogic_players") &&
+			listing["novalogic_players"].t() == crow::json::type::Null);
 	const int64_t host_rid = listing["rid"].i();
 
 	// The client plays on that server instead (its join address: where the host sends from):
@@ -4008,6 +4012,85 @@ int test_server_info(Harness &h) {
 		TEST_EXPECT(refused.transport_ok && refused.code == 503);
 		TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
 	}
+	return 0;
+}
+
+// GET /api/lobbies/novalogic, the Lobbies page's list of the servers on NovaLogic's
+// NovaWorld: with ONNET_NOVALOGIC_LOBBIES off (the harness listener, as every listener
+// given no list) enabled false, no servers and nothing fetched. A listener of its own
+// given a list over a scripted feed (minted by gsb_build_response, never the network)
+// answers its first read at once with no list yet, starting the one fetch, and once it
+// ran the feed's servers, UTF-8, with no host address; /api/lobbies and
+// /api/lobbies/<rid> beside it answer as ever.
+int test_novalogic_lobbies_route(Harness &h) {
+	auto reply = h.send("GET", "/api/lobbies/novalogic");
+	if (reply.code != 200) std::fprintf(stderr, "  off: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && !json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["ageSeconds"].t() == crow::json::type::Null);
+
+	opennova::GsbServerEntry row;
+	row.rid = 0x0A0027A0;
+	row.ip = "203.0.113.7";
+	row.server_name = "Caf\xE9 Ops";
+	row.mission_name = "AS - Kombang Valley";
+	row.game_type = "AAS";
+	row.players = 5;
+	row.max_players = 32;
+	row.password = "Y";
+	const std::vector<uint8_t> feed = opennova::gsb_build_response({ row });
+	std::atomic<int> fetches{ 0 };
+	nws::NovaLogicLobbies list([&]() {
+		++fetches;
+		net::HttpReply answer;
+		answer.transport_ok = true;
+		answer.connected = true;
+		answer.code = 200;
+		answer.body = feed;
+		return answer;
+	});
+	nws::ServerConfig config;
+	config.http_port = 0;
+	config.web_dist_dir = h.temp_root / "web_dist";
+	config.templates_dir = h.temp_root / "templates";
+	config.static_dir = h.temp_root / "static";
+	test_redis::TestRedis redis;
+	nws::HttpListener listener(h.pool, redis.pool());
+	listener.set_novalogic_lobbies(&list);
+	TEST_EXPECT(listener.start(config));
+
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["enabled"].b() && json["servers"].size() == 0);
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::Null);
+	list.settle();
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/novalogic");
+	const std::string body = body_text(reply);
+	json = crow::json::load(body);
+	if (!json || json["servers"].size() != 1) std::fprintf(stderr, "  on: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 200 && json);
+	TEST_EXPECT(json["enabled"].b() && !json["failing"].b());
+	TEST_EXPECT(json["fetchedAt"].t() == crow::json::type::String && json["ageSeconds"].i() == 0);
+	TEST_EXPECT(json["servers"].size() == 1);
+	TEST_EXPECT(json["servers"][0]["id"].i() == 0x0A0027A0);
+	TEST_EXPECT(str(json["servers"][0]["serverName"]) == "Caf\xC3\xA9 Ops");
+	TEST_EXPECT(str(json["servers"][0]["mission"]) == "AS - Kombang Valley");
+	TEST_EXPECT(str(json["servers"][0]["gameType"]) == "AAS");
+	TEST_EXPECT(json["servers"][0]["players"].i() == 5 && json["servers"][0]["maxPlayers"].i() == 32);
+	TEST_EXPECT(json["servers"][0]["locked"].b());
+	TEST_EXPECT(body.find("203.0.113.7") == std::string::npos);
+	TEST_EXPECT(fetches == 1);
+
+	TEST_EXPECT(h.send_to(listener.bound_port(), "GET", "/api/lobbies").code == 200);
+	reply = h.send_to(listener.bound_port(), "GET", "/api/lobbies/4242");
+	TEST_EXPECT(reply.code == 404 && str(crow::json::load(body_text(reply))["error"]) == "not_found");
+	listener.stop();
+	TEST_EXPECT(fetches == 1);
 	return 0;
 }
 
@@ -5532,13 +5615,16 @@ int test_hosted_server_routes(Harness &h) {
 	const Owner eve = owner("hosted_eve", "10.51.0.5");
 	const Owner fay = owner("hosted_fay", "10.51.0.6");
 	const Owner gus = owner("hosted_gus", "10.51.0.7");
-	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus }) TEST_EXPECT(o->id > 0 && !o->session.empty());
+	const Owner hal = owner("hosted_hal", "10.51.0.8");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal })
+		TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
 	// four (the data set refusals, then an expansion start with no entitlement),
-	// the others fewer: add a draw to one of them and it must move to a new account.
+	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
+	// one of them and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -5615,6 +5701,8 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
+	// Listing on NovaLogic's NovaWorld is off unless the service offers it (ONNET_NOVALOGIC_LISTING).
+	TEST_EXPECT(json.has("novalogic_listing") && !json["novalogic_listing"].b());
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
@@ -5640,6 +5728,13 @@ int test_hosted_server_routes(Harness &h) {
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// A NovaLogic listing this service does not offer, and a mistyped one (Hal's two draws).
+	reply = start(hal, "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings" && json &&
+			str(json["field"]) == "list_on_novalogic" && json.has("message"));
+	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
@@ -5716,6 +5811,11 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_first = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
+	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
+			!json["server"]["settings"]["list_on_novalogic"].b());
+	// Not asked to list on NovaLogic's NovaWorld: no state of one.
+	TEST_EXPECT(json["server"].has("novalogic") &&
+			json["server"]["novalogic"].t() == crow::json::type::Null);
 	// No data set named: the first offered, with its names; no expansion (null is
 	// the base game alone, as the start form sends it); not started yet, so no data
 	// and nothing newer.
@@ -6062,7 +6162,9 @@ int test_hosted_server_routes(Harness &h) {
 // it (a key /NWHost.dll recorded for that account, presented by a hand-driven
 // host), and its owner's GET /api/me/hosts carries it with its hosted server,
 // the owner's ServerCommand reaches it while another account's is a 404, and
-// the admin view names the owner. An admin withdraws the owner's comp grant
+// the admin view names the owner; the admin's NovaWorld sessions count the
+// players NovaLogic's NovaWorld sent it once its agent reports them (a planted
+// slot report, null before and after). An admin withdraws the owner's comp grant
 // through the route and one supervisor pass (a fake machine driver) moves the server
 // to stopping; a stopping server takes no command (409 server_stopping), and
 // the owner's and the admin's stop on the listing are the hosted server's stop
@@ -6149,6 +6251,62 @@ int test_hosted_listing_owner(Harness &h) {
 		TEST_EXPECT(e["hosted_server_id"].i() == server_id);
 	}
 	TEST_EXPECT(seen);
+
+	// The admin's NovaWorld sessions: the hosted server's own session, and the players
+	// NovaLogic's NovaWorld sent it (who hold no session here) once its agent reports them, none
+	// before (-1: null; -2: no row). Its slot and its agent's report are planted as the fleet
+	// leaves them for a server whose owner asked, then taken away again.
+	const auto novalogic_players = [&h, rid]() -> int64_t {
+		const auto sessions =
+				crow::json::load(body_text(h.send("GET", "/api/admin/connections", { kBearer })));
+		for (const auto &e : sessions["connections"]) {
+			if (e["host"].t() != crow::json::type::Object ||
+					e["host"]["rid"].i() != static_cast<int64_t>(rid))
+				continue;
+			const auto &players = e["host"]["novalogic_players"];
+			return players.t() == crow::json::type::Null ? -1 : players.i();
+		}
+		return -2;
+	};
+	TEST_EXPECT(wait_until([&] { return novalogic_players() == -1; }));
+	int64_t novalogic_machine = 0;
+	{
+		auto db = h.pool.acquire();
+		novalogic_machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+									.id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-novalogic-1";
+		launched.private_address = "10.52.0.40";
+		launched.public_address = "198.51.100.40";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, novalogic_machine, launched));
+		const std::string container = hosted::hosted_container_name(server_id, 1);
+		db->exec("UPDATE hosted_servers SET machine_ref = $1, slot = 0, machine_id = $2, "
+				 "list_on_novalogic = true WHERE id = $3;",
+				{ opennova::db::BindValue(novalogic_machine), opennova::db::BindValue(container),
+						opennova::db::BindValue(server_id) });
+		hosted::ContainerReport running;
+		running.name = container;
+		running.slot = 0;
+		running.state = hosted::ContainerState::Running;
+		hosted::SecondListingStatus listed;
+		listed.state = hosted::SecondListingState::Listed;
+		listed.slots = { 2, 5 };
+		running.second_listing = listed;
+		TEST_EXPECT(
+				hosted::record_sync(*db, novalogic_machine, "test-agent", { running }).has_value());
+	}
+	TEST_EXPECT(novalogic_players() == 2);
+	{
+		auto db = h.pool.acquire();
+		db->exec("UPDATE hosted_servers SET machine_ref = NULL, slot = NULL, machine_id = '', "
+				 "list_on_novalogic = false WHERE id = $1;",
+				{ opennova::db::BindValue(server_id) });
+		db->exec("DELETE FROM fleet_machines WHERE id = $1;",
+				{ opennova::db::BindValue(novalogic_machine) });
+	}
+	TEST_EXPECT(novalogic_players() == -1);
 
 	// An admin withdraws the owner's comp grant (the route), and the supervisor's
 	// next pass (here one hand-driven pass over a fake machine driver) stops the server.
@@ -8905,6 +9063,7 @@ int run(Harness &h, const char *part) {
 		{ "titles", "dfx2_activation", test_dfx2_activation },
 		{ "titles", "unknown_path_404", test_unknown_path_404 },
 		{ "titles", "server_info", test_server_info },
+		{ "titles", "novalogic_lobbies_route", test_novalogic_lobbies_route },
 		{ "titles", "healthz", test_healthz },
 		{ "lobby", "admin_host_push", test_admin_host_push },
 		{ "owner_push", "owner_host_push", test_owner_host_push },
@@ -9030,7 +9189,7 @@ int with_harness(const char *part) {
 			jo_id = data_set_named(*db, "Joint Operations");
 			jox_id = data_set_named(*db, "Escalation");
 			dfx2_id = data_set_named(*db, "Delta Force Xtreme 2");
-			on_id = data_set_named(*db, "OpenNova");
+			on_id = data_set_named(*db, "OP: Acid Gambit");
 			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
 			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
 			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });

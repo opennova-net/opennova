@@ -91,6 +91,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_RETAIL_PROXY")) c.retail_proxy = v;
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
+	c.novalogic_lobbies = getenv_bool("ONNET_NOVALOGIC_LOBBIES", c.novalogic_lobbies);
 	c.cd_key_auto_mint = getenv_bool("ONNET_CD_KEY_AUTO_MINT", c.cd_key_auto_mint);
 	c.embedded_jo_host = getenv_bool("ONNET_EMBEDDED_JO_HOST", c.embedded_jo_host);
 	if (auto v = getenv_safe("ONNET_SITE_URL")) {
@@ -119,6 +120,8 @@ ServerConfig ServerConfig::from_env() {
 
 	if (auto v = getenv_safe("ONNET_HOSTED_PROVIDER")) c.hosted_provider = v;
 	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
+	if (auto v = getenv_safe("ONNET_NOVALOGIC_USER")) c.novalogic_user = v;
+	if (auto v = getenv_safe("ONNET_NOVALOGIC_PASS")) c.novalogic_pass = v;
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_URL")) c.object_store_url = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_REGION")) c.object_store_region = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_UPDATE_HOST")) c.update_host = strutil::trim(v);

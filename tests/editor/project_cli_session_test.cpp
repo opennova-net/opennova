@@ -770,8 +770,8 @@ static int test_install_import() {
 }
 
 // ADR 0046 S16, the design's §6 row: a project built as the expansion jxm over a game install's
-// expansion (minted from OpenNova's own game, minted_install.h: its onjo1, in the place JO:CA's jox01
-// has). Its table imported from the install as /exp onjo1 serves it (onjo1.bin loose in its folder,
+// expansion (minted from OpenNova's own game, minted_install.h: its nifty, in the place JO:CA's jox01
+// has). Its table imported from the install as /exp nifty serves it (nifty.bin loose in its folder,
 // under the project's name), the main menu and its stylesheet with the files they need; the build
 // leaves out what the base game serves the same (same_as_base > 0); its run directory, staged over
 // the install as Play stages it, mounts with /exp jxm and serves the table and the menu.
@@ -780,7 +780,7 @@ static int test_install_expansion_build() {
 	const std::string scratch = dir.root(), root = dir.file("Mod"), install = dir.file("install");
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted) &&
-	            fs::is_regular_file(install + "/expansion/" + minted_install::kExpansion + "/onjo1.pff"));
+	            fs::is_regular_file(install + "/expansion/" + minted_install::kExpansion + "/nifty.pff"));
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Install Mod", "--expansion", "jxm", "--builds-on", minted_install::kExpansion })
 	                    .code == 0);
 	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "jxm.bin", "--entry", "main.mnu", "--entry",
@@ -802,7 +802,7 @@ static int test_install_expansion_build() {
 	flags.expansion = "jxm";
 	TEST_EXPECT(opennova::mount_install(vfs, run_dir, flags) && vfs.mounted_expansion() == "jxm" &&
 	            vfs.has_file("main.mnu") && vfs.has_file("menu_style.mns"));
-	std::printf("install: expansion jxm over onjo1, %lu file(s) left out as the base game's own\n", same);
+	std::printf("install: expansion jxm over nifty, %lu file(s) left out as the base game's own\n", same);
 	return 0;
 }
 

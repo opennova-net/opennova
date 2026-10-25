@@ -417,6 +417,19 @@ if(BUILD_NOVAWORLD_HTTP)
     # below ctest's 1500 s default.
     set_tests_properties(${opennova_novaworld_web_http_routes_rows} PROPERTIES TIMEOUT 120)
 
+    # The servers on NovaLogic's NovaWorld for the Lobbies page
+    # (apps/novaworld_web/novalogic_lobbies.h), no database and no network: a scripted
+    # fetch answering a feed minted through gsb_build_response, the test's clocks; the
+    # parse to the route's JSON (UTF-8 text, the lock column, no host address), the
+    # cache (one fetch per kRefreshMs however many reads, from however many threads),
+    # every failure keeping the last good list with its age, ONNET_NOVALOGIC_LOBBIES off
+    # unless set, the feed's URL.
+    add_executable(novalogic_lobbies_test novaworld/novalogic_lobbies_test.cpp)
+    target_link_libraries(novalogic_lobbies_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
+    target_include_directories(novalogic_lobbies_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME novalogic_lobbies COMMAND novalogic_lobbies_test)
+
     # The admin's background jobs routes (apps/novaworld_web/jobs/job_routes.h over
     # job_admin.h) on the in-process Crow listener over a migrated database and a Redis
     # namespace: every route refused without an admin, the overview's counts, latency,
@@ -729,7 +742,7 @@ if(BUILD_NOVAWORLD_HTTP)
     # A row per case (99-112 s as one row), each on databases of its own.
     opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test PARTS
         settings_rules renders data_sets no_data pins_and_updates service_accounts requests fleet_room
-        lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
+        novalogic_listing lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
         static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
         machine_lost_replaces
@@ -1024,6 +1037,20 @@ target_include_directories(opennova_serve_novaworld_test PRIVATE ${CMAKE_CURRENT
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 opennova_loopback_e2e(opennova_serve_novaworld)
 opennova_off_bakes(opennova_serve_novaworld)
+# opennova-serve listed on two services at once (--also-master-host, none of retail's): two real
+# NwUdpListeners behind in-test gates. The second hosts once the map is up on the same game socket
+# with the same match's columns and PCIDKey, its ServerCommands run on the match, its service's
+# ServerStopHosting delists it there alone (the first listing and the match go on, no retry), and
+# a second listing that does not host leaves the server serving with its next try scheduled; its
+# state as a supervisor reads it at each step (--second-listing-file), and the console's [join]
+# line naming the service a joiner came through.
+add_executable(opennova_serve_second_listing_test serve/opennova_serve_second_listing_test.cpp)
+target_link_libraries(opennova_serve_second_listing_test PRIVATE
+    opennova_serve_core opennova_novaworld_lobby_core opennova_novaworld_service)
+target_include_directories(opennova_serve_second_listing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_serve_second_listing COMMAND opennova_serve_second_listing_test)
+opennova_loopback_e2e(opennova_serve_second_listing)
+opennova_off_bakes(opennova_serve_second_listing)
 # The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup,
 # over a migrated database: each push a command for the listener, lobby_repository.h): a pushed
 # SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map, a pushed

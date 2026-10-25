@@ -96,7 +96,7 @@ jobs:
           load: true
           tags: opennova-serve:ci
           cache-from: type=gha,scope=opennova-serve
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
 
       - name: Build hostd image
         uses: docker/build-push-action@v6
@@ -108,7 +108,7 @@ jobs:
           load: true
           tags: opennova-hostd:ci
           cache-from: type=gha,scope=opennova-serve
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
 
       # The machine agent's image: the agent reports this commit as its build,
       # and the CLIs it runs are there (the docker client, the AWS CLI, nft);
@@ -161,14 +161,15 @@ jobs:
           fi
           docker volume rm serve-smoke >/dev/null
 
-  # On push events alone (PRs from forks can't push to GHCR), once http-tests
-  # and the smoke run have passed: the same build, pushed. Its checkout is the
+  # On master's pushes and on a manual run (a branch's images for staging before
+  # it merges: its sha and branch tags, never `latest`), never a PR's (PRs from
+  # forks can't push to GHCR), once http-tests and the smoke run have passed: the same build, pushed. Its checkout is the
   # smoke run's, so every step hits the cache serve-image just exported for
   # this commit and the job compiles nothing, only uploads (a missed cache
   # costs time alone: the same image builds again here).
   push:
     needs: [http-tests, serve-image]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

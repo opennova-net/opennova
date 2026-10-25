@@ -76,8 +76,8 @@ std::string wizard_product(std::string_view cmd) {
 		return "jo";
 	if (strutil::iequals(name, kDfx2CommandFile))
 		return "dfx2";
-	if (strutil::iequals(name, kOpenNovaCommandFile))
-		return "opennova";
+	if (strutil::iequals(name, kAcidGambitCommandFile))
+		return "acidgambit";
 	return {};
 }
 

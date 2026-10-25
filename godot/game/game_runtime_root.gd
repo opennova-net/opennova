@@ -52,7 +52,7 @@ func _ready() -> void:
 		run_args.append_array(user_args)
 	RuntimeUpdates.configure(LaunchFlags.product(), runtime_dir, resource_dir,
 			run_args, not LaunchFlags.no_update() and OS.get_name() == "Windows")
-	if LaunchFlags.product() == "opennova" and not has_content(resource_dir,
+	if LaunchFlags.product() == "acidgambit" and not has_content(resource_dir,
 			LaunchFlags.loose_override_enabled(), LaunchFlags.loose_root_allowed()):
 		_show_bootstrap()
 		return

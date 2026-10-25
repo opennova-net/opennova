@@ -95,27 +95,27 @@ class PackageReleaseTest(unittest.TestCase):
         self.assertNotIn("--exe", build)
 
     def test_native_package_is_full_with_its_predecessor(self):
-        project = self.project("OPENNOVA")
-        previous = self.root / "OPENNOVA-0.1.0.sfs"
+        project = self.project("ACIDGAMBIT")
+        previous = self.root / "ACIDGAMBIT-0.1.0.sfs"
         previous.write_bytes(b"1SFS")
-        self.package(product="OPENNOVA", project=project, version="0.2.0", previous=previous)
+        self.package(product="ACIDGAMBIT", project=project, version="0.2.0", previous=previous)
         self.assertFalse(any("import" in call for call in self.calls))
         build = self.build_call()
         self.assertTrue(build[build.index("--from") + 1].endswith("empty"))
         self.assertIn("--full", build)
         self.assertEqual(Path(build[build.index("--previous") + 1]), previous.resolve())
-        self.assertEqual(build[build.index("--base") + 1], "OPENNOVA.CMD")
+        self.assertEqual(build[build.index("--base") + 1], "ACIDGAMBIT.CMD")
         # Its wizard rides the package, marking the folder it installs into as OpenNova's.
         tree = Path(build[build.index("--to") + 1])
-        self.assertIn("CMD=OPENNOVA.CMD", self.wizards[tree / "UPDATE.WIZ"])
+        self.assertIn("CMD=ACIDGAMBIT.CMD", self.wizards[tree / "UPDATE.WIZ"])
 
     def test_native_expansion_exports_its_base_first(self):
-        project = self.project("ONJO1", expansion="onjo1")
-        self.package(product="ONJO1", project=project, version="0.2.0")
+        project = self.project("NIFTY", expansion="nifty")
+        self.package(product="NIFTY", project=project, version="0.2.0")
         exports = [call for call in self.calls if "export" in call]
         self.assertTrue(exports[0][-1].endswith("BASE"))
         self.assertEqual(
-            self.build_call()[self.build_call().index("--expansion") + 1], "onjo1=ONJO1.CMD"
+            self.build_call()[self.build_call().index("--expansion") + 1], "nifty=NIFTY.CMD"
         )
 
     def test_refusals(self):
@@ -123,9 +123,9 @@ class PackageReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--install"):
             self.package(product="JO", project=project, version="1.0")
         with self.assertRaisesRegex(ValueError, "no --install"):
-            self.package(product="OPENNOVA", project=project, version="1.0", install=self.root)
+            self.package(product="ACIDGAMBIT", project=project, version="1.0", install=self.root)
         with self.assertRaisesRegex(ValueError, "no OpenNova Editor project"):
-            self.package(product="OPENNOVA", project=self.root / "missing", version="1.0")
+            self.package(product="ACIDGAMBIT", project=self.root / "missing", version="1.0")
 
 
 if __name__ == "__main__":

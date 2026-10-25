@@ -124,9 +124,12 @@ secrets_init() {
   log "vault '$VAULT', deployment $DEP: adding what is missing (no value is printed or overwritten)…"
   # The deployment's own: its app item (the edge authentication secret among
   # it: each deployment's web hostnames carry their own, infra/zone) and its
-  # database's master password.
+  # database's master password. The NovaLogic listing's account fields start as REPLACE_ME,
+  # which counts as unset, until the project's account goes in (DEPLOY.md "Listing on
+  # NovaLogic's NovaWorld").
   ensure_item "$APP_ITEM" SERVER admin_api_token:gen:24:CONCEALED database_password:gen:24:CONCEALED \
-    redis_password:gen:32:CONCEALED edge_auth_secret:gen:32:CONCEALED
+    redis_password:gen:32:CONCEALED edge_auth_secret:gen:32:CONCEALED \
+    novalogic_user:value:REPLACE_ME:STRING novalogic_pass:value:REPLACE_ME:CONCEALED
   ensure_item "$RDS_ITEM" SECURE_NOTE \
     master_password:gen:24:CONCEALED
   # The deployment's AWS account (an account of its own in the Organization):

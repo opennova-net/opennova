@@ -277,6 +277,12 @@ variable "mail_sender" {
   }
 }
 
+variable "novalogic_lobbies" {
+  description = "Whether the site's Lobbies page also lists the Joint Operations servers on NovaLogic's NovaWorld (a live service OpenNova does not run), as the original game's server browser shows them (ONNET_NOVALOGIC_LOBBIES, web's; apps/novaworld_web/novalogic_lobbies.h). On by default (the maintainer's request, 2026-10-25): each web task fetches NovaLogic's list, with no login, at most once every 5 minutes while visitors look, and keeps the last good one through a failure. false: no section and no fetch."
+  type        = bool
+  default     = true
+}
+
 # ---------------------------------------------------------------------------
 # The database (database.tf)
 # ---------------------------------------------------------------------------
@@ -497,6 +503,12 @@ variable "fleet_idle_minutes" {
   description = "How long a shared machine with no server runs before the service ends it (ONNET_FLEET_IDLE_MINUTES)."
   type        = number
   default     = 30
+}
+
+variable "novalogic_listing" {
+  description = "Whether a hosted server's owner may have it listed on NovaLogic's NovaWorld (gs.novaworld.net, a live service OpenNova does not run) as well as this one's (ONNET_NOVALOGIC_LISTING; apps/serve/README.md \"Two listings\"). On by default (the maintainer's decision, 2026-10-25): the site shows the box. The fleet lists there with the project's NovaLogic account, the app item's novalogic_user and novalogic_pass fields (deploy/env/runtime.env.tpl); while they are unset or the vault's placeholder (REPLACE_ME) no server does. false offers no such box, and turning it off stops each server's NovaLogic listing at its next start (DEPLOY.md, \"Listing on NovaLogic's NovaWorld\")."
+  type        = bool
+  default     = true
 }
 
 variable "fleet_ami" {

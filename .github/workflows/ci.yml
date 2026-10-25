@@ -1065,7 +1065,7 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension, and talks to OpenNova's staging service alone: it updates from update.staging.opennova.net and its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
@@ -1073,7 +1073,7 @@ jobs:
               `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
-              `| Switcher: opennova-switcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
+              `| Switcher: opennova-switcher.exe, a tray app that points the original dfx2.exe at OpenNova's NovaWorld through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

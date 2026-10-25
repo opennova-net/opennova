@@ -12,7 +12,7 @@ func after_each() -> void:
 
 func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([]))
-	assert_eq(LaunchFlags.product(), "opennova")
+	assert_eq(LaunchFlags.product(), "acidgambit")
 	assert_eq(LaunchFlags.game(), "jo")
 	assert_true(LaunchFlags.product_supported())
 	assert_false(LaunchFlags.no_update())
@@ -23,8 +23,8 @@ func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() 
 	assert_eq(LaunchFlags.product(), "dfx2")
 	assert_eq(LaunchFlags.game(), "dfx2")
 	assert_true(LaunchFlags.no_update())
-	LaunchFlags.set_args_override(PackedStringArray(["/game", "opennova"]))
-	assert_eq(LaunchFlags.product(), "opennova")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "acidgambit"]))
+	assert_eq(LaunchFlags.product(), "acidgambit")
 	assert_eq(LaunchFlags.game(), "jo")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "unknown"]))
 	assert_false(LaunchFlags.product_supported())
@@ -42,8 +42,8 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 	var dir := TestFs.cache_dir(self, "launch_wizard")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
 	assert_eq(LaunchFlags.launch_directory(), dir)
-	assert_eq(LaunchFlags.product(), "opennova", "no wizard: OpenNova's own folder")
-	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["OPENNOVA.CMD", "opennova", "jo"]]:
+	assert_eq(LaunchFlags.product(), "acidgambit", "no wizard: OpenNova's own folder")
+	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["ACIDGAMBIT.CMD", "acidgambit", "jo"]]:
 		TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=%s\r\n" % row[0])
 		assert_eq(LaunchFlags.product(), row[1], row[0])
 		assert_eq(LaunchFlags.game(), row[2], row[0])

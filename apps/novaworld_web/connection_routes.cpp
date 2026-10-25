@@ -3,6 +3,8 @@
 #include "accounts/auth.h"
 #include "core/loggable.h"
 #include "host_routes.h"
+#include "hosted/hosted_routes.h" // live_second_listing
+#include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 #include "program/catalog_repository.h"
 
@@ -88,7 +90,11 @@ void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_m
 // server), server_kind ("hosted" for a live hosted server of the fleet's,
 // "owned" for a listing its HostKey names an account for, "anonymous" for
 // one it names none), dedicated (its listing's Dedicated column: true for a
-// Serve Only host, false for a listen host; null while it is not listed)}.
+// Serve Only host, false for a listen host; null while it is not listed),
+// novalogic_players (a hosted server listed on NovaLogic's NovaWorld too: the
+// players in its match that service sent, who hold no session here though its
+// PlayerList counts them, hosted_routes.h live_second_listing; null for any other
+// server, and while its agent reports none)}.
 // Playing is null unless it plays (its latest ClientPlayRequest, not stopped):
 // {rid (the listing at its PlaySetup's address when it asked; null for none),
 // addr (that address), since_ms, listed (whether that listing is still in the
@@ -160,6 +166,17 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 					host["dedicated"] = listing->second.dedicated != "N";
 				else
 					host["dedicated"] = nullptr;
+				// The players NovaLogic's NovaWorld sent a hosted server listed there too: they
+				// hold no session here, though its PlayerList counts them.
+				const auto server = owner.hosted_server_id
+						? hosted::find_server(*db_conn, *owner.hosted_server_id)
+						: std::nullopt;
+				const auto novalogic =
+						server ? hosted::live_second_listing(*db_conn, *server) : std::nullopt;
+				if (novalogic)
+					host["novalogic_players"] = novalogic->slots.size();
+				else
+					host["novalogic_players"] = nullptr;
 				e["host"] = std::move(host);
 				if (owner.owner)
 					e["account"] = account_json(*owner.owner, "host_key");

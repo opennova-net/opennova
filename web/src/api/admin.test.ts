@@ -71,6 +71,8 @@ const productionShape = {
         hosted_server_id: 1,
         server_kind: 'hosted',
         dedicated: true,
+        // Two of its players came through NovaLogic's NovaWorld: no session here.
+        novalogic_players: 2,
       },
       playing: null,
     },
@@ -139,7 +141,10 @@ describe('fetchConnections', () => {
     const oldHost = { rid: 167772161, server_name: 'Retail Joint Ops', mission_name: 'River Patrol', players: 2, max_players: 32, listed: true, hosted_server_id: 1 };
     get.mockResolvedValue(reply({ ...productionShape, connections: [{ ...unkinded, host: oldHost }] }));
     const old = await fetchConnections();
-    expect(old.ok && old.value.connections[0]).toMatchObject({ kind: 'server', host: { server_kind: 'hosted', dedicated: null } });
+    expect(old.ok && old.value.connections[0]).toMatchObject({
+      kind: 'server',
+      host: { server_kind: 'hosted', dedicated: null, novalogic_players: null },
+    });
   });
 
   it('drops a malformed account, game, listing or play and refuses a malformed session', async () => {

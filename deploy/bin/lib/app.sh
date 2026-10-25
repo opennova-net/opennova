@@ -538,8 +538,10 @@ service_roll() {
         err "$program's deployment $dep_id is gone: another replaced it, or the circuit breaker rolled it back (app status)"
         return 1 ;;
     esac
+    # A daemon's new deployment counts no task while ECS still stops the old one on a machine,
+    # so only the service's own count, one per machine, says there is none.
     if [ "$daemon" -eq 1 ] && [ "$waited" -gt 0 ] && jq -e --arg d "$dep_id" \
-         '[.services[0].deployments[]? | select(.id == $d)][0] | .desiredCount == 0 and .runningCount == 0 and .pendingCount == 0' \
+         '.services[0].desiredCount == 0 and ([.services[0].deployments[]? | select(.id == $d)][0] | .desiredCount == 0 and .runningCount == 0 and .pendingCount == 0)' \
          <<<"$out" >/dev/null 2>&1; then
       log "$program: no machine runs a task of it yet (the fleet cluster has no container instance)"
       break

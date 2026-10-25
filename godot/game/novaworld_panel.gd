@@ -365,9 +365,9 @@ func _unwire_client(client: NovaWorldClient) -> void:
 			client.disconnect(signal_name, handler)
 
 
-# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: the live
-# one in an exported build, loopback in a source run, --novaworld-host over
-# both). "Original NovaWorld" points the same client at NovaLogic's live gate
+# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: prod's in
+# a release export, staging's in a debug one, loopback in a source run,
+# --novaworld-host over all three). "Original NovaWorld" points the same client at NovaLogic's live gate
 # (gs.novaworld.net), which no flag moves.
 func _resolved_host() -> String:
 	if _target == NovaWorldSettings.Target.REAL:

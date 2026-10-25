@@ -81,7 +81,7 @@ export function dataSetsResponse(overrides: Partial<DataSetsResponse> = {}): Dat
     games: [
       { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
       { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2' },
-      { slug: 'opennova_0_consumer', display_name: 'OpenNova' },
+      { slug: 'acidgambit_0_consumer', display_name: 'OpenNova' },
     ],
     data_sets: [JO_SET, ESCALATION_SET, DFX2_SET],
     ...overrides,

@@ -61,7 +61,7 @@ constexpr uint32_t SESSION_CONNECT_VERIFY_TIMEOUT_MS = 20000u; // 0x4E20
 // The per-session HostSetup/Host "AppId": (GetTickCount() + rand()) % 0x2328 + 1000, minted once
 // per host registration. It is NOT a timeout (the old SESSION_TIMEOUT_RANDOM_* name misread the
 // function): its only readers are the two var-list builders, the server status screen, the
-// join validator and the session creator. [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80
+// join validator and the session creator. [orig: CNapiNetwork_MintAppId @0x4c4d80
 //  (`% 0x2328` @0x4c4d9a, `+ 1000` @0x4c4da3); sole caller
 //  CNapiGameSession_BuildHostVarLists @0x4D0B50 (the call @0x4d0b6e), which
 //  reads it back through the getter CNapiNPCtx_GetAppId @0x4C4DB0 (the call @0x4d0c6a)]

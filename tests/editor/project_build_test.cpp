@@ -1016,7 +1016,7 @@ static size_t count_code(const std::vector<Diagnostic> &findings, const char *co
 
 // The plan's refusals alone (plan_blockers, what Problems marks and the build_gate query lists) are the plan's
 // (plan_build's blockers), and its findings the plan's, over OpenNova's own game (assets/, minted_install.h's
-// stand-ins for what rides LFS) as the standalone game and over its expansion (expansions/onjo1) as that expansion,
+// stand-ins for what rides LFS) as the standalone game and over its expansion (expansions/nifty) as that expansion,
 // over the base game's names and with none; each with the plan's own word on three files (an archive, a name no
 // archive stores, a player's file), in a gate that holds them (the Problems rows' gate) and in one that does not.
 // Each archive's entries are in their normalized names' order (the scan's keys).

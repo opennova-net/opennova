@@ -7,7 +7,8 @@
         <p class="max-w-3xl text-base text-ink-muted">
           OpenNova is a free, open-source project. A monthly support tier funds it, and lets you run your own
           hosted servers on NovaWorld: we start them on our machines, list them in the game's server browser and
-          keep them running until you stop them. A dedicated machine adds one more server on a machine of its own,
+          keep them running until you stop them. A Joint Operations server can also list on NovaLogic's NovaWorld,
+          reaching players on the original game with nothing to install. A dedicated machine adds one more server on a machine of its own,
           with or without a tier. A tier is support for the project, not the sale of any game. Hosted servers are
           pre-1.0 and experimental.
         </p>

@@ -55,6 +55,9 @@ std::optional<SettingsRefusal> check_settings(
 		const HostedSettings &s, const std::vector<OfferedDataSet> &offered) {
 	const OfferedDataSet *data_set = find_offered(offered, s.data_set_id);
 	if (!data_set) return SettingsRefusal{ "data_set_id", "is no data set this service offers" };
+	if (s.list_on_novalogic && !novalogic_lists(*data_set))
+		return SettingsRefusal{ "list_on_novalogic",
+			"NovaLogic's NovaWorld lists Joint Operations servers only" };
 	{
 		std::string bytes;
 		if (has_control_byte(s.game_name) || has_c1_control(s.game_name))
@@ -69,6 +72,13 @@ std::optional<SettingsRefusal> check_settings(
 		if (bytes.size() > kGameNameMaxBytes)
 			return SettingsRefusal{ "game_name",
 				"is longer than " + std::to_string(kGameNameMaxBytes) + " characters" };
+		// NovaLogic's service refuses a server name holding "nova" in any case with 1009,
+		// SERVERNAMENOTACCEPTED (witnessed live 2026-10-25, ADR 0068), so a listing there
+		// asked over one would list nowhere: the start asks for another name.
+		if (s.list_on_novalogic && strutil::ifind(s.game_name, "nova") != std::string_view::npos)
+			return SettingsRefusal{ "game_name",
+				"holds \"Nova\", which NovaLogic's NovaWorld does not accept in a server name: "
+				"rename the server or untick the NovaLogic box" };
 	}
 	if (s.game_password.size() > kGamePasswordMaxBytes)
 		return SettingsRefusal{ "game_password",
@@ -190,13 +200,21 @@ LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,
 			render_credentials(in.service_username, in.service_password), true });
-	spec.serve_args =
-			render_serve_args(settings, title, expansion_code, in.master_host, in.master_gate_port);
+	if (lists_on_novalogic(settings, in.novalogic))
+		spec.files.push_back({ kNovaLogicCredentialsFileName,
+				render_credentials(in.novalogic.username, in.novalogic.password), true });
+	spec.serve_args = render_serve_args(
+			settings, title, expansion_code, in.master_host, in.master_gate_port, in.novalogic);
 	return spec;
 }
 
-std::vector<std::string> render_serve_args(const HostedSettings &, std::string_view title,
-		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port) {
+bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic) {
+	return settings.list_on_novalogic && novalogic.offered();
+}
+
+std::vector<std::string> render_serve_args(const HostedSettings &settings, std::string_view title,
+		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port,
+		const NovaLogicListing &novalogic) {
 	// A supervised server's: no status page (its lines would ride the server's
 	// log stream every 200 ms), its tick health and its exit's line for the
 	// agent (hosted/protocol/slots.h).
@@ -207,6 +225,15 @@ std::vector<std::string> render_serve_args(const HostedSettings &, std::string_v
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);
+	}
+	// An owner who asked sees the listing's state on the server's page: the second listing's
+	// file for the agent, which says off when the service offers no listing this start.
+	if (settings.list_on_novalogic)
+		args.insert(args.end(), { "--second-listing-file", kSecondListingFileName });
+	if (lists_on_novalogic(settings, novalogic)) {
+		args.insert(args.end(), { "--also-master-host", novalogic.gate_host,
+				"--also-master-gate-port", std::to_string(novalogic.gate_port), "--also-credentials",
+				kNovaLogicCredentialsFileName, "--allow-public" });
 	}
 	return args;
 }
