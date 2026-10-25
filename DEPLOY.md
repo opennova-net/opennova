@@ -200,7 +200,8 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    (section "CI runners").
 8. **The images** (section 5): a push to your repository's `master` that touches their
    paths publishes them (`.github/workflows/novaworld-images.yml`, `serve-image.yml`; a
-   manual run builds them but never pushes); then make each GHCR package public. They
+   manual run publishes its branch's, tagged by its short sha and branch name and never
+   `latest`, for staging before a branch merges); then make each GHCR package public. They
    come before step 9: `db bootstrap` already runs the backup image.
 9. **Staging's infrastructure** (section 4), with `D='--deployment staging'`:
    `./deploy/run.sh $D secrets sync`, `infra plan`, `infra apply`, `db bootstrap`. Confirm
