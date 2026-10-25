@@ -30,7 +30,7 @@
              total host count (not games.length) — otherwise an idle server renders
              bare game headers over empty grids. -->
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
-          <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
+          <p class="text-lg font-semibold text-ink">No games are being hosted on our NovaWorld right now</p>
           <p class="mt-2 text-sm text-ink-muted">
             Host one from the game's own menu: OpenNova reaches NovaWorld as it is, and the original game
             <RouterLink :to="{ path: '/', hash: '#online' }" class="link">through the OpenNova Switcher</RouterLink>.
@@ -51,6 +51,16 @@
           </div>
         </template>
       </div>
+
+      <!-- NovaLogic's servers, from the service's copy of their list: their own
+           section, shown whenever the service lists them, whatever ours did. -->
+      <NovaLogicServerList
+        v-if="state.novalogic && state.novalogic.enabled"
+        class="mt-12"
+        :list="state.novalogic"
+        :updated-at="state.novalogicAt"
+        :now="state.now"
+      />
     </div>
   </section>
 </template>
@@ -59,13 +69,19 @@
 import { computed, onMounted, onUnmounted, reactive } from 'vue';
 import { RouterLink } from 'vue-router';
 import LobbyCard from '../components/LobbyCard.vue';
-import { fetchLobbies } from '../api/lobbies';
-import type { LobbyGroup } from '../types/lobby';
+import NovaLogicServerList from '../components/NovaLogicServerList.vue';
+import { fetchLobbies, fetchNovaLogicLobbies } from '../api/lobbies';
+import type { LobbyGroup, NovaLogicLobbies } from '../types/lobby';
 
 const state = reactive({
   games: [] as LobbyGroup[],
   loading: true,
-  error: ''
+  error: '',
+  // NovaLogic's list as the service last answered it (null until it has), and
+  // when the service fetched it by this page's clock.
+  novalogic: null as NovaLogicLobbies | null,
+  novalogicAt: null as number | null,
+  now: Date.now()
 });
 
 const totalHosts = computed(() => state.games.reduce((n, group) => n + group.hosts.length, 0));
@@ -75,7 +91,21 @@ const gamesWithServersFirst = computed(() => [
   ...state.games.filter((group) => group.hosts.length === 0),
 ]);
 
+// NovaLogic's list never holds up or breaks ours: a failed read keeps what the
+// page had.
+const loadNovaLogic = async () => {
+  try {
+    const list = await fetchNovaLogicLobbies();
+    state.now = Date.now();
+    state.novalogic = list;
+    state.novalogicAt = list.ageSeconds === null ? null : state.now - list.ageSeconds * 1000;
+  } catch {
+    // The next poll tries again.
+  }
+};
+
 const load = async (background = false) => {
+  void loadNovaLogic();
   // Background polls update the list in place: don't toggle the loading
   // skeleton or wipe the list on a transient fetch error, or the page would
   // flash "Loading lobbies..." every poll interval.
