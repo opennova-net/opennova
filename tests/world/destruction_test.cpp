@@ -3154,6 +3154,14 @@ static void test_vehicle_respawn_lifecycle() {
 	ItemDeathTraits death;
 	death.static_death = true;
 	w.tables.item_death_traits.set(seed.item_id, death);
+	// A cveh row: its def binds the vehicle class init (def+0x148), which the
+	// respawn re-runs before it drops the rotor words, as every vehicle row's does.
+	// [orig: g_EntityClassEventCallbackTable @0x813000, row cveh @0x813378 (init
+	//  +12 -> Entity_InitVehicleAIFromDef @0x4686C0); Entity_RespawnVehicle @0x45FF40
+	//  (the test @0x45FF53, the call @0x45FF68)]
+	VehicleTraits vehicle_traits;
+	vehicle_traits.brain_class = VehicleBrainClass::Ground;
+	w.vehicles.traits.set(seed.item_id, vehicle_traits);
 	w.vehicles.capture_spawn_pose(e);
 	e.health = 0;
 	e.alive = false;
