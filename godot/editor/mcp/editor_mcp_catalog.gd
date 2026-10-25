@@ -83,7 +83,8 @@ const REQUEST_PROSE := (
 		+ "The answer: ok (it read), served, and outcome: done (false when it was refused, did not finish, or "
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
 		+ "unsaved_prompt, operation (the one it started or joined, 0 for none: open_project, new_project, rescan, "
-		+ "reimport, the import previews and import_files, the renames, build and play start one; the request "
+		+ "reimport, the import previews and import_files, the renames, build and play, and the content store's "
+		+ "content_check, content_get, content_bind, content_pull and content_push start one; the request "
 		+ "returns at once and editor_query operation shows it stepping, done of total, cancellable), findings, "
 		+ "added (the records its edits made, in "
 		+ "order) and, for an edit_record, made {label: id}; then status and view_revision (the view's clock "
@@ -328,8 +329,17 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 			"wait_ms": {"type": "integer", "minimum": 0, "maximum": REQUEST_WAIT_MAX_MS, "description": ("How long wait "
 					+ "awaits, at most %d (and when left out); past it the answer says timed_out, and editor_query "
 					+ "operation follows the operation from there.") % REQUEST_WAIT_MAX_MS}}
+	# A field only the kinds a person answers take is no property (content_sign_in's password): the tool serves
+	# none of them.
+	var offered := {}
+	for row: Variant in catalog.get("requests", []):
+		if served.has(String(row.get("kind", ""))):
+			for field: Variant in row.get("takes", []):
+				offered[String(field)] = true
 	for field: Variant in catalog.get("fields", []):
 		var name := String(field.get("field", ""))
+		if not offered.has(name):
+			continue
 		var schema: Dictionary
 		if name == "edits":
 			schema = {"type": "array", "items": edit_schema(catalog)}

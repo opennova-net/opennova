@@ -62,6 +62,9 @@ enum class ViewConcern : uint8_t {
 	// NavigationView: the navigation history's places, Back's and Forward's; moves with a step kept, a
 	// Back or a Forward, a place dropped or moved, and the history cleared with its project.
 	Navigation,
+	// ContentView: the content store's standing (ADR 0069): the account, the projects, the open project's
+	// binding, its changes and its head, a pull's conflicts, the last content job's outcome.
+	Content,
 	kCount,
 };
 
@@ -85,6 +88,7 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::Viewports, "viewports"},
 	{ViewConcern::Workspace, "workspace"},
 	{ViewConcern::Navigation, "navigation"},
+	{ViewConcern::Content, "content"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

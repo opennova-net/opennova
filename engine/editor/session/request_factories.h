@@ -820,6 +820,51 @@ inline EditorRequest empty_trash(bool force) {
 	return request;
 }
 
+// --- the content store (ADR 0069, session/content_controller.h) -------------------------------------
+
+// A person's sign-in: never over the wire.
+inline EditorRequest content_sign_in(std::string server, std::string username, std::string password) {
+	EditorRequest request = of(EditorRequestKind::ContentSignIn);
+	request.server = std::move(server);
+	request.username = std::move(username);
+	request.password = std::move(password);
+	return request;
+}
+inline EditorRequest content_sign_out() {
+	return of(EditorRequestKind::ContentSignOut);
+}
+inline EditorRequest content_check() {
+	return of(EditorRequestKind::ContentCheck);
+}
+inline EditorRequest content_get(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::ContentGet);
+	request.project_key = std::move(project_key);
+	request.dir = std::move(dir);
+	return request;
+}
+inline EditorRequest content_bind(std::string project_key) {
+	EditorRequest request = of(EditorRequestKind::ContentBind);
+	request.project_key = std::move(project_key);
+	return request;
+}
+inline EditorRequest content_pull() {
+	return of(EditorRequestKind::ContentPull);
+}
+inline EditorRequest content_resolve(std::string path, Resolution resolution) {
+	EditorRequest request = of(EditorRequestKind::ContentResolve);
+	request.path = std::move(path);
+	request.resolution = resolution;
+	return request;
+}
+inline EditorRequest content_push(std::string message) {
+	EditorRequest request = of(EditorRequestKind::ContentPush);
+	request.message = std::move(message);
+	return request;
+}
+inline EditorRequest content_cancel() {
+	return of(EditorRequestKind::ContentCancel);
+}
+
 // --- the shell's -------------------------------------------------------------------------------
 
 inline EditorRequest pick_directory(PickPurpose purpose) {

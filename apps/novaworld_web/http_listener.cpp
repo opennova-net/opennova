@@ -395,11 +395,10 @@ struct HttpListener::Impl {
 	infra::AttentionRoutes attention;
 	// The month's AWS costs (infra/cost_routes.h).
 	infra::CostRoutes costs;
-	// The hosted data sets' and the update releases' routes over the object store
-	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
+	// The data sets', the releases' and the content store's routes over the object store
+	// (data_sets/data_set_routes.h, data_sets/release_routes.h, content/content_routes.h).
 	hosted::DataSetRoutes data_sets;
 	hosted::ReleaseRoutes releases;
-	// The content store's routes over the object store (content/content_routes.h, ADR 0069).
 	content::ContentRoutes content_routes;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.

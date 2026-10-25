@@ -153,6 +153,11 @@ static int test_tokens() {
 		TEST_EXPECT(*unsaved_choice_token(choice) && unsaved_choice_from_token(unsaved_choice_token(choice), back) &&
 		            back == choice);
 	}
+	for (const Resolution resolution : { Resolution::KeepMine, Resolution::TakeTheirs }) {
+		Resolution back = Resolution::KeepMine;
+		TEST_EXPECT(*content_resolution_token(resolution) &&
+		            content_resolution_from_token(content_resolution_token(resolution), back) && back == resolution);
+	}
 	for (int i = 0; i <= static_cast<int>(DiagnosticSeverity::Error); ++i) {
 		const auto severity = static_cast<DiagnosticSeverity>(i);
 		DiagnosticSeverity back = DiagnosticSeverity::Info;
@@ -865,6 +870,12 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Gesture: out.gesture = 6; break;
 		case F::Cancel: out.cancel = true; break;
 		case F::TerrainView: out.terrain_view = "missions/m01.mis"; break;
+		case F::Server: out.server = "https://opennova.example"; break;
+		case F::Username: out.username = "taylor"; break;
+		case F::Password: out.password = "pw"; break;
+		case F::ProjectKey: out.project_key = "JO"; break;
+		case F::Message: out.message = "A change"; break;
+		case F::Resolution: out.resolution = Resolution::TakeTheirs; break;
 		case F::kCount: break;
 		}
 	}

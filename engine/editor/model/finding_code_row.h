@@ -116,6 +116,7 @@ enum class FindingGroup {
 	AvatarTables, // Avatars.def, through the game's avatar reader (ADR 0046 S23 B)
 	TilePlacements, // a .til, through the game's tile placement load (ADR 0046 S25)
 	TerrainHeights, // a .cpt (or an imported terrain's heightmap) as the heights a brush sculpts (ADR 0046 S25)
+	Content, // the content store's requests and jobs (ADR 0069, session/content_controller.h)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);

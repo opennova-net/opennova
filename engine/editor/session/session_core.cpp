@@ -47,6 +47,7 @@
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/open_operation.h>
+#include <editor/session/content_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
@@ -471,6 +472,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
 	navigation().clear(); // its history starts where it reopened, with no place behind it
+	content().project_opened(); // its binding to a content project, ADR 0069
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";
@@ -508,6 +510,7 @@ bool SessionCore::close_project() {
 	navigation().clear(); // its places are its files'
 	guard().close_prompt_if_open();
 	play().forget_project();
+	content().forget_project();
 	documents().activate(std::string());
 	view_.documents.clipboard.clear();
 	documents().update_view();

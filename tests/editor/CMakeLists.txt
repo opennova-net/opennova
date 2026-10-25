@@ -691,6 +691,13 @@ opennova_add_editor_test(content_store)
 # refused, a renewed session kept and an ended one signing out; and the requests' shapes.
 opennova_add_editor_test(content_client)
 
+# The content store's part of the editor's session (engine/editor/session/content_controller.h, ADR
+# 0069) through its requests over the in-memory service: every request refused offline; a sign-in (a
+# person's, refused over the wire) kept and the projects listed; a project bound and pushed, got into
+# another folder and opened there, a change pulled, a stale push refused until a pull, a conflict taken;
+# and the content section's JSON, which holds no session.
+opennova_add_editor_test(content_session)
+
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.

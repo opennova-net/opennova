@@ -935,7 +935,8 @@ static int test_catalog() {
 		}
 		const std::string served = entry.get_string("served_by", "");
 		TEST_EXPECT((row.served_by == ServedBy::Session) == (served == "session"));
-		TEST_EXPECT((row.served_by == ServedBy::ShellNeedsPerson) == (served == "person"));
+		TEST_EXPECT((row.served_by == ServedBy::ShellNeedsPerson || row.served_by == ServedBy::SessionNeedsPerson) ==
+				(served == "person"));
 	}
 	const JsonValue *fields = catalog.get("fields");
 	TEST_EXPECT(fields && fields->array.size() == kRequestFieldCount);

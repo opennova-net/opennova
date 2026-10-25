@@ -84,6 +84,11 @@ constexpr Token<UnsavedChoice> kChoiceTokens[] = {
 	{UnsavedChoice::Cancel, "cancel"},
 };
 
+constexpr Token<Resolution> kResolutionTokens[] = {
+	{Resolution::KeepMine, "keep_mine"},
+	{Resolution::TakeTheirs, "take_theirs"},
+};
+
 constexpr Token<ProblemScope> kScopeTokens[] = {
 	{ProblemScope::Project, "project"},
 	{ProblemScope::ActiveFile, "active_file"},
@@ -1118,6 +1123,20 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return false;
 	case F::Cancel: return flag_of(json, token, request.cancel, error);
 	case F::TerrainView: return text_of(json, token, request.terrain_view, error);
+	case F::Server: return text_of(json, token, request.server, error);
+	case F::Username: return text_of(json, token, request.username, error);
+	case F::Password: return text_of(json, token, request.password, error);
+	case F::ProjectKey: return text_of(json, token, request.project_key, error);
+	case F::Message: return text_of(json, token, request.message, error);
+	case F::Resolution: {
+		Resolution resolution = Resolution::KeepMine;
+		if (json.is_string() && content_resolution_from_token(json.string, resolution)) {
+			request.resolution = resolution;
+			return true;
+		}
+		error = std::string("\"") + token + "\" must be keep_mine or take_theirs.";
+		return false;
+	}
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1249,6 +1268,14 @@ bool field_to_json(
 	case F::Gesture: out = json_number(double(request.gesture)); return request.gesture != 0;
 	case F::Cancel: out = boolean(request.cancel); return request.cancel;
 	case F::TerrainView: out = json_string(request.terrain_view); return !request.terrain_view.empty();
+	case F::Server: out = json_string(request.server); return !request.server.empty();
+	case F::Username: out = json_string(request.username); return !request.username.empty();
+	case F::Password: out = json_string(request.password); return !request.password.empty();
+	case F::ProjectKey: out = json_string(request.project_key); return !request.project_key.empty();
+	case F::Message: out = json_string(request.message); return !request.message.empty();
+	case F::Resolution:
+		out = json_string(content_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
+		return request.resolution.has_value();
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
@@ -1284,6 +1311,10 @@ const char *select_mode_token(SelectMode mode) { return token_of(kSelectModeToke
 bool select_mode_from_token(const std::string &token, SelectMode &out) { return value_of(kSelectModeTokens, token, out); }
 bool unsaved_choice_from_token(const std::string &token, UnsavedChoice &out) {
 	return value_of(kChoiceTokens, token, out);
+}
+const char *content_resolution_token(Resolution resolution) { return token_of(kResolutionTokens, resolution); }
+bool content_resolution_from_token(const std::string &token, Resolution &out) {
+	return value_of(kResolutionTokens, token, out);
 }
 bool diagnostic_severity_from_token(const std::string &token, DiagnosticSeverity &out) {
 	for (const DiagnosticSeverity severity :

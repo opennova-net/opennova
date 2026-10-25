@@ -1,8 +1,5 @@
 #pragma once
 
-// STAGED, NOT WIRED: the session's content controller (session/content_controller.h, ADR 0069's
-// editor slice E3) runs these jobs for the Content window and the editor's MCP.
-
 // The content store's long operations as the editor runs them (ADR 0069): a pull and a push, each a
 // cursor the session steps a budget at a time (as it steps a build), over the transport seam
 // (content_transport.h), the folder's scan (content_scan.h), the plan (content_plan.h) and the

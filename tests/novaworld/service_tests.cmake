@@ -578,7 +578,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # a presigned GET to its very signature, the session token signed, and a PUT's checksum header
     # signed. Pure functions.
     add_executable(s3_presign_test novaworld/s3_presign_test.cpp)
-    target_link_libraries(s3_presign_test PRIVATE opennova_novaworld_web_core)
+    target_link_libraries(s3_presign_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service)
     target_include_directories(s3_presign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME s3_presign COMMAND s3_presign_test)
 

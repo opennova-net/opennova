@@ -8,6 +8,7 @@
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
+#include <editor/session/content_controller.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
@@ -262,6 +263,34 @@ void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 }
 void serve_correct_line(SessionCore &core, const EditorRequest &request) {
 	correct_source_line(core, request);
+}
+// The content store (ADR 0069, session/content_controller.h).
+void serve_content_sign_in(SessionCore &core, const EditorRequest &request) {
+	core.content().sign_in(request);
+}
+void serve_content_sign_out(SessionCore &core, const EditorRequest &) {
+	core.content().sign_out();
+}
+void serve_content_check(SessionCore &core, const EditorRequest &) {
+	core.content().check();
+}
+void serve_content_get(SessionCore &core, const EditorRequest &request) {
+	core.content().get(request);
+}
+void serve_content_bind(SessionCore &core, const EditorRequest &request) {
+	core.content().bind(request);
+}
+void serve_content_pull(SessionCore &core, const EditorRequest &) {
+	core.content().pull();
+}
+void serve_content_resolve(SessionCore &core, const EditorRequest &request) {
+	core.content().resolve(request);
+}
+void serve_content_push(SessionCore &core, const EditorRequest &request) {
+	core.content().push(request);
+}
+void serve_content_cancel(SessionCore &core, const EditorRequest &) {
+	core.content().cancel();
 }
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
@@ -1406,6 +1435,79 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::Path, F::Values }, { F::AskName }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.row,
+	// The content store (ADR 0069, session/content_controller.h). A sign-in is a person's alone (its password
+	// never on the wire), and its reply and a project list come back on the poll, holding nothing of the
+	// session's; a check, a get, a bind, a pull and a push are operations (their kinds' rows: a pull writes
+	// the files and the documents, a check and a push read the files), each of which content_cancel stops.
+	Request(K::ContentSignIn, "content_sign_in", serve_content_sign_in,
+			"Signed in to the content store at server (a bare host is https://; left out, the account's) as "
+			"username with password, the account kept for the editor (its session never in the view), then its "
+			"projects listed (the content section). A person's alone: refused over the wire.")
+			.served_by(ServedBy::SessionNeedsPerson)
+			.takes(request_params({ F::Username, F::Password }, { F::Server }))
+			.row,
+	Request(K::ContentSignOut, "content_sign_out", serve_content_sign_out,
+			"Signed out of the content store: the account's session ended and forgotten, the public projects "
+			"listed.")
+			.row,
+	Request(K::ContentCheck, "content_check", serve_content_check,
+			"The content store's projects listed again and, for an open project that is a working copy of one, its "
+			"standing checked, an operation: the project's head asked of the service, the folder's changes since "
+			"its base read (the content section's standing). Refused where the editor reaches no content store.")
+			.holds(kFiles, kSlot)
+			.row,
+	Request(K::ContentGet, "content_get", serve_content_get,
+			"The content project project_key got into dir (missing, or empty) as a working copy at its head, an "
+			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
+			"An expansion's project builds on its base game's in the folder beside it: get that one there too.")
+			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
+			.holds(kNone, kHoldsAll | kSlot)
+			.ends_edit_groups()
+			.guarded(GuardScope::AllDirty, "Get a project", "Save all")
+			.can_discard()
+			.acts_on_saved()
+			.row,
+	Request(K::ContentBind, "content_bind", serve_content_bind,
+			"The open project made a working copy of the content project project_key as it stands, an operation: "
+			"its base the project's head, its files untouched, so what differs from the head is its change to "
+			"push (a project with no revision yet: every file is its first push).")
+			.takes(request_params({ F::ProjectKey }, {}))
+			.holds(kNone, kSlot)
+			.row,
+	Request(K::ContentPull, "content_pull", serve_content_pull,
+			"The open project's content project's head pulled into it, an operation: a file only the revision "
+			"changed taken, one only the folder changed kept, one both changed otherwise a conflict, the pull "
+			"stopping on them (the content section's pull: content_resolve settles each, content_pull again goes "
+			"on). The files it replaces or removes go to the project's trash; the files it wrote are read again. "
+			"Unsaved edits wait on the prompt first.")
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.guarded(GuardScope::AllDirty, "Pull", "Save all and pull")
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	Request(K::ContentResolve, "content_resolve", serve_content_resolve,
+			"The stopped pull's conflict at path settled: resolution keep_mine (the folder's file stays, a change "
+			"to push over the revision's) or take_theirs (the revision's file in its place, or the folder's removed "
+			"where the revision has none). Nothing is written until content_pull goes on.")
+			.takes(request_params({ F::Path, F::Resolution }, {}))
+			.row,
+	Request(K::ContentPush, "content_push", serve_content_push,
+			"The open project's files pushed as the revision after its base, with message, an operation: the "
+			"files the store lacks uploaded, then the revision; refused for a project whose base is behind the "
+			"head (pull first), and for anyone but an admin. Unsaved edits wait on the prompt first.")
+			.takes(request_params({ F::Message }, {}))
+			.holds(kFiles, kSlot)
+			.guarded(GuardScope::AllDirty, "Push", "Save all and push")
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
+	// its conflicts.
+	Request(K::ContentCancel, "content_cancel", serve_content_cancel,
+			"The content operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
+			"its conflicts given up.")
+			.holds(kNone, kNone, OnBusy::Supersede)
+			.row,
 };
 
 static_assert(
@@ -1426,11 +1528,11 @@ constexpr bool rows_named() {
 }
 static_assert(rows_named(), "each request kind has a token of its own and a doc");
 
-// The session serves a row by its handler; a shell row has none, and holds, guards, ends and moves
+// The session serves a row by its handler (a person's alone too); a shell row has none, and holds, guards, ends and moves
 // nothing of the session's.
 constexpr bool handlers_where_served() {
 	for (const RequestKindRow &row : kRows) {
-		const bool session = row.served_by == ServedBy::Session;
+		const bool session = row.served_by == ServedBy::Session || row.served_by == ServedBy::SessionNeedsPerson;
 		if (session != (row.handler != nullptr))
 			return false;
 		if (!session &&
