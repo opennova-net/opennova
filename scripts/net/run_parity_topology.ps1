@@ -4044,7 +4044,8 @@ function Wait-OpenNovaJoinerAfterRotation {
             return $state
         }
         if ([DateTime]::UtcNow -ge $deadline) {
-            throw "OpenNova joiner is neither in the rotation's next match nor live after $TimeoutSeconds s (session_lost=$($state.session_lost) join_error='$($state.join_error)')"
+            throw (Write-JoinerReadinessRefusal -State $state `
+                -Reason "OpenNova joiner is neither in the rotation's next match nor live after $TimeoutSeconds s")
         }
         Start-Sleep -Milliseconds 1000
     }

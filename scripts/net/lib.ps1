@@ -214,7 +214,7 @@ function Format-OpenNovaJoinerReadinessFields {
         'in_match', 'local_player', 'deploy_presented', 'deploy_hold_ready',
         'deployment_pick_pending', 'deployment_pick_sent', 'joiner_phase',
         'join_admission_stage', 'self_handle', 'session_lost', 'join_error',
-        'motion_complete', 'ticks_msec'
+        'motion_complete', 'ticks_msec', 'heartbeat_sequence', 'process_id'
     )
     $parts = foreach ($name in $names) {
         $property = $State.PSObject.Properties[$name]
