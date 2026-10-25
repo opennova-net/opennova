@@ -1524,7 +1524,7 @@ constexpr RequestKindRow kRows[] = {
 			"The open project's file at path put back as revision of its content project has it, an operation: "
 			"left out (0), as the folder's base has it, which discards the folder's changes to it (a file the base "
 			"lacks removed); an older revision's file is a change to push. The file it replaces goes to the "
-			"project's trash (Undo file brings it back); unsaved edits to it wait on the prompt first.")
+			"project's trash (kept until Empty the trash); unsaved edits to it wait on the prompt first.")
 			.takes(request_params({ F::Path }, { F::Revision }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.guarded(GuardScope::Document, "Restore %s", "Save")

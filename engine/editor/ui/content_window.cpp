@@ -142,9 +142,15 @@ void ContentWindow::draw_account(const ContentView &c) {
 }
 
 void ContentWindow::draw_binding(const ContentView &c) {
-	const SessionView &v = workspace_.view();
 	ui_kit::empty_state("Not in the content store.", "An admin binds the project's folder to a project of the store; "
 	                                                  "its files are then pushed and pulled.");
+	draw_bind(c);
+}
+
+// The bind controls, an admin's alone: an unbound folder's, and a bound one's again (the store
+// reset, or the folder moved to another service's project).
+void ContentWindow::draw_bind(const ContentView &c) {
+	const SessionView &v = workspace_.view();
 	if (!admin(c)) return;
 	if (bind_key_.empty() && !c.projects.empty()) bind_key_ = c.projects.front().key;
 	ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x * 0.6f, ImGui::GetFontSize() * 14.0f));
@@ -332,6 +338,7 @@ void ContentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		draw_standing(c);
 		draw_conflicts(c);
 		draw_history(c);
+		if (admin(c) && ImGui::CollapsingHeader("Bind again")) draw_bind(c);
 	}
 	if (!c.last.empty()) {
 		ImGui::Spacing();

@@ -31,7 +31,7 @@ std::string count_text(size_t n, const char *one, const char *many) {
 std::string reset_text(const ContentBinding &binding, int64_t head) {
 	return binding.key + "'s newest revision is " + std::to_string(head) +
 			", before the folder's " + std::to_string(binding.revision) +
-			": the store was reset, so bind the project again (content_bind)";
+			": the store was reset, so bind the project again (the Content window's Bind again)";
 }
 
 } // namespace

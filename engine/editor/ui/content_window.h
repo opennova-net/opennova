@@ -66,6 +66,7 @@ public:
 private:
 	void draw_account(const ContentView &content);
 	void draw_binding(const ContentView &content);
+	void draw_bind(const ContentView &content);
 	void draw_standing(const ContentView &content);
 	void draw_conflicts(const ContentView &content);
 	void draw_history(const ContentView &content);
