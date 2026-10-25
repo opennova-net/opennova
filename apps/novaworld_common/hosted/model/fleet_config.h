@@ -66,6 +66,8 @@
 #include "net_cidr.h"
 #include "placement.h"
 
+#include <net/novaworld/gate_probe.h> // GATE_DEFAULT_PORT (NovaLogic's gate's)
+
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -104,7 +106,7 @@ struct FleetConfig {
 	// owner may have a server listed on NovaLogic's NovaWorld too, and NovaLogic's gate.
 	bool novalogic_listing = false;
 	std::string novalogic_gate = "gs.novaworld.net";
-	uint16_t novalogic_gate_port = 7597;
+	uint16_t novalogic_gate_port = GATE_DEFAULT_PORT;
 };
 
 // What the agent routes (agent_route.h) are built with.
