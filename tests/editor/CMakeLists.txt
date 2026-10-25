@@ -685,6 +685,12 @@ opennova_add_editor_test(content_export LIBS opennova_project_cli)
 # and finished by a pull planned again after one cut short.
 opennova_add_editor_test(content_store)
 
+# The content store's client (engine/editor/content_store/content_jobs.h, content_api.h, ADR 0069)
+# over an in-memory service keeping the routes' contract, driving real folders: a first push, a get,
+# a stale push pulled and pushed, a conflict settled and pulled back, nothing to push, a player
+# refused, a renewed session kept and an ended one signing out; and the requests' shapes.
+opennova_add_editor_test(content_client)
+
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.

@@ -39,6 +39,12 @@ using opennova::content::ContentFile;
 
 namespace {
 
+// `bytes` written at `path` as they are (test_io::write_text stages a .def's line ends as CRLF),
+// its folders made.
+bool put(const std::string &path, const std::string &bytes) {
+	return test_io::write_file(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
+}
+
 std::string sha_of(const std::string &bytes) {
 	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
@@ -66,16 +72,15 @@ std::vector<std::string> paths_of(const std::vector<ContentFile> &files) {
 
 // A small project folder: its project file, its own files, and what a machine keeps beside them.
 bool make_folder(const std::string &root) {
-	return test_io::write_text(root + "/project.opennova", "{}\n") &&
-			test_io::write_text(root + "/defs/weapon.def", "weapon\n") &&
-			test_io::write_text(root + "/art/gun.blend", "blend scene") &&
-			test_io::write_text(root + "/art/gun.blend1", "blender's backup") &&
-			test_io::write_text(root + "/art/Thumbs.db", "windows' thumbnails") &&
-			test_io::write_text(root + "/.opennova/local.json", "{\"game_install\": \"C:/JO\"}") &&
-			test_io::write_text(root + "/.git/config", "[core]") &&
-			test_io::write_text(root + "/build/export/resource.pff", "an export") &&
-			test_io::write_text(root + "/build/export.tmp/resource.pff", "an export cut short") &&
-			test_io::write_text(root + "/build/notes.txt", "a file of the project's under build/");
+	return put(root + "/project.opennova", "{}\n") && put(root + "/defs/weapon.def", "weapon\n") &&
+			put(root + "/art/gun.blend", "blend scene") &&
+			put(root + "/art/gun.blend1", "blender's backup") &&
+			put(root + "/art/Thumbs.db", "windows' thumbnails") &&
+			put(root + "/.opennova/local.json", "{\"game_install\": \"C:/JO\"}") &&
+			put(root + "/.git/config", "[core]") &&
+			put(root + "/build/export/resource.pff", "an export") &&
+			put(root + "/build/export.tmp/resource.pff", "an export cut short") &&
+			put(root + "/build/notes.txt", "a file of the project's under build/");
 }
 
 } // namespace
@@ -125,7 +130,7 @@ static int test_scan() {
 	TEST_EXPECT(editor::scan_content(paths, export_dir).problems().empty()); // the cache written
 	const fs::path weapon = editor::system_path(root + "/defs/weapon.def");
 	const auto stamp = fs::last_write_time(weapon);
-	TEST_EXPECT(test_io::write_text(root + "/defs/weapon.def", "WEAPON\n"));
+	TEST_EXPECT(put(root + "/defs/weapon.def", "WEAPON\n"));
 	fs::last_write_time(weapon, stamp);
 	const editor::ContentScan warm = editor::scan_content(paths, export_dir);
 	TEST_EXPECT(warm.files()[2].sha256 == sha_of("weapon\n"));
@@ -135,7 +140,7 @@ static int test_scan() {
 
 	// Two paths one file on Windows and macOS, where the file system holds both: the second is kept
 	// out.
-	TEST_EXPECT(test_io::write_text(root + "/defs/Weapon.def", "other"));
+	TEST_EXPECT(put(root + "/defs/Weapon.def", "other"));
 	std::error_code ec;
 	size_t named = 0;
 	for (const auto &entry : fs::directory_iterator(editor::system_path(root + "/defs"), ec)) {
@@ -242,10 +247,8 @@ static int test_apply() {
 	// The folder at its base, revision 3: one file it changed since.
 	const std::vector<ContentFile> base = { file("defs/a.def", "a1"), file("defs/b.def", "b1"),
 		file("old/gone.txt", "gone"), file("project.opennova", "{}") };
-	TEST_EXPECT(test_io::write_text(root + "/defs/a.def", "a1") &&
-			test_io::write_text(root + "/defs/b.def", "b2") &&
-			test_io::write_text(root + "/old/gone.txt", "gone") &&
-			test_io::write_text(root + "/project.opennova", "{}"));
+	TEST_EXPECT(put(root + "/defs/a.def", "a1") && put(root + "/defs/b.def", "b2") &&
+			put(root + "/old/gone.txt", "gone") && put(root + "/project.opennova", "{}"));
 	TEST_EXPECT(editor::write_content_base(content_paths, base, error));
 	TEST_EXPECT(editor::write_content_binding(
 			content_paths, { "https://example.test", "JO", 3 }, error));
@@ -268,14 +271,14 @@ static int test_apply() {
 	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
 			error.find("download") != std::string::npos);
 	for (const ContentFile &download : plan.downloads())
-		TEST_EXPECT(test_io::write_text(editor::incoming_path(content_paths, download.sha256),
+		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
 				download.sha256 == sha_of("a2") ? "a2" : "same"));
 	// A file changed since the plan: refused, nothing moved.
-	TEST_EXPECT(test_io::write_text(root + "/old/gone.txt", "touched"));
+	TEST_EXPECT(put(root + "/old/gone.txt", "touched"));
 	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
 			result.changed_since == std::vector<std::string>{ "old/gone.txt" } &&
 			read(root + "/defs/a.def") == "a1");
-	TEST_EXPECT(test_io::write_text(root + "/old/gone.txt", "gone"));
+	TEST_EXPECT(put(root + "/old/gone.txt", "gone"));
 
 	// Applied.
 	TEST_EXPECT(editor::apply_pull(paths, plan, theirs, r4, result, error));
@@ -322,12 +325,12 @@ static int test_resumed_pull() {
 	// place.
 	const std::vector<ContentFile> theirs = { file("a.def", "a"), file("b.def", "b"),
 		file("c.def", "c") };
-	TEST_EXPECT(test_io::write_text(root + "/a.def", "a"));
+	TEST_EXPECT(put(root + "/a.def", "a"));
 	const editor::ContentScan scan = editor::scan_content(paths, "");
 	editor::PullPlan plan = editor::plan_pull({}, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.def")); // the one in place needs nothing
 	for (const ContentFile &download : plan.downloads())
-		TEST_EXPECT(test_io::write_text(editor::incoming_path(content_paths, download.sha256),
+		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
 				download.sha256 == sha_of("b") ? "b" : "c"));
 	editor::ApplyResult result;
 	TEST_EXPECT(editor::apply_pull(

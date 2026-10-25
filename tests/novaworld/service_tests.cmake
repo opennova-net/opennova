@@ -574,6 +574,18 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(content_routes REDIS COMMAND content_routes_test)
     set_tests_properties(content_routes PROPERTIES TIMEOUT 120)
 
+    # The editor's content client (engine/editor/content_store, ADR 0069) against these routes
+    # over HTTP, so the contract's two halves are one: an admin signed in by the client's own
+    # login, a first push, a get, a stale push pulled and pushed, and a player refused.
+    add_executable(content_client_routes_test novaworld/content_client_routes_test.cpp)
+    target_link_libraries(content_client_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_service opennova_editor)
+    target_include_directories(content_client_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(content_client_routes_test PRIVATE
+        OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(content_client_routes REDIS COMMAND content_client_routes_test)
+    set_tests_properties(content_client_routes PROPERTIES TIMEOUT 120)
+
     # The update listener (apps/novaworld_web/updater/update_listener.h) over a migrated database
     # and a local object store: a packed update built from the synthetic trees
     # (opennova-update-tool's builder) as two data sets' published release, fetched and
