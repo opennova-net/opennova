@@ -263,7 +263,7 @@ int test_script_plays_streams() {
 const char *const kStaleChunks = "fixtures/sbf/tool_bank.sbf";
 
 // Every bank of the variant set through the document: fixtures/sbf/'s (the format's minted banks), our base game's
-// pair (assets/) and our expansion's (expansions/onjo1/music/). Each saved at its size as the same streams, the bytes
+// pair (assets/) and our expansion's (expansions/nifty/music/). Each saved at its size as the same streams, the bytes
 // the game never reads (a header word, a chunk's reserved pair and tail) the writer's, which the findings list (S26:
 // the writer writes its model alone), the stale-chunk bank's among them; saved again, the same bytes.
 int test_every_bank() {

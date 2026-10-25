@@ -336,7 +336,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ShowBalloon(
                 "Switched to " + ShortName(_state),
-                "Retail Joint Operations uses it the next time it connects to NovaWorld.");
+                "The original game uses it the next time it connects to NovaWorld.");
         }
 
         return true;

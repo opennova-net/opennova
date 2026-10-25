@@ -149,9 +149,19 @@ The engine repository and its CI hold and ship no game data. The Windows runtime
 package contains the engine, its native dependencies, `update.exe`, and
 `revupdat.exe`; a standalone installation downloads OpenNova content on first run.
 
+A package talks to its export mode's deployment (DEPLOY.md "Deployments: dev, staging and
+prod"). A release package (`scripts/package_godot_windows.ps1`'s default: tagged releases
+and master pushes) updates from `update.opennova.net`, and its NovaWorld menu's OpenNova
+target dials `nw.opennova.net`. A debug package (`-ExportMode debug`: the zip PR CI
+builds) updates from `update.staging.opennova.net` and dials `nw.staging.opennova.net`,
+so testing a PR's zip never touches production. The update host is the `URL=` of the
+zip's `OPENNOVA.WIZ` (the runtime update it ships carries the same wizard); the gate is
+the exported build's own (`NovaWorldSettings.opennova_host`). A source run's NovaWorld
+target dials loopback ("Test with our Godot game").
+
 Every product's game data is an OpenNova Editor project in the NovaWorld content store
-(ADR 0069), never in a repository: OpenNova's base game and Indigo Storm (with their
-Blender sources) are public, and Joint Operations, Escalation and DFX2, imported from
+(ADR 0069), never in a repository: OP: Acid Gambit and its expansion, OP: Nifty Package (with their
+Blender sources), are public, and Joint Operations, Escalation and DFX2, imported from
 their stock installs (each one's revision 1 the stock import), are private. The editor's
 Content window gets, pulls and pushes a project; admins alone push, and a push is not a
 release. A release is built on the server from a revision: the editor's
@@ -166,9 +176,9 @@ revision's), so only changed files get rows, each into the archive the stock ins
 holds it in. Its hosted tree is built on publish from the data set's stock baseline,
 uploaded once with "Upload data".
 
-The game product is `/game opennova`, `/game jo` or `/game dfx2`. Without `/game`,
+The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
-`OPENNOVA.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
+`ACIDGAMBIT.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
 another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
 updater refuses a product the folder's wizard does not name, and installs OpenNova
 content only into OpenNova's own folder or an empty one. The selected product
@@ -417,11 +427,12 @@ Its **OpenNova service URL...** setting points it at a local stack, `http://loca
    `$GODOT_BIN --path godot -- /game jo --resource-dir <game dir> --no-update`.
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
    `NovaWorldClient` whose OpenNova target probes the local gate at `127.0.0.1:7597` in a
-   source run (`NovaWorldSettings.opennova_host`; an exported build dials the live service,
-   `nw.opennova.net`), runs the session handshake against the dev server, fills the
-   server browser, and exposes **Host a Game**. `--novaworld-host <address>` points either
-   kind of run at another gate: a packaged `opennova.exe` at this stack, or a source run at
-   staging (`nw.staging.opennova.net`).
+   source run (`NovaWorldSettings.opennova_host`; a release export dials the live service,
+   `nw.opennova.net`, and a debug export staging's, `nw.staging.opennova.net`), runs the
+   session handshake against the dev server, fills the server browser, and exposes **Host
+   a Game**. `--novaworld-host <address>` points any kind of run at another gate: a
+   packaged `opennova.exe` at this stack, or a source run at staging
+   (`nw.staging.opennova.net`).
 3. For a two-client host/join, run a second instance, or a second machine with
    `ONNET_PUBLIC_HOST` set to your LAN IP so the gate advertises a reachable address (and
    `--novaworld-host <that IP>` on the other machine's client).

@@ -253,7 +253,7 @@ _Avoid_: data worker, uploader
 
 **Content store**:
 The NovaWorld service's keeping of every product's raw content (ADR 0069): a **content
-project** per product (`OPENNOVA`, `JO`, `JOX01`, ...), its history a line of revisions, each
+project** per product (`ACIDGAMBIT`, `JO`, `JOX01`, ...), its history a line of revisions, each
 a manifest of the project's files by path, SHA-256 and size, every file stored once by its
 SHA-256. Public projects are anyone's to get; private ones (the retail games') an admin's.
 Admins push; a push is not a release. The editor's Content window is its client, the web
@@ -539,10 +539,11 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 **OpenNova content**:
 OpenNova's own game data, authored from scratch as OpenNova Editor projects kept in the
 **content store** (never in a repository) and released as update packages: the
-"Indigo Shore" mission (single player and Co-op over LAN) and its "Indigo Storm"
-expansion. The minimal runtime downloads it on first launch. `/game opennova`
-is the default; `/game jo` or `/game dfx2` selects an existing retail installation
-(ADR 0067). `--resource-dir` selects content separately from the runtime directory.
+"OP: Acid Gambit" game (single player and Co-op over LAN) and its "OP: Nifty Package"
+expansion. The minimal runtime downloads it on first launch. `/game acidgambit`,
+`/game jo` or `/game dfx2` selects the game; without `/game` the folder's `UPDATE.WIZ`
+names it (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit;
+ADR 0067). `--resource-dir` selects content separately from the runtime directory.
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:

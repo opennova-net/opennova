@@ -6,6 +6,7 @@ import ForgotPasswordPage from '../pages/ForgotPasswordPage.vue';
 import ResetPasswordPage from '../pages/ResetPasswordPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
+import NovaLogicServerPage from '../pages/NovaLogicServerPage.vue';
 import AccountLayout from '../pages/account/AccountLayout.vue';
 import ServersPage from '../pages/account/ServersPage.vue';
 import NewServerPage from '../pages/account/NewServerPage.vue';
@@ -59,6 +60,8 @@ const router = createRouter({
     { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
     { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
     { path: '/lobby/:id(\\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
+    // A server on NovaLogic's NovaWorld, from the service's copy of their list.
+    { path: '/lobby/novalogic/:id(\\d+)', component: NovaLogicServerPage, meta: { title: 'Server' } },
     { path: '/lobbies', redirect: '/lobby' },
     { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },

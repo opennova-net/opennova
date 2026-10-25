@@ -12,13 +12,79 @@
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
+#include <cstring>
 #include <optional>
+#include <utility>
 
 namespace opennova::serve {
 
 using io::LogLevel;
 
 namespace {
+
+// Whether a web page that failed the flow is the service's answer: a page it served (200, a
+// content refusal) or a client error it chose (4xx). A request that never reached it, a page its
+// web host failed (5xx) or one moved elsewhere (3xx) is a fault, which a second listing retries.
+bool answered_by_service(const net::HttpReply &reply) {
+	return reply.transport_ok && (reply.code == 200 || (reply.code >= 400 && reply.code < 500));
+}
+
+// The gloss on the host request's NWEC tags: what each says in plain words, and the service's
+// MsgCode name behind it [orig: the NWUSERVERMSGCODE_ name table, {code, name} pairs from
+// @0x7CB960; ConnectOrHost's MsgCode switch @0x4D5207 picks the tag] (null for the listing's own
+// fault). The plain words are a second listing's reported reason (Lister::failure).
+struct HostTagGloss {
+	const char *text;
+	const char *msg_code;
+};
+HostTagGloss host_tag_gloss(const std::string &tag) {
+	if (tag == "NWEC51")
+		return { "the request was not queued", nullptr };
+	if (tag == "NWEC52")
+		return { "the service did not answer within 60 s", nullptr };
+	if (tag == "NWEC53")
+		return { "the service wants a server name", "MISSINGSERVERNAME" };
+	if (tag == "NWEC54")
+		return { "the service rejected the hosting options", "REJECTEDHOSTINGINFO" };
+	if (tag == "NWEC55")
+		return { "the service rejected the server name", "BADSERVERNAME" };
+	if (tag == "NWEC56")
+		return { "the service counts too many servers running", "TOOMANYSERVERSRUNNING" };
+	if (tag == "NWEC57")
+		return { "the service did not accept the server name", "SERVERNAMENOTACCEPTED" };
+	if (tag == "NWEC60")
+		return { "the service did not accept the server message", "MSGNOTACCEPTED" };
+	return { "another refusal, or the session left before the service answered", nullptr };
+}
+
+// The operator's gloss on a host request's tag: the plain words with the MsgCode name.
+std::string host_tag_meaning(const std::string &tag) {
+	const HostTagGloss gloss = host_tag_gloss(tag);
+	return gloss.msg_code != nullptr ? std::string(gloss.text) + " (" + gloss.msg_code + ")"
+									 : std::string(gloss.text);
+}
+
+// An NWEC tag ("NWEC57"), as the connect and the host request report one: the tag a second
+// listing's state carries beside its reason (a session's other failure texts are none).
+bool is_nwec_tag(const std::string &text) {
+	if (text.size() < 5 || text.size() > 8 || text.compare(0, 4, "NWEC") != 0)
+		return false;
+	for (std::size_t i = 4; i < text.size(); ++i)
+		if (text[i] < '0' || text[i] > '9')
+			return false;
+	return true;
+}
+
+// The hosting leg's own refusals ahead of its request (host_leg_refusal's tags), in plain words.
+const char *host_leg_meaning(const char *tag) {
+	if (std::strcmp(tag, NWEC_SESSION_NOT_SET_UP) == 0)
+		return "the session was not set up";
+	if (std::strcmp(tag, NWEC_WRONG_SESSION_STATE) == 0)
+		return "the session was not in a state to host";
+	if (std::strcmp(tag, NWEC_HOST_GATE_NOT_OK) == 0)
+		return "the gate named no lobby to host in";
+	return "the session could not host";
+}
 
 // The operator's gloss on the connect's NWEC tags this driver reports (the game shows menutxt's
 // text; these lines are the lister's own).
@@ -74,41 +140,48 @@ HostLobbyText english_lobby_text() {
 
 Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket) :
 		options_(std::move(options)),
+		log_prefix_(options_.label.empty() ? std::string() : options_.label + " "),
 		source_(source),
 		shared_session_socket_(session_socket),
 		lobby_(
 				[this]() {
 					NwuLobbySession::Hooks hooks;
-					hooks.on_gate_response = [](const GateResponse &gate) {
+					hooks.on_gate_response = [this](const GateResponse &gate) {
 						std::string addresses;
 						for (const std::string &address : gate.udp_novaworld)
 							addresses += (addresses.empty() ? "" : ", ") + address;
-						io::logf(LogLevel::kInfo, "[gate] lobby %s, NovaWorld %s",
+						io::logf(LogLevel::kInfo, "%s[gate] lobby %s, NovaWorld %s", who(),
 								gate.lobby_name.c_str(), addresses.c_str());
 					};
 					hooks.cookie_vars = [this]() { return cookie_vars(); };
 					hooks.on_fatal = [this](const std::string &message) {
 						const char *meaning = connect_tag_meaning(message);
-						io::logf(LogLevel::kError, "[session] failed: %s%s%s%s", message.c_str(),
-								meaning != nullptr ? " (" : "", meaning != nullptr ? meaning : "",
-								meaning != nullptr ? ")" : "");
+						io::logf(LogLevel::kError, "%s[session] failed: %s%s%s%s", who(),
+								message.c_str(), meaning != nullptr ? " (" : "",
+								meaning != nullptr ? meaning : "", meaning != nullptr ? ")" : "");
 						// A refused join (CR 0) keeps the 0x82's failure fields on the connection.
 						if (const ClientSession *session = lobby_.session();
 								session != nullptr && message == "NWEC43")
 							io::logf(LogLevel::kError,
-									"[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"",
+									"%s[session] the 0x82 refused: JFC %u JFP %u JFS \"%s\"", who(),
 									session->join_fail_code(), session->join_fail_param(),
 									session->join_fail_string().c_str());
-						end(kExitFailed);
+						// The session server's refusal is its decision; the other tags are a
+						// gate or a session that did not answer.
+						end(kExitFailed, /*refused=*/message == "NWEC43",
+								meaning != nullptr ? meaning : "the NovaWorld session failed",
+								is_nwec_tag(message) ? message : std::string());
 					};
-					hooks.on_soft_error = [](const std::string &message) {
-						io::logf(LogLevel::kDebug, "[gate] %s", message.c_str());
+					hooks.on_soft_error = [this](const std::string &message) {
+						io::logf(LogLevel::kDebug, "%s[gate] %s", who(), message.c_str());
 					};
 					// A gate naming no UDPNOVAWORLD leaves no NWU session to register the host on.
 					hooks.on_sessionless = [this]() {
 						io::logf(LogLevel::kError,
-								"[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)");
-						end(kExitFailed);
+								"%s[gate] the gate named no NovaWorld session server (UDPNOVAWORLD)",
+								who());
+						end(kExitFailed, /*refused=*/false,
+								"the gate named no NovaWorld session server");
 					};
 					// The gate and connect lines to the server's _connectlog.txt.
 					hooks.connect_log_on = [this]() {
@@ -142,9 +215,18 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 					inmatch::server_logs_inout_line(*options_.server_logs, text);
 			};
 			hooks.on_failed = [this](const std::string &tag) {
-				io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
+				io::logf(LogLevel::kError, "%s[host] the host request failed: %s (%s)", who(),
+						tag.c_str(), host_tag_meaning(tag).c_str());
 				source_.on_host_result(false, tag);
-				end(kExitFailed);
+				// NWEC53..58 and NWEC60 are the service's MsgCode refusals (too many servers, the
+				// name not accepted, ...; NWEC58 one outside the table). NWEC51 (not queued), NWEC52
+				// (no reply in 60 s) and NWEC58 over no word (0: the session left state 5/6 with
+				// no answer, a reap or a reconnect) are faults, not its decision.
+				const ClientSession *session = lobby_.session();
+				const bool no_word = session == nullptr || session->server_msg_code() == 0;
+				end(kExitFailed, /*refused=*/tag != "NWEC51" && tag != "NWEC52" &&
+								!(tag == "NWEC58" && no_word),
+						host_tag_gloss(tag).text, is_nwec_tag(tag) ? tag : std::string());
 			};
 			// ServerStopHosting drops the session to verified and sends nothing; the session
 			// stays up, pumped, until the match's NovaWorld exit (12) over the dropped word
@@ -159,7 +241,7 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 			//  CNapiGameSession_ResetToDisconnected @0x4D0890 - CNapiNPConnection_RequestDisconnect
 			//  @0x61E0F0 (the call @0x4D08A1)]
 			hooks.on_stopped = [this](const std::string &key) {
-				io::logf(LogLevel::kError, "[host] the service stopped the hosting (%s)",
+				io::logf(LogLevel::kError, "%s[host] the service stopped the hosting (%s)", who(),
 						key.c_str());
 				source_.on_host_result(false, key);
 				stopped_by_service_ = true;
@@ -204,7 +286,7 @@ bool Lister::start() {
 	if (!gate_udp_.is_valid()) (void)lobby_.gate_start_failed();
 	if (shared_session_socket_ == nullptr) session_udp_ = net::ScopedSocket(net::udp_bind(0));
 	if (!gate_udp_.is_valid() || (shared_session_socket_ == nullptr && !session_udp_.is_valid())) {
-		io::logf(LogLevel::kError, "[net] cannot bind the UDP sockets");
+		io::logf(LogLevel::kError, "%s[net] cannot bind the UDP sockets", who());
 		exit_code_ = kExitNetwork;
 		return false;
 	}
@@ -217,8 +299,8 @@ bool Lister::start() {
 	lobby_.set_title(options_.title, options_.gate_tag);
 	lobby_.open(*gate_socket_, *session);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
-	io::logf(LogLevel::kInfo, "[gate] probing %s:%u as %s (%s)", options_.master_host.c_str(),
-			options_.master_gate_port, options_.gate_tag.c_str(),
+	io::logf(LogLevel::kInfo, "%s[gate] probing %s:%u as %s (%s)", who(),
+			options_.master_host.c_str(), options_.master_gate_port, options_.gate_tag.c_str(),
 			options_.allow_public ? "public destinations allowed"
 								  : "NovaLogic's NovaWorld refused");
 	return true;
@@ -240,9 +322,9 @@ bool Lister::tick(uint32_t now_ms) {
 		for (const ClientSession::Notice &notice : session->take_notices()) {
 			if (role_.handle_notice(notice)) continue;
 			if (notice.kind == ClientSession::Notice::Kind::LeaveNovaWorld) {
-				io::logf(LogLevel::kError, "[session] the service ended the session (MsgCode %d)",
-				         notice.fields.msg_code);
-				end(kExitStoppedByService);
+				io::logf(LogLevel::kError, "%s[session] the service ended the session (MsgCode %d)",
+				         who(), notice.fields.msg_code);
+				end(kExitStoppedByService, /*refused=*/false, "the service ended the session");
 			}
 		}
 	}
@@ -265,14 +347,14 @@ void Lister::publish_server_info(int32_t session_round_count) {
 
 void Lister::stop() {
 	if (phase_ == Phase::Done) return;
-	io::logf(LogLevel::kInfo, "[main] stopping");
+	io::logf(LogLevel::kInfo, "%s[main] stopping", who());
 	end(kExitStopped);
 	teardown(/*stop_hosting=*/true);
 }
 
 void Lister::disconnect() {
 	if (phase_ == Phase::Done) return;
-	io::logf(LogLevel::kInfo, "[main] disconnecting");
+	io::logf(LogLevel::kInfo, "%s[main] disconnecting", who());
 	end(kExitStopped);
 	teardown(/*stop_hosting=*/false);
 }
@@ -291,7 +373,7 @@ void Lister::on_listed() {
 		host_page_in_flight_ = true;
 	}
 	host_page_ = HttpRequestSpec{};
-	io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)",
+	io::logf(LogLevel::kInfo, "%s[host] listed: '%s', %zu player(s)", who(),
 			registration().server_name.c_str(), role_.roster().size());
 	source_.on_host_result(true, std::string());
 }
@@ -299,17 +381,19 @@ void Lister::on_listed() {
 // Verified: the account login first when there is one (the hosting page needs it), else the host
 // request straight away.
 void Lister::on_verified() {
-	io::logf(LogLevel::kInfo, "[session] verified at %s", peer_addr_to_string(lobby_.nw_peer()).c_str());
+	io::logf(LogLevel::kInfo, "%s[session] verified at %s", who(),
+			peer_addr_to_string(lobby_.nw_peer()).c_str());
 	if (!options_.credentials.present()) {
-		io::logf(LogLevel::kInfo, "[http] no account: hosting without a HOSTKEY");
+		io::logf(LogLevel::kInfo, "%s[http] no account: hosting without a HOSTKEY", who());
 		request_host();
 		return;
 	}
 	sync_flow_context();
 	const LoginResult first = flow_.login(options_.credentials.user, options_.credentials.pass);
 	if (first.kind != LoginResult::Kind::NeedRequest) {
-		io::logf(LogLevel::kError, "[http] login failed: %s", first.reason.c_str());
-		end(kExitFailed);
+		io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), first.reason.c_str());
+		// Nothing a later try would change.
+		end(kExitFailed, /*refused=*/true, "the sign-in could not start");
 		return;
 	}
 	phase_ = Phase::LoggingIn;
@@ -317,7 +401,7 @@ void Lister::on_verified() {
 }
 
 void Lister::on_http_reply(const net::HttpReply &reply) {
-	if (!reply.transport_ok) io::logf(LogLevel::kWarn, "[http] %s", reply.error.c_str());
+	if (!reply.transport_ok) io::logf(LogLevel::kWarn, "%s[http] %s", who(), reply.error.c_str());
 	// The HOSTKEY page's refresh (on_listed): its answer settles the flow's host leg.
 	if (host_page_in_flight_) {
 		host_page_in_flight_ = false;
@@ -331,18 +415,24 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 			return;
 		}
 		if (r.kind == LoginResult::Kind::Failed) {
-			io::logf(LogLevel::kError, "[http] login failed: %s", r.reason.c_str());
-			end(kExitFailed);
+			io::logf(LogLevel::kError, "%s[http] login failed: %s", who(), r.reason.c_str());
+			// A login the service answered and refused is its decision; a request that never
+			// reached it, or a page its web host failed (5xx) or moved (3xx), is not.
+			const bool answered = answered_by_service(reply);
+			end(kExitFailed, /*refused=*/answered,
+					answered ? "the service refused the sign-in"
+							 : "the sign-in page did not answer");
 			return;
 		}
 		add_log_secret(r.nwhandle);
-		io::logf(LogLevel::kInfo, "[http] logged in");
+		io::logf(LogLevel::kInfo, "%s[http] logged in", who());
 		sync_flow_context();
 		// The Host's jar entries carry the registration's Exp (g_ExpansionName).
 		const HostKeyResult first = flow_.host(registration().expansion);
 		if (first.kind != HostKeyResult::Kind::NeedRequest) {
-			io::logf(LogLevel::kError, "[http] the hosting page failed: %s", first.reason.c_str());
-			end(kExitFailed);
+			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
+					first.reason.c_str());
+			end(kExitFailed, /*refused=*/true, "the hosting page could not start");
 			return;
 		}
 		phase_ = Phase::FetchingHostKey;
@@ -356,12 +446,16 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 			return;
 		}
 		if (r.kind == HostKeyResult::Kind::Failed) {
-			io::logf(LogLevel::kError, "[http] the hosting page failed: %s", r.reason.c_str());
-			end(kExitFailed);
+			io::logf(LogLevel::kError, "%s[http] the hosting page failed: %s", who(),
+					r.reason.c_str());
+			const bool answered = answered_by_service(reply);
+			end(kExitFailed, /*refused=*/answered,
+					answered ? "the service refused the hosting page"
+							 : "the hosting page did not answer");
 			return;
 		}
 		host_key_ = r.host_key;
-		io::logf(LogLevel::kInfo, "[http] HOSTKEY %s", mask_value(host_key_, 6).c_str());
+		io::logf(LogLevel::kInfo, "%s[http] HOSTKEY %s", who(), mask_value(host_key_, 6).c_str());
 		// The HOSTKEY page's refresh goes out once the host request's wait ends (on_listed).
 		host_page_ = r.request;
 		request_host();
@@ -377,7 +471,7 @@ void Lister::ship(const HttpRequestSpec &spec) {
 	}
 	const bool allow_public = options_.allow_public;
 	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
-	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
+	io::logf(LogLevel::kDebug, "%s[http] %s %s", who(), method, spec.url.c_str());
 	http_ = std::async(std::launch::async, [spec, method, allow_public]() {
 		// One resolve per request: the connect uses the address the nocachefix pair reads.
 		// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called
@@ -427,16 +521,19 @@ void Lister::request_host() {
 	const char *refusal = host_leg_refusal(session != nullptr, session ? session->session_flags() : 0u,
 	                                       true, gate.lobby_name);
 	if (refusal != nullptr) {
-		io::logf(LogLevel::kError, "[host] cannot host: %s", refusal);
-		end(kExitFailed);
+		io::logf(LogLevel::kError, "%s[host] cannot host: %s", who(), refusal);
+		// Only the gate's reply naming no lobby to host in is the service's word; a session not
+		// set up or out of state (a reconnect during the web leg) is a fault.
+		end(kExitFailed, /*refused=*/std::strcmp(refusal, NWEC_HOST_GATE_NOT_OK) == 0,
+				host_leg_meaning(refusal), refusal);
 		return;
 	}
 	phase_ = Phase::Requesting;
 	refresh_listing(true);
-	if (!role_.request(registration())) return; // on_failed finished it
+	if (!role_.request(registration(), options_.taken_app_id)) return; // on_failed finished it
 	sync_roster();
-	io::logf(LogLevel::kInfo, "[host] ClientHostRequest for '%s' on %s", registration().server_name.c_str(),
-	         gate.lobby_name.c_str());
+	io::logf(LogLevel::kInfo, "%s[host] ClientHostRequest for '%s' on %s", who(),
+	         registration().server_name.c_str(), gate.lobby_name.c_str());
 }
 
 // The flow reads the gate response and the session's SessionInit; both are fixed once the
@@ -508,9 +605,12 @@ void Lister::sync_roster() {
 	role_.sync_roster(source_.wanted_roster(role_.roster()));
 }
 
-void Lister::end(int code) {
+void Lister::end(int code, bool refused, std::string why, std::string tag) {
 	if (ending_ || phase_ == Phase::Done) return;
 	ending_ = true;
+	refused_ = refused;
+	failure_ = std::move(why);
+	failure_tag_ = std::move(tag);
 	exit_code_ = stopped_by_service_ ? kExitStoppedByService : code;
 }
 
@@ -541,7 +641,7 @@ void Lister::teardown(bool stop_hosting) {
 			session->request_disconnect(out);
 			for (const std::vector<uint8_t> &dg : out) lobby_.send(dg);
 			if (!out.empty())
-				io::logf(LogLevel::kInfo, "[session] %s",
+				io::logf(LogLevel::kInfo, "%s[session] %s", who(),
 				         stop_sent ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
 		}
 		lobby_.close();

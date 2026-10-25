@@ -12,7 +12,7 @@ export interface ContentStorage {
 }
 
 export interface ContentProject {
-  // 1 to 16 of A-Z, 0-9 and _ ('OPENNOVA', 'JO').
+  // 1 to 16 of A-Z, 0-9 and _ ('ACIDGAMBIT', 'JO').
   key: string;
   title: string;
   visibility: ContentVisibility;

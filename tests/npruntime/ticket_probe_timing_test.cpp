@@ -104,6 +104,39 @@ int main() {
 	CHECK(!conn.join_ticket_validation);
 	CHECK(conn.admission_stage == inmatch::GameAdmissionStage::AwaitPaddingEcho);
 
+	// A match listed on two services (D-NET-1385): the joiner the second listing's service sent
+	// (its APPID the second listing's: novaworld_listing 1) follows that listing's arm. With the
+	// first unarmed and the second armed, its 0x01 holds it in state 3, and the watchdog's
+	// ClientPlayerEnterRequest names the second listing, whose session it goes to.
+	ctx.novaworld_join_tickets_armed = false;
+	ctx.novaworld_second_app_id = 4321u;
+	ctx.novaworld_second_join_tickets_armed = true;
+	conn.novaworld_listing = 1;
+	conn.admission_stage = inmatch::GameAdmissionStage::AwaitFormPost;
+	conn.player_enter_requested = false;
+	conn.player_enter_admitted = false;
+	replies = inmatch::dispatch_session_replies(ctx.config, conn, form_post, 7,
+			ctx.np_protocol.connection_list, nullptr, inputs);
+	CHECK(replies.empty());
+	CHECK(conn.join_ticket_validation);
+	CHECK(conn.admission_stage == inmatch::GameAdmissionStage::AwaitPlayEnter);
+	std::vector<inmatch::NapiNPServerCtx::PlayerEnterRequest> requests;
+	ctx.on_player_enter_request = [&requests](const inmatch::NapiNPServerCtx::PlayerEnterRequest &r) {
+		requests.push_back(r);
+	};
+	inmatch::Server_CheckPlayerTimeouts(ctx);
+	CHECK(requests.size() == 1 && requests[0].connection_id == 20u && requests[0].listing == 1);
+	CHECK(conn.player_enter_requested);
+	// The first listing's joiner on that match follows the first's arm: ungated, the probe at once.
+	conn.novaworld_listing = 0;
+	conn.admission_stage = inmatch::GameAdmissionStage::AwaitFormPost;
+	conn.join_ticket_validation = false;
+	conn.player_enter_requested = false;
+	replies = inmatch::dispatch_session_replies(ctx.config, conn, form_post, 7,
+			ctx.np_protocol.connection_list, nullptr, inputs);
+	CHECK(replies.size() == 1 && replies[0].tag == s2c::JOIN_PADDING_PROBE);
+	CHECK(!conn.join_ticket_validation);
+
 	std::printf("ticket_probe_timing: %d failure(s)\n", g_failures);
 	return g_failures == 0 ? 0 : 1;
 }

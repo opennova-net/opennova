@@ -2,24 +2,24 @@ extends GutTest
 
 
 func before_each() -> void:
-	RuntimeUpdates.configure("opennova", "C:/Runtime", "D:/Game Data",
-			PackedStringArray(["--", "/game", "opennova", "/exp", "onx"]), true)
+	RuntimeUpdates.configure("acidgambit", "C:/Runtime", "D:/Game Data",
+			PackedStringArray(["--", "/game", "acidgambit", "/exp", "onx"]), true)
 
 
 func after_each() -> void:
-	RuntimeUpdates.configure("opennova", "", "", PackedStringArray(), false)
+	RuntimeUpdates.configure("acidgambit", "", "", PackedStringArray(), false)
 	MusicService.stop_context()
 	LaunchFlags.clear_args_override()
 
 
 func test_check_and_handoff_preserve_product_roots_and_relaunch_arguments() -> void:
 	assert_eq(RuntimeUpdates.check_arguments(), PackedStringArray([
-			"--check", "/game", "opennova", "--runtime-dir", "C:/Runtime",
+			"--check", "/game", "acidgambit", "--runtime-dir", "C:/Runtime",
 			"--resource-dir", "D:/Game Data"]))
 	assert_eq(RuntimeUpdates.install_arguments(1234), PackedStringArray([
-			"/RUN", "--parent-pid", "1234", "/game", "opennova",
+			"/RUN", "--parent-pid", "1234", "/game", "acidgambit",
 			"--runtime-dir", "C:/Runtime", "--resource-dir", "D:/Game Data",
-			"--run-arg", "--", "--run-arg", "/game", "--run-arg", "opennova",
+			"--run-arg", "--", "--run-arg", "/game", "--run-arg", "acidgambit",
 			"--run-arg", "/exp", "--run-arg", "onx"]))
 
 
@@ -28,13 +28,13 @@ func test_check_and_handoff_preserve_product_roots_and_relaunch_arguments() -> v
 func test_a_bootstrap_install_marks_its_relaunch_once() -> void:
 	var marked := RuntimeUpdates.install_arguments(1234, true)
 	assert_eq(marked.slice(marked.size() - 2), PackedStringArray(["--run-arg", "--after-update"]))
-	RuntimeUpdates.configure("opennova", "C:/Runtime", "D:/Game Data",
+	RuntimeUpdates.configure("acidgambit", "C:/Runtime", "D:/Game Data",
 			PackedStringArray(["--verbose", "--", "/exp", "onx", "--after-update"]), true)
 	assert_false(RuntimeUpdates.install_arguments(1234).has("--after-update"))
 	var again := RuntimeUpdates.install_arguments(1234, true)
 	assert_eq(again.count("--after-update"), 1)
 	assert_eq(again.count("--"), 1)
-	RuntimeUpdates.configure("opennova", "C:/Runtime", "D:/Game Data", PackedStringArray(), true)
+	RuntimeUpdates.configure("acidgambit", "C:/Runtime", "D:/Game Data", PackedStringArray(), true)
 	assert_eq(RuntimeUpdates.install_arguments(1234, true).slice(9), PackedStringArray([
 			"--run-arg", "--", "--run-arg", "--after-update"]), "no game arguments: the marker after --")
 

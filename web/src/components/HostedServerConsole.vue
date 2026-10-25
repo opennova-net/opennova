@@ -56,7 +56,15 @@
           <tbody class="divide-y divide-border">
             <tr v-for="player in players" :key="player.slot">
               <td class="px-3 py-2 font-mono text-xs">{{ player.slot }}</td>
-              <th scope="row" class="break-all px-3 py-2 text-left font-medium">{{ playerName(player) }}</th>
+              <th scope="row" class="break-all px-3 py-2 text-left font-medium">
+                {{ playerName(player) }}
+                <span
+                  v-if="fromNovaLogic(player)"
+                  class="player-novalogic ml-1 inline-flex items-center rounded-control bg-accent/15 px-1.5 py-0.5 text-xs font-semibold text-accent"
+                  title="Came through NovaLogic's NovaWorld"
+                  >NovaLogic<span class="sr-only">: came through NovaLogic's NovaWorld</span></span
+                >
+              </th>
               <td class="px-3 py-2 text-right font-mono text-xs">{{ player.team }}</td>
               <td class="px-3 py-2 text-right font-mono text-xs">{{ player.class }}</td>
               <td class="px-3 py-2 text-right font-mono text-xs">{{ player.kills }}</td>
@@ -306,6 +314,10 @@ const props = withDefaults(
     mode: 'owner' | 'admin';
     // For the confirmations and the captions.
     serverName: string;
+    // The player slots (PLAYER LIST's) of the players who came through
+    // NovaLogic's NovaWorld (the server's `novalogic.player_slots`), each
+    // marked in the list: as of the server's last report, a few seconds behind.
+    novalogicSlots?: readonly number[];
     // The heading level the console sits under (its panels take the next).
     headingLevel?: 2 | 3 | 4;
     // The console log alone (the server is not running).
@@ -313,8 +325,12 @@ const props = withDefaults(
     // Keep reading (the default); false reads once (an ended server).
     follow?: boolean;
   }>(),
-  { headingLevel: 3, logOnly: false, follow: true },
+  { headingLevel: 3, logOnly: false, follow: true, novalogicSlots: () => [] },
 );
+
+function fromNovaLogic(player: ConsolePlayer): boolean {
+  return props.novalogicSlots.includes(player.slot);
+}
 
 const emit = defineEmits<{
   // The server is not running any more: read it again.

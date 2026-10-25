@@ -151,8 +151,8 @@ resource "aws_security_group" "program" {
   })
 }
 
-# Out: the image pulls (ghcr.io), the AWS APIs, Stripe, the database and the
-# cache.
+# Out: the image pulls (ghcr.io), the AWS APIs, Stripe, the database, the
+# cache and NovaLogic's server list (web's, var.novalogic_lobbies).
 resource "aws_vpc_security_group_egress_rule" "program_all" {
   for_each = local.programs
 
@@ -469,6 +469,9 @@ locals {
     ONNET_API_PROXY_ONLY  = "1"
     ONNET_RETAIL_PROXY    = "127.0.0.2"
     ONNET_LOG_STORE       = "cloudwatch:${local.log_group_prefix}"
+    # The Lobbies page's list of the servers on NovaLogic's NovaWorld, fetched
+    # from NovaLogic's live service (var.novalogic_lobbies).
+    ONNET_NOVALOGIC_LOBBIES = var.novalogic_lobbies ? "1" : "0"
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
@@ -525,6 +528,10 @@ locals {
   # "# optional" and "# billing" lines of deploy/env/runtime.env.tpl), which
   # its label names for a deploy to add while SSM holds them.
   billing_secrets = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE", "STRIPE_PRICE_STATIC_ADDRESS"]
+  # The project's NovaLogic account, the fleet's alone: the servers that also list on
+  # NovaLogic's NovaWorld log in with it (var.novalogic_listing offers the listing).
+  novalogic_secrets = ["ONNET_NOVALOGIC_USER", "ONNET_NOVALOGIC_PASS"]
+
   program_secrets = {
     gate   = ["DATABASE_PASSWORD"]
     lobby  = ["DATABASE_PASSWORD"]
@@ -537,7 +544,7 @@ locals {
     gate   = []
     lobby  = []
     web    = concat(["ONNET_BOOTSTRAP_ADMIN"], local.billing_secrets)
-    fleet  = []
+    fleet  = local.novalogic_secrets
     worker = local.billing_secrets
     data   = []
   }

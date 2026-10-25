@@ -37,7 +37,10 @@ runs as, and keys a listing's joiners (`host_players`) by their account, so its
 roster is who plays on it now ("Listed servers and owners"). `0022_lobby_goodbyes.sql`
 adds the goodbyes a lobby's clean stop leaves for the sessions it held
 (`lobby_goodbyes`), which the lobby their next packets reach sends in its place
-("Lobby instances").
+("Lobby instances"). `0024_second_listing_reports.sql` adds a slot report's
+second listing: a hosted server's listing on NovaLogic's NovaWorld as its agent
+last read it, its state, tries, reason and the players that service sent
+(apps/novaworld_common/hosted/README.md "Routes", the server's `novalogic`).
 
 ## Migrations until 1.0
 

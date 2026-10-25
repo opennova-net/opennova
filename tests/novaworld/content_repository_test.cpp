@@ -1,4 +1,4 @@
-// The content store's rows (apps/novaworld_common/data_sets/content_repository.h, migration 0023,
+// The content store's rows (apps/novaworld_common/data_sets/content_repository.h, migration 0025,
 // ADR 0069) on a migrated database of the test's own: the five seeded projects on their data sets
 // (the retail ones private, each expansion on its base game's project) and who may list them; a
 // project created, changed and refused (a duplicate key, a data set another project updates, no

@@ -74,7 +74,7 @@ describe('the data sets', () => {
             parent_id: null,
             expansion_code: '',
             title: 'jo',
-            game: 'opennova_0_consumer',
+            game: 'acidgambit_0_consumer',
             updater_login: '',
             command_file: '',
             retail_updater: false,

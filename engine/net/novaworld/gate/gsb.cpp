@@ -327,7 +327,10 @@ bool parse_servers(const std::vector<uint8_t> &payload,
 	Cursor c{payload.data(), payload.data() + payload.size()};
 	const uint16_t count = c.u16();
 	if (!c.ok) return false;
-	servers.reserve(servers.size() + count);
+	// A row is at least its id, address, field terminators and player count: the reserve never
+	// passes what the payload can hold, whatever count it claims.
+	const size_t min_row = 4 + 4 + field_names.size() + 2;
+	servers.reserve(servers.size() + std::min<size_t>(count, payload.size() / min_row));
 	for (uint16_t i = 0; i < count; ++i) {
 		GsbServerEntry e{};
 		e.rid = c.u32();  // host id
@@ -342,7 +345,7 @@ bool parse_servers(const std::vector<uint8_t> &payload,
 		}
 		const uint16_t player_count = c.u16();
 		if (!c.ok) return false;
-		e.player_names.reserve(player_count);
+		e.player_names.reserve(std::min<size_t>(player_count, c.left()));
 		for (uint16_t p = 0; p < player_count; ++p) {
 			std::string name = c.cstr();
 			if (!c.ok) return false;

@@ -51,7 +51,8 @@ There are three places the service runs, and nothing of one reaches another by a
 | Where | the developer's machine | its own AWS account, `opennova-staging`, in the Organization | its own AWS account, `opennova-prod` |
 | Site | `http://localhost:8000` | `https://staging.<domain>` | `https://<domain>` (and `www`) |
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
-| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` | `nw.<domain>` |
+| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` (a debug game export's own) | `nw.<domain>` (a release export's own) |
+| Update service (OpenNova's `update.exe`) | none (`update.exe --server`) | `update.staging.<domain>` (a debug game zip's `OPENNOVA.WIZ`) | `update.<domain>` (a release zip's) |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -200,7 +201,8 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    (section "CI runners").
 8. **The images** (section 5): a push to your repository's `master` that touches their
    paths publishes them (`.github/workflows/novaworld-images.yml`, `serve-image.yml`; a
-   manual run builds them but never pushes); then make each GHCR package public. They
+   manual run publishes its branch's, tagged by its short sha and branch name and never
+   `latest`, for staging before a branch merges); then make each GHCR package public. They
    come before step 9: `db bootstrap` already runs the backup image.
 9. **Staging's infrastructure** (section 4), with `D='--deployment staging'`:
    `./deploy/run.sh $D secrets sync`, `infra plan`, `infra apply`, `db bootstrap`. Confirm
@@ -243,9 +245,9 @@ own, change these on your fork:
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
 | `web/src/pages/legal/*.vue` | the terms, privacy and refunds pages: drafts with placeholders and a draft banner | your text, before Stripe's live mode (its activation needs them) |
-| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
+| the game and the Switcher | OpenNova's NovaWorld (`nw.opennova.net`, a debug game export's `nw.staging.opennova.net`, `https://opennova.net`) | players reach yours with `opennova.exe -- --novaworld-host nw.<domain>`, or the Switcher's **Custom address...** (your gate's address) for the original exes; a self-run `opennova-serve` lists with `--master-host nw.<domain>` |
 | `godot/src/authoring/editor_app.cpp` | the content store the OpenNova Editor reaches with no account kept (ADR 0069): `https://staging.opennova.net` in a debug build, `https://opennova.net` in a release build | `staging.<domain>` and `<domain>`, your deployment's |
-| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` the runtime's package writes (a content release's `UPDATE.WIZ` names the deployment's own `ONNET_UPDATE_HOST`) | `update.<domain>`, your deployment's ("The update service") |
+| `apps/update/client.cpp`, `scripts/package_godot_windows.ps1` | OpenNova's update service, `update.opennova.net`: the gateway OpenNova's `update.exe` dials when no `OPENNOVA.WIZ` names one, and the `URL=` of the `OPENNOVA.WIZ` the runtime's package writes (a debug game zip's names staging's, `update.staging.opennova.net`; a content release's `UPDATE.WIZ` names the deployment's own `ONNET_UPDATE_HOST`) | `update.<domain>` and `update.staging.<domain>`, your deployments' ("The update service") |
 
 ## Rebuilding from the vault
 
@@ -1166,8 +1168,8 @@ admin") and publish OpenNova's runtime and content releases ("The update service
 An account with a hosting entitlement (a monthly support tier, a dedicated machine, or an
 admin's comp grant of shared servers and dedicated machines, the admin user page) starts
 servers from the site's My servers page, picking a data set
-(JO, DFX2 or OpenNova: a product's game files, which admins put on the site's Game
-data page, below) and an expansion of it (JO's Escalation, OpenNova's `onjo1`). The
+(JO, DFX2 or OP: Acid Gambit: a product's game files, which admins put on the site's Game
+data page, below) and an expansion of it (JO's Escalation, OP: Acid Gambit's `nifty`). The
 server is always the public `opennova-serve` image, started with `/game <title>` (and
 `/exp <code>`) over the data set's files, which its machine fetches from the store.
 
@@ -1206,8 +1208,8 @@ attention list shows the shortfall.
 
 Admins fill the data sets on the admin page **Game data** (`/admin/data-sets`; ADR 0064);
 migrations 0011 and 0013 seed the catalog's rows, and an admin may create more. A data set
-is one product: of kind base (JO, DFX2, OpenNova: its title and the lobby it lists in),
-expansion (Escalation, code `jox01`, under JO; `onjo1` under OpenNova) or update (OpenNova's
+is one product: of kind base (JO, DFX2, OP: Acid Gambit: its title and the lobby it lists in),
+expansion (Escalation, code `jox01`, under JO; `nifty` under OP: Acid Gambit) or update (OpenNova's
 runtime, `ONRUNTIME`: an updater product with no tree, shown under Releases alone), with the
 login and command file the updater asks for when OpenNova's update service serves it. Its
 data is a **tree**, one immutable version of its files: **Upload data** takes an install's folder
@@ -1228,7 +1230,7 @@ the trees it started on until its owner presses **Update** on its page (the page
 update waits), or an admin's **Update servers** does it for every server of the data set,
 and a crash restart or a fleet roll keeps the pins. A **release** (a 1SFS package built
 with `opennova-update-tool build`, uploaded on the same page) validated and published is
-applied to the data set's baseline tree (an OpenNova or `onjo1` section, a complete package,
+applied to the data set's baseline tree (an OP: Acid Gambit or `nifty` section, a complete package,
 is built from empty instead, and an `update` row's gets no tree), which makes its next
 current tree, and the update service serves the package to the updater ("The update
 service", below).
@@ -1296,13 +1298,13 @@ deployment's admins upload it on its own site, into its own bucket.
    incomplete does not boot: `app logs worker` names what is missing).
 
 6. **Upload the data.** The data sets are there already: migrations 0011 and 0013 seed
-   JO, its Escalation (`jox01`), DFX2, OpenNova, its `onjo1` and the runtime's `update`
+   JO, its Escalation (`jox01`), DFX2, OP: Acid Gambit, its `nifty` and the runtime's `update`
    row, with their updater logins (make none again: a second base is a duplicate row, and
    an expansion code or updater login already held is refused, 409 `duplicate_expansion`
    or `duplicate_login`). On Game data, **Upload data** on each retail one (JO,
-   Escalation, DFX2) from its install's folder, then **Finalize**. OpenNova's and
-   `onjo1`'s trees come from their published full releases instead: publish OpenNova's
-   runtime and content releases ("The update service", below). A data set is offered to
+   Escalation, DFX2) from its install's folder, then **Finalize**. OP: Acid Gambit's and
+   `nifty`'s trees come from their published full releases instead: publish OpenNova's
+   runtime and the games' content releases ("The update service", below). A data set is offered to
    owners once its current tree is ready; until then a server of it fails with "its data
    set has no data" (not counted as a crash). Each deployment's admins upload into that
    deployment alone: staging's data never reaches prod's bucket, nor the other way.
@@ -1380,7 +1382,11 @@ switched client updates from here; with it off, `update.<domain>` (`update.<depl
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
 (web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
 does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
-`OPENNOVA.WIZ` names, else `update.opennova.net`, which the packages write there too. An
+`OPENNOVA.WIZ` names, else `update.opennova.net`. A release game zip writes prod's there,
+and a debug one (`-ExportMode debug`, what PR CI builds) staging's,
+`update.staging.opennova.net`, so a PR's zip updates from staging alone. The runtime's
+update package carries the same wizard, so an install that takes a runtime release takes
+that release's wizard and the deployment it names. An
 OpenNova product (`retail_updater` off) that no published release serves is refused, so an
 OpenNova first install fails until OpenNova's runtime and content releases are published; a
 retail one with none is answered current, from a package web writes into its cache itself.
@@ -1395,6 +1401,57 @@ and packs it, then validates it as an upload); the runtime's is each tagged rele
 release stays a draft). The
 packages are the published releases of the Game data page; web fetches one from the store
 the first time the updater asks for it, into its task's storage.
+
+### Listing on NovaLogic's NovaWorld
+
+An owner can have a hosted server listed on NovaLogic's NovaWorld (`gs.novaworld.net`) as
+well as this service's, so a retail player who never switched NovaWorld sees it too. The
+switch is on by default (`novalogic_listing`, the maintainer's decision of 2026-10-25), but no
+server lists there until the project's NovaLogic account is in the vault. NovaLogic's service
+is a live shared service OpenNova does not run; each listed server sends it what a stock host
+does, its players' names and addresses among them (the site's privacy notice says so).
+
+The server lists there under one project-owned NovaLogic account. NovaLogic's service hands
+out a HOSTKEY only after a login, so without the account no server lists there. Only Joint
+Operations servers can: NovaLogic's DFX2 NovaWorld is down, and OP: Acid Gambit's lobby is ours
+alone, so the form shows the box for Joint Operations data sets and a start of any other
+that asks is refused. The listing is opennova-serve's second listing (`--also-master-host`,
+`apps/serve/README.md` "Two listings"). It starts once the server's first map is up and
+never stops the server. Anything NovaLogic refuses or stops stays off until that server's
+next start; only faults on the way (no answer, a request that never arrived) are tried
+again, at most 5 times. Whether one account may hold several listings at once is not yet
+witnessed; a refusal (MsgCode 1008, too many servers) would show as the extra servers' second
+listings ending, in each server's log and on its page (its Overview's NovaLogic's NovaWorld
+line: listed, retrying or not listed and why; its console marks the players who came through
+it, and the admin's NovaWorld sessions count them per hosted server).
+
+**The switch** is `novalogic_listing` in the var-file, `true` unless a deployment sets it.
+With it on, web, the fleet and the worker read `ONNET_NOVALOGIC_LISTING=1` (`infra apply`,
+then `app converge`), and the start form shows the box.
+
+**The account.** The deployment's app item (`app-<deployment>`) holds `novalogic_user` and
+`novalogic_pass`. Both are `REPLACE_ME` until the real account goes in. They are optional
+secrets (`deploy/env/runtime.env.tpl`), synced only while the fields exist, and only the
+fleet reads them. While either is unset or `REPLACE_ME`, the fleet lists no server on
+NovaLogic's NovaWorld, even with the box ticked. To put the real account in:
+
+1. Write the account's name and password into the two fields in the vault, then run
+   `secrets sync`.
+2. Run `app converge`.
+3. **Check it.** The fleet's boot logs `[hosted] supervisor: a server whose owner asks also
+   lists on NovaLogic's NovaWorld (gs.novaworld.net:7597)`. If it instead logs `WARNING
+   ONNET_NOVALOGIC_LISTING is on but ONNET_NOVALOGIC_USER or ONNET_NOVALOGIC_PASS is unset
+   or still the vault's placeholder`, the account did not reach it: the box shows, but no
+   server lists there. A server that lists there logs `opennova-serve: also listed on
+   NovaWorld (gs.novaworld.net)`, and its other lines from that listing start with
+   `(second listing)`.
+
+**Turning it off:** `novalogic_listing = false`, `infra apply`, then `app converge` (the
+services keep their task definitions' revision until a deploy). The box goes, and a start
+that asks for the listing is refused. A running server keeps its NovaLogic listing until it
+next starts, so to take every one down at once, also stop all from the admin fleet view
+and let the owners start again. Setting the account back to `REPLACE_ME` (or removing the
+fields, then `secrets sync --prune`) and `app converge` also stops new listings there.
 
 ### Fleet commands
 
@@ -1991,6 +2048,13 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 - **Changing a secret.** Edit the deployment's vault item, `secrets sync`, `app converge`. A new
   `database_password` takes `db bootstrap` (it sets the role's password) between the sync
   and the converge.
+- **NovaLogic's servers on the Lobbies page.** On by default (`novalogic_lobbies`, web's
+  `ONNET_NOVALOGIC_LOBBIES`): each web task fetches the Joint Operations list from NovaLogic's
+  live NovaWorld, with no login, at most once every 5 minutes while the page is open
+  somewhere, and keeps the last good list through a failure (web's log names each failed
+  fetch). `novalogic_lobbies = false` in the var-file, `infra apply` and `app converge`
+  turn it off: no section, no fetch (apps/novaworld_common/README.md, "NovaLogic's servers
+  on the Lobbies page").
 
 ### Cost
 

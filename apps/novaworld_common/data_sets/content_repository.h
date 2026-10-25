@@ -1,6 +1,6 @@
 #pragma once
 
-// The content store's rows (backend/migrations/0023_content.sql, ADR 0069): the content
+// The content store's rows (backend/migrations/0025_content.sql, ADR 0069): the content
 // projects (one per product, its key the store's and the routes' name for it), each one's
 // linear history of revisions (each a manifest in the object store,
 // base/content/content_manifest.h), and the files its store holds. The content routes and the

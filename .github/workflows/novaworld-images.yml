@@ -87,13 +87,14 @@ jobs:
       - name: Build the images
         uses: docker/bake-action@v6
         env:
-          GHA_CACHE: ${{ github.event_name == 'push' && 'readwrite' || 'read' }}
+          GHA_CACHE: ${{ github.event_name != 'pull_request' && 'readwrite' || 'read' }}
         with:
           source: .
           files: apps/novaworld_common/docker-bake.hcl
 
-  # On push events alone (PRs from forks can't push to GHCR), once http-tests
-  # and the build have passed: each image pushed by a job of its own, its bake
+  # On master's pushes and on a manual run (a branch's images for staging before
+  # it merges: its sha and branch tags, never `latest`), never a PR's (PRs from
+  # forks can't push to GHCR), once http-tests and the build have passed: each image pushed by a job of its own, its bake
   # target built again with its tags. The checkout is the build's, so every
   # step hits the layer cache the build exported for this commit and nothing
   # compiles; each job only uploads (a missed cache costs time alone: the
@@ -104,7 +105,7 @@ jobs:
   push:
     name: push (${{ matrix.target }})
     needs: [http-tests, build]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read

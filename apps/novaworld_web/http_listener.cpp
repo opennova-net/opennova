@@ -472,6 +472,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->connections.register_routes(impl_->app, config.heartbeat_timeout_ms);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.set_address_zone(address_zone_);
+	impl_->hosted_servers.set_novalogic_listing(novalogic_listing_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->addresses.configure(addresses_on_, address_zone_, fleet_placement_.max_addresses);
 	impl_->addresses.register_routes(impl_->app);
@@ -483,7 +484,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->stats.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app);
-	impl_->lobbies.register_routes(impl_->app);
+	impl_->lobbies.register_routes(impl_->app, novalogic_lobbies_);
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
 	impl_->billing.set_billing(billing_);
@@ -909,7 +910,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
-	// GET /api/lobbies and /api/lobbies/<rid> are lobby_routes.h's.
+	// GET /api/lobbies, /api/lobbies/<rid> and /api/lobbies/novalogic are lobby_routes.h's.
 
 	// Phase I.5: aggregate counts for the Vue dashboard.
 	CROW_ROUTE(app, "/api/stats")([this]() {
@@ -1774,7 +1775,7 @@ void HttpListener::register_legacy_host_join_routes(
 	// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
 	//
 	// One route per games row, at its gsb_path (/jop_2.gsb, /dfx2_0.gsb,
-	// /opennova_0.gsb), listing the hosts registered under its LobbyName; a
+	// /acidgambit_0.gsb), listing the hosts registered under its LobbyName; a
 	// column a host reported nothing for shows its game's VER1 / Expbits.
 	auto handle_gsb = [this](const catalog::GameRow &game) {
 		// Phase I.2: backed by active_hosts, filtered to the requested game

@@ -322,7 +322,7 @@ policy, not a port.
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
 | `tree.finalize` | an uploaded data set tree checked, sized and made ready (`data_sets/data_set_jobs.h`) | the admin's finalize | data | 2 |
 | `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | data | 1 |
-| `release.apply` | one section of a published release applied to its data set's baseline (an OpenNova or `onjo1` section built from empty), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
+| `release.apply` | one section of a published release applied to its data set's baseline (an OP: Acid Gambit or `nifty` section built from empty), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each job above, the delete routes | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
@@ -402,13 +402,13 @@ boot); `title` is the engine's game profile code the row's clients speak
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
-| `opennova:0` | `opennova_0_consumer` | `opennova_0_consumer` | `jo` | `jop_2_start.htm` | `/opennova_0.gsb` | 28 | 1 |
+| `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `jop_2_start.htm` | `/acidgambit_0.gsb` | 28 | 1 |
 
 The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
 (3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
 LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
 Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
-bit 0 alone (ON's `onjo1` expansion, a data set migration 0013 seeds, has no bit here).
+bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set migration 0013 seeds, has no bit here).
 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
@@ -437,6 +437,33 @@ bit 0 alone (ON's `onjo1` expansion, a data set migration 0013 seeds, has no bit
   prefix of the page it names (`dfx2_0_`); else JO's. JO and ON share pfid 28 and JO's
   pages, so only the tag tells them apart. The HTTP listener also reads the table once in
   `start()`, where it registers the `.gsb` routes.
+
+### NovaLogic's servers on the Lobbies page
+
+`GET /api/lobbies/novalogic` (public, read-only) answers the Joint Operations servers listed
+on NovaLogic's own NovaWorld, as a stock client's browser lists them:
+`{"enabled", "servers": [{"id", "serverName", "mission", "gameType", "players",
+"maxPlayers", "locked", "password", "message", "country", "region", "timeLeft", "timeOfDay",
+"expansion", "punkBuster", "dedicated", "tracers", "roster"}], "fetchedAt", "ageSeconds",
+"failing"}`: the text UTF-8 with the game's inline markup left in (the page draws it as the
+game does), the roster the players' names the game's browser shows, and no host's address
+([`novalogic_lobbies.h`](../novaworld_web/novalogic_lobbies.h)). The site's Lobbies page lists
+them in its server table and each on a page of its own (`/lobby/novalogic/<id>`).
+Web reads them the way the stock client does, with no login and no cookie: one GET of JO's
+GSB feed on NovaLogic's web host, `http://207.178.209.204/jop_2.gsb?a=1` (the lobby
+SessionInit's web domain and the list load the record's live capture shows,
+`docs/net/novaworld-net-re.md` §7 Wave 4), parsed with `gsb_parse_response`. DFX2's feed
+there is unwitnessed, so only JO's is read. The list is a cache in each web process: a
+request answers what it holds and never waits on NovaLogic; a request that finds it older
+than 5 minutes (or none) starts one fetch in the background, so a process fetches at most
+once every 5 minutes however many visitors look, and not at all while nobody does. A fetch
+that fails (no answer within 5 s a step, a status other than 200, bytes that are no server
+list) keeps the last good list and its time (`failing` true), and the next waits its 5
+minutes too. `ONNET_NOVALOGIC_LOBBIES=1` turns it on (web's, read at boot); unset or `0`
+(the default, so no test, dev stack or CI run contacts NovaLogic), the route answers
+`enabled` false and nothing is fetched. A deployment sets it from `novalogic_lobbies`
+(`infra/aws`, on by default). The route harness's `novalogic_lobbies_route` case and the
+`novalogic_lobbies` ctest pin it over a feed minted by `gsb_build_response`.
 
 ## Connection lifecycle
 
@@ -571,7 +598,7 @@ the lobby program's usage of that instance's task, and the lobby instances below
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
+| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed, and `novalogic_players`: a hosted server listed on NovaLogic's NovaWorld too, the players that service sent it, who hold no session here though its `players` counts them; null for any other server and while its agent reports none) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
 | `POST /api/admin/connections/<session id>/end` | admin | 202, an `end_session` command for the instance holding it: the client gets its `ServerGoodBye` burst and the connection drops (`Logout`), as the NAPI server role ends a connection it asked to disconnect; 404 for a session that ended; 409 `hosting` (with its `rid`: stop the listing instead, since ending its session only parks it for the re-host) |
 
 ## Pushing statements to a listed server
@@ -1109,6 +1136,9 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 `ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`. The listing policy:
 `ONNET_REQUIRE_HOST_KEY=1` lists no host whose HostKey names no account (default off:
 listed with no owner; "Listed servers and owners" above).
+`ONNET_NOVALOGIC_LOBBIES=1` has web list the servers on NovaLogic's NovaWorld on the
+Lobbies page (default off: nothing is fetched from NovaLogic; "NovaLogic's servers on the
+Lobbies page" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
 `ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on a UDP

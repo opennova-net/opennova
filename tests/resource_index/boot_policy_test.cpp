@@ -255,7 +255,7 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_game(none, "") == "jo");
     CHECK(none.resource_dir.empty());
     // No /game: the folder's product, a folder with no wizard OpenNova's, a foreign one none.
-    CHECK(launch_product(none, "") == "opennova" && launch_product_supported(none, ""));
+    CHECK(launch_product(none, "") == "acidgambit" && launch_product_supported(none, ""));
     CHECK(launch_product(none, "dfx2") == "dfx2" && launch_product_supported(none, "dfx2"));
     CHECK(launch_product(none, kForeignFolder).empty() && !launch_product_supported(none, kForeignFolder));
     CHECK(launch_game(none, launch_product(none, "jo")) == "jo");
@@ -264,8 +264,8 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     // /game wins over the folder, a foreign one too.
     CHECK(launch_product(parse_launch_flags({"/game", "Jo"}), "dfx2") == "jo");
     CHECK(launch_product_supported(parse_launch_flags({"/game", "jo"}), kForeignFolder));
-    CHECK(launch_game(parse_launch_flags({"/game", "OPENNOVA"}), "dfx2") == "jo");
-    CHECK(launch_game(parse_launch_flags({"/game", "DFX2"}), "opennova") == "dfx2");
+    CHECK(launch_game(parse_launch_flags({"/game", "ACIDGAMBIT"}), "dfx2") == "jo");
+    CHECK(launch_game(parse_launch_flags({"/game", "DFX2"}), "acidgambit") == "dfx2");
     CHECK(!launch_product_supported(parse_launch_flags({"/game", "missing"}), ""));
     CHECK(!launch_product_supported(parse_launch_flags({"/game", "dfx"}), ""));
     CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
@@ -321,7 +321,7 @@ void test_folder_product() {
             "[HEADER]\r\nCMD=JOPTR.CMD\r\nURL=ftp.novaworld.com\r\nPRODUCT_LOGIN=JOTRqq\r\n")) == "jo");
     CHECK(folder_product(folder("dfx2", "update.wiz", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n")) ==
           "dfx2");
-    CHECK(folder_product(folder("opennova", "UPDATE.WIZ", "[HEADER]\r\nCMD=OPENNOVA.CMD\r\n")) == "opennova");
+    CHECK(folder_product(folder("acidgambit", "UPDATE.WIZ", "[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\n")) == "acidgambit");
     CHECK(folder_product(folder("bhd", "Update.Wiz", "[HEADER]\r\nCMD=DFBHD.CMD\r\n")) == kForeignFolder);
     CHECK(folder_product(folder("unread", "UPDATE.WIZ", "")) == kForeignFolder);
     CHECK(folder_product(folder("fresh", nullptr, "")).empty());

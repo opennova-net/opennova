@@ -1129,16 +1129,16 @@ static int test_apply_never_player_files() {
 }
 
 // ADR 0046 S16: a project that builds as an expansion (jxm) on the installed one (a packed game install
-// minted from OpenNova's own game, minted_install.h, and its expansion onjo1, in the place JO:CA's jox01
-// has) imports the install as `/exp onjo1` serves it: the closure of the expansion's smallest mission
-// planned with what it needs, the expansion's own files under the project's names (onjo1.bin as jxm.bin),
+// minted from OpenNova's own game, minted_install.h, and its expansion nifty, in the place JO:CA's jox01
+// has) imports the install as `/exp nifty` serves it: the closure of the expansion's smallest mission
+// planned with what it needs, the expansion's own files under the project's names (nifty.bin as jxm.bin),
 // each byte for byte what the game is served; and the whole install listed, each name once.
 static int test_apply_install_expansion() {
 	test_temp::TempDir dir("opennova_editor_apply_install_expansion");
 	const std::string install = dir.file("install");
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted) &&
-	            fs::is_regular_file(fs::path(install) / "expansion" / minted_install::kExpansion / "onjo1.pff"));
+	            fs::is_regular_file(fs::path(install) / "expansion" / minted_install::kExpansion / "nifty.pff"));
 	const std::string root = dir.file("project");
 	ProjectDocument created;
 	Diagnostic error;
@@ -1156,9 +1156,9 @@ static int test_apply_install_expansion() {
 		TEST_EXPECT(names.insert(normalized_logical_name(choice.name())).second);
 		renamed += choice.as.empty() ? 0 : 1;
 	}
-	TEST_EXPECT(names.count("JXM.BIN") && names.count("MJXM.SBF") && !names.count("ONJO1.BIN") &&
+	TEST_EXPECT(names.count("JXM.BIN") && names.count("MJXM.SBF") && !names.count("NIFTY.BIN") &&
 	            !names.count("MENUMUS.SBF") && !names.count("VERSION.TXT"));
-	std::printf("editor_import install expansion: the whole install with onjo1 as jxm lists %zu names (%zu under the "
+	std::printf("editor_import install expansion: the whole install with nifty as jxm lists %zu names (%zu under the "
 	            "project's own names), the base game %zu\n",
 	            whole.size(), renamed, base.size());
 	// The smallest mission of the expansion's own.
@@ -1189,7 +1189,7 @@ static int test_apply_install_expansion() {
 	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(session.outcome().done() && !plan.truncated && !has_error(plan.diagnostics));
-	// What /exp onjo1 serves, read the game's way, against each planned file of the install's archives.
+	// What /exp nifty serves, read the game's way, against each planned file of the install's archives.
 	opennova::Vfs game;
 	opennova::LaunchFlags flags;
 	flags.expansion = minted_install::kExpansion;
@@ -1211,11 +1211,11 @@ static int test_apply_install_expansion() {
 	}
 	// The same, independently of the view's mount (the mount above is the code path the view reads
 	// through): the expansion's own archives opened directly. A row of the expansion's layer is a member of
-	// onjo1L.pff or onjo1.pff, served as stored there; a row of the base's is a member of neither (the
+	// niftyL.pff or nifty.pff, served as stored there; a row of the base's is a member of neither (the
 	// expansion would serve it); a loose row is the file on the disk, the expansion's in its folder.
 	opennova::pff::PffArchive language{}, resources{};
-	const bool language_open = opennova::pff::pff_open(&language, (install + "/expansion/onjo1/onjo1L.pff").c_str()) == 0;
-	const bool resources_open = opennova::pff::pff_open(&resources, (install + "/expansion/onjo1/onjo1.pff").c_str()) == 0;
+	const bool language_open = opennova::pff::pff_open(&language, (install + "/expansion/nifty/niftyL.pff").c_str()) == 0;
+	const bool resources_open = opennova::pff::pff_open(&resources, (install + "/expansion/nifty/nifty.pff").c_str()) == 0;
 	TEST_EXPECT(language_open && resources_open);
 	const auto stored = [](const opennova::pff::PffArchive &archive, const opennova::pff::PffEntry *entry) {
 		std::vector<uint8_t> bytes(entry ? entry->size : 0);
@@ -1263,12 +1263,12 @@ static int test_apply_install_expansion() {
 	};
 	// The expansion's own files come with a mission as the game's fixed names do, under the project's.
 	const ImportPlanRow *table = row_called("jxm.bin");
-	TEST_EXPECT(table && table->state == State::Found && table->source.entry == "onjo1.bin" &&
+	TEST_EXPECT(table && table->state == State::Found && table->source.entry == "nifty.bin" &&
 	            table->needed_by.field.find("the game, ") == 0);
-	TEST_EXPECT(!row_called("onjo1.bin") && !row_called("menumus.bin"));
+	TEST_EXPECT(!row_called("nifty.bin") && !row_called("menumus.bin"));
 	std::printf("editor_import install expansion: %s's closure %zu files (%.1f MB), %zu of the install's archives' checked "
-	            "byte for byte against /exp onjo1 (%zu from the expansion's, %zu under the project's names; %zu against "
-	            "onjo1's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
+	            "byte for byte against /exp nifty (%zu from the expansion's, %zu under the project's names; %zu against "
+	            "nifty's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
 	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, independent,
 	            loose_rows, seconds);
 	TEST_EXPECT(checked > expansion_layer && expansion_layer > 0 && own > 0);

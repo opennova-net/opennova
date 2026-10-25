@@ -4,7 +4,8 @@
 // type says so. The server's legs live in server.cpp; this file owns the
 // console, the stop signals, the socket layer and the wall clock. The status
 // page and its chat input are status_console.cpp's; what a supervisor reads of
-// the run (the tick health, the exit's line) is run_reports.h's.
+// the run (the tick health, the exit's line, the second listing's state) is
+// run_reports.h's.
 
 #include "run_reports.h"
 #include "server.h"
@@ -33,6 +34,7 @@
 #include <csignal>
 #include <cstdio>
 #include <ctime>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -98,6 +100,9 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	if (options.status_page)
 		input.start();
 	serve::TickStats ticks;
+	// The second listing's state as last written (--second-listing-file): rewritten when it
+	// changes.
+	std::optional<serve::SecondListingReport> listing_written;
 	while (!g_stop.load()) {
 		const auto now = clock::now();
 		const uint32_t tick_count = world::frame_tick_count_ms();
@@ -134,6 +139,19 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 				if (!io::write_file_atomic(options.stats_file,
 							serve::tick_minute_json(*minute, static_cast<int64_t>(std::time(nullptr))), why))
 					io::logf(io::LogLevel::kWarn, "opennova-serve: --stats-file: %s", why.c_str());
+			}
+		}
+		if (!options.second_listing_file.empty()) {
+			// After the frame's measure, so a write never counts in its time. A write that fails
+			// is logged once and tried again at the state's next change.
+			const serve::SecondListingReport listing = server.second_listing_report();
+			if (!listing_written || *listing_written != listing) {
+				listing_written = listing;
+				std::string why;
+				if (!io::write_file_atomic(
+							options.second_listing_file, serve::second_listing_json(listing), why))
+					io::logf(io::LogLevel::kWarn, "opennova-serve: --second-listing-file: %s",
+							why.c_str());
 			}
 		}
 		std::this_thread::sleep_until(next);
@@ -174,14 +192,23 @@ int main(int argc, char **argv) {
 			io::logf(io::LogLevel::kWarn, "opennova-serve: --exit-file: %s", why.c_str());
 		return code;
 	};
-	if (!options.credentials_path.empty()) {
-		if (!serve::load_credentials(options.credentials_path, options.credentials, error)) {
-			io::logf(io::LogLevel::kError, "opennova-serve: --credentials: %s", error.c_str());
-			return exit_with(2, "--credentials: " + error);
+	// The first listing's account (--credentials) and the second's (--also-credentials).
+	const auto load_account = [&error](const char *flag, const std::string &path,
+			serve::Credentials &out) {
+		if (path.empty()) return true;
+		if (!serve::load_credentials(path, out, error)) {
+			error = std::string(flag) + ": " + error;
+			return false;
 		}
-		const serve::Credentials &c = options.credentials;
-		for (const std::string *secret : { &c.user, &c.pass })
+		for (const std::string *secret : { &out.user, &out.pass })
 			serve::add_log_secret(*secret);
+		return true;
+	};
+	if (!load_account("--credentials", options.credentials_path, options.credentials) ||
+			!load_account("--also-credentials", options.also_credentials_path,
+					options.also_credentials)) {
+		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());
+		return exit_with(2, error);
 	}
 	// Installed before the boot, so a stop during a long load or the
 	// NovaWorld hosting stops cleanly.

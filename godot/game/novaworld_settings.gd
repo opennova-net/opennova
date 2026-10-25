@@ -17,23 +17,29 @@ enum Target { OPENNOVA = 0, REAL = 1 }
 # the value.
 const REAL_NOVAWORLD_HOST := "gs.novaworld.net"
 const GATE_PORT := HostSessionConfig.DEFAULT_GATE_PORT
-# The OpenNova target's gates (ADR 0010 d2): the live service's own name (the
-# unproxied A record at the gate's address, infra/aws/edge.tf), and loopback, the
+# The OpenNova target's gates (ADR 0010 d2): each deployment's own name (the
+# unproxied A record at its gate's address, infra/aws/edge.tf; DEPLOY.md
+# "Deployments: dev, staging and prod"): prod's, staging's, and loopback, the
 # local stack DEVELOPING.md runs.
 const OPENNOVA_NOVAWORLD_HOST := "nw.opennova.net"
+const STAGING_NOVAWORLD_HOST := "nw.staging.opennova.net"
 const LOCAL_NOVAWORLD_HOST := "127.0.0.1"
 
-# The gate the OpenNova target dials: --novaworld-host when given, else the live
-# service in an exported build, else loopback, so a source run (and every test)
-# reaches the local stack and never the live service. Not stored: a build's
-# own, never the player's.
+# The gate the OpenNova target dials: --novaworld-host when given, else the
+# export's own deployment, prod's in a release export and staging's in a debug
+# one (PR CI's zip), as its updater's OPENNOVA.WIZ names (package_godot_windows.ps1),
+# else loopback, so a source run (and every test) reaches the local stack and
+# never a live service. Not stored: a build's own, never the player's.
 static func opennova_host() -> String:
-	return opennova_host_for(LaunchFlags.novaworld_host(), OS.has_feature("template"))
+	return opennova_host_for(LaunchFlags.novaworld_host(), OS.has_feature("template"),
+			OS.is_debug_build())
 
-static func opennova_host_for(flag_host: String, exported: bool) -> String:
+static func opennova_host_for(flag_host: String, exported: bool, debug: bool) -> String:
 	if not flag_host.is_empty():
 		return flag_host
-	return OPENNOVA_NOVAWORLD_HOST if exported else LOCAL_NOVAWORLD_HOST
+	if not exported:
+		return LOCAL_NOVAWORLD_HOST
+	return STAGING_NOVAWORLD_HOST if debug else OPENNOVA_NOVAWORLD_HOST
 
 static func load_target() -> int:
 	var value := int(ConfigStore.read(CONFIG_PATH, SECTION, "target", Target.OPENNOVA))

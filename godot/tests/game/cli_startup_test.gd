@@ -44,7 +44,7 @@ func _launch(args: PackedStringArray, expected_exit: int, verbose := false,
 func test_empty_opennova_install_reaches_bootstrap_without_game_data() -> void:
 	var dir := TestFs.cache_dir(self, "empty_bootstrap")
 	_dirs.append(dir)
-	var log_text := _launch(["/game", "opennova", "--resource-dir", dir], 1, true)
+	var log_text := _launch(["/game", "acidgambit", "--resource-dir", dir], 1, true)
 	assert_string_contains(log_text, "OpenNova: content installation required")
 	assert_false(log_text.contains("no menu found in resource dir"), log_text)
 

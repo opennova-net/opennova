@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 
+#include <chrono>
 #include <cstddef>
 #include <optional>
 #include <string_view>
@@ -10,7 +11,6 @@ namespace opennova::net {
 
 namespace {
 
-constexpr size_t kMaxReplyBytes = 8u * 1024u * 1024u;
 
 // Split the head (status line + header lines) off `raw`; false while it is incomplete.
 bool parse_head(const std::string &raw, HttpReply &reply, size_t &body_at, long long &content_length) {
@@ -56,7 +56,7 @@ bool parse_head(const std::string &raw, HttpReply &reply, size_t &body_at, long 
 
 HttpReply http_exchange(const std::string &method, const std::string &url,
 		const std::vector<std::string> &headers, const std::string &body, int timeout_ms,
-		const HttpResolver &resolve) {
+		const HttpResolver &resolve, size_t max_reply_bytes, int total_ms) {
 	HttpReply reply;
 	constexpr std::string_view kScheme = "http://";
 	if (!strutil::starts_with_icase(url, kScheme)) {
@@ -118,6 +118,7 @@ HttpReply http_exchange(const std::string &method, const std::string &url,
 		return reply;
 	}
 
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(total_ms);
 	std::string raw;
 	bool head_done = false;
 	size_t body_at = 0;
@@ -131,12 +132,16 @@ HttpReply http_exchange(const std::string &method, const std::string &url,
 				raw.size() - body_at >= static_cast<size_t>(content_length)) {
 			break;
 		}
+		if (total_ms > 0 && std::chrono::steady_clock::now() >= deadline) {
+			reply.error = "reply too slow";
+			return reply;
+		}
 		const int n = tcp_recv(socket.get(), buf, sizeof(buf));
 		if (n <= 0) {
 			break;
 		}
 		raw.append(reinterpret_cast<const char *>(buf), static_cast<size_t>(n));
-		if (raw.size() > kMaxReplyBytes) {
+		if (raw.size() > max_reply_bytes) {
 			reply.error = "reply too large";
 			return reply;
 		}

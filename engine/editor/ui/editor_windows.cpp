@@ -1063,7 +1063,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in the content store (ADR 0069): "OPENNOVA r41, 3 changed, 2 incoming".
+	// The project's standing in the content store (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
 	const std::string content_text = content_status_text(v.content);
 
 	// Each part's width, left to right: the content store's standing, the unsaved files, the problem

@@ -34,8 +34,8 @@ private:
 // (content_check). The welcome page and the Content window draw it.
 void draw_content_projects(Workspace &workspace);
 
-// The words the status bar gives the open project's standing in the content store: "OPENNOVA r41", then its
-// changes and the revisions it lacks once a check, a pull or a push has counted them ("OPENNOVA r41, 3 changed,
+// The words the status bar gives the open project's standing in the content store: "ACIDGAMBIT r41", then its
+// changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
 // 2 incoming"); "" for a project the store does not hold.
 std::string content_status_text(const ContentView &content);
 

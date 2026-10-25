@@ -4672,8 +4672,9 @@ add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_option
 
 # What a supervised opennova-serve leaves its supervisor (apps/serve/run_reports.h), on a
 # hand-stepped clock: a minute of frames as their p50, p99 and longest frame time and the late
-# frames, the window starting over; the --stats-file and --exit-file lines; the --status-page,
-# --stats-file and --exit-file flags. No retail data.
+# frames, the window starting over; the --stats-file, --exit-file and --second-listing-file
+# lines; the --status-page, --stats-file, --exit-file and --second-listing-file flags. No retail
+# data.
 add_executable(opennova_serve_run_reports_test serve/run_reports_test.cpp)
 target_link_libraries(opennova_serve_run_reports_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_run_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

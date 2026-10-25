@@ -210,6 +210,13 @@ struct ServerConfig {
 	// (LobbySession::set_require_host_key).
 	bool require_host_key = false;
 
+	// ONNET_NOVALOGIC_LOBBIES=1: web's Lobbies page also lists the servers on
+	// NovaLogic's NovaWorld, fetched from NovaLogic's live service at most once
+	// per a few minutes (apps/novaworld_web/novalogic_lobbies.h). Off by
+	// default, so no test, dev stack or CI run contacts NovaLogic; a
+	// deployment turns it on (infra/aws var.novalogic_lobbies). Web's alone.
+	bool novalogic_lobbies = false;
+
 	// The site's origin (ONNET_SITE_URL, its trailing '/' dropped): the links
 	// the welcome mail and the password reset mail carry (accounts/mailer.h). Billing
 	// reads the same variable for its return URLs (billing/billing_config.h).
@@ -277,6 +284,11 @@ struct ServerConfig {
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account, a backstop beside the fleet's own room.
 	int hosted_cap = 24;
+	// ONNET_NOVALOGIC_USER / ONNET_NOVALOGIC_PASS: the project's NovaLogic NovaWorld account,
+	// which the hosted servers that also list on NovaLogic's NovaWorld log in with (the fleet's
+	// alone; fleet_config.h ONNET_NOVALOGIC_LISTING offers it). Secrets: never logged.
+	std::string novalogic_user;
+	std::string novalogic_pass;
 	// The object store the hosted game data and the update packages live in
 	// (core/object_store.h, ADR 0064): ONNET_OBJECT_STORE_URL, `s3://<bucket>/data`
 	// (the deployment's own ops bucket) with ONNET_OBJECT_STORE_REGION, the

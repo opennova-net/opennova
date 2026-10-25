@@ -2,7 +2,8 @@
 // one opennova-hostd and the NovaWorld service both build: each message's round trip
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
 // sync's report, the reason a container ended or never started, what a starting one
-// waits for, its slot's network, a running server's tick health, the machine's image,
+// waits for, its slot's network, a running server's tick health and second listing (each
+// state's members alone, its file's own line read by the same rules), the machine's image,
 // log stream, use and trees, and a listing that failed among them, and its reply, the
 // files' bytes in base64, cp1252 and NUL included, the trees each container uses and
 // their manifests, each container's log stream), the exact member names on the wire, the
@@ -477,6 +478,108 @@ int test_sync_request() {
 	return 0;
 }
 
+// A running server's second listing (its --second-listing-file, a hosted server's listing on
+// NovaLogic's NovaWorld): absent unless reported, each state's members alone, the shapes, and
+// the file's own line read by the same rules.
+int test_sync_request_second_listing() {
+	using hosted::SecondListingState;
+	hosted::SyncRequest request;
+	request.agent_version = "0123abcd";
+	request.containers = { sample_report(0, ContainerState::Running) };
+	const std::string none = hosted::encode_sync_request(request);
+	// A report without it (an agent or a server from before it) reads as no state.
+	hosted::SyncRequest back;
+	std::string error;
+	TEST_EXPECT(none.find("second_listing") == std::string::npos);
+	TEST_EXPECT(
+			hosted::decode_sync_request(none, back, error) && !back.containers[0].second_listing);
+
+	hosted::SecondListingStatus refused;
+	refused.state = SecondListingState::NotListed;
+	refused.reason = "the service did not accept the server name";
+	refused.tag = "NWEC57";
+	refused.slots = { 2, 7 };
+	request.containers[0].second_listing = refused;
+	const std::string json = hosted::encode_sync_request(request);
+	for (const char *member : { "\"second_listing\"", "\"state\": \"not_listed\"",
+				 "\"reason\": \"the service did not accept the server name\"",
+				 "\"tag\": \"NWEC57\"" })
+		TEST_EXPECT(json.find(member) != std::string::npos);
+	TEST_EXPECT(json.find("\"try\"") == std::string::npos &&
+			json.find("next_try_at") == std::string::npos);
+	TEST_EXPECT(
+			hosted::decode_sync_request(json, back, error) && back.containers[0].second_listing);
+	const hosted::SecondListingStatus &got = *back.containers[0].second_listing;
+	TEST_EXPECT(got.state == SecondListingState::NotListed && got.reason == refused.reason &&
+			got.tag == "NWEC57" && got.slots == refused.slots && got.attempt == 0 &&
+			!got.next_try_at);
+
+	// A retry: its try of the run's most, when, why.
+	hosted::SecondListingStatus retrying;
+	retrying.state = SecondListingState::Retrying;
+	retrying.attempt = 2;
+	retrying.attempts = 5;
+	retrying.next_try_at = 1792000060;
+	retrying.reason = "the gate did not answer";
+	request.containers[0].second_listing = retrying;
+	TEST_EXPECT(hosted::decode_sync_request(hosted::encode_sync_request(request), back, error));
+	const hosted::SecondListingStatus &again = *back.containers[0].second_listing;
+	TEST_EXPECT(again.state == SecondListingState::Retrying && again.attempt == 2 &&
+			again.attempts == 5 && again.next_try_at == 1792000060 && again.tag.empty() &&
+			again.slots.empty());
+
+	// Each state's members, nowhere else; the shapes.
+	const auto reads = [](const std::string &member) {
+		hosted::SecondListingStatus out;
+		std::string why;
+		return hosted::decode_second_listing(member, out, why);
+	};
+	TEST_EXPECT(reads("{\"state\":\"off\"}") && reads("{\"state\":\"listed\",\"slots\":[0,255]}"));
+	TEST_EXPECT(reads("{\"state\":\"trying\",\"try\":1,\"tries\":5}"));
+	TEST_EXPECT(!reads("{\"state\":\"trying\"}") &&
+			!reads("{\"state\":\"trying\",\"try\":6,\"tries\":5}") &&
+			!reads("{\"state\":\"trying\",\"try\":0,\"tries\":5}"));
+	TEST_EXPECT(!reads("{\"state\":\"listed\",\"try\":1,\"tries\":5}") &&
+			!reads("{\"state\":\"listed\",\"reason\":\"x\"}") &&
+			!reads("{\"state\":\"trying\",\"try\":1,\"tries\":5,\"next_try_at\":1}"));
+	TEST_EXPECT(!reads("{\"state\":\"retrying\",\"try\":2,\"tries\":5,\"reason\":\"x\"}") &&
+			!reads("{\"state\":\"retrying\",\"try\":2,\"tries\":5,\"next_try_at\":1}") &&
+			reads("{\"state\":\"retrying\",\"try\":2,\"tries\":5,\"next_try_at\":1,\"reason\":"
+				  "\"x\"}"));
+	TEST_EXPECT(!reads("{\"state\":\"not_listed\"}") &&
+			!reads("{\"state\":\"not_listed\",\"reason\":\"\"}") &&
+			!reads("{\"state\":\"not_listed\",\"reason\":\"tab\\there\"}") &&
+			!reads("{\"state\":\"not_listed\",\"reason\":\"" + std::string(201, 'x') + "\"}"));
+	TEST_EXPECT(!reads("{\"state\":\"not_listed\",\"reason\":\"x\",\"tag\":\"57\"}") &&
+			!reads("{\"state\":\"not_listed\",\"reason\":\"x\",\"tag\":\"NWEC\"}") &&
+			!reads("{\"state\":\"not_listed\",\"reason\":\"x\",\"tag\":\"NWEC12345\"}") &&
+			reads("{\"state\":\"not_listed\",\"reason\":\"x\",\"tag\":\"NWEC60\"}"));
+	TEST_EXPECT(!reads("{\"state\":\"listed\",\"slots\":[256]}") &&
+			!reads("{\"state\":\"listed\",\"slots\":[-1]}") &&
+			!reads("{\"state\":\"listed\",\"slots\":[3,3]}") &&
+			!reads("{\"state\":\"listed\",\"slots\":[4,3]}") &&
+			!reads("{\"state\":\"listed\",\"slots\":3}"));
+	TEST_EXPECT(!reads("{\"state\":\"hosting\"}") && !reads("{\"state\":\"listed\",\"extra\":1}") &&
+			!reads("[]") && !reads("not json"));
+	// opennova-serve's own line (apps/serve/run_reports.h second_listing_json) reads.
+	hosted::SecondListingStatus line;
+	TEST_EXPECT(hosted::decode_second_listing(
+			"{\"state\":\"retrying\",\"try\":2,\"tries\":5,\"next_try_at\":1792000060,"
+			"\"reason\":\"the gate did not answer\",\"tag\":\"NWEC15\",\"slots\":[2,5]}\n",
+			line, error));
+	TEST_EXPECT(line.tag == "NWEC15" && line.slots == std::vector<int>({ 2, 5 }));
+	// Only on a running container.
+	request.containers = { sample_report(1, ContainerState::Exited) };
+	request.containers[0].second_listing = refused;
+	TEST_EXPECT(!hosted::decode_sync_request(hosted::encode_sync_request(request), back, error) &&
+			error.find("running") != std::string::npos);
+	TEST_EXPECT(std::string(hosted::second_listing_state_text(SecondListingState::NotListed)) ==
+					"not_listed" &&
+			hosted::parse_second_listing_state("retrying") == SecondListingState::Retrying &&
+			!hosted::parse_second_listing_state("Listed"));
+	return 0;
+}
+
 // What a report says of the machine itself: its image, the agent's log stream, its use
 // and the trees it holds, each with its shapes; a starting container's wait.
 int test_sync_request_machine() {
@@ -779,6 +882,7 @@ int main() {
 		{ "bootstrap", test_bootstrap },
 		{ "protocol", test_protocol },
 		{ "sync_request", test_sync_request },
+		{ "sync_request_second_listing", test_sync_request_second_listing },
 		{ "sync_request_machine", test_sync_request_machine },
 		{ "sync_reply", test_sync_reply },
 	};

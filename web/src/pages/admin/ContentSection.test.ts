@@ -62,7 +62,7 @@ describe('ContentSection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    read.mockResolvedValue({ ok: true, value: [project('OPENNOVA'), project('JO', { visibility: 'private', retail: true, data_set_id: 2 })] });
+    read.mockResolvedValue({ ok: true, value: [project('ACIDGAMBIT'), project('JO', { visibility: 'private', retail: true, data_set_id: 2 })] });
     dataSets.mockResolvedValue({
       ok: true,
       value: { store: { kind: 'local' }, titles: [], games: [], data_sets: [{ id: 2, display_name: 'Joint Operations' }] },
@@ -99,28 +99,28 @@ describe('ContentSection', () => {
     history.mockResolvedValueOnce({ ok: true, value: revisions });
     history.mockResolvedValueOnce({ ok: true, value: [{ ...revisions[0], number: 10, message: 'Change 10' }] });
     const page = await mountSection();
-    const button = page.findAll('button').find((b) => b.text().startsWith('History') && b.text().includes('OPENNOVA'));
+    const button = page.findAll('button').find((b) => b.text().startsWith('History') && b.text().includes('ACIDGAMBIT'));
     await button!.trigger('click');
     await flushPromises();
-    expect(history).toHaveBeenCalledWith('OPENNOVA', undefined);
+    expect(history).toHaveBeenCalledWith('ACIDGAMBIT', undefined);
     expect(page.findAll('.content-history li')).toHaveLength(50);
     const older = page.findAll('button').find((b) => b.text() === 'Older revisions');
     await older!.trigger('click');
     await flushPromises();
-    expect(history).toHaveBeenLastCalledWith('OPENNOVA', 11);
+    expect(history).toHaveBeenLastCalledWith('ACIDGAMBIT', 11);
     expect(page.findAll('.content-history li')).toHaveLength(51);
   });
 
   it('makes a project, its key in capitals', async () => {
-    create.mockResolvedValue({ ok: true, value: project('ONJO1') });
+    create.mockResolvedValue({ ok: true, value: project('NIFTY') });
     const page = await mountSection();
-    await page.get('#content-new-key').setValue('onjo1');
+    await page.get('#content-new-key').setValue('nifty');
     await page.get('#content-new-title').setValue('Our expansion');
-    await page.get('#content-new-base').setValue('OPENNOVA');
+    await page.get('#content-new-base').setValue('ACIDGAMBIT');
     await page.get('form.grid').trigger('submit');
     await flushPromises();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ key: 'ONJO1', title: 'Our expansion', base: 'OPENNOVA', visibility: 'private' }));
-    expect(page.get('[role="status"]').text()).toContain('ONJO1 is made');
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ key: 'NIFTY', title: 'Our expansion', base: 'ACIDGAMBIT', visibility: 'private' }));
+    expect(page.get('[role="status"]').text()).toContain('NIFTY is made');
   });
 
   it('makes a project public, and deletes one only once its key is typed', async () => {
@@ -132,7 +132,7 @@ describe('ContentSection', () => {
     await flushPromises();
     expect(update).toHaveBeenCalledWith('JO', { visibility: 'public' });
 
-    const begin = page.findAll('button').find((b) => b.text().startsWith('Delete') && b.text().includes('JO') && !b.text().includes('OPENNOVA'));
+    const begin = page.findAll('button').find((b) => b.text().startsWith('Delete') && b.text().includes('JO') && !b.text().includes('ACIDGAMBIT'));
     await begin!.trigger('click');
     const confirm = () => page.findAll('button').find((b) => b.text() === 'Delete now')!;
     expect(confirm().attributes('disabled')).toBeDefined();
@@ -146,7 +146,7 @@ describe('ContentSection', () => {
   it('builds a release of a revision, its version checked first', async () => {
     release.mockResolvedValue({ ok: true, value: { id: 9, name: 'JO 1.0.1' } });
     const page = await mountSection();
-    const begin = page.findAll('button').find((b) => b.text().startsWith('Release') && b.text().includes('JO') && !b.text().includes('OPENNOVA'));
+    const begin = page.findAll('button').find((b) => b.text().startsWith('Release') && b.text().includes('JO') && !b.text().includes('ACIDGAMBIT'));
     await begin!.trigger('click');
     const form = () => page.findAll('form').find((f) => f.find('#content-release-version-JO').exists())!;
     await page.get('#content-release-version-JO').setValue('1.x');

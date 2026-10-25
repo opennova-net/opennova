@@ -12,6 +12,7 @@ import {
   updateHostedServer,
 } from './hostedServer';
 import { hostedServer, serversResponse, settings } from '../test/hostedFixtures';
+import { FIELD_RULES } from '../utils/hostedSettings';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -92,6 +93,20 @@ describe('fetchMyServers', () => {
     get.mockResolvedValue(reply({ ...good, data_sets: [good.data_sets[0], { id: 'x' }, { ...good.data_sets[1], limits: { max_players: { min: 5, max: 2 } } }] }));
     const result = await fetchMyServers();
     expect(result.ok && result.value.data_sets.map((d) => d.id)).toEqual([1]);
+  });
+
+  it("reads whether the service offers listing on NovaLogic's NovaWorld, off when left out", async () => {
+    const offered = serversResponse([], { novalogic_listing: true });
+    get.mockResolvedValue(reply(offered));
+    const on = await fetchMyServers();
+    expect(on.ok && on.value.novalogic_listing).toBe(true);
+    const { novalogic_listing: _listing, ...older } = offered;
+    get.mockResolvedValue(reply(older));
+    const missing = await fetchMyServers();
+    expect(missing.ok && missing.value.novalogic_listing).toBe(false);
+    get.mockResolvedValue(reply({ ...offered, novalogic_listing: 'yes' }));
+    const odd = await fetchMyServers();
+    expect(odd.ok && odd.value.novalogic_listing).toBe(false);
   });
 
   it('reads the data a server runs on, with defaults for what a reply leaves out', async () => {
@@ -184,6 +199,30 @@ describe('fetchMyServers', () => {
     const bare = await fetchMyServers();
     expect(bare.ok && bare.value.servers[0].phase).toBeNull();
     expect(bare.ok && bare.value.servers[0].stopped_because).toBeNull();
+  });
+
+  it("reads a server's listing on NovaLogic's NovaWorld, each member only when it is well formed", async () => {
+    const retrying = hostedServer(3, {
+      novalogic: {
+        state: 'retrying',
+        try: 2,
+        tries: 5,
+        next_try_at: '2026-10-25T13:05:00Z',
+        reason: 'the gate did not answer',
+        tag: 'NWEC15',
+        player_slots: [2, 5],
+      },
+    });
+    const listed = hostedServer(4, { novalogic: { state: 'listed', try: -1, reason: '', player_slots: [3, 'x', -1, 1.5] as never } });
+    // A reply that leaves it out (a service from before it), or one with no state: none.
+    const missing = hostedServer(5, { novalogic: undefined as never });
+    const stateless = hostedServer(6, { novalogic: { player_slots: [1] } as never });
+    get.mockResolvedValue(reply(serversResponse([retrying, listed, missing, stateless])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0].novalogic).toEqual(retrying.novalogic);
+    expect(result.ok && result.value.servers[1].novalogic).toEqual({ state: 'listed', player_slots: [3] });
+    expect(result.ok && result.value.servers[2].novalogic).toBeNull();
+    expect(result.ok && result.value.servers[3].novalogic).toBeNull();
   });
 });
 
@@ -281,6 +320,18 @@ describe('the start, the stop and one server', () => {
     post.mockRejectedValue(refusal(400, { error: 'invalid_settings', field: 'max_players' }));
     const bad = await startHostedServer(settings());
     expect(!bad.ok && bad.error.field).toBe('max_players');
+
+    // The listing on NovaLogic's NovaWorld goes in the body; refused when the
+    // service does not offer it, in the rule's words.
+    post.mockRejectedValue(
+      refusal(400, { error: 'invalid_settings', field: 'list_on_novalogic', message: 'raw server text' }),
+    );
+    const unlisted = await startHostedServer(settings({ list_on_novalogic: true }));
+    expect(post.mock.lastCall?.[1]).toMatchObject({ list_on_novalogic: true });
+    expect(!unlisted.ok && unlisted.error.field).toBe('list_on_novalogic');
+    expect(!unlisted.ok && unlisted.error.message).toBe(
+      `The server refused the settings. ${FIELD_RULES.list_on_novalogic}`,
+    );
 
     post.mockRejectedValue(refusal(429, {}, { 'retry-after': '30' }));
     const limited = await stopHostedServer(1);

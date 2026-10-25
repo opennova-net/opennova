@@ -133,7 +133,7 @@ PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<st
 // from `revision` (an expansion's on its base game's newest), an admin's (ADR 0069 d7).
 ContentRequest release(const ContentAccount &account, const std::string &key,
 		const std::string &version, int64_t revision);
-// The reply: the release's id and name ("OPENNOVA 0.2.0"), building.
+// The reply: the release's id and name ("ACIDGAMBIT 0.2.0"), building.
 bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, ContentApiError &error);
 
 } // namespace content_api

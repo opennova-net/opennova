@@ -49,6 +49,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <vector>
@@ -103,7 +104,7 @@ std::vector<hosted::OfferedDataSet> offered_for_rules() {
 	on.id = 4;
 	on.display_name = "OpenNova";
 	on.title = "jo";
-	on.game = "opennova_0_consumer";
+	on.game = "acidgambit_0_consumer";
 	on.tree_id = 13;
 	on.missions = dfx2.missions;
 	out.push_back(on);
@@ -126,6 +127,32 @@ int test_settings_rules() {
 		change(c);
 		return c;
 	};
+	// The NovaLogic listing: Joint Operations' lobby alone (DFX2's NovaLogic NovaWorld is down,
+	// and OP: Acid Gambit's lobby is only OpenNova's).
+	TEST_EXPECT(!check(with([](auto &c) { c.list_on_novalogic = true; })));
+	// NovaLogic's service refuses a name holding "Nova" (any case): with the box, the start does.
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.list_on_novalogic = true;
+		c.game_name = "[OPENNOVA.NET] Joint Ops";
+	}), "game_name"));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.list_on_novalogic = true;
+		c.game_name = "my nova server";
+	}), "game_name"));
+	TEST_EXPECT(!check(with([](auto &c) { c.game_name = "OpenNova Test"; })));
+	{
+		const std::vector<std::string> dfx2_rotation = { "servetst.bms" };
+		hosted::HostedSettings dfx2 = valid_settings(3);
+		dfx2.missions = dfx2_rotation;
+		TEST_EXPECT(!check(dfx2));
+		dfx2.list_on_novalogic = true;
+		TEST_EXPECT(refused(dfx2, "list_on_novalogic"));
+		hosted::HostedSettings own = valid_settings(4);
+		own.missions = dfx2_rotation;
+		TEST_EXPECT(!check(own));
+		own.list_on_novalogic = true;
+		TEST_EXPECT(refused(own, "list_on_novalogic"));
+	}
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = ""; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = "   "; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = std::string(32, 'n'); }), "game_name"));
@@ -307,7 +334,68 @@ int test_renders() {
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
 		"/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
-	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597) == args);
+	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
+
+	// The NovaLogic listing: only for an owner who asked, on a service that offers it (the
+	// gate and the project's account), with the account's file beside the server's own.
+	{
+		hosted::NovaLogicListing novalogic;
+		novalogic.gate_host = "gs.novaworld.net";
+		novalogic.gate_port = 7597;
+		novalogic.username = "opennova-project";
+		novalogic.password = "nlpass";
+		TEST_EXPECT(novalogic.offered());
+		hosted::HostedSettings asked = s;
+		asked.list_on_novalogic = true;
+		// Asked, but the service offers none: the server's own listing alone, and the second
+		// listing's state file, which then says off, so the owner's page says why.
+		std::vector<std::string> asked_args = args;
+		for (const char *arg : { "--second-listing-file", "second-listing.json" })
+			asked_args.emplace_back(arg);
+		TEST_EXPECT(!hosted::lists_on_novalogic(asked, in.novalogic));
+		TEST_EXPECT(hosted::render_launch(asked, "jo", "jox01", in).serve_args == asked_args);
+		// Offered, but not asked: the same.
+		hosted::RenderInputs offered_in = in;
+		offered_in.novalogic = novalogic;
+		const hosted::LaunchSpec not_asked = hosted::render_launch(s, "jo", "jox01", offered_in);
+		TEST_EXPECT(not_asked.serve_args == args && not_asked.files.size() == 4);
+		// Both: the second listing's arguments after the server's own and its state file, and its
+		// account's file.
+		const hosted::LaunchSpec both = hosted::render_launch(asked, "jo", "jox01", offered_in);
+		std::vector<std::string> both_args = asked_args;
+		for (const char *arg : { "--also-master-host", "gs.novaworld.net", "--also-master-gate-port",
+					 "7597", "--also-credentials", "novalogic.txt", "--allow-public" })
+			both_args.emplace_back(arg);
+		TEST_EXPECT(both.serve_args == both_args);
+		TEST_EXPECT(hosted::render_serve_args(asked, "jo", "jox01", "203.0.113.5", 7597, novalogic) ==
+				both_args);
+		TEST_EXPECT(both.files.size() == 5);
+		const auto file = std::find_if(both.files.begin(), both.files.end(),
+				[](const hosted::LaunchFile &f) { return f.name == "novalogic.txt"; });
+		TEST_EXPECT(file != both.files.end() && file->secret);
+		if (file != both.files.end()) {
+			TEST_EXPECT(credential(file->content, "NOVAWORLD_USER") == "opennova-project");
+			TEST_EXPECT(credential(file->content, "NOVAWORLD_PASS") == "nlpass");
+		}
+		// The arguments carry no secret.
+		for (const std::string &arg : both.serve_args)
+			TEST_EXPECT(arg.find("nlpass") == std::string::npos);
+		// An unset account offers nothing, nor one still the vault's placeholder.
+		hosted::NovaLogicListing no_account = novalogic;
+		no_account.password.clear();
+		TEST_EXPECT(!no_account.offered());
+		TEST_EXPECT(!hosted::lists_on_novalogic(asked, no_account));
+		for (const bool user_placeholder : { true, false }) {
+			hosted::NovaLogicListing placeholder = novalogic;
+			(user_placeholder ? placeholder.username : placeholder.password) =
+					hosted::kNovaLogicAccountPlaceholder;
+			TEST_EXPECT(!placeholder.account_set() && !placeholder.offered());
+			hosted::RenderInputs placeholder_in = in;
+			placeholder_in.novalogic = placeholder;
+			const hosted::LaunchSpec unoffered = hosted::render_launch(asked, "jo", "jox01", placeholder_in);
+			TEST_EXPECT(unoffered.serve_args == asked_args && unoffered.files.size() == 4);
+		}
+	}
 
 	// Each data set speaks its title (its row's); OpenNova's data speaks Joint
 	// Operations', and no expansion is no /exp.
@@ -359,13 +447,13 @@ int test_no_data() {
 	TEST_EXPECT(rig.fake.launches == 0);
 
 	// The data set row gone (its id set NULL on the server's row): named as such.
-	const int64_t on = seeded_data_set(rig.db, "OpenNova");
+	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
 	hosted::HostedSettings on_settings = valid_settings(on);
 	on_settings.missions = { "on.bms" };
 	const int64_t orphan = rig.request("gone_row_owner", on_settings);
 	TEST_EXPECT(orphan > 0);
-	// Seeded OpenNova includes ONJO1. Remove the unused child first so this
+	// Seeded OpenNova includes NIFTY. Remove the unused child first so this
 	// fixture can exercise a missing base row without violating its parent FK.
 	rig.db.exec("DELETE FROM data_sets WHERE parent_id = $1;", { BindValue(on) });
 	rig.db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(on) });
@@ -402,7 +490,7 @@ int test_data_sets() {
 			offered[0].expansions[0].tree_id == rig.data.jox_tree && offered[0].expansions[0].missions.size() == 1);
 	TEST_EXPECT(offered[1].id == rig.data.dfx2 && offered[1].title == "dfx2" && offered[1].expansions.empty() &&
 			offered[1].missions.size() == 2);
-	const int64_t on = seeded_data_set(rig.db, "OpenNova");
+	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(hosted::find_offered(offered, rig.data.jo) != nullptr && hosted::find_offered(offered, on) == nullptr);
 	TEST_EXPECT(hosted::find_offered_expansion(offered[0], rig.data.jox) != nullptr &&
 			hosted::find_offered_expansion(offered[0], rig.data.jo) == nullptr);
@@ -789,6 +877,59 @@ int test_fleet_room() {
 	TEST_EXPECT(rig.state(b.id) == State::Stopped);
 	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, false) && !hosted::fleet_has_room(*db, fleet, true));
 	TEST_EXPECT(start(false).outcome == hosted::RequestOutcome::Created);
+	return 0;
+}
+
+// --- the NovaLogic listing -----------------------------------------------------
+
+// A server whose owner asked to be listed on NovaLogic's NovaWorld too, on a service that offers
+// it (the gate and the project's account): its row keeps the ask, and its start hands the agent
+// the second listing's arguments and the account's file. A server that did not ask gets neither.
+int test_novalogic_listing() {
+	Rig rig("hosted_novalogic");
+	rig.config.novalogic.gate_host = "gs.novaworld.net";
+	rig.config.novalogic.gate_port = 7597;
+	rig.config.novalogic.username = "opennova-project";
+	rig.config.novalogic.password = "nlpass";
+	rig.make_supervisor();
+	hosted::HostedSettings asked = rig.settings();
+	asked.list_on_novalogic = true;
+	const int64_t id = rig.request("novalogic_owner", asked);
+	const int64_t plain = rig.request("plain_owner", rig.settings());
+	TEST_EXPECT(id > 0 && plain > 0);
+	// The ask round-trips through its row.
+	TEST_EXPECT(rig.server(id) && rig.server(id)->settings.list_on_novalogic);
+	TEST_EXPECT(rig.server(plain) && !rig.server(plain)->settings.list_on_novalogic);
+	for (int i = 0; i < 8 && (!rig.running_container(id) || !rig.running_container(plain)); ++i) {
+		rig.tick();
+		rig.sync_all();
+	}
+	const FakeAgent::Container *asked_c = rig.running_container(id);
+	const FakeAgent::Container *plain_c = rig.running_container(plain);
+	TEST_EXPECT(asked_c != nullptr && plain_c != nullptr);
+	if (!asked_c || !plain_c) return 1;
+	const auto tail = [](const std::vector<std::string> &args, size_t n) {
+		return args.size() < n ? std::vector<std::string>() : std::vector<std::string>(args.end() - n, args.end());
+	};
+	const std::vector<std::string> second = { "--also-master-host", "gs.novaworld.net",
+		"--also-master-gate-port", "7597", "--also-credentials", "novalogic.txt", "--allow-public" };
+	TEST_EXPECT(tail(asked_c->desired.args, second.size()) == second);
+	TEST_EXPECT(std::find(plain_c->desired.args.begin(), plain_c->desired.args.end(),
+			"--also-master-host") == plain_c->desired.args.end());
+	// The second listing's state file rides the server that asked alone.
+	const auto state_file = std::find(
+			asked_c->desired.args.begin(), asked_c->desired.args.end(), "--second-listing-file");
+	TEST_EXPECT(state_file != asked_c->desired.args.end() &&
+			std::next(state_file) != asked_c->desired.args.end() &&
+			*std::next(state_file) == "second-listing.json");
+	TEST_EXPECT(std::find(plain_c->desired.args.begin(), plain_c->desired.args.end(),
+						"--second-listing-file") == plain_c->desired.args.end());
+	const std::string account = file_of(rig, id, "novalogic.txt");
+	TEST_EXPECT(credential(account, "NOVAWORLD_USER") == "opennova-project");
+	TEST_EXPECT(credential(account, "NOVAWORLD_PASS") == "nlpass");
+	TEST_EXPECT(file_of(rig, plain, "novalogic.txt").empty());
+	// The server's own account stays its service account's.
+	TEST_EXPECT(credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_USER") == "srv-" + std::to_string(id));
 	return 0;
 }
 
@@ -2736,6 +2877,7 @@ int main(int argc, char **argv) {
 		{ "service_accounts", { test_service_accounts } },
 		{ "requests", { test_requests } },
 		{ "fleet_room", { test_fleet_room } },
+		{ "novalogic_listing", { test_novalogic_listing } },
 		{ "lifecycle_and_stop", { test_lifecycle_and_stop } },
 		{ "two_servers_one_machine", { test_two_servers_one_machine } },
 		{ "own_machine", { test_own_machine } },

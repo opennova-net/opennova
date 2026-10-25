@@ -43,7 +43,12 @@
 //                    "cpu_percent": <number>, "memory_bytes": <int>, "egress_bytes": <int>,
 //                    "net_in_bytes": <int>,
 //                    ["tick": {"p50_ms": <number>, "p99_ms": <number>, "max_ms": <number>,
-//                              "late": <int>}]}],
+//                              "late": <int>}],
+//                    ["second_listing": {"state": "off" | "trying" | "listed" | "retrying" |
+//                                                 "not_listed",
+//                                        ["try": <int>, "tries": <int>,] ["next_try_at": <int>,]
+//                                        ["reason": "<why>", ["tag": "NWEC<digits>"],]
+//                                        ["slots": [<int>, ...]]}]}],
 //    ["listing_failed": true]}
 //   -> 200 {"protocol": 3, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid",
@@ -91,7 +96,18 @@
 // code. One waiting for its image's pull or its trees' fetch is reported
 // starting, `waiting` saying which ("" for none). A running container carries
 // its server's last minute of ticks (`tick`, its --stats-file: the frame
-// time's p50, p99 and longest, and the late frames) while that file is fresh.
+// time's p50, p99 and longest, and the late frames) while that file is fresh,
+// and, for a server listed on a second service (a hosted server's listing on
+// NovaLogic's NovaWorld, ADR 0068), that listing's state (`second_listing`, its
+// --second-listing-file, which holds this member's own JSON: decode_second_listing):
+// off, trying or retrying (`try` of `tries`, a retry's `next_try_at` in Unix
+// seconds and its `reason`), listed, or not_listed for the run (`reason`), the
+// NWEC `tag` behind a reason when there is one, and the PlayerList `slots` of the
+// players that service sent. The member rides only a server that wrote the file,
+// which only a start the service renders it for does (a server whose owner asked:
+// hosted/model/hosted_settings.h render_serve_args) with the serve image the same
+// release's service pins, so an agent sends it to a service that reads it; a
+// service of this protocol reads a report without it as no state.
 // Each desired container names its log stream (`log`), where its output goes
 // (docker's awslogs driver, or the agent's --log-dir). `files` carries the slot's working directory
 // (the bytes in standard base64: the host file is cp1252) and is sent until
@@ -267,6 +283,39 @@ struct TickHealth {
 	uint64_t late = 0; // frames that started a whole quantum behind
 };
 
+// A server's second listing (opennova-serve's --second-listing-file, apps/serve/run_reports.h:
+// its run's listing on a second NovaWorld service beside the first; the header's comment).
+enum class SecondListingState : uint8_t {
+	Off, // the run has none (the service did not render it)
+	Trying,
+	Listed,
+	Retrying, // a try ended on a fault; the next waits
+	NotListed, // over for the run: its service's decision, or its tries spent
+};
+// "off", "trying", "listed", "retrying", "not_listed".
+const char *second_listing_state_text(SecondListingState state);
+std::optional<SecondListingState> parse_second_listing_state(std::string_view text);
+// The most tries a run may name, and the most players a report names (a PlayerList slot is
+// 0..kMaxSecondListingSlot).
+inline constexpr int kMaxSecondListingTries = 100;
+inline constexpr int kMaxSecondListingSlot = 255;
+
+struct SecondListingStatus {
+	SecondListingState state = SecondListingState::Off;
+	// Trying and Retrying alone: the try under way or the next, 1..attempts, of the run's
+	// most, 1..kMaxSecondListingTries (the members "try" and "tries").
+	int attempt = 0;
+	int attempts = 0;
+	std::optional<int64_t> next_try_at; // Retrying alone: Unix seconds
+	// Retrying and NotListed alone: why, 1..kMaxContainerReasonBytes printable; with it, the
+	// NWEC tag behind it ("NWEC" and 1..4 digits; "" for none).
+	std::string reason;
+	std::string tag;
+	// The PlayerList slots (the remote admin's PLAYER LIST numbers) of the players in the
+	// match that service sent, ascending, each once, 0..kMaxSecondListingSlot.
+	std::vector<int> slots;
+};
+
 struct ContainerReport {
 	std::string name;
 	int slot = 0;
@@ -283,6 +332,8 @@ struct ContainerReport {
 	uint64_t egress_bytes = 0; // its slot's, since the machine booted
 	uint64_t net_in_bytes = 0; // its slot's ports', since the machine booted
 	std::optional<TickHealth> tick; // running, with a fresh --stats-file
+	// Running, with a --second-listing-file that reads.
+	std::optional<SecondListingStatus> second_listing;
 };
 
 // The machine's own use, as its agent read it (core/proc_stats.h).
@@ -379,5 +430,9 @@ std::string encode_sync_request(const SyncRequest &request);
 bool decode_sync_request(std::string_view json, SyncRequest &out, std::string &error);
 std::string encode_sync_reply(const SyncReply &reply);
 bool decode_sync_reply(std::string_view json, SyncReply &out, std::string &error);
+// A container report's `second_listing` as its own JSON text, by the same strict read: the
+// agent reads a server's --second-listing-file with it, so a file of any other shape says
+// nothing.
+bool decode_second_listing(std::string_view json, SecondListingStatus &out, std::string &error);
 
 } // namespace opennova::novaworld_server::hosted

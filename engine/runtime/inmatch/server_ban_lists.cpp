@@ -190,7 +190,7 @@ uint32_t Server_ValidateJoinAccount(NapiNPServerCtx &ctx, NapiNPConnection &conn
 				return 30;
 			}
 		}
-		if (join_tickets_required(ctx)) {
+		if (join_tickets_required(ctx, conn)) {
 			const std::string ticket = local_address + "JOINTICKET";
 			bool named = false;
 			for (const auto &pair : conn.join_identity_pairs)

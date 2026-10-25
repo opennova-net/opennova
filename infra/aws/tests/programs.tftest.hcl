@@ -525,10 +525,13 @@ run "environments" {
         "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_TIER1", "STRIPE_PRICE_TIER2", "STRIPE_PRICE_TIER3", "STRIPE_PRICE_OWN_MACHINE",
         "STRIPE_PRICE_STATIC_ADDRESS",
       ]) &&
-      alltrue([for p in ["gate", "lobby", "fleet", "data"] : jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]) == {}]) &&
+      toset(keys(jsondecode(jsondecode(aws_ecs_task_definition.program["fleet"].container_definitions)[0].dockerLabels["opennova.optional-secrets"]))) == toset([
+        "ONNET_NOVALOGIC_USER", "ONNET_NOVALOGIC_PASS",
+      ]) &&
+      alltrue([for p in ["gate", "lobby", "data"] : jsondecode(jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].dockerLabels["opennova.optional-secrets"]) == {}]) &&
       jsondecode(jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].dockerLabels["opennova.optional-secrets"])["STRIPE_SECRET_KEY"] == "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/STRIPE_SECRET_KEY"
     )
-    error_message = "the optional secrets (the first admin; billing's, for web and the worker) are in each template's label, for a deploy to add while SSM holds them; the fleet and the data program read none"
+    error_message = "the optional secrets (the first admin; billing's, for web and the worker; the NovaLogic account, the fleet's) are in each template's label, for a deploy to add while SSM holds them; the data program reads none"
   }
   assert {
     condition = (
@@ -552,11 +555,19 @@ run "environments" {
     error_message = "web alone serves the update service: at the update record's name, on the updater's four ports; data's release build names the host in our own game's UPDATE.WIZ"
   }
   assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_NOVALOGIC_LOBBIES"] == "1" &&
+      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_NOVALOGIC_LOBBIES")])
+    )
+    error_message = "web alone lists NovaLogic's servers on the Lobbies page, on by default"
+  }
+  assert {
     condition = (alltrue([
       for p in ["web", "fleet", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14"
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_NOVALOGIC_LISTING"] == "1"
       ]) && alltrue([for p in ["web", "worker"] : { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"]) &&
     alltrue([for p in ["gate", "lobby", "web", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL")]))
     error_message = "web, the fleet and the worker read the fleet's policy (hosting off without a data set); no program is handed the machines' URL without hosting"

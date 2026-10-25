@@ -416,6 +416,7 @@ function pickConnectionHost(value: unknown): AdminConnectionHost | null {
           ? 'hosted'
           : 'anonymous',
     dedicated: typeof v.dedicated === 'boolean' ? v.dedicated : null,
+    novalogic_players: isCount(v.novalogic_players) ? v.novalogic_players : null,
   };
 }
 

@@ -1214,6 +1214,9 @@ int test_fleet_config() {
 		TEST_EXPECT(c.slot_pids == 128 && c.serve_image.empty() && c.image_id.empty());
 		// No static addresses sold, and no zone.
 		TEST_EXPECT(c.placement.max_addresses == 0 && c.address_zone.empty());
+		// No listing on NovaLogic's NovaWorld, its gate the game's own.
+		TEST_EXPECT(!c.novalogic_listing && c.novalogic_gate == "gs.novaworld.net" &&
+				c.novalogic_gate_port == 7597);
 		hosted::DriverConfig d;
 		TEST_EXPECT(hosted::parse_driver_config(env_of({}), c, d, errors) && errors.empty());
 		TEST_EXPECT(d.machine_script_path == "/app/hosted/machine_user_data.sh");
@@ -1248,7 +1251,9 @@ int test_fleet_config() {
 				{ "ONNET_HOSTED_ADDRESS_ZONE", "play.opennova.net" },
 				{ "ONNET_HOSTED_ADDRESS_ZONE_ID", "Z0123456789ABC" },
 				{ "ONNET_HOSTED_ADDRESS_ZONE_FILE", "/var/lib/opennova/zone/play.localhost.zone" },
-				{ "ONNET_HOSTED_DOCKER_ADDRESSES", "172.30.77.64/28" } });
+				{ "ONNET_HOSTED_DOCKER_ADDRESSES", "172.30.77.64/28" },
+				{ "ONNET_NOVALOGIC_LISTING", " 1 " }, { "ONNET_NOVALOGIC_GATE", "gate.example" },
+				{ "ONNET_NOVALOGIC_GATE_PORT", "17597" } });
 		hosted::FleetConfig c;
 		std::vector<std::string> errors;
 		const bool ok = hosted::parse_fleet_config(env, c, errors);
@@ -1266,6 +1271,9 @@ int test_fleet_config() {
 				c.hostd_image == kHostdImage);
 		// The static addresses' policy: how many are sold and the zone they are named in.
 		TEST_EXPECT(c.placement.max_addresses == 4 && c.address_zone == "play.opennova.net");
+		// The NovaLogic listing offered, at the gate set.
+		TEST_EXPECT(c.novalogic_listing && c.novalogic_gate == "gate.example" &&
+				c.novalogic_gate_port == 17597);
 		// What the agent routes take from it: its networks.
 		const hosted::AgentRouteConfig routes = hosted::agent_route_config(c);
 		TEST_EXPECT(routes.admitted.size() == 2);
@@ -1346,6 +1354,10 @@ int test_fleet_config() {
 	TEST_EXPECT(refused("ONNET_FLEET_SLOT_CPUS", "65"));
 	TEST_EXPECT(refused("ONNET_FLEET_SLOT_CPUS", "1e3"));
 	TEST_EXPECT(refused("ONNET_FLEET_SLOT_CPUS", ".5"));
+	TEST_EXPECT(refused("ONNET_NOVALOGIC_LISTING", "yes"));
+	TEST_EXPECT(refused("ONNET_NOVALOGIC_LISTING", "2"));
+	TEST_EXPECT(refused("ONNET_NOVALOGIC_GATE_PORT", "0"));
+	TEST_EXPECT(refused("ONNET_NOVALOGIC_GATE_PORT", "65536"));
 	// A private bind with no network to admit is refused too (nothing could reach it).
 	{
 		hosted::FleetConfig c;

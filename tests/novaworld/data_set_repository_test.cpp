@@ -78,16 +78,16 @@ int test_data_sets() {
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
 			!runtime->retail_updater);
-	const auto native = find_data_set(db, seeded(db, "OpenNova"));
-	TEST_EXPECT(native && native->updater_login == "OPENNOVA" &&
-			native->command_file == "OPENNOVA.CMD" && !native->retail_updater);
+	const auto native = find_data_set(db, seeded(db, "OP: Acid Gambit"));
+	TEST_EXPECT(native && native->updater_login == "ACIDGAMBIT" &&
+			native->command_file == "ACIDGAMBIT.CMD" && !native->retail_updater);
 	const auto dfx2 = find_data_set(db, seeded(db, "Delta Force Xtreme 2"));
 	TEST_EXPECT(dfx2 && dfx2->updater_login == "DFX2" && dfx2->command_file == "DFX2.CMD" &&
 			dfx2->retail_updater);
 	const auto native_expansions = list_expansions_of(db, native->id);
-	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "onjo1" &&
-			native_expansions[0].updater_login == "ONJO1" &&
-			native_expansions[0].command_file == "ONJO1.CMD");
+	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "nifty" &&
+			native_expansions[0].updater_login == "NIFTY" &&
+			native_expansions[0].command_file == "NIFTY.CMD");
 	TEST_EXPECT(tree_file_rules(DataSetKind::Update, "").empty());
 
 	// A new base, a new expansion of it, and the refusals.
@@ -129,9 +129,9 @@ int test_data_sets() {
 	steal.updater_login = "JOTRUS";
 	TEST_EXPECT(update_data_set(db, bhd_id, steal) == DataSetOutcome::DuplicateLogin);
 	DataSetPatch lobby;
-	lobby.game = "opennova_0_consumer";
+	lobby.game = "acidgambit_0_consumer";
 	TEST_EXPECT(update_data_set(db, bhd_id, lobby) == DataSetOutcome::Ok);
-	TEST_EXPECT(find_data_set(db, bhd_id)->game == "opennova_0_consumer");
+	TEST_EXPECT(find_data_set(db, bhd_id)->game == "acidgambit_0_consumer");
 	// An expansion lists in its parent's lobby: a game patched onto it changes nothing.
 	TEST_EXPECT(update_data_set(db, ts_id, lobby) == DataSetOutcome::Ok);
 	TEST_EXPECT(find_data_set(db, ts_id)->game.empty());
@@ -382,10 +382,10 @@ int test_migration_mapping() {
 	const fs::path staged = fs::temp_directory_path() / test_paths_unique("opennova_ds_migrations");
 	fs::remove_all(staged);
 	fs::create_directories(staged);
-	// 0023 (the content store) seeds its projects from the data sets, so it waits for them too.
+	// 0025 (the content store) seeds its projects from the data sets, so it waits for them too.
 	for (const auto &entry : fs::directory_iterator(all)) {
 		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 && name.rfind("0023", 0) != 0)
+		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 && name.rfind("0025", 0) != 0)
 			fs::copy_file(entry.path(), staged / name);
 	}
 	db::run_migrations(db, staged);
@@ -397,7 +397,7 @@ int test_migration_mapping() {
 			"VALUES ('stopped', 'old2', 32, 30, 50, 5, 5, 0, 'a.bms', 'dfx2_consumer', '');");
 	fs::copy_file(all / "0011_data_sets.sql", staged / "0011_data_sets.sql");
 	fs::copy_file(all / "0013_releases.sql", staged / "0013_releases.sql");
-	fs::copy_file(all / "0023_content.sql", staged / "0023_content.sql");
+	fs::copy_file(all / "0025_content.sql", staged / "0025_content.sql");
 	db::run_migrations(db, staged);
 	fs::remove_all(staged);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");

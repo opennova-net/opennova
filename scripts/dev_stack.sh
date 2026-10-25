@@ -202,7 +202,7 @@ synthetic_data() {
 # the games slug; "" for a lobby the stack knows no title for.
 title_of() {
     case "$1" in
-        jop_2_consumer | opennova_0_consumer) echo jo ;;
+        jop_2_consumer | acidgambit_0_consumer) echo jo ;;
         dfx2_consumer) echo dfx2 ;;
         *) echo "" ;;
     esac
@@ -295,7 +295,7 @@ seed_data_set() {
     case "$game" in
         jop_2_consumer) display="Joint Operations (dev)" ;;
         dfx2_consumer) display="Delta Force Xtreme 2 (dev)" ;;
-        opennova_0_consumer) display="OpenNova (dev)" ;;
+        acidgambit_0_consumer) display="OP: Acid Gambit (dev)" ;;
         *) display="$game (dev)" ;;
     esac
 
@@ -395,7 +395,7 @@ cmd_up() {
     [[ "$data_set" =~ ^[a-z0-9_]+$ ]] || die "--data-set takes a data set slug (jop_2_consumer)"
     [[ "$synthetic" == 0 ]] || data_set="jop_2_consumer"
     [[ "$hosting" == 0 || -n "$(title_of "$data_set")" ]] \
-        || die "--data-set $data_set: no title known for that lobby (jop_2_consumer, dfx2_consumer, opennova_0_consumer)"
+        || die "--data-set $data_set: no title known for that lobby (jop_2_consumer, dfx2_consumer, acidgambit_0_consumer)"
     [[ -z "$mission" || "$mission" =~ ^[A-Za-z0-9_-]+\.[Bb][Mm][Ss]$ ]] || die "--mission takes a .bms name"
 
     mkdir -p "$state"

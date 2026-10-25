@@ -120,7 +120,8 @@ int test_migrations_create_expected_tables() {
 		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
-		"hosted_server_samples.mission_started", "hosted_server_starts.oom", "hosted_servers.own_machine",
+		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
+		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
 		"server_status.maintenance_enabled",
@@ -159,21 +160,21 @@ int test_seed_populates_games() {
 	auto games =
 			db.query("SELECT slug, gate_tag, title, lobby_name, pfid FROM games ORDER BY slug;");
 	TEST_EXPECT(games.size() == 3);
-	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(games[0].as_text(1).value() == "dfx2:0:cus:buffy");
-	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
-	TEST_EXPECT(games[0].as_text(3).value() == "dfx2_0_consumer");
-	TEST_EXPECT(games[0].as_text(4).value() == "38");
-	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
-	TEST_EXPECT(games[1].as_text(1).value() == "jop:cus2");
-	TEST_EXPECT(games[1].as_text(2).value() == "jo");
-	TEST_EXPECT(games[1].as_text(3).value() == "jop_2_consumer");
-	TEST_EXPECT(games[1].as_text(4).value() == "28");
-	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
-	TEST_EXPECT(games[2].as_text(1).value() == "opennova:0");
+	TEST_EXPECT(games[1].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(games[1].as_text(1).value() == "dfx2:0:cus:buffy");
+	TEST_EXPECT(games[1].as_text(2).value() == "dfx2");
+	TEST_EXPECT(games[1].as_text(3).value() == "dfx2_0_consumer");
+	TEST_EXPECT(games[1].as_text(4).value() == "38");
+	TEST_EXPECT(games[2].as_text(0).value() == "jop_2_consumer");
+	TEST_EXPECT(games[2].as_text(1).value() == "jop:cus2");
 	TEST_EXPECT(games[2].as_text(2).value() == "jo");
-	TEST_EXPECT(games[2].as_text(3).value() == "opennova_0_consumer");
+	TEST_EXPECT(games[2].as_text(3).value() == "jop_2_consumer");
 	TEST_EXPECT(games[2].as_text(4).value() == "28");
+	TEST_EXPECT(games[0].as_text(0).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[0].as_text(1).value() == "acidgambit:0");
+	TEST_EXPECT(games[0].as_text(2).value() == "jo");
+	TEST_EXPECT(games[0].as_text(3).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(games[0].as_text(4).value() == "28");
 
 	auto players = db.query(
 		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
@@ -352,15 +353,15 @@ int expect_opennova_row(Database &db) {
 	const auto on = db.query(
 			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
 			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
-			"WHERE slug = 'opennova_0_consumer';");
+			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(on.size() == 1);
-	TEST_EXPECT(on[0].as_text(0).value() == "OpenNova");
-	TEST_EXPECT(on[0].as_text(1).value() == "opennova_0_consumer");
-	TEST_EXPECT(on[0].as_text(2).value() == "opennova:0");
+	TEST_EXPECT(on[0].as_text(0).value() == "OP: Acid Gambit");
+	TEST_EXPECT(on[0].as_text(1).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(on[0].as_text(2).value() == "acidgambit:0");
 	TEST_EXPECT(on[0].as_text(3).value() == "jo");
 	TEST_EXPECT(on[0].as_text(4).value() == "jop_2_start.htm");
 	TEST_EXPECT(on[0].as_text(5).value() == "jop_2_host1.htm");
-	TEST_EXPECT(on[0].as_text(6).value() == "opennova_0.gsb?a=1");
+	TEST_EXPECT(on[0].as_text(6).value() == "acidgambit_0.gsb?a=1");
 	TEST_EXPECT(on[0].as_int(7).value() == 1);
 	TEST_EXPECT(on[0].as_text(8).value() == "3");
 	TEST_EXPECT(on[0].as_text(9).value() == "2345");
@@ -379,19 +380,19 @@ int expect_gate_rows(Database &db) {
 							   "glsvss_rims, glsvss_agrms, start_page FROM games ORDER BY slug;");
 	TEST_EXPECT(rows.size() == 3);
 	const std::string jo_query = "ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
-	TEST_EXPECT(rows[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(rows[0].as_text(1).value() == "dfx2_0_consumer");
-	TEST_EXPECT(rows[0].as_text(2).value() ==
+	TEST_EXPECT(rows[1].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(rows[1].as_text(1).value() == "dfx2_0_consumer");
+	TEST_EXPECT(rows[1].as_text(2).value() ==
 			"ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38&gt=[GT]&url=dfx2_0_start.htm");
-	TEST_EXPECT(rows[0].as_text(3).value() == "[DFX2]KILLS");
-	TEST_EXPECT(rows[0].as_int(4).value() == 3600000 && rows[0].as_int(5).value() == 45000);
-	TEST_EXPECT(rows[1].as_text(1).value() == "jop_2_consumer");
-	TEST_EXPECT(rows[1].as_text(2).value() == jo_query);
-	TEST_EXPECT(rows[1].as_text(3).value().empty());
-	TEST_EXPECT(rows[1].as_int(4).value() == 0 && rows[1].as_int(5).value() == 0);
-	TEST_EXPECT(rows[2].as_text(1).value() == "opennova_0_consumer");
+	TEST_EXPECT(rows[1].as_text(3).value() == "[DFX2]KILLS");
+	TEST_EXPECT(rows[1].as_int(4).value() == 3600000 && rows[1].as_int(5).value() == 45000);
+	TEST_EXPECT(rows[2].as_text(1).value() == "jop_2_consumer");
 	TEST_EXPECT(rows[2].as_text(2).value() == jo_query);
 	TEST_EXPECT(rows[2].as_text(3).value().empty());
+	TEST_EXPECT(rows[2].as_int(4).value() == 0 && rows[2].as_int(5).value() == 0);
+	TEST_EXPECT(rows[0].as_text(1).value() == "acidgambit_0_consumer");
+	TEST_EXPECT(rows[0].as_text(2).value() == jo_query);
+	TEST_EXPECT(rows[0].as_text(3).value().empty());
 	for (const auto &row : rows) {
 		const std::string query = row.as_text(2).value();
 		const std::string tail = "&url=" + row.as_text(6).value();
@@ -412,8 +413,8 @@ int test_games_title_fresh() {
 	apply_seeds(db, source_dir / "backend" / "seed");
 	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
 	TEST_EXPECT(titles.size() == 3);
-	TEST_EXPECT(titles[0].as_text(1).value() == "dfx2");
-	TEST_EXPECT(titles[1].as_text(1).value() == "jo");
+	TEST_EXPECT(titles[0].as_text(1).value() == "jo");
+	TEST_EXPECT(titles[1].as_text(1).value() == "dfx2");
 	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
 	if (expect_gate_rows(db) != 0)
 		return 1;

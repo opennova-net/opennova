@@ -154,6 +154,28 @@
         </label>
         <p :id="hintId('team_ff')" class="text-xs text-ink-muted">Teammates can hurt each other.</p>
       </div>
+
+      <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
+      <div v-if="showNovaLogic" class="min-w-0 space-y-1 sm:col-span-2">
+        <label class="flex items-center gap-3 text-sm text-ink">
+          <input
+            :id="fieldId('list_on_novalogic')"
+            v-model="form.list_on_novalogic"
+            type="checkbox"
+            :disabled="busy"
+            :aria-invalid="errors.list_on_novalogic ? 'true' : undefined"
+            :aria-describedby="describedBy('list_on_novalogic')"
+            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+          />
+          {{ FIELD_LABELS.list_on_novalogic }}
+        </label>
+        <p :id="hintId('list_on_novalogic')" class="text-xs text-ink-muted">
+          Players using the original game's server list can find your server too.
+        </p>
+        <p v-if="errors.list_on_novalogic" :id="errorId('list_on_novalogic')" class="text-xs text-danger">
+          {{ errors.list_on_novalogic }}
+        </p>
+      </div>
     </div>
 
     <!-- /exp: shown when the game has an expansion to choose. -->
@@ -301,7 +323,8 @@
 // the start when the server started again ran on one), or with no server on
 // shared machines free runs it on the dedicated machine; there, a pick of the
 // account's free static addresses (the one `preferredAddressId` names first)
-// while any is.
+// while any is. While the service offers it, a box lists the server on
+// NovaLogic's NovaWorld too; else the start sends it off.
 // The game (a base data set the service offers, by id) comes first and drives
 // the rest: the expansions it offers (expansion data sets with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
@@ -335,6 +358,7 @@ import {
   GAME_PASSWORD_MAX,
   initialDataSet,
   initialRotation,
+  offersNovaLogicListing,
   type IntField,
   type SettingsErrors,
   type SettingsField,
@@ -346,6 +370,9 @@ const props = withDefaults(
     previous: HostedSettings | null;
     // The games the service offers (GET /api/me/servers data_sets), in its order.
     dataSets: HostedDataSet[];
+    // The service offers listing the server on NovaLogic's NovaWorld too (GET
+    // /api/me/servers novalogic_listing): the box shows, and its value goes.
+    novalogicListing?: boolean;
     // The server started from failed: the start is another try at it.
     retry?: boolean;
     // The base of every id in the form.
@@ -368,6 +395,7 @@ const props = withDefaults(
   }>(),
   {
     retry: false,
+    novalogicListing: false,
     baseId: 'hosted-settings',
     sharedFree: 1,
     ownMachinesFree: 0,
@@ -434,6 +462,7 @@ const FIELD_ORDER: SettingsField[] = [
   'respawn',
   'start_delay',
   'team_ff',
+  'list_on_novalogic',
   'expansion_id',
   'missions',
 ];
@@ -453,6 +482,8 @@ const firstForm = formFrom(props.previous, findDataSet(props.dataSets, firstData
 firstForm.missions = rotationFor(firstDataSet, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
 const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
+// The NovaLogic box: the service offers it and the picked game takes it (Joint Operations alone).
+const showNovaLogic = computed(() => offersNovaLogicListing(dataSet.value, props.novalogicListing));
 const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
 const missions = computed(() => availableMissions(dataSet.value, form.expansion_id));
 // The picked expansion's version; players need it installed to join.
@@ -521,7 +552,7 @@ const errors = computed<SettingsErrors>(() => {
 watch(
   form,
   () => {
-    if (attempted.value) checked.value = checkSettings(form, props.dataSets).errors;
+    if (attempted.value) checked.value = checkSettings(form, props.dataSets, props.novalogicListing).errors;
   },
   { deep: true },
 );
@@ -563,7 +594,7 @@ async function submit() {
   if (busy.value) return;
   attempted.value = true;
   serverRefusal.value = null;
-  const result = checkSettings(form, props.dataSets);
+  const result = checkSettings(form, props.dataSets, props.novalogicListing);
   checked.value = result.errors;
   alertLinksToTiers.value = false;
   if (!result.settings) {

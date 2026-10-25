@@ -428,7 +428,7 @@ static int test_variant_menus() {
 
 // Every .mnu a packed install serves (the base mount, then each expansion's), read with the files that mount
 // serves; a menu a later layer serves byte for byte again is not swept twice. The install is minted from our own
-// game (minted_install.h: the base game's project and the onjo1 expansion through our PFF writer, the expansion
+// game (minted_install.h: the base game's project and the nifty expansion through our PFF writer, the expansion
 // carrying its own main.mnu, variant_fixtures::expansion_main_menu).
 static int test_install_leg() {
 	test_temp::TempDir scratch("opennova_menu_render_install");

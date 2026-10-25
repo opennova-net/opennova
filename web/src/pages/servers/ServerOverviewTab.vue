@@ -166,6 +166,19 @@
       </div>
       <p v-else-if="server.state === 'running'" class="text-sm text-warn">It is not in the server browser right now.</p>
       <p v-else class="text-sm text-ink-muted">It shows up in the server browser once it is ready.</p>
+      <!-- Its listing on NovaLogic's NovaWorld too, for an owner who asked, as
+           the server last reported it. -->
+      <div v-if="server.settings.list_on_novalogic && server.novalogic" class="server-novalogic space-y-1 text-sm">
+        <p class="font-semibold text-ink">NovaLogic's NovaWorld</p>
+        <p :class="novalogicClass">{{ novalogicListingText(server.novalogic, now) }}</p>
+        <p v-if="server.novalogic.player_slots.length > 0" class="server-novalogic-players text-ink-muted">
+          {{ server.novalogic.player_slots.length === 1 ? '1 player' : `${server.novalogic.player_slots.length} players` }}
+          on it came through NovaLogic's NovaWorld.
+        </p>
+        <p v-if="scope === 'admin' && server.novalogic.tag" class="font-mono text-xs text-ink-muted">
+          <span class="sr-only">The NovaWorld error tag: </span>{{ server.novalogic.tag }}
+        </p>
+      </div>
       <MyServerCard
         v-if="scope === 'owner' && listing && server.state === 'running'"
         :key="listing.rid"
@@ -246,7 +259,9 @@
 // the game data it runs on with the owner's Update when its data set has
 // newer (POST /api/me/servers/<id>/update, which restarts it), its listing
 // (the owner's with the pushes its console lacks, MyServerCard embedded,
-// from GET /api/me/hosts), its timeline and, while it is live, its stop (the
+// from GET /api/me/hosts) and, when its owner asked, its listing on
+// NovaLogic's NovaWorld (the server's `novalogic`: whether and why), its
+// timeline and, while it is live, its stop (the
 // owner's POST /api/me/servers/<id>/stop, the admin's POST
 // /api/admin/hosted/<id>/stop).
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
@@ -264,6 +279,8 @@ import {
   LAUNCHES_HELD_NOTICE,
   OWNER_START_STEPS,
   SLOW_PHASE_TEXT,
+  novalogicListingText,
+  novalogicListingTone,
   ownerStateLabel,
   ownerStepIndex,
   phaseSlow,
@@ -434,6 +451,20 @@ watch(
 );
 
 const stepIndex = computed(() => ownerStepIndex(props.server.state));
+
+// The NovaLogic listing's line: listed, refused or off for the run, or on its way.
+const novalogicClass = computed(() => {
+  const listing = props.server.novalogic;
+  if (!listing) return 'text-ink';
+  switch (novalogicListingTone(listing)) {
+    case 'good':
+      return 'text-online';
+    case 'bad':
+      return 'text-danger';
+    default:
+      return 'text-warn';
+  }
+});
 
 // The phase under the progress while the server starts (its states' own
 // notes say the rest).
