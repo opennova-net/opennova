@@ -413,11 +413,11 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		if (it->is_directory(ec)) dirs.push_back(it->path());
 	std::sort(dirs.begin(), dirs.end());
 	for (const fs::path &dir : dirs) {
+		// Every expansion\<n>\ holding an UPDATE.WIZ is a product, its archive installed or not:
+		// a release is a whole install, so the wizard alone installs the expansion (the jointops
+		// zip ships Escalation's). [orig: Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
 		const fs::path wizard = named_file(dir, "UPDATE.WIZ");
 		if (!fs::is_regular_file(wizard, ec)) continue;
-		// A retail game's expansion needs its archive installed, where retail needs only the wizard
-		// (D-UPD-9); a native content's registers by its wizard alone.
-		if (!native_content && !fs::is_regular_file(named_file(dir, io::utf8_path(dir.filename()) + ".pff"), ec)) continue;
 		Product registered;
 		if (!wizard_product(dir, wizard, registered, error)) return false;
 		registered.native = registered.native || native_content;
