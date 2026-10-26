@@ -169,9 +169,10 @@ jobs:
           # Vocabulary conventions (CLAUDE.md): no Nova/nova_ prefix (ADR 0040).
           python scripts/lint/conventions_lint.py --enforce
           # No test reads retail data; then the suite runner's own checks
-          # (shards, inventory against report).
+          # (shards, inventory against report) and the workflows' triggers
+          # against what their builds are made from (test_workflow_triggers.py).
           python scripts/ci/test_suites.py --check-layout
-          python -B -m unittest discover -s scripts/ci -p test_test_suites.py
+          python -B -m unittest discover -s scripts/ci -p "test_*.py"
           # The cite image rule cite_census.py and scripts/ida/cite_sweep.py share.
           python -B -m unittest discover -s scripts/lint -p "test_*.py"
           # cite_sweep.py's classifier (the sweep itself needs a live IDA).
