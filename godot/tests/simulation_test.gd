@@ -3028,7 +3028,9 @@ func test_panm_liveness_is_scoped_to_the_active_transform_family() -> void:
 	# and track controls are the case (fixtures/README.md):
 	# every track control 0, the case's live tracks 0x10.
 	var cases := [
-		["panm_live_01_spinner", true, "spinner uses raw coefficients"],
+		# A spinner stands still in JO: its loader keeps no flag for rotation
+		# type 1 (D-3DI-9).
+		["panm_live_01_spinner", false, "a spinner row is inert under JO's loader"],
 		["panm_live_02_view3", true, "view rotation type 3 is evaluated"],
 		["panm_live_03_view4", true, "view rotation type 4 is evaluated"],
 		["panm_live_04_rotz", true, "rotation family samples rotation tracks"],
