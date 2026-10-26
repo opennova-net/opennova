@@ -11,6 +11,8 @@
 #include <formats/update/update_crc.h>
 
 #include <algorithm>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <set>
 #include <system_error>
@@ -47,9 +49,12 @@ struct ArchiveEntry {
 	uint32_t timestamp = 0;
 };
 
-bool read_archive(
-		const fs::path &path, std::map<std::string, ArchiveEntry> &out, std::string &error) {
-	out.clear();
+// Each entry of an archive decrypted and handed to `each` with its normalized name, one at a time
+// (a whole game's archive is hundreds of megabytes), in the order of those names, the last entry
+// of a name the one kept. An absent archive has none.
+bool each_archive_entry(const fs::path &path,
+		const std::function<bool(const std::string &key, ArchiveEntry &entry)> &each,
+		std::string &error) {
 	std::error_code ec;
 	if (!fs::exists(path, ec))
 		return true;
@@ -59,22 +64,40 @@ bool read_archive(
 		error = "cannot open the archive " + utf8;
 		return false;
 	}
-	for (uint32_t i = 0; i < archive.entry_count; ++i) {
-		const pff::PffEntry &entry = archive.entries[i];
+	std::map<std::string, uint32_t> order; // normalized name -> its last entry
+	for (uint32_t i = 0; i < archive.entry_count; ++i)
+		order[pff::normalized_logical_name(pff::pff_entry_stored_name(archive.entries[i]))] = i;
+	bool ok = true;
+	for (const auto &[key, index] : order) {
+		const pff::PffEntry &entry = archive.entries[index];
 		ArchiveEntry item;
 		item.name = pff::pff_entry_stored_name(entry);
 		item.timestamp = entry.timestamp;
 		item.content.resize(entry.size ? entry.size : 1);
 		if (pff::pff_extract(&archive, &entry, item.content.data(), item.content.size()) != 0) {
-			pff::pff_close(&archive);
 			error = "cannot read " + item.name + " from " + utf8;
-			return false;
+			ok = false;
+			break;
 		}
 		item.content.resize(entry.size);
-		out[pff::normalized_logical_name(item.name)] = std::move(item);
+		if (!each(key, item)) {
+			ok = false;
+			break;
+		}
 	}
 	pff::pff_close(&archive);
-	return true;
+	return ok;
+}
+
+// The entries of an archive by normalized name, decrypted, with their times. Empty when the
+// archive is absent.
+bool read_archive(
+		const fs::path &path, std::map<std::string, ArchiveEntry> &out, std::string &error) {
+	out.clear();
+	return each_archive_entry(path, [&out](const std::string &key, ArchiveEntry &entry) {
+		out[key] = std::move(entry);
+		return true;
+	}, error);
 }
 
 // The product root's plain files (not archives), by lower-cased name, and its subdirectories'
@@ -299,17 +322,18 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 
 	// Each archive: a TARGET, its changed entries as COPY rows, its dropped ones as REMOVE rows.
 	for (const auto &[key, path] : to_archives) {
-		std::map<std::string, ArchiveEntry> before, after;
+		std::map<std::string, ArchiveEntry> before;
 		const auto from_path = from_archives.find(key);
 		if (from_path != from_archives.end() && !read_archive(from_path->second, before, error))
 			return false;
-		if (!read_archive(path, after, error))
-			return false;
+		std::set<std::string> after; // the entries `to` holds, by normalized name
 		std::vector<CommandRow> rows;
-		for (const auto &[entry_key, entry] : after) {
+		const bool read = each_archive_entry(path, [&](const std::string &entry_key,
+															ArchiveEntry &entry) {
+			after.insert(entry_key);
 			const auto old = before.find(entry_key);
 			if (!spec.full && old != before.end() && old->second.content == entry.content)
-				continue;
+				return true;
 			if (!claim_name(names, entry.name, error))
 				return false;
 			const uint32_t time = entry.timestamp ? entry.timestamp : pff::PFF_NEW_ENTRY_TIMESTAMP;
@@ -319,7 +343,10 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 							update::file_crc(entry.content.data(), entry.content.size())) });
 			add_blob(entry.name, entry.content);
 			++report.copy_rows;
-		}
+			return true;
+		}, error);
+		if (!read)
+			return false;
 		if (spec.removes) {
 			for (const auto &[entry_key, entry] : before) {
 				if (after.count(entry_key))
@@ -361,7 +388,8 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 	section.expansion = product.expansion;
 	section.entries.push_back(
 			{ product.command_file, std::vector<uint8_t>(text.begin(), text.end()) });
-	section.entries.insert(section.entries.end(), blobs.begin(), blobs.end());
+	section.entries.insert(section.entries.end(), std::make_move_iterator(blobs.begin()),
+			std::make_move_iterator(blobs.end()));
 	report.command_file = product.command_file;
 	return true;
 }
@@ -394,8 +422,9 @@ bool build_update_package(const BuildSpec &spec, update::SfsPackage &out,
 		package.sections.push_back(std::move(section));
 		report.push_back(line);
 	}
-	if (update::sfs_write(package).empty()) {
-		error = "the package cannot be written (a name does not fit its field)";
+	if (!update::sfs_writable(package)) {
+		error = "the package cannot be written (a name does not fit its field, or it passes the "
+				"2 GiB a packed update holds)";
 		return false;
 	}
 	out = std::move(package);

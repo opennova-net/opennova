@@ -67,11 +67,13 @@ func _ready() -> void:
 
 
 ## The game's name on the download screen, by product.
-const PRODUCT_TITLES := {
-	"acidgambit": "OP: Acid Gambit",
-	"jo": "Joint Operations",
-	"dfx2": "Delta Force Xtreme 2",
-}
+static func product_title(product: String) -> String:
+	match product:
+		"jo":
+			return "Joint Operations"
+		"dfx2":
+			return "Delta Force Xtreme 2"
+	return "OP: Acid Gambit"
 
 
 ## `game` is the engine profile the product mounts with (LaunchFlags.game()).
@@ -91,7 +93,7 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 
 func _show_bootstrap() -> void:
 	print_verbose("OpenNova: content installation required")
-	var title: String = PRODUCT_TITLES.get(LaunchFlags.product(), "the game")
+	var title := product_title(LaunchFlags.product())
 	if is_headless():
 		push_error("%s is not installed here. Run update.exe to install it." % title)
 		get_tree().quit(1)

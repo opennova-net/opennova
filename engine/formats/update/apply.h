@@ -30,6 +30,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,19 @@ struct ApplyReport {
 // short would be).
 bool apply_section(const SfsSection &section, std::string_view command_file,
 		const std::filesystem::path &dir, ApplyReport &report, std::string &error);
+
+// A section's blob by a row's name (the name as the flat update directory holds it, without case):
+// its packed bytes into `packed`, or false with `error` when the section has none.
+using SectionBlobs =
+		std::function<bool(std::string_view name, std::vector<uint8_t> &packed, std::string &error)>;
+
+// apply_section over a command file's bytes and blobs read one at a time, as a package on disk is
+// read: a whole game's release is never held in memory. Each row's blob is read and checked, then
+// let go, before any row is applied; an archive's new entries are held only until it is written.
+// The same refusals as apply_section's.
+bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view command_file,
+		const SectionBlobs &blobs, const std::filesystem::path &dir, ApplyReport &report,
+		std::string &error);
 
 // Whether `name` may name a file or entry of the tree: not empty, no '/', '\\' or ':', not "."
 // or "..", at most kCommandNameBytes - 1 bytes.
