@@ -12,9 +12,9 @@
 // package no published section names
 // any more is deleted from the cache. The table the server reads is swapped under a mutex,
 // so the refresh runs on a thread of its own beside the listener's pump. SERVER.LST names
-// one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a data set served
-// through the Switcher's hosts block (retail_updater), else the deployment's update host
-// (ONNET_UPDATE_HOST). A retail updater product (retail_updater) with no published release
+// one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a retail game's data set,
+// served through the Switcher's hosts block (data_set_repository.h retail), else the
+// deployment's update host (ONNET_UPDATE_HOST). A retail game's product with no published release
 // is served as current: a package of one section holding its command file with no rows (its
 // EXE the title's executable, so a stock /RUN still restarts the game),
 // written into the cache under its sha, so a check finds nothing to fetch until a release is

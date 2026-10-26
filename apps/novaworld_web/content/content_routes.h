@@ -1,10 +1,12 @@
 #pragma once
 
 // The content store's routes (ADR 0069; data_sets/content_repository.h,
-// base/content/content_manifest.h): what the OpenNova Editor's Content window reads and pushes,
-// and the admin's management of the projects. A public project is anyone's to read, signed in or
-// not; a private one answers 404 to anyone but an admin (WebAccess::caller_is_admin). A push needs
-// an admin's own session (never the Bearer ADMIN_API_TOKEN, so every revision names its author),
+// base/content/content_manifest.h): what the OpenNova Editor's NovaWorld window reads and pushes,
+// each game's project named by its key, and the release built from a revision. A game, its
+// project with it, is made, changed and deleted by the games' admin routes
+// (data_sets/data_set_routes.h). A public project is anyone's to read, signed in or not; a
+// private one answers 404 to anyone but an admin (WebAccess::caller_is_admin). A push needs an
+// admin's own session (never the Bearer ADMIN_API_TOKEN, so every revision names its author),
 // and an admin's change is logged with its actor and status (AccessMiddleware):
 //
 //   GET    /api/content/projects                             the projects the caller may read
@@ -17,10 +19,6 @@
 //                                                            to upload, each with its upload
 //   PUT    /api/content/projects/<key>/blobs/<sha256>        one file's bytes, checked by its sha
 //   POST   /api/content/projects/<key>/revisions             {parent, message, manifest}: a push
-//   POST   /api/admin/content/projects                       {key, title, visibility, retail?,
-//                                                            data_set_id?, base?}: a new project
-//   PATCH  /api/admin/content/projects/<key>                 {title?, visibility?}
-//   DELETE /api/admin/content/projects/<key>                 a project with its objects gone
 //   POST   /api/admin/content/projects/<key>/releases        {version, revision?, base_revision?}:
 //                                                            a release built from a revision
 //                                                            (building; data_sets/release_build.h)
@@ -32,7 +30,7 @@
 // it was made on: 409 {error: "stale", head} when the head moved; 400 missing_blobs {hashes} when
 // the store does not hold a file its manifest lists at its size; 400 unchanged when it lists the
 // head's files. Every reply is an error code with our own message, never database or store text.
-// Without a store (hosting off) every route but the project list and the admin's writes answers 503
+// Without a store (hosting off) every route that reads or writes the store's objects answers 503
 // store_unavailable. The HttpListener owns one ContentRoutes beside its ReleaseRoutes.
 
 #include "web_access.h"
@@ -58,8 +56,7 @@ class ContentUrls; // content_urls.h
 
 class ContentRoutes {
 public:
-	// A project's title and a revision's message, in characters and bytes.
-	static constexpr size_t kTitleMax = 64;
+	// A revision's message, in bytes.
 	static constexpr size_t kMessageMax = 2000;
 	// The files one missing request may name, and one manifest list.
 	static constexpr size_t kMissingMax = 20000;
@@ -96,9 +93,6 @@ private:
 	crow::response downloads(const crow::request &req, const std::string &key);
 	crow::response upload(const crow::request &req, const std::string &key, const std::string &sha);
 	crow::response push(const crow::request &req, const std::string &key);
-	crow::response create(const crow::request &req);
-	crow::response patch(const crow::request &req, const std::string &key);
-	crow::response remove(const crow::request &req, const std::string &key);
 	crow::response release(const crow::request &req, const std::string &key);
 
 	// A file in the scratch directory for one request's bytes, its name its own; "" with

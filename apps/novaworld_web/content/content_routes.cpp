@@ -47,7 +47,7 @@ crow::response store_failure(const char *route, const std::string &error) {
 }
 
 crow::response no_such_project() {
-	return json_error(404, "not_found", "no content project has this key");
+	return json_error(404, "not_found", "no game's project has this key");
 }
 
 crow::response field_error(
@@ -62,16 +62,6 @@ crow::response field_error(
 // A push and an upload are an admin's own: the Bearer token, a machine's, names no author.
 crow::response session_required() {
 	return json_error(403, "session_required", "a push is an admin's own: sign in to push");
-}
-
-// A project's key: 1 to 16 of A-Z, 0-9 and _.
-bool valid_key(std::string_view key) {
-	if (key.empty() || key.size() > 16)
-		return false;
-	for (const char c : key)
-		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
-			return false;
-	return true;
 }
 
 // A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
@@ -92,11 +82,6 @@ bool valid_version(std::string_view version) {
 		digits = 0;
 	}
 	return digits > 0 && dots < 4;
-}
-
-bool valid_title(std::string_view title) {
-	return !title.empty() && strutil::utf8_length(title) <= ContentRoutes::kTitleMax &&
-			opennova::content::is_utf8(title) && !has_control_byte(title) && !has_c1_control(title);
 }
 
 // A revision's message: UTF-8 with no control character but a line break or a tab.
@@ -184,9 +169,9 @@ crow::json::wvalue revision_json(const ContentRevision &r) {
 	return out;
 }
 
-// A project as the routes answer it: {key, title, visibility, retail, base (its base project's
-// key, or null), data_set_id (or null), head, can_push}, and for an admin its storage ({files,
-// bytes}). `keys` maps every project's id to its key.
+// A project as the routes answer it: {key, title (its game's name), visibility, retail, base (an
+// expansion's base game's project key, or null), data_set_id (its game's), head, can_push}, and
+// for an admin its storage ({files, bytes}). `keys` maps every game with a project to its key.
 crow::json::wvalue project_json(db::Database &db, const ContentProject &p, bool admin,
 		const std::unordered_map<int64_t, std::string> &keys) {
 	crow::json::wvalue out;
@@ -194,15 +179,12 @@ crow::json::wvalue project_json(db::Database &db, const ContentProject &p, bool 
 	out["title"] = p.title;
 	out["visibility"] = visibility_name(p.visibility);
 	out["retail"] = p.retail;
-	const auto base = p.base_project_id ? keys.find(*p.base_project_id) : keys.end();
+	const auto base = p.parent_id ? keys.find(*p.parent_id) : keys.end();
 	if (base != keys.end())
 		out["base"] = base->second;
 	else
 		out["base"] = nullptr;
-	if (p.data_set_id)
-		out["data_set_id"] = *p.data_set_id;
-	else
-		out["data_set_id"] = nullptr;
+	out["data_set_id"] = p.id;
 	out["head"] = p.head;
 	out["can_push"] = admin;
 	if (admin) {
@@ -311,16 +293,6 @@ void ContentRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/content/projects/<string>/revisions")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return push(req, key);
-			});
-	CROW_ROUTE(app, "/api/admin/content/projects")
-			.methods("POST"_method)([this](const crow::request &req) { return create(req); });
-	CROW_ROUTE(app, "/api/admin/content/projects/<string>")
-			.methods("PATCH"_method)([this](const crow::request &req, const std::string &key) {
-				return patch(req, key);
-			});
-	CROW_ROUTE(app, "/api/admin/content/projects/<string>")
-			.methods("DELETE"_method)([this](const crow::request &req, const std::string &key) {
-				return remove(req, key);
 			});
 	CROW_ROUTE(app, "/api/admin/content/projects/<string>/releases")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
@@ -755,158 +727,12 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 	}
 }
 
-// POST /api/admin/content/projects — {"key", "title", "visibility", "retail"?, "data_set_id"?,
-// "base"? (its base game's project's key)}: 201 {"project"}; 400 invalid_json, missing_field,
-// invalid_field, no_such_data_set, no_such_base; 409 duplicate_key, data_set_taken.
-crow::response ContentRoutes::create(const crow::request &req) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	auto body = JsonBody::parse(req.body);
-	if (!body)
-		return json_error(400, "invalid_json");
-	const auto key = body->text("key");
-	const auto title = body->text("title");
-	const auto visibility = body->text("visibility");
-	const auto retail = body->flag("retail");
-	const auto data_set_id =
-			body->null("data_set_id") ? std::nullopt : body->integer("data_set_id");
-	const auto base = body->null("base") ? std::nullopt : body->text("base");
-	if (body->wrong_type())
-		return json_error(400, "invalid_field");
-	if (!key || !title || !visibility)
-		return json_error(400, "missing_field", "a project is {key, title, visibility}");
-	if (!valid_key(*key))
-		return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
-	if (!valid_title(*title))
-		return field_error(400, "invalid_field", "title",
-				"title is 1 to 64 characters with no control characters");
-	const auto seen = visibility_from_name(*visibility);
-	if (!seen)
-		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
-	NewProject project;
-	project.key = *key;
-	project.title = *title;
-	project.visibility = *seen;
-	project.retail = retail.value_or(false);
-	project.data_set_id = data_set_id;
-	project.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
-	try {
-		auto db_conn = pool_.acquire();
-		if (base) {
-			const auto base_project = find_project(*db_conn, *base);
-			if (!base_project)
-				return json_error(400, "no_such_base", "no content project has the base's key");
-			project.base_project_id = base_project->id;
-		}
-		int64_t id = 0;
-		switch (create_project(*db_conn, project, id)) {
-			case ProjectOutcome::Ok:
-				break;
-			case ProjectOutcome::DuplicateKey:
-				return json_error(409, "duplicate_key", "another content project has this key");
-			case ProjectOutcome::DataSetTaken:
-				return json_error(
-						409, "data_set_taken", "another content project updates this data set");
-			case ProjectOutcome::NoSuchDataSet:
-				return json_error(400, "no_such_data_set", "no data set has this id");
-			case ProjectOutcome::NoSuchBase:
-				return json_error(400, "no_such_base", "no content project has the base's key");
-			case ProjectOutcome::NotFound:
-			case ProjectOutcome::InUse:
-				return json_error(500, "db_error");
-		}
-		const auto made = find_project_by_id(*db_conn, id);
-		if (!made)
-			return json_error(500, "db_error");
-		crow::json::wvalue out;
-		out["project"] = project_json(*db_conn, *made, true, project_keys(*db_conn));
-		return no_store(json_reply(201, out));
-	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/content/projects", e);
-	}
-}
-
-// PATCH /api/admin/content/projects/<key> — {"title"?, "visibility"?}: 200 {"project"}; 400
-// invalid_json, invalid_field; 404 not_found.
-crow::response ContentRoutes::patch(const crow::request &req, const std::string &key) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	auto body = JsonBody::parse(req.body);
-	if (!body)
-		return json_error(400, "invalid_json");
-	const auto title = body->text("title");
-	const auto visibility = body->text("visibility");
-	if (body->wrong_type())
-		return json_error(400, "invalid_field");
-	ProjectPatch changes;
-	if (title) {
-		if (!valid_title(*title))
-			return field_error(400, "invalid_field", "title",
-					"title is 1 to 64 characters with no control characters");
-		changes.title = *title;
-	}
-	if (visibility) {
-		const auto seen = visibility_from_name(*visibility);
-		if (!seen)
-			return field_error(
-					400, "invalid_field", "visibility", "visibility is public or private");
-		changes.visibility = *seen;
-	}
-	try {
-		auto db_conn = pool_.acquire();
-		const auto p = find_project(*db_conn, key);
-		if (!p || update_project(*db_conn, p->id, changes) != ProjectOutcome::Ok)
-			return no_such_project();
-		const auto changed = find_project_by_id(*db_conn, p->id);
-		if (!changed)
-			return no_such_project();
-		crow::json::wvalue out;
-		out["project"] = project_json(*db_conn, *changed, true, project_keys(*db_conn));
-		return no_store(json_reply(200, out));
-	} catch (const db::Error &e) {
-		return db_failure("PATCH /api/admin/content/projects/<key>", e);
-	}
-}
-
-// DELETE /api/admin/content/projects/<key> — 204, the project's rows gone and then its objects
-// (content/<key>/); 404 not_found; 409 has_expansion (an expansion's project builds on it).
-crow::response ContentRoutes::remove(const crow::request &req, const std::string &key) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	try {
-		auto db_conn = pool_.acquire();
-		const auto p = find_project(*db_conn, key);
-		if (!p)
-			return no_such_project();
-		switch (delete_project(*db_conn, p->id)) {
-			case ProjectOutcome::Ok:
-				break;
-			case ProjectOutcome::InUse:
-				return json_error(
-						409, "has_expansion", "an expansion's content project builds on this one");
-			default:
-				return no_such_project();
-		}
-	} catch (const db::Error &e) {
-		return db_failure("DELETE /api/admin/content/projects/<key>", e);
-	}
-	std::string error;
-	if (store_ != nullptr && !store_->remove_prefix(project_prefix(key), error))
-		std::fprintf(stderr,
-				"[http] DELETE /api/admin/content/projects/%s: its objects stay in the store: %s\n",
-				loggable(key).c_str(), error.c_str());
-	return crow::response(204);
-}
-
 // POST /api/admin/content/projects/<key>/releases — {"version", "revision"?, "base_revision"?}: a
-// release the data program builds (data_sets/release_build.h) from the revision (the head when
-// none is named) and, for an expansion's project, its base's (its head), its package's version
-// `version`: 201 {"release"}, building, its release.build queued in the same transaction; 400
-// invalid_json, invalid_field, no_data_set (the project's releases update none), no_revision (no
-// such revision, or none pushed yet); 404 not_found; 503 store_unavailable.
+// release of the game the key names that the data program builds (data_sets/release_build.h)
+// from the revision (the head when none is named) and, for an expansion's, its base game's (its
+// head), its package's version `version`: 201 {"release"}, building, its release.build queued in
+// the same transaction; 400 invalid_json, invalid_field, no_revision (no such revision, none
+// pushed yet, or a base game with no project); 404 not_found; 503 store_unavailable.
 crow::response ContentRoutes::release(const crow::request &req, const std::string &key) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -931,14 +757,12 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 		const auto p = find_project(*db_conn, key);
 		if (!p)
 			return no_such_project();
-		if (!p->data_set_id)
-			return json_error(400, "no_data_set", "the project's releases update no data set");
 		const int64_t number = revision.value_or(p->head);
 		if (number <= 0 || !find_revision(*db_conn, p->id, number))
 			return json_error(400, "no_revision", "the project has no such revision");
 		int64_t base_number = 0;
-		if (p->base_project_id) {
-			const auto base = find_project_by_id(*db_conn, *p->base_project_id);
+		if (p->parent_id) {
+			const auto base = find_project_by_id(*db_conn, *p->parent_id);
 			base_number = base ? base_revision.value_or(base->head) : 0;
 			if (!base || base_number <= 0 || !find_revision(*db_conn, base->id, base_number))
 				return json_error(
@@ -947,7 +771,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 		hosted::NewBuiltRelease made;
 		made.name = p->key + " " + *version;
 		made.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
-		made.content_project_id = p->id;
+		made.data_set_id = p->id;
 		made.content_revision = number;
 		made.base_revision = base_number;
 		made.version = *version;

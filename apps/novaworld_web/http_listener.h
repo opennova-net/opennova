@@ -81,13 +81,13 @@ namespace content { class ContentUrls; }
 //                         (infra/usage_routes.h): what everything uses and
 //                         the programs' tasks; CostRoutes
 //                         (infra/cost_routes.h): the month's AWS bill
-//   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
-//                         hosted data sets, their tree uploads into the object
-//                         store and the update releases, each part through
-//                         this program (ADR 0064)
-//   content store       — ContentRoutes (content/): the content projects'
+//   games               — DataSetRoutes and ReleaseRoutes (data_sets/): the
+//                         games (each a data set, its project with it) and
+//                         their releases, a project-less game's package
+//                         uploaded through this program part by part (ADR 0064)
+//   content store       — ContentRoutes (content/): the games' projects'
 //                         revisions, manifests and files, the editor's
-//                         pushes, and the admin's projects (ADR 0069)
+//                         pushes, and a release built from a revision (ADR 0069)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -167,10 +167,10 @@ public:
 	// start(); it must outlive the listener. Null: the view says none is read.
 	void set_cost_store(infra::CostStore *store) { cost_store_ = store; }
 
-	// The object store the hosted data sets' trees and the update packages
-	// live in (core/object_store.h; core/object_store_stack.h
-	// make_object_store), which the admin's data set and release routes upload
-	// into and read. Set before start(); it
+	// The object store the hosted data sets' trees, the projects' files and the
+	// update packages live in (core/object_store.h; core/object_store_stack.h
+	// make_object_store), which the games', release and content routes read and
+	// write. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }

@@ -61,9 +61,9 @@ struct Source {
 	std::string label() const { return key + " r" + id_text(revision); }
 };
 
-// What a build makes, read in one lease: the release, the data set its package updates, the
-// revision it exports (an expansion's base's beside it), a retail game's stock revisions, and the
-// data set's last published package.
+// What a build makes, read in one lease: the release, its game (the data set its package
+// updates), the revision it exports (an expansion's base game's beside it), a retail game's stock
+// revisions, and the game's last published package.
 struct BuildPlan {
 	ReleaseRow release;
 	DataSetRow data_set;
@@ -93,17 +93,16 @@ bool source_of(db::Database &db, const content::ContentProject &project, int64_t
 // The plan of the building release `release`; false with `why` (the release's refusal).
 bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::string &why) {
 	plan.release = release;
-	const std::optional<content::ContentProject> project = release.content_project_id
-			? content::find_project_by_id(db, *release.content_project_id)
-			: std::nullopt;
-	if (!project) {
-		why = "its content project was deleted";
+	const std::optional<DataSetRow> data_set =
+			release.data_set_id ? find_data_set(db, *release.data_set_id) : std::nullopt;
+	if (!data_set) {
+		why = "its game was deleted";
 		return false;
 	}
-	const std::optional<DataSetRow> data_set =
-			project->data_set_id ? find_data_set(db, *project->data_set_id) : std::nullopt;
-	if (!data_set) {
-		why = project->key + " updates no data set";
+	const std::optional<content::ContentProject> project =
+			content::find_project_by_id(db, data_set->id);
+	if (!project) {
+		why = data_set->display_name + " has no project";
 		return false;
 	}
 	if (data_set->command_file.empty()) {
@@ -113,7 +112,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	plan.data_set = *data_set;
 	// A data set an admin made carries no product name: ours is named as its data set, the game
 	// run by the runtime's executable (as 0025 names the seeded ones).
-	if (plan.data_set.product_name.empty() && !plan.data_set.retail_updater) {
+	if (plan.data_set.product_name.empty() && !plan.data_set.retail) {
 		plan.data_set.product_name = plan.data_set.display_name;
 		if (plan.data_set.kind == DataSetKind::Base)
 			plan.data_set.product_exe = "opennova.exe";
@@ -126,10 +125,10 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	if (!source_of(db, *project, release.content_revision, plan.project, why))
 		return false;
 	std::optional<content::ContentProject> base;
-	if (project->base_project_id) {
-		base = content::find_project_by_id(db, *project->base_project_id);
+	if (data_set->parent_id) {
+		base = content::find_project_by_id(db, *data_set->parent_id);
 		if (!base) {
-			why = project->key + "'s base project was deleted";
+			why = project->key + "'s base game has no project";
 			return false;
 		}
 		Source source;

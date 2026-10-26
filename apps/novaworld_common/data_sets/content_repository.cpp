@@ -13,10 +13,9 @@ using db::BindValue;
 
 constexpr std::array<const char *, 2> kVisibilityNames = { "public", "private" };
 
-constexpr const char *kProjectColumns = "id, key, title, visibility, retail, data_set_id, "
-										"base_project_id, head, created_by, created_at, "
-										"updated_at";
-constexpr const char *kRevisionColumns = "project_id, number, author_id, created_by, message, "
+constexpr const char *kProjectColumns = "id, key, display_name, visibility, retail, parent_id, "
+										"head, created_by, created_at, updated_at";
+constexpr const char *kRevisionColumns = "data_set_id, number, author_id, created_by, message, "
 										 "manifest_sha256, file_count, bytes, created_at";
 
 BindValue optional_id(std::optional<int64_t> id) {
@@ -32,18 +31,17 @@ ContentProject row_to_project(const db::Row &r) {
 	p.title = r.as_text(2).value_or("");
 	p.visibility = visibility_from_name(r.as_text(3).value_or("")).value_or(Visibility::Private);
 	p.retail = r.as_int(4).value_or(0) != 0;
-	p.data_set_id = r.as_int(5);
-	p.base_project_id = r.as_int(6);
-	p.head = r.as_int(7).value_or(0);
-	p.created_by = r.as_text(8).value_or("");
-	p.created_at = r.as_text(9).value_or("");
-	p.updated_at = r.as_text(10).value_or("");
+	p.parent_id = r.as_int(5);
+	p.head = r.as_int(6).value_or(0);
+	p.created_by = r.as_text(7).value_or("");
+	p.created_at = r.as_text(8).value_or("");
+	p.updated_at = r.as_text(9).value_or("");
 	return p;
 }
 
 ContentRevision row_to_revision(const db::Row &r) {
 	ContentRevision v;
-	v.project_id = r.as_int(0).value_or(0);
+	v.data_set_id = r.as_int(0).value_or(0);
 	v.number = r.as_int(1).value_or(0);
 	v.author_id = r.as_int(2);
 	v.created_by = r.as_text(3).value_or("");
@@ -55,10 +53,11 @@ ContentRevision row_to_revision(const db::Row &r) {
 	return v;
 }
 
+// The games with a project matching `tail` (a condition after "AND", then the order).
 std::vector<ContentProject> query_projects(
 		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
-	const auto rows = db.query(
-			std::string("SELECT ") + kProjectColumns + " FROM content_projects " + tail + ";",
+	const auto rows = db.query(std::string("SELECT ") + kProjectColumns +
+					" FROM data_sets WHERE key IS NOT NULL " + tail + ";",
 			binds);
 	std::vector<ContentProject> out;
 	out.reserve(rows.size());
@@ -91,95 +90,42 @@ std::optional<Visibility> visibility_from_name(std::string_view name) {
 	return std::nullopt;
 }
 
-ProjectOutcome create_project(db::Database &db, const NewProject &project, int64_t &id) {
-	db::Transaction tx(db);
-	if (!db.query("SELECT 1 FROM content_projects WHERE key = $1;", { BindValue(project.key) })
-					.empty())
-		return ProjectOutcome::DuplicateKey;
-	if (project.data_set_id) {
-		if (db.query("SELECT 1 FROM data_sets WHERE id = $1 FOR SHARE;",
-					  { BindValue(*project.data_set_id) })
-						.empty())
-			return ProjectOutcome::NoSuchDataSet;
-		if (!db.query("SELECT 1 FROM content_projects WHERE data_set_id = $1;",
-					   { BindValue(*project.data_set_id) })
-						.empty())
-			return ProjectOutcome::DataSetTaken;
-	}
-	if (project.base_project_id &&
-			db.query("SELECT 1 FROM content_projects WHERE id = $1 FOR SHARE;",
-					  { BindValue(*project.base_project_id) })
-					.empty())
-		return ProjectOutcome::NoSuchBase;
-	const auto rows = db.query("INSERT INTO content_projects (key, title, visibility, retail, "
-							   "data_set_id, base_project_id, created_by) "
-							   "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;",
-			{ BindValue(project.key), BindValue(project.title),
-					BindValue(visibility_name(project.visibility)),
-					BindValue(db::Bool{ project.retail }), optional_id(project.data_set_id),
-					optional_id(project.base_project_id), BindValue(project.created_by) });
-	id = rows.front().as_int(0).value_or(0);
-	tx.commit();
-	return ProjectOutcome::Ok;
-}
-
-ProjectOutcome update_project(db::Database &db, int64_t id, const ProjectPatch &patch) {
-	db::Transaction tx(db);
-	const auto rows = query_projects(db, "WHERE id = $1 FOR NO KEY UPDATE", { BindValue(id) });
-	if (rows.empty())
-		return ProjectOutcome::NotFound;
-	ContentProject row = rows.front();
-	if (patch.title)
-		row.title = *patch.title;
-	if (patch.visibility)
-		row.visibility = *patch.visibility;
-	db.exec("UPDATE content_projects SET title = $2, visibility = $3, updated_at = now() "
-			"WHERE id = $1;",
-			{ BindValue(id), BindValue(row.title), BindValue(visibility_name(row.visibility)) });
-	tx.commit();
-	return ProjectOutcome::Ok;
-}
-
-ProjectOutcome delete_project(db::Database &db, int64_t id) {
-	db::Transaction tx(db);
-	if (db.query("SELECT 1 FROM content_projects WHERE id = $1 FOR UPDATE;", { BindValue(id) })
-					.empty())
-		return ProjectOutcome::NotFound;
-	if (!db.query("SELECT 1 FROM content_projects WHERE base_project_id = $1;", { BindValue(id) })
-					.empty())
-		return ProjectOutcome::InUse;
-	db.exec("DELETE FROM content_projects WHERE id = $1;", { BindValue(id) });
-	tx.commit();
-	return ProjectOutcome::Ok;
+bool valid_key(std::string_view key) {
+	if (key.empty() || key.size() > 16)
+		return false;
+	for (const char c : key)
+		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+			return false;
+	return true;
 }
 
 std::vector<ContentProject> list_projects(db::Database &db, bool include_private) {
 	return query_projects(db,
 			include_private ? "ORDER BY key COLLATE \"C\""
-							: "WHERE visibility = 'public' ORDER BY key COLLATE \"C\"",
+							: "AND visibility = 'public' ORDER BY key COLLATE \"C\"",
 			{});
 }
 
 std::optional<ContentProject> find_project(db::Database &db, std::string_view key) {
-	const auto rows = query_projects(db, "WHERE key = $1", { BindValue(std::string(key)) });
+	const auto rows = query_projects(db, "AND key = $1", { BindValue(std::string(key)) });
 	if (rows.empty())
 		return std::nullopt;
 	return rows.front();
 }
 
-std::optional<ContentProject> find_project_by_id(db::Database &db, int64_t id) {
-	const auto rows = query_projects(db, "WHERE id = $1", { BindValue(id) });
+std::optional<ContentProject> find_project_by_id(db::Database &db, int64_t data_set_id) {
+	const auto rows = query_projects(db, "AND id = $1", { BindValue(data_set_id) });
 	if (rows.empty())
 		return std::nullopt;
 	return rows.front();
 }
 
 std::vector<ContentRevision> list_revisions(
-		db::Database &db, int64_t project_id, int64_t before, int limit) {
+		db::Database &db, int64_t data_set_id, int64_t before, int limit) {
 	const auto rows = db.query(std::string("SELECT ") + kRevisionColumns +
-					" FROM content_revisions WHERE project_id = $1 AND ($2 = 0 OR number < $2) "
+					" FROM content_revisions WHERE data_set_id = $1 AND ($2 = 0 OR number < $2) "
 					"ORDER BY number DESC LIMIT $3;",
-			{ BindValue(project_id), BindValue(before),
+			{ BindValue(data_set_id), BindValue(before),
 					BindValue(static_cast<int64_t>(std::max(limit, 0))) });
 	std::vector<ContentRevision> out;
 	out.reserve(rows.size());
@@ -188,10 +134,10 @@ std::vector<ContentRevision> list_revisions(
 	return out;
 }
 
-std::optional<ContentRevision> find_revision(db::Database &db, int64_t project_id, int64_t number) {
+std::optional<ContentRevision> find_revision(db::Database &db, int64_t data_set_id, int64_t number) {
 	const auto rows = db.query(std::string("SELECT ") + kRevisionColumns +
-					" FROM content_revisions WHERE project_id = $1 AND number = $2;",
-			{ BindValue(project_id), BindValue(number) });
+					" FROM content_revisions WHERE data_set_id = $1 AND number = $2;",
+			{ BindValue(data_set_id), BindValue(number) });
 	if (rows.empty())
 		return std::nullopt;
 	return row_to_revision(rows.front());
@@ -210,7 +156,7 @@ std::string project_prefix(std::string_view project_key) {
 }
 
 std::vector<StoredBlob> missing_blobs(
-		db::Database &db, int64_t project_id, const std::vector<StoredBlob> &wanted) {
+		db::Database &db, int64_t data_set_id, const std::vector<StoredBlob> &wanted) {
 	std::vector<StoredBlob> unique;
 	std::vector<std::string> shas;
 	std::unordered_set<std::string> seen;
@@ -222,8 +168,8 @@ std::vector<StoredBlob> missing_blobs(
 	if (unique.empty())
 		return {};
 	const auto rows = db.query("SELECT sha256, bytes FROM content_blobs "
-							   "WHERE project_id = $1 AND sha256 = ANY($2::text[]);",
-			{ BindValue(project_id), BindValue(sha_array(shas)) });
+							   "WHERE data_set_id = $1 AND sha256 = ANY($2::text[]);",
+			{ BindValue(data_set_id), BindValue(sha_array(shas)) });
 	std::unordered_map<std::string, int64_t> held;
 	for (const auto &r : rows)
 		held.emplace(r.as_text(0).value_or(""), r.as_int(1).value_or(-1));
@@ -236,19 +182,19 @@ std::vector<StoredBlob> missing_blobs(
 	return missing;
 }
 
-void record_blobs(db::Database &db, int64_t project_id, const std::vector<StoredBlob> &blobs) {
+void record_blobs(db::Database &db, int64_t data_set_id, const std::vector<StoredBlob> &blobs) {
 	db::Transaction tx(db);
 	for (const StoredBlob &blob : blobs)
-		db.exec("INSERT INTO content_blobs (project_id, sha256, bytes) VALUES ($1, $2, $3) "
-				"ON CONFLICT (project_id, sha256) DO NOTHING;",
-				{ BindValue(project_id), BindValue(blob.sha256), BindValue(blob.bytes) });
+		db.exec("INSERT INTO content_blobs (data_set_id, sha256, bytes) VALUES ($1, $2, $3) "
+				"ON CONFLICT (data_set_id, sha256) DO NOTHING;",
+				{ BindValue(data_set_id), BindValue(blob.sha256), BindValue(blob.bytes) });
 	tx.commit();
 }
 
-ProjectStorage project_storage(db::Database &db, int64_t project_id) {
+ProjectStorage project_storage(db::Database &db, int64_t data_set_id) {
 	const auto rows = db.query("SELECT count(*), COALESCE(sum(bytes), 0)::bigint "
-							   "FROM content_blobs WHERE project_id = $1;",
-			{ BindValue(project_id) });
+							   "FROM content_blobs WHERE data_set_id = $1;",
+			{ BindValue(data_set_id) });
 	ProjectStorage storage;
 	if (!rows.empty()) {
 		storage.blobs = rows.front().as_int(0).value_or(0);
@@ -257,24 +203,24 @@ ProjectStorage project_storage(db::Database &db, int64_t project_id) {
 	return storage;
 }
 
-CommitOutcome commit_revision(db::Database &db, int64_t project_id, int64_t parent,
+CommitOutcome commit_revision(db::Database &db, int64_t data_set_id, int64_t parent,
 		const NewRevision &revision, int64_t &head) {
 	db::Transaction tx(db);
-	const auto moved = db.query("UPDATE content_projects SET head = head + 1, updated_at = now() "
-								"WHERE id = $1 AND head = $2 RETURNING head;",
-			{ BindValue(project_id), BindValue(parent) });
+	const auto moved = db.query("UPDATE data_sets SET head = head + 1, updated_at = now() "
+								"WHERE id = $1 AND key IS NOT NULL AND head = $2 RETURNING head;",
+			{ BindValue(data_set_id), BindValue(parent) });
 	if (moved.empty()) {
-		const auto now = db.query(
-				"SELECT head FROM content_projects WHERE id = $1;", { BindValue(project_id) });
+		const auto now = db.query("SELECT head FROM data_sets WHERE id = $1 AND key IS NOT NULL;",
+				{ BindValue(data_set_id) });
 		if (now.empty())
 			return CommitOutcome::NotFound;
 		head = now.front().as_int(0).value_or(0);
 		return CommitOutcome::Stale;
 	}
 	head = moved.front().as_int(0).value_or(0);
-	db.exec("INSERT INTO content_revisions (project_id, number, author_id, created_by, message, "
+	db.exec("INSERT INTO content_revisions (data_set_id, number, author_id, created_by, message, "
 			"manifest_sha256, file_count, bytes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);",
-			{ BindValue(project_id), BindValue(head), optional_id(revision.author_id),
+			{ BindValue(data_set_id), BindValue(head), optional_id(revision.author_id),
 					BindValue(revision.created_by), BindValue(revision.message),
 					BindValue(revision.manifest_sha256), BindValue(revision.file_count),
 					BindValue(revision.bytes) });

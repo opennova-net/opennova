@@ -81,14 +81,14 @@ inline int64_t seeded_data_set(Database &db, const char *display_name) {
 // and a two-file manifest; its id.
 inline int64_t seed_tree(Database &db, int64_t data_set_id, const std::string &version,
 		const std::vector<std::string> &missions, const std::vector<std::string> &files = { "resource.pff", "version.txt" }) {
-	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeSource::Baseline, hosted::TreeState::Finalizing, std::nullopt, std::nullopt, "test");
+	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "test");
 	hosted::TreeReady ready;
 	for (size_t i = 0; i < files.size(); ++i)
 		ready.files.push_back({ files[i], 1000 + i });
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
 	ready.version_text = version;
 	ready.bytes = 2001;
-	if (!hosted::finish_tree(db, id, hosted::TreeState::Finalizing, ready)) return 0;
+	if (!hosted::finish_tree(db, id, ready)) return 0;
 	return id;
 }
 

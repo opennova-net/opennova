@@ -221,7 +221,7 @@ int run(const test_temp::TempDir &dir) {
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
-		e.retail_updater = true;
+		e.retail = true;
 		e.created_by = "test";
 		TEST_EXPECT(hosted::create_data_set(*db, e, expansion) == hosted::DataSetOutcome::Ok);
 		release = publish(*db, sha, static_cast<int64_t>(bytes.size()),

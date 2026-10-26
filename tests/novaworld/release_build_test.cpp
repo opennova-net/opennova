@@ -1,13 +1,16 @@
-// A release built from a content project's revision
+// A release built from a revision of its game's project
 // (apps/novaworld_common/data_sets/release_build.h, ADR 0069 d7) on a migrated database of the
 // test's own and a local object store, the data program's jobs run on this thread with the real
 // tools (opennova-project's export, opennova-update-tool's builder, as child processes). A retail
-// game's stock import pushed as revision 1 and an edit as revision 2: the build exports both and
-// packs the revision whole (every file a row, the stock install's removals counted from revision
-// 1, the runtime's own files left out), a package release.validate makes a draft of, its one
-// section the game's data set's. Our own game's first revision: a full package whose tree holds the UPDATE.WIZ naming its
-// product. And the refusals: a project that updates no data set, and a revision that is no project
-// (its export fails, what the tool said kept as the build's log).
+// game's stock import of a minted install pushed as revision 1 and an edit as revision 2: the
+// build exports both and packs the revision whole (every file a row, the stock install's removals
+// counted from revision 1, the runtime's own files left out), a package release.validate makes a
+// draft of, its one section the game's; published, release.apply builds the game's tree from
+// nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
+// equal to the edited revision's export. Our own game's first revision: a full package whose
+// tree holds the UPDATE.WIZ naming its product. And the refusals: a game that names no updater
+// product, and a revision that is no project (its export fails, what the tool said kept as the
+// build's log).
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -28,12 +31,14 @@
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
 #include <formats/update/sfs.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -142,16 +147,15 @@ struct Rig {
 				: 0;
 	}
 
-	// Our own game's project as the seeds key it (its updater product's login) with its data set's
+	// Our own game's project as the seeds key it (its updater product's login) with the game's
 	// command file and name, whatever the game is called.
 	struct OwnGame {
 		std::string key, command_file, name;
 	};
 	OwnGame own_game() {
 		const auto rows = db.query(
-				"SELECT p.key, d.command_file, d.display_name FROM content_projects p "
-				"JOIN data_sets d ON d.id = p.data_set_id "
-				"WHERE d.kind = 'base' AND d.updater_login <> '' AND NOT d.retail_updater;");
+				"SELECT key, command_file, display_name FROM data_sets "
+				"WHERE kind = 'base' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
 		OwnGame own;
 		if (rows.size() == 1) {
 			own.key = rows.front().as_text(0).value_or("");
@@ -169,7 +173,7 @@ struct Rig {
 		hosted::NewBuiltRelease made;
 		made.name = key + " " + version;
 		made.created_by = "admin taylor";
-		made.content_project_id = project->id;
+		made.data_set_id = project->id;
 		made.content_revision = revision;
 		made.version = version;
 		const int64_t id = hosted::create_built_release(db, made);
@@ -203,6 +207,24 @@ const update::SfsEntry *entry_named(const update::SfsSection &section, const cha
 		if (strutil::iequals(entry.name, name))
 			return &entry;
 	return nullptr;
+}
+
+// An archive's entries by their normalized names: each one's bytes (none when it does not open).
+std::map<std::string, std::vector<uint8_t>> archive_contents(const std::string &path) {
+	namespace pff = opennova::pff;
+	std::map<std::string, std::vector<uint8_t>> out;
+	pff::PffArchive archive{};
+	if (pff::pff_open(&archive, path.c_str()) != 0)
+		return out;
+	for (uint32_t i = 0; i < archive.entry_count; ++i) {
+		const pff::PffEntry &entry = archive.entries[i];
+		std::vector<uint8_t> content(entry.size ? entry.size : 1);
+		pff::pff_extract(&archive, &entry, content.data(), content.size());
+		content.resize(entry.size);
+		out[pff::normalized_logical_name(pff::pff_entry_stored_name(entry))] = std::move(content);
+	}
+	pff::pff_close(&archive);
+	return out;
 }
 
 } // namespace
@@ -245,8 +267,9 @@ static int test_retail_whole() {
 			release->build_log.find("laid out JO r1") != std::string::npos);
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	const auto set = content::find_project(rig.db, "JO");
-	TEST_EXPECT(sections.size() == 1 && set && sections[0].data_set_id == *set->data_set_id &&
-			sections[0].command_file == "JOPTR.CMD" && sections[0].version == "1.0.1");
+	TEST_EXPECT(sections.size() == 1 && set && sections[0].data_set_id == set->id &&
+			release->data_set_id == set->id && sections[0].command_file == "JOPTR.CMD" &&
+			sections[0].version == "1.0.1");
 	TEST_EXPECT(!sections.empty() && sections[0].row_count >= 1);
 	update::SfsPackage package;
 	TEST_EXPECT(rig.package(*release, package) && package.product == "Joint Operations" &&
@@ -271,8 +294,39 @@ static int test_retail_whole() {
 				strutil::iequals(row.name, "revupdat.exe") || strutil::iequals(row.name, "README.txt");
 	}
 	TEST_EXPECT(edited && copies > 1 && !runtime_file);
-	std::printf("retail whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft\n",
-			copies);
+
+	// Published, the game's tree is built from the release alone (no stock install beside it):
+	// every archive back from nothing, entry for entry as the edited revision exports.
+	if (!set)
+		return 1;
+	TEST_EXPECT(hosted::publish_release(rig.db, id) &&
+			hosted::enqueue_release_apply(rig.db, id, set->id) > 0);
+	rig.run_jobs();
+	const auto game = hosted::find_data_set(rig.db, set->id);
+	TEST_EXPECT(game && game->current_tree_id);
+	if (!game || !game->current_tree_id) {
+		for (const hosted::ReleaseSection &s : hosted::list_sections(rig.db, id))
+			if (s.tree_id)
+				if (const auto failed = hosted::find_tree(rig.db, *s.tree_id))
+					std::fprintf(stderr, "tree %lld: %s\n", static_cast<long long>(failed->id),
+							failed->error.c_str());
+		return 1;
+	}
+	const auto tree = hosted::find_tree(rig.db, *game->current_tree_id);
+	TEST_EXPECT(tree && tree->state == hosted::TreeState::Ready && tree->release_id == id &&
+			tree->version_text == "1.0.1");
+	const std::string expected = rig.temp.file("expected");
+	TEST_EXPECT(rig.project({ "export", project, "--out", expected }) == 0);
+	size_t entries = 0;
+	for (const char *archive : { "resource.pff", "localres.pff", "language.pff" }) {
+		const auto built = archive_contents(rig.store.path_of(hosted::tree_prefix(tree->id) + archive));
+		const auto want = archive_contents(io::utf8_join(expected, archive));
+		TEST_EXPECT(!built.empty() && built == want);
+		entries += built.size();
+	}
+	std::printf("retail whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft; "
+				"its tree built from nothing, %zu archive entries back\n",
+			copies, entries);
 	return 0;
 }
 
@@ -314,16 +368,19 @@ static int test_own_full() {
 	return 0;
 }
 
-// A project that updates no data set, and a revision that is no project: each release invalid
+// A game that names no updater product, and a revision that is no project: each release invalid
 // with its reason, the second with what the export said.
 static int test_refusals() {
 	Rig rig("opennova_release_build_refusals");
-	content::NewProject loose;
+	hosted::NewDataSet loose;
+	loose.display_name = "Loose";
+	loose.kind = hosted::DataSetKind::Base;
+	loose.title = "jo";
+	loose.game = "jop_2_consumer";
 	loose.key = "LOOSE";
-	loose.title = "Loose";
-	loose.visibility = content::Visibility::Private;
+	loose.visibility = "private";
 	int64_t loose_id = 0;
-	TEST_EXPECT(content::create_project(rig.db, loose, loose_id) == content::ProjectOutcome::Ok);
+	TEST_EXPECT(hosted::create_data_set(rig.db, loose, loose_id) == hosted::DataSetOutcome::Ok);
 	const std::string notes = rig.temp.file("notes");
 	std::string error;
 	TEST_EXPECT(io::ensure_directory(notes, error) &&
@@ -336,13 +393,13 @@ static int test_refusals() {
 	rig.run_jobs();
 	const auto first = hosted::find_release(rig.db, no_set);
 	TEST_EXPECT(first && first->status == hosted::ReleaseStatus::Invalid &&
-			first->error.find("updates no data set") != std::string::npos);
+			first->error.find("names no updater product") != std::string::npos);
 	const auto second = hosted::find_release(rig.db, no_project);
 	TEST_EXPECT(second && second->status == hosted::ReleaseStatus::Invalid &&
 			second->error.find("the export of " + own.key + " r1") != std::string::npos &&
 			second->build_log.find("$ ") != std::string::npos);
 	if (second && second->status == hosted::ReleaseStatus::Invalid)
-		std::printf("refusals: no data set; a revision that is no project (%s)\n",
+		std::printf("refusals: no updater product; a revision that is no project (%s)\n",
 				second->error.c_str());
 	return 0;
 }

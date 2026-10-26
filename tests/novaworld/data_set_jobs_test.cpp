@@ -1,19 +1,19 @@
 // The hosted data sets' jobs (apps/novaworld_common/data_sets/data_set_jobs.h) over a migrated
 // database of the test's own and a local object store in a scratch directory, each job run as
-// the workers run it (jobs::run_due): a baseline tree uploaded as a packed synthetic install
-// (the three archives, two multiplayer missions and a single-player one titled from
-// language.pff, version.txt, score.ini) finalized into its manifest, missions, version and
-// bytes, trees/<id>/manifest.json (names and sizes) beside its files, the data set's current
-// and baseline trees following; a tree holding a file no base tree takes, and one lacking a
-// required archive, failed with the reason; an expansion tree finalized through its own pair;
-// a 1SFS package opennova-update-tool built from the synthetic baseline and its updated tree
-// validated into a draft with its two sections and versions, the object moved under its
-// digest, a package whose command file names no data set and a second upload of the same
-// bytes refused; a published release applied to the baselines (the release trees' files equal
-// the updated tree's: the loose files byte for byte, the archives entry for entry, a file the
-// tree does not hold left out, a removed one gone, the version and the missions redone, a run
-// again on a building tree continuing on its row), and applied with no baseline failing so;
-// and the prune removing an orphaned tree's objects and an abandoned upload, idempotent.
+// the workers run it (jobs::run_due), over a minted retail-shaped install (the boot table's three
+// archives, two multiplayer missions and a single-player one titled from language.pff,
+// version.txt, score.ini) and the tree a release takes it to: a 1SFS package
+// opennova-update-tool built from them validated into a draft with its two sections and
+// versions, the object moved under its digest, and the refusals (a package whose command file
+// names no data set, a second upload of the same bytes, an upload of a game with a project,
+// whose releases are built); our own game's first release and the runtime's (a second of the
+// same version taken too); a whole retail-shaped release built into each game's tree from
+// nothing (the trees' files equal the updated tree's: the loose files byte for byte, every
+// archive made anew entry for entry, the unchanged entries with the rest, a file the tree does
+// not hold left out, the removals since the stock install nothing to do, the version and the
+// missions read, trees/<id>/manifest.json beside the files, a run again on a building tree
+// continuing on its row afresh); a release that leaves a tree without a required archive
+// failing it; and the prune removing an orphaned tree's objects, idempotent.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -278,21 +278,16 @@ struct Rig {
 		std::sort(names.begin(), names.end());
 		return names;
 	}
-	// A baseline tree of `data_set_id` from the files at `dir`, finalized by the job: its id,
-	// 0 when it did not come out ready.
-	int64_t upload_baseline(int64_t data_set_id, const std::string &dir) {
-		const int64_t id = create_tree(db, data_set_id, TreeSource::Baseline, TreeState::Uploading,
-				std::nullopt, std::nullopt, "admin");
-		if (!put_dir(tree_prefix(id), dir))
+	// A ready tree of `data_set_id` holding the files at `dir`, as release.apply leaves one: its
+	// id.
+	int64_t ready_tree(int64_t data_set_id, const std::string &dir) {
+		const int64_t id = create_tree(db, data_set_id, std::nullopt, "worker");
+		if (!put_dir(tree_prefix(id), dir) || !finish_tree(db, id, TreeReady{}))
 			return 0;
-		if (!set_tree_state(db, id, TreeState::Uploading, TreeState::Finalizing) ||
-				enqueue_tree_finalize(db, id) == 0)
-			return 0;
-		run_jobs();
-		const auto tree = find_tree(db, id);
-		return tree && tree->state == TreeState::Ready ? id : 0;
+		return id;
 	}
-	// The synthetic data sets the package's command files name: the base and its expansion.
+	// The synthetic retail games the package's command files name, with no project (their
+	// packages uploaded): the base and its expansion.
 	bool make_synthetic_data_sets(int64_t &base, int64_t &expansion) {
 		NewDataSet b;
 		b.display_name = "Synthetic";
@@ -301,6 +296,7 @@ struct Rig {
 		b.game = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
+		b.retail = true;
 		b.created_by = "admin";
 		if (create_data_set(db, b, base) != DataSetOutcome::Ok)
 			return false;
@@ -311,13 +307,14 @@ struct Rig {
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
+		e.retail = true;
 		e.created_by = "admin";
 		return create_data_set(db, e, expansion) == DataSetOutcome::Ok;
 	}
-	// The package built from `root`'s from and to trees, uploaded as a new release and
-	// validated by the job: its id; `package` the package as built.
-	int64_t upload_release(const std::string &root, const char *name, update::SfsPackage &package,
-			std::vector<update_tool::ProductSpec> products = {}, bool full = false) {
+	// The package opennova-update-tool builds from `root`'s from and to trees (`full`: every file
+	// of `to` a row, as every release now is): false when it builds none.
+	bool build_package(const std::string &root, std::vector<update_tool::ProductSpec> products,
+			bool full, update::SfsPackage &package) {
 		update_tool::BuildSpec spec;
 		spec.full = full;
 		spec.from = io::os_path(root + "/from");
@@ -333,14 +330,42 @@ struct Rig {
 		std::string error;
 		if (!update_tool::build_update_package(spec, package, report, error)) {
 			std::fprintf(stderr, "  build: %s\n", error.c_str());
-			return 0;
+			return false;
 		}
+		return true;
+	}
+	// The package built from `root`'s trees, uploaded as a new release and validated by the job:
+	// its id; `package` the package as built.
+	int64_t upload_release(const std::string &root, const char *name, update::SfsPackage &package,
+			std::vector<update_tool::ProductSpec> products = {}, bool full = false) {
+		if (!build_package(root, std::move(products), full, package))
+			return 0;
 		const std::vector<uint8_t> packed = update::sfs_write(package);
 		const int64_t id = create_release(db, name, static_cast<int64_t>(packed.size()), "admin");
 		if (!put(release_upload_key(id), packed))
 			return 0;
 		if (!set_release_status(db, id, ReleaseStatus::Uploading, ReleaseStatus::Validating) ||
 				enqueue_release_validate(db, id) == 0)
+			return 0;
+		run_jobs();
+		return id;
+	}
+	// The whole package built from `root`'s trees as release.build hands one on: a release of the
+	// game `data_set_id` built from its project's revision 1, the package where an upload lands,
+	// validated by the job: its id.
+	int64_t built_release(const std::string &root, const char *name, int64_t data_set_id,
+			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package) {
+		if (!build_package(root, std::move(products), true, package))
+			return 0;
+		NewBuiltRelease made;
+		made.name = name;
+		made.created_by = "admin";
+		made.data_set_id = data_set_id;
+		made.content_revision = 1;
+		made.version = "1.0";
+		const int64_t id = create_built_release(db, made);
+		if (!put(release_upload_key(id), update::sfs_write(package)) ||
+				!set_release_built(db, id, "built") || enqueue_release_validate(db, id) == 0)
 			return 0;
 		run_jobs();
 		return id;
@@ -393,145 +418,20 @@ int expect_manifest_matches_store(Rig &rig, const DataSetTree &tree) {
 	return 0;
 }
 
+// The tree's archive `name` fetched from the store: its entries.
+std::map<std::string, Entry> stored_archive(Rig &rig, int64_t tree, const std::string &name) {
+	const std::string fetched = rig.temp.file(("fetched-" + std::to_string(tree) + "-" + name).c_str());
+	std::string error;
+	if (!rig.store.get_file(tree_prefix(tree) + name, fetched, error))
+		return {};
+	return archive_entries(fetched);
+}
+
 // --- the cases ---
 
-// A baseline upload of a base data set finalized: the files measured, the version read, the
-// multiplayer missions listed with their titles, the manifest beside the files, the data set's
-// current and baseline trees this one, a prune queued after.
-int test_finalize_baseline() {
-	Rig rig("data_set_jobs_finalize");
-	const std::string from = rig.temp.file("from");
-	TEST_EXPECT(make_base_tree(from, false));
-	const int64_t jo = rig.seeded("Joint Operations");
-	const int64_t id = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Uploading,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(rig.put_dir(tree_prefix(id), from));
-	// Not finalizing yet: the job has nothing to do and changes nothing.
-	const int64_t early = enqueue_tree_finalize(rig.db, id);
-	TEST_EXPECT(early > 0 && rig.run_jobs() == 1);
-	TEST_EXPECT(
-			find_tree(rig.db, id)->state == TreeState::Uploading && rig.job_state(early) == "done");
-	TEST_EXPECT(set_tree_state(rig.db, id, TreeState::Uploading, TreeState::Finalizing));
-	const int64_t job = enqueue_tree_finalize(rig.db, id);
-	TEST_EXPECT(job > 0 && enqueue_tree_finalize(rig.db, id) == 0); // deduped while queued
-	TEST_EXPECT(!jobs::job_pending(rig.db, kJobTreePrune));
-	TEST_EXPECT(rig.run_jobs() >= 1);
-	TEST_EXPECT(rig.job_state(job) == "done");
-	const auto tree = find_tree(rig.db, id);
-	TEST_EXPECT(tree && tree->state == TreeState::Ready && tree->error.empty() &&
-			!tree->ready_at.empty());
-	if (!tree || tree->state != TreeState::Ready) {
-		if (tree)
-			std::fprintf(stderr, "  tree: %s\n", tree->error.c_str());
-		return 1;
-	}
-	TEST_EXPECT(tree->files.size() == 5);
-	const char *names[] = { "language.pff", "localres.pff", "resource.pff", "score.ini",
-		"version.txt" };
-	int64_t bytes = 0;
-	for (size_t i = 0; i < 5 && i < tree->files.size(); ++i) {
-		TEST_EXPECT(tree->files[i].name == names[i]);
-		const std::vector<uint8_t> content = read_bytes(from + "/" + names[i]);
-		TEST_EXPECT(!content.empty() && tree->files[i].size == content.size());
-		bytes += static_cast<int64_t>(content.size());
-	}
-	TEST_EXPECT(tree->bytes == bytes && tree->version_text == kBaseVersion);
-	// The catalog's multiplayer rows, titled from language.pff, in its order; the
-	// single-player one left out. An archived mission lists by its directory name, which
-	// PFF_Open's sort uppercased [orig: PFF_SortEntries @0x768280 (_strupr @0x7682A1);
-	// Mission_BuildMapListFromPFF @0x562910 (@0x562AEA)].
-	TEST_EXPECT(tree->missions.size() == 2);
-	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "ALPHA.BMS" &&
-			tree->missions[0].title == "Alpha Strike" && tree->missions[1].file == "BRAVO.BMS" &&
-			tree->missions[1].title == "Bravo Hold");
-	if (int rc = expect_manifest_matches_store(rig, *tree))
-		return rc;
-	const auto data_set = find_data_set(rig.db, jo);
-	TEST_EXPECT(data_set && data_set->current_tree_id == id && data_set->baseline_tree_id == id);
-	// The prune ran after it (nothing to prune yet: the job is done, the tree stays).
-	TEST_EXPECT(!jobs::job_pending(rig.db, kJobTreePrune));
-	TEST_EXPECT(find_tree(rig.db, id)->state == TreeState::Ready);
-	// The scratch directory is left clean.
-	std::error_code ec;
-	TEST_EXPECT(!fs::exists(
-			io::os_path(rig.temp.file(("scratch/tree-" + std::to_string(id)).c_str())), ec));
-	return 0;
-}
-
-// A tree holding what a base tree does not, and one lacking a required archive: failed with
-// the reason, the data set untouched.
-int test_finalize_refusals() {
-	Rig rig("data_set_jobs_refusals");
-	const std::string from = rig.temp.file("from");
-	TEST_EXPECT(make_base_tree(from, false));
-	const int64_t jo = rig.seeded("Joint Operations");
-	// An extra file.
-	const int64_t extra = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(rig.put_dir(tree_prefix(extra), from));
-	TEST_EXPECT(rig.put(tree_prefix(extra) + "Jointops.exe", bytes("MZ")));
-	TEST_EXPECT(enqueue_tree_finalize(rig.db, extra) > 0 && rig.run_jobs() >= 1);
-	auto tree = find_tree(rig.db, extra);
-	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
-			tree->error.find("Jointops.exe") != std::string::npos);
-	// A required archive missing.
-	const int64_t missing = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(rig.put_dir(tree_prefix(missing), from));
-	std::string error;
-	TEST_EXPECT(rig.store.remove(tree_prefix(missing) + "language.pff", error));
-	TEST_EXPECT(enqueue_tree_finalize(rig.db, missing) > 0 && rig.run_jobs() >= 1);
-	tree = find_tree(rig.db, missing);
-	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
-			tree->error.find("language.pff") != std::string::npos);
-	// An archive that is none.
-	const int64_t corrupt = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(rig.put_dir(tree_prefix(corrupt), from));
-	TEST_EXPECT(rig.put(tree_prefix(corrupt) + "localres.pff", bytes("not an archive")));
-	TEST_EXPECT(enqueue_tree_finalize(rig.db, corrupt) > 0 && rig.run_jobs() >= 1);
-	tree = find_tree(rig.db, corrupt);
-	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
-			tree->error.find("localres.pff") != std::string::npos);
-	const auto data_set = find_data_set(rig.db, jo);
-	TEST_EXPECT(data_set && !data_set->current_tree_id && !data_set->baseline_tree_id);
-	return 0;
-}
-
-// An expansion's baseline finalized through its own pair, with no base install beside it.
-int test_finalize_expansion() {
-	Rig rig("data_set_jobs_expansion");
-	const std::string from = rig.temp.file("from");
-	TEST_EXPECT(make_expansion_tree(from, false));
-	const int64_t jox = rig.seeded("Escalation");
-	const int64_t id = rig.upload_baseline(jox, from);
-	TEST_EXPECT(id != 0);
-	if (id == 0)
-		return 1;
-	const auto tree = find_tree(rig.db, id);
-	TEST_EXPECT(tree->files.size() == 3 && tree->files[0].name == "jox01.pff" &&
-			tree->files[1].name == "jox01L.pff" && tree->files[2].name == "version.txt");
-	TEST_EXPECT(tree->version_text == kExpVersion);
-	TEST_EXPECT(tree->missions.size() == 1 && tree->missions[0].file == "EXP.BMS" &&
-			tree->missions[0].title == "Expansion Op");
-	TEST_EXPECT(find_data_set(rig.db, jox)->current_tree_id == id);
-	if (int rc = expect_manifest_matches_store(rig, *tree))
-		return rc;
-	// A spelling that is not the canonical one is refused (hostd fetches by the manifest's).
-	const int64_t spelled = create_tree(rig.db, jox, TreeSource::Baseline, TreeState::Finalizing,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(rig.put_dir(tree_prefix(spelled), from));
-	std::string error;
-	TEST_EXPECT(rig.put_file(tree_prefix(spelled) + "JOX01L.PFF", from + "/jox01L.pff") &&
-			rig.store.remove(tree_prefix(spelled) + "jox01L.pff", error));
-	TEST_EXPECT(enqueue_tree_finalize(rig.db, spelled) > 0 && rig.run_jobs() >= 1);
-	TEST_EXPECT(find_tree(rig.db, spelled)->state == TreeState::Failed &&
-			find_tree(rig.db, spelled)->error.find("JOX01L.PFF") != std::string::npos);
-	return 0;
-}
-
 // The package validated: a draft with its sections and versions, the object under its digest;
-// then a package naming no data set, and the same bytes again, invalid.
+// then a package naming no data set, the same bytes again, and an upload of a game with a
+// project, invalid.
 int test_validate() {
 	Rig rig("data_set_jobs_validate");
 	TEST_EXPECT(make_trees(rig.temp.root()));
@@ -552,7 +452,8 @@ int test_validate() {
 	const std::vector<uint8_t> packed = update::sfs_write(package);
 	TEST_EXPECT(release->sha256 == sha_of(packed) &&
 			release->bytes == static_cast<int64_t>(packed.size()) &&
-			release->package_product == "Synthetic Product" && release->error.empty());
+			release->package_product == "Synthetic Product" && release->error.empty() &&
+			release->data_set_id == base);
 	const std::vector<ReleaseSection> sections = list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 2);
 	if (sections.size() != 2)
@@ -587,6 +488,15 @@ int test_validate() {
 	TEST_EXPECT(find_release(rig.db, unmapped)->error.find("command file") != std::string::npos);
 	TEST_EXPECT(!rig.has(release_package_key(sha_of(update::sfs_write(nope)))));
 
+	// A game with a project (our own, seeded) has its releases built: an upload of one is refused.
+	update::SfsPackage own;
+	const int64_t uploaded = rig.upload_release(rig.temp.root(), "own", own,
+			{ { "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" } }, true);
+	TEST_EXPECT(uploaded != 0 && find_release(rig.db, uploaded)->status == ReleaseStatus::Invalid);
+	TEST_EXPECT(find_release(rig.db, uploaded)->error.find("built from its project") !=
+			std::string::npos);
+	TEST_EXPECT(!rig.has(release_package_key(sha_of(update::sfs_write(own)))));
+
 	// Not a package at all.
 	const int64_t junk = create_release(rig.db, "junk", 4, "admin");
 	TEST_EXPECT(rig.put(release_upload_key(junk), bytes("junk")));
@@ -598,31 +508,38 @@ int test_validate() {
 	return 0;
 }
 
+// Our own game's first release, built from its project's revision (a game with a project): its
+// tree and its expansion's built from nothing.
 int test_native_first_release() {
 	Rig rig("data_set_jobs_native_first");
 	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
 	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/nifty"), true, "nifty"));
-	update::SfsPackage package;
-	const int64_t id = rig.upload_release(rig.temp.root(), "native first", package,
-			{ { "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" },
-					{ "expansion/nifty", "nifty", "NIFTY.CMD", "OpenNova JO", "1.0", "" } }, true);
-	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft);
 	const int64_t native = rig.seeded("OP: Acid Gambit");
 	const int64_t expansion = rig.seeded("OP: Nifty Package");
+	update::SfsPackage package;
+	const int64_t id = rig.built_release(rig.temp.root(), "native first", native,
+			{ { "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" },
+					{ "expansion/nifty", "nifty", "NIFTY.CMD", "OpenNova JO", "1.0", "" } },
+			package);
+	TEST_EXPECT(id != 0 && find_release(rig.db, id)->status == ReleaseStatus::Draft &&
+			find_release(rig.db, id)->data_set_id == native);
 	TEST_EXPECT(publish_release(rig.db, id));
 	TEST_EXPECT(enqueue_release_apply(rig.db, id, native) > 0 &&
 			enqueue_release_apply(rig.db, id, expansion) > 0 && rig.run_jobs() >= 2);
 	const auto current = find_data_set(rig.db, native);
-	TEST_EXPECT(current && current->current_tree_id && !current->baseline_tree_id);
+	TEST_EXPECT(current && current->current_tree_id);
+	if (!current || !current->current_tree_id)
+		return 1;
 	const auto tree = find_tree(rig.db, *current->current_tree_id);
-	TEST_EXPECT(tree && tree->state == TreeState::Ready && !tree->baseline_tree_id);
+	TEST_EXPECT(tree && tree->state == TreeState::Ready && tree->release_id == id);
 	for (const char *name : { "resource.pff", "localres.pff", "language.pff" }) {
 		const std::string installed = rig.store.path_of(tree_prefix(tree->id) + name);
 		TEST_EXPECT(archive_entries(installed) == archive_entries(rig.temp.file("to") + "/" + name));
 	}
 	const auto installed_expansion = find_data_set(rig.db, expansion);
-	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id &&
-			!installed_expansion->baseline_tree_id);
+	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id);
+	if (!installed_expansion || !installed_expansion->current_tree_id)
+		return 1;
 	for (const char *name : { "nifty.pff", "niftyL.pff" }) {
 		const std::string canonical = canonical_tree_file(DataSetKind::Expansion, "nifty", name);
 		const std::string installed =
@@ -633,6 +550,9 @@ int test_native_first_release() {
 	return 0;
 }
 
+// The runtime, a game with no project: its package uploaded (naming no game, so it becomes its
+// section's), published, served and built into no tree; a second of the same version (a staging
+// build of an unchanged version) is a draft too.
 int test_runtime_release() {
 	Rig rig("data_set_jobs_runtime");
 	TEST_EXPECT(write_text(rig.temp.file("to") + "/opennova.exe", "synthetic runtime"));
@@ -641,42 +561,47 @@ int test_runtime_release() {
 			{ { "", "", "ONRUNTIME.CMD", "OpenNova runtime", "1.0", "opennova.exe" } }, true);
 	TEST_EXPECT(id != 0);
 	const auto release = find_release(rig.db, id);
-	TEST_EXPECT(release && release->status == ReleaseStatus::Draft);
-	const auto sections = list_sections(rig.db, id);
 	const int64_t runtime = rig.seeded("OpenNova runtime");
+	TEST_EXPECT(release && release->status == ReleaseStatus::Draft && release->data_set_id == runtime);
+	const auto sections = list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 1 && sections[0].data_set_id == runtime &&
-			sections[0].command_file == "ONRUNTIME.CMD");
+			sections[0].command_file == "ONRUNTIME.CMD" && sections[0].version == "1.0");
 	TEST_EXPECT(publish_release(rig.db, id));
 	TEST_EXPECT(enqueue_release_apply(rig.db, id, runtime) == 0);
 	TEST_EXPECT(list_trees(rig.db, runtime).empty());
 	const auto served = published_sections(rig.db);
 	TEST_EXPECT(served.size() == 1 && served[0].updater_login == "ONRUNTIME");
+	TEST_EXPECT(write_text(rig.temp.file("to") + "/opennova.exe", "synthetic runtime, rebuilt"));
+	update::SfsPackage again;
+	const int64_t second = rig.upload_release(rig.temp.root(), "runtime again", again,
+			{ { "", "", "ONRUNTIME.CMD", "OpenNova runtime", "1.0", "opennova.exe" } }, true);
+	TEST_EXPECT(second != 0 && find_release(rig.db, second)->status == ReleaseStatus::Draft &&
+			list_sections(rig.db, second).size() == 1 &&
+			list_sections(rig.db, second)[0].version == "1.0");
+	TEST_EXPECT(publish_release(rig.db, second) &&
+			find_release(rig.db, id)->status == ReleaseStatus::Retired);
 	return 0;
 }
 
-// A published release applied: a release tree per section built from its baseline, equal to
-// the updated tree; a run again on a building tree continues on its row.
+// A whole retail-shaped release published (every file of the updated tree a row, with the
+// removals since the stock install): each section's tree built from nothing, every archive made
+// anew equal to the updated tree's entry for entry; a run again on a building tree continues on
+// its row with its prefix emptied first.
 int test_apply() {
 	Rig rig("data_set_jobs_apply");
 	const std::string root = rig.temp.root();
 	TEST_EXPECT(make_trees(root));
 	int64_t base = 0, expansion = 0;
 	TEST_EXPECT(rig.make_synthetic_data_sets(base, expansion));
-	const int64_t base_tree = rig.upload_baseline(base, root + "/from");
-	const int64_t exp_tree = rig.upload_baseline(expansion, root + "/from/expansion/jox01");
-	TEST_EXPECT(base_tree != 0 && exp_tree != 0);
-	if (base_tree == 0 || exp_tree == 0)
-		return 1;
 	update::SfsPackage package;
-	const int64_t release = rig.upload_release(root, "1.0.0.10", package);
+	const int64_t release = rig.upload_release(root, "1.0.0.10", package, {}, true);
 	TEST_EXPECT(release != 0 && find_release(rig.db, release)->status == ReleaseStatus::Draft);
 	if (release == 0)
 		return 1;
 	TEST_EXPECT(publish_release(rig.db, release));
 	// A worker's earlier run of the base's apply was cut short after making its tree and
 	// writing one object: the run again continues on that row and starts its prefix afresh.
-	const int64_t building = create_tree(
-			rig.db, base, TreeSource::Release, TreeState::Building, release, base_tree, "worker");
+	const int64_t building = create_tree(rig.db, base, release, "worker");
 	set_section_tree(rig.db, release, base, building);
 	TEST_EXPECT(rig.put(tree_prefix(building) + "stray.bin", bytes("left behind")));
 	TEST_EXPECT(enqueue_release_apply(rig.db, release, base) > 0);
@@ -696,8 +621,7 @@ int test_apply() {
 			std::fprintf(stderr, "  tree: %s\n", tree->error.c_str());
 		return 1;
 	}
-	TEST_EXPECT(tree->source == TreeSource::Release && tree->release_id == release &&
-			tree->baseline_tree_id == base_tree);
+	TEST_EXPECT(tree->release_id == release);
 	const char *names[] = { "_NSTMOUT.TXT", "language.pff", "localres.pff", "resource.pff",
 		"version.txt" };
 	TEST_EXPECT(tree->files.size() == 5);
@@ -706,19 +630,20 @@ int test_apply() {
 	TEST_EXPECT(file_named(tree->files, "score.ini") == nullptr &&
 			file_named(tree->files, "readme.txt") == nullptr);
 	// The loose files byte for byte, the archives entry for entry, as the updated tree holds
-	// them; the stray object gone.
+	// them: made from nothing, so the entries the release left as they were (keep.def) are there
+	// beside the changed and added ones; the stray object gone.
 	const std::string to = root + "/to";
 	TEST_EXPECT(rig.get(tree_prefix(building) + "version.txt") == read_bytes(to + "/version.txt"));
 	TEST_EXPECT(
 			rig.get(tree_prefix(building) + "_NSTMOUT.TXT") == read_bytes(to + "/_NSTMOUT.TXT"));
 	for (const char *archive : { "resource.pff", "localres.pff", "language.pff" }) {
-		const std::string fetched = rig.temp.file((std::string("fetched-") + archive).c_str());
-		std::string error;
-		TEST_EXPECT(rig.store.get_file(tree_prefix(building) + archive, fetched, error));
-		const std::map<std::string, Entry> got = archive_entries(fetched),
+		const std::map<std::string, Entry> got = stored_archive(rig, building, archive),
 										   want = archive_entries(to + "/" + archive);
 		TEST_EXPECT(!want.empty() && got == want);
 	}
+	const std::map<std::string, Entry> resource = stored_archive(rig, building, "resource.pff");
+	TEST_EXPECT(resource.count(pff::normalized_logical_name("keep.def")) == 1 &&
+			resource.count(pff::normalized_logical_name("drop.def")) == 0 && resource.size() == 3);
 	TEST_EXPECT(!rig.has(tree_prefix(building) + "stray.bin") &&
 			!rig.has(tree_prefix(building) + "score.ini") &&
 			!rig.has(tree_prefix(building) + "readme.txt"));
@@ -730,17 +655,12 @@ int test_apply() {
 	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "ALPHA.BMS" &&
 			tree->missions[1].file == "BRAVO.BMS" && tree->missions[2].file == "CHARLIE.BMS" &&
 			tree->missions[2].title == "Charlie Flag");
-	// The data set's current tree is the release's, its baseline the upload's.
-	TEST_EXPECT(find_data_set(rig.db, base)->current_tree_id == building &&
-			find_data_set(rig.db, base)->baseline_tree_id == base_tree);
-	// The baseline's objects are untouched.
-	TEST_EXPECT(rig.has(tree_prefix(base_tree) + "score.ini") &&
-			rig.get(tree_prefix(base_tree) + "version.txt") ==
-					read_bytes(root + "/from/version.txt"));
+	// The data set's current tree is the release's.
+	TEST_EXPECT(find_data_set(rig.db, base)->current_tree_id == building);
 
-	// The expansion's.
+	// The expansion's, its own beside its base game's.
 	tree = find_tree(rig.db, *sections[1].tree_id);
-	TEST_EXPECT(tree && tree->state == TreeState::Ready && tree->baseline_tree_id == exp_tree);
+	TEST_EXPECT(tree && tree->state == TreeState::Ready && tree->release_id == release);
 	if (!tree || tree->state != TreeState::Ready) {
 		if (tree)
 			std::fprintf(stderr, "  tree: %s\n", tree->error.c_str());
@@ -749,13 +669,9 @@ int test_apply() {
 	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
 	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "DELTA.BMS" &&
 			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "EXP.BMS");
-	for (const char *archive : { "jox01.pff", "jox01L.pff" }) {
-		const std::string fetched = rig.temp.file((std::string("fetched-") + archive).c_str());
-		std::string error;
-		TEST_EXPECT(rig.store.get_file(tree_prefix(tree->id) + archive, fetched, error));
-		TEST_EXPECT(
-				archive_entries(fetched) == archive_entries(to + "/expansion/jox01/" + archive));
-	}
+	for (const char *archive : { "jox01.pff", "jox01L.pff" })
+		TEST_EXPECT(stored_archive(rig, tree->id, archive) ==
+				archive_entries(to + "/expansion/jox01/" + archive));
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
 	TEST_EXPECT(find_data_set(rig.db, expansion)->current_tree_id == tree->id);
@@ -772,83 +688,68 @@ int test_apply() {
 	return 0;
 }
 
-// A release published before any baseline: each section's tree fails "no baseline uploaded",
-// the release stays published.
-int test_apply_without_baseline() {
-	Rig rig("data_set_jobs_no_baseline");
-	TEST_EXPECT(make_trees(rig.temp.root()));
+// A whole release whose tree would lack a required archive (language.pff): the tree fails with
+// the reason, nothing of it stored, the release still published, the data set's current tree
+// unchanged.
+int test_apply_incomplete() {
+	Rig rig("data_set_jobs_incomplete");
+	const std::string root = rig.temp.root();
+	TEST_EXPECT(make_base_tree(root + "/to", true));
+	std::error_code ec;
+	TEST_EXPECT(fs::remove(io::os_path(root + "/to/language.pff"), ec));
 	int64_t base = 0, expansion = 0;
 	TEST_EXPECT(rig.make_synthetic_data_sets(base, expansion));
 	update::SfsPackage package;
-	const int64_t release = rig.upload_release(rig.temp.root(), "1.0.0.10", package);
+	const int64_t release = rig.upload_release(root, "1.0.0.10", package,
+			{ { "", "", "SYNPTR.CMD", "Synthetic Product", "1.0.0.10", "" } }, true);
 	TEST_EXPECT(release != 0 && publish_release(rig.db, release));
-	TEST_EXPECT(enqueue_release_apply(rig.db, release, base) > 0 &&
-			enqueue_release_apply(rig.db, release, expansion) > 0 && rig.run_jobs() >= 2);
-	for (const ReleaseSection &s : list_sections(rig.db, release)) {
-		TEST_EXPECT(s.tree_id.has_value());
-		if (!s.tree_id)
-			continue;
-		const auto tree = find_tree(rig.db, *s.tree_id);
-		TEST_EXPECT(tree && tree->state == TreeState::Failed &&
-				tree->error == "no baseline uploaded" && tree->source == TreeSource::Release &&
-				!tree->baseline_tree_id);
-		TEST_EXPECT(rig.names_under(tree_prefix(*s.tree_id)).empty());
-	}
+	TEST_EXPECT(enqueue_release_apply(rig.db, release, base) > 0 && rig.run_jobs() >= 1);
+	const std::vector<ReleaseSection> sections = list_sections(rig.db, release);
+	TEST_EXPECT(sections.size() == 1 && sections[0].tree_id.has_value());
+	if (sections.size() != 1 || !sections[0].tree_id)
+		return 1;
+	const auto tree = find_tree(rig.db, *sections[0].tree_id);
+	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
+			tree->error.find("language.pff") != std::string::npos);
+	TEST_EXPECT(rig.names_under(tree_prefix(*sections[0].tree_id)).empty());
 	TEST_EXPECT(find_release(rig.db, release)->status == ReleaseStatus::Published);
 	TEST_EXPECT(!find_data_set(rig.db, base)->current_tree_id);
 	return 0;
 }
 
-// The prune: an orphaned ready tree's objects removed and its row marked, an abandoned
-// upload's parts aborted, the current tree kept; a second run finds nothing.
+// The prune: an orphaned ready tree's objects removed and its row marked, the current tree and a
+// fresh failed one kept; a second run finds nothing.
 int test_prune() {
 	Rig rig("data_set_jobs_prune");
 	const std::string from = rig.temp.file("from");
 	TEST_EXPECT(make_base_tree(from, false));
 	const int64_t jo = rig.seeded("Joint Operations");
-	const int64_t first = rig.upload_baseline(jo, from);
-	const int64_t second = rig.upload_baseline(jo, from);
+	const int64_t first = rig.ready_tree(jo, from);
+	const int64_t second = rig.ready_tree(jo, from);
 	TEST_EXPECT(first != 0 && second != 0);
 	if (first == 0 || second == 0)
 		return 1;
-	// The first is neither current nor baseline now, and old enough.
+	// The first is not current now, and old enough.
 	rig.db.exec("UPDATE data_set_trees SET created_at = now() - interval '2 hours' WHERE id = $1;",
 			{ BindValue(first) });
-	// An upload begun eight days ago and never finished.
-	const int64_t abandoned = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Uploading,
-			std::nullopt, std::nullopt, "admin");
-	rig.db.exec("UPDATE data_set_trees SET created_at = now() - interval '8 days' WHERE id = $1;",
-			{ BindValue(abandoned) });
-	TEST_EXPECT(rig.put(tree_prefix(abandoned) + "version.txt", bytes("partial")));
-	std::string upload_id, error;
-	TEST_EXPECT(
-			rig.store.multipart_begin(tree_prefix(abandoned) + "resource.pff", upload_id, error));
-	const std::string upload_dir = rig.temp.file(("store/.uploads/" + upload_id).c_str());
-	std::error_code ec;
-	TEST_EXPECT(fs::is_directory(io::os_path(upload_dir), ec));
 	// A fresh failed tree is not old enough.
-	const int64_t fresh = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing,
-			std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(set_tree_state(rig.db, fresh, TreeState::Finalizing, TreeState::Failed, "x"));
+	const int64_t fresh = create_tree(rig.db, jo, std::nullopt, "worker");
+	TEST_EXPECT(set_tree_state(rig.db, fresh, TreeState::Building, TreeState::Failed, "x"));
 	TEST_EXPECT(rig.put(tree_prefix(fresh) + "version.txt", bytes("fresh")));
 
 	const int64_t job = enqueue_tree_prune(rig.db);
 	TEST_EXPECT(job > 0 && enqueue_tree_prune(rig.db) == 0);
 	TEST_EXPECT(rig.run_jobs() == 1 && rig.job_state(job) == "done");
-	TEST_EXPECT(rig.names_under(tree_prefix(first)).empty() &&
-			rig.names_under(tree_prefix(abandoned)).empty());
-	TEST_EXPECT(!fs::exists(io::os_path(upload_dir), ec));
-	TEST_EXPECT(rig.names_under(tree_prefix(second)).size() == 6 &&
+	TEST_EXPECT(rig.names_under(tree_prefix(first)).empty());
+	TEST_EXPECT(rig.names_under(tree_prefix(second)).size() == 5 &&
 			rig.has(tree_prefix(fresh) + "version.txt"));
-	for (const int64_t id : { first, abandoned }) {
-		const auto tree = find_tree(rig.db, id);
-		TEST_EXPECT(tree && tree->state == TreeState::Pruned && !tree->pruned_at.empty());
-	}
+	const auto pruned = find_tree(rig.db, first);
+	TEST_EXPECT(pruned && pruned->state == TreeState::Pruned && !pruned->pruned_at.empty());
 	TEST_EXPECT(find_tree(rig.db, second)->state == TreeState::Ready &&
 			find_tree(rig.db, fresh)->state == TreeState::Failed);
 	// Again: nothing to prune, nothing changes.
 	TEST_EXPECT(enqueue_tree_prune(rig.db) > 0 && rig.run_jobs() == 1);
-	TEST_EXPECT(rig.names_under(tree_prefix(second)).size() == 6);
+	TEST_EXPECT(rig.names_under(tree_prefix(second)).size() == 5);
 	// The hourly schedule.
 	const std::vector<jobs::PeriodicJob> schedule = data_set_schedule();
 	TEST_EXPECT(schedule.size() == 1 && schedule[0].kind == kJobTreePrune &&
@@ -865,14 +766,11 @@ int main(int argc, char **argv) {
 		int (*fn)();
 	};
 	const Case cases[] = {
-		{ "finalize_baseline", test_finalize_baseline },
-		{ "finalize_refusals", test_finalize_refusals },
-		{ "finalize_expansion", test_finalize_expansion },
 		{ "validate", test_validate },
 		{ "runtime_release", test_runtime_release },
 		{ "native_first_release", test_native_first_release },
 		{ "apply", test_apply },
-		{ "apply_without_baseline", test_apply_without_baseline },
+		{ "apply_incomplete", test_apply_incomplete },
 		{ "prune", test_prune },
 	};
 	for (const Case &c : cases) {

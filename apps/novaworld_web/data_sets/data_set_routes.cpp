@@ -2,7 +2,7 @@
 
 #include "core/loggable.h"
 #include "core/object_store.h"
-#include "data_sets/data_set_files.h"
+#include "data_sets/content_repository.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/model/hosted_repository.h"
@@ -16,7 +16,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -49,22 +48,12 @@ crow::response field_error(
 	return json_reply(code, body);
 }
 
-crow::response store_unavailable() {
-	return json_error(503, "store_unavailable", "this NovaWorld service has no object store");
-}
-
-// A store call that failed mid-way, logged with the store's own text (never sent).
-crow::response store_failure(const char *route, const std::string &error) {
-	std::fprintf(stderr, "[http] %s: the object store failed: %s\n", route, error.c_str());
-	return json_error(502, "store_error", "the object store did not take the request");
-}
-
 crow::response no_such_data_set() {
 	return json_error(404, "not_found", "no data set has this id");
 }
 
-crow::response no_such_tree() {
-	return json_error(404, "not_found", "this data set has no tree with this id");
+crow::response duplicate_key() {
+	return json_error(409, "duplicate_key", "another game's project has this key");
 }
 
 bool printable_ascii(std::string_view s) {
@@ -98,10 +87,8 @@ bool valid_command_file(std::string_view name) {
 			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
 }
 
-// A multipart upload's id as the store minted it: S3's tokens and the local store's UUIDs are
-// both printable and bounded.
-bool valid_upload_id(std::string_view id) {
-	return !id.empty() && id.size() <= 1024 && printable_ascii(id);
+bool valid_visibility(std::string_view visibility) {
+	return content::visibility_from_name(visibility).has_value();
 }
 
 void id_or_null(crow::json::wvalue &out, const char *key, std::optional<int64_t> id) {
@@ -109,6 +96,13 @@ void id_or_null(crow::json::wvalue &out, const char *key, std::optional<int64_t>
 		out[key] = *id;
 	else
 		out[key] = nullptr;
+}
+
+void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
+	if (text.empty())
+		out[key] = nullptr;
+	else
+		out[key] = text;
 }
 
 // A data set as the admin's JSON, with its live trees (pruned ones left out).
@@ -123,7 +117,10 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	out["game"] = d.game;
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
-	out["retail_updater"] = d.retail_updater;
+	out["retail_updater"] = d.retail;
+	text_or_null(out, "key", d.key);
+	text_or_null(out, "visibility", d.visibility);
+	out["head"] = d.head;
 	std::optional<DataSetTree> current;
 	if (d.current_tree_id)
 		current = find_tree(db, *d.current_tree_id);
@@ -134,7 +131,6 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	} else {
 		out["current_tree"] = nullptr;
 	}
-	id_or_null(out, "baseline_tree_id", d.baseline_tree_id);
 	std::optional<ReleaseRow> published;
 	if (d.published_release_id)
 		published = find_release(db, *d.published_release_id);
@@ -155,41 +151,12 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	return out;
 }
 
-// The tree `tree` of data set `id`, or none.
-std::optional<DataSetTree> tree_of(db::Database &db, int64_t id, int64_t tree) {
-	std::optional<DataSetTree> t = find_tree(db, tree);
-	if (t && t->data_set_id != id)
-		t.reset();
-	return t;
-}
-
-// A JSON member read with its type checked (crow's rvalue throws on a wrong-typed read).
-bool member_string(const crow::json::rvalue &object, const char *key, std::string &out) {
-	if (!object.has(key) || object[key].t() != crow::json::type::String)
-		return false;
-	out = std::string(object[key].s());
-	return true;
-}
-
-bool member_whole(const crow::json::rvalue &object, const char *key, int64_t &out) {
-	if (!object.has(key) || object[key].t() != crow::json::type::Number ||
-			object[key].nt() == crow::json::num_type::Floating_point)
-		return false;
-	out = object[key].i();
-	return true;
-}
-
 } // namespace
-
-std::string tree_file_key(int64_t tree_id, std::string_view name) {
-	return tree_prefix(tree_id) + std::string(name);
-}
 
 crow::json::wvalue tree_json(db::Database &db, const DataSetTree &t) {
 	crow::json::wvalue out;
 	out["id"] = t.id;
 	out["state"] = tree_state_name(t.state);
-	out["source"] = tree_source_name(t.source);
 	id_or_null(out, "release_id", t.release_id);
 	out["version"] = t.version_text;
 	out["bytes"] = t.bytes;
@@ -215,35 +182,16 @@ void DataSetRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/data-sets/<uint>")
 			.methods("DELETE"_method)(
 					[this](const crow::request &req, uint64_t id) { return remove(req, id); });
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>/trees")
-			.methods("POST"_method)(
-					[this](const crow::request &req, uint64_t id) { return begin_tree(req, id); });
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>/trees/<uint>/files/<string>/parts/<uint>")
-			.methods("PUT"_method)([this](const crow::request &req, uint64_t id, uint64_t tree,
-										   const std::string &name, uint64_t part) {
-				return tree_file_part(req, id, tree, name, part);
-			});
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>/trees/<uint>/files/<string>/complete")
-			.methods("POST"_method)([this](const crow::request &req, uint64_t id, uint64_t tree,
-											const std::string &name) {
-				return tree_file_complete(req, id, tree, name);
-			});
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>/trees/<uint>/finalize")
-			.methods("POST"_method)([this](const crow::request &req, uint64_t id, uint64_t tree) {
-				return tree_finalize(req, id, tree);
-			});
-	CROW_ROUTE(app, "/api/admin/data-sets/<uint>/trees/<uint>")
-			.methods("DELETE"_method)([this](const crow::request &req, uint64_t id, uint64_t tree) {
-				return tree_remove(req, id, tree);
-			});
 }
 
 // GET /api/admin/data-sets — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
 // (what a base may speak), "games" (the lobbies, each {slug, display_name}), "data_sets"}:
-// each data set {id, display_name, kind, parent_id, expansion_code, title, game, updater_login,
-// command_file, retail_updater, current_tree ({id, version, ready_at} or null),
-// baseline_tree_id, published_release ({id, name, sha256} or null), servers_live,
-// servers_outdated, trees (its trees newest first, pruned ones left out, each as tree_json)}.
+// every game (bases, expansions, then the runtime), each {id, display_name, kind, parent_id,
+// expansion_code, title, game, updater_login, command_file, retail_updater, key (its project's,
+// or null), visibility ("public", "private", or null with no project), head (its project's newest
+// revision, 0 before the first push), current_tree ({id, version, ready_at} or null),
+// published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
+// trees newest first, pruned ones left out, each as tree_json)}.
 crow::response DataSetRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -270,8 +218,7 @@ crow::response DataSetRoutes::list(const crow::request &req) {
 		out["games"] = std::move(games);
 		std::vector<crow::json::wvalue> data_sets;
 		for (const DataSetRow &d : list_data_sets(*db_conn))
-			if (d.kind != DataSetKind::Update)
-				data_sets.push_back(data_set_json(*db_conn, d));
+			data_sets.push_back(data_set_json(*db_conn, d));
 		out["data_sets"] = std::move(data_sets);
 	} catch (const db::Error &e) {
 		return db_failure("GET /api/admin/data-sets", e);
@@ -280,11 +227,13 @@ crow::response DataSetRoutes::list(const crow::request &req) {
 }
 
 // POST /api/admin/data-sets — {display_name, kind, parent_id?, expansion_code?, title?, game?,
-// updater_login?, command_file?, retail_updater?}: a new base (title one of the titles, game a
-// games slug) or expansion (parent_id a base, expansion_code [a-z0-9]{1,8}); the updater's
-// product both or neither (a login of 1..32 printable characters, a command file of 1..15
-// ending .CMD). 201 {"data_set"}; 400 invalid_json, missing_field, invalid_field (with the
-// field); 409 duplicate_login, duplicate_expansion, no_such_parent.
+// updater_login?, command_file?, retail_updater?, key?, visibility?}: a new game, a base (title
+// one of the titles, game a games slug) or expansion (parent_id a base, expansion_code
+// [a-z0-9]{1,8}); the updater's product both or neither (a login of 1..32 printable characters,
+// a command file of 1..15 ending .CMD); its project's key (1..16 of A-Z, 0-9, _) and visibility
+// (public or private) both or neither (a game with a key has a project). 201 {"data_set"}; 400
+// invalid_json, missing_field, invalid_field (with the field); 409 duplicate_login,
+// duplicate_key, duplicate_expansion, no_such_parent.
 crow::response DataSetRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -315,6 +264,10 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 	note("command_file");
 	const auto retail_updater = body->flag("retail_updater");
 	note("retail_updater");
+	const auto key = body->text("key");
+	note("key");
+	const auto visibility = body->text("visibility");
+	note("visibility");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (!display_name)
@@ -372,7 +325,19 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		data_set.updater_login = *updater_login;
 		data_set.command_file = *command_file;
 	}
-	data_set.retail_updater = retail_updater.value_or(false);
+	data_set.retail = retail_updater.value_or(false);
+	if (key.has_value() != visibility.has_value())
+		return field_error(400, "invalid_field", key ? "visibility" : "key",
+				"key and visibility come together: a game with a key has a project");
+	if (key) {
+		if (!content::valid_key(*key))
+			return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
+		if (!valid_visibility(*visibility))
+			return field_error(
+					400, "invalid_field", "visibility", "visibility is public or private");
+		data_set.key = *key;
+		data_set.visibility = *visibility;
+	}
 
 	try {
 		auto db_conn = pool_.acquire();
@@ -386,6 +351,8 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 			case DataSetOutcome::DuplicateLogin:
 				return json_error(
 						409, "duplicate_login", "another data set holds this updater login");
+			case DataSetOutcome::DuplicateKey:
+				return duplicate_key();
 			case DataSetOutcome::DuplicateExpansion:
 				return json_error(
 						409, "duplicate_expansion", "the base has an expansion of this code");
@@ -394,9 +361,10 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 			default:
 				return json_error(500, "internal_error");
 		}
-		std::printf("[http] data set %lld '%s' (%s) created by %s\n", static_cast<long long>(id),
-				loggable(data_set.display_name).c_str(), data_set_kind_name(*kind),
-				loggable(data_set.created_by).c_str());
+		std::printf("[http] data set %lld '%s' (%s%s%s) created by %s\n",
+				static_cast<long long>(id), loggable(data_set.display_name).c_str(),
+				data_set_kind_name(*kind), data_set.key.empty() ? "" : ", project ",
+				loggable(data_set.key).c_str(), loggable(data_set.created_by).c_str());
 		crow::json::wvalue out;
 		out["data_set"] = data_set_json(*db_conn, *find_data_set(*db_conn, id));
 		return json_reply(201, out);
@@ -406,8 +374,11 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 }
 
 // PATCH /api/admin/data-sets/<id> — any of {display_name, game (a base's), updater_login,
-// command_file, retail_updater}, the shapes as the create's; 200 {"data_set"}; 400
-// invalid_json, invalid_field; 404 not_found; 409 duplicate_login.
+// command_file, retail_updater, key, visibility}, the shapes as the create's; after it the key
+// and visibility are both set or neither (the runtime takes neither: its releases arrive from
+// CI). A new key renames the project: its objects in the store move from content/<old>/ to
+// content/<new>/ first. 200 {"data_set"}; 400 invalid_json, invalid_field; 404 not_found; 409
+// duplicate_login, duplicate_key; 502 store_error (the objects did not move; nothing changed).
 crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -429,13 +400,21 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	note("updater_login");
 	patch.command_file = body->text("command_file");
 	note("command_file");
-	patch.retail_updater = body->flag("retail_updater");
+	patch.retail = body->flag("retail_updater");
 	note("retail_updater");
+	patch.key = body->text("key");
+	note("key");
+	patch.visibility = body->text("visibility");
+	note("visibility");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (patch.display_name && !valid_display_name(*patch.display_name))
 		return field_error(400, "invalid_field", "display_name",
 				"display_name is 1 to 64 characters with no control characters");
+	if (patch.key && !content::valid_key(*patch.key))
+		return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
+	if (patch.visibility && !valid_visibility(*patch.visibility))
+		return field_error(400, "invalid_field", "visibility", "visibility is public or private");
 	try {
 		auto db_conn = pool_.acquire();
 		const auto row = find_data_set(*db_conn, path_id(id));
@@ -460,7 +439,37 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 		if (!command_file.empty() && !valid_command_file(command_file))
 			return field_error(400, "invalid_field", "command_file",
 					"command_file is 1 to 15 characters ending in .CMD");
-		switch (update_data_set(*db_conn, row->id, patch)) {
+		if ((patch.key || patch.visibility) && row->kind == DataSetKind::Update)
+			return field_error(400, "invalid_field", patch.key ? "key" : "visibility",
+					"the runtime has no project: its releases arrive from CI");
+		const std::string key = patch.key.value_or(row->key);
+		if (key.empty() != patch.visibility.value_or(row->visibility).empty())
+			return field_error(400, "invalid_field", key.empty() ? "key" : "visibility",
+					"key and visibility come together: a game with a key has a project");
+		// A rename: the project's objects copied under the new key first, so a refusal leaves the
+		// old ones where its rows name them; the old ones go once the row names the new key.
+		const bool rename = !row->key.empty() && key != row->key;
+		if (rename) {
+			if (content::find_project(*db_conn, key))
+				return duplicate_key();
+			std::string error;
+			if (store_ != nullptr &&
+					!store_->copy_prefix(
+							content::project_prefix(row->key), content::project_prefix(key), error)) {
+				std::fprintf(stderr,
+						"[http] PATCH /api/admin/data-sets/<id>: the object store did not copy "
+						"%s to %s: %s\n",
+						content::project_prefix(row->key).c_str(),
+						content::project_prefix(key).c_str(), error.c_str());
+				return json_error(502, "store_error", "the object store did not move the project");
+			}
+		}
+		const DataSetOutcome outcome = update_data_set(*db_conn, row->id, patch);
+		if (outcome != DataSetOutcome::Ok && rename && store_ != nullptr) {
+			std::string error;
+			store_->remove_prefix(content::project_prefix(key), error);
+		}
+		switch (outcome) {
 			case DataSetOutcome::Ok:
 				break;
 			case DataSetOutcome::NotFound:
@@ -468,8 +477,21 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 			case DataSetOutcome::DuplicateLogin:
 				return json_error(
 						409, "duplicate_login", "another data set holds this updater login");
+			case DataSetOutcome::DuplicateKey:
+				return duplicate_key();
 			default:
 				return json_error(500, "internal_error");
+		}
+		if (rename) {
+			std::string error;
+			if (store_ != nullptr &&
+					!store_->remove_prefix(content::project_prefix(row->key), error))
+				std::fprintf(stderr,
+						"[http] PATCH /api/admin/data-sets/<id>: %s stays in the store: %s\n",
+						content::project_prefix(row->key).c_str(), error.c_str());
+			std::printf("[http] project %s of data set %lld renamed %s by %s\n",
+					loggable(row->key).c_str(), static_cast<long long>(row->id),
+					loggable(key).c_str(), loggable(creator_of(caller)).c_str());
 		}
 		crow::json::wvalue out;
 		out["data_set"] = data_set_json(*db_conn, *find_data_set(*db_conn, row->id));
@@ -479,37 +501,42 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	}
 }
 
-// DELETE /api/admin/data-sets/<id> — the data set and its trees: 404 not_found; 409 in_use
-// while a live server runs it or an expansion has it as parent. Each tree's objects go
-// first, here and now (its uploads in flight aborted, its prefix removed, the row marked
-// pruned as it goes: the row delete cascades the tree rows, so the tree.prune job could
-// never find them), then the row. 503 store_unavailable with no store or one that failed
-// (the data set stays, the trees not yet removed still there). 204.
+// DELETE /api/admin/data-sets/<id> — the game: its trees, its project (its history and files)
+// and the row. 404 not_found; 409 in_use while a live server runs it, has_expansion while an
+// expansion builds on it. Each tree's objects go first, here and now (its prefix removed, the row
+// marked pruned as it goes: the row delete cascades the tree rows, so the tree.prune job could
+// never find them), then the row, then the project's objects (content/<key>/; ones the store
+// keeps are logged). 503 store_unavailable with no store or one that failed while a tree has
+// objects (the data set stays, the trees not yet removed still there). 204.
 crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
+	const auto in_use = [] {
+		return json_error(409, "in_use", "a live server runs this game");
+	};
+	const auto has_expansion = [] {
+		return json_error(409, "has_expansion", "an expansion builds on this game");
+	};
+	std::optional<DataSetRow> row;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
+		row = find_data_set(*db_conn, path_id(id));
 		if (!row)
 			return no_such_data_set();
-		if (count_live_servers_of(*db_conn, row->id) > 0 ||
-				!list_expansions_of(*db_conn, row->id).empty())
-			return json_error(409, "in_use",
-					"a live server runs this data set, or an expansion has it as parent");
+		if (count_live_servers_of(*db_conn, row->id) > 0)
+			return in_use();
+		if (!list_expansions_of(*db_conn, row->id).empty())
+			return has_expansion();
 		for (const DataSetTree &t : list_trees(*db_conn, row->id)) {
 			if (t.state == TreeState::Pruned && !t.pruned_at.empty())
 				continue;
-			if (store_ == nullptr)
-				return store_unavailable();
 			std::string error;
-			if (!store_->abort_uploads_under(tree_prefix(t.id), error) ||
-					!store_->remove_prefix(tree_prefix(t.id), error)) {
+			if (store_ == nullptr || !store_->remove_prefix(tree_prefix(t.id), error)) {
 				std::fprintf(stderr,
 						"[http] DELETE /api/admin/data-sets/<id>: the object store kept "
 						"tree %lld's objects: %s\n",
-						static_cast<long long>(t.id), error.c_str());
+						static_cast<long long>(t.id), store_ ? error.c_str() : "no store");
 				return json_error(
 						503, "store_unavailable", "the object store did not remove the trees");
 			}
@@ -521,346 +548,23 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 			case DataSetOutcome::NotFound:
 				return no_such_data_set();
 			case DataSetOutcome::InUse:
-				return json_error(409, "in_use",
-						"a live server runs this data set, or an expansion has it as parent");
+				return in_use();
+			case DataSetOutcome::HasExpansion:
+				return has_expansion();
 			default:
 				return json_error(500, "internal_error");
 		}
-		std::printf("[http] data set %lld '%s' deleted by %s\n", static_cast<long long>(row->id),
-				loggable(row->display_name).c_str(), loggable(creator_of(caller)).c_str());
-		return crow::response(204);
 	} catch (const db::Error &e) {
 		return db_failure("DELETE /api/admin/data-sets/<id>", e);
 	}
-}
-
-// POST /api/admin/data-sets/<id>/trees — {"files": [{"name", "size"}]}: a new uploading tree
-// and one multipart upload per file, each name canonicalised to the kind's spelling. 201
-// {"tree", "uploads": [{"name", "key", "upload_id", "part_size"}]}; 400 invalid_json,
-// invalid_field, invalid_files ({"missing", "unexpected"}: a required file not named, a name
-// the kind lacks); 404 not_found; 409 upload_in_flight (a tree of it is uploading or
-// finalizing); 503 store_unavailable (no store, or one that took no upload).
-crow::response DataSetRoutes::begin_tree(const crow::request &req, uint64_t id) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	const crow::json::rvalue body = crow::json::load(req.body);
-	if (!body || body.t() != crow::json::type::Object)
-		return json_error(400, "invalid_json");
-	if (!body.has("files") || body["files"].t() != crow::json::type::List)
-		return field_error(400, "invalid_field", "files", "files is a list of {name, size}");
-	std::vector<std::pair<std::string, int64_t>> files;
-	for (const crow::json::rvalue &item : body["files"]) {
-		std::string name;
-		int64_t size = 0;
-		if (item.t() != crow::json::type::Object || !member_string(item, "name", name) ||
-				!member_whole(item, "size", size))
-			return field_error(400, "invalid_field", "files", "files is a list of {name, size}");
-		if (size <= 0 || size > kPartSize * kMaxParts)
-			return field_error(
-					400, "invalid_field", "files", "a file has bytes, at most 32 MiB x 10000");
-		files.emplace_back(std::move(name), size);
-	}
-	if (files.empty())
-		return field_error(400, "invalid_field", "files", "files names at least one file");
-	try {
-		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
-		if (!row)
-			return no_such_data_set();
-		std::vector<std::string> names;
-		if (row->kind == DataSetKind::Update)
-			return json_error(409, "update_only", "this updater product has no game data tree");
-		std::vector<std::string> unexpected;
-		std::set<std::string> seen;
-		for (const auto &[name, size] : files) {
-			const std::string canonical = canonical_tree_file(row->kind, row->expansion_code, name);
-			if (canonical.empty()) {
-				unexpected.push_back(name);
-				continue;
-			}
-			if (!seen.insert(canonical).second)
-				return field_error(400, "invalid_field", "files", "a file is named twice");
-			names.push_back(canonical);
-		}
-		const std::vector<std::string> missing =
-				missing_tree_files(row->kind, row->expansion_code, names);
-		if (!missing.empty() || !unexpected.empty()) {
-			crow::json::wvalue out;
-			out["error"] = "invalid_files";
-			out["message"] =
-					"the files are not the kind's: a required one missing, or one it lacks";
-			out["missing"] = missing;
-			out["unexpected"] = unexpected;
-			return json_reply(400, out);
-		}
-		if (store_ == nullptr)
-			return store_unavailable();
-		for (const DataSetTree &t : list_trees(*db_conn, row->id))
-			if (t.state == TreeState::Uploading || t.state == TreeState::Finalizing)
-				return json_error(409, "upload_in_flight",
-						"a tree of this data set is uploading or finalizing; delete it or wait");
-		const int64_t tree_id = create_tree(*db_conn, row->id, TreeSource::Baseline,
-				TreeState::Uploading, std::nullopt, std::nullopt, creator_of(caller));
-		// A reset database numbers its trees from 1 again over a bucket that may still hold an
-		// earlier database's tree at this id (DEPLOY.md "Resetting the service database"), and
-		// the finalize takes every object under the prefix: empty it first, as release.apply
-		// does for the tree it builds.
-		{
-			std::string error;
-			if (!store_->abort_uploads_under(tree_prefix(tree_id), error) ||
-					!store_->remove_prefix(tree_prefix(tree_id), error)) {
-				std::fprintf(stderr,
-						"[http] POST /api/admin/data-sets/<id>/trees: the object store kept "
-						"tree %lld's earlier objects: %s\n",
-						static_cast<long long>(tree_id), error.c_str());
-				mark_tree_pruned(*db_conn, tree_id);
-				return json_error(503, "store_unavailable", "the object store took no upload");
-			}
-		}
-		std::vector<crow::json::wvalue> uploads;
-		for (const std::string &name : names) {
-			const std::string key = tree_file_key(tree_id, name);
-			std::string upload_id, error;
-			if (!store_->multipart_begin(key, upload_id, error)) {
-				std::fprintf(stderr,
-						"[http] POST /api/admin/data-sets/<id>/trees: the object store "
-						"began no upload of %s: %s\n",
-						key.c_str(), error.c_str());
-				std::string ignored;
-				store_->abort_uploads_under(tree_prefix(tree_id), ignored);
-				mark_tree_pruned(*db_conn, tree_id);
-				return json_error(503, "store_unavailable", "the object store took no upload");
-			}
-			crow::json::wvalue u;
-			u["name"] = name;
-			u["key"] = key;
-			u["upload_id"] = upload_id;
-			u["part_size"] = kPartSize;
-			uploads.push_back(std::move(u));
-		}
-		std::printf("[http] tree %lld of data set %lld: %zu file(s) uploading, begun by %s\n",
-				static_cast<long long>(tree_id), static_cast<long long>(row->id), names.size(),
-				loggable(creator_of(caller)).c_str());
-		crow::json::wvalue out;
-		out["tree"] = tree_json(*db_conn, *find_tree(*db_conn, tree_id));
-		out["uploads"] = std::move(uploads);
-		return json_reply(201, out);
-	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/data-sets/<id>/trees", e);
-	}
-}
-
-// PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u> — the body
-// (application/octet-stream, at most kPartSize) handed to the store as part n (1 to 10000)
-// of the file's upload: 200 {"etag"} (what the completion reports for it); 400
-// invalid_field (part_number, upload_id); 404 not_found (the data set, the tree, a name the
-// kind lacks); 409 not_uploading; 413 too_large; 502 store_error; 503 store_unavailable.
-// Crow caps no request body, so this check is the one after nginx's.
-crow::response DataSetRoutes::tree_file_part(const crow::request &req, uint64_t id,
-		uint64_t tree, const std::string &name, uint64_t part) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	if (part < 1 || part > static_cast<uint64_t>(kMaxParts))
-		return field_error(400, "invalid_field", "part_number", "the part number is 1 to 10000");
-	const char *upload_id = req.url_params.get("upload_id");
-	if (upload_id == nullptr || !valid_upload_id(upload_id))
-		return field_error(
-				400, "invalid_field", "upload_id", "upload_id is the one the upload began with");
-	if (req.body.size() > static_cast<size_t>(kPartSize))
-		return json_error(413, "too_large", "a part is at most 32 MiB");
-	try {
-		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
-		if (!row)
-			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, path_id(tree));
-		if (!t)
-			return no_such_tree();
-		const std::string canonical = canonical_tree_file(row->kind, row->expansion_code, name);
-		if (canonical.empty())
-			return json_error(404, "not_found", "this tree has no file of this name");
-		if (t->state != TreeState::Uploading)
-			return json_error(409, "not_uploading", "this tree is not uploading");
-		if (store_ == nullptr)
-			return store_unavailable();
-		std::string etag, error;
-		if (!store_->upload_part(tree_file_key(t->id, canonical), upload_id,
-					static_cast<int>(part), req.body, etag, error))
-			return store_failure(
-					"PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>", error);
-		crow::json::wvalue out;
-		out["etag"] = etag;
-		return no_store(json_reply(200, out));
-	} catch (const db::Error &e) {
-		return db_failure("PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>", e);
-	}
-}
-
-// POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete — {"upload_id", "parts":
-// [{"part_number", "etag"}]}: the file's upload completed in the store, 200 {"completed":
-// true}; 400 invalid_json, invalid_field; 404 not_found; 409 not_uploading; 502 store_error;
-// 503 store_unavailable.
-crow::response DataSetRoutes::tree_file_complete(
-		const crow::request &req, uint64_t id, uint64_t tree, const std::string &name) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	const crow::json::rvalue body = crow::json::load(req.body);
-	if (!body || body.t() != crow::json::type::Object)
-		return json_error(400, "invalid_json");
-	std::string upload_id;
-	if (!member_string(body, "upload_id", upload_id) || !valid_upload_id(upload_id))
-		return field_error(
-				400, "invalid_field", "upload_id", "upload_id is the one the upload began with");
-	if (!body.has("parts") || body["parts"].t() != crow::json::type::List)
-		return field_error(400, "invalid_field", "parts", "parts is a list of {part_number, etag}");
-	std::vector<UploadPart> parts;
-	for (const crow::json::rvalue &item : body["parts"]) {
-		UploadPart part;
-		int64_t number = 0;
-		if (item.t() != crow::json::type::Object || !member_whole(item, "part_number", number) ||
-				!member_string(item, "etag", part.etag) || number < 1 || number > kMaxParts ||
-				part.etag.empty() || part.etag.size() > 256 || !printable_ascii(part.etag))
-			return field_error(
-					400, "invalid_field", "parts", "parts is a list of {part_number, etag}");
-		part.number = static_cast<int>(number);
-		parts.push_back(std::move(part));
-	}
-	if (parts.empty())
-		return field_error(400, "invalid_field", "parts", "parts names at least one part");
-	try {
-		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
-		if (!row)
-			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, path_id(tree));
-		if (!t)
-			return no_such_tree();
-		if (t->state != TreeState::Uploading)
-			return json_error(409, "not_uploading", "this tree is not uploading");
-		const std::string canonical = canonical_tree_file(row->kind, row->expansion_code, name);
-		if (canonical.empty())
-			return field_error(400, "invalid_field", "name", "the kind takes no file of this name");
-		if (store_ == nullptr)
-			return store_unavailable();
-		std::string error;
-		if (!store_->multipart_complete(tree_file_key(t->id, canonical), upload_id, parts, error))
-			return store_failure(
-					"POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete", error);
-		std::printf("[http] tree %lld: %s uploaded (%zu part(s))\n", static_cast<long long>(t->id),
-				canonical.c_str(), parts.size());
-		crow::json::wvalue out;
-		out["completed"] = true;
-		return json_reply(200, out);
-	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete", e);
-	}
-}
-
-// POST /api/admin/data-sets/<id>/trees/<t>/finalize — the tree finalizing and its
-// tree.finalize job, in one transaction: 202 {"tree"}; 404 not_found; 409 not_uploading.
-crow::response DataSetRoutes::tree_finalize(const crow::request &req, uint64_t id, uint64_t tree) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	try {
-		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
-		if (!row)
-			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, path_id(tree));
-		if (!t)
-			return no_such_tree();
-		{
-			db::Transaction tx(*db_conn);
-			if (!set_tree_state(*db_conn, t->id, TreeState::Uploading, TreeState::Finalizing))
-				return json_error(409, "not_uploading", "this tree is not uploading");
-			enqueue_tree_finalize(*db_conn, t->id);
-			tx.commit();
-		}
-		std::printf("[http] tree %lld of data set %lld finalizing, asked by %s\n",
-				static_cast<long long>(t->id), static_cast<long long>(row->id),
-				loggable(creator_of(caller)).c_str());
-		crow::json::wvalue out;
-		out["tree"] = tree_json(*db_conn, *find_tree(*db_conn, t->id));
-		return json_reply(202, out);
-	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/data-sets/<id>/trees/<t>/finalize", e);
-	}
-}
-
-// DELETE /api/admin/data-sets/<id>/trees/<t> — an uploading tree: its uploads aborted, its
-// objects removed, the row pruned, 204; a ready or failed one: the row marked pruned and a
-// tree.prune job in the same transaction, 202 {"tree"}; a pruned one 204 (nothing to do).
-// 404 not_found; 409 current, baseline, pinned (with "servers", how many live ones) for a
-// tree a data set or a live server still needs, in_progress for one the data program is
-// finalizing or building; 502 store_error; 503 store_unavailable.
-crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id, uint64_t tree) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal)
-		return std::move(*caller.refusal);
-	try {
-		auto db_conn = pool_.acquire();
-		const auto row = find_data_set(*db_conn, path_id(id));
-		if (!row)
-			return no_such_data_set();
-		const auto t = tree_of(*db_conn, row->id, path_id(tree));
-		if (!t)
-			return no_such_tree();
-		switch (t->state) {
-			case TreeState::Pruned:
-				return crow::response(204);
-			case TreeState::Finalizing:
-			case TreeState::Building:
-				return json_error(409, "in_progress",
-						"the data program is finalizing or building this tree; wait for it");
-			case TreeState::Uploading: {
-				if (store_ == nullptr)
-					return store_unavailable();
-				std::string error;
-				if (!store_->abort_uploads_under(tree_prefix(t->id), error) ||
-						!store_->remove_prefix(tree_prefix(t->id), error))
-					return store_failure("DELETE /api/admin/data-sets/<id>/trees/<t>", error);
-				mark_tree_pruned(*db_conn, t->id);
-				std::printf("[http] tree %lld of data set %lld: the upload abandoned by %s\n",
-						static_cast<long long>(t->id), static_cast<long long>(row->id),
-						loggable(creator_of(caller)).c_str());
-				return crow::response(204);
-			}
-			case TreeState::Ready:
-			case TreeState::Failed:
-				break;
-		}
-		int pinned_by = 0;
-		const std::string hold = tree_hold(*db_conn, t->id, pinned_by);
-		if (hold == "current")
-			return json_error(409, "current", "this tree is what new starts take");
-		if (hold == "baseline")
-			return json_error(409, "baseline", "this tree is what a release applies to");
-		if (hold == "pinned") {
-			crow::json::wvalue body;
-			body["error"] = "pinned";
-			body["message"] = "live servers run on this tree";
-			body["servers"] = pinned_by;
-			return json_reply(409, body);
-		}
-		{
-			db::Transaction tx(*db_conn);
-			request_tree_prune(*db_conn, t->id);
-			enqueue_tree_prune(*db_conn);
-			tx.commit();
-		}
-		std::printf("[http] tree %lld of data set %lld pruned by %s\n",
-				static_cast<long long>(t->id), static_cast<long long>(row->id),
-				loggable(creator_of(caller)).c_str());
-		crow::json::wvalue out;
-		out["tree"] = tree_json(*db_conn, *find_tree(*db_conn, t->id));
-		return json_reply(202, out);
-	} catch (const db::Error &e) {
-		return db_failure("DELETE /api/admin/data-sets/<id>/trees/<t>", e);
-	}
+	std::string error;
+	if (!row->key.empty() && store_ != nullptr &&
+			!store_->remove_prefix(content::project_prefix(row->key), error))
+		std::fprintf(stderr, "[http] DELETE /api/admin/data-sets/<id>: %s stays in the store: %s\n",
+				content::project_prefix(row->key).c_str(), error.c_str());
+	std::printf("[http] data set %lld '%s' deleted by %s\n", static_cast<long long>(row->id),
+			loggable(row->display_name).c_str(), loggable(creator_of(caller)).c_str());
+	return crow::response(204);
 }
 
 } // namespace opennova::novaworld_server::hosted

@@ -1,6 +1,6 @@
 // The content store's routes (apps/novaworld_web/content/content_routes.h, ADR 0069), driven
 // in-process: a database of the run's own (migrated with the games seed, so the five seeded
-// projects are there), a Redis namespace, a local object store in a temp directory, the Crow
+// games' projects are there), a Redis namespace, a local object store in a temp directory, the Crow
 // HttpListener on a port the OS picks, and requests as the site's sessions (an admin's and a
 // player's, logged in through POST /api/login) and as the Bearer admin. The cases share the
 // listener and run in order: who reads what (the public projects anyone's, the private ones an
@@ -10,8 +10,10 @@
 // the same parent told the head that won, one listing the head's files refused, one naming a file
 // the store lacks refused with its hash, a manifest out of its canonical form refused), its
 // history, manifest and files read back; a file the store got through no route of this program (as
-// an upload through the store's own URL puts one) held once a push names it; and the admin's
-// projects created, refused, changed and deleted with their objects.
+// an upload through the store's own URL puts one) held once a push names it; a game's project
+// made, refused, made public and renamed (its objects moving under the new key) and deleted with
+// its objects through the games' admin routes (data_sets/data_set_routes.h); and a release built
+// from a revision.
 
 #include "core/local_object_store.h"
 #include "data_sets/content_repository.h"
@@ -69,6 +71,7 @@ struct Harness {
 	std::string admin; // the admin's session cookie, "Cookie: ..."
 	std::string player; // a player's
 	std::string own_game; // our own game's project's key (its updater login)
+	int64_t jo = 0; // the seeded Joint Operations game's id
 
 	net::HttpReply send(const char *method, const std::string &path,
 			const std::vector<std::string> &headers = {}, const std::string &body = {}) const {
@@ -414,68 +417,76 @@ int test_push(Harness &h) {
 	return 0;
 }
 
-int test_admin_projects(Harness &h) {
+// A game's project through the games' admin routes (data_sets/data_set_routes.h): an expansion
+// of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
+// in its store, then the game made public and its key renamed, the file moving under the new key
+// (still held: the store's rows name the game) and the old key no project's; Joint Operations
+// kept from deletion while an expansion builds on it; the mod deleted with its files.
+int test_game_projects(Harness &h) {
 	const auto admin = [&](const char *method, const std::string &path,
 							   const std::string &body = {}) {
 		return h.send(method, path, { kJson, kBearer }, body);
 	};
-	auto json =
-			json_of(admin("POST", "/api/admin/content/projects",
-							"{\"key\": \"MOD\", \"title\": \"A mod\", \"visibility\": \"private\", "
-							"\"base\": \"JO\"}"),
-					201);
+	auto json = json_of(admin("POST", "/api/admin/data-sets",
+								"{\"display_name\": \"A mod\", \"kind\": \"expansion\", "
+								"\"parent_id\": " + std::to_string(h.jo) +
+										", \"expansion_code\": \"mod\", \"key\": \"MOD\", "
+										"\"visibility\": \"private\"}"),
+			201);
+	TEST_EXPECT(json && std::string(json["data_set"]["key"].s()) == "MOD" &&
+			std::string(json["data_set"]["visibility"].s()) == "private" &&
+			json["data_set"]["head"].i() == 0);
+	const int64_t mod = json ? json["data_set"]["id"].i() : 0;
+	json = json_of(h.send("GET", "/api/content/projects/MOD", { h.admin }), 200);
 	TEST_EXPECT(json && std::string(json["project"]["base"].s()) == "JO" &&
-			std::string(json["project"]["visibility"].s()) == "private");
-	TEST_EXPECT(
-			refused(admin("POST", "/api/admin/content/projects",
-							"{\"key\": \"MOD\", \"title\": \"Again\", \"visibility\": \"public\"}"),
-					409, "duplicate_key"));
-	TEST_EXPECT(
-			refused(admin("POST", "/api/admin/content/projects",
-							"{\"key\": \"lower\", \"title\": \"x\", \"visibility\": \"public\"}"),
-					400, "invalid_field"));
-	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects",
-								"{\"key\": \"X\", \"title\": \"x\", \"visibility\": \"secret\"}"),
-			400, "invalid_field"));
-	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects",
-								"{\"key\": \"X\", \"title\": \"x\", \"visibility\": \"public\", "
-								"\"base\": \"NOPE\"}"),
-			400, "no_such_base"));
-	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects", "{\"key\": \"X\"}"), 400,
-			"missing_field"));
-	TEST_EXPECT(refused(h.send("POST", "/api/admin/content/projects", { kJson, kCsrf, h.player },
-								"{\"key\": \"P\", \"title\": \"x\", \"visibility\": \"public\"}"),
-			403, "forbidden"));
-
-	// Made public, then read by anyone.
+			std::string(json["project"]["title"].s()) == "A mod" &&
+			json["project"]["data_set_id"].i() == mod && !json["project"]["retail"].b());
 	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MOD"), 404, "not_found"));
-	json = json_of(admin("PATCH", "/api/admin/content/projects/MOD",
-						   "{\"visibility\": \"public\", \"title\": \"Renamed\"}"),
-			200);
-	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed");
-	TEST_EXPECT(json_of(h.send("GET", "/api/content/projects/MOD"), 200));
-	TEST_EXPECT(refused(admin("PATCH", "/api/admin/content/projects/NOPE", "{\"title\": \"x\"}"),
-			404, "not_found"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/data-sets",
+								"{\"display_name\": \"Again\", \"kind\": \"base\", \"title\": "
+								"\"jo\", \"game\": \"jop_2_consumer\", \"key\": \"MOD\", "
+								"\"visibility\": \"public\"}"),
+			409, "duplicate_key"));
 
-	// A project an expansion builds on stays; another goes with its objects.
+	// A file in its store; made public and renamed, the file moves with it.
 	TEST_EXPECT(json_of(h.upload("MOD", sha_of("mod file"), "mod file"), 200));
-	bool exists = false;
+	const std::string game = "/api/admin/data-sets/" + std::to_string(mod);
+	TEST_EXPECT(refused(admin("PATCH", game, "{\"key\": \"JO\"}"), 409, "duplicate_key"));
+	json = json_of(admin("PATCH", game,
+						   "{\"visibility\": \"public\", \"key\": \"MODDED\", \"display_name\": "
+						   "\"Renamed\"}"),
+			200);
+	TEST_EXPECT(json && std::string(json["data_set"]["key"].s()) == "MODDED" &&
+			std::string(json["data_set"]["visibility"].s()) == "public");
+	bool exists = true;
 	uint64_t size = 0;
 	std::string error;
 	TEST_EXPECT(h.store.head(content::blob_key("MOD", sha_of("mod file")), exists, size, error) &&
-			exists);
-	TEST_EXPECT(refused(admin("DELETE", "/api/admin/content/projects/JO"), 409, "has_expansion"));
-	const auto gone = admin("DELETE", "/api/admin/content/projects/MOD");
-	TEST_EXPECT(gone.transport_ok && gone.code == 204);
-	TEST_EXPECT(h.store.head(content::blob_key("MOD", sha_of("mod file")), exists, size, error) &&
 			!exists);
-	TEST_EXPECT(refused(admin("DELETE", "/api/admin/content/projects/MOD"), 404, "not_found"));
+	TEST_EXPECT(h.store.head(content::blob_key("MODDED", sha_of("mod file")), exists, size, error) &&
+			exists);
+	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MOD", { h.admin }), 404, "not_found"));
+	json = json_of(h.send("GET", "/api/content/projects/MODDED"), 200);
+	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed");
+	json = json_of(h.as_admin("POST", "/api/content/projects/MODDED/missing",
+						   missing_body({ file_of("mod.def", "mod file") })),
+			200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+
+	// Joint Operations stays while an expansion builds on it; the mod goes with its files.
+	TEST_EXPECT(refused(admin("DELETE", "/api/admin/data-sets/" + std::to_string(h.jo)), 409,
+			"has_expansion"));
+	const auto gone = admin("DELETE", game);
+	TEST_EXPECT(gone.transport_ok && gone.code == 204);
+	TEST_EXPECT(h.store.head(content::blob_key("MODDED", sha_of("mod file")), exists, size, error) &&
+			!exists);
+	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MODDED", { h.admin }), 404, "not_found"));
 	return 0;
 }
 
-// A release built from a revision (data_sets/release_build.h): refused with no version, no data
-// set or no such revision, a player refused; made building with its build queued, and kept from
-// deletion while the data program is on it.
+// A release built from a revision (data_sets/release_build.h): refused with no version or no such
+// revision, a player refused; made building with its build queued, and kept from deletion while
+// the data program is on it.
 int test_release_route(Harness &h) {
 	const auto admin = [&](const char *method, const std::string &path,
 							   const std::string &body = {}) {
@@ -489,12 +500,6 @@ int test_release_route(Harness &h) {
 	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/JOX01/releases",
 								"{\"version\": \"1.0\"}"),
 			400, "no_revision"));
-	TEST_EXPECT(json_of(admin("POST", "/api/admin/content/projects",
-								"{\"key\": \"NOSET\", \"title\": \"x\", \"visibility\": \"public\"}"),
-			201));
-	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/NOSET/releases",
-								"{\"version\": \"1.0\"}"),
-			400, "no_data_set"));
 	TEST_EXPECT(refused(admin("POST", "/api/admin/content/projects/NOPE/releases",
 								"{\"version\": \"1.0\"}"),
 			404, "not_found"));
@@ -506,6 +511,7 @@ int test_release_route(Harness &h) {
 	const int64_t number = head ? head["project"]["head"].i() : 0;
 	const auto made = json_of(admin("POST", jo, "{\"version\": \"1.0.1\"}"), 201);
 	TEST_EXPECT(made && std::string(made["release"]["status"].s()) == "building" &&
+			made["release"]["data_set_id"].i() == h.jo &&
 			std::string(made["release"]["source"]["project"].s()) == "JO" &&
 			made["release"]["source"]["revision"].i() == number &&
 			std::string(made["release"]["version"].s()) == "1.0.1" &&
@@ -557,9 +563,12 @@ int main(int argc, char **argv) {
 		{
 			const auto rows = pool.acquire()->query("SELECT updater_login FROM data_sets WHERE "
 													"kind = 'base' AND updater_login <> '' "
-													"AND NOT retail_updater;");
+													"AND NOT retail;");
 			TEST_EXPECT(rows.size() == 1);
 			harness.own_game = rows.front().as_text(0).value_or("");
+			const auto jo = pool.acquire()->query("SELECT id FROM data_sets WHERE key = 'JO';");
+			TEST_EXPECT(jo.size() == 1);
+			harness.jo = jo.empty() ? 0 : jo.front().as_int(0).value_or(0);
 		}
 
 		struct Case {
@@ -570,7 +579,7 @@ int main(int argc, char **argv) {
 			{ "who_reads_what", test_who_reads_what },
 			{ "who_pushes", test_who_pushes },
 			{ "push", test_push },
-			{ "admin_projects", test_admin_projects },
+			{ "game_projects", test_game_projects },
 			{ "release_route", test_release_route },
 		};
 		rc = 0;

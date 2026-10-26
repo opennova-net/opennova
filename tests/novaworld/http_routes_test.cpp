@@ -226,13 +226,13 @@ int64_t data_set_named(opennova::db::Database &db, const char *display_name) {
 int64_t seed_tree(opennova::db::Database &db, int64_t data_set_id, const std::string &version,
 		const std::vector<std::string> &missions) {
 	namespace hosted = opennova::novaworld_server::hosted;
-	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeSource::Baseline, hosted::TreeState::Finalizing, std::nullopt, std::nullopt, "harness");
+	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "harness");
 	hosted::TreeReady ready;
 	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
 	ready.version_text = version;
 	ready.bytes = 1020;
-	return hosted::finish_tree(db, id, hosted::TreeState::Finalizing, ready) ? id : 0;
+	return hosted::finish_tree(db, id, ready) ? id : 0;
 }
 
 // What a start may pick now (data_set_repository.h).

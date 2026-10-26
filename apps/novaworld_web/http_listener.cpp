@@ -510,10 +510,10 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->content_routes.set_urls(content_urls_);
 	impl_->content_routes.register_routes(impl_->app);
 	if (object_store_ != nullptr)
-		std::printf("[http] game data routes over the %s object store\n", object_store_->kind());
+		std::printf("[http] games routes over the %s object store\n", object_store_->kind());
 	else
 		std::printf(
-				"[http] game data routes with no object store (hosting off): uploads refused\n");
+				"[http] games routes with no object store (hosting off): store routes refused\n");
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a

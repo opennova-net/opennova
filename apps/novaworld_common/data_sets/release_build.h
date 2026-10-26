@@ -1,13 +1,14 @@
 #pragma once
 
-// A release built from a content project's revision (ADR 0069 d7; content_repository.h): the
+// A release built from a revision of its game's project (ADR 0069 d7; content_repository.h): the
 // data program's release.build job, which the content store's release route enqueues in the
-// transaction that makes the release (building):
+// transaction that makes the release (building). Every release of a game with a project is
+// built so; only a game with none (the runtime) has its packages uploaded:
 //
 //   release.build  {release_id}, cap 1. The release must be building. Its project's revision
 //                  is laid out from the store (every file by its SHA-256 from the program's own
 //                  cache of the project's files, synced down once per build: sync_down), an
-//                  expansion's beside its base's revision where its project.opennova's
+//                  expansion's beside its base game's revision where its project.opennova's
 //                  base_project names it, and exported by opennova-project. Every package is
 //                  whole (--full: every file of the export a row, so the jointops and dfx2 zips
 //                  install their game into an empty folder from it), carrying the removals
@@ -20,7 +21,7 @@
 //                  ONNET_UPDATE_HOST, its URL). opennova-update-tool packs it with the data
 //                  set's command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with
-//                  release.validate queued, as a completed upload is. A refusal (no data set, no
+//                  release.validate queued, as a completed upload is. A refusal (no project, no
 //                  product, a tool failing) makes the release invalid with its reason, what the
 //                  tools said kept as its build_log; a store failure runs the job again.
 //
@@ -55,8 +56,8 @@ int64_t enqueue_release_build(db::Database &db, int64_t release_id);
 // That build's job's dedupe key (jobs::job_pending: whether it is queued or running).
 std::string release_build_key(int64_t release_id);
 
-// release.build's handler over `store`, its work under `scratch_dir` (the content projects'
-// files cached there between builds).
+// release.build's handler over `store`, its work under `scratch_dir` (the projects' files cached
+// there between builds).
 void register_release_build(jobs::JobRegistry &registry, ObjectStore &store,
 		std::string scratch_dir, ReleaseTools tools);
 
