@@ -337,13 +337,15 @@ const TextureHeader *kept_header(const ProjectPaths &paths, const AssetEntry *en
 	kept.size = entry->size_bytes;
 	kept.modified = entry->modified_ticks;
 	kept.source = paths.files;
-	if (read_texture_file(paths, *entry, header_prefix(reader), bytes, bytes_read, error))
-		kept.header = texture_header_as(reader, bytes);
+	const bool read_whole = read_texture_file(paths, *entry, header_prefix(reader), bytes, bytes_read, error);
+	if (read_whole) kept.header = texture_header_as(reader, bytes);
 	else kept.header.refusal = error;
 	++g_stats.headers_read;
 	g_stats.header_bytes += bytes_read;
 	if (read) *read = bytes_read;
-	if (disk && io::file_stamp_settled(kept.modified, now)) {
+	// A read that failed is kept on no disk: what failed it (the file held open, gone for a moment) is no fact of the
+	// file, which the next session reads again.
+	if (disk && read_whole && io::file_stamp_settled(kept.modified, now)) {
 		disk->headers[{entry->relative_path, reader}] = kept;
 		disk->dirty = true;
 	}

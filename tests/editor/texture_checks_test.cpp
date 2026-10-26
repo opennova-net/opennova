@@ -582,7 +582,7 @@ int test_header_reads() {
 // The headers kept on disk (ProjectPaths::texture_headers_file): a project's textures whose last writes have settled
 // are read once, and an open after the check let go of what it kept in memory (forget_texture_checks, as a new
 // session holds nothing) reads none of them, the same findings made; a file rewritten (another size, another last
-// write) is read again, alone. A last write that has not settled keeps nothing on disk.
+// write) is read again, alone. A last write that has not settled keeps nothing on disk, nor a read that failed.
 int test_header_cache() {
 	test_temp::TempDir dir{"opennova_editor_texture_header_cache"};
 	const std::string root = dir.file("project");
@@ -602,8 +602,7 @@ int test_header_cache() {
 	};
 	TEST_EXPECT(age("colour.tga") && age("side.tga"));
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	const auto validate = [&](std::vector<Diagnostic> &rows) {
-		const AssetScan scan = scan_project_assets(paths, document);
+	const auto validate_over = [&](const AssetScan &scan, std::vector<Diagnostic> &rows) {
 		const std::vector<std::shared_ptr<const DocumentBase>> open;
 		const ValidationInput input{paths, document, scan, open};
 		AssetGraph graph;
@@ -614,6 +613,9 @@ int test_header_cache() {
 		}
 		rows = project_rows(input, graph, cache);
 		return texture_check_stats().headers_read;
+	};
+	const auto validate = [&](std::vector<Diagnostic> &rows) {
+		return validate_over(scan_project_assets(paths, document), rows);
 	};
 	const auto colormap_rows = [](const std::vector<Diagnostic> &rows) {
 		size_t n = 0;
@@ -648,6 +650,26 @@ int test_header_cache() {
 	const uint64_t fresh = validate(again_rows);
 	forget_texture_checks();
 	TEST_EXPECT(validate(again_rows) == fresh + 1);
+	// A read that failed (the file gone from under a scan that lists it) is kept on no disk: the file back as it was,
+	// its size and its last write, the next open reads it again.
+	TEST_EXPECT(test_io::write_file(root + "/textures/side.tga", tga(256, 256)) && age("side.tga"));
+	{
+		const AssetScan listed = scan_project_assets(paths, document);
+		const auto side = opennova::io::os_path(root + "/textures/side.tga");
+		const auto away = opennova::io::os_path(root + "/side.tga.away");
+		std::error_code ec;
+		std::filesystem::rename(side, away, ec);
+		TEST_EXPECT(!ec);
+		forget_texture_checks();
+		std::vector<Diagnostic> gone_rows;
+		const uint64_t before_gone = texture_check_stats().headers_read;
+		TEST_EXPECT(validate_over(listed, gone_rows) == before_gone + 1);
+		std::filesystem::rename(away, side, ec);
+		TEST_EXPECT(!ec);
+	}
+	forget_texture_checks();
+	const uint64_t back = texture_check_stats().headers_read;
+	TEST_EXPECT(validate(again_rows) == back + 1);
 	std::printf("header cache: %llu headers read cold, none warm\n", (unsigned long long)(first - before));
 	return 0;
 }
