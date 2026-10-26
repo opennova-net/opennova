@@ -124,6 +124,7 @@ add_library(opennova_formats STATIC
     # mnu — menu UI
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_layout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_read.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_schema.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mnu/mnu_xml.cpp

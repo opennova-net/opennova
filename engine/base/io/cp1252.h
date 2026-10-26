@@ -294,7 +294,7 @@ inline std::string retail_text_to_utf8(std::string_view bytes) {
 // fonts, wire strings and typed keys are all the page's bytes; a text decoded from them through
 // retail_text_to_utf8 or cp1252_to_utf8 comes back byte for byte, unless its bytes happened to form
 // UTF-8, which retail_text_to_utf8 kept as they were, and one typed into ours that is not narrows
-// as the menu reader narrows a code-page document's, mnu.cpp's TreeReader::narrow); anything else
+// as the menu reader narrows a code-page document's, mnu_read.cpp's TreeReader::narrow); anything else
 // already is the page's bytes, as retail_text_to_utf8 reads it.
 inline std::string utf8_to_retail_text(std::string_view text) {
 	if (!is_valid_utf8(text)) return std::string(text);

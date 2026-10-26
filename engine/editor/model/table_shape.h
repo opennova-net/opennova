@@ -286,7 +286,7 @@ private:
 
 // Zero identities in the shape of a native record and of everything it holds (each list's records,
 // all the way down), which a load or an insert gives identities (for_each_identity). Built from an
-// explicit stack, never a call a level: a menu nests its windows thousands deep (formats/mnu/mnu.cpp).
+// explicit stack, never a call a level: a menu nests its windows thousands deep (formats/mnu/mnu_read.cpp).
 inline RecordIds shape_ids(const RecordTable &table, const RecordHandle &record) {
 	RecordIds ids;
 	struct Level {

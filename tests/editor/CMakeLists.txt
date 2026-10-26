@@ -701,7 +701,7 @@ opennova_add_editor_test(content_client)
 # and the content section's JSON, which holds no session.
 opennova_add_editor_test(content_session)
 
-# opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp's bounds: 2017
+# opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp's bounds: 2017
 # nested windows, the 4031-deep LAN_LIST chain): it completes on the test's own stack, in time linear in
 # the windows, with the findings it always gave.
 opennova_add_editor_test(menu_depth LIBS opennova_project_cli)

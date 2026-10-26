@@ -1,4 +1,4 @@
-// opennova-project validate over the deepest menus the game reads (formats/mnu/mnu.cpp: windows nest as
+// opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp: windows nest as
 // deep as the game's 1 MiB creation stack takes them): 2017 nested generic windows and 2015 LAN_LISTs
 // nested through their JOIN_BUTTONs, 4031 windows deep. The editor core reads, validates and indexes a
 // menu without a call a window level (its walks keep explicit stacks), on this test's own main-thread
