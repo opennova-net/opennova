@@ -34,7 +34,7 @@ static func is_headless() -> bool:
 ## read game.cfg (GameCfgStore, the first use of the block). False when that read sets
 ## mpreset: the caller ends the process with exit code 0, before anything mounts, with
 ## nothing saved and no shutdown, so Num Lock stays as the start forced it
-## (docs/gamecfg/game-cfg-re.md, the load; D-MNU-76). The launch checks and the
+## (docs/gamecfg/game-cfg-re.md, the load; D-MNU-78). The launch checks and the
 ## first-launch download ahead of it are OpenNova's own (ADR 0067) and touch no device.
 static func begin_game() -> bool:
 	LocalPlayerPresenter.start_process_num_lock()

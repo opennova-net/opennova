@@ -37,7 +37,7 @@ func test_embedding_decision_preserves_direct_runtime_fallbacks() -> void:
 
 
 func test_the_game_start_reads_game_cfg_after_num_lock_and_ends_on_mpreset() -> void:
-	# GameRuntimeRoot.begin_game is the start's one home (D-MNU-76): Num Lock's
+	# GameRuntimeRoot.begin_game is the start's one home (D-MNU-78): Num Lock's
 	# start, then the start's read of game.cfg in the working directory, a set
 	# mpreset answering false (the caller quits with 0) and a clear one true.
 	var dir := TestFs.cache_dir(self, "begin_game_cfg")
