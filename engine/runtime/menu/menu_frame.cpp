@@ -57,6 +57,18 @@ void list_row_justify(const Row &row, int *io_justify, int *io_vjustify, int *io
 	if (!row.vjustify_offset.empty()) *io_y = static_cast<int>(std::strtol(row.vjustify_offset.c_str(), nullptr, 10));
 }
 
+// A STRING's x and y offsets, the JUSTIFY / VJUSTIFY of another token read by wcstol (+748 /
+// +752), 0 where none is authored [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30, the
+// two fields @ 0x657d62..0x657eba].
+void label_offsets(const mnu::String &string, int *x, int *y) {
+	*x = string.justify_offset.empty()
+			? 0
+			: static_cast<int>(std::strtol(string.justify_offset.c_str(), nullptr, 10));
+	*y = string.vjustify_offset.empty()
+			? 0
+			: static_cast<int>(std::strtol(string.vjustify_offset.c_str(), nullptr, 10));
+}
+
 } // namespace
 
 MenuFrameCompiler::MenuFrameCompiler() = default;
@@ -726,9 +738,11 @@ MenuFrameCompiler::ResolvedText MenuFrameCompiler::resolved_widget_text(
 		ResolvedText resolved;
 		resolved.text = ws->text;
 		if (ws->text_hotkey_pos >= 0 &&
-				ws->text_hotkey_pos < static_cast<int>(ws->text.size())) {
+				ws->text_hotkey_pos <= static_cast<int>(ws->text.size())) {
 			resolved.hotkey_pos = ws->text_hotkey_pos;
-			resolved.hotkey = std::string(1, ws->text[static_cast<size_t>(ws->text_hotkey_pos)]);
+			if (ws->text_hotkey_pos < static_cast<int>(ws->text.size()))
+				resolved.hotkey =
+						std::string(1, ws->text[static_cast<size_t>(ws->text_hotkey_pos)]);
 		}
 		return resolved;
 	}
@@ -1204,14 +1218,19 @@ bool MenuFrameCompiler::fit_label_(const WidgetNode &node, const std::string &te
 	return true;
 }
 
-// The single-line text pass shared by the static family
+// The single-line text pass shared by the static family and the edit
 // [orig: CStaticWnd_DrawLabel @ 0x656fb0 — edge-inset available width,
-//  truncate-to-fit, justify from the truncated width, then the state-colored
-//  draw; the wrap path (+760 -> sub_653D60) is deferred (D-MNU-13)].
+//  truncate-to-fit, justify from the truncated width, the STRING's x / y
+//  offsets (+748 @0x65725e, +752 @0x657252), then the state-colored draw; the
+//  wrap path (+760 -> sub_653D60) is deferred (D-MNU-13), drawn here with the
+//  EDGE its x takes @0x65710d]. A single-line label's EDGE only narrows the
+// span it is cut to; the edit's draw adds it to x as well [orig:
+// CEditWnd_Render @ 0x6619e0 — x += +748 @0x661c25 and +756 @0x661c31, y +=
+// +752 @0x661c37] (D-MNU-61).
 void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 		const MenuWidgetState *ws, int caret,
-		const std::string *override_text) {
+		const std::string *override_text, bool edit) {
 	const mnu::Window &w = *node.window;
 	ResolvedText resolved;
 	if (override_text != nullptr) {
@@ -1245,23 +1264,36 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 	} else if (iequals(w.string_data.vjustify, "bottom")) {
 		y = rect.bottom - line_h;
 	}
-	x += edge; // [orig: the edge term added into the draw x]
+	int x_offset = 0;
+	int y_offset = 0;
+	label_offsets(w.string_data, &x_offset, &y_offset);
+	x += x_offset;
+	y += y_offset;
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
-	// The button mnemonic is drawn by retail's caret leg — the '_' glyph
-	// stretched to the marked character's width at its prefix offset, the
-	// same CFontCache_DrawTextWithCursor path the edit caret rides (emit_caret).
-	// Only when the marked byte survived prefix truncation.
-	// [orig: CStaticWnd_DrawLabel passes the +740 offset @0x657270 ->
-	//  CFontCache_DrawTextWithCursor @0x6533b0 — prefix measure + pad @0x6534b7..
-	//  0x6534eb, '_' @0x6534f7/@0x653550, char-width stretch
-	//  @0x6535d8..0x65360f]
-	int drawn_caret = caret;
-	if (drawn_caret < 0 && w.type == mnu::WindowType::Button &&
-			resolved.hotkey_pos >= 0 &&
-			resolved.hotkey_pos < static_cast<int>(drawn.size())) {
-		drawn_caret = resolved.hotkey_pos;
+	if (edit) {
+		emit_glyph_run(node, drawn, x + edge, y, s, node.colors[state], caret);
+		return;
 	}
-	emit_glyph_run(node, drawn, x, y, s, node.colors[state], drawn_caret);
+	if (w.string_data.wrap) x += edge;
+	// The label set's offset (+740, the cut {hot} marker; -1 none) is the
+	// cursor every label pass hands the draw, a STATIC's, BUTTON's, RADIO's and
+	// COMBOBOX's alike (the combo's own over the face it swaps in): the '_'
+	// glyph stretched to the marked character's width at its prefix offset, the
+	// path the edit caret rides (emit_caret). Given a cursor, the draw takes
+	// the whole label, past the span it was cut to, and a marker at the end
+	// draws its '_' after the text [orig: CStaticWnd_DrawLabel passes +740
+	// @0x657270; CRadioWnd_Render @0x656e20 runs CStaticWnd_Render @0x656e3d;
+	// CComboWnd_Render @0x65c07e -> CFontCache_DrawTextWithCursor @0x6533b0 —
+	// the cursor's draw of the whole text (count -1) @0x6535d3, a NUL at the
+	// cursor measured as '_' @0x6534f7, the prefix measure + pad @0x6534b7..
+	// 0x6534eb, char-width stretch @0x6535d8..0x65360f] (D-MNU-57).
+	const int hotkey = override_text != nullptr ? resolved_widget_text(node, ws).hotkey_pos
+												: resolved.hotkey_pos;
+	if (hotkey >= 0 && hotkey <= static_cast<int>(text.size())) {
+		emit_glyph_run(node, text, x, y, s, node.colors[state], hotkey);
+		return;
+	}
+	emit_glyph_run(node, drawn, x, y, s, node.colors[state], -1);
 }
 
 // The edit render [orig: CEditWnd_Render @ 0x6619e0]: focus forces visual
@@ -1289,6 +1321,9 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 				gf.set_font(font);
 				const int edge =
 						w.string_data.has_edge ? w.string_data.edge : 0;
+				int x_offset = 0;
+				int y_offset = 0;
+				label_offsets(w.string_data, &x_offset, &y_offset);
 				int line_h = 0;
 				int tw = 0;
 				measure_text(node, "_", &tw, &line_h);
@@ -1299,10 +1334,11 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 				} else if (iequals(w.string_data.vjustify, "bottom")) {
 					y = rect.bottom - line_h;
 				}
+				y += y_offset;
 				const size_t first = draw_list_.glyphs.size();
 				// The strike goes through the text sink, which halves its
 				// colour like any menu text's (menu_text_sink_color).
-				emit_caret(gf, std::string(), rect.left + edge, y, s,
+				emit_caret(gf, std::string(), rect.left + edge + x_offset, y, s,
 						menu_text_sink_color(node.colors[visual >= 0 && visual < 4
 										? visual
 										: 0]),
@@ -1370,13 +1406,16 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 	}
 	local.has_text = true;
 	local.text = visible;
-	emit_widget_text(node, rect, s, visual, &local, caret_draw);
+	emit_widget_text(node, rect, s, visual, &local, caret_draw, nullptr, true);
 }
 
 // The checkbox label [orig: CCheckWnd_DrawLabel @ 0x64aa20]: non-AS_BUTTON
 // pins the label at rect.right + 2 with the h-justify ignored (v-justify
-// honored); AS_BUTTON honors both justifies inside the full rect. Colors
-// follow the RAW pump state, not the checked-forced slot.
+// honored); AS_BUTTON honors both justifies inside the full rect; then the
+// STRING's x / y offsets (+748 @0x64ab1f, +752 @0x64ab13), and the whole label
+// drawn with the label set's offset as the cursor (+740 @0x64ab31; D-MNU-57,
+// emit_widget_text). Colors follow the RAW pump state, not the checked-forced
+// slot.
 void MenuFrameCompiler::emit_checkbox_label(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 		const MenuWidgetState *ws) {
@@ -1405,8 +1444,13 @@ void MenuFrameCompiler::emit_checkbox_label(const WidgetNode &node,
 	} else {
 		x = rect.right + 2; // [orig: label_rect.left = right + 2]
 	}
+	int x_offset = 0;
+	int y_offset = 0;
+	label_offsets(w.string_data, &x_offset, &y_offset);
+	const int hotkey = resolved_widget_text(node, ws).hotkey_pos;
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
-	emit_glyph_run(node, text, x, y, s, node.colors[state], -1);
+	emit_glyph_run(node, text, x + x_offset, y + y_offset, s, node.colors[state],
+			hotkey <= static_cast<int>(text.size()) ? hotkey : -1);
 }
 
 // The current item of a spin list [orig: CSpinListWnd_Render @ 0x64b220]: none for a row the game

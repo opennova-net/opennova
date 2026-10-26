@@ -454,6 +454,18 @@ static int test_layout_notes() {
 		            std::string("ABCDEFGHIJ").compare(0, truncated->subject.size(), truncated->subject) == 0);
 		TEST_EXPECT(is(find(notes, Code::TextNoRoom), 2, "", -1, "string.value", "AB"));
 		TEST_EXPECT(is(find(notes, Code::TextIdMissing), 3, "", -1, "string.value", "NOPE"));
+		// A label with a {hot} marker draws whole past its span: no truncation note
+		// (D-MNU-57).
+		{
+			Rig marked;
+			Window mroot = window(WindowType::Window, "ROOT", 0, 0, 800, 600);
+			with_font(mroot);
+			Window hot = window(WindowType::Static, "HOT", 0, 0, 40, 20);
+			with_text(hot, "A{hot}BCDEFGHIJ");
+			mroot.children = {hot};
+			marked.configure(mroot);
+			TEST_EXPECT(!find(marked.compiler.layout_notes(marked.state), Code::TextTruncated));
+		}
 		// A table that defines the id quiets it.
 		auto table = std::make_shared<opennova::rtxt::File>();
 		table->sections.push_back({"menu", 1});

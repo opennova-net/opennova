@@ -1148,9 +1148,11 @@ private:
 			int caret);
 	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
 			int design_y, const WalkScale &s, uint32_t color, int caret);
+	// `edit`: the edit's draw, its `caret` the cursor (-1 none); a label passes
+	// its {hot} marker's offset instead.
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
-			int caret, const std::string *override_text = nullptr);
+			int caret, const std::string *override_text = nullptr, bool edit = false);
 	// The closed combo face: the popup row collection's selected row TEXT
 	// (runtime rows win; else the same nested-wins/top-level-fallback set the
 	// popup renders) [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — the label

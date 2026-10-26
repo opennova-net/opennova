@@ -890,10 +890,10 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 	CHECK(dl.glyphs[0].x_top_left == 51.5f, "centered text x");
 	CHECK(dl.glyphs[0].y_top == 21.5f,
 			"centered text y (the drawer's -0.5 vertex offset)");
-	// TITLE: LEFT justify with edge 5 -> x = 200 + 5; the run follows OK's
-	// two glyphs.
+	// TITLE: LEFT justify with edge 5 -> x = 200, the edge only narrowing the
+	// span (D-MNU-61); the run follows OK's two glyphs.
 	CHECK(dl.glyphs.size() >= 7, "both labels laid out");
-	CHECK(dl.glyphs[2].x_top_left == 204.5f, "left text starts at rect + edge");
+	CHECK(dl.glyphs[2].x_top_left == 199.5f, "left text starts at the rect, not the edge");
 
 	// Truncation: a long value in a 100px-wide button with edge 0 keeps the
 	// largest prefix strictly below the span [orig: @ 0x657199].
@@ -979,11 +979,12 @@ void test_scale_truncation(const fnt_font_t *font) {
 					menu_scaled_edge(600, 1.28f) == 768.0f && menu_scaled_edge(420, 1.28f) == 537.0f,
 			"edges truncate the float product");
 	// The text anchor is the design point times the pair, untruncated: TITLE's
-	// label at (200 + EDGE 5, 50) lands at (262.4, 64), its glyph quad half a
-	// pixel up and left [orig: CFontCache_DrawTextScaled @ 0x6531f1..0x65322c].
+	// label at (200, 50) (its EDGE only narrows the span, D-MNU-61) lands at
+	// (256, 64), its glyph quad half a pixel up and left [orig:
+	// CFontCache_DrawTextScaled @ 0x6531f1..0x65322c].
 	bool title_at_anchor = false;
 	for (const auto &g : dl.glyphs) {
-		if (g.x_top_left == menu_text_anchor(205, 1.28f) - 0.5f &&
+		if (g.x_top_left == menu_text_anchor(200, 1.28f) - 0.5f &&
 				g.y_top == menu_text_anchor(50, 1.28f) - 0.5f) {
 			title_at_anchor = true;
 		}
@@ -2056,6 +2057,74 @@ void test_label_mnemonic(const fnt_font_t *font) {
 	st.widgets.back().text_hotkey_pos = -1;
 	const MenuDrawList &kept = c.compile(st, 1.0f, 1.0f);
 	CHECK(kept.glyphs.size() == 8, "the kept marker draws as its five glyphs, no '_'");
+}
+
+// A label sits at its justify anchor plus the STRING's x / y offsets, its EDGE only narrowing
+// the span it is cut to (an edit's draw adds the EDGE too) (D-MNU-61); and every label class
+// hands the draw its {hot} marker's offset as the cursor: a RADIO's and a CHECKBOX's draw the
+// '_' as a BUTTON's does, a marker at the end draws it after the text, and a label with a
+// marker draws whole past its span (D-MNU-57). The uniform font: n glyphs measure 9n - 1.
+// [orig: CStaticWnd_DrawLabel @ 0x656fb0 - the offsets @0x657252/@0x65725e, +740 @0x657270;
+//  CCheckWnd_DrawLabel @ 0x64aa20 - @0x64ab1f/@0x64ab27, +740 @0x64ab31; CEditWnd_Render
+//  @ 0x6619e0 - @0x661c31; CFontCache_DrawTextWithCursor @ 0x6533b0 - the whole-text draw
+//  @0x6535d3, the NUL as '_' @0x6534f7]
+void test_label_offsets_and_cursor(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>L</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME></FONT>
+    <WINDOW type="static" name="OFF">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <STRING justify="7" vjustify="3" edge="5">AB</STRING>
+    </WINDOW>
+    <WINDOW type="radio" name="TAB">
+      <POSITION><LEFT>0</LEFT><TOP>40</TOP><RIGHT>100</RIGHT><BOTTOM>60</BOTTOM></POSITION>
+      <STRING>T{hot}ab</STRING>
+    </WINDOW>
+    <WINDOW type="checkbox" name="CHK">
+      <POSITION><LEFT>0</LEFT><TOP>80</TOP><RIGHT>10</RIGHT><BOTTOM>90</BOTTOM></POSITION>
+      <STRING justify="4">C{hot}k</STRING>
+    </WINDOW>
+    <WINDOW type="static" name="END">
+      <POSITION><LEFT>0</LEFT><TOP>100</TOP><RIGHT>100</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+      <STRING>Go{hot}</STRING>
+    </WINDOW>
+    <WINDOW type="static" name="WIDE">
+      <POSITION><LEFT>0</LEFT><TOP>130</TOP><RIGHT>20</RIGHT><BOTTOM>150</BOTTOM></POSITION>
+      <STRING>A{hot}BCDE</STRING>
+    </WINDOW>
+    <WINDOW type="static" name="CUT">
+      <POSITION><LEFT>0</LEFT><TOP>160</TOP><RIGHT>20</RIGHT><BOTTOM>180</BOTTOM></POSITION>
+      <STRING>ABCDE</STRING>
+    </WINDOW>
+    <WINDOW type="edit" name="ED">
+      <POSITION><LEFT>0</LEFT><TOP>200</TOP><RIGHT>100</RIGHT><BOTTOM>220</BOTTOM></POSITION>
+      <STRING justify="4" vjustify="2" edge="5">E</STRING>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuFrameState st;
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl.font_runs.size() == 7, "one run per label");
+	if (dl.font_runs.size() != 7) return;
+	const auto first = [&dl](size_t run) {
+		return dl.glyphs[static_cast<size_t>(dl.font_runs[run].first)];
+	};
+	CHECK(first(0).x_top_left == 6.5f && first(0).y_top == 2.5f,
+			"OFF at the anchor plus the offsets (7, 3), the edge not added");
+	CHECK(dl.font_runs[1].count == 4, "the RADIO's marker draws its '_'");
+	CHECK(dl.font_runs[2].count == 3 && first(2).x_top_left == 15.5f,
+			"the CHECKBOX label at right + 2 plus its offset, with its '_'");
+	CHECK(dl.font_runs[3].count == 3, "a marker at the end draws a '_' after the text");
+	CHECK(dl.font_runs[4].count == 6, "a label with a marker draws whole past its span");
+	CHECK(dl.font_runs[5].count == 2, "without one it is cut to the span");
+	CHECK(first(6).x_top_left == 8.5f && first(6).y_top == 201.5f,
+			"the edit adds its edge to the anchor and the offsets");
 }
 
 // The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->
@@ -3271,6 +3340,7 @@ int main() {
 	test_interaction_geometry(&font);
 	test_combo_face_and_outside_arrow_claim(&font);
 	test_label_mnemonic(&font);
+	test_label_offsets_and_cursor(&font);
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
