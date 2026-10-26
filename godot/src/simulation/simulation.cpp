@@ -64,6 +64,9 @@ opennova::bms::File make_demo_mission() {
 		opennova::bms::Entity e{};
 		e.type = opennova::bms::ItemType::Marker;
 		e.x = x; e.y = y; e.z = z;
+		// No advance trigger (the record's 0xFFFF), so the route advances by proximity:
+		// a trigger of 0 holds the marker (D-HUD-60).
+		e.wp_adv_trigger = -1;
 		return e;
 	};
 	auto organic = [](int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id) {
