@@ -366,9 +366,7 @@ func _ready() -> void:
 	_vehicle_menu_presenter = VehicleMenuPresenter.new()
 	_vehicle_menu_presenter.name = "VehicleMenuPresenter"
 	add_child(_vehicle_menu_presenter)
-	_vehicle_menu_presenter.setup(
-			func() -> Simulation: return _world.get_sim() if _world != null else null,
-			_hud if _hud != null else self)
+	_vehicle_menu_presenter.setup(_world.world_view(), _hud if _hud != null else self)
 	_vehicle_menu_presenter.opened.connect(func() -> void: _state = State.VEHICLE)
 	_vehicle_menu_presenter.closed.connect(_leave_screen.bind(State.VEHICLE))
 	# The joiner's deploy-map screen (death.mnu DEATH; net-re 5.61) owns the cursor.
