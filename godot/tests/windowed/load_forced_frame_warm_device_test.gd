@@ -88,11 +88,18 @@ func _stage_root(name: String) -> String:
 # overlay pass shares, drawing nothing, so the first overlay draw past the reveal (the first tracer
 # seen in a reflection among them) makes none. Retail's tail draws through render states made with
 # the device and the mission textures (engine renderer/scene_overlay.h kSceneOverlayPipelineStates
-# carries the witness). The made pipelines need the real rendering device: pending under the
-# headless dummy renderer.
+# carries the witness). The frame draws the world view through the viewport's current camera, the
+# one the view's passes compose around (ParticleRenderer::render_now): the shell's GameplayCamera,
+# current through every load (main_game.tscn), which this rig stands in for, as the fixture world
+# carries no camera of its own and a frame with none draws no world view. The made pipelines need the
+# real rendering device: pending under the headless dummy renderer.
 func test_the_forced_frame_makes_every_overlay_pipeline() -> void:
 	var root_dir := _stage_root("overlay_pipeline_warm")
 	var world := WorldFixture.make_world(self)
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	add_child_autofree(camera)
+	camera.make_current()
 	var loadout := PlayerSpawnLoadout.new()
 	loadout.primary = "WPN_M4AUTO"
 	loadout.player_class = 8
@@ -111,10 +118,13 @@ func test_the_forced_frame_makes_every_overlay_pipeline() -> void:
 				"%s took the forced frame's warm request" % key)
 		assert_eq(int(overlay.get("device_id", -1)), int(world_overlay.get("device_id", -2)),
 				"%s draws through the one shared device" % key)
-	if not bool(world_overlay.get("callback_seen", false)):
+	var world_camera: Dictionary = report.get("world_camera_backend", {})
+	if not bool(world_camera.get("rd_available", false)):
 		world.unload()
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
+	assert_true(bool(world_overlay.get("callback_seen", false)),
+			"the forced frame ran the world view's overlay pass: %s" % world_overlay)
 	assert_gte(int(world_overlay.get("pipeline_warm_requests_serviced", 0)), 1,
 			String(world_overlay.get("failure", "the forced frame serviced no overlay warm")))
 	assert_gte(int(world_overlay.get("device_pipelines", 0)),
