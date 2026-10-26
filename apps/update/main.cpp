@@ -3,13 +3,8 @@
 #include "client.h"
 #include "platform.h"
 
-#include <base/io/file_io.h>
 #include <base/io/os_path.h>
-#include <base/vfs/vfs.h>
 #include <formats/update/apply.h>
-#include <formats/update/command_file.h>
-#include <formats/update/update_crc.h>
-#include <formats/update/update_wizard.h>
 
 #include <ctime>
 #include <fstream>
@@ -29,32 +24,8 @@ using namespace opennova;
 
 constexpr const char *kSucceeded = "Operation completed successfully!";
 
-// The installed command file of the folder's game (its wizard's CMD), as the result box reads it: its
-// CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads the
-// command file the release wrote, whose VERSION is the release's (D-UPD-11).
-struct VersionMark {
-	bool present = false;
-	uint32_t crc = 0;
-	std::string version;
-};
-
-VersionMark version_mark(const std::filesystem::path &dir) {
-	// The wizard's CMD; a folder with none is OpenNova's own (the client's rule, discover_products).
-	std::string wizard;
-	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
-	                                    ? update::read_update_wizard(wizard).cmd
-	                                    : std::string(update::kAcidGambitCommandFile);
-	std::vector<uint8_t> bytes;
-	std::string ignored;
-	if (command.empty() || !update::is_safe_row_name(command) ||
-			!io::read_file_bytes(io::utf8_path(dir / command), bytes, ignored))
-		return {};
-	VersionMark mark{true, update::command_file_crc(bytes.data(), bytes.size()), std::string()};
-	if (const std::optional<update::CommandFile> file =
-					update::read_command_file(std::string(bytes.begin(), bytes.end())))
-		mark.version = file->version;
-	return mark;
-}
+using updater::VersionMark;
+using updater::version_mark;
 
 // The result box's text as retail composes it: the result line, then "No Update Needed!" when a
 // successful run left the command file as it found it, else "Current Version:" and its VERSION; nothing
@@ -66,6 +37,13 @@ std::string result_text(const std::string &line, bool ok, const std::filesystem:
 	if (!now.present) return line;
 	if (ok && start.present && now.crc == start.crc) return line + "\r\nNo Update Needed!\r\n";
 	return now.version.empty() ? line : line + "\r\nCurrent Version:\r\n" + now.version + "\r\n";
+}
+
+// An expansion's box, its nested run's: the result line of its outcome over its own folder.
+// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): a nested run's report, US_DONE's @0x408aac
+//  when it succeeded, US_ERROR's @0x408b64 when it failed]
+std::string expansion_text(const updater::Result::Expansion &expansion) {
+	return result_text(expansion.ok ? kSucceeded : expansion.error, expansion.ok, expansion.dir, expansion.start);
 }
 
 bool execute(const updater::Options &options, updater::Result &result, std::string &error,
@@ -168,13 +146,14 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
 		if (dialog->done.load()) {
 			KillTimer(window, 1);
 			dialog->worker.join();
-			// Retail's DONE: each failed expansion's own box (its nested run's), the result box (titled
-			// "OpenNova Update", D-UPD-11), then the launch. A revision hands over to revupdat with
-			// no box.
+			// Retail's DONE: each expansion's own box (its nested run's, succeeded or failed), the
+			// result box (titled "OpenNova Update", D-UPD-11), then the launch. A revision hands over
+			// to revupdat with no box. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE),
+			// US_DONE: Cupdate2Dlg_RunExpansionUpdates @0x408a9e ahead of the report @0x408aac]
 			if (!dialog->ok || !dialog->result.revision_pending) {
-				for (const updater::Result::Failure &failure : dialog->result.expansion_failures)
-					MessageBoxW(window, updater::wide(result_text(failure.error, false, failure.dir, {})).c_str(),
-							L"OpenNova Update", MB_OK | MB_ICONERROR);
+				for (const updater::Result::Expansion &expansion : dialog->result.expansions)
+					MessageBoxW(window, updater::wide(expansion_text(expansion)).c_str(), L"OpenNova Update",
+							MB_OK | (expansion.ok ? MB_ICONINFORMATION : MB_ICONERROR));
 				const std::string text = result_text(dialog->ok ? kSucceeded : dialog->error, dialog->ok,
 						dialog->options.resource_dir, dialog->start);
 				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update",
@@ -250,8 +229,8 @@ int app_main(const std::vector<std::string> &args, const std::filesystem::path &
 		updater::write_stdout("ERROR " + result_text(error, false, options.resource_dir, start) + "\n");
 		return 1;
 	}
-	for (const updater::Result::Failure &failure : result.expansion_failures)
-		updater::write_stdout("ERROR " + result_text(failure.error, false, failure.dir, {}) + "\n");
+	for (const updater::Result::Expansion &expansion : result.expansions)
+		updater::write_stdout((expansion.ok ? "" : "ERROR ") + expansion_text(expansion) + "\n");
 	if (!result.revision_pending)
 		updater::write_stdout(result_text(kSucceeded, true, options.resource_dir, start) + "\n");
 	if (!finish(options, args, result, error)) {

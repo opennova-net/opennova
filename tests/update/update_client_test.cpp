@@ -207,13 +207,30 @@ int test_check_goes_past_a_failing_product(const test_temp::TempDir &temp) {
 	options.check = false;
 	TEST_EXPECT(!updater::run(options, products, result, error)); // a failing game stops an install
 	// A failing expansion does not: it is recorded and the install goes on, as retail's nested
-	// expansion runs do.
+	// expansion runs do. Every expansion's outcome is recorded in order, a succeeded one's too, for
+	// the box each nested run shows [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE
+	// @0x408a9e, @0x408aac].
 	updater::Product unpublished_expansion = products[0];
 	unpublished_expansion.expansion = true;
-	TEST_EXPECT(updater::run(options, {products[1], unpublished_expansion}, result, error) && result.applied &&
-			result.expansion_failures.size() == 1 && result.expansion_failures[0].dir == products[0].dir &&
-			!result.expansion_failures[0].error.empty());
+	updater::Product published_expansion = products[1];
+	published_expansion.expansion = true;
+	// The folder's wizard names TEST.CMD, which nothing has installed yet: a mark taken at the run's
+	// start finds none, the expansion's own run, after the game's install, finds it.
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(options.resource_dir / "UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=TEST.CMD\r\n"));
+	TEST_EXPECT(!updater::version_mark(options.resource_dir).present);
+	TEST_EXPECT(updater::run(options, {products[1], unpublished_expansion, published_expansion}, result, error) &&
+			result.applied && result.expansions.size() == 2);
+	TEST_EXPECT(result.expansions[0].dir == products[0].dir && !result.expansions[0].ok &&
+			!result.expansions[0].error.empty());
+	TEST_EXPECT(result.expansions[1].dir == options.resource_dir && result.expansions[1].ok &&
+			result.expansions[1].error.empty());
+	// Its command file as its own run found it: after the game's install before it, so current.
+	const updater::VersionMark installed = updater::version_mark(options.resource_dir);
+	TEST_EXPECT(installed.present && result.expansions[1].start.present &&
+			result.expansions[1].start.crc == installed.crc);
 	options.check = true;
+	TEST_EXPECT(updater::run(options, {products[1], published_expansion}, result, error) && result.expansions.empty());
 	TEST_EXPECT(!updater::run(options, products, result, error) && !result.available && !error.empty());
 	return 0;
 }

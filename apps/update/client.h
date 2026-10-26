@@ -26,6 +26,16 @@ struct Progress {
 };
 using ProgressSink = std::function<void(const Progress &)>;
 
+// The installed command file of a product's folder (its wizard's CMD), as the result box reads it:
+// its CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads
+// the command file the release wrote, whose VERSION is the release's (D-UPD-11).
+struct VersionMark {
+	bool present = false;
+	uint32_t crc = 0;
+	std::string version;
+};
+VersionMark version_mark(const std::filesystem::path &dir);
+
 struct Result {
 	bool available = false;
 	bool applied = false;
@@ -33,12 +43,16 @@ struct Result {
 	size_t products = 0;
 	size_t files = 0;
 	std::string launch_exe; // legacy command file's EXE, if present
-	// An install's expansions that failed while the install went on, with the error of each.
-	struct Failure {
+	// An install's expansions in their order, each run as retail runs one, a nested updater with a
+	// result box of its own: its folder, its command file as its run found it, and its outcome
+	// (an install goes on past a failed one). A check records none.
+	struct Expansion {
 		std::filesystem::path dir;
+		VersionMark start;
+		bool ok = false;
 		std::string error;
 	};
-	std::vector<Failure> expansion_failures;
+	std::vector<Expansion> expansions;
 };
 
 // Read-only discovery: runtime, selected content, and installed expansions with a wizard.

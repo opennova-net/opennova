@@ -10,6 +10,7 @@
 #include <base/vfs/vfs.h>
 #include <formats/pff/pff.h>
 #include <formats/update/apply.h>
+#include <formats/update/command_file.h>
 #include <formats/update/nlz.h>
 #include <formats/update/server_list.h>
 #include <formats/update/update_crc.h>
@@ -538,6 +539,24 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 	return true;
 }
 
+VersionMark version_mark(const fs::path &dir) {
+	// The wizard's CMD; a folder with none is OpenNova's own (the client's rule, discover_products).
+	std::string wizard;
+	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
+	                                    ? update::read_update_wizard(wizard).cmd
+	                                    : std::string(update::kAcidGambitCommandFile);
+	std::vector<uint8_t> bytes;
+	std::string ignored;
+	if (command.empty() || !update::is_safe_row_name(command) ||
+			!io::read_file_bytes(io::utf8_path(dir / command), bytes, ignored))
+		return {};
+	VersionMark mark{true, update::command_file_crc(bytes.data(), bytes.size()), std::string()};
+	if (const std::optional<update::CommandFile> file =
+					update::read_command_file(std::string(bytes.begin(), bytes.end())))
+		mark.version = file->version;
+	return mark;
+}
+
 bool run(const Options &options, const std::vector<Product> &products, Result &result,
 		std::string &error, const ProgressSink &progress, const std::atomic_bool *cancel) {
 	result = {};
@@ -546,6 +565,11 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 	Worker worker{options, progress, cancel, Clock::now() + std::chrono::seconds(10), error};
 	std::string failure;
 	for (const Product &product : products) {
+		// An expansion's run starts here, where retail's nested updater for it would start, after
+		// the products before it: its command file as that run finds it, for its box.
+		// [orig: Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
+		const bool nested = product.expansion && !options.check;
+		const VersionMark start = nested ? version_mark(product.dir) : VersionMark{};
 		bool updated = false;
 		try {
 			updated = update_product(worker, product, result);
@@ -568,10 +592,11 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 			// and to the relaunch. [orig: Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE), the
 			// exit code dropped @0x40633b; Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE]
 			if (!product.expansion) return false;
-			result.expansion_failures.push_back({product.dir, error});
+			result.expansions.push_back({product.dir, start, false, error});
 			error.clear();
 			continue;
 		}
+		if (nested) result.expansions.push_back({product.dir, start, true, std::string()});
 		// Let the helper replace this process before continuing with content. A
 		// later product failure must not strand an already staged updater revision.
 		if (result.revision_pending) break;
