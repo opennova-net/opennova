@@ -290,7 +290,6 @@ struct MissionEnv {
 	Config config;
 	Config overcast;
 	bool environment = false; // the .env parsed
-	bool terrain = false;     // the .trn's pass ran (its text was read)
 };
 
 // A mission's environment as the mission load makes it [orig: Environment_LoadTimeOfDayConfig

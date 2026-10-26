@@ -1513,7 +1513,6 @@ int main() {
 		opennova::env::MissionEnv skipped;
 		ok &= expect(!opennova::env::load_mission_env(texts, skipped),
 				"no .env: the load skips its pass");
-		ok &= expect(skipped.terrain, "the .trn's pass ran");
 		ResolvedWaterHeight resolved =
 				opennova::env::mission_water_rung(none, skipped.config);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 20.0f),
@@ -1539,9 +1538,6 @@ int main() {
 		// No pass wrote the line: no plane. The global has no terrain writer, so a .trn holding the
 		// height is the first pass's line, never a rung of its own (env #46) [orig: g_EnvWaterHeightFixed's
 		// writers TimeOfDay_ParseProperty @ 0x57CB6A, Terrain_Init @ 0x60FCBA (the header's flagged word)].
-		opennova::env::MissionEnv no_trn;
-		(void)opennova::env::load_mission_env(opennova::env::MissionEnvTexts(), no_trn);
-		ok &= expect(!no_trn.terrain, "no .trn text: its pass did not run");
 		const opennova::env::Config empty;
 		resolved = opennova::env::mission_water_rung(none, empty);
 		ok &= expect(resolved.rung == WaterRung::None && resolved.height == 0.0f,

@@ -20,6 +20,9 @@ const DBUGGY_GRAPHIC := "carrier"
 const MRK5_ITEM_ID := VehicleFixture.MARK_V
 const MRK5_TYPE_ID := VehicleFixture.MARK_V - 100000
 const MRK5_GRAPHIC := "gunboat"
+# The drive's terrain name: the mission names it, and its .trn text in the catalog
+# root holds the water line the boot's time-of-day pass reads (_catalog_root).
+const DRIVE_TERRAIN := "drive"
 # The two Blackhawks' placements (mission axes, yaw): one parked level, one
 # turned, so the anchor frames compose with a real carrier rotation.
 const BLACKHAWK_PLACEMENTS := [
@@ -38,6 +41,8 @@ func _driving_terrain() -> TerrainData:
 	var terrain := TerrainData.new()
 	terrain.set_trn_path(directory.path_join(TestFs.TMAP_TRN))
 	assert_eq(terrain.load(), OK)
+	# The document agrees with the drive's .trn text (_catalog_root), whose line the
+	# plane takes.
 	terrain.set_water_height(-100)
 	return terrain
 
@@ -54,10 +59,18 @@ func after_each() -> void:
 	_stage_dirs.clear()
 
 
-# The catalog root (VehicleFixture.stage) and its items table.
-func _catalog_root() -> ResourceRoot:
+# The catalog root (VehicleFixture.stage) and its items table. With
+# `drive_water`, it also holds DRIVE_TERRAIN's .trn text, whose water_height
+# line the mission's time-of-day pass reads for the plane (env #46): -100 half
+# units, a plane below the drive's relief.
+func _catalog_root(drive_water := false) -> ResourceRoot:
 	var directory := VehicleFixture.stage(self, "emplacement_alignment")
 	_stage_dirs.append(directory)
+	if drive_water:
+		var trn := FileAccess.open(directory.path_join(DRIVE_TERRAIN + ".trn"), FileAccess.WRITE)
+		assert_not_null(trn)
+		trn.store_string("water_height -100\r\n")
+		trn.close()
 	var root := VehicleFixture.root_over(self, directory)
 	_resource_roots.append(root)
 	return root
@@ -455,7 +468,7 @@ func test_blackhawk_rotor_register_spins_while_crewed() -> void:
 
 
 func test_buggy_attachment_nodes_follow_when_driven() -> void:
-	var root := _catalog_root()
+	var root := _catalog_root(true)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
@@ -478,6 +491,7 @@ func test_buggy_attachment_nodes_follow_when_driven() -> void:
 	var driving_terrain := _driving_terrain()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
+	assert_true(mission.set_header_string("terrain", DRIVE_TERRAIN))
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, DBUGGY_ITEM_ID,
 			Vector3(2, 0, driving_terrain.get_height_world_bilinear(Vector3(2, 0, 0)) + 1.0), Vector3.ZERO)
@@ -663,7 +677,7 @@ func test_buggy_attachment_stays_collected_when_driven_away() -> void:
 	# loopback 0x0A is header-only, so the decoded row keeps the spawn image:
 	# a sphere pinned there culled the gun as soon as the driven buggy left
 	# it behind ("the emplaced weapon disappears when you drive").
-	var root := _catalog_root()
+	var root := _catalog_root(true)
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	var child_types := {}
@@ -674,6 +688,7 @@ func test_buggy_attachment_stays_collected_when_driven_away() -> void:
 	var driving_terrain := _driving_terrain()
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
+	assert_true(mission.set_header_string("terrain", DRIVE_TERRAIN))
 	var placed := mission.add_entity(
 			MissionData.KIND_ITEM, DBUGGY_ITEM_ID, Vector3(2, 0, driving_terrain.get_height_world_bilinear(Vector3(2, 0, 0)) + 1.0), Vector3.ZERO)
 	assert_not_null(placed)
