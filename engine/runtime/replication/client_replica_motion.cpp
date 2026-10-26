@@ -1203,6 +1203,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 				? es.rm_vel_z : 2 * es.rm_vel_z);
 		ClientReplicaPipeline::ReplicaContactQuery q;
 		q.row_handle = es.handle;
+		q.row_lifetime = es.spawn_revision;
+		q.row_respawn = es.respawn_revision;
 		q.type_id = es.type_id;
 		q.is_player_class = es.cls == EntityClass::Player;
 		q.pos[0] = es.x;

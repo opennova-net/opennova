@@ -62,6 +62,22 @@ bool run_replica_person_ewep(world::World &world, replication::ClientState &stat
 void rebuild_local_body_words(world::World &world, world::Entity &local, world::AiEntity &local_ai,
 		const replication::ClientEntityState &row);
 
+// A replica row's movement-resolver state (the prev pose and the idle skip counter, the slot's
+// +0x373 throttle), kept by wire handle with the row lifetime (its spawn revision) and respawn
+// (its respawn revision) it belongs to: either's next starts from a zeroed state, as retail zeroes
+// the byte at each. [orig: NapiNPClientMsg_0x00C @0x42E730 - memset(slot, 0, 0x388) @0x42E7F1;
+//  NapiNPClientMsg_FullEntitySpawn @0x433780's class init @0x433E82 - PlayerClass_InitEntity
+//  @0x4B11A6, Entity_InitOrganicAI @0x4BFD86; Entity_ResetToSpawnState @0x4B9656, called from
+//  NetPacket_SerializePlayerState @0x4C113C / NetPacket_SerializeInfantryEntityState @0x4C05EC]
+struct ReplicaResolveRow {
+	uint32_t lifetime = 0;
+	uint32_t respawn = 0;
+	world::CollisionWorld::ResolveState state;
+};
+using ReplicaResolveRows = std::unordered_map<uint16_t, ReplicaResolveRow>;
+world::CollisionWorld::ResolveState &replica_resolve_state(ReplicaResolveRows &rows,
+		uint16_t handle, uint32_t lifetime, uint32_t respawn);
+
 class JoinerRole final : public Role, public world::VehicleOccupancySource {
 public:
 	RoleKind kind() const override { return RoleKind::Joiner; }
@@ -397,6 +413,7 @@ public:
 		post_start_identity_pending_ = false;
 		local_flags_spawn_seen_ = 0;
 		local_flags_revision_seen_ = 0;
+		replica_resolve_states_.clear();
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
@@ -638,13 +655,10 @@ private:
 	int flat_seconds_ = 0;
 	bool freeze_suspected_ = false;
 
-	// Per-replica-row resolver state (the movement collision resolver's
-	// prev-pose + idle skip counter) keyed by wire handle — the persistent
-	// half the ClientState row cannot carry across the replication seam.
-	// Entries for retired rows are benign: a reused handle's stale prev pose
-	// triggers one displaced-detect full update and self-corrects.
-	std::unordered_map<uint16_t, world::CollisionWorld::ResolveState>
-			replica_resolve_states_;
+	// Per-replica-row resolver state (replica_resolve_state) — the persistent
+	// half the ClientState row cannot carry across the replication seam; a
+	// mission reload drops it all.
+	ReplicaResolveRows replica_resolve_states_;
 	// Scratch for the replica contact resolver's replication->world peer copy
 	// (cleared per call; grows once to the session's peer cap).
 	std::vector<world::CollisionWorld::ReplicaPeer> replica_peer_scratch_;

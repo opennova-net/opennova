@@ -563,6 +563,17 @@ void JoinerRole::land_local_respawn_arm(const ClientRuntime::LocalRespawnArm &ar
 	lp.respawn_init(/*rebuild_kit=*/false);
 }
 
+world::CollisionWorld::ResolveState &replica_resolve_state(ReplicaResolveRows &rows,
+		uint16_t handle, uint32_t lifetime, uint32_t respawn) {
+	ReplicaResolveRow &row = rows[handle];
+	if (row.lifetime != lifetime || row.respawn != respawn) {
+		row.lifetime = lifetime;
+		row.respawn = respawn;
+		row.state = world::CollisionWorld::ResolveState{};
+	}
+	return row.state;
+}
+
 // The player record's Flags apply: the record that names the local player folds
 // the wire byte into its Flags under 0xE1 (a remote's under 0xFD), so the host's
 // deploy-screen bit 0x01, the chute 0x20 and bits 0x40 / 0x80 land on L and ride
@@ -1679,8 +1690,8 @@ void JoinerRole::wire_replica_collision_seams() {
 								&q) -> int32_t {
 					using world::CollisionWorld;
 					CollisionWorld *col = world_->ai.collision;
-					CollisionWorld::ResolveState &st =
-							replica_resolve_states_[q.row_handle];
+					CollisionWorld::ResolveState &st = replica_resolve_state(replica_resolve_states_,
+							q.row_handle, q.row_lifetime, q.row_respawn);
 					// Role-member scratch: this resolver runs per armed
 					// replica row per 62.5 Hz pump, and every row of one pump
 					// shares the same staged peer table (q.tick is the pump

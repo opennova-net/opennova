@@ -3302,6 +3302,28 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
+// D-NET-1403: a replica row's resolver state is its lifetime's and respawn's: the same keeps
+// the idle throttle, the handle's next spawn or the row's respawn starts from a zeroed one.
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - memset(slot, 0, 0x388) @0x42E7F1;
+//  Entity_ResetToSpawnState @0x4B9656]
+bool run_a_replica_row_lifetime_starts_a_fresh_resolve_state() {
+	inmatch::ReplicaResolveRows rows;
+	w::CollisionWorld::ResolveState &first = inmatch::replica_resolve_state(rows, 0x0007, 3, 0);
+	first.skip_counter = 15;
+	first.prev_valid = true;
+	if (!expect(inmatch::replica_resolve_state(rows, 0x0007, 3, 0).skip_counter == 15,
+			"the same lifetime keeps the throttle"))
+		return false;
+	w::CollisionWorld::ResolveState &respawned = inmatch::replica_resolve_state(rows, 0x0007, 3, 1);
+	if (!expect(respawned.skip_counter == 0 && !respawned.prev_valid,
+			"the row's respawn starts from a zeroed state"))
+		return false;
+	respawned.skip_counter = 15;
+	const w::CollisionWorld::ResolveState &next = inmatch::replica_resolve_state(rows, 0x0007, 4, 0);
+	return expect(next.skip_counter == 0 && !next.prev_valid,
+			"the handle's next lifetime starts from a zeroed state");
+}
+
 // D-NET-NEW-L5-60 follow-up (V-ROLL-BA F2): a remote row's respawn arm releases its +0x1CC group
 // inside the record decode, so the release reaches the embedder ahead of anything the frame's
 // entity update spawns: here L's own corpse leg's decay, which the update spawns the same frame
@@ -6455,6 +6477,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_a_replica_row_lifetime_starts_a_fresh_resolve_state();
 	ok &= run_respawn_release_precedes_the_frames_entity_update();
 	ok &= run_tail_armor_lands_on_l();
 	ok &= run_tail_carried_word_lands_on_l();

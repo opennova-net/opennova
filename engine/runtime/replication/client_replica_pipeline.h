@@ -229,6 +229,12 @@ public:
 	};
 	struct ReplicaContactQuery {
 		uint16_t row_handle = 0xFFFF;
+		// The row's lifetime and respawn (its spawn and respawn revisions): the resolver's
+		// per-row state starts over with each, as retail zeroes the slot's idle throttle
+		// (+0x373) at a spawn and at a respawn's reset (inmatch::replica_resolve_state)
+		// [orig: memset(slot, 0, 0x388) @0x42E7F1; Entity_ResetToSpawnState @0x4B9656].
+		uint32_t row_lifetime = 0;
+		uint32_t row_respawn = 0;
 		uint16_t type_id = 0;
 		bool is_player_class = false; // org2 (player body) vs org1 (NPC) shape
 		int32_t pos[3] = {};          // in/out, 16.16 mission space

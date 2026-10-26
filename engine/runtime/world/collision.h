@@ -1766,7 +1766,7 @@ public:
         // a decoded row the stamp resolve_replica stages (resolve_entity).
         int32_t prev_pos[3] = {};
         bool prev_valid = false;
-        uint8_t skip_counter = 0;   // [orig: entity pad_370[3] idle throttle]
+        uint8_t skip_counter = 0;   // [orig: entity +0x373 collideIdleSkipCount, the idle throttle]
     };
     // is_player_class = the entity's wire Player class bit (Flags & 0x100):
     // retail keys EVERY physics leg on it — the skip-path gravity undo
