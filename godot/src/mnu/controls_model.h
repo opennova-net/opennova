@@ -85,7 +85,7 @@ public:
 	// The same, without the keyboard slots and the mouse buttons: the scripted device's
 	// hold and the joystick. A keyboard key fires its row through the key queue's events
 	// (the shell's KeyboardPass), a mouse button's through its click records
-	// (mouse_click_code; D-CTRL-6).
+	// (mouse_click_record; D-CTRL-6).
 	bool is_token_held_off_keyboard(const String &p_token) const;
 	// Whether the token's binding is held as the fire arm's live test reads it: its key slots
 	// by the key state and its mouse buttons (engine BindingSet::binding_active carries the
@@ -94,11 +94,15 @@ public:
 	// The scripted device holds the token's row and the row binds the left mouse button: the
 	// hold stands for that button (engine controls::PlayerActionSource::scripted_left_button).
 	bool is_token_scripted_left_button(const char *p_token) const;
-	// The dispatch code a mouse button message's event queues (2 / 4 / 1024 left down /
-	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle), -1 for none, under
-	// the death screen's mode gate the key scan holds (engine BindingSet::mouse_click_action
-	// carries the witness).
-	int mouse_click_code(int p_event) const;
+	// The click record a mouse button message's event queues (2 / 4 / 1024 left down /
+	// up / double click, 8 / 0x10 / 2048 right, 32 / 64 / 4096 middle, the wheel's 0x100 /
+	// 0x200): its action code (-1 for none) under the death screen's mode gate the key scan
+	// holds, and its sign (engine BindingSet::mouse_click_record carries the witness).
+	struct MouseClickRecord {
+		int code = -1;
+		bool sign = false;
+	};
+	MouseClickRecord mouse_click_record(int p_event) const;
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.

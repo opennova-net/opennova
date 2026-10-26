@@ -373,14 +373,18 @@ bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
 			scripted_input_->native().token_held(p_token);
 }
 
-int ControlsModel::mouse_click_code(int p_event) const {
+ControlsModel::MouseClickRecord ControlsModel::mouse_click_record(int p_event) const {
 	const auto key_down = [this](int vk) { return vk_down_(vk); };
-	const int index = bindings_.mouse_click_action(static_cast<uint32_t>(p_event), key_down,
-			bindings_.scan_death_screen());
+	const opennova::controls::BindingSet::MouseClickRecord record = bindings_.mouse_click_record(
+			static_cast<uint32_t>(p_event), key_down, bindings_.scan_death_screen());
 	std::size_t count = 0;
 	const auto *cat = opennova::controls::catalog(&count);
-	return index >= 0 && static_cast<std::size_t>(index) < count
-			? opennova::controls::action_code(cat[index].id) : -1;
+	MouseClickRecord out;
+	if (record.index >= 0 && static_cast<std::size_t>(record.index) < count) {
+		out.code = opennova::controls::action_code(cat[record.index].id);
+		out.sign = record.sign;
+	}
+	return out;
 }
 
 bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse,

@@ -342,6 +342,19 @@ bool test_mouse_click_dispatch() {
   CHECK(set.mouse_click_action(4096, held) == token("Prone"), "a middle double click is its button");
   CHECK(set.mouse_click_action(64, held) == -1, "middle up takes none");
   CHECK(set.mouse_click_action(1, held) == -1, "a move takes none");
+  // The record's sign: the Shift key held or the row's 0x200 bit (no catalog row carries it)
+  // [orig: Input_TryDispatchBindingByWeaponType @0x499180 - @0x49919E..0x4991A4].
+  {
+    bool shift = false;
+    auto keys = [&shift](int vk) { return shift && vk == 0x10; };
+    const BindingSet::MouseClickRecord bare = set.mouse_click_record(2, keys);
+    CHECK(bare.index == token("attack_1") && !bare.sign, "a bare click's record is unsigned");
+    shift = true;
+    const BindingSet::MouseClickRecord shifted = set.mouse_click_record(2, keys);
+    CHECK(shifted.index >= 0 && shifted.sign, "Shift signs the click record");
+    CHECK(set.mouse_click_record(1, keys).index == -1 && !set.mouse_click_record(1, keys).sign,
+          "no row, no record");
+  }
   CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "the wheel's event");
   CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "the wheel's down event");
   // The second switch takes a held row's wheel word too (no flag-4 test there): a held row

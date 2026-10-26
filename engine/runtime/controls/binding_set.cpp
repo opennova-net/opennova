@@ -360,6 +360,18 @@ int BindingSet::mouse_event_action(uint16_t mask,
   return -1;
 }
 
+BindingSet::MouseClickRecord BindingSet::mouse_click_record(uint32_t event,
+    const std::function<bool(int)> &key_down, bool dead) const {
+  MouseClickRecord out;
+  out.index = mouse_click_action(event, key_down, dead);
+  if (out.index < 0) return out;
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  out.sign = key_down(0x10) ||
+      (static_cast<std::size_t>(out.index) < count && (cat[out.index].flags & 0x200u) != 0);
+  return out;
+}
+
 int BindingSet::mouse_click_action(uint32_t event,
     const std::function<bool(int)> &key_down, bool dead) const {
   // Input_TryDispatchBindingByWeaponType's two switches over the row's mouse word and flags.

@@ -923,13 +923,10 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 }
 
 void PlayerInputRouter::queue_mouse_event_record(int p_event) {
-	// The row the binding walk takes for the event, with the Shift sign or the row's 0x200
-	// bit (engine BindingSet::mouse_click_action carries the witness).
-	const int code = controls_->mouse_click_code(p_event);
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(code);
-	if (code >= 0)
-		pump_records_.push_back({code, 0, 0, 0,
-				controls_->is_vk_down(0x10) || (def != nullptr && (def->flags & 0x200u) != 0)});
+	// The row the binding walk takes for the event and the record's sign (engine
+	// BindingSet::mouse_click_record carries the witness).
+	const ControlsModel::MouseClickRecord record = controls_->mouse_click_record(p_event);
+	if (record.code >= 0) pump_records_.push_back({record.code, 0, 0, 0, record.sign});
 }
 
 void PlayerInputRouter::reset() {

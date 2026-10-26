@@ -355,6 +355,15 @@ class BindingSet {
   //  Input_QueueEvent @0x499251)]
   int mouse_click_action(uint32_t event,
       const std::function<bool(int)> &key_down, bool dead = false) const;
+  // The click record the walk queues: mouse_click_action's row (-1 none) and the record's
+  // sign, the Shift key held or the row's 0x200 bit.
+  // [orig: Input_TryDispatchBindingByWeaponType @0x499180 - @0x49919E..0x4991A4]
+  struct MouseClickRecord {
+    int index = -1;
+    bool sign = false;
+  };
+  MouseClickRecord mouse_click_record(uint32_t event,
+      const std::function<bool(int)> &key_down, bool dead = false) const;
 
   // Buttons 1..128 followed by four four-bit POV hats. The caller retains
   // event edges; held action rows can repeat each tick. The row's joystick
