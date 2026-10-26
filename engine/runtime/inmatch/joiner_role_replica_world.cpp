@@ -1598,6 +1598,8 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				proxy.mounted = entity.carrier_handle != world::EntityHandle::kInvalid &&
 						entity.mount_bone != 0;
 				proxy.moving = (entity.move_input & world::Entity::kMoveOrderMoving) != 0;
+				// The team the world stream bore for the row (entity+354), the sun ray's person rule's.
+				proxy.team = entity.team_known ? entity.team : 0;
 				// The row's Flags dead bit as it stands at the build, which the
 				// person repulsion's live re-read skips (D-NET-NEW-L4-2); a row
 				// updated after the build carries its own

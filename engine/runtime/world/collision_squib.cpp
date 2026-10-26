@@ -72,6 +72,53 @@ bool CollisionWorld::sun_ray_clear_of_entities(const World &world, const FixedVe
             const Entity *e=world.registry.get(handle);
             if (e && pool_row_hits_ray(world,handle,*e,ray,local,local_row)) return false;
         }
+    // A joiner's pools hold every decoded row: the movers the registry has no twin of (pool 1) and
+    // the remote persons (pool 0) are the wire proxies, the row tests' gates over their live poses
+    // (env #49) [orig: Render_SkyboxSunGlow @0x5aceae..0x5acede, Environment_UpdateSunGlare
+    //  @0x5ad2cb..0x5ad2fb -> Physics_RaycastAgainstEntityPool @0x538720 over the client's pools].
+    if (!world.rules.mp_session || world.rules.projectile_authority) return true;
+    using namespace detail;
+    const auto in_bound = [&ray](const FixedVec3 &position, int32_t radius) {
+        const int32_t p[]={position.x,position.y,position.z};
+        bool outside=false;
+        for (int a=0;a<3;++a)
+            outside |= std::min(ray.start[a],ray.end[a])>int64_t(p[a])+radius ||
+                    std::max(ray.start[a],ray.end[a])<int64_t(p[a])-radius;
+        return !outside && ray_line_distance(ray.start,ray.dir,p)<=radius;
+    };
+    for (const WireDynamicCollisionProxy &proxy : wire_dynamic_proxies_) {
+        if (proxy.registry_twin.valid() || proxy.bound_radius_q16 == 0 || (proxy.live_flags & 1u)) continue;
+        if (!in_bound(proxy.live_position_q16, proxy.bound_radius_q16)) continue;
+        const CollisionModel *solid_model = model(proxy.model_id);
+        if (solid_model == nullptr || !solid_model->valid()) continue;
+        const int32_t pos[3]={proxy.live_position_q16.x,proxy.live_position_q16.y,proxy.live_position_q16.z};
+        const CollisionMatrix placed = collision_matrix_from_placement(proxy.heading_bam, proxy.pitch_bam,
+                proxy.roll_bam, pos, proxy.uniform_scale_q16);
+        std::vector<CollisionMatrix> matrices(solid_model->sections.size(), placed);
+        CollisionTargetView view;
+        view.model = solid_model;
+        view.matrices = matrices.data();
+        view.pos[0]=pos[0];
+        view.pos[1]=pos[1];
+        view.pos[2]=pos[2];
+        view.yaw_bam = proxy.heading_bam;
+        view.pitch_bam = proxy.pitch_bam;
+        view.bound_radius = proxy.bound_radius_q16;
+        view.pool_index = proxy.wire_handle & 0xFFF;
+        view.uniform_scale_q16 = proxy.uniform_scale_q16;
+        view.live_section_pose = false;
+        CollisionRay solid=ray;
+        if (collision_raycast_model(view,solid)) return false;
+    }
+    for (const WirePersonCollisionProxy &proxy : wire_person_proxies_) {
+        if (proxy.bound_radius_q16 == 0 || (proxy.live_flags & 1u)) continue;
+        if (!in_bound(proxy.live_position_q16, proxy.bound_radius_q16)) continue;
+        const FixedVec3 &p = proxy.live_position_q16;
+        if (local_row && local_row->team==proxy.team &&
+                vec_len_ftol(p.x-ray.start[0],p.y-ray.start[1],p.z-ray.start[2])<196608)
+            continue;
+        return false;
+    }
     return true;
 }
 

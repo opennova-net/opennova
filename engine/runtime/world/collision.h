@@ -865,6 +865,10 @@ struct WirePersonCollisionProxy {
     bool player = false;
     bool mounted = false;
     bool moving = false;
+    // The person's team (entity+354) as the world stream bears it, 0 before a record that carries it:
+    // the sun ray's person rule passes over a row of the local player's team near the eye
+    // (sun_ray_clear_of_entities).
+    uint8_t team = 0;
     // The person's LIVE Flags dead bit (0x02): the table keeps no copy, so the
     // movement resolver re-reads the entity's own word past the reach gate and
     // passes over a dead peer; a trace does not test it. A body below the own
@@ -1464,7 +1468,10 @@ public:
     // (a segment under 16 raw is clear), each pool walked with the walker's include arg 1 (a
     // NoTarget row blocks), the local player and what stands on it skipped, a def-type-3 row a
     // bound-sphere hit unless it is on the local player's team within 3 u of `start`, any other
-    // row its TYPE-1 solid. True when nothing blocks; the terrain is the caller's.
+    // row its TYPE-1 solid. On a joiner the pools hold every decoded row, so the walk takes the
+    // wire proxies too (env #49): each person proxy as a type-3 row and each mover proxy with no
+    // registry twin its posed authored solid, as the projectile trace merges them.
+    // True when nothing blocks; the terrain is the caller's.
     // [orig: Render_SkyboxSunGlow @0x5ace65..0x5acee8; Environment_UpdateSunGlare
     //  @0x5ad282..0x5ad305 -> Physics_InitRayContext @0x5385E0 (radius 0),
     //  Physics_RaycastAgainstPoolByIndex @0x539530 (2, 1, 0; include 1), ctx[17] =
