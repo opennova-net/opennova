@@ -281,8 +281,10 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 	return Step::Ok;
 }
 
-// `project` laid out in a folder of its key's name under `under`; an expansion's base where its
-// project.opennova's base_project names it, which must be another folder under `under`.
+// `project` laid out in a folder of its key's name under `under`; an expansion's base beside it, in a
+// folder of its base game's key's name, and the laid-out copy's project.opennova pointed at it
+// (base_project "../<base key>"), whatever folder the author kept the base game's project in: refused
+// only where the expansion's project names no base game's project at all.
 Step Build::lay_out_project(const Source &project, const std::optional<Source> &base,
 		const std::string &under, LaidOut &out, std::string &why) {
 	out.dir = io::utf8_join(under, project.key);
@@ -290,28 +292,27 @@ Step Build::lay_out_project(const Source &project, const std::optional<Source> &
 	const Step laid = lay_out(project, out.dir, why);
 	if (laid != Step::Ok || !base)
 		return laid;
+	const std::string file = io::utf8_join(out.dir, "project.opennova");
 	std::string text;
 	io::JsonValue document;
-	if (!io::read_file_text(io::utf8_join(out.dir, "project.opennova"), text, why) ||
-			!io::json_parse(text, document, why) || !document.is_object()) {
+	if (!io::read_file_text(file, text, why) || !io::json_parse(text, document, why) ||
+			!document.is_object()) {
 		why = project.label() + " holds no project.opennova that reads";
 		return Step::Refused;
 	}
-	const io::JsonValue *expansion = document.get("expansion");
+	io::JsonValue *expansion = document.get("expansion");
 	const std::string named = expansion && expansion->is_object()
 			? expansion->get_string("base_project", "")
 			: std::string();
-	const fs::path root = io::os_path(under).lexically_normal();
-	const fs::path own = io::os_path(out.dir).lexically_normal();
-	const fs::path base_dir = (own / io::os_path(named)).lexically_normal();
-	const fs::path rel = base_dir.lexically_relative(root);
-	if (named.empty() || rel.empty() || *rel.begin() == ".." || rel == "." || base_dir == own) {
-		why = project.label() +
-				"'s project names no base game's project beside it (base_project \"" + named +
-				"\")";
+	if (named.empty()) {
+		why = project.label() + "'s project names no base game's project (its base_project)";
 		return Step::Refused;
 	}
-	out.base_dir = io::utf8_path(base_dir);
+	expansion->set("base_project", io::JsonValue::make_string("../" + base->key));
+	if (!io::write_file_atomic(file, io::json_write(document), why))
+		return Step::Transient;
+	note("pointed " + project.label() + "'s base_project \"" + named + "\" at ../" + base->key);
+	out.base_dir = io::utf8_join(under, base->key);
 	return lay_out(*base, *out.base_dir, why);
 }
 

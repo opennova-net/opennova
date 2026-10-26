@@ -1304,8 +1304,9 @@ constexpr VerbRow kRows[] = {
 	     "build the project, then copy the build into its export folder as what ships (default:\n"
 	     "project.opennova's export.output; --out from where the command runs, replaced only when\n"
 	     "missing, empty or an export of this project): a standalone game's archives and loose\n"
-	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project\n"
-	     "(--json: the state query's import and operation)")
+	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project;\n"
+	     "an expansion of a base game's project exports that project first, as it opens, when its\n"
+	     "export is missing or older than it (--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

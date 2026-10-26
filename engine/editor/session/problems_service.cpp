@@ -112,9 +112,58 @@ void ProblemsService::validate_pending_now() {
 }
 
 void ProblemsService::compose(bool keep_reported) {
+	if (held_) return compose_held();
 	while (!step_pass(UINT64_MAX)) {
 	}
 	compose_rows(keep_reported);
+}
+
+void ProblemsService::hold_validation(bool held) {
+	if (held == held_) return;
+	held_ = held;
+	if (!held) {
+		// The rows are made again whatever the counts say: the held ones were made of none of it.
+		moved_since_composed_ = true;
+		validate_later();
+		return;
+	}
+	pass_.reset();
+	compose_held();
+}
+
+// The scan's and the requirements' findings, as every composition leads with them (show_requirements
+// keeps them as files land), then every finding reported since the last validation; the gate empty
+// (gate_findings), the marks made again.
+void ProblemsService::compose_held() {
+	if (!view_.project.scan || !view_.project.requirements) return;
+	std::vector<Diagnostic> rows = view_.project.scan->diagnostics;
+	const std::vector<Diagnostic> &requirements = view_.project.requirements->diagnostics;
+	rows.insert(rows.end(), requirements.begin(), requirements.end());
+	const size_t composed = rows.size();
+	for (const Reported &reported : reported_) rows.push_back(reported.finding);
+	gate_size_ = 0;
+	gate_tail_ = composed;
+	trailing_ = rows.size() - composed;
+	composed_ = Composed();
+	composed_.made = true;
+	composed_.rows = rows.size();
+	composed_.scan = view_.project.scan->diagnostics;
+	composed_.requirements = requirements;
+	lead_scan_ = composed_.scan;
+	lead_requirements_ = composed_.requirements;
+	if (rows != view_.findings.diagnostics) {
+		view_.findings.diagnostics = std::move(rows);
+		core_.touch(ViewConcern::Findings);
+	}
+	mark_rows();
+	show_validation();
+}
+
+void ProblemsService::release_base_files() {
+	assets_->set_base(nullptr);
+	originals_->clear();
+	originals_needed_ = false;
+	show_originals();
 }
 
 bool ProblemsService::pass_current() const {
@@ -455,6 +504,7 @@ void ProblemsService::clear() {
 	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;
+	held_ = false;
 	read_once_ = false;
 	graph_scan_.reset();
 	pass_.reset();
