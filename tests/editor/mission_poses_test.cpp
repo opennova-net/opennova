@@ -696,7 +696,11 @@ static int test_start_seat() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-	const std::string items = std::string(kItems) +
+	// The table's first row the Null marker, as every shipped items.def's is: an entity's type index is its row's
+	// place, and ssn2ssn and ssnuse take index 0 for no item and refuse it [orig: WacCmd_SsnToSsn @ 0x4F7330, the
+	// test @ 0x4F73CC; WacScript_TryMountEntityToVehicle @ 0x4F70F0, the test @ 0x4F713B], so the rifleman and the
+	// carrier stand on rows past it.
+	const std::string items = std::string("begin \"Null\"\nid 100000\ntype marker\nend\n") + kItems +
 			"begin \"Seat Carrier\"\nid 106300\ntype vehicle\ngraphic carrier\nattrib: PlayerControl\nend\n";
 	const std::string seats = "if never() then\n\tssn2ssn(13,50)\n\tssnuse(13)\nendif\n";
 	TEST_EXPECT(test_io::write_file(root + "/" + mission_path, bytes) &&
