@@ -131,6 +131,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_parse.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_decompile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_compile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mus/mus_vm.cpp
     # pcx — image (+ the 256-colour quantizer an import writes an 8-bit PCX through)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_io.cpp
