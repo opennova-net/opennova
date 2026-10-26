@@ -428,11 +428,20 @@ int test_body_cap(Harness &h) {
 	std::string conf, error;
 	TEST_EXPECT(io::read_file_text(
 			std::string(OPENNOVA_SOURCE_DIR) + "/web/nginx.conf", conf, error));
-	const size_t api = conf.find("location /api/ {");
+	const std::string location = "location /api/ {";
+	const size_t api = conf.find(location);
 	TEST_EXPECT(api != std::string::npos);
+	// The location's own closing brace, past the blocks nested in it (its `if`).
+	size_t end = api + location.size();
+	for (int depth = 1; end < conf.size() && depth > 0; ++end) {
+		if (conf[end] == '{')
+			++depth;
+		else if (conf[end] == '}')
+			--depth;
+	}
 	const std::string directive = "client_max_body_size ";
 	const size_t at = conf.find(directive, api);
-	TEST_EXPECT(at != std::string::npos && at < conf.find('}', api));
+	TEST_EXPECT(at != std::string::npos && at < end);
 	const size_t number = at + directive.size();
 	const unsigned long megabytes = std::strtoul(conf.c_str() + number, nullptr, 10);
 	TEST_EXPECT(conf.find("m;", number) == conf.find_first_not_of("0123456789", number));
