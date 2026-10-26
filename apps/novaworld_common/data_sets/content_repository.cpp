@@ -13,8 +13,6 @@ using db::BindValue;
 
 constexpr std::array<const char *, 2> kVisibilityNames = { "public", "private" };
 
-constexpr const char *kProjectColumns = "id, key, display_name, visibility, retail, parent_id, "
-										"head, created_by, created_at, updated_at";
 constexpr const char *kRevisionColumns = "data_set_id, number, author_id, created_by, message, "
 										 "manifest_sha256, file_count, bytes, created_at";
 
@@ -22,21 +20,6 @@ BindValue optional_id(std::optional<int64_t> id) {
 	if (!id)
 		return BindValue(std::monostate{});
 	return BindValue(*id);
-}
-
-ContentProject row_to_project(const db::Row &r) {
-	ContentProject p;
-	p.id = r.as_int(0).value_or(0);
-	p.key = r.as_text(1).value_or("");
-	p.title = r.as_text(2).value_or("");
-	p.visibility = visibility_from_name(r.as_text(3).value_or("")).value_or(Visibility::Private);
-	p.retail = r.as_int(4).value_or(0) != 0;
-	p.parent_id = r.as_int(5);
-	p.head = r.as_int(6).value_or(0);
-	p.created_by = r.as_text(7).value_or("");
-	p.created_at = r.as_text(8).value_or("");
-	p.updated_at = r.as_text(9).value_or("");
-	return p;
 }
 
 ContentRevision row_to_revision(const db::Row &r) {
@@ -51,19 +34,6 @@ ContentRevision row_to_revision(const db::Row &r) {
 	v.bytes = r.as_int(7).value_or(0);
 	v.created_at = r.as_text(8).value_or("");
 	return v;
-}
-
-// The games with a project matching `tail` (a condition after "AND", then the order).
-std::vector<ContentProject> query_projects(
-		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
-	const auto rows = db.query(std::string("SELECT ") + kProjectColumns +
-					" FROM data_sets WHERE key IS NOT NULL " + tail + ";",
-			binds);
-	std::vector<ContentProject> out;
-	out.reserve(rows.size());
-	for (const auto &r : rows)
-		out.push_back(row_to_project(r));
-	return out;
 }
 
 // A text[] literal of SHA-256s (hex digits alone, so nothing in them needs quoting).
@@ -90,6 +60,10 @@ std::optional<Visibility> visibility_from_name(std::string_view name) {
 	return std::nullopt;
 }
 
+bool project_is_public(const hosted::DataSetRow &game) {
+	return !game.key.empty() && visibility_from_name(game.visibility) == Visibility::Public;
+}
+
 bool valid_key(std::string_view key) {
 	if (key.empty() || key.size() > 16)
 		return false;
@@ -97,27 +71,6 @@ bool valid_key(std::string_view key) {
 		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
 			return false;
 	return true;
-}
-
-std::vector<ContentProject> list_projects(db::Database &db, bool include_private) {
-	return query_projects(db,
-			include_private ? "ORDER BY key COLLATE \"C\""
-							: "AND visibility = 'public' ORDER BY key COLLATE \"C\"",
-			{});
-}
-
-std::optional<ContentProject> find_project(db::Database &db, std::string_view key) {
-	const auto rows = query_projects(db, "AND key = $1", { BindValue(std::string(key)) });
-	if (rows.empty())
-		return std::nullopt;
-	return rows.front();
-}
-
-std::optional<ContentProject> find_project_by_id(db::Database &db, int64_t data_set_id) {
-	const auto rows = query_projects(db, "AND id = $1", { BindValue(data_set_id) });
-	if (rows.empty())
-		return std::nullopt;
-	return rows.front();
 }
 
 std::vector<ContentRevision> list_revisions(

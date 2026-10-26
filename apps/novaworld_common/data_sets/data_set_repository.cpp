@@ -284,6 +284,21 @@ std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id) 
 	return query_data_sets(db, "WHERE parent_id = $1 ORDER BY id", { BindValue(parent_id) });
 }
 
+std::vector<DataSetRow> list_projects(db::Database &db, bool include_private) {
+	return query_data_sets(db,
+			include_private ? "WHERE key IS NOT NULL ORDER BY key COLLATE \"C\""
+							: "WHERE key IS NOT NULL AND visibility = 'public' "
+							  "ORDER BY key COLLATE \"C\"",
+			{});
+}
+
+std::optional<DataSetRow> find_data_set_by_key(db::Database &db, std::string_view key) {
+	const auto rows = query_data_sets(db, "WHERE key = $1", { BindValue(std::string(key)) });
+	if (rows.empty())
+		return std::nullopt;
+	return rows.front();
+}
+
 int count_live_servers_of(db::Database &db, int64_t id) {
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
 					kServerLiveSql + " AND (data_set_id = $1 OR expansion_id = $1);",

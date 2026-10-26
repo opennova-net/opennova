@@ -14,7 +14,9 @@
 #include "data_sets/data_set_repository.h"
 
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace opennova;
@@ -54,6 +56,11 @@ SeededDataSet own(Database &db, const char *kind) {
 	return seeded(db, "kind = $1 AND updater_login <> '' AND NOT retail", { BindValue(kind) });
 }
 
+// The game whose project's key is `key` (data_set_repository.h).
+std::optional<hosted::DataSetRow> project(Database &db, std::string_view key) {
+	return hosted::find_data_set_by_key(db, key);
+}
+
 NewRevision revision(const std::string &message, std::optional<int64_t> author = std::nullopt) {
 	NewRevision r;
 	r.author_id = author;
@@ -76,39 +83,40 @@ static int test_seeded_projects() {
 	TEST_EXPECT(game.id && expansion.id && jo_set.id && jox_set.id && dfx2_set.id);
 
 	// Every project by key, each byte before the next; our two the public ones.
-	const std::vector<ContentProject> all = list_projects(db, true);
+	const std::vector<hosted::DataSetRow> all = hosted::list_projects(db, true);
 	TEST_EXPECT(all.size() == 5);
 	for (size_t i = 0; i < all.size(); ++i)
 		TEST_EXPECT(all[i].head == 0 && (i == 0 || all[i - 1].key < all[i].key));
-	const std::vector<ContentProject> visible = list_projects(db, false);
+	const std::vector<hosted::DataSetRow> visible = hosted::list_projects(db, false);
 	TEST_EXPECT(visible.size() == 2 && visible[0].key < visible[1].key);
-	for (const ContentProject &p : visible)
+	for (const hosted::DataSetRow &p : visible)
 		TEST_EXPECT(p.key == game.login || p.key == expansion.login);
 
 	// Our own game's and its expansion's, keyed by their updater logins and titled as their
 	// data sets are.
-	const auto own_game = find_project(db, game.login),
-			   own_expansion = find_project(db, expansion.login);
+	const auto own_game = project(db, game.login),
+			   own_expansion = project(db, expansion.login);
 	TEST_EXPECT(own_game && own_expansion);
-	TEST_EXPECT(own_game->title == game.name && own_game->visibility == Visibility::Public &&
+	TEST_EXPECT(own_game->display_name == game.name && project_is_public(*own_game) &&
 			!own_game->retail && !own_game->parent_id && own_game->id == game.id);
-	TEST_EXPECT(own_expansion->title == expansion.name &&
-			own_expansion->visibility == Visibility::Public && !own_expansion->retail &&
+	TEST_EXPECT(own_expansion->display_name == expansion.name &&
+			project_is_public(*own_expansion) && !own_expansion->retail &&
 			own_expansion->parent_id == own_game->id && own_expansion->id == expansion.id);
 	// The retail games', private.
-	const auto jo = find_project(db, "JO"), jox01 = find_project(db, "JOX01"),
-			   dfx2 = find_project(db, "DFX2");
+	const auto jo = project(db, "JO"), jox01 = project(db, "JOX01"),
+			   dfx2 = project(db, "DFX2");
 	TEST_EXPECT(jo && jox01 && dfx2);
-	TEST_EXPECT(jo->title == "Joint Operations" && jo->visibility == Visibility::Private &&
+	TEST_EXPECT(jo->display_name == "Joint Operations" && jo->visibility == "private" &&
 			jo->retail && !jo->parent_id && jo->id == jo_set.id);
-	TEST_EXPECT(jox01->visibility == Visibility::Private && jox01->retail &&
+	TEST_EXPECT(jox01->visibility == "private" && !project_is_public(*jox01) && jox01->retail &&
 			jox01->parent_id == jo->id && jox01->id == jox_set.id);
-	TEST_EXPECT(dfx2->visibility == Visibility::Private && dfx2->retail && dfx2->id == dfx2_set.id);
-	TEST_EXPECT(find_project_by_id(db, jo->id)->key == "JO" && !find_project(db, "NOPE"));
+	TEST_EXPECT(dfx2->visibility == "private" && dfx2->retail && dfx2->id == dfx2_set.id);
+	TEST_EXPECT(hosted::find_data_set(db, jo->id)->key == "JO" &&
+			!project(db, "NOPE"));
 	// The runtime, a game with no project.
 	const auto runtime = db.query("SELECT id FROM data_sets WHERE kind = 'update';");
 	TEST_EXPECT(runtime.size() == 1 &&
-			!find_project_by_id(db, runtime.front().as_int(0).value_or(0)));
+			hosted::find_data_set(db, runtime.front().as_int(0).value_or(0))->key.empty());
 	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
 			!valid_key("SEVENTEEN_LETTERS") && !valid_key("A-B"));
 	std::printf(
@@ -125,16 +133,16 @@ static int test_project_writes() {
 	hosted::NewDataSet mod;
 	mod.display_name = "A mod";
 	mod.kind = hosted::DataSetKind::Expansion;
-	mod.parent_id = find_project(db, "JO")->id;
+	mod.parent_id = project(db, "JO")->id;
 	mod.expansion_code = "mod";
 	mod.key = "MOD";
 	mod.visibility = "private";
 	mod.created_by = "admin taylor";
 	int64_t id = 0;
 	TEST_EXPECT(hosted::create_data_set(db, mod, id) == hosted::DataSetOutcome::Ok && id != 0);
-	const auto made = find_project(db, "MOD");
-	TEST_EXPECT(made && made->id == id && made->title == "A mod" &&
-			made->visibility == Visibility::Private && made->parent_id == find_project(db, "JO")->id &&
+	const auto made = project(db, "MOD");
+	TEST_EXPECT(made && made->id == id && made->display_name == "A mod" &&
+			made->visibility == "private" && made->parent_id == project(db, "JO")->id &&
 			made->head == 0 && made->created_by == "admin taylor");
 	hosted::NewDataSet again = mod;
 	again.expansion_code = "mod2";
@@ -146,9 +154,9 @@ static int test_project_writes() {
 	patch.key = "MODDED";
 	patch.display_name = "Renamed";
 	TEST_EXPECT(hosted::update_data_set(db, id, patch) == hosted::DataSetOutcome::Ok);
-	const auto changed = find_project(db, "MODDED");
-	TEST_EXPECT(!find_project(db, "MOD") && changed && changed->id == id &&
-			changed->visibility == Visibility::Public && changed->title == "Renamed");
+	const auto changed = project(db, "MODDED");
+	TEST_EXPECT(!project(db, "MOD") && changed && changed->id == id &&
+			project_is_public(*changed) && changed->display_name == "Renamed");
 	patch = {};
 	patch.key = "JO";
 	TEST_EXPECT(hosted::update_data_set(db, id, patch) == hosted::DataSetOutcome::DuplicateKey);
@@ -161,10 +169,10 @@ static int test_project_writes() {
 	revision.manifest_sha256 = kShaC;
 	TEST_EXPECT(commit_revision(db, id, 0, revision, head) == CommitOutcome::Ok && head == 1);
 	record_blobs(db, id, { { kShaA, 10 } });
-	TEST_EXPECT(hosted::delete_data_set(db, find_project(db, "JO")->id) ==
+	TEST_EXPECT(hosted::delete_data_set(db, project(db, "JO")->id) ==
 			hosted::DataSetOutcome::HasExpansion);
 	TEST_EXPECT(hosted::delete_data_set(db, id) == hosted::DataSetOutcome::Ok &&
-			!find_project(db, "MODDED"));
+			!project(db, "MODDED"));
 	TEST_EXPECT(db.query("SELECT 1 FROM content_revisions WHERE data_set_id = $1 UNION ALL "
 						 "SELECT 1 FROM content_blobs WHERE data_set_id = $1;",
 						  { BindValue(id) })
@@ -176,7 +184,7 @@ static int test_project_writes() {
 static int test_blobs() {
 	TestDatabase tdb;
 	Database db = tdb.open();
-	const int64_t jo = find_project(db, "JO")->id, dfx2 = find_project(db, "DFX2")->id;
+	const int64_t jo = project(db, "JO")->id, dfx2 = project(db, "DFX2")->id;
 	const StoredBlob a{ kShaA, 10 }, b{ kShaB, 20 };
 	const auto shas = [](const std::vector<StoredBlob> &blobs) {
 		std::vector<std::string> out;
@@ -211,7 +219,7 @@ static int test_pushes() {
 								   .front()
 								   .as_int(0)
 								   .value_or(0);
-	const int64_t jox01 = find_project(db, "JOX01")->id;
+	const int64_t jox01 = project(db, "JOX01")->id;
 
 	int64_t head = -1;
 	TEST_EXPECT(
@@ -235,7 +243,7 @@ static int test_pushes() {
 			db.query("SELECT id FROM data_sets WHERE kind = 'update';").front().as_int(0).value_or(0);
 	TEST_EXPECT(
 			commit_revision(db, runtime, 0, revision("Runtime"), head) == CommitOutcome::NotFound);
-	TEST_EXPECT(find_project(db, "JOX01")->head == 3 && find_project(db, "JO")->head == 0);
+	TEST_EXPECT(project(db, "JOX01")->head == 3 && project(db, "JO")->head == 0);
 
 	const std::vector<ContentRevision> history = list_revisions(db, jox01, 0, 10);
 	TEST_EXPECT(history.size() == 3 && history[0].number == 3 && history[2].number == 1);

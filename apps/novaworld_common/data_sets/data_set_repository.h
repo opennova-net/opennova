@@ -187,6 +187,11 @@ std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id);
 std::vector<DataSetRow> list_data_sets(db::Database &db);
 // The expansions of base `parent_id`, by id.
 std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id);
+// The games with a project (a key, content_repository.h), by key in byte order; the private
+// ones only when `include_private`.
+std::vector<DataSetRow> list_projects(db::Database &db, bool include_private);
+// The game whose project's key is `key`; none when no game's is.
+std::optional<DataSetRow> find_data_set_by_key(db::Database &db, std::string_view key);
 // How many live servers run `id` as their data set or expansion.
 int count_live_servers_of(db::Database &db, int64_t id);
 

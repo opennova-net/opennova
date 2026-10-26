@@ -64,12 +64,11 @@ struct Source {
 };
 
 // What a build makes, read in one lease: the release, its game (the data set its package
-// updates), the revision it exports (an expansion's base game's beside it), a retail game's stock
-// revisions, and the game's last published package.
+// updates, its project on its row), the revision it exports (an expansion's base game's beside
+// it), a retail game's stock revisions, and the game's last published package.
 struct BuildPlan {
 	ReleaseRow release;
 	DataSetRow data_set;
-	bool retail = false;
 	Source project;
 	std::optional<Source> base;
 	std::optional<Source> stock;
@@ -77,9 +76,10 @@ struct BuildPlan {
 	std::string previous_key; // the data set's published package, "" for none
 };
 
-// The revision `number` of `project` as a Source; false with `why` when it has none.
-bool source_of(db::Database &db, const content::ContentProject &project, int64_t number,
-		Source &out, std::string &why) {
+// The revision `number` of `project`'s (a game with a project) as a Source; false with `why`
+// when it has none.
+bool source_of(db::Database &db, const DataSetRow &project, int64_t number, Source &out,
+		std::string &why) {
 	const std::optional<content::ContentRevision> revision =
 			content::find_revision(db, project.id, number);
 	if (!revision) {
@@ -102,9 +102,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		why = "its game was deleted";
 		return false;
 	}
-	const std::optional<content::ContentProject> project =
-			content::find_project_by_id(db, data_set->id);
-	if (!project) {
+	if (data_set->key.empty()) {
 		why = data_set->display_name + " has no project";
 		return false;
 	}
@@ -124,14 +122,13 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 		why = data_set->display_name + " names no updater product (a product name)";
 		return false;
 	}
-	plan.retail = project->retail;
-	if (!source_of(db, *project, release.content_revision, plan.project, why))
+	if (!source_of(db, *data_set, release.content_revision, plan.project, why))
 		return false;
-	std::optional<content::ContentProject> base;
+	std::optional<DataSetRow> base;
 	if (data_set->parent_id) {
-		base = content::find_project_by_id(db, *data_set->parent_id);
-		if (!base) {
-			why = project->key + "'s base game has no project";
+		base = find_data_set(db, *data_set->parent_id);
+		if (!base || base->key.empty()) {
+			why = data_set->key + "'s base game has no project";
 			return false;
 		}
 		Source source;
@@ -139,9 +136,9 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 			return false;
 		plan.base = source;
 	}
-	if (plan.retail) {
+	if (data_set->retail) {
 		Source stock;
-		if (!source_of(db, *project, 1, stock, why))
+		if (!source_of(db, *data_set, 1, stock, why))
 			return false;
 		plan.stock = stock;
 		if (base) {
@@ -418,7 +415,7 @@ Step Build::run(std::string &why) {
 	// file of the edited export is a row either way (pack_command's --full).
 	std::string from = io::utf8_join(work_, "empty");
 	std::string previous;
-	if (plan_.retail) {
+	if (plan_.data_set.retail) {
 		LaidOut stock;
 		step = lay_out_project(
 				*plan_.stock, plan_.base_stock, io::utf8_join(work_, "stock"), stock, why);

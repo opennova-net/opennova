@@ -101,7 +101,7 @@ struct Rig {
 	// failure.
 	int64_t push(
 			const std::string &key, const std::string &dir, int64_t parent, const char *message) {
-		const auto project = content::find_project(db, key);
+		const auto project = hosted::find_data_set_by_key(db, key);
 		if (!project)
 			return 0;
 		std::vector<opennova::content::ContentFile> files;
@@ -171,7 +171,7 @@ struct Rig {
 	// revision `base_revision`), its build queued: its id.
 	int64_t release(const std::string &key, int64_t revision, const char *version,
 			int64_t base_revision = 0) {
-		const auto project = content::find_project(db, key);
+		const auto project = hosted::find_data_set_by_key(db, key);
 		if (!project)
 			return 0;
 		hosted::NewBuiltRelease made;
@@ -271,7 +271,7 @@ static int test_retail_whole() {
 	TEST_EXPECT(release->build_log.find("$ ") != std::string::npos &&
 			release->build_log.find("laid out JO r1") != std::string::npos);
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
-	const auto set = content::find_project(rig.db, "JO");
+	const auto set = hosted::find_data_set_by_key(rig.db, "JO");
 	TEST_EXPECT(sections.size() == 1 && set && sections[0].data_set_id == set->id &&
 			release->data_set_id == set->id && sections[0].command_file == "JOPTR.CMD" &&
 			sections[0].version == "1.0.1");

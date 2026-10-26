@@ -31,6 +31,7 @@ namespace opennova::novaworld_server::content {
 namespace {
 
 using opennova::content::ContentFile;
+using hosted::DataSetRow;
 
 crow::response db_failure(const char *route, const db::Error &e) {
 	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
@@ -103,16 +104,16 @@ bool valid_message(std::string_view message) {
 
 // The caching a reply of `project`'s immutable bytes takes (a manifest, a file: each named by its
 // SHA-256): anyone's for a public project, the browser's own for a private one.
-std::string immutable_cache(const ContentProject &project) {
-	return project.visibility == Visibility::Public ? "public, max-age=31536000, immutable"
+std::string immutable_cache(const DataSetRow &project) {
+	return project_is_public(project) ? "public, max-age=31536000, immutable"
 													: "private, max-age=31536000, immutable";
 }
 
 // The project `key` names as a caller (`admin` or not) may read it: none for a private one asked
 // for by anyone but an admin.
-std::optional<ContentProject> readable(db::Database &db, const std::string &key, bool admin) {
-	auto project = find_project(db, key);
-	if (!project || (project->visibility == Visibility::Private && !admin))
+std::optional<DataSetRow> readable(db::Database &db, const std::string &key, bool admin) {
+	auto project = hosted::find_data_set_by_key(db, key);
+	if (!project || (!project_is_public(*project) && !admin))
 		return std::nullopt;
 	return project;
 }
@@ -176,12 +177,12 @@ crow::json::wvalue revision_json(const ContentRevision &r) {
 // A project as the routes answer it: {key, title (its game's name), visibility, retail, base (an
 // expansion's base game's project key, or null), data_set_id (its game's), head, can_push}, and
 // for an admin its storage ({files, bytes}). `keys` maps every game with a project to its key.
-crow::json::wvalue project_json(db::Database &db, const ContentProject &p, bool admin,
+crow::json::wvalue project_json(db::Database &db, const DataSetRow &p, bool admin,
 		const std::unordered_map<int64_t, std::string> &keys) {
 	crow::json::wvalue out;
 	out["key"] = p.key;
-	out["title"] = p.title;
-	out["visibility"] = visibility_name(p.visibility);
+	out["title"] = p.display_name;
+	out["visibility"] = p.visibility;
 	out["retail"] = p.retail;
 	const auto base = p.parent_id ? keys.find(*p.parent_id) : keys.end();
 	if (base != keys.end())
@@ -201,7 +202,7 @@ crow::json::wvalue project_json(db::Database &db, const ContentProject &p, bool 
 
 std::unordered_map<int64_t, std::string> project_keys(db::Database &db) {
 	std::unordered_map<int64_t, std::string> keys;
-	for (const ContentProject &p : list_projects(db, true))
+	for (const DataSetRow &p : hosted::list_projects(db, true))
 		keys.emplace(p.id, p.key);
 	return keys;
 }
@@ -313,7 +314,7 @@ crow::response ContentRoutes::list(const crow::request &req) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto keys = project_keys(*db_conn);
 		std::vector<crow::json::wvalue> projects;
-		for (const ContentProject &p : list_projects(*db_conn, admin))
+		for (const DataSetRow &p : hosted::list_projects(*db_conn, admin))
 			projects.push_back(project_json(*db_conn, p, admin, keys));
 		out["projects"] = std::move(projects);
 	} catch (const db::Error &e) {
@@ -380,7 +381,7 @@ crow::response ContentRoutes::manifest(
 	const bool admin = access_.caller_is_admin(req);
 	if (store_ == nullptr)
 		return store_unavailable();
-	std::optional<ContentProject> p;
+	std::optional<DataSetRow> p;
 	std::optional<ContentRevision> revision;
 	try {
 		auto db_conn = pool_.acquire();
@@ -420,7 +421,7 @@ crow::response ContentRoutes::blob(
 				400, "invalid_sha256", "a file is named by its SHA-256 in lower-case hex");
 	if (store_ == nullptr)
 		return store_unavailable();
-	std::optional<ContentProject> p;
+	std::optional<DataSetRow> p;
 	try {
 		p = readable(*pool_.acquire(), key, admin);
 	} catch (const db::Error &e) {
@@ -496,7 +497,7 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 	int64_t data_set_id = 0;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = find_project(*db_conn, key);
+		const auto p = hosted::find_data_set_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		data_set_id = p->id;
@@ -607,7 +608,7 @@ crow::response ContentRoutes::upload(
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = find_project(*db_conn, key);
+		const auto p = hosted::find_data_set_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		std::string error;
@@ -663,7 +664,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const auto p = find_project(*db_conn, key);
+		const auto p = hosted::find_data_set_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		if (p->head != *parent) {
@@ -763,7 +764,7 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 	try {
 		auto db_conn = pool_.acquire();
 		db::Transaction tx(*db_conn);
-		const auto p = find_project(*db_conn, key);
+		const auto p = hosted::find_data_set_by_key(*db_conn, key);
 		if (!p)
 			return no_such_project();
 		const int64_t number = revision.value_or(p->head);
@@ -771,7 +772,9 @@ crow::response ContentRoutes::release(const crow::request &req, const std::strin
 			return json_error(400, "no_revision", "the project has no such revision");
 		int64_t base_number = 0;
 		if (p->parent_id) {
-			const auto base = find_project_by_id(*db_conn, *p->parent_id);
+			auto base = hosted::find_data_set(*db_conn, *p->parent_id);
+			if (base && base->key.empty())
+				base.reset(); // a base game with no project
 			base_number = base ? base_revision.value_or(base->head) : 0;
 			if (!base || base_number <= 0 || !find_revision(*db_conn, base->id, base_number))
 				return json_error(
