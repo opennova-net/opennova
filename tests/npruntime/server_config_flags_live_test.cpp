@@ -36,7 +36,7 @@
 #include <net/title/title_identity.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/game_config.h>
-#include <runtime/inmatch/host_config.h> // host_screen_from_block, apply_block_session_settings
+#include <runtime/inmatch/host_config.h> // host_screen_from_block, apply_mission_start_session_config
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
@@ -246,15 +246,22 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	                    admin_set(*ctx, "SET GameTime 30", &block),
 	            "SET ChangeTeam 1 and SET GameTime 30 are accepted"))
 		return false;
-	inmatch::GameConfig next = session; // the shell's session config, the map staged on it
-	inmatch::apply_block_session_settings(next, block);
+	// The shell's session config, the next map staged on it as every host's mission start
+	// stages it: the block, then the rotation's map and mode and the header's name.
+	inmatch::MissionRotation rotation;
+	rotation.map_file = "next.bms";
+	rotation.map_game_type = game_type::kTeamDeathmatch;
+	inmatch::GameConfig next = session;
+	inmatch::apply_mission_start_session_config(next, &block, rotation, "Next Map");
 	inmatch::continue_session(*ctx, next, nullptr);
 	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
 	                      ctx->config.round_time_limit_minutes == 30 &&
 	                      ctx->config.player_name == "Callsign" &&
 	                      ctx->config.session_channel == inmatch::GameSessionChannel::Lan &&
-	                      ctx->config.game_type == game_type::kTeamDeathmatch,
-	              "the next mission takes the SET's block words and keeps the session's own");
+	                      ctx->config.game_type == game_type::kTeamDeathmatch &&
+	                      next.mission_file == "next.bms" && next.mission_name == "Next Map",
+	              "the next mission takes the SET's block words, the rotation's map and mode, and "
+	              "keeps the session's own");
 }
 
 } // namespace

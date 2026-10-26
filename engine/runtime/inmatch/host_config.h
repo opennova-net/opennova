@@ -18,6 +18,7 @@
 #include <net/npwire/peer_addr.h> // PeerAddr (a socket open's bound address)
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_session.h> // HostConfig
+#include <runtime/inmatch/mission_rotation.h> // MissionRotation (the mission start's map and mode)
 #include <runtime/inmatch/server_admin_command.h>
 
 #include <optional>
@@ -109,6 +110,18 @@ HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
 //  Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E; CAdminServer_HandleSetCommand
 //  @0x405A60 - the rules word into the block @0x406190]
 void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cfg);
+
+// The session config a host's mission start runs, a map change's too: the cfg block as it stands
+// (apply_block_session_settings; none when `cfg` is null), then the rotation's current row its map
+// and its mode over the file's, and the map header's name; the words neither holds stay
+// `config`'s (the host screen's or the host file's, the expansion, the channel, the callsign).
+// opennova-serve's boot_mission and the game shell's map change both stage the next mission
+// through it.
+// [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals @0x524662 under the
+//  first-load flag @0x52465E; g_GameType from the rotation's current catalog entry +0x1128 on
+//  the authority @0x5244DE..0x52452B]
+void apply_mission_start_session_config(GameConfig &config, const gamecfg::GameCfg *cfg,
+		const MissionRotation &rotation, const std::string &mission_name);
 
 // The session socket's bind scan over the cfg block's port quads, as the
 // socket open picks them: a NovaWorld session, either side, the mpnovaworld

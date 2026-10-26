@@ -648,10 +648,10 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// (continue_session) (D-NET-NEW-L1-42) [orig: Game_StartMission @0x524360 - the first-load
 	//  flag @0x5243A4, Game_ApplySessionSettingsToGlobals @0x524662 under it @0x52465E;
 	//  CAdminServer_HandleSetCommand @0x405A60 - the cfg word @0x406190].
+	// The block's title, cap and server type first (host_screen_from_block, which applies its
+	// session words too), then the mission start's staging (inmatch/host_config.h).
 	inmatch::GameConfig config = inmatch::host_screen_from_block(config_.cfg()).config;
-	config.game_type = list.map_game_type;
-	config.mission_file = map_file;
-	config.mission_name = doc.get_mission_name();
+	inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
