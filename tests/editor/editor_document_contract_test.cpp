@@ -1337,6 +1337,11 @@ void check_project_check(const DocumentType &type, const Fixture &fixture, TypeC
 		            opennova::tga::tga_write_rgba32(one_cell.data(), 64, 64, set, why) &&
 		            test_io::write_file(root + "/files/mnml_t.tga", set);
 	}
+	// The particle type's (documents/particle_type.cpp's project check): the minted effect file resolves every name it
+	// uses (its tables minted with it), so a particle beside it naming a table no file defines gives the check a finding.
+	if (type.id == DocumentTypeId::Particles)
+		companion = test_io::write_text(root + "/files/contract_unresolved.ptl",
+		                                "[particledef]\r\n{\r\nid = Contract_lone;\r\nscale_func = contract_nowhere;\r\n}\r\n");
 	const bool made = create_project(root, "Contract", "jo", project, error) &&
 	                  test_io::write_file(root + "/files/" + fixture.name, fixture.bytes) && companion;
 	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");
