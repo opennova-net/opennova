@@ -766,6 +766,7 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// create whose server start logs HOST STARTED and whose round init clears
 	// the punt table.
 	owner.ctx.logs = cfg.logs;
+	owner.ctx.nopunt = cfg.nopunt;
 	owner.ctx.local_address = cfg.local_address;
 	owner.ctx.local_address_known = cfg.local_address_known;
 	// The ban files' directory, ahead of the session create's round init, which loads them

@@ -723,6 +723,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// The log devices and the socket's address (bound on every interface) for
 	// the session's logs (inmatch/server_log_devices.h; inmatch/server_console.h).
 	request.host_cfg.logs = log_devices_.logs();
+	request.host_cfg.nopunt = options_.nopunt; // /NOPUNT (NapiNPServerCtx::nopunt)
 	request.host_cfg.local_address = PeerAddr{0, bound_port_};
 	request.host_cfg.local_address_known = true;
 	// banned.txt and banlist.txt by bare name in the working directory, as retail opens them;

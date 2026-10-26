@@ -838,6 +838,21 @@ struct NapiNPServerCtx {
 	// logs — installed from HostConfig::logs at the session start; a null
 	// pointer is a device retail's switch left off (server_files.h).
 	ServerLogs logs;
+	// `/NOPUNT` (base/resource_index boot_policy.h RetailSwitches::nopunt), installed from
+	// HostConfig::nopunt at the session start. Its ten tests gate these punts, each with the
+	// punt-log line ahead of it: the checksum replies' (WCRC / ACRC), the control quartet's
+	// silences (t16 / t24), the join's map checksums (HMCRC / CMCRC), the violation sweep's team
+	// kills and suicides (t6) and the periodic walk's deploy idle (t35) and dead too long (t7).
+	// Every other automatic punt carries no test (the ping kick, the client CRC validation's
+	// tN punts of Server_HandleClientCRCValidation @0x519110), so a /NOPUNT host still makes it.
+	// [orig: Game_ParseCommandLineAndInit - dword_B4C698 = 1 @0x4A747F; its reads
+	//  Server_ValidateWeaponCRC @0x501FFA, NapiNPServerMsg_HandleAntiCheatCRCCheck @0x5021C6,
+	//  Server_UpdateAllActivePlayerSlots @0x518A07 / @0x518A2D, Server_OnPlayerJoin @0x51A8C6 /
+	//  @0x51A907, Server_CheckPlayerViolations @0x51ACCC / @0x51ACFA, Server_TickUpdate
+	//  @0x51E130 / @0x51E181; dfx2.exe's the same ten, dword_B45DD4 = 1 @0x4A74CF, read
+	//  @0x4FF13A, @0x4FF306, @0x515A47 / @0x515A6D, @0x5178E7 / @0x517928, @0x517CFC /
+	//  @0x517D2A, @0x51B140 / @0x51B191]
+	bool nopunt = false;
 	// The host socket's bound address the /INOUT host lines print
 	// [orig: the protocol manager's socket +8 / +12, CNapiNPConnection_LogHostStarted
 	//  @0x61e6c6]; unknown prints retail's no-socket placeholder.

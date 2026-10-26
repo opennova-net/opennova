@@ -81,6 +81,9 @@ uint32_t read_u32_le_lenient(
 }
 
 bool stage_integrity_crc_punt(const ServerDispatchInputs &inputs, NapiNPConnection &conn, const char *reason) {
+	// `/NOPUNT` gates the line and the punt [orig: `cmp dword_B4C698, 0` @0x501FFA /
+	//  @0x5021C6].
+	if (inputs.server_ctx != nullptr && inputs.server_ctx->nopunt) return false;
 	// The _PUNT.TXT line first [orig: Server_WritePuntLog @0x50200e / @0x5021da].
 	if (inputs.server_ctx != nullptr) server_logs_punt(inputs.server_ctx->logs, conn, reason);
 	DisconnectEvent event;

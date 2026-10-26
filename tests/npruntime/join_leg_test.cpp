@@ -723,6 +723,26 @@ bool run_join_punts_a_map_checksum_mismatch() {
 		if (!expect(dstr.empty() && !f.joiner().host_disconnect_sent,
 		            "zero checksums (or none) pass")) return false;
 	}
+	// /NOPUNT gates both legs, the lines and the punts [orig: dword_B4C698 @0x51A8C6 /
+	// @0x51A907].
+	{
+		JoinFixture f(/*with_existing=*/false);
+		f.ctx->nopunt = true;
+		MemoryFiles files;
+		inmatch::PuntLog punt_log(files);
+		punt_log.set_time_text([] { return std::string("T"); });
+		punt_log.arm_punt_log();
+		f.ctx->logs.punt = &punt_log;
+		if (!expect(inmatch::Server_ProcessPendingPlayerSpawns(*f.ctx, *f.world) == 1 &&
+		                    f.drive_to_await_join(),
+		            "the joiner reaches slot state 5")) return false;
+		std::vector<std::string> dstr;
+		std::size_t at = 0;
+		punts(f.join(body(0x1234u, 0x5678u)), dstr, at);
+		if (!expect(dstr.empty() && !f.joiner().host_disconnect_sent &&
+		                    files.files["_PUNT.TXT"] == "T : START : \r\n",
+		            "/NOPUNT: mismatched checksums punt no one and log no line")) return false;
+	}
 	return true;
 }
 

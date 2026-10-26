@@ -211,6 +211,8 @@ struct HostConfig {
 	// address for the /INOUT lines; the session start installs both on the
 	// fresh context.
 	ServerLogs logs;
+	// The process's `/NOPUNT` (NapiNPServerCtx::nopunt), which the session start installs.
+	bool nopunt = false;
 	// The process's client words the host's own client runtime steps (ClientProcessState,
 	// client_runtime.h): null keeps the role's own across its map changes.
 	ClientProcessState *client_process = nullptr;

@@ -682,6 +682,51 @@ bool check_host_control_punts_are_ordered_before_the_countdown() {
 	return check_host_control_punt(7, 8, 24);
 }
 
+// /NOPUNT gates the quartet's two silence punts; the countdown and its sends run on.
+// [orig: Server_UpdateAllActivePlayerSlots - `cmp dword_B4C698, ebx` @0x518A07 / @0x518A2D,
+//  the countdown @0x518A42]
+bool check_nopunt_keeps_the_control_quartet_from_punting() {
+	for (const uint32_t charattr : {8u, 7u}) {
+		inmatch::HostOwner owner;
+		inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
+		owner.ctx.is_in_session = 1;
+		owner.ctx.nopunt = true;
+		owner.ctx.network_quality_broadcast_countdown = 100;
+		opennova::world::World world;
+		world.rules.mp_session = true;
+		world.registry.configure_pool(0, 8);
+		const opennova::world::EntityHandle player =
+				opennova::world::spawn_remote_player(world, opennova::world::PlayerSpawn{});
+		owner.ctx.world = &world;
+		replication::UdpSessionTransport transport(
+				replication::UdpSessionTransport::Role::Host);
+		inmatch::NapiNPConnection conn;
+		conn.peer = PeerAddr{0x0100007Fu, 34100};
+		conn.type = 1;
+		conn.phase = inmatch::ConnectionPhase::InMatch;
+		conn.burst.spawned = true;
+		conn.link.mode = replication::TransportMode::Client;
+		conn.link.transport = &transport;
+		conn.link.owned_entity = player;
+		conn.reply.minimap_initial_scan_pending = false;
+		world.match.upsert_player({player, 1, "P"});
+		world.match.player(player)->play_ticks = inmatch::CONTROL_REQUEST_LIVE_GATE_TICKS;
+		conn.reply.control_request_countdown = 1;
+		conn.reply.charattr_unanswered_count = charattr;
+		conn.reply.time_sync_unanswered_count = 8;
+		owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+		CaptureDatagramSocket socket;
+		inmatch::host_session_pump(owner, socket);
+		const inmatch::NapiNPConnection &live = owner.ctx.np_protocol.connection_list.front();
+		if (!expect(!live.host_disconnect_sent &&
+						live.reply.control_request_countdown == inmatch::CONTROL_REQUEST_PERIOD_TICKS,
+				charattr == 8 ? "/NOPUNT: the charattr silence punts no one"
+				              : "/NOPUNT: the time-sync silence punts no one"))
+			return false;
+	}
+	return true;
+}
+
 // A connection whose description went keeps taking its packets until its teardown: retail's
 // session receive, resend list and ping test the connection's active byte (+0x28) and drop
 // byte (+0x2D, which nothing sets), never the description's sent byte, so a punted joiner's
@@ -1344,6 +1389,14 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	if (!expect_no_description("exactly six minutes is not strictly over the t35 limit"))
 		return false;
 
+	// /NOPUNT: over the limit, no t35 [orig: dword_B4C698 @0x51E130].
+	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
+	ctx.nopunt = true;
+	tick_second();
+	if (!expect_no_description("/NOPUNT keeps the over-limit held slot from t35"))
+		return false;
+	ctx.nopunt = false;
+
 	// The slot's 0x6E (it is held) leads the punt in its walk turn; the
 	// description is the last record it is sent [orig: @0x51E0AD, @0x51E13D].
 	ctx.np_protocol.host_run_duration_ms = state6_ms + 360001u;
@@ -1481,7 +1534,15 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 			"a spectator's dead seconds count on without t7"))
 		return false;
 
+	// /NOPUNT: the counter counts on, no t7 [orig: dword_B4C698 @0x51E181].
 	live.link.spectator = false;
+	ctx.nopunt = true;
+	tick_to_periodic_second();
+	(void)drain_outbound();
+	if (!expect(live.reply.dead_live_seconds == 363 && !live.host_disconnect_sent,
+			"/NOPUNT: the dead seconds count on without t7"))
+		return false;
+	ctx.nopunt = false;
 	tick_to_periodic_second();
 	DisconnectEvent expected;
 	expected.ds = 1;
@@ -1528,8 +1589,9 @@ public:
 //  punts @0x51ad17/@0x51acd9; caller Server_TickUpdate @0x51df5f]
 bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_kills,
 		int32_t suicides, bool host_own, bool expect_punt, const char *label,
-		bool round_over = false) {
+		bool round_over = false, bool nopunt = false) {
 	inmatch::NapiNPServerCtx ctx;
+	ctx.nopunt = nopunt;
 	inmatch::set_connection_mode(ctx,
 			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
@@ -1653,6 +1715,12 @@ bool check_violation_sweep_type6_arms() {
 			"the listen host's own slot is never punted") && ok;
 	ok = check_violation_sweep_emits_type6(3, 4, 10, false, false,
 			"a round-over slot (state 7) is not walked", /*round_over=*/true) && ok;
+	// /NOPUNT gates both arms, the suicide arm's #S>9 line with its punt
+	// [orig: dword_B4C698 @0x51ACCC / @0x51ACFA].
+	ok = check_violation_sweep_emits_type6(3, 4, 0, false, false,
+			"/NOPUNT: team kills over the limit punt no one", false, /*nopunt=*/true) && ok;
+	ok = check_violation_sweep_emits_type6(3, 0, 10, false, false,
+			"/NOPUNT: ten suicides punt no one and log no #S>9", false, /*nopunt=*/true) && ok;
 	return ok;
 }
 
@@ -2146,6 +2214,7 @@ int main() {
 	ok = check_initial_settings_and_close_emit_only_goodbyes() && ok;
 	ok = check_ordinary_settings_traffic_is_undisturbed() && ok;
 	ok = check_host_control_punts_are_ordered_before_the_countdown() && ok;
+	ok = check_nopunt_keeps_the_control_quartet_from_punting() && ok;
 	ok = check_described_connection_keeps_taking_records() && ok;
 	ok = check_host_description_bypasses_saturated_message_capacity() && ok;
 	ok = check_host_pool_overflow_disconnects_with_msgcre() && ok;

@@ -58,7 +58,8 @@ struct ServerLogs {
 
 // Server_WritePuntLog(slot, reason, "") at a punt the host logs: the line goes
 // only for a slot that is not the host's own and not a bot, with `/NOPUNT`
-// unset (no port host sets it). The gates also test a latch, slot+89896, that
+// unset (NapiNPServerCtx::nopunt, which every caller tests ahead of the line). The gates
+// also test a latch, slot+89896, that
 // nothing in the image writes, so a slot already punted still logs; its
 // description stays the first (Server_StageHostDisconnect) [orig: the gates
 // ahead of each call: Server_ValidateWeaponCRC @0x501fd6..0x50200e,

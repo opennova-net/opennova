@@ -20,6 +20,7 @@
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
 #include "util/string_convert.h"
+#include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
 #include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
 #include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
 
@@ -113,6 +114,8 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
 	if (net_.log_devices != nullptr) cfg.logs = net_.log_devices->logs();
+	// The process's /NOPUNT, which every host it runs reads (NapiNPServerCtx::nopunt).
+	cfg.nopunt = LaunchFlags::nopunt();
 	// The listen socket's bind address and bound port, which HOST STARTED / STOPPED print
 	// (the NovaWorld session's when the host rides it); a socketless host prints the
 	// placeholder (engine: inmatch::inout_host_line, JoinerRole::set_local_address).

@@ -4215,7 +4215,12 @@ bool run_integrity_replies_validate_computed_sources() {
 
 	auto observe = [](const inmatch::IntegritySources &sources, uint8_t tag,
 			std::vector<uint8_t> body, uint32_t weapon_salt = 0,
-			uint32_t ammo_salt = 0, bool append_ping = false) {
+			uint32_t ammo_salt = 0, bool append_ping = false, bool nopunt = false) {
+		// A /NOPUNT host's context, else none (the dispatch's own).
+		inmatch::NapiNPServerCtx nopunt_ctx;
+		nopunt_ctx.nopunt = true;
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = nopunt ? &nopunt_ctx : nullptr;
 		inmatch::GameConfig config;
 		config.integrity_sources = sources;
 		replication::UdpSessionTransport transport(
@@ -4237,7 +4242,7 @@ bool run_integrity_replies_validate_computed_sources() {
 		Observation result;
 		result.replies_empty = inmatch::dispatch_session_replies(
 				config, conn, messages,
-				100, roster, nullptr).empty();
+				100, roster, nullptr, inputs).empty();
 		if (append_ping) {
 			result.replies_empty = result.replies_empty &&
 					inmatch::dispatch_session_replies(
@@ -4319,6 +4324,17 @@ bool run_integrity_replies_validate_computed_sources() {
 			observe(profile, c2s::ENTITY_CHECKSUM_REPLY, {0xFF}),
 			"PUNT WCRC",
 			"a short C2S 0x20 zero-fills its missing checksum before validation"))
+		return false;
+	// /NOPUNT gates the line and the punt [orig: dword_B4C698 @0x501FFA / @0x5021C6].
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY, indexed_crc_reply(0xFF, 0), 0, 0,
+					/*append_ping=*/false, /*nopunt=*/true),
+			"/NOPUNT: a wrong C2S 0x20 stages no punt"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::CHECKSUM_REPLY, indexed_crc_reply(0x18, 0), 0, 0,
+					/*append_ping=*/false, /*nopunt=*/true),
+			"/NOPUNT: a wrong C2S 0x21 stages no punt"))
 		return false;
 	if (!expect_silent(
 			observe(none, c2s::ENTITY_CHECKSUM_REPLY,

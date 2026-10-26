@@ -237,9 +237,9 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 // MaxFriendlyKills limit L, `L < 0 || teamKills <= L` routes to the suicide arm
 // (`suicides > 9` -> punt t6, the suicide arm logging "#S>9" to _PUNT.TXT
 // first), else the team-kill arm punts t6 with no log line. The global
-// punts-off switch dword_B4C698 (`/NOPUNT`) is not modeled (no port host sets
-// it). The slot +89896 latch the gates also test has no writer in the image,
-// and the slot gates are the slot's alone (active, entity, state 6), so a
+// punts-off switch dword_B4C698 (`/NOPUNT`, NapiNPServerCtx::nopunt) gates both
+// arms, the line and the punt. The slot +89896 latch the gates also test has no
+// writer in the image, and the slot gates are the slot's alone (active, entity, state 6), so a
 // punted slot still in state 6 is walked again each second: its suicide arm
 // writes "#S>9" again while the description stays the first
 // (stage_host_disconnect, SendChatMessage's first-event-wins), and a round
@@ -248,7 +248,8 @@ void update_all_active_player_slots(NapiNPServerCtx &ctx, world::World &world) {
 //  gates @0x51abf6/@0x51abff/@0x51ac0d, game types @0x51ac2c, counter
 //  @0x51ac5a/@0x51ac63, limit @0x51ac75, drop/sync/health @0x51ac84/@0x51ac8a/
 //  @0x51ac94, slot +5 @0x51ac9d / +96483 @0x51aca2, TK gate @0x51acc2, suicide
-//  compare @0x51aced/@0x51acf0 (/NOPUNT @0x51ad00), punts @0x51ad17/@0x51acd9; the sole caller is
+//  compare @0x51aced/@0x51acf0, /NOPUNT @0x51ACCC / @0x51ACFA, punts @0x51ad17/@0x51acd9; the
+//  sole caller is
 //  the periodic-second block of Server_TickUpdate @0x51df5f, behind the win check
 //  @0x51df5a, whose round end puts every slot in state 7 first]
 void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
@@ -305,7 +306,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 				kill_player_body_at_frame_tail(world, player);
 			}
 		}
-		if (conn.link.mode == replication::TransportMode::Loopback) continue;
+		if (conn.link.mode == replication::TransportMode::Loopback || ctx.nopunt) continue;
 		const world::MatchPlayer *stats = world.match.player(player->handle);
 		if (stats == nullptr) continue;
 		const int32_t limit = ctx.config.max_friendly_kills;
@@ -459,10 +460,12 @@ void run_control_quartet(NapiNPServerCtx &ctx, world::World &world, NapiNPConnec
 	// [orig: @0x5189EF..0x5189F5 (charattr < 8 takes the time-sync arm), the 16
 	//  arm's push and jmp @0x518A11..0x518A13, the 24 arm's @0x518A37, the one
 	//  call @0x518A3A, then the countdown @0x518A42]
-	if (net_player != nullptr && reply.charattr_unanswered_count >= kPuntSilenceLimit)
-		stage_host_punt(*net_player, kPuntCharattrSilence);
-	else if (net_player != nullptr && reply.time_sync_unanswered_count >= kPuntSilenceLimit)
-		stage_host_punt(*net_player, kPuntTimeSyncSilence);
+	// `/NOPUNT` gates both [orig: `cmp dword_B4C698, ebx` @0x518A07 / @0x518A2D].
+	if (net_player != nullptr && reply.charattr_unanswered_count >= kPuntSilenceLimit) {
+		if (!ctx.nopunt) stage_host_punt(*net_player, kPuntCharattrSilence);
+	} else if (net_player != nullptr && reply.time_sync_unanswered_count >= kPuntSilenceLimit) {
+		if (!ctx.nopunt) stage_host_punt(*net_player, kPuntTimeSyncSilence);
+	}
 	bool control_due = reply.control_request_countdown == 0;
 	if (!control_due) {
 		--reply.control_request_countdown;
@@ -899,8 +902,9 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 // strictly over six minutes from its state-6 entry stamp, not a spectator. The
 // t7 arm's exclusions, all at the punt and none at the counter: permanent
 // death, the local slot (+0x5, ours the type-1 test), the bot byte (+0x178E3,
-// written only as 0), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698, not
-// modelled); the counter is compared after its increment, so the punt lands
+// written only as 0), the spectator latch (+0x188D7) and /NOPUNT (dword_B4C698,
+// NapiNPServerCtx::nopunt), which gates the t35 arm too; the counter is compared after its
+// increment, so the punt lands
 // after 361 dead seconds.
 // [orig: Server_TickUpdate - the walk @0x51DFB0..0x51E1A5; state 6 and the
 //  entity @0x51E062..0x51E06C, the counter @0x51E06E..0x51E07D, the 0x6E
@@ -909,7 +913,8 @@ void emit_scoreboard_boundary(NapiNPServerCtx &ctx, world::World &world) {
 //  is_in_session @0x51E0D4, state 6
 //  and the entity @0x51E0E0..0x51E0EC; t35: the hold @0x51E0F2, the stamp
 //  @0x51E0FD..0x51E10E (0x57E40), +0x5 @0x51E110, +0x178E3 @0x51E116, the
-//  spectator latch @0x51E11F, +0x15F28 @0x51E128, the punt @0x51E13D; t7: the
+//  spectator latch @0x51E11F, +0x15F28 @0x51E128, dword_B4C698 @0x51E130, the punt
+//  @0x51E13D; t7: the
 //  dead bit @0x51E145..0x51E14B, the counter `cmp 168h` @0x51E14D,
 //  permanentDeath @0x51E159, +0x5 @0x51E161, +0x178E3 @0x51E167, the spectator
 //  latch @0x51E170, +0x15F28 @0x51E179, dword_B4C698 @0x51E181, the punt
@@ -972,14 +977,14 @@ void update_periodic_slot_walk(NapiNPServerCtx &ctx, world::World &world) {
 		// GetTickCount against the state-6 stamp, the process clock, so a host load counts
 		// (D-NET-NEW-L8-35) [orig: Server_TickUpdate - GetTickCount @0x51E0FB, the stamp
 		//  @0x51E0FD, `sub` @0x51E107, 0x57E40 @0x51E109].
-		if (join_deploy_idle_gate &&
+		if (join_deploy_idle_gate && !ctx.nopunt &&
 				static_cast<uint32_t>(host_tick_count_ms(ctx) - reply.state6_entry_host_ms) >
 						kJoinDeployIdleLimitMs)
 			stage_host_punt(*net_player, kPuntJoinDeployIdle);
 		if (dead && reply.dead_live_seconds > kDeadLiveSecondLimit &&
 				!ctx.config.permanent_death &&
 				conn.type == NapiNPConnection::kTypeServerSide &&
-				!conn.link.spectator)
+				!conn.link.spectator && !ctx.nopunt)
 			stage_host_punt(*net_player, kPuntDeadTooLong);
 	}
 }
