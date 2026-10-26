@@ -609,16 +609,25 @@ std::size_t prune_host_keys(opennova::db::Database &db) {
 }
 
 std::string mint_join_ticket(opennova::db::Database &db, uint32_t host_rid, int64_t user_id,
-		const std::string &peer_ip) {
+		int64_t credentials_gen, const std::string &peer_ip) {
 	uint8_t bytes[kJoinTicketHexDigits / 2];
 	os_random_bytes(bytes, sizeof bytes);
 	const std::string ticket = "JT:" + strutil::bytes_to_hex(bytes, sizeof bytes);
+	opennova::db::Transaction tx(db);
 	db.exec("DELETE FROM join_tickets WHERE expires_at <= now();");
-	db.exec("INSERT INTO join_tickets (ticket_hash, host_rid, user_id, peer_ip, expires_at) "
-			"VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5));",
-			{ str(io::sha256_hex(io::sha256(ticket))), i64(host_rid), i64(user_id), str(peer_ip),
-					i64(kJoinTicketSeconds) });
-	return ticket;
+	// One statement: the account's status and generation it tests are the ones the ticket is
+	// written against, its row held to the commit (a reset or a ban runs wholly before or after).
+	db.exec("INSERT INTO join_tickets "
+			"(ticket_hash, host_rid, user_id, credentials_gen, peer_ip, expires_at) "
+			"SELECT $1::text, $2::bigint, id, credentials_gen, $5::text, "
+			"now() + make_interval(secs => $6) FROM players "
+			"WHERE id = $3 AND credentials_gen = $4 AND account_status = 'active' "
+			"FOR NO KEY UPDATE;",
+			{ str(io::sha256_hex(io::sha256(ticket))), i64(host_rid), i64(user_id),
+					i64(credentials_gen), str(peer_ip), i64(kJoinTicketSeconds) });
+	const bool minted = db.changes() > 0;
+	tx.commit();
+	return minted ? ticket : std::string();
 }
 
 namespace {
@@ -638,11 +647,13 @@ bool private_ipv4(const std::string &dotted) {
 
 JoinTicketCheck redeem_join_ticket(opennova::db::Database &db, std::string_view ticket,
 		uint32_t host_rid, const std::string &joiner_ip, const std::string &host_ip) {
-	const auto rows = db.query("DELETE FROM join_tickets WHERE ticket_hash = $1 "
-							   "RETURNING host_rid, peer_ip, expires_at > now();",
+	const auto rows = db.query(
+			"DELETE FROM join_tickets t USING players p WHERE t.ticket_hash = $1 AND p.id = t.user_id "
+			"RETURNING t.host_rid, t.peer_ip, t.expires_at > now(), "
+			"p.account_status = 'active' AND p.credentials_gen = t.credentials_gen;",
 			{ str(io::sha256_hex(io::sha256(ticket))) });
 	if (rows.empty() || rows.front().as_int(0).value_or(0) != static_cast<int64_t>(host_rid) ||
-			rows.front().as_int(2).value_or(0) == 0)
+			rows.front().as_int(2).value_or(0) == 0 || rows.front().as_int(3).value_or(0) == 0)
 		return JoinTicketCheck::NotFound;
 	const std::string minted_at = rows.front().as_text(1).value_or("");
 	if (minted_at == joiner_ip || (private_ipv4(joiner_ip) && minted_at == host_ip))

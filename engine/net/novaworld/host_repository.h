@@ -265,10 +265,12 @@ inline constexpr std::size_t kJoinTicketHexDigits = 48;
 inline constexpr int64_t kJoinTicketSeconds = 5 * 60;
 
 // Mints a ticket for `user_id` joining the listing under `host_rid` from `peer_ip` (the
-// request's address, a.b.c.d), stores its hash and deletes the expired ones; returns it.
-// Throws db::Error.
-std::string mint_join_ticket(
-		db::Database &db, uint32_t host_rid, int64_t user_id, const std::string &peer_ip);
+// request's address, a.b.c.d), stores its hash with the account's `credentials_gen` (the
+// generation its retail login was read under) and deletes the expired ones; returns it. Only
+// while the account is active and still at that generation, tested by the insert itself, which
+// holds the account's row (as record_host_key does); "" when it is not. Throws db::Error.
+std::string mint_join_ticket(db::Database &db, uint32_t host_rid, int64_t user_id,
+		int64_t credentials_gen, const std::string &peer_ip);
 
 enum class JoinTicketCheck {
 	Admitted,
@@ -277,7 +279,9 @@ enum class JoinTicketCheck {
 };
 // The ticket a host's ClientPlayerEnterRequest carries for its joiner at `joiner_ip` (a.b.c.d,
 // the address the host reports), redeemed by the host's listing `host_rid`, whose own address
-// the lobby observes as `host_ip`: redeemed once, whatever the answer. A joiner the host reports
+// the lobby observes as `host_ip`: redeemed once, whatever the answer. A ticket whose account is
+// no longer active, or no longer at the generation it was minted under (a password reset or a
+// ban since), is not found. A joiner the host reports
 // at a private address (RFC 1918, or loopback) is behind the host's own NAT when its ticket was
 // minted at the host's address, and is admitted (the maintainer's decision, 2026-10-26: the
 // same-NAT joiner); any other address the ticket was not minted at mismatches. Throws

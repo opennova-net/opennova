@@ -372,6 +372,7 @@ void HttpListener::register_legacy_host_join_routes(
 		std::string joiner_pcid;
 		std::string joiner_nwhandle;
 		int64_t     joiner_user_id = 0;
+		int64_t     joiner_credentials_gen = 0; // the generation its retail login was read under
 		std::string joiner_label;  // for logging
 		{
 			const std::string msg_tpl =
@@ -398,6 +399,7 @@ void HttpListener::register_legacy_host_join_routes(
 			}
 			if (joiner) {
 				joiner_user_id = joiner->id;
+				joiner_credentials_gen = joiner->credentials_gen;
 				joiner_pcid = joiner->pcid;
 				joiner_nwhandle = joiner->nwhandle;
 				joiner_label = std::string(how) + "=" + joiner->nwhandle;
@@ -474,8 +476,8 @@ void HttpListener::register_legacy_host_join_routes(
 					                : joiner_nwhandle;
 					p.peer_ip   = req.remote_ip_address;
 					hostdb::add_player(*db_conn, p);
-					pub_join_ticket =
-							hostdb::mint_join_ticket(*db_conn, host.rid, p.user_id, p.peer_ip);
+					pub_join_ticket = hostdb::mint_join_ticket(
+							*db_conn, host.rid, p.user_id, joiner_credentials_gen, p.peer_ip);
 				} catch (const std::exception &e) {
 					std::fprintf(stderr, "[http] /NWJoin.dll WARN join rows: %s\n", e.what());
 				}
