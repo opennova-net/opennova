@@ -724,8 +724,8 @@ every folder of it is a **working copy** of. A public project (OP: Acid Gambit's
 Package's) is anyone's to get, a private one (the retail games') an admin's; admins push, and
 a push is not a **release**. The editor's NovaWorld window is its client, the admin's Games
 area its management.
-_Avoid_: workspace (the editor's windows, not the data), mod (an expansion-type project is a
-project kind), game directory (the runtime's mounted root), content project, content store
+_Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
+New project's choice), game directory (the runtime's mounted root), content project, content store
 (the code's `content_*` names), repository, git, depot, asset server
 
 **Game install**:
@@ -749,8 +749,18 @@ _Avoid_: install validation (nothing is validated: the folder is read)
 **Welcome page**:
 The editor with no project open: the Document window across the whole workspace, with the
 recent projects (each by its title, its game and its expansion), Open, and the New project
-form with its game install.
+form, which asks what is made, then its game install.
 _Avoid_: start screen, home, launcher
+
+**A game you own**:
+New project's first choice: the project of the game install's own game, Joint Operations or one
+of its installed expansions (made as that expansion on the base game's project), every file of it
+imported as it opens (`new_project`'s `all`), the install's files winning over anything the project
+held, the features its files need on. Beside it, **a mod** (a change to a game: an expansion project
+of the install's base game, an installed expansion, or a project of the author's own) and **a new
+game** (a standalone project).
+_Avoid_: stock import (the import is part of making the project), the raw expansion fields (Builds
+on, Expansion name: Project settings keep them for an existing project)
 
 **File card**:
 Files' page for one project file: what a file of its kind is to the game, where a build puts it, where
@@ -764,8 +774,9 @@ name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, 
 expansion it **builds on** (none: the base game). A project with no expansion name is standalone.
 The files the game reads by an expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, ...) are
 its **expansion files**.
-_Avoid_: mod (a project builds as an expansion; "mod" is the Mods list's word for one), base (for
-the expansion a project builds on: the base game is the install with none)
+_Avoid_: mod for the expansion itself (A mod is New project's choice that makes a project building
+as one; "mod" is the Mods list's word for an installed one), base (for the expansion a project
+builds on: the base game is the install with none)
 
 **Logical name**:
 The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
@@ -806,7 +817,8 @@ its import context), and the outputs are regenerated into `.opennova/imported/` 
 native assets. It runs again when the source or an input changes; the machine-local **import
 cache** keeps hashes so an untouched file is not read. A file is an **import source** only while
 its record is there, and an **import input** while a record lists it; the build packs neither,
-only the outputs. The files the import dialog offers are **import choices**.
+only the outputs. The files the import dialog offers are **import choices**; File > Import... is
+the one way in, its first step the sources that fit the project.
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source
 

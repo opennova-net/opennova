@@ -19,7 +19,9 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
+#include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -96,35 +98,67 @@ int test_table_and_wire() {
 }
 
 // The new-project form: its fields set as a person types them (nothing made), the install named once given,
-// building on an expansion building as one; the state section writes the form as it shows; the modal opened
-// closes once new_project makes the project.
+// what it makes by its token (stock first; one no choice has refused, nothing changed); an expansion on a
+// project's base game (a game you own's expansion, a mod of a project of the author's) offered the first folder
+// beside its own that holds a standalone project of the game, until one is named; the state section writes the
+// form as it shows; the modal opened closes once new_project makes the project. File > Import...'s first step
+// is a project's, shown and closed with no preview open.
 int test_new_project_form() {
 	test_temp::TempDir dir("opennova_editor_workspace_form");
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
-	TEST_EXPECT(v.workspace.new_project.title == "My Game" && !v.workspace.new_project.install_named);
-	JsonValue answer = wire(session, R"({"new_project": {"open": true, "title": "Operation Nightfall", "dir": ")" +
-	                                         dir.file("nightfall") + R"(", "builds_on": "jox01", "expansion": "nightfall"}})");
-	TEST_EXPECT(answer.get_bool("ok", false) && answer.get("outcome") && answer.get("outcome")->get_bool("done", false));
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
-	TEST_EXPECT(form.open && form.title == "Operation Nightfall" && form.dir == dir.file("nightfall") && form.builds_on == "jox01" &&
-	            form.as_expansion && form.expansion == "nightfall" && !form.install_named && !v.project.open);
+	TEST_EXPECT(form.title == "My Game" && !form.install_named && form.making == WorkspaceView::Making::Stock);
+	JsonValue answer = wire(session, R"({"new_project": {"open": true, "making": "mod", "title": "Operation Nightfall", "dir": ")" +
+	                                         dir.file("work/nightfall") + R"(", "installed": "jox01", "expansion": "nightfall"}})");
+	TEST_EXPECT(answer.get_bool("ok", false) && answer.get("outcome") && answer.get("outcome")->get_bool("done", false));
+	TEST_EXPECT(form.open && form.making == WorkspaceView::Making::Mod && form.title == "Operation Nightfall" &&
+	            form.dir == dir.file("work/nightfall") && form.installed == "jox01" && !form.on_project &&
+	            form.expansion == "nightfall" && form.base_project.empty() && !form.install_named && !v.project.open);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"game_install": "C:/Games/JO"}})")));
 	TEST_EXPECT(form.install_named && form.game_install == "C:/Games/JO");
 	JsonValue shown = section(session);
 	const JsonValue *made = shown.get("new_project");
 	TEST_EXPECT(made && made->get_bool("open", false) && made->get_string("title", "") == "Operation Nightfall" &&
 	            made->get_string("game_install", "") == "C:/Games/JO" && made->get_bool("install_named", false) &&
-	            made->get_bool("as_expansion", false) && made->get_string("builds_on", "") == "jox01");
-	// Building on nothing: as_expansion stays as set.
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"builds_on": "", "as_expansion": false}})")));
-	TEST_EXPECT(!form.as_expansion && form.builds_on.empty() && form.expansion == "nightfall");
+	            made->get_string("making", "") == "mod" && made->get_string("installed", "") == "jox01" &&
+	            !made->get_bool("on_project", true) && made->get_string("expansion", "") == "nightfall");
+	// What it makes is one of the three.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "remake"}})")) &&
+	            refused_with(session, "workspace.refused") && form.making == WorkspaceView::Making::Mod);
+	// A mod of a project of the author's: offered the folder beside its own that holds a standalone project of the
+	// game (Base, by name, before Other; an expansion's project passed over), until one is named.
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("work/Base"), "Base", "jo", base, error));
+	ProjectDocument other;
+	TEST_EXPECT(create_project(dir.file("work/Other"), "Other", "jo", other, error));
+	ProjectDocument expansion;
+	TEST_EXPECT(create_project(dir.file("work/Aside"), "Aside", "jo", expansion, error, ProjectExpansion{ "asd" }));
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"on_project": true}})")));
+	TEST_EXPECT(form.on_project && form.base_project == "../Base");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_project": "../Other"}})")) &&
+	            form.base_project == "../Other");
+	// A game you own's expansion likewise; its base game alone is offered nothing.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "stock", "installed": "", "base_project": ""}})")));
+	TEST_EXPECT(form.base_project.empty());
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"installed": "jox01"}})")) && form.base_project == "../Base");
+	TEST_EXPECT(sibling_base_project(dir.file("lone/New"), "jo").empty());
+	// File > Import...'s first step is a project's.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"sources": true}})")) &&
+	            refused_with(session, "workspace.refused") && !v.workspace.import.sources);
 	// new_project makes the project (standalone, no install named in the request): the modal closes.
 	TEST_EXPECT(session.handle(request::new_project(dir.file("plain"), "Plain")) && session.outcome().done());
 	session.run_operations();
 	TEST_EXPECT(v.project.open && !form.open && form.title == "Operation Nightfall");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"sources": true}})")) && v.workspace.import.sources &&
+	            shown_modal(v).modal == HeldModal::Import);
+	shown = section(session);
+	TEST_EXPECT(shown.get("import") && shown.get("import")->get_bool("sources", false));
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"sources": false}})")) && !v.workspace.import.sources &&
+	            shown_modal(v).modal == HeldModal::None);
 	return 0;
 }
 

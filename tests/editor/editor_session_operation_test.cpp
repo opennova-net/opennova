@@ -192,6 +192,45 @@ static int test_slot_cancels_between_steps() {
 	return 0;
 }
 
+// A finish that starts the next operation (a game you own's open going on to its import): the slot is free as it
+// runs, so the next starts; the first's outcome names the next (then), the next's names the first (follows), a
+// cancelled one's too; an operation started outside a finish follows nothing.
+struct ChainOperation : FakeOperation {
+	OperationSlot &slot;
+	std::unique_ptr<SessionOperation> next;
+	ChainOperation(Tally &t, OperationSlot &s, std::unique_ptr<SessionOperation> n) : FakeOperation(t, 10), slot(s), next(std::move(n)) {}
+	OperationOutcome finish(SessionCore &core) override {
+		OperationOutcome outcome = FakeOperation::finish(core);
+		slot.start(std::move(next));
+		return outcome;
+	}
+};
+
+static int test_slot_follows_a_finish() {
+	FakePlatform platform;
+	MemoryPreferencesStore store;
+	EditorPreferences preferences(store);
+	SessionCore core(platform, preferences);
+	OperationSlot slot;
+	Tally first, second;
+	const uint64_t id = slot.start(std::make_unique<ChainOperation>(first, slot, std::make_unique<FakeOperation>(second, 10)));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && first.finishes == 1);
+	TEST_EXPECT(slot.running() && slot.status().id == id + 1);
+	TEST_EXPECT(slot.last().id == id && slot.last().then == id + 1 && slot.last().follows == 0);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && second.finishes == 1 && !slot.running());
+	TEST_EXPECT(slot.last().id == id + 1 && slot.last().follows == id && slot.last().then == 0);
+	// One cancelled says what it followed.
+	Tally third, fourth;
+	const uint64_t chained = slot.start(std::make_unique<ChainOperation>(third, slot, std::make_unique<FakeOperation>(fourth, 1000)));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.running());
+	TEST_EXPECT(slot.cancel() && slot.last().id == chained + 1 && slot.last().end == OperationEnd::Cancelled &&
+	            slot.last().follows == chained);
+	Tally alone;
+	TEST_EXPECT(slot.start(std::make_unique<FakeOperation>(alone, 10)) && slot.run_to_end() && slot.finish(core) &&
+	            slot.last().follows == 0 && slot.last().then == 0);
+	return 0;
+}
+
 // The tables: every request kind has its row, in the enum's order (static_asserted); a project
 // switch and Quit write everything and cancel the running operation as they commit; Build and
 // Play join a build; a new import plan (and the import dialog's Cancel) supersedes a running one;
@@ -874,6 +913,7 @@ int main() {
 	int failures = 0;
 	failures += test_slot_steps_and_finishes();
 	failures += test_slot_cancels_between_steps();
+	failures += test_slot_follows_a_finish();
 	failures += test_request_table();
 	failures += test_gate_is_what_busy_refuses_says();
 	failures += test_busy_gate();

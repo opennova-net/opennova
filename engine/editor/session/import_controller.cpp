@@ -27,6 +27,7 @@
 #include <editor/model/field_text.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
+#include <editor/requirements/requirements.h>
 #include <editor/session/base_layer_build.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
@@ -149,6 +150,41 @@ void ImportController::preview_install(const EditorRequest &request) {
 	}
 	for (const auto &d : diagnostics) core_.report(d);
 	preview(std::move(sources), std::move(facts), std::move(named), request.with_dependencies);
+}
+
+void ImportController::import_stock() {
+	if (!view_.project.open) return;
+	ProjectDocument document = *view_.project.document;
+	std::vector<Diagnostic> diagnostics;
+	std::vector<ImportChoice> roots =
+	        document.expansion.standalone()
+	                ? list_retail_import_choices(core_.base_game(), document, diagnostics)
+	                : list_installed_expansion_choices(core_.game_install(), document, document.expansion.name, diagnostics);
+	for (const auto &d : diagnostics) core_.report(d);
+	if (roots.empty()) return; // the findings say why
+	// The features its files need, with the base game's under an expansion (a stock game plays its missions and
+	// its multiplayer): the project file says so before the import's refresh weighs the requirements.
+	std::vector<std::string> names = view_.project.base_files;
+	for (const ImportChoice &root : roots) names.push_back(root.name());
+	const ProjectFeatures needed = features_files_need(names);
+	if (needed.mission != document.features.mission || needed.multiplayer != document.features.multiplayer) {
+		document.features = needed;
+		Diagnostic error;
+		if (save_project_document(paths_.project_file, document, error)) {
+			view_.project.document = std::make_shared<const ProjectDocument>(document);
+			core_.touch(ViewConcern::Project);
+		} else {
+			core_.report(error);
+			document = *view_.project.document;
+		}
+	}
+	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, document,
+			std::make_unique<ImportPlanOperation>(core_.problems(), paths_, document, core_.problems().graph(),
+					view_.documents.open, std::move(roots), false, core_.base_game())));
+	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	view_.activity.status = document.expansion.standalone() ? "Importing every file of the game install..."
+	                                                        : "Importing every file of " + document.expansion.name + "...";
+	core_.touch(ViewConcern::Output);
 }
 
 void ImportController::cancel() {
@@ -937,6 +973,21 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 			return refused(make_finding(CoreFinding::ImportChanged, DiagnosticSeverity::Warning, "The files changed since the preview: nothing was imported. Check the import again."));
 		}
 		if (!operation.refusals().empty()) return refused(operation.refusals().front());
+	}
+	// An import of its own plan (a game you own's), which no dialog showed: what the plan found (an install that
+	// does not mount) is what the import came to, and the rows it left out are said.
+	if (operation.own_plan() && operation.new_plan()) {
+		const ImportPlan &plan = *operation.new_plan();
+		for (const Diagnostic &d : plan.diagnostics) {
+			core_.report(d);
+			outcome.findings.push_back(d);
+			if (d.severity == DiagnosticSeverity::Error) outcome.end = OperationEnd::Failed;
+		}
+		std::vector<std::string> left;
+		for (size_t i = 0; i < plan.rows.size(); ++i)
+			if (plan.rows[i].state != ImportPlanRow::State::NotFound)
+				if (const std::string why = import_row_refusal(plan, i); !why.empty()) left.push_back(plan.rows[i].name + ": " + why);
+		if (!left.empty()) core_.note_folded("Left out " + counted(left.size(), "file") + " the project cannot take.", std::move(left));
 	}
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
 	forget_import_workspace(view_.workspace);

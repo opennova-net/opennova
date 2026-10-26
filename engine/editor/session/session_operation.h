@@ -135,6 +135,11 @@ struct OperationOutcome {
 	std::vector<Diagnostic> findings;
 	std::vector<std::string> imported;
 	std::vector<std::string> not_imported;
+	// The operation its finish started to go on with its work (0 none: a new project of a game you own goes on
+	// from its Open to the import of every file of its game, SessionCore::absorb_open), and on that one the
+	// operation whose finish started it (`follows`): a wait on the first follows `then` to the end.
+	uint64_t then = 0;
+	uint64_t follows = 0;
 };
 
 // The operation that runs, as the view shows it (id 0: none), with what the busy gate weighs a
@@ -198,7 +203,8 @@ public:
 	// Steps the running operation to its end (a test, a command line); true when one is done.
 	bool run_to_end();
 	// The done operation's finish(core), once: last() is what it came to, and the slot is free
-	// (before its finish runs, so a finish may start the next one). False when none is done.
+	// (before its finish runs, so a finish may start the next one, which then follows it: its outcome's
+	// `then` names the next, the next's `follows` it). False when none is done.
 	bool finish(SessionCore &core);
 	// Cancels the running operation between two steps: its work discarded, last() says so, the
 	// slot free. False when none runs or it cannot be cancelled.
@@ -213,6 +219,8 @@ private:
 	std::unique_ptr<SessionOperation> operation_;
 	uint64_t id_ = 0;
 	uint64_t next_id_ = 1;
+	uint64_t follows_ = 0;   // the operation whose finish started the running one (0 none)
+	uint64_t finishing_ = 0; // the operation whose finish runs now (0 none)
 	bool done_ = false;
 	OperationOutcome last_;
 };

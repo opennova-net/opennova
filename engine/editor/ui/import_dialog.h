@@ -15,9 +15,14 @@
 
 namespace opennova::editor {
 
-// The import dialog (ADR 0046 S8, S11d, S11g), open while the view previews an import
-// (DialogsView::import_preview: the shell's file pick, the game data, an Import fix), sized to the
-// editor's window as it opens. A listing's files to choose from (a picked archive's members, the
+// The import dialog (ADR 0046 S8, S11d, S11g), File > Import...'s, the one way an import is chosen (the
+// editor import round): its first step (the workspace's import.sources) offers the sources that fit the open
+// project, each raising its request: the whole game install (a standalone project's) or an installed
+// expansion's own files (an expansion project's, of each expansion the game install has), choosing from the game
+// data (with "Include the files these need", the editor's setting), files from the disk (a loose file or a PFF's
+// members, the shell's pick) and every source imported again. Then, while the view previews an import
+// (DialogsView::import_preview: a source chosen, a Problems Import fix, an Inspector's Import <name>...), the
+// preview, sized to the editor's window as it opens. A listing's files to choose from (a picked archive's members, the
 // game install's files), each with its kind and size (the UX round's project lane), with a filter
 // over the names (a kind's name finds that kind: "texture"), a kind to show alone and how many
 // show, each choice planned again at once (PlanImport); "Include the files these need", the
@@ -54,6 +59,8 @@ private:
 		bool also = false; // a row listed under another file that names it too (ImportPlanGroup::also)
 	};
 
+	// The first step: the sources, while the workspace shows it and no preview is open.
+	void draw_sources(Workspace &workspace);
 	void take(const SessionView &view, const DialogsView::ImportPreview &preview);
 	void follow(const SessionView &view);
 	void send(Workspace &workspace, const DialogsView::ImportPreview &preview);

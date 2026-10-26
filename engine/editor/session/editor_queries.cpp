@@ -1172,7 +1172,9 @@ constexpr EditorQueryRow kRows[] = {
 			"The operation that runs (running, and while one does its id, kind (open, refresh, "
 			"build, import_plan, import_apply, rename_apply), label, done and total in its unit, "
 			"cancellable, and what it reads and writes), what the last one came to "
-			"(last_operation: id, kind, end, findings), the validation the polls step "
+			"(last_operation: id, kind, end, findings; then, the operation its finish started to go on "
+			"with its work, and follows, on that one, the operation it goes on from: a game you own's new "
+			"project goes on from its open to its import), the validation the polls step "
 			"(validation: running, done and total files) and the last build.")
 			.row,
 	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,

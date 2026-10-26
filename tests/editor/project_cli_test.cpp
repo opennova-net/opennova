@@ -168,6 +168,11 @@ static int test_new_expansion() {
 	std::string text;
 	TEST_EXPECT(run({"new", dir.file("bad"), "--expansion", "my mod"}) == 2 && !fs::exists(dir.file("bad")));
 	TEST_EXPECT(run({"new", dir.file("on"), "--builds-on", "jox01"}) == 2 && !fs::exists(dir.file("on")));
+	// A game you own (--all): its expansion on the base game's project, never on another expansion.
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"new", dir.file("own"), "--all", "--builds-on", "jox01"}, text) == 2 &&
+	            text.find("--builds-on") != std::string::npos && !fs::exists(dir.file("own")));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"new", dir.file("own"), "--all", "--expansion", "jox01"}, text) == 2 &&
+	            text.find("--base-project") != std::string::npos && !fs::exists(dir.file("own")));
 	TEST_EXPECT(run_capture(dir.file("new.txt"), {"new", root, "--title", "Mod", "--expansion", "jxm"}, text) == 0 &&
 	            text.find("as the expansion jxm, on the base game") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/version.txt") && fs::is_regular_file(root + "/strings/jxm.bin"));

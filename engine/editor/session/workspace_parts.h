@@ -29,6 +29,11 @@ enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers
 // "number[]" (finite ones).
 const char *workspace_json_token(WorkspaceJson json);
 
+// What the new-project form makes, by its token: stock (a game you own), mod, game (a new game); false for a token
+// none has.
+const char *new_project_making_token(WorkspaceView::Making making);
+bool new_project_making_named(const std::string &token, WorkspaceView::Making &out);
+
 // `longest` (the window's field's buffer, workspace_view.h's kWorkspaceText and the rest, less its
 // terminator): a string's (each string's of an array or an object) most characters, 0 for no bound.
 struct WorkspaceMember {

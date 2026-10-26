@@ -12,7 +12,9 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
+#include <editor/import/import_run.h>
 #include <editor/model/field_text.h>
+#include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
 #include <editor/session/request_factories.h>
@@ -194,9 +196,94 @@ void ImportDialog::send(Workspace &workspace, const DialogsView::ImportPreview &
 	window_requests::set_workspace(workspace, "import", std::move(members));
 }
 
+// File > Import...'s first step: each source a button its request raises, the step closing as it goes (a
+// preview it opens takes its place); each enabled while the busy gate takes that request, its tooltip what it
+// brings or why it cannot.
+void ImportDialog::draw_sources(Workspace &workspace) {
+	const SessionView &v = workspace.view();
+	const bool shows = v.workspace.import.sources && v.project.open && !v.dialogs.import_preview.open &&
+	                   modal_may_show(v, HeldModal::Import);
+	if (shows && !ImGui::IsPopupOpen("Import")) ImGui::OpenPopup("Import");
+	if (!ImGui::BeginPopupModal("Import", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+	if (!shows) {
+		ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+		return;
+	}
+	const auto close = [&workspace] {
+		window_requests::set_workspace(workspace, "import", "sources", io::JsonValue::make_bool(false));
+		ImGui::CloseCurrentPopup();
+	};
+	const float width = ImGui::GetFontSize() * 24.0f;
+	const auto source = [&](const std::string &label, bool enabled, const std::string &tip) {
+		ImGui::BeginDisabled(!enabled);
+		const bool pressed = ImGui::Button(label.c_str(), ImVec2(width, 0.0f)) && enabled;
+		ImGui::EndDisabled();
+		ui_kit::tooltip(tip);
+		return pressed;
+	};
+	ui_kit::clipped_text("Copy files into the project from:");
+	const bool install = !v.project.retail_directory.empty();
+	const std::string no_install = "Choose the game install folder in File > Project settings... first.";
+	const bool lists = install && v.allows(EditorRequestKind::PreviewInstallImport);
+	// The game's own: a standalone project the whole install; an expansion project an installed expansion's own
+	// files (list_installed_expansion_choices), one for each expansion the game install has.
+	const ProjectDocument *document = v.project.document.get();
+	if (!document || document->expansion.standalone()) {
+		if (source("The whole game install...", lists,
+		           install ? "Every file of the game install: what a mission project needs to play, build and resolve every name."
+		                   : no_install)) {
+			close();
+			workspace.request(request::import_whole_install());
+		}
+	} else {
+		for (const ProjectView::InstallExpansion &installed : v.project.game_install_expansions) {
+			const std::string title = installed.title.empty() ? installed.name : installed.title;
+			if (source("The installed expansion " + installed.name + "...", lists,
+			           !install ? no_install
+			                    : "Every file of " + title + " as the game installs it, under the project's expansion name: its "
+			                      "archives' files and its folder's" +
+			                              (strutil::iequals(installed.name, document->expansion.name)
+			                                       ? ", its version.txt too, which a joiner's game must match."
+			                                       : "."))) {
+				close();
+				workspace.request(request::import_installed_expansion(installed.name, v.project.retail_directory));
+			}
+		}
+	}
+	if (source("Choose from the game data...", lists,
+	           install ? "Every file of the game install listed to choose from." : no_install)) {
+		close();
+		workspace.request(request::preview_install_import({}, v.project.import_dependencies));
+	}
+	// The editor's setting, which the choice above and the files from the disk plan with.
+	bool with = v.project.import_dependencies;
+	const bool sets = v.allows(EditorRequestKind::SetImportDependencies);
+	ImGui::BeginDisabled(!sets);
+	if (ImGui::Checkbox("Include the files these need", &with) && sets) workspace.request(request::set_import_dependencies(with));
+	ImGui::EndDisabled();
+	ui_kit::tooltip("Look for the files the chosen ones name (fonts, textures, models...) beside them and in the game install, "
+	                "and import those found too. The editor remembers it.");
+	if (source("Files from the disk...", v.allows(EditorRequestKind::PreviewImport), "Loose files, or what a PFF archive holds.")) {
+		close();
+		workspace.request(request::pick_file(PickPurpose::ImportFiles));
+	}
+	const size_t sources = v.project.imports ? v.project.imports->size() : 0;
+	if (source("Every source again", sources > 0 && v.allows(EditorRequestKind::Reimport),
+	           sources == 0 ? std::string("No file of the project is imported from a source.")
+	                        : "Run every importer again (" + counted(sources, "source") + ").")) {
+		close();
+		workspace.request(request::reimport(std::string(), true));
+	}
+	ImGui::Spacing();
+	if (ImGui::Button("Cancel")) close();
+	ImGui::EndPopup();
+}
+
 void ImportDialog::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	draw_sources(workspace);
 	follow(v);
 	// The unsaved prompt an Import raised (it writes over a file with unsaved edits) takes the
 	// dialog's place until it is answered: of the modals at the top level, where opening one

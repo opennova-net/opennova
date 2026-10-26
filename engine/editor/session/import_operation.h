@@ -28,6 +28,10 @@ public:
 	// `replan`: the dialog's plan made again (null with no dialog open); `shown`, the plan it showed.
 	ImportOperation(const ProjectPaths &paths, const ProjectDocument &document, std::vector<ImportChoice> imports,
 			bool replace, std::unique_ptr<ImportPlanOperation> replan, std::shared_ptr<const ImportPlan> shown);
+	// An import of its own plan, no dialog showing one (a game you own's, ImportController::import_stock): `plan`
+	// plans its files, and the import takes every row the project can take, the project's files of their names
+	// written over (import_selection over import_default_checks with Replace existing files).
+	ImportOperation(const ProjectPaths &paths, const ProjectDocument &document, std::unique_ptr<ImportPlanOperation> plan);
 
 	OperationKind kind() const override { return OperationKind::ImportApply; }
 	bool step(const StepBudget &budget) override;
@@ -36,8 +40,10 @@ public:
 	void cancel() override;
 	OperationOutcome finish(SessionCore &core) override;
 
-	// What the import dialog showed and what planning it again made (none with no dialog open).
-	bool replanned() const { return replan_ != nullptr; }
+	// What the import dialog showed and what planning it again made (none with no dialog open); an import of its
+	// own plan showed none.
+	bool replanned() const { return replan_ != nullptr && !own_plan_; }
+	bool own_plan() const { return own_plan_; }
 	const std::shared_ptr<const ImportPlan> &shown() const { return shown_; }
 	std::shared_ptr<const ImportPlan> new_plan() const { return new_plan_; }
 	// Why nothing was written: the plan changed (import.changed is the caller's to say, from the plans),
@@ -65,6 +71,7 @@ private:
 	ProjectDocument document_;
 	std::vector<ImportChoice> imports_;
 	bool replace_ = false;
+	bool own_plan_ = false;
 	std::unique_ptr<ImportPlanOperation> replan_;
 	std::shared_ptr<const ImportPlan> shown_;
 	std::shared_ptr<const ImportPlan> new_plan_;

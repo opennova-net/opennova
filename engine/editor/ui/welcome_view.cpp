@@ -2,11 +2,17 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
+#include <base/io/strutil.h>
+#include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
+#include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/workspace_parts.h>
 #include <editor/ui/content_window.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
@@ -150,7 +156,62 @@ void InstallFieldCheck::forget() {
 	retries_ = 0;
 }
 
+EditorRequest new_project_request(const WorkspaceView::NewProject &form, const std::string &install,
+                                  const std::string &stock_title) {
+	using Making = WorkspaceView::Making;
+	switch (form.making) {
+	case Making::Stock:
+		// An installed expansion is made on the base game's project; the base game stands alone.
+		return request::new_stock_project(form.dir, stock_title, install, form.installed,
+		                                  form.installed.empty() ? std::string() : form.base_project);
+	case Making::Mod: {
+		EditorRequest made = request::new_expansion_project(form.dir, form.title, form.expansion,
+		                                                    form.on_project ? std::string() : form.installed, true,
+		                                                    form.on_project ? form.base_project : std::string());
+		made.game_install = install;
+		return made;
+	}
+	case Making::Game: break;
+	}
+	EditorRequest made = request::new_project(form.dir, form.title);
+	made.game_install = install;
+	return made;
+}
+
+namespace {
+
+// What the form offers, each with what it makes.
+struct MakingRow {
+	WorkspaceView::Making making;
+	const char *label;
+	const char *tip;
+};
+constexpr MakingRow kMakings[] = {
+	{ WorkspaceView::Making::Stock, "A game you own",
+	  "The game as your game install has it, or one of its expansions: every file of it imported into the project, the "
+	  "game's own files as it ships them." },
+	{ WorkspaceView::Making::Mod, "A mod",
+	  "A change to a game: its own files over the game's, shipped as expansion\\<name>\\ and played with /exp <name>." },
+	{ WorkspaceView::Making::Game, "A new game", "A game of its own, standalone: you bring in the files it starts from." },
+};
+
+// An installed expansion as the combos name it: its folder's name, the Mods list's name after it.
+std::string installed_words(const InstallCheck::Expansion &installed) {
+	return installed.title.empty() || installed.title == installed.name ? installed.name
+	                                                                      : installed.name + " - " + installed.title;
+}
+
+// The base game's name: the game the install was read as (Joint Operations).
+std::string base_game_name(const InstallCheck *check) {
+	const gameprofile::GameProfile *profile =
+	        gameprofile::gameprofile_by_code(check && !check->game.empty() ? check->game.c_str() : kDefaultTargetGame);
+	return profile && profile->display_name ? profile->display_name : std::string(kDefaultTargetGame);
+}
+
+} // namespace
+
 bool NewProjectForm::draw(Workspace &workspace) {
+	using Making = WorkspaceView::Making;
 	const SessionView &v = workspace.view();
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	const auto set = [&workspace](const char *member, io::JsonValue value) {
@@ -161,14 +222,18 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const bool allowed = v.allows(EditorRequestKind::NewProject);
 	title_.follow(form.title);
 	folder_.follow(form.dir);
+	base_.follow(form.base_project);
+	name_.follow(form.expansion);
 	// The install, the editor's own until the author names one (never another project's: an open project's
 	// install may be its own, or a session's); checked once it is not being typed.
 	install_.follow(form.install_named ? form.game_install : v.project.editor_install);
-	if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
-	const ui_kit::PathField folder = ui_kit::path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", 0.0f, allowed);
-	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
-	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
-	ui_kit::tooltip("The folder is made if it does not exist; it must not hold a project already.");
+	// What it makes, the form's first question.
+	for (size_t i = 0; i < std::size(kMakings); ++i) {
+		if (i) ImGui::SameLine();
+		if (ImGui::RadioButton(kMakings[i].label, form.making == kMakings[i].making) && form.making != kMakings[i].making)
+			set("making", io::JsonValue::make_string(new_project_making_token(kMakings[i].making)));
+		ui_kit::tooltip(kMakings[i].tip);
+	}
 	const ui_kit::PathField field = ui_kit::path_field("Game install", install_.text, sizeof(install_.text), "Browse...##install", 0.0f, allowed);
 	if (field.edited) set("game_install", io::JsonValue::make_string(install_.sent()));
 	if (field.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectInstall));
@@ -176,42 +241,128 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	bool found = false;
 	const std::string words = check_.words(workspace, install_.text, field.typing, v.project.editor_install, found);
 	draw_install_line(words, found, install_.text[0] != '\0');
-	// What it builds on: the expansions of the install named, once it is checked.
-	std::vector<ProjectView::InstallExpansion> installed;
-	if (const InstallCheck *check = found ? check_.answer(install_.text) : nullptr)
-		for (const InstallCheck::Expansion &each : check->expansions) installed.push_back({ each.name, each.title, std::string() });
-	ExpansionChoice choice{ form.builds_on, form.as_expansion, form.expansion, form.base_project };
-	bool changed = false;
-	const bool expansion_ok =
-			expansion_.draw(choice, install_.text[0] ? installed : v.project.new_project_expansions, ProjectExpansion(), changed);
-	if (changed) {
-		io::JsonValue members = io::JsonValue::make_object();
-		members.set("builds_on", io::JsonValue::make_string(choice.builds_on));
-		members.set("as_expansion", io::JsonValue::make_bool(choice.as_expansion));
-		members.set("expansion", io::JsonValue::make_string(choice.name));
-		members.set("base_project", io::JsonValue::make_string(choice.base_project));
-		window_requests::set_workspace(workspace, "new_project", std::move(members));
+	// The install's games: its base game, then each of its expansions, once it is checked.
+	const InstallCheck *check = found ? check_.answer(install_.text) : nullptr;
+	std::vector<InstallCheck::Expansion> installed;
+	if (check) installed = check->expansions;
+	else if (!install_.text[0])
+		for (const ProjectView::InstallExpansion &each : v.project.new_project_expansions) installed.push_back({ each.name, each.title });
+	const std::string base_name = base_game_name(check);
+	const InstallCheck::Expansion *chosen = nullptr;
+	for (const InstallCheck::Expansion &each : installed)
+		if (strutil::iequals(each.name, form.installed)) chosen = &each;
+	const std::string chosen_words = form.installed.empty() ? base_name
+	                                 : chosen               ? installed_words(*chosen)
+	                                                        : form.installed + " (not in the game install)";
+	// The install's game the project is or changes: its base game, or an installed expansion.
+	const auto game_combo = [&](const char *label, bool projects) {
+		const std::string shown = projects && form.on_project ? std::string("A project of yours") : chosen_words;
+		if (!ImGui::BeginCombo(label, shown.c_str())) return;
+		const bool base_now = form.installed.empty() && !(projects && form.on_project);
+		if (ImGui::Selectable((base_name + " (the base game)").c_str(), base_now) && !base_now) {
+			io::JsonValue members = io::JsonValue::make_object();
+			members.set("installed", io::JsonValue::make_string(""));
+			members.set("on_project", io::JsonValue::make_bool(false));
+			window_requests::set_workspace(workspace, "new_project", std::move(members));
+		}
+		for (const InstallCheck::Expansion &each : installed) {
+			// Only what the game can mount by its name is offered (expansion_name_problem's rule for an installed one).
+			if (!expansion_name_problem(each.name, ExpansionNameUse::BuildsOn).empty()) continue;
+			const bool now = strutil::iequals(each.name, form.installed) && !(projects && form.on_project);
+			if (ImGui::Selectable(installed_words(each).c_str(), now) && !now) {
+				io::JsonValue members = io::JsonValue::make_object();
+				members.set("installed", io::JsonValue::make_string(each.name));
+				members.set("on_project", io::JsonValue::make_bool(false));
+				window_requests::set_workspace(workspace, "new_project", std::move(members));
+			}
+		}
+		if (projects && ImGui::Selectable("A project of yours (its base game)...", form.on_project) && !form.on_project) {
+			io::JsonValue members = io::JsonValue::make_object();
+			members.set("installed", io::JsonValue::make_string(""));
+			members.set("on_project", io::JsonValue::make_bool(true));
+			window_requests::set_workspace(workspace, "new_project", std::move(members));
+		}
+		ImGui::EndCombo();
+	};
+	// The base game's project an expansion stands on: a folder, Browse..., the one beside it offered.
+	const auto base_field = [&](const char *tip) {
+		const ui_kit::PathField base = ui_kit::path_field("Base game's project", base_.text, sizeof(base_.text), "Browse...##base", 0.0f, allowed);
+		if (base.edited) set("base_project", io::JsonValue::make_string(base_.sent()));
+		if (base.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectBase));
+		ui_kit::tooltip(tip);
+	};
+	const auto name_field = [&] {
+		if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
+	};
+	std::string why; // why Create waits ("" it does not)
+	std::string stock_title = base_name;
+	switch (form.making) {
+	case Making::Stock:
+		game_combo("Game", false);
+		ui_kit::tooltip("Which game of the install the project is: its base game, or one of its expansions, made on the "
+		                "base game's project.");
+		if (!form.installed.empty()) {
+			stock_title = chosen && !chosen->title.empty() ? chosen->title : form.installed;
+			base_field(("Your " + base_name + " project's folder: " + form.installed + " is made on it, as the game installs "
+			            "it over " + base_name + ".").c_str());
+			if (form.base_project.empty()) {
+				why = "Make " + base_name + " first: " + stock_title + " is made on its project. Then name its folder here.";
+				ui_kit::refusal_text(why);
+			}
+		}
+		if (!found && why.empty())
+			why = words.empty() ? std::string("The game install is being checked.") : "A game you own is made from its game install.";
+		break;
+	case Making::Mod: {
+		game_combo("Changes", true);
+		ui_kit::tooltip("The game the mod changes: the install's base game, one of its expansions, or a project of yours as "
+		                "the base game.");
+		if (form.on_project) {
+			base_field("Your project the mod changes, a new game's folder (relative to the mod's, as ../My Game): its export "
+			           "is the base game the mod imports from, builds over and plays over.");
+			if (form.base_project.empty()) {
+				why = "Name the folder of your project the mod changes.";
+				ui_kit::refusal_text(why);
+			}
+		}
+		name_field();
+		if (ImGui::InputText("Short name", name_.text, sizeof(name_.text))) set("expansion", io::JsonValue::make_string(name_.sent()));
+		ui_kit::tooltip("The mod's folder, expansion\\<name>\\, and what a player types to play it: /exp <name>.");
+		std::string problem = expansion_name_problem(form.expansion, ExpansionNameUse::Own);
+		// A mod of a project's base game is weighed against that game's export as New project weighs it.
+		if (problem.empty() && !form.on_project)
+			for (const InstallCheck::Expansion &each : installed)
+				if (strutil::iequals(each.name, form.expansion)) problem = "The game install has an expansion named " + each.name + " already.";
+		if (!problem.empty()) {
+			ui_kit::refusal_text(problem);
+			if (why.empty()) why = problem;
+		}
+		break;
 	}
+	case Making::Game: name_field(); break;
+	}
+	const ui_kit::PathField folder = ui_kit::path_field("Folder", folder_.text, sizeof(folder_.text), "Browse...##folder", 0.0f, allowed);
+	if (folder.edited) set("dir", io::JsonValue::make_string(folder_.sent()));
+	if (folder.browse) workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
+	ui_kit::tooltip("The folder is made if it does not exist; it must not hold a project already.");
 	// A folder named that holds no install refuses the project (the session says why, as it checks the
 	// folder again); none at all is a project of the files from the disk; one not checked yet is the session's
 	// to check.
 	const bool install_ok = install_.text[0] == '\0' || found || words.empty();
+	if (why.empty() && !install_ok) why = "Name a folder that holds the game, or none.";
+	if (why.empty() && form.making != Making::Stock && form.title.empty()) why = "Name it first.";
+	if (why.empty() && form.dir.empty()) why = "Choose its folder first.";
 	// Create raises what the session holds of the form (what a client set, whole), not the fields' copies.
 	const std::string install = form.install_named ? form.game_install : v.project.editor_install;
-	const bool ready = !form.title.empty() && !form.dir.empty() && allowed && expansion_ok && install_ok;
+	const bool ready = allowed && why.empty();
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
-	if (!install_ok && !words.empty()) ui_kit::tooltip("Name a folder that holds the game, or none.");
-	if (create) {
-		const ProjectExpansion expansion = choice.value();
-		EditorRequest made = expansion.standalone() ? request::new_project(form.dir, form.title)
-		                                            : request::new_expansion_project(form.dir, form.title, expansion.name,
-		                                                                             expansion.builds_on, true,
-		                                                                             expansion.base_project);
-		made.game_install = install;
-		workspace.request(std::move(made));
-	}
+	if (!why.empty()) ui_kit::tooltip(why);
+	else if (form.making == Making::Stock)
+		ui_kit::tooltip("Makes the project and imports every file of " + stock_title + " into it, the game's own files "
+		                "as it ships them.");
+	if (create) workspace.request(new_project_request(form, install, stock_title));
 	return create;
 }
 
@@ -253,7 +404,7 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 		ImGui::TableNextColumn();
 		ImGui::SeparatorText("New project");
 		// A field leaves room for its label and its Browse... beside it.
-		ImGui::PushItemWidth(-(ui_kit::text_width("Game install") + ui_kit::button_width("Browse...") +
+		ImGui::PushItemWidth(-(ui_kit::text_width("Base game's project") + ui_kit::button_width("Browse...") +
 		                       ImGui::GetStyle().ItemSpacing.x * 3.0f));
 		form.draw(workspace);
 		ImGui::PopItemWidth();
