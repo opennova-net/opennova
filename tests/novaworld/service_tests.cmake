@@ -155,8 +155,8 @@ target_compile_definitions(jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE
 opennova_add_pg_test(jobs COMMAND jobs_test)
 set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 
-# What each program's tasks use (apps/novaworld_common/program/program_usage.h; migration
-# 0018_program_usage.sql) over fixture trees standing in for a container's kernel files and
+# What each program's tasks use (apps/novaworld_common/program/program_usage.h) over
+# fixture trees standing in for a container's kernel files and
 # a migrated database: the cgroup's CPU limit (v2, v1, none), the sampler (no CPU for its
 # first minute, then the percent of the task's limit; the memory's limit from the cgroup,
 # the task or the machine; the network's bytes; null where nothing reads), the task found
@@ -360,21 +360,22 @@ target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(host_key COMMAND host_key_test)
 
-# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006, 0009,
-# 0012, 0020 and 0021): its instances (two at one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner
-# the routes and the supervisor queue for it (answered from the session rows as the lobby would,
-# bearing the session's lobby_id, a forget_owner one per instance), each instance's take in
-# insert order with the expiry, a session's delete taking its commands, clear_unheld, and the
-# goodbyes a clean stop leaves (listed in their window, replaced by address, the older deleted). A
-# migrated database per case; runs on every service build.
+# The lobby's tables below the listener (net/novaworld/lobby_repository.h): its instances (two at
+# one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner the routes
+# and the supervisor queue for it (answered from the session rows as the lobby would, bearing the
+# session's lobby_id, a forget_owner one per instance), each instance's take in insert order with
+# the expiry, a session's delete taking its commands, clear_unheld, and the goodbyes a clean stop
+# leaves (listed in their window, replaced by address, the older deleted). A migrated database per
+# case; runs on every service build.
 add_executable(lobby_repository_test novaworld/lobby_repository_test.cpp)
 target_link_libraries(lobby_repository_test PRIVATE opennova_novaworld_service)
 target_include_directories(lobby_repository_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(lobby_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(lobby_repository COMMAND lobby_repository_test)
 
-# The schema backend/migrations builds and the seeds: tables, columns, keys, indexes and
-# the rules they hold, the applied list against the directory, the seeds' rows.
+# The schema backend/migrations builds (the one baseline) and the seeds: tables, columns,
+# keys, indexes and the rules they hold, the applied list against the directory, the seeds'
+# rows.
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -856,7 +857,7 @@ if(BUILD_NOVAWORLD_HTTP)
     set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
 
     # The hosted servers' stats (apps/novaworld_fleet/hosted/stats_sampler.h,
-    # stats_repository.h; migration 0004_server_stats.sql) on a migrated database and a
+    # stats_repository.h) on a migrated database and a
     # hand-stepped wall clock: one sample a minute of each live server (its listing's players
     # and mission, its link's scene, its agent's CPU, memory and egress: the counter's
     # differences, a restart of it counted from 0), the unique players counted and never
@@ -1130,10 +1131,10 @@ target_link_libraries(hosted_agent_protocol_test PRIVATE opennova_novaworld_host
 target_include_directories(hosted_agent_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 
-# The games' rows (data_sets/data_set_repository.h, migrations 0011, 0013 and 0025, ADR 0064):
+# The games' rows (data_sets/data_set_repository.h, ADR 0064):
 # the seeded games and their projects' keys, a game's writes and refusals, trees, releases naming
 # their games, the servers' pins (hosted/model/hosted_repository.h), the holds' live rule against
-# the hosted servers' own, and the migration's mapping of the old columns.
+# the hosted servers' own.
 add_executable(data_set_repository_test novaworld/data_set_repository_test.cpp)
 target_link_libraries(data_set_repository_test PRIVATE
     opennova_novaworld_data_sets opennova_novaworld_hosting_model opennova_novaworld_service
@@ -1143,7 +1144,7 @@ target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR=
 opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
 set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 
-# The content store's rows (data_sets/content_repository.h, migration 0025, ADR 0069): the seeded
+# The content store's rows (data_sets/content_repository.h, ADR 0069): the seeded
 # games' projects and who lists them, a project made, renamed and gone with its game, the files a
 # store holds, pushes moving the head one at a time (the loser told the winner) and the history
 # paged.
@@ -1188,8 +1189,8 @@ add_dependencies(release_build_test opennova_project opennova_update_tool)
 opennova_add_pg_test(release_build COMMAND release_build_test)
 set_tests_properties(release_build PROPERTIES TIMEOUT 300)
 
-# The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h, migration
-# 0003_fleet.sql): a machine's row and its one-time token (its SHA-256 alone), every lifecycle
+# The fleet in the database (apps/novaworld_common/hosted/model/fleet_repository.h): a
+# machine's row and its one-time token (its SHA-256 alone), every lifecycle
 # move a compare-and-set, the bootstrap's redeem, the agent's secret, a sync's report and its
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
 # generation moving on, let go, read back for placement).

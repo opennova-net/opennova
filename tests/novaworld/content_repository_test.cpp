@@ -1,11 +1,10 @@
-// The content store's rows (apps/novaworld_common/data_sets/content_repository.h, migration 0025,
-// ADR 0069) on a migrated database of the test's own: the five seeded games' projects (the retail
-// ones private, each expansion on its base game) and who may list them, the runtime none; a
-// game's project made, renamed and refused through the games' rows (data_set_repository.h: a
-// duplicate key) and gone with its game; the files a store holds, each once and at its size;
-// pushes moving the head one at a time, the push that lost told the head that won, a game with
-// no project taking none; the history newest first, a page of it, and an author's name kept past
-// their account.
+// The content store's rows (apps/novaworld_common/data_sets/content_repository.h, ADR 0069) on a
+// migrated database of the test's own: the five seeded games' projects (the retail ones private,
+// each expansion on its base game) and who may list them, the runtime none; a game's project made,
+// renamed and refused through the games' rows (data_set_repository.h: a duplicate key) and gone
+// with its game; the files a store holds, each once and at its size; pushes moving the head one at
+// a time, the push that lost told the head that won, a game with no project taking none; the
+// history newest first, a page of it, and an author's name kept past their account.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"

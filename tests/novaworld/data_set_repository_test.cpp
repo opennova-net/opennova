@@ -1,24 +1,21 @@
-// The games' rows (apps/novaworld_common/data_sets/data_set_repository.h, migrations 0011, 0013
-// and 0025) on a migrated database of the test's own: the seeded games with their projects' keys,
+// The games' rows (apps/novaworld_common/data_sets/data_set_repository.h) on a migrated
+// database of the test's own: the seeded games (in their seeded order) with their projects' keys,
 // a game created, changed and refused (a duplicate login, a duplicate key, a duplicate
 // expansion, no base parent, an expansion building on it, in use); trees from building to ready
 // (the data set's current tree follows), what a start may pick and what may be pruned; releases
 // of their games validated (an upload naming none takes its base section's), published (the
 // previous one retired), retired, and a built one naming its game; the servers' pins, the
 // owner's update and the admin's update-all; the data sets' holds on the servers' rows reading
-// a server as live exactly when the hosted servers' own rule does; and the migration's mapping
-// of the old game and expansion columns onto the seeded rows.
+// a server as live exactly when the hosted servers' own rule does.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
-#include "common/test_paths.h"
 
 #include "data_sets/data_set_files.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/model/hosted_repository.h"
 
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -65,6 +62,11 @@ int test_data_sets() {
 	TEST_EXPECT(all.size() == 6);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	TEST_EXPECT(jo != 0 && jox != 0);
+	// The baseline seeds them in one order, so each keeps its id across a reset (the store names
+	// a project's files by its game's id: DEPLOY.md "Resetting the service database").
+	TEST_EXPECT(jo == 1 && seeded(db, "Delta Force Xtreme 2") == 2 &&
+			seeded(db, "OP: Acid Gambit") == 3 && jox == 4 && seeded(db, "OpenNova runtime") == 5 &&
+			seeded(db, "OP: Nifty Package") == 6);
 	const auto jo_row = find_data_set(db, jo);
 	TEST_EXPECT(jo_row && jo_row->kind == DataSetKind::Base && jo_row->title == "jo" &&
 			jo_row->game == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
@@ -373,9 +375,6 @@ int test_pins() {
 	return 0;
 }
 
-// The migration's mapping: a server on the old game slug and expansion code lands on the
-// seeded rows. Migrations 0001-0010 and 0012 first, a row written as the old service wrote
-// it, then 0011 and 0013 over it (0013's seeded updater products with it).
 // The data sets' holds read the hosted servers' rows with a copy of their live rule
 // (data_set_repository.cpp, which stands below the hosted servers' model): for every state,
 // a server pinning a tree holds it exactly while is_live calls the server live.
@@ -398,49 +397,6 @@ int test_live_rule() {
 		TEST_EXPECT((count_live_servers_of(db, jo) == 1) == is_live(state));
 		db.exec("DELETE FROM hosted_servers WHERE id = $1;", { BindValue(server) });
 	}
-	return 0;
-}
-
-int test_migration_mapping() {
-	test_db::Options options;
-	options.migrate = false;
-	TestDatabase tdb(options);
-	Database db = tdb.open();
-	namespace fs = std::filesystem;
-	const fs::path all = test_db::source_dir() / "backend" / "migrations";
-	const fs::path staged = fs::temp_directory_path() / test_paths_unique("opennova_ds_migrations");
-	fs::remove_all(staged);
-	fs::create_directories(staged);
-	// 0025 (the content store) seeds its projects from the data sets, so it waits for them too.
-	for (const auto &entry : fs::directory_iterator(all)) {
-		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 && name.rfind("0025", 0) != 0)
-			fs::copy_file(entry.path(), staged / name);
-	}
-	db::run_migrations(db, staged);
-	db.exec("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-			"max_score, respawn, start_delay, missions, game, expansion) "
-			"VALUES ('running', 'old', 32, 30, 50, 5, 5, 0, 'a.bms', 'jop_2_consumer', 'jox01');");
-	db.exec("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-			"max_score, respawn, start_delay, missions, game, expansion) "
-			"VALUES ('stopped', 'old2', 32, 30, 50, 5, 5, 0, 'a.bms', 'dfx2_consumer', '');");
-	fs::copy_file(all / "0011_data_sets.sql", staged / "0011_data_sets.sql");
-	fs::copy_file(all / "0013_releases.sql", staged / "0013_releases.sql");
-	fs::copy_file(all / "0025_content.sql", staged / "0025_content.sql");
-	db::run_migrations(db, staged);
-	fs::remove_all(staged);
-	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
-	const int64_t dfx2 = seeded(db, "Delta Force Xtreme 2");
-	const auto rows = db.query("SELECT game_name, data_set_id, expansion_id, base_tree_id, update_requested "
-							   "FROM hosted_servers ORDER BY id;");
-	TEST_EXPECT(rows.size() == 2);
-	TEST_EXPECT(rows[0].as_int(1) == jo && rows[0].as_int(2) == jox && rows[0].is_null(3) && rows[0].as_int(4) == 0);
-	TEST_EXPECT(rows[1].as_int(1) == dfx2 && rows[1].is_null(2));
-	TEST_EXPECT(db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'hosted_servers' "
-						 "AND column_name IN ('game', 'expansion');")
-					.empty());
-	TEST_EXPECT(find_data_set(db, jo)->updater_login == "JOTRus" && find_data_set(db, jox)->updater_login == "JOEus" &&
-			find_data_set(db, dfx2)->updater_login == "DFX2");
 	return 0;
 }
 
@@ -487,8 +443,6 @@ int main(int argc, char **argv) {
 	if (int rc = test_pins())
 		return rc;
 	if (int rc = test_live_rule())
-		return rc;
-	if (int rc = test_migration_mapping())
 		return rc;
 	std::printf("data_set_repository: ok\n");
 	return 0;

@@ -17,7 +17,7 @@ add_library(opennova_novaworld_web_core STATIC
     # (ONNET_NOVALOGIC_LOBBIES).
     lobby_routes.cpp
     novalogic_lobbies.cpp
-    # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
+    # CD keys: the keys, the DFX2 activations, their routes.
     cd_keys.cpp
     cd_key_routes.cpp
     # Web's shared state in Redis: the client and its pool, and over them

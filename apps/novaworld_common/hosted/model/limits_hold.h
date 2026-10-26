@@ -10,7 +10,7 @@
 // /api/admin/billing/reconcile {"force_limits": true}) makes the next pass
 // apply them past the brake, once.
 //
-// One row (hosted_limits_hold, migration 0008), so the supervisor (the
+// One row (hosted_limits_hold), so the supervisor (the
 // fleet's), the billing sync's reconcile (a worker's) and the admin's
 // routes (the web's) share it through the database alone; each read-modify-
 // write is one transaction on the row. Each function throws db::Error on a

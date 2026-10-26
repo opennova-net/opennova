@@ -1,7 +1,7 @@
 #pragma once
 
-// The hosted servers' rows (hosted_servers, hosted_server_events; the
-// baseline, and 0003_fleet.sql's place in the fleet): the requests the site
+// The hosted servers' rows (hosted_servers, hosted_server_events,
+// backend/migrations/0001_baseline.sql): the requests the site
 // makes, the state each server is in, every transition with what caused it,
 // and which listing is a hosted server's. The supervisor (supervisor.h) and the
 // routes share it; every write that spans statements is one db::Transaction,
@@ -84,7 +84,7 @@ struct HostedServer {
 	std::optional<int64_t> base_tree_id;
 	std::optional<int64_t> expansion_tree_id;
 	bool update_requested = false;
-	// Its place in the fleet (0003_fleet.sql): the fleet_machines row and the
+	// Its place in the fleet: the fleet_machines row and the
 	// slot it holds while live (an ended row keeps where it last ran), the game
 	// port its files were rendered with, how many starts it has had (its
 	// container's generation) and the serve image its start pinned.
@@ -239,7 +239,7 @@ void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
-// --- A server's starts (hosted_server_starts, 0016_fleet_observability.sql) ---
+// --- A server's starts (hosted_server_starts) ---
 //
 // A row is one owner's request; a generation is one of its runs: made with its
 // slot (fleet_repository.h assign_slot), its image, trees and log stream written

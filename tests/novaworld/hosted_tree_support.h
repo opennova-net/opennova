@@ -157,7 +157,7 @@ inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_s
 	return id;
 }
 
-// The seeded data set named `display_name` (migration 0011's rows), 0 for none.
+// The seeded data set named `display_name` (the baseline's rows), 0 for none.
 inline int64_t seeded_data_set(opennova::db::Database &db, const char *display_name) {
 	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;",
 			{ opennova::db::BindValue(display_name) });

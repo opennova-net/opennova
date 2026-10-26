@@ -1,6 +1,6 @@
 #pragma once
 
-// The content store's rows (backend/migrations/0025_content.sql, ADR 0069): each game's project's
+// The content store's rows (backend/migrations/0001_baseline.sql, ADR 0069): each game's project's
 // linear history of revisions (each a manifest in the object store,
 // base/content/content_manifest.h) and the files its store holds. A project is its game's
 // data_sets row (data_set_repository.h DataSetRow: a game with a key has one, the key the routes'
@@ -45,7 +45,7 @@ struct ContentRevision {
 
 // --- projects ---
 
-// A project's key: 1 to 16 of A-Z, 0-9 and _ (0025's check).
+// A project's key: 1 to 16 of A-Z, 0-9 and _ (data_sets.key's check).
 bool valid_key(std::string_view key);
 
 // --- revisions ---

@@ -376,7 +376,8 @@ private:
 // is edited in place and a database that applied it is reset (backend/README.md).
 // A missing directory applies nothing.
 //
-// Naming: NNNN_descriptive_name.sql (0001_baseline.sql, 0002_billing.sql).
+// Naming: NNNN_descriptive_name.sql; until 1.0 the service's schema is the one
+// 0001_baseline.sql (backend/README.md).
 //
 // A failing file throws and stops the run: its transaction rolls back, it is
 // not recorded, and the files after it are not applied.

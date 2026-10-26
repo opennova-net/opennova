@@ -4,8 +4,7 @@
 // CloudWatch reads go to stub CommandRunners (infra_aws_stub.h). Rows are planted as the
 // fleet and the programs leave them: a hosted server's minutes and hours (cumulative
 // network counters, one starting over, a gap; tick health), a machine's, and the programs'
-// tasks (web's reporting one, one gone an hour ago, the worker's), in migration 0016's and
-// 0018's rows.
+// tasks (web's reporting one, one gone an hour ago, the worker's), in their tables' rows.
 //
 //   - refused without an admin; a subject, range, id or task that is none 400 or 404;
 //   - a server: its slot's limits, its minutes with the rates between them (none across a

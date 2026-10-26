@@ -1,6 +1,6 @@
 #pragma once
 
-// The service's background jobs in the database (backend/migrations/0007_jobs.sql):
+// The service's background jobs in the database (backend/migrations/0001_baseline.sql):
 // a queue in the river/Oban/good_job pattern, so the work no request or pass
 // waits on (the fleet's cloud calls, the billing sync, the outbound mail, the
 // prunes) is written with the change that causes it and outlives a restart of

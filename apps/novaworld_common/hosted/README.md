@@ -33,8 +33,8 @@ this directory's.
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
-  `backend/migrations/0011_data_sets.sql`). A data set is a row, one **game** (migrations
-  0011, 0013 and 0025 seed the catalog's, and an admin may make more): a **base**
+  `backend/migrations/0001_baseline.sql`). A data set is a row, one **game** (the baseline seeds the
+  catalog's, and an admin may make more): a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
   `dfx2`, and its `game`, the `games` row whose lobby it lists in) or an **expansion** of a
   base (its `expansion_code`, `/exp jox01`); a third kind, `update`, is an updater product
@@ -54,7 +54,7 @@ this directory's.
 ## The fleet
 
 - **Machines and slots** (`model/placement.*`, `model/fleet_repository.*`,
-  `backend/migrations/0003_fleet.sql`). A **shared machine** packs up to
+  `backend/migrations/0001_baseline.sql`). A **shared machine** packs up to
   `ONNET_FLEET_SHARED_SLOTS` servers of any account; a **dedicated machine** runs exactly one,
   its owner's, launched for it and ended when it stops or moves to a shared machine
   (the owners' limits, below). A **slot** is one server's
@@ -64,7 +64,7 @@ this directory's.
   `fleet_machines` row moves by compare-and-set: `launching` → `booting` (the cloud runs
   it) → `ready` (its agent reports) → `draining` → `ending` → `ended`, or `failed`, and
   `lost` once its agent has been silent 60 s. Every move writes its event in the same
-  statement (`fleet_machine_events`, `backend/migrations/0016_fleet_observability.sql`:
+  statement (`fleet_machine_events`, `backend/migrations/0001_baseline.sql`:
   from, to, the reason; a launch the cloud refused names its error code, `the launch
   failed (VcpuLimitExceeded)`, from the AWS CLI's text), and so does each new log stream
   of the machine's agent (`log stream <name>`, from and to its state). What the agent says
@@ -92,8 +92,7 @@ this directory's.
   slot is assigned (the machine and slot), its image, trees and log stream
   (`<server id>/g<generation>`) written when it renders, `running_at` once its agent
   reports it running, and ended with its cause (`crash`, `timeout`, `fleet`, `owner_stop`
-  and `admin_stop` (who asked its stop), `stop` (the service's own stop, and every stop
-  before `0021_stop_causes.sql`), `update`, `limits`, `no_data`, `link_lost`,
+  and `admin_stop` (who asked its stop), `stop` (the service's own stop), `update`, `limits`, `no_data`, `link_lost`,
   `data_unavailable`) and how its container
   ended (its exit code, OOM flag and the server's exit line, or the agent's reason it never
   started). The stats' restarts are
@@ -443,7 +442,7 @@ releases the held ones.
 
 ## Stats
 
-`stats_sampler.*`, `model/stats_repository.*`, `backend/migrations/0004_server_stats.sql`. The
+`stats_sampler.*`, `model/stats_repository.*`, `backend/migrations/0001_baseline.sql`. The
 first supervisor pass of each minute samples every live server into
 `hosted_server_samples`: its state, its listing's players and mission, its admin link's
 scene, its container's CPU (a share of the slot's CPUs) and memory as its agent last
@@ -552,7 +551,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it, 0024_second_listing_reports.sql) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end, and for a limits stop before `0021_stop_causes.sql`), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
@@ -583,7 +582,7 @@ writes need the CSRF header.
 ## Games
 
 **Games** (`apps/novaworld_web/data_sets/`, ADR 0064): the data sets as rows
-(`../data_sets/data_set_repository.h`, migrations 0011, 0013 and 0025), each one game with, when
+(`../data_sets/data_set_repository.h`, `backend/migrations/0001_baseline.sql`), each one game with, when
 it has a key, its project (`../data_sets/content_repository.h`; the editor's routes,
 `apps/novaworld_web/content/content_routes.h`, push and pull its revisions by that key), and
 the update releases (1SFS packages) the data program validates and builds into each game's tree

@@ -9,7 +9,7 @@
 // packed trees (hosted_tree_support.h: resource.pff, localres.pff holding
 // serve_test_support.h's deathmatch map, language.pff holding the game text,
 // version.txt), one per data set: the seeded Joint Operations and Delta Force
-// Xtreme 2 rows (migration 0011) each given a ready tree in a local object
+// Xtreme 2 rows (the baseline's) each given a ready tree in a local object
 // store (ADR 0064), which the agent fetches into its trees root (--trees-root)
 // from the file:// URL the sync's reply names, checks against the manifest and
 // reports present. Built only with BUILD_NOVAWORLD_HTTP; Linux (the agent is).

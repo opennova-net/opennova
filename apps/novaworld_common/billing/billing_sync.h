@@ -8,7 +8,7 @@
 // what it read, so an event's body is never trusted and the order events arrive
 // in does not matter. Its state (the prices as last checked, the last
 // reconcile and what it found, each waiting customer's backoff) is rows
-// (0007_jobs.sql billing_sync_state, billing_sync_backoff), read by the routes
+// (billing_sync_state, billing_sync_backoff), read by the routes
 // and the heartbeat wherever they run. Service policy over Stripe's REST API,
 // not a port.
 //

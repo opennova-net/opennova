@@ -51,8 +51,8 @@
 // (supervisor.h) syncs it every pass with its running servers: a link comes up
 // when a server reaches running, is replaced when a restart rendered a new
 // login, and goes down as the server leaves running (at stopping, or a crash);
-// then it publishes each link's status to its row (hosted_admin_links,
-// migration 0008), which the web routes read (admin_link_status). The routes'
+// then it publishes each link's status to its row (hosted_admin_links),
+// which the web routes read (admin_link_status). The routes'
 // commands reach a link through a table the fleet drains (console_queue.h,
 // console_drain.h). Crow-free.
 

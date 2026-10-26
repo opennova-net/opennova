@@ -1,6 +1,6 @@
 #pragma once
 
-// What each program's tasks use (backend/migrations/0018_program_usage.sql):
+// What each program's tasks use (backend/migrations/0001_baseline.sql):
 // every program's task samples itself once a minute on its main loop
 // (program.h run_main_loop) and writes its own program_samples row: its CPU
 // over the minute in percent of its CPU limit, its memory and the most it may

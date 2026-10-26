@@ -1226,8 +1226,9 @@ other's bucket.
 
 ### Resetting the service database
 
-Until 1.0 the service database is disposable: a migration is edited in place, and a
-deployment whose database applied the old file is reset when it takes the change. The boot
+Until 1.0 the service database is disposable: its one migration,
+`backend/migrations/0001_baseline.sql`, is edited in place, and a deployment whose database
+applied the old file is reset when it takes the change. The boot
 still refuses a recorded migration whose SHA-256 changed, which is how a database that needs
 the reset shows, and ignores a recorded one the program does not have (`backend/README.md`,
 "Migrations until 1.0"). `db reset-db` takes `--yes-drop-database [--orphan-subscriptions]
@@ -1252,7 +1253,7 @@ first site admin again (section 4). On prod it asks for `prod` besides
 terminates every machine no row names (so every hosted server ends) and records the static
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
 in the ops bucket under `data/content/<game id>/` (the store names a project's files by its
-game's id, never its key), and the migrations seed the six games in one order, so each seeded
+game's id, never its key), and the baseline seeds the six games in one order, so each seeded
 game keeps its id and a project pushed again uploads none it already had, while a game an admin
 made has its files under an id the new database may give another game: remove those
 (`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
@@ -1260,7 +1261,9 @@ made has its files under an id the new database may give another game: remove th
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
 database does not reach stay until removed by hand.
 
-A release that changed a migration goes out in this order (staging's, for #1253):
+A release that changed the migration goes out in this order (staging's, for #1253; the release
+that squashed the 25 migrations into the one baseline goes out the same way, its database
+refusing the changed `0001_baseline.sql`):
 
 ```bash
 D='--deployment staging'
@@ -1327,7 +1330,7 @@ attention list shows the shortfall.
 ### The games
 
 Admins manage the games in the admin's **Games** area (`/admin/games`, a game's page
-`/admin/games/<key or id>`; ADR 0071); migrations 0011, 0013 and 0025 seed the catalog, and an
+`/admin/games/<key or id>`; ADR 0071); the baseline migration seeds the catalog, and an
 admin may create more. A game is of kind base (JO, DFX2, OP: Acid Gambit: its title and the
 lobby it lists in), expansion (Escalation, code `jox01`, under JO; OP: Nifty Package, code
 `nifty`, under OP: Acid Gambit) or update (the OpenNova runtime, `ONRUNTIME`: no project and
@@ -1436,7 +1439,7 @@ into its own bucket.
    join ECS cluster opennova-<deployment>-fleet` (a worker whose driver settings are
    incomplete does not boot: `app logs worker` names what is missing).
 
-6. **The games.** They are there already: migrations 0011, 0013 and 0025 seed JO, its
+6. **The games.** They are there already: the baseline migration seeds JO, its
    Escalation (`jox01`), DFX2, OP: Acid Gambit, its OP: Nifty Package (`nifty`) and the
    runtime, with their updater logins and project keys (make none again: a second base is a
    duplicate row, and an expansion code, updater login or project key already held is

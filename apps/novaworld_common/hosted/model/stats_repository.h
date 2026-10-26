@@ -1,7 +1,7 @@
 #pragma once
 
-// The hosted servers' stats in the database (backend/migrations/
-// 0004_server_stats.sql, 0016_fleet_observability.sql): the per-minute samples
+// The hosted servers' stats in the database
+// (backend/migrations/0001_baseline.sql): the per-minute samples
 // the sampler writes (stats_sampler.h), their hourly rollups, each machine's
 // egress by the calendar month, each machine's own minutes and hours (its
 // agent's reports of its use), and the reads the stats routes answer from (stats_routes.h):

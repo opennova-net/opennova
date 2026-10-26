@@ -61,7 +61,7 @@ inline constexpr int64_t kWall = 1760000000;
 // The serve image the rigs' starts pin.
 inline constexpr const char *kServeImage = "ghcr.io/opennova-net/opennova-serve:sha-test";
 
-// The seeded data sets (migration 0011: Joint Operations, Escalation under it,
+// The seeded data sets (the baseline's: Joint Operations, Escalation under it,
 // Delta Force Xtreme 2) and the ready tree each got.
 struct SeededData {
 	int64_t jo = 0;

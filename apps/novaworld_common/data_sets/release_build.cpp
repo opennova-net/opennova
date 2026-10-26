@@ -112,7 +112,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	}
 	plan.data_set = *data_set;
 	// A data set an admin made carries no product name: ours is named as its data set, the game
-	// run by the runtime's executable (as 0025 names the seeded ones).
+	// run by the runtime's executable (as the baseline names the seeded ones).
 	if (plan.data_set.product_name.empty() && !plan.data_set.retail) {
 		plan.data_set.product_name = plan.data_set.display_name;
 		if (plan.data_set.kind == DataSetKind::Base)

@@ -3,7 +3,7 @@
 // What the web routes read of the hosted servers' admin links (the links
 // themselves are the fleet program's, apps/novaworld_fleet/hosted/admin_link.h):
 // a link's state and status as the fleet last published it to its row
-// (hosted_admin_links, migration 0008), and the shapes a console command goes
+// (hosted_admin_links), and the shapes a console command goes
 // and comes back in through the console queue (console_queue.h): its options,
 // its outcome and its replies. Crow-free. Service policy, not a port.
 

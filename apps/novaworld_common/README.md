@@ -256,7 +256,7 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
 ## Background jobs
 
 The work no request or pass waits on runs as jobs on one queue in the database
-(`jobs/`, `backend/migrations/0007_jobs.sql`, the river/Oban/good_job pattern): the
+(`jobs/`, `backend/migrations/0001_baseline.sql`, the river/Oban/good_job pattern): the
 fleet's cloud calls, the billing sync, the outbound mail and the prunes. Service
 policy, not a port.
 
@@ -355,8 +355,7 @@ The replies' times are ISO 8601 UTC, with `Cache-Control: no-store`.
 
 ## The fleet program
 
-`apps/novaworld_fleet/election.*` (migrations `0008_controller_state.sql` and
-`0014_fleet_leader.sql`, which renamed its row's table): of the
+`apps/novaworld_fleet/election.*` (its row, `fleet_leader`): of the
 fleet processes (`apps/novaworld_fleet/main.cpp`), the one that runs the machines' internal
 listener, the hosted servers' supervisor (with its admin links) and the console drain,
 elected among them. It runs no job pool and no scheduler: the periodic jobs are each
@@ -409,7 +408,7 @@ The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
 (3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
 LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
 Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
-bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set migration 0013 seeds, has no bit here).
+bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set the baseline seeds, has no bit here).
 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
@@ -495,8 +494,8 @@ instances" below), with their rows. A lobby's start clears the rows no instance 
 registers an instance of its own: a previous run's rows went at its clean stop, or go
 with its stale row), and no other program's boot touches them.
 
-**Lobby instances** (`backend/migrations/0009_lobby_instances.sql`,
-`0012_lobby_instances_share_endpoint.sql`, `0020_lobby_live_view.sql`, `lobbydb::register_instance` and its neighbours;
+**Lobby instances** (`lobby_instances` in `backend/migrations/0001_baseline.sql`,
+`lobbydb::register_instance` and its neighbours;
 service policy). Each lobby process is one instance, a row of its own, and as many lobbies
 run as the deployment wants, all behind one lobby address (`ONNET_LOBBY_ENDPOINT`), which
 every lobby announces alike: on ECS the network load balancer's, the gate's Elastic IP and
@@ -508,7 +507,7 @@ port) and keeps each flow on one task.
   ServerGoodBye from the lobby address, or 240 s of silence), so with one address a host
   whose lobby went away is listed again on a live one with no restart; retail self-hosts
   recover the same way.
-- **The goodbyes** (`0022_lobby_goodbyes.sql`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
+- **The goodbyes** (`lobby_goodbyes`, `lobbydb::leave_goodbyes` / `list_goodbyes`;
   service policy): a NAPI server that stops sends each connection its ServerGoodBye burst
   (`{1, 9, 0, 0, "", 0, "NP.C:SH:STOP"}`), but behind the balancer a stopping lobby's flows
   ended before its stop's signal, so its burst would reach no one. Its clean stop leaves a
@@ -557,7 +556,7 @@ port) and keeps each flow on one task.
 | `GET /api/admin/lobbies` | admin | the instances by id, each with its state, the task its lobby runs as (`task_id`, the program usage page's key), times and session count |
 | `POST /api/admin/lobbies/<id>/drain` | admin | 200; 404 |
 
-**The lobby's tables** (`backend/migrations/0006_lobby_commands.sql`, `0020_lobby_live_view.sql`,
+**The lobby's tables** (`backend/migrations/0001_baseline.sql`,
 `engine/net/novaworld/lobby_repository.h`; service policy):
 
 - **`lobby_sessions`**, one row per lobby session, which the listener alone writes:
@@ -765,7 +764,7 @@ site. Everything here is service policy (`billing/`).
   `LANG`, `LC_*`, `TZ` alone). Each request pins the API version
   (`kStripeApiVersion`, basil), carries an idempotency key on a POST, and is tried once
   more on no answer, a 429 or a 5xx. The key and the webhook secret are log secrets.
-- **The cache** (`billing/billing_repository.*`, `backend/migrations/0002_billing.sql`):
+- **The cache** (`billing/billing_repository.*`, `backend/migrations/0001_baseline.sql`):
   each account's Stripe customer (`billing_customers`), every subscription of it as
   Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine`,
   `static_address` or `unknown` for a price no setting names, read from its price; its status and since when;
@@ -1382,7 +1381,7 @@ the known addresses and the credentials generation below.
 ## Account email and password resets
 
 Every account a person registers has an email address (`players.email`,
-`backend/migrations/0005_account_email.sql`): the welcome mail goes there, and so do the
+`backend/migrations/0001_baseline.sql`): the welcome mail goes there, and so do the
 password reset links. Service policy, not a port: retail's NovaWorld accounts had no
 email the service kept.
 

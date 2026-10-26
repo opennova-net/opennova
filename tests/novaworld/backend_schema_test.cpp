@@ -69,7 +69,8 @@ int test_migrations_create_expected_tables() {
 		if (e.path().extension() == ".sql") listing.push_back(e.path().filename().string());
 	}
 	std::sort(listing.begin(), listing.end());
-	TEST_EXPECT(!listing.empty() && r.applied == listing);
+	// The one baseline (backend/README.md "Migrations until 1.0").
+	TEST_EXPECT(listing == std::vector<std::string>{ "0001_baseline.sql" } && r.applied == listing);
 	const auto recorded = db.query("SELECT filename FROM _schema_migrations ORDER BY filename;");
 	TEST_EXPECT(recorded.size() == listing.size());
 	for (size_t i = 0; i < listing.size(); ++i) TEST_EXPECT(recorded[i].as_text(0) == listing[i]);
@@ -660,14 +661,14 @@ int test_hosted_server_game() {
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
 	        "max_score, respawn, start_delay, missions) "
 	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
-	// A server runs a data set by row (0011_data_sets.sql): the seeded Joint Operations and
-	// its Escalation; the old game and expansion columns are gone.
+	// A server runs a data set by row: the seeded Joint Operations and its Escalation; no game
+	// or expansion column.
 	const auto rows = db.query("SELECT data_set_id, team_ff, own_machine, update_requested FROM hosted_servers "
 	                           "WHERE game_name = 'Default';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].is_null(0));
 	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0 && rows[0].as_int(3) == 0);
 	TEST_EXPECT(!has_column(db, "hosted_servers", "game") && !has_column(db, "hosted_servers", "expansion"));
-	// A slot's report carries why its container never started (0011).
+	// A slot's report carries why its container never started.
 	TEST_EXPECT(has_column(db, "fleet_slot_reports", "reason"));
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, data_set_id, expansion_id, game_name, "
 	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
@@ -686,9 +687,9 @@ int test_hosted_server_game() {
 	return 0;
 }
 
-// A game's project on its data_sets row (0025_content.sql): every seeded game keyed (our own
-// public, the retail ones private) but the runtime; a key and its visibility come together, a key
-// is unique and of its shape, and the runtime takes none. The project tables and the releases
+// A game's project on its data_sets row: every seeded game keyed (our own public, the retail ones
+// private) but the runtime; a key and its visibility come together, a key is unique and of its
+// shape, and the runtime takes none. The project tables and the releases
 // name the game by its row.
 int test_game_projects() {
 	TestDatabase scratch;
@@ -723,11 +724,10 @@ int test_game_projects() {
 	return 0;
 }
 
-// The billing tables (0002_billing.sql) and the comp grants beside them
-// (0017_capacity_addresses.sql): a grant's range and items, an account's delete
-// taking its grants, a subscription's item and tier rules, the indexes, an
-// account's delete taking its customer row and leaving its subscriptions with no
-// account, one customer row per account and per Stripe customer.
+// The billing tables and the comp grants beside them: a grant's range and items, an account's
+// delete taking its grants, a subscription's item and tier rules, the indexes, an account's
+// delete taking its customer row and leaving its subscriptions with no account, one customer row
+// per account and per Stripe customer.
 int test_billing_tables() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -783,7 +783,7 @@ int test_billing_tables() {
 	return 0;
 }
 
-// The account email (0005_account_email.sql): players.email, NULL for none
+// The account email: players.email, NULL for none
 // (as many accounts as like), stored lowercased (an upper-case or empty one is
 // refused) and one account's (a unique index); the password reset links, one
 // per account (a second row for it is refused, the token's hash unique), gone
@@ -823,7 +823,7 @@ int test_account_email() {
 	return 0;
 }
 
-// The job queue (0007_jobs.sql): the states and their rules, the dedupe key unique
+// The job queue: the states and their rules, the dedupe key unique
 // among the queued and running jobs alone, the schedule key unique for good, and the
 // billing sync's one state row.
 int test_jobs_tables() {
@@ -845,7 +845,7 @@ int test_jobs_tables() {
 	TEST_EXPECT(refused(db, "INSERT INTO billing_sync_state (id) VALUES (2);"));
 	TEST_EXPECT(refused(
 			db, "INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ('big', 1);"));
-	// Each kind's failed launches in a row (0010_launch_backoff_failures.sql).
+	// Each kind's failed launches in a row.
 	TEST_EXPECT(refused(db,
 			"INSERT INTO fleet_launch_backoff (kind, not_before_ms, failures) VALUES ('own', 1, "
 			"-1);"));
@@ -856,85 +856,9 @@ int test_jobs_tables() {
 	return 0;
 }
 
-// The backend's migrations.
-std::filesystem::path migrations_dir() {
-	return std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
-}
-
-// `scratch`'s database migrated through the migrations named before `first`.
-Database migrated_before(TestDatabase &scratch, const std::string &first) {
-	const std::filesystem::path before =
-			std::filesystem::temp_directory_path() / ("opennova-migrations-" + scratch.name());
-	std::filesystem::create_directories(before);
-	for (const auto &e : std::filesystem::directory_iterator(migrations_dir())) {
-		const std::string name = e.path().filename().string();
-		if (e.path().extension() == ".sql" && name < first)
-			std::filesystem::copy_file(e.path(), before / name);
-	}
-	Database db = scratch.open();
-	run_migrations(db, before);
-	std::filesystem::remove_all(before);
-	return db;
-}
-
-// 0017_capacity_addresses.sql over a database migrated to the one before it: each
-// account's players.comp_servers becomes its comp_grants row of servers (none for 0),
-// and the column goes.
-int test_comp_grants_migration() {
-	TestDatabase scratch({ /*migrate=*/false });
-	Database db = migrated_before(scratch, "0017_");
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, comp_servers) "
-	        "VALUES ('cg_ann', 'x', '0b120001', '1', 'Ann', 3), ('cg_bo', 'x', '0b120002', '1', 'Bo', 0);");
-	run_migrations(db, migrations_dir());
-	TEST_EXPECT(!has_column(db, "players", "comp_servers"));
-	const auto rows = db.query("SELECT p.username, g.item, g.quantity FROM comp_grants g "
-							   "JOIN players p ON p.id = g.user_id ORDER BY p.username;");
-	TEST_EXPECT(rows.size() == 1 && rows.front().as_text(0) == "cg_ann" && rows.front().as_text(1) == "servers" &&
-			rows.front().as_int(2) == 3);
-	return 0;
-}
-
-// 0019_dedicated_machines.sql over a database migrated to the one before it: an
-// admin's grant of servers gives up the machines granted beside it (each a server of
-// its own now, a dedicated machine), and goes when they cover it: 11 servers with 2
-// machines become 9 shared servers and 2 dedicated machines, 2 with 2 the 2 dedicated
-// machines alone; a grant of servers alone, and one of machines alone, stay.
-int test_dedicated_grants_migration() {
-	TestDatabase scratch({ /*migrate=*/false });
-	Database db = migrated_before(scratch, "0019_");
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
-			"('dg_ann', 'x', '0b130001', '1', 'Ann'), ('dg_bo', 'x', '0b130002', '1', 'Bo'), "
-			"('dg_cy', 'x', '0b130003', '1', 'Cy'), ('dg_dee', 'x', '0b130004', '1', 'Dee');");
-	const auto grant = [&db](const char *user, const char *item, int quantity) {
-		db.exec(std::string("INSERT INTO comp_grants (user_id, item, quantity) SELECT id, '") + item + "', " +
-				std::to_string(quantity) + " FROM players WHERE username = '" + user + "';");
-	};
-	grant("dg_ann", "servers", 11);
-	grant("dg_ann", "own_machine", 2);
-	grant("dg_bo", "servers", 2);
-	grant("dg_bo", "own_machine", 2);
-	grant("dg_cy", "servers", 3);
-	grant("dg_dee", "own_machine", 1);
-	run_migrations(db, migrations_dir());
-	const auto rows = db.query("SELECT p.username, g.item, g.quantity FROM comp_grants g "
-							   "JOIN players p ON p.id = g.user_id ORDER BY p.username, g.item;");
-	std::vector<std::string> got;
-	for (const auto &r : rows)
-		got.push_back(r.as_text(0).value_or("") + " " + r.as_text(1).value_or("") + " " +
-				std::to_string(r.as_int(2).value_or(0)));
-	const std::vector<std::string> want = { "dg_ann own_machine 2", "dg_ann servers 9", "dg_bo own_machine 2",
-		"dg_cy servers 3", "dg_dee own_machine 1" };
-	if (got != want) {
-		for (const std::string &g : got) std::fprintf(stderr, "  comp grant after 0019: %s\n", g.c_str());
-	}
-	TEST_EXPECT(got == want);
-	return 0;
-}
-
-// The fleet program's state (0008_controller_state.sql, its leadership's row
-// renamed by 0014_fleet_leader.sql): the leadership's and the limits hold's one
-// rows, the admin links' states (gone with their server), and the console's
-// commands with their replies (gone with their command).
+// The fleet program's state: the leadership's and the limits hold's one rows, the admin links'
+// states (gone with their server), and the console's commands with their replies (gone with
+// their command).
 int test_fleet_tables() {
 	TestDatabase scratch({ /*migrate=*/true });
 	Database db = scratch.open();
@@ -956,10 +880,10 @@ int test_fleet_tables() {
 	return 0;
 }
 
-// The lobby instances (0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql): a row
-// per lobby, two of them at one endpoint (the deployment's one lobby address), a state of two,
-// the sessions, commands and listings that name an instance gone with it (a name no instance has
-// refused), the commands' per-instance index, and the RID sequence (1..0xFFFFFF, cycling).
+// The lobby instances: a row per lobby, two of them at one endpoint (the deployment's one lobby
+// address), a state of two, the sessions, commands and listings that name an instance gone with
+// it (a name no instance has refused), the commands' per-instance index, and the RID sequence
+// (1..0xFFFFFF, cycling).
 int test_lobby_instances_tables() {
 	TestDatabase scratch({ /*migrate=*/true });
 	Database db = scratch.open();
@@ -1007,7 +931,7 @@ int test_lobby_instances_tables() {
 	return 0;
 }
 
-// The goodbyes a lobby's clean stop leaves (0022_lobby_goodbyes.sql): one per address, stamped
+// The goodbyes a lobby's clean stop leaves: one per address, stamped
 // as it is left; an SK of 0 (no session's), a key past 32 bits and a port past 16 refused.
 int test_lobby_goodbyes_table() {
 	TestDatabase scratch({ /*migrate=*/true });
@@ -1029,24 +953,13 @@ int test_lobby_goodbyes_table() {
 	return 0;
 }
 
-// 0020_lobby_live_view.sql over a database migrated to the ones before it: a listing's joiners
-// keyed by their account (a row with none goes, one per account and listing stays, its latest
-// join, and the port of 0 goes), an account's delete taking its rows; the session rows' account
-// and play columns (the login tag gone) and the instances' task.
-int test_lobby_live_view_migration() {
-	const std::filesystem::path migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
-	TestDatabase scratch({ /*migrate=*/false });
-	const std::filesystem::path before =
-			std::filesystem::temp_directory_path() / ("opennova-migrations-" + scratch.name());
-	std::filesystem::create_directories(before);
-	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
-		const std::string name = e.path().filename().string();
-		if (e.path().extension() == ".sql" && name < "0020_")
-			std::filesystem::copy_file(e.path(), before / name);
-	}
+// The admin's live view of NovaWorld (connection_routes.h): a listing's joiners keyed by their
+// account (one row per account and listing, none without one, an account's delete taking its
+// rows, no port), the session rows' account and play columns (no login tag) and the instances'
+// task.
+int test_lobby_live_view_tables() {
+	TestDatabase scratch({ /*migrate=*/true });
 	Database db = scratch.open();
-	run_migrations(db, before);
-	std::filesystem::remove_all(before);
 	const auto player = [&db](const char *name, const char *pcid) {
 		return db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 						"VALUES ($1, 'x', $2, '1', $1) RETURNING id;",
@@ -1060,19 +973,13 @@ int test_lobby_live_view_migration() {
 	db.exec("INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, host_port, "
 			"peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1', 'Live', '10.0.0.7', "
 			"32768, '10.0.0.7', 32768);");
-	// Ann joined twice from two addresses, Bo once behind Ann's first, and one joiner's account
-	// is gone.
-	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip, peer_port, joined_at) "
-			"VALUES (7, $1, 'ann-old', '10.0.0.1', 0, now() - interval '5 minutes'), "
-			"(7, $1, 'ann-new', '10.0.0.2', 0, now()), (7, NULL, 'gone', '10.0.0.3', 0, now()), "
-			"(7, $2, 'bo', '10.0.0.1', 1, now());",
+	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip) "
+			"VALUES (7, $1, 'ann', '10.0.0.2'), (7, $2, 'bo', '10.0.0.1');",
 			{ BindValue(ann), BindValue(bo) });
-	run_migrations(db, migrations);
-
 	const auto joined = db.query("SELECT user_id, nwhandle FROM host_players WHERE host_rid = 7 "
 								 "ORDER BY nwhandle;");
-	TEST_EXPECT(joined.size() == 2 && joined[0].as_int(0) == ann &&
-			joined[0].as_text(1) == "ann-new" && joined[1].as_int(0) == bo);
+	TEST_EXPECT(joined.size() == 2 && joined[0].as_int(0) == ann && joined[0].as_text(1) == "ann" &&
+			joined[1].as_int(0) == bo);
 	TEST_EXPECT(!has_column(db, "host_players", "peer_port"));
 	TEST_EXPECT(has_index(db, "host_players", "host_players_pkey"));
 	TEST_EXPECT(has_index(db, "host_players", "idx_host_players_user"));
@@ -1117,14 +1024,12 @@ int main(int argc, char **argv) {
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;
-	if (test_comp_grants_migration() != 0) return 1;
-	if (test_dedicated_grants_migration() != 0) return 1;
 	if (test_account_email() != 0) return 1;
 	if (test_jobs_tables() != 0)
 		return 1;
 	if (test_lobby_instances_tables() != 0)
 		return 1;
-	if (test_lobby_live_view_migration() != 0)
+	if (test_lobby_live_view_tables() != 0)
 		return 1;
 	if (test_lobby_goodbyes_table() != 0)
 		return 1;
@@ -1134,6 +1039,6 @@ int main(int argc, char **argv) {
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
 				"cd keys, billing, account email, jobs, fleet state, the lobby live view, the "
-				"lobby goodbyes)\n");
+				"lobby goodbyes; the one baseline)\n");
 	return 0;
 }

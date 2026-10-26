@@ -1,5 +1,5 @@
 // The hosted servers' fleet in the database (apps/novaworld_common/hosted/model/
-// fleet_repository.h, backend/migrations/0003_fleet.sql) on a migrated
+// fleet_repository.h, backend/migrations/0001_baseline.sql) on a migrated
 // database: a machine's row and its one-time token (only its SHA-256 stored),
 // the launch's answer, every lifecycle move as a compare-and-set (ready_at,
 // the end's time and reason, the credentials spent at the end), the
@@ -731,7 +731,7 @@ int test_slots() {
 	TEST_EXPECT(of_a && of_a->slot == 0 && of_a->egress_bytes == 777);
 	TEST_EXPECT(!of_a->second_listing);
 	TEST_EXPECT(!hosted::slot_report_of(db, c) && !hosted::slot_report_of(db, a + 1000));
-	// Its server's second listing (0024_second_listing_reports.sql): kept as reported, each
+	// Its server's second listing: kept as reported, each
 	// state's members alone, and gone again with a report that carries none.
 	{
 		hosted::ContainerReport listed =

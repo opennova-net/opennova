@@ -182,7 +182,7 @@ struct Harness {
 	// The first listener's Redis (its own namespace): what every web process
 	// sharing it would see.
 	nws::RedisPool *redis = nullptr;
-	// The seeded data sets (migration 0011) the harness gave ready trees: Joint
+	// The seeded data sets (the baseline's) the harness gave ready trees: Joint
 	// Operations (missions a.bms, alpha.bms, first.bms, second.bms), Escalation
 	// under it (escal.bms) and Delta Force Xtreme 2 (dfx2_a.bms, dfx2_b.bms);
 	// OpenNova's has none, so it is not offered.
@@ -216,7 +216,7 @@ std::string body_text(const net::HttpReply &reply) {
 	return std::string(reply.body.begin(), reply.body.end());
 }
 
-// The seeded data set named `display_name` (migration 0011's rows), 0 for none.
+// The seeded data set named `display_name` (the baseline's rows), 0 for none.
 int64_t data_set_named(opennova::db::Database &db, const char *display_name) {
 	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;", { opennova::db::BindValue(display_name) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
@@ -573,7 +573,7 @@ int test_admin_server_status_requires_token(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json.has("maintenance_enabled"));
 	TEST_EXPECT(!json["maintenance_enabled"].b());
-	// 0003_novaworld_status_and_gsb.sql seeds the row with this message.
+	// The baseline seeds the row with this message.
 	TEST_EXPECT(str(json["message"]) == "NovaWorld is temporarily unavailable.");
 
 	reply = h.send("PUT", "/api/admin/server-status", {kBearer, kJson},

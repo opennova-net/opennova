@@ -1,16 +1,15 @@
 #pragma once
 
-// The games' rows (backend/migrations/0011_data_sets.sql, 0013_releases.sql and 0025_content.sql,
-// ADR 0064): the data sets an admin created (one game each: a base game, or one expansion of a
-// base; a game with a project carries its key, visibility and head, content_repository.h),
-// standalone updater products (kind update, no game tree and no project; 0013's
-// data_sets_update_check), their trees (each an immutable version of the data set's files in the
-// object store, core/object_store.h, built from its published release), the update releases (1SFS
-// packages) and the sections each carries, and the trees each hosted server is pinned to. The
-// routes, the supervisor, the worker's jobs and the update listener share it; every write that
-// spans statements is one db::Transaction, and each state move a compare-and-set, so two writers
-// never both win. Crow-free. Each function throws db::Error on a database failure. Service
-// policy, not a port.
+// The games' rows (backend/migrations/0001_baseline.sql, ADR 0064): the data sets an admin created
+// (one game each: a base game, or one expansion of a base; a game with a project carries its key,
+// visibility and head, content_repository.h), standalone updater products (kind update, no game
+// tree and no project; data_sets_update_check), their trees (each an immutable version of the data
+// set's files in the object store, core/object_store.h, built from its published release), the
+// update releases (1SFS packages) and the sections each carries, and the trees each hosted server
+// is pinned to. The routes, the supervisor, the worker's jobs and the update listener share it;
+// every write that spans statements is one db::Transaction, and each state move a compare-and-set,
+// so two writers never both win. Crow-free. Each function throws db::Error on a database failure.
+// Service policy, not a port.
 
 #include <net/novaworld/db/database.h>
 
