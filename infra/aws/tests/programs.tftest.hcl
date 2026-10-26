@@ -396,9 +396,9 @@ run "task_definitions" {
       aws_ecs_task_definition.program["fleet"].cpu == "256" && aws_ecs_task_definition.program["fleet"].memory == "512" &&
       aws_ecs_task_definition.program["web"].cpu == "512" && aws_ecs_task_definition.program["web"].memory == "1024" &&
       aws_ecs_task_definition.program["worker"].cpu == "512" && aws_ecs_task_definition.program["worker"].memory == "1024" &&
-      aws_ecs_task_definition.program["data"].cpu == "256" && aws_ecs_task_definition.program["data"].memory == "1024"
+      aws_ecs_task_definition.program["data"].cpu == "256" && aws_ecs_task_definition.program["data"].memory == "2048"
     )
-    error_message = "small tasks: gate, lobby and the fleet 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB, data 0.25 vCPU and 1 GiB"
+    error_message = "small tasks: gate, lobby and the fleet 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB, data 0.25 vCPU and 2 GiB (a whole game's release build)"
   }
   assert {
     condition = alltrue([

@@ -8,13 +8,16 @@
 //                  is laid out from the store (every file by its SHA-256 from the program's own
 //                  cache of the project's files, synced down once per build: sync_down), an
 //                  expansion's beside its base's revision where its project.opennova's
-//                  base_project names it, and exported by opennova-project. A retail game's
-//                  package is what changed since its stock revision (1, a fresh import of the
-//                  stock install, an expansion's on its base's), both exports ours, so only the
-//                  files the project changed get rows; our own game's is a full package with an
-//                  UPDATE.WIZ naming its product in the tree (the deployment's update host,
-//                  ONNET_UPDATE_HOST, its URL), carrying the removals since the data set's
-//                  published release (--previous). opennova-update-tool packs it with the data
+//                  base_project names it, and exported by opennova-project. Every package is
+//                  whole (--full: every file of the export a row, so the jointops and dfx2 zips
+//                  install their game into an empty folder from it), carrying the removals
+//                  since the data set's published release (--previous) and leaving out the
+//                  runtime's own files in a game's folder (update.exe, revupdat.exe,
+//                  README.txt). A retail game's also carries the removals since its stock
+//                  revision (1, a fresh import of the stock install, an expansion's on its
+//                  base's, exported by our own writer as the edited one is); our own game's
+//                  tree gets an UPDATE.WIZ naming its product (the deployment's update host,
+//                  ONNET_UPDATE_HOST, its URL). opennova-update-tool packs it with the data
 //                  set's command file, product name and executable. The package is put where an
 //                  upload lands (release_upload_key), and the release made validating with
 //                  release.validate queued, as a completed upload is. A refusal (no data set, no

@@ -827,8 +827,10 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		if (!data_set || data_set->kind == DataSetKind::Update ||
 				data_set->published_release_id != release_id)
 			return jobs::JobResult::done();
-		// OpenNova's own content packages are complete installs, including first launch.
-		// Build those from empty on every release; retail packages still patch a baseline.
+		// OpenNova's own content packages are complete installs, including first launch:
+		// built from empty on every release. A retail release is whole too, but carries its
+		// removals since the stock install (release_build.cpp), so it applies over the
+		// stock baseline, which holds what the project never did (a stock install's own).
 		const auto base = data_set->parent_id ? find_data_set(db, *data_set->parent_id) : data_set;
 		full_content = base && base->game == kAcidGambitGame;
 		for (const ReleaseSection &s : list_sections(db, release_id))
