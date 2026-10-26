@@ -373,13 +373,14 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		}
 		install_class_attribute_flags(kernel.world, nullptr, boot.charattr);
 		// The chat filter's filter.txt, read off the disk once at boot ahead of the archives' mount
-		// (an optional file: none leaves the filter empty), its rules on every session's context.
+		// (an optional file: none, or a copy only an archive holds, leaves the filter empty), its
+		// rules on every session's context.
 		// [orig: Game_InitSubsystems @0x4A6DEC -> ChatFilter_LoadFromFile @0x4FD640 ->
 		//  ChatFilter_LoadDictionary("filter.txt") @0x68AAF0, ahead of PFF_OpenAllArchives @0x4A6F44]
 		if (!boot.chat_filter_read) {
 			auto filter = std::make_shared<ChatFilter>();
 			std::vector<uint8_t> filter_bytes;
-			if (files.valid() && files.read_loose("filter.txt", filter_bytes))
+			if (files.valid() && files.read_disk("filter.txt", filter_bytes))
 				filter->load(filter_bytes.data(), filter_bytes.size());
 			boot.chat_filter = std::move(filter);
 			boot.chat_filter_read = true;

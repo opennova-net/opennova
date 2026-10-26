@@ -119,6 +119,7 @@ std::map<std::string, std::string> mount() {
 	files["gametext.bin"] = gametext_bytes();
 	files["charattr.def"] = "[CHARACTER1]\r\nATTRIBUTES\t= AutoScope\r\n"
 	                        "[CHARACTER2]\r\nATTRIBUTES\t= Medic\r\n";
+	files["filter.txt"] = "[WORDS]\r\nITEM=darn,O\r\n";
 	return files;
 }
 
@@ -243,6 +244,8 @@ int main() {
 		CHECK(kernel.world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 		CHECK(!kernel.world.tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 		CHECK(kernel.world.tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
+		// D-NET-1401: the chat filter loaded filter.txt (the in-memory mount's, read_disk's fallback).
+		CHECK(ctx.chat_filter != nullptr && ctx.chat_filter->is_text_filtered("darn"));
 
 		// Serve Only: no local client; the host's own slot 0 has its hidden body, owned by
 		// connection 0, which binds as the local player (D-NET-352) [orig:
@@ -284,6 +287,20 @@ int main() {
 		CHECK(kernel.world.out.weather_sounds.empty());
 		CHECK(kernel.world.out.tip_events.empty());
 		CHECK(kernel.world.out.terrain_scorches.pending_page_invalidations().empty());
+	}
+
+	// --- the chat filter reads filter.txt from the game directory alone: with no copy there,
+	// the one the mount reads loads nothing [orig: ChatFilter_LoadFromFile @0x4FD640, ahead of
+	// Expansion_ScanAndRegister @0x4A6F32 and PFF_OpenAllArchives @0x4A6F44] ---
+	{
+		Host host;
+		inmatch::HostBootRequest r = host.request(0);
+		r.files.read_game_root = [](const std::string &, std::vector<uint8_t> &) { return false; };
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(r), host.boot, error));
+		const std::shared_ptr<const inmatch::ChatFilter> &filter =
+				host.role.state.host_owner.ctx.chat_filter;
+		CHECK(filter != nullptr && !filter->is_text_filtered("darn"));
 	}
 
 	// --- the host's character table (D-NET-137): with none installed by the

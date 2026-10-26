@@ -638,6 +638,26 @@ static int test_expansion_records() {
     return 1;
 }
 
+// The reads ahead of the mount find the game directory's own file alone, any case, raw: never an
+// expansion folder's copy nor an archive's.
+// [orig: FileSystem_ReadFileWithSearchPaths @0x75B700 with no search path and no archive yet]
+static int test_game_root_file() {
+    using opennova::vfs_game_root_file;
+    fs::path d = fresh_dir("game_root_file");
+    write_pff1(d / "resource.pff", "packed.txt", "ARCHIVE");
+    write_loose(d / "expansion" / "exp1" / "only_exp.txt", "EXPANSION");
+    write_loose(d / "Filter.TXT", "ROOT");
+    std::vector<uint8_t> out;
+    CHECK(vfs_game_root_file(d.string(), "filter.txt", out) &&
+              std::string(out.begin(), out.end()) == "ROOT",
+          "the root's copy, found case-insensitively");
+    CHECK(!vfs_game_root_file(d.string(), "only_exp.txt", out) && out.empty(),
+          "an expansion folder's copy is not the root's");
+    CHECK(!vfs_game_root_file(d.string(), "packed.txt", out), "an archive's copy is not read");
+    CHECK(!vfs_game_root_file(std::string(), "filter.txt", out), "no root reads nothing");
+    return 1;
+}
+
 // The expansion's text-override table [orig: Expansion_LoadAssets @ 0x4a49d4 ->
 // TextResource_LoadOverrideTable @ 0x75d5c0 -> File_LoadResource @ 0x75b540]: only a
 // loose expansion/<n>/<n>.bin serves it, never the archived copy; a load with the old
@@ -788,6 +808,7 @@ int main() {
     RUN_TEST(test_expansion_info);
     RUN_TEST(test_expansion_records);
     RUN_TEST(test_expansion_override_table);
+    RUN_TEST(test_game_root_file);
     RUN_TEST(test_expansion_paths_and_names);
     RUN_TEST(test_archive_past_2gib);
 
