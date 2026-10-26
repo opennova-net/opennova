@@ -1,6 +1,9 @@
 #include <editor/project/base_project.h>
 
+#include <algorithm>
 #include <filesystem>
+#include <system_error>
+#include <vector>
 
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -49,6 +52,38 @@ bool base_project_game_dir(const std::string &project_root, const ProjectExpansi
 		return fail(error, "The base game's project " + expansion.base_project + " is a project of \"" +
 		                           base.target_game + "\", and this one of \"" + target_game + "\".");
 	return true;
+}
+
+std::string base_project_from(const std::string &project_root, const std::string &folder) {
+	const fs::path path = path_of(folder);
+	if (!path.is_absolute()) return folder;
+	const fs::path root = path_of(io::without_trailing_separator(project_root)).lexically_normal();
+	const fs::path relative = path.lexically_normal().lexically_relative(root);
+	return relative.empty() ? folder : io::without_trailing_separator(utf8_of(relative));
+}
+
+std::string sibling_base_project(const std::string &new_root, const std::string &target_game) {
+	if (new_root.empty()) return std::string();
+	const fs::path root = path_of(io::without_trailing_separator(new_root)).lexically_normal();
+	const fs::path parent = root.parent_path();
+	if (parent.empty() || root.filename().empty()) return std::string();
+	std::vector<std::string> names; // the folders beside it, by name
+	std::error_code ec;
+	for (fs::directory_iterator it(system_path(utf8_of(parent)), ec), end; !ec && it != end; it.increment(ec)) {
+		std::error_code is;
+		if (!it->is_directory(is)) continue;
+		const std::string name = utf8_of(it->path().filename());
+		if (name != utf8_of(root.filename()) && !name.empty() && name.front() != '.') names.push_back(name);
+	}
+	std::sort(names.begin(), names.end());
+	for (const std::string &name : names) {
+		ProjectDocument base;
+		Diagnostic why;
+		if (open_project(utf8_of(parent / path_of(name)), base, why) && base.expansion.standalone() &&
+		    strutil::iequals(base.target_game, target_game))
+			return "../" + name;
+	}
+	return std::string();
 }
 
 BaseExport base_export_of(const std::string &project_root, const ProjectExpansion &expansion,

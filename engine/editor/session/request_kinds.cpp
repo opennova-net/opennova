@@ -45,7 +45,8 @@ constexpr Holds kSlot = HoldsSlot;
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
-	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install);
+	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install,
+	                 request.all);
 }
 void serve_check_install(SessionCore &core, const EditorRequest &request) {
 	core.check_install(request.game_install);
@@ -443,9 +444,17 @@ constexpr RequestKindRow kRows[] = {
 			"install refuses (a name it has, one it lacks to build on). game_install (the UX round's "
 			"project lane): the game install it imports from and plays in, checked first (check_install: "
 			"refused, project.install.invalid, where the folder holds none of the game's archives) and "
-			"then the editor's install, which the project's local.json takes as it opens.")
+			"then the editor's install, which the project's local.json takes as it opens. all (a game you "
+			"own, the New project form's first choice): the project of the game install's own game (left "
+			"out, the editor's install), the base game standalone, or as `expansion` one of the install's "
+			"expansions on the base game's project `base_project` (refused where the install lacks it or "
+			"no base game's project is named: make the base game's first); no placeholder made, and once "
+			"it opens every file of its game imported, the base game's whole install or the expansion's own "
+			"files, planned and written over whatever the project holds of their names, the features they "
+			"need set first: the operation that follows the open (its last_operation's then), after the base "
+			"game's export where an expansion's base project is exported first.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
-			                                    F::GameInstall }))
+			                                    F::GameInstall, F::All }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")

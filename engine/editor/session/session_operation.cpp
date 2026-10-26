@@ -101,6 +101,7 @@ uint64_t OperationSlot::start(std::unique_ptr<SessionOperation> operation) {
 	if (operation_ || !operation) return 0;
 	operation_ = std::move(operation);
 	id_ = next_id_++;
+	follows_ = finishing_; // started by a finish to go on with its work, or 0
 	done_ = false;
 	return id_;
 }
@@ -122,16 +123,26 @@ bool OperationSlot::run_to_end() {
 bool OperationSlot::finish(SessionCore &core) {
 	if (!done()) return false;
 	std::unique_ptr<SessionOperation> operation = std::move(operation_);
-	const uint64_t id = id_;
+	const uint64_t id = id_, follows = follows_;
 	id_ = 0;
+	follows_ = 0;
 	done_ = false;
+	finishing_ = follows ? follows : id; // what its finish starts goes on with the work this one went on with
 	OperationOutcome outcome = operation->finish(core);
+	finishing_ = 0;
 	outcome.id = id;
 	outcome.kind = operation->kind();
-	last_ = std::move(outcome);
+	outcome.follows = follows;
 	// The operation its finish started goes on under its id (a base export's Build): the id it took is
-	// never handed out again, as no id is.
-	if (operation_ && operation->hands_on_id()) id_ = id;
+	// never handed out again, as no id is, and a wait on this one waits on it. Any other is the one that
+	// follows (then), which runs now.
+	const bool hands_on = operation_ && operation->hands_on_id();
+	outcome.then = operation_ && !hands_on ? id_ : 0;
+	last_ = std::move(outcome);
+	if (hands_on) {
+		id_ = id;
+		follows_ = follows;
+	}
 	return true;
 }
 
@@ -143,8 +154,10 @@ bool OperationSlot::cancel() {
 		return true;
 	}
 	last_ = OperationOutcome{id_, operation_->kind(), OperationEnd::Cancelled, {}};
+	last_.follows = follows_;
 	operation_.reset();
 	id_ = 0;
+	follows_ = 0;
 	done_ = false;
 	return true;
 }

@@ -2,8 +2,8 @@
 // release from a revision's files, which the store keeps without the machine's own folder
 // (`.opennova/`: its game install, its caches, its import outputs) or the export folder, and with
 // no game install beside them. A copy of a project holding only those files exports the very bytes
-// the project does: one imported whole from a game install (a retail product's stock revision: new
-// --install, import --all), one of our own with an import source (its output made again from the
+// the project does: one imported whole from a game install (a retail product's stock revision, a game
+// you own: new --all --install), one of our own with an import source (its output made again from the
 // source), and an expansion project over its base game's project in the folder beside it (the
 // store's sibling layout: base_project "../Base"). Run on Linux too, whose file names are
 // case-sensitive, as the data program's.
@@ -98,8 +98,8 @@ bool same_export(const std::string &original, const std::string &copied) {
 
 } // namespace
 
-// A project imported whole from a game install, as a retail product's stock revision is, and its
-// copy, which names no game install: one export.
+// A project imported whole from a game install, as a retail product's stock revision is (a game you own:
+// new --all, every file imported as it opens), and its copy, which names no game install: one export.
 static int test_install_import() {
 	test_temp::TempDir dir("opennova_content_export_install");
 	const std::string scratch = dir.root(), install = dir.file("install"), root = dir.file("Stock"),
@@ -107,9 +107,8 @@ static int test_install_import() {
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted));
 	TEST_EXPECT(
-			run(scratch, { "new", root, "--title", "Stock", "--game", "jo", "--install", install })
+			run(scratch, { "new", root, "--title", "Stock", "--game", "jo", "--all", "--install", install })
 					.code == 0);
-	TEST_EXPECT(run(scratch, { "import", root, "--all", "--install", install }).code == 0);
 	TEST_EXPECT(run(scratch, { "export", root, "--out", dir.file("export") }).code == 0);
 	TEST_EXPECT(store_copy(root, copy));
 	TEST_EXPECT(run(scratch, { "export", copy, "--out", dir.file("copy-export") }).code == 0);
@@ -142,10 +141,11 @@ static int test_import_source() {
 }
 
 // An expansion imported from the install's expansion over its base game's project (base_project
-// "../Base"), as a retail expansion's stock revision is, and the copies of both side by side: one
-// export. The copy of the base holds no export, so the expansion's exports its base first, as the
-// expansion opens (the session's base export, session/base_export.h); exported again with the base
-// unchanged, nothing of the base is exported.
+// "../Base"), as a retail expansion's stock revision is (a game you own: new --all --expansion, made before
+// its base was exported: the session exports the base first, as the expansion opens, then imports the
+// expansion's own files), and the copies of both side by side: one export. The copy of the base holds no
+// export, so the expansion's exports its base first (the session's base export, session/base_export.h);
+// exported again with the base unchanged, nothing of the base is exported.
 static int test_expansion_over_base_project() {
 	test_temp::TempDir dir("opennova_content_export_expansion");
 	const std::string scratch = dir.root(), install = dir.file("install"),
@@ -154,18 +154,15 @@ static int test_expansion_over_base_project() {
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted));
 	TEST_EXPECT(
-			run(scratch, { "new", base, "--title", "Base", "--game", "jo", "--install", install })
+			run(scratch, { "new", base, "--title", "Base", "--game", "jo", "--all", "--install", install })
 					.code == 0);
-	TEST_EXPECT(run(scratch, { "import", base, "--all", "--install", install }).code == 0);
-	TEST_EXPECT(run(scratch, { "export", base }).code == 0);
+	TEST_EXPECT(!fs::exists(opennova::editor::system_path(base + "/build/export/export.json")));
 	TEST_EXPECT(run(scratch,
 						{ "new", expansion, "--title", "Exp", "--game", "jo", "--expansion",
-								minted_install::kExpansion, "--base-project", "../Base" })
+								minted_install::kExpansion, "--base-project", "../Base", "--all", "--install",
+								install })
 						.code == 0);
-	TEST_EXPECT(run(scratch,
-						{ "import", expansion, install, "--all", "--expansion",
-								minted_install::kExpansion, "--replace" })
-						.code == 0);
+	TEST_EXPECT(fs::exists(opennova::editor::system_path(base + "/build/export/export.json")));
 	TEST_EXPECT(run(scratch, { "export", expansion, "--out", dir.file("export") }).code == 0);
 	TEST_EXPECT(store_copy(base, base_copy) && store_copy(expansion, expansion_copy));
 	TEST_EXPECT(!fs::exists(opennova::editor::system_path(base_copy + "/build/export/export.json")));

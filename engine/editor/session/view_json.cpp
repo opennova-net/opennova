@@ -816,6 +816,9 @@ JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
 	// An import's write: the files it wrote and those it did not reach, each only when it has any.
 	if (!outcome.imported.empty()) out.set("imported", io::json_string_array(outcome.imported));
 	if (!outcome.not_imported.empty()) out.set("not_imported", io::json_string_array(outcome.not_imported));
+	// The operation its finish started to go on with its work, and the work's first operation, each only when it has one.
+	if (outcome.then) out.set("then", json_number(double(outcome.then)));
+	if (outcome.follows) out.set("follows", json_number(double(outcome.follows)));
 	return out;
 }
 

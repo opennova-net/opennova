@@ -25,11 +25,24 @@ ImportOperation::ImportOperation(const ProjectPaths &paths, const ProjectDocumen
 	if (!replan_) phase_ = imports_.empty() ? Phase::Done : Phase::Write;
 }
 
+ImportOperation::ImportOperation(const ProjectPaths &paths, const ProjectDocument &document,
+		std::unique_ptr<ImportPlanOperation> plan) :
+		paths_(paths), document_(document), replace_(true), own_plan_(true), replan_(std::move(plan)) {
+	if (!replan_) phase_ = Phase::Done;
+}
+
 bool ImportOperation::step(const StepBudget &budget) {
 	switch (phase_) {
 	case Phase::Plan: {
 		if (!replan_->step(budget)) return false;
 		new_plan_ = std::make_shared<const ImportPlan>(std::move(replan_->plan()));
+		// Its own plan: every row the project can take, each file the project holds of its name written over
+		// (a row it cannot take left out, as a planned import leaves it out).
+		if (own_plan_) {
+			imports_ = import_selection(*new_plan_, import_default_checks(*new_plan_, true), true).sources;
+			phase_ = imports_.empty() ? Phase::Done : Phase::Write;
+			return phase_ == Phase::Done;
+		}
 		// Planned again before it writes: when that is not the import the dialog showed (a dependency
 		// new or gone, a file found in another place, a file that no longer reads), nothing is
 		// written; a row the plan does not have is refused.
@@ -90,7 +103,7 @@ OperationProgress ImportOperation::progress() const {
 	progress.unit = OperationUnit::Files;
 	if (phase_ == Phase::Plan) {
 		progress = replan_->progress();
-		progress.label = "Planning the import again: " + progress.label;
+		progress.label = (own_plan_ ? "Planning the import: " : "Planning the import again: ") + progress.label;
 		return progress;
 	}
 	// The plan's files (all of them, once it ended), the write's (each source checked and each

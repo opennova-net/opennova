@@ -1327,8 +1327,9 @@ asks for when OpenNova's update service serves it. Every game but the runtime ha
 **project**, keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01` or `DFX2`: public (OP: Acid Gambit's
 and OP: Nifty Package's, anyone's to get) or private (the retail games', an admin's), its
 revisions pushed by admins from the OpenNova Editor's NovaWorld window (ADR 0069), a retail
-game's revision 1 its stock install imported afresh (`opennova-project new --install`,
-`import --all`). **New game** makes a game and its project in one form. A game's page
+game's revision 1 its stock install imported afresh (the editor's New project, A game you own;
+`opennova-project new --all --install <dir>`, with `--expansion jox01 --base-project ../JO` for an
+expansion). **New game** makes a game and its project in one form. A game's page
 (**Edit**; **Delete**, by typing its key) shows its project (its newest revision; **History**,
 **Make public** or **private**, **Rename key**), its releases and its servers (how many run,
 on which release).

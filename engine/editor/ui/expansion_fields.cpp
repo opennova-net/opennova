@@ -21,13 +21,13 @@ std::string installed_words(const ProjectView::InstallExpansion &installed) {
 bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectView::InstallExpansion> &expansions,
                            const ProjectExpansion &current, bool &changed) {
 	changed = false;
-	// Builds on: the base game, or an expansion of the game install the game can mount (a name it no
+	// Changes: the base game, or an expansion of the game install the game can mount (a name it no
 	// longer has stays offered, as the project holds it). Names compared as the file system does.
 	std::string shown = "The base game";
 	for (const ProjectView::InstallExpansion &installed : expansions)
 		if (strutil::iequals(installed.name, choice.builds_on)) shown = installed_words(installed);
 	if (!choice.builds_on.empty() && shown == "The base game") shown = choice.builds_on + " (not in the game install)";
-	if (ImGui::BeginCombo("Builds on", shown.c_str())) {
+	if (ImGui::BeginCombo("Changes", shown.c_str())) {
 		if (ImGui::Selectable("The base game", choice.builds_on.empty()) && !choice.builds_on.empty()) {
 			choice.builds_on.clear();
 			changed = true;
@@ -44,22 +44,22 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 		}
 		ImGui::EndCombo();
 	}
-	ui_kit::tooltip("The game data the project's files come from: the base game, or an expansion the game install has, "
-	                "mounted as the game mounts it with /exp.");
-	// A project builds on an installed expansion only as an expansion of its own: the game reads an
-	// expansion's own files only under /exp (the session holds the fields to that too).
+	ui_kit::tooltip("The game the project changes, whose files it comes from: the base game, or an expansion the game "
+	                "install has, mounted as the game mounts it with /exp.");
+	// A project changes an installed expansion only as a mod of its own: the game reads an expansion's own
+	// files only under /exp (the session holds the fields to that too).
 	if (!choice.builds_on.empty() && !choice.as_expansion) {
 		choice.as_expansion = true;
 		changed = true;
 	}
 	ImGui::BeginDisabled(!choice.builds_on.empty());
-	if (ImGui::Checkbox("Build as an expansion", &choice.as_expansion)) changed = true;
+	if (ImGui::Checkbox("Ships as a mod", &choice.as_expansion)) changed = true;
 	ImGui::EndDisabled();
-	ui_kit::tooltip("The build is an expansion folder, expansion\\<name>\\, played with /exp <name> in OpenNova and "
-	                "in the game; its folder is what Export ships.");
+	ui_kit::tooltip("The build is a mod's folder, expansion\\<name>\\, played with /exp <name> in OpenNova and in the "
+	                "game; its folder is what Export ships. Unchecked, the project is a game of its own.");
 	if (!choice.as_expansion) return true;
 	name_.follow(choice.name);
-	if (ImGui::InputText("Expansion name", name_.text, sizeof(name_.text))) {
+	if (ImGui::InputText("Short name", name_.text, sizeof(name_.text))) {
 		choice.name = name_.sent();
 		changed = true;
 	}
@@ -72,10 +72,10 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 	}
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Empty: the game install's base game. A folder (relative to this project's, as ../../assets): a "
-	                "standalone project of yours whose export, made first, is the base game it imports from, builds over "
-	                "and plays over.");
+	                "standalone project of yours whose export is the base game it imports from, builds over and plays "
+	                "over.");
 	if (!choice.base_project.empty() && !choice.builds_on.empty()) {
-		ui_kit::refusal_text("An expansion builds on an installed expansion or on a base game's project, never both.");
+		ui_kit::refusal_text("A mod changes an installed expansion or a base game's project, never both.");
 		return false;
 	}
 	if (choice.value() == current && !current.standalone()) return true; // as the project holds it: nothing to weigh again

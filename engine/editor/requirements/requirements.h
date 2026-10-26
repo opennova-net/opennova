@@ -61,6 +61,13 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase);
 bool requirement_multiplayer_only(const std::string &role);
 const char *requirement_phase_label(int phase);
 
+// The features a project holding the files `names` (logical names) needs on (ADR 0046 d7), which a game you own's
+// project is made with (its game's own files, ImportController::import_stock): Missions where one is a mission
+// (.bms), so the files a mission's start reads are on the checklist (else the mission-feature warning says they are
+// not checked); Multiplayer where one is a file the game reads for multiplayer alone (requirement_multiplayer_only's
+// rows: mp.mnu, pre.mnu).
+ProjectFeatures features_files_need(const std::vector<std::string> &names);
+
 // Beside the rows, a project's expansion (ADR 0046 S16): weighed against `install_expansions` (the
 // game install's, vfs_list_expansions; null when no install is set) as listed warnings
 // (expansion_install_findings: a name the install has, one to build on it lacks); and the project's

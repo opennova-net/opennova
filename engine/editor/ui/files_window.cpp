@@ -600,77 +600,12 @@ void FilesWindow::draw_kind_filter(float width) {
 	ui_kit::tooltip(kind_shown_ == AssetKind::kCount ? "Only the files of one kind." : "Only the " + shown + " files: Every kind shows them all.");
 }
 
-// Import, New and Refresh, wrapping in a narrow dock; each item enabled while the busy gate takes
-// its request too (SessionView::allows: a build packing the files refuses a new file, a Refresh
-// and a reimport).
+// New, Refresh and Undo, wrapping in a narrow dock; each item enabled while the busy gate takes its
+// request too (SessionView::allows: a build packing the files refuses a new file and a Refresh). An import is
+// File > Import...'s alone (the editor import round); a file's menu imports it again.
 void FilesWindow::draw_toolbar(const SessionView &view) {
 	ui_kit::WrapRow row;
 	const float arrow = ImGui::GetFrameHeight();
-	const float import_width = ui_kit::button_width("Import") + arrow;
-	row.next(import_width);
-	ImGui::SetNextItemWidth(import_width);
-	const bool importing = ImGui::BeginCombo("##import", "Import", ImGuiComboFlags_HeightLargest);
-	if (!importing) ui_kit::tooltip("Copy files into the project: from the disk, from the game data, or every source again.");
-	if (importing) {
-		const bool picks = view.allows(EditorRequestKind::PreviewImport);
-		ImGui::BeginDisabled(!picks);
-		if (ImGui::Selectable("Files...") && picks)
-			workspace_.request(request::pick_file(PickPurpose::ImportFiles));
-		ImGui::EndDisabled();
-		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
-		const bool game_data =
-		        !view.project.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
-		// A project that holds missions is offered the whole game install first (ADR 0046 S14).
-		const bool missions = view.project.document && view.project.document->features.mission;
-		const auto whole_install = [&] {
-			ImGui::BeginDisabled(!game_data);
-			if (ImGui::Selectable("The whole game install...") && game_data)
-				workspace_.request(request::import_whole_install());
-			ImGui::EndDisabled();
-			ui_kit::tooltip(!view.project.retail_directory.empty()
-			                        ? "Every file of the game install, copied into the project: what a mission project needs to "
-			                          "play, build and resolve every name."
-			                        : "Choose the game install folder in File > Project settings... first.");
-		};
-		if (missions) whole_install();
-		ImGui::BeginDisabled(!game_data);
-		if (ImGui::Selectable("From the game data...") && game_data)
-			workspace_.request(
-					request::preview_install_import({}, view.project.import_dependencies));
-		ImGui::EndDisabled();
-		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
-		                                               : "Choose the game install folder in File > Project settings... first.");
-		if (!missions) whole_install();
-		// An expansion project imports an installed expansion's own files (list_installed_expansion_choices):
-		// one item for each expansion the game install has.
-		if (view.project.document && !view.project.document->expansion.standalone()) {
-			for (const ProjectView::InstallExpansion &installed : view.project.game_install_expansions) {
-				const std::string label = "The installed expansion " + installed.name + "...";
-				ImGui::BeginDisabled(!game_data);
-				if (ImGui::Selectable(label.c_str()) && game_data)
-					workspace_.request(request::import_installed_expansion(installed.name, view.project.retail_directory));
-				ImGui::EndDisabled();
-				ui_kit::tooltip("Every file of " + (installed.title.empty() ? installed.name : installed.title) +
-				                " as the game installs it, copied into the project under its expansion's name: its "
-				                "archives' files and its folder's" +
-				                (strutil::iequals(installed.name, view.project.document->expansion.name)
-				                         ? ", its version.txt too, which a joiner's game must match."
-				                         : "."));
-			}
-		}
-		const bool reimports =
-				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
-		ImGui::BeginDisabled(!reimports);
-		if (ImGui::Selectable("Reimport all") && reimports)
-			workspace_.request(request::reimport(std::string(), true));
-		ImGui::EndDisabled();
-		ui_kit::tooltip(view.project.imports->empty()
-						? "No file of the project is imported from a source."
-						: "Run every importer again (" +
-								std::to_string(view.project.imports->size()) +
-								(view.project.imports->size() == 1 ? " source)." : " sources)."));
-		ImGui::EndCombo();
-	}
 	const float new_width = ui_kit::button_width("New") + arrow;
 	row.next(new_width);
 	ImGui::SetNextItemWidth(new_width);

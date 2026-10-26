@@ -138,6 +138,12 @@ struct OperationOutcome {
 	std::vector<Diagnostic> findings;
 	std::vector<std::string> imported;
 	std::vector<std::string> not_imported;
+	// The operation its finish started to go on with its work (0 none: a new project of a game you own goes on
+	// from its Open to the import of every file of its game, SessionCore::absorb_open, its base game's export
+	// between them where one is due), and on each that goes on, the work's first operation (`follows`: the one
+	// the request named). A wait on the first follows `then` to the end.
+	uint64_t then = 0;
+	uint64_t follows = 0;
 };
 
 // The operation that runs, as the view shows it (id 0: none), with what the busy gate weighs a
@@ -204,8 +210,9 @@ public:
 	// Steps the running operation to its end (a test, a command line); true when one is done.
 	bool run_to_end();
 	// The done operation's finish(core), once: last() is what it came to, and the slot is free
-	// (before its finish runs, so a finish may start the next one, which takes its id where it hands it
-	// on: SessionOperation::hands_on_id). False when none is done.
+	// (before its finish runs, so a finish may start the next one: it takes its id where it hands it on,
+	// SessionOperation::hands_on_id, else it follows it, its outcome's `then` naming the next and the next's
+	// `follows` the work's first operation). False when none is done.
 	bool finish(SessionCore &core);
 	// Cancels the running operation between two steps: its work discarded, last() says so, the
 	// slot free. False when none runs or it cannot be cancelled.
@@ -220,6 +227,8 @@ private:
 	std::unique_ptr<SessionOperation> operation_;
 	uint64_t id_ = 0;
 	uint64_t next_id_ = 1;
+	uint64_t follows_ = 0;   // the first operation of the work the running one goes on with (0 none)
+	uint64_t finishing_ = 0; // the operation whose finish runs now (0 none)
 	bool done_ = false;
 	OperationOutcome last_;
 };

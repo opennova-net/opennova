@@ -525,7 +525,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		if (found) continue;
 		refuse(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Error,
 		                          "The project has no " + std::string(param.token) + " named " + value +
-		                                  ": import it first (Files > Import).",
+		                                  ": import it first (File > Import...).",
 		                          request.path));
 		return;
 	}

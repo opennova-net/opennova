@@ -1173,7 +1173,10 @@ constexpr EditorQueryRow kRows[] = {
 			"build, import_plan, import_apply, rename_apply, base_export, the content_ ones), label, "
 			"done and total in its unit, "
 			"cancellable, and what it reads and writes), what the last one came to "
-			"(last_operation: id, kind, end, findings), the validation the polls step "
+			"(last_operation: id, kind, end, findings; then, the operation its finish started to go on "
+			"with its work, and follows, on each that goes on, the work's first operation: a game you own's "
+			"new project goes on from its open to its import, its base game's export between them where one "
+			"runs), the validation the polls step "
 			"(validation: running, done and total files) and the last build.")
 			.row,
 	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,

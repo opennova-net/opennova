@@ -273,6 +273,7 @@ bool SessionCore::cancel_operation(bool asked) {
 		imports().refresh_install_files();
 		read_install_expansions();
 		hold_for_base();
+		start_stock_import(); // a game you own's import that waited on it goes on
 	}
 	const std::string line = "Cancelled " + noun + ".";
 	if (asked) view_.activity.status = line;
@@ -308,9 +309,10 @@ void SessionCore::show_operation() {
 // changes: the open project stays open, its operation running. Then the open project closes, its
 // operation cancelled (refused, nothing made, when it cannot be), and only then is the folder made,
 // titled `title` or else, left empty, after the folder (create_project's rule, the one every path to a
-// new project takes).
+// new project takes). A game you own (`stock`) is the game install's own game, refused where it cannot be: no
+// install to make it from, an expansion the install lacks, or an expansion with no base game's project to stand on.
 bool SessionCore::new_project(const std::string &dir, const std::string &title, const std::string &game,
-                              bool import_pass, const ProjectExpansion &expansion, const std::string &game_install) {
+                              bool import_pass, const ProjectExpansion &asked, const std::string &named_install, bool stock) {
 	if (dir.empty()) return false;
 	view_.project.refused.clear();
 	const std::string target_game = game.empty() ? std::string(kDefaultTargetGame) : game;
@@ -320,6 +322,29 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		refuse_project(why, "The project could not be created");
 		return false;
 	};
+	const auto refused_for = [&refused](CoreFinding code, const std::string &message) {
+		return refused(make_finding(code, DiagnosticSeverity::Error, message));
+	};
+	// The base game's project named by its folder (a Browse... names it whole) is kept from this project's folder,
+	// so a clone finds it where the repository keeps it.
+	ProjectExpansion expansion = asked;
+	if (expansion.on_base_project()) expansion.base_project = base_project_from(dir, expansion.base_project);
+	// A game you own is made from its game install: the one named, else the editor's.
+	const std::string game_install = stock && named_install.empty() ? preferences_.values().game_install : named_install;
+	if (stock) {
+		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(target_game.c_str());
+		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
+		if (game_install.empty())
+			return refused_for(CoreFinding::ProjectInstallInvalid,
+			                   "A game you own is made from its game install: name the folder that holds " + game_name + ".");
+		if (!expansion.builds_on.empty())
+			return refused_for(CoreFinding::ProjectFieldInvalid,
+			                   "An expansion of a game you own is made on its base game's project, never on another expansion.");
+		if (!expansion.standalone() && !expansion.on_base_project())
+			return refused_for(CoreFinding::ProjectBaseProject,
+			                   expansion.name + " is made on the " + game_name + " project: make " + game_name +
+			                           " first (A game you own, " + game_name + "), then name its folder as the base game's project.");
+	}
 	if (!can_create_project(dir, target_game, error, expansion)) return refused(error);
 	// The install the form names (the UX round's project lane): a folder that holds the game, which the
 	// project is made on and the editor's install from then on (written once the project is made); another is
@@ -332,6 +357,13 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 			return refused(make_finding(CoreFinding::ProjectInstallInvalid, DiagnosticSeverity::Error,
 			                            view_.project.install_check.words()));
 		chosen = view_.project.install_check.root;
+	}
+	// A game you own's expansion is one the install has (its own files are what the project imports).
+	if (stock && !expansion.standalone()) {
+		const std::vector<std::string> installed = vfs_list_expansions(chosen);
+		if (std::none_of(installed.begin(), installed.end(),
+		                 [&](const std::string &name) { return strutil::iequals(name, expansion.name); }))
+			return refused_for(CoreFinding::ProjectFieldInvalid, "The game install has no expansion named " + expansion.name + ".");
 	}
 	// The expansion against the game install the new project opens with (the one named, else the editor's,
 	// whatever install an open project names): a name it has already, one to build on it lacks, a name whose
@@ -380,8 +412,9 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		}
 	}
 	// An expansion's own files a new project makes (ADR 0046 S16): its version text always, its text
-	// table on the base game (one that builds on an installed expansion imports that one's).
-	if (!doc.expansion.standalone()) {
+	// table on the base game (one that builds on an installed expansion imports that one's). A game you own's
+	// are the install's, which its import brings: no placeholder stands in for them.
+	if (!doc.expansion.standalone() && !stock) {
 		std::vector<std::string> roles{ expansion_file_row(ExpansionFileRole::Version).manifest_role };
 		if (doc.expansion.builds_on.empty()) roles.push_back(expansion_file_row(ExpansionFileRole::Table).manifest_role);
 		const ProjectPaths paths = ProjectPaths::for_root(dir);
@@ -390,7 +423,10 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		for (const std::string &path : made.created) note("Created " + path);
 		for (const Diagnostic &d : made.diagnostics) report(d);
 	}
-	return open_project(dir, import_pass);
+	if (!open_project(dir, import_pass)) return false;
+	// A game you own goes on to import every file of its game once it opens (absorb_open).
+	if (stock) stock_import_ = ProjectPaths::for_root(dir).root;
+	return true;
 }
 
 // The project in `dir` read before the open one closes: one that does not open leaves the open
@@ -403,6 +439,7 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 bool SessionCore::open_project(const std::string &dir, bool import_pass, const std::string &game_install) {
 	if (dir.empty()) return false;
 	view_.project.refused.clear();
+	stock_import_.clear(); // a game you own's import goes with the Open that made it, never another
 	ProjectDocument doc;
 	Diagnostic error;
 	const auto refuse_open = [&](const Diagnostic &why) {
@@ -498,7 +535,16 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	touch(ViewConcern::Project);
 	touch(ViewConcern::Operation); // no build yet
 	touch(ViewConcern::Output);
+	// A game you own's new project goes on to import every file of its game: the operation that follows this one,
+	// or the one that follows its base game's export where that runs first (absorb_base_export).
+	start_stock_import();
 	return outcome;
+}
+
+void SessionCore::start_stock_import() {
+	if (stock_import_.empty() || stock_import_ != paths_.root || !view_.project.open || operations_.running()) return;
+	stock_import_.clear();
+	imports().import_stock();
 }
 
 bool SessionCore::close_project() {
@@ -1561,6 +1607,9 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
 	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true);
+	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
+	// or failed: they come from the game install).
+	start_stock_import();
 	return outcome;
 }
 

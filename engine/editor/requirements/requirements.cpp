@@ -26,6 +26,19 @@ bool requirement_multiplayer_only(const std::string &role) {
 	return role == "mp_menu" || role == "pre_menu";
 }
 
+ProjectFeatures features_files_need(const std::vector<std::string> &names) {
+	ProjectFeatures features;
+	std::vector<std::string> multiplayer; // the multiplayer-only rows' files
+	for (const char *role : { "mp_menu", "pre_menu" })
+		if (const RequiredResource *row = gameprofile_required_resource_by_role(role)) multiplayer.push_back(row->name);
+	for (const std::string &name : names) {
+		if (strutil::ends_with_icase(name, ".bms")) features.mission = true;
+		for (const std::string &file : multiplayer)
+			if (strutil::iequals(name, file)) features.multiplayer = true;
+	}
+	return features;
+}
+
 namespace {
 
 // Whether the project's checklist has the manifest's row: its phase on (requirement_phase_enabled), and a

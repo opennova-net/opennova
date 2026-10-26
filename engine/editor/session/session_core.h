@@ -200,10 +200,14 @@ public:
 	// opened as open_project opens it, with its import pass unless `import_pass` is false. `game_install`
 	// (the UX round's project lane), when given, is checked first (refused, project.install.invalid, for a
 	// folder that holds no install) and is the editor's install from then on, which the project's
-	// local.json takes as it opens.
+	// local.json takes as it opens. `stock` (a game you own, new_project's all): the project of the game install's
+	// own game (the editor's install when none is named), the base game standalone or, as `expansion`, one of the
+	// install's expansions on the base game's project; no placeholder of an expansion's own files made, and once it
+	// opens every file of its game imported (ImportController::import_stock, the operation that follows the Open, or
+	// the base game's export the Open starts first: start_stock_import).
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
 	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion(),
-	                 const std::string &game_install = std::string());
+	                 const std::string &game_install = std::string(), bool stock = false);
 	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
 	// project's game (check_install), the view's install_check.
 	void check_install(const std::string &path);
@@ -385,6 +389,10 @@ private:
 	// Why the last New project or Open was refused, for the welcome page, which stands in for Output and
 	// Problems while no project is open (ProjectView::refused); cleared as either starts.
 	void refuse_project(const Diagnostic &why, const std::string &what);
+	// A game you own's import (stock_import_, ImportController::import_stock) started once its project is open and
+	// the slot is free: as its Open finishes, else as the base game's export the Open started ends (finished,
+	// failed or cancelled by the person), so it follows the work its New project began.
+	void start_stock_import();
 	// The editor's install and the one in effect shown (ProjectView::editor_install, retail_directory).
 	void show_installs();
 	// The refresh run to its end now and the project validated (the build's, before it plans).
@@ -462,6 +470,9 @@ private:
 	// The install the open project was opened with for this session alone (open_project's `game_install`),
 	// in effect over local.json's and written nowhere; "" for none.
 	std::string run_install_;
+	// The project a game you own's New project made, whose Open goes on to import every file of its game
+	// (new_project's stock; its root as the Open's paths name it), "" for none: any other Open forgets it.
+	std::string stock_import_;
 	bool workspace_kept_ = true; // set_workspace_kept
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;

@@ -44,6 +44,18 @@ inline EditorRequest new_expansion_project(std::string dir, std::string title, s
 	request.base_project = std::move(base_project);
 	return request;
 }
+// A game you own (new_project's all): the project of the game install `game_install`'s own game ("" the
+// editor's install), made in `dir` and titled `title`, every file of it imported as it opens: the base game, or
+// with `expansion` that installed expansion on the base game's project `base_project`.
+inline EditorRequest new_stock_project(std::string dir, std::string title, std::string game_install,
+		std::string expansion = std::string(), std::string base_project = std::string(), bool import_pass = true) {
+	EditorRequest request = new_project(std::move(dir), std::move(title), std::string(), import_pass);
+	request.game_install = std::move(game_install);
+	request.expansion = std::move(expansion);
+	request.base_project = std::move(base_project);
+	request.all = true;
+	return request;
+}
 // The project in `dir` opened, its import pass first unless `import_pass` is false (its files as
 // they are, no source imported), on `game_install` for the session alone when given.
 inline EditorRequest open_project(

@@ -666,11 +666,12 @@ void test_thirty_tabs() {
 
 // No project: the Document window is the welcome page, the workspace's whole (the UX round's project
 // lane): open (a folder, the recent projects by their titles, their games and their folders, one whose
-// folder holds no project said so), new, what happened. Create waits for a folder, the shell's pick fills
-// it, Create raises NewProject; File > New project... shows the same form in a modal; File > Open recent
-// opens one.
+// folder holds no project said so), new (what it makes asked first: a game you own, a mod, a new game),
+// what happened. Create waits for a folder, the shell's pick fills it, Create raises NewProject; File > New
+// project... shows the same form in a modal; File > Open recent opens one.
 void test_welcome_view() {
 	SessionView v;
+	v.workspace.new_project.making = WorkspaceView::Making::Game; // a new game: no install needed
 	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
 	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
 	                            {"C:/mods/Other", true, "Other", "Joint Operations", "", ""},
@@ -684,10 +685,15 @@ void test_welcome_view() {
 	ui.drain();
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
-	                                  "No project here now", "C:/mods/Gone", "New project", "Name", "Folder", "Game install",
-	                                  "No game install chosen", "Create project", "No project open."}),
+	                                  "No project here now", "C:/mods/Gone", "New project", "A game you own", "A mod",
+	                                  "A new game", "Game install", "No game install chosen", "Name", "Folder",
+	                                  "Create project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
+	// What it makes is the workspace's: a choice is a set_workspace.
+	ui.activate(item_id(document, {"A mod"}));
+	std::vector<EditorRequest> chosen = ui.drain();
+	CHECK(chosen.size() == 1 && workspace_member(chosen[0], "new_project", "making").string == "mod", "A mod: the form's");
 	ui.activate(item_id(document, {"Create project"}));
 	CHECK(ui.drain().empty(), "no folder yet: nothing to create");
 	ui.activate(item_id(document, {"Browse...##folder"}));
@@ -975,11 +981,54 @@ void test_menus() {
 	CHECK(r.kind == EditorRequestKind::SaveAll, "File > Save All");
 	r = raised("File", {"Close file"}, EditorRequestKind::CloseDocument);
 	CHECK(r.kind == EditorRequestKind::CloseDocument && r.path == document->path(), "File > Close file");
-	r = raised("File", {"Import files..."}, EditorRequestKind::PickFile);
-	CHECK(r.kind == EditorRequestKind::PickFile && r.purpose == PickPurpose::ImportFiles, "File > Import files...");
-	r = raised("File", {"Import from the game data..."}, EditorRequestKind::PreviewInstallImport);
-	CHECK(r.kind == EditorRequestKind::PreviewInstallImport && r.names.empty() && r.with_dependencies == v.project.import_dependencies,
-	      "File > Import from the game data...: every file to choose from, planned as the setting says");
+	// File > Import...: the one way in to an import, its dialog's first step the sources that fit the project (a
+	// standalone one's: the whole install, the game data to choose from, files from the disk, every source again).
+	const auto import_source = [&](const char *label) {
+		CHECK(choose(ui, "File", {"Import..."}).empty() && v.workspace.import.sources, "File > Import... asks its first step");
+		ui.frames(2);
+		ui.activate(item_id(ImHashStr("Import"), {label}));
+		const std::vector<EditorRequest> requests = ui.drain();
+		if (modal_open("Import")) ui.activate(item_id(ImHashStr("Import"), {"Cancel"}));
+		ui.frames(2);
+		return requests.size() == 1 ? requests[0] : EditorRequest();
+	};
+	CHECK(choose(ui, "File", {"Import..."}).empty(), "File > Import... raises no request of its own");
+	ui.frames(2);
+	CHECK(modal_open("Import") && in_order(logged_frame(ui), {"The whole game install...", "Choose from the game data...",
+	                                                          "Include the files these need", "Files from the disk...",
+	                                                          "Every source again", "Cancel"}),
+	      "File > Import...: its sources");
+	ui.activate(item_id(ImHashStr("Import"), {"Cancel"}));
+	ui.frames(2);
+	CHECK(!v.workspace.import.sources && !modal_open("Import"), "its Cancel closes it");
+	r = import_source("Files from the disk...");
+	CHECK(r.kind == EditorRequestKind::PickFile && r.purpose == PickPurpose::ImportFiles && !v.workspace.import.sources,
+	      "Import's Files from the disk...: the shell's pick, the step closed");
+	r = import_source("Choose from the game data...");
+	CHECK(r.kind == EditorRequestKind::PreviewInstallImport && r.names.empty() && !r.all &&
+	              r.with_dependencies == v.project.import_dependencies,
+	      "Import's Choose from the game data...: every file to choose from, planned as the setting says");
+	r = import_source("The whole game install...");
+	CHECK(r.kind == EditorRequestKind::PreviewInstallImport && r.all && r.expansion.empty(),
+	      "Import's The whole game install...: every file chosen");
+	// An expansion project's: the installed expansions' own files in place of the whole install.
+	{
+		const std::shared_ptr<const ProjectDocument> standalone = v.project.document;
+		auto expansion = std::make_shared<ProjectDocument>(*standalone);
+		expansion->expansion = ProjectExpansion{ "jox01", "", "../JO" };
+		v.project.document = expansion;
+		v.project.game_install_expansions = {{"jox01", "Joint Operations: Escalation", ""}};
+		v.revisions.touch(ViewConcern::Project);
+		r = import_source("The installed expansion jox01...");
+		CHECK(r.kind == EditorRequestKind::PreviewInstallImport && r.all && r.expansion == "jox01" &&
+		              r.game_install == v.project.retail_directory,
+		      "an expansion project's Import: the installed expansion's own files, from the game install");
+		CHECK(import_source("The whole game install...").kind != EditorRequestKind::PreviewInstallImport,
+		      "and no whole install");
+		v.project.document = standalone;
+		v.project.game_install_expansions.clear();
+		v.revisions.touch(ViewConcern::Project);
+	}
 	r = raised("File", {"Show project folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.project.root, "File > Show project folder");
 	r = raised("File", {"Close project"}, EditorRequestKind::CloseProject);
@@ -1026,7 +1075,8 @@ void test_menus() {
 	CHECK(choose(ui, "Build", {"Play"}).empty(), "no Play while it runs");
 	v.project.retail_directory.clear();
 	v.revisions.touch(ViewConcern::Preferences);
-	CHECK(choose(ui, "File", {"Import from the game data..."}).empty(), "no game install: nothing to import from");
+	CHECK(import_source("Choose from the game data...").kind != EditorRequestKind::PreviewInstallImport,
+	      "no game install: nothing to import from");
 }
 
 // Along the main menu bar, a pixel in two, the leftmost and rightmost x at which each of

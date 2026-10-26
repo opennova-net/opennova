@@ -200,6 +200,13 @@ static int test_project_expansion() {
 // builds as an expansion itself, or where it is another game's.
 static int test_base_project_dir() {
 	test_temp::TempDir dir("opennova_editor_base_project_dir");
+	// A folder named whole is kept from the project's folder; one named from it already stays as it is.
+	TEST_EXPECT(base_project_from(dir.file("game/expansions/onx"), dir.file("game/assets")) == "../../assets");
+	TEST_EXPECT(base_project_from(dir.file("game/expansions/onx"), "../../assets") == "../../assets");
+	// The features a game's files need: Missions for a mission, Multiplayer for the multiplayer screens.
+	TEST_EXPECT(features_files_need({ "main.mnu", "01TR.bms" }).mission && !features_files_need({ "01TR.bms" }).multiplayer);
+	TEST_EXPECT(features_files_need({ "MP.MNU" }).multiplayer && features_files_need({ "pre.mnu" }).multiplayer &&
+	            !features_files_need({ "main.mnu", "gametext.bin" }).mission);
 	const std::string mod = dir.file("game/expansions/onx");
 	ProjectDocument made;
 	Diagnostic error;
@@ -690,6 +697,59 @@ static int test_session() {
 	TEST_EXPECT(!outcome.refused && view.project.open &&
 	            view.project.document->expansion == (ProjectExpansion{ "jxz", "x1" }) &&
 	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0);
+	return 0;
+}
+
+// A game you own (new_project's all) in a session, over a game install with an expansion: refused with no install
+// to make it from; the base game's project made standalone on the install, every file of it imported as it opens
+// (the operation that follows the open: the import's outcome follows it), the features its files need on (a
+// mission: Missions), no placeholder made; its expansion refused with no base game's project named (nothing made)
+// and for an expansion the install lacks, then made on the base game's project, whose export the session makes
+// first (the base has none: session/base_export.h), the import never refused for it but following it, the
+// installed expansion's own files imported (its version text the install's, never a placeholder's).
+static int test_session_stock() {
+	test_temp::TempDir dir("opennova_editor_expansion_stock");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install) && write_archive(install + "/localres.pff", { { "local.txt", "localres" } }) &&
+	            write_archive(install + "/language.pff", { { "words.txt", "language" } }));
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string base = dir.file("work/JO"), expansion = dir.file("work/JOX01");
+	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_stock_project(base, "Joint Operations", ""));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.install.invalid") == 1 && !view.project.open &&
+	            !std::filesystem::exists(opennova::io::os_path(base)));
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(base, "Joint Operations", install));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.project.document->expansion.standalone());
+	const OperationOutcome &imported = view.activity.last_operation;
+	TEST_EXPECT(imported.kind == OperationKind::ImportApply && imported.end == OperationEnd::Done && imported.follows != 0 &&
+	            imported.follows == outcome.operation && imported.id == outcome.operation + 1 && !imported.imported.empty());
+	TEST_EXPECT(view.project.scan->find("01TR.bms") && view.project.scan->find("baseonly.txt") &&
+	            view.project.scan->find("local.txt") && view.project.scan->find("words.txt") && view.project.scan->find("MENUMUS.SBF"));
+	TEST_EXPECT(view.project.document->features.mission && !view.project.document->features.multiplayer);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.mission.feature_off") == 0);
+	// Its expansion: on the base game's project, which must be named.
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x1"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.base_project", "make Joint Operations first") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(expansion)));
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x2", "../JO"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.field.invalid", "no expansion named x2") == 1);
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x1", "../JO"));
+	TEST_EXPECT(!outcome.refused && view.project.open &&
+	            view.project.document->expansion == (ProjectExpansion{ "x1", "", "../JO" }));
+	// The base game's project has no export: the session exports it first, then the import goes on (the operation
+	// between them the export), never refused for the slot the export held.
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end == OperationEnd::Done &&
+	            view.activity.last_operation.follows == outcome.operation &&
+	            view.activity.last_operation.id == outcome.operation + 2 && count_code(view.findings.diagnostics, "operation.busy") == 0);
+	std::string text, message;
+	const auto text_in = [&](const char *name) {
+		const AssetEntry *entry = view.project.scan->find(name);
+		return entry && opennova::io::read_file_text(view.project.root + "/" + entry->relative_path, text, message) ? text : "<none>";
+	};
+	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("x1.bin") == "x1 table" && text_in("x1only.txt") == "x1 only");
 	return 0;
 }
 
@@ -1248,6 +1308,7 @@ int main() {
 	failures += test_base_project_dir();
 	failures += test_base_export_weighed();
 	failures += test_session_on_base_project();
+	failures += test_session_stock();
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
 	failures += test_base_string_tables();

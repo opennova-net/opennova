@@ -1,9 +1,9 @@
 // S13 A1: the windows show the session's busy gate. Every menu item and button that raises a
 // request (the File, Edit and Build menus, the menu bar's buttons and its list of unsaved files,
 // the document toolbar, Files' tools and a file's menu, the Problems summary's fixes and their
-// confirmation, the import dialog, Rename everywhere, the welcome view; since S13 A3 the document
-// view's record tools and the Inspector's form) is enabled exactly when the gate takes that
-// request (SessionView::allows: busy_refuses over the running operation).
+// confirmation, the import dialog and its first step's sources, Rename everywhere, the welcome
+// view; since S13 A3 the document view's record tools and the Inspector's form) is enabled exactly
+// when the gate takes that request (SessionView::allows: busy_refuses over the running operation).
 // Drawn on the null backend over a view where only the gate can hold a control back, under no
 // operation and under the status of every operation kind, cancellable and not: each control
 // pressed, and whether its request came (or, for one that opens a dialog first, the dialog
@@ -195,7 +195,23 @@ void test_windows_show_the_gate() {
 		ui.drain();
 		return open;
 	};
-	// An item of a Files combo ("##import", "##new"), pressed.
+	// A source of File > Import...'s first step (the workspace's, served as the Shell serves it), pressed; the step
+	// closed by its Cancel where the source did not close it.
+	const auto import_source = [&ui](const char *label, EditorRequestKind raised) {
+		return [&ui, label, raised]() {
+			ui.activate(item_id(menu_bar_id(), {"File"}));
+			ui.activate(item_id(ImHashStr("##Menu_00"), {"Import..."}));
+			ImGui::ClosePopupsExceptModals();
+			ui.frames(2);
+			ui.activate(item_id(ImHashStr("Import"), {label}));
+			const bool came = has(ui.drain(), raised);
+			if (modal_open("Import")) ui.activate(item_id(ImHashStr("Import"), {"Cancel"}));
+			ui.frames(2);
+			ui.drain();
+			return came;
+		};
+	};
+	// An item of a Files combo ("##new"), pressed.
 	const auto listed = [&ui, files, combo](const char *list, ImGuiID item, EditorRequestKind raised) {
 		return [&ui, files, list, item, raised]() {
 			ui.activate(item_id(files, {list}));
@@ -237,9 +253,13 @@ void test_windows_show_the_gate() {
 	        {"File > Save", K::Save, menu("File", {"Save"}, K::Save), nullptr},
 	        {"File > Save All", K::SaveAll, menu("File", {"Save All"}, K::SaveAll), nullptr},
 	        {"File > Close file", K::CloseDocument, menu("File", {"Close file"}, K::CloseDocument), nullptr},
-	        {"File > Import files...", K::PreviewImport, menu("File", {"Import files..."}, K::PickFile), nullptr},
-	        {"File > Import from the game data...", K::PreviewInstallImport,
-	         menu("File", {"Import from the game data..."}, K::PreviewInstallImport), nullptr},
+	        // File > Import...: one dialog, its first step the sources that fit the project (a standalone one here).
+	        {"Import's Files from the disk...", K::PreviewImport, import_source("Files from the disk...", K::PickFile), nullptr},
+	        {"Import's The whole game install...", K::PreviewInstallImport,
+	         import_source("The whole game install...", K::PreviewInstallImport), nullptr},
+	        {"Import's Choose from the game data...", K::PreviewInstallImport,
+	         import_source("Choose from the game data...", K::PreviewInstallImport), nullptr},
+	        {"Import's Every source again", K::Reimport, import_source("Every source again", K::Reimport), nullptr},
 	        {"File > Show project folder", K::RevealPath, menu("File", {"Show project folder"}, K::RevealPath), nullptr},
 	        {"File > Close project", K::CloseProject, menu("File", {"Close project"}, K::CloseProject), nullptr},
 	        {"File > Quit", K::Quit, menu("File", {"Quit"}, K::Quit), nullptr},
@@ -274,12 +294,6 @@ void test_windows_show_the_gate() {
 	        {"the toolbar's Undo", K::Undo, pressed(item_id(tab, {"Undo"}), K::Undo), nullptr},
 	        {"the toolbar's Redo", K::Redo, pressed(item_id(tab, {"Redo"}), K::Redo), nullptr},
 	        {"Files' Refresh", K::Rescan, pressed(item_id(files, {"Refresh"}), K::Rescan), nullptr},
-	        {"Files' Import > Files...", K::PreviewImport, listed("##import", item_id(combo, {"Files..."}), K::PickFile),
-	         nullptr},
-	        {"Files' Import > From the game data...", K::PreviewInstallImport,
-	         listed("##import", item_id(combo, {"From the game data..."}), K::PreviewInstallImport), nullptr},
-	        {"Files' Import > Reimport all", K::Reimport, listed("##import", item_id(combo, {"Reimport all"}), K::Reimport),
-	         nullptr},
 	        {"Files' New > weapon.def", K::CreateFile,
 	         listed("##new", item_id(pushed(combo, factory_index("weapon_def", AssetKind::WeaponDefs)), {"weapon.def"}),
 	                K::CreateFile),
@@ -431,8 +445,10 @@ void test_windows_show_the_gate() {
 	v.documents.active.clear();
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
 	ui.frames(3);
-	// The form's folder, the workspace's (as the session takes the pick's set_workspace).
+	// The form's folder, the workspace's (as the session takes the pick's set_workspace); a new game's (a game you
+	// own waits for its install, checked).
 	v.workspace.new_project.dir = "C:/mods/New";
+	v.workspace.new_project.making = WorkspaceView::Making::Game;
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	// (The welcome page's two columns are a table: its items in its scope.)

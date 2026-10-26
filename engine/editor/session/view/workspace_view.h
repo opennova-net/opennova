@@ -90,21 +90,26 @@ struct WorkspaceView {
 	BuildResult build_result;
 
 	// The new-project form (the welcome page's, File > New project...'s modal): whether the modal is open
-	// (the welcome page shows the form whenever no project is open), its name, its folder, the game install
-	// it imports from (the editor's own until one is named: `install_named`), what it builds on (an
-	// installed expansion by its folder's name, "" the base game) and whether it builds as an expansion of
-	// that name (ADR 0046 S16; building on an expansion builds as one). New project raises new_project
-	// with them; nothing here makes a project.
+	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a game you own,
+	// its game's every file imported; a mod of a game; a new game of its own), its name, its folder, the game
+	// install it imports from (the editor's own until one is named: `install_named`), the install's game it is or
+	// changes (`installed`: "" the base game, else an installed expansion by its folder's name), for a mod whether
+	// it changes a project of the author's own instead (`on_project`, T5), the base game's project (a game you
+	// own's expansion is made on it, a mod on_project changes it; offered the folder beside it that holds one), and
+	// a mod's name, the expansion it builds as (ADR 0046 S16). New project raises new_project with them; nothing
+	// here makes a project.
+	enum class Making : uint8_t { Stock, Mod, Game };
 	struct NewProject {
 		bool open = false;
+		Making making = Making::Stock;
 		std::string title = "My Game";
 		std::string dir;
 		std::string game_install;
 		bool install_named = false;
-		std::string builds_on;
-		bool as_expansion = false;
+		std::string installed;
+		bool on_project = false;
+		std::string base_project;
 		std::string expansion;
-		std::string base_project; // the base game's project it builds on (T5; "" the game install's base game)
 	};
 	NewProject new_project;
 
@@ -223,12 +228,15 @@ struct WorkspaceView {
 	};
 	Files files;
 
-	// The import dialog's own, over the preview the dialogs view holds (DialogsView::import_preview): the
-	// filter of the files to choose from and the kind it lists alone, the filter of the plan's rows and the
+	// The import dialog's own: File > Import...'s first step (`sources`, the one way in: the sources that fit the
+	// open project, each raising its preview or its import), then over the preview the dialogs view holds
+	// (DialogsView::import_preview) the filter of the files to choose from and the kind it lists alone, the filter of the plan's rows and the
 	// kind they show alone (kCount: every kind), Replace existing files, and which of the plan's rows are
 	// checked (each plan made takes them anew, import_default_checks; Import takes the checked ones), with a
 	// serial that moves with each change of the checks. A new preview starts it afresh; its close ends it.
 	struct Import {
+		// File > Import...'s first step shows (a project open, no preview yet): the sources that fit the project.
+		bool sources = false;
 		std::string filter;
 		AssetKind choice_kind = AssetKind::kCount;
 		std::string rows_filter;
