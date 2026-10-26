@@ -525,11 +525,13 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	std::vector<uint16_t> sweep_destroyed;
 	// ClientState intentionally keeps its decoded rows public, so its general
 	// find() contract must remain a derived linear lookup. This refresh owns a
-	// stable vector for its whole eight-depth pass, though: build a disposable
-	// first-row index here instead of rescanning a retail-sized world stream for
-	// every carrier/parent edge. emplace preserves find()'s first-match behavior
-	// if a caller has directly introduced duplicate handles.
-	std::unordered_map<uint16_t, std::size_t> row_by_handle;
+	// stable vector for its whole eight-depth pass, though: build a first-row index
+	// here (in the kept scratch, carried_row_index_) instead of rescanning a
+	// retail-sized world stream for every carrier/parent edge. emplace preserves
+	// find()'s first-match behavior if a caller has directly introduced duplicate
+	// handles.
+	std::unordered_map<uint16_t, std::size_t> &row_by_handle = carried_row_index_;
+	row_by_handle.clear();
 	row_by_handle.reserve(state_.entities.size());
 	for (std::size_t i = 0; i < state_.entities.size(); ++i)
 		row_by_handle.emplace(state_.entities[i].handle, i);
@@ -557,7 +559,8 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 	// world_class_update, D-NET-690); without model bone tables at this layer,
 	// the recompose below carries the rigid child-in-carrier pose captured from
 	// the 0x0D absolutes for a row no world holds.
-	std::vector<uint16_t> persistent_carrier(state_.entities.size(), wire_handle::kInvalid);
+	std::vector<uint16_t> &persistent_carrier = carried_persistent_;
+	persistent_carrier.assign(state_.entities.size(), wire_handle::kInvalid);
 	for (std::size_t i = 0; i < state_.entities.size(); ++i) {
 		const ClientEntityState &child = state_.entities[i];
 		if (child.target_handle == wire_handle::kInvalid && child.parent_handle == wire_handle::kInvalid)

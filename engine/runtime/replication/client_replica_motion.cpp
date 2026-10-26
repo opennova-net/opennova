@@ -2309,18 +2309,18 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 void ClientReplicaPipeline::tick_remote_motion_through_self() {
 	finish_pool1_rows();
 	if (middle_rows_.empty()) return;
-	std::vector<ParkedRow> rows;
-	rows.swap(middle_rows_);
-	visit_parked_rows(rows);
+	parked_visit_.clear();
+	parked_visit_.swap(middle_rows_);
+	visit_parked_rows(parked_visit_);
 }
 
 void ClientReplicaPipeline::tick_remote_motion_after_self() {
 	// A middle half the embedder never ran keeps the walk's order.
 	tick_remote_motion_through_self();
 	if (parked_rows_.empty()) return;
-	std::vector<ParkedRow> rows;
-	rows.swap(parked_rows_);
-	visit_parked_rows(rows);
+	parked_visit_.clear();
+	parked_visit_.swap(parked_rows_);
+	visit_parked_rows(parked_visit_);
 }
 
 ClientEntityState *ClientReplicaPipeline::parked_row(const ParkedRow &parked) {
@@ -2364,12 +2364,12 @@ std::vector<uint16_t> ClientReplicaPipeline::unvisited_pool1_rows() const {
 
 void ClientReplicaPipeline::finish_pool1_rows() {
 	if (pool1_rows_.empty()) return;
-	std::vector<uint16_t> rows;
-	rows.swap(pool1_rows_);
+	pool1_visit_.clear();
+	pool1_visit_.swap(pool1_rows_);
 	// Every row the World's walk reached took its visit there: only a row still parked
 	// takes one here.
 	if (pool1_parked_count_ == 0) return;
-	for (const uint16_t handle : rows) visit_pool1_row(handle);
+	for (const uint16_t handle : pool1_visit_) visit_pool1_row(handle);
 }
 
 void ClientReplicaPipeline::visit_parked_rows(std::vector<ParkedRow> &rows) {

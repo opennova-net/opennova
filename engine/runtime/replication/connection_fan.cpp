@@ -119,7 +119,7 @@ struct FrameHeaderState {
 // loop mirrors NetPacket_SerializeEntityStatesToPacket @0x50f070 (priority/budget port = step 2).
 // [orig: NapiNPClientMsg_0x00A @0x42FEC0 (reader) / NetPacket_SerializePlayerState case 1 @0x4C09C0]
 std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
-                                    const std::vector<GameEntitySnapshot> &entities, uint8_t flags2,
+                                    const std::vector<const GameEntitySnapshot *> &entities, uint8_t flags2,
                                     const FrameHeaderState &hdr,
                                     uint32_t game_type,
                                     const world::SubgoalState &subgoals,
@@ -228,7 +228,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	fu.armor = hdr.tail_armor; // [orig: @0x4FFD77..0x4FFD8B]
 	fu.passenger = hdr.mount_ammo;
 
-	for (const GameEntitySnapshot &e : entities) {
+	for (const GameEntitySnapshot *const row : entities) {
+		const GameEntitySnapshot &e = *row;
 		// The anchor-relative triple. A value that folds to 0 / -1 takes its word's shift
 		// bits from the call's ECX (network_compress_fixedpoint): y's and z's hold the word
 		// before them (`movzx ecx, ax`); the infantry's x holds the live Yaw (+0x10, loaded
@@ -1152,7 +1153,7 @@ void serialize_frame_records(Connection &conn,
                              const std::vector<RoundEventRecord> &listed_rounds,
                              std::size_t header_bytes, std::size_t hard_frame_limit,
                              std::size_t frame_budget,
-                             std::vector<GameEntitySnapshot> &selected,
+                             std::vector<const GameEntitySnapshot *> &selected,
                              std::vector<RoundEventRecord> &rounds) {
 	const auto fits = [&](std::size_t written, std::size_t bytes) {
 		return hard_frame_limit == 0 ||
@@ -1168,7 +1169,7 @@ void serialize_frame_records(Connection &conn,
 			const GameEntitySnapshot &snap = *listed[row++];
 			const std::size_t bytes = record_wire_size(snap);
 			if (fits(written, bytes)) {
-				selected.push_back(snap);
+				selected.push_back(&snap);
 				std::size_t idx = 0;
 				if (priority_cache_index(snap, idx)) {
 					conn.s2c_entity_age[idx] = 0;
@@ -1538,7 +1539,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	lap.mark(devtools::Slot::SIM_REPLICATION_ROUNDS);
 	const std::vector<const GameEntitySnapshot *> listed =
 			select_frame_entities(w, conn, ents, anchor, body, despawned);
-	std::vector<GameEntitySnapshot> selected;
+	std::vector<const GameEntitySnapshot *> selected;
 	std::vector<RoundEventRecord> rounds;
 	serialize_frame_records(conn, listed, listed_rounds, header_bytes, max_frame_body_bytes,
 			frame_budget, selected, rounds);
@@ -1549,10 +1550,14 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	// own record reads the body after them.
 	// [orig: Server_SendEntityStateToPlayer - the list @0x517C1E, the writer
 	//  @0x517C76, the records @0x517C81]
-	for (GameEntitySnapshot &row : selected) {
-		if (row.wire_handle != owned->handle.packed) continue;
-		row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
-		row.health = owned->health;
+	// The selection points into the caller's snapshots: the recipient's own record takes a copy.
+	GameEntitySnapshot own_row;
+	for (const GameEntitySnapshot *&row : selected) {
+		if (row->wire_handle != owned->handle.packed) continue;
+		own_row = *row;
+		own_row.state_flags = static_cast<uint8_t>(owned->flags & 0xFF);
+		own_row.health = owned->health;
+		row = &own_row;
 	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITIES);
 

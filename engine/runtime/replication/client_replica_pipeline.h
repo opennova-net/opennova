@@ -569,6 +569,10 @@ public:
 	// record applies must not run it [orig: Entity_UpdateTransformAndTurret
 	// @0x440CA0, the sweep @0x440D2A..0x440E2F].
 	void refresh_carried_entities(bool tick_sweep = false);
+	// The refresh's scratch, kept across calls so a pass reuses its buckets and capacity: the
+	// first-row index by handle and each row's persistent structural carrier.
+	std::unordered_map<uint16_t, std::size_t> carried_row_index_;
+	std::vector<uint16_t> carried_persistent_;
 
 	// S2C 0x5D empty-slot sweep: retire one RAW pool-0 slot index and everything
 	// attached to it. The decoded view is the client's entity pool, so
@@ -1011,6 +1015,10 @@ private:
 	bool self_body_split_ = false;
 	std::vector<ParkedRow> middle_rows_;
 	std::vector<ParkedRow> parked_rows_;
+	// The list a visit walks: a parked list is swapped into it, so the list takes back the
+	// visit's emptied buffer with its capacity (pool1_visit_ likewise for pool1_rows_).
+	std::vector<ParkedRow> parked_visit_;
+	std::vector<uint16_t> pool1_visit_;
 	uint16_t parked_self_ = 0xFFFFu;
 	uint32_t parked_tick_ = 0;
 	// The pool-1 interleave (set_pool1_interleave): the pool-1 rows the walk parked, in
