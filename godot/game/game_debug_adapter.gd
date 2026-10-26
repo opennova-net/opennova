@@ -310,8 +310,6 @@ func capture_mcp_render_bundle(
 		"hud_hidden":
 			presentation_begin = _shell.begin_hud_hidden_capture
 			presentation_finish = _shell.finish_hud_hidden_capture
-			if _shell == null:
-				return {"error": "HUD-hidden render capture witness is unavailable in this game shell."}
 			diagnostics_source = func() -> Variant:
 				var diagnostics_value: Variant = get_mcp_render_diagnostics()
 				if not (diagnostics_value is Dictionary):
