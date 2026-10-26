@@ -7,9 +7,10 @@
 // precheck file), score.ini and _NSTMOUT.TXT (the two loose root files the server reads) and
 // gt.ssc (the gate tag override, ADR 0055 d3) when the install has them. An expansion's tree
 // is its pair, <code>.pff and <code>L.pff, and its version.txt (the checksum joiners compare,
-// vfs_expansion_version_checksum), required, with gt.ssc when present. The admin page keeps
-// only these out of a picked folder, the upload route refuses any other name, and the
-// worker's finalize checks the required ones are there. Service policy, not a port.
+// vfs_expansion_version_checksum), required, with gt.ssc when present. A release's apply
+// (release.apply) keeps only these of what the package's rows leave, under their canonical
+// names, and refuses a tree without a required one. The archives' names are base/vfs's (the
+// boot table, vfs_expansion_archive_name). Service policy, not a port.
 
 #include "data_set_repository.h"
 
