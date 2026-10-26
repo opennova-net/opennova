@@ -419,6 +419,11 @@ public:
     World &world() { return world_; }
 
 private:
+    // One Entity_ApplyCommand over a resolved row (entity_commands_ai.cpp): the BMS single
+    // command's pool 0..2 walk resolves the row, the family's own arms apply it.
+    // [orig: Entity_ApplyCommand @0x43ab60]
+    bool apply_ai_command_at(EntityHandle handle, int sub_type, int32_t p2, int32_t p3, int32_t p4);
+
     World &world_;
 };
 

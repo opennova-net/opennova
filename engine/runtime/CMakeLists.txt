@@ -267,6 +267,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/powerup.cpp     # the med/ammo pack pickups (powerup.def)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands.cpp   # the Entity_* command layer (split from world.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands_ai.cpp   # its AI-change family (Entity_ApplyCommand)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
