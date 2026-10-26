@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <utility>
 
+#include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
@@ -248,10 +249,21 @@ void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
 	// The install is validated for the files a row may be the game's own in (problem_query.h's
 	// original_candidate): a finding on a file of a name the install serves, each name validated once (the
-	// install's files of those names and what their findings read, session/original_files.h).
-	// The install's names normalized once while its listing stands (a composition asks every row's).
-	if (served_listing_ != view_.project.retail_files) {
-		served_listing_ = view_.project.retail_files;
+	// install's files of those names and what their findings read, session/original_files.h). The install is
+	// SessionCore::original_install's: the one the project imports from, whose names the session lists
+	// (retail_files), or for a stock expansion the game as it ships, its names listed here once while that view
+	// stands. Its names normalized once while its listing stands (a composition asks every row's).
+	const InstallSpec install = core_.original_install();
+	// A view mounting an expansion the project does not build on is a stock expansion's (it builds on a base
+	// project, mounting none); any other is the one the project imports from.
+	const bool imported_from = install.root.empty() || install.expansion == view_.project.document->expansion.builds_on;
+	if (!imported_from && install != original_listed_) {
+		original_listed_ = install;
+		original_names_ = list_install_file_names(install);
+	}
+	const std::vector<std::string> &listing = imported_from ? view_.project.retail_files : original_names_;
+	if (served_listing_ != listing) {
+		served_listing_ = listing;
 		served_.clear();
 		for (const std::string &name : served_listing_) served_.insert(pff::normalized_logical_name(name));
 	}
@@ -264,7 +276,7 @@ void ProblemsService::want_originals() {
 	originals_needed_ = !names.empty();
 	// Another install or game forgets what was found (the view says so at once); a new scan looks at the
 	// install's folder again.
-	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get(), names);
+	originals_->want(install, view_.project.document, view_.project.scan.get(), names);
 	show_originals();
 }
 
@@ -512,6 +524,8 @@ void ProblemsService::clear() {
 	readings_.clear();
 	originals_->clear();
 	originals_needed_ = false;
+	original_listed_ = InstallSpec();
+	original_names_.clear();
 	blockers_.clear();
 	*blocker_memo_ = BlockerMemo();
 	view_.findings.marks.reset();

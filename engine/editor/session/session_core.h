@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/install_view.h>
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/terrain_brush.h>
@@ -308,6 +309,12 @@ public:
 	// every read of the base game reads: the import's listing, the base's names, lean packing, the build's
 	// gate and the Play run's base; the game install stays the program Play in the game install starts.
 	std::string base_game() const;
+	// The install the game's own data is judged against (ADR 0046 S15, session/original_files.h): a stock
+	// expansion (one on a base game's project whose game install has an installed expansion of the project's own
+	// name: Escalation, jox01, on the Joint Operations project) against the game as it ships, the game install
+	// with that expansion mounted, its files under the project's names (installed_expansion_spec); every other
+	// project against the install it imports from (install_spec over base_game()). An empty root for none.
+	InstallSpec original_install() const;
 	// An expansion of a project's base game (ADR 0046 T5): its base project's export weighed (base_export_of)
 	// and, where it is missing or older than the project and may be replaced, exported again as an operation
 	// (BaseExportOperation), which starts `after` (the Build, Play or Export that found it so) once the base is
