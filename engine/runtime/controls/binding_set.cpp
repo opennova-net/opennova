@@ -582,36 +582,21 @@ int BindingSet::pressed_key(int index,
     }
     return 0;
   }
-  // A held row keeps the two passes over every row's claim (D-CTRL-8).
-  // Pass 1: the row's modifier is held and one of its keys is down
-  // [orig: @0x49d35b..0x49d3a7].
-  if (row_mod_down(*r)) {
-    for (const uint16_t key : keys) {
-      if (slot_down(key)) {
-        return key;
-      }
-    }
-    return 0;
-  }
-  // Fallback: both modifier words zero [orig: @0x49d3c1..0x49d3d2], for a key
-  // no pass-1 row claims (a pass-1 fire skips the fallback @0x49d437).
-  if (r->primary_mod != 0 || r->secondary_mod != 0) {
-    return 0;
-  }
+  // A held row: the held pass queues it on either key down, under its mode
+  // bit alone (no modifier test, no first match). Its list is every flag-4
+  // row with a nonzero code (D-CTRL-8).
+  // [orig: Input_InitBindingSystem @0x499ab0 - the list @0x499b80..0x499d01
+  //  (the rows with a modifier word) and @0x499d17.. (the rest), the code
+  //  test @0x499b80, flag 4 @0x499b86; Input_ProcessAnalogBindings @0x4995f0
+  //  - the keys @0x499608..0x499629, the class filter @0x49962b..0x499635
+  //  (never written), the mode bit @0x499637..0x499650, the queue @0x499660;
+  //  Input_ProcessPlayerFrame - the pass behind !g_InputCaptureMode
+  //  @0x49d502..0x49d50c]
+  const ActionDef &def = catalog(&n)[index];
+  if (action_code(def.id) == 0) return 0;
+  if ((def.modes & (scan_death_screen_ ? 2u : 1u)) == 0) return 0;
   for (const uint16_t key : keys) {
-    if (!slot_down(key)) {
-      continue;
-    }
-    bool claimed = false;
-    for (const BindingRecord &other : records_) {
-      if ((other.primary == key || other.secondary == key) && row_mod_down(other)) {
-        claimed = true;
-        break;
-      }
-    }
-    if (!claimed) {
-      return key;
-    }
+    if (slot_down(key)) return key;
   }
   return 0;
 }
@@ -624,8 +609,12 @@ bool BindingSet::fire_signed(int index, uint16_t held_mouse_mask,
     return false;
   }
   // A keyboard fire: the fallback (both modifier words zero) is signed, the
-  // modifier pass is not [orig: @0x49d3ed..0x49d3f8 vs @0x49d42f].
-  if (pressed_key(index, key_down) != 0) {
+  // modifier pass is not [orig: @0x49d3ed..0x49d3f8 vs @0x49d42f]; the held
+  // pass queues the row's bare code [orig: Input_ProcessAnalogBindings
+  //  @0x499652..0x499660], so a held row's sign is its mouse arm's alone.
+  std::size_t n = 0;
+  const bool held = (catalog(&n)[index].flags & 0x4u) != 0;
+  if (!held && pressed_key(index, key_down) != 0) {
     return r->primary_mod == 0 && r->secondary_mod == 0;
   }
   // A held mouse button: the mouse dispatch's sign; a joystick fire is bare.

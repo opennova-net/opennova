@@ -745,6 +745,56 @@ bool test_key_scan_gates() {
   return true;
 }
 
+// A held (flag 4) row reads its keys alone: the held pass queues every listed row
+// whose either key is down, under the row's mode bit, with no modifier test and
+// no first match (D-CTRL-8). A held row bound with Ctrl walks on a bare key, one
+// sharing a modifier row's key walks under that modifier, and a mode-1 held row
+// reads nothing on the death screen.
+// [orig: Input_ProcessAnalogBindings @0x4995f0 - the keys @0x499608..0x499629,
+//  the mode bit @0x499637..0x499650, the queue @0x499660]
+bool test_held_row_reads_its_keys_alone() {
+  BindingSet set;
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  const int forward = set.index_of_token("move_forward");
+  const int respawn = set.index_of_token("respawn");
+  const int jump = set.index_of_token("move_jump");
+  CHECK(forward >= 0 && respawn >= 0 && jump >= 0, "the rows exist");
+
+  // Ctrl+W on Forward (the remap screen records the modifier).
+  BindingRecord ctrl_w;
+  ctrl_w.primary = 0x57;
+  ctrl_w.primary_mod = 17;
+  CHECK(set.set_record(forward, ctrl_w), "Forward takes Ctrl+W");
+  down = {0x57};
+  CHECK(set.pressed_key(forward, key_down) == 0x57, "a bare W walks");
+  down = {0x11, 0x57};
+  CHECK(set.pressed_key(forward, key_down) == 0x57, "Ctrl+W walks");
+
+  // Forward moved onto R beside Ctrl+R respawn: both fire under Ctrl+R.
+  BindingRecord r;
+  r.primary = 0x52;
+  CHECK(set.set_record(forward, r), "Forward takes R");
+  down = {0x11, 0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52, "Ctrl+R walks");
+  CHECK(set.pressed_key(respawn, key_down) == 0x52, "and respawns");
+
+  // Jump is mode 1: off the death screen it reads its Space, on it nothing.
+  down = {0x20};
+  CHECK(set.pressed_key(jump, key_down) == 0x20, "alive: Space jumps");
+  set.set_scan_gates(true, true);
+  CHECK(set.pressed_key(jump, key_down) == 0, "the death screen's mode bit drops the jump");
+  down = {0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52, "a mode-3 held row still walks there");
+  set.set_scan_gates(false, false);
+
+  // The held pass queues the bare code: a held row's keyboard fire is unsigned.
+  down = {0x10, 0x52};
+  CHECK(set.pressed_key(forward, key_down) == 0x52 && !set.fire_signed(forward, 0, key_down),
+        "Shift+R walks unsigned");
+  return true;
+}
+
 // The sign bit a fire carries (the mousescale step's direction): the
 // keyboard fallback pass and the mouse dispatch put it on while Shift is
 // held, the modifier pass and a joystick button never do
@@ -995,6 +1045,7 @@ int main() {
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_held_row_reads_its_keys_alone);
   RUN_TEST(test_key_scan_first_match);
   RUN_TEST(test_key_scan_gates);
   RUN_TEST(test_fire_sign);

@@ -213,9 +213,9 @@ class BindingSet {
   //  ex byte_B3B768, read @0x49d321), flag 4 @0x49d362 / @0x49d40a, the mode
   //  bit @0x49d380..0x49d393 / @0x49d40f..0x49d43d, the jumps to the next
   //  event @0x49d437 / @0x49d490 (no match @0x49d450)]
-  // A held (flag 4) row keeps the two passes alone, with no first match and
-  // no gate (D-CTRL-8: retail's held pass reads its keys and its mode bit).
-  // 0 while the keyboard is captured (below).
+  // A held (flag 4) row takes neither pass: the held pass reads either of its
+  // keys down, under its mode bit alone (no modifier test, no first match),
+  // for a row with a nonzero code. 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
 
   // The catalog row one dequeued key event fires, or -1: the event's scan code
