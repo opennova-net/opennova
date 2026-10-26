@@ -491,7 +491,7 @@ bool parse_mis_wav_list(const std::vector<MisLine> &lines, size_t &pos, bms::Fil
 
 // `begin layer N`: the original editor's own layer (its description and colour, an item's `layer`
 // naming it), which no .bms byte holds [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the keys @
-// 0x453f12..0x453f37]: walked, its keys checked, nothing kept.
+// 0x453f12..0x453f37]: walked, its keys checked; parse_mis_names keeps it (MisEditorFields).
 bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, std::string &error,
 		std::vector<MisIssue> *issues) {
 	int32_t index = 0;
@@ -1010,7 +1010,7 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error,
 	// `name` and general_information's are not these). An event by its place in the file, an area by its
 	// zone id (`begin areatrig N`, 1..99 as parse_mis_text reads it: another number's name skipped, a second
 	// section's replacing the first's), a path by its record index (`begin waypoint N`).
-	enum class Kind { None, Event, Area, Path, Other };
+	enum class Kind { None, Event, Area, Path, Group, Layer, Other };
 	Kind kind = Kind::None;
 	std::string section;
 	size_t index = 0;
@@ -1048,6 +1048,20 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error,
 				}
 				kind = Kind::Path;
 				index = static_cast<size_t>(number);
+			} else if (section == "group" || section == "layer") {
+				// A group's colour by its record (its description is its record's name, parse_mis_text's), a layer's
+				// description and colour by its number (MisEditorFields); a number past the slots is none of them.
+				int32_t number = 0;
+				const size_t slots = section == "group" ? size_t(bms::kGroupRecordCount) : kMisLayerCount;
+				if (!token_i32(line, 2, number, error)) return false;
+				if (number < 0 || size_t(number) >= slots) {
+					note(issues, line.line_no, section + " " + std::to_string(number) + " is no slot of 0.." +
+					                                   std::to_string(slots - 1) + "; its fields skipped");
+					kind = Kind::Other;
+					continue;
+				}
+				kind = section == "group" ? Kind::Group : Kind::Layer;
+				index = static_cast<size_t>(number);
 			} else {
 				kind = Kind::Other;
 			}
@@ -1060,13 +1074,30 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error,
 			continue;
 		}
 		if (t.size() < 2) continue;
+		// A colour as both readers take a number; one that reads as none is noted and left 0.
+		const auto color = [&](int32_t &into) {
+			if (!parse_i32_token(t[1], into)) {
+				into = 0;
+				note(issues, line.line_no, section + "'s color \"" + t[1] + "\" is no number; skipped");
+			}
+		};
 		if (kind == Kind::Event && t[0] == "name") {
 			if (out.events.size() <= index) out.events.resize(index + 1);
 			out.events[index] = t[1];
 		} else if (kind == Kind::Area && t[0] == "description") {
 			out.areas[index] = t[1];
+		} else if (kind == Kind::Area && t[0] == "color") {
+			color(out.editor.area_colors[index]);
 		} else if (kind == Kind::Path && t[0] == "description") {
 			out.paths[index] = t[1];
+		} else if (kind == Kind::Path && t[0] == "color") {
+			color(out.editor.path_colors[index]);
+		} else if (kind == Kind::Group && t[0] == "color") {
+			color(out.editor.group_colors[index]);
+		} else if (kind == Kind::Layer && t[0] == "description") {
+			out.editor.layers[index].description = t[1];
+		} else if (kind == Kind::Layer && t[0] == "color") {
+			color(out.editor.layers[index].color);
 		}
 	}
 	if (kind != Kind::None) {

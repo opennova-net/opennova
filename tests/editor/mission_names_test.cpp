@@ -1736,6 +1736,32 @@ int test_names_refusals() {
 		std::printf("  status: %s\n", p.view().activity.status.c_str());
 	return 0;
 }
+
+// The original editor's own fields a matching .mis holds (its colours and layers, mission::MisEditorFields,
+// D-MIS-22), which no .bms byte holds: the matched file's, which the save writes back as it holds them,
+// so a .mis the editor's writer makes of them is its own (the fixed point) and the save writes the same text.
+int test_names_file_editor_fields() {
+	const bms::File plain = names_mission();
+	std::string error, mis_text, text;
+	mission::MisNames names = file_names();
+	names.editor.area_colors[4] = 2;
+	names.editor.path_colors[3] = 5;
+	names.editor.layers[1] = {"Snipers", 3};
+	TEST_EXPECT(mission::write_mis_text(plain, mis_text, error, nullptr, &names));
+	TEST_EXPECT(mis_text.find("  color 2\r\n") != std::string::npos &&
+	            mis_text.find("begin layer 1\r\n  description \"Snipers\"\r\n  color \"3\"\r\n") != std::string::npos);
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	const std::vector<uint8_t> mis = bytes_of(mis_text);
+	std::unique_ptr<Document> document = read_with(bms_bytes, &mis);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &m = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(m.names_file().found == MissionNamesFile::Found::Matched && m.names_file().ours && !m.companion_unsaved());
+	TEST_EXPECT(save_text(m, beside(&mis), text) && text == mis_text);
+	if (text != mis_text) std::printf("  saved:\n%s\n  read:\n%s\n", text.c_str(), mis_text.c_str());
+	return 0;
+}
 } // namespace
 
 int main() {
@@ -1758,6 +1784,7 @@ int main() {
 	if (test_names_refusals() != 0) return 1;
 	if (test_names_unsaved_paths() != 0) return 1;
 	if (test_names_file_kit() != 0) return 1;
+	if (test_names_file_editor_fields() != 0) return 1;
 	std::printf("editor_mission_names: all tests passed\n");
 	return 0;
 }

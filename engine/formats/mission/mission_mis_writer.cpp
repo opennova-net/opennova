@@ -289,6 +289,7 @@ bool write_mis_area_triggers(const bms::File &file, std::string &out, const MisN
 		append_kv(out, "begin areatrig ", id);
 		append_kv(out, "  description \"", names != nullptr ? mis_name(names->areas[id], kMisDescriptionChars) : std::string(),
 		          "\"");
+		if (names != nullptr && names->editor.area_colors[id] != 0) append_kv(out, "  color ", names->editor.area_colors[id]);
 		if (flags != 0) append_kv(out, "  attrib ", flags);
 		append_line(out, "end areatrig");
 		append_line(out);
@@ -313,6 +314,8 @@ void write_mis_waypoints(const bms::File &file, const HeldCounts &held, std::str
 		}
 		append_kv(out, "begin waypoint ", i);
 		append_kv(out, "  description \"", description, "\"");
+		if (names != nullptr && i < names->editor.path_colors.size() && names->editor.path_colors[i] != 0)
+			append_kv(out, "  color ", names->editor.path_colors[i]);
 		if (static_cast<uint32_t>(record.flags) != 0) {
 			append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
 		}
@@ -329,7 +332,7 @@ void write_mis_waypoints(const bms::File &file, const HeldCounts &held, std::str
 // group's description is its name (the 20 bytes the game's loader drops, bms.h GroupRecord). The .bms holds no
 // color. The original writes the commander line with the color's word (`mov ecx, [edi+104h]` @0x454eea, the
 // commander being +108h), so its own save loses the commander; this writer writes the commander's (D-MIS-16).
-void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string &out) {
+void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string &out, const MisNames *names) {
 	for (size_t i = 1; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
 		const std::string name = bms::group_name(record);
@@ -341,6 +344,8 @@ void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string
 		if (record.flags != 0) {
 			append_kv(out, "  attrib ", record.flags);
 		}
+		if (names != nullptr && i < names->editor.group_colors.size() && names->editor.group_colors[i] != 0)
+			append_kv(out, "  color ", names->editor.group_colors[i]);
 		if (record.value != 0) {
 			append_kv(out, "  commander ", record.value);
 		}
@@ -354,8 +359,7 @@ void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string
 // 0x454630, the loop
 // @ 0x454f89..0x455012, the test @ 0x454fa9 / @ 0x454fcf, the lines @ 0x454fd8, @ 0x454fea, @
 // 0x454ff6, @ 0x455001]; its slot 0 it never writes. The .bms holds a slot's file name alone (bms.h
-// WavListRecord), so the description is written empty. Its editor layers (`begin layer N`) hold
-// nothing the .bms holds: none written.
+// WavListRecord), so the description is written empty.
 void write_mis_wav_list(const bms::File &file, std::string &out) {
 	for (size_t i = 1; i < file.wav_list_records.size(); ++i) {
 		const std::string name =
@@ -385,6 +389,21 @@ void write_mis_variable_names(const MisNames *names, std::string &out) {
 	}
 	if (any)
 		append_line(out);
+}
+
+// The original editor's layers 0..31 after the wav list, each that has a description: its description, then its
+// colour quoted, whatever it is (MisEditorFields, D-MIS-22). The .bms holds none.
+void write_mis_layers(std::string &out, const MisNames *names) {
+	if (names == nullptr) return;
+	for (size_t i = 0; i < kMisLayerCount; ++i) {
+		const MisLayer &layer = names->editor.layers[i];
+		if (layer.description.empty()) continue;
+		append_kv(out, "begin layer ", i);
+		append_kv(out, "  description \"", mis_name(layer.description, kMisLayerDescriptionChars), "\"");
+		append_kv(out, "  color \"", layer.color, "\"");
+		append_line(out, "end layer");
+		append_line(out);
+	}
 }
 
 void write_mis_events(const bms::File &file, std::string &out, const MisNames *names) {
@@ -636,8 +655,9 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 	}
 	const HeldCounts held = held_counts(file);
 	write_mis_waypoints(file, held, out, names);
-	write_mis_groups(file, held, out);
+	write_mis_groups(file, held, out, names);
 	write_mis_wav_list(file, out);
+	write_mis_layers(out, names);
 	write_mis_events(file, out, names);
 	write_mis_area_markers(file, write_mis_items(file, out, base_heights), out);
 	return true;

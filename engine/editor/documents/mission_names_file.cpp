@@ -109,6 +109,15 @@ void take_kept(const bms::File &mission, size_t event_count, MissionNamesFile &o
 		if (mission::mis_name_allowed(name, mission::kMisDescriptionChars, why)) out.kept.variables[v] = name;
 		else out.refused.push_back("V" + std::to_string(v) + "'s name (" + why + ")");
 	}
+	// The original editor's own fields (D-MIS-22): its colours as read, each layer's description as a name the .mis
+	// carries.
+	out.kept.editor = out.names.editor;
+	for (size_t l = 0; l < out.kept.editor.layers.size(); ++l) {
+		std::string &name = out.kept.editor.layers[l].description;
+		if (name.empty() || mission::mis_name_allowed(name, mission::kMisLayerDescriptionChars, why)) continue;
+		out.refused.push_back("layer " + std::to_string(l) + "'s description (" + why + ")");
+		name.clear();
+	}
 	for (size_t g = 1; g < out.groups.size() && g < mission.group_records.size(); ++g) {
 		const std::string &name = out.groups[g];
 		bms::GroupRecord probe = mission.group_records[g];
@@ -288,6 +297,10 @@ mission::MisNames mission_names(const MissionDocument &document) {
 		}
 	}
 	if (const auto *state = dynamic_cast<const MissionFileState *>(document.file_state())) out.variables = state->variables;
+	// The original editor's own fields (its colours and layers, D-MIS-22) are the file's, which the editor never
+	// edits: as the .mis the mission matched last holds them (kept: none for one it does not match), so a save
+	// writes them back, and what a later read of the file finds is what the next save writes.
+	out.editor = document.names_file().kept.editor;
 	return out;
 }
 
@@ -496,7 +509,8 @@ std::string write_over_detail(const std::string &mis, Over over) {
 	switch (over) {
 	case Over::Original:
 		lost = ", which the original editor wrote: what the editor's writer does not write goes with it (its weapon "
-		       "availability, teleport targets, wav list and wind, the areas', paths' and groups' colours and speeds, the "
+		       "availability, teleport targets, wav list and wind, the paths' speeds and, where the mission does not "
+		       "match it, its areas', paths' and groups' colours and its layers, the "
 		       "item keys the .bms has no field for, a group's description past the 20 bytes of its name, and each item's "
 		       "base height as the original editor sampled it)";
 		break;
