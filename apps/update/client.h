@@ -3,6 +3,8 @@
 #include "options.h"
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -18,13 +20,47 @@ struct Product {
 	bool expansion = false; // a registered expansion's (expansion/<name>/UPDATE.WIZ)
 };
 
+// What UPDATE.EXE's dialog (IDD 102) shows of a product's run, as its state machine and its
+// passes write each control: the product line (control 1007, the command file's PRODUCT), the
+// status line (1005), the current file (1002), the bar (1003, 0..range at position) and the
+// three counter lines (1000, 1001, 1006) as `lines` says; `start` is the run's START, whence the
+// elapsed line (1004) and the throughput. A run is a product's: each of retail's is a process of
+// its own, nested for an expansion (D-UPD-12). [orig: Cupdate2Dlg_StateTick @ 0x408170
+// (UPDATE.EXE); Cupdate2Dlg_ReadCommandFile @ 0x4076e0, Cupdate2Dlg_PrecheckCommands @ 0x407820,
+// Cupdate2Dlg_OnGetReply @ 0x406ec0, Cupdate2Dlg_InstallPffRows @ 0x406380 (UPDATE.EXE)]
 struct Progress {
+	enum class Lines {
+		Blank, // the three lines empty: the run's start, and PACK's clearing @0x408cb8..0x408cd8
+		Commands, // the precheck's "%d/%d Commands": `done` rows of `total` @0x40791b
+		Download, // the fetch's: `done` bytes of the rows fetched of the `total` to fetch @0x408bd2
+		Files, // the install's and the integration's "%d/%d Files" @0x40648e, @0x408d34
+	};
+	std::string product;
 	std::string status;
 	std::string file;
-	uint64_t bytes = 0;
+	Lines lines = Lines::Blank;
+	uint64_t done = 0;
 	uint64_t total = 0;
+	uint32_t position = 0;
+	uint32_t range = 0;
+	std::chrono::steady_clock::time_point start{};
 };
 using ProgressSink = std::function<void(const Progress &)>;
+
+// The dialog's three counter lines and its elapsed line for `progress`, `elapsed_ms` after its
+// start, as StateTick writes them each tick: "Downloading:  %d/%d KBytes", the throughput (the
+// fetched bytes over the elapsed seconds, "%d BPS" to 1024, "%d KBPS" past it) and the estimate
+// (all the bytes to fetch over that rate, "-" at none), from the CRT's truncation (a rate no int
+// holds, the first millisecond's infinity among them, is INT_MIN); "Elapsed time: %2.1f
+// seconds". [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE) @0x408bd2..0x408c7c, the
+// elapsed line @0x408dc4]
+struct DialogLines {
+	std::string downloaded; // control 1000
+	std::string throughput; // control 1001
+	std::string estimated;  // control 1006
+	std::string elapsed;    // control 1004
+};
+DialogLines dialog_lines(const Progress &progress, uint64_t elapsed_ms);
 
 // How long an install's connect to a gateway or an update server may take before the next one is
 // tried: retail's 10 s from the connect's start. A check keeps its own bound (at most 2 s each,

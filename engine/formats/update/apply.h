@@ -60,13 +60,17 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 using SectionBlobs =
 		std::function<bool(std::string_view name, std::vector<uint8_t> &packed, std::string &error)>;
 
+// Each row as the install reaches it, ahead of its write: its index among the command file's
+// rows, and the row (the updater's dialog draws its install from it).
+using ApplyRowStart = std::function<void(size_t index, const CommandRow &row)>;
+
 // apply_section over a command file's bytes and blobs read one at a time, as a package on disk is
 // read: a whole game's release is never held in memory. Each row's blob is read and checked, then
 // let go, before any row is applied; an archive's new entries are held only until it is written.
 // The same refusals as apply_section's.
 bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view command_file,
 		const SectionBlobs &blobs, const std::filesystem::path &dir, ApplyReport &report,
-		std::string &error);
+		std::string &error, const ApplyRowStart &row_start = {});
 
 // Whether `name` may name a file or entry of the tree: not empty, no '/', '\\' or ':', not "."
 // or "..", at most kCommandNameBytes - 1 bytes.

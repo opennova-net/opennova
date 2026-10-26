@@ -129,8 +129,13 @@ struct Worker {
 		if (options.check && Clock::now() >= deadline) { error = "Update check timed out."; return true; }
 		return false;
 	}
-	void status(const std::string &text, const std::string &file = "", uint64_t n = 0, uint64_t total = 0) {
-		if (sink) sink({text, file, n, total});
+	Progress shown; // the dialog as this run has written it
+	void show() {
+		if (sink) sink(shown);
+	}
+	void status(const std::string &text) {
+		shown.status = text;
+		show();
 	}
 	int connect_timeout() const {
 		if (!options.check) return kInstallConnectTimeoutMs;
@@ -149,11 +154,9 @@ struct Worker {
 		error = "Unable to open update server " + host + ":" + std::to_string(port);
 		return false;
 	}
-	// A reply's bytes. The 90 s silence limit restarts whenever bytes arrive. `done` and `total`
-	// place them in the whole file for the progress line (a file read a buffer at a time).
+	// A reply's bytes. The 90 s silence limit restarts whenever bytes arrive.
 	// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_WAIT_REPLY's 0x15F90 ms and US_FETCH_WAIT]
-	bool receive(net::Socket &socket, uint8_t *out, size_t size, const std::string &file = "",
-			uint64_t done = 0, uint64_t total = 0) {
+	bool receive(net::Socket &socket, uint8_t *out, size_t size) {
 		size_t received = 0;
 		auto last = Clock::now();
 		while (received < size) {
@@ -167,7 +170,6 @@ struct Worker {
 			if (count <= 0) { error = "The server closed an incomplete update reply."; return false; }
 			received += static_cast<size_t>(count);
 			last = Clock::now();
-			if (!file.empty()) status("Fetching files...", file, done + received, total ? total : size);
 		}
 		return true;
 	}
@@ -206,7 +208,7 @@ struct Worker {
 			int32_t id, uint64_t limit, update::Reply &reply, const std::string &name = "") {
 		if (!request(socket, text, verb, id, limit, reply, name)) return false;
 		reply.payload.resize(static_cast<size_t>(reply.size));
-		return receive(socket, reply.payload.data(), reply.payload.size(), name);
+		return receive(socket, reply.payload.data(), reply.payload.size());
 	}
 	// A row's GET, its reply's body written to `path` as it arrives, a buffer at a time, so a whole
 	// game's release is never held in memory. [orig: NLUpdateProtocol_OnGetReply @ 0x4013e0
@@ -223,7 +225,7 @@ struct Worker {
 		bool ok = true;
 		while (ok && done < total) {
 			const size_t count = static_cast<size_t>(std::min<uint64_t>(total - done, buffer.size()));
-			ok = receive(socket, buffer.data(), count, name, done, total);
+			ok = receive(socket, buffer.data(), count);
 			if (ok && std::fwrite(buffer.data(), 1, count, file) != count) {
 				error = "Cannot write " + io::utf8_path(path) + ".";
 				ok = false;
@@ -250,12 +252,21 @@ struct Worker {
 		std::vector<uint16_t> ports;
 		if (options.port) ports.push_back(options.port);
 		else ports.assign(std::begin(update::kGatewayPorts), std::end(update::kGatewayPorts));
-		for (const std::string &host : hosts) for (uint16_t port : ports) {
+		for (size_t index = 0; index < hosts.size(); ++index) for (uint16_t port : ports) {
 			if (interrupted()) return false;
-			status("Locating Gateway Server...", host);
+			const std::string &host = hosts[index];
+			// Each gateway state's status line names the gateway by its place among them and its
+			// port. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): OPEN_GATEWAY @0x40840d,
+			// LOGIN_GATEWAY @0x4084a5, FETCH_LST @0x408566]
+			char where[48];
+			std::snprintf(where, sizeof where, "\n(Server %d, Port %x)   ", int(index + 1), unsigned(port));
+			status(std::string("Locating Gateway Server...") + where);
 			net::ScopedSocket gateway;
 			const ProtocolClose gateway_closing{gateway};
-			if (!connect(host, port, gateway) || !login(gateway.get(), product, update::kIdGatewayLogin)) continue;
+			if (!connect(host, port, gateway)) continue;
+			status(std::string("Logging into Gateway Server...") + where);
+			if (!login(gateway.get(), product, update::kIdGatewayLogin)) continue;
+			status(std::string("Fetching server list...") + where);
 			update::Reply list;
 			if (!exchange(gateway.get(), update::encode_get({"SERVER.LST"}, update::kIdServerList),
 						update::Verb::Get, update::kIdServerList, 65536, list, "SERVER.LST")) continue;
@@ -267,8 +278,15 @@ struct Worker {
 			// deployed service's form, needs no LOADTEST round trip (updater-re section 5).
 			for (const std::string &listed : servers) {
 				const std::string server = dialed_server(listed, host);
-				status("Opening update server...", server);
-				if (connect(server, port, out) && login(out.get(), product, update::kIdServerLogin)) return true;
+				// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): OPEN_SERVER @0x40863a,
+				// LOGIN_SERVER @0x408699]
+				char opening[48];
+				std::snprintf(opening, sizeof opening, "Opening update server...\n(Port %x)   ", unsigned(port));
+				status(opening);
+				if (connect(server, port, out)) {
+					status("Logging into remote server...");
+					if (login(out.get(), product, update::kIdServerLogin)) return true;
+				}
 				close_protocol(out); // a refused login, as retail's ERROR closes it
 			}
 		}
@@ -351,16 +369,24 @@ struct DownloadDir {
 };
 
 // One product: the command file's CRC against the local copy's (equal: keep it, else GET it),
-// the rows the precheck finds, fetched into the download directory, then installed in one pass
-// from there, update.exe landing as update.new for revupdat (D-UPD-4). The command file is
-// written only once every row is in (D-UPD-5). [orig: Cupdate2Dlg_StateTick @ 0x408170
+// the rows the precheck finds, then fetched into the download directory, then installed in one
+// pass from there, update.exe landing as update.new for revupdat (D-UPD-4). The command file is
+// written only once every row is in (D-UPD-5). Its dialog is a run's of its own, written as
+// retail's states write theirs (Progress). [orig: Cupdate2Dlg_StateTick @ 0x408170
 // (UPDATE.EXE), states 11-16; Cupdate2Dlg_InstallLooseRows @ 0x406860 (UPDATE.EXE)]
 bool update_product(Worker &worker, const Product &product, Result &result) {
 	if (!update::is_safe_row_name(product.command)) { worker.error = "Unsafe command file name."; return false; }
+	// START: the dialog afresh, its clock from now. [orig: Cupdate2Dlg_StateTick @ 0x408170
+	// (UPDATE.EXE), US_START @0x4081d1, the start tick @0x4081ee]
+	worker.shown = Progress{};
+	worker.shown.start = Clock::now();
+	worker.status("Processing wizard file...");
 	net::ScopedSocket socket;
 	const ProtocolClose closing{socket};
 	if (!worker.open_product(product, socket)) return false;
-	worker.status("Checking for update...", product.login);
+	// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): CHECK_UPDATE @0x4086f7, FETCH_UPDATE
+	// @0x408747, FETCH_FILES @0x4088b4 and @0x4088f5]
+	worker.status("Checking for update...");
 	update::Reply remote;
 	if (!worker.exchange(socket.get(), update::encode_crc(product.command, update::kIdCommandFile),
 				update::Verb::Crc, update::kIdCommandFile, 0, remote)) return false;
@@ -371,6 +397,7 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 	const bool cached = io::read_file_bytes(io::utf8_path(command_path), command_bytes, ignored) &&
 			update::command_file_crc(command_bytes.data(), command_bytes.size()) == remote_crc;
 	if (!cached) {
+		worker.status("Fetching command file...");
 		if (!worker.exchange(socket.get(), update::encode_get({product.command}, update::kIdCommandFile),
 					update::Verb::Get, update::kIdCommandFile, 1024 * 1024, remote, product.command)) return false;
 		command_bytes = std::move(remote.payload);
@@ -378,11 +405,17 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 			worker.error = "The command file did not match the server's CRC. Please retry."; return false;
 		}
 	}
+	worker.status("Processing command file...");
 	const auto command = update::read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
 	if (!command || !update::validate_commands(*command, worker.error)) {
 		if (!command) worker.error = "Error processing CMD file: " + product.command;
 		return false;
 	}
+	// The product line, as the command file is read: its PRODUCT, else retail's words for none.
+	// [orig: Cupdate2Dlg_ReadCommandFile @ 0x4076e0 (UPDATE.EXE), the default @0x407706, the line
+	// @0x407794]
+	worker.shown.product = command->product.empty() ? "Your NovaLogic Product" : command->product;
+	worker.status("Checking file versions...");
 	if (worker.options.legacy && result.launch_exe.empty()) result.launch_exe = command->exe;
 	update::CommandFile selected = *command;
 	selected.rows.clear();
@@ -397,12 +430,44 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 	std::error_code revision_error;
 	const bool pending_revision = product.dir == worker.options.runtime_dir &&
 			fs::is_regular_file(named_file(product.dir, "update.new"), revision_error);
+	// What the precheck finds to fetch, each name once, and what the dialog counts of it as retail's
+	// GET per row counts: the rows and bytes of every row to fetch (a name two rows share fetched
+	// once, counted twice); an archive's REMOVE rows, every one, and its TARGET rows, the archive
+	// jobs retail queues. [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE): a GET's
+	// size and step @0x407a4a..0x407a67, an archive's REMOVE queued with no check @0x407e88..0x407eb0;
+	// Cupdate2Dlg_InstallPffRows @ 0x406380 (UPDATE.EXE): an archive TARGET's AddDir job @0x406530]
+	struct Fetch {
+		std::string name;
+		int32_t id = 0;
+		uint64_t size = 0;
+		fs::path path;
+		uint32_t rows = 0; // the rows naming it
+		uint64_t bytes = 0; // their sizes
+	};
+	std::vector<Fetch> fetches;
+	std::map<std::string, size_t> fetch_of; // a fetched name's place in `fetches`
+	uint64_t fetch_bytes = 0;
+	uint32_t fetch_rows = 0;
+	uint32_t archive_removes = 0;
+	uint32_t archive_targets = 0;
+	std::vector<size_t> origin; // each selected row's index among the command file's rows
+	// The precheck's line and bar: each row's place among them as it is reached.
+	// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE): the range @0x407890, each row's
+	// "%d/%d Commands" @0x40791b and position @0x407948]
+	worker.shown.lines = Progress::Lines::Commands;
+	worker.shown.total = command->rows.size();
+	worker.shown.range = static_cast<uint32_t>(command->rows.size());
 	Precheck precheck{product};
 	for (size_t i = 0; i < command->rows.size(); ++i) {
+		worker.shown.done = i;
+		worker.shown.position = static_cast<uint32_t>(i);
+		worker.show();
 		update::CommandRow row = command->rows[i];
 		if (row.type == update::CommandType::Target) {
-			target = row.name; selected.rows.push_back(row); continue;
+			if (strutil::ends_with_icase(row.name, ".pff")) ++archive_targets;
+			target = row.name; selected.rows.push_back(row); origin.push_back(i); continue;
 		}
+		if (row.type == update::CommandType::Remove && strutil::ends_with_icase(target, ".pff")) ++archive_removes;
 		// A new native command file installs every row (D-UPD-6). This avoids treating the retail
 		// defective CRC as a full-file digest when code/PCK bytes changed beyond its prefix.
 		const bool updater_image = row.type == update::CommandType::Loose && target == "." &&
@@ -416,14 +481,17 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 		++result.files;
 		if (worker.options.check) continue;
 		if (row.type == update::CommandType::Loose || row.type == update::CommandType::Copy) {
-			if (worker.interrupted()) return false;
 			// A name two rows share is fetched once: the update directory is flat.
 			const auto [at, fresh] = fetched.emplace(strutil::to_lower(row.name), download.path / io::os_path(row.name));
 			if (fresh) {
-				if (!download.make(worker.error)) return false;
-				const uint64_t bound = uint64_t(row.size) + uint64_t(row.size) / 100 + 65536;
-				if (!worker.fetch(socket.get(), row.name, int32_t(i), bound, at->second)) return false;
+				fetch_of[at->first] = fetches.size();
+				fetches.push_back({row.name, int32_t(i), uint64_t(row.size), at->second, 0, 0});
 			}
+			Fetch &counted = fetches[fetch_of[at->first]];
+			++counted.rows;
+			counted.bytes += uint64_t(row.size);
+			++fetch_rows;
+			fetch_bytes += uint64_t(row.size);
 			if (updater_image) {
 				row.name = "update.new";
 				revised = true;
@@ -431,13 +499,44 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 			files[strutil::to_lower(row.name)] = at->second;
 		}
 		selected.rows.push_back(row);
+		origin.push_back(i);
 	}
 	++result.products;
+	if (!worker.options.check) {
+		// FETCH_WAIT: "Fetching files...", the bar's range the fetches and an archive's REMOVE rows;
+		// each file as its reply completes moves the bar, adds its row's bytes, and is the current
+		// file. [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the range @0x407aa7;
+		// Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_FETCH_WAIT @0x408940;
+		// Cupdate2Dlg_OnGetReply @ 0x406ec0 (UPDATE.EXE): the bar @0x40701f, the bytes @0x40703b,
+		// the file @0x407053]
+		worker.shown.lines = Progress::Lines::Download;
+		worker.shown.done = 0;
+		worker.shown.total = fetch_bytes;
+		worker.shown.position = 0;
+		worker.shown.range = fetch_rows + archive_removes;
+		worker.status("Fetching files...");
+		for (const Fetch &fetch : fetches) {
+			if (worker.interrupted()) return false;
+			if (!download.make(worker.error)) return false;
+			const uint64_t bound = fetch.size + fetch.size / 100 + 65536;
+			if (!worker.fetch(socket.get(), fetch.name, fetch.id, bound, fetch.path)) return false;
+			worker.shown.position += fetch.rows;
+			worker.shown.done += fetch.bytes;
+			worker.shown.file = fetch.name;
+			worker.show();
+		}
+	}
 	// The fetches are done: the server's connection ends ahead of the install, as retail's PACK
 	// ends it.
 	close_protocol(socket);
 	if (worker.options.check) return true;
 	if (worker.interrupted()) return false;
+	// The fetch's end clears the three lines (FETCH_WAIT moving to PACK), and PACK's line follows.
+	// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE): FETCH_WAIT's PACK @0x408965, the
+	// clearing @0x408cb8..0x408cd8, US_PACK @0x4089d7]
+	worker.shown.lines = Progress::Lines::Blank;
+	worker.show();
+	worker.status("Decompressing update...");
 	precheck.close(); // Windows must release the source archive before replacement.
 	const std::string selected_text = update::write_command_file(selected);
 	if (selected_text.empty()) { worker.error = "Cannot prepare update commands."; return false; }
@@ -452,10 +551,30 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 		}
 		return io::read_file_bytes(io::utf8_path(found->second), packed, why);
 	};
-	worker.status("Integrating update...", product.login);
+	// The install's "%d/%d Files" and bar: each row's place among the command file's rows as the
+	// install reaches it, the current file each COPY row's; at its end the bar's range the archive
+	// jobs, at 0, and no current file; then INTEGRATE's line and its jobs, ours done with the rows.
+	// [orig: Cupdate2Dlg_InstallPffRows @ 0x406380 (UPDATE.EXE): the range @0x406401, each row's
+	// line @0x40648e and position @0x4064b5, a COPY row's file @0x406619, the end @0x406819..0x406838;
+	// Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_INTEGRATE @0x408a48, its line @0x408d34]
+	worker.shown.lines = Progress::Lines::Files;
+	worker.shown.total = command->rows.size();
+	worker.shown.range = static_cast<uint32_t>(command->rows.size());
+	const update::ApplyRowStart row_start = [&worker, &origin](size_t index, const update::CommandRow &row) {
+		worker.shown.done = origin[index];
+		worker.shown.position = static_cast<uint32_t>(origin[index]);
+		if (row.type == update::CommandType::Copy) worker.shown.file = row.name;
+		worker.show();
+	};
 	update::ApplyReport report;
-	if (!update::apply_commands(selected_bytes, product.command, read_fetched, product.dir, report, worker.error))
+	if (!update::apply_commands(selected_bytes, product.command, read_fetched, product.dir, report, worker.error,
+				row_start))
 		return false;
+	const uint32_t jobs = archive_targets + archive_removes;
+	worker.shown.file.clear();
+	worker.shown.done = worker.shown.total = jobs;
+	worker.shown.position = worker.shown.range = jobs;
+	worker.status("Integrating update...");
 	// Persist the remote command only after every selected row succeeded. An interrupted
 	// first install therefore checks/fetches again, rather than becoming a false no-op.
 	if (!io::write_file_atomic(io::utf8_path(command_path), command_bytes.data(), command_bytes.size(), worker.error))
@@ -557,6 +676,44 @@ VersionMark version_mark(const fs::path &dir) {
 	return mark;
 }
 
+DialogLines dialog_lines(const Progress &progress, uint64_t elapsed_ms) {
+	DialogLines lines;
+	char text[128];
+	const auto done = static_cast<unsigned long long>(progress.done);
+	const auto total = static_cast<unsigned long long>(progress.total);
+	switch (progress.lines) {
+	case Progress::Lines::Blank:
+		break;
+	case Progress::Lines::Commands:
+		std::snprintf(text, sizeof text, "%llu/%llu Commands", done, total);
+		lines.downloaded = text;
+		break;
+	case Progress::Lines::Download: {
+		std::snprintf(text, sizeof text, "Downloading:  %llu/%llu KBytes", done >> 10, total >> 10);
+		lines.downloaded = text;
+		// The rate in bytes a second, as the CRT's (int) of it: __ftol2_sse's cvttsd2si, the integer
+		// indefinite for what no int holds (a NaN or an infinity, the first millisecond's).
+		// [orig: __ftol2_sse @ 0x41d3b0 (UPDATE.EXE), from Cupdate2Dlg_StateTick @ 0x408170 @0x408c01]
+		const double bps = double(progress.done) / (double(elapsed_ms) / 1000.0);
+		const int rate = bps > -2147483649.0 && bps < 2147483648.0 ? static_cast<int>(bps) : INT32_MIN;
+		if (rate <= 1024) std::snprintf(text, sizeof text, "Throughput:  %d BPS", rate);
+		else std::snprintf(text, sizeof text, "Throughput:  %d KBPS", rate >> 10);
+		lines.throughput = text;
+		if (rate <= 0) std::snprintf(text, sizeof text, "Estimated time: -");
+		else std::snprintf(text, sizeof text, "Estimated time: %2.1f seconds", double(progress.total) / double(rate));
+		lines.estimated = text;
+		break;
+	}
+	case Progress::Lines::Files:
+		std::snprintf(text, sizeof text, "%llu/%llu Files", done, total);
+		lines.downloaded = text;
+		break;
+	}
+	std::snprintf(text, sizeof text, "Elapsed time: %2.1f seconds", double(elapsed_ms) / 1000.0);
+	lines.elapsed = text;
+	return lines;
+}
+
 bool run(const Options &options, const std::vector<Product> &products, Result &result,
 		std::string &error, const ProgressSink &progress, const std::atomic_bool *cancel) {
 	result = {};
@@ -608,7 +765,6 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 		return false;
 	}
 	error.clear();
-	worker.status(result.available ? "Operation completed successfully!" : "No Update Needed!");
 	return true;
 }
 } // namespace opennova::updater

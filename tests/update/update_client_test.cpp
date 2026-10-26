@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <mutex>
 #include <thread>
 
@@ -90,6 +91,128 @@ int test_install_connect_timeout() {
 	// The result box is retail's type 0, no icon [orig: Cupdate2Dlg_ReportResult @ 0x405140
 	// (UPDATE.EXE) @0x4053ce].
 	TEST_EXPECT(updater::kResultBoxType == 0);
+	return 0;
+}
+
+// The dialog's counter and elapsed lines, StateTick's formats [orig: Cupdate2Dlg_StateTick @ 0x408170
+// (UPDATE.EXE) @0x408bd2..0x408c7c, @0x408d34, @0x408dc4; Cupdate2Dlg_PrecheckCommands @ 0x407820
+// (UPDATE.EXE) @0x40791b].
+int test_dialog_lines() {
+	updater::Progress progress;
+	updater::DialogLines lines = updater::dialog_lines(progress, 2500);
+	TEST_EXPECT(lines.downloaded.empty() && lines.throughput.empty() && lines.estimated.empty());
+	TEST_EXPECT(lines.elapsed == "Elapsed time: 2.5 seconds");
+	TEST_EXPECT(updater::dialog_lines(progress, 12345).elapsed == "Elapsed time: 12.3 seconds");
+	TEST_EXPECT(updater::dialog_lines(progress, 0).elapsed == "Elapsed time: 0.0 seconds");
+	progress.lines = updater::Progress::Lines::Commands;
+	progress.done = 3;
+	progress.total = 10;
+	lines = updater::dialog_lines(progress, 0);
+	TEST_EXPECT(lines.downloaded == "3/10 Commands" && lines.throughput.empty() && lines.estimated.empty());
+	progress.lines = updater::Progress::Lines::Files;
+	progress.done = 2;
+	progress.total = 5;
+	TEST_EXPECT(updater::dialog_lines(progress, 0).downloaded == "2/5 Files");
+	// The fetch: KBytes by a shift, the rate in bytes a second, KBPS past 1024, the estimate all the
+	// bytes over the rate.
+	progress.lines = updater::Progress::Lines::Download;
+	progress.done = 1536000;
+	progress.total = 3072000;
+	lines = updater::dialog_lines(progress, 3000);
+	TEST_EXPECT(lines.downloaded == "Downloading:  1500/3000 KBytes");
+	TEST_EXPECT(lines.throughput == "Throughput:  500 KBPS");
+	TEST_EXPECT(lines.estimated == "Estimated time: 6.0 seconds");
+	progress.done = 1000;
+	progress.total = 4000;
+	lines = updater::dialog_lines(progress, 2000);
+	TEST_EXPECT(lines.downloaded == "Downloading:  0/3 KBytes" && lines.throughput == "Throughput:  500 BPS" &&
+			lines.estimated == "Estimated time: 8.0 seconds");
+	progress.done = 1024;
+	TEST_EXPECT(updater::dialog_lines(progress, 1000).throughput == "Throughput:  1024 BPS");
+	progress.done = 1025;
+	TEST_EXPECT(updater::dialog_lines(progress, 1000).throughput == "Throughput:  1 KBPS");
+	// No bytes yet: a rate of 0 and no estimate; the first millisecond's infinite rate is x87's
+	// integer indefinite.
+	progress.done = 0;
+	lines = updater::dialog_lines(progress, 500);
+	TEST_EXPECT(lines.throughput == "Throughput:  0 BPS" && lines.estimated == "Estimated time: -");
+	progress.done = 100;
+	lines = updater::dialog_lines(progress, 0);
+	TEST_EXPECT(lines.throughput == "Throughput:  -2147483648 BPS" && lines.estimated == "Estimated time: -");
+	return 0;
+}
+
+// A run's dialog, as retail's states write it: every status line in their order (the gateway's
+// with its place and port), the product line from the command file, the precheck's rows, the
+// fetch's bytes and files, the install's rows and the integration's jobs.
+int test_dialog_progress(const test_temp::TempDir &temp) {
+	Server server;
+	std::string error;
+	TEST_EXPECT(server.start(package("A release the dialog follows"), error));
+	updater::Options options;
+	options.runtime_dir = temp.path;
+	options.resource_dir = io::os_path(temp.file("dialog install"));
+	options.server = "127.0.0.1";
+	options.port = server.listener.ports()[0];
+	std::vector<updater::Product> products{{options.resource_dir, "TEST", "TEST.CMD", {}, true}};
+	std::vector<updater::Progress> shown;
+	const updater::ProgressSink sink = [&shown](const updater::Progress &progress) { shown.push_back(progress); };
+	updater::Result result;
+	TEST_EXPECT(updater::run(options, products, result, error, sink) && result.applied);
+	std::vector<std::string> statuses;
+	for (const updater::Progress &progress : shown)
+		if (statuses.empty() || statuses.back() != progress.status) statuses.push_back(progress.status);
+	char where[48], opening[48];
+	std::snprintf(where, sizeof where, "\n(Server 1, Port %x)   ", unsigned(options.port));
+	std::snprintf(opening, sizeof opening, "Opening update server...\n(Port %x)   ", unsigned(options.port));
+	const std::vector<std::string> expected = {"Processing wizard file...",
+		std::string("Locating Gateway Server...") + where, std::string("Logging into Gateway Server...") + where,
+		std::string("Fetching server list...") + where, opening, "Logging into remote server...",
+		"Checking for update...", "Fetching command file...", "Processing command file...",
+		"Checking file versions...", "Fetching files...", "Decompressing update...", "Integrating update..."};
+	TEST_EXPECT(statuses == expected);
+	const auto with = [&shown](const char *status) {
+		std::vector<updater::Progress> out;
+		for (const updater::Progress &progress : shown) if (progress.status == status) out.push_back(progress);
+		return out;
+	};
+	// The product line is the command file's PRODUCT once it is read; the clock runs from the start.
+	TEST_EXPECT(with("Processing command file...").front().product.empty());
+	TEST_EXPECT(with("Checking file versions...").front().product == "Synthetic updater client");
+	TEST_EXPECT(shown.back().start == shown.front().start && shown.front().start != std::chrono::steady_clock::time_point{});
+	// The precheck: each of the 3 rows as it is reached, the bar over them.
+	const std::vector<updater::Progress> precheck = with("Checking file versions...");
+	TEST_EXPECT(precheck.back().lines == updater::Progress::Lines::Commands && precheck.back().done == 2 &&
+			precheck.back().total == 3 && precheck.back().range == 3 && precheck.back().position == 2);
+	// The fetch: version.txt's and menu.txt's bytes of theirs, the bar over the 2 files, the last one
+	// the current file.
+	const uint64_t bytes = synthetic_trees::bytes("A release the dialog follows").size() +
+			synthetic_trees::bytes("test archive entry").size();
+	const std::vector<updater::Progress> fetch = with("Fetching files...");
+	TEST_EXPECT(fetch.front().lines == updater::Progress::Lines::Download && fetch.front().done == 0 &&
+			fetch.front().total == bytes && fetch.front().range == 2 && fetch.front().position == 0);
+	TEST_EXPECT(fetch.back().lines == updater::Progress::Lines::Blank && fetch.back().position == 2 &&
+			fetch.back().file == "menu.txt");
+	TEST_EXPECT(fetch[fetch.size() - 2].done == bytes && fetch[fetch.size() - 2].lines == updater::Progress::Lines::Download);
+	// The install: the rows by their place among the command file's 3, the COPY row the current file;
+	// then the integration's 1 job done.
+	const std::vector<updater::Progress> install = with("Decompressing update...");
+	TEST_EXPECT(install.front().lines == updater::Progress::Lines::Blank);
+	TEST_EXPECT(install.back().lines == updater::Progress::Lines::Files && install.back().done == 2 &&
+			install.back().total == 3 && install.back().range == 3 && install.back().file == "menu.txt");
+	const updater::Progress &end = shown.back();
+	TEST_EXPECT(end.status == "Integrating update..." && end.lines == updater::Progress::Lines::Files &&
+			end.done == 1 && end.total == 1 && end.position == 1 && end.range == 1 && end.file.empty());
+	// A run with nothing to update: the command file kept (no "Fetching command file..."), nothing to
+	// fetch, and INTEGRATE's jobs still the archive TARGET's one, as retail queues an AddDir for every
+	// archive target [orig: Cupdate2Dlg_InstallPffRows @ 0x406380 (UPDATE.EXE) @0x406530].
+	shown.clear();
+	TEST_EXPECT(updater::run(options, products, result, error, sink) && !result.available);
+	TEST_EXPECT(with("Fetching command file...").empty() && !with("Checking file versions...").empty());
+	const std::vector<updater::Progress> idle = with("Fetching files...");
+	TEST_EXPECT(idle.front().total == 0 && idle.front().range == 0 && idle.back().position == 0);
+	TEST_EXPECT(shown.back().status == "Integrating update..." && shown.back().done == 1 &&
+			shown.back().total == 1 && shown.back().range == 1 && shown.back().position == 1);
 	return 0;
 }
 
@@ -507,6 +630,8 @@ int main() {
 	TEST_EXPECT(net::startup() == 0);
 	test_temp::TempDir temp("update_client");
 	if (int rc = test_install_connect_timeout()) return rc;
+	if (int rc = test_dialog_lines()) return rc;
+	if (int rc = test_dialog_progress(temp)) return rc;
 	if (int rc = test_first_install(temp)) return rc;
 	if (int rc = test_retail_first_install(temp)) return rc;
 	if (int rc = test_retail_server_list(temp)) return rc;

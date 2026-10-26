@@ -149,7 +149,8 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 }
 
 bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view command_file,
-		const SectionBlobs &blobs, const fs::path &dir, ApplyReport &report, std::string &error) {
+		const SectionBlobs &blobs, const fs::path &dir, ApplyReport &report, std::string &error,
+		const ApplyRowStart &row_start) {
 	report = ApplyReport{};
 	const std::optional<CommandFile> cmd =
 			read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
@@ -176,6 +177,7 @@ bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view 
 	ArchiveEdits edits;
 	for (size_t i = 0; i < cmd->rows.size(); ++i) {
 		const CommandRow &row = cmd->rows[i];
+		if (row_start) row_start(i, row);
 		const bool archive_target = is_archive_name(target);
 		switch (row.type) {
 			case CommandType::Target:
