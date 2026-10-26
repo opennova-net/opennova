@@ -759,6 +759,13 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 	// distance as its weather tick left it (view_distance_units carries the
 	// witness). Zero, an unseeded environment, disables both terms.
 	const int view_distance = view_distance_units(w);
+	// Whether each tracked slot despawns: nothing the walk below reads changes within one
+	// emit, so each slot's answer is resolved once here, where retail's walk resolves the slot's
+	// handle in each admitted row's turn (the walk carries the witness).
+	bool slot_despawns[4] = {};
+	for (int t = 0; t < 4; ++t)
+		slot_despawns[t] = conn.tracked_handle[t] != 0xFFFF &&
+				tracked_slot_despawns(w, conn, entities, conn.tracked_handle[t]);
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SETUP);
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -796,7 +803,7 @@ std::vector<const GameEntitySnapshot *> select_frame_entities(const world::World
 		for (int t = 0; t < 4; ++t) {
 			uint16_t &tracked = conn.tracked_handle[t];
 			if (tracked == 0xFFFF) continue;
-			if (tracked_slot_despawns(w, conn, entities, tracked)) {
+			if (slot_despawns[t]) {
 				if (despawned != nullptr) despawned->push_back(tracked);
 				tracked = 0xFFFF;
 			}
