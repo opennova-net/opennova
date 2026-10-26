@@ -2,7 +2,9 @@
 #include <cstdint>
 namespace opennova::io {
 // [orig: PRNG_Next16_B @ 0x6130F0] The same recurrence as the A stream,
-// with a distinct owner/seed. Callers own lifetime and call order.
+// with a distinct owner/seed. Callers own lifetime and call order. The C stream
+// is the same recurrence again [orig: PRNG_Next16_C @ 0x6131B0], the occlusion
+// latch's (OcclusionWorld::latch_rand16).
 inline uint16_t rotating_prng_next16(uint32_t &state) noexcept {
     const uint32_t rotated = (state << 11) | (state >> 21);
     const uint32_t sum = state + rotated;
