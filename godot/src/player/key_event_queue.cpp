@@ -11,9 +11,12 @@ using namespace godot;
 void KeyEventQueue::push_key(const Ref<InputEventKey> &p_event, bool p_ctrl_down,
 		bool p_shift_down) {
 	if (p_event.is_null()) return;
-	const Key physical = p_event->get_physical_keycode();
+	// The message's VK is the layout's, as WM_KEYDOWN's wParam is (engine controls::KeyEvent
+	// carries the witness): Godot's keycode carries it (a synthetic event with none falls back to
+	// its physical key).
+	const Key keycode = p_event->get_keycode();
 	int vk = ControlsModel::vk_from_godot_key(
-			static_cast<int>(physical != KEY_NONE ? physical : p_event->get_keycode()));
+			static_cast<int>(keycode != KEY_NONE ? keycode : p_event->get_physical_keycode()));
 	if (vk == 0) return;
 	namespace flag = opennova::controls::key_event_flag;
 	uint16_t flags = 0;

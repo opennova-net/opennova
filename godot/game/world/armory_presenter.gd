@@ -31,12 +31,11 @@ static func is_accept_hotkey(keycode: Key) -> bool:
 	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
 
-# The key a binding row matches an event by. The rows hold PHYSICAL codes (the
-# polled rows read Input.is_physical_key_pressed, ControlsModel::vk_down_), so an
-# event matches by its physical_keycode; a synthetic event that carries none
-# falls back to its keycode.
+# The key a binding row matches an event by: the layout's VK (Godot's keycode), as
+# the polled rows read it (Input.is_key_pressed, ControlsModel::vk_down_); a
+# synthetic event that carries none falls back to its physical_keycode.
 static func bound_key_of(key: InputEventKey) -> Key:
-	return key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+	return key.keycode if key.keycode != KEY_NONE else key.physical_keycode
 
 signal opened
 signal closed

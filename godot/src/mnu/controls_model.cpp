@@ -194,9 +194,10 @@ bool ControlsModel::is_token_fire_signed(const String &p_token) const {
 bool ControlsModel::vk_down_(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
-	// A key held through a menu close's reset reads up (KeyStateReset).
+	// The key state by the layout's VK, as WM_KEYDOWN stores it (engine controls::KeyEvent
+	// carries the witness). A key held through a menu close's reset reads up (KeyStateReset).
 	const bool down = key_reset_.held(p_vk, input != nullptr && key != 0 &&
-			input->is_physical_key_pressed(static_cast<Key>(key)));
+			input->is_key_pressed(static_cast<Key>(key)));
 	// A press the special-key handler took reads up until the key is
 	// released (consume_key_press).
 	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size()) && consumed_vks_[p_vk]) {
@@ -219,7 +220,7 @@ bool ControlsModel::is_key_state_down(int p_vk) const {
 	Input *input = Input::get_singleton();
 	const int key = godot_key_from_vk(p_vk);
 	return key_reset_.held(p_vk, input != nullptr && key != 0 &&
-			input->is_physical_key_pressed(static_cast<Key>(key)));
+			input->is_key_pressed(static_cast<Key>(key)));
 }
 
 void ControlsModel::reset_key_state() {
@@ -227,7 +228,7 @@ void ControlsModel::reset_key_state() {
 	key_reset_.reset([input](int p_vk) {
 		const int key = godot_key_from_vk(p_vk);
 		return input != nullptr && key != 0 &&
-				input->is_physical_key_pressed(static_cast<Key>(key));
+				input->is_key_pressed(static_cast<Key>(key));
 	});
 }
 

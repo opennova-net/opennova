@@ -75,7 +75,7 @@ public:
 
 	// Whether the token's binding is held RIGHT NOW: keyboard slots under the
 	// dispatcher's two passes (engine BindingSet::pressed_key over Godot's
-	// physical key state: a row's modifier word must be held, and a
+	// key state by the layout's VK: a row's modifier word must be held, and a
 	// modifier-less row yields its key to a held-modifier row that claims it)
 	// plus the held-sampleable mouse-mask buttons (wheel masks are
 	// impulse-only and never sample). The one gameplay-sampler entry point —
@@ -214,7 +214,7 @@ public:
 	static String help_footer();
 
 private:
-	// The physical key state by VK under the special-key takes.
+	// The key state by the layout's VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
 	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true) const;
 

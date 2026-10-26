@@ -880,8 +880,12 @@ int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
 	if (key.is_valid()) {
 		input.kind = opennova::menu::RemapInput::Kind::Key;
 		input.pressed = key->is_pressed();
-		input.escape = key->get_physical_keycode() == Key::KEY_ESCAPE;
-		input.vk = ControlsModel::vk_from_godot_key(static_cast<int>(key->get_physical_keycode()));
+		// The layout's VK (Godot's keycode), as every key leg reads it; a synthetic event with
+		// none falls back to its physical key.
+		const Key code = key->get_keycode() != Key::KEY_NONE ? key->get_keycode()
+				: key->get_physical_keycode();
+		input.escape = code == Key::KEY_ESCAPE;
+		input.vk = ControlsModel::vk_from_godot_key(static_cast<int>(code));
 		input.ctrl = key->is_ctrl_pressed();
 		input.shift = key->is_shift_pressed();
 		input.repeat = key->is_echo();

@@ -648,7 +648,6 @@ int main() {
 		const auto key = [&](SpMission &mission, int vk) {
 			im::SpecialKeyInput in;
 			in.vk = vk;
-			in.deploy_vk = vk;
 			return im::special_key_chain(mission.view(), *mission.role, toggles, actions, zones, in);
 		};
 		SpMission m;

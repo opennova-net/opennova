@@ -167,7 +167,8 @@ func _click(button: MouseButton, pressed: bool) -> void:
 	Input.flush_buffered_events()
 
 
-# Physical key state through Input, flushed so the sampler sees it this frame.
+# The key state through Input (the layout key and the physical one), flushed so
+# the sampler sees it this frame.
 func _press(keycode: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()
 	event.keycode = keycode

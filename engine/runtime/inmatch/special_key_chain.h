@@ -35,12 +35,11 @@ namespace opennova::inmatch {
 struct RoleView;
 class Role;
 
-// One key-down as the chain reads it: its VK, the deploy keys' VK (the embedder's
-// label read), and the KeyPress gametext keys' first characters (hud::HudQuitDialogKeyInput
-// carries their witness).
+// One key-down as the chain reads it: its VK (the layout's, WM_KEYDOWN's wParam, which every leg
+// reads), and the KeyPress gametext keys' first characters (hud::HudQuitDialogKeyInput carries
+// their witness).
 struct SpecialKeyInput {
 	int vk = 0;
-	int deploy_vk = 0;
 	int yes_vk = 'Y';
 	int no_vk = 'N';
 	int restart_vk = 'R';

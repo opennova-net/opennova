@@ -168,10 +168,12 @@ func test_accept_hotkey_follows_the_use_item_binding() -> void:
 	await _key_edge(KEY_E, false)
 
 
-# The binding rows hold physical codes: on a layout whose logical key differs
-# (the physical E key typing another letter), the physical key ACCEPTs
-# and the logical code alone does not.
-func test_accept_hotkey_matches_the_physical_key() -> void:
+# The binding rows hold the layout's VKs, as WM_KEYDOWN's wParam is: on a layout
+# whose logical key differs from the physical one (another physical key typing
+# E), the logical E ACCEPTs and the physical E key alone does not.
+# [orig: Game_WindowProc @0x7624c0 - wParam @0x7624c8 -> Input_HandleKeyPress
+#  @0x76276a, the key state @0x760cbb]
+func test_accept_hotkey_matches_the_layout_key() -> void:
 	var model := ControlsBindings.model()
 	var use_item := -1
 	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
@@ -186,9 +188,9 @@ func test_accept_hotkey_matches_the_physical_key() -> void:
 	var event := InputEventKey.new()
 	event.physical_keycode = KEY_E
 	event.keycode = KEY_F
-	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_E, "the physical code wins")
-	event.physical_keycode = KEY_NONE
-	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_F, "a synthetic event falls back")
+	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_F, "the layout's code wins")
+	event.keycode = KEY_NONE
+	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_E, "a synthetic event falls back")
 
 	var world := _make_world(_real_sim(2), _make_weapons())
 	var overlay := Control.new()
@@ -198,12 +200,12 @@ func test_accept_hotkey_matches_the_physical_key() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 	assert_true(presenter.open(), "the staged player opens the armory")
-	await _key_edge(KEY_F, true, KEY_E)
-	await _key_edge(KEY_F, false, KEY_E)
-	assert_true(presenter.is_open(), "the logical E on another physical key is no accelerator")
 	await _key_edge(KEY_E, true, KEY_F)
-	assert_false(presenter.is_open(), "the physical E ACCEPTs whatever it types")
 	await _key_edge(KEY_E, false, KEY_F)
+	assert_true(presenter.is_open(), "the physical E typing another letter is no accelerator")
+	await _key_edge(KEY_F, true, KEY_E)
+	assert_false(presenter.is_open(), "the logical E ACCEPTs whatever physical key types it")
+	await _key_edge(KEY_F, false, KEY_E)
 
 
 # The ACCEPT accelerator reads the engine's armory press latch, not a debounce

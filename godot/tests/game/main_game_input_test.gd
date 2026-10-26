@@ -68,7 +68,7 @@ func _key_event(keycode: Key, pressed: bool, shift_pressed := false) -> InputEve
 
 # One press-and-release of `keycode` through Input: the same device edge feeds
 # MainGame's key queue (the event) and the presenters' polled binding rows
-# (Input's physical key state). The keyboard pass runs in an update's input frame
+# (Input's key state by the layout key). The keyboard pass runs in an update's input frame
 # (engine inmatch::TickInputSource carries the witness), so each edge waits for
 # the next update.
 func _tap(keycode: Key) -> void:

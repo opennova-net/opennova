@@ -140,12 +140,11 @@ public:
 	bool is_use_held() const { return actions_.use_held(); }
 	// One key-down through the special-key chain (engine inmatch::special_key_chain carries
 	// the chain and its witness) over the sim's session, the HUD's words as the key meets
-	// them (none open without the HUD's toggles) and this router's action latches: its VK,
-	// the deploy keys' VK (the label's) and the KeyPress gametext keys' VKs. A digit arm's
+	// them (none open without the HUD's toggles) and this router's action latches: its VK
+	// (the layout's) and the KeyPress gametext keys' VKs. A digit arm's
 	// pick runs at once, past no head (the seat pick, or the menu's send: the chain closed
 	// the menu); the outcome carries the rest of the device half, which the shell runs.
-	Ref<SpecialKeyOutcome> special_key(int p_vk, int p_deploy_vk, int p_yes_vk, int p_no_vk,
-			int p_restart_vk);
+	Ref<SpecialKeyOutcome> special_key(int p_vk, int p_yes_vk, int p_no_vk, int p_restart_vk);
 	// The held USE row's armory arm took its open on the last frame's poll
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.

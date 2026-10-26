@@ -73,8 +73,8 @@ class PresenterKeyLegs:
 
 	func ring_special_key(key: InputEventKey) -> bool:
 		var outcome: SpecialKeyOutcome = presenter.special_key(
-				ControlsModel.vk_from_godot_key(key.physical_keycode),
-				ControlsModel.vk_from_godot_key(key.keycode), KEY_Y, KEY_N, KEY_R)
+				ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key)), KEY_Y, KEY_N,
+				KEY_R)
 		return outcome.is_taken()
 
 	func ring_binding_code(scan_code: int) -> int:
@@ -101,7 +101,8 @@ func after_each() -> void:
 	_models.clear()
 
 
-# Physical key state through Input, flushed so the router's next sample sees it.
+# The key state through Input (the layout key and the physical one), flushed so
+# the router's next sample sees it.
 func _hold(keycode: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()
 	event.keycode = keycode

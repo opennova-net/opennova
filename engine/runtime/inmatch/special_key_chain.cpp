@@ -96,7 +96,7 @@ SpecialKeyOutcome special_key_chain(const RoleView &view, Role &role, hud::HudTo
 	// The tail: the deploy keys, then the help page's PgUp / PgDn, else the briefing's.
 	// [orig: @0x49c9c9..0x49ca97 (Input_QueueEvent(12, ...) @0x49c658 / @0x49ca14 /
 	//  @0x49ca73); @0x49ca9e..0x49cb53]
-	const int param = deploy_key_pick(view, zones, input.deploy_vk);
+	const int param = deploy_key_pick(view, zones, vk);
 	if (param >= 0) {
 		out.taken = true;
 		out.pick = param;

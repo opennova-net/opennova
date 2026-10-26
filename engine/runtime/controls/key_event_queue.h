@@ -5,12 +5,17 @@
 
 namespace opennova::controls {
 
-// One key-down message as the device's key queue holds it: the VK, the character byte
+// One key-down message as the device's key queue holds it: the VK (the message's wParam, the
+// keyboard layout's virtual key, which the key state and every key leg read too; the embedder's
+// layout-mapped key code, not its physical one), the character byte
 // (0 at the queue: the WM_CHAR leg fills it on the last queued event), and the flag word:
 // Ctrl held, Shift held, the message's extended-key bit (lParam bit 24) and its
 // previous-state bit (lParam bit 30), set on every OS auto-repeat.
-// [orig: Input_QueueKeyEvent @0x760c10 - the VK @0x760c3c, the character cleared @0x760c3e,
-//  Ctrl (key state 17) @0x760c4b / 0x800 @0x760c4d, Shift (key state 16) @0x760c59 / 0x200
+// [orig: Game_WindowProc @0x7624c0 - wParam @0x7624c8, WM_KEYDOWN @0x7624fa ->
+//  Input_HandleKeyPress @0x76276a (WM_SYSKEYDOWN @0x7627e5): the key state @0x760cbb and the
+//  queue @0x760cc2 over that VK; Input_QueueKeyEvent @0x760c10 - the VK @0x760c3c, the
+//  character cleared @0x760c3e, Ctrl (key state 17) @0x760c4b / 0x800 @0x760c4d, Shift (key
+//  state 16) @0x760c59 / 0x200
 //  @0x760c5b, the extended bit @0x760c6b / 0x100 @0x760c6d, the repeat bit @0x760c79 / 0x80
 //  @0x760c7b]
 namespace key_event_flag {

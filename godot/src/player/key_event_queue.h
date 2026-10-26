@@ -22,8 +22,8 @@ class KeyEventQueue : public RefCounted {
 	GDCLASS(KeyEventQueue, RefCounted)
 
 public:
-	// One key-down, an OS repeat (Godot's echo) included: its VK (the physical key, else
-	// the label, as the binding model reads keys), Ctrl and Shift as the key state holds
+	// One key-down, an OS repeat (Godot's echo) included: its VK (the layout's, Godot's keycode,
+	// else the physical key, as the binding model reads keys), Ctrl and Shift as the key state holds
 	// them, the extended bit by the VK (keypad Enter queues VK 13 with it), the repeat bit
 	// from the echo. A key with no VK queues nothing.
 	void push_key(const Ref<InputEventKey> &p_event, bool p_ctrl_down, bool p_shift_down);
