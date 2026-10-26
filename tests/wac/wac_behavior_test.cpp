@@ -232,9 +232,9 @@ static void test_environment() {
     w.add_system(&sys);
     w.load_systems();
     run(w, sys, 1);
-    CHECK(w.env.fog_type == 1);
-    CHECK(w.env.fog_dist == 225);
-    CHECK(w.env.generation >= 2);
+    CHECK(w.weather.fog_type == 1);
+    CHECK(w.weather.fog_target_q16() == (225 << 16));
+    CHECK(w.weather.command_generation >= 2);
 }
 
 static void test_paren_less_music_success() {

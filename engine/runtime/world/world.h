@@ -137,12 +137,10 @@ struct CharacterTraitsTable {
 };
 
 // ----------------------------------------------------------------------------
-// Environment / weather state (targets of the WAC env commands: fog/sky/rain/
-// tod/sun/...). A clean observable model; the renderer consumes it later.
+// The environment's load-fed words the sim reads (the weather's own state, the
+// WAC env commands' home, is World::weather).
 // ----------------------------------------------------------------------------
 struct EnvState {
-    int32_t time_of_day = 0;   // 16.16 hours
-    int32_t fog_type = 0;
     // Mission water plane, 16.16 (0 = no water). Host-fed from the .env at
     // load; the infantry footstep water pick and the landing legs read it
     // sim-side. [orig: g_EnvWaterHeightFixed @ 0x26C6454]
@@ -151,15 +149,6 @@ struct EnvState {
     // environment load; the NovaWorld listing's TimeOfDay reads it. [orig: g_EnvTimeOfDayEnum
     // @ 0x24D2364]
     int32_t time_of_day_enum = 0;
-    int32_t fog_dist = 0;      // legacy whole-metre mirror; WeatherState owns the Q16 target
-    int32_t sky_speed = 0;
-    int32_t rain = 0;
-    int32_t snow = 0;
-    int32_t overcast = 0;
-    uint32_t sun_rgb = 0;
-    uint32_t sky_rgb = 0;
-    uint32_t fog_rgb = 0;
-    uint32_t generation = 0;   // bumped on any change, for change detection
 };
 
 // Non-entity side effects (text/sound/fx/objective) recorded for observability

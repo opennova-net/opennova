@@ -548,12 +548,9 @@ bool EntityCommands::set_entity_position(EntityHandle h, const Vec3 &mission_pos
     return true;
 }
 
-// --- the WAC weather handlers (the observable EnvState mirror + the weather
-// home; every command bumps the mirror's generation the way the VM did) ------
+// --- the WAC weather handlers (the weather home, World::weather) ------------
 
 void EntityCommands::set_fog_type(int32_t type) {
-    world_.env.fog_type = type;
-    ++world_.env.generation;
     world_.weather.command_fog_type(type);
 }
 
@@ -566,38 +563,26 @@ void EntityCommands::move_fog(int32_t metres, int32_t seconds) {
 }
 
 void EntityCommands::set_fog_distance_q16(int32_t distance_q16) {
-    world_.env.fog_dist = distance_q16 / 65536; // legacy whole-metre inspection mirror
-    ++world_.env.generation;
     world_.weather.command_fog_distance_q16(distance_q16);
 }
 
 void EntityCommands::move_fog_q16(int32_t distance_q16, int32_t seconds) {
-    world_.env.fog_dist = distance_q16 / 65536;
-    ++world_.env.generation;
     world_.weather.command_move_fog_q16(distance_q16, seconds);
 }
 
 void EntityCommands::set_rain(int32_t percent, int32_t seconds) {
-    world_.env.rain = percent;
-    ++world_.env.generation;
     world_.weather.command_rain(percent, seconds);
 }
 
 void EntityCommands::set_snow(int32_t percent, int32_t seconds) {
-    world_.env.snow = percent;
-    ++world_.env.generation;
     world_.weather.command_snow(percent, seconds);
 }
 
 void EntityCommands::set_overcast(int32_t percent, int32_t seconds) {
-    world_.env.overcast = percent;
-    ++world_.env.generation;
     world_.weather.command_overcast(percent, seconds);
 }
 
 void EntityCommands::set_sky_speed(int32_t rate) {
-    world_.env.sky_speed = rate;
-    ++world_.env.generation;
     world_.weather.command_sky_speed(rate);
 }
 
@@ -614,14 +599,10 @@ void EntityCommands::quake(int32_t seconds) {
 }
 
 void EntityCommands::set_time_of_day_minutes(int32_t minute_of_day) {
-    world_.env.time_of_day = minute_of_day;
-    ++world_.env.generation;
     world_.weather.command_time_of_day_minutes(minute_of_day);
 }
 
 void EntityCommands::debug_set_time_of_day_minutes(double minute_of_day) {
-    world_.env.time_of_day = static_cast<int32_t>(minute_of_day);
-    ++world_.env.generation;
     world_.weather.debug_set_time_of_day_minutes(minute_of_day);
 }
 
@@ -646,12 +627,6 @@ void EntityCommands::lightning_far_flash() {
 }
 
 void EntityCommands::set_weather_color(WeatherColorTarget target, uint32_t rgb) {
-    switch (target) {
-        case WeatherColorTarget::Sun: world_.env.sun_rgb = rgb; ++world_.env.generation; break;
-        case WeatherColorTarget::Sky: world_.env.sky_rgb = rgb; ++world_.env.generation; break;
-        case WeatherColorTarget::Fog: world_.env.fog_rgb = rgb; ++world_.env.generation; break;
-        default: break;
-    }
     world_.weather.command_block_color(target, rgb);
 }
 

@@ -421,7 +421,7 @@ int main() {
         const EntityHandle kept = sw.registry.spawn(0, seed);
         sw.script.vars.set_mission(2, 11);
         sw.script.wac_values.accuracy_spread = 5;
-        sw.env.time_of_day = 9 << 16;
+        sw.env.water_z = 9 << 16;
         sw.weather.tod_fixed24 = 0x0ABCDEF0u;
         MatchRules snap_rules;
         snap_rules.game_type = 0x10001u;
@@ -442,7 +442,7 @@ int main() {
         sw.registry.get(kept)->health = 1;
         sw.script.vars.set_mission(2, 0);
         sw.script.wac_values.accuracy_spread = 0;
-        sw.env.time_of_day = 0;
+        sw.env.water_z = 0;
         sw.weather.tod_fixed24 = 0;
         MatchRules other_rules;
         other_rules.game_type = 0x10020u;
@@ -459,7 +459,7 @@ int main() {
         CHECK(sw.registry.get(kept) != nullptr && sw.registry.get(kept)->health == 40);
         CHECK(sw.script.vars.get_mission(2) == 11);
         CHECK(sw.script.wac_values.accuracy_spread == 5);
-        CHECK(sw.env.time_of_day == (9 << 16));
+        CHECK(sw.env.water_z == (9 << 16));
         CHECK(sw.weather.tod_fixed24 == 0x0ABCDEF0u);
         CHECK(sw.match.rules().game_type == 0x10001u);
         CHECK(sw.match.rules().score_limit == 3);
