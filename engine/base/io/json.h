@@ -10,7 +10,8 @@
 // diffs cleanly: object keys sorted, two-space indent, "\n" line ends, integral numbers
 // without a fraction, other numbers in the shortest form that round-trips, a trailing
 // newline; a string's byte that starts no well-formed UTF-8 sequence is written as U+FFFD,
-// so a written file always reads back.
+// so a written file reads back, but for two object keys that differ only in such bytes: they
+// are one key when read, a duplicate the reader refuses.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -512,7 +513,7 @@ inline void write_escaped(const std::string &s, std::string &out) {
 		const unsigned char u = static_cast<unsigned char>(c);
 		if (u >= 0x80) {
 			// A well-formed sequence is copied whole; a byte that starts none is written as
-			// U+FFFD, so whatever is written reads back.
+			// U+FFFD, so what is written reads back (two keys that differ only there excepted).
 			const size_t length = u >= 0xF0 ? 4 : u >= 0xE0 ? 3 : u >= 0xC0 ? 2 : 1;
 			if (length > 1 && i + length <= s.size() && is_valid_utf8(std::string_view(s).substr(i, length))) {
 				out.append(s, i, length);
