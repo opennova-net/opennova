@@ -1914,8 +1914,9 @@ static int test_reference_file_candidates() {
 // S14: a terrain and a sound bank through the engine's parsers. A terrain names its height data,
 // its maps, its tile atlas and each foliage block's model; a bank the wave of each single, found
 // by the file name of the path it holds. A terrain's height data the project lacks is an error
-// (the game refuses the terrain), a wave it lacks a warning (nothing plays); a terrain the game's
-// gate refuses is a file the graph does not read.
+// (the game refuses the terrain), a foliage model it lacks a warning (the block grows nothing), a
+// wave it lacks a warning (nothing plays); a terrain the game's gate refuses is a file the graph
+// does not read.
 static int test_terrain_and_bank_extractors() {
 	test_temp::TempDir dir("opennova_asset_graph_terrain_bank");
 	NoProcess platform;
@@ -1977,6 +1978,12 @@ static int test_terrain_and_bank_extractors() {
 	};
 	const Diagnostic *no_heights = missing("isle.trn", "isle.cpt"), *no_wave = missing("game.lwf", "gone.wav");
 	TEST_EXPECT(no_heights && no_heights->severity == DiagnosticSeverity::Error);
+	// A foliage block's model the project lacks: the definition keeps a null model and grows nothing, the terrain
+	// loading on [orig: Foliage_LoadDefAssets @ 0x601A0A; Foliage_UpdateDetailCellSlotsForDef @ 0x601D68], as JO:CA's
+	// own terrains naming mveg3_b and mveg_d do: a warning, never an error.
+	const Diagnostic *no_palm = missing("isle.trn", "'palm'");
+	TEST_EXPECT(no_palm && no_palm->severity == DiagnosticSeverity::Warning && no_palm->field == "graphic" &&
+	            no_palm->message.find("grows nothing") != std::string::npos);
 	TEST_EXPECT(no_wave && no_wave->severity == DiagnosticSeverity::Warning &&
 	            no_wave->message.find("plays nothing") != std::string::npos && !missing("game.lwf", "shot.wav"));
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
