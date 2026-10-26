@@ -169,6 +169,12 @@ void test_window_clamp_writes_occupant_look() {
     CHECK(r.body->pitch == bam_sub(0, pitch_bound));
     CHECK(r.body->inf.target_heading == r.body->heading);
     CHECK(r.body->inf.look_pitch == r.body->pitch);
+    // The words the parent-brain publication read are the slew's, ahead of the window leg
+    // (a joiner's replica publication of its own gun reads them).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication @0x440F04..0x441020,
+    //  the window leg @0x4411D1]
+    CHECK(r.gun().emplaced_published_yaw_word == emplaced_bam_word(50 * kBamPerDegree));
+    CHECK(r.gun().emplaced_published_pitch_word == emplaced_bam_word(25 * kBamPerDegree));
 
     // Inside the arc nothing is written back.
     const int32_t inside_heading = bam_sub(kGunHeading, 10 * kBamPerDegree);

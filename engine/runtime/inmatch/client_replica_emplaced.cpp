@@ -92,9 +92,11 @@ void publish_replica_gun_words(replication::ClientState &state,
 				world::EntityHandle{carrier->handle}, carrier->type_id, wire_header_world);
 		if (carrier_twin == nullptr)
 			continue;
+		// The words the class update publishes: past the slew, ahead of the counter-rotation and
+		// the window leg (ClientEntityState::emplaced_published_yaw_word).
 		const world::EmplacedParentGunWords words = world::emplaced_parent_gun_words(world,
 				*carrier_twin, replica_parent_profile_type(world, *carrier_twin),
-				child.emplaced_gun_yaw_word, child.emplaced_gun_pitch_word);
+				child.emplaced_published_yaw_word, child.emplaced_published_pitch_word);
 		if (words.yaw) {
 			carrier->carried_gun_yaw_word = world::emplaced_bam_word(words.yaw_bam);
 			carrier->carried_gun_words_valid = true;
@@ -167,6 +169,12 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		//  row @0x82CFA0, no occupant test]
 		if (pool1)
 			mount.emplaced_controls_valid = same_type && spin_source->emplaced_ctrl_publisher;
+		// An unoccupied gun's class update publishes its held words (an occupied one's channel
+		// below overwrites them past its slew).
+		if (pool1) {
+			mount.emplaced_published_yaw_word = mount.emplaced_gun_yaw_word;
+			mount.emplaced_published_pitch_word = mount.emplaced_gun_pitch_word;
+		}
 		// Retail's joiner holds a remote gunner as an entity attached to this
 		// UseGun seat; its body update's seat call writes this carrier's words
 		// every tick unless the rider's Flags carry the hidden or the dead bit.
@@ -197,6 +205,8 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			if (own_copy) {
 				mount.emplaced_gun_yaw_word = local_mount->emplaced_gun_yaw_word;
 				mount.emplaced_gun_pitch_word = local_mount->emplaced_gun_pitch_word;
+				mount.emplaced_published_yaw_word = local_mount->emplaced_published_yaw_word;
+				mount.emplaced_published_pitch_word = local_mount->emplaced_published_pitch_word;
 				occupant.heading_bam = local_gunner->heading;
 				occupant.pitch_bam = local_gunner->pitch;
 			} else {
@@ -220,6 +230,8 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::advance_emplaced_gun_channel(channel, look, mount.heading_bam,
 						mount.pitch_bam,
 						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0, planar_rate);
+				mount.emplaced_published_yaw_word = channel.yaw;
+				mount.emplaced_published_pitch_word = channel.pitch;
 				const int32_t frame_before[3] = {mount.heading_bam, mount.pitch_bam,
 						mount.roll_bam};
 				const int32_t frame_posed[3] = {

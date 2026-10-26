@@ -1301,6 +1301,13 @@ struct Entity {
     uint16_t emplaced_spin_phase = 0; // entity+0x320, WEAP_SPIN
     int16_t emplaced_gun_yaw_word = 0;   // entity+0x322
     int16_t emplaced_gun_pitch_word = 0; // entity+0x324
+    // The two words as the occupied channel's parent-brain publication read them: after the slew,
+    // ahead of dfx2.exe's counter-rotation and the window leg (tick_emplaced_weapon_channel). A
+    // joiner's replica publication of its own gun reads them (client_replica_emplaced.cpp).
+    // [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication @0x440F04..0x441020
+    //  ahead of the window leg @0x4411D1; dfx2.exe's @0x440B20 - @0x440E01..0x440EB1]
+    int16_t emplaced_published_yaw_word = 0;
+    int16_t emplaced_published_pitch_word = 0;
     // The subobject (bone) the child's anchor userpoint rides — retail reads
     // it off the parent model's 48-byte userpoint record (+0x18, indexed by
     // the child's 1-based userpoint index entity+0x319 = emplacement_bone)

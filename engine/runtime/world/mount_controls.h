@@ -738,6 +738,8 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 			emplaced_carrier_is_dead_hull(world.registry.get(mount.emplacement_parent)))
 		return;
 	publish_emplaced_gun_words_to_parent(world, mount);
+	mount.emplaced_published_yaw_word = mount.emplaced_gun_yaw_word;
+	mount.emplaced_published_pitch_word = mount.emplaced_gun_pitch_word;
 	// dfx2.exe's counter-rotation, after the publication and ahead of the window leg (DFX2-25):
 	// the brain takes the slewed words, the window the turned ones.
 	// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - the publication

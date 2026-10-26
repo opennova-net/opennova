@@ -1178,6 +1178,85 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	return ok;
 }
 
+// The class update's parent publication reads the turret's words past the slew and ahead of
+// the window leg, which clamps them after it. A remote gunner looking 0x55555555 off an
+// immediate turret's yaw 0 sets its yaw word to 0xAAAA (-21846); the turret's 45-degree
+// window then pins the word at -8192, but the hull's replica row carries -21846.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication reads +0x322/+0x324
+//  @0x440F04..0x441020, the window leg reads and clamps them after it @0x4411F0..0x44123C]
+bool test_joiner_hull_takes_the_turret_words_ahead_of_the_window() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 4);
+	im::ClientRuntime runtime("TankWindowRows");
+	w::Entity *hull = spawn_pool_row(kernel, 1, 0, 700);
+	w::Entity *turret = spawn_pool_row(kernel, 1, 1, 701);
+	if (!expect(hull != nullptr && turret != nullptr, "tank rows spawn")) return false;
+	turret->emplaced_update = true;
+	turret->primary_weapon = "WPN_TURRET";
+	kernel.world.tables.weapons.entries.resize(1);
+	kernel.world.tables.weapons.entries[0].valid = true;
+	kernel.world.tables.weapons.entries[0].name = "WPN_TURRET";
+	if (!expect(kernel.world.vehicles.init_weapon_slot_from_entity_def(*turret),
+			"the turret's slot binds"))
+		return false;
+	w::VehicleTraits traits;
+	traits.render_family = w::VehicleRenderFamily::Tank;
+	traits.family = w::VehicleFamily::Tank;
+	kernel.world.vehicles.traits.set(700, traits);
+	opennova::mission::ItemSeatSpec hull_spec;
+	hull_spec.type_id = 700;
+	opennova::mission::ItemEmplacementAttachmentSpec attachment;
+	attachment.child_type_id = 701;
+	attachment.anchor_found = true;
+	attachment.anchor.bone_index = 3;
+	attachment.anchor_subobject = 0;
+	hull_spec.emplacement_attachments.push_back(attachment);
+	kernel.seat_specs.push_back(hull_spec);
+	// The turret: an immediate gun with a gunner seat and a 45-degree yaw window (pitch +-90).
+	opennova::mission::ItemSeatSpec turret_spec;
+	turret_spec.type_id = 701;
+	w::Seat seat;
+	seat.type = w::SeatType::Gunner;
+	seat.bone_index = 1;
+	turret_spec.seats.push_back(seat);
+	turret_spec.turret_limits_valid = true;
+	turret_spec.turret_yaw_range_bam = 0x20000000;
+	turret_spec.turret_pitch_max_bam = 0x40000000;
+	turret_spec.turret_pitch_min_bam = 0x40000000;
+	kernel.seat_specs.push_back(turret_spec);
+	constexpr uint16_t kGunner = 0x0002;
+	opennova::replication::ClientEntityState hull_row;
+	hull_row.handle = hull->handle.packed;
+	hull_row.type_id = 700;
+	hull_row.cls = opennova::EntityClass::NoNetworkCallback;
+	runtime.state().upsert(hull_row.handle) = hull_row;
+	opennova::replication::ClientEntityState turret_row;
+	turret_row.handle = turret->handle.packed;
+	turret_row.type_id = 701;
+	turret_row.cls = opennova::EntityClass::NoNetworkCallback;
+	turret_row.target_handle = hull_row.handle;
+	turret_row.parent_handle = kGunner;
+	runtime.state().upsert(turret_row.handle) = turret_row;
+	opennova::replication::ClientEntityState gunner_row;
+	gunner_row.handle = kGunner;
+	gunner_row.cls = opennova::EntityClass::Player;
+	gunner_row.carrier_handle = turret_row.handle;
+	gunner_row.mount_bone = 1;
+	gunner_row.heading_bam = 0x55555555;
+	runtime.state().upsert(gunner_row.handle) = gunner_row;
+	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr, false);
+	const opennova::replication::ClientEntityState *gun = runtime.state().find(turret_row.handle);
+	const opennova::replication::ClientEntityState *carrier = runtime.state().find(hull_row.handle);
+	bool ok = expect(gun != nullptr && gun->emplaced_gun_yaw_word == -8192 &&
+					gun->emplaced_gun_pitch_word == 0,
+			"the turret's window pins its yaw word");
+	ok = expect(carrier != nullptr && carrier->carried_gun_words_valid &&
+					carrier->carried_gun_yaw_word == static_cast<int16_t>(0xAAAA) &&
+					carrier->carried_gun_pitch_word == 0,
+			"the hull takes the slewed word, ahead of the window leg") && ok;
+	return ok;
+}
+
 bool test_death_ctrl_register_reaches_present_rows() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(0, 4);
@@ -1752,6 +1831,7 @@ int main() {
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
 	ok = test_joiner_hull_gun_words_follow_the_turret_child() && ok;
+	ok = test_joiner_hull_takes_the_turret_words_ahead_of_the_window() && ok;
 	ok = test_rows_carry_the_primary_ring_entries() && ok;
 	ok = test_rows_publish_the_person_overlays() && ok;
 	ok = test_world_rows_hide_the_carried_object() && ok;

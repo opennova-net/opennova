@@ -524,6 +524,13 @@ struct ClientEntityState {
 	// Client-owned +0x322/+0x324 gun channel, advanced by the joiner tick.
 	int16_t emplaced_gun_yaw_word = 0;
 	int16_t emplaced_gun_pitch_word = 0;
+	// The words the class update's parent-brain publication reads this tick: the held words
+	// for an unoccupied gun, an occupied one's after its slew, ahead of dfx2.exe's
+	// counter-rotation and the window leg (publish_replica_gun_words).
+	// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the publication @0x440F04..0x441020
+	//  ahead of the window leg @0x4411D1; dfx2.exe's @0x440B20 - @0x440E01..0x440EB1]
+	int16_t emplaced_published_yaw_word = 0;
+	int16_t emplaced_published_pitch_word = 0;
 	uint16_t emplaced_spin_phase = 0; // local ewep class update; not a wire field
 	bool emplaced_controls_valid = false;
 	// The joiner's form of this carrier brain's turret words (the +0x1D8 yaw /
