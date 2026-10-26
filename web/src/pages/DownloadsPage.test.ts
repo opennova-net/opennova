@@ -136,6 +136,7 @@ describe('DownloadsPage', () => {
     host.mockReturnValue('https://downloads.example.com');
     manifest.mockResolvedValue({
       version: 'v0.0.21', published: '2026-10-26T12:00:00Z', source: 'https://github.com/opennova-net/opennova/releases/tag/v0.0.21',
+      commit: '1a2b3c4' + 'b'.repeat(33), build: 'release', talks_to: 'prod',
       files: { [BUILDS[0]]: { size: 1000, sha256: 'ab'.repeat(32) } },
     });
     const page = await mountPage();
