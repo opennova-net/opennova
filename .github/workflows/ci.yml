@@ -748,10 +748,18 @@ jobs:
             exit 1
           fi
 
+      # The loader takes lavapipe alone, its manifest found by the package's own file list (the
+      # name changes with the Mesa release: lvp_icd.x86_64.json in older ones).
       - name: Run the windowed Godot tests (lavapipe)
-        env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: |
+          icd=$(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd[^/]*\.json$' | head -n 1)
+          if [[ -z "$icd" ]]; then
+            echo "::error::mesa-vulkan-drivers installed no lavapipe ICD manifest"
+            dpkg -L mesa-vulkan-drivers | grep -i 'icd' || true
+            exit 1
+          fi
+          echo "lavapipe ICD: ${icd}"
+          export VK_ICD_FILENAMES="$icd"
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           vulkaninfo --summary
           xvfb-run -a -s "-screen 0 1920x1080x24" bash scripts/test_godot.sh --windowed
