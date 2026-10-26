@@ -216,7 +216,9 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 		if (overcast_read) texts.overcast = &overcast;
 		if (has_environment_text) texts.environment = &environment_lines;
 		env::MissionEnv mission_env;
-		(void)env::load_mission_env(texts, mission_env);
+		// A named terrain whose .trn is not there ends the game's load before every pass, the defaults
+		// standing (env::read_mission_env, D-114).
+		if (use.terrain.empty() || terrain_text_read) (void)env::load_mission_env(texts, mission_env);
 		const env::ResolvedWaterHeight water = env::mission_water_rung(use.overrides, mission_env.config);
 		use.water_height = water.height;
 		use.water_from = water.rung;

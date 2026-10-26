@@ -315,7 +315,8 @@ bool load_mission_env(const MissionEnvTexts &texts, MissionEnv &out);
 
 // The same load over a reader of the files by name (`read` false: no such file): `terrain_file`
 // (empty: no map name) and `environment_file` (empty: none) as the caller names them, overcast.def by
-// kOvercastFile.
+// kOvercastFile. A named .trn the reader does not find ends the load before every pass, the defaults
+// standing, false [orig: Environment_LoadTimeOfDayConfig @ 0x57dbc0..0x57dbcf].
 using EnvTextReader = std::function<bool(const std::string &name, std::string &text)>;
 bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file,
 		const std::string &environment_file, MissionEnv &out);

@@ -934,7 +934,16 @@ bool read_mission_env(const EnvTextReader &read, const std::string &terrain_file
 		const std::string &environment_file, MissionEnv &out) {
 	std::string terrain, overcast, environment;
 	MissionEnvTexts texts;
-	if (!terrain_file.empty() && read(terrain_file, terrain)) texts.terrain = &terrain;
+	if (!terrain_file.empty()) {
+		// A named map whose .trn is not there: the load returns before every pass, on the
+		// defaults it reset first [orig: Environment_LoadTimeOfDayConfig @ 0x57dbc0 (FileSystem_FileExists),
+		// the return @ 0x57dbca..0x57dbcf; Environment_InitDefaults @ 0x57c010].
+		if (!read(terrain_file, terrain)) {
+			out = MissionEnv();
+			return false;
+		}
+		texts.terrain = &terrain;
+	}
 	if (read(kOvercastFile, overcast)) texts.overcast = &overcast;
 	if (!environment_file.empty() && read(environment_file, environment)) texts.environment = &environment;
 	return load_mission_env(texts, out);

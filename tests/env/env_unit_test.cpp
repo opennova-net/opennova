@@ -204,6 +204,16 @@ int main() {
 		                    near(loaded.config.water_murk, 0.8f),
 		            "no names: overcast.def alone, the defaults standing"))
 			return 1;
+		// A named map whose .trn is not there: the load returns before every pass, overcast.def and
+		// the .env unread, the defaults standing [orig: Environment_LoadTimeOfDayConfig
+		// @ 0x57dbc0..0x57dbcf].
+		(void)opennova::env::read_mission_env(read, "Dvxi5.trn", "full_00.env", loaded);
+		asked.clear();
+		if (!expect(!opennova::env::read_mission_env(read, "Gone.trn", "full_00.env", loaded) &&
+		                    asked.size() == 1 && asked[0] == "Gone.trn" && !loaded.environment &&
+		                    near(loaded.config.water_murk, 0.8f) && loaded.config.keyframes.empty(),
+		            "a named .trn not there: no pass runs"))
+			return 1;
 		// The mission's config: the header's names with their extensions, then its override layer
 		// over what the load made, the .env read or skipped [orig: Game_LoadTerrainDuringConnect
 		// @ 0x520710].
