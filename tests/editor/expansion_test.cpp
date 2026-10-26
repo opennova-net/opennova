@@ -891,6 +891,70 @@ static int test_base_files_under_the_project() {
 	return 0;
 }
 
+// The base game's string tables under an expansion's graph (base_layer_build.h): a `.bin` of the base typed by its
+// content as the project scan types the project's own, so the base's menutxt.bin (RTXT) is a string table and its
+// fgn2.bin (no magic) a raw table. An expansion's menu naming menutxt.BIN as its TEXT_RSRC then reads the base's
+// table, as the game does through the archives below the expansion's pair [orig: CUIStringTable_LookupString @
+// 0x6527c0; PFF_OpenAllArchives @ 0x4a4310, slots 2..4]: no reference.wrong_kind (Escalation's menus over the JO
+// project's export read "the project's menutxt.bin is Binary table", 2026-10-26), a string id the base's Menu
+// section defines resolved, one it does not still missing.
+static int test_base_string_tables() {
+	test_temp::TempDir dir("opennova_editor_expansion_base_strings");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	const std::vector<uint8_t> menutxt = table_bytes({ { "Menu", { "MM_HELLO" } } });
+	TEST_EXPECT(!menutxt.empty() &&
+	            write_archive(exported + "/language.pff", { { "menutxt.bin", std::string(menutxt.begin(), menutxt.end()) },
+	                                                        { "fgn2.bin", "a marker" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	ProjectDocument mod;
+	mod.target_game = "jo";
+	mod.expansion = ProjectExpansion{ "onx", "", "../../assets" };
+	// Typed by content in the layer, stepped or in one call alike.
+	const std::shared_ptr<const GraphLayer> whole = build_base_layer(exported, mod);
+	BaseLayerBuild stepped(exported, mod);
+	while (!stepped.step(4)) {
+	}
+	const std::shared_ptr<const GraphLayer> layer = stepped.take();
+	for (const std::shared_ptr<const GraphLayer> &built : { whole, layer }) {
+		const GraphSlot *table = built ? built->file_named("menutxt.bin") : nullptr;
+		const GraphSlot *marker = built ? built->file_named("fgn2.bin") : nullptr;
+		TEST_EXPECT(table && table->kind == AssetKind::Strings && table->read && table->ok && !table->symbols.empty());
+		TEST_EXPECT(marker && marker->kind == AssetKind::RawBin);
+	}
+	TEST_EXPECT(whole && layer && whole->symbol_count() == layer->symbol_count());
+
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	const std::string position = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/night.mnu",
+	                                    "<SCREEN>\r\n<NAME>NIGHT</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"MAIN\">\r\n" + position +
+	                                            "<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>\r\n"
+	                                            "<WINDOW TYPE=\"STATIC\" NAME=\"HELLO\">\r\n" + position +
+	                                            "<STRING type=\"id\">MM_HELLO</STRING>\r\n</WINDOW>\r\n"
+	                                            "<WINDOW TYPE=\"STATIC\" NAME=\"GONE\">\r\n" + position +
+	                                            "<STRING type=\"id\">MM_GONE</STRING>\r\n</WINDOW>\r\n"
+	                                            "</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(view.project.open && view.project.scan->find("night.mnu") && view.findings.graph);
+	if (!view.findings.graph) return 1;
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextTable, "menutxt.BIN") == ReferenceStatus::Present);
+	TEST_EXPECT(count_code(rows, "reference.wrong_kind") == 0 && count_code(rows, "reference.missing", "menutxt.BIN") == 0);
+	TEST_EXPECT(count_code(rows, "reference.missing", "MM_HELLO") == 0 && count_code(rows, "reference.missing", "MM_GONE") == 1);
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -1039,6 +1103,7 @@ int main() {
 	failures += test_session_on_base_project();
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
+	failures += test_base_string_tables();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
