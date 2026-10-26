@@ -43,11 +43,11 @@ void resolve_track_register(const Threedi3di3 &model, ThreediTransform &track) {
 } // namespace
 
 bool threedi_panm_animation_is_live(const ThreediPartAnimation &anim) {
-    const uint8_t rotation_type = threedi_panm_rotation_type(anim.flags);
-    // Spinner and the two view-derived modes are evaluated without sampling a
-    // conventional track. In particular, spinner coefficients reinterpret raw
-    // PANM bytes as floats and may have a zero control high nibble.
-    if (rotation_type == 1 || rotation_type == 3 || rotation_type == 4)
+    // The types the loader keeps (threedi_panm_loaded_*): a spinner (rotation
+    // type 1) keeps none and stands still in JO. The two view-derived modes are
+    // evaluated without sampling a conventional track.
+    const uint8_t rotation_type = threedi_panm_loaded_rotation_type(anim.flags);
+    if (rotation_type == 3 || rotation_type == 4)
         return true;
     if (rotation_type == 2 &&
             (track_is_live(anim.rotation_x) ||
@@ -64,7 +64,7 @@ bool threedi_panm_animation_is_live(const ThreediPartAnimation &anim) {
              track_is_live(anim.scale_z)))
         return true;
 
-    return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
+    return threedi_panm_loaded_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
             track_is_live(anim.translation);
 }
 
@@ -83,7 +83,7 @@ bool threedi_panm_animation_uses_noise(const ThreediPartAnimation &anim) {
              track_uses_noise(anim.scale_y) ||
              track_uses_noise(anim.scale_z)))
         return true;
-    return threedi_panm_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
+    return threedi_panm_loaded_translate_type(anim.flags) != THREEDI_TRANS_NONE &&
             track_uses_noise(anim.translation);
 }
 

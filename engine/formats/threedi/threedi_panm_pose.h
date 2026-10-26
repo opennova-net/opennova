@@ -17,11 +17,10 @@
 
 namespace opennova::threedi {
 
-// A node is "live" when any of its enabled transform families samples a track
-// with a non-zero control high nibble — plus the three rotation modes that
-// evaluate without sampling a conventional track (spinner reinterprets raw
-// PANM bytes as floats and may carry a zero high nibble; the two view-derived
-// modes never sample).
+// A node is "live" when any of the transform families the loader keeps
+// (threedi_panm_loaded_*) samples a track with a non-zero control high nibble,
+// plus the two view-derived rotation modes, which never sample; a spinner
+// (rotation type 1) keeps none and is never live (D-3DI-9).
 bool threedi_panm_animation_is_live(const ThreediPartAnimation &anim);
 // Noise-style tracks (control low nibble 6) re-randomize per evaluation, so a
 // caching consumer must re-evaluate every frame while one is present.

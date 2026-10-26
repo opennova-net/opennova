@@ -804,8 +804,8 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::ModelRegister, "model_register", "the CTRL register", "CTRL register")
 	        .record("register")
 	        .row,
-	// A spinner's or an Euler row's frame byte names an MTRX row of its model (frame_none: 0, and
-	// 128 to 255, none).
+	// An Euler row's frame byte names an MTRX row of its model (frame_none: 0, and 128 to 255,
+	// none); a spinner's names none, the loader keeping no spinner (D-3DI-9).
 	Row(ReferenceKind::ModelFrame, "model_frame", "the rotation frame", "rotation frame")
 	        .record("frame", frame_none)
 	        .row,
