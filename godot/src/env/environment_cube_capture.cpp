@@ -84,6 +84,8 @@ void EnvironmentCubeCapture::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("advance_frame", "player_position"),
 			&EnvironmentCubeCapture::advance_frame);
+	ClassDB::bind_method(D_METHOD("create_cube_device"),
+			&EnvironmentCubeCapture::create_cube_device);
 	ClassDB::bind_method(D_METHOD("is_cube_ready"),
 			&EnvironmentCubeCapture::is_cube_ready);
 	ClassDB::bind_method(D_METHOD("is_globals_held"), &EnvironmentCubeCapture::is_globals_held);
