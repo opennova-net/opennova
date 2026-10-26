@@ -180,6 +180,53 @@ static int test_share_and_pull() {
 // A restore: changes discarded (the base's file back, the folder's own new file gone, a deleted one
 // back), and a file put back as an older revision has it, the base and the binding untouched (a
 // change to push); every file it replaced in the project's trash.
+// The signed URLs a batch's transfers wait on (ContentJob::kSignedBatchBytes): a push asks which of a batch's files the
+// store lacks, uploads them, then asks of the next; a pull asks where a batch is, downloads it, then asks of the next.
+// So no URL the store signed for an hour waits past its own batch, where every URL was signed before the first
+// transfer. Bounded here at 25 bytes: the 10-byte files go two a batch, the 30-byte one alone; bounded at one file,
+// each its own ask.
+static int test_signed_batches() {
+	test_temp::TempDir dir("opennova_content_batches");
+	const std::string first = dir.file("First"), second = dir.file("Second");
+	FakeService service;
+	TEST_EXPECT(put(first + "/project.opennova", "{}") && put(first + "/a.def", "aaaaaaaaaa") &&
+			put(first + "/b.def", "bbbbbbbbbb") && put(first + "/c.def", std::string(30, 'c')) &&
+			put(first + "/d.def", "dddddddddd"));
+	{
+		editor::ContentPush job(service, account(kAdminCookie), editor::ProjectPaths::for_root(first), "",
+				binding_of(first), "First");
+		job.limit_batches(0, 25);
+		TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.outcome() == editor::PushOutcome::Pushed);
+	}
+	// The scan's order (by path): a.def, b.def | c.def | d.def, project.opennova.
+	const std::vector<std::string> pushed = { "lacks:2", "put", "put", "lacks:1", "put", "lacks:2", "put", "put" };
+	TEST_EXPECT(service.transfers == pushed);
+	if (service.transfers != pushed)
+		for (const std::string &call : service.transfers) std::fprintf(stderr, "  push call %s\n", call.c_str());
+	service.transfers.clear();
+	{
+		editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(second), "", { kServer, "MOD", 0 });
+		pull.limit_batches(0, 25);
+		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && files_of(second) == files_of(first));
+	}
+	const std::vector<std::string> pulled = { "where:2", "get", "get", "where:1", "get", "where:2", "get", "get" };
+	TEST_EXPECT(service.transfers == pulled);
+	if (service.transfers != pulled)
+		for (const std::string &call : service.transfers) std::fprintf(stderr, "  pull call %s\n", call.c_str());
+	// A batch of one file at most: five asks, each before its download.
+	service.transfers.clear();
+	const std::string third = dir.file("Third");
+	{
+		editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(third), "", { kServer, "MOD", 0 });
+		pull.limit_batches(1, editor::ContentJob::kSignedBatchBytes);
+		TEST_EXPECT(run(pull) == editor::ContentJobState::Done);
+	}
+	const std::vector<std::string> single = { "where:1", "get", "where:1", "get", "where:1", "get", "where:1", "get",
+		"where:1", "get" };
+	TEST_EXPECT(service.transfers == single);
+	return 0;
+}
+
 static int test_restore() {
 	test_temp::TempDir dir("opennova_content_client_restore");
 	const std::string root = dir.file("Folder");
@@ -495,6 +542,7 @@ static int test_transport_rules() {
 int main() {
 	int failures = 0;
 	failures += test_share_and_pull();
+	failures += test_signed_batches();
 	failures += test_restore();
 	failures += test_accounts();
 	failures += test_bind_and_check();

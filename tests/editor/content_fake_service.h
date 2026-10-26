@@ -60,6 +60,9 @@ public:
 	std::map<std::string, std::string> blobs; // by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	size_t uploads = 0, downloads = 0;
+	// The transfers' calls in the order they came: "where" (a downloads ask, its files' count after a colon),
+	// "get" (a blob downloaded), "lacks" (a missing ask, likewise) and "put" (a blob uploaded).
+	std::vector<std::string> transfers;
 	// The last release asked for: its version and revision.
 	std::string release_version;
 	int64_t release_revision = 0;
@@ -222,6 +225,7 @@ private:
 			r.file_bytes = blob->second.size();
 			r.file_sha256 = io::sha256_hex(blob->second.data(), blob->second.size());
 			++downloads;
+			transfers.push_back("get");
 			return r;
 		}
 		// Where each file is downloaded from: the service's own blob route, as a store with no
@@ -229,6 +233,7 @@ private:
 		if (request.method == "POST" && rest == "/downloads" &&
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();
+			transfers.push_back("where:" + std::to_string(body.get("hashes")->array.size()));
 			for (const io::JsonValue &sha : body.get("hashes")->array) {
 				io::JsonValue entry = io::JsonValue::make_object();
 				entry.set("sha256", sha);
@@ -246,6 +251,7 @@ private:
 		if (request.method == "POST" && rest == "/missing" &&
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();
+			transfers.push_back("lacks:" + std::to_string(body.get("blobs")->array.size()));
 			for (const io::JsonValue &item : body.get("blobs")->array) {
 				const std::string sha = item.get_string("sha256", "");
 				if (blobs.count(sha))
@@ -271,6 +277,7 @@ private:
 				return refusal(400, "sha256_mismatch");
 			blobs[rest.substr(7)] = bytes;
 			++uploads;
+			transfers.push_back("put");
 			return json(200, io::JsonValue::make_object());
 		}
 		if (request.method == "POST" && rest == "/revisions" &&

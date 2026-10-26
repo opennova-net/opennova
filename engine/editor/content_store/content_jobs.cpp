@@ -164,8 +164,12 @@ ContentJobProgress ContentPull::progress() const {
 			return { count_text(plan_.conflicts(), "conflict", "conflicts") + " to settle", 0, 0,
 				false };
 		case Phase::Locate:
-			return { "Asking where " + count_text(downloads_.size(), "file is", "files are"),
-				next_locate_, downloads_.size(), false };
+			if (next_locate_ == 0)
+				return { "Asking where " + count_text(downloads_.size(), "file is", "files are"), 0,
+					downloads_.size(), false };
+			// A later batch's ask, between its downloads.
+			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
+				bytes_downloaded_, bytes_to_download_, true };
 		case Phase::Download:
 			return { "Downloading " + count_text(downloads_.size(), "file", "files"),
 				bytes_downloaded_, bytes_to_download_, true };
@@ -211,8 +215,9 @@ bool ContentPull::step_downloads() {
 		bytes_downloaded_ += file.size;
 		it = downloading_.erase(it);
 	}
+	// The files located so far: the batch asked of last.
 	while (downloading_.size() < std::max<size_t>(transport_.parallel(), 1) &&
-			next_download_ < downloads_.size()) {
+			next_download_ < next_locate_) {
 		const content::ContentFile &file = downloads_[next_download_++];
 		// A file an earlier pull landed (checked when it was named) is downloaded again by none.
 		if (landed(file)) {
@@ -228,7 +233,7 @@ bool ContentPull::step_downloads() {
 		request.response_file = incoming_path(content_paths_, file.sha256) + ".part";
 		downloading_.emplace_back(file, ContentCall(transport_, std::move(request)));
 	}
-	return downloading_.empty() && next_download_ == downloads_.size();
+	return downloading_.empty() && next_download_ == next_locate_;
 }
 
 bool ContentPull::landed(const content::ContentFile &file) const {
@@ -329,15 +334,23 @@ ContentJobState ContentPull::step(uint64_t budget) {
 			case Phase::Resolve:
 				return state_;
 			case Phase::Locate: {
-				// Where each file is downloaded from (the store's own URL, or the service's route),
-				// the service's kDownloadsMax at a time; a file an earlier pull landed is asked of
-				// none.
+				// Where the next batch of files is downloaded from (the store's own URL, or the
+				// service's route): the service's kDownloadsMax at most, and batch_bytes_ of files
+				// (ContentJob::kSignedBatchBytes), downloaded before the next is asked of; a file an
+				// earlier pull landed is asked of none.
 				if (!call_.started()) {
+					const size_t most = batch_files_ ? std::min(batch_files_, kDownloadsBatch) : kDownloadsBatch;
 					std::vector<std::string> batch;
-					while (next_locate_ < downloads_.size() && batch.size() < kDownloadsBatch) {
-						const content::ContentFile &file = downloads_[next_locate_++];
-						if (!landed(file))
+					uint64_t bytes = 0;
+					while (next_locate_ < downloads_.size() && batch.size() < most) {
+						const content::ContentFile &file = downloads_[next_locate_];
+						if (!landed(file)) {
+							if (!batch.empty() && bytes + file.size > batch_bytes_)
+								break;
 							batch.push_back(file.sha256);
+							bytes += file.size;
+						}
+						++next_locate_;
 					}
 					if (batch.empty()) {
 						phase_ = Phase::Download;
@@ -352,16 +365,19 @@ ContentJobState ContentPull::step(uint64_t budget) {
 				if (!note_session(call_.reply()))
 					return fail("the session ended: sign in again");
 				ContentApiError error;
+				requests_.clear(); // an earlier batch's, downloaded
 				if (!content_api::read_downloads(call_.reply(), account_, requests_, error))
 					return fail("cannot ask where the files are: " + error.line());
 				call_ = ContentCall();
+				phase_ = Phase::Download;
 				break;
 			}
 			case Phase::Download: {
 				spent += kCallCost;
 				if (!step_downloads())
 					return state_;
-				phase_ = Phase::Apply;
+				// The batch landed: the next asked of, or the files put in place.
+				phase_ = next_locate_ < downloads_.size() ? Phase::Locate : Phase::Apply;
 				break;
 			}
 			case Phase::Apply: {
@@ -683,10 +699,16 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				break;
 			}
 			case Phase::Missing: {
-				// At most the service's kMissingMax files a request (content_routes.h), one request
-				// after another.
+				// At most the service's kMissingMax files a request (content_routes.h) and batch_bytes_
+				// of files (ContentJob::kSignedBatchBytes), what the store lacks of them uploaded before
+				// the next is asked of.
 				if (!call_.started()) {
-					const size_t end = std::min(files_.size(), next_missing_ + kMissingBatch);
+					const size_t most = batch_files_ ? std::min(batch_files_, kMissingBatch) : kMissingBatch;
+					size_t end = next_missing_;
+					uint64_t bytes = 0;
+					while (end < files_.size() && end - next_missing_ < most &&
+							(end == next_missing_ || bytes + files_[end].size <= batch_bytes_))
+						bytes += files_[end++].size;
 					const std::vector<content::ContentFile> batch(
 							files_.begin() + static_cast<std::ptrdiff_t>(next_missing_),
 							files_.begin() + static_cast<std::ptrdiff_t>(end));
@@ -708,8 +730,6 @@ ContentJobState ContentPush::step(uint64_t budget) {
 					bytes_to_upload_ += target.file.size;
 					uploads_.push_back(std::move(target));
 				}
-				if (next_missing_ < files_.size())
-					break;
 				phase_ = Phase::Upload;
 				break;
 			}
@@ -717,7 +737,8 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				spent += kCallCost;
 				if (!step_uploads())
 					return state_;
-				phase_ = Phase::Commit;
+				// The batch's uploads stored: the next asked of, or the revision pushed.
+				phase_ = next_missing_ < files_.size() ? Phase::Missing : Phase::Commit;
 				break;
 			}
 			case Phase::Commit: {

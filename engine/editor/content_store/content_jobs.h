@@ -94,6 +94,18 @@ public:
 	// The account as the job's replies left it (taken once by take_account).
 	ContentAccountUpdate take_account();
 
+	// The bytes of files one batch of the service's signed URLs covers. A pull asks where a batch of files is,
+	// downloads them, then asks of the next; a push asks which of a batch's files the store lacks, uploads those,
+	// then asks of the next. The store signs a URL for an hour (the service's S3ContentUrls::kExpiresS), so a URL
+	// waits no longer than its own batch's transfers take: past the hour only below about 150 kbit/s.
+	static constexpr uint64_t kSignedBatchBytes = uint64_t(64) << 20;
+	// A batch's bounds: at most `files` (0: the route's own cap, the service's kDownloadsMax or kMissingMax) and
+	// `bytes` of files, a file larger than that a batch of its own. kSignedBatchBytes unless set (a test's smaller).
+	void limit_batches(size_t files, uint64_t bytes) {
+		batch_files_ = files;
+		batch_bytes_ = bytes;
+	}
+
 protected:
 	ContentJob(ContentTransport &transport, ContentAccount account) :
 			transport_(transport), account_(std::move(account)) {}
@@ -103,6 +115,8 @@ protected:
 
 	ContentTransport &transport_;
 	ContentAccount account_;
+	size_t batch_files_ = 0;
+	uint64_t batch_bytes_ = kSignedBatchBytes;
 	bool account_changed_ = false;
 	ContentJobState state_ = ContentJobState::Running;
 	std::string error_;
@@ -174,7 +188,7 @@ private:
 	std::unique_ptr<ContentScan> scan_;
 	PullPlan plan_;
 	std::vector<content::ContentFile> downloads_;
-	size_t next_locate_ = 0; // the first file the next downloads request names
+	size_t next_locate_ = 0; // the first file the next downloads request names; those before it located
 	std::map<std::string, ContentRequest> requests_; // each file's download, by SHA-256
 	size_t next_download_ = 0;
 	std::vector<std::pair<content::ContentFile, ContentCall>> downloading_;
