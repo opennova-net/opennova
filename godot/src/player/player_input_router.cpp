@@ -779,9 +779,9 @@ void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
 }
 
-Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(int p_vk, int p_yes_vk, int p_no_vk,
-		int p_restart_vk) {
-	const Ref<Simulation> chain_sim = sim();
+Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk,
+		int p_yes_vk, int p_no_vk, int p_restart_vk) {
+	const Ref<Simulation> chain_sim = p_session.is_valid() ? p_session : sim();
 	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
 	opennova::inmatch::SpecialKeyInput input;
 	input.vk = p_vk;

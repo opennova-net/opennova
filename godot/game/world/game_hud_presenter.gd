@@ -1213,12 +1213,13 @@ func handle_chat_key(key: InputEventKey) -> bool:
 ## (ControlsModel.consume_key_press: it never reaches the action rows); the shell
 ## runs the rest (the restart's splash re-run, the event-12 pick). Null with no
 ## player presenter. The chain reads the key's one VK, the layout's (Godot's keycode,
-## else the physical key), as the key queue and the binding scan do.
-func handle_special_key(key: InputEventKey) -> SpecialKeyOutcome:
+## else the physical key), as the key queue and the binding scan do, over `session`
+## (the shell's world view's; null = the player presenter's world's).
+func handle_special_key(key: InputEventKey, session: Simulation = null) -> SpecialKeyOutcome:
 	if _player_presenter == null:
 		return null
 	var vk := ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key))
-	var outcome: SpecialKeyOutcome = _player_presenter.special_key(vk,
+	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk,
 			_key_press_vk("STRKEYPRESS_YES", "Y"), _key_press_vk("STRKEYPRESS_NO", "N"),
 			_key_press_vk("STRKEYPRESS_RESTART", "R"))
 	if outcome.is_quit_confirmed():

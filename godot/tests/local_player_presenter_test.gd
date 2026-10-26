@@ -72,7 +72,7 @@ class PresenterKeyLegs:
 		return false
 
 	func ring_special_key(key: InputEventKey) -> bool:
-		var outcome: SpecialKeyOutcome = presenter.special_key(
+		var outcome: SpecialKeyOutcome = presenter.special_key(null,
 				ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key)), KEY_Y, KEY_N,
 				KEY_R)
 		return outcome.is_taken()

@@ -1758,7 +1758,10 @@ func ring_chat_key(key: InputEventKey) -> bool:
 func ring_special_key(key: InputEventKey) -> bool:
 	if _hud_presenter == null:
 		return false
-	var outcome := _hud_presenter.handle_special_key(key)
+	# The chain runs over the session the shell's world view names, the one the deploy
+	# pick's send (the record leg's DeployScreenPresenter.send_pick) serves.
+	var outcome := _hud_presenter.handle_special_key(key,
+			_deploy_presenter.view_sim() if _deploy_presenter != null else null)
 	if outcome == null:
 		return false
 	if outcome.is_restart_splash():

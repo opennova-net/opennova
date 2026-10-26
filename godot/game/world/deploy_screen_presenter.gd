@@ -239,6 +239,12 @@ func handle_key(key: InputEventKey) -> bool:
 	return not is_open()
 
 
+## The session the screen's world view names (the shell's world's), which the
+## shell's special-key chain and the pick's send both serve; null with no view.
+func view_sim() -> Simulation:
+	return _view.sim() if _view != null else null
+
+
 ## The queued pick's dispatch (case 12), the screen open or not: like a list
 ## select, the initial overlay closes on the send and a death re-pick keeps the
 ## screen until the host releases the hold.
