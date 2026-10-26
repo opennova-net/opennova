@@ -722,11 +722,12 @@ jobs:
           chmod +x "$bin"
 
       # The software GPU: lavapipe (mesa-vulkan-drivers) behind the Vulkan
-      # loader, and an X server with no screen for Godot's window.
-      - name: Install lavapipe and Xvfb
+      # loader, an X server with no screen for Godot's window, and a window
+      # manager over it (openbox; xprop to see it up).
+      - name: Install lavapipe, Xvfb and openbox
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
-          mesa-vulkan-drivers libvulkan1 vulkan-tools xvfb
+          mesa-vulkan-drivers libvulkan1 vulkan-tools xvfb openbox x11-utils
 
       - name: Download Linux GDExtensions
         uses: actions/download-artifact@v4
@@ -762,7 +763,17 @@ jobs:
           export VK_ICD_FILENAMES="$icd"
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_linux.x86_64"
           vulkaninfo --summary
-          xvfb-run -a -s "-screen 0 1920x1080x24" bash scripts/test_godot.sh --windowed
+          # Under a window manager: a window minimizes and comes back only through one
+          # (editor_screenshot_minimized_test.gd); Xvfb alone leaves it as it is.
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c '
+            openbox --sm-disable &
+            for _ in $(seq 50); do
+              xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" && break
+              sleep 0.2
+            done
+            xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q "window id" ||
+              { echo "::error::openbox did not start"; exit 1; }
+            bash scripts/test_godot.sh --windowed'
 
       - name: Upload windowed Godot test reports
         if: always()
