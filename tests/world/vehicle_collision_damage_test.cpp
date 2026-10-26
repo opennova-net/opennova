@@ -152,6 +152,32 @@ void test_bump_sound_gate() {
 	CHECK(kRunOverSoundSuppressTicks == 0x1F, "the 31-tick suppression window");
 }
 
+// The rotor gate: a helicopter target (unit type 3) admits its damage-box legs only while its
+// rotor word, doubled and read signed, passes 0xCCCCCC0; any other target always admits. The
+// strike sound needs a damage-box contact flag too, and its hold is 62 * the slot's 16.16 first
+// parameter, rounded over 64 bits. [orig: Entity_MovementCollisionResolver @0x4B2BD0 -
+// @0x4B30AF..0x4B310C, @0x4B314E..0x4B316E]
+void test_rotor_gate() {
+	CHECK(rotor_gate_admits(1, 0), "a vehicle target always admits");
+	CHECK(rotor_gate_admits(0, 0), "a target with no def admits");
+	CHECK(!rotor_gate_admits(3, 0), "a stopped rotor refuses");
+	CHECK(!rotor_gate_admits(3, 0x6666660), "the doubled word at the threshold refuses");
+	CHECK(rotor_gate_admits(3, 0x6666661), "a rotor just past it admits");
+	CHECK(!rotor_gate_admits(3, 0x40000000), "the doubled word wraps negative and refuses");
+	CHECK(!rotor_gate_admits(3, -0x6666661), "a negative rotor refuses");
+	CHECK(rotor_gate_admits(0x103, 0x6666661) && !rotor_gate_admits(0x103, 0),
+			"the unit type is its low byte");
+	CHECK(rotor_strike_sound_applies(0x100u, 3, 0x6666661), "a DH contact with a spinning rotor");
+	CHECK(rotor_strike_sound_applies(0x40u, 3, 0x6666661), "a DL contact too");
+	CHECK(!rotor_strike_sound_applies(0x200u, 3, 0x6666661), "a CT contact is no damage box");
+	CHECK(!rotor_strike_sound_applies(0x100u, 1, 0x6666661), "only a helicopter strikes");
+	CHECK(!rotor_strike_sound_applies(0x100u, 3, 0), "a stopped rotor strikes nothing");
+	CHECK(rotor_strike_hold_ticks(0x8000) == 31, "half a second holds 31 ticks");
+	CHECK(rotor_strike_hold_ticks(0x10000) == 62, "a second holds 62 ticks");
+	CHECK(rotor_strike_hold_ticks(0) == 0, "no parameter holds none");
+	CHECK(rotor_strike_hold_ticks(-0x8000) == -31, "the shift is arithmetic");
+}
+
 void test_constants() {
 	CHECK(kDamageFlagCollision == 0x400u, "the knife cause bit");
 	CHECK(kDeathCauseCollision == 3, "the class callback event");
@@ -170,6 +196,7 @@ int main() {
 	test_approach_quadrant();
 	test_run_over_gates();
 	test_bump_sound_gate();
+	test_rotor_gate();
 	test_constants();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

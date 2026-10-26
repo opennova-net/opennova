@@ -1730,7 +1730,7 @@ void JoinerRole::wire_replica_collision_seams() {
 							peers.data(), static_cast<int32_t>(peers.size()),
 							q.row_handle, &q.entity_flags, &ground,
 							q.has_saved_live ? q.saved_live_pos : nullptr,
-							q.has_eye ? q.eye_offset : nullptr);
+							q.has_eye ? q.eye_offset : nullptr, q.type_id);
 					note_replica_collision_ns(std::chrono::duration_cast<std::chrono::nanoseconds>(
 							std::chrono::steady_clock::now() - start).count());
 					// A remote player's powerup contact runs the pickup on this

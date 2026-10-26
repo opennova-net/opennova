@@ -180,4 +180,50 @@ inline bool run_over_sound_applies(int32_t pusher_move_planar, int32_t relative_
 			relative_move_planar > kRunOverSoundThreshold;
 }
 
+// THE ROTOR GATE AND THE ROTOR-STRIKE SOUND of the movement resolver's damage boxes (the
+// DL / DM / DH contacts, outFlags 0x40 / 0x80 / 0x100). A helicopter target (its def's
+// unit type byte 3) hurts only while its rotor spins faster than 0x6666660 (the doubled
+// word against 0xCCCCCC0, signed): a slower rotor skips the damage legs and the CT
+// capture leg alike. And on every peer, a damage-box contact with a spinning helicopter
+// plays the struck body's own sound profile slot 40 at the body, once per hold: the
+// trigger table takes the set for that slot's first parameter (seconds as 16.16) in
+// rounded ticks, and only a living body plays it, though a dead one takes the hold.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the sound @0x4B30AF..0x4B312A
+//  (`test [outFlags], 1C0h` @0x4B30AF, the unit type `cmp byte ptr [ecx+196h], 3`
+//  @0x4B30C3, `add edx, edx; cmp edx, 0CCCCCC0h; jle` @0x4B30CC..0x4B30DA, the body's
+//  profile page slot +0xA0 @0x4B30DF..0x4B30F1 and its +0x1AC hold `imul 3Eh; add 8000h;
+//  shrd 10h` @0x4B30E5..0x4B310C, Server_TrackEntityInTable @0x4B3112, the dead test
+//  @0x4B311E, Sound_PlayWithDistanceAttenuation at the body @0x4B312A); the gate
+//  @0x4B314E..0x4B316E ahead of the damage legs @0x4B3174..0x4B31D7 and the CT leg
+//  @0x4B31DD..0x4B323D; SoundProfile_ParseLineCallback @0x526FC0 - the slot's first
+//  parameter at profile +0x10C + 4 * slot @0x527140]
+inline constexpr int32_t kRotorTargetUnitType = 3;
+inline constexpr int32_t kRotorStrikeDoubledSpeed = 0xCCCCCC0;
+inline constexpr uint32_t kDamageBoxContactFlags = 0x1C0u;
+
+inline bool rotor_strike_spinning(int32_t rotor_speed) {
+	return static_cast<int32_t>(static_cast<uint32_t>(rotor_speed) * 2u) > kRotorStrikeDoubledSpeed;
+}
+
+inline bool rotor_target(int32_t unit_type) {
+	return static_cast<uint8_t>(unit_type) == kRotorTargetUnitType;
+}
+
+// Whether a contact's damage and CT legs run: any target but a helicopter, or one whose rotor
+// spins.
+inline bool rotor_gate_admits(int32_t target_unit_type, int32_t target_rotor_speed) {
+	return !rotor_target(target_unit_type) || rotor_strike_spinning(target_rotor_speed);
+}
+
+inline bool rotor_strike_sound_applies(uint32_t contact_flags, int32_t target_unit_type,
+		int32_t target_rotor_speed) {
+	return (contact_flags & kDamageBoxContactFlags) != 0u && rotor_target(target_unit_type) &&
+			rotor_strike_spinning(target_rotor_speed);
+}
+
+// The hold in ticks: 62 * the slot's 16.16 first parameter, rounded, over 64 bits.
+inline int32_t rotor_strike_hold_ticks(int32_t param_q16) {
+	return static_cast<int32_t>((static_cast<int64_t>(param_q16) * 62 + 0x8000) >> 16);
+}
+
 } // namespace opennova::world

@@ -1845,7 +1845,7 @@ public:
                             int32_t peer_count, uint16_t exclude_handle,
                             uint32_t *entity_flags, EntityHandle *out_ground,
                             const int32_t *saved_live_pos = nullptr,
-                            const int32_t *eye_offset = nullptr);
+                            const int32_t *eye_offset = nullptr, int32_t item_id = 0);
     // A wire replica row's ground column (raycast_ground) through the same
     // candidate slice its resolve reads (resolve_replica's staging), the row's
     // Flags mirror gating the terrain clamp. The player body's slope conform
@@ -2046,8 +2046,12 @@ private:
             const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset,
             bool all_types, bool query_parent_cleared);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
-    // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
-    void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
+    // the CA/CM entity flags); contact_legs is the authority's admission of the damage
+    // legs (no Flags 0x4000000, the rotor gate). [orig: the dispatch @ 0x4b30b7-0x4b351e]
+    void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool contact_legs);
+    // The struck body's rotor-strike sound (vehicle_collision_damage.h).
+    void play_rotor_strike_sound(World &world, EntityHandle source, const Entity *ent,
+                                 const int32_t pos[3]);
     void record_change_team_contact(EntityHandle source, EntityHandle trigger);
     void record_movement_callback_contact(EntityHandle source, EntityHandle target);
     void record_powerup_contact(EntityHandle source, EntityHandle target);
@@ -2285,6 +2289,8 @@ private:
     const ReplicaPeer *replica_peers_ = nullptr;
     int32_t replica_peer_count_ = 0;
     uint16_t replica_exclude_handle_ = 0xFFFF;
+    // The row's runtime type id (its def's sound profile binding: the rotor-strike sound).
+    int32_t replica_item_id_ = 0;
     // A cell index over the staged peer table, rebuilt once per (table, pump
     // tick): the repulsion loop only ever moves a row for peers within 30% of
     // the summed radii, so each resolve gathers the peers of the cells that

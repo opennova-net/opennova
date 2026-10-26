@@ -1681,6 +1681,102 @@ void test_named_gameplay_volume_dispatch() {
     CHECK(cp_player.force[0] < 0);
 }
 
+// A helicopter's damage boxes (unit type 3) hurt only while its rotor spins faster than
+// 0x6666660, each leg crediting the struck body itself (+0x178); on every peer a spinning
+// rotor's damage-box contact plays the struck body's profile slot 40 at the body and holds
+// the set for the slot's first parameter (0.5 s: 31 ticks); a dead body takes the hold and
+// plays nothing; a joiner's decoded row plays its own type's profile at the working pose. [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the sound
+// @0x4B30AF..0x4B312A, the gate @0x4B314E..0x4B316E, the legs @0x4B3174..0x4B31D7]
+void test_resolver_rotor_gate_and_strike_sound() {
+    struct Touch {
+        int16_t health = 0;
+        bool self_credit = false;
+        size_t sounds = 0;
+        std::string sound;
+        Vec3 at{};
+        bool held = false;
+    };
+    // replica: a joiner's decoded row of type 7 (bound to the "heavy" profile) resolves in
+    // place of the registry body.
+    auto touch = [](int type, int32_t unit_type, int32_t rotor, bool authority, bool dead,
+                    bool replica = false) {
+        Rig rig(box_model(type, 0, 3.0, 3.0, 3.0));
+        Entity *heli = rig.world.registry.get(rig.building);
+        heli->has_item_def = true;
+        heli->item_unit_type = unit_type;
+        heli->veh.part_spin.speed = rotor;
+        const std::string keyword =
+                opennova::audio::sound_profile_slot_keyword(opennova::audio::kSlotRotorImpact);
+        const std::string profile = "begin \"default\"\r\n  " + keyword +
+                " ROTOR_HIT 0.5\r\nend\r\nbegin \"heavy\"\r\n  " + keyword +
+                " HEAVY_HIT 0.5\r\nend\r\n";
+        CHECK(rig.world.tables.sound_profiles.parse(profile.data(), profile.size()) == 2);
+        opennova::audio::OrganicSoundProfile heavy;
+        heavy.primary = static_cast<int16_t>(rig.world.tables.sound_profiles.index_of("heavy"));
+        rig.world.tables.organic_sound_profiles.set(7, heavy);
+        rig.world.out.fire_sounds.set_listener(Vec3{10.0f, 10.0f, 0.5f});
+        Entity *soldier = rig.world.registry.get(rig.soldier);
+        if (dead && !replica) soldier->flags |= kEntityFlagDead;
+        if (replica)
+            rig.move_soldier(60.0, 60.0, 0.0);
+        else
+            rig.move_soldier(10.0, 10.0, 0.5);
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        if (replica) {
+            uint32_t flags = dead ? kEntityFlagDead : 0u;
+            EntityHandle ground;
+            rig.cw.resolve_replica(rig.world, state, pos, vel, vel[2], 0, fx(1.8), fx(1.0),
+                                   false, 0, 43, 0u, nullptr, 0, 0x0123, &flags, &ground,
+                                   nullptr, nullptr, 7);
+        } else {
+            rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0,
+                                  fx(1.8), 0, 0, false, authority, 0, 43, 0u, health);
+        }
+        Touch out;
+        out.health = health;
+        out.self_credit = rig.world.registry.get(rig.soldier)->last_attacker == rig.soldier;
+        const std::vector<ReadyFireSound> sounds = rig.world.out.fire_sounds.drain();
+        out.sounds = sounds.size();
+        if (!sounds.empty()) {
+            out.sound = sounds[0].set_name;
+            out.at = sounds[0].pos;
+        }
+        out.held = !rig.world.out.fire_sounds.track_trigger(replica ? "HEAVY_HIT" : "ROTOR_HIT", 1);
+        return out;
+    };
+    const int32_t kSpinning = 0x6666661;
+    // A parked helicopter's boxes take nothing and play nothing.
+    const Touch parked = touch(16, 3, 0, true, false);
+    CHECK(parked.health == 100 && !parked.self_credit && parked.sounds == 0 && !parked.held);
+    // The doubled word at the threshold still refuses.
+    const Touch threshold = touch(16, 3, 0x6666660, true, false);
+    CHECK(threshold.health == 100 && threshold.sounds == 0);
+    // A spinning rotor strikes: -50, the body's own credit, the body's slot-40 set held.
+    const Touch spinning = touch(16, 3, kSpinning, true, false);
+    CHECK(spinning.health == 50 && spinning.self_credit);
+    CHECK(spinning.sounds == 1 && spinning.sound == "ROTOR_HIT" && spinning.held);
+    // Any other target's boxes hurt whatever its rotor word, with the credit and no sound.
+    const Touch other = touch(16, 1, 0, true, false);
+    CHECK(other.health == 50 && other.self_credit && other.sounds == 0 && !other.held);
+    // The sound is every peer's: a joiner's DL contact plays it and takes no damage.
+    const Touch joiner = touch(18, 3, kSpinning, false, false);
+    CHECK(joiner.health == 100 && joiner.sounds == 1 && joiner.held);
+    // A dead body takes the hold and plays nothing.
+    const Touch corpse = touch(18, 3, kSpinning, false, true);
+    CHECK(corpse.sounds == 0 && corpse.held);
+    // A joiner's decoded row plays its own type's profile (not "default") at the resolve's
+    // working pose; a dead row takes the hold and plays nothing.
+    // [orig: the org2 resolve of a remote row @0x4B7CF4; the play at [esi+4] @0x4B3125]
+    const Touch row = touch(16, 3, kSpinning, false, false, true);
+    CHECK(row.sounds == 1 && row.sound == "HEAVY_HIT" && row.held);
+    CHECK(row.at.x == 10.0f && row.at.y == 10.0f);
+    const Touch dead_row = touch(16, 3, kSpinning, false, true, true);
+    CHECK(dead_row.sounds == 0 && dead_row.held);
+}
+
 // ---------------------------------------------------------------------------
 void test_resolver_damage_grades_and_zones() {
     auto health_after_touch = [](int type, bool authority, uint32_t engine_flags) {
@@ -6664,6 +6760,7 @@ int main() {
     test_vehicle_collision_volume_selection();
     test_named_gameplay_volume_dispatch();
     test_resolver_damage_grades_and_zones();
+    test_resolver_rotor_gate_and_strike_sound();
     test_idle_skip_throttle();
     test_slice_cadence_and_invuln();
     test_pool1_item_is_one_collision_candidate();
