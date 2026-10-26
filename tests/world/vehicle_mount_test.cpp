@@ -1135,8 +1135,11 @@ void test_binoculars_survive_all_but_the_camera_reset() {
         carrier.position = {200.0f, 200.0f, 10.0f};
         const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
         CHECK(r.w.vehicles.init_weapon_slot_from_entity_def(*r.w.registry.get(carrier_h)));
+        // An emplaced gun's def, as the shipped ones: EWeap without PlayerControl, which
+        // would keep the gun on its own slot whatever the route bit [orig:
+        // Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6].
         r.veh().item_type = 2;
-        r.veh().item_attrib |= kItemAttribEweap;
+        r.veh().item_attrib = kItemAttribEweap;
         r.veh().emplacement_attachment_flags = 0x02;
         r.veh().emplacement_parent = carrier_h;
         r.veh().emplacement_parent_spawn_id = r.w.registry.get(carrier_h)->registry_spawn_id;
