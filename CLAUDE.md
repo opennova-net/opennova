@@ -81,7 +81,7 @@ processes.
 ```bash
 scripts/build.sh          # C++ build + ctest (Release); --no-godot, --jobs N, --shard editor|rest (one of CI's two)
 scripts/build_godot.sh    # both GDExtension variants -> godot/bin/ (--runtime-only for one); fully restart the editor after
-scripts/test_godot.sh     # GUT headless; --shard shells|world (one of CI's two); --windowed runs the RD-only tests/windowed/ scripts (local, no CI job)
+scripts/test_godot.sh     # GUT headless; --shard shells|world (one of CI's two); --windowed runs the RD-only tests/windowed/ scripts (CI: godot-tests-windowed, lavapipe under Xvfb)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv)
 python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (docs repo; --write regenerates)
 ```
