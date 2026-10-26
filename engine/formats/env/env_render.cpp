@@ -1784,7 +1784,11 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 		config.water_word_set = true;
 	}
 	if (overrides.has_water_murk) {
-		config.water_murk = clamp_water_murk_upper(overrides.water_murk);
+		// The header's byte * 0.01, stored as it is: the 0.99 clamp is the .env keyword's alone
+		// [orig: Game_LoadTerrainDuringConnect @ 0x5207B9..0x5207CE (fild, fmul 0.01f, fstp) ->
+		// Environment_SetWaterMurk @ 0x57D4F0 (fld, fstp g_EnvWaterMurk, no clamp); the keyword's
+		// clamp TimeOfDay_ParseProperty @ 0x57CBA9].
+		config.water_murk = overrides.water_murk;
 	}
 	if (overrides.has_start_time) {
 		config.curtime = overrides.start_time;
