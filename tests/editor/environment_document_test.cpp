@@ -1021,6 +1021,28 @@ int test_ambient_alias() {
 	return 0;
 }
 
+// The colours with no keyframe: a skyfog edit alone moves the skyfog's keyword alone, since a skyfog line sets the
+// skyfog and no fog [orig: TimeOfDay_ParseProperty @ 0x57c9d2]. The save writes no fog line, so a mission's .trn fog
+// stands.
+int test_skyfog_alone() {
+	const std::string overcast = "fog_level 900\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	TEST_EXPECT(set(*document, row_address(*document), "static_skyfog_rgb_r", int64_t(100)));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("skyfog_rgb 100,192,255\r\n") != std::string::npos &&
+	            saved.find("\nfog_rgb") == std::string::npos && saved.rfind("fog_rgb", 0) != 0);
+	const std::string trn = "polytrn_colormap c.tga\r\nfog_rgb 1,2,3\r\n", env;
+	opennova::env::MissionEnv loaded;
+	opennova::env::load_mission_env({&trn, &saved, &env}, loaded);
+	const opennova::env::Keyframe &scratch = loaded.config.scratch;
+	TEST_EXPECT(same_rgb(scratch.fog, {1 / 255.0f, 2 / 255.0f, 3 / 255.0f}) &&
+	            same_rgb(scratch.skyfog, {100 / 255.0f, 192 / 255.0f, 255 / 255.0f}));
+	std::printf("skyfog alone: its keyword alone, the .trn's fog standing\n");
+	return 0;
+}
+
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
@@ -1033,6 +1055,7 @@ int main() {
 	failures += test_fixtures(repo);
 	failures += test_overcast();
 	failures += test_ambient_alias();
+	failures += test_skyfog_alone();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

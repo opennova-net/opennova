@@ -570,12 +570,12 @@ bool write_env(std::ostream &output, const Config &cfg, const std::set<std::stri
 		line("moon_rgb", scratch.moon, seed.moon);
 		line("sky_rgb", scratch.sky, seed.sky);
 		line("ground_rgb", scratch.ground, seed.ground);
-		// skyfog before fog, both when either moved: a fog line mirrors into a skyfog that
-		// still holds its seed (@ 0x57c9b8), so the pair reads back as written.
-		const bool fog_moved = rgb_line_to_string(scratch.fog) != rgb_line_to_string(seed.fog) ||
-				rgb_line_to_string(scratch.skyfog) != rgb_line_to_string(seed.skyfog);
+		// skyfog before fog, and with it when the fog moved: a fog line mirrors into a skyfog
+		// that still holds its seed (@ 0x57c9b8), so the pair reads back as written. A skyfog
+		// line sets the skyfog alone (@ 0x57c9d2), so a moved skyfog brings no fog line.
+		const bool fog_moved = rgb_line_to_string(scratch.fog) != rgb_line_to_string(seed.fog);
 		line("skyfog_rgb", scratch.skyfog, seed.skyfog, fog_moved);
-		line("fog_rgb", scratch.fog, seed.fog, fog_moved);
+		line("fog_rgb", scratch.fog, seed.fog);
 		line("skybase_rgb", scratch.skybase, seed.skybase);
 		line("skybright_rgb", scratch.skybright, seed.skybright);
 		line("skyhighlight_rgb", scratch.skyhighlight, seed.skyhighlight);
