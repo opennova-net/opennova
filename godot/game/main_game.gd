@@ -319,6 +319,8 @@ func _ready() -> void:
 	# owner decides what it means).
 	if not _camera.escape_pressed.is_connected(_on_camera_escape):
 		_camera.escape_pressed.connect(_on_camera_escape)
+	# Outside a debug build the free camera moves only while the dev tools are open.
+	_camera.dev_tools_open = _dev_tools.is_open
 	_player_presenter = LocalPlayerPresenter.new()
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
