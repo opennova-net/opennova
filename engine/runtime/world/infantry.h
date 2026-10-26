@@ -983,7 +983,7 @@ struct InfantryState {
     // 0xD000) * cos(lean), floored 0x2000 at the store [orig: on-foot
     // @0x4b6984..0x4b6bab, floor @0x4b6b98; mounted floor @0x4b68e7]; that
     // leg's full 3-angle lateral tilt (on-foot @0x4b69ab..0x4b6b7c, mounted
-    // @0x4b66fc..0x4b68e5) is the tracked residue, D-INF-18.
+    // @0x4b66fc..0x4b68e5) is player_body_capsule_eye's (D-NET-330).
     int32_t eye_offset_x = 0;
     int32_t eye_offset_y = 0;
     int32_t eye_offset_z = 0;
