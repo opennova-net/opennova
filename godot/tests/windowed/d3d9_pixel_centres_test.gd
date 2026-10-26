@@ -65,10 +65,66 @@ func _render(viewport: SubViewport) -> Image:
 
 
 # The HUD's draw lists are the original's window coordinates: a quad at integer
-# coordinates covers the same pixels on either raster, but D3D9 samples its
-# texture at the texels' shared corners (pixel i's centre is the quad's x0 + k),
-# so a texel-for-texel checkerboard filters to one even grey; drawn at Godot's
-# centres it would sample every texel's own centre and keep the checker.
+# coordinates covers the same pixels on either raster, and D3D9 samples pixel i at
+# its centre, the window coordinate i itself, so pixel x0 + k reads the quad's UV
+# at k. The static frame's bordered quad insets its UVs by 0.05 texel and widens
+# them by one pixel's worth, u0 = 0.05 / tex_w, u1 = 1 - u0 + 1 / width [orig:
+# HUD_DrawTexturedQuadWithBorder @0x590C40 - @0x590D2F..0x590D8C], so a
+# texel-for-texel checker filters to a drifting blend of its texels, which this
+# pins against the D3D9 model; drawn at this raster's own centres it would read the
+# UVs half a pixel on, a different blend. The checker's odd height makes it the
+# same read either way up, so a loader's row order cannot change the expectation.
+const CHECKER := Vector2i(32, 17)
+const CHECKER_ON := 64.0 / 255.0
+
+
+# Texel (x, y) of the checker, clamped to its edge.
+func _checker_at(x: int, y: int) -> float:
+	x = clampi(x, 0, CHECKER.x - 1)
+	y = clampi(y, 0, CHECKER.y - 1)
+	return CHECKER_ON if (x + y) % 2 == 0 else 0.0
+
+
+# The bilinear read at texel coordinates (tx, ty), texel centres on the halves.
+func _bilinear(tx: float, ty: float) -> float:
+	var fx := tx - 0.5
+	var fy := ty - 0.5
+	var x0 := floori(fx)
+	var y0 := floori(fy)
+	var ax := fx - x0
+	var ay := fy - y0
+	var top := _checker_at(x0, y0) * (1.0 - ax) + _checker_at(x0 + 1, y0) * ax
+	var bottom := _checker_at(x0, y0 + 1) * (1.0 - ax) + _checker_at(x0 + 1, y0 + 1) * ax
+	return top * (1.0 - ay) + bottom * ay
+
+
+# Pixel (kx, ky) of the bordered quad as D3D9 reads it (`centre` 0), or as a raster
+# with its centres half a pixel on would (`centre` 0.5).
+func _bordered_read(kx: int, ky: int, centre: float) -> float:
+	var u0 := 0.05 / CHECKER.x
+	var v0 := 0.05 / CHECKER.y
+	var u1 := 1.0 - u0 + 1.0 / CHECKER.x
+	var v1 := 1.0 - v0 + 1.0 / CHECKER.y
+	var tx := (u0 + (u1 - u0) * (kx + centre) / CHECKER.x) * CHECKER.x
+	var ty := (v0 + (v1 - v0) * (ky + centre) / CHECKER.y) * CHECKER.y
+	return _bilinear(tx, ty)
+
+
+# The largest miss of the measured pixels against a model scaled by its best fit
+# (the texture's colour stage scales the read; the sampling is what is pinned).
+func _fit_miss(measured: PackedFloat32Array, model: PackedFloat32Array) -> float:
+	var num := 0.0
+	var den := 0.0
+	for i in measured.size():
+		num += measured[i] * model[i]
+		den += model[i] * model[i]
+	var scale := num / den if den > 0.0 else 0.0
+	var miss := 0.0
+	for i in measured.size():
+		miss = maxf(miss, absf(measured[i] - scale * model[i]))
+	return miss
+
+
 func test_the_hud_samples_its_textures_where_d3d9_does() -> void:
 	if not _rd_available():
 		pending("RenderingDevice unavailable under this Godot renderer")
@@ -76,7 +132,7 @@ func test_the_hud_samples_its_textures_where_d3d9_does() -> void:
 	var dir := TestFs.cache_dir(self, "d3d9_pixel_centres")
 	_temp_dirs.append(dir)
 	TestFs.write_bytes(self, dir.path_join("frame.tga"),
-			_checker_tga(Vector2i(32, 16), Color(0.25, 0.25, 0.25, 1)))
+			_checker_tga(CHECKER, Color(CHECKER_ON, CHECKER_ON, CHECKER_ON, 1)))
 	TestFs.write_text(self, dir.path_join("hudpos.def"),
 			"\n".join(PackedStringArray(HudFixture.DECLUTTER_ROWS)
 					+ PackedStringArray(["STATICFRAME frame.tga 100 100"])))
@@ -103,19 +159,23 @@ func test_the_hud_samples_its_textures_where_d3d9_does() -> void:
 				low = low.min(Vector2i(x, y))
 				high = high.max(Vector2i(x, y))
 	var lit := Rect2i(low, high - low + Vector2i.ONE)
-	assert_eq(lit.size, Vector2i(32, 16),
-			"the quad at integer coordinates covers its 32 x 16 pixels, as on either raster")
-	if lit.size.x < 8 or lit.size.y < 8:
+	assert_eq(lit.size, CHECKER,
+			"the quad at integer coordinates covers its 32 x 17 pixels, as on either raster")
+	if lit.size != CHECKER:
 		return
-	var first := image.get_pixel(lit.position.x + 3, lit.position.y + 3).r
-	assert_gt(first, 0.1, "the checker's mean is drawn")
-	for y in range(lit.position.y + 2, lit.end.y - 2):
-		for x in range(lit.position.x + 2, lit.end.x - 2):
-			var value := image.get_pixel(x, y).r
-			if absf(value - first) > 0.02:
-				fail_test("pixel (%d, %d) = %.3f against %.3f: the checker survived, the HUD sampled texel centres" % [x, y, value, first])
-				return
-	pass_test("every interior pixel filters four texels evenly, as D3D9's pixel centres do")
+	var measured := PackedFloat32Array()
+	var d3d9 := PackedFloat32Array()
+	var godot_centres := PackedFloat32Array()
+	for ky in range(2, CHECKER.y - 2):
+		for kx in range(2, CHECKER.x - 2):
+			measured.append(image.get_pixel(lit.position.x + kx, lit.position.y + ky).r)
+			d3d9.append(_bordered_read(kx, ky, 0.0))
+			godot_centres.append(_bordered_read(kx, ky, 0.5))
+	var miss := _fit_miss(measured, d3d9)
+	assert_lt(miss, 0.02,
+			"every interior pixel reads the bordered UVs at D3D9's pixel centre (miss %.3f)" % miss)
+	assert_gt(_fit_miss(measured, godot_centres), 0.05,
+			"and not where this raster's own centres would read them")
 
 
 # The frame's camera draws through the surface's D3D9 half pixel: an edge the
