@@ -1155,8 +1155,25 @@ void JoinerRole::pump() {
 	//  of Entity_UpdateAllEntities called @0x52674B; NetPacket_SerializePlayerState @0x4C09C0 -
 	//  Entity_ResetToSpawnState called @0x4C113C; Entity_UpdateAllEntities @0x4C2100 -
 	//  Weapon_UpdateAllProjectiles called @0x4C223A]
-	for (const uint16_t handle : rt.view().drain_respawn_releases())
+	const std::vector<uint16_t> respawned = rt.view().drain_respawn_releases();
+	for (const uint16_t handle : respawned)
 		push_replica_slot_release(world, handle);
+	// The same reset's tail builds every slice over the tables as they stand, restarting the
+	// 17-tick phase: a respawned row's wire slice is built at its record's position at once,
+	// where it kept the one built at its death spot until the next 17-tick edge (D-COL-22).
+	// The build reads each source's live entity, whose record the decode stored ahead of the
+	// reset, so the proxies' live words take the decoded rows first; the tables (the copies)
+	// stand, as the reset rebuilds no Pool01 table. A decoded row keeps no blink words of its
+	// own (its lighting walks them at its decoded position), so the row's own list adds none.
+	// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the position stores
+	//  @0x4C110F..0x4C112A ahead of Entity_ResetToSpawnState called @0x4C113C;
+	//  NetPacket_SerializeInfantryEntityState @0x4C0320 - @0x4C05C0..0x4C05DB ahead of the
+	//  call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - Entity_BuildProximityListsFromPools
+	//  called @0x4B98EB, Entity_BuildProximityList called @0x4B98F1]
+	if (!respawned.empty() && world.ai.collision != nullptr) {
+		sync_wire_collision_proxies_live();
+		world.ai.collision->rebuild_candidate_slices(world);
+	}
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round
 	// predicate. Mirror it onto World before any local entity/system work.
 	world.preround_delay_seconds =

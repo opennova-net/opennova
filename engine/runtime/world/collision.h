@@ -1921,6 +1921,12 @@ public:
     int32_t static_count() const { return static_count_; }
     int32_t static_building_count() const { return static_building_count_; }
     int32_t candidate_count(EntityHandle h) const;
+    // A decoded row's wire slice size (0 for none).
+    int32_t wire_candidate_count(uint16_t wire_handle) const {
+        int32_t count = 0;
+        (void)wire_candidate_slice(wire_handle, count);
+        return count;
+    }
     // The entity's proximity slice [orig: entity+444/448 — the g_ProxCandidateArena
     // window Entity_BuildProximityListsFromPools fills @ 0x4b8eb0]. Pointer into
     // the arena, valid until the next 17th-tick rebuild; null when the entity has

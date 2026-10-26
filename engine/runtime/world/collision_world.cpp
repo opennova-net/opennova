@@ -1148,13 +1148,17 @@ void CollisionWorld::build_candidate_slices(World &world) {
         }
         wire_candidates_[wire_handle] = slice;
     };
+    // A source is its live entity, tested against the tables' copies: its LIVE
+    // position (the copy at the table build; a move or a respawn after it moves
+    // the live words). [orig: the source reads [esi+4] / [esi+8] / [esi+0Ch]
+    //  @0x4B8F50 / @0x4B8F6B / @0x4B8F82 against g_DynProxX/Y/Z]
     for (const WirePersonCollisionProxy &person : wire_person_proxies_) {
-        build_wire_for(person.wire_handle, person.position_q16,
+        build_wire_for(person.wire_handle, person.live_position_q16,
                        person.bound_radius_q16, 0x40000, EntityHandle{});
     }
     for (const WireDynamicCollisionProxy &dynamic : wire_dynamic_proxies_) {
         if (!dynamic.candidate_source_eligible) continue;
-        build_wire_for(dynamic.wire_handle, dynamic.position_q16,
+        build_wire_for(dynamic.wire_handle, dynamic.live_position_q16,
                        dynamic.bound_radius_q16, 0x60000,
                        dynamic.registry_twin);
     }

@@ -346,7 +346,8 @@ public:
 	// The organic rows whose respawn arm ran in this receive, by wire handle in record order: the
 	// arm's reset releases the row's +0x1CC group inside the decode, ahead of the frame's entity
 	// update, so the embedder stops each one at the receive's point and a hit emitter the update
-	// spawns on the row survives (D-NET-NEW-L5-60). [orig: NetPacket_SerializePlayerState
+	// spawns on the row survives (D-NET-NEW-L5-60); the reset's slice rebuild runs there too
+	// (D-COL-22). [orig: NetPacket_SerializePlayerState
 	// @0x4C09C0 - Entity_ResetToSpawnState called @0x4C113C; NetPacket_SerializeInfantryEntityState
 	// @0x4C0320 - the call @0x4C05EC; Entity_ResetToSpawnState @0x4B9610 - the release
 	// @0x4B97CB..0x4B97F5]

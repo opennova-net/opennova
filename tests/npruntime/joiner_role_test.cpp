@@ -3907,6 +3907,78 @@ bool run_redeploy_release_rebuilds_the_candidate_slices() {
 			"slice: the release rebuilds L's slice at the redeployed pose");
 }
 
+// D-COL-22: a remote row's respawn arm ends in the same reset, so its wire slice is
+// built at its record's position in that receive, where it kept the one built at its
+// death spot until the next 17-tick edge.
+// [orig: NetPacket_SerializePlayerState @0x4C09C0 - the position stores
+//  @0x4C110F..0x4C112A, Entity_ResetToSpawnState called @0x4C113C; Entity_ResetToSpawnState
+//  @0x4B9610 - the Entity_BuildProximityListsFromPools call @0x4B98EB]
+bool run_remote_respawn_rebuilds_its_wire_slice() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(2, 4);
+	// The items table wires the collision world (MissionKernel::wire_collision).
+	def::DefItemDef defs[2]{};
+	defs[0].id = 100000;
+	defs[1].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[1].type = 3;
+	defs[1].hp = 100;
+	std::strcpy(defs[1].move_function, "org2");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// A wall at the spot the remote row respawns on.
+	w::Entity wall;
+	wall.kind = w::EntityKind::Building;
+	wall.position = {40.0f, 30.0f, 0.0f};
+	wall.bound_radius = 1.0f;
+	wall.alive = true;
+	world.registry.spawn(2, wall);
+	h.kernel->collision.build_initial_tables(world);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	constexpr uint16_t kRemote = 0x0007;
+	auto &remote_row = h.role.runtime->state().upsert(kRemote);
+	remote_row.cls = EntityClass::Player;
+	remote_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int32_t x, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = 100;
+		FrameUpdateRecord rec;
+		rec.handle = kRemote;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.pos_x_compressed = network_compress_fixedpoint(x);
+		rec.player.pos_y_compressed = network_compress_fixedpoint(30 << 16);
+		rec.player.pos_z_compressed = network_compress_fixedpoint(0);
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	// The row dies 500 u off; its slice is built there: no wall.
+	frame(540 << 16, 0x00);
+	frame(540 << 16, w::kEntityFlagDead);
+	h.kernel->collision.rebuild_candidate_slices(world);
+	if (!expect(h.kernel->collision.wire_candidate_count(kRemote) == 0,
+			"remote respawn: the corpse's wire slice holds no wall"))
+		return false;
+	// The record alive again at the wall, one tick into the 17-tick phase: the arm's
+	// reset rebuilds the slice in this receive.
+	frame(40 << 16, 0x00);
+	return expect(h.kernel->collision.wire_candidate_count(kRemote) == 1,
+			"remote respawn: the arm rebuilds the row's wire slice at its record's pose");
+}
+
 // D-NET-NEW-L2-55: the self record's respawn arm lands on L in its own receive. A dead L
 // whose alive self record arrives (the release of its deploy pick) takes the record's world
 // sample, its composed Yaw and its Pitch byte inside that receive, so the frame's own C2S
@@ -6486,6 +6558,7 @@ int main() {
 	ok &= run_the_person_pass_keys_the_class_row();
 	ok &= run_a_seated_death_sends_the_seat_leave();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
+	ok &= run_remote_respawn_rebuilds_its_wire_slice();
 	ok &= run_the_respawn_arm_lands_l_in_its_receive();
 	ok &= run_the_respawn_arm_leaves_the_stage_to_the_later_record();
 	ok &= run_the_respawn_arm_resolves_nothing_in_the_receive();
