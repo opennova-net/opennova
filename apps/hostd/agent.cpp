@@ -1,8 +1,8 @@
 #include "agent.h"
 
+#include "core/clock.h"
 #include "reconcile.h"
 #include "saved_machine.h"
-#include "steady_clock.h"
 
 #include "net_sockets.h"
 
@@ -183,7 +183,7 @@ Agent::Agent(AgentConfig config, ServiceLink &link, ContainerRuntime &runtime, S
 		slots_(slots),
 		trees_(trees),
 		counters_(counters),
-		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(novaworld_server::steady_now_ms)) {}
 
 Agent::~Agent() = default;
 

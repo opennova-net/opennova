@@ -1,5 +1,6 @@
 #include "program.h"
 
+#include "core/clock.h"
 #include "core/health_listener.h"
 #include "core/loggable.h"
 #include "core/program_log.h"
@@ -289,13 +290,13 @@ int run_main_loop(
 	install_signal_handlers();
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
 
-	uint64_t last_heartbeat_ms = Watchdog::steady_now_ms();
+	uint64_t last_heartbeat_ms = steady_now_ms();
 	db::LockFailures lock_failures_reported = db::lock_failures();
 	while (!g_shutdown.load()) {
 		db::Database &db = **lease;
 		std::this_thread::sleep_for(std::chrono::milliseconds(boot.config.tick_interval_ms));
 		main_turns.fetch_add(1, std::memory_order_relaxed);
-		const uint64_t now = Watchdog::steady_now_ms();
+		const uint64_t now = steady_now_ms();
 		if (hooks.tick)
 			hooks.tick(db, now);
 		// The heartbeat line (core/health.h), every kHeartbeatMs: the program's

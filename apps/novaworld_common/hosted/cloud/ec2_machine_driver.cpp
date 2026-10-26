@@ -1,6 +1,6 @@
 #include "ec2_machine_driver.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/owner_file.h"
 #include "core/random_secret.h"
@@ -154,7 +154,7 @@ Ec2MachineDriver::Ec2MachineDriver(
 		Ec2MachineConfig config, proc::CommandRunner &runner, Clock now_ms) :
 		config_(std::move(config)),
 		runner_(runner),
-		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')

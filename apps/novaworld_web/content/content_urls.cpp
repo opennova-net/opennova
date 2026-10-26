@@ -1,5 +1,6 @@
 #include "content_urls.h"
 
+#include "core/clock.h"
 #include "s3_presign.h"
 
 #include <base/io/base64.h>
@@ -9,12 +10,6 @@
 namespace opennova::novaworld_server::content {
 
 namespace {
-
-int64_t system_now() {
-	return std::chrono::duration_cast<std::chrono::seconds>(
-			std::chrono::system_clock::now().time_since_epoch())
-			.count();
-}
 
 // `hex` (64 lower-case hex digits) as the base64 of its 32 bytes, x-amz-checksum-sha256's spelling.
 std::string checksum_base64(const std::string &hex) {
@@ -32,7 +27,7 @@ S3ContentUrls::S3ContentUrls(proc::CommandRunner &runner, infra::AwsApiConfig aw
 		ObjectStoreConfig store, std::function<int64_t()> now) :
 		api_(runner, std::move(aws)),
 		store_(std::move(store)),
-		now_(now ? std::move(now) : std::function<int64_t()>(system_now)) {}
+		now_(now ? std::move(now) : std::function<int64_t()>(wall_now_s)) {}
 
 bool S3ContentUrls::sign(const char *method, const std::string &key,
 		std::vector<std::pair<std::string, std::string>> headers, SignedTransfer &out,

@@ -2,6 +2,7 @@
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "hosted/model/address_names.h"
 #include "hosted/model/address_repository.h"
@@ -141,7 +142,7 @@ jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver
 	// yet (recorded on the row): this run reads it once that is done.
 	if (on_db(ctx, [id](db::Database &db) { return address_allocate_pending(db, id); }))
 		return jobs::JobResult::retry("its address.allocate runs first", 10 * 1000);
-	const int64_t now = billing::unix_now();
+	const int64_t now = wall_now_s();
 	// Its record: deleted, in sync, then its TTL drained.
 	if (a->dns_state == "pending") {
 		const std::optional<bool> synced = zone.in_sync(a->dns_change_id);

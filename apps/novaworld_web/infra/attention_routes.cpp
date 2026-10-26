@@ -1,6 +1,7 @@
 #include "attention_routes.h"
 
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "core/clock.h"
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 
 #include <cstdio>
@@ -14,7 +15,7 @@ namespace {
 
 void time_or_null(crow::json::wvalue &out, const char *key, int64_t unix_seconds) {
 	if (unix_seconds > 0)
-		out[key] = hosted::iso_utc(unix_seconds);
+		out[key] = iso_utc(unix_seconds);
 	else
 		out[key] = nullptr;
 }
@@ -94,7 +95,7 @@ crow::response AttentionRoutes::attention(const crow::request &req) {
 	out["alarms"] = std::move(firing);
 	out["alarms_read"] = alarms.read;
 	out["alarms_read_failed"] = !alarms.error.empty();
-	out["checked_at"] = hosted::iso_utc(now);
+	out["checked_at"] = iso_utc(now);
 	return no_store(json_reply(200, out));
 }
 

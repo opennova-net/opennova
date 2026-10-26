@@ -435,29 +435,4 @@ std::optional<int64_t> running_seconds_of(db::Database &db, int64_t server_id, i
 	return seconds < 0 ? 0 : seconds;
 }
 
-std::string iso_utc(int64_t unix_seconds) {
-	// The civil date of a day count (days since 1970-01-01), the proleptic
-	// Gregorian calendar's.
-	int64_t days = unix_seconds / 86400;
-	int64_t secs = unix_seconds % 86400;
-	if (secs < 0) {
-		secs += 86400;
-		--days;
-	}
-	days += 719468;
-	const int64_t era = (days >= 0 ? days : days - 146096) / 146097;
-	const int64_t doe = days - era * 146097;
-	const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-	const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-	const int64_t mp = (5 * doy + 2) / 153;
-	const int64_t day = doy - (153 * mp + 2) / 5 + 1;
-	const int64_t month = mp < 10 ? mp + 3 : mp - 9;
-	const int64_t year = yoe + era * 400 + (month <= 2 ? 1 : 0);
-	char text[96]; // room for any year the arithmetic can reach
-	std::snprintf(text, sizeof(text), "%04lld-%02lld-%02lldT%02lld:%02lld:%02lldZ", static_cast<long long>(year),
-			static_cast<long long>(month), static_cast<long long>(day), static_cast<long long>(secs / 3600),
-			static_cast<long long>(secs % 3600 / 60), static_cast<long long>(secs % 60));
-	return text;
-}
-
 } // namespace opennova::novaworld_server::hosted

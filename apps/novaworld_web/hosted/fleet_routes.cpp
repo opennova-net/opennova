@@ -2,6 +2,7 @@
 
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/model/address_repository.h"
 #include "hosted/model/hosted_repository.h"
@@ -125,7 +126,7 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m,
 	text_or_null(out, "ended_at", m.ended_at);
 	text_or_null(out, "end_reason", m.end_reason);
 	// Its slots' egress this calendar month, as the stats' samples counted it.
-	out["egress_bytes_month"] = machine_egress_month(db, m.id, billing::unix_now());
+	out["egress_bytes_month"] = machine_egress_month(db, m.id, wall_now_s());
 	// Its image and its use as its agent last reported them, the network's rates
 	// between its two newest minutes.
 	text_or_null(out, "image_id", m.image_id);
@@ -290,7 +291,7 @@ crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 		const auto s = find_server(*db_conn, path_id(id));
 		if (!s) return json_error(404, "not_found", "no hosted server has this id");
 		crow::json::wvalue e = server_json(*db_conn, *s, true);
-		put_phase(e, *db_conn, *s, billing::unix_now() * 1000, true);
+		put_phase(e, *db_conn, *s, wall_now_s() * 1000, true);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, s->id, kEventsShown)) {
 			crow::json::wvalue j;

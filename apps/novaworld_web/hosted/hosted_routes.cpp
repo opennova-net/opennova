@@ -2,6 +2,7 @@
 
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "data_sets/data_set_repository.h"
 #include "hosted/model/address_names.h"
@@ -9,7 +10,7 @@
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/host_limits.h"
 #include "hosted/model/server_phase.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 #include "program/server_config.h"
 
@@ -149,7 +150,7 @@ void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t>
 	crow::json::wvalue owner;
 	owner["id"] = user->id;
 	owner["username"] = user->username;
-	const billing::Entitlement entitlement = billing::entitlement_of(db, user->id, billing::unix_now());
+	const billing::Entitlement entitlement = billing::entitlement_of(db, user->id, wall_now_s());
 	if (entitlement.tier > 0)
 		owner["tier"] = entitlement.tier;
 	else
@@ -309,7 +310,8 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	} else {
 		e["novalogic"] = nullptr;
 	}
-	if (!admin) put_phase(e, db, s, billing::unix_now() * 1000, false);
+	if (!admin)
+		put_phase(e, db, s, wall_now_s() * 1000, false);
 	if (admin) {
 		put_owner(e, db, s.owner_user_id);
 		put_account(e, "service_account", db, s.service_user_id);
@@ -515,7 +517,8 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
 		out["novalogic_listing"] = enabled && novalogic_listing_;
-		const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, owner, billing::unix_now());
+		const billing::Entitlement entitlement =
+				billing::entitlement_of(*db_conn, owner, wall_now_s());
 		const int shared_used = count_shared_live_of(*db_conn, owner);
 		const int own_used = count_own_live_of(*db_conn, owner);
 		const bool shared_free = shared_used < entitlement.shared_servers;
@@ -694,8 +697,8 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const RequestResult result = request_server(
-				*db_conn, user.id, settings, offered, cap_, billing::unix_now(), own_machine, &fleet_, address_id);
+		const RequestResult result = request_server(*db_conn, user.id, settings, offered, cap_,
+				wall_now_s(), own_machine, &fleet_, address_id);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",

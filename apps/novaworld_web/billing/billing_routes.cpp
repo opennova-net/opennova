@@ -3,6 +3,7 @@
 #include "accounts/auth.h"
 #include "billing/billing_jobs.h"
 #include "billing/tiers.h"
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
@@ -111,19 +112,6 @@ std::vector<crow::json::wvalue> comp_grants_json(db::Database &db) {
 
 } // namespace
 
-std::string iso_utc(int64_t unix_seconds) {
-	const std::time_t t = static_cast<std::time_t>(unix_seconds);
-	std::tm tm{};
-#ifdef _WIN32
-	gmtime_s(&tm, &t);
-#else
-	gmtime_r(&t, &tm);
-#endif
-	char out[32];
-	std::strftime(out, sizeof(out), "%Y-%m-%dT%H:%M:%SZ", &tm);
-	return out;
-}
-
 std::string iso_from_db(const std::string &db_text) {
 	if (db_text.size() != 19 || db_text[10] != ' ') return db_text;
 	return db_text.substr(0, 10) + "T" + db_text.substr(11) + "Z";
@@ -195,7 +183,7 @@ void BillingRoutes::register_routes(WebApp &app) {
 crow::response BillingRoutes::tiers() {
 	SyncStatus status;
 	std::optional<hosted::Capacity> sold;
-	const int64_t now = unix_now();
+	const int64_t now = wall_now_s();
 	if (billing_ != nullptr) {
 		try {
 			auto db_conn = pool_.acquire();
@@ -273,7 +261,7 @@ crow::response BillingRoutes::tiers() {
 // tier may start: the prices checked out, the account an active player's, no
 // tier granting, no admin grant)}.
 crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id) {
-	const int64_t now = unix_now();
+	const int64_t now = wall_now_s();
 	const Entitlement e = entitlement_of(db, user_id, now);
 	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user_id);
 	const auto user = get_user_by_id(db, user_id);
@@ -374,7 +362,7 @@ std::optional<crow::response> BillingRoutes::judge_checkout(
 		log_account(user, "checkout", "not_eligible (account)");
 		return json_error(403, "not_eligible", "this account cannot subscribe");
 	}
-	const int64_t now = unix_now();
+	const int64_t now = wall_now_s();
 	// The account as the sold capacity counts it: its subscriptions and its
 	// open checkouts' reservations.
 	const hosted::AccountHoldings holdings = hosted::holdings_of(db, user.id, now, replaced);
@@ -435,7 +423,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 	// after reads it).
 	try {
 		auto db_conn = pool_.acquire();
-		if (billing_->sync().sync_customer(*db_conn, customer.stripe_customer_id, unix_now()) ==
+		if (billing_->sync().sync_customer(*db_conn, customer.stripe_customer_id, wall_now_s()) ==
 				SyncOutcome::Unreachable) {
 			log_account(user, "checkout", "stripe_unavailable (the previous session's sync)");
 			return stripe_unavailable();
@@ -618,7 +606,7 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	create.require_tos_consent = true;
 	// Stripe counts the life from the session's creation and refuses one under
 	// 30 minutes: the clock read last, after every slow call above.
-	create.expires_at = unix_now() + kCheckoutLifeS;
+	create.expires_at = wall_now_s() + kCheckoutLifeS;
 	const auto session = client.create_checkout_session(create);
 	if (!session.ok() || session.value->url.empty()) {
 		const std::string why =
@@ -785,7 +773,8 @@ crow::response BillingRoutes::me_sync(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		const auto customer = customer_of(*db_conn, user.id);
 		if (!customer) return json_error(404, "no_billing_account", "this account has no billing account yet");
-		const SyncOutcome outcome = billing_->sync().sync_customer(*db_conn, customer->stripe_customer_id, unix_now());
+		const SyncOutcome outcome = billing_->sync().sync_customer(
+				*db_conn, customer->stripe_customer_id, wall_now_s());
 		if (outcome == SyncOutcome::Unreachable) {
 			log_account(user, "sync", "stripe_unavailable");
 			return stripe_unavailable();
@@ -810,7 +799,7 @@ crow::response BillingRoutes::me_sync(const crow::request &req) {
 crow::response BillingRoutes::webhook(const crow::request &req) {
 	if (req.body.size() > kWebhookMaxBytes) return json_error(413, "payload_too_large");
 	if (billing_ == nullptr) return disabled();
-	const int64_t now = unix_now();
+	const int64_t now = wall_now_s();
 	int64_t skew = 0;
 	const SignatureCheck check = verify_stripe_signature(req.get_header_value("Stripe-Signature"), req.body,
 			{ billing_->config().webhook_secret }, now, 300, &skew);
@@ -892,7 +881,7 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		limits_hold_json(*db_conn, out);
-		out["capacity"] = sold_capacity_json(*db_conn, sellable_, unix_now());
+		out["capacity"] = sold_capacity_json(*db_conn, sellable_, wall_now_s());
 		out["comp_grants"] = comp_grants_json(*db_conn);
 		if (billing_ == nullptr) {
 			out["enabled"] = false;
@@ -903,7 +892,7 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 		std::fprintf(stderr, "[http] GET /api/admin/billing failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
-	const int64_t now = unix_now();
+	const int64_t now = wall_now_s();
 	out["enabled"] = true;
 	out["mode"] = billing_->config().live() ? "live" : "test";
 	out["prices_ok"] = status.prices_ok;
@@ -1068,7 +1057,7 @@ crow::response BillingRoutes::admin_link(const crow::request &req) {
 			insert_customer(*db_conn, *user_id, *customer_id, customer.value->livemode);
 			tx.commit();
 		}
-		outcome = billing_->sync().sync_customer(*db_conn, *customer_id, unix_now());
+		outcome = billing_->sync().sync_customer(*db_conn, *customer_id, wall_now_s());
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/billing/link failed: %s\n", e.what());
 		return json_error(500, "db_error");

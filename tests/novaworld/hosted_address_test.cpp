@@ -24,6 +24,7 @@
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "command_runner.h"
 #include "hosted/cloud/address_job_handlers.h"
 #include "hosted/cloud/address_zone.h"
@@ -372,7 +373,7 @@ void subscribe_item(Database &db, int64_t user, billing::ItemKind item, int tier
 	row.item = item;
 	row.price_id = "price_" + id;
 	row.tier = tier;
-	row.current_period_end = billing::unix_now() + kMonth;
+	row.current_period_end = nws::wall_now_s() + kMonth;
 	billing::upsert_subscription(db, row);
 }
 
@@ -388,7 +389,7 @@ int test_naming_and_starts() {
 	auto lease = pool.acquire();
 	Database &db = *lease;
 	const SeededData data = seed_data(db);
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const int64_t ana = make_player(db, "addr_ana", 0);
 	const int64_t ben = make_player(db, "addr_ben", 0);
 	TEST_EXPECT(ana > 0 && ben > 0);
@@ -569,7 +570,7 @@ int test_jobs() {
 	nws::jobs::JobRegistry registry;
 	hosted::register_address_jobs(registry, driver, zone, true);
 	using Kind = nws::jobs::JobResult::Kind;
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const int64_t ana = make_player(db, "jobs_ana", 0);
 	subscribe_item(db, ana, billing::ItemKind::Tier, 1, "sub_j_t1");
 	subscribe_item(db, ana, billing::ItemKind::OwnMachine, 0, "sub_j_om");
@@ -718,7 +719,7 @@ int test_jobs_add_on_off() {
 	using Kind = nws::jobs::JobResult::Kind;
 	const int64_t ben = make_player(db, "off_ben", 0);
 	TEST_EXPECT(billing::set_comp_grants(db, ben, { 1, 1 }));
-	const int64_t id = hosted::add_comp_address(db, ben, "kept", billing::unix_now()).id;
+	const int64_t id = hosted::add_comp_address(db, ben, "kept", nws::wall_now_s()).id;
 	TEST_EXPECT(id > 0);
 
 	const auto result = run_job(pool, off, hosted::kJobAddressAllocate, { { "address_id", id } });
@@ -760,7 +761,7 @@ int test_refusals_and_retries() {
 	nws::jobs::JobRegistry registry;
 	hosted::register_address_jobs(registry, driver, zone, true);
 	using Kind = nws::jobs::JobResult::Kind;
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 
 	// The pure parts: what passes, and the backoff.
 	TEST_EXPECT(hosted::address_refusal_passes("AddressLimitExceeded"));
@@ -862,7 +863,7 @@ int test_release_races_allocate() {
 	nws::jobs::JobRegistry registry;
 	hosted::register_address_jobs(registry, driver, zone, true);
 	using Kind = nws::jobs::JobResult::Kind;
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const int64_t ben = make_player(db, "race_ben", 0);
 	TEST_EXPECT(billing::set_comp_grants(db, ben, { 1, 1 }));
 	const int64_t id = hosted::add_comp_address(db, ben, "racer", now).id;
@@ -919,7 +920,7 @@ int test_comp_uncovered() {
 	ConnectionPool pool(scratch.options());
 	auto lease = pool.acquire();
 	Database &db = *lease;
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const std::string machines_why = "its account's dedicated machines no longer cover it";
 
 	// Cal: one shared server, one dedicated machine, one comp address. Its

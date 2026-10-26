@@ -245,6 +245,7 @@
 // wins. Each pass leases its own pooled connection.
 
 #include "admin_link.h"
+#include "core/clock.h"
 #include "fleet_desired_state.h"
 #include "stats_sampler.h"
 
@@ -360,12 +361,10 @@ struct SupervisorConfig {
 	uint64_t launch_backoff_max_ms = 30 * 60 * 1000;
 	// The wall clock, Unix seconds, the owners' hosting entitlements are read
 	// at (a subscription's period end is a date); the tests step it by hand.
-	std::function<int64_t()> wall_clock_s = billing::unix_now;
+	std::function<int64_t()> wall_clock_s = wall_now_s;
 	// The passes' clock, Unix milliseconds: what the machine rows' times are
 	// on, so another supervisor reads them (the tests step one by hand).
-	std::function<uint64_t()> clock_ms = wall_clock_ms;
-
-	static uint64_t wall_clock_ms();
+	std::function<uint64_t()> clock_ms = wall_now_ms;
 };
 
 class Supervisor : public FleetDesiredState {

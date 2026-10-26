@@ -26,6 +26,7 @@
 
 #include "hosted/model/stats_jobs.h"
 #include "hosted/model/stats_repository.h"
+#include "core/clock.h"
 #include "hosted/stats_sampler.h"
 #include "jobs/job_queue.h"
 #include "jobs/worker_pool.h"
@@ -437,9 +438,9 @@ int test_reads() {
 	TEST_EXPECT(s.live_seconds == 960 && s.egress_bytes == 1060 && s.unique_players == 5);
 
 	// The ISO timestamps.
-	TEST_EXPECT(hosted::iso_utc(0) == "1970-01-01T00:00:00Z");
-	TEST_EXPECT(hosted::iso_utc(1760000000) == "2025-10-09T08:53:20Z");
-	TEST_EXPECT(hosted::iso_utc(951782400) == "2000-02-29T00:00:00Z");
+	TEST_EXPECT(nws::iso_utc(0) == "1970-01-01T00:00:00Z");
+	TEST_EXPECT(nws::iso_utc(1760000000) == "2025-10-09T08:53:20Z");
+	TEST_EXPECT(nws::iso_utc(951782400) == "2000-02-29T00:00:00Z");
 	return 0;
 }
 

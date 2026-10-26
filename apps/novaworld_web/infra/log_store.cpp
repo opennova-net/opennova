@@ -1,6 +1,6 @@
 #include "log_store.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/program_log.h"
 #include "core/text_util.h"
@@ -37,12 +37,6 @@ constexpr int kPagesPerWindow = 2;
 constexpr int64_t kNarrowestWindowMs = 1000;
 // A file's bytes read at a time, backwards.
 constexpr int64_t kScanBlock = 64 * 1024;
-
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
 
 std::string json_text(std::string_view text) {
 	std::string out = "\"";
@@ -281,8 +275,7 @@ CloudWatchLogStore::CloudWatchLogStore(proc::CommandRunner &runner, AwsApiConfig
 		prefix_(std::move(prefix)),
 		wall_(wall_ms ? std::move(wall_ms) : Clock(wall_now_ms)),
 		steady_(steady_ms ? std::move(steady_ms)
-						  : Clock([] { return static_cast<int64_t>(Watchdog::steady_now_ms()); })) {
-}
+						  : Clock([] { return static_cast<int64_t>(steady_now_ms()); })) {}
 
 LogPage CloudWatchLogStore::read(const LogQuery &query) {
 	const LogSource &s = query.source;

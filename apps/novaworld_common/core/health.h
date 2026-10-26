@@ -43,6 +43,8 @@
 //
 // Crow-free and database-free; thread-safe.
 
+#include "clock.h"
+
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -81,8 +83,6 @@ public:
 	bool healthy() const;
 
 	uint64_t stall_ms() const { return stall_ms_; }
-
-	static uint64_t steady_now_ms();
 
 private:
 	struct Loop {

@@ -9,11 +9,6 @@ Watchdog::Watchdog(uint64_t stall_ms, Clock clock) : stall_ms_(stall_ms), clock_
 	last_check_ms_ = clock_();
 }
 
-uint64_t Watchdog::steady_now_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
-
 void Watchdog::watch(std::string name, std::function<uint64_t()> progress) {
 	std::lock_guard<std::mutex> lock(mu_);
 	Loop loop;

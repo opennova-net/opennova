@@ -20,6 +20,7 @@
 // nothing.
 
 #include "billing_repository.h"
+#include "core/clock.h"
 #include "tiers.h"
 
 #include <net/novaworld/db/database.h>
@@ -116,8 +117,5 @@ int64_t dedicated_machines(const std::vector<SubscriptionRow> &subscriptions, in
 // for a support tier's end: it needs none.
 std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow> &subscriptions, int comp_own_machines,
 		const std::set<std::string> &named, int64_t now);
-
-// The wall clock in Unix seconds (the entitlement's `now` in the service).
-int64_t unix_now();
 
 } // namespace opennova::novaworld_server::billing

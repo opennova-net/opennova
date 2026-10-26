@@ -14,6 +14,7 @@
 
 #include "billing/billing_repository.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "hosted/model/placement.h"
 #include "hosted/model/sold_capacity.h"
 
@@ -138,7 +139,7 @@ void subscribe(Database &db, int64_t user, SubscriptionRow row) {
 int test_sold_now() {
 	TestDatabase scratch;
 	Database db = scratch.open();
-	const int64_t now = billing::unix_now();
+	const int64_t now = opennova::novaworld_server::wall_now_s();
 	TEST_EXPECT(same(hosted::sold_now(db, now), 0, 0, 0));
 	// Ana: tier 2 and a dedicated machine. Ben: a grant of 3 shared servers and
 	// 1 dedicated machine, under a tier 1 (the larger shared count counts). Cy,
@@ -245,7 +246,7 @@ int test_last_place_under_the_lock() {
 	TestDatabase scratch;
 	Database first = scratch.open();
 	Database second = scratch.open();
-	const int64_t now = billing::unix_now();
+	const int64_t now = opennova::novaworld_server::wall_now_s();
 	const int64_t ana = make_player(first, "lock_ana");
 	const int64_t ben = make_player(first, "lock_ben");
 	Capacity sellable;

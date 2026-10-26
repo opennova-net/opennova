@@ -87,12 +87,6 @@ uint64_t elapsed(uint64_t now_ms, int64_t since_ms) {
 
 } // namespace
 
-uint64_t SupervisorConfig::wall_clock_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
 Supervisor::Supervisor(db::ConnectionPool &pool, MachineProfile profile, SupervisorConfig config) :
 		pool_(pool),
 		profile_(std::move(profile)),

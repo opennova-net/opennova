@@ -27,9 +27,10 @@
 //     finding in its own words and no credential.
 
 #include "accounts/auth.h"
+#include "core/clock.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/model/fleet_repository.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
 #include "net_http.h"
@@ -333,7 +334,7 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 	const auto &retry = second.first;
 	TEST_EXPECT(retry && str(retry["novalogic"]["state"]) == "retrying" &&
 			retry["novalogic"]["try"].i() == 2 && retry["novalogic"]["tries"].i() == 5 &&
-			str(retry["novalogic"]["next_try_at"]) == hosted::iso_utc(1792000060) &&
+			str(retry["novalogic"]["next_try_at"]) == nws::iso_utc(1792000060) &&
 			str(retry["novalogic"]["reason"]) == "the gate did not answer" &&
 			retry["novalogic"]["player_slots"].size() == 0);
 	TEST_EXPECT(second.second && !second.second["novalogic"].has("tag"));

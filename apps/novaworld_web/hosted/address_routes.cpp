@@ -2,6 +2,7 @@
 
 #include "accounts/auth.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/address_names.h"
@@ -126,7 +127,7 @@ crow::response AddressRoutes::me_addresses(const crow::request &req) {
 		out["enabled"] = on_;
 		out["zone"] = zone_;
 		out["unnamed"] = static_cast<int64_t>(
-				unnamed_address_subscriptions(*db_conn, access.user->id, billing::unix_now()).size());
+				unnamed_address_subscriptions(*db_conn, access.user->id, wall_now_s()).size());
 		std::vector<crow::json::wvalue> list;
 		for (const HostedAddress &a : addresses_of(*db_conn, access.user->id))
 			list.push_back(address_json(*db_conn, a, zone_, false));
@@ -158,7 +159,7 @@ crow::response AddressRoutes::me_name(const crow::request &req) {
 		NameResult named;
 		{
 			db::Transaction tx(*db_conn);
-			named = name_subscription_address(*db_conn, access.user->id, name, billing::unix_now());
+			named = name_subscription_address(*db_conn, access.user->id, name, wall_now_s());
 			if (auto refused = refusal_of(named)) return std::move(*refused);
 			enqueue_address_allocate(*db_conn, named.id);
 			tx.commit();
@@ -331,7 +332,7 @@ crow::response AddressRoutes::admin_comp(const crow::request &req, uint64_t user
 		NameResult named;
 		{
 			db::Transaction tx(*db_conn);
-			named = add_comp_address(*db_conn, path_id(user_id), name, billing::unix_now());
+			named = add_comp_address(*db_conn, path_id(user_id), name, wall_now_s());
 			if (auto refused = refusal_of(named)) return std::move(*refused);
 			enqueue_address_allocate(*db_conn, named.id);
 			tx.commit();

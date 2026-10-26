@@ -1,9 +1,9 @@
 #include "cost_store.h"
 
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/text_util.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "infra_status.h"
 
 #include <base/io/json.h>
@@ -29,12 +29,6 @@ using io::JsonValue;
 
 constexpr const char *kCostExplorerTarget = "AWSInsightsIndexService.";
 constexpr const char *kBudgetsTarget = "AWSBudgetServiceGateway.";
-
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
 
 // `text` as a JSON string literal.
 std::string json_text(std::string_view text) {
@@ -106,7 +100,7 @@ bool json_reply(const char *service, const AwsReply &reply, JsonValue &out, std:
 
 // "2026-10-19": the UTC date of Unix second `s`.
 std::string utc_date(int64_t s) {
-	return hosted::iso_utc(s).substr(0, 10);
+	return iso_utc(s).substr(0, 10);
 }
 
 // "2026-11-01": the first day of the month after `date`'s.
@@ -193,8 +187,7 @@ CostStore::CostStore(
 		api_(runner, config_.aws),
 		wall_(wall_ms ? std::move(wall_ms) : Clock(wall_now_ms)),
 		steady_(steady_ms ? std::move(steady_ms)
-						  : Clock([] { return static_cast<int64_t>(Watchdog::steady_now_ms()); })) {
-}
+						  : Clock([] { return static_cast<int64_t>(steady_now_ms()); })) {}
 
 CostRead CostStore::read() {
 	std::lock_guard<std::mutex> lock(mu_);

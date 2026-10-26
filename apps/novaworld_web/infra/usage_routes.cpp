@@ -1,8 +1,9 @@
 #include "usage_routes.h"
 
+#include "core/clock.h"
 #include "core/text_util.h"
 #include "hosted/model/fleet_repository.h"
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 #include "infra_routes.h"
 
@@ -62,7 +63,7 @@ std::optional<double> hour_rate(int64_t hour, int64_t now, std::optional<int64_t
 
 crow::json::wvalue point_json(const Point &p, bool server, bool machine) {
 	crow::json::wvalue j;
-	j["at"] = hosted::iso_utc(p.at);
+	j["at"] = iso_utc(p.at);
 	value_or_null(j, "cpu_percent", p.cpu_percent);
 	value_or_null(j, "memory_bytes", p.memory_bytes);
 	value_or_null(j, "net_in_bps", p.net_in_bps);
@@ -494,7 +495,7 @@ crow::response UsageRoutes::usage(const crow::request &req) {
 			points.reserve(s.points.size());
 			for (const MetricPoint &p : s.points) {
 				crow::json::wvalue j;
-				j["at"] = hosted::iso_utc(p.at);
+				j["at"] = iso_utc(p.at);
 				j["value"] = p.value;
 				points.push_back(std::move(j));
 			}
@@ -654,7 +655,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 	}
 	const bool read_cloud = snap && snap->unavailable.empty() && snap->error.empty();
 
-	out["at"] = hosted::iso_utc(now);
+	out["at"] = iso_utc(now);
 	crow::json::wvalue cloud_json;
 	cloud_json["configured"] = snap != nullptr && snap->unavailable.empty();
 	text_or_null(cloud_json, "unavailable",
@@ -721,7 +722,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 			crow::json::wvalue j;
 			j["id"] = t->id;
 			j["reporting"] = true;
-			j["sampled_at"] = hosted::iso_utc(t->at);
+			j["sampled_at"] = iso_utc(t->at);
 			put_now(j, sum_now({ t }));
 			put_ecs(j, ecs_task(t->id));
 			task_rows.push_back(std::move(j));

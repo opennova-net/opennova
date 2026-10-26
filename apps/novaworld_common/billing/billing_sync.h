@@ -61,6 +61,7 @@
 
 #include "billing_config.h"
 #include "billing_repository.h"
+#include "core/clock.h"
 #include "entitlement.h"
 #include "stripe_client.h"
 
@@ -161,7 +162,7 @@ public:
 	// `client` and `pool`, outlive the sync. `clock` is the wall clock in Unix
 	// seconds (the tests step one by hand).
 	BillingSync(db::ConnectionPool &pool, StripeClient &client, const BillingConfig &config,
-			std::string instance_id, Clock clock = unix_now);
+			std::string instance_id, Clock clock = wall_now_s);
 	BillingSync(const BillingSync &) = delete;
 	BillingSync &operator=(const BillingSync &) = delete;
 

@@ -13,6 +13,7 @@
 // not hosting is on, so the rows of a fleet that was turned off still age out.
 // Service policy, not a port.
 
+#include "core/clock.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
 
@@ -29,7 +30,7 @@ inline constexpr int64_t kStatsPruneIntervalMs = 60 * 60 * 1000;
 // wall clock's, a test's hand-stepped one).
 void register_stats_jobs(
 		jobs::JobRegistry &registry,
-		std::function<int64_t()> now_s = [] { return jobs::Scheduler::wall_now_ms() / 1000; });
+		std::function<int64_t()> now_s = [] { return wall_now_ms() / 1000; });
 // Its schedule (the worker's): hourly.
 std::vector<jobs::PeriodicJob> stats_schedule();
 

@@ -23,6 +23,7 @@
 
 #include "accounts/auth.h"
 #include "accounts/web_session.h"
+#include "core/clock.h"
 #include "http_listener.h"
 #include "jobs/job_admin.h"
 #include "jobs/job_queue.h"
@@ -318,7 +319,7 @@ int test_overview(Harness &h) {
 		// A scheduled jobs.prune that ran, and the fleet process that leads.
 		jobs::NewJob prune = job_of(jobs::kJobJobsPrune, jobs::kJobJobsPrune, 1);
 		prune.schedule_key = jobs::Scheduler::schedule_key(
-				jobs::kJobJobsPrune, jobs::Scheduler::wall_now_ms(), 60 * 60 * 1000);
+				jobs::kJobJobsPrune, nws::wall_now_ms(), 60 * 60 * 1000);
 		auto p = claimed(*db, prune, "worker-feedf00d-1");
 		TEST_EXPECT(p && jobs::complete(*db, *p));
 		db->exec("UPDATE fleet_leader SET holder = 'fleet-1234abcd', generation = "
@@ -437,7 +438,7 @@ int test_list(Harness &h) {
 	page = json_of(h.admin("GET", "/api/admin/jobs?q=%25"), 200);
 	TEST_EXPECT(page && page["total"].i() == 0);
 	// The time range on when each was made.
-	const int64_t now_s = jobs::Scheduler::wall_now_ms() / 1000;
+	const int64_t now_s = nws::wall_now_ms() / 1000;
 	page = json_of(h.admin("GET", "/api/admin/jobs?from=" + std::to_string(now_s - 3600)), 200);
 	TEST_EXPECT(page && page["total"].i() == 5);
 	page = json_of(h.admin("GET", "/api/admin/jobs?to=" + std::to_string(now_s - 3600)), 200);

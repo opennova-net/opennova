@@ -155,7 +155,4 @@ std::map<int64_t, SampleWindow> sample_windows_since(db::Database &db, int64_t s
 // when it is not running.
 std::optional<int64_t> running_seconds_of(db::Database &db, int64_t server_id, int64_t now);
 
-// "2026-10-15T09:41:00Z": Unix seconds in ISO 8601, UTC.
-std::string iso_utc(int64_t unix_seconds);
-
 } // namespace opennova::novaworld_server::hosted

@@ -38,6 +38,7 @@
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
+#include "core/clock.h"
 #include "connection_routes.h"
 #include "core/health.h"
 #include "data_sets/data_set_repository.h"
@@ -6010,7 +6011,7 @@ int test_hosted_server_routes(Harness &h) {
 			json["own_machines"].i() == 0 && json["own_used"].i() == 0);
 	{
 		auto db = h.pool.acquire();
-		const int64_t period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		const int64_t period_end = nws::wall_now_s() + 30 * 24 * 60 * 60;
 		billing::SubscriptionRow tier;
 		tier.stripe_subscription_id = "sub_routes_fay_tier";
 		tier.stripe_customer_id = "cus_routes_fay";
@@ -6201,7 +6202,7 @@ int test_hosted_listing_owner(Harness &h) {
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
-			opennova::novaworld_server::billing::unix_now());
+			nws::wall_now_s());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t server_id = request.id;
 	const std::string service_name = nws::service_username(server_id);
@@ -6673,7 +6674,7 @@ int test_admin_fleet_routes(Harness &h) {
 		tier.item = billing::ItemKind::Tier;
 		tier.price_id = "price_htier2";
 		tier.tier = 2;
-		tier.current_period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		tier.current_period_end = nws::wall_now_s() + 30 * 24 * 60 * 60;
 		billing::upsert_subscription(*h.pool.acquire(), tier);
 	}
 	const std::string ana_s = login_token(h, "10.53.0.1", "fleet_ana", "pw-fleet-ana");
@@ -6698,7 +6699,7 @@ int test_admin_fleet_routes(Harness &h) {
 	settings.game_name = "Fleet Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner) {
-		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
+		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(ana);
@@ -6932,7 +6933,7 @@ int test_hosted_stats_routes(Harness &h) {
 	settings.game_name = "Stats Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t who) {
-		const auto r = hosted::request_server(*db, who, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
+		const auto r = hosted::request_server(*db, who, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(owner);
@@ -6972,7 +6973,7 @@ int test_hosted_stats_routes(Harness &h) {
 	// supervisor pass sampled the servers live then).
 	db->exec("DELETE FROM hosted_server_samples;");
 	db->exec("DELETE FROM hosted_server_hourly;");
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const int64_t minute = now - now % 60;
 	// (The unique players written once per server, so an hour's edge between the
 	// two minutes counts them once either way.)
@@ -7024,7 +7025,7 @@ int test_hosted_stats_routes(Harness &h) {
 	TEST_EXPECT(series["step_seconds"].i() == 60 && series["points"].size() == 60);
 	if (series["points"].size() == 60) {
 		const auto &last = series["points"][59];
-		TEST_EXPECT(str(last["t"]) == hosted::iso_utc(minute) && str(last["t"]).size() == 20 && str(last["t"]).back() == 'Z');
+		TEST_EXPECT(str(last["t"]) == nws::iso_utc(minute) && str(last["t"]).size() == 20 && str(last["t"]).back() == 'Z');
 		TEST_EXPECT(std::fabs(last["players"].d() - 4.0) < 1e-9 && last["running"].b() && last["egress_bytes"].i() == 1000);
 		TEST_EXPECT(last["max_players"].i() == 32 && std::fabs(last["cpu_percent"].d() - 30.0) < 1e-9);
 		const auto &empty = series["points"][0];
@@ -7126,7 +7127,7 @@ int test_hosted_usage_route(Harness &h) {
 	const auto start = [&](int64_t owner, const char *name) {
 		settings.game_name = name;
 		const auto r = hosted::request_server(
-				*db, owner, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
+				*db, owner, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const auto to_running = [&](int64_t id) {
@@ -7160,7 +7161,7 @@ int test_hosted_usage_route(Harness &h) {
 	// The minutes, on an empty slate (an earlier case's hand-driven supervisor
 	// pass sampled the servers live then).
 	db->exec("DELETE FROM hosted_server_samples;");
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const int64_t minute = now - now % 60;
 	const auto put = [&](int64_t id, int64_t at, const char *state, std::optional<int64_t> players,
 							 std::optional<double> cpu, std::optional<int64_t> memory,
@@ -7243,7 +7244,7 @@ int test_hosted_usage_route(Harness &h) {
 		TEST_EXPECT(sa["owner"]["id"].i() == ana && str(sa["owner"]["username"]) == "usage_ana");
 		TEST_EXPECT(sa["machine_ref"].i() == shared && sa["slot"].i() == 1 &&
 				sa["uptime_seconds"].t() == type::Number);
-		TEST_EXPECT(str(sa["sample_at"]) == hosted::iso_utc(minute) && sa["players"].i() == 6 &&
+		TEST_EXPECT(str(sa["sample_at"]) == nws::iso_utc(minute) && sa["players"].i() == 6 &&
 				sa["max_players"].i() == 32);
 		TEST_EXPECT(std::fabs(sa["cpu_percent"].d() - 25.0) < 1e-9 &&
 				sa["memory_bytes"].i() == 200 * kMiB);
@@ -7345,7 +7346,7 @@ int test_hosted_console_routes(Harness &h) {
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
-			opennova::novaworld_server::billing::unix_now());
+			nws::wall_now_s());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
 	const std::string base = "/api/admin/hosted/" + std::to_string(id);
@@ -7760,7 +7761,7 @@ std::string stripe_signature(const std::string &body, int64_t t, const std::stri
 
 std::string event_body(const std::string &id, const std::string &customer, bool livemode = false) {
 	return "{\"id\":\"" + id + "\",\"object\":\"event\",\"type\":\"customer.subscription.updated\",\"livemode\":" +
-			(livemode ? "true" : "false") + ",\"created\":" + std::to_string(nws::billing::unix_now()) +
+			(livemode ? "true" : "false") + ",\"created\":" + std::to_string(nws::wall_now_s()) +
 			",\"data\":{\"object\":{\"id\":\"sub_x\",\"object\":\"subscription\",\"customer\":\"" + customer + "\"}}}";
 }
 
@@ -7876,7 +7877,7 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
 		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
 		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
-		const int64_t life = session.expires_at - billing::unix_now();
+		const int64_t life = session.expires_at - nws::wall_now_s();
 		TEST_EXPECT(life > 3500 && life <= 3600);
 		bool terms = false;
 		for (const auto &[k, v] : session.params) terms = terms || (k == "consent_collection[terms_of_service]" && v == "required");
@@ -8071,11 +8072,11 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(reply.code == 200);
 	const std::string paid_tier = open_session(dot);
 	TEST_EXPECT(!h.stripe->complete_checkout(paid_tier).empty());
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 0);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, nws::wall_now_s()).max_servers == 0);
 	reply = checkout(dot_s, "tier2");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
 	TEST_EXPECT(session_reads(paid_tier) == 1);
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, nws::wall_now_s()).max_servers == 1);
 	// Her dedicated machine, then a static address for it (the success page's
 	// sync between: an address needs the machine it is for synced); that address
 	// paid, a second is refused through the same sync, then from the cache with
@@ -8086,8 +8087,8 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(paid_machine != paid_tier && !h.stripe->complete_checkout(paid_machine).empty());
 	const auto dot_customer = billing::customer_of(*h.pool.acquire(), dot);
 	TEST_EXPECT(dot_customer && h.billing->sync().sync_customer(*h.pool.acquire(), dot_customer->stripe_customer_id,
-										billing::unix_now()) == billing::SyncOutcome::Synced);
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).own_machines == 1);
+										nws::wall_now_s()) == billing::SyncOutcome::Synced);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, nws::wall_now_s()).own_machines == 1);
 	reply = checkout(dot_s, "static_address");
 	TEST_EXPECT(reply.code == 200);
 	const std::string paid_address = open_session(dot);
@@ -8095,7 +8096,7 @@ int test_billing_checkout_guard(Harness &h) {
 	reply = checkout(dot_s, "static_address");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
 	TEST_EXPECT(session_reads(paid_address) == 1);
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).address_grants == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, nws::wall_now_s()).address_grants == 1);
 	const size_t reads = session_reads(paid_address);
 	reply = checkout(dot_s, "static_address");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
@@ -8108,7 +8109,7 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(!h.stripe->complete_checkout(open_session(fay)).empty());
 	reply = checkout(fay_s, "own_machine");
 	TEST_EXPECT(reply.code == 200);
-	const billing::Entitlement fay_now = billing::entitlement_of(*h.pool.acquire(), fay, billing::unix_now());
+	const billing::Entitlement fay_now = billing::entitlement_of(*h.pool.acquire(), fay, nws::wall_now_s());
 	TEST_EXPECT(fay_now.own_machines == 1 && fay_now.max_servers == 1 && fay_now.tier == 0 && fay_now.can_start);
 	const std::string pending = open_session(fay);
 	const size_t sessions_before = h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
@@ -8162,10 +8163,10 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(ida > 0 && !ida_s.empty());
 	const std::string ida_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(ida) }, { billing::kMetaUsername, "chk_ida" } });
-	h.stripe->add_subscription(ida_cus, "price_htier2", 1, "past_due", billing::unix_now() + 30 * 86400);
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ida_cus, billing::unix_now()) ==
+	h.stripe->add_subscription(ida_cus, "price_htier2", 1, "past_due", nws::wall_now_s() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ida_cus, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), ida, billing::unix_now()).max_servers == 2);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), ida, nws::wall_now_s()).max_servers == 2);
 	for (const char *item : { "own_machine", "static_address" }) {
 		reply = checkout(ida_s, item);
 		TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "payment_past_due");
@@ -8211,7 +8212,7 @@ int test_billing_capacity(Harness &h) {
 				std::string("{\"item\":\"") + item + "\"}");
 	};
 	auto tiers = [&h] { return crow::json::load(body_text(h.send("GET", "/api/billing/tiers"))); };
-	auto sold = [&h] { return hosted::sold_now(*h.pool.acquire(), billing::unix_now()); };
+	auto sold = [&h] { return hosted::sold_now(*h.pool.acquire(), nws::wall_now_s()); };
 	auto open_session = [&h](int64_t user) {
 		const auto customer = billing::customer_of(*h.pool.acquire(), user);
 		return customer ? customer->open_checkout_session : std::string();
@@ -8223,8 +8224,8 @@ int test_billing_capacity(Harness &h) {
 	// fleet's 16: her dedicated machine is sold out, a tier still sells.
 	const std::string ivy_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(ivy) }, { billing::kMetaUsername, "cap_ivy" } });
-	h.stripe->add_subscription(ivy_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ivy_cus, billing::unix_now()) ==
+	h.stripe->add_subscription(ivy_cus, "price_htier1", 1, "active", nws::wall_now_s() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), ivy_cus, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
 	const int64_t own_left = 16 - sold().own;
 	TEST_EXPECT(own_left > 0 && own_left <= 16);
@@ -8283,10 +8284,10 @@ int test_billing_capacity(Harness &h) {
 	const auto lee_customer = billing::customer_of(*h.pool.acquire(), lee);
 	const std::string expired = "{\"id\":\"evt_cap_expired\",\"object\":\"event\",\"type\":\"checkout.session.expired\","
 								"\"livemode\":false,\"created\":" +
-			std::to_string(billing::unix_now()) + ",\"data\":{\"object\":{\"id\":\"" + lee_customer->open_checkout_session +
+			std::to_string(nws::wall_now_s()) + ",\"data\":{\"object\":{\"id\":\"" + lee_customer->open_checkout_session +
 			"\",\"object\":\"checkout.session\",\"customer\":\"" +
 			lee_customer->stripe_customer_id + "\"}}}";
-	reply = h.send("POST", "/api/billing/webhook", { kJson, stripe_signature(expired, billing::unix_now()) }, expired);
+	reply = h.send("POST", "/api/billing/webhook", { kJson, stripe_signature(expired, nws::wall_now_s()) }, expired);
 	TEST_EXPECT(reply.code == 200 && billing::live_reservations_of(*h.pool.acquire(), lee).empty());
 	reply = checkout(mo_s, "tier1");
 	TEST_EXPECT(reply.code == 200);
@@ -8294,10 +8295,10 @@ int test_billing_capacity(Harness &h) {
 	// Mo pays: the sync writes his tier and drops the reservation in its place.
 	TEST_EXPECT(!h.stripe->complete_checkout(open_session(mo)).empty());
 	const std::string mo_cus = billing::customer_of(*h.pool.acquire(), mo)->stripe_customer_id;
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), mo_cus, billing::unix_now()) ==
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), mo_cus, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
 	TEST_EXPECT(billing::live_reservations_of(*h.pool.acquire(), mo).empty());
-	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), mo, billing::unix_now()).max_servers == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), mo, nws::wall_now_s()).max_servers == 1);
 	TEST_EXPECT(sold().shared == 24);
 	TEST_EXPECT(grant_shared(0));
 	return 0;
@@ -8332,8 +8333,8 @@ int test_address_routes(Harness &h) {
 	const std::string uma_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(uma) }, { billing::kMetaUsername, "addr_uma" } });
 	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), uma, uma_cus, false));
-	h.stripe->add_subscription(uma_cus, "price_htier1", 1, "active", billing::unix_now() + 30 * 86400);
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+	h.stripe->add_subscription(uma_cus, "price_htier1", 1, "active", nws::wall_now_s() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
 	auto reply = post("/api/billing/checkout", uma_s, "{\"item\":\"static_address\"}");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "address_limit");
@@ -8346,7 +8347,7 @@ int test_address_routes(Harness &h) {
 	const std::string address_session = open_session(uma);
 	const std::string address_sub = h.stripe->complete_checkout(address_session);
 	TEST_EXPECT(!address_sub.empty());
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, billing::unix_now()) ==
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), uma_cus, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
 	reply = h.send("GET", "/api/me/billing", { with_session(uma_s) });
 	json = crow::json::load(body_text(reply));
@@ -8484,7 +8485,7 @@ int test_billing_webhook(Harness &h) {
 	const std::string cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
 			{ billing::kMetaUserId, std::to_string(dee) }, { billing::kMetaUsername, "bill_dee" } });
 	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), dee, cus, false));
-	h.stripe->add_subscription(cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
+	h.stripe->add_subscription(cus, "price_htier3", 1, "active", nws::wall_now_s() + 30 * 86400);
 	TEST_EXPECT(crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(dee_s) })))["max_servers"]
 						.i() == 0);
 
@@ -8494,7 +8495,7 @@ int test_billing_webhook(Harness &h) {
 		return h.send("POST", "/api/billing/webhook", headers, body);
 	};
 	const uint64_t rejects_before = h.billing->webhook_rejects();
-	const int64_t now = billing::unix_now();
+	const int64_t now = nws::wall_now_s();
 	const std::string body = event_body("evt_harness_1", cus);
 	auto reply = deliver(body, {});
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
@@ -8562,7 +8563,7 @@ int test_billing_admin(Harness &h) {
 	const std::string foreign = h.stripe->add_customer({ { billing::kMetaInstance, "another-instance" },
 			{ billing::kMetaUserId, "424242" }, { billing::kMetaUsername, "bill_eli" } });
 	const std::string orphan_sub =
-			h.stripe->add_subscription(foreign, "price_htier2", 1, "active", billing::unix_now() + 30 * 86400);
+			h.stripe->add_subscription(foreign, "price_htier2", 1, "active", nws::wall_now_s() + 30 * 86400);
 	auto reply = h.send("POST", "/api/admin/billing/reconcile", { kBearer });
 	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["reconcile"]) == "requested");
 	billing_pass(h);
@@ -8625,7 +8626,7 @@ int test_billing_admin(Harness &h) {
 		const auto ana_customer = ana ? billing::customer_of(*h.pool.acquire(), ana->id) : std::nullopt;
 		TEST_EXPECT(ana_customer.has_value());
 		const std::string unlisted = h.stripe->add_subscription(ana_customer->stripe_customer_id, "price_hunlisted", 1,
-				"active", billing::unix_now() + 30 * 86400);
+				"active", nws::wall_now_s() + 30 * 86400);
 		TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
 		billing_pass(h);
 		json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
@@ -8707,7 +8708,7 @@ int test_billing_admin(Harness &h) {
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		h.stripe->subscriptions[orphan_sub].status = "canceled";
 	}
-	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, billing::unix_now()) ==
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, nws::wall_now_s()) ==
 			billing::SyncOutcome::Synced);
 	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer }).code == 204);
 	// An add-on alone grants too: the delete waits for it as for a tier.
@@ -8721,7 +8722,7 @@ int test_billing_admin(Harness &h) {
 	addon.status = "active";
 	addon.item = billing::ItemKind::OwnMachine;
 	addon.price_id = "price_hown";
-	addon.current_period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+	addon.current_period_end = nws::wall_now_s() + 30 * 24 * 60 * 60;
 	billing::upsert_subscription(*h.pool.acquire(), addon);
 	reply = h.send("DELETE", jan_path, { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "active_subscription");
@@ -9254,7 +9255,7 @@ int with_harness(const char *part) {
 		// Billing over the in-memory Stripe, its jobs the cases' own (no worker):
 		// the first reconcile here checks the prices (nothing to read yet).
 		billing_fake::FakeStripeApi stripe;
-		stripe.now = nws::billing::unix_now(); // the periods Checkout starts are real ones
+		stripe.now = nws::wall_now_s(); // the periods Checkout starts are real ones
 		stripe.add_price(harness_price("price_htier1", 500));
 		stripe.add_price(harness_price("price_htier2", 1000));
 		stripe.add_price(harness_price("price_htier3", 1500));
@@ -9272,7 +9273,7 @@ int with_harness(const char *part) {
 		billing_config.sells_addresses = true;
 		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
 		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
-		TEST_EXPECT(billing_service.sync().reconcile_all(nws::billing::unix_now()).completed);
+		TEST_EXPECT(billing_service.sync().reconcile_all(nws::wall_now_s()).completed);
 		TEST_EXPECT(billing_service.sync().status(*pool.acquire()).prices_ok);
 		// The first listener's mail: its mail.send jobs over a mailer that
 		// records, declared before the listener so they outlive it, and the site

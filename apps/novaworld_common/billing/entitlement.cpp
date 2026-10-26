@@ -133,9 +133,4 @@ std::vector<SubscriptionRow> addresses_to_end(const std::vector<SubscriptionRow>
 	return out;
 }
 
-int64_t unix_now() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(duration_cast<seconds>(system_clock::now().time_since_epoch()).count());
-}
-
 } // namespace opennova::novaworld_server::billing

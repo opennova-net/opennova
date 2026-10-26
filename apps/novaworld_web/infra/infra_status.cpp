@@ -2,7 +2,7 @@
 
 #include "aws_xml.h"
 #include "billing/stripe_api.h"
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "core/loggable.h"
 #include "core/text_util.h"
 #include "hosted/model/stats_repository.h"
@@ -26,12 +26,6 @@ using io::JsonValue;
 constexpr const char *kEcsTarget = "AmazonEC2ContainerServiceV20141113.";
 // ListTasks pages of running tasks one read follows at most (100 a page).
 constexpr int kTaskPages = 3;
-
-int64_t wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
 
 bool is_name_char(char c) {
 	return is_alnum(c) || c == '-' || c == '_';
@@ -88,7 +82,7 @@ std::string epoch_iso(const JsonValue &object, const char *key) {
 	const JsonValue *v = member(object, key, JsonValue::Type::Number);
 	if (v == nullptr || !std::isfinite(v->number) || v->number <= 0)
 		return {};
-	return hosted::iso_utc(static_cast<int64_t>(std::floor(v->number)));
+	return iso_utc(static_cast<int64_t>(std::floor(v->number)));
 }
 
 const std::vector<JsonValue> &array_of(const JsonValue &object, const char *key) {
@@ -357,7 +351,7 @@ InfraStatus::InfraStatus(InfraConfig config, proc::CommandRunner &runner, Clock 
 		config_(std::move(config)),
 		unavailable_(check_infra_config(config_)),
 		api_(runner, config_.aws),
-		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
 std::shared_ptr<const CloudSnapshot> InfraStatus::snapshot(
 		const std::vector<std::string> &instance_ids) {

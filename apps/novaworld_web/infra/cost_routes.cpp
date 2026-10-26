@@ -1,6 +1,7 @@
 #include "cost_routes.h"
 
-#include "hosted/model/stats_repository.h" // iso_utc
+#include "core/clock.h"
+#include "hosted/model/stats_repository.h"
 #include "http_json.h"
 
 #include <string>
@@ -63,7 +64,7 @@ crow::response CostRoutes::costs(const crow::request &req) {
 	text_or_null(out, "unavailable", read.unavailable);
 	text_or_null(out, "error", read.error);
 	if (read.read_ms > 0)
-		out["read_at"] = hosted::iso_utc(read.read_ms / 1000);
+		out["read_at"] = iso_utc(read.read_ms / 1000);
 	else
 		out["read_at"] = nullptr;
 	out["currency"] = read.currency;

@@ -8,12 +8,6 @@
 
 namespace opennova::novaworld_server::jobs {
 
-int64_t Scheduler::wall_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
 Scheduler::Scheduler(db::ConnectionPool &pool, std::vector<PeriodicJob> jobs, Clock now_ms,
 		int64_t tick_ms, std::string start_key) :
 		pool_(pool),

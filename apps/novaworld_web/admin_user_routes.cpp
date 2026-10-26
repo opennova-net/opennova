@@ -4,6 +4,7 @@
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
 #include "billing/tiers.h"
+#include "core/clock.h"
 #include "hosted/address_routes.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/model/address_repository.h"
@@ -71,7 +72,7 @@ crow::json::wvalue user_json(const UserRecord &u, const billing::Entitlement &en
 } // namespace
 
 crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
-	return user_json(u, billing::entitlement_of(db, u.id, billing::unix_now()));
+	return user_json(u, billing::entitlement_of(db, u.id, wall_now_s()));
 }
 
 void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
@@ -90,7 +91,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const int64_t now = billing::unix_now();
+		const int64_t now = wall_now_s();
 		const auto subscriptions = billing::subscriptions_by_account(*db_conn);
 		const auto grants = billing::comp_grants_by_account(*db_conn);
 		const auto comp_addresses = billing::comp_addresses_by_account(*db_conn);
@@ -187,7 +188,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			db::ReadSnapshot snapshot(*db_conn);
 			const auto user = get_user_by_id(*db_conn, id);
 			if (!user || user->kind != "player") return json_error(404, "not_found", "no player account has this id");
-			const int64_t now = billing::unix_now();
+			const int64_t now = wall_now_s();
 			crow::json::wvalue out;
 			out["user"] = user_to_json(*db_conn, *user);
 			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, now), true);
@@ -242,7 +243,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			{
 				db::Transaction tx(*db_conn);
 				db_conn->exec("SELECT pg_advisory_xact_lock($1);", { db::BindValue(db::kHostedStartLock) });
-				if (billing::has_granting_subscription(*db_conn, id, billing::unix_now()))
+				if (billing::has_granting_subscription(*db_conn, id, wall_now_s()))
 					return json_error(409, "active_subscription",
 							"a subscription of this account still grants (a support tier, a dedicated machine or a static "
 							"address); cancel it in Stripe first");
@@ -354,9 +355,10 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			const auto updated = get_user_by_id(*db_conn, id);
 			crow::json::wvalue out;
 			out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
-			out["entitlement"] = entitlement_json(billing::entitlement_of(*db_conn, id, billing::unix_now()), true);
-			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, billing::unix_now());
-			const hosted::Capacity sold = hosted::sold_now(*db_conn, billing::unix_now());
+			out["entitlement"] =
+					entitlement_json(billing::entitlement_of(*db_conn, id, wall_now_s()), true);
+			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable_, wall_now_s());
+			const hosted::Capacity sold = hosted::sold_now(*db_conn, wall_now_s());
 			if (hosted::sold_exceeds_capacity(sold, sellable_))
 				std::fprintf(stderr,
 						"[http] WARN account %lld's comp grants take the sold capacity past what the fleet sells "

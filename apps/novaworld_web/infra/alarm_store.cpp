@@ -1,7 +1,7 @@
 #include "alarm_store.h"
 
 #include "aws_xml.h"
-#include "core/health.h" // Watchdog::steady_now_ms
+#include "core/clock.h"
 #include "infra_status.h"
 
 #include <base/io/strutil.h>
@@ -51,8 +51,7 @@ AlarmStore::AlarmStore(proc::CommandRunner &runner, AlarmConfig config, Clock st
 		unavailable_(why_unavailable(config_)),
 		api_(runner, config_.aws),
 		steady_(steady_ms ? std::move(steady_ms)
-						  : Clock([] { return static_cast<int64_t>(Watchdog::steady_now_ms()); })) {
-}
+						  : Clock([] { return static_cast<int64_t>(steady_now_ms()); })) {}
 
 AlarmRead AlarmStore::read() {
 	{

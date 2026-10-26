@@ -1,5 +1,7 @@
 #include "job_admin.h"
 
+#include "core/clock.h"
+
 #include <algorithm>
 #include <ctime>
 #include <map>
@@ -456,7 +458,7 @@ ActionResult cancel(db::Database &db, int64_t id, const std::string &actor) {
 
 int64_t run_now(db::Database &db, const PeriodicJob &periodic,
 		const std::optional<io::JsonValue> &payload) {
-	const int64_t now_ms = Scheduler::wall_now_ms();
+	const int64_t now_ms = wall_now_ms();
 	NewJob job;
 	job.kind = periodic.kind;
 	job.payload = payload ? *payload : periodic.payload;
