@@ -278,10 +278,16 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 		grow();
 		out.format = DeviceTextureFormat::A8R8G8B8;
 		out.bits = 32;
-		out.halvings = std::min(skip, chain - 1);
-		out.width = std::max(1u, source.width >> out.halvings);
-		out.height = std::max(1u, source.height >> out.halvings);
-		out.levels = chain - out.halvings;
+		// The texture is made over the sides shifted by the skip with the chain's levels less the skip,
+		// unclamped [orig: @ 0x687FDC..0x687FEC (the shifts), @ 0x68805E..0x688060 (sub eax, edi)]: a skip at
+		// or past the chain asks D3DX for 0 levels or fewer, its complete chain over sides halved to nothing
+		// (each made 1, so one level), and the copy from the skip runs no level (@ 0x68806E..0x688074), that
+		// level left as D3DX made it.
+		out.halvings = skip;
+		const uint32_t shift = std::min(skip, 31u);
+		out.width = std::max(1u, source.width >> shift);
+		out.height = std::max(1u, source.height >> shift);
+		out.levels = skip < chain ? chain - skip : full_chain_levels(out.width, out.height);
 	} else if (skip == 0) {
 		out.width = std::max(1u, source.width);
 		out.height = std::max(1u, source.height);

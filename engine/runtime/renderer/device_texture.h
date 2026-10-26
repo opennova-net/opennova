@@ -97,7 +97,8 @@ struct DeviceTexture {
 	uint32_t bits = 32; // an uncompressed format's bits a texel
 	uint32_t width = 0, height = 0;
 	uint32_t levels = 0;
-	// The halvings from the file's sides (a pixel texture's), or the levels of a DDS's chain skipped.
+	// The halvings from the file's sides (a pixel texture's), or the levels of a DDS's chain skipped: on a
+	// card without the DDS's format, a skip at or past its chain copies no level (dds_device_texture).
 	uint32_t halvings = 0;
 	// A DDS loaded whole although the detail asked for a smaller one: its chain held too few levels to
 	// skip (GTexture_InitFromMemory @ 0x68820A).

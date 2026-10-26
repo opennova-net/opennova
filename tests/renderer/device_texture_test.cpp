@@ -170,6 +170,12 @@ void test_dds_device_texture() {
 	small_dxt5.width = small_dxt5.height = 2;
 	small_dxt5.levels = 1;
 	CHECK(dds_device_texture(small_dxt5, 0, no_dxt5).levels == 2, "a decoded DXT's chain is unrounded");
+	// A skip at or past that chain is not clamped: two skipped of a 2 x 2's two levels asks D3DX for none, its
+	// complete chain over sides halved to nothing (one 1 x 1 level), and no level is copied into it
+	// [orig: GTexture_InitFromMemory @ 0x68805E..0x688060, @ 0x68806E..0x688074].
+	const DeviceTexture past = dds_device_texture(small_dxt5, kTextureFlagHalveTwice, no_dxt5);
+	CHECK(past.halvings == 2 && past.width == 1 && past.height == 1 && past.levels == 1,
+			"a skip past a decoded chain is kept, its texture one 1 x 1 level");
 	// An A8R8G8B8 DDS (the preview cube's form) at 32 bits a texel.
 	DdsSource argb;
 	argb.width = argb.height = 64;
