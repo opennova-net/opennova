@@ -144,8 +144,10 @@ std::vector<EnvSourceIssue> env_source_issues(const std::string &text) {
 		if (key == "envscale") envscale = static_cast<float>(io::retail_atof(value));
 		// The scaled colours the record scales by the last envscale: a keyframe's, and the global ones.
 		if (is_envscaled_key(key) && (on_slot || !is_tod_color_key(key))) scaled.push_back({line, key, envscale});
-		// A keyword read again outside the blocks: the last line wins.
-		if (!on_slot) {
+		// A keyword read again outside the blocks: the last line wins. Not envscale, whose every line scales the colour
+		// lines after it: the rule above says where that differs from the record, and a save writes one at 1 ahead of
+		// the colours with no keyframe where they are kept at another scale (save_env).
+		if (!on_slot && key != "envscale") {
 			const auto first = first_line.emplace(key, line);
 			if (!first.second) {
 				issue(false, first.first->second, key,

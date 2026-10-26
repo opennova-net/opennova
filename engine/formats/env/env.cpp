@@ -556,14 +556,27 @@ bool write_env(std::ostream &output, const Config &cfg, const std::set<std::stri
 	put("timeofday", "\"" + cfg.timeofday + "\"");
 	next_group();
 	// The scratch keyframe's colors that are not its seed, as color lines outside every
-	// block (every one the keys name, its seed or not). They precede the envscale line: they
-	// are kept packed (envscale already applied), so they must read back at envscale 1.
+	// block (every one the keys name, its seed or not). They are kept packed (envscale already
+	// applied), so they read back as kept at envscale 1 alone, and a file's lines read at the
+	// envscale the mission's earlier files left until its own envscale line: the load sets it
+	// to 1 once, ahead of the .trn's, overcast.def's and the .env's parses [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57db42..0x57db49; the parses @ 0x57dbeb, @ 0x57dc3b,
+	// @ 0x57dcbf], and each color line packs with the envscale read before it [orig:
+	// TimeOfDay_ParseProperty @ 0x57c590; Color_ScaleRGBAndPack @ 0x57f890]. A file that writes
+	// its envscale writes it at 1 ahead of them, then its own after them where that is not 1; a
+	// file that writes none leaves them at the scale before it, as its lines were read.
+	const bool own_scale = wants("envscale");
+	bool scaled_ahead = false; // an envscale 1 line written ahead of the scratch's lines
 	{
 		const Keyframe seed = scratch_keyframe_defaults();
 		const Keyframe &scratch = cfg.scratch;
 		const auto line = [&](const char *key, const Rgb &value, const Rgb &seeded, bool force = false) {
 			if (keys ? !wants(key) : (!force && rgb_line_to_string(value) == rgb_line_to_string(seeded))) return;
 			begin_line();
+			if (own_scale && !scaled_ahead) {
+				output << "envscale " << number_to_string(1.0f) << NL;
+				scaled_ahead = true;
+			}
 			output << key << " " << rgb_line_to_string(value) << NL;
 		};
 		line("sun_rgb", scratch.sun, seed.sun);
@@ -584,7 +597,7 @@ bool write_env(std::ostream &output, const Config &cfg, const std::set<std::stri
 		line("cloudedge_rgb", scratch.cloudedge, seed.cloudedge);
 		next_group();
 	}
-	put("envscale", number_to_string(cfg.envscale));
+	if (!scaled_ahead || cfg.envscale != 1.0f) put("envscale", number_to_string(cfg.envscale));
 	next_group();
 	put("iris_percent", number_to_string(cfg.iris_percent));
 	put("iris_center", number_to_string(cfg.iris_center));

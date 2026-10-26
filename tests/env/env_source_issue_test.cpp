@@ -58,6 +58,9 @@ int test_blocking() {
 		const std::vector<EnvSourceIssue> issues = env_source_issues("water_rgb 100,100,100\r\nenvscale 2\r\nsky_height 175\r\n");
 		TEST_EXPECT(issues.size() == 1 && has_issue(issues, 1, true, "envscale") && issues[0].field == "water_rgb");
 		TEST_EXPECT(env_source_issues("envscale 2\r\nwater_rgb 100,100,100\r\nsky_height 175\r\n").empty());
+		// The writer's envscale 1 ahead of the colours with no keyframe, then the file's own: no issue (a line on the
+		// scratch keyframe keeps its packed bytes, and each envscale scales the lines after it).
+		TEST_EXPECT(env_source_issues("envscale 1\r\nsun_rgb 20,40,60\r\n\r\nenvscale 2\r\nwater_rgb 1,2,3\r\n").empty());
 	}
 	// A colour value the record cannot hold (env.h rgb01_to_line_channel): 16777217 has no float of
 	// its own, so a save would write a neighbour. Values below 0 or past a byte within the record's

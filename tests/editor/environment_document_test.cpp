@@ -1043,6 +1043,44 @@ int test_skyfog_alone() {
 	return 0;
 }
 
+// The colours with no keyframe are kept packed with the envscale read before them, and a mission's earlier files leave
+// their envscale standing over a file's lines until its own [orig: Environment_LoadTimeOfDayConfig @ 0x57db42..0x57db49,
+// set to 1 once ahead of the three parses]: a save of a file that writes its envscale writes them after an envscale 1,
+// then the file's own, so a mission over a .trn's envscale 2 reads them as it read the file. A file that writes none
+// reads them at the .trn's, saved or not.
+int test_scratch_scale() {
+	const std::string trn = "polytrn_colormap c.tga\r\nenvscale 2\r\n", env;
+	for (const std::string overcast : {std::string("envscale 2\r\nsun_rgb 10,20,30\r\n"),
+	                                   std::string("envscale 1\r\nsun_rgb 10,20,30\r\n"),
+	                                   std::string("sun_rgb 10,20,30\r\n")}) {
+		auto document = std::make_unique<EnvironmentDocument>();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		const std::string saved = document->serialize().text;
+		opennova::env::MissionEnv as_read, as_saved;
+		opennova::env::load_mission_env({&trn, &overcast, &env}, as_read);
+		opennova::env::load_mission_env({&trn, &saved, &env}, as_saved);
+		TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+		            config_difference(as_read.overcast, as_saved.overcast).empty());
+		// Saved again the same, and nothing the reader reads otherwise.
+		auto again = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(again->load_bytes(bytes_of(saved), "overcast.def", AssetKind::OvercastDefs, "jo", error) &&
+		            again->serialize().text == saved && again->issues().empty());
+		if (overcast[0] != 'e') TEST_EXPECT(saved.find("envscale") == std::string::npos);
+	}
+	// The file's envscale 2: the colour kept as 20,40,60 at 1, then the file's scale.
+	{
+		const std::string overcast = "envscale 2\r\nsun_rgb 10,20,30\r\n";
+		auto document = std::make_unique<EnvironmentDocument>();
+		Diagnostic error;
+		TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		const std::string saved = document->serialize().text;
+		TEST_EXPECT(saved == "envscale 1\r\nsun_rgb 20,40,60\r\n\r\nenvscale 2\r\n");
+	}
+	std::printf("scratch scale: the colours with no keyframe read as kept over an earlier file's envscale\n");
+	return 0;
+}
+
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
@@ -1056,6 +1094,7 @@ int main() {
 	failures += test_overcast();
 	failures += test_ambient_alias();
 	failures += test_skyfog_alone();
+	failures += test_scratch_scale();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -234,7 +234,9 @@ float clamp_water_murk_upper(float value);
 
 bool load_env(std::istream &input, Config &out, std::string &error);
 // The file from scratch (no stock writer exists; retail reads it through the parser above):
-// every keyword the parser reads, a line each, CR LF, the keyframes in time order. Each value
+// every keyword the parser reads, a line each (envscale twice where the colours with no keyframe
+// are kept at a scale other than 1: at 1 ahead of them, then its own), CR LF, the keyframes in
+// time order. Each value
 // is written in the form the parser reads back as the Config holds it: a time as four HHMM
 // digits, an atol keyword as a whole number, an atof keyword in the fewest digits that read
 // back as the same float, a name quoted where it holds a separator. False, with `error`, for a

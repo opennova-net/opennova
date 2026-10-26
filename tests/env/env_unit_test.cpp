@@ -275,8 +275,9 @@ int main() {
 
 	// The scratch keyframe (env #39): a color line outside every tod_begin block lands there,
 	// packed with the envscale read before it [orig: Color_ScaleRGBAndPack @ 0x57f890], fog
-	// mirroring into the seeded skyfog; the writer puts those lines ahead of the envscale so
-	// they read back as they were, and writes none for the seed.
+	// mirroring into the seeded skyfog; the writer puts those lines after an envscale 1 and
+	// ahead of the file's envscale so they read back as they were whatever scale an earlier
+	// file left, and writes none for the seed.
 	{
 		opennova::env::Config naked;
 		std::string err;
@@ -295,8 +296,9 @@ int main() {
 		if (!expect(opennova::env::save_env(saved, naked, err), "save with a scratch keyframe")) return 1;
 		const std::string text = saved.str();
 		if (!expect(text.find("sky_rgb 5,10,15") != std::string::npos &&
-		                    text.find("sky_rgb 5,10,15") < text.find("envscale"),
-		            "the scratch lines precede the envscale line"))
+		                    text.find("envscale 1\r\n") < text.find("sky_rgb 5,10,15") &&
+		                    text.find("sky_rgb 5,10,15") < text.find("envscale 0.5\r\n"),
+		            "the scratch lines follow an envscale 1 and precede the file's envscale"))
 			return 1;
 		opennova::env::Config back;
 		std::istringstream again(text);
