@@ -29,7 +29,7 @@
     <section class="space-y-3" aria-labelledby="overview-areas">
       <h2 id="overview-areas" class="text-xl font-semibold text-ink">At a glance</h2>
       <div class="grid gap-4 xl:grid-cols-2">
-        <OverviewArea :area="AREA.novaworld" :status="novaworldStatus">
+        <OverviewArea :area="AREA.service" :status="serviceStatus" class="xl:col-span-2 [&_.overview-figures]:xl:grid-cols-5">
           <OverviewFigure
             label="Sign-in"
             :value="status ? (status.maintenance_enabled ? 'Maintenance' : 'Open') : 'Unknown'"
@@ -41,9 +41,7 @@
             :value="sessions ? formatCount(sessions.count) : 'Unknown'"
             :detail="sessions ? counted(hostingSessions, 'hosts a server', 'host a server') : 'Not read'"
           />
-        </OverviewArea>
 
-        <OverviewArea :area="AREA.hosting" :status="hostingStatus">
           <OverviewFigure
             label="Live servers"
             :value="fleet ? `${fleet.shared.live} of ${fleet.shared.room} shared` : 'Unknown'"
@@ -65,7 +63,7 @@
           </OverviewFigure>
         </OverviewArea>
 
-        <OverviewArea :area="AREA.people" :status="peopleStatus">
+        <OverviewArea :area="AREA.accounts" :status="accountsStatus">
           <OverviewFigure
             label="Subscribers"
             :value="billingOn ? String(subscribers.total) : billing ? 'Billing off' : 'Unknown'"
@@ -84,10 +82,10 @@
             approximate
             detail="At today's prices, before Stripe's fees and tax"
           />
-          <OverviewFigure label="AWS this month" :value="awsValue" :tone="awsTone" :detail="awsDetail" />
         </OverviewArea>
 
         <OverviewArea :area="AREA.operations" :status="operationsStatus">
+          <OverviewFigure label="AWS this month" :value="awsValue" :tone="awsTone" :detail="awsDetail" />
           <OverviewFigure label="Alarms firing" :value="alarmsValue" :tone="alarmsFiring > 0 ? 'bad' : undefined" :detail="alarmsDetail" />
           <OverviewFigure
             label="Background jobs"
@@ -102,26 +100,8 @@
 </template>
 
 <script setup lang="ts">
-// /admin/overview, the admin's home: what needs an admin first (AttentionList,
-// the admin layout's read of GET /api/admin/attention), with a banner while the
-// hosted servers' limits are on hold; then each area (utils/adminNav.ts) at a
-// glance, its state as a badge in words and colour (the worst of what it holds,
-// what needs you in it among them) and its key numbers, each from its own read
-// so one failing leaves the rest (and the failure is named above):
-//
-//   NovaWorld         sign-in open or in maintenance (GET /api/admin/server-status),
-//                     the sessions signed in and hosting (GET /api/admin/connections)
-//   Hosting           live servers against the cap and the machines by kind
-//                     (GET /api/admin/hosted), players now and the last 24 hours
-//                     (GET /api/admin/hosted/stats)
-//   People and money  subscribers by tier, payments past due, what the
-//                     subscriptions bring in a month at today's prices (GET
-//                     /api/admin/billing, /api/billing/tiers), and the month's
-//                     AWS bill against the budget (GET /api/admin/costs)
-//   Operations        the firing alarms (the attention read), the job queue
-//                     and its failures (GET /api/admin/jobs/overview)
-//
-// Polled every 30 s; Refresh reads everything again, what needs you with it.
+// Service, accounts and operations, each retaining independent reads and freshness.
+// The shared attention read comes first; this overview refreshes every 30 seconds.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import AdminPageHeader from '../../components/AdminPageHeader.vue';
@@ -171,16 +151,6 @@ const now = ref(Date.now());
 
 // NovaWorld.
 const hostingSessions = computed(() => (sessions.value?.connections ?? []).filter((c) => c.host !== null).length);
-const novaworldStatus = computed<AreaStatus>(() =>
-  worstStatus(
-    [
-      areaAttention(attentionState.attention.value, 'novaworld'),
-      status.value?.maintenance_enabled ? { tone: 'warn', label: 'In maintenance' } : null,
-    ],
-    status.value ? { tone: 'ok', label: 'Open' } : { tone: 'idle', label: 'Not read' },
-  ),
-);
-
 // Hosting.
 const machines = computed(() => {
   const active = (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed');
@@ -189,10 +159,13 @@ const machines = computed(() => {
 });
 const playersOnline = computed(() => (fleet.value?.servers ?? []).reduce((n, s) => n + (s.live ? s.players ?? 0 : 0), 0));
 const sparkValues = computed(() => (stats.value ? playerValues(stats.value) : []));
-const hostingStatus = computed<AreaStatus>(() => {
+const serviceStatus = computed<AreaStatus>(() => {
   let fallback: AreaStatus = { tone: 'idle', label: 'Not read' };
   if (fleet.value) fallback = fleet.value.enabled ? { tone: 'ok', label: 'Running' } : { tone: 'idle', label: 'Hosting is off' };
-  return worstStatus([areaAttention(attentionState.attention.value, 'hosting')], fallback);
+  return worstStatus([
+    areaAttention(attentionState.attention.value, 'service'),
+    status.value?.maintenance_enabled ? { tone: 'warn', label: 'In maintenance' } : null,
+  ], !status.value || !fleet.value ? { tone: 'idle', label: 'Partly read' } : fallback);
 });
 
 // People and money.
@@ -230,15 +203,13 @@ const awsDetail = computed(() => {
   }
   return `${scope}${c.forecast_cents === null ? 'No forecast yet' : `About ${costMoney(c.forecast_cents, c.currency)} by the month's end`}`;
 });
-const peopleStatus = computed<AreaStatus>(() => {
+const accountsStatus = computed<AreaStatus>(() => {
   const b = billing.value;
   return worstStatus(
     [
       b?.limits_hold ? { tone: 'bad', label: 'Server limits on hold' } : null,
-      budget.value?.tone === 'bad' ? { tone: 'bad', label: budget.value.accountLabel ? `${budget.value.accountLabel} over its AWS budget` : 'Over the AWS budget' } : null,
-      areaAttention(attentionState.attention.value, 'people'),
+      areaAttention(attentionState.attention.value, 'accounts'),
       billingOn.value && pastDue.value > 0 ? { tone: 'warn', label: counted(pastDue.value, 'payment past due', 'payments past due') } : null,
-      budget.value?.tone === 'warn' ? { tone: 'warn', label: budget.value.accountLabel ? `${budget.value.accountLabel} near its AWS budget` : 'Near the AWS budget' } : null,
     ],
     b ? (b.enabled ? { tone: 'ok', label: 'Up to date' } : { tone: 'idle', label: 'Billing off' }) : { tone: 'idle', label: 'Not read' },
   );
@@ -261,6 +232,8 @@ const alarmsDetail = computed(() => {
 const operationsStatus = computed<AreaStatus>(() =>
   worstStatus(
     [
+      budget.value?.tone === 'bad' ? { tone: 'bad', label: budget.value.accountLabel ? `${budget.value.accountLabel} over its AWS budget` : 'Over the AWS budget' } : null,
+      budget.value?.tone === 'warn' ? { tone: 'warn', label: budget.value.accountLabel ? `${budget.value.accountLabel} near its AWS budget` : 'Near the AWS budget' } : null,
       areaAttention(attentionState.attention.value, 'operations'),
       jobs.value && jobs.value.attention_total > 0 ? { tone: 'warn', label: counted(jobs.value.attention_total, 'job failed', 'jobs failed') } : null,
     ],

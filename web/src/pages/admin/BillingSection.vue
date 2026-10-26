@@ -307,6 +307,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/billing: the billing overview (GET /api/admin/billing): the hosted
 // servers' limits hold with its reason and a two-step "Apply the stops" (POST
 // /api/admin/billing/reconcile {"force_limits": true}), the sold capacity
@@ -451,7 +452,7 @@ async function relink(customerId: string) {
       fail(`No account is named ${name}.`);
       return;
     }
-    if (!window.confirm(`Link Stripe customer ${customerId} to ${user.username}? Its subscriptions then count for that account.`)) return;
+    if (!await confirmAction(`Link Stripe customer ${customerId} to ${user.username}? Its subscriptions then count for that account.`)) return;
     const result = await linkBillingCustomer(user.id, customerId);
     if (!result.ok) {
       fail(result.error.message);

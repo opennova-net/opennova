@@ -1,3 +1,4 @@
+import * as actionReview from '../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import NovaWorldLobbies from './NovaWorldLobbies.vue';
@@ -27,7 +28,7 @@ function lobby(id: number, over: Partial<AdminLobby> = {}): AdminLobby {
 
 describe('NovaWorldLobbies', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountBlock(list: AdminLobby[]) {
     lobbies.mockResolvedValue({ ok: true, value: { lobbies: list } });
@@ -41,7 +42,7 @@ describe('NovaWorldLobbies', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     drain.mockResolvedValue({ ok: true, value: undefined });
   });
 
@@ -87,7 +88,7 @@ describe('NovaWorldLobbies', () => {
 
   it('drains a lobby once confirmed, then reads again', async () => {
     const page = await mountBlock([lobby(3)]);
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await page.get('tr.lobby-row button').trigger('click');
     expect(drain).not.toHaveBeenCalled();
     await page.get('tr.lobby-row button').trigger('click');

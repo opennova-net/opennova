@@ -1,160 +1,121 @@
 <template>
   <section class="page py-10 sm:py-14">
-    <div>
-      <header class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p class="eyebrow">NovaWorld</p>
-          <h1 class="mt-2 text-3xl font-semibold text-ink-bright">Lobbies</h1>
-          <p class="mt-2 text-sm text-ink-muted">Join from your game's server browser.</p>
-        </div>
-        <button
-          class="btn-secondary"
-          @click="refresh"
-          :disabled="state.loading"
-        >
-          <span v-if="state.loading">Refreshing...</span>
-          <span v-else>Refresh</span>
-        </button>
-      </header>
-
-      <div v-if="state.error" class="mt-6 rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-        {{ state.error }}
+    <header class="flex flex-wrap items-end justify-between gap-5">
+      <div>
+        <p class="eyebrow">NovaWorld / Server browser</p>
+        <h1 class="mt-3 text-4xl font-semibold tracking-tight text-ink-bright">Find your next match.</h1>
+        <p class="mt-4 max-w-xl text-sm leading-relaxed text-ink-muted">Explore servers on OpenNova and NovaLogic. Open a listing for its players and details, then join from your game's server browser.</p>
       </div>
-
-      <div v-if="state.loading && !state.error" class="mt-12 animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
-        Loading lobbies...
+      <div class="flex flex-wrap items-center gap-3">
+        <RouterLink to="/play#online" class="btn-secondary">How to join</RouterLink>
+        <button type="button" class="btn-secondary" :disabled="loading" @click="refresh">{{ loading ? 'Refreshing…' : 'Refresh' }}</button>
       </div>
+    </header>
 
-      <div v-if="!state.loading && !state.error" class="mt-10 space-y-10">
-        <!-- The API returns a group per game even with no hosts, so guard on the
-             total host count (not games.length) — otherwise an idle server renders
-             bare game headers over empty tables. -->
-        <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
-          <p class="text-lg font-semibold text-ink">No games are being hosted on our NovaWorld right now</p>
-          <p class="mt-2 text-sm text-ink-muted">
-            Host one from the game's own menu: OpenNova reaches our NovaWorld as it is, and the original dfx2.exe
-            <RouterLink :to="{ path: '/', hash: '#online' }" class="link">through the OpenNova Switcher</RouterLink>.
-            Or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
-          </p>
-        </div>
-
+    <div class="my-8 grid gap-3 sm:grid-cols-2" aria-label="Listing sources">
+      <section class="card p-4" aria-labelledby="opennova-source">
+        <h2 id="opennova-source" class="text-sm font-semibold text-ink">OpenNova's NovaWorld</h2>
+        <p v-if="oursAt !== null" class="mt-2 text-xs text-ink-muted">{{ ownCount }} {{ ownCount === 1 ? 'server' : 'servers' }} · Updated <RelativeTime :value="oursAt" :now="now" />
+        </p>
+        <p v-else-if="!oursError" class="mt-2 text-xs text-ink-muted">Checking our NovaWorld…</p>
+        <p v-if="oursError" role="status" class="mt-2 text-xs text-warn">{{ oursAt === null ? 'Our server list could not be loaded.' : 'Our last refresh failed. Showing the last list received.' }} We keep trying.</p>
+      </section>
+      <section class="card p-4" aria-labelledby="novalogic-source">
+        <h2 id="novalogic-source" class="text-sm font-semibold text-ink">NovaLogic's NovaWorld</h2>
+        <p v-if="novalogic && !novalogic.enabled" class="mt-2 text-xs text-ink-muted">This deployment does not list NovaLogic's servers.</p>
         <template v-else>
-          <div v-for="group in gamesWithServersFirst" :key="group.slug" class="space-y-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-2xl font-semibold text-ink">{{ group.displayName }}</h2>
-              <span class="text-sm text-ink-muted">{{ group.rows.length }} {{ group.rows.length === 1 ? 'server' : 'servers' }}</span>
-            </div>
-            <ServerTable :rows="group.rows" empty="No servers right now." :caption="`${group.displayName} servers`" />
-          </div>
+          <p v-if="novalogicAt !== null" class="mt-2 text-xs text-ink-muted">{{ novalogic?.servers.length ?? 0 }} {{ novalogic?.servers.length === 1 ? 'server' : 'servers' }} · Updated <RelativeTime :value="novalogicAt" :now="now" />
+          </p>
+          <p v-if="novalogicError" role="status" class="mt-2 text-xs text-warn">{{ novalogicAt === null ? 'The NovaLogic list could not be loaded from our service.' : 'Our last refresh of the NovaLogic list failed. Showing the last list received.' }} We keep trying.</p>
+          <p v-else-if="novalogic?.failing" role="status" class="mt-2 text-xs text-warn">NovaLogic's NovaWorld can't be reached right now.<template v-if="novalogicAt !== null"> This is the last list our service received.</template>
+          </p>
+          <p v-else-if="novalogicAt === null" class="mt-2 text-xs text-ink-muted">Checking NovaLogic's NovaWorld…</p>
         </template>
-      </div>
+      </section>
+    </div>
 
-      <!-- NovaLogic's servers, from the service's copy of their list: their own
-           section, shown whenever the service lists them, whatever ours did. -->
-      <NovaLogicServerList
-        v-if="state.novalogic && state.novalogic.enabled"
-        class="mt-12"
-        :list="state.novalogic"
-        :updated-at="state.novalogicAt"
-        :now="state.now"
-      />
+    <p v-if="loading && oursAt === null && novalogicAt === null" class="mb-5 text-sm text-ink-muted" role="status">Loading server listings…</p>
+    <ServerTable :rows="rows" directory :empty="emptyText" caption="Servers on OpenNova and NovaLogic" />
+    <div class="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-ink-muted">
+      <p>Each listing names the NovaWorld service to select in-game.</p>
+      <RouterLink to="/support" class="link">Host a server of your own</RouterLink>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
-import NovaLogicServerList from '../components/NovaLogicServerList.vue';
+import RelativeTime from '../components/RelativeTime.vue';
 import ServerTable from '../components/ServerTable.vue';
 import { fetchLobbies, fetchNovaLogicLobbies } from '../api/lobbies';
-import type { LobbyGroup, LobbyHost, NovaLogicLobbies, ServerRow } from '../types/lobby';
+import { usePolling } from '../composables/usePolling';
+import type { LobbyGroup, NovaLogicLobbies, ServerRow } from '../types/lobby';
 
-const state = reactive({
-  games: [] as LobbyGroup[],
-  loading: true,
-  error: '',
-  // NovaLogic's list as the service last answered it (null until it has), and
-  // when the service fetched it by this page's clock.
-  novalogic: null as NovaLogicLobbies | null,
-  novalogicAt: null as number | null,
-  now: Date.now()
-});
+const games = ref<LobbyGroup[]>([]);
+const novalogic = ref<NovaLogicLobbies | null>(null);
+const oursAt = ref<number | null>(null);
+const novalogicAt = ref<number | null>(null);
+const oursError = ref(false);
+const novalogicError = ref(false);
+const now = ref(Date.now());
+const ownCount = computed(() => games.value.reduce((total, game) => total + game.hosts.length, 0));
+const rows = computed<ServerRow[]>(() => [
+  ...games.value.flatMap((game) => game.hosts.map((host): ServerRow => ({
+    key: `opennova-${host.id}`, to: `/lobby/${host.id}`, source: 'opennova', game: game.slug, gameName: game.displayName,
+    serverName: host.serverName, mission: host.mission || '', gameType: host.gameType || '',
+    players: host.players, maxPlayers: host.maxPlayers || 0, expansion: host.expansion || '', password: Boolean(host.locked),
+  }))),
+  ...(novalogic.value?.enabled && novalogicAt.value !== null ? novalogic.value.servers.map((server, index): ServerRow => ({
+    key: `novalogic-${server.id}-${index}`, to: `/lobby/novalogic/${server.id}`, source: 'novalogic',
+    game: 'jop_2_consumer', gameName: 'Joint Operations', serverName: server.serverName, mission: server.mission,
+    gameType: server.gameType, players: server.players, maxPlayers: server.maxPlayers, country: server.country,
+    expansion: server.expansion, password: server.password, locked: server.locked, punkBuster: server.punkBuster,
+  })) : []),
+]);
 
-const totalHosts = computed(() => state.games.reduce((n, group) => n + group.hosts.length, 0));
-// The games with servers first, each kept in the service's order, with their
-// servers as the table's rows.
-const gamesWithServersFirst = computed(() =>
-  [
-    ...state.games.filter((group) => group.hosts.length > 0),
-    ...state.games.filter((group) => group.hosts.length === 0),
-  ].map((group) => ({ ...group, rows: group.hosts.map(hostRow) })),
-);
-
-// One of our listed servers as a table row, opening its page.
-function hostRow(host: LobbyHost): ServerRow {
-  return {
-    key: String(host.id),
-    to: `/lobby/${host.id}`,
-    serverName: host.serverName,
-    mission: host.mission ?? '',
-    gameType: host.gameType ?? '',
-    players: host.players,
-    maxPlayers: host.maxPlayers || 0,
-    expansion: host.expansion ?? '',
-    password: Boolean(host.locked),
-  };
-}
-
-// NovaLogic's list never holds up or breaks ours: a failed read keeps what the
-// page had.
-const loadNovaLogic = async () => {
-  try {
-    const list = await fetchNovaLogicLobbies();
-    state.now = Date.now();
-    state.novalogic = list;
-    state.novalogicAt = list.ageSeconds === null ? null : state.now - list.ageSeconds * 1000;
-  } catch {
-    // The next poll tries again.
-  }
-};
-
-const load = async (background = false) => {
-  void loadNovaLogic();
-  // Background polls update the list in place: don't toggle the loading
-  // skeleton or wipe the list on a transient fetch error, or the page would
-  // flash "Loading lobbies..." every poll interval.
-  if (!background) {
-    state.loading = true;
-    state.error = '';
-  }
-  try {
-    const { games } = await fetchLobbies();
-    state.games = games;
-    if (background) state.error = '';
-  } catch (error) {
-    if (!background) {
-      state.error = 'Unable to load lobbies right now. Please try again shortly.';
+// Independent, visibility-aware reads retain the last successful list. A failure
+// of either source never blocks the other or silently makes old data look fresh.
+const oursPoll = usePolling({
+  async read(signal) {
+    try {
+      const result = await fetchLobbies(signal);
+      if (signal.aborted) return false;
+      games.value = result.games;
+      oursAt.value = now.value = Date.now();
+      oursError.value = false;
+      return true;
+    } catch {
+      if (!signal.aborted) { oursError.value = true; now.value = Date.now(); }
+      return false;
     }
-  } finally {
-    if (!background) state.loading = false;
-  }
-};
-
-const refresh = () => load();
-
-// Poll so a game hosted after the page is open appears without a manual
-// refresh. The in-game flow registers the host seconds after login, long
-// after the initial onMounted fetch would have run.
-const POLL_INTERVAL_MS = 5000;
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-
-onMounted(() => {
-  load();
-  pollTimer = setInterval(() => load(true), POLL_INTERVAL_MS);
+  },
+  next: () => 5000,
 });
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
+const novalogicPoll = usePolling({
+  async read(signal) {
+    try {
+      const result = await fetchNovaLogicLobbies(signal);
+      if (signal.aborted) return false;
+      novalogic.value = result;
+      now.value = Date.now();
+      const fetched = result.ageSeconds !== null ? now.value - result.ageSeconds * 1000 : result.fetchedAt ? Date.parse(result.fetchedAt) : null;
+      novalogicAt.value = fetched !== null && Number.isFinite(fetched) ? fetched : null;
+      novalogicError.value = false;
+      return true;
+    } catch {
+      if (!signal.aborted) { novalogicError.value = true; now.value = Date.now(); }
+      return false;
+    }
+  },
+  next: () => 5000,
 });
+const loading = computed(() => oursPoll.loading.value || novalogicPoll.loading.value);
+const emptyText = computed(() => {
+  if (loading.value) return 'Checking for server listings…';
+  if (oursError.value || novalogicError.value || novalogic.value?.failing) return 'No server listings are available. Check the source notices above.';
+  if (novalogic.value?.enabled && novalogicAt.value === null) return "No servers listed on OpenNova. Waiting for NovaLogic's first list.";
+  return 'No servers are listed right now.';
+});
+function refresh() { void oursPoll.refresh(); void novalogicPoll.refresh(); }
 </script>

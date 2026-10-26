@@ -1,6 +1,6 @@
 <template>
   <ul class="grid gap-4 sm:grid-cols-3">
-    <li v-for="offer in tiers" :key="offer.tier">
+    <li v-for="offer in tiers" :key="offer.tier" :class="selectedTier === offer.tier ? 'rounded-panel ring-2 ring-accent ring-offset-2 ring-offset-surface' : ''">
       <TierCard
         :offer="offer"
         :currency="currency"
@@ -19,7 +19,9 @@
 // The three support tiers side by side. `mode` sets their action: subscribe
 // (no tier yet, or a visitor not logged in), or manage (the account's tier
 // is marked, and every action opens the billing portal, where a tier is
-// changed or canceled). A tier below the account's warns which of its live
+// changed or canceled). selectionOnly chooses a tier for a separate review
+// step; selectedTier marks that choice without claiming an active subscription.
+// A tier below the account's warns which of its live
 // servers on shared machines a move there would stop: the service stops the
 // newest first (its dedicated machines need no tier). A tier the fleet is
 // sold out of cannot be picked (TierCard), but the account's own.
@@ -40,8 +42,10 @@ const props = withDefaults(
     busy?: boolean;
     disabled?: boolean;
     baseId?: string;
+    selectedTier?: TierNumber | null;
+    selectionOnly?: boolean;
   }>(),
-  { currentTier: null, used: 0, busy: false, disabled: false, baseId: 'support' },
+  { currentTier: null, used: 0, busy: false, disabled: false, baseId: 'support', selectedTier: null, selectionOnly: false },
 );
 
 const emit = defineEmits<{
@@ -49,6 +53,7 @@ const emit = defineEmits<{
 }>();
 
 function actionLabel(offer: TierOffer): string {
+  if (props.selectionOnly) return props.selectedTier === offer.tier ? 'Selected' : 'Choose tier';
   if (props.mode === 'subscribe') return 'Subscribe';
   return offer.tier === props.currentTier ? 'Manage' : 'Change';
 }

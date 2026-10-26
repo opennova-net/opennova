@@ -185,6 +185,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../composables/useConfirm';
 // The NovaWorld sessions the service holds now (GET /api/admin/connections), on
 // the NovaWorld page, in two tables: the clients, each with the server it plays
 // on (the listing, linked to its page, or to /admin/fleet/<id> for a hosted
@@ -332,7 +333,7 @@ function who(c: AdminConnection): string {
 
 async function endSession(c: AdminConnection) {
   if (busy.value) return;
-  if (!window.confirm(`End ${who(c)} NovaWorld session ${c.id} (${c.addr})? The game is told the session ended and has to sign in again.`)) return;
+  if (!await confirmAction(`End ${who(c)} NovaWorld session ${c.id} (${c.addr})? The game is told the session ended and has to sign in again.`)) return;
   busy.value = true;
   const result = await endConnection(c);
   busy.value = false;
@@ -345,7 +346,7 @@ async function stopServer(c: AdminConnection) {
   const host = c.host;
   if (busy.value || !host) return;
   const players = host.players ? ` The match ends for the ${host.players} player${host.players === 1 ? '' : 's'} on it.` : '';
-  if (!window.confirm(`Stop ${who(c)} server ${host.server_name || host.rid}? It leaves NovaWorld.${players}`)) return;
+  if (!await confirmAction(`Stop ${who(c)} server ${host.server_name || host.rid}? It leaves NovaWorld.${players}`)) return;
   busy.value = true;
   const result = await stopListedServer(host.rid);
   busy.value = false;

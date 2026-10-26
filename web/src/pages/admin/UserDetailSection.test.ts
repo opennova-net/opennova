@@ -1,5 +1,7 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
 import UserDetailSection from './UserDetailSection.vue';
 import { addCompAddress } from '../../api/adminAddresses';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
@@ -45,11 +47,11 @@ async function mountSection() {
 }
 
 describe('UserDetailSection', () => {
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     detail.mockResolvedValue({
       ok: true,
       value: userDetail(7, {
@@ -94,6 +96,22 @@ describe('UserDetailSection', () => {
     expect(customer?.attributes('rel')).toContain('noopener');
     expect(wrapper.text()).toContain('No key on this account.');
     expect(wrapper.text()).not.toMatch(/can host|approve/i);
+  });
+
+  it('opens with account context and keeps profile editing in Settings', async () => {
+    const { wrapper, router } = await mountSection();
+    expect(wrapper.get('#user-profile').isVisible()).toBe(false);
+    expect(wrapper.get('#user-servers').isVisible()).toBe(true);
+    expect(wrapper.get('details summary').text()).toBe('Advanced identity');
+    const keysLink = wrapper.findAll('a').find((a) => a.text() === "Manage this account's keys")!;
+    expect(keysLink.attributes('href')).toBe('/admin/cd-keys?account=7#cd-account-heading');
+    await router.push('/admin/users/7?tab=settings');
+    await flushPromises();
+    expect(router.currentRoute.value.query.tab).toBe('settings');
+    expect(wrapper.get('section[aria-labelledby="user-profile"]').attributes('style')).not.toContain('display: none');
+    expect(wrapper.get('section[aria-labelledby="user-servers"]').attributes('style')).toContain('display: none');
+    expect(wrapper.get('section[aria-labelledby="user-role"]').attributes('style')).not.toContain('display: none');
+    wrapper.unmount();
   });
 
   it("adds the grant's dedicated machines to its shared servers", async () => {
@@ -258,7 +276,7 @@ describe('UserDetailSection', () => {
       value: granted(3, 1, [hostedServer(30, { own_machine: true }), hostedServer(31), hostedServer(32), hostedServer(33)]),
     });
     const { wrapper } = await mountSection();
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await submitGrant(wrapper, 1, 1);
     expect(confirm).toHaveBeenCalledWith(
       "Lower player7's shared servers to 1? They run 3 on shared machines, so the service stops their 2 newest servers there: their matches end for everyone on them.",
@@ -271,7 +289,7 @@ describe('UserDetailSection', () => {
     const servers = [hostedServer(31, { own_machine: true }), hostedServer(32, { own_machine: true }), hostedServer(33)];
     detail.mockResolvedValue({ ok: true, value: granted(3, 2, servers) });
     const { wrapper } = await mountSection();
-    confirm.mockReturnValue(false);
+    confirm.mockResolvedValue(false);
     await submitGrant(wrapper, 3, 0);
     expect(confirm).toHaveBeenLastCalledWith(
       "Lower player7's dedicated machines to 0? Their 2 newest servers on dedicated machines move to a shared machine (their matches restart) while the fleet has room; the rest stop.",
@@ -331,7 +349,7 @@ describe('UserDetailSection', () => {
       }),
     });
     const { wrapper } = await mountSection();
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await submitGrant(wrapper, 0, 0);
     // The paid one stays; with no shared server, the newer server stops.
     expect(confirm).toHaveBeenCalledWith(
@@ -362,7 +380,7 @@ describe('UserDetailSection', () => {
       }),
     });
     const { wrapper } = await mountSection();
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await submitGrant(wrapper, 0, 0);
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 on shared machines, so the service stops their newest server there'));
     expect(comp).not.toHaveBeenCalled();
@@ -403,5 +421,40 @@ describe('UserDetailSection', () => {
     await button.trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.path).toBe('/admin/users');
+  });
+
+  it('keeps drafts after failed deletion and leaves a deleted account without an unsaved warning', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/admin/users/:id', component: UserDetailSection },
+        { path: '/:rest(.*)*', component: { render: () => null } },
+      ],
+    });
+    await router.push('/admin/users/7?tab=settings');
+    const page = mount(RouterView, { global: { plugins: [router] } });
+    try {
+      await flushPromises();
+      await page.get('section[aria-labelledby="user-profile"] input').setValue('unsaved-name');
+      remove.mockResolvedValueOnce({ ok: false, error: { code: 'active_subscription', status: 409, message: 'Subscription still grants.' } });
+      const deleteButton = () => page.findAll('button').find((button) => button.text().startsWith('Delete'))!;
+      await deleteButton().trigger('click');
+      await flushPromises();
+      confirm.mockResolvedValue(false);
+      await router.push('/admin/users');
+      expect(router.currentRoute.value.path).toBe('/admin/users/7');
+      expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('unsaved changes'), 'Unsaved changes');
+
+      remove.mockResolvedValueOnce({ ok: true, value: undefined });
+      confirm.mockClear();
+      confirm.mockResolvedValueOnce(true);
+      await deleteButton().trigger('click');
+      await flushPromises();
+      expect(router.currentRoute.value.path).toBe('/admin/users');
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm).toHaveBeenCalledWith('Delete player7? This cannot be undone.');
+    } finally {
+      page.unmount();
+    }
   });
 });

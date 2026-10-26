@@ -12,16 +12,16 @@ describe('AdminCrumbs', () => {
   it("names a section's page by its area alone", async () => {
     const page = await crumbs('/admin/fleet');
     expect(page.get('nav').attributes('aria-label')).toBe('Breadcrumb');
-    expect(page.text()).toBe('Hosting');
+    expect(page.text()).toBe('Service');
     expect(page.findAll('a')).toHaveLength(0);
   });
 
   it('leads from a page under a section back to it', async () => {
     const machine = await crumbs('/admin/fleet/machines/3');
-    expect(machine.text()).toBe('Hosting/Fleet');
+    expect(machine.text()).toBe('Service/Fleet');
     expect(machine.get('a').attributes('href')).toBe('/admin/fleet');
     const user = await crumbs('/admin/users/7');
-    expect(user.text()).toBe('People and money/Users');
+    expect(user.text()).toBe('Accounts/Users');
     const program = await crumbs('/admin/infrastructure/programs/web');
     expect(program.get('a').attributes('href')).toBe('/admin/infrastructure');
   });

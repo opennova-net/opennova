@@ -53,12 +53,15 @@ describe('LobbyServerPage', () => {
     const page = await open();
     expect(read).toHaveBeenCalledWith(167772173, expect.anything());
     expect(page.get('h1').text()).toBe('Retail Joint Ops: Escalation');
+    expect(page.get('#join-server').text()).toBe("Join through OpenNova's NovaWorld");
+    expect(page.find('a[href="/play#online"]').exists()).toBe(true);
     const info = page.get('dl').text();
     expect(info).toContain('AS - Kombang Valley (AAS)');
     expect(info).toContain('23 min');
     expect(info).toContain('Escalation');
     expect(info).toContain('203.0.113.7:32768');
     expect(page.text()).not.toContain('Put your message here');
+    expect(page.text()).toContain('Updated just now');
     expect(info).not.toContain('Unknown');
     // No scores: the names who joined.
     expect(page.findAll('li').map((li) => li.text())).toEqual(['biggy', 'Ann']);

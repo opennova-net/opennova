@@ -1,50 +1,53 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import LandingPage from '../pages/LandingPage.vue';
-import LoginPage from '../pages/LoginPage.vue';
-import RegisterPage from '../pages/RegisterPage.vue';
-import ForgotPasswordPage from '../pages/ForgotPasswordPage.vue';
-import ResetPasswordPage from '../pages/ResetPasswordPage.vue';
-import LobbyPage from '../pages/LobbyPage.vue';
-import LobbyServerPage from '../pages/LobbyServerPage.vue';
-import NovaLogicServerPage from '../pages/NovaLogicServerPage.vue';
-import AccountLayout from '../pages/account/AccountLayout.vue';
-import ServersPage from '../pages/account/ServersPage.vue';
-import NewServerPage from '../pages/account/NewServerPage.vue';
-import AccountPage from '../pages/account/AccountPage.vue';
-import SupportTierPage from '../pages/account/SupportTierPage.vue';
-import AddressesPage from '../pages/account/AddressesPage.vue';
-import SupportPage from '../pages/SupportPage.vue';
-import NotFoundPage from '../pages/NotFoundPage.vue';
-import TermsPage from '../pages/legal/TermsPage.vue';
-import PrivacyPage from '../pages/legal/PrivacyPage.vue';
-import RefundsPage from '../pages/legal/RefundsPage.vue';
-import ServerDetailLayout from '../pages/servers/ServerDetailLayout.vue';
-import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
-import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
-import ServerStatsTab from '../pages/servers/ServerStatsTab.vue';
-import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
-import ServerMachineTab from '../pages/servers/ServerMachineTab.vue';
-import ServerUsageTab from '../pages/servers/ServerUsageTab.vue';
-import ServerLogsTab from '../pages/servers/ServerLogsTab.vue';
-import AdminLayout from '../pages/admin/AdminLayout.vue';
-import OverviewSection from '../pages/admin/OverviewSection.vue';
-import UsersSection from '../pages/admin/UsersSection.vue';
-import UserDetailSection from '../pages/admin/UserDetailSection.vue';
-import FleetSection from '../pages/admin/FleetSection.vue';
-import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
-import UsageSection from '../pages/admin/UsageSection.vue';
-import BillingSection from '../pages/admin/BillingSection.vue';
-import CostsSection from '../pages/admin/CostsSection.vue';
-import NovaWorldSection from '../pages/admin/NovaWorldSection.vue';
-import JobsSection from '../pages/admin/JobsSection.vue';
-import JobDetailSection from '../pages/admin/JobDetailSection.vue';
-import InfraSection from '../pages/admin/InfraSection.vue';
-import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
-import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
-import CdKeysSection from '../pages/admin/CdKeysSection.vue';
-import GamesSection from '../pages/admin/GamesSection.vue';
-import GameSection from '../pages/admin/GameSection.vue';
-import AddressesSection from '../pages/admin/AddressesSection.vue';
+const PlayPage = () => import('../pages/PlayPage.vue');
+const DownloadsPage = () => import('../pages/DownloadsPage.vue');
+const AccountOverviewPage = () => import('../pages/account/AccountOverviewPage.vue');
+const LoginPage = () => import('../pages/LoginPage.vue');
+const RegisterPage = () => import('../pages/RegisterPage.vue');
+const ForgotPasswordPage = () => import('../pages/ForgotPasswordPage.vue');
+const ResetPasswordPage = () => import('../pages/ResetPasswordPage.vue');
+const LobbyPage = () => import('../pages/LobbyPage.vue');
+const LobbyServerPage = () => import('../pages/LobbyServerPage.vue');
+const NovaLogicServerPage = () => import('../pages/NovaLogicServerPage.vue');
+const AccountLayout = () => import('../pages/account/AccountLayout.vue');
+const ServersPage = () => import('../pages/account/ServersPage.vue');
+const NewServerPage = () => import('../pages/account/NewServerPage.vue');
+const AccountPage = () => import('../pages/account/AccountPage.vue');
+const SupportTierPage = () => import('../pages/account/SupportTierPage.vue');
+const AddressesPage = () => import('../pages/account/AddressesPage.vue');
+const SupportPage = () => import('../pages/SupportPage.vue');
+const NotFoundPage = () => import('../pages/NotFoundPage.vue');
+const TermsPage = () => import('../pages/legal/TermsPage.vue');
+const PrivacyPage = () => import('../pages/legal/PrivacyPage.vue');
+const RefundsPage = () => import('../pages/legal/RefundsPage.vue');
+const ServerDetailLayout = () => import('../pages/servers/ServerDetailLayout.vue');
+const ServerOverviewTab = () => import('../pages/servers/ServerOverviewTab.vue');
+const ServerConsoleTab = () => import('../pages/servers/ServerConsoleTab.vue');
+const ServerStatsTab = () => import('../pages/servers/ServerStatsTab.vue');
+const ServerSettingsTab = () => import('../pages/servers/ServerSettingsTab.vue');
+const ServerMachineTab = () => import('../pages/servers/ServerMachineTab.vue');
+const ServerUsageTab = () => import('../pages/servers/ServerUsageTab.vue');
+const ServerLogsTab = () => import('../pages/servers/ServerLogsTab.vue');
+const AdminLayout = () => import('../pages/admin/AdminLayout.vue');
+const OverviewSection = () => import('../pages/admin/OverviewSection.vue');
+const UsersSection = () => import('../pages/admin/UsersSection.vue');
+const UserDetailSection = () => import('../pages/admin/UserDetailSection.vue');
+const FleetSection = () => import('../pages/admin/FleetSection.vue');
+const MachineDetailSection = () => import('../pages/admin/MachineDetailSection.vue');
+const UsageSection = () => import('../pages/admin/UsageSection.vue');
+const BillingSection = () => import('../pages/admin/BillingSection.vue');
+const CostsSection = () => import('../pages/admin/CostsSection.vue');
+const NovaWorldSection = () => import('../pages/admin/NovaWorldSection.vue');
+const JobsSection = () => import('../pages/admin/JobsSection.vue');
+const JobDetailSection = () => import('../pages/admin/JobDetailSection.vue');
+const InfraSection = () => import('../pages/admin/InfraSection.vue');
+const ProgramDetailSection = () => import('../pages/admin/ProgramDetailSection.vue');
+const InfraResourceSection = () => import('../pages/admin/InfraResourceSection.vue');
+const CdKeysSection = () => import('../pages/admin/CdKeysSection.vue');
+const GamesSection = () => import('../pages/admin/GamesSection.vue');
+const GameSection = () => import('../pages/admin/GameSection.vue');
+const AddressesSection = () => import('../pages/admin/AddressesSection.vue');
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -53,17 +56,19 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: LandingPage },
+    { path: '/play', component: PlayPage, meta: { title: 'Play' } },
+    { path: '/downloads', component: DownloadsPage, meta: { title: 'Downloads' } },
     { path: '/login', component: LoginPage, meta: { title: 'Log in' } },
     { path: '/register', component: RegisterPage, meta: { title: 'Register' } },
     { path: '/forgot', component: ForgotPasswordPage, meta: { title: 'Forgot password' } },
     // The link a password reset mail carries: /reset?token=<64 hex digits>.
     { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
-    { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
+    { path: '/lobby', component: LobbyPage, meta: { title: 'Servers' } },
     { path: '/lobby/:id(\\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
     // A server on NovaLogic's NovaWorld, from the service's copy of their list.
     { path: '/lobby/novalogic/:id(\\d+)', component: NovaLogicServerPage, meta: { title: 'Server' } },
     { path: '/lobbies', redirect: '/lobby' },
-    { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
+    { path: '/support', component: SupportPage, meta: { title: 'Hosting and support' } },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },
     { path: '/privacy', component: PrivacyPage, meta: { title: 'Privacy notice' } },
     { path: '/refunds', component: RefundsPage, meta: { title: 'Refund policy' } },
@@ -73,14 +78,14 @@ const router = createRouter({
       component: AccountLayout,
       meta: { requiresUser: true },
       children: [
-        { path: '', redirect: '/me/servers' },
+        { path: '', component: AccountOverviewPage, meta: { title: 'Your overview' } },
         { path: 'servers', component: ServersPage, meta: { title: 'Servers' } },
         { path: 'servers/new', component: NewServerPage, meta: { title: 'New server' } },
         {
           path: 'servers/:id(\\d+)',
           component: ServerDetailLayout,
           props: { scope: 'owner' },
-          meta: { title: 'Server' },
+          meta: { title: 'Server', serverDetail: true },
           children: [
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
@@ -90,7 +95,7 @@ const router = createRouter({
         },
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
-        { path: 'support', component: SupportTierPage, meta: { title: 'Support tier' } },
+        { path: 'support', component: SupportTierPage, meta: { title: 'Billing' } },
         // The billing portal's cancel flow for an address returns here.
         { path: 'addresses', component: AddressesPage, meta: { title: 'Static addresses' } },
         { path: 'account', component: AccountPage, meta: { title: 'Account' } },
@@ -118,7 +123,7 @@ const router = createRouter({
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,
           props: { scope: 'admin' },
-          meta: { title: 'Admin: Server' },
+          meta: { title: 'Admin: Server', serverDetail: true },
           children: [
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
@@ -166,8 +171,8 @@ const router = createRouter({
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition;
     if (to.hash) return { el: to.hash, top: 72 };
-    if (to.path === '/admin/jobs' && from.path === '/admin/jobs') return false;
-    const onServerPage = to.matched.some((record) => record.components?.default === ServerDetailLayout);
+    if (to.path === from.path) return false;
+    const onServerPage = to.matched.some((record) => record.meta.serverDetail);
     if (onServerPage && to.params.id === from.params.id) return false;
     return { top: 0 };
   },

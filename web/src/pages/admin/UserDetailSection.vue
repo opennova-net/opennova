@@ -29,8 +29,14 @@
         </p>
       </header>
 
+      <nav aria-label="Account views" class="flex gap-1 border-b border-border">
+        <RouterLink :to="{ path: route.path }" class="tab-link" :class="tab === 'overview' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'" :aria-current="tab === 'overview' ? 'page' : undefined">Overview</RouterLink>
+        <RouterLink :to="{ path: route.path, query: { tab: 'settings' } }" class="tab-link" :class="tab === 'settings' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'" :aria-current="tab === 'settings' ? 'page' : undefined">Settings</RouterLink>
+      </nav>
+      <p v-if="tab === 'overview'" class="text-sm text-ink-muted">Review this account's access, subscriptions and servers. Profile, role and hosting grants are in Settings.</p>
+
       <!-- Profile, and its edit. -->
-      <section class="space-y-4" aria-labelledby="user-profile">
+      <section v-show="tab === 'settings'" class="space-y-4" aria-labelledby="user-profile">
         <h2 id="user-profile" class="text-xl font-semibold text-ink">Profile</h2>
         <form class="grid gap-4 rounded-panel border border-border bg-panel p-4 sm:grid-cols-2 sm:p-6" @submit.prevent="saveProfile">
           <label class="space-y-1">
@@ -42,6 +48,9 @@
             <input v-model="edit.nwhandle" required autocomplete="off" aria-describedby="user-handle-hint" :class="inputClass" />
             <span id="user-handle-hint" class="block text-xs text-ink-muted">The player's name in the game.</span>
           </label>
+          <details class="rounded-control border border-border p-4 sm:col-span-2">
+            <summary class="cursor-pointer text-sm font-medium text-ink">Advanced identity</summary>
+            <div class="mt-4 grid gap-4 sm:grid-cols-2">
           <label class="space-y-1">
             <span :class="labelClass">PCID</span>
             <input v-model="edit.pcid" autocomplete="off" aria-describedby="user-pcid-hint" :class="[inputClass, 'font-mono']" />
@@ -52,6 +61,8 @@
             <input v-model="edit.nwh" autocomplete="off" aria-describedby="user-nwh-hint" :class="[inputClass, 'font-mono']" />
             <span id="user-nwh-hint" class="block text-xs text-ink-muted">A field retail clients carry with the handle; usually 1.</span>
           </label>
+            </div>
+          </details>
           <label class="space-y-1 sm:col-span-2">
             <span :class="labelClass">New password</span>
             <input
@@ -70,7 +81,7 @@
       </section>
 
       <!-- Role. -->
-      <section class="space-y-3" aria-labelledby="user-role">
+      <section v-show="tab === 'settings'" class="space-y-3" aria-labelledby="user-role">
         <h2 id="user-role" class="text-xl font-semibold text-ink">Role</h2>
         <p class="text-sm text-ink-muted">
           {{ detail.user.role === 'admin' ? 'An admin manages every account and the service.' : 'A player has no admin pages.' }}
@@ -104,7 +115,7 @@
         >
           {{ oversoldText(detail.capacity) }}
         </p>
-        <form class="space-y-2" @submit.prevent="saveComp">
+        <form v-show="tab === 'settings'" class="space-y-2 rounded-panel border border-border bg-panel p-5" @submit.prevent="saveComp">
           <div class="flex flex-wrap items-end gap-4">
             <div class="space-y-1">
               <label for="user-comp-servers" :class="labelClass">Shared servers</label>
@@ -155,7 +166,7 @@
       </section>
 
       <!-- Hosted servers. -->
-      <section class="space-y-3" aria-labelledby="user-servers">
+      <section v-show="tab === 'overview'" class="space-y-3" aria-labelledby="user-servers">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="user-servers" class="text-xl font-semibold text-ink">Hosted servers</h2>
           <HistoryToggle v-model="showServerHistory" :count="replacedServerIds.size" />
@@ -176,7 +187,7 @@
       </section>
 
       <!-- Static addresses, with an admin's comp address. -->
-      <section class="space-y-3" aria-labelledby="user-addresses">
+      <section v-show="tab === 'overview'" class="space-y-3" aria-labelledby="user-addresses">
         <h2 id="user-addresses" class="text-xl font-semibold text-ink">Static addresses</h2>
         <p v-if="detail.addresses.length === 0" class="text-sm text-ink-muted">None.</p>
         <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
@@ -225,7 +236,7 @@
       </section>
 
       <!-- Billing ids. -->
-      <section class="space-y-3" aria-labelledby="user-billing">
+      <section v-show="tab === 'overview'" class="space-y-3" aria-labelledby="user-billing">
         <h2 id="user-billing" class="text-xl font-semibold text-ink">Billing</h2>
         <p v-if="!detail.billing.stripe_customer_id" class="text-sm text-ink-muted">No Stripe customer: this account has never checked out.</p>
         <template v-else>
@@ -276,7 +287,7 @@
       </section>
 
       <!-- CD keys. -->
-      <section class="space-y-3" aria-labelledby="user-cd-keys">
+      <section v-show="tab === 'overview'" class="space-y-3" aria-labelledby="user-cd-keys">
         <h2 id="user-cd-keys" class="text-xl font-semibold text-ink">CD keys</h2>
         <p v-if="keys === null" class="text-sm text-ink-muted">{{ keysError || 'Loading the keys…' }}</p>
         <p v-else-if="keys.keys.length === 0" class="text-sm text-ink-muted">No key on this account.</p>
@@ -288,11 +299,11 @@
             </span>
           </li>
         </ul>
-        <RouterLink to="/admin/cd-keys" class="inline-block text-sm text-accent hover:text-ink-bright">Manage keys on the CD keys page</RouterLink>
+        <RouterLink :to="{ path: '/admin/cd-keys', query: { account: detail.user.id }, hash: '#cd-account-heading' }" class="inline-block text-sm text-accent hover:text-ink-bright">Manage this account's keys</RouterLink>
       </section>
 
       <!-- Delete. -->
-      <section class="space-y-3 rounded-panel border border-danger/40 p-4" aria-labelledby="user-delete">
+      <section v-show="tab === 'settings'" class="space-y-3 rounded-panel border border-danger/40 p-4" aria-labelledby="user-delete">
         <h2 id="user-delete" class="text-lg font-semibold text-danger">Delete the account</h2>
         <p class="text-sm text-ink-muted">
           The account goes for good. One with a subscription that still grants (a support tier, a dedicated machine or
@@ -307,6 +318,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
 // edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
 // who can log in says how one comes back), its hosting entitlement with the
@@ -332,6 +344,7 @@ import { stripeDashboardUrl } from '../../api/adminBilling';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
 import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../api/users';
 import { useSession } from '../../composables/useSession';
+import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { CdKeyAccountResponse } from '../../types/cdKeys';
 import {
   COMP_OWN_MACHINES_MAX,
@@ -366,6 +379,7 @@ const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 
 const route = useRoute();
+const tab = computed(() => route.query.tab === 'settings' ? 'settings' : 'overview');
 const router = useRouter();
 const { user: sessionUser, refresh: refreshSession } = useSession();
 
@@ -412,6 +426,13 @@ const compChanged = computed(
     !!detail.value &&
     (Number(comp.value) !== detail.value.user.comp_servers || Number(compOwn.value) !== detail.value.user.comp_own_machines),
 );
+useUnsavedChanges(() => {
+  const u = detail.value?.user;
+  return !!u && (
+    edit.username !== u.username || edit.nwhandle !== u.nwhandle || edit.pcid !== u.pcid ||
+    edit.nwh !== u.nwh || edit.password !== '' || compChanged.value || (!addressesOff.value && compAddress.value.trim() !== '')
+  );
+});
 const compAddressProblem = computed(() => (compAddressTried.value ? addressNameProblem(compAddress.value.trim()) : ''));
 
 // What the service has sold past the fleet, item by item.
@@ -535,7 +556,7 @@ async function changeRole(role: Role) {
       flash(`${current.username} is already ${role === 'admin' ? 'an admin' : 'a player'}.`);
       return;
     }
-    if (!window.confirm(roleChangePrompt(current, role, list.value))) return;
+    if (!await confirmAction(roleChangePrompt(current, role, list.value))) return;
     const self = sessionUser.value?.id === current.id;
     const result = await updateUser(current.id, { role });
     if (!result.ok) {
@@ -613,7 +634,7 @@ async function saveComp() {
     const moving = Math.min(ownOver, Math.max(0, sharedAfter - shared.length));
     warnings.push(`Lower ${u.username}'s dedicated machines to ${ownAfter}? ${dedicatedCutText(ownOver, moving)}`);
   }
-  if (warnings.length > 0 && !window.confirm(warnings.join('\n\n'))) return;
+  if (warnings.length > 0 && !await confirmAction(warnings.join('\n\n'))) return;
   busy.value = true;
   const result = await setCompGrants(u.id, { servers: n, own_machines: own });
   busy.value = false;
@@ -658,7 +679,7 @@ async function addAddress() {
 async function remove() {
   if (!detail.value || busy.value) return;
   const u = detail.value.user;
-  if (!window.confirm(`Delete ${u.username}? This cannot be undone.`)) return;
+  if (!await confirmAction(`Delete ${u.username}? This cannot be undone.`)) return;
   busy.value = true;
   const result = await deleteUser(u.id);
   busy.value = false;
@@ -666,6 +687,7 @@ async function remove() {
     fail(result.error.message);
     return;
   }
+  detail.value = null;
   await router.push({ path: '/admin/users' });
 }
 

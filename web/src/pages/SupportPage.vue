@@ -3,19 +3,15 @@
     <div class="space-y-10">
       <header class="space-y-4">
         <p class="eyebrow">Server hosting</p>
-        <h1 class="text-4xl font-semibold text-ink-bright">Support tiers</h1>
+        <h1 class="page-heading">Your server. Your next game night.</h1>
         <p class="max-w-3xl text-base text-ink-muted">
-          OpenNova is a free, open-source project. A monthly support tier funds it, and lets you run your own
-          hosted servers on NovaWorld: we start them on our machines, list them in the game's server browser and
-          keep them running until you stop them. A Joint Operations server can also list on NovaLogic's NovaWorld,
-          reaching players on the original game with nothing to install. A dedicated machine adds one more server on a machine of its own,
-          with or without a tier. A tier is support for the project, not the sale of any game. Hosted servers are
-          pre-1.0 and experimental.
+          Support OpenNova and give your group a place to play. We run your server and list it on NovaWorld;
+          you choose the game, missions and settings. It stays up until you stop it.
         </p>
         <p class="max-w-3xl text-base text-ink-muted">
-          Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
-          join them alike. They aim to play exactly like the original servers, but OpenNova is pre-1.0 and we can't
-          guarantee that yet.
+          A Joint Operations server can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install.
+          Retail and OpenNova players can join. Hosting uses OpenNova's experimental server and may differ from the
+          original game. A tier supports the project; it is not the sale of any game.
         </p>
       </header>
 
@@ -34,11 +30,11 @@
       <template v-else-if="tiers">
         <section class="space-y-4" aria-labelledby="public-support-tiers">
           <h2 id="public-support-tiers" class="text-xl font-semibold text-ink">Choose a tier</h2>
-          <TierPicker :tiers="tiers.tiers" :currency="tiers.currency" mode="subscribe" base-id="public-support" @choose="onChoose" />
+          <TierPicker :tiers="tiers.tiers" :currency="tiers.currency" mode="subscribe" selection-only base-id="public-support" @choose="onChoose" />
           <p class="text-xs text-ink-muted">
             Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel, which you
             can do at any time in Stripe's billing portal.
-            <template v-if="!user">Subscribing asks you to log in first.</template>
+            <template v-if="!user">Log in to review your selection before checkout.</template>
             Read the <RouterLink to="/terms" class="link">terms of service</RouterLink>
             and the <RouterLink to="/refunds" class="link">refund policy</RouterLink>
             before you subscribe.
@@ -73,7 +69,7 @@ import RunItYourself from '../components/RunItYourself.vue';
 import TierPicker from '../components/TierPicker.vue';
 import { fetchTiers } from '../api/billing';
 import { useSession } from '../composables/useSession';
-import type { TiersResponse } from '../types/billing';
+import type { TierNumber, TiersResponse } from '../types/billing';
 import { formatMoney } from '../utils/format';
 
 const router = useRouter();
@@ -82,9 +78,10 @@ const { user } = useSession();
 const tiers = ref<TiersResponse | null>(null);
 const alertText = ref('');
 
-function onChoose() {
-  if (user.value) void router.push('/me/support');
-  else void router.push({ path: '/login', query: { redirect: '/me/support' } });
+function onChoose(tier: TierNumber) {
+  const destination = `/me/support?tier=${tier}`;
+  if (user.value) void router.push(destination);
+  else void router.push({ path: '/login', query: { redirect: destination } });
 }
 
 onMounted(async () => {

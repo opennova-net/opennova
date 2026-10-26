@@ -1,279 +1,100 @@
 <template>
   <div>
-    <!-- Hero: OpenNova, over a map running in it. -->
     <section class="relative isolate overflow-hidden border-b border-border" aria-labelledby="hero-title">
-      <img
-        :src="hero.src"
-        :alt="hero.alt"
-        class="absolute inset-0 -z-10 h-full w-full object-cover object-center opacity-60"
-        width="1920"
-        height="1080"
-        fetchpriority="high"
-      />
-      <div class="absolute inset-0 -z-10 bg-gradient-to-r from-surface via-surface/90 to-surface/30" aria-hidden="true"></div>
-      <div class="absolute inset-x-0 bottom-0 -z-10 h-24 bg-gradient-to-t from-surface to-transparent" aria-hidden="true"></div>
-
-      <div class="page py-20 sm:py-28 lg:py-32">
+      <img :src="hero.src" :alt="hero.alt" class="absolute inset-0 -z-10 h-full w-full object-cover opacity-60" width="1920" height="1080" fetchpriority="high" />
+      <div class="absolute inset-0 -z-10 bg-gradient-to-r from-surface via-surface/90 to-surface/20" aria-hidden="true">
+      </div>
+      <div class="page py-20 sm:py-28">
         <div class="max-w-2xl">
-          <p class="eyebrow">Open source · Pre-1.0</p>
-          <h1 id="hero-title" class="mt-4 text-5xl font-bold leading-tight text-ink-bright sm:text-6xl lg:text-7xl">OpenNova</h1>
-          <p class="mt-4 text-2xl font-semibold text-ink-bright sm:text-3xl">A game on NovaLogic's engine, rebuilt in the open.</p>
-          <p class="mt-6 text-lg text-ink">
-            Play our own game, make yours with the OpenNova Editor, or use OpenNova in place of Jointops.exe with the
-            Joint Operations you own.
-          </p>
-          <p class="mt-4 text-base text-ink-muted">
-            Our own NovaWorld keeps Joint Operations and Delta Force Xtreme 2 online, and a
-            <RouterLink to="/support" class="link">support tier</RouterLink> hosts a server of your own on it.
-          </p>
-
-          <div class="mt-8 flex flex-wrap items-center gap-3">
-            <a href="#downloads" class="btn-primary">Download</a>
-            <a href="#editor" class="btn-secondary">Make your own</a>
-            <RouterLink to="/support" class="btn-secondary">Host a server</RouterLink>
+          <p class="eyebrow">Open source. Still exploring.</p>
+          <h1 id="hero-title" class="mt-5 text-6xl font-semibold tracking-tight text-ink-bright sm:text-7xl">OpenNova</h1>
+          <p class="mt-5 max-w-xl text-2xl font-medium leading-snug text-ink-bright sm:text-3xl">A familiar world.<br />New possibilities.</p>
+          <p class="mt-5 max-w-lg text-base leading-relaxed text-ink">A game on NovaLogic's engine, rebuilt in the open. Play our own game, revisit the Joint Operations you own, or make something of your own.</p>
+          <div class="mt-8 flex flex-wrap gap-3">
+            <RouterLink to="/play" class="btn-primary">Start playing <span aria-hidden="true">↗</span>
+            </RouterLink>
+            <RouterLink to="/lobby" class="btn-secondary bg-surface/60">Find a server</RouterLink>
           </div>
-          <p class="mt-3 text-sm text-ink-muted">Windows x64. Pre-1.0 and experimental.</p>
-
-          <p class="mt-8 inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/80 px-3 py-1.5 text-sm text-ink-muted" role="status">
-            <span class="h-2 w-2 shrink-0 rounded-full" :class="statusDot" aria-hidden="true"></span>
-            <span>{{ statusText }}</span>
-          </p>
+          <p class="mt-4 text-xs text-ink-muted">Windows x64 · Pre-1.0 and experimental</p>
+        </div>
+      </div>
+      <div class="border-t border-border-strong bg-surface/80">
+        <div class="page flex flex-wrap items-center justify-between gap-3 py-4 text-sm">
+          <p role="status" class="text-ink-muted">{{ statusText }}</p>
+          <RouterLink to="/lobby" class="font-medium text-accent hover:text-ink-bright">Explore NovaWorld <span aria-hidden="true">→</span>
+          </RouterLink>
         </div>
       </div>
     </section>
 
-    <!-- Our own game: what a download plays with no retail install. -->
-    <section id="game" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="game-title">
-      <p class="eyebrow">Our game</p>
-      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">OP: Acid Gambit, and more to come</h2>
-      <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
-        <p>
-          OpenNova comes with a small game of its own, OP: Acid Gambit, made in the OpenNova Editor with no file from
-          the original games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN,
-          then play it again at night in a storm with the OP: Nifty Package expansion.
-        </p>
-        <p>
-          A carbine, a pistol, a knife, grenades and binoculars; rebels who patrol, stand guard and raise the alarm.
-          It is small and growing. Online play in our own game is coming.
-        </p>
+    <section class="page py-14 sm:py-20" aria-labelledby="choose-title">
+      <div class="mb-7 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p class="eyebrow">Your next session</p>
+          <h2 id="choose-title" class="mt-3 text-3xl font-semibold tracking-tight text-ink-bright">Where will you go?</h2>
+        </div>
+        <RouterLink to="/downloads" class="link text-sm">All downloads</RouterLink>
       </div>
-    </section>
-
-    <!-- The editor that made it. -->
-    <section id="editor" class="scroll-mt-20 border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="editor-title">
-      <div class="page">
-        <p class="eyebrow">The OpenNova Editor</p>
-        <h2 id="editor-title" class="mt-3 text-3xl font-semibold text-ink-bright">Make your own</h2>
-        <p class="mt-3 max-w-2xl text-ink-muted">
-          The editor that built our game. Make maps, missions and whole games in the formats Joint Operations reads,
-          then Build them and Play them in OpenNova or in the original game.
-        </p>
-        <div class="mt-10 grid gap-8 lg:grid-cols-5">
-          <figure class="lg:col-span-3">
-            <video
-              class="aspect-video w-full rounded-panel border border-border bg-panel"
-              :poster="timelapse.poster"
-              controls
-              muted
-              loop
-              playsinline
-              preload="none"
-              width="1280"
-              height="720"
-              :aria-label="timelapse.alt"
-            >
-              <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
-            </video>
-            <figcaption class="mt-2 text-sm text-ink-muted">{{ timelapse.caption }}</figcaption>
-          </figure>
-          <div class="lg:col-span-2">
-            <ul class="space-y-3">
-              <li v-for="feature in editorFeatures" :key="feature" class="flex gap-3 text-ink">
-                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
-                <span>{{ feature }}</span>
-              </li>
-            </ul>
+      <div class="grid gap-5 md:grid-cols-3">
+        <article id="game" class="card scroll-mt-24 overflow-hidden">
+          <img :src="editorShots[0].thumb" :alt="editorShots[0].alt" loading="lazy" width="800" height="450" class="aspect-[16/9] w-full object-cover" />
+          <div class="p-6">
+            <p class="eyebrow">01 / Play</p>
+            <h3 class="mt-3 text-xl font-semibold text-ink-bright">An island of our own</h3>
+            <p class="mt-3 text-sm leading-relaxed text-ink-muted">OP: Acid Gambit is our small, growing game. Clear a rebel camp alone or in Co-op over LAN. Its OP: Nifty Package expansion brings night and a storm.</p>
+            <RouterLink to="/play" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">Meet the game →</RouterLink>
           </div>
-        </div>
-        <div class="mt-8 grid gap-4 sm:grid-cols-3">
-          <figure v-for="shot in editorShots" :key="shot.src">
-            <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-              <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="800" height="450" class="aspect-video w-full object-cover" />
-            </a>
-            <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
-          </figure>
-        </div>
+        </article>
+        <article id="retail" class="card scroll-mt-24 overflow-hidden">
+          <img :src="retailShots[0].thumb" :alt="retailShots[0].alt" loading="lazy" width="1600" height="900" class="aspect-[16/9] w-full object-cover" />
+          <div class="p-6">
+            <p class="eyebrow">02 / Reconnect</p>
+            <h3 class="mt-3 text-xl font-semibold text-ink-bright">Your Joint Operations, too</h3>
+            <p class="mt-3 text-sm leading-relaxed text-ink-muted">OpenNova runs in place of Jointops.exe with the Joint Operations you own. The aim is parity with the game as it shipped. It is pre-1.0, so expect differences.</p>
+            <RouterLink to="/play?game=jointops" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">Choose your setup →</RouterLink>
+          </div>
+        </article>
+        <article id="online" class="card scroll-mt-24 flex flex-col p-6">
+          <p class="eyebrow">03 / Bring everyone</p>
+          <h3 class="mt-3 text-2xl font-semibold leading-tight text-ink-bright">A place for<br />the next match.</h3>
+          <p class="mt-4 text-sm leading-relaxed text-ink-muted">Discover Joint Operations and Delta Force Xtreme 2 servers, or keep a server of your own running with a support tier.</p>
+          <div class="mt-6 border-t border-border pt-5 text-sm text-ink-muted">Hosted servers run OpenNova's own server, opennova-serve. Retail and OpenNova players join them alike. Hosting is experimental; a tier supports the project, not the sale of any game.</div>
+          <div class="mt-auto flex flex-wrap gap-4 pt-6">
+            <RouterLink to="/support" class="font-medium text-accent hover:text-ink-bright">Host a server →</RouterLink>
+            <RouterLink to="/play#online" class="link text-sm">How to join</RouterLink>
+          </div>
+        </article>
       </div>
     </section>
 
-    <!-- Retail Joint Operations, run by OpenNova. -->
-    <section id="retail" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="retail-title">
-      <p class="eyebrow">Joint Operations</p>
-      <h2 id="retail-title" class="mt-3 text-3xl font-semibold text-ink-bright">Your Joint Operations, too</h2>
-      <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
-        <p>
-          OpenNova runs in place of Jointops.exe. Put it in your Joint Operations folder and run it to play its maps,
-          missions, models and sounds. It ships no retail files.
-        </p>
-        <p>
-          The aim is parity with the game as it shipped, not a remake. OpenNova is pre-1.0, so expect differences,
-          and please <a :href="ISSUES_URL" target="_blank" rel="noopener" class="link">report them on GitHub</a>.
-        </p>
-      </div>
-      <div class="mt-10 grid gap-4 sm:grid-cols-3">
-        <figure v-for="(shot, i) in retailShots" :key="shot.src" :class="i === 0 ? 'sm:col-span-3' : ''">
-          <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-            <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover" />
-          </a>
-          <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
+    <section id="editor" class="scroll-mt-24 border-y border-border bg-panel/40 py-14 sm:py-20" aria-labelledby="editor-title">
+      <div class="page grid gap-9 lg:grid-cols-2 lg:items-center">
+        <div>
+          <p class="eyebrow">The OpenNova Editor</p>
+          <h2 id="editor-title" class="mt-4 text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">Make the place<br />you want to play.</h2>
+          <p class="mt-5 max-w-md leading-relaxed text-ink-muted">Sculpt terrain, build missions and shape their logic in a 3D view. The same editor that made our game builds yours in the formats Joint Operations reads.</p>
+          <RouterLink to="/downloads#tools" class="btn-secondary mt-6">Get the editor</RouterLink>
+        </div>
+        <figure>
+          <video class="aspect-video w-full rounded-panel border border-border bg-panel" :poster="timelapse.poster" controls muted loop playsinline preload="none" width="1280" height="720" :aria-label="timelapse.alt">
+            <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
+          </video>
+          <figcaption class="mt-3 text-xs text-ink-muted">{{ timelapse.caption }}</figcaption>
         </figure>
       </div>
     </section>
 
-    <!-- Online: OpenNova reaches either NovaWorld, the original Jointops.exe finds our hosted servers on
-         NovaLogic's, and only the original dfx2.exe needs the Switcher. -->
-    <section id="online" class="scroll-mt-20 border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="online-title">
-      <div class="page">
-        <p class="eyebrow">NovaWorld</p>
-        <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online</h2>
-        <p class="mt-3 max-w-2xl text-ink-muted">
-          NovaWorld is the online service these games log in to. We run our own for Joint Operations and Delta Force
-          Xtreme 2, with accounts, lobbies and the in-game server browser, and NovaLogic still runs theirs for Joint
-          Operations. To play on ours, first <RouterLink to="/register" class="link">make a NovaWorld account</RouterLink>:
-          the handle and password you log in with in-game.
-        </p>
-        <div class="mt-10 grid gap-4 lg:grid-cols-3">
-          <article class="card p-6">
-            <h3 class="text-lg font-semibold text-ink-bright">With OpenNova</h3>
-            <p class="mt-2 text-ink-muted">
-              Open NovaWorld from Joint Operations' multiplayer menu in OpenNova and choose OpenNova, or Original
-              NovaWorld for NovaLogic's. Nothing else to install.
-            </p>
-          </article>
-          <article class="card p-6">
-            <h3 class="text-lg font-semibold text-ink-bright">With the original Jointops.exe</h3>
-            <p class="mt-2 text-ink-muted">
-              Joint Operations servers we host can also list on NovaLogic's NovaWorld, so the original game finds them
-              as it is: log in to NovaLogic's NovaWorld as always and pick one from its server browser. Nothing to
-              install.
-            </p>
-          </article>
-          <article class="card p-6">
-            <h3 class="text-lg font-semibold text-ink-bright">With the original dfx2.exe</h3>
-            <p class="mt-2 text-ink-muted">
-              NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, so the OpenNova Switcher points the original
-              game at ours. It manages one block in the Windows hosts file, for gs.novaworld.net, so it asks for
-              administrator rights. Your game files stay as they are.
-            </p>
-            <a href="#downloads" class="link mt-3 inline-block text-sm">Get the Switcher</a>
-          </article>
-        </div>
-        <p class="mt-6 text-ink-muted">
-          <RouterLink to="/lobby" class="link">See who is playing</RouterLink> on our NovaWorld and on NovaLogic's.
-        </p>
-      </div>
-    </section>
-
-    <!-- Hosted servers, and running one yourself. -->
-    <section class="page py-16 sm:py-20" aria-labelledby="hosting-title">
-      <div class="grid gap-10 lg:grid-cols-2 lg:items-center">
+    <section id="downloads" class="page scroll-mt-24 py-12" aria-labelledby="downloads-title">
+      <div class="flex flex-wrap items-center justify-between gap-5">
         <div>
-          <p class="eyebrow">Server hosting</p>
-          <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Hosted servers</h2>
-          <p class="mt-4 text-ink">
-            A monthly support tier funds OpenNova and runs your own servers on NovaWorld. We start them on our machines,
-            list them in the game's server browser and keep them running until you stop them. A Joint Operations server
-            can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install. Pick
-            the map rotation and game settings, watch the stats and use the server console, all from this site.
-          </p>
-          <p class="mt-3 text-ink-muted">
-            Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
-            join them alike. They aim to play exactly like the original servers, but OpenNova is pre-1.0 and we can't
-            guarantee that yet.
-          </p>
-          <div class="mt-6">
-            <RouterLink to="/support" class="btn-primary">{{ tiersState === 'open' ? 'Choose a tier' : 'See support tiers' }}</RouterLink>
-          </div>
-          <p class="mt-4 text-xs text-ink-muted">A tier is support for the project, not the sale of any game.</p>
+          <h2 id="downloads-title" class="text-2xl font-semibold text-ink-bright">Ready when you are.</h2>
+          <p class="mt-2 text-sm text-ink-muted">Games, the editor, the Switcher and tools. Each build, in one place.</p>
         </div>
-
-        <div>
-          <ul v-if="tiersState === 'open' || tiersState === 'loading'" class="grid grid-cols-3 gap-3" :aria-busy="tiersState === 'loading'">
-            <template v-if="tiersState === 'open'">
-              <li v-for="row in tierRows" :key="row.tier" class="card px-2 py-5 text-center">
-                <p class="text-sm text-ink-muted">Tier {{ row.tier }}</p>
-                <p class="mt-1 text-3xl font-semibold text-ink-bright">{{ row.price }}</p>
-                <p class="text-sm text-ink-muted">a month</p>
-                <p class="mt-3 text-sm text-ink">{{ row.servers }}</p>
-              </li>
-            </template>
-            <li v-for="n in loadingCards" v-else :key="n" class="card h-36 animate-pulse" aria-hidden="true"></li>
-          </ul>
-          <p v-if="ownMachine" class="mt-3 text-sm text-ink-muted">
-            Dedicated machine: {{ ownMachine }} a month for each, one more hosted server on a machine of its own, no tier
-            needed.
-          </p>
-          <p v-if="tiersState === 'closed'" class="card p-6 text-sm text-ink-muted">Support tiers are not open on NovaWorld yet.</p>
-          <p v-if="tiersState === 'failed'" class="card p-6 text-sm text-ink-muted">
-            The prices did not load. They are on the <RouterLink to="/support" class="link">support tiers</RouterLink> page.
-          </p>
-        </div>
+        <RouterLink to="/downloads" class="btn-primary">Get OpenNova</RouterLink>
       </div>
-
-      <RunItYourself id="run-it-yourself" class="mt-10" />
-    </section>
-
-    <!-- Downloads. -->
-    <section id="downloads" class="scroll-mt-20 border-t border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="downloads-title">
-      <div class="page">
-        <p class="eyebrow">Downloads</p>
-        <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
-        <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. There is a zip for each game, and its first launch downloads that
-          game: OP: Acid Gambit, Joint Operations or Delta Force Xtreme 2. Playing Joint Operations needs your own
-          purchased copy. Unzip one into an empty folder and run opennova.exe.
-        </p>
-        <p v-if="manifest" class="mt-2 text-sm text-ink-muted" data-test="downloads-version">
-          Version {{ manifest.version }}{{ buildKind ? `, a ${buildKind}` : '' }}<template v-if="manifest.commit">
-            from commit <a v-if="sourceUrl" :href="sourceUrl" class="link font-mono" :title="manifest.commit">{{ shortCommit }}</a
-            ><span v-else class="font-mono" :title="manifest.commit">{{ shortCommit }}</span></template
-          >, published <time :datetime="isoTime(manifest.published)">{{ formatUtc(manifest.published) }}</time>.
-        </p>
-
-        <ul class="mt-10 grid gap-4 lg:grid-cols-3">
-          <li v-for="item in gameCards" :key="item.file" class="card flex flex-col p-6">
-            <p class="text-lg font-semibold text-ink-bright">{{ item.name }}</p>
-            <p class="mt-2 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
-            <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="`Download ${item.name}`">Download</a>
-              <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">Not published yet</span>
-              <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="`build-${item.file}`">
-                <p>{{ item.file }}</p>
-                <p v-if="item.build">
-                  {{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span>
-                </p>
-              </div>
-            </div>
-          </li>
-        </ul>
-
-        <h3 class="mt-12 text-lg font-semibold text-ink-bright">Tools</h3>
-        <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <li v-for="item in toolCards" :key="item.file" class="card flex flex-col p-5">
-            <p class="font-semibold text-ink-bright">{{ item.name }}</p>
-            <p class="mt-1 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
-            <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-secondary px-4 py-2" :aria-label="`Download ${item.name}`">Download</a>
-              <span v-else class="btn-secondary cursor-not-allowed px-4 py-2 opacity-50" aria-disabled="true">Not published yet</span>
-              <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="`build-${item.file}`">
-                <p>{{ item.file }}</p>
-                <p v-if="item.build">
-                  {{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span>
-                </p>
-              </div>
-            </div>
-          </li>
-        </ul>
+      <div id="run-it-yourself" class="mt-8 flex flex-wrap gap-x-6 gap-y-3 border-t border-border pt-6 text-sm">
+        <RouterLink to="/support#support-run-it-yourself" class="link">Run a server yourself for free</RouterLink>
+        <a :href="ISSUES_URL" class="link" target="_blank" rel="noopener">Report a problem</a>
       </div>
     </section>
   </div>
@@ -283,179 +104,19 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchStats } from '../api/stats';
-import { fetchTiers } from '../api/billing';
-import RunItYourself from '../components/RunItYourself.vue';
-import type { TiersResponse } from '../types/billing';
-import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
-import { formatBytes, formatMoney, formatUtc, isoTime } from '../utils/format';
-import { ISSUES_URL } from '../utils/links';
 import { editorShots, hero, retailShots, timelapse } from '../utils/media';
-
-const editorFeatures = [
-  'Missions in a 3D view of their terrain, with their event logic beside them',
-  'Terrains: heights, surface maps and tiles',
-  'Models with their animation clips, and a Blender add-on for .3di models',
-  'Definition tables, menus, strings, fonts, sounds and music',
-  'Build packs the game archives; Play runs them in OpenNova or the original game',
-];
-
-// The downloads host's builds, by their stable names (scripts/stage_downloads.py): the games
-// first, then the tools.
-const games = [
-  {
-    name: 'OpenNova',
-    body: 'Our own game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
-    file: 'opennova-game-windows.zip',
-  },
-  {
-    name: 'OpenNova for Joint Operations',
-    body: 'The same game, set up for Joint Operations: unzip it into an empty folder and its first launch downloads Joint Operations and its Escalation expansion.',
-    file: 'jointops-game-windows.zip',
-  },
-  {
-    name: 'OpenNova for Delta Force Xtreme 2',
-    body: 'The same game, set up for Delta Force Xtreme 2: unzip it into an empty folder and its first launch downloads Delta Force Xtreme 2.',
-    file: 'dfx2-game-windows.zip',
-  },
-];
-
-const tools = [
-  {
-    name: 'OpenNova Editor',
-    body: 'The editor that made our game, ready to run on its own.',
-    file: 'opennova-editor-windows.zip',
-  },
-  {
-    name: 'Blender add-on',
-    body: 'Imports and exports .3di models and their animations in Blender 5.',
-    file: 'opennova-blender-addon-windows.zip',
-  },
-  {
-    name: 'Tools and dedicated server',
-    body: 'The command-line tools and opennova-serve, the server our hosted servers run. Retail and OpenNova players both join it.',
-    file: 'opennova-apps-windows.zip',
-  },
-  {
-    name: 'OpenNova Switcher',
-    body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address of your own. OpenNova and the original Jointops.exe don't need it.",
-    file: 'opennova-switcher-windows.zip',
-  },
-];
-
-// This deployment's downloads host (downloads.<the site's hostname>), and what its manifest
-// says: the version, the build and its commit, and each file's version, size and SHA-256. A
-// site with no host (a local stack) offers no download.
-const downloadsHost = downloadsBase(window.location.hostname);
-const manifest = ref<DownloadsManifest | null>(null);
-
-// The build on this deployment's downloads host once its manifest lists it; none before (a
-// deployment before its first publish, a manifest that failed to load), and never elsewhere.
-function downloadUrl(file: string): string | undefined {
-  return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : undefined;
-}
-
-// "release build", "debug build for staging": what the set is, when the manifest says.
-const buildKind = computed(() => {
-  const m = manifest.value;
-  if (!m) return '';
-  return m.build !== 'release' && m.talks_to ? `${m.build} build for ${m.talks_to}` : `${m.build} build`;
-});
-
-const shortCommit = computed(() => manifest.value?.commit.slice(0, 7) ?? '');
-
-// Where the builds came from (the release, or the CI run), which the commit links to.
-const sourceUrl = computed(() => {
-  const source = manifest.value?.source;
-  return source && /^https:\/\//i.test(source) ? source : undefined;
-});
-
-// A build's line under its file name: its version when its name carried one, the set's commit and,
-// for a build that is no release, the deployment it talks to, as the runtime's main menu names its
-// build ("v0.0.20 (705c774, staging), 53 MB"), then its size and SHA-256; none before the manifest
-// lists it.
-function buildInfo(file: string): { details: string; sha256: string } | undefined {
-  const m = manifest.value;
-  const entry = m?.files[file];
-  if (!m || !entry) return undefined;
-  const notes = [shortCommit.value, m.build && m.build !== 'release' ? m.talks_to || m.build : '']
-    .filter(Boolean)
-    .join(', ');
-  const name = entry.version ? `v${entry.version}` : '';
-  const which = name && notes ? `${name} (${notes})` : name || notes;
-  return { details: which ? `${which}, ${formatBytes(entry.size)}` : formatBytes(entry.size), sha256: entry.sha256 };
-}
-
-const gameCards = computed(() => games.map((item) => ({ ...item, build: buildInfo(item.file) })));
-const toolCards = computed(() => tools.map((item) => ({ ...item, build: buildInfo(item.file) })));
-
-// NovaWorld's live counts (GET /api/stats), as of the page's load.
+import { ISSUES_URL } from '../utils/links';
 const stats = ref<{ players: number; lobbies: number } | null>(null);
-const statsFailed = ref(false);
-
+const failed = ref(false);
 const statusText = computed(() => {
-  if (statsFailed.value) return 'NovaWorld status unavailable.';
-  if (!stats.value) return 'Checking NovaWorld…';
+  if (failed.value) return 'Player activity is unavailable right now.';
+  if (!stats.value) return 'Checking player activity…';
   const { players, lobbies } = stats.value;
-  if (!players && !lobbies) return 'NovaWorld is online. No one is hosting right now.';
-  return `${players.toLocaleString()} ${players === 1 ? 'player' : 'players'} across ${lobbies.toLocaleString()} ${
-    lobbies === 1 ? 'lobby' : 'lobbies'
-  } right now.`;
+  if (!players && !lobbies) return 'No players or servers listed on our NovaWorld right now.';
+  return `${players.toLocaleString()} ${players === 1 ? 'player' : 'players'} across ${lobbies.toLocaleString()} ${lobbies === 1 ? 'server' : 'servers'} on our NovaWorld.`;
 });
-
-const statusDot = computed(() => {
-  if (statsFailed.value) return 'bg-ink-muted';
-  if (!stats.value) return 'bg-warn';
-  return 'bg-online';
-});
-
-// The support tiers (GET /api/billing/tiers): loading, open with prices,
-// closed (billing off), or failed to load.
-const tiers = ref<TiersResponse | null>(null);
-const tiersFailed = ref(false);
-const loadingCards = 3;
-
-const tierRows = computed(() => {
-  const t = tiers.value;
-  if (!t || !t.enabled) return [];
-  return t.tiers
-    .filter((offer) => offer.amount !== null)
-    .map((offer) => ({
-      tier: offer.tier,
-      price: formatMoney(offer.amount as number, t.currency),
-      servers: `${offer.max_servers} hosted server${offer.max_servers === 1 ? '' : 's'}`,
-    }));
-});
-
-const tiersState = computed<'loading' | 'open' | 'closed' | 'failed'>(() => {
-  if (tiersFailed.value) return 'failed';
-  if (!tiers.value) return 'loading';
-  if (!tiers.value.enabled) return 'closed';
-  return tierRows.value.length ? 'open' : 'failed';
-});
-
-const ownMachine = computed(() => {
-  const t = tiers.value;
-  if (tiersState.value !== 'open' || !t?.own_machine || t.own_machine.amount === null) return '';
-  return formatMoney(t.own_machine.amount, t.currency);
-});
-
-onMounted(() => {
-  if (downloadsHost) {
-    fetchDownloadsManifest(downloadsHost).then((found) => {
-      manifest.value = found;
-    });
-  }
-  fetchStats()
-    .then((value) => {
-      if (value) stats.value = { players: value.players, lobbies: value.lobbies };
-      else statsFailed.value = true;
-    })
-    .catch(() => {
-      statsFailed.value = true;
-    });
-  fetchTiers().then((result) => {
-    if (result.ok) tiers.value = result.value;
-    else tiersFailed.value = true;
-  });
+onMounted(async () => {
+  try { stats.value = await fetchStats(); failed.value = !stats.value; }
+  catch { failed.value = true; }
 });
 </script>

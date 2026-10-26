@@ -55,10 +55,10 @@ describe('the legal pages', () => {
     expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Refunds', 'Canceling', 'How to ask']);
   });
 
-  it('the footer links the support tiers and the three legal pages', async () => {
+  it('the footer links hosting and support and the three legal pages', async () => {
     const wrapper = await mountAt(SiteFooter, '/');
     const links = Object.fromEntries(wrapper.findAll('a').map((a) => [a.text(), a.attributes('href')]));
-    expect(links['Support tiers']).toBe('/support');
+    expect(links['Hosting and support']).toBe('/support');
     expect(links['Terms']).toBe('/terms');
     expect(links['Privacy']).toBe('/privacy');
     expect(links['Refunds']).toBe('/refunds');

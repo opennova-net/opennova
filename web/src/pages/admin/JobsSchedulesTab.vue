@@ -75,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // The background jobs page's Schedules tab (JobsSection.vue): who schedules
 // them (each program its own) and the fleet leader, and each periodic kind (how often, its last run and its
 // result, the next, run now: POST /api/admin/jobs/run, asked first).
@@ -105,7 +106,7 @@ function capitalized(text: string): string {
 
 async function runNow(s: JobSchedule) {
   if (busy.value) return;
-  if (!window.confirm(`Run "${jobKindLabel(s.kind)}" now? A job of this kind is queued at once, beside its schedule; a worker takes it within seconds.`)) return;
+  if (!await confirmAction(`Run "${jobKindLabel(s.kind)}" now? A job of this kind is queued at once, beside its schedule; a worker takes it within seconds.`)) return;
   busy.value = true;
   const result = await runJobNow(s.kind);
   busy.value = false;

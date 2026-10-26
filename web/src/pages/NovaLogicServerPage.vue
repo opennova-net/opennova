@@ -1,6 +1,6 @@
 <template>
   <section class="page py-10 sm:py-14">
-    <RouterLink to="/lobby" class="text-sm text-accent hover:text-ink-bright">All lobbies</RouterLink>
+    <RouterLink to="/lobby" class="text-sm text-accent hover:text-ink-bright">All servers</RouterLink>
 
     <p v-if="gone" class="mt-6 rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
       This server is no longer listed.
@@ -23,6 +23,15 @@
           {{ server.players }} / {{ server.maxPlayers || 0 }}
         </span>
       </header>
+
+      <section class="mt-6 rounded-panel border border-accent/30 bg-accent/5 p-5" aria-labelledby="join-server">
+        <h2 id="join-server" class="font-semibold text-ink-bright">Join through NovaLogic's NovaWorld</h2>
+        <p class="mt-2 text-sm leading-relaxed text-ink-muted">To join, connect your game to NovaLogic's NovaWorld and find <span class="font-medium text-ink"><GameText :text="name" /></span> in the game's server browser. Use your NovaLogic account there. In OpenNova, choose Original NovaWorld; the original Jointops.exe needs no Switcher.</p>
+        <p v-if="server.password" class="mt-2 text-sm text-warn">Ask the host for this server's password.</p>
+        <p v-else-if="server.locked" class="mt-2 text-sm text-warn">This server is locked and may not accept new players.</p>
+        <RouterLink to="/play?game=jointops#online" class="link mt-3 inline-block text-sm">Joint Operations setup instructions</RouterLink>
+      </section>
+      <p v-if="loadedAt !== null" class="mt-3 text-xs text-ink-muted">List updated <RelativeTime :value="loadedAt" :now="now" /><span v-if="stale" class="text-warn">. The last refresh failed; showing the last details received.</span></p>
 
       <p v-if="unreachable" class="mt-4 text-xs text-ink-muted">
         NovaLogic's NovaWorld can't be reached right now, so this is from the last list we got.
@@ -76,10 +85,6 @@
         <p v-else class="text-sm text-ink-muted">No one is playing.</p>
       </section>
 
-      <p class="mt-8 text-sm text-ink-muted">
-        This server is on NovaLogic's own NovaWorld. To join it, connect your game to NovaLogic's NovaWorld instead of
-        ours and pick it in the game's server browser.
-      </p>
     </template>
   </section>
 </template>
@@ -91,6 +96,7 @@
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import GameText from '../components/GameText.vue';
+import RelativeTime from '../components/RelativeTime.vue';
 import { fetchNovaLogicLobbies } from '../api/lobbies';
 import { usePolling } from '../composables/usePolling';
 import { stripGameText } from '../utils/gameText';
@@ -106,6 +112,9 @@ const route = useRoute();
 const server = ref<NovaLogicServer | null>(null);
 const gone = ref(false);
 const error = ref('');
+const loadedAt = ref<number | null>(null);
+const now = ref(Date.now());
+const stale = ref(false);
 // The service has no list yet (it fetches NovaLogic's on its own cadence).
 const awaitingList = ref(false);
 // The service's last fetch of NovaLogic's list failed.
@@ -134,6 +143,11 @@ const poll = usePolling({
   async read(signal, background) {
     try {
       const list = await fetchNovaLogicLobbies(signal);
+      if (signal.aborted) return false;
+      now.value = Date.now();
+      const fetched = list.ageSeconds !== null ? now.value - list.ageSeconds * 1000 : list.fetchedAt ? Date.parse(list.fetchedAt) : null;
+      loadedAt.value = fetched !== null && Number.isFinite(fetched) ? fetched : null;
+      stale.value = false;
       const id = Number(route.params.id);
       const found = list.servers.find((s) => s.id === id) ?? null;
       unreachable.value = list.failing;
@@ -149,6 +163,8 @@ const poll = usePolling({
       return true;
     } catch (e) {
       if (signal.aborted) return false;
+      now.value = Date.now();
+      stale.value = true;
       if (!background || !server.value) error.value = 'The server could not be read. Try again shortly.';
       return false;
     }
@@ -161,6 +177,9 @@ watch(
   () => {
     server.value = null;
     gone.value = false;
+    loadedAt.value = null;
+    stale.value = false;
+    error.value = '';
     void poll.refresh();
   },
 );

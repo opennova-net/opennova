@@ -84,6 +84,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../composables/useConfirm';
 // The lobby instances (GET /api/admin/lobbies), on the NovaWorld page: each
 // lobby's address, whether it takes clients (taking clients, draining, or not
 // seen for 15 s), its sessions, the task it runs as (linked to that task's
@@ -116,7 +117,7 @@ let errorFromLoad = false;
 async function drain(l: AdminLobby) {
   if (busy.value) return;
   if (
-    !window.confirm(
+    !await confirmAction(
       `Drain lobby ${l.id}? The gates hand it no new client from their next read; the ${countLabel(l.sessions, 'session')} it holds stay until they leave, and its task stays in the load balancer.`,
     )
   )

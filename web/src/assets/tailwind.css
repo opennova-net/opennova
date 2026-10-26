@@ -8,38 +8,35 @@
   /* OpenNova's tactical palette — RGB channels so Tailwind alpha modifiers
      (e.g. bg-accent/22, border-border/50) keep working. Edit this block to
      re-skin the whole site. */
-  --surface: 22 24 32; /* #161820 darkest: app bg, inputs, pressed, tab bg */
-  --panel: 29 32 36; /* #1D2024 card / panel background */
-  --raised: 35 39 56; /* #232738 normal control fill / subtle border */
-  --hover: 45 51 57; /* #2D3339 hover fill / separators / scroll grabber */
-  --border: 35 39 56; /* #232738 default 1px border */
-  --border-strong: 60 65 74; /* #3C414A hover / window border */
-  --ink: 228 228 231; /* #E4E4E7 primary text */
-  --ink-muted: 156 163 175; /* #9CA3AF secondary / disabled text */
+  --surface: 16 23 25;
+  --panel: 24 33 35;
+  --raised: 35 46 49;
+  --hover: 43 57 60;
+  --border: 43 55 58;
+  --border-strong: 79 96 100;
+  --ink: 232 237 235;
+  --ink-muted: 164 180 181;
   --ink-bright: 255 255 255; /* #FFFFFF hover / focus text */
-  --on-accent: 22 24 32; /* dark text on an orange fill (== surface) */
-  --accent: 214 140 74; /* #D68C4A tactical orange */
+  --on-accent: 16 23 25;
+  --accent: 237 165 99;
   --danger: 240 68 68; /* #F04444 errors */
   --warn: 234 179 5; /* #EAB305 warnings / pending */
   --online: 74 222 128; /* #4ADE80 online / success */
 
-  /* Charts and meters (components/charts/, AllowanceMeter). The site is dark
-     only, so these are its one set. A series mark is the accent's hue
-     stepped into the dark lightness band (OKLCH L 0.48-0.67, >= 3:1 on the
-     panel), validated with the dataviz skill's validate_palette.js against
-     #1D2024 and #161820; the context line (a limit beside the series) is the
-     de-emphasis gray; grid and axis are hairlines one and two steps off the
-     panel. */
-  --chart-series: 201 128 64; /* #C98040 the series (slot 1) */
-  --chart-context: 107 114 128; /* #6B7280 de-emphasis: limits, context */
-  --chart-grid: 45 51 57; /* #2D3339 gridlines */
-  --chart-axis: 60 65 74; /* #3C414A baseline / axis rule */
+  /* Charts share the interface's palette; gaps remain gaps in the data. */
+  --chart-series: 237 165 99;
+  --chart-context: 145 164 167;
+  --chart-grid: 43 55 58;
+  --chart-axis: 79 96 100;
 
   background-color: rgb(var(--surface));
   color: rgb(var(--ink));
   /* The scrollbar's room kept on a short page too, so the layout does not
      shift sideways between a short page and a long one. */
   scrollbar-gutter: stable;
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
 /* The site's shared pieces: one place for the button, card and section
@@ -50,7 +47,7 @@
   }
   /* The admin pages' width: their tables want the screen. */
   .page-wide {
-    @apply mx-auto w-full max-w-screen-2xl px-4 sm:px-6;
+    @apply mx-auto w-full max-w-screen-2xl px-4 sm:px-6 lg:px-8;
   }
   .eyebrow {
     @apply text-xs font-semibold uppercase tracking-[0.25em] text-accent;
@@ -65,7 +62,34 @@
     @apply btn bg-accent text-on-accent hover:bg-accent/90;
   }
   .btn-secondary {
-    @apply btn border border-border-strong text-ink hover:border-accent hover:text-ink-bright;
+    @apply btn border border-border-strong bg-panel text-ink hover:border-accent hover:text-ink-bright;
+  }
+  .btn-danger {
+    @apply btn border border-danger/50 bg-danger/10 text-danger hover:bg-danger/20;
+  }
+  .page-heading {
+    @apply text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl;
+  }
+  .page-lead {
+    @apply mt-3 max-w-2xl text-base leading-relaxed text-ink-muted;
+  }
+  .section-heading {
+    @apply text-lg font-semibold tracking-tight text-ink-bright;
+  }
+  .field {
+    @apply w-full rounded-control border border-border-strong bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted/70 focus:border-accent disabled:opacity-50;
+  }
+  .field-label {
+    @apply block text-sm font-medium text-ink;
+  }
+  .notice {
+    @apply rounded-panel border border-border bg-panel px-4 py-3 text-sm leading-relaxed;
+  }
+  .workspace-nav-link {
+    @apply flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium text-ink-muted transition hover:bg-hover hover:text-ink-bright;
+  }
+  .tab-link {
+    @apply inline-flex min-h-11 items-center whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-ink-muted transition hover:text-ink-bright;
   }
   .link {
     @apply text-accent underline underline-offset-4 transition hover:text-ink-bright;
@@ -73,7 +97,31 @@
 }
 
 @layer base {
+  body {
+    @apply m-0 leading-relaxed antialiased;
+  }
+  button, input, select, textarea {
+    font: inherit;
+  }
+  button:not(:disabled), summary {
+    cursor: pointer;
+  }
+  dialog::backdrop {
+    background: rgb(5 10 12 / 0.75);
+    backdrop-filter: blur(4px);
+  }
+  :target {
+    scroll-margin-top: 5rem;
+  }
   :focus-visible {
     @apply outline outline-2 outline-offset-2 outline-accent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
