@@ -106,9 +106,19 @@ struct GameFontRun {
 
 class GameFont {
 public:
-	// Borrow a parsed font (not owned; the caller keeps it alive).
-	void set_font(const opennova::fnt::fnt_font_t *font) { font_ = font; }
+	// Borrow a parsed font (not owned; the caller keeps it alive). `unit_scale`: a
+	// menu font, which the menu font cache makes draw and measure at its texels,
+	// writing 1.0 over the 800 / design_width scale the loader stored [orig:
+	// CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0
+	// - fld flt_84C10C (1.0f), fstp [font+0x12EC]] (D-FNT-7); the HUD's fonts keep it.
+	void set_font(const opennova::fnt::fnt_font_t *font, bool unit_scale = false) {
+		font_ = font;
+		unit_scale_ = unit_scale;
+	}
 	const opennova::fnt::fnt_font_t *font() const { return font_; }
+	// The scale every glyph extent, line height and spacing pad multiplies in (the
+	// font's +0x12EC): 1.0 for a menu font, else fnt_design_scale. 0 with no font.
+	float design_scale() const;
 
 	// Emitted glyph quads carry page indices offset by this base, giving each
 	// font its own page namespace inside one mixed draw list (the compiler
@@ -176,6 +186,7 @@ private:
 	const opennova::fnt::fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
 
 	const opennova::fnt::fnt_font_t *font_ = nullptr;
+	bool unit_scale_ = false;
 	uint32_t page_base_ = 0;
 };
 

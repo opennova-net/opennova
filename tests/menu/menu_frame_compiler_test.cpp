@@ -7,6 +7,7 @@
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
+#include <runtime/hud/game_font.h>
 #include <runtime/menu/menu_click.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_frame.h>
@@ -909,6 +910,34 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 	// width(n) = 9n-1 >= 100 first at n=12 (107) -> 11 glyphs drawn.
 	CHECK(dl2.font_runs[0].count == 11,
 			"overflowing text truncates to the fitting prefix");
+}
+
+// A menu font measures and draws at its texels whatever its design width: the menu font
+// cache writes 1.0 over the loader's 800 / design_width, where the HUD's fonts keep it
+// [orig: CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0 -
+// flt_84C10C into the font's +0x12EC] (D-FNT-7). A 1600-designed font (the HUD's
+// scale 0.5) centres OK's "OK" where the 800-designed one does: 17 wide, x = 52.
+void test_menu_font_draws_at_its_texels() {
+	fnt_font_t wide = test_font::uniform_test_font();
+	wide.design_width = 1600;
+	opennova::mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), &wide);
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl.glyphs.empty() && dl.glyphs[0].x_top_left == 51.5f && dl.glyphs[0].y_top == 21.5f,
+			"the menu draws the font at its texels");
+	opennova::hud::GameFont hud;
+	hud.set_font(&wide);
+	int w = 0;
+	int h = 0;
+	hud.measure("OK", 1.0f, 1.0f, &w, &h);
+	CHECK(w < 17 && hud.design_scale() == 0.5f, "the HUD keeps the design scale");
+	opennova::hud::GameFont menu;
+	menu.set_font(&wide, true);
+	menu.measure("OK", 1.0f, 1.0f, &w, &h);
+	CHECK(w == 17 && h == 16 && menu.design_scale() == 1.0f, "a menu font's scale is 1.0");
+	fnt_free(&wide);
 }
 
 // Menu text honours the inline tags: a colour tag draws its own RGB under the
@@ -3321,6 +3350,7 @@ int main() {
 	test_table_visible_count_floors_to_one(&font);
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
+	test_menu_font_draws_at_its_texels();
 	test_list_rows_lay_out_by_the_items_justification(&font);
 	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);

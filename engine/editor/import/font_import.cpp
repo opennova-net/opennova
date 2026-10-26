@@ -159,8 +159,8 @@ const std::vector<ImportOptionRow> &font_import_option_rows() {
 		ImportOptionRow design;
 		design.key = "design_width";
 		design.label = "Design width";
-		design.words = "The screen width the font is drawn for (the .fnt header's design width): the game draws it at "
-		               "800 / this of its texels, 800 at their own size.";
+		design.words = "The screen width the font is drawn for (the .fnt header's design width): the HUD draws it at "
+		               "800 / this of its texels, 800 at their own size; the menus draw it at its own size.";
 		design.forms = {"<1..4096>"};
 		design.accepts = design_width_form;
 		design.fallback = "800";

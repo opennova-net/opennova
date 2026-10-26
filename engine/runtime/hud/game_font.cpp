@@ -59,9 +59,14 @@ float GameFont::char_height(uint8_t byte, float scale_y) const {
 	const fnt_glyph_t &space = font_->glyphs[0];
 	const int32_t extent = static_cast<int32_t>(
 			(static_cast<double>(space.uv.v1) - static_cast<double>(space.uv.v0)) *
-			static_cast<double>(fnt_design_scale(font_->design_width)) * 256.0);
+			static_cast<double>(design_scale()) * 256.0);
 	return static_cast<float>(
 			static_cast<int32_t>(static_cast<double>(extent) * static_cast<double>(scale_y)));
+}
+
+float GameFont::design_scale() const {
+	if (font_ == nullptr) return 0.0f;
+	return unit_scale_ ? 1.0f : fnt_design_scale(font_->design_width);
 }
 
 int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {
@@ -88,7 +93,7 @@ int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {
 		return 0;
 	}
 	return glyph_extent(
-			glyph->uv, font_->glyph_spacing, fnt_design_scale(font_->design_width), scale_x);
+			glyph->uv, font_->glyph_spacing, design_scale(), scale_x);
 }
 
 int glyph_extent(
@@ -111,7 +116,7 @@ float GameFont::line_height(float scale_y) const {
 	// @ 0x6752c0].
 	const fnt_glyph_t *space = &font_->glyphs[0];
 	return (space->uv.v1 - space->uv.v0) * 256.0f *
-			fnt_design_scale(font_->design_width) * scale_y;
+			design_scale() * scale_y;
 }
 
 bool GameFont::parse_format_tag(const char *text, int *index,
@@ -241,7 +246,7 @@ void GameFont::measure(const char *text, float scale_x, float scale_y,
 		return;
 	}
 	GameFontState state = p_state != nullptr ? *p_state : GameFontState{};
-	const float design = fnt_design_scale(font_->design_width);
+	const float design = design_scale();
 	const float scaled_x = design * scale_x;
 	const float pad = static_cast<float>(font_->glyph_spacing - 1);
 	const int tab = state.tab_width > 0 ? state.tab_width : 0;
@@ -344,7 +349,7 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 	base_state.color = color;
 	base_state.original_color = color;
 
-	const float design = fnt_design_scale(font_->design_width);
+	const float design = design_scale();
 	const float scaled_x = design * scale_x;
 	const float scaled_y = design * scale_y;
 	const float pad = static_cast<float>(font_->glyph_spacing - 1);

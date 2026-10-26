@@ -773,7 +773,7 @@ void MenuFrameCompiler::measure_with_(const fnt_font_t *font,
 		return;
 	}
 	hud::GameFont gf;
-	gf.set_font(font);
+	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
 	// Menu measurement runs at scale 1 in design space
 	// [orig: CStaticWnd_DrawLabel @ 0x656fb0 fld1 before the measure].
 	gf.measure(text.c_str(), 1.0f, 1.0f, out_w, out_h);
@@ -1102,7 +1102,7 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 		return;
 	}
 	hud::GameFont gf;
-	gf.set_font(font);
+	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
 	const size_t first = draw_list_.glyphs.size();
 	const size_t underline_first = draw_list_.underlines.size();
 	const float x = menu_text_anchor(design_x, s.x);
@@ -1157,7 +1157,7 @@ void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
 				1.0f, &left_w, &left_h);
 	}
 	const int gap = static_cast<int>(static_cast<float>(font->glyph_spacing - 1) *
-							fnt_design_scale(font->design_width)) +
+							gf.design_scale()) +
 			2;
 	int caret_x = design_x + left_w;
 	if (left_w > 0) {
@@ -1318,7 +1318,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 			const fnt_font_t *font = font_for(node);
 			if (font != nullptr) {
 				hud::GameFont gf;
-				gf.set_font(font);
+				gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
 				const int edge =
 						w.string_data.has_edge ? w.string_data.edge : 0;
 				int x_offset = 0;
