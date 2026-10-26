@@ -362,6 +362,10 @@ bool ControlsModel::is_token_held_off_keyboard(const String &p_token) const {
 	return token_pressed_(p_token, false, false);
 }
 
+bool ControlsModel::is_token_binding_active(const char *p_token) const {
+	return token_pressed_(String(p_token), true, true, true);
+}
+
 bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
 	const opennova::controls::BindingRecord *r = bindings_.record(bindings_.index_of_token(p_token));
 	return r != nullptr && r->mouse_mask == opennova::controls::kMouseLeft &&
@@ -379,7 +383,8 @@ int ControlsModel::mouse_click_code(int p_event) const {
 			? opennova::controls::action_code(cat[index].id) : -1;
 }
 
-bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse) const {
+bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse,
+		bool p_binding_active) const {
 	const CharString token = p_token.utf8();
 	const int index = bindings_.index_of_token(token.get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -395,15 +400,20 @@ bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool 
 	if (input == nullptr) {
 		return false;
 	}
-	if (p_keyboard && pressed_key_for_token(p_token) != 0) {
-		return true;
-	}
 	uint16_t held = 0;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) held |= opennova::controls::kMouseLeft;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) held |= opennova::controls::kMouseRight;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
-    const auto key_down = [this](int vk) { return vk_down_(vk); };
-    if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
+	if (p_binding_active) {
+		const auto key_state = [this](int vk) { return is_key_state_down(vk); };
+		if (bindings_.binding_active(index, key_state, held)) return true;
+	} else {
+		if (p_keyboard && pressed_key_for_token(p_token) != 0) {
+			return true;
+		}
+		const auto key_down = [this](int vk) { return vk_down_(vk); };
+		if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
+	}
     // A disabled joystick is never polled (engine BindingSet::set_joystick_enabled).
     if (r->joy_button != 0 && bindings_.joystick_enabled()) {
         const auto devices = input->get_connected_joypads();
@@ -429,15 +439,6 @@ bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool 
     return false;
 }
 
-String ControlsModel::mouse_event_token(int p_button) const {
-    Input *input = Input::get_singleton();
-    if (input == nullptr) return String();
-    const auto key_down = [this](int vk) { return vk_down_(vk); };
-    const int index = bindings_.mouse_event_action(mouse_mask_from_godot_button(p_button), key_down);
-    std::size_t count = 0;
-    const auto *cat = opennova::controls::catalog(&count);
-    return index >= 0 ? String::utf8(cat[index].token) : String();
-}
 
 int ControlsModel::mouse_mask_from_godot_button(int p_button) {
 	// Godot MouseButton -> the engine's witnessed kMouse* masks (the
@@ -553,7 +554,6 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restore_defaults"), &ControlsModel::restore_defaults);
 	ClassDB::bind_method(D_METHOD("godot_keys_for_token", "token"),
 			&ControlsModel::godot_keys_for_token);
-    ClassDB::bind_method(D_METHOD("mouse_event_token", "button"), &ControlsModel::mouse_event_token);
 	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("set_scripted_input", "input"),

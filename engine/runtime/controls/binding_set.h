@@ -299,6 +299,17 @@ class BindingSet {
   void set_keyboard_captured(bool captured) { keyboard_captured_ = captured; }
   bool keyboard_captured() const { return keyboard_captured_; }
 
+  // Whether the row's binding is held as the fire arm's live test reads it: a key slot down by
+  // the key state, else one of the row's mouse buttons held. No modifier word, no scan gate or
+  // walk, no other row's claim on the key, no text line's capture: a key shared with a row the
+  // press scan reaches first still holds this row. The test's joystick leg is
+  // pressed_joystick's (the embedder's device).
+  // [orig: Input_IsBindingActive @0x498320 - the key slots @0x498348, the mouse word against
+  //  g_MouseState.rawWParam @0x49836E, the joystick button @0x4983A0; its fire-arm call
+  //  Input_HandleActionBinding_0 case 0x95 @0x4E07D9]
+  bool binding_active(int index, const std::function<bool(int)> &key_state,
+                      uint16_t mouse_held) const;
+
   // Held mouse rows are polled independently. Event rows dispatch the FIRST
   // eligible match, modified rows before unmodified, in catalog order.
   // [orig: Input_ProcessMouseAxisBindings @0x499680;

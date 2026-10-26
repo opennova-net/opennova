@@ -87,6 +87,10 @@ public:
 	// (the shell's KeyboardPass), a mouse button's through its click records
 	// (mouse_click_code; D-CTRL-6).
 	bool is_token_held_off_keyboard(const String &p_token) const;
+	// Whether the token's binding is held as the fire arm's live test reads it: its key slots
+	// by the key state and its mouse buttons (engine BindingSet::binding_active carries the
+	// witness), its joystick button, the scripted device's hold.
+	bool is_token_binding_active(const char *p_token) const;
 	// The scripted device holds the token's row and the row binds the left mouse button: the
 	// hold stands for that button (engine controls::PlayerActionSource::scripted_left_button).
 	bool is_token_scripted_left_button(const char *p_token) const;
@@ -113,7 +117,6 @@ public:
 	// reaches only the readers of raw key events (retail's keystroke would
 	// also fire its key's binding).
 	void advance_scripted_input(int64_t p_logic_tick);
-	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
 	// those same two passes — the sampler's seam for rules that look at WHICH
 	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.
@@ -216,7 +219,10 @@ public:
 private:
 	// The key state by the layout's VK under the special-key takes.
 	bool vk_down_(int p_vk) const;
-	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true) const;
+	// p_binding_active: the keyboard and mouse legs by BindingSet::binding_active (the slots
+	// and buttons raw) in place of the dispatcher's walk.
+	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true,
+			bool p_binding_active = false) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

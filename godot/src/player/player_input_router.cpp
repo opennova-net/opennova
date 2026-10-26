@@ -89,6 +89,9 @@ public:
 	bool key_slots_down(const char *p_token) const override {
 		return controls_.is_valid() && controls_->is_token_key_down(p_token);
 	}
+	bool binding_active(const char *p_token) const override {
+		return controls_.is_valid() && controls_->is_token_binding_active(p_token);
+	}
 	// A keyboard key fires its row through the key queue's events (the shell's
 	// KeyboardPass); the mouse, joystick and scripted arms here.
 	bool held_off_keyboard(const char *p_token) const override {

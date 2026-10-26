@@ -208,7 +208,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	const auto admitted = [&gate](const char *token) {
 		return !gate.death_screen || (row_modes(token) & 2u) != 0;
 	};
-	frame.fire_held = captured && admitted("attack_1") && source.pressed("attack_1");
+	frame.fire_held = captured && admitted("attack_1") && source.binding_active("attack_1");
 	// The fire row's records (PlayerActionFrame::fire_held carries the witness): a key's press
 	// under the captured gate and the scan's mode word, the release pass's event under none,
 	// as ToSpecial's. Its off-keyboard arm's edges follow the gated state, as the trigger's

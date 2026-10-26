@@ -313,6 +313,16 @@ bool BindingSet::pressed_joystick(int index,
   return held(r->joy_button);
 }
 
+bool BindingSet::binding_active(int index, const std::function<bool(int)> &key_state,
+                                uint16_t mouse_held) const {
+  const BindingRecord *r = record(index);
+  if (r == nullptr) return false;
+  if ((r->primary != 0 && key_state(r->primary)) ||
+      (r->secondary != 0 && key_state(r->secondary)))
+    return true;  // [orig: @0x498348]
+  return (r->mouse_mask & mouse_held) != 0;  // [orig: @0x49836E]
+}
+
 bool BindingSet::pressed_mouse(int index, uint16_t held_mask,
     const std::function<bool(int)> &key_down, bool dead) const {
   const BindingRecord *r = record(index);
@@ -323,7 +333,8 @@ bool BindingSet::pressed_mouse(int index, uint16_t held_mask,
     return (r->mouse_mask & held_mask) != 0 &&
         (r->mouse_mod == 0 || key_down(r->mouse_mod));
   // Event rows use the same priority walk on the held button, leaving the
-  // caller to edge-detect it. Wheel events call mouse_event_action directly.
+  // caller to edge-detect it. A wheel notch is a click record (mouse_click_action's
+  // events 0x100 / 0x200).
   for (uint16_t mask : {kMouseLeft, kMouseRight, kMouseMiddle})
     if ((held_mask & mask) != 0 && mouse_event_action(mask, key_down, dead) == index)
       return true;

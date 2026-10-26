@@ -174,6 +174,29 @@ bool test_release_pass_follows_the_press_latch() {
 	latch.set(g);
 	events = set.release_pass(latch, key_state);
 	CHECK(events.size() == 1 && events[0].code == 220 && events[0].key == 'G');
+	// The release is the key's first release row in code order, whichever row took the press
+	// (D-CTRL-9): attack_1 (149) on ToSpecial's G takes the release alone, and on NextWaypoint's
+	// F7 (23, which the press scan fires) attack_1 still takes the key's release.
+	// [orig: @0x49d252..0x49d27f, the 0x80800000 test @0x49d26f, no press-scan gate read]
+	BindingSet shared;
+	const int attack = shared.index_of_token("attack_1");
+	const int next_waypoint = shared.index_of_token("NextWaypoint");
+	const int special = shared.index_of_token("ToSpecial");
+	CHECK(attack >= 0 && next_waypoint >= 0 && special >= 0);
+	CHECK(shared.assign_key(special, 'G', false, false, false, false));
+	CHECK(shared.assign_key(attack, 'G', false, false, false, false));
+	CHECK(shared.release_row('G') == attack);
+	latch.set(g);
+	down.clear();
+	events = shared.release_pass(latch, key_state);
+	CHECK(events.size() == 1 && events[0].code == 149 && events[0].key == 'G');
+	CHECK(shared.assign_key(attack, 0x76, false, false, false, false));
+	CHECK(shared.event_row(0x76, key_state) == next_waypoint);
+	KeyEvent f7;
+	f7.vk = 0x76;
+	latch.set(f7);
+	events = shared.release_pass(latch, key_state);
+	CHECK(events.size() == 1 && events[0].code == 149 && events[0].key == 0x76);
 	return true;
 }
 

@@ -297,11 +297,22 @@ bool test_mouse_dispatch() {
   bool ctrl = false;
   auto held = [&ctrl](int vk) { return ctrl && vk == 17; };
   auto token = [&set](const char *name) { return set.index_of_token(name); };
-  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("cycleweaponP"), "bare wheel cycles");
-  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("cycleweaponN"), "bare reverse wheel cycles");
+  // A wheel notch is a click record (events 0x100 / 0x200), which takes a held row's wheel
+  // word too [orig: Input_TryDispatchBindingByWeaponType @0x499180 - the second switch
+  // @0x4992C3..0x49930A].
+  CHECK(set.mouse_click_action(0x100, held) == token("cycleweaponP"), "bare wheel cycles");
+  CHECK(set.mouse_click_action(0x200, held) == token("cycleweaponN"), "bare reverse wheel cycles");
   ctrl = true;
-  CHECK(set.mouse_event_action(kMouseWheelUp, held) == token("ScopeZeroInc"), "Ctrl wheel increments zero only");
-  CHECK(set.mouse_event_action(kMouseWheelDown, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
+  CHECK(set.mouse_click_action(0x100, held) == token("ScopeZeroInc"), "Ctrl wheel increments zero only");
+  CHECK(set.mouse_click_action(0x200, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
+  ctrl = false;
+  {
+    BindingSet held_wheel;
+    held_wheel.assign_mouse(held_wheel.index_of_token("move_forward"), kMouseWheelUp);
+    CHECK(held_wheel.mouse_click_action(0x100, held) == held_wheel.index_of_token("move_forward"),
+          "a held row bound to the wheel takes the notch");
+  }
+  ctrl = true;
   CHECK(set.mouse_event_action(kMouseRight, held) == token("scope"), "RMB event toggles scope");
   CHECK(set.pressed_mouse(token("FreeLook"), kMouseRight, held), "RMB held also supplies free look");
   CHECK(!set.pressed_mouse(token("FreeLook"), 0, held), "release clears free look");

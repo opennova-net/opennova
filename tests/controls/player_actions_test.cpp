@@ -709,7 +709,34 @@ struct BoundKeys : PlayerActionSource {
 		return bindings.fire_signed(bindings.index_of_token(token), 0,
 				[this](int vk) { return down.count(vk) != 0; });
 	}
+	bool binding_active(const char *token) const override {
+		return bindings.binding_active(bindings.index_of_token(token),
+				[this](int vk) { return down.count(vk) != 0; }, 0);
+	}
 };
+
+// The fire row's held state is its binding's, as the fire arm's live test reads it: attack_1
+// moved onto NextWaypoint's F7 (the press scan gives F7 to NextWaypoint, code 23) still reads
+// held while F7 is down (D-CTRL-9).
+// [orig: Input_IsBindingActive @0x498320 - the key slots @0x498348; Input_HandleActionBinding_0
+//  case 0x95 @0x4E07D9]
+bool test_fire_held_reads_the_binding_raw() {
+	PlayerActions actions;
+	BoundKeys keys;
+	const int attack = keys.bindings.index_of_token("attack_1");
+	const int next_waypoint = keys.bindings.index_of_token("NextWaypoint");
+	CHECK(attack >= 0 && next_waypoint >= 0);
+	CHECK(keys.bindings.assign_key(attack, 0x76, false, false, false, false));
+	keys.down = {0x76};
+	CHECK(keys.bindings.pressed_key(attack, [&](int vk) { return keys.down.count(vk) != 0; }) == 0);
+	PlayerActionPoll gate;
+	gate.active = true;
+	gate.captured = true;
+	CHECK(actions.poll(keys, gate).fire_held);
+	keys.down.clear();
+	CHECK(!actions.poll(keys, gate).fire_held);
+	return true;
+}
 
 bool test_live_binding_modifier_remap_and_use_stream() {
 	PlayerActions actions;
@@ -1170,6 +1197,7 @@ int main() {
 			test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
 			test_live_binding_modifier_remap_and_use_stream,
+			test_fire_held_reads_the_binding_raw,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint,
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes, test_key_state_reset,
