@@ -615,13 +615,26 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 						if (p.user_id == *user_id)
 							row = p;
 					hostdb::remove_player(*db, playing_rid, *user_id);
+					// The row goes to the park for the reconnect's resume to write back. A
+					// reconnect on the receive thread may have taken the park meanwhile (this
+					// runs on main for a timeout), before the row reached it: the connection
+					// is back as it was, so the row is written back here instead.
+					bool resumed = false;
 					if (row && parked_ms != 0) {
 						std::lock_guard<std::mutex> lk(lobby_states_mu_);
 						const auto park = parked_lobby_states_.find(peer);
 						if (park != parked_lobby_states_.end() &&
-								park->second.parked_ms == parked_ms)
+								park->second.parked_ms == parked_ms) {
 							park->second.roster_row = std::move(row);
+						} else if (const auto back = lobby_states_.find(peer);
+								back != lobby_states_.end() &&
+								back->second.lobby.user_id == user_id &&
+								back->second.lobby.playing_rid == playing_rid) {
+							resumed = true;
+						}
 					}
+					if (resumed)
+						hostdb::add_player(*db, *row);
 				}
 			}
 		} catch (const std::exception &e) {
