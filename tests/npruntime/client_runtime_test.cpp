@@ -88,6 +88,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -267,7 +268,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(reply.data(), reply.size());
+	(void)joiner_receive::receive(joiner, reply.data(), reply.size());
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	return nw_decode_inbound(auth_datagram.data(), auth_datagram.size(), opcode, body) &&
 			opcode == SESSION_OPCODE_CLIENT_AUTH &&
@@ -648,8 +649,8 @@ bool run_tick_seed_anchors_the_client_clock() {
 	const std::vector<uint8_t> seed_dg = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x61, {0x00, 0x00, 0x11, 0x00})});
-	const inmatch::JoinerConnection::PollResult seeded =
-			joiner.handle_datagram(seed_dg.data(), seed_dg.size());
+	const joiner_receive::Received seeded =
+			joiner_receive::receive(joiner, seed_dg.data(), seed_dg.size());
 	if (!expect(seeded.tick_seed_set && seeded.tick_seed == kSeed,
 			"S2C 0x61 surfaces the per-player tick seed")) {
 		return false;
@@ -659,8 +660,8 @@ bool run_tick_seed_anchors_the_client_clock() {
 	// real seed that parks the clock again.
 	const std::vector<uint8_t> short_dg = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x61, {0x01, 0x02})});
-	const inmatch::JoinerConnection::PollResult short_seed =
-			joiner.handle_datagram(short_dg.data(), short_dg.size());
+	const joiner_receive::Received short_seed =
+			joiner_receive::receive(joiner, short_dg.data(), short_dg.size());
 	if (!expect(short_seed.tick_seed_set && short_seed.tick_seed == 0u,
 			"a short 0x61 body seeds zero rather than reading past the payload")) {
 		return false;
@@ -668,8 +669,8 @@ bool run_tick_seed_anchors_the_client_clock() {
 	const std::vector<uint8_t> disarm_dg = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x61, {0x00, 0x00, 0x00, 0x00})});
-	const inmatch::JoinerConnection::PollResult disarm =
-			joiner.handle_datagram(disarm_dg.data(), disarm_dg.size());
+	const joiner_receive::Received disarm =
+			joiner_receive::receive(joiner, disarm_dg.data(), disarm_dg.size());
 	return expect(disarm.tick_seed_set && disarm.tick_seed == 0u,
 			"the round-end disarm form is a witnessed seed of zero");
 }
@@ -698,8 +699,8 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_HEADER,
 					encode_end_round_header(header, /*non_team_form=*/false))});
-	const inmatch::JoinerConnection::PollResult header_result =
-			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
+	const joiner_receive::Received header_result =
+			joiner_receive::receive(joiner, header_datagram.data(), header_datagram.size());
 	if (!expect(header_result.queued_send_messages.size() == 1 &&
 			header_result.queued_send_messages[0].tag ==
 					c2s::END_ROUND_STATS_REQUEST &&
@@ -738,8 +739,8 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_STATS,
 					encode_end_round_stats_chunk(board_wire, 0))});
-	const inmatch::JoinerConnection::PollResult first =
-			joiner.handle_datagram(first_datagram.data(), first_datagram.size());
+	const joiner_receive::Received first =
+			joiner_receive::receive(joiner, first_datagram.data(), first_datagram.size());
 	if (!expect(first.queued_send_messages.size() == 1 &&
 			first.queued_send_messages[0].tag ==
 					c2s::END_ROUND_STATS_REQUEST &&
@@ -759,8 +760,8 @@ bool run_end_round_header_pulls_complete_board() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_STATS,
 					encode_end_round_stats_chunk(board_wire, 200))});
-	const inmatch::JoinerConnection::PollResult final =
-			joiner.handle_datagram(final_datagram.data(), final_datagram.size());
+	const joiner_receive::Received final =
+			joiner_receive::receive(joiner, final_datagram.data(), final_datagram.size());
 	if (!expect(final.queued_send_messages.empty(),
 			"the completing S2C 0x56 queues no further pull")) {
 		return false;
@@ -799,8 +800,8 @@ bool run_end_round_named_header_kicks_and_folds() {
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::END_ROUND_HEADER,
 					encode_end_round_header(header, /*non_team_form=*/true))});
-	const inmatch::JoinerConnection::PollResult header_result =
-			joiner.handle_datagram(header_datagram.data(), header_datagram.size());
+	const joiner_receive::Received header_result =
+			joiner_receive::receive(joiner, header_datagram.data(), header_datagram.size());
 	if (!expect(header_result.queued_send_messages.size() == 1 &&
 			header_result.queued_send_messages[0].tag ==
 					c2s::END_ROUND_STATS_REQUEST &&
@@ -890,7 +891,7 @@ bool run_class_allow_mask_follows_retail_host() {
 	const std::vector<uint8_t> configured = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x76, {0x55, 0x01})});
-	(void)joiner.handle_datagram(configured.data(), configured.size());
+	(void)joiner_receive::receive(joiner, configured.data(), configured.size());
 	if (!expect(joiner.class_allow_mask() == 0x0155u,
 	            "S2C 0x76 installs the retail host's configured u16 mask")) {
 		return false;
@@ -899,7 +900,7 @@ bool run_class_allow_mask_follows_retail_host() {
 	const std::vector<uint8_t> short_body = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x76, {0xAA})});
-	(void)joiner.handle_datagram(short_body.data(), short_body.size());
+	(void)joiner_receive::receive(joiner, short_body.data(), short_body.size());
 	if (!expect(joiner.class_allow_mask() == 0u,
 	            "a short S2C 0x76 clears the class mask like retail")) {
 		return false;
@@ -964,7 +965,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 		server_hello.sus2 = "revx02";
 		const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 				SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-		(void)joiner.handle_datagram(
+		(void)joiner_receive::receive(joiner,
 				server_hello_datagram.data(), server_hello_datagram.size());
 		const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 		if (!expect(!auth_datagram.empty(),
@@ -1044,7 +1045,7 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	server_auth.mi = 3;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
+	(void)joiner_receive::receive(joiner, server_auth_datagram.data(), server_auth_datagram.size());
 	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<ProtocolMessage> initial_settings = {
 			make_protocol_message(
@@ -1054,8 +1055,8 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	};
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck, initial_settings);
-	const inmatch::JoinerConnection::PollResult settings_result =
-			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
+	const joiner_receive::Received settings_result =
+			joiner_receive::receive(joiner, settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 	            "join-tokens: initial settings emit ACK then JOIN")) {
 		return false;
@@ -1170,7 +1171,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	server_hello.sus2 = "revx02";
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	// The 0x42 leaves at the first pump whose clock reads past the connect state's start: the
 	// held join's test clock steps there (the steady helper waits on a clock it never moves).
@@ -1201,7 +1202,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	server_auth.mi = kConnectionId;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+	const joiner_receive::Received auth_result = joiner_receive::receive(joiner,
 			server_auth_datagram.data(), server_auth_datagram.size());
 	if (!expect(auth_result.outbound.empty(),
 			"ServerAuth waits for retail's initial sequenced settings packet")) {
@@ -1222,8 +1223,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	};
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck, initial_settings);
-	const inmatch::JoinerConnection::PollResult settings_result =
-			joiner.handle_datagram(settings_datagram.data(), settings_datagram.size());
+	const joiner_receive::Received settings_result =
+			joiner_receive::receive(joiner, settings_datagram.data(), settings_datagram.size());
 	if (!expect(settings_result.outbound.size() == 2,
 			"initial settings emit header-only ACK then JOIN")) {
 		return false;
@@ -1262,8 +1263,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	const std::vector<uint8_t> join_ack_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x00, {})});
-	const inmatch::JoinerConnection::PollResult join_ack_result =
-			joiner.handle_datagram(join_ack_datagram.data(), join_ack_datagram.size());
+	const joiner_receive::Received join_ack_result =
+			joiner_receive::receive(joiner, join_ack_datagram.data(), join_ack_datagram.size());
 	if (!expect(join_ack_result.outbound.size() == 2,
 			"S2C JOIN ack emits header-only ACK then form post")) {
 		return false;
@@ -1307,8 +1308,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	const std::vector<uint8_t> padding_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x02, std::move(padding_probe))});
-	const inmatch::JoinerConnection::PollResult padding_result =
-			joiner.handle_datagram(padding_datagram.data(), padding_datagram.size());
+	const joiner_receive::Received padding_result =
+			joiner_receive::receive(joiner, padding_datagram.data(), padding_datagram.size());
 	if (!expect(padding_result.outbound.size() == 1 &&
 				decode_client_session(
 						padding_result.outbound[0], client_auth.scrk,
@@ -1370,7 +1371,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 						make_protocol_message(0x7B, retail_full_player_info()),
 						make_protocol_message(0x03, nag),
 				});
-		if (!expect(take_acks(joiner.handle_datagram(admission_datagram.data(),
+		if (!expect(take_acks(joiner_receive::receive(joiner, admission_datagram.data(),
 						admission_datagram.size()).outbound) &&
 						take_acks(joiner.pump(0)) && acks == 1,
 				"held: the 0x02 handler's records draw one header-only ACK")) {
@@ -1384,7 +1385,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 			const std::vector<uint8_t> nag_datagram = frame_server_session(
 					server_seq, server_scrk, client_auth.ck,
 					{make_protocol_message(0x03, nag)});
-			if (!expect(take_acks(joiner.handle_datagram(nag_datagram.data(),
+			if (!expect(take_acks(joiner_receive::receive(joiner, nag_datagram.data(),
 							nag_datagram.size()).outbound) &&
 							take_acks(joiner.pump(0)) && acks == 1,
 					"held: each nag draws one header-only ACK and nothing else")) {
@@ -1418,7 +1419,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 						make_protocol_message(0x04, retail_slot_assignment()),
 						make_protocol_message(0x7B, retail_full_player_info()),
 				});
-		const inmatch::JoinerConnection::PollResult held_start_result = joiner.handle_datagram(
+		const joiner_receive::Received held_start_result = joiner_receive::receive(joiner,
 				held_start_datagram.data(), held_start_datagram.size());
 		return expect(held_start_result.outbound.size() == 1 &&
 						decode_client_session(held_start_result.outbound[0], client_auth.scrk,
@@ -1436,8 +1437,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	const std::vector<uint8_t> metadata_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x03, {0x01})});
-	const inmatch::JoinerConnection::PollResult metadata_result =
-			joiner.handle_datagram(metadata_datagram.data(), metadata_datagram.size());
+	const joiner_receive::Received metadata_result =
+			joiner_receive::receive(joiner, metadata_datagram.data(), metadata_datagram.size());
 	if (!expect(metadata_result.outbound.empty(),
 			"metadata with no semantic response defers its ACK to the send boundary")) {
 		return false;
@@ -1476,8 +1477,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					make_protocol_message(0x04, retail_slot_assignment()),
 					make_protocol_message(0x7B, retail_full_player_info()),
 			});
-	const inmatch::JoinerConnection::PollResult game_start_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received game_start_result =
+			joiner_receive::receive(joiner,
 					game_start_datagram.data(), game_start_datagram.size());
 	if (!expect(game_start_result.outbound.size() == 1 &&
 				decode_client_session(
@@ -1515,8 +1516,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					make_protocol_message(
 							0x60, retail_transfer_chunk(1, 171, 0xA5)),
 			});
-	const inmatch::JoinerConnection::PollResult server_info_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received server_info_result =
+			joiner_receive::receive(joiner,
 					server_info_datagram.data(), server_info_datagram.size());
 	if (!expect(server_info_result.outbound.size() == 2,
 			"final server-info chunk emits retail's two response packets")) {
@@ -1569,8 +1570,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					make_protocol_message(
 							0x64, std::move(mission_data_chunk)),
 			});
-	const inmatch::JoinerConnection::PollResult mission_data_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received mission_data_result =
+			joiner_receive::receive(joiner,
 					mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
 			mission_data_result.queued_send_messages.size() == 1 &&
@@ -1605,8 +1606,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 			{make_protocol_message(0x2C, std::move(map_names)),
 					make_protocol_message(
 							0x16, encode_test_player_list({{0, 1}, {1, 2}}))});
-	const inmatch::JoinerConnection::PollResult player_list_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received player_list_result =
+			joiner_receive::receive(joiner,
 					player_list_datagram.data(), player_list_datagram.size());
 	if (!expect(player_list_result.outbound.empty() &&
 				player_list_result.queued_send_messages.empty(),
@@ -1635,11 +1636,11 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		fork_seq.last_inbound_seq = 10;
 		const std::vector<uint8_t> round_end = frame_server_session(
 				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
-		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)joiner_receive::receive(fork, round_end.data(), round_end.size());
 		(void)fork.finish_receive_pump();
 		const std::vector<uint8_t> late_tail = frame_server_session(
 				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
-		const inmatch::JoinerConnection::PollResult late = fork.handle_datagram(
+		const joiner_receive::Received late = joiner_receive::receive(fork,
 				late_tail.data(), late_tail.size());
 		bool queued_0a = false;
 		for (const std::vector<uint8_t> &dg : late.outbound) {
@@ -1672,8 +1673,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x11, {})});
 		const std::vector<uint8_t> round_end = frame_server_session(
 				fork_seq, server_scrk, client_auth.ck, {make_protocol_message(0x1D, {})});
-		(void)fork.handle_datagram(tail.data(), tail.size());
-		(void)fork.handle_datagram(round_end.data(), round_end.size());
+		(void)joiner_receive::receive(fork, tail.data(), tail.size());
+		(void)joiner_receive::receive(fork, round_end.data(), round_end.size());
 		(void)fork.finish_receive_pump();
 		bool sent_0a = false;
 		sent_0a = fork.take_world_stream_request().has_value();
@@ -1694,8 +1695,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	const std::vector<uint8_t> sync_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x11, {})});
-	const inmatch::JoinerConnection::PollResult sync_tail_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received sync_tail_result =
+			joiner_receive::receive(joiner,
 					sync_tail_datagram.data(), sync_tail_datagram.size());
 	if (!expect(sync_tail_result.outbound.empty() && joiner.finish_receive_pump().empty(),
 			"the 0x11 sets the wait's flag: its 0x0A is owed to the send boundary")) {
@@ -1734,7 +1735,7 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		const std::vector<uint8_t> same_pass = frame_server_session(
 				fork_seq, server_scrk, client_auth.ck,
 				{make_protocol_message(0x1A, {}), make_protocol_message(0x1D, {})});
-		(void)fork.handle_datagram(same_pass.data(), same_pass.size());
+		(void)joiner_receive::receive(fork, same_pass.data(), same_pass.size());
 		(void)fork.finish_receive_pump();
 		inmatch::JoinerConnection::MissionStartSubmissions none;
 		if (!expect(fork.mission_start_aborted() && !fork.mission_start_released() &&
@@ -1748,8 +1749,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
-	const inmatch::JoinerConnection::PollResult world_end_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received world_end_result =
+			joiner_receive::receive(joiner,
 					world_end_datagram.data(), world_end_datagram.size());
 	// The 0x1A only releases the mission start; its submissions are the runtime's to
 	// queue and pump (ClientRuntime::push_mission_start_end, D-NET-NEW-L2-6).
@@ -1811,8 +1812,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					make_organic_spawn(
 							kRetailSelfHandle, "RetailPrelude",
 							0x10000, 0x20000, 0x30000, 0, 1, 7, 0, kConnectionId))});
-	const inmatch::JoinerConnection::PollResult self_spawn_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received self_spawn_result =
+			joiner_receive::receive(joiner,
 					self_spawn_datagram.data(), self_spawn_datagram.size());
 	if (!expect(self_spawn_result.outbound.empty() &&
 				joiner.has_self_handle() &&
@@ -1832,8 +1833,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 		const std::vector<uint8_t> world_state_only = frame_server_session(
 				fork_seq, server_scrk, client_auth.ck,
 				{make_protocol_message(0x0F, std::vector<uint8_t>(23, 0))});
-		const inmatch::JoinerConnection::PollResult released =
-				spectator_fork.handle_datagram(world_state_only.data(), world_state_only.size());
+		const joiner_receive::Received released =
+				joiner_receive::receive(spectator_fork, world_state_only.data(), world_state_only.size());
 		if (!expect(released.gameplay_release_applied && released.reached_in_match &&
 		                    spectator_fork.in_match() &&
 		                    spectator_fork.initial_admission_complete(),
@@ -1850,8 +1851,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(
 					0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
-	const inmatch::JoinerConnection::PollResult first_grant_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received first_grant_result =
+			joiner_receive::receive(joiner,
 					first_grant_datagram.data(), first_grant_datagram.size());
 	if (!expect(first_grant_result.outbound.empty() &&
 				first_grant_result.gameplay_release_applied &&
@@ -1880,8 +1881,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					make_protocol_message(0x19, {0x40, 0x30, 0x20, 0x10}),
 					make_protocol_message(0x0F, std::move(zoned_world_state)),
 			});
-	const inmatch::JoinerConnection::PollResult granted_loadout_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received granted_loadout_result =
+			joiner_receive::receive(joiner,
 					deployment_policy_datagram.data(),
 					deployment_policy_datagram.size());
 	const std::vector<uint8_t> expected_loadout_request = {
@@ -1917,8 +1918,8 @@ bool run_retail_post_auth_prelude(const std::string &side_password = {},
 					{make_protocol_message(
 							0x5A,
 							{0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
-	const inmatch::JoinerConnection::PollResult split_second_grant_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received split_second_grant_result =
+			joiner_receive::receive(joiner,
 					split_second_grant_datagram.data(),
 					split_second_grant_datagram.size());
 	if (!expect(split_second_grant_result.outbound.empty() &&
@@ -1962,7 +1963,7 @@ bool run_early_sync_tail_latch() {
 	server_hello.hk = 0x99AA0011u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(!auth_datagram.empty(), "early-tail: ClientAuth emitted")) {
@@ -1982,7 +1983,7 @@ bool run_early_sync_tail_latch() {
 	server_auth.mi = kConnectionId;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
+	(void)joiner_receive::receive(joiner, server_auth_datagram.data(), server_auth_datagram.size());
 	const std::string server_scrk = "SERVER-EARLY-TAIL-SCRK";
 
 	// Settings -> [header ACK, JOIN]; S2C 0x00 -> [header ACK, 0x01 {0}]; probe -> echo;
@@ -1999,7 +2000,7 @@ bool run_early_sync_tail_latch() {
 	};
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck, initial_settings);
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				settings_datagram.data(), settings_datagram.size()).outbound.size() == 2,
 			"early-tail: settings emit ACK + JOIN")) {
 		return false;
@@ -2008,7 +2009,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> join_ack_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x00, {})});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				join_ack_datagram.data(), join_ack_datagram.size()).outbound.size() == 2,
 			"early-tail: JOIN ack emits ACK + form post")) {
 		return false;
@@ -2030,7 +2031,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> padding_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x02, std::move(padding_probe))});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				padding_datagram.data(), padding_datagram.size()).outbound.size() == 1,
 			"early-tail: probe echoed")) {
 		return false;
@@ -2042,7 +2043,7 @@ bool run_early_sync_tail_latch() {
 					make_protocol_message(0x05, {0x01}),
 					make_protocol_message(0x7B, retail_full_player_info()),
 			});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				game_start_datagram.data(), game_start_datagram.size()).outbound.size() == 1,
 			"early-tail: game-start emits the grouped admission packet")) {
 		return false;
@@ -2054,7 +2055,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> early_tail_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x11, {})});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				early_tail_datagram.data(), early_tail_datagram.size()).outbound.empty() &&
 				!joiner.preload_ready(),
 			"early-tail: a mid-transfer 0x11 is latched, not applied")) {
@@ -2080,7 +2081,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> server_info_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x60, retail_transfer_chunk(1, 64, 0xA5))});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				server_info_datagram.data(), server_info_datagram.size()).outbound.size() == 2,
 			"early-tail: server-info final emits 0x47 + 0x37")) {
 		return false;
@@ -2088,7 +2089,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x64, retail_transfer_chunk(1, 64, 0x5A))});
-	const inmatch::JoinerConnection::PollResult mission_data_result = joiner.handle_datagram(
+	const joiner_receive::Received mission_data_result = joiner_receive::receive(joiner,
 			mission_data_datagram.data(), mission_data_datagram.size());
 	if (!expect(mission_data_result.outbound.empty() &&
 				mission_data_result.queued_send_messages.size() == 1 &&
@@ -2126,7 +2127,7 @@ bool run_early_sync_tail_latch() {
 	const std::vector<uint8_t> world_end_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x1A, {})});
-	const inmatch::JoinerConnection::PollResult world_end_result = joiner.handle_datagram(
+	const joiner_receive::Received world_end_result = joiner_receive::receive(joiner,
 			world_end_datagram.data(), world_end_datagram.size());
 	inmatch::JoinerConnection::MissionStartSubmissions submissions;
 	return expect(world_end_result.outbound.empty() &&
@@ -2158,14 +2159,14 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 	const std::vector<uint8_t> first =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(first_body));
 
-	inmatch::JoinerConnection::PollResult initial =
-			joiner.handle_datagram(first.data(), first.size());
+	joiner_receive::Received initial =
+			joiner_receive::receive(joiner, first.data(), first.size());
 	if (!expect(initial.inbound_gameplay.size() == 1 &&
 	                    initial.inbound_gameplay[0].first == 0x49,
 	            "first S2C 0x83 surfaces its one-shot reload event"))
 		return false;
-	inmatch::JoinerConnection::PollResult duplicate =
-			joiner.handle_datagram(first.data(), first.size());
+	joiner_receive::Received duplicate =
+			joiner_receive::receive(joiner, first.data(), first.size());
 	if (!expect(duplicate.inbound_gameplay.empty(),
 	            "exact duplicate S2C 0x83 does not replay its one-shot event"))
 		return false;
@@ -2179,10 +2180,10 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 		return false;
 	const std::vector<uint8_t> second =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(second_body));
-	if (!expect(joiner.handle_datagram(second.data(), second.size()).inbound_gameplay.size() == 1,
+	if (!expect(joiner_receive::receive(joiner, second.data(), second.size()).inbound_gameplay.size() == 1,
 	            "next contiguous S2C 0x83 dispatches"))
 		return false;
-	if (!expect(joiner.handle_datagram(first.data(), first.size()).inbound_gameplay.empty(),
+	if (!expect(joiner_receive::receive(joiner, first.data(), first.size()).inbound_gameplay.empty(),
 	            "older replayed S2C 0x83 stays suppressed"))
 		return false;
 	if (!expect(joiner.connection().seq.last_inbound_seq == 2,
@@ -2249,8 +2250,8 @@ bool run_client_reducer_preserves_packet_message_order() {
 			});
 	if (!expect(!datagram.empty(), "frame mixed reducer-order packet"))
 		return false;
-	const inmatch::JoinerConnection::PollResult poll =
-			joiner.handle_datagram(datagram.data(), datagram.size());
+	const joiner_receive::Received poll =
+			joiner_receive::receive(joiner, datagram.data(), datagram.size());
 	const std::array<uint8_t, 10> expected{
 			{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x44, 0x6E, 0x81, 0x40, 0x6B}};
 	if (!expect(poll.inbound_reducer.size() == expected.size(),
@@ -5127,8 +5128,8 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x43, {0x11, 0x22, 0x33, 0x44}), // server stamp
 					make_protocol_message(0x68, {0x32, 0x00, 0x00, 0x00}), // page start 50
 			});
-	const inmatch::JoinerConnection::PollResult r =
-			joiner.handle_datagram(quartet.data(), quartet.size());
+	const joiner_receive::Received r =
+			joiner_receive::receive(joiner, quartet.data(), quartet.size());
 	if (!expect(r.outbound.empty() && r.queued_send_messages.size() == 3,
 			"periodic replies remain semantic until the client send boundary"))
 		return false;
@@ -5217,8 +5218,8 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 					make_protocol_message(0x68, {0x01, 0x00, 0x00, 0x00}),
 			});
-	const inmatch::JoinerConnection::PollResult active_result =
-			joiner.handle_datagram(active.data(), active.size());
+	const joiner_receive::Received active_result =
+			joiner_receive::receive(joiner, active.data(), active.size());
 	if (!expect(active_result.outbound.empty() &&
 	                    active_result.queued_send_messages.size() == 2,
 			"active challenge pair remains queued for one send boundary"))
@@ -5274,8 +5275,8 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x41, {0x05, 0xA5}),
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 			});
-	const inmatch::JoinerConnection::PollResult cleared_result =
-			joiner.handle_datagram(
+	const joiner_receive::Received cleared_result =
+			joiner_receive::receive(joiner,
 					clear_then_challenge.data(), clear_then_challenge.size());
 	const std::vector<std::vector<uint8_t>> cleared_framed =
 			joiner.frame_messages(cleared_result.queued_send_messages);
@@ -5320,8 +5321,8 @@ bool run_periodic_request_quartet_is_answered() {
 					make_protocol_message(0x5A, {0x08, 0xFF}),
 					make_protocol_message(0x39, {0x04, 0x03, 0x02, 0x01}),
 			});
-	const inmatch::JoinerConnection::PollResult ordered_result =
-			joiner.handle_datagram(ordered_classes.data(), ordered_classes.size());
+	const joiner_receive::Received ordered_result =
+			joiner_receive::receive(joiner, ordered_classes.data(), ordered_classes.size());
 	const std::vector<std::vector<uint8_t>> ordered_framed =
 			joiner.frame_messages(ordered_result.queued_send_messages);
 	ProtocolPacketHeader ordered_header;
@@ -5347,7 +5348,7 @@ bool run_periodic_request_quartet_is_answered() {
 	//  CharAttr_UnpackDisabledProperties @0x4124D0]
 	const std::vector<uint8_t> latch_word = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x42, {0x02, 0x00})});
-	joiner.handle_datagram(latch_word.data(), latch_word.size());
+	joiner_receive::receive(joiner, latch_word.data(), latch_word.size());
 	if (!expect(joiner.charattr_table().disabled[charattr::kAttributes] == 1 &&
 	                    joiner.charattr_table().disabled[charattr::kRecoilMute] == 0 &&
 	                    !inmatch::charattr_class_has_attribute(joiner.charattr_table(), 8, charattr::kKnifeBonus),
@@ -5355,7 +5356,7 @@ bool run_periodic_request_quartet_is_answered() {
 		return false;
 	const std::vector<uint8_t> short_word = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x42, {0x02})});
-	joiner.handle_datagram(short_word.data(), short_word.size());
+	joiner_receive::receive(joiner, short_word.data(), short_word.size());
 	return expect(joiner.charattr_table().disabled[charattr::kAttributes] == 0 &&
 	                      inmatch::charattr_class_has_attribute(joiner.charattr_table(), 8, charattr::kKnifeBonus),
 			"a short S2C 0x42 unpacks 0");
@@ -5372,8 +5373,8 @@ bool run_reverse_rtt_probe_is_echoed() {
 	const std::vector<uint8_t> probe = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x57, {0x44, 0x33, 0x22, 0x11, 0x01})});
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(probe.data(), probe.size());
+	const joiner_receive::Received result =
+			joiner_receive::receive(joiner, probe.data(), probe.size());
 	if (!expect(result.outbound.empty() && result.queued_send_messages.size() == 1,
 			"S2C 0x57 flag=1 queues one C2S response"))
 		return false;
@@ -5416,8 +5417,8 @@ bool run_rtt_pong_fills_the_client_ring() {
 	const std::vector<uint8_t> pong = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x57, {0x00, 0x70, 0x66, 0x55, 0x00})});
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(pong.data(), pong.size());
+	const joiner_receive::Received result =
+			joiner_receive::receive(joiner, pong.data(), pong.size());
 	if (!expect(result.outbound.empty() && result.queued_send_messages.empty(),
 			"a flag=0 0x57 queues nothing back"))
 		return false;
@@ -5428,7 +5429,7 @@ bool run_rtt_pong_fills_the_client_ring() {
 	const std::vector<uint8_t> second = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x57, {0x00, 0x77, 0x66, 0x55, 0x00})});
-	(void)joiner.handle_datagram(second.data(), second.size());
+	(void)joiner_receive::receive(joiner, second.data(), second.size());
 	return expect(joiner.client_ping_ms() == 0x88u &&
 					joiner.client_average_ping_ms() == (0x788u + 0x88u) / 10u,
 			"the second pong advances the ring index and the mean");
@@ -5463,8 +5464,8 @@ bool run_server_ping_answers_and_measures() {
 	now_ms = 5500;
 	const std::vector<uint8_t> request =
 			nw_encode_outbound(0x85, ping_body(7u, 1, 0xAABBCCDDu));
-	inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(request.data(), request.size());
+	joiner_receive::Received result =
+			joiner_receive::receive(joiner, request.data(), request.size());
 	// SendPing writes the pong to the socket from inside the receive pump
 	// [orig: Nwu_HandlePing -> CNapiNPConnection_SendPing @0x623c6f].
 	if (!expect(result.immediate_outbound.size() == 1 && result.outbound.empty(),
@@ -5483,14 +5484,14 @@ bool run_server_ping_answers_and_measures() {
 	// The host's pong of our ping: rtt = now - MS.
 	now_ms = 6000;
 	const std::vector<uint8_t> pong = nw_encode_outbound(0x85, ping_body(7u, 0, 5750u));
-	result = joiner.handle_datagram(pong.data(), pong.size());
+	result = joiner_receive::receive(joiner, pong.data(), pong.size());
 	if (!expect(result.outbound.empty() && result.immediate_outbound.empty() &&
 					joiner.session_ping_ms() == 250u,
 			"a WR-clear ping lands the outer round trip"))
 		return false;
 	// A foreign receiver key is dropped silently.
 	const std::vector<uint8_t> foreign = nw_encode_outbound(0x85, ping_body(9u, 1, 1u));
-	result = joiner.handle_datagram(foreign.data(), foreign.size());
+	result = joiner_receive::receive(joiner, foreign.data(), foreign.size());
 	return expect(result.outbound.empty() && result.immediate_outbound.empty() &&
 					joiner.session_ping_ms() == 250u,
 			"a ping keyed by another connection is ignored");
@@ -5516,14 +5517,14 @@ bool run_world_state_load_bursts_on_every_0x0f() {
 	};
 	const std::vector<uint8_t> first = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, body)});
-	const inmatch::JoinerConnection::PollResult r1 =
-			joiner.handle_datagram(first.data(), first.size());
+	const joiner_receive::Received r1 =
+			joiner_receive::receive(joiner, first.data(), first.size());
 	if (!expect(burst_count(r1) == 1, "the first 0x0F queues its completion burst"))
 		return false;
 	const std::vector<uint8_t> second = frame_server_session(
 			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, body)});
-	const inmatch::JoinerConnection::PollResult r2 =
-			joiner.handle_datagram(second.data(), second.size());
+	const joiner_receive::Received r2 =
+			joiner_receive::receive(joiner, second.data(), second.size());
 	return expect(burst_count(r2) == 1, "a second 0x0F queues the burst again");
 }
 
@@ -7765,8 +7766,8 @@ bool run_joiner_correlates_handshake_echoes() {
 	wrong_hello.ci ^= 0x100u;
 	const std::vector<uint8_t> wrong_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(wrong_hello));
-	const inmatch::JoinerConnection::PollResult ignored_hello =
-			joiner.handle_datagram(wrong_hello_datagram.data(), wrong_hello_datagram.size());
+	const joiner_receive::Received ignored_hello =
+			joiner_receive::receive(joiner, wrong_hello_datagram.data(), wrong_hello_datagram.size());
 	if (!expect(ignored_hello.outbound.empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"a ServerHello for another CI is ignored without advancing"))
@@ -7775,7 +7776,7 @@ bool run_joiner_correlates_handshake_echoes() {
 	ServerHello valid_hello = build_server_hello(hello, 0x7F000001u, 32769);
 	const std::vector<uint8_t> valid_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(valid_hello));
-	(void)joiner.handle_datagram(valid_hello_datagram.data(), valid_hello_datagram.size());
+	(void)joiner_receive::receive(joiner, valid_hello_datagram.data(), valid_hello_datagram.size());
 	const std::vector<uint8_t> auth_request = inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(!auth_request.empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::Auth,
@@ -7794,7 +7795,7 @@ bool run_joiner_correlates_handshake_echoes() {
 	wrong_auth.ck ^= 0x200u;
 	const std::vector<uint8_t> wrong_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(wrong_auth));
-	(void)joiner.handle_datagram(wrong_auth_datagram.data(), wrong_auth_datagram.size());
+	(void)joiner_receive::receive(joiner, wrong_auth_datagram.data(), wrong_auth_datagram.size());
 	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Auth &&
 	                      joiner.server_key() == 0,
 			"a ServerAuth with mismatched CK cannot install server keys");
@@ -7830,7 +7831,7 @@ bool run_team_latch_is_falsifiable() {
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> assign = frame_server_session(server_tx, server_scrk, 1u,
 			{make_protocol_message(0x04, retail_slot_assignment(0x03))});
-	(void)joiner.handle_datagram(assign.data(), assign.size());
+	(void)joiner_receive::receive(joiner, assign.data(), assign.size());
 	if (!expect(resubmit_team(team) && team == 0x03,
 			"the 0x04 tail byte latches and drives the 0x2F team byte")) {
 		return false;
@@ -7839,7 +7840,7 @@ bool run_team_latch_is_falsifiable() {
 	const std::vector<uint8_t> live_state = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x75, {0x00, 0x01})});
-	(void)joiner.handle_datagram(live_state.data(), live_state.size());
+	(void)joiner_receive::receive(joiner, live_state.data(), live_state.size());
 	if (!expect(resubmit_team(team) && team == 0x01,
 			"0x75 byte 1 refreshes the same 0x2F team latch")) {
 		return false;
@@ -7849,7 +7850,7 @@ bool run_team_latch_is_falsifiable() {
 	short_body[19] = 0x04; // a would-be team in a body too short for the tail read
 	const std::vector<uint8_t> short_assign = frame_server_session(server_tx, server_scrk, 1u,
 			{make_protocol_message(0x04, std::move(short_body))});
-	(void)joiner.handle_datagram(short_assign.data(), short_assign.size());
+	(void)joiner_receive::receive(joiner, short_assign.data(), short_assign.size());
 	return expect(resubmit_team(team) && team == 0x01,
 			"a short (<24 B) 0x04 body does not take the latch");
 }
@@ -7879,13 +7880,13 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 	const std::vector<uint8_t> config_datagram = frame_server_session(
 			server_tx, server_scrk, 1u,
 			{make_protocol_message(0x04, std::move(slot_config))});
-	(void)joiner.handle_datagram(config_datagram.data(), config_datagram.size());
+	(void)joiner_receive::receive(joiner, config_datagram.data(), config_datagram.size());
 
 	auto apply_sync = [&](std::vector<uint8_t> body) {
 		const std::vector<uint8_t> datagram = frame_server_session(
 				server_tx, server_scrk, 1u,
 				{make_protocol_message(0x46, std::move(body))});
-		return joiner.handle_datagram(datagram.data(), datagram.size());
+		return joiner_receive::receive(joiner, datagram.data(), datagram.size());
 	};
 	const inmatch::JoinerConnection::PollResult slot_zero = apply_sync({
 			0x00, 0x05, 0x40, // slot 0, name|team|queue-ack
@@ -7936,7 +7937,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	server_hello.hk = 0x44556677u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	if (!expect(!auth_datagram.empty(), "pad-clamp: ClientAuth emitted")) {
@@ -7956,7 +7957,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	server_auth.mi = 6;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	(void)joiner.handle_datagram(server_auth_datagram.data(), server_auth_datagram.size());
+	(void)joiner_receive::receive(joiner, server_auth_datagram.data(), server_auth_datagram.size());
 
 	SessionSequencing server_seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> settings_datagram = frame_server_session(
@@ -7969,7 +7970,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 							0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
 							0xA0),
 			});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				settings_datagram.data(), settings_datagram.size()).outbound.size() == 2,
 			"pad-clamp: settings emit ACK + JOIN")) {
 		return false;
@@ -7978,7 +7979,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	const std::vector<uint8_t> join_ack_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x00, {})});
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 				join_ack_datagram.data(), join_ack_datagram.size()).outbound.size() == 2,
 			"pad-clamp: JOIN ack emits ACK + form post")) {
 		return false;
@@ -8000,8 +8001,8 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 			{make_protocol_message(0x02, std::move(probe))});
 	ProtocolPacketHeader client_header;
 	std::vector<ProtocolMessage> client_messages;
-	const inmatch::JoinerConnection::PollResult padding_result =
-			joiner.handle_datagram(padding_datagram.data(), padding_datagram.size());
+	const joiner_receive::Received padding_result =
+			joiner_receive::receive(joiner, padding_datagram.data(), padding_datagram.size());
 	if (!expect(padding_result.outbound.size() == 1 &&
 				decode_client_session(
 						padding_result.outbound[0], client_auth.scrk,
@@ -8029,7 +8030,7 @@ bool run_padding_echo_retail_clamp(uint32_t requested_len, std::size_t expected_
 	const std::vector<uint8_t> game_start_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{make_protocol_message(0x05, {0x01})});
-	return expect(joiner.handle_datagram(
+	return expect(joiner_receive::receive(joiner,
 				game_start_datagram.data(), game_start_datagram.size()).outbound.size() == 1,
 			"pad-clamp: the echo advanced the FSM to AwaitGameStart");
 }

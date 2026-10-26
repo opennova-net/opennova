@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 namespace {
 
@@ -127,8 +128,8 @@ bool check_session_header_key_validation() {
 			{make_protocol_message(0x49, {0xC5})}, wrong_s2c),
 	            "frame S2C packet for a different client session"))
 		return false;
-	const inmatch::JoinerConnection::PollResult joiner_drop =
-			joiner.handle_datagram(wrong_s2c.data(), wrong_s2c.size());
+	const joiner_receive::Received joiner_drop =
+			joiner_receive::receive(joiner, wrong_s2c.data(), wrong_s2c.size());
 	return expect(joiner_drop.inbound_gameplay.empty() &&
 	                      joiner_drop.inbound_0a.empty() &&
 	                      joiner_drop.outbound.empty() &&
@@ -157,12 +158,12 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 			{make_protocol_message(0x49, {0x03})}, s2c3),
 	            "frame reordered same-batch S2C packets"))
 		return false;
-	if (!expect(joiner.handle_datagram(
+	if (!expect(joiner_receive::receive(joiner,
 			s2c3.data(), s2c3.size()).inbound_gameplay.empty(),
 	            "joiner queues the future S2C packet"))
 		return false;
-	const inmatch::JoinerConnection::PollResult joiner_close =
-			joiner.handle_datagram(s2c2.data(), s2c2.size());
+	const joiner_receive::Received joiner_close =
+			joiner_receive::receive(joiner, s2c2.data(), s2c2.size());
 	if (!expect(joiner_close.inbound_gameplay.size() == 2 &&
 	                    joiner.connection().seq.queued_inbound.empty(),
 	            "later S2C packet in the batch closes and drains the gap"))
@@ -268,8 +269,8 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	            "host ACK advances before handling the resend request"))
 		return false;
 
-	const inmatch::JoinerConnection::PollResult gap =
-			joiner.handle_datagram(second.data(), second.size());
+	const joiner_receive::Received gap =
+			joiner_receive::receive(joiner, second.data(), second.size());
 	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty() &&
 	                    gap.immediate_outbound.empty(),
 	            "joiner queues S2C sequence two without NACKing before the batch boundary"))
@@ -342,8 +343,8 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	            "host reconstructs old S2C records with its current ACK"))
 		return false;
 
-	const inmatch::JoinerConnection::PollResult recovered =
-			joiner.handle_datagram(resend.immediate_outbound[0].data(), resend.immediate_outbound[0].size());
+	const joiner_receive::Received recovered =
+			joiner_receive::receive(joiner, resend.immediate_outbound[0].data(), resend.immediate_outbound[0].size());
 	if (!expect(recovered.inbound_gameplay.size() == 2 &&
 	                    recovered.inbound_gameplay[0].second ==
 	                            std::vector<uint8_t>({0xC5}) &&
@@ -365,7 +366,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, final_server_ack),
 	            "host frames final ACK-bearing S2C packet"))
 		return false;
-	joiner.handle_datagram(final_server_ack.data(), final_server_ack.size());
+	joiner_receive::receive(joiner, final_server_ack.data(), final_server_ack.size());
 	return expect(joiner.connection().seq.retained_outbound.empty(),
 	              "host's admitted ACK retires the joiner's remaining C2S records");
 }
@@ -697,7 +698,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_packet),
 	            "host frames one S2C packet to advance the joiner's current ACK"))
 		return false;
-	joiner.handle_datagram(server_packet.data(), server_packet.size());
+	joiner_receive::receive(joiner, server_packet.data(), server_packet.size());
 	if (!expect(joiner.connection().seq.last_inbound_seq == 1,
 	            "joiner ACK advances before it handles the resend request"))
 		return false;
@@ -728,8 +729,8 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	const uint32_t next_before_bad = joiner.connection().seq.next_outbound_seq;
 	const std::vector<uint8_t> wrong_key = make_resend_datagram(
 			SESSION_OPCODE_SERVER_RESEND_LIST, kClientKey + 1, {1});
-	const inmatch::JoinerConnection::PollResult wrong_key_result =
-			joiner.handle_datagram(wrong_key.data(), wrong_key.size());
+	const joiner_receive::Received wrong_key_result =
+			joiner_receive::receive(joiner, wrong_key.data(), wrong_key.size());
 	if (!expect(wrong_key_result.outbound.empty() &&
 		            wrong_key_result.immediate_outbound.empty() &&
 		            joiner.connection().seq.next_outbound_seq == next_before_bad,
@@ -737,8 +738,8 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 		return false;
 	const std::vector<uint8_t> malformed =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, {0x01, 0x00, 0x00});
-	const inmatch::JoinerConnection::PollResult malformed_result =
-			joiner.handle_datagram(malformed.data(), malformed.size());
+	const joiner_receive::Received malformed_result =
+			joiner_receive::receive(joiner, malformed.data(), malformed.size());
 	if (!expect(malformed_result.outbound.empty() &&
 		            malformed_result.immediate_outbound.empty(),
 	            "joiner ignores a resend-list body shorter than its key"))
@@ -747,8 +748,8 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	if (!expect(joiner.take_net_quality_link_errors() == 0,
 	            "invalid resend lists raise no joiner link error"))
 		return false;
-	const inmatch::JoinerConnection::PollResult resend =
-			joiner.handle_datagram(
+	const joiner_receive::Received resend =
+			joiner_receive::receive(joiner,
 					gap_nacks[0].outbound[0].data(),
 					gap_nacks[0].outbound[0].size());
 	// The rebuilt packet is transmitted by the resend handler itself, not held for the
@@ -785,7 +786,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x34, {}, server_ack),
 	            "host frames ACK for the recovered C2S frontier"))
 		return false;
-	joiner.handle_datagram(server_ack.data(), server_ack.size());
+	joiner_receive::receive(joiner, server_ack.data(), server_ack.size());
 	if (!expect(joiner.connection().seq.retained_outbound.empty(),
 	            "host ACK retires both recovered joiner records"))
 		return false;

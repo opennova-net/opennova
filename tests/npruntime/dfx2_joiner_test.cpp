@@ -37,6 +37,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "joiner_receive.h"
 
 using namespace opennova;
 
@@ -95,14 +96,14 @@ int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
 		header[offsetof(bms::Header, mission_type)] = mission_type;
 		const std::vector<uint8_t> dg =
 				frame_s2c(seq, {make_protocol_message(s2c::BMS_HEADER, header)}, kServerScrk, kClientKey);
-		(void)joiner.handle_datagram(dg.data(), dg.size());
+		(void)joiner_receive::receive(joiner, dg.data(), dg.size());
 	}
 	TeamAssign assign;
 	assign.entity_handle = 0x0001;
 	assign.team = 1;
 	const std::vector<uint8_t> dg = frame_s2c(seq,
 			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, kServerScrk, kClientKey);
-	const inmatch::JoinerConnection::PollResult result = joiner.handle_datagram(dg.data(), dg.size());
+	const joiner_receive::Received result = joiner_receive::receive(joiner, dg.data(), dg.size());
 	for (const ProtocolMessage &m : result.queued_send_messages) {
 		if (m.tag != 0x2F) continue;
 		LoadoutSubmit submit;
@@ -148,7 +149,7 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 	ServerHello sh = build_server_hello(hello, 0x7F000001u, 32769);
 	sh.hk = 0x55667788u;
 	const std::vector<uint8_t> sh_dg = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(sh));
-	(void)joiner.handle_datagram(sh_dg.data(), sh_dg.size());
+	(void)joiner_receive::receive(joiner, sh_dg.data(), sh_dg.size());
 	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
 	const std::vector<uint8_t> auth_dg = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
@@ -163,13 +164,13 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 	ServerAuth sa = build_server_auth(auth, 0x7F000001u, 32769, kServerKey, kServerScrk, "", "", "", false);
 	sa.mi = 3;
 	const std::vector<uint8_t> sa_dg = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa));
-	(void)joiner.handle_datagram(sa_dg.data(), sa_dg.size());
+	(void)joiner_receive::receive(joiner, sa_dg.data(), sa_dg.size());
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> settings = frame_s2c(seq,
 			{make_protocol_message(0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0),
 			 make_protocol_message(0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00}, 0xA0)},
 			kServerScrk, auth.ck);
-	const inmatch::JoinerConnection::PollResult result = joiner.handle_datagram(settings.data(), settings.size());
+	const joiner_receive::Received result = joiner_receive::receive(joiner, settings.data(), settings.size());
 	for (const std::vector<uint8_t> &dg : result.outbound) {
 		std::vector<ProtocolMessage> messages;
 		if (!decode_c2s(dg, auth.scrk, messages)) continue;

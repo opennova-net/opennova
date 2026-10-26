@@ -701,15 +701,6 @@ void JoinerConnection::drain_client_queue_after_teardown() {
 	}
 }
 
-JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *raw, std::size_t len) {
-	PollResult out;
-	ManagerPass manager = manager_receive(raw, len);
-	out.immediate_outbound = std::move(manager.immediate_outbound);
-	while (pump_client_queue(out)) {
-	}
-	return out;
-}
-
 bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) const {
 	// The enumerator reads 0x81s while its timer runs: from the enumerate's start through the
 	// pass that records the session, until the next pass's connect start stops it

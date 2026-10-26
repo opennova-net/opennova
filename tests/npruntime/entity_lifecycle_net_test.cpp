@@ -53,6 +53,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 namespace {
 
@@ -153,7 +154,7 @@ bool run_team_assign_relatches_self_and_resubmits() {
 	// Prior state: the 0x04 tail latched team 1.
 	const std::vector<uint8_t> assign_04 =
 			frame_server_session(server_tx, {make_protocol_message(0x04, slot_assignment(1))});
-	(void)joiner.handle_datagram(assign_04.data(), assign_04.size());
+	(void)joiner_receive::receive(joiner, assign_04.data(), assign_04.size());
 	if (!expect(joiner.assigned_team() == 1,
 			"0x50-self: the 0x04 tail latched team 1 (the prior value)"))
 		return false;
@@ -167,8 +168,8 @@ bool run_team_assign_relatches_self_and_resubmits() {
 	const std::vector<uint8_t> assign_payload = encode_team_assign(assign);
 	const std::vector<uint8_t> dg = frame_server_session(
 			server_tx, {make_protocol_message(0x50, assign_payload)});
-	const inmatch::JoinerConnection::PollResult poll =
-			joiner.handle_datagram(dg.data(), dg.size());
+	const joiner_receive::Received poll =
+			joiner_receive::receive(joiner, dg.data(), dg.size());
 
 	if (!expect(joiner.assigned_team() == 3,
 			"0x50-self: the team latch moved to the assigned team"))
@@ -276,7 +277,7 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 	{
 		const std::vector<uint8_t> dg = frame_server_session(
 				server_tx, {make_protocol_message(0x04, slot_assignment(1))});
-		(void)joiner.handle_datagram(dg.data(), dg.size());
+		(void)joiner_receive::receive(joiner, dg.data(), dg.size());
 	}
 	if (!expect(joiner.assigned_team() == 1,
 			"0x50-profile: the 0x04 tail latched blue team 1"))
@@ -292,8 +293,8 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 		const std::vector<uint8_t> dg = frame_server_session(
 				server_tx,
 				{make_protocol_message(0x50, encode_team_assign(assign))});
-		const inmatch::JoinerConnection::PollResult poll =
-				joiner.handle_datagram(dg.data(), dg.size());
+		const joiner_receive::Received poll =
+				joiner_receive::receive(joiner, dg.data(), dg.size());
 		std::vector<uint8_t> payload;
 		LoadoutSubmit got;
 		if (!one_loadout_submit(poll, payload, got,
@@ -323,8 +324,8 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 		const std::vector<uint8_t> dg = frame_server_session(
 				server_tx,
 				{make_protocol_message(0x50, encode_team_assign(assign))});
-		const inmatch::JoinerConnection::PollResult poll =
-				joiner.handle_datagram(dg.data(), dg.size());
+		const joiner_receive::Received poll =
+				joiner_receive::receive(joiner, dg.data(), dg.size());
 		if (!expect(joiner.assigned_team() == 2,
 				"0x50-profile: the latch crossed to the red team"))
 			return false;
@@ -376,15 +377,15 @@ bool run_team_assign_default_kit_stays_byte_identical() {
 	{
 		const std::vector<uint8_t> dg = frame_server_session(
 				server_tx, {make_protocol_message(0x04, slot_assignment(1))});
-		(void)joiner.handle_datagram(dg.data(), dg.size());
+		(void)joiner_receive::receive(joiner, dg.data(), dg.size());
 	}
 	TeamAssign assign;
 	assign.entity_handle = kSelf;
 	assign.team = 2;
 	const std::vector<uint8_t> dg = frame_server_session(
 			server_tx, {make_protocol_message(0x50, encode_team_assign(assign))});
-	const inmatch::JoinerConnection::PollResult poll =
-			joiner.handle_datagram(dg.data(), dg.size());
+	const joiner_receive::Received poll =
+			joiner_receive::receive(joiner, dg.data(), dg.size());
 
 	std::vector<uint8_t> payload;
 	LoadoutSubmit got;
@@ -466,8 +467,8 @@ bool run_empty_slot_sweep_surfaces_raw_gameplay() {
 	const std::vector<uint8_t> sweep_payload = encode_destroy_entity_list(sweep);
 	const std::vector<uint8_t> dg = frame_server_session(
 			server_tx, {make_protocol_message(0x5D, sweep_payload)});
-	const inmatch::JoinerConnection::PollResult poll =
-			joiner.handle_datagram(dg.data(), dg.size());
+	const joiner_receive::Received poll =
+			joiner_receive::receive(joiner, dg.data(), dg.size());
 
 	if (!expect(poll.destroyed_pool0_slots == sweep.pool0_indices,
 			"0x5D-poll: decoded slot diagnostics remain available"))
@@ -503,8 +504,8 @@ bool run_deployed_item_lifecycle_surfaces_raw_gameplay() {
 			make_protocol_message(s2c::DEPLOYED_ITEM, spawn_payload),
 			make_protocol_message(s2c::ENTITY_REMOVE, removal_payload),
 	});
-	const inmatch::JoinerConnection::PollResult poll =
-			joiner.handle_datagram(dg.data(), dg.size());
+	const joiner_receive::Received poll =
+			joiner_receive::receive(joiner, dg.data(), dg.size());
 
 	if (!expect(poll.inbound_gameplay.size() == 2 &&
 			poll.inbound_gameplay[0].first == s2c::DEPLOYED_ITEM &&
@@ -1098,8 +1099,8 @@ bool run_redeployment_session_loss() {
 	SessionSequencing late_server_tx = inmatch::make_jo_game_session_sequencing();
 	const std::vector<uint8_t> late = frame_server_session(
 			late_server_tx, {make_protocol_message(0x03, {0, 0, 0, 0})});
-	const inmatch::JoinerConnection::PollResult late_result =
-			joiner.handle_datagram(late.data(), late.size());
+	const joiner_receive::Received late_result =
+			joiner_receive::receive(joiner, late.data(), late.size());
 	return expect(late_result.outbound.empty() && joiner.session_lost() &&
 				joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
 				joiner.milliseconds_since_last_receive() == terminal_silence,

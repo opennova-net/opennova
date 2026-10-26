@@ -48,6 +48,7 @@
 #include <string_view>
 #include <vector>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -120,7 +121,7 @@ bool drive_to_initial_server_settings(
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
@@ -144,7 +145,7 @@ bool drive_to_initial_server_settings(
 	server_auth.mi = 3;
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
+	const joiner_receive::Received auth_result = joiner_receive::receive(joiner,
 			server_auth_datagram.data(), server_auth_datagram.size());
 	return expect(auth_result.outbound.empty() &&
 				joiner.phase() == inmatch::JoinerConnection::Phase::Driving,
@@ -348,8 +349,8 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 			{make_protocol_message(0x03, kCapturedPunt, kDescriptionFlags)});
 	if (!expect(!kick.empty(), "frame the captured kick as an S2C packet")) return false;
 
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(kick.data(), kick.size());
+	const joiner_receive::Received result =
+			joiner_receive::receive(joiner, kick.data(), kick.size());
 	if (!expect(result.queued_send_messages.empty() &&
 				check_client_goodbye_burst(result.outbound, kServerKey,
 						make_disconnect_event(2, 2, 0, 0, "t35", 33, "LogPuntEvent"),
@@ -403,7 +404,7 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 	append_tlv(second_body, "DDSTR", {'L', 'a', 't', 'e', 'r', 0});
 	const std::vector<uint8_t> second_kick = frame_s2c(repeat_tx,
 			{make_protocol_message(0x03, second_body, kDescriptionFlags)});
-	joiner.handle_datagram(second_kick.data(), second_kick.size());
+	joiner_receive::receive(joiner, second_kick.data(), second_kick.size());
 	return expect(joiner.session_loss_reason() == reason,
 	              "a later disconnect record cannot restate the cause");
 }
@@ -489,8 +490,8 @@ bool check_initial_settings_and_close_emit_only_goodbyes() {
 	if (!expect(!close.empty(),
 			"frame initial settings and terminal description in one packet"))
 		return false;
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(close.data(), close.size());
+	const joiner_receive::Received result =
+			joiner_receive::receive(joiner, close.data(), close.size());
 	if (!expect(joiner.session_lost() &&
 				check_client_goodbye_burst(result.outbound, kServerKey,
 						make_disconnect_event(2, 2, 0, 0, "t35", 33, "LogPuntEvent"),
@@ -513,8 +514,8 @@ bool check_ordinary_settings_traffic_is_undisturbed() {
 	const std::vector<uint8_t> settings = frame_s2c(server_tx,
 			{make_cs_config(0, 3, 40), make_cs_config(1, 3, 250)});
 	if (!expect(!settings.empty(), "frame the initial settings pair")) return false;
-	const inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(settings.data(), settings.size());
+	const joiner_receive::Received result =
+			joiner_receive::receive(joiner, settings.data(), settings.size());
 	if (!expect(!joiner.session_lost() && joiner.session_loss_reason().empty() &&
 	                    joiner.phase() == inmatch::JoinerConnection::Phase::InMatch,
 	            "settings-update traffic does not close the session"))
@@ -533,7 +534,7 @@ bool check_ordinary_settings_traffic_is_undisturbed() {
 	SessionSequencing noise_tx{2, 0};
 	const std::vector<uint8_t> noise = frame_s2c(noise_tx,
 			{make_protocol_message(0x03, {0xFF, 0xFE, 0xFD, 0xFC}, kDescriptionFlags)});
-	joiner.handle_datagram(noise.data(), noise.size());
+	joiner_receive::receive(joiner, noise.data(), noise.size());
 	return expect(joiner.session_lost(),
 	              "a tag-3 description closes the session even when its body is not a TLV run");
 }
@@ -638,8 +639,8 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	inmatch::JoinerConnection joiner("HostPuntReceiver");
 	joiner.set_title(&kJo);
 	seed_joiner(joiner);
-	const inmatch::JoinerConnection::PollResult receive =
-			joiner.handle_datagram(socket.sent[0].data(), socket.sent[0].size());
+	const joiner_receive::Received receive =
+			joiner_receive::receive(joiner, socket.sent[0].data(), socket.sent[0].size());
 	if (!expect(joiner.session_lost() &&
 				joiner.session_loss_reason().find(expected.dstr) !=
 						std::string::npos,
@@ -1149,22 +1150,22 @@ bool check_server_goodbye_closes_the_joiner() {
 
 	const std::vector<uint8_t> wrong_key = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey ^ 1u, stop));
-	inmatch::JoinerConnection::PollResult result =
-			joiner.handle_datagram(wrong_key.data(), wrong_key.size());
+	joiner_receive::Received result =
+			joiner_receive::receive(joiner, wrong_key.data(), wrong_key.size());
 	if (!expect(result.outbound.empty() && !joiner.session_lost() &&
 				joiner.phase() == inmatch::JoinerConnection::Phase::InMatch,
 			"a 0x86 keyed by another client's CK is ignored"))
 		return false;
 	const std::vector<uint8_t> short_body = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, {0x44, 0x33});
-	result = joiner.handle_datagram(short_body.data(), short_body.size());
+	result = joiner_receive::receive(joiner, short_body.data(), short_body.size());
 	if (!expect(result.outbound.empty() && !joiner.session_lost(),
 			"a 0x86 too short to carry the key is ignored"))
 		return false;
 
 	const std::vector<uint8_t> goodbye = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, stop));
-	result = joiner.handle_datagram(goodbye.data(), goodbye.size());
+	result = joiner_receive::receive(joiner, goodbye.data(), goodbye.size());
 	if (!expect(result.queued_send_messages.empty() &&
 				check_client_goodbye_burst(result.outbound, kServerKey, stop,
 						"a keyed 0x86 draws the four-packet 0x46 burst echoing its record"),
@@ -1179,7 +1180,7 @@ bool check_server_goodbye_closes_the_joiner() {
 				joiner.session_loss_reason().find("class 9") != std::string::npos,
 			"the 0x86 record is latched with the peer role and named in the loss reason"))
 		return false;
-	result = joiner.handle_datagram(goodbye.data(), goodbye.size());
+	result = joiner_receive::receive(joiner, goodbye.data(), goodbye.size());
 	if (!expect(result.outbound.empty() && joiner.disconnect().empty(),
 			"a second 0x86 after the loss emits nothing"))
 		return false;
@@ -1195,7 +1196,7 @@ bool check_server_goodbye_closes_the_joiner() {
 	uncapped.ddstr = std::string(40, 'y');
 	const std::vector<uint8_t> long_goodbye = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(kClientKey, uncapped));
-	result = capped.handle_datagram(long_goodbye.data(), long_goodbye.size());
+	result = joiner_receive::receive(capped, long_goodbye.data(), long_goodbye.size());
 	if (!expect(capped.session_lost() && capped.last_disconnect_event().dstr.size() == 127 &&
 				capped.last_disconnect_event().ddstr.size() == 31 &&
 				check_client_goodbye_burst(result.outbound, kServerKey, long_record,
@@ -1209,7 +1210,7 @@ bool check_server_goodbye_closes_the_joiner() {
 	seed_joiner(zeros);
 	const std::vector<uint8_t> bare = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, u32_value(kClientKey));
-	result = zeros.handle_datagram(bare.data(), bare.size());
+	result = joiner_receive::receive(zeros, bare.data(), bare.size());
 	if (!expect(zeros.session_lost() && zeros.last_disconnect_event().dc == 0 &&
 				check_client_goodbye_burst(result.outbound, kServerKey,
 						make_disconnect_event(1, 0, 0, 0, "", 0, ""),
@@ -1223,7 +1224,7 @@ bool check_server_goodbye_closes_the_joiner() {
 	(void)early.start();
 	const std::vector<uint8_t> premature = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(early.client_key(), stop));
-	result = early.handle_datagram(premature.data(), premature.size());
+	result = joiner_receive::receive(early, premature.data(), premature.size());
 	return expect(result.outbound.empty() && !early.session_lost() &&
 				early.phase() == inmatch::JoinerConnection::Phase::Hello,
 			"a 0x86 before the connection is active is ignored");
@@ -1431,7 +1432,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	inmatch::JoinerConnection joiner("IdlePuntReceiver");
 	joiner.set_title(&kJo);
 	seed_joiner(joiner);
-	joiner.handle_datagram(wire.data(), wire.size());
+	joiner_receive::receive(joiner, wire.data(), wire.size());
 	return expect(joiner.session_lost() &&
 				joiner.session_loss_reason().find("t35") != std::string::npos,
 			"the strict-boundary host record is terminal to the retail-client path");
@@ -1854,8 +1855,8 @@ bool check_crc_challenges_are_not_answered() {
 			frame_s2c(server_tx, {make_protocol_message(0x31, {0x07, 0x34, 0x12})}),
 	};
 	for (const std::vector<uint8_t> &challenge : forms) {
-		const inmatch::JoinerConnection::PollResult result =
-				joiner.handle_datagram(challenge.data(), challenge.size());
+		const joiner_receive::Received result =
+				joiner_receive::receive(joiner, challenge.data(), challenge.size());
 		std::vector<uint8_t> body;
 		if (!expect(!reply_body(result, 0x20, body) && !reply_body(result, 0x21, body),
 		            "an anti-cheat CRC challenge draws no reply without a computed source"))
@@ -1868,8 +1869,8 @@ bool check_crc_challenges_are_not_answered() {
 	}
 	const std::vector<uint8_t> literal =
 			frame_s2c(server_tx, {make_protocol_message(0x30, {0xFF, 0x01, 0x00})});
-	const inmatch::JoinerConnection::PollResult literal_result =
-			joiner.handle_datagram(literal.data(), literal.size());
+	const joiner_receive::Received literal_result =
+			joiner_receive::receive(joiner, literal.data(), literal.size());
 	std::vector<uint8_t> body;
 	if (!expect(reply_body(literal_result, 0x20, body) &&
 					body == std::vector<uint8_t>{0xFF, 0x2B, 0x00, 0x00, 0x00},
@@ -1908,7 +1909,7 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
@@ -1926,7 +1927,7 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 	rejection.jfp = 2;
 	const std::vector<uint8_t> rejection_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
-	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
+	joiner_receive::receive(joiner, rejection_datagram.data(), rejection_datagram.size());
 	if (!expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
 					joiner.last_error() == "join refused (GCC002)",
 			"the JFC=14/JFP=2 family names the game-connect entry GCC002"))
@@ -1963,7 +1964,7 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 	server_hello.hk = 0x55667788u;
 	const std::vector<uint8_t> server_hello_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(
+	(void)joiner_receive::receive(joiner,
 			server_hello_datagram.data(), server_hello_datagram.size());
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth client_auth;
@@ -1983,7 +1984,7 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 	rejection.jfc = 7;
 	const std::vector<uint8_t> rejection_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
-	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
+	joiner_receive::receive(joiner, rejection_datagram.data(), rejection_datagram.size());
 	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
 					joiner.last_error() == "join refused (NCC007)" &&
 					joiner.connection_error_record().connect_error == 7,
@@ -2053,8 +2054,8 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 	for (const Case &c : cases) {
 		const std::vector<uint8_t> challenge = frame_s2c(
 				server_tx, {make_protocol_message(c.request_tag, c.request_body)});
-		const inmatch::JoinerConnection::PollResult result =
-				joiner.handle_datagram(challenge.data(), challenge.size());
+		const joiner_receive::Received result =
+				joiner_receive::receive(joiner, challenge.data(), challenge.size());
 		std::vector<uint8_t> body;
 		if (!expect(reply_body(result, c.reply_tag, body) && body == c.reply_body,
 				"the computed sources emit the exact witnessed integrity reply"))
@@ -2065,8 +2066,8 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 	// A named row's own CRC hashes process pointers: never answered.
 	const std::vector<uint8_t> named_row = frame_s2c(
 			server_tx, {make_protocol_message(0x30, {0x05, 0x00, 0x00})});
-	const inmatch::JoinerConnection::PollResult named_row_result =
-			joiner.handle_datagram(named_row.data(), named_row.size());
+	const joiner_receive::Received named_row_result =
+			joiner_receive::receive(joiner, named_row.data(), named_row.size());
 	if (!expect(!reply_body(named_row_result, 0x20, body),
 			"a named weapon row's CRC challenge stays unanswered"))
 		return false;
@@ -2079,8 +2080,8 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 				server_tx,
 				{make_protocol_message(0x31,
 						{static_cast<uint8_t>(row), 0x00, 0x00})});
-		const inmatch::JoinerConnection::PollResult result =
-				joiner.handle_datagram(request.data(), request.size());
+		const joiner_receive::Received result =
+				joiner_receive::receive(joiner, request.data(), request.size());
 		body.clear();
 		if (!expect(reply_body(result, 0x21, body) && body.size() == 9 &&
 					body[0] == row,
@@ -2097,8 +2098,8 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 
 	const std::vector<uint8_t> trailing = frame_s2c(
 			server_tx, {make_protocol_message(0x30, {0xFF, 0x00, 0x00, 0x99})});
-	const inmatch::JoinerConnection::PollResult trailing_result =
-			joiner.handle_datagram(trailing.data(), trailing.size());
+	const joiner_receive::Received trailing_result =
+			joiner_receive::receive(joiner, trailing.data(), trailing.size());
 	if (!expect(!reply_body(trailing_result, 0x20, body),
 			"a checksum request with trailing bytes is not answered"))
 		return false;
@@ -2123,16 +2124,16 @@ bool check_revx02_sources_answer_exact_crc_challenges() {
 			 make_protocol_message(0x31, {0x18, 0x00, 0x00}),
 			 make_protocol_message(0x31, {0x66, 0x00, 0x00}),
 			 make_protocol_message(0x30, {0x8C, 0x00, 0x00})});
-	const inmatch::JoinerConnection::PollResult after_clear_result =
-			joiner.handle_datagram(after_clear.data(), after_clear.size());
+	const joiner_receive::Received after_clear_result =
+			joiner_receive::receive(joiner, after_clear.data(), after_clear.size());
 	if (!expect(!reply_body(after_clear_result, 0x20, body) &&
 					!reply_body(after_clear_result, 0x21, body),
 			"no computed source leaves the table and the rows unanswered"))
 		return false;
 	const std::vector<uint8_t> literal = frame_s2c(
 			server_tx, {make_protocol_message(0x30, {0xFF, 0x34, 0x12})});
-	const inmatch::JoinerConnection::PollResult literal_result =
-			joiner.handle_datagram(literal.data(), literal.size());
+	const joiner_receive::Received literal_result =
+			joiner_receive::receive(joiner, literal.data(), literal.size());
 	return expect(reply_body(literal_result, 0x20, body) &&
 					body == std::vector<uint8_t>{0xFF, 0x1E, 0x12, 0x00, 0x00},
 			"the literal-42 arm answers without a table");
@@ -2170,8 +2171,8 @@ bool check_jox01_sources_answer_exact_crc_challenges() {
 	for (const Case &c : cases) {
 		const std::vector<uint8_t> challenge = frame_s2c(
 				server_tx, {make_protocol_message(c.request_tag, c.request_body)});
-		const inmatch::JoinerConnection::PollResult result =
-				joiner.handle_datagram(challenge.data(), challenge.size());
+		const joiner_receive::Received result =
+				joiner_receive::receive(joiner, challenge.data(), challenge.size());
 		if (!expect(reply_body(result, c.reply_tag, body) && body == c.reply_body,
 				"the jox01 sources emit the exact witnessed integrity reply"))
 			return false;
@@ -2184,8 +2185,8 @@ bool check_jox01_sources_answer_exact_crc_challenges() {
 				server_tx,
 				{make_protocol_message(0x31,
 						{static_cast<uint8_t>(row), 0x00, 0x00})});
-		const inmatch::JoinerConnection::PollResult result =
-				joiner.handle_datagram(request.data(), request.size());
+		const joiner_receive::Received result =
+				joiner_receive::receive(joiner, request.data(), request.size());
 		body.clear();
 		if (!expect(reply_body(result, 0x21, body) && body.size() == 9 &&
 					body[0] == row,

@@ -47,6 +47,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -625,7 +626,7 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	if (!expect(opcode_is(socket.sent[0], opennova::SESSION_OPCODE_SERVER_HELLO),
 	            "pre-dictation fixture starts with ServerHello"))
 		return false;
-	(void)joiner.handle_datagram(socket.sent[0].data(), socket.sent[0].size());
+	(void)joiner_receive::receive(joiner, socket.sent[0].data(), socket.sent[0].size());
 	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
 	const std::vector<uint8_t> auth_datagram =
 			opennova::inmatch::test::enumerated_join_auth(joiner);
@@ -661,8 +662,8 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	     ++turn) {
 		std::vector<std::vector<uint8_t>> client_outbound;
 		for (const std::vector<uint8_t> &datagram : socket.sent) {
-			const opennova::inmatch::JoinerConnection::PollResult result =
-					joiner.handle_datagram(datagram.data(), datagram.size());
+			const joiner_receive::Received result =
+					joiner_receive::receive(joiner, datagram.data(), datagram.size());
 			client_outbound.insert(client_outbound.end(), result.outbound.begin(),
 			                       result.outbound.end());
 		}
@@ -2211,12 +2212,12 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 			0x11223344u, remote.client_ck,
 			"CLIENTFRAGSWEEPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 			remote.server_scrk, 1, 0, 0, 0x14B9);
-	const auto first_poll = joiner.handle_datagram(
+	const auto first_poll = joiner_receive::receive(joiner,
 			socket.sent[0].data(), socket.sent[0].size());
 	if (!expect(first_poll.destroyed_pool0_slots.empty(),
 	            "joiner does not dispatch an incomplete sweep fragment"))
 		return false;
-	const auto final_poll = joiner.handle_datagram(
+	const auto final_poll = joiner_receive::receive(joiner,
 			socket.sent[1].data(), socket.sent[1].size());
 	if (!expect(final_poll.destroyed_pool0_slots.size() == 1022,
 	            "joiner dispatches one complete sweep after the final fragment"))

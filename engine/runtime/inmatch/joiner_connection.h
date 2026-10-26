@@ -159,17 +159,6 @@ public:
 		// send-holdoff gate) and the handshake's ClientAuth (no holdoff exists before the
 		// host's CS update), or a terminal teardown's goodbye burst (shipped at once).
 		std::vector<std::vector<uint8_t>> outbound;
-		// handle_datagram only: the datagrams its manager receive wrote to the socket
-		// (ManagerPass::immediate_outbound), the 0x84 resend answers (each requested sequence
-		// rebuilt from its retained records with the ACK the connection held before the
-		// client pump) and the 0x45 pong of a WR-flagged 0x85; they never wait for the
-		// send-holdoff gate. The opcode handlers run in the manager's dispatch, never queued.
-		// [orig: NapiNPManager_HandlePacket @0x622F10 -> NapiNPProtocol_DispatchOpcode (the call
-		//  @0x622F96) -> Nwu_HandleServerResendList @0x6242B0 / Nwu_HandleServerPing @0x6242E0;
-		//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
-		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61F032; Nwu_HandlePing @0x623a70 ->
-		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61F25A]
-		std::vector<std::vector<uint8_t>> immediate_outbound;
 		// Receive handlers queue reliable semantic replies here, in the order they ran.
 		// ClientRuntime appends them to its one C2S queue as it folds the reducer stream.
 		std::vector<ProtocolMessage> queued_send_messages;
@@ -365,11 +354,16 @@ public:
 	//  @0x622FF9; g_NPOpcodeHandlers @0x849D90 rows 7..13 (0x81..0x87);
 	//  NapiLib_SetManagerCallbacks @0x4C6F50 - the five lines while the log is on @0x4C6F64..0x4C6FAC]
 	struct ManagerPass {
-		// The 0x84's rebuilt packets and the 0x85's pong, written to the socket by their
-		// handlers inside this receive (the owner ships them, and logs their NET SENDING, at
-		// once). [orig: NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
-		//  (the call @0x6239B6); Nwu_HandlePing @0x623A70 -> CNapiNPConnection_SendPing (the call
-		//  @0x623C6F)]
+		// The 0x84's rebuilt packets (each requested sequence rebuilt from its retained records
+		// with the ACK the connection held before the client pump) and the 0x85's pong (a
+		// WR-flagged 0x85's 0x45), written to the socket by their handlers inside this receive:
+		// the owner ships them, and logs their NET SENDING, at once, outside the send-holdoff
+		// gate; the opcode handlers run in the manager's dispatch, never queued.
+		// [orig: NapiNPManager_HandlePacket @0x622F10 -> NapiNPProtocol_DispatchOpcode (the call
+		//  @0x622F96) -> Nwu_HandleServerResendList @0x6242B0 / Nwu_HandleServerPing @0x6242E0;
+		//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket (the call
+		//  @0x6239B6) -> CNapiNPManager_SendTo @0x61F032; Nwu_HandlePing @0x623A70 ->
+		//  CNapiNPConnection_SendPing (the call @0x623C6F) -> CNapiNPManager_SendTo @0x61F25A]
 		std::vector<std::vector<uint8_t>> immediate_outbound;
 	};
 	ManagerPass manager_receive(const uint8_t *raw, std::size_t len);
@@ -390,9 +384,6 @@ public:
 	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - @0x6268AA; NapiNPProtocol_HandleSessionPacket
 	//  @0x626A00 - conn_flag0 @0x626B01; Nwu_HandleDisconnect @0x623CE0 - @0x623DF2]
 	void drain_client_queue_after_teardown();
-	// One frame of one datagram: its manager receive, then the whole client pump, everything
-	// collected in one result (the manager pass's sends in immediate_outbound).
-	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
 	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram, measured by the
 	// monotonic wall clock (independent of render/simulation cadence): the 0x41 once more than
@@ -401,11 +392,12 @@ public:
 	// 30000 ms.
 	// Once Driving, flush deferred ACKs, the active-interval header-only probes, and the held C2S
 	// 0x0A after local world readiness. Semantic admission transitions are emitted reactively from
-	// handle_datagram(); the 0x44 missing-sequence request belongs to finish_receive_pump().
+	// the client pump (pump_client_queue); the 0x44 missing-sequence request belongs to
+	// finish_receive_pump().
 	std::vector<std::vector<uint8_t>> pump(uint32_t now_tick);
 
 	// The receive pump's per-connection tail, run once per client frame after every datagram
-	// of the batch went through handle_datagram. A future S2C packet in the batch latched the
+	// of the batch went through the two passes. A future S2C packet in the batch latched the
 	// missing-sequence check; when the ordered queue still holds a packet (the gap outlived the
 	// batch) ONE C2S 0x44 naming the missing sequences goes out NOW, outside the send-holdoff
 	// gate, and the latch clears either way. Empty when nothing is owed or the session is lost.

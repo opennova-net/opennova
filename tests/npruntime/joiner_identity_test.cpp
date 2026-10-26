@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <utility>
 #include "../common/test_expect.h"
+#include "joiner_receive.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -41,7 +42,7 @@ bool run_identity() {
 	server_hello.hk = 0x55667788u;
 	datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
-	(void)joiner.handle_datagram(datagram.data(), datagram.size());
+	(void)joiner_receive::receive(joiner, datagram.data(), datagram.size());
 	// The 0x42 leaves at the first pump past the connect state's start (D-NET-NEW-L2-25).
 	const std::vector<uint8_t> auth_datagram = inmatch::test::enumerated_join_auth(joiner);
 	ClientAuth auth;
@@ -51,14 +52,14 @@ bool run_identity() {
 			server_scrk, "", "", "", false);
 	server_auth.mi = connection_id;
 	datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
-	joiner.handle_datagram(datagram.data(), datagram.size());
+	joiner_receive::receive(joiner, datagram.data(), datagram.size());
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
 	auto receive = [&](uint8_t tag, std::vector<uint8_t> payload) {
 		std::vector<uint8_t> frame;
 		frame_session_packet(seq, SessionCrypto{server_scrk, {}, auth.ck},
 				{make_protocol_message(tag, std::move(payload))}, frame);
 		auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(frame));
-		return joiner.handle_datagram(packet.data(), packet.size());
+		return joiner_receive::receive(joiner, packet.data(), packet.size());
 	};
 	auto spawn = [&](uint16_t handle, uint32_t owner, uint16_t flags, const char *name,
 			uint8_t def_type = 3) { // ItemDefType person; 0 = empty spawn
