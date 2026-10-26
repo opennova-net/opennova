@@ -15,9 +15,10 @@
 #           own-machine add-on.
 # Slot k of a machine: game UDP 32768+k (to players), admin TCP 32800+k (to the
 # fleet program's security group alone). A server's game data is a tree (one
-# version of a data set's files, ADR 0064) in the store: the deployment's
-# operations bucket, data/trees/<id>/, which admins fill from the site's Game
-# data page. A machine holds no volume of game data: its hostd fetches
+# game's files as its published release builds them, ADR 0064, ADR 0071) in the
+# store: the deployment's operations bucket, data/trees/<id>/, which a release
+# published on the site's Games pages fills. A machine holds no volume of game
+# data: its hostd fetches
 # the trees its servers pin on demand (`aws s3 sync`, under hostd's task role)
 # onto the root volume, /opt/game/<tree id>/, and keeps each while a server
 # needs it.

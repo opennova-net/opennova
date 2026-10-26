@@ -242,7 +242,7 @@ own, change these on your fork:
 | `infra/aws/prod.tfvars`, `staging.tfvars` | `image_registry` (default `ghcr.io/opennova-net`), `azs` (`us-east-1a`, `us-east-1b`) | `image_registry = "ghcr.io/<your owner>"` in both. Another region is the `region` fields of `aws-org` and `aws-<deployment>` (`secrets init` writes `us-east-1`) and `azs`; the Route 53 health check's alarm exists in `us-east-1` alone |
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
 | `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
-| `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test). Publish needs `NOVAWORLD_URL` and `ADMIN_API_TOKEN` in each environment too ("The downloads host") |
+| `infra/github/` | the GitHub organization `opennova-net`, all of it | adapt it to your organization, or leave it out and make what the deploy workflow needs by hand: the repository environments `staging` and `prod` (prod with required reviewers), each with the variables `AWS_DEPLOY_ROLE_ARN` (the vault's `aws-<deployment>/github_deploy_role_arn`), `AWS_REGION` and `AWS_ACCOUNT_ID`; optionally the secret `STRIPE_TEST_SECRET_KEY` (the billing end-to-end test). and for Publish `NOVAWORLD_URL` (the deployment's site) and the secret `ADMIN_API_TOKEN` (its admin API token) ("The downloads host") |
 | `.github/workflows/ci.yml` | RunsOn's runner labels on the build and test legs (section "CI runners") | your own RunsOn stack, or `windows-latest` and `ubuntu-latest` in place of the labels. The image workflows run on `ubuntu-latest` and need neither |
 | `infra/zone/variables.tf` | `email_routes`: `support`, `aws-prod`, `aws-staging`, `aws-ci` | its default, if your accounts' root addresses differ (the zone stack takes no var-file) |
 | `web/src/utils/links.ts`, `web/index.html` | the site's links to OpenNova's repository and gate (`nw.opennova.net`), its `og:` tags | your own |
@@ -1082,9 +1082,11 @@ which talk to prod), staging's `downloads.staging.<domain>` a pull request's CI 
 (origin access control; the account's S3 public access block stands), a certificate ACM
 issues in us-east-1 (the stack's `aws.us_east_1` provider; CloudFront takes its
 certificates from there alone) and validates through a record in the Cloudflare zone, and
-an unproxied CNAME to the distribution. Cloudflare's proxy stays the site's: game archives
-go through CloudFront, whose free tier covers a terabyte a month. Without a zone there is
-none of it.
+an unproxied CNAME to the distribution. Its own response headers policy answers
+`Access-Control-Allow-Origin: *` whatever the request's headers (the managed CORS policies
+drop it for a browser's fetch, which carries `Priority`). Cloudflare's proxy stays the
+site's: game archives go through CloudFront, whose free tier covers a terabyte a month.
+Without a zone there is none of it.
 
 The host holds the current set alone, each build under its stable name
 (`opennova-game-windows.zip`, `jointops-game-windows.zip`, `dfx2-game-windows.zip`,
@@ -1120,8 +1122,9 @@ other game's are built from its project, "The games", section 7), and Publish al
 them, with each environment's secret `ADMIN_API_TOKEN` (the vault's
 `app-<deployment>/admin_api_token`) and variable `NOVAWORLD_URL` (the deployment's site:
 `https://opennova.net` and `https://staging.opennova.net`, or your `https://<domain>` and
-`https://staging.<domain>`). `infra/github` does not make these two: set them on each
-environment (the repository's Settings, Environments) before its first Publish. The
+`https://staging.<domain>`). `infra/github` makes both from the vault (`cloudflare/domain`,
+`app-<deployment>/admin_api_token`): `./deploy/run.sh github apply` before the first
+Publish, and again after a token's rotation. The
 repository variables the older workflows read (`PUBLISH_DOWNLOADS`,
 `PUBLISH_RUNTIME_UPDATES`, `UPDATE_PUBLISH_URL`) and any repository-level `ADMIN_API_TOKEN`
 secret are read no more: delete them.
@@ -1161,8 +1164,8 @@ B=$(./deploy/run.sh --deployment staging infra output -raw downloads_bucket)
    `downloads_bucket`). The apply waits for ACM to validate (minutes) and not for
    CloudFront to deploy, which takes up to a quarter of an hour more before the host
    answers.
-3. Set `NOVAWORLD_URL` and `ADMIN_API_TOKEN` on the `staging` environment (above), run
-   Publish for `staging` with a pull request's run id, and check:
+3. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
+   above), run Publish for `staging` with a pull request's run id, and check:
    `curl -s https://downloads.staging.<domain>/manifest.json`, and the runtime's release
    published on the admin's Games page.
 4. `--deployment staging app deploy` with a portal image of this change or later: the

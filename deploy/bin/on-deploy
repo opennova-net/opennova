@@ -213,7 +213,7 @@
 #                                 the replaced ones drained onto new machines,
 #                                 one at a time; for an AMI, launch template or
 #                                 user-data change (a new hostd is app deploy's).
-#                                 The game data is the site's Game data page
+#                                 The games are the site's Games pages
 #                                 (DEPLOY.md, "Hosted game servers"), not the
 #                                 toolbox's
 #
