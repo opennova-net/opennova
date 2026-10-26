@@ -9,6 +9,7 @@
 #include <editor/preview/model_preview_rig.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/anim/adm_root_motion.h>
+#include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/physics_class_table.h>
@@ -105,8 +106,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		if (world::physics_class_from_move_function(pose.definition.move_function) != world::PhysicsClass::Org1)
 			continue;
 		// A route's walker (a route or an order to walk, 123..125 included) stands at its spawn pose: the game walks it
-		// along its route, which no think runs here; the reserved 126 and 127 stand (infantry_command_think).
-		if (pose.route != 0 && pose.route != 126 && pose.route != 127) continue;
+		// along its route, which no think runs here; the reserved 126 and 127 stand (infantry_command_think). A person
+		// the start seated sits.
+		if (!pose.seated && pose.route != 0 && pose.route != 126 && pose.route != 127) continue;
 		Person person;
 		person.row = pose.row;
 		person.channels = pose.channels;
@@ -115,7 +117,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		person.alert = pose.alert;
 		person.guarding = pose.guarding;
 		person.airborne = pose.stood && !pose.settled;
-		if (in_world) {
+		person.seated = pose.seated;
+		person.seat_state = pose.seat.state;
+		if (in_world && !person.seated) {
 			const auto body = world_->bodies.find(pose.row);
 			const world::AiEntity *ai = body != world_->bodies.end() ? world_->mission->world.ai.for_handle(body->second)
 			                                                         : nullptr;
@@ -151,6 +155,15 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 		return false;
 	}
 	world::IRootMotionSource *motion = poses.motion();
+	// A seated person's tick: its motor head, then its seat block's request (the class's comment).
+	const auto sit = [&](Person &person) {
+		world::RootMotionFrame frame;
+		world::infantry_org1_motor_head(person.channels, motion, rings_, frame);
+		const uint32_t word = person.channels.last_events;
+		if (word != 0)
+			events_.push_back(Event{ person.row, tick_, word, person.channels.clip_phase, frame.capsule_bottom });
+		world::AiSystem::request_seat_animation(person.channels, person.seat_state);
+	};
 	while (tick_ < tick) {
 		++tick_;
 		// The game's tick: its first frame runs at 1 (MissionKernel::boot), the clock's first tick past the start.
@@ -161,6 +174,10 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 			world::World &w = world_->mission->world;
 			w.logic_tick = game_tick;
 			for (Person &person : people_) {
+				if (person.seated) {
+					sit(person);
+					continue;
+				}
 				world::AiEntity *body = w.ai.for_handle(person.body);
 				if (body == nullptr) continue;
 				const world::RootMotionFrame frame = w.ai.tick_still_body(*body, w, game_tick);
@@ -171,6 +188,10 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 			continue;
 		}
 		for (Person &person : people_) {
+			if (person.seated) {
+				sit(person);
+				continue;
+			}
 			world::RootMotionFrame frame;
 			world::infantry_org1_motor_head(person.channels, motion, rings_, frame);
 			const uint32_t word = person.channels.last_events;
@@ -203,13 +224,18 @@ const world::InfantryState *MissionPeople::channels(NodeId row) const {
 	const auto found = rows_.find(row);
 	if (found == rows_.end()) return nullptr;
 	const Person &person = people_[found->second];
-	if (!world_) return &person.channels;
+	if (!world_ || person.seated) return &person.channels;
 	const world::AiEntity *body = world_->mission->world.ai.for_handle(person.body);
 	return body ? &body->inf : nullptr;
 }
 
+bool MissionPeople::seated_(NodeId row) const {
+	const auto found = rows_.find(row);
+	return found != rows_.end() && people_[found->second].seated;
+}
+
 bool MissionPeople::aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOverlayClassCount]) const {
-	if (!world_) return false;
+	if (!world_ || seated_(row)) return false;
 	const auto found = world_->bodies.find(row);
 	if (found == world_->bodies.end()) return false;
 	const world::World &w = world_->mission->world;
@@ -222,7 +248,7 @@ bool MissionPeople::aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOv
 }
 
 bool MissionPeople::look(NodeId row, Look &out) const {
-	if (!world_) return false;
+	if (!world_ || seated_(row)) return false;
 	const auto found = world_->bodies.find(row);
 	if (found == world_->bodies.end()) return false;
 	const world::AiEntity *body = world_->mission->world.ai.for_handle(found->second);

@@ -1184,6 +1184,14 @@ public:
     // [orig: Entity_UpdateInfantryAI parent/health gate @0x4b9960..0x4b9983,
     //  mounted pose @0x4bec23..0x4bed3f, death detach @0x4b9c57..0x4b9c60.]
     bool pose_if_mounted(AiEntity &e, World &world);
+    // The seat block's animation: the clip a mounted body plays on `seat` of `carrier` (a
+    // gunner's emplaced variant where its .adm authors one, else the emplaced row; any other
+    // seat the sit_N its name numbers, sit_24 following the hull), and its request, asked
+    // whenever the body plays another, the deferred request cleared. pose_if_mounted's, and the
+    // editor's seated person's (S27). [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3;
+    // Entity_UpdateInfantryAI @0x4BEE0D..0x4BEE28 (+0x2BC the sit_N its name's digits number, +0x2B8 cleared)]
+    int seat_animation_state(const InfantryState &inf, const Entity &carrier, const Seat &seat) const;
+    static void request_seat_animation(InfantryState &inf, int state);
 
     // Repeat only the carrier-owned seat-frame pose after a later carrier mover.
     // This deliberately does not mirror input, chase gunner aim, select animation,

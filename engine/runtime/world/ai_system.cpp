@@ -1614,19 +1614,23 @@ bool AiSystem::pose_if_mounted(AiEntity &e, World &world) {
     if (e.inf.active) {
         // The seat animation (+0x2BC, the deferred +0x2B8 cleared) is the posed arm's.
         // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3]
-        if (!player_seat_bone_lost) {
-            const int mounted_state = mounted_anim_state_for_seat(*veh, seat, e.inf, root_motion);
-            if (e.inf.anim_state != mounted_state) {
-                e.inf.request_body_animation(mounted_state);
-            }
-            e.inf.anim_pending = 0;
-        }
+        if (!player_seat_bone_lost) request_seat_animation(e.inf, seat_animation_state(e.inf, *veh, seat));
         e.inf.move_mode = 0;
         e.inf.target_dist = 0;
         occ->body_anim_slot = body_anim_slot_from_state(e.inf.anim_state);
         mirror_wire_anim(e, world); // seat-state anim bytes reach the 0x0A player record too
     }
     return true;
+}
+
+int AiSystem::seat_animation_state(const InfantryState &inf, const Entity &carrier, const Seat &seat) const {
+    return mounted_anim_state_for_seat(carrier, seat, inf, root_motion);
+}
+
+void AiSystem::request_seat_animation(InfantryState &inf, int state) {
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4B65A8..0x4B65C3; Entity_UpdateInfantryAI @0x4BEE0D..0x4BEE28]
+    if (inf.anim_state != state) inf.request_body_animation(state);
+    inf.anim_pending = 0;
 }
 
 static int32_t part_anim_wrapped_add(int32_t lhs, int32_t rhs) {

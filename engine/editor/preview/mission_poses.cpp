@@ -25,6 +25,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::editor {
 
@@ -48,7 +49,7 @@ bool same_pose(const MissionPose &a, const MissionPose &b) {
 	return a.item == b.item && a.status == b.status && a.ai_function == b.ai_function && a.adm == b.adm &&
 			a.ai_slot == b.ai_slot && a.state == b.state && a.updates == b.updates && a.rise == b.rise &&
 			a.ssn == b.ssn && a.alert == b.alert && a.guarding == b.guarding && a.route == b.route &&
-			a.clip == b.clip &&
+			a.seated == b.seated && a.seat == b.seat && a.carrier == b.carrier && a.clip == b.clip &&
 			a.source_clip == b.source_clip && p.state == q.state && p.phase == q.phase && p.variant == q.variant &&
 			p.parked == q.parked && p.blending == q.blending && p.source_state == q.source_state &&
 			p.source_phase == q.source_phase && p.source_variant == q.source_variant && p.weight == q.weight;
@@ -126,12 +127,24 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 	return catalog;
 }
 
-bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene) {
+bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene, const std::vector<MissionStartSeat> &seats) {
 	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : scene.entities()) {
 		if (entity.pool != MissionPool::Organic) continue;
-		inputs.push_back(MissionPoseInput{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn,
-				uint8_t(entity.alert) });
+		MissionPoseInput input{ entity.row, entity.item, entity.attributes, entity.route, entity.ssn, uint8_t(entity.alert) };
+		// The seat the start took for it (by its record: its place among the organics), and the record its carrier is.
+		for (const MissionStartSeat &seat : seats) {
+			if (seat.rider != entity.index) continue;
+			input.seated = true;
+			input.seat = seat;
+			for (const MissionEntityMark &carrier : scene.entities())
+				if (seat.carrier >= 0 && carrier.pool == seat.carrier_pool && carrier.index == seat.carrier) {
+					input.carrier = carrier.row;
+					break;
+				}
+			break;
+		}
+		inputs.push_back(input);
 	}
 	const AssetGraph *graph = view.findings.graph.get();
 	const uint64_t graph_generation = graph ? graph->generation() : 0;
@@ -427,6 +440,13 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 		}
 		pose_person(*definition, PersonRecord{ input.ssn, input.route, input.attributes, input.alert }, has_file, *files,
 				rig_files.store, motion, rings, pose);
+		// The start's seat, for a body its update's seat block poses (MissionPose::seated).
+		if (input.seated && pose.status == "posed" &&
+				world::physics_class_from_move_function(definition->move_function) == world::PhysicsClass::Org1) {
+			pose.seated = true;
+			pose.seat = input.seat;
+			pose.carrier = input.carrier;
+		}
 		out.push_back(std::move(pose));
 	}
 	if (rings_out) *rings_out = rings;
@@ -503,6 +523,20 @@ io::JsonValue mission_pose_json(const MissionPose &pose) {
 	out.set("lift", json_number(pose.lift));
 	out.set("settled", JsonValue::make_bool(pose.settled));
 	if (pose.on) out.set("on", json_number(double(pose.on)));
+	if (pose.seated) {
+		// The seat the start took (S27): where it poses the body, the clip it asks, the carrier's record.
+		JsonValue seat = JsonValue::make_object();
+		JsonValue at = JsonValue::make_array();
+		for (const double axis : { pose.seat.x, pose.seat.y, pose.seat.z }) at.push(json_number(axis));
+		seat.set("at", std::move(at));
+		seat.set("yaw", json_number(pose.seat.yaw));
+		seat.set("pitch", json_number(pose.seat.pitch));
+		seat.set("roll", json_number(pose.seat.roll));
+		seat.set("state", json_number(pose.seat.state));
+		seat.set("row", json_string(world::infantry_anim_key(pose.seat.state)));
+		if (pose.carrier) seat.set("carrier_row", json_number(double(pose.carrier)));
+		out.set("seat", std::move(seat));
+	}
 	JsonValue playing = JsonValue::make_object();
 	playing.set("state", json_number(body.state));
 	playing.set("row", json_string(world::infantry_anim_key(body.state)));

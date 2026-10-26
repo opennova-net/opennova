@@ -390,6 +390,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	people_.clear();
 	effects_.close();
 	listen_.close();
+	start_.close();
 	drawn_ = JsonValue();
 	missing_.clear();
 	ground_ = false;
@@ -423,19 +424,43 @@ double MissionViewport::hours() const {
 	return double(env::tod_start_fixed24(scene_.header().start_time)) / double(env::kTodFixed24OneHour);
 }
 
-void MissionViewport::follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock) {
+const std::vector<MissionStartSeat> &MissionViewport::follow_start_(const SessionView &view, const Document *document) {
 	const auto *mission = dynamic_cast<const MissionDocument *>(document);
-	if (!options_.listen.on || !mission) {
-		listen_.close();
-		return;
-	}
 	// The mission's script is its file's stem's (<stem>.wac, as Play's game compiles it).
 	std::string stem = path();
 	const size_t slash = stem.find_last_of("/\\");
 	if (slash != std::string::npos) stem = stem.substr(slash + 1);
 	const size_t dot = stem.find_last_of('.');
 	if (dot != std::string::npos) stem = stem.substr(0, dot);
-	listen_.refresh(view, scene_, *mission, stem);
+	// Booted while the Listen runs it, or while a person could be seated: a seat comes from the start's script alone
+	// (docs/world/world-wac-ai-re.md 41.1), so a person and a layer of it the project holds (game.wac, server.wac,
+	// <stem>.wac [orig: WacScript_InitAndLoad @0x4f91f0]); booted again where what it read moved.
+	const std::shared_ptr<const ProjectAssetSource> &files = view.findings.assets;
+	const bool scripted = files && (files->stamp("game.wac") != 0 || files->stamp("server.wac") != 0 ||
+	                                files->stamp(stem + ".wac") != 0);
+	if (!mission || (!options_.listen.on && (scene_.count(MissionPool::Organic) == 0 || !scripted))) {
+		start_.close();
+		return start_.start_seats();
+	}
+	start_.follow(view.findings.assets, *mission, scene_.header(), stem, mission_start_records(scene_));
+	return start_.start_seats();
+}
+
+bool MissionViewport::seat_now(const MissionPose &pose, MissionStartSeat &out) const {
+	if (!pose.seated) return false;
+	out = pose.seat;
+	if (const MissionEntityMark *carrier = pose.carrier != 0 ? scene_.entity(pose.carrier) : nullptr)
+		start_.seat_on(pose.seat, *carrier, out);
+	return true;
+}
+
+void MissionViewport::follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock) {
+	const auto *mission = dynamic_cast<const MissionDocument *>(document);
+	if (!options_.listen.on || !mission) {
+		listen_.close();
+		return;
+	}
+	listen_.refresh(view, scene_, *mission);
 	listen_.play_to(clock.ticks(), camera_.eye(), hours());
 	// What the people's sounds play from (DI-04's sources: SndProf.def and the game's bank chain).
 	people_sources_.refresh(*view.findings.assets,
@@ -458,9 +483,13 @@ std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan 
 			const MissionPose *pose = poses_.pose(row);
 			const MissionEntityMark *entity = scene_.entity(row);
 			if (!pose || !entity || pose->status != "posed") return false;
-			const double at[3] = { entity->x, entity->y, entity->z + pose->lift };
+			// A seated person from its seat as it sits now (S27).
+			MissionStartSeat seat;
+			const bool seated = seat_now(*pose, seat);
+			const double at[3] = { seated ? seat.x : entity->x, seated ? seat.y : entity->y,
+				seated ? seat.z : entity->z + pose->lift };
 			out.origin = mission_to_preview(at);
-			const MissionGroundFacts ground = terrain_ground_.terrain_at(entity->x, entity->y, entity->z);
+			const MissionGroundFacts ground = terrain_ground_.terrain_at(at[0], at[1], seated ? at[2] : entity->z);
 			out.surface = ground.under_water ? audio::FootSurface::Water
 			              : ground.surface == 3 ? audio::FootSurface::Snow : audio::FootSurface::Ground;
 			const PersonDefinition &definition = pose->definition;
@@ -539,7 +568,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		scene_.read(*source);
 		take_fog_(files);
 		bound_items_(view);
-		stand_people_(view, *document, poses_.refresh(view, scene_));
+		stand_people_(view, *document, poses_.refresh(view, scene_, follow_start_(view, document)));
 		people_.run_to(poses_, clock.ticks());
 		follow_overlay_(view);
 		picture_.show(key, generation);
@@ -598,7 +627,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	bound_items_(view);
 	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an
 	// Update poses them, the picture standing.
-	bool posed = poses_.refresh(view, scene_);
+	bool posed = poses_.refresh(view, scene_, follow_start_(view, document));
 	posed = stand_people_(view, *document, posed) || posed;
 	// The people play their clips on to the clock (S23 C): the device poses them each frame as they stand, no Update
 	// asked.

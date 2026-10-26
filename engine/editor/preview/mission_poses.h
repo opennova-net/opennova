@@ -10,6 +10,7 @@
 
 #include <base/io/json.h>
 #include <editor/model/node.h>
+#include <editor/preview/mission_script_run.h>
 #include <runtime/world/infantry.h>
 
 namespace opennova::anim {
@@ -107,6 +108,13 @@ struct MissionPose {
 	uint8_t alert = 0;
 	bool guarding = false;
 	int route = 0; // the slot's route channel the init reads (0 none, or no AI slot)
+	// The seat the mission's start took for it (S27, MissionStartSeat), a person on the org1 row's alone (the seat block
+	// is its update's [orig: Entity_UpdateInfantryAI @0x4BEC23..0x4BED3F]; an org0 body's update is a nullsub,
+	// mission_people.h), and its carrier's row (0: no record of the scene is the carrier). The device draws it on the
+	// seat, the people play its seat's clip.
+	bool seated = false;
+	MissionStartSeat seat;
+	NodeId carrier = 0;
 };
 
 struct PersonRecord {
@@ -124,9 +132,13 @@ struct MissionPoseInput {
 	int route = 0;
 	int ssn = 0;
 	uint8_t alert = 0;
+	// The seat the start took for it (S27), and its carrier's row.
+	bool seated = false;
+	MissionStartSeat seat;
+	NodeId carrier = 0;
 	bool operator==(const MissionPoseInput &o) const {
 		return row == o.row && item == o.item && attributes == o.attributes && route == o.route && ssn == o.ssn &&
-				alert == o.alert;
+				alert == o.alert && seated == o.seated && seat == o.seat && carrier == o.carrier;
 	}
 };
 
@@ -185,8 +197,9 @@ public:
 	MissionPoses(const MissionPoses &) = delete;
 	MissionPoses &operator=(const MissionPoses &) = delete;
 
-	// True when a pose changed (the device poses its people again).
-	bool refresh(const SessionView &view, const MissionScene &scene);
+	// True when a pose changed (the device poses its people again). `seats`: the seats the mission's start took
+	// (MissionScriptRun::start_seats), each person's by its SSN.
+	bool refresh(const SessionView &view, const MissionScene &scene, const std::vector<MissionStartSeat> &seats = {});
 	// Each posed person stood where the spawn's ground solve stands it over `floor` (no terrain
 	// read: the rise alone), at its record as `scene` holds it now: with the mission given, over its
 	// world (the posed people and the items and buildings within their candidates' reach, loaded as

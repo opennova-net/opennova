@@ -70,7 +70,7 @@ JsonValue point_json(const PreviewVec3 &at) {
 
 } // namespace
 
-MissionListen::MissionListen() = default;
+MissionListen::MissionListen(MissionScriptRun &script) : script_(script) {}
 MissionListen::~MissionListen() = default;
 
 const MissionSoundSource *MissionListen::source(NodeId row) const {
@@ -101,11 +101,8 @@ const MissionListen::Catalog &MissionListen::catalog_(const SessionView &view, c
 	return catalog;
 }
 
-bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document,
-		const std::string &basename) {
+bool MissionListen::refresh(const SessionView &view, const MissionScene &scene, const MissionDocument &document) {
 	opened_ = true;
-	// The mission's start and its script, booted again where what they read moved.
-	script_.follow(view.findings.assets, document, scene.header(), basename);
 	// The dialog bank the mission loads and the text its subtitles read (DI-32).
 	files_ = view.findings.assets;
 	dialog_bank_ = mission_dialog_bank(document);
@@ -512,7 +509,8 @@ void MissionListen::run_dialog_to_(int32_t end, std::vector<DialogChannel::Loade
 void MissionListen::close() {
 	if (opened_) mix_.moved();
 	opened_ = false;
-	script_.close();
+	// The start the view holds, back at its start (its sounds the start's again): what a Listen opened later hears.
+	script_.run_to(0);
 	mix_.close();
 	sources_.clear();
 	source_index_.clear();

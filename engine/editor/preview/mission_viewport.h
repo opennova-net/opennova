@@ -184,6 +184,13 @@ public:
 	// What the mission sounds like at its camera while its options listen (DI-36, preview/mission_listen): the sources,
 	// the channels the device plays, the script's weather; closed while they do not.
 	const MissionListen &listen() const { return listen_; }
+	// The mission's start and its script (preview/mission_script_run), followed while its scene holds a person (the
+	// seats the start takes, S27) or its options listen (the Listen runs it on the clock), closed otherwise.
+	const MissionScriptRun &start() const { return start_; }
+	// Where a seated person sits now (S27, MissionPose::seated): the start's seat posed again over its carrier where
+	// the carrier's record stands now (MissionScriptRun::seat_on; the start is not booted again for a move), what the
+	// device draws it at and its sounds play from. False: not seated.
+	bool seat_now(const MissionPose &pose, MissionStartSeat &out) const;
 	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds, its people's
 	// footsteps and foley as they play their clips), each planned as the game plays it with its member picked through
 	// `selector`, numbered from `seq`: what the session's clip sounds hand the Shell (session/clip_sounds). None while
@@ -312,6 +319,8 @@ private:
 	// The items' effects followed over the scene and played to the clock while the options show them (DI-31),
 	// closed while they do not.
 	void follow_effects_(const SessionView &view, const PreviewClock &clock);
+	// The mission's start followed over the document (start()); the seats it took.
+	const std::vector<MissionStartSeat> &follow_start_(const SessionView &view, const Document *document);
 	// The Listen followed over the scene and the document and played to the clock at the camera's eye while the
 	// options listen (DI-36), closed while they do not.
 	void follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock);
@@ -379,7 +388,8 @@ private:
 	ClipSoundSources people_sources_; // SndProf.def and the banks the people's sounds play from
 	int32_t people_heard_ = -1; // the clock's last tick the people's sounds were heard to
 	MissionEffects effects_;
-	MissionListen listen_;
+	MissionScriptRun start_;
+	MissionListen listen_{ start_ };
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
 	uint64_t stood_ground_ = UINT64_MAX; // the ground's revision then

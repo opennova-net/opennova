@@ -208,6 +208,17 @@ Transform3D MissionViewportApplier::transform_of_(const MissionEntityMark &entit
 							  : MissionObjectPlacer::entity_transform(position, rotation);
 }
 
+Transform3D MissionViewportApplier::person_place_(const MissionViewport &mission, const MissionEntityMark &entity,
+		const opennova::editor::MissionPose &pose) const {
+	opennova::editor::MissionStartSeat seat;
+	if (!mission.seat_now(pose, seat)) return transform_of_(entity).translated(Vector3(0.0f, float(pose.lift), 0.0f));
+	// The body drawn at its seat's frame, through the placement composition as a record's (its items.def scale kept).
+	const Vector3 at(float(seat.x), float(seat.y), float(seat.z));
+	const Vector3 angles(float(seat.pitch), float(seat.yaw), float(seat.roll));
+	return placer_.is_valid() ? placer_->item_entity_transform(at, angles, int(entity.item))
+							  : MissionObjectPlacer::entity_transform(at, angles);
+}
+
 ObjectModel *MissionViewportApplier::model_of_(const Placed &placed) {
 	return placed.model != 0 ? Object::cast_to<ObjectModel>(ObjectDB::get_instance(placed.model)) : nullptr;
 }
@@ -729,17 +740,9 @@ void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewp
 	apply_state_(viewport);
 }
 
-namespace {
-
-// How far a posed person stands over its record (where its spawn stands it, metres; 0 for anyone else).
-double lift_of(const opennova::editor::MissionPoses &poses, NodeId row) {
-	const opennova::editor::MissionPose *pose = poses.pose(row);
-	return pose != nullptr && pose->status == "posed" ? pose->lift : 0.0;
-}
-
-} // namespace
-
-void MissionViewportApplier::move_entities_(const MissionScene &scene, const opennova::editor::MissionPoses &poses) {
+void MissionViewportApplier::move_entities_(const MissionViewport &mission) {
+	const MissionScene &scene = mission.scene();
+	const opennova::editor::MissionPoses &poses = mission.poses();
 	for (const MissionEntityMark &entity : scene.entities()) {
 		const auto found = entities_.find(entity.row);
 		// One of another item, group or attributes is the next build's to lift.
@@ -752,8 +755,10 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene, const ope
 		placed.stamp = entity.stamp;
 		const Transform3D xform = transform_of_(entity);
 		if (ObjectModel *model = model_of_(placed)) {
-			// A person stands where its spawn stands it (its pose's lift; the mission's z up is the picture's y).
-			model->set_transform(xform.translated(Vector3(0.0f, float(lift_of(poses, entity.row)), 0.0f)));
+			// A person stands where its spawn stands it (its pose's lift; the mission's z up is the picture's y), or on
+			// the seat the start took.
+			const opennova::editor::MissionPose *pose = poses.pose(entity.row);
+			model->set_transform(pose != nullptr && pose->status == "posed" ? person_place_(mission, entity, *pose) : xform);
 			placed.aimed = false; // its overlay, if any, given again at its next pose
 		} else if (placed.key != 0 && placer_.is_valid()) {
 			placer_->move_static_instance(placed.key, xform);
@@ -761,13 +766,27 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene, const ope
 		if (placed.key != 0 && std::find(shadow_pending_.begin(), shadow_pending_.end(), entity.row) == shadow_pending_.end())
 			shadow_pending_.push_back(entity.row);
 	}
+	// A person on a seat the start took moves with its carrier (S27).
+	for (const opennova::editor::MissionPose &pose : poses.poses()) {
+		const auto found = pose.seated && pose.carrier != 0 ? entities_.find(pose.row) : entities_.end();
+		const MissionEntityMark *rider = found != entities_.end() ? scene.entity(pose.row) : nullptr;
+		const MissionEntityMark *carrier = rider != nullptr ? scene.entity(pose.carrier) : nullptr;
+		if (carrier == nullptr || found->second.carrier_stamp == carrier->stamp) continue;
+		found->second.carrier_stamp = carrier->stamp;
+		if (ObjectModel *model = model_of_(found->second)) {
+			model->set_transform(person_place_(mission, *rider, pose));
+			found->second.aimed = false;
+		}
+	}
 	// What the scene no longer has: hidden until it comes back or the next placement.
 	for (auto &entry : entities_)
 		if (!entry.second.hidden && !scene.entity(entry.first)) show_(entry.second, false);
 }
 
-void MissionViewportApplier::pose_people_(const MissionScene &scene, const opennova::editor::MissionPoses &poses,
-		const opennova::editor::MissionPeople &people) {
+void MissionViewportApplier::pose_people_(const MissionViewport &mission) {
+	const MissionScene &scene = mission.scene();
+	const opennova::editor::MissionPoses &poses = mission.poses();
+	const opennova::editor::MissionPeople &people = mission.people();
 	for (auto &entry : entities_) {
 		Placed &placed = entry.second;
 		const opennova::editor::MissionPose *pose = poses.pose(entry.first);
@@ -776,8 +795,8 @@ void MissionViewportApplier::pose_people_(const MissionScene &scene, const openn
 		if (placed.posed_model == placed.model && placed.pose_stamp == pose->stamp) continue;
 		ObjectModel *model = model_of_(placed);
 		if (model == nullptr) continue;
-		// Where the spawn stands it: its record lifted by the warmup and its ground solve.
-		const Transform3D place = transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f));
+		// Where the spawn stands it: its record lifted by the warmup and its ground solve; or the start's seat.
+		const Transform3D place = person_place_(mission, *entity, *pose);
 		model->set_transform(place);
 		placed.aimed = false; // the root is the record's again
 		// Its body as it plays now (S23 C), its spawn's before it plays.
@@ -817,8 +836,7 @@ void MissionViewportApplier::play_people_(const opennova::editor::MissionViewpor
 		if (ObjectModel *model = model_of_(placed)) {
 			pose_body_(*model, *body);
 			if (entity != nullptr && pose != nullptr)
-				aim_body_(*model, placed, people, entry.first,
-						transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f)));
+				aim_body_(*model, placed, people, entry.first, person_place_(mission, *entity, *pose));
 		}
 	}
 }
@@ -891,8 +909,8 @@ void MissionViewportApplier::relight_() {
 void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport) {
 	const MissionViewport &mission = mission_of(viewport);
 	const opennova::editor::MissionViewportOptions &options = mission.options();
-	move_entities_(mission.scene(), mission.poses());
-	pose_people_(mission.scene(), mission.poses(), mission.people());
+	move_entities_(mission);
+	pose_people_(mission);
 	// The layers the options switch.
 	PreviewSceneLayers::Shown shown;
 	shown.terrain = options.terrain;
