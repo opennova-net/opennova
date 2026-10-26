@@ -429,7 +429,9 @@ func test_dds_reader_decodes_hdr_into_one_buffer() -> void:
 	var flat := root.load_texture("flat.dds", stage)
 	assert_not_null(flat, "a flat HDR under a .dds name decodes")
 	if flat != null:
-		assert_eq(flat.get_width(), 3)
+		# Its 3 wide side rounds up to D3DX's power of two, the image top-left
+		# [orig: D3DXCreateTextureFromFileInMemoryEx_Internal @ 0x6914D9..0x691520].
+		assert_eq(flat.get_width(), 4)
 		# (byte + 0.5) * 2^(128 - 136) through D3DX's 8-bit encode: 40 -> 40.
 		assert_eq(_pixel(flat, 0, 0), Color8(40, 50, 60), "the first word is held, never written")
 		assert_eq(_pixel(flat, 2, 0), Color8(0, 0, 0), "the last pixel stays unwritten")
