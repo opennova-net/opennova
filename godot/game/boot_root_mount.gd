@@ -17,7 +17,7 @@ static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 		# ERR_FILE_NOT_FOUND is specifically the zero-archives fatal; other
 		# errors (missing dir, unreadable root) fail the loose mount too.
 		if err == ERR_FILE_NOT_FOUND and allow_loose_root \
-				and root.set_root_dir(dir) == OK:
+				and root.set_root_dir(dir, game) == OK:
 			report_missing_boot_resources(root)
 			return root
 		push_warning("BootRootMount: %s" % root.get_last_error())

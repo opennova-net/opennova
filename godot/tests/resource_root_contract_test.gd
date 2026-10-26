@@ -47,6 +47,25 @@ func test_editor_set_root_dir_is_loose_only() -> void:
 	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn")
 
 
+func test_loose_root_mounts_as_the_launch_game() -> void:
+	# `/game dfx2 --loose-root` over a tree with no archives: the boot's loose fallback mounts it
+	# as DFX2, the title its sessions speak, not as JO.
+	var root := _make_flat_root("loose_launch_game")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx2", "--loose-root"]))
+	var mounted := BootRootMount.mount(root, true)
+	LaunchFlags.clear_args_override()
+	assert_not_null(mounted)
+	if mounted == null:
+		return
+	assert_false(mounted.is_runtime_mount())
+	assert_eq(mounted.get_game_code(), "dfx2")
+	assert_eq(mounted.read_file("Alpha.trn").get_string_from_utf8(), "loose trn")
+	var fixture := ResourceRoot.new()
+	assert_eq(fixture.set_root_dir(root), OK)
+	assert_eq(fixture.get_game_code(), "jo", "a fixture mount names no game: JO's")
+
+
 func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 	var root := _make_flat_root("packed_runtime")
 	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")

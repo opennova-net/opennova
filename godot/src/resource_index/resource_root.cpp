@@ -110,7 +110,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("is_valid_root", "path"), &ResourceRoot::is_valid_root);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("cache_epoch"), &ResourceRoot::cache_epoch);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("bump_cache_epoch"), &ResourceRoot::bump_cache_epoch);
-	ClassDB::bind_method(D_METHOD("set_root_dir", "path"), &ResourceRoot::set_root_dir);
+	ClassDB::bind_method(D_METHOD("set_root_dir", "path", "game_code"), &ResourceRoot::set_root_dir, DEFVAL("jo"));
+	ClassDB::bind_method(D_METHOD("get_game_code"), &ResourceRoot::get_game_code);
 	ClassDB::bind_method(D_METHOD("mount_runtime", "path", "expansion", "allow_loose_override", "game_code"),
 			&ResourceRoot::mount_runtime, DEFVAL(String()), DEFVAL(false), DEFVAL("jo"));
 	ClassDB::bind_method(D_METHOD("list_expansions", "path"), &ResourceRoot::list_expansions);
@@ -310,7 +311,8 @@ const opennova::TitleIdentity *ResourceRoot::title_identity(std::string &error) 
 const opennova::TitleIdentity *ResourceRoot::session_title(const Ref<ResourceRoot> &root,
 		std::string &error) {
 	if (root.is_valid()) return root->title_identity(error);
-	return opennova::resolve_title_identity(opennova::to_std(LaunchFlags::game("jo")), error);
+	// The launch's game as the boot mount picks it: `/game`'s, else the launch folder's product.
+	return opennova::resolve_title_identity(opennova::to_std(LaunchFlags::game(String())), error);
 }
 
 std::string ResourceRoot::session_gate_tag(const Ref<ResourceRoot> &root,
@@ -318,9 +320,9 @@ std::string ResourceRoot::session_gate_tag(const Ref<ResourceRoot> &root,
 	return opennova::title_gate_tag(title, root.is_valid() ? &root->index_ : nullptr);
 }
 
-Error ResourceRoot::set_root_dir(const String &path) {
-	// Loose-source mount: never open PFF archives. Loose files aren't SCR-wrapped,
-	// so the JO default (version-detect) is correct here.
+Error ResourceRoot::set_root_dir(const String &path, const String &game_code) {
+	// Loose-source mount: never open PFF archives. The game it is mounted as names its title and
+	// its SCR policy, as a runtime mount's does.
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
@@ -336,8 +338,8 @@ Error ResourceRoot::set_root_dir(const String &path) {
 			last_error_ = String(index_.last_error().c_str());
 			return ERR_CANT_OPEN;
 		}
-		index_.set_scr_policy(gameprofile_scr_policy_for_code("jo"));
-		game_code_ = "jo";
+		index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.to_lower().utf8().get_data()));
+		game_code_ = game_code;
 		last_error_ = String();
 		mount_kind_ = MountKind::Loose;
 		return OK;

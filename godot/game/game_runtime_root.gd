@@ -100,7 +100,7 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 	var root := ResourceRoot.new()
 	var err := root.mount_runtime(directory, "", loose_override, game)
 	if err != OK:
-		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory) != OK:
+		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory, game) != OK:
 			return false
 	var missing := root.list_missing_boot_resources()
 	root.clear()
