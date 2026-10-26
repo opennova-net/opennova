@@ -62,7 +62,7 @@ inline constexpr const char *kExpansion = "nifty";
 // The mission the editor's end-to-end scripts run on (scripts/mcp/editor_mission_e2e.py, editor_terrain_e2e.py; their
 // CI job passes --mission onjo_e2e.bms), and the item its one entity is (items.def's row, drawn by test.3di).
 inline constexpr const char *kE2eMission = "onjo_e2e";
-inline constexpr int kE2eItem = 106001;
+inline constexpr int kE2eItem = 107001; // an id the engine keeps for no kind (formats/def/reserved_items)
 
 inline std::string repo() {
 	return std::string(test_paths_repo_root(__FILE__));
