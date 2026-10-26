@@ -587,11 +587,13 @@ struct CollisionPolygonHit {
     int32_t poly_type = -1;
 };
 
+// `back_face`: the walk's back-face argument (ProjectileTrace::back_face_arg).
 bool collision_raycast_polygons(const CollisionTargetView &target,
                                 const CollisionRay &ray,
                                 int32_t segment_length_q16,
                                 uint32_t ammo_flags,
-                                CollisionPolygonHit &out_hit);
+                                CollisionPolygonHit &out_hit,
+                                bool back_face = true);
 
 // The reflection's face lookup on a struck entity's model: the face at a
 // section-local index of a section, within the section count and that
@@ -612,8 +614,10 @@ bool collision_section_face_normal(const CollisionTargetView &target, int32_t se
 // transform of the segment, face AABB reject, flags & 0x100 skip, the
 // material-17 foliage skip when the ammo carries flag 0x4000000, the
 // plane-straddle test ((v.n >> 14) + dist on both endpoints), the direction
-// rule (either side, the back-face argument every caller pushes being 1; a
-// 0x800 face enter-front d0>0 && d1<=0 alone, unless flag 1), the distance
+// rule (flag 1 either side; else, with the back-face argument the projectile
+// callers push, 1, either side unless 0x800, which takes a front entry
+// d0>0 && d1<=0 alone, and with the clamped ground query's 0 a front entry
+// alone), the distance
 // split |d0| * len / (|d0| + |d1|) with the "Rounds Divide Error"
 // 0x40000000 clamp, accept at <= best, and the odd-even point-in-triangle on
 // the normal's projection plane (Math_PointInTriangle2D @ 0x414050, Q8
@@ -633,7 +637,8 @@ struct RayFaceHit {
 // @0x4E51E4..0x4E522A]. Null = the segment's own unit direction and length.
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
-                             const int32_t *ray_dir = nullptr, int32_t ray_length = 0);
+                             const int32_t *ray_dir = nullptr, int32_t ray_length = 0,
+                             bool back_face = true);
 // The nearest-entity walker's face test over one entity: each enabled section's CFAC faces whose
 // box meets the section-local segment's, bit 2 of the flags clear and the material not 16, that
 // the segment crosses (either way) at |d0| * length / (|d0| + |d1|) along `dir` inside the
@@ -1007,6 +1012,13 @@ struct ProjectileTrace {
     //  parameter @0x4E51B8, the test point @0x4E51E4..0x4E522A]
     FixedVec3 ray_dir_q16;
     int32_t ray_length_q16 = 0;
+    // The face walk's back-face argument: set, a face without flag 1 is taken from
+    // either side unless 0x800, which takes it entering its front alone (every
+    // projectile walk pushes 1); clear, a face without flag 1 is taken entering its
+    // front alone (the clamped ground query, D-COL-17).
+    // [orig: Physics_RaycastAgainstBoneCollision @0x4E4CB0 - the argument's test
+    //  @0x4E511D, the 0x800 leg @0x4E5127..0x4E513B, the front leg @0x4E5140..0x4E514A]
+    bool back_face_arg = true;
     // One entity alone, through its own gate and faces and no slot gate: the
     // walk's other rows are misses, and so is the entity itself without a
     // collision model (Physics_RaycastAgainstBoneCollision's model test).

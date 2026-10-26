@@ -3331,6 +3331,11 @@ target_link_libraries(candidate_slice_lifetime_test PRIVATE opennova_runtime ope
 target_compile_features(candidate_slice_lifetime_test PRIVATE cxx_std_17)
 add_test(NAME candidate_slice_lifetime COMMAND candidate_slice_lifetime_test)
 
+add_executable(clamped_ground_query_test world/clamped_ground_query_test.cpp)
+target_link_libraries(clamped_ground_query_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(clamped_ground_query_test PRIVATE cxx_std_17)
+add_test(NAME clamped_ground_query COMMAND clamped_ground_query_test)
+
 add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
 target_link_libraries(vehicle_motor_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

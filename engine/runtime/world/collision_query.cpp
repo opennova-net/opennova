@@ -309,7 +309,7 @@ bool point_in_triangle_2d(const int32_t p[3], const CollisionFace &face,
 // ----------------------------------------------------------------------------
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
                              const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
-                             const int32_t *ray_dir, int32_t ray_length) {
+                             const int32_t *ray_dir, int32_t ray_length, bool back_face) {
     if (target.model == nullptr || target.matrices == nullptr) return false;
     const CollisionModel &model = *target.model;
     if (model.faces.empty()) return false;
@@ -379,15 +379,17 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                                          14) +
                     face.plane_dist;
             if (d0 > 0 ? d1 > 0 : d1 <= 0) continue; // both on one side [orig: @ 0x4e5101]
-            // Direction rule [orig: @ 0x4e5115..0x4e5139 — flag 1 takes the face
+            // Direction rule [orig: @ 0x4e5115..0x4e514a — flag 1 takes the face
             // from either side; with the back-face argument set a face is taken
             // from either side unless 0x800, which takes it only entering from its
-            // front (d0 > 0, d1 <= 0); every caller pushes that argument as 1
-            // (Projectile_UpdatePhysics @ 0x4ea4ee; each Projectile_RaycastProximitySlots
-            // caller, e.g. @ 0x5384c8, @ 0x4e871a; Entity_ProcessTerrainBounce
-            // @ 0x445ac7 through Weapon_ValidateHitTarget), as collision_raycast_polygons
-            // takes it].
-            if ((face.flags & 1u) == 0 && (face.flags & kFaceFlagFrontOnly) != 0 && !(d0 > 0 && d1 <= 0))
+            // front (d0 > 0, d1 <= 0); the projectile callers push that argument as 1
+            // (Projectile_UpdatePhysics @ 0x4ea4ee; Projectile_RaycastProximitySlots
+            // callers, e.g. @ 0x5384c8, @ 0x4e871a; Entity_ProcessTerrainBounce
+            // @ 0x445ac7 through Weapon_ValidateHitTarget); with it clear (the clamped
+            // ground query's 0, Entity_ComputeClampedDisplacement @ 0x4ad6e5) a face is
+            // taken entering its front alone], as collision_raycast_polygons takes it.
+            if ((face.flags & 1u) == 0 && (!back_face || (face.flags & kFaceFlagFrontOnly) != 0) &&
+                !(d0 > 0 && d1 <= 0))
                 continue;
             const int32_t a0 = abs32(d0);
             const int32_t total = a0 + abs32(d1);
@@ -682,7 +684,8 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                                 const CollisionRay &ray,
                                 int32_t segment_length_q16,
                                 uint32_t ammo_flags,
-                                CollisionPolygonHit &out_hit) {
+                                CollisionPolygonHit &out_hit,
+                                bool back_face) {
     out_hit = CollisionPolygonHit{};
     if (target.model == nullptr || target.matrices == nullptr ||
         segment_length_q16 <= 0)
@@ -748,10 +751,12 @@ bool collision_raycast_polygons(const CollisionTargetView &target,
                 continue;
             }
 
-            // Projectile callers pass backfaceArg=1. Only a non-two-sided,
-            // 0x800 face rejects the negative-to-positive crossing.
+            // The direction rule (collision_raycast_faces carries the witness): with the
+            // back-face argument set, only a non-two-sided 0x800 face rejects a crossing
+            // that is not a front entry; with it clear, every non-two-sided face does.
             if ((face.material_flags & threedi::THREEDI_CFAC_FLAG_BOTH_SIDES) == 0 &&
-                (face.material_flags & threedi::THREEDI_CFAC_FLAG_FRONT_ONLY) != 0 &&
+                (!back_face ||
+                 (face.material_flags & threedi::THREEDI_CFAC_FLAG_FRONT_ONLY) != 0) &&
                 !(d0 > 0 && d1 <= 0))
                 continue;
 

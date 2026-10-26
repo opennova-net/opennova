@@ -478,10 +478,19 @@ ProjectileHit CollisionWorld::trace_knife_impact(
     return hit;
 }
 
-// [orig: Entity_ComputeClampedDisplacement @ 0x4AD6A0]. Its pools-2/1 face
-// walk differs from retail's in three ways, D-COL-17: the back-face argument
-// (retail pushes 0), the candidate gates (retail's ray state carries no
-// direction, so they test the start point) and the in-triangle point.
+// [orig: Entity_ComputeClampedDisplacement @ 0x4AD6A0]. The ray state's
+// direction words are never written after its memset and its length is the
+// query's Z, so the pools-2/1 walk is a ray context with a zero direction: each
+// slot and entity gate measures the start point against the candidate's sphere,
+// and a face's in-triangle test reads the local start point. Its back-face
+// argument is 0: a face without flag 1 is taken entering its front alone
+// (D-COL-17). A query at or below Z 0 finds no face: the walk's distance seed is
+// the Z, which no crossing's distance stays under.
+// [orig: the memset @0x4AD6B6, the length store @0x4AD74F, `xor ebp, ebp`
+//  @0x4AD6E5 and its pushes @0x4AD755 / @0x4AD797; Projectile_RaycastProximitySlots
+//  @0x4E5340 - the seed @0x4E534F, the slot gate @0x4E548F..0x4E554A, the argument
+//  forwarded @0x4E5574 / @0x4E5784; Physics_RaycastAgainstBoneCollision @0x4E4CB0 -
+//  the entity gate @0x4E4DE8..0x4E4EB4, the test point @0x4E51E4..0x4E522A]
 int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source,
         FixedVec3 position, bool indoors, EntityHandle *out_ground) const {
     ProjectileTrace trace;
@@ -492,8 +501,12 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
     trace.walk_terrain = trace.walk_water = trace.walk_persons = false;
     trace.include_wire_proxies = world.rules.mp_session && !world.rules.projectile_authority;
     trace.shooter_carrier_wire_handle = source.packed;
+    trace.ray_dir_q16 = FixedVec3{0, 0, 0};
+    trace.ray_length_q16 = position.z;
+    trace.back_face_arg = false;
     // The CFAC-only traversal (no unresolved-model sphere substitute).
-    const ProjectileHit hit = trace_projectile_impl(world, trace, true);
+    const ProjectileHit hit = position.z > 0 ? trace_projectile_impl(world, trace, true)
+                                             : ProjectileHit{};
     const bool object_ground = hit.hit() && hit.distance_q16 < position.z;
     int32_t height = object_ground ? position.z - hit.distance_q16 : position.z;
     if (!indoors) {
@@ -705,14 +718,16 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                              !model_ref.face_vertices.empty();
         if (indexed_mesh) {
             return collision_raycast_polygons(target, ray, ray_length,
-                                              trace.ammo_flags, model_hit);
+                                              trace.ammo_flags, model_hit,
+                                              trace.back_face_arg);
         }
         if (q8_mesh) {
             RayFaceHit face_hit;
             if (!collision_raycast_faces(target, ray.start, ray.end,
                                          trace.ammo_flags, face_hit,
                                          context_ray ? context_dir : nullptr,
-                                         context_ray ? ray_length : 0))
+                                         context_ray ? ray_length : 0,
+                                         trace.back_face_arg))
                 return false;
             model_hit.distance_q16 = face_hit.dist;
             if (context_ray) {

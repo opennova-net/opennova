@@ -352,9 +352,10 @@ typedef struct ThreediCollisionNormal {
 // them [orig: Physics_RaycastAgainstBoneCollision @ 0x4e4cb0: the BULLETS_PASS skip @ 0x4e5055; the
 // direction rule @ 0x4e5115..0x4e5139]: BULLETS_PASS lets every round by with no effect; a face is
 // taken from either side unless FRONT_ONLY, which takes it only entering from its front (the side its
-// normal faces), and BOTH_SIDES overrides FRONT_ONLY. Every caller passes the back-face argument as 1
-// (Projectile_UpdatePhysics @ 0x4ea4ee and Projectile_RaycastProximitySlots' callers), so BOTH_SIDES
-// matters only beside FRONT_ONLY.
+// normal faces), and BOTH_SIDES overrides FRONT_ONLY. The projectile callers pass the back-face
+// argument as 1 (Projectile_UpdatePhysics @ 0x4ea4ee and Projectile_RaycastProximitySlots' callers);
+// the clamped ground query passes 0 (Entity_ComputeClampedDisplacement @ 0x4ad6e5), under which a face
+// without BOTH_SIDES is taken entering its front alone.
 inline constexpr uint32_t THREEDI_CFAC_FLAG_BOTH_SIDES = 0x1u;
 inline constexpr uint32_t THREEDI_CFAC_FLAG_BULLETS_PASS = 0x100u;
 inline constexpr uint32_t THREEDI_CFAC_FLAG_FRONT_ONLY = 0x800u;
