@@ -146,6 +146,9 @@ CptTile make_tile(int tx, int tz, int size) {
 CptFile make_cpt() {
 	CptFile cpt;
 	cpt.header.magic = CptFile::MAGIC;
+	// The +4 dword as the bake writes it: the root's side 1024, then the five levels the game reads at +6.
+	cpt.header.reserved[1] = 0x04;
+	cpt.header.reserved[2] = 0x05;
 	std::strncpy(cpt.header.terrain_name, "Tmap", sizeof(cpt.header.terrain_name) - 1);
 	std::strncpy(cpt.header.creator, "OpenNova", sizeof(cpt.header.creator) - 1);
 	std::strncpy(cpt.header.version, "1", sizeof(cpt.header.version) - 1);

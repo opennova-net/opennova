@@ -10,7 +10,7 @@
 #include <base/io/log.h>
 #include <base/io/os_path.h>
 
-// [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk reader with the CBitStream
+// [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk walk with the CBitStream
 //  variable-width tile-index codec; DPTH magic @0x6037b2, CDEP magic @0x60361f]
 
 namespace opennova {
@@ -24,6 +24,9 @@ static constexpr size_t kDepthPixels = 1024u * 1024u;
 static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
+static constexpr uint32_t NMAP_MAGIC = 0x50414D4E; // "NMAP"
+// The NMAP section's normal map: 1024 x 1024 A8R8G8B8 [orig: Terrain_LoadLodStorage @ 0x6037DE, @ 0x6037F6].
+static constexpr size_t kNmapBytes = 0x400000;
 
 
 // The CDEP/POLY bit codec is the shared io::BitReader / io::BitWriter
@@ -184,165 +187,179 @@ bool write_poly_section(BitWriter &bits, const std::vector<CptTile> &tiles, std:
 
 } // namespace
 
+namespace {
+
+// A CDEP section after its id: its block count and width, then each block's 4-bit width, 16-bit least height and
+// its heights as the least plus a delta of the width, from the atlas's first word [orig: Terrain_LoadLodStorage
+// @ 0x603635..0x6037A8]. A later CDEP writes over an earlier one from its start. False, with `error`, for a count the
+// 1024 x 1024 atlas or the bits left cannot hold (the game writes on past its atlas).
+bool read_cdep(BitReader &bits, CptFile &out, std::string &error) {
+	const uint32_t num_blocks = bits.read_bits(16);
+	const uint32_t block_width = bits.read_bits(16);
+	// Both counts come straight off the bitstream: the depth image is 1024 x 1024, and each block costs at least
+	// its 4-bit width and 16-bit least height (a width of 0 is a whole block in those 20 bits).
+	const uint64_t declared_pixels = static_cast<uint64_t>(num_blocks) * static_cast<uint64_t>(block_width);
+	if (declared_pixels > kDepthPixels) {
+		error = "CDEP declares more depth pixels than the 1024x1024 image holds";
+		return false;
+	}
+	if (static_cast<uint64_t>(num_blocks) * 20u > bits.remaining_bits()) {
+		error = "CDEP declares more blocks than the section's bits can encode";
+		return false;
+	}
+	out.depth_format = DepthFormat::CDEP;
+	if (out.depth_buffer.size() < declared_pixels) out.depth_buffer.resize(static_cast<size_t>(declared_pixels));
+	size_t pixel_index = 0;
+	for (uint32_t block = 0; block < num_blocks; ++block) {
+		const uint32_t bits_per_delta = bits.read_bits(4);
+		const uint32_t base_value = bits.read_bits(16);
+		for (uint32_t px = 0; px < block_width; ++px) {
+			const uint32_t delta = bits.read_bits(static_cast<int>(bits_per_delta));
+			out.depth_buffer[pixel_index++] = static_cast<uint16_t>(base_value + delta);
+		}
+	}
+	return true;
+}
+
+// One LOD list as the draw reads it: from the next whole byte its 16-bit count, 15-bit largest index and strip bit,
+// then chunks of `chunk_size` indices (the last the rest), each a 4-bit width and a 12-bit least index, an index the
+// least plus a delta of the width [orig: BitStream_ReadTileLODIndices @ 0x602F40; the walk's pass over it
+// Terrain_LoadLodStorage @ 0x603A87..0x603BB7]. `out` null walks it only. False, with `error`, for a list whose
+// chunks the bits left cannot hold, or a chunk size of 0 under a list of indices, which the game's walk never ends.
+bool read_lod_list(BitReader &bits, uint32_t chunk_size, CptTileLOD *out, const std::string &at, std::string &error) {
+	bits.advance_byte();
+	const uint32_t total = bits.read_bits(16);
+	const uint32_t max_index = bits.read_bits(15);
+	const bool is_strip = bits.read_bits(1) != 0;
+	std::vector<uint16_t> indices;
+	if (total > 0) {
+		if (chunk_size == 0) {
+			error = at + " has a LOD list of " + std::to_string(total) +
+			        " indices in chunks of 0, which the game's walk never ends";
+			return false;
+		}
+		if ((static_cast<uint64_t>(total) + chunk_size - 1) / chunk_size * 16u > bits.remaining_bits()) {
+			error = at + "'s LOD list declares more indices than the section can encode";
+			return false;
+		}
+		indices.resize(total);
+		for (uint32_t done = 0; done < total;) {
+			const uint32_t count = std::min(total - done, chunk_size);
+			const uint32_t width = bits.read_bits(4);
+			const uint32_t least = bits.read_bits(12);
+			for (uint32_t i = 0; i < count; ++i)
+				indices[done + i] = static_cast<uint16_t>(least + bits.read_bits(static_cast<int>(width)));
+			done += count;
+		}
+	}
+	if (out) {
+		out->indices = std::move(indices);
+		out->max_index = static_cast<uint16_t>(max_index);
+		out->is_strip = is_strip;
+	}
+	return true;
+}
+
+// The tiles after the POLY id, level by level: the header's level count at most the five the game configures, a
+// level a grid of the root's side over its stride, the stride halved a level; in a level the rows (tile_y) outer and
+// the places along them (tile_x) inner, each tile placed by its order, never by the place it stores; an is_single
+// tile ends its level [orig: Terrain_LoadLodStorage @ 0x60380E..0x60381C, @ 0x603845..0x603C9A - the stored place
+// passed over @ 0x6038C2..0x6038DD, is_single @ 0x603BF0, the stride @ 0x603C77; Terrain_LoadTileBitStreamData
+// @ 0x602E25, the tile's index]. A tile's vertices are read at the width it stores, its lists in chunks of the size it
+// stores (the draw's @ 0x602EF8); of its lists the walk passes the count it stores and the draw reads eight
+// [orig: LODTileCache_UpdateSlots @ 0x602572], so a list past the eighth is never drawn and, under eight, the draw's
+// later lists are the bits that follow. False, with `error`, for a section ending before a tile its levels hold.
+bool read_poly_levels(BitReader &bits, CptFile &out, std::string &error) {
+	const int levels = std::min(cpt_header_levels(out.header), kCptLevelsMax);
+	int stride = kCptGridSide;
+	for (int level = 0; level < levels; ++level, stride >>= 1) {
+		bool level_done = false;
+		for (int y = 0; y < kCptGridSide && !level_done; y += stride)
+			for (int x = 0; x < kCptGridSide && !level_done; x += stride) {
+				const std::string at = "level " + std::to_string(level) + "'s tile at (" + std::to_string(x) + ", " +
+				                       std::to_string(y) + ")";
+				bits.align_dword();
+				if (bits.at_end()) {
+					error = "the POLY section ends before " + at;
+					return false;
+				}
+				bits.read_bits(10); // the place the tile stores, which the walk passes over
+				bits.read_bits(10);
+				const uint32_t vertex_count = bits.read_bits(16);
+				const uint32_t bit_width = bits.read_bits(4);
+				const uint32_t lod_count = bits.read_bits(7);
+				const uint32_t is_single = bits.read_bits(1);
+				const uint32_t chunk_size = bits.read_bits(8);
+
+				CptTile tile;
+				tile.tile_x = static_cast<uint16_t>(x);
+				tile.tile_y = static_cast<uint16_t>(y);
+				tile.tile_size = static_cast<uint16_t>(stride);
+				tile.vertex_count = static_cast<uint16_t>(vertex_count);
+				tile.is_single = is_single != 0;
+				// Each vertex costs 2 * bit_width bits: a count the section cannot encode is a truncated file.
+				if (static_cast<uint64_t>(vertex_count) * 2u * bit_width > bits.remaining_bits()) {
+					error = "POLY tile declares more vertices than the section can encode";
+					return false;
+				}
+				tile.vertex_indices.resize(static_cast<size_t>(vertex_count) * 2u);
+				for (uint16_t &word : tile.vertex_indices)
+					word = static_cast<uint16_t>(bits.read_bits(static_cast<int>(bit_width)));
+
+				bits.align_dword();
+				for (uint32_t lod = 0; lod < lod_count; ++lod)
+					if (!read_lod_list(bits, chunk_size, lod < 8 ? &tile.lods[lod] : nullptr, at, error)) return false;
+				if (lod_count < 8) {
+					BitReader draw = bits;
+					for (uint32_t lod = lod_count; lod < 8; ++lod)
+						if (!read_lod_list(draw, chunk_size, &tile.lods[lod], at, error)) return false;
+				}
+				out.tiles.push_back(std::move(tile));
+				if (is_single != 0) level_done = true;
+			}
+	}
+	return true;
+}
+
+} // namespace
+
 bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error) {
 	out = CptFile{};
 
+	// The header the walk starts past (its magic is never tested) and a chunk id.
 	if (size < 164) {
 		error = "CPT data too small";
 		return false;
 	}
-
-	uint32_t magic = 0;
-	std::memcpy(&magic, data, sizeof(uint32_t));
-	if (magic != CptFile::MAGIC) {
-		error = "Bad CPT magic";
-		return false;
-	}
-
 	std::memcpy(&out.header, data, sizeof(CptFile::Header));
-	out.header.magic = magic;
 
-	uint32_t section_magic = 0;
-	std::memcpy(&section_magic, data + 160, sizeof(uint32_t));
-
-	if (section_magic == DPTH_MAGIC) {
-		out.depth_format = DepthFormat::DPTH;
-		const size_t depth_offset = 164;
-		const size_t depth_bytes = kDepthPixels * sizeof(uint16_t);
-		if (size < depth_offset + depth_bytes) {
-			error = "DPTH section truncated";
-			return false;
-		}
-		out.depth_buffer.resize(kDepthPixels);
-		std::memcpy(out.depth_buffer.data(), data + depth_offset, depth_bytes);
-	} else if (section_magic == CDEP_MAGIC) {
-		out.depth_format = DepthFormat::CDEP;
-		BitReader bits(data + 164, size - 164);
-		const uint32_t num_blocks = bits.read_bits(16);
-		const uint32_t block_width = bits.read_bits(16);
-		// Both counts come straight off the bitstream, and the product used to be
-		// computed in 32 bits and handed to resize(): a corrupt 4-byte header
-		// (0xffff blocks of 0xffff pixels) demanded ~8 GB before a single delta
-		// was read. Two bounds, both taken from the format rather than guessed:
-		//   * the depth image is 1024x1024 — DPTH above resizes to exactly that,
-		//     and the writer emits 4096 blocks of depth_buffer.size()/4096;
-		//   * each block costs at least its 4-bit width + 16-bit base, so the
-		//     block count is bounded by the bits actually present. Pixels are NOT
-		//     bounded that way: bits_per_delta may legitimately be 0, encoding a
-		//     whole block in 20 bits, so a per-pixel bit budget would reject
-		//     valid files.
-		const uint64_t declared_pixels =
-				static_cast<uint64_t>(num_blocks) * static_cast<uint64_t>(block_width);
-		if (declared_pixels > kDepthPixels) {
-			error = "CDEP declares more depth pixels than the 1024x1024 image holds";
-			return false;
-		}
-		if (static_cast<uint64_t>(num_blocks) * 20u > bits.remaining_bits()) {
-			error = "CDEP declares more blocks than the section's bits can encode";
-			return false;
-		}
-		out.depth_buffer.resize(static_cast<size_t>(declared_pixels));
-		uint32_t pixel_index = 0;
-
-		for (uint32_t block = 0; block < num_blocks; ++block) {
-			const uint32_t bits_per_delta = bits.read_bits(4);
-			const uint32_t base_value = bits.read_bits(16);
-			for (uint32_t px = 0; px < block_width; ++px) {
-				const uint32_t delta = bits.read_bits(static_cast<int>(bits_per_delta));
-				out.depth_buffer[static_cast<size_t>(pixel_index++)] = static_cast<uint16_t>(base_value + delta);
-			}
-		}
-	} else {
-		error = "Unknown depth section magic";
-		return false;
-	}
-
-	size_t poly_offset = 0;
-	for (size_t off = 164; off + 4 <= size; off += 4) {
+	// The chunk walk from byte 160, each id on a dword boundary: CDEP decodes the atlas, NMAP's 4 MiB normal map is
+	// passed over, POLY ends the walk, any other id is passed as its dword [orig: Terrain_LoadLodStorage @ 0x6035FA,
+	// @ 0x603605..0x603804; NMAP @ 0x6037C2..0x6037F6]. DPTH is the raw atlas the original editor reads [orig:
+	// JOTACmed.exe MissionDocument_LoadTerrain @ 0x44c64b] and TrnGen writes; the game returns at it with no terrain
+	// [orig: Terrain_LoadLodStorage @ 0x6037B7].
+	BitReader bits(data + 160, size - 160);
+	bool poly = false;
+	while (!poly) {
+		bits.align_dword();
 		uint32_t section = 0;
-		std::memcpy(&section, data + off, sizeof(uint32_t));
-		if (section == POLY_MAGIC) {
-			poly_offset = off + 4;
-			break;
-		}
-	}
-
-	if (poly_offset > 0 && poly_offset < size) {
-		BitReader bits(data + poly_offset, size - poly_offset);
-		while (true) {
-			bits.align_dword();
-			if (bits.at_end()) {
-				break;
-			}
-
-			const uint32_t tile_x = bits.read_bits(10);
-			const uint32_t tile_y = bits.read_bits(10);
-			const uint32_t vertex_count = bits.read_bits(16);
-			const uint32_t bit_width = bits.read_bits(4);
-			const uint32_t lod_count = bits.read_bits(7);
-			const uint32_t is_single = bits.read_bits(1);
-			const uint32_t chunk_size = bits.read_bits(8);
-
-			// bit_width == 0 joins the structural guards: the writer derives it
-			// from tile_size and refuses a non-positive width, so zero never
-			// appears in a real tile — and reaching tile_size below would shift
-			// by (0 - 1), which is undefined.
-			if (vertex_count == 0 || bit_width == 0 || lod_count != 8 || chunk_size != 48) {
-				break;
-			}
-
-			CptTile tile;
-			tile.tile_x = static_cast<uint16_t>(tile_x);
-			tile.tile_y = static_cast<uint16_t>(tile_y);
-			tile.vertex_count = static_cast<uint16_t>(vertex_count);
-			tile.tile_size = static_cast<uint16_t>(1u << (bit_width - 1));
-			tile.is_single = is_single != 0;
-			// Each vertex costs 2 * bit_width bits. A declared count the section
-			// cannot encode means the file is truncated — say so instead of
-			// fabricating that many zero vertices out of absent data.
-			if (static_cast<uint64_t>(vertex_count) * 2u * bit_width > bits.remaining_bits()) {
-				error = "POLY tile declares more vertices than the section can encode";
+		if (!bits.read_bytes(&section, sizeof(section))) break; // no POLY: the game reads on past the file
+		if (section == CDEP_MAGIC) {
+			if (!read_cdep(bits, out, error)) return false;
+		} else if (section == DPTH_MAGIC) {
+			out.depth_format = DepthFormat::DPTH;
+			out.depth_buffer.resize(kDepthPixels);
+			if (!bits.read_bytes(out.depth_buffer.data(), kDepthPixels * sizeof(uint16_t))) {
+				error = "DPTH section truncated";
 				return false;
 			}
-			tile.vertex_indices.resize(static_cast<size_t>(vertex_count) * 2u);
-
-			for (uint32_t i = 0; i < vertex_count; ++i) {
-				tile.vertex_indices[static_cast<size_t>(i * 2 + 0)] = static_cast<uint16_t>(bits.read_bits(static_cast<int>(bit_width)));
-				tile.vertex_indices[static_cast<size_t>(i * 2 + 1)] = static_cast<uint16_t>(bits.read_bits(static_cast<int>(bit_width)));
-			}
-
-			bits.align_dword();
-			for (int lod = 0; lod < 8; ++lod) {
-				bits.advance_byte();
-
-				const uint32_t total_indices = bits.read_bits(16);
-				tile.lods[lod].max_index = static_cast<uint16_t>(bits.read_bits(15));
-				tile.lods[lod].is_strip = bits.read_bits(1) != 0;
-				tile.lods[lod].indices.resize(total_indices);
-
-				int remaining = static_cast<int>(total_indices);
-				int offset = 0;
-				while (remaining > 0) {
-					const int chunk = std::min(remaining, 48);
-					const uint32_t chunk_width = bits.read_bits(4);
-					const uint32_t min_value = bits.read_bits(12);
-					for (int i = 0; i < chunk; ++i) {
-						const uint32_t delta = bits.read_bits(static_cast<int>(chunk_width));
-						tile.lods[lod].indices[static_cast<size_t>(offset + i)] = static_cast<uint16_t>(min_value + delta);
-					}
-					offset += chunk;
-					remaining -= 48;
-				}
-			}
-
-			out.tiles.push_back(std::move(tile));
-			if (is_single != 0) {
-				break;
-			}
+		} else if (section == NMAP_MAGIC) {
+			bits.skip_bytes(kNmapBytes);
+		} else if (section == POLY_MAGIC) {
+			poly = true;
 		}
 	}
-
-	return true;
+	return !poly || read_poly_levels(bits, out, error);
 }
 
 CptFile CptFile::read(const std::string &path) {

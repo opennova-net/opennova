@@ -3,6 +3,7 @@
 
 #include "common/test_paths.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -51,13 +52,14 @@ private:
 	int bit_ = 0;
 };
 
-// A 164-byte CPT prefix: valid magic, zeroed header, `section` at offset 160.
-std::vector<uint8_t> cpt_prefix(const char *section) {
+// A 164-byte CPT prefix: valid magic, zeroed header but its level count at +6, `section` at offset 160.
+std::vector<uint8_t> cpt_prefix(const char *section, uint8_t levels = 0) {
 	std::vector<uint8_t> b(164, 0);
 	const uint32_t magic = opennova::CptFile::MAGIC;
 	for (int i = 0; i < 4; ++i) {
 		b[static_cast<size_t>(i)] = static_cast<uint8_t>(magic >> (8 * i));
 	}
+	b[6] = levels;
 	std::memcpy(b.data() + 160, section, 4);
 	return b;
 }
@@ -120,11 +122,11 @@ bool check_malformed_guards() {
 		tile.push(10, 0u);   // tile_y
 		tile.push(16, 0xFFFFu); // vertex_count
 		tile.push(4, 8u);    // bit_width
-		tile.push(7, 8u);    // lod_count (the parser requires 8)
+		tile.push(7, 8u);    // lod_count
 		tile.push(1, 0u);    // is_single
-		tile.push(8, 48u);   // chunk_size (the parser requires 48)
+		tile.push(8, 48u);   // chunk_size
 
-		std::vector<uint8_t> buf = cpt_prefix("CDEP");
+		std::vector<uint8_t> buf = cpt_prefix("CDEP", 1); // one level: the root's tile
 		append(buf, depth.bytes());
 		const char poly[4] = {'P', 'O', 'L', 'Y'};
 		buf.insert(buf.end(), poly, poly + 4);
@@ -148,6 +150,7 @@ bool check_poly_roundtrip(const std::filesystem::path &out_path) {
 	// before it reaches the tile section.
 	saved.depth_format = opennova::DepthFormat::DPTH;
 	saved.depth_buffer.assign(1024u * 1024u, 0);
+	saved.header.reserved[2] = 1; // one level, the root's tile
 
 	opennova::CptTile tile;
 	tile.tile_x = 12;
@@ -187,10 +190,11 @@ bool check_poly_roundtrip(const std::filesystem::path &out_path) {
 
 	if (!expect(loaded.tiles.size() == 1, "one tile should round-trip")) return false;
 	const opennova::CptTile &got = loaded.tiles[0];
-	if (!expect(got.tile_x == tile.tile_x && got.tile_y == tile.tile_y,
-	            "tile coordinates should round-trip")) return false;
+	// The walk places the root's tile at (0, 0) the root's side, whatever place it stores [orig:
+	// Terrain_LoadLodStorage @ 0x6038C2..0x6038DD]; its vertices read at the width it stores (9 bits).
+	if (!expect(got.tile_x == 0 && got.tile_y == 0, "the root's tile stands at (0, 0)")) return false;
 	if (!expect(got.vertex_count == tile.vertex_count, "vertex_count should round-trip")) return false;
-	if (!expect(got.tile_size == tile.tile_size, "tile_size should round-trip")) return false;
+	if (!expect(got.tile_size == 1024, "the root's tile is the root's side")) return false;
 	if (!expect(got.is_single == tile.is_single, "is_single should round-trip")) return false;
 	if (!expect(got.vertex_indices.size() >= tile.vertex_indices.size(),
 	            "vertex index payload should round-trip")) return false;
@@ -209,6 +213,158 @@ bool check_poly_roundtrip(const std::filesystem::path &out_path) {
 				return false;
 		}
 	}
+	return true;
+}
+
+opennova::CptTile walk_tile(uint16_t vertices, uint16_t size, bool single = false) {
+	opennova::CptTile tile;
+	tile.tile_x = 7; // a place no walk puts a tile: the walk places it by its order
+	tile.tile_y = 9;
+	tile.tile_size = size;
+	tile.vertex_count = vertices;
+	tile.is_single = single;
+	tile.vertex_indices.assign(static_cast<size_t>(vertices) * 2u, 1);
+	return tile;
+}
+
+opennova::CptFile walk_file(int levels) {
+	opennova::CptFile cpt;
+	cpt.depth_format = opennova::DepthFormat::DPTH;
+	cpt.depth_buffer.assign(1024u * 1024u, 3);
+	cpt.header.reserved[2] = static_cast<uint8_t>(levels);
+	return cpt;
+}
+
+// One LOD list bit by bit, as the draw reads it: from the next whole byte its count, largest index and strip bit, then
+// chunks of `chunk` indices, each a 4-bit width (4 here) and a 12-bit least index.
+void push_list(BitPacker &bits, const std::vector<uint16_t> &indices, uint32_t chunk) {
+	bits.pad_to(bits.bytes().size());
+	bits.push(16, static_cast<uint32_t>(indices.size()));
+	bits.push(15, indices.empty() ? 0u : *std::max_element(indices.begin(), indices.end()));
+	bits.push(1, 0u);
+	if (chunk == 0) return; // no chunk the reader reaches: it refuses the size
+	for (size_t at = 0; at < indices.size(); at += chunk) {
+		const size_t count = std::min<size_t>(chunk, indices.size() - at);
+		const uint16_t least = *std::min_element(indices.begin() + long(at), indices.begin() + long(at + count));
+		bits.push(4, 4u);
+		bits.push(12, least);
+		for (size_t i = 0; i < count; ++i) bits.push(4, static_cast<uint32_t>(indices[at + i] - least));
+	}
+}
+
+// A one-level file of one tile built bit by bit: no vertices, `lod_count` lists the first holding 0..24, chunks of
+// `chunk`, and `after` (a list the tile does not count) past its lists.
+std::vector<uint8_t> one_tile_file(uint32_t lod_count, uint32_t chunk, const std::vector<uint16_t> &after) {
+	BitPacker depth;
+	depth.push(16, 0u); // a CDEP of no blocks
+	depth.push(16, 0u);
+	std::vector<uint8_t> buf = cpt_prefix("CDEP", 1);
+	append(buf, depth.bytes());
+	const char poly[4] = {'P', 'O', 'L', 'Y'};
+	buf.insert(buf.end(), poly, poly + 4);
+	BitPacker tile;
+	tile.push(10, 0u);
+	tile.push(10, 0u);
+	tile.push(16, 0u); // vertex_count
+	tile.push(4, 1u);  // bit_width
+	tile.push(7, lod_count);
+	tile.push(1, 0u);  // is_single
+	tile.push(8, chunk);
+	tile.pad_to(8); // the lists from the next dword
+	std::vector<uint16_t> first;
+	for (uint16_t i = 0; i < 25; ++i) first.push_back(i);
+	push_list(tile, first, chunk);
+	for (uint32_t lod = 1; lod < lod_count; ++lod) push_list(tile, {}, chunk);
+	if (!after.empty()) push_list(tile, after, chunk);
+	append(buf, tile.bytes());
+	return buf;
+}
+
+// The game's walk [orig: Terrain_LoadLodStorage @ 0x603550]: no magic test; the chunk ids on dword boundaries, an
+// unknown one passed as its dword and NMAP's 4 MiB normal map passed over whole (@ 0x603605..0x603804); the header's
+// level count at +6, at most five (@ 0x60380E..0x60381C); each level a grid walked rows outer, its tiles placed by
+// their order, an is_single tile ending its level (@ 0x603BF0), a tile of no vertices kept; the chunk size each tile
+// stores, and of its lists the eight the draw reads [orig: LODTileCache_UpdateSlots @ 0x602572].
+bool check_game_walk() {
+	std::string error;
+
+	// Two levels, the second's four tiles placed by their order; no magic, a JUNK id and an NMAP of POLY ids before the
+	// POLY section.
+	opennova::CptFile two = walk_file(2);
+	two.tiles.push_back(walk_tile(1, 1024));
+	for (uint16_t i = 0; i < 4; ++i) two.tiles.push_back(walk_tile(static_cast<uint16_t>(2 + i), 512));
+	std::vector<uint8_t> bytes;
+	if (!expect(opennova::save_cpt(two, bytes, error), "the two-level file writes")) return false;
+	std::memcpy(bytes.data(), "XXXX", 4);
+	const size_t poly = 164 + 1024u * 1024u * 2u;
+	if (!expect(std::memcmp(bytes.data() + poly, "POLY", 4) == 0, "the writer's POLY follows its DPTH")) return false;
+	std::vector<uint8_t> extra = {'J', 'U', 'N', 'K', 'N', 'M', 'A', 'P'};
+	for (size_t i = 0; i < 0x400000u / 4u; ++i) extra.insert(extra.end(), {'P', 'O', 'L', 'Y'});
+	bytes.insert(bytes.begin() + long(poly), extra.begin(), extra.end());
+	opennova::CptFile read;
+	if (!expect(opennova::load_cpt(bytes.data(), bytes.size(), read, error) && read.tiles.size() == 5,
+	            "a file of another magic, an unknown id and an NMAP reads its five tiles"))
+		return false;
+	const uint16_t places[4][2] = {{0, 0}, {512, 0}, {0, 512}, {512, 512}};
+	bool placed = read.tiles[0].tile_x == 0 && read.tiles[0].tile_y == 0 && read.tiles[0].tile_size == 1024;
+	for (int i = 0; i < 4; ++i) {
+		const opennova::CptTile &t = read.tiles[size_t(1 + i)];
+		placed = placed && t.tile_x == places[i][0] && t.tile_y == places[i][1] && t.tile_size == 512 &&
+		         t.vertex_count == 2 + i;
+	}
+	if (!expect(placed, "each tile stands where its order puts it, rows outer")) return false;
+	bytes[6] = 0;
+	if (!expect(opennova::load_cpt(bytes.data(), bytes.size(), read, error) && read.tiles.empty(),
+	            "a level count of 0 reads no tile"))
+		return false;
+	bytes[6] = 3;
+	if (!expect(!opennova::load_cpt(bytes.data(), bytes.size(), read, error) && error.find("level 2") != std::string::npos,
+	            "a third level the section does not hold is refused"))
+		return false;
+
+	// An is_single tile ends its level, not the read.
+	opennova::CptFile single = walk_file(3);
+	single.tiles.push_back(walk_tile(1, 1024));
+	single.tiles.push_back(walk_tile(1, 512, true));
+	for (int i = 0; i < 15; ++i) single.tiles.push_back(walk_tile(1, 256));
+	single.tiles.push_back(walk_tile(5, 256));
+	if (!expect(opennova::save_cpt(single, bytes, error) && opennova::load_cpt(bytes.data(), bytes.size(), read, error) &&
+	                    read.tiles.size() == 18 && read.tiles[1].is_single && read.tiles[2].tile_x == 0 &&
+	                    read.tiles[2].tile_y == 0 && read.tiles[2].tile_size == 256 && read.tiles[17].tile_x == 768 &&
+	                    read.tiles[17].tile_y == 768 && read.tiles[17].vertex_count == 5,
+	            "an is_single tile ends its level and the next level reads"))
+		return false;
+
+	// Five levels at most, whatever the header says; a tile of no vertices is a tile.
+	opennova::CptFile full = walk_file(6);
+	for (int size = 1024; size >= 64; size /= 2)
+		for (int n = 0; n < (1024 / size) * (1024 / size); ++n)
+			full.tiles.push_back(walk_tile(0, static_cast<uint16_t>(size)));
+	full.tiles.push_back(walk_tile(3, 64)); // past the five levels
+	if (!expect(opennova::save_cpt(full, bytes, error) && opennova::load_cpt(bytes.data(), bytes.size(), read, error) &&
+	                    read.tiles.size() == 341 && read.tiles.back().tile_x == 960 && read.tiles.back().tile_y == 960 &&
+	                    read.tiles.back().tile_size == 64 && read.tiles.back().vertex_count == 0,
+	            "a level count of 6 reads the five levels' 341 tiles, each of no vertices"))
+		return false;
+
+	// The chunk size the tile stores; nine lists, the draw's eight kept.
+	bytes = one_tile_file(9, 10, {});
+	if (!expect(opennova::load_cpt(bytes.data(), bytes.size(), read, error) && read.tiles.size() == 1 &&
+	                    read.tiles[0].lods[0].indices.size() == 25 && read.tiles[0].lods[0].indices[24] == 24 &&
+	                    read.tiles[0].lods[0].indices[10] == 10 && read.tiles[0].lods[7].indices.empty(),
+	            "chunks of 10 read 0..24; a ninth list walked"))
+		return false;
+	// Seven lists: the draw's eighth is the list that follows.
+	bytes = one_tile_file(7, 10, {5, 6, 7});
+	if (!expect(opennova::load_cpt(bytes.data(), bytes.size(), read, error) && read.tiles.size() == 1 &&
+	                    read.tiles[0].lods[7].indices == std::vector<uint16_t>({5, 6, 7}),
+	            "a tile of seven lists draws the following list as its eighth"))
+		return false;
+	// A chunk size of 0 under a list of indices never ends the game's walk.
+	bytes = one_tile_file(8, 0, {});
+	if (!expect(!opennova::load_cpt(bytes.data(), bytes.size(), read, error) && error.find("chunks of 0") != std::string::npos,
+	            "a chunk size of 0 under indices is refused"))
+		return false;
 	return true;
 }
 
@@ -291,6 +447,7 @@ int main() {
 	if (!check_clamp_steep_blocks()) return 1;
 	if (!check_save_cpt()) return 1;
 	if (!check_poly_roundtrip(out_path)) return 1;
+	if (!check_game_walk()) return 1;
 
 	opennova::CptFile saved;
 	std::strncpy(saved.header.terrain_name, "RoundtripTerrain", sizeof(saved.header.terrain_name) - 1);
