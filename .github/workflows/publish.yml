@@ -82,8 +82,11 @@ jobs:
             [[ -z "$RUN_ID" ]] || { echo "::error::prod publishes a release tag alone (a CI run's builds are not a release)"; exit 1; }
             [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "::error::prod needs a release tag (v0.0.21)"; exit 1; }
             gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null
+            commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE" --jq .sha)"
             echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
             echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            echo "build=release" >> "$GITHUB_OUTPUT"
           else
             [[ -z "$RELEASE" ]] || { echo "::error::staging publishes a pull request's CI run alone (a release's builds talk to prod)"; exit 1; }
             [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::staging needs a CI run id"; exit 1; }
@@ -94,10 +97,12 @@ jobs:
             [[ "$workflow" == .github/workflows/ci.yml ]] || { echo "::error::run $RUN_ID is not a CI run ($workflow)"; exit 1; }
             [[ "$event" == pull_request ]] || { echo "::error::run $RUN_ID is a $event run: its builds are release builds, which talk to prod"; exit 1; }
             [[ "$conclusion" == success ]] || { echo "::error::run $RUN_ID did not succeed ($conclusion)"; exit 1; }
-            sha="$(jq -r .head_sha <<<"$run" | cut -c1-7)"
+            commit="$(jq -r .head_sha <<<"$run")"
             pr="$(jq -r '.pull_requests[0].number // empty' <<<"$run")"
-            echo "version=${pr:+PR #$pr }($sha)" >> "$GITHUB_OUTPUT"
+            echo "version=${pr:+PR #$pr }(${commit:0:7})" >> "$GITHUB_OUTPUT"
             echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            echo "build=debug" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download the release's assets
@@ -126,7 +131,11 @@ jobs:
         env:
           VERSION: ${{ steps.source.outputs.version }}
           SOURCE: ${{ steps.source.outputs.url }}
-        run: python scripts/stage_downloads.py --from dist --to stage --version "$VERSION" --source "$SOURCE"
+          COMMIT: ${{ steps.source.outputs.commit }}
+          BUILD: ${{ steps.source.outputs.build }}
+        run: >-
+          python scripts/stage_downloads.py --from dist --to stage --version "$VERSION" --source "$SOURCE"
+          --commit "$COMMIT" --build "$BUILD"
 
       - name: Publish the runtime release
         shell: bash

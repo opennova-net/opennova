@@ -234,30 +234,43 @@
           purchased copy. Unzip one into an empty folder and run opennova.exe.
         </p>
         <p v-if="manifest" class="mt-2 text-sm text-ink-muted" data-test="downloads-version">
-          Version {{ manifest.version }}, published {{ formatDate(manifest.published) }}.
+          Version {{ manifest.version }}{{ buildKind ? `, a ${buildKind}` : '' }}<template v-if="manifest.commit">
+            from commit <a v-if="sourceUrl" :href="sourceUrl" class="link font-mono" :title="manifest.commit">{{ shortCommit }}</a
+            ><span v-else class="font-mono" :title="manifest.commit">{{ shortCommit }}</span></template
+          >, published <time :datetime="isoTime(manifest.published)">{{ formatUtc(manifest.published) }}</time>.
         </p>
 
         <ul class="mt-10 grid gap-4 lg:grid-cols-3">
-          <li v-for="item in games" :key="item.file" class="card flex flex-col p-6">
+          <li v-for="item in gameCards" :key="item.file" class="card flex flex-col p-6">
             <p class="text-lg font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-2 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
             <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
               <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="`Download ${item.name}`">Download</a>
               <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">Not published yet</span>
-              <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
+              <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="`build-${item.file}`">
+                <p>{{ item.file }}</p>
+                <p v-if="item.build">
+                  {{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span>
+                </p>
+              </div>
             </div>
           </li>
         </ul>
 
         <h3 class="mt-12 text-lg font-semibold text-ink-bright">Tools</h3>
         <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <li v-for="item in tools" :key="item.file" class="card flex flex-col p-5">
+          <li v-for="item in toolCards" :key="item.file" class="card flex flex-col p-5">
             <p class="font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-1 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
             <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-secondary px-4 py-2" :aria-label="`Download ${item.name}`">Download</a>
               <span v-else class="btn-secondary cursor-not-allowed px-4 py-2 opacity-50" aria-disabled="true">Not published yet</span>
-              <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
+              <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="`build-${item.file}`">
+                <p>{{ item.file }}</p>
+                <p v-if="item.build">
+                  {{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span>
+                </p>
+              </div>
             </div>
           </li>
         </ul>
@@ -274,7 +287,7 @@ import { fetchTiers } from '../api/billing';
 import RunItYourself from '../components/RunItYourself.vue';
 import type { TiersResponse } from '../types/billing';
 import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
-import { formatBytes, formatDate, formatMoney } from '../utils/format';
+import { formatBytes, formatMoney, formatUtc, isoTime } from '../utils/format';
 import { ISSUES_URL } from '../utils/links';
 import { editorShots, hero, retailShots, timelapse } from '../utils/media';
 
@@ -330,8 +343,8 @@ const tools = [
 ];
 
 // This deployment's downloads host (downloads.<the site's hostname>), and what its manifest
-// says: the version and each file's size. A site with no host (a local stack) sends the
-// buttons to the GitHub releases.
+// says: the version, the build and its commit, and each file's version, size and SHA-256. A
+// site with no host (a local stack) offers no download.
 const downloadsHost = downloadsBase(window.location.hostname);
 const manifest = ref<DownloadsManifest | null>(null);
 
@@ -341,10 +354,32 @@ function downloadUrl(file: string): string | undefined {
   return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : undefined;
 }
 
-function fileLine(file: string): string {
-  const size = manifest.value?.files[file]?.size;
-  return size === undefined ? file : `${file}, ${formatBytes(size)}`;
+// "release build", "debug build for staging": what the set is, when the manifest says.
+const buildKind = computed(() => {
+  const m = manifest.value;
+  if (!m?.build) return '';
+  return m.build !== 'release' && m.talks_to ? `${m.build} build for ${m.talks_to}` : `${m.build} build`;
+});
+
+const shortCommit = computed(() => manifest.value?.commit?.slice(0, 7) ?? '');
+
+// Where the builds came from (the release, or the CI run), which the commit links to.
+const sourceUrl = computed(() => {
+  const source = manifest.value?.source;
+  return source && /^https:\/\//i.test(source) ? source : undefined;
+});
+
+// A build's line under its file name: its version when its name carried one ("v0.0.20, 53 MB")
+// and its SHA-256; none before the manifest lists it.
+function buildInfo(file: string): { details: string; sha256: string } | undefined {
+  const entry = manifest.value?.files[file];
+  if (!entry) return undefined;
+  const details = entry.version ? `v${entry.version}, ${formatBytes(entry.size)}` : formatBytes(entry.size);
+  return { details, sha256: entry.sha256 };
 }
+
+const gameCards = computed(() => games.map((item) => ({ ...item, build: buildInfo(item.file) })));
+const toolCards = computed(() => tools.map((item) => ({ ...item, build: buildInfo(item.file) })));
 
 // NovaWorld's live counts (GET /api/stats), as of the page's load.
 const stats = ref<{ players: number; lobbies: number } | null>(null);

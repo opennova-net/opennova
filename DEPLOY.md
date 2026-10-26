@@ -1092,10 +1092,13 @@ The host holds the current set alone, each build under its stable name
 (`opennova-game-windows.zip`, `jointops-game-windows.zip`, `dfx2-game-windows.zip`,
 `opennova-editor-windows.zip`, `opennova-blender-addon-windows.zip`,
 `opennova-apps-windows.zip`, `opennova-switcher-windows.zip`) beside `manifest.json` (the
-version, when it was published, where the builds came from, and each file's size and
-SHA-256; `scripts/stage_downloads.py`). The site reads the manifest for the version and
-the sizes, and shows a build's button once the manifest lists it ("Not published yet"
-before; never a GitHub link). Older releases and the Switcher's checksum stay on the GitHub
+version, when it was published, where the builds came from, the commit they were made from,
+the build kind and what it talks to (`release` and `prod`, or `debug` and `staging`), and
+each file's size, SHA-256 and version, the `-v<version>` its name carried when it had one;
+`scripts/stage_downloads.py`). The site reads the manifest to say what the set is (its
+version, build kind, commit linked to its source and publish time) and each build (its
+version, size and SHA-256), and shows a build's button once the manifest lists it ("Not
+published yet" before; never a GitHub link). Older releases and the Switcher's checksum stay on the GitHub
 releases.
 
 **Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071), run in
