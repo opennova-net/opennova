@@ -24,7 +24,8 @@ name: Publish
 # - staging: a pull request's CI build (its run id), debug builds that talk to
 #   staging. In the environment `staging`. A master run's builds are release
 #   builds, which talk to prod, so a staging publish takes a pull request's run
-#   alone.
+#   alone. It keeps the runtime package it published (the staging-runtime-package
+#   artifact), the --previous of the next pull request's build (ci.yml).
 on:
   workflow_dispatch:
     inputs:
@@ -152,6 +153,18 @@ jobs:
           unset ADMIN_API_TOKEN
           python scripts/publish_runtime.py --url "$NOVAWORLD_URL" --token-file "$token_file" \
             --from dist --name "$NAME"
+
+      # The runtime package staging now serves, kept for the next pull request's build to carry
+      # its removals from (ci.yml package-godot-windows, --previous), as release.yml takes the
+      # preceding release's for prod. 90 days: a staging idle past them builds with none.
+      - name: Keep staging's published runtime package
+        if: inputs.deployment == 'staging'
+        uses: actions/upload-artifact@v7
+        with:
+          name: staging-runtime-package
+          path: dist/opennova-runtime-windows-*.sfs
+          if-no-files-found: error
+          retention-days: 90
 
       - name: AWS credentials (OIDC, the deployment's account)
         uses: aws-actions/configure-aws-credentials@v4

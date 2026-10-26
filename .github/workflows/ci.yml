@@ -1055,6 +1055,9 @@ jobs:
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
+    permissions:
+      contents: read
+      actions: read   # staging's published runtime package, another run's artifact
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
       jointops_artifact_url: ${{ steps.upload_jointops.outputs.artifact-url }}
@@ -1112,6 +1115,30 @@ jobs:
           flavour: win-root
           mode: restore
 
+      # A pull request's runtime package is what a staging Publish serves next, so it carries
+      # the removals since the one staging serves now (publish.yml keeps that package as the
+      # staging-runtime-package artifact), as release.yml's carry the preceding release's for
+      # prod (apps/update/README.md: --previous). None kept yet, or a fork's build: none.
+      - name: Download staging's published runtime package
+        id: previous
+        if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $listed = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?name=staging-runtime-package&per_page=1" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not list staging's runtime package" }
+          $latest = @($listed.artifacts | Where-Object { -not $_.expired }) | Select-Object -First 1
+          if ($latest) {
+            $folder = Join-Path $env:RUNNER_TEMP 'previous-runtime'
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+            gh run download $latest.workflow_run.id --repo $env:GITHUB_REPOSITORY --name staging-runtime-package --dir $folder
+            if ($LASTEXITCODE -ne 0) { throw "Could not download staging's runtime package" }
+            $packages = @(Get-ChildItem -LiteralPath $folder -Filter 'opennova-runtime-windows-*.sfs')
+            if ($packages.Count -ne 1) { throw "staging's runtime package artifact holds $($packages.Count) packages" }
+            "package=$($packages[0].FullName)" >> $env:GITHUB_OUTPUT
+          }
+
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); pushes and manual runs export in
       # release mode like the release workflow.
@@ -1121,9 +1148,14 @@ jobs:
           CMAKE_GENERATOR: Ninja
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
           CMAKE_C_COMPILER_LAUNCHER: sccache
+          PREVIOUS_RUNTIME_PACKAGE: ${{ steps.previous.outputs.package }}
         # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
         # page names it.
-        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }} -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          scripts/package_godot_windows.ps1 -SkipBuild
+          -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+          -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
+          -PreviousRuntimePackage "$env:PREVIOUS_RUNTIME_PACKAGE"
 
       - name: Save Godot export templates
         if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'

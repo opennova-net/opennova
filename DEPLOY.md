@@ -1120,7 +1120,12 @@ and the manifest (`scripts/stage_downloads.py`). Then it publishes the runtime's
 through the deployment's admin API (`scripts/publish_runtime.py`: uploaded, waited through
 validation and published, named `OpenNova runtime <tag>` or `OpenNova runtime PR #<n>
 (<sha>)`), so an install's next check offers it; a package the service refuses stops the
-run before the host changes. The runtime is the one game whose releases are uploaded (every
+run before the host changes. A staging run keeps the package it published as its
+`staging-runtime-package` artifact (90 days), and a pull request's CI build packages its
+runtime with that one as `--previous`, so a file the published release holds and the new
+build drops is removed from staging's installs, as a tag's release carries the preceding
+release's removals (`release.yml`).
+The runtime is the one game whose releases are uploaded (every
 other game's are built from its project, "The games", section 7), and Publish alone uploads
 them, with each environment's secret `ADMIN_API_TOKEN` (the vault's
 `app-<deployment>/admin_api_token`) and variable `NOVAWORLD_URL` (the deployment's site:
