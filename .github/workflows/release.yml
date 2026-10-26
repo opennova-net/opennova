@@ -68,14 +68,17 @@ jobs:
             sleep 60
           done
 
-  # Tagged releases ship the runtime, the editor with its own copy of the
-  # runtime, the Blender authoring add-on, the apps and the switcher. The game carries
-  # the updater beside the executable; game content downloads on first launch.
+  # Tagged releases ship the runtime (one zip per game: OpenNova's own, Joint
+  # Operations and DFX2), the editor with its own copy of the runtime, the Blender
+  # authoring add-on, the apps and the switcher. Each game zip carries the updater
+  # beside the executable; its game downloads on first launch.
   package-godot-windows:
     needs: gate
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
+      jointops_artifact_id: ${{ steps.upload_jointops.outputs.artifact-id }}
+      dfx2_artifact_id: ${{ steps.upload_dfx2.outputs.artifact-id }}
       editor_artifact_id: ${{ steps.upload_editor.outputs.artifact-id }}
       runtime_artifact_id: ${{ steps.upload_runtime.outputs.artifact-id }}
     env:
@@ -131,6 +134,22 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: Upload Joint Operations Windows game zip
+        id: upload_jointops
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/jointops-game-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload DFX2 Windows game zip
+        id: upload_dfx2
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/dfx2-game-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
       - name: Upload OpenNova Windows editor zip
         id: upload_editor
         uses: actions/upload-artifact@v7
@@ -182,7 +201,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: dist
-          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-godot-windows.outputs.runtime_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
+          artifact-ids: ${{ needs.package-godot-windows.outputs.artifact_id }},${{ needs.package-godot-windows.outputs.jointops_artifact_id }},${{ needs.package-godot-windows.outputs.dfx2_artifact_id }},${{ needs.package-godot-windows.outputs.editor_artifact_id }},${{ needs.package-godot-windows.outputs.runtime_artifact_id }},${{ needs.package-blender-windows.outputs.artifact_id }},${{ needs.package-apps-windows.outputs.artifact_id }},${{ needs.package-switcher-windows.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
@@ -194,13 +213,13 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          for product in game editor; do
-            zips=(dist/opennova-${product}-windows-v*.zip)
+          for product in opennova-game jointops-game dfx2-game opennova-editor; do
+            zips=(dist/${product}-windows-v*.zip)
             if [[ ${#zips[@]} -ne 1 ]]; then
               echo "::error::Expected exactly one ${product} zip, found ${#zips[@]}"
               exit 1
             fi
-            release_zip="dist/opennova-${product}-windows-${GITHUB_REF_NAME}.zip"
+            release_zip="dist/${product}-windows-${GITHUB_REF_NAME}.zip"
             if [[ "${zips[0]}" != "$release_zip" ]]; then
               mv -- "${zips[0]}" "$release_zip"
             fi
@@ -233,6 +252,8 @@ jobs:
         with:
           files: |
             dist/opennova-game-windows-${{ github.ref_name }}.zip
+            dist/jointops-game-windows-${{ github.ref_name }}.zip
+            dist/dfx2-game-windows-${{ github.ref_name }}.zip
             dist/opennova-editor-windows-${{ github.ref_name }}.zip
             dist/opennova-runtime-windows-${{ github.ref_name }}.sfs
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip

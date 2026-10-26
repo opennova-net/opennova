@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <thread>
@@ -68,6 +69,68 @@ bool read_package(const std::string &path, update::SfsPackage &package, std::str
 		return false;
 	}
 	return true;
+}
+
+// The previous package's command files alone, all a full build reads of it (its removals):
+// its blobs, a whole game's, stay in the file.
+bool read_command_files(const std::string &path, update::SfsPackage &package, std::string &error) {
+	std::FILE *file = io::fopen_utf8(path.c_str(), "rb");
+	if (file == nullptr) {
+		error = "cannot open " + path;
+		return false;
+	}
+	update::SfsLayout layout;
+	bool ok = update::sfs_locate(file, layout, error);
+	package = {};
+	package.product = layout.product;
+	for (const update::SfsSectionSpans &spans : layout.sections) {
+		if (!ok)
+			break;
+		update::SfsSection section;
+		section.expansion = spans.expansion;
+		for (const update::SfsEntrySpan &span : spans.entries) {
+			if (!strutil::ends_with_icase(span.name, ".cmd"))
+				continue;
+			update::SfsEntry entry{ span.name, std::vector<uint8_t>(span.size) };
+			ok = io::fseek64(file, static_cast<int64_t>(span.offset), SEEK_SET) == 0 &&
+					(span.size == 0 ||
+							std::fread(entry.data.data(), 1, span.size, file) == span.size);
+			if (!ok) {
+				error = "cannot read " + span.name;
+				break;
+			}
+			section.entries.push_back(std::move(entry));
+		}
+		package.sections.push_back(std::move(section));
+	}
+	std::fclose(file);
+	if (!ok)
+		error = path + ": " + error;
+	return ok;
+}
+
+// `prefix` (an updater executable, or nothing) and the package written to `out` through a
+// partial file, the package a piece at a time: a whole game's is never copied whole in memory.
+bool write_package(const std::string &out, const std::vector<uint8_t> &prefix,
+		const update::SfsPackage &package, uint64_t &package_bytes, std::string &error) {
+	if (!update::sfs_writable(package, &package_bytes)) {
+		error = "the package cannot be written";
+		return false;
+	}
+	const std::string partial = out + ".partial";
+	std::FILE *file = io::fopen_utf8(partial.c_str(), "wb");
+	bool ok = file != nullptr &&
+			(prefix.empty() || std::fwrite(prefix.data(), 1, prefix.size(), file) == prefix.size()) &&
+			update::sfs_write_file(package, file);
+	if (file != nullptr && std::fclose(file) != 0)
+		ok = false;
+	if (!ok) {
+		std::error_code ec;
+		std::filesystem::remove(io::os_path(partial), ec);
+		error = "cannot write " + out;
+		return false;
+	}
+	return io::replace_file(partial, out, error);
 }
 
 int run_build(int argc, char **argv) {
@@ -137,7 +200,7 @@ int run_build(int argc, char **argv) {
 	std::string error;
 	if (!previous.empty()) {
 		spec.previous.emplace();
-		if (!read_package(previous, *spec.previous, error)) {
+		if (!read_command_files(previous, *spec.previous, error)) {
 			std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str()); return 1;
 		}
 	}
@@ -150,9 +213,8 @@ int run_build(int argc, char **argv) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
 	}
-	const std::vector<uint8_t> payload = update::sfs_write(package);
-	bytes.insert(bytes.end(), payload.begin(), payload.end());
-	if (!io::write_file_atomic(out, bytes.data(), bytes.size(), error)) {
+	uint64_t package_bytes = 0;
+	if (!write_package(out, bytes, package, package_bytes, error)) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
 	}
@@ -176,7 +238,8 @@ int run_build(int argc, char **argv) {
 		std::printf("%s: %zu loose, %zu copy, %zu remove, %zu bytes of blobs\n",
 				line.command_file.c_str(), line.loose_rows, line.copy_rows, line.remove_rows,
 				line.blob_bytes);
-	std::printf("wrote %s (%zu bytes)\n", out.c_str(), bytes.size());
+	std::printf("wrote %s (%llu bytes)\n", out.c_str(),
+			static_cast<unsigned long long>(bytes.size() + package_bytes));
 	return 0;
 }
 

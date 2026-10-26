@@ -3,10 +3,12 @@
 OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
 runtime, native format readers, NovaWorld-compatible services, and the project
-web portal. The minimal runtime downloads OpenNova's own game on first run:
+web portal. The minimal runtime downloads its game on first run: OpenNova's own,
 "OP: Acid Gambit", a mission for single player and Co-op over LAN, and its
-"OP: Nifty Package" expansion. The same `opennova.exe` can run against an existing
-Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder and run it.
+"OP: Nifty Package" expansion, or, from the zips set up for them, Joint Operations
+(with Escalation) or Delta Force Xtreme 2. The same `opennova.exe` can run against an
+existing Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder
+and run it.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -92,8 +94,8 @@ $GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache c
 $GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" --no-update
 ```
 
-In its own folder the packaged runtime plays OpenNova's game, and its first launch
-downloads OpenNova's content through the adjacent `update.exe`. Existing content
+In its own folder the packaged runtime plays the game its zip is set up for, and its
+first launch downloads that game through the adjacent `update.exe`. Existing content
 starts normally while an update check runs in the background; **UPDATE** appears
 in the main menu when a newer package is available. Installed content works offline.
 
@@ -116,11 +118,15 @@ Editor project or an existing retail install.
 
 ## Downloads
 
-CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
-contains `opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`,
-and the small bootstrap configuration. Game content is downloaded on first run.
-Retail game data is supplied separately. Debug builds include
-the game's dev tools (Insert). Tagged releases also attach
+CI and tagged releases publish one game zip per game, each the same runtime set up
+for its game: `opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty
+Package), `jointops-game-windows-v<version>.zip` (Joint Operations and Escalation) and
+`dfx2-game-windows-v<version>.zip` (Delta Force Xtreme 2). Each contains
+`opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`, and the small
+bootstrap configuration: the Joint Operations and DFX2 zips add the `UPDATE.WIZ`
+naming their game (and Escalation's `expansion/jox01/UPDATE.WIZ`). Unzipped into an
+empty folder, a zip's first run downloads its game from OpenNova's update service.
+Debug builds include the game's dev tools (Insert). Tagged releases also attach
 `opennova-runtime-windows-v<version>.sfs`, the same runtime packed as the update
 `update.exe` installs.
 

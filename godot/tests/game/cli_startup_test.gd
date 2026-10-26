@@ -51,18 +51,21 @@ func test_empty_opennova_install_reaches_bootstrap_without_game_data() -> void:
 
 # ADR 0067 d2: without /game the folder's UPDATE.WIZ names the product. A wizard
 # naming a game OpenNova does not play stops the launch before anything mounts; a
-# JO wizard selects JO, which never offers OpenNova's content bootstrap.
+# JO or DFX2 wizard selects that game, and a folder holding only the wizard (the
+# jointops and dfx2 zips, unzipped) offers that game's download (ADR 0067 d3).
 func test_a_folder_wizard_selects_or_refuses_the_product_without_game() -> void:
 	var foreign := TestFs.cache_dir(self, "foreign_wizard")
 	_dirs.append(foreign)
 	TestFs.write_text(self, foreign.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=DFBHD.CMD\r\n")
 	assert_string_contains(_launch(["--resource-dir", foreign], 2, false, false),
 			"holds a game OpenNova does not play")
-	var jo := TestFs.cache_dir(self, "jo_wizard")
-	_dirs.append(jo)
-	TestFs.write_text(self, jo.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
-	var log_text := _launch(["--resource-dir", jo], 1, true, false)
-	assert_false(log_text.contains("content installation required"), log_text)
+	for game in [["jo", "JOPTR.CMD", "Joint Operations"], ["dfx2", "DFX2.CMD", "Delta Force Xtreme 2"]]:
+		var dir := TestFs.cache_dir(self, "%s_wizard" % game[0])
+		_dirs.append(dir)
+		TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=%s\r\n" % game[1])
+		var log_text := _launch(["--resource-dir", dir], 1, true, false)
+		assert_string_contains(log_text, "OpenNova: content installation required")
+		assert_string_contains(log_text, "%s is not installed here" % game[2])
 
 
 func test_unknown_or_missing_game_selection_is_a_usage_error() -> void:
