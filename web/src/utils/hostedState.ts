@@ -230,11 +230,11 @@ export function stoppedBecauseText(b: StoppedBecause, scope: 'owner' | 'admin'):
     case 'admin_stop':
       return 'An admin stopped it.';
     case 'update':
-      return 'It was restarted onto newer game data.';
+      return 'It was restarted onto a newer release.';
     case 'limits':
       return limitsText(b.limit, owner);
     case 'no_data':
-      return 'Its game data is no longer offered, so it could not run.';
+      return 'Its game is no longer offered, so it could not run.';
     case 'data_unavailable':
       return 'Its game data could not be fetched.';
     case 'link_lost':

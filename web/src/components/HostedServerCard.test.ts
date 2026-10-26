@@ -47,6 +47,6 @@ describe('HostedServerCard', () => {
       global: { plugins: [router] },
     });
     expect(ended.find('.hosted-phase').exists()).toBe(false);
-    expect(ended.get('.hosted-stopped-because').text()).toBe('It was restarted onto newer game data.');
+    expect(ended.get('.hosted-stopped-because').text()).toBe('It was restarted onto a newer release.');
   });
 });

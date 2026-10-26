@@ -1,9 +1,9 @@
 // The logged-in account's hosted servers (apps/novaworld_common/hosted/README.md;
 // hosted/hosted_routes.cpp): GET /api/me/servers (the
-// hosting entitlement, the data sets and the servers), GET
+// hosting entitlement, the games and the servers), GET
 // /api/me/servers/<id>, POST /api/me/servers (a start), POST
 // /api/me/servers/<id>/stop and POST /api/me/servers/<id>/update (a restart
-// on the data set's current data). The session cookie authenticates them and
+// on the game's current data). The session cookie authenticates them and
 // `apiClient` sends the CSRF header the POSTs need. Below them, the console
 // routes (hosted/console_routes.cpp), the owner's and the admin's.
 //
@@ -258,7 +258,7 @@ function isHostedServerShape(value: unknown): value is HostedServer {
   );
 }
 
-// A data set or expansion a server names ({id, display_name}, with an
+// A game or expansion a server names ({id, display_name}, with an
 // expansion's code), or null.
 function parseNamed<T extends { id: number; display_name: string }>(value: unknown, extra: (v: Record<string, unknown>) => Omit<T, 'id' | 'display_name'>): T | null {
   const v = value as Record<string, unknown> | null;
@@ -280,7 +280,7 @@ function parseServerData(value: unknown): HostedServerData {
 
 // A hosted server as the routes answer it, or null when it lacks what every
 // page needs (its id, state, liveness and settings). The data it runs on
-// (its data set, expansion, trees and update flags) and its static address
+// (its game, expansion, trees and update flags) and its static address
 // are read with defaults, so a reply that leaves them out still shows.
 function parsePhase(value: unknown): ServerPhase | null {
   const v = value as Record<string, unknown> | null;
@@ -396,7 +396,7 @@ function parseMissions(value: unknown): HostedMission[] {
   return out;
 }
 
-// One expansion of a data set, or null when the entry is malformed.
+// One expansion of a game, or null when the entry is malformed.
 function parseExpansion(value: unknown): HostedExpansionOption | null {
   const v = value as Partial<Record<keyof HostedExpansionOption, unknown>> | null;
   if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.code !== 'string') return null;
@@ -409,7 +409,7 @@ function parseExpansion(value: unknown): HostedExpansionOption | null {
   };
 }
 
-// One offered data set, or null when the entry is malformed (no id or name,
+// One offered game, or null when the entry is malformed (no id or name,
 // a malformed expansion, a range that is no pair of whole numbers): the form
 // never offers a game it could not check.
 function parseDataSet(value: unknown): HostedDataSet | null {
@@ -441,7 +441,7 @@ function parseDataSet(value: unknown): HostedDataSet | null {
 }
 
 // GET /api/me/servers: whether hosting is on (and full), the account's
-// hosting entitlement, the data sets a start may pick and the account's
+// hosting entitlement, the games a start may pick and the account's
 // servers (the live ones, then its newest ended ones). A reply whose
 // entitlement or any server is malformed is refused whole: the page never
 // counts servers it could not read.
@@ -515,7 +515,7 @@ export function stopHostedServer(id: number): Promise<HostedResult<HostedServer>
   return forServer(() => apiClient.post<unknown>(`/me/servers/${id}/stop`));
 }
 
-// POST /api/me/servers/<id>/update: the server restarts on its data set's
+// POST /api/me/servers/<id>/update: the server restarts on its game's
 // current data (202; again when it was asked already): its match ends and
 // its players drop. 409 not_live once it has ended, up_to_date when it runs
 // the current data already.

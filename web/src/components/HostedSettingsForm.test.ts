@@ -234,7 +234,7 @@ describe('HostedSettingsForm', () => {
     expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ game_name: 'Night Ops' }), true, 1);
   });
 
-  it('marks the game picker when the backend refuses the data set', async () => {
+  it('marks the game picker when the backend refuses the game', async () => {
     start.mockResolvedValue({
       ok: false,
       error: {

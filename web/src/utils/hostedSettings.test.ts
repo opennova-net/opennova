@@ -25,7 +25,7 @@ function form(overrides: Partial<SettingsForm> = {}): SettingsForm {
 }
 
 describe('checkSettings', () => {
-  it('passes good settings and sends the data set and expansion by id', () => {
+  it('passes good settings and sends the game and expansion by id', () => {
     const result = checkSettings(form({ expansion_id: ESCALATION, missions: ['jo_one.bms', 'jox_one.bms'] }), BOTH);
     expect(result.errors).toEqual({});
     expect(result.settings?.data_set_id).toBe(JO.id);
