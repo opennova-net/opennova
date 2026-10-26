@@ -437,6 +437,26 @@ int main() {
 		CHECK(host.water_at_bringup == (15 << 16));
 	}
 
+	// --- no water line anywhere: the global keeps Environment_InitDefaults' 0,
+	// which the world's readers take as the plane with no zero test (the
+	// ground's float, the vehicles' contact), while only the surface's draw
+	// bails at 0 (env::water_draws_at_height) [orig: Environment_InitDefaults
+	// @ 0x57c01e (the memset); Terrain_Init @ 0x60FCB1..0x60FCBA (no store with
+	// bit 31 clear); Entity_CalcAverageGroundHeight @ 0x457327..0x457331;
+	// Entity_UpdateVehiclePhysics @ 0x48B9A6; Render_WaterSurface's 0 gate] -----
+	{
+		Host host;
+		host.files["synth.env"] = "enviro_name \"Synth\"\r\nfog_level 900\r\n";
+		host.files["synth.trn"] = "terrain_name \"synth\"\r\nwater_murk .3\r\n";
+		inmatch::HostBootRequest request = host.request();
+		std::snprintf(request.mission.header.terrain, sizeof(request.mission.header.terrain), "synth");
+		std::string error;
+		CHECK(inmatch::boot_host_mission(std::move(request), host.boot, error));
+		CHECK(!host.boot.env_config.water_height_set);
+		CHECK(host.boot.water_z_q16 == 0);
+		CHECK(host.water_at_bringup == 0);
+	}
+
 	// --- the terrain's pass (env #43): the mission's .trn reads ahead of its
 	// .env, so its murk and height stand where the .env writes neither --------
 	{
