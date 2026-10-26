@@ -14,12 +14,6 @@
                  class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
-          Player name (optional)
-          <input v-model="form.nwhandle" type="text" maxlength="30"
-                 placeholder="Defaults to your username" autocomplete="nickname"
-                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
-        </label>
-        <label class="grid gap-2 text-sm text-ink">
           Email
           <input ref="emailInput" v-model="form.email" name="email" type="email" required maxlength="254"
                  autocomplete="email" autocapitalize="none" spellcheck="false"
@@ -90,7 +84,7 @@ function loginLink(username?: string): RouteLocationRaw {
 
 const loginOffer = ref<{ $el: HTMLElement } | null>(null);
 
-const form = reactive({ username: '', nwhandle: '', email: '', password: '' });
+const form = reactive({ username: '', email: '', password: '' });
 const busy = ref(false);
 const success = ref<User | null>(null);
 const error = ref<string | null>(null);
@@ -130,11 +124,9 @@ async function handleSubmit() {
     success.value = await registerUser({
       username: form.username.trim(),
       password: form.password,
-      nwhandle: form.nwhandle.trim() || undefined,
       email,
     });
     form.username = '';
-    form.nwhandle = '';
     form.email = '';
     form.password = '';
     // The next step is the login: put the keyboard on it.

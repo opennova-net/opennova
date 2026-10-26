@@ -31,7 +31,7 @@ describe('AccountOverviewPage', () => {
     const view = await render();
     expect(view.find('a[href="/lobby"]').exists()).toBe(true);
     expect(view.find('a[href="/downloads"]').exists()).toBe(true);
-    expect(view.text()).toContain('No active servers');
+    expect(view.text()).toContain('No servers running.');
     expect(view.find('a[href="/me/servers/new"]').exists()).toBe(false);
     expect(view.text()).toContain('Explore hosting');
   });

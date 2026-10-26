@@ -34,10 +34,10 @@ describe('SupportPage', () => {
     expect(wrapper.text()).toContain('$15 a month');
     expect(wrapper.get('#public-own-machine').text()).toBe('Dedicated machines');
     expect(wrapper.text()).toContain('$45 a month for each');
-    expect(wrapper.text()).toContain('No support tier needed');
+    expect(wrapper.text()).toContain("You don't need a support tier for it.");
     expect(wrapper.text()).toContain('not the sale of any game');
     expect(wrapper.text()).toContain(
-      "A Joint Operations server can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install.",
+      "A Joint Operations server can also list on NovaLogic's NovaWorld, so players on the original game find it with nothing to install.",
     );
     expect(wrapper.text()).not.toContain('—');
     // The terms and the refund policy beside Subscribe.

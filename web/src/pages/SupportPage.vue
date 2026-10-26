@@ -3,15 +3,15 @@
     <div class="space-y-10">
       <header class="space-y-4">
         <p class="eyebrow">Server hosting</p>
-        <h1 class="page-heading">Your server. Your next game night.</h1>
+        <h1 class="page-heading">Host a server</h1>
         <p class="max-w-3xl text-base text-ink-muted">
-          Support OpenNova and give your group a place to play. We run your server and list it on NovaWorld;
-          you choose the game, missions and settings. It stays up until you stop it.
+          A support tier funds OpenNova and lets you run hosted servers. We run them on our machines and list them on
+          NovaWorld; you choose the game, the missions and the settings. A server stays up until you stop it.
         </p>
         <p class="max-w-3xl text-base text-ink-muted">
-          A Joint Operations server can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install.
-          Retail and OpenNova players can join. Hosting uses OpenNova's experimental server and may differ from the
-          original game. A tier supports the project; it is not the sale of any game.
+          A Joint Operations server can also list on NovaLogic's NovaWorld, so players on the original game find it with
+          nothing to install. Hosted servers run OpenNova's own server, which is experimental and may differ from the
+          original. A tier supports the project; it is not the sale of any game.
         </p>
       </header>
 
@@ -47,8 +47,8 @@
             <template v-if="tiers.own_machine.amount !== null">
               {{ formatMoney(tiers.own_machine.amount, tiers.currency) }} a month for each.
             </template>
-            One more hosted server, on a machine of its own. No support tier needed; add as many as you like, each its
-            own monthly subscription, from your support tier page.
+            One more hosted server, on a machine of its own. You don't need a support tier for it. Add as many as you
+            like from your billing page, each its own monthly subscription.
           </p>
         </section>
       </template>

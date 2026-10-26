@@ -21,7 +21,7 @@ describe('LandingPage', () => {
     for (const id of ['game', 'retail', 'online', 'editor', 'downloads', 'run-it-yourself']) expect(page.find(`#${id}`).exists()).toBe(true);
     expect(page.text()).toContain('OP: Acid Gambit');
     expect(page.text()).toContain('OP: Nifty Package');
-    expect(page.text()).toContain('parity with the game as it shipped');
+    expect(page.text()).toContain('aims to play exactly like the original');
     expect(page.text()).toContain('not the sale of any game');
     expect(page.text()).toContain('Pre-1.0 and experimental');
     expect(page.text()).not.toMatch(/production-ready|—/);

@@ -78,7 +78,7 @@ const router = createRouter({
       component: AccountLayout,
       meta: { requiresUser: true },
       children: [
-        { path: '', component: AccountOverviewPage, meta: { title: 'Your overview' } },
+        { path: '', component: AccountOverviewPage, meta: { title: 'Overview' } },
         { path: 'servers', component: ServersPage, meta: { title: 'Servers' } },
         { path: 'servers/new', component: NewServerPage, meta: { title: 'New server' } },
         {

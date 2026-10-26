@@ -6,12 +6,12 @@
       </div>
       <div class="page py-20 sm:py-28">
         <div class="max-w-2xl">
-          <p class="eyebrow">Open source. Still exploring.</p>
+          <p class="eyebrow">Open source · Pre-1.0</p>
           <h1 id="hero-title" class="mt-5 text-6xl font-semibold tracking-tight text-ink-bright sm:text-7xl">OpenNova</h1>
-          <p class="mt-5 max-w-xl text-2xl font-medium leading-snug text-ink-bright sm:text-3xl">A familiar world.<br />New possibilities.</p>
-          <p class="mt-5 max-w-lg text-base leading-relaxed text-ink">A game on NovaLogic's engine, rebuilt in the open. Play our own game, revisit the Joint Operations you own, or make something of your own.</p>
+          <p class="mt-5 max-w-xl text-2xl font-medium leading-snug text-ink-bright sm:text-3xl">NovaLogic's game engine, rebuilt from scratch.</p>
+          <p class="mt-5 max-w-lg text-base leading-relaxed text-ink">Play OP: Acid Gambit, our own game, or the Joint Operations you already own. Build missions with the editor we made our game in.</p>
           <div class="mt-8 flex flex-wrap gap-3">
-            <RouterLink to="/play" class="btn-primary">Start playing <span aria-hidden="true">↗</span>
+            <RouterLink to="/play" class="btn-primary">Start playing
             </RouterLink>
             <RouterLink to="/lobby" class="btn-secondary bg-surface/60">Find a server</RouterLink>
           </div>
@@ -21,7 +21,7 @@
       <div class="border-t border-border-strong bg-surface/80">
         <div class="page flex flex-wrap items-center justify-between gap-3 py-4 text-sm">
           <p role="status" class="text-ink-muted">{{ statusText }}</p>
-          <RouterLink to="/lobby" class="font-medium text-accent hover:text-ink-bright">Explore NovaWorld <span aria-hidden="true">→</span>
+          <RouterLink to="/lobby" class="font-medium text-accent hover:text-ink-bright">Browse servers <span aria-hidden="true">→</span>
           </RouterLink>
         </div>
       </div>
@@ -30,8 +30,7 @@
     <section class="page py-14 sm:py-20" aria-labelledby="choose-title">
       <div class="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p class="eyebrow">Your next session</p>
-          <h2 id="choose-title" class="mt-3 text-3xl font-semibold tracking-tight text-ink-bright">Where will you go?</h2>
+          <h2 id="choose-title" class="text-3xl font-semibold tracking-tight text-ink-bright">What you can play</h2>
         </div>
         <RouterLink to="/downloads" class="link text-sm">All downloads</RouterLink>
       </div>
@@ -39,26 +38,23 @@
         <article id="game" class="card scroll-mt-24 overflow-hidden">
           <img :src="editorShots[0].thumb" :alt="editorShots[0].alt" loading="lazy" width="800" height="450" class="aspect-[16/9] w-full object-cover" />
           <div class="p-6">
-            <p class="eyebrow">01 / Play</p>
-            <h3 class="mt-3 text-xl font-semibold text-ink-bright">An island of our own</h3>
-            <p class="mt-3 text-sm leading-relaxed text-ink-muted">OP: Acid Gambit is our small, growing game. Clear a rebel camp alone or in Co-op over LAN. Its OP: Nifty Package expansion brings night and a storm.</p>
-            <RouterLink to="/play" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">Meet the game →</RouterLink>
+            <h3 class="text-xl font-semibold text-ink-bright">OP: Acid Gambit</h3>
+            <p class="mt-3 text-sm leading-relaxed text-ink-muted">Our own game, made without a single file from the original games. Clear a rebel camp on a jungle island, alone or in co-op. Its expansion, OP: Nifty Package, plays at night in a storm.</p>
+            <RouterLink to="/play" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">How to play →</RouterLink>
           </div>
         </article>
         <article id="retail" class="card scroll-mt-24 overflow-hidden">
           <img :src="retailShots[0].thumb" :alt="retailShots[0].alt" loading="lazy" width="1600" height="900" class="aspect-[16/9] w-full object-cover" />
           <div class="p-6">
-            <p class="eyebrow">02 / Reconnect</p>
-            <h3 class="mt-3 text-xl font-semibold text-ink-bright">Your Joint Operations, too</h3>
-            <p class="mt-3 text-sm leading-relaxed text-ink-muted">OpenNova runs in place of Jointops.exe with the Joint Operations you own. The aim is parity with the game as it shipped. It is pre-1.0, so expect differences.</p>
-            <RouterLink to="/play?game=jointops" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">Choose your setup →</RouterLink>
+            <h3 class="text-xl font-semibold text-ink-bright">Joint Operations</h3>
+            <p class="mt-3 text-sm leading-relaxed text-ink-muted">OpenNova runs the Joint Operations you own in place of Jointops.exe, and aims to play exactly like the original. It is pre-1.0, so expect differences.</p>
+            <RouterLink to="/play?game=jointops" class="mt-5 inline-block font-medium text-accent hover:text-ink-bright">Set it up →</RouterLink>
           </div>
         </article>
         <article id="online" class="card scroll-mt-24 flex flex-col p-6">
-          <p class="eyebrow">03 / Bring everyone</p>
-          <h3 class="mt-3 text-2xl font-semibold leading-tight text-ink-bright">A place for<br />the next match.</h3>
-          <p class="mt-4 text-sm leading-relaxed text-ink-muted">Discover Joint Operations and Delta Force Xtreme 2 servers, or keep a server of your own running with a support tier.</p>
-          <div class="mt-6 border-t border-border pt-5 text-sm text-ink-muted">Hosted servers run OpenNova's own server, opennova-serve. Retail and OpenNova players join them alike. Hosting is experimental; a tier supports the project, not the sale of any game.</div>
+          <h3 class="text-xl font-semibold text-ink-bright">Servers and hosting</h3>
+          <p class="mt-4 text-sm leading-relaxed text-ink-muted">Browse Joint Operations and Delta Force Xtreme 2 servers on our NovaWorld and NovaLogic's, or run your own with a support tier.</p>
+          <div class="mt-6 border-t border-border pt-5 text-sm text-ink-muted">Hosted servers run opennova-serve, OpenNova's own server, and take players on the original game and on OpenNova alike. Hosting is experimental. A tier supports the project; it is not the sale of any game.</div>
           <div class="mt-auto flex flex-wrap gap-4 pt-6">
             <RouterLink to="/support" class="font-medium text-accent hover:text-ink-bright">Host a server →</RouterLink>
             <RouterLink to="/play#online" class="link text-sm">How to join</RouterLink>
@@ -71,8 +67,8 @@
       <div class="page grid gap-9 lg:grid-cols-2 lg:items-center">
         <div>
           <p class="eyebrow">The OpenNova Editor</p>
-          <h2 id="editor-title" class="mt-4 text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">Make the place<br />you want to play.</h2>
-          <p class="mt-5 max-w-md leading-relaxed text-ink-muted">Sculpt terrain, build missions and shape their logic in a 3D view. The same editor that made our game builds yours in the formats Joint Operations reads.</p>
+          <h2 id="editor-title" class="mt-4 text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl">Make your own missions</h2>
+          <p class="mt-5 max-w-md leading-relaxed text-ink-muted">Shape terrain, place units and script mission logic in a 3D view, then build the files Joint Operations reads. It is the editor we made OP: Acid Gambit with.</p>
           <RouterLink to="/downloads#tools" class="btn-secondary mt-6">Get the editor</RouterLink>
         </div>
         <figure>
@@ -87,13 +83,13 @@
     <section id="downloads" class="page scroll-mt-24 py-12" aria-labelledby="downloads-title">
       <div class="flex flex-wrap items-center justify-between gap-5">
         <div>
-          <h2 id="downloads-title" class="text-2xl font-semibold text-ink-bright">Ready when you are.</h2>
-          <p class="mt-2 text-sm text-ink-muted">Games, the editor, the Switcher and tools. Each build, in one place.</p>
+          <h2 id="downloads-title" class="text-2xl font-semibold text-ink-bright">Downloads</h2>
+          <p class="mt-2 text-sm text-ink-muted">The games, the editor, the Switcher and the tools, for Windows.</p>
         </div>
-        <RouterLink to="/downloads" class="btn-primary">Get OpenNova</RouterLink>
+        <RouterLink to="/downloads" class="btn-primary">Go to downloads</RouterLink>
       </div>
       <div id="run-it-yourself" class="mt-8 flex flex-wrap gap-x-6 gap-y-3 border-t border-border pt-6 text-sm">
-        <RouterLink to="/support#support-run-it-yourself" class="link">Run a server yourself for free</RouterLink>
+        <RouterLink to="/support#support-run-it-yourself" class="link">Run your own server</RouterLink>
         <a :href="ISSUES_URL" class="link" target="_blank" rel="noopener">Report a problem</a>
       </div>
     </section>
