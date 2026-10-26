@@ -143,7 +143,7 @@ deferred. A stale DLL shows up as GDScript "class not found" errors for classes 
 
 ## Run the game
 
-### Runtime and content distribution
+### Runtime and game distribution
 
 The engine repository and its CI hold and ship no game data. The Windows runtime
 package contains the engine, its native dependencies, `update.exe`, and
@@ -164,16 +164,19 @@ zip's `OPENNOVA.WIZ` (the runtime update it ships carries the same wizard); the 
 the exported build's own (`NovaWorldSettings.opennova_host`). A source run's NovaWorld
 target dials loopback ("Test with our Godot game").
 
-Every product's game data is an OpenNova Editor project in the NovaWorld content store
-(ADR 0069), never in a repository: OP: Acid Gambit and its expansion, OP: Nifty Package (with their
-Blender sources), are public, and Joint Operations, Escalation and DFX2, imported from
-their stock installs (each one's revision 1 the stock import), are private. The editor's
-Content window gets, pulls and pushes a project; admins alone push, and a push is not a
+Every game (ADR 0071) has its OpenNova Editor project in NovaWorld (ADR 0069), never in a
+repository: OP: Acid Gambit's and its expansion OP: Nifty Package's (with their Blender
+sources) are public, and Joint Operations', Escalation's and DFX2's, imported from their
+stock installs (each one's revision 1 the stock import), are private. The editor's
+NovaWorld window gets, pulls and pushes a project; admins alone push, and a push is not a
 release. A release is built on the server from a revision: the editor's
-**Build > Release...** or the admin's Content page starts it, the data program exports
-and packs it, and the admin's Game data (Releases) publishes it. Every release is a
-whole package, carrying the last published one's removals, so the jointops and dfx2 zips
-install their game into an empty folder from it.
+**Build > Release...** or the game's page in the admin's Games area starts it, the data
+program exports and packs it, and the game's page publishes it. Every release is a whole
+package, carrying the last published one's removals, so the jointops and dfx2 zips install
+their game into an empty folder from it, and a hosted server's data is built from it
+alone. The OpenNova runtime is the game with no project: Publish
+(`.github/workflows/publish.yml`) ships each CI build to a deployment's downloads host and
+its update service at once (DEPLOY.md, "The downloads host").
 
 The version goes into the package's command file; no version file is read or written.
 A retail release also carries the removals since the stock install: it is packed from the
@@ -181,7 +184,7 @@ stock revision's export by our own writer to the revision's, every file a row, e
 the archive the stock install holds it in (a stock install's first update fetches its
 archives once, since our export stamps every entry anew). The runtime's own files in a
 game's folder (`update.exe`, `revupdat.exe`, `README.txt`) are left out. Its hosted tree is
-built on publish over the data set's stock baseline, uploaded once with "Upload data".
+built on publish from that whole package, from empty: the service keeps no stock install.
 
 The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
@@ -224,7 +227,7 @@ See [README.md](README.md) for packaged launch examples.
 The whole NovaWorld service runs on your machine with one command, in Docker, in the
 shape a deployment runs it (`deploy/compose/`, ADR 0063): the six programs each in a
 container of its own, PostgreSQL, Valkey, the site behind prod's nginx portal, and, given a
-data set, hosted game servers on machines the worker launches.
+game, hosted game servers on machines the worker launches.
 
 ```bash
 scripts/dev_stack.sh up        # build the images and start the stack (about 10 min the first time)
@@ -245,7 +248,7 @@ reach the published ports there too. It prints what to point a client at when it
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
 | `novaworld-web` | `8080/tcp`; `20044`, `20556`, `21068`, `21580/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed); the update service's ports, retail `UPDATE.EXE`'s (on with `ONNET_UPDATE_HOST`) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
-| `novaworld-fleet`, `novaworld-worker`, `novaworld-data` | none | the supervisor, the jobs, the data sets' jobs; the machines' internal listener at `172.30.77.10:8070` |
+| `novaworld-fleet`, `novaworld-worker`, `novaworld-data` | none | the supervisor, the jobs, the games' jobs (a release's build and apply); the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |
 | `docker-api`, `machine-data`, `dev-machine-<id>` | none | hosted servers (below) |
 
@@ -267,7 +270,7 @@ Docker, as CI does. `up` refuses to start while another container publishes one 
 
 ### Hosted game servers locally
 
-With a data set the stack runs hosted servers as a deployment does, machines and all: the
+With a game seeded the stack runs hosted servers as a deployment does, machines and all: the
 worker's docker machine driver launches each fleet machine as a container of the serve image
 (`dev-machine-<id>`, through a socket proxy that admits the Docker containers API on every
 container of this machine, which is root-equivalent on it: the proxy sits on an internal
@@ -285,14 +288,15 @@ scripts/dev_stack.sh up --synthetic-data                      # no licensed data
 scripts/dev_stack.sh up --no-hosting                          # neither
 ```
 
-`--data` uploads the folder's game files (the base kind's: the three boot archives,
-`version.txt`, `score.ini`, `_NSTMOUT.TXT` and `gt.ssc` when present) through the admin API
-as the Joint Operations data set (`--data-set` names another seeded base), the way the Game
-data page uploads them (each file in parts PUT through the site, which web puts in the
-stack's store volume; `curl` and `jq` do it); the data program lists its missions, which are the
-rotation (`--mission` names the one the smoke test's server runs). Retail data never enters
-the repository or an image. With no data set hosting stays off (web logs
-`hosted servers: off (provider none ...)` and `up` prints it).
+`--data` seeds Joint Operations from the folder the way a deployment gets a game, with no
+tree uploaded: the install imported into a project, pushed as the game's project through
+the editor's routes (signed in as the seeded admin), a release built from that revision and
+published, and the data program's apply building the game's tree from it (`--data-set`
+names another seeded base game). `--synthetic-data` seeds a minted project of one synthetic
+deathmatch map the same way. The tree's multiplayer missions are the rotation (`--mission`
+names the one the smoke test's server runs). Retail data never enters the repository or an
+image. With neither, hosting stays off (web logs `hosted servers: off (provider none ...)`
+and `up` prints it).
 
 To start one by hand: log in to the site as `test`, grant an account a server (the admin's
 comp grant, `PUT /api/admin/users/<id>/comp` with `{"servers": 1, "own_machines": 0}`), and start it
@@ -307,7 +311,7 @@ stack's network (the `smoke` image) and exits non-zero on any failure, printing 
 programs' and machines' last log lines. It checks every program's `GET /livez` and web's
 `GET /healthz`; an account registered and logged in through the portal's API and `GET
 /api/me`; the gate's answer to a retail probe naming a live lobby and a NovaWorld session
-verified there (the engine's own codecs); the jobs admin API; and, with a data set, a hosted
+verified there (the engine's own codecs); the jobs admin API; and, with a game seeded, a hosted
 server started through the site that reaches `running` on a machine the worker launched, is
 listed in the lobby, answers console commands through the fleet's admin link (`PLAYER
 LIST`, `CHAT SEND`) and stops. CI's `local-stack.yml` runs `up --synthetic-data --prebuilt`
@@ -480,9 +484,11 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
 package jobs then build the game, editor, Blender add-on, apps and switcher zips and the
-runtime's packed update, `opennova-runtime-windows-<tag>.sfs`. The opt-in
-`publish-runtime-update` job (the Actions variable `PUBLISH_RUNTIME_UPDATES` set to `true`)
-then publishes that update through the admin API.
+runtime's packed update, `opennova-runtime-windows-<tag>.sfs`. Then `release.yml` starts
+Publish for prod (`.github/workflows/publish.yml`; ADR 0071), which waits for the prod
+environment's reviewers: it publishes the runtime's update as the runtime's release on prod's
+update service through the admin API, then the tag's builds on prod's downloads host
+(DEPLOY.md, "The downloads host").
 
 ## Troubleshooting
 

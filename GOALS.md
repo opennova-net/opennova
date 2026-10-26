@@ -41,8 +41,8 @@ That keeps source ownership visible and makes retail compatibility the acceptanc
 
 OpenNova ships a minimal runtime and downloads its own game on first run. The
 "OP: Acid Gambit" game, its "OP: Nifty Package" expansion, and their authoring sources
-are OpenNova Editor projects kept outside the repository, released through the
-admin's update packages; no repository holds game data. It never distributes
+are OpenNova Editor projects kept in NovaWorld, outside the repository, and released
+as the update packages NovaWorld builds from them; no repository holds game data. It never distributes
 retail game data. Users select a product with `/game`, else the folder's
 `UPDATE.WIZ` names it (no wizard: OP: Acid Gambit), and can point the same executable at an existing JO or DFX2 install with
 `--resource-dir`. The editor is a separate download and application. Test-only
