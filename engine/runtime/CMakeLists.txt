@@ -385,6 +385,7 @@ add_library(opennova_runtime STATIC
     world/vehicle_contact.cpp # shared probe/impact contract
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_contact_solve.cpp # the air/ground contact + suspension solves (split of vehicle_motor.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_watercraft.cpp # the watercraft mover: the platform solve, the client tick, the motor (split of vehicle_motor.cpp)
     world/vehicle_simple_motor.cpp
     world/vehicle_simple_contact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_mount.cpp

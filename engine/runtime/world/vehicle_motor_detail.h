@@ -6,7 +6,7 @@
 // The shared platform-solve sub-contract — the x87 trig pair, the Q22 Euler
 // basis, the probe placement, the bilinear terrain probe force, the severity
 // speed response and the 4-normal plane fit — that the watercraft platform
-// solve (vehicle_motor.cpp) and the aircraft, tracked, wheeled and light
+// solve (vehicle_watercraft.cpp) and the aircraft, tracked, wheeled and light
 // contact solves (vehicle_contact_solve.cpp) consume, plus the contact-solve
 // entry points the movers call at their witnessed call sites.
 
@@ -42,6 +42,10 @@ inline int32_t bam_shl_wrap(int32_t value, unsigned shift) {
 // is_authority)` [orig: Entity_UpdateAircraftPhysics @0x490310 input gate; the
 // ground twin is Entity_UpdateVehiclePhysics @0x48b0ff].
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
+// The predicting client's own driver and the input block's parked arm (defined in
+// vehicle_motor.cpp; the watercraft TU, vehicle_watercraft.cpp, consumes both).
+Entity *resolve_local_vehicle_controller(World &world, Entity &veh, const VehicleTraits &traits);
+void vehicle_park_inputs(Entity &veh);
 
 int32_t turn_pilot_view(World &, Entity &, int32_t delta);
 // The movers' MoveOrder 0x10 merge onto an occupant (defined in vehicle_motor.cpp).
@@ -52,6 +56,30 @@ enum class VehicleChaseFamily : uint8_t { Plain, Ground, Bike, Tank };
 void vehicle_client_chase(Entity &, VehicleChaseFamily family, int32_t entry_up_z16);
 
 namespace detail {
+
+// The Euler basis's forward row and up Z in Q16 (the Q22 matrix's words >> 6), the ground and
+// boat movers' (vehicle_motor.cpp, vehicle_watercraft.cpp).
+struct VehicleEulerBasisQ16 {
+    int32_t fwd_x = 0;
+    int32_t fwd_y = 0;
+    int32_t fwd_z = 0;
+    int32_t up_z = 0;
+};
+
+inline VehicleEulerBasisQ16 vehicle_euler_basis_q16(int32_t yaw_bam,
+                                             int32_t pitch_bam,
+                                             int32_t roll_bam) {
+    const int32_t origin[3] = {};
+    const CollisionMatrix basis = collision_matrix_from_euler(
+            yaw_bam, pitch_bam, roll_bam, origin);
+    VehicleEulerBasisQ16 out;
+    // The mover reads the retail-built Q22 matrix columns as Q16 components.
+    out.fwd_x = io::bam_sar(basis.m[0], 6);
+    out.fwd_y = io::bam_sar(basis.m[4], 6);
+    out.fwd_z = io::bam_sar(basis.m[8], 6);
+    out.up_z = io::bam_sar(basis.m[10], 6);
+    return out;
+}
 
 // Shared physics=0 pad/spine suspension. [orig: Entity_ProcessVehicleSuspension @0x463C60]
 void vehicle_simple_contact(
