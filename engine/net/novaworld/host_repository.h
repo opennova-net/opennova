@@ -35,6 +35,8 @@ namespace opennova {
 //   the joiner leaves  -> remove_player() (its lobby session's ClientStopPlaying, a play
 //     request for another server, or the session's end: the account the session signed in
 //     as, LobbyState::user_id, off the server its PlaySetup named)
+//   its NWU re-join    -> add_player() (the row the drop removed, as it was: a resumed
+//     connection's, the NW UDP listener's parked identity)
 //   a lobby's start    -> clear_unheld() (the rows no lobby instance holds)
 //
 // The listing's owner (host_keys; service policy, the retail

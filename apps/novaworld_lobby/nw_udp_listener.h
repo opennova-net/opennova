@@ -15,6 +15,7 @@
 #include <net/npwire/cs_config.h>
 #include <net_sockets.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
+#include <net/novaworld/host_repository.h>       // hostdb::PlayerRow
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/protocol_message.h>
@@ -429,13 +430,17 @@ private:
 	// takes the parked state back, so its re-host (CurrentlyHosting=1) keeps its RID and GSID.
 	// Service policy (the retail service side has no witness); an entry lapses after
 	// kParkedLobbyTtlMs or on any fresh join from its address. Its SK and CK answer the rest of
-	// the client's goodbye burst (the 0x46 case). Guarded by lobby_states_mu_.
+	// the client's goodbye burst (the 0x46 case). A joiner's roster row (its account's
+	// host_players row under the server it plays on, which /NWJoin.dll wrote and the drop
+	// removed) is kept with it, so the resume writes it back as it was. Guarded by
+	// lobby_states_mu_.
 	struct ParkedLobbyState {
 		uint32_t client_ci = 0;
 		LobbyState lobby;
 		uint64_t parked_ms = 0;
 		uint32_t server_sk = 0;
 		uint32_t client_ck = 0;
+		std::optional<hostdb::PlayerRow> roster_row;
 	};
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
 	std::atomic<bool> command_drain_paused_{false}; // pause_command_drain

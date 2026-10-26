@@ -24,7 +24,12 @@
 //     its RID and owner; with its keys revoked, the next re-host is refused with
 //     MsgCode 200, a stock host's NWEC58;
 //   * on the lenient service a second connection presenting a listed key is
-//     listed with no owner.
+//     listed with no owner;
+//   * a joiner signed in as its account (its Cookie list's live retail login)
+//     plays on a listed server whose roster holds the row /NWJoin.dll wrote;
+//     its session's own reap drops the connection, which takes the row off,
+//     and its re-join (the same CI, DCNT 1) resumes the parked identity and
+//     writes the row back as it was.
 
 #include "nw_service_harness.h"
 #include <net/title/title_identity.h>
@@ -210,13 +215,17 @@ std::string fetch_host_key(const Service &service) {
 // key, and the reconnect.
 class RawHost {
 public:
-	RawHost(uint16_t service_port, uint32_t ci, uint32_t ck)
-		: session_([ci, ck] {
+	// `login_tag`, when given, is the LOGINSESSIONTAG its Cookie lists carry (a live retail
+	// login's, which pins the session's account).
+	RawHost(uint16_t service_port, uint32_t ci, uint32_t ck, std::string login_tag = {})
+		: session_([ci, ck, login_tag] {
 			  ClientSession::Config cfg = ClientSession::Config::lobby(kJo, kJo.gate_tag);
 			  cfg.client_index = ci;
 			  cfg.na = "ownership:host";
-			  cfg.cookie_vars = [] {
-				  return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+			  cfg.cookie_vars = [login_tag] {
+				  std::vector<std::pair<std::string, std::string>> vars{{"NWUID", ""}};
+				  if (!login_tag.empty()) vars.emplace_back("LOGINSESSIONTAG", login_tag);
+				  return vars;
 			  };
 			  // The 0x81s' draws (D-NET-704): the connect's CK, then each re-join's the next.
 			  cfg.connection_keys = [next = ck]() mutable {
@@ -264,11 +273,33 @@ public:
 		}, rounds);
 	}
 
+	// The play leg for the server at `ip`:`port` (its PlaySetup as the .joi hands it): Playing,
+	// or Failed with play_result().
+	ClientSession::PlayState play(const std::string &ip, int port) {
+		if (!session_.request_playing(
+					opennova::make_play_setup_vars("Roster", ip, std::to_string(port), "20", 0)))
+			return ClientSession::PlayState::Idle;
+		drive([this] {
+			const auto state = session_.play_state();
+			return state == ClientSession::PlayState::Playing ||
+			       state == ClientSession::PlayState::Failed;
+		}, 100);
+		return session_.play_state();
+	}
+
 	// The session's own reap (its 0x46 burst drops the service's connection,
 	// which parks the lobby identity), the re-probe, and the re-join, whose
 	// re-verify re-hosts with CurrentlyHosting=1 and the kept Host list.
 	// `dropped` holds once the service took the row out of the browser.
 	ClientSession::HostState reconnect(const std::function<bool()> &dropped) {
+		if (!reap_and_rejoin(dropped, [this] { return settled(); }))
+			return ClientSession::HostState::Idle;
+		return session_.host_state();
+	}
+
+	// The reap, the re-probe and the re-join, then `done` within the re-join's rounds; false when
+	// the session never re-probed.
+	bool reap_and_rejoin(const std::function<bool()> &dropped, const std::function<bool()> &done) {
 		const uint32_t dcnt = session_.disconnect_count();
 		clock_ms_ += 240001;
 		session_.set_clock_ms(clock_ms_);
@@ -284,11 +315,11 @@ public:
 			for (const auto &dg : pumped) send(dg);
 			probed = !pumped.empty();
 		}
-		if (!probed) return ClientSession::HostState::Idle;
-		drive([this, dcnt] {
-			return session_.disconnect_count() == dcnt + 1 && session_.is_verified() && settled();
+		if (!probed) return false;
+		drive([this, dcnt, &done] {
+			return session_.disconnect_count() == dcnt + 1 && session_.is_verified() && done();
 		}, 150);
-		return session_.host_state();
+		return true;
 	}
 
 	void goodbye() { send(session_.build_goodbye()); }
@@ -524,6 +555,68 @@ void lenient_thief_unlinked(Service &service) {
 	       "lenient: both deregister");
 }
 
+// A joiner's roster row across its NWU reconnect (service policy): its lobby session, signed in
+// as its account by its Cookie list's live retail login, plays on a listed server, whose roster
+// holds the row /NWJoin.dll wrote for the join; the session's own reap drops its connection, which
+// takes the row off the roster; its re-join (the same CI, DCNT 1) resumes the parked identity and
+// writes the row back as it was (its handle, the address it joined from).
+void joiner_roster_resumed(Service &service) {
+	using opennova::db::BindValue;
+	int64_t joiner = 0;
+	{
+		auto db = service.pool.acquire();
+		joiner = db->query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+						   "VALUES ('roster_resumer', 'x', '0e2e00d1', '1', 'ResumerHandle') "
+						   "RETURNING id;")
+						 .front()
+						 .as_int(0)
+						 .value_or(0);
+		db->exec("INSERT INTO active_user_sessions (user_id, username, session_tag) "
+				 "VALUES ($1, 'roster_resumer', 'tag-roster-resumer');",
+				{ BindValue(joiner) });
+	}
+	expect(joiner > 0, "roster: the joiner's account");
+	RawHost server(service.nwudp.bound_port(), 0x52535631u, 0x52534b10u);
+	expect(server.verify() && server.host("Roster Resume") == ClientSession::HostState::Established,
+	       "roster: the server hosts");
+	expect(wait_for([&] { return service.row("Roster Resume").has_value(); }),
+	       "roster: the server is listed");
+	const auto listed = service.row("Roster Resume");
+	if (!listed) return;
+
+	RawHost player(service.nwudp.bound_port(), 0x4a4f4931u, 0x4a4f4b10u, "tag-roster-resumer");
+	expect(player.verify(), "roster: the joiner verifies");
+	expect(player.play(listed->host_ip, listed->host_port) == ClientSession::PlayState::Playing,
+	       "roster: the joiner plays on the listed server");
+	// The row /NWJoin.dll wrote for the join.
+	hostdb::PlayerRow joined;
+	joined.host_rid = listed->rid;
+	joined.user_id = joiner;
+	joined.nwhandle = "ResumerHandle";
+	joined.peer_ip = "10.0.0.77";
+	hostdb::add_player(*service.pool.acquire(), joined);
+	const auto on_roster = [&] {
+		for (const auto &p : hostdb::list_players(*service.pool.acquire(), listed->rid)) {
+			if (p.user_id == joiner && p.nwhandle == "ResumerHandle" && p.peer_ip == "10.0.0.77")
+				return true;
+		}
+		return false;
+	};
+	expect(on_roster(), "roster: the join's row is on the server's roster");
+
+	bool taken_off = false;
+	const bool rejoined = player.reap_and_rejoin(
+			[&] { return taken_off = !on_roster(); }, [&] { return on_roster(); });
+	expect(taken_off, "roster: the drop takes the row off the roster");
+	expect(rejoined && player.session().disconnect_count() == 1,
+	       "roster: the joiner re-joins, counting the drop");
+	expect(on_roster(), "roster: the resume writes the row back as /NWJoin.dll wrote it");
+	player.goodbye();
+	server.goodbye();
+	expect(wait_for([&] { return !service.row("Roster Resume"); }),
+	       "roster: the server deregisters");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -546,6 +639,7 @@ int main(int argc, char **argv) {
 			lister_with_account(lenient);
 			anonymous_lister_listed(lenient);
 			lenient_thief_unlinked(lenient);
+			joiner_roster_resumed(lenient);
 			anonymous_lister_stopped(strict);
 			strict_flow(strict);
 		}

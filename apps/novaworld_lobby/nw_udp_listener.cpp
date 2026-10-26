@@ -558,6 +558,7 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	uint32_t playing_rid = 0;
 	std::optional<int64_t> user_id;
 	int64_t session_id = 0;
+	uint64_t parked_ms = 0; // when its identity was parked, 0 for none
 	{
 		std::lock_guard<std::mutex> lk(lobby_states_mu_);
 		// This method is the ConnectionManager on_lost sink as well as the
@@ -580,8 +581,9 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 				park = now - park->second.parked_ms > kParkedLobbyTtlMs ? parked_lobby_states_.erase(park)
 				                                                       : std::next(park);
 			}
-			parked_lobby_states_[peer] = ParkedLobbyState{
-					it->second.client_ci, it->second.lobby, now, it->second.server_sk, it->second.client_ck};
+			parked_lobby_states_[peer] = ParkedLobbyState{ it->second.client_ci, it->second.lobby,
+				now, it->second.server_sk, it->second.client_ck, std::nullopt };
+			parked_ms = now;
 			if (was_hosting) {
 				std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
 						peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
@@ -597,8 +599,9 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 	// joiner leaves the server it played on, its account's host_players row
 	// under that RID going (LobbySession::leave_server's rule). The parked
 	// state keeps its play columns, so a reconnect's replay still names the
-	// server it plays on; its roster row does not come back (only
-	// /NWJoin.dll writes one). The
+	// server it plays on, and the row as it was (/NWJoin.dll wrote it: its
+	// handle and the address it joined from), which the re-join's resume
+	// writes back. The
 	// session row goes by its id, and its commands with it (their foreign
 	// key cascades). On the calling thread's own connection (this runs on
 	// the receive thread and on main alike): the caller's, else the one its
@@ -618,7 +621,18 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, 
 					hostdb::remove_host_by_rid(*db, rid);
 				}
 				if (playing_rid != 0 && user_id) {
+					std::optional<hostdb::PlayerRow> row;
+					for (const hostdb::PlayerRow &p : hostdb::list_players(*db, playing_rid))
+						if (p.user_id == *user_id)
+							row = p;
 					hostdb::remove_player(*db, playing_rid, *user_id);
+					if (row && parked_ms != 0) {
+						std::lock_guard<std::mutex> lk(lobby_states_mu_);
+						const auto park = parked_lobby_states_.find(peer);
+						if (park != parked_lobby_states_.end() &&
+								park->second.parked_ms == parked_ms)
+							park->second.roster_row = std::move(row);
+					}
 				}
 			}
 		} catch (const std::exception &e) {
@@ -1342,6 +1356,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// A re-join that counted a disconnect takes back the identity its dropped
 			// connection parked; any other join from the address discards it.
 			std::optional<LobbyState> resumed_lobby;
+			std::optional<hostdb::PlayerRow> resumed_row; // its roster row, which the drop removed
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				const auto park = parked_lobby_states_.find(peer);
@@ -1349,6 +1364,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					if (static_cast<int32_t>(auth.dcnt) > 0 && park->second.client_ci == auth.ci &&
 					    now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
 						resumed_lobby = park->second.lobby;
+						resumed_row = park->second.roster_row;
 					}
 					parked_lobby_states_.erase(park);
 				}
@@ -1430,6 +1446,18 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				// previous one), before its 0x82 goes out.
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				sync_session_locked(peer, loop_db);
+			}
+			// A resumed joiner is back on its server's roster as /NWJoin.dll wrote it (its
+			// handle, the address it joined from): the drop took the row, and only that page
+			// writes one. A listing gone meanwhile takes none.
+			if (resumed_row && loop_db != nullptr) {
+				try {
+					hostdb::add_player(*loop_db, *resumed_row);
+				} catch (const std::exception &e) {
+					std::fprintf(stderr,
+							"[lobby] WARN roster row of %s on rid=%u not restored: %s\n",
+							client_label.c_str(), resumed_row->host_rid, e.what());
+				}
 			}
 
 			std::printf("[nwudp] AUTH scrks: client_scrk=%zuB server_scrk=%zuB ck=0x%08x\n",
