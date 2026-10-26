@@ -176,7 +176,8 @@ int load_edit_save() {
 	document.undo();
 	TEST_EXPECT(document.dirty() && document.rows()[0]->id != custom);
 	document.undo();
-	TEST_EXPECT(!document.apply(set(hello, "y", int64_t(1)), diagnostic) || true); // the string still exists here
+	// Undone back to before its y was set: the string still exists here, so its y takes a new value.
+	TEST_EXPECT(document.apply(set(hello, "y", int64_t(1)), diagnostic));
 	NodeAddress found;
 	TEST_EXPECT(
 			find_definition(AssetGraph(), document, "hello", found) && found.child == hello.child);
