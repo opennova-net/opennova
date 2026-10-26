@@ -5,7 +5,6 @@
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
-#include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <formats/update/apply.h>
 #include <formats/update/command_file.h>
@@ -101,26 +100,8 @@ bool finish(const updater::Options &options, const std::vector<std::string> &ori
 	const auto launch_dir = std::filesystem::current_path(ec);
 	if (ec) { error = "Cannot determine the launch directory."; return false; }
 	if (result.revision_pending) {
-		std::vector<std::string> args{"--runtime-dir", io::utf8_path(options.runtime_dir),
-				"--parent-pid", std::to_string(updater::process_id()), "--forward-options"};
-		for (size_t i = 0; i < original.size(); ++i) {
-			if (strutil::iequals(original[i], "--parent-pid")) { ++i; continue; }
-			// A stale legacy window handle must not close a newly reused window on relaunch.
-			if (i == 0 && options.legacy && !original[i].empty() && original[i][0] >= '0' && original[i][0] <= '9') {
-				args.push_back("--update-arg"); args.push_back("0"); continue;
-			}
-			args.push_back("--update-arg"); args.push_back(original[i]);
-			const auto flag = strutil::to_lower(original[i]);
-			if (flag == "--runtime-dir" || flag == "--resource-dir" || flag == "/dir") {
-				++i;
-				args.push_back("--update-arg");
-				args.push_back(io::utf8_path(flag == "--runtime-dir" ? options.runtime_dir : options.resource_dir));
-			} else if (flag == "--run-arg" || flag == "/game" || flag == "--server" || flag == "--port") {
-				// Values forwarded to the game may themselves look like updater flags.
-				args.push_back("--update-arg"); args.push_back(original[++i]);
-			}
-		}
-		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir, args, error);
+		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir,
+				updater::revision_handoff_arguments(options, original, updater::process_id()), error);
 	}
 	std::filesystem::path program = options.runtime_dir / "opennova.exe";
 	if (options.legacy && !result.launch_exe.empty()) {

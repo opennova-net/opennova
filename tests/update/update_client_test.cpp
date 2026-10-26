@@ -259,6 +259,48 @@ int test_revision(const test_temp::TempDir &temp) {
 	return 0;
 }
 
+// The self-update hand-off round trip: the game's install arguments, update.exe's arguments to
+// revupdat, and revupdat's relaunch of update.exe give the install's arguments back but the game's
+// --parent-pid (the game has exited), so the relaunched updater runs the same install; revupdat
+// itself waits for the updater that started it.
+int test_revision_handoff(const test_temp::TempDir &temp) {
+	std::string error;
+	const std::vector<std::string> install = {"/RUN", "--parent-pid", "4242", "/game", "jo",
+			"--runtime-dir", temp.file("handoff runtime"), "--resource-dir", temp.file("handoff content"),
+			"--run-arg", "--", "--run-arg", "--parent-pid", "--run-arg", "--after-update"};
+	updater::Options options;
+	TEST_EXPECT(updater::parse_options(install, temp.path / "update.exe", options, error));
+	updater::RevisionArguments revision;
+	TEST_EXPECT(updater::read_revision_arguments(
+			updater::revision_handoff_arguments(options, install, 777), revision, error));
+	updater::Options helper;
+	TEST_EXPECT(updater::parse_options(revision.own, temp.path / "revupdat.exe", helper, error));
+	TEST_EXPECT(helper.parent_pid == 777 && helper.runtime_dir == options.runtime_dir);
+	const std::vector<std::string> relaunch = {"/RUN", "/game", "jo",
+			"--runtime-dir", io::utf8_path(options.runtime_dir), "--resource-dir", io::utf8_path(options.resource_dir),
+			"--run-arg", "--", "--run-arg", "--parent-pid", "--run-arg", "--after-update"};
+	TEST_EXPECT(revision.relaunch == relaunch);
+	updater::Options relaunched;
+	TEST_EXPECT(updater::parse_options(revision.relaunch, temp.path / "update.exe", relaunched, error));
+	TEST_EXPECT(relaunched.parent_pid == 0 && relaunched.run && relaunched.game == "jo" &&
+			relaunched.game_explicit && !relaunched.legacy && relaunched.runtime_dir == options.runtime_dir &&
+			relaunched.resource_dir == options.resource_dir && relaunched.run_args == options.run_args);
+	// Retail's game launches update.exe <its window> /force /log /run: by the relaunch that handle
+	// is stale, so it goes over as 0 and /run carries the run.
+	const std::vector<std::string> legacy = {"123456", "/force", "/log", "/run"};
+	TEST_EXPECT(updater::parse_options(legacy, temp.path / "update.exe", options, error) && options.legacy &&
+			options.parent_window == 123456);
+	TEST_EXPECT(updater::read_revision_arguments(
+			updater::revision_handoff_arguments(options, legacy, 777), revision, error));
+	TEST_EXPECT((revision.relaunch == std::vector<std::string>{"0", "/force", "/log", "/run"}));
+	TEST_EXPECT(updater::parse_options(revision.relaunch, temp.path / "update.exe", relaunched, error) &&
+			relaunched.legacy && relaunched.run && relaunched.parent_window == 0);
+	// revupdat's own options need their values.
+	TEST_EXPECT(!updater::read_revision_arguments({"--runtime-dir"}, revision, error) && !error.empty());
+	TEST_EXPECT(!updater::read_revision_arguments({"--forward-options", "--update-arg"}, revision, error));
+	return 0;
+}
+
 int test_options_and_discovery(const test_temp::TempDir &temp) {
 	updater::Options options;
 	std::string error;
@@ -359,6 +401,7 @@ int main() {
 	if (int rc = test_check_goes_past_a_failing_product(temp)) return rc;
 	if (int rc = test_failures(temp)) return rc;
 	if (int rc = test_revision(temp)) return rc;
+	if (int rc = test_revision_handoff(temp)) return rc;
 	if (int rc = test_options_and_discovery(temp)) return rc;
 	std::puts("update_client: ok");
 	return 0;

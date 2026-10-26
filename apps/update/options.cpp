@@ -3,6 +3,8 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <limits>
 
 namespace opennova::updater {
@@ -88,6 +90,71 @@ bool parse_options(const std::vector<std::string> &args,
 	o.resource_dir = std::filesystem::absolute(o.resource_dir, ec).lexically_normal();
 	if (ec) { error = "invalid resource directory"; return false; }
 	out = std::move(o);
+	return true;
+}
+
+std::vector<std::string> revision_handoff_arguments(const Options &options,
+		const std::vector<std::string> &original, uint64_t updater_pid) {
+	std::vector<std::string> args{"--runtime-dir", io::utf8_path(options.runtime_dir),
+			"--parent-pid", std::to_string(updater_pid), "--forward-options"};
+	const auto forward = [&args](const std::string &value) {
+		args.push_back("--update-arg");
+		args.push_back(value);
+	};
+	for (size_t i = 0; i < original.size(); ++i) {
+		if (strutil::iequals(original[i], "--parent-pid")) { ++i; continue; }
+		if (i == 0 && options.legacy && !original[i].empty() && original[i][0] >= '0' && original[i][0] <= '9') {
+			forward("0");
+			continue;
+		}
+		forward(original[i]);
+		const std::string flag = strutil::to_lower(original[i]);
+		const bool directory = flag == "--runtime-dir" || flag == "--resource-dir" || flag == "/dir";
+		const bool valued = flag == "--run-arg" || flag == "/game" || flag == "--server" || flag == "--port";
+		if ((directory || valued) && i + 1 < original.size()) {
+			++i;
+			forward(!directory ? original[i]
+			                   : io::utf8_path(flag == "--runtime-dir" ? options.runtime_dir : options.resource_dir));
+		}
+	}
+	return args;
+}
+
+bool read_revision_arguments(const std::vector<std::string> &args, RevisionArguments &out,
+		std::string &error) {
+	RevisionArguments read;
+	bool explicit_forwarding = false;
+	for (size_t i = 0; i < args.size(); ++i) {
+		if (args[i] == "--forward-options") {
+			explicit_forwarding = true;
+		} else if (args[i] == "--update-arg") {
+			explicit_forwarding = true;
+			if (++i == args.size()) { error = "Missing --update-arg value."; return false; }
+			read.relaunch.push_back(args[i]);
+		} else if (args[i] == "--runtime-dir" || args[i] == "--parent-pid") {
+			read.own.push_back(args[i]);
+			if (++i == args.size()) { error = "Missing helper option value."; return false; }
+			read.own.push_back(args[i]);
+		} else {
+			// Stock UPDATE launches REVUPDAT with /RUN and its original command line.
+			read.relaunch.push_back(args[i]);
+		}
+	}
+	if (!explicit_forwarding) {
+		std::vector<std::string> &relaunch = read.relaunch;
+		if (relaunch.empty()) relaunch.push_back("/RUN");
+		// Retail prepends /RUN before UPDATE's original positional hwnd. Give the new
+		// updater its own harmless positional handle and discard the original one.
+		for (size_t i = 0; i < std::min<size_t>(2, relaunch.size()); ++i) {
+			if (!relaunch[i].empty() && std::all_of(relaunch[i].begin(), relaunch[i].end(),
+						[](char c) { return c >= '0' && c <= '9'; })) {
+				relaunch.erase(relaunch.begin() + static_cast<std::ptrdiff_t>(i));
+				break;
+			}
+		}
+		relaunch.insert(relaunch.begin(), "0");
+	}
+	out = std::move(read);
 	return true;
 }
 } // namespace opennova::updater
