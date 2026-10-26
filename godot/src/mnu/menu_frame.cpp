@@ -1350,6 +1350,12 @@ PackedStringArray MenuFrame::terrain_texture_detail_controls() {
 	return out;
 }
 
+PackedStringArray MenuFrame::object_texture_detail_controls() {
+	PackedStringArray out;
+	for (const char *name : opennova::menu::kObjectTexDetailControls) out.push_back(String(name));
+	return out;
+}
+
 PackedStringArray MenuFrame::options_unsupported_controls() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kOptionsUnsupportedControls) out.push_back(String(name));
@@ -1369,6 +1375,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::texture_compression_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("terrain_texture_detail_controls"),
 			&MenuFrame::terrain_texture_detail_controls);
+	ClassDB::bind_static_method("MenuFrame", D_METHOD("object_texture_detail_controls"),
+			&MenuFrame::object_texture_detail_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
 			&MenuFrame::options_unsupported_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),

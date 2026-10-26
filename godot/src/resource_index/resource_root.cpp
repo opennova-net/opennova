@@ -135,7 +135,10 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_image", "name", "loader", "policy"), &ResourceRoot::load_image,
 			DEFVAL(LOOKUP_SESSION_DEFAULT));
 	ClassDB::bind_method(D_METHOD("get_decoded_texture_count"), &ResourceRoot::get_decoded_texture_count);
-	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type"), &ResourceRoot::load_material_texture);
+	ClassDB::bind_method(D_METHOD("load_material_texture", "name", "type", "slot"), &ResourceRoot::load_material_texture,
+			DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_object_texdetail", "level"), &ResourceRoot::set_object_texdetail);
+	ClassDB::bind_method(D_METHOD("get_object_texdetail"), &ResourceRoot::get_object_texdetail);
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
@@ -847,16 +850,22 @@ Ref<Texture2D> ResourceRoot::load_texture_created(const String &name, TextureLoa
 	return result;
 }
 
-Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
+Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type, uint8_t slot) const {
 	sync_texture_caches_();
 	const Ref<Texture> texture = texture_registry_.find_or_load(
 			opennova::renderer::texture_registry_key(opennova::to_std(name), type),
-			[&] { return material_row_texture_(name, type); },
+			[&] { return material_row_texture_(name, type, slot); },
 			[](const Ref<Texture> &made) { return made.is_valid(); });
 	return texture.is_valid() ? texture : opennova::missing_material_texture();
 }
 
-Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t type) const {
+void ResourceRoot::set_object_texdetail(int p_level) {
+	if (p_level == object_texdetail_) return;
+	object_texdetail_ = p_level;
+	texture_registry_.clear();
+}
+
+Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t type, uint8_t slot) const {
 	using opennova::renderer::MaterialTextureReader;
 	// The one file the row's loader opens and the reader that decodes it, never an
 	// alternate extension, suffix or reader (renderer::material_texture_source; a type-1
@@ -873,7 +882,7 @@ Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t typ
 	}
 	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
 	return opennova::make_material_texture(load, [this, &load] { return read_file(opennova::to_gd(load.file)); },
-			name, type);
+			name, type, opennova::renderer::object_texdetail_flags(object_texdetail_, slot));
 }
 
 bool ResourceRoot::material_texture_missing(const String &name, uint8_t type) const {

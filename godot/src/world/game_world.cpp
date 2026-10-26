@@ -298,6 +298,10 @@ int GameWorld::terrain_texdetail_fresh_profile() {
 	return opennova::renderer::kTerrainTexDetailFreshProfile;
 }
 
+int GameWorld::object_texdetail_fresh_profile() {
+	return opennova::renderer::kObjectTexDetailFreshProfile;
+}
+
 int GameWorld::particle_density_fresh_profile() {
 	return opennova::renderer::kParticleDensityFreshProfile;
 }
@@ -314,6 +318,9 @@ void GameWorld::set_particle_density(int p_density) {
 // compressed families (its detail layers and colormap quadrants) and the
 // effect world's pages and scene-pass stride.
 void GameWorld::publish_session_render_settings() {
+	// The model texture loaders' halvings for the mission start's detail (engine
+	// renderer/device_texture.h object_texdetail_flags carries the witness).
+	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
 	if (terrain_ != nullptr) {
 		terrain_->set_texcompression_level(session_texcompression_level_);
 		terrain_->set_terrain_texdetail(session_terrain_texdetail_);
@@ -1064,6 +1071,12 @@ void GameWorld::_bind_methods() {
 			&GameWorld::get_session_terrain_texdetail);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("terrain_texdetail_fresh_profile"),
 			&GameWorld::terrain_texdetail_fresh_profile);
+	ClassDB::bind_method(D_METHOD("set_object_texdetail", "level"), &GameWorld::set_object_texdetail);
+	ClassDB::bind_method(D_METHOD("get_object_texdetail"), &GameWorld::get_object_texdetail);
+	ClassDB::bind_method(D_METHOD("get_session_object_texdetail"),
+			&GameWorld::get_session_object_texdetail);
+	ClassDB::bind_static_method("GameWorld", D_METHOD("object_texdetail_fresh_profile"),
+			&GameWorld::object_texdetail_fresh_profile);
 	ClassDB::bind_method(D_METHOD("set_particle_density", "density"), &GameWorld::set_particle_density);
 	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
 	ClassDB::bind_method(D_METHOD("get_session_particle_density"),

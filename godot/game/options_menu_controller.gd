@@ -104,6 +104,11 @@ func _seed_player_options() -> void:
 		var terrain_id := _driver.widget_id(control_name)
 		if terrain_id >= 0:
 			_driver.select_row_by_value(terrain_id, str(state.terrain_texdetail), false)
+	# The object-texture-detail row (OBJECTTEX, front end only) seeds by value.
+	for control_name: String in MenuFrame.object_texture_detail_controls():
+		var object_tex_id := _driver.widget_id(control_name)
+		if object_tex_id >= 0:
+			_driver.select_row_by_value(object_tex_id, str(state.object_texdetail), false)
 
 
 func _seed_scroll(control_name: String, value: int) -> void:
@@ -168,8 +173,8 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 			state.crosshair_color = int(_driver.item_value(color_id, index))
 		_:
 			# The object-detail, texture-filter, particle-density,
-			# texture-compression and terrain-texture-detail rows write the
-			# selected row's value back.
+			# texture-compression, terrain-texture-detail and
+			# object-texture-detail rows write the selected row's value back.
 			var row_id := _driver.widget_id(widget_name)
 			if row_id < 0 or index < 0: return
 			var upper := widget_name.to_upper()
@@ -183,6 +188,8 @@ func _on_widget_value_changed(widget_name: String, kind: String,
 				state.texcompression_level = int(_driver.item_value(row_id, index))
 			elif MenuFrame.terrain_texture_detail_controls().has(upper):
 				state.terrain_texdetail = int(_driver.item_value(row_id, index))
+			elif MenuFrame.object_texture_detail_controls().has(upper):
+				state.object_texdetail = int(_driver.item_value(row_id, index))
 			else:
 				return
 	_options.update(state)

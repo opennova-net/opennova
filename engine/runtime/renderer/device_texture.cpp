@@ -119,6 +119,15 @@ uint32_t full_chain_levels(uint32_t width, uint32_t height) {
 	return levels;
 }
 
+// [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690BB7..0x690BCE (a DXT side up to a multiple of 4), the
+// level count @ 0x690C32..0x690C7D]
+uint32_t d3dx_chain_levels(uint32_t width, uint32_t height, DeviceTextureFormat format) {
+	const TextureDxtFormat blocks = format == DeviceTextureFormat::Dxt1 ? TextureDxtFormat::Dxt1
+			: (format == DeviceTextureFormat::Dxt3 || format == DeviceTextureFormat::Dxt5) ? TextureDxtFormat::Dxt5
+			: TextureDxtFormat::None;
+	return full_chain_levels(d3dx_texture_side(width, blocks), d3dx_texture_side(height, blocks));
+}
+
 // [orig: GTexture_StatBytesForFormat @ 0x686EF0: DXT1 (0x31545844) (w * h) >> 1 (@ 0x686F16); DXT2 to DXT5 w * h (@ 0x686EFB,
 // @ 0x686F1C, @ 0x686F1E); any other w * h times its bytes a texel (@ 0x686F38)]
 uint64_t texture_stat_bytes(uint32_t width, uint32_t height, DeviceTextureFormat format, uint32_t bits) {
@@ -228,8 +237,11 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 // [orig: GTexture_InitFromMemory @ 0x687DF0 — the detail's skip @ 0x687E3B..0x687E49; the DXT5 made DXT1
 // @ 0x687E90..0x687EB9 (sub_67C7F0, the card's DXT1, and dword_32656A0, the kept DXT5); the formats the card
 // takes @ 0x687F5D, else A8R8G8B8 @ 0x688069; the skip grown by the cap or the card @ 0x6881AC..0x6881FC
-// (each flag lowering the card's side only); a chain of no more levels than the skip and one loaded whole
-// @ 0x68820A, @ 0x6882DE (MipLevels D3DX_DEFAULT); with no skip the file through D3DX with MipLevels 0
+// (each flag lowering the card's side only); the skip counted against the level count of the system-memory
+// texture D3DX makes of the file with MipLevels D3DX_DEFAULT (@ 0x68812A, its GetLevelCount @ 0x68819C..0x6881A0),
+// the complete chain whatever the file holds (D3DX makes the levels it lacks), a chain of no more levels than the
+// skip and one loaded whole @ 0x688208..0x68820A, @ 0x6882DE (MipLevels D3DX_DEFAULT), else the device texture made
+// with that count less the skip @ 0x688219..0x688224; with no skip the file through D3DX with MipLevels 0
 // @ 0x688315, D3DX's complete chain; the stat over the sides shifted by the skip @ 0x688328..0x688398]
 DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const TextureDxtCaps &caps, uint32_t max_side) {
 	DeviceTexture out;
@@ -256,25 +268,27 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 			++skip;
 		}
 	};
-	const uint32_t full = full_chain_levels(std::max(1u, source.width), std::max(1u, source.height));
+	const uint32_t full = d3dx_chain_levels(std::max(1u, source.width), std::max(1u, source.height), source.format);
 	if (!takes) {
 		// D3DX loads the file in its own format with its complete chain, then each level from the skip is
-		// copied into an A8R8G8B8 texture [orig: @ 0x687F9F, @ 0x688069..0x6880E0].
+		// copied into an A8R8G8B8 texture [orig: @ 0x687F9F, @ 0x688069..0x6880E0]. The closest format D3DX
+		// finds on a card without the DXT is no DXT, so its sides are not rounded [orig:
+		// FindClosestDeviceFormat @ 0x69053D, a DXT only as an exact match @ 0x6905E5..0x6905E7].
+		const uint32_t chain = full_chain_levels(std::max(1u, source.width), std::max(1u, source.height));
 		grow();
 		out.format = DeviceTextureFormat::A8R8G8B8;
 		out.bits = 32;
-		out.halvings = std::min(skip, full - 1);
+		out.halvings = std::min(skip, chain - 1);
 		out.width = std::max(1u, source.width >> out.halvings);
 		out.height = std::max(1u, source.height >> out.halvings);
-		out.levels = full - out.halvings;
+		out.levels = chain - out.halvings;
 	} else if (skip == 0) {
 		out.width = std::max(1u, source.width);
 		out.height = std::max(1u, source.height);
 		out.levels = full;
 	} else {
 		grow();
-		const uint32_t file_levels = std::max(1u, source.levels);
-		if (file_levels <= skip + 1) {
+		if (full <= skip + 1) {
 			out.whole = true;
 			out.width = std::max(1u, source.width);
 			out.height = std::max(1u, source.height);
@@ -283,7 +297,7 @@ DeviceTexture dds_device_texture(const DdsSource &source, uint32_t flags, const 
 			out.halvings = skip;
 			out.width = std::max(1u, source.width >> skip);
 			out.height = std::max(1u, source.height >> skip);
-			out.levels = file_levels - skip;
+			out.levels = full - skip;
 		}
 	}
 	out.bytes = chain_bytes(out.width, out.height, out.levels, out.format, out.bits);

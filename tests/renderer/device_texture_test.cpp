@@ -38,6 +38,10 @@ void test_object_texdetail_flags() {
 	// Level 3 and past it, and the normal-map slots at any level: none.
 	for (uint8_t slot : {1, 2, 8, 9}) CHECK(object_texdetail_flags(3, slot) == 0, "level 3: none");
 	CHECK(object_texdetail_flags(7, 1) == 0, "a level past 3: none");
+	// A fresh profile starts one rung below full detail on the reference machine [orig:
+	// Renderer_ComputeQualityLevels @0x5861C7..0x5861E4], where slots 2, 8 and 9 halve once.
+	CHECK(kObjectTexDetailFreshProfile == 2, "a fresh profile's object texture detail");
+	CHECK(object_texdetail_flags(kObjectTexDetailFreshProfile, 2) == kTextureFlagHalveOnce, "the fresh profile halves slot 2");
 	for (int level = 0; level < kObjectTexDetailLevels; ++level)
 		for (uint8_t slot : {0, 3, 4, 5, 6, 7, 10})
 			CHECK(object_texdetail_flags(level, slot) == 0, "slots 3 to 7 and any other: none");
@@ -109,16 +113,30 @@ void test_dds_device_texture() {
 	// At detail 0 (slot 1) its top two levels are skipped.
 	const DeviceTexture low = dds_device_texture(dxt5, object_texdetail_flags(0, 1));
 	CHECK(low.width == 256 && low.levels == 9 && low.halvings == 2 && !low.whole, "two levels skipped");
-	// A chainless DDS at a detail that skips loads whole, with D3DX's complete chain.
+	// A chainless DDS at a detail that skips is skipped all the same: the skip counts D3DX's complete
+	// chain, the levels the file lacks D3DX's [orig: GTexture_InitFromMemory @ 0x68812A, @ 0x68819C..0x6881A0,
+	// @ 0x688208].
 	DdsSource flat = dxt5;
 	flat.levels = 1;
-	const DeviceTexture whole = dds_device_texture(flat, kTextureFlagHalveOnce);
-	CHECK(whole.whole && whole.width == 1024 && whole.levels == 11, "a chain too short loads whole");
-	CHECK(whole.stat_bytes == 512ull * 512, "the game counts it as if halved");
-	// A chain of exactly skip + 1 levels loads whole too.
-	DdsSource two = dxt5;
-	two.levels = 2;
-	CHECK(dds_device_texture(two, kTextureFlagHalveOnce).whole, "two levels, one skipped: whole");
+	const DeviceTexture skipped = dds_device_texture(flat, kTextureFlagHalveOnce);
+	CHECK(!skipped.whole && skipped.width == 512 && skipped.halvings == 1 && skipped.levels == 10,
+			"a chainless file skips from D3DX's complete chain");
+	CHECK(skipped.stat_bytes == 512ull * 512, "the game counts it halved");
+	// A complete chain of no more levels than the skip and one loads whole: a 2 x 2 A8R8G8B8 file, one skipped.
+	DdsSource tiny = dxt5;
+	tiny.width = tiny.height = 2;
+	tiny.levels = 1;
+	tiny.format = DeviceTextureFormat::A8R8G8B8;
+	const DeviceTexture whole = dds_device_texture(tiny, kTextureFlagHalveOnce);
+	CHECK(whole.whole && whole.width == 2 && whole.levels == 2, "a complete chain too short loads whole");
+	// A DXT's sides are rounded up to a multiple of 4 before D3DX counts its chain [orig:
+	// D3DXTex_ValidateAndAdjustTextureParams @ 0x690BB7..0x690BCE]: a 2 x 2 DXT5's chain is 4 x 4's three
+	// levels, so one skip is taken.
+	tiny.format = DeviceTextureFormat::Dxt5;
+	const DeviceTexture tiny_dxt = dds_device_texture(tiny, kTextureFlagHalveOnce);
+	CHECK(!tiny_dxt.whole && tiny_dxt.halvings == 1 && tiny_dxt.levels == 2, "a 2 x 2 DXT skips from 4 x 4's chain");
+	CHECK(d3dx_chain_levels(2, 2, DeviceTextureFormat::Dxt1) == 3 && d3dx_chain_levels(2, 2, DeviceTextureFormat::A8R8G8B8) == 2,
+			"D3DX counts a DXT's chain over its rounded sides");
 	// The cap grows a skip once one is taken, never without one.
 	CHECK(dds_device_texture(dxt5, kTextureFlagCap512).width == 1024, "no detail skip: the cap is not applied");
 	DdsSource big = dxt5;
@@ -145,6 +163,13 @@ void test_dds_device_texture() {
 	no_dxt5.dxt5 = false;
 	const DeviceTexture decoded = dds_device_texture(dxt5, 0, no_dxt5);
 	CHECK(decoded.format == DeviceTextureFormat::A8R8G8B8 && decoded.levels == 11, "decoded to A8R8G8B8");
+	// On a card without the format the closest format D3DX finds is no DXT, so the chain is the file's
+	// sides' own: a 2 x 2 DXT5 decodes to two levels, not 4 x 4's three [orig: FindClosestDeviceFormat
+	// @ 0x69053D, @ 0x6905E5..0x6905E7].
+	DdsSource small_dxt5 = dxt5;
+	small_dxt5.width = small_dxt5.height = 2;
+	small_dxt5.levels = 1;
+	CHECK(dds_device_texture(small_dxt5, 0, no_dxt5).levels == 2, "a decoded DXT's chain is unrounded");
 	// An A8R8G8B8 DDS (the preview cube's form) at 32 bits a texel.
 	DdsSource argb;
 	argb.width = argb.height = 64;

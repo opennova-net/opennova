@@ -20,6 +20,7 @@
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/renderer/texture_registry.h>
 #include <runtime/renderer/texture_roles.h>
@@ -144,7 +145,8 @@ private:
 	// epoch moved since they filled.
 	void sync_texture_caches_() const;
 	// What one material row's own loader makes, null when it makes nothing.
-	Ref<Texture> material_row_texture_(const String &name, uint8_t type) const;
+	Ref<Texture> material_row_texture_(const String &name, uint8_t type, uint8_t slot) const;
+	int object_texdetail_ = opennova::renderer::kObjectTexDetailFull;
 
 	// mount_runtime's mount itself (the archives, the expansion that took).
 	Error mount_runtime_archives_(const String &path, const String &expansion,
@@ -290,7 +292,15 @@ public:
 	// it, file, reader and flags; else the one file retail's loader opens for it,
 	// decoded by that loader's reader, prepared as the dispatcher does and kept;
 	// the checkerboard when it does not load.
-	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
+	// `slot` is the row's slot byte, whose object-texture-detail word the loader creates the texture
+	// with (renderer::object_texdetail_flags at set_object_texdetail's level): the first row of a key
+	// decides it, as the registry's every other flag.
+	Ref<Texture> load_material_texture(const String &name, uint8_t type, uint8_t slot = 0) const;
+	// The session's object_texdetail the model texture loaders halve slots 1, 2, 8 and 9 by (0..3, 3
+	// none; engine renderer/device_texture.h), set at each mission start. A changed level empties the
+	// registry, as retail's mission teardown frees the textures the last mission made.
+	void set_object_texdetail(int p_level);
+	int get_object_texdetail() const { return object_texdetail_; }
 	// C++ siblings only (not bound): whether that row's loader finds no file to open: the file it
 	// opens is not there, or it opens none and the name as written is not there either (a file of the
 	// name its loader cannot read is no miss). False for an empty name.

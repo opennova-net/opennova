@@ -630,6 +630,7 @@ void GameWorld::copy_mission_start_options() {
 	// renderer/texture_compression.h, renderer/particle_density.h).
 	session_texcompression_level_ = texcompression_level_;
 	session_terrain_texdetail_ = terrain_texdetail_;
+	session_object_texdetail_ = object_texdetail_;
 	session_particle_density_ = particle_density_;
 	publish_session_render_settings();
 	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
@@ -688,6 +689,9 @@ int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String
 		last_load_timeline_ = r_timeline;
 	}
 	resource_root_ = p_resource_root;
+	// The model textures this mission loads take the mission start's object texture detail
+	// (publish_session_render_settings, past copy_mission_start_options).
+	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
 	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
 			p_mission->is_wire_header_only());
 	// Each stage below presents the plan's anchor when it starts.

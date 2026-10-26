@@ -270,6 +270,13 @@ public:
 	int get_terrain_texdetail() const { return terrain_texdetail_; }
 	int get_session_terrain_texdetail() const { return session_terrain_texdetail_; }
 	static int terrain_texdetail_fresh_profile();
+	// game.cfg's object_texdetail (0..3; engine: renderer/device_texture.h), handed over and copied
+	// at each mission start as terrain_texdetail is: the model textures this mission loads are
+	// halved by the session's copy (the resource root's set_object_texdetail).
+	void set_object_texdetail(int p_level) { object_texdetail_ = p_level; }
+	int get_object_texdetail() const { return object_texdetail_; }
+	int get_session_object_texdetail() const { return session_object_texdetail_; }
+	static int object_texdetail_fresh_profile();
 	void set_particle_density(int p_density);
 	int get_particle_density() const { return particle_density_; }
 	int get_session_particle_density() const { return session_particle_density_; }
@@ -1175,6 +1182,8 @@ private:
 	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
 	int terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
 	int session_terrain_texdetail_ = opennova::renderer::kTerrainTexDetailFreshProfile;
+	int object_texdetail_ = opennova::renderer::kObjectTexDetailFreshProfile;
+	int session_object_texdetail_ = opennova::renderer::kObjectTexDetailFreshProfile;
 	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	CorpseRagdollPresenter ragdolls_;

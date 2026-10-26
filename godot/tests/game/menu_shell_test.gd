@@ -1100,7 +1100,6 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	var driver: MenuDriver = shell.get_driver()
 	var expected := {
 		"TERRAINPOLY": "3",
-		"OBJECTTEX": "3",
 		"ANTIALIAS": "2",
 		"SHADERUSAGE": "2",
 		"WATERQUALITY": "3",
@@ -1155,6 +1154,14 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 	assert_eq(driver.item_value(terrain_tex, driver.selected_row(terrain_tex)), "2",
 			"TERRAINTEX shows the persisted terrain texture detail")
 	assert_false(driver.is_widget_disabled(terrain_tex), "TERRAINTEX is editable")
+	# The object texture detail is served too: game.cfg's object_texdetail, seeded
+	# by value and editable (options_policy.h kObjectTexDetailControls).
+	var object_tex := driver.widget_id("OBJECTTEX")
+	assert_gte(object_tex, 0, "OBJECTTEX exists")
+	assert_eq(driver.item_value(object_tex, driver.selected_row(object_tex)),
+			str(PlayerOptions.new().current().object_texdetail),
+			"OBJECTTEX shows the persisted object texture detail")
+	assert_false(driver.is_widget_disabled(object_tex), "OBJECTTEX is editable")
 	_cleanup(dir)
 
 

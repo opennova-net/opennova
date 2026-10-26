@@ -177,6 +177,9 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 		_world.set_particle_density(state.particle_density)
 		_world.set_texcompression_level(state.texcompression_level)
 		_world.set_terrain_texdetail(state.terrain_texdetail)
+		# The object texture detail reaches the model textures the next mission
+		# loads (its session copy, D-RMAT-20).
+		_world.set_object_texdetail(state.object_texdetail)
 	if _hud_presenter != null:
 		_hud_presenter.set_crosshair_style(state.crosshair_style)
 		_hud_presenter.set_crosshair_color(state.crosshair_color)

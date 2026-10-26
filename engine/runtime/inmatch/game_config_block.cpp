@@ -22,6 +22,7 @@ void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t deskto
 	cfg.particle_density = renderer::kParticleDensityFreshProfile;
 	cfg.texcompression_level = renderer::kTexCompressionLevelFreshProfile;
 	cfg.terrain_texdetail = renderer::kTerrainTexDetailFreshProfile;
+	cfg.object_texdetail = renderer::kObjectTexDetailFreshProfile;
 }
 
 GameConfigBlock::GameConfigBlock(std::string path) : path_(std::move(path)) {}

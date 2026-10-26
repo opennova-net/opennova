@@ -257,7 +257,7 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 			ResourceRoot::report_missing(opennova::gameprofile::resource_kind::kTexture, texture_name, source_path,
 					"its material draws the missing-texture checkerboard");
 		}
-		return resource_root->load_material_texture(texture_name, type);
+		return resource_root->load_material_texture(texture_name, type, row.slot);
 	}
 	return opennova::load_material_texture_from_dir(source_dir, texture_name, type);
 }

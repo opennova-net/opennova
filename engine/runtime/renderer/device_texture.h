@@ -33,6 +33,17 @@ inline constexpr uint32_t kTextureFlagHalveTwice = 0x20000;
 // [orig: @ 0x524A77..0x524A7D].
 inline constexpr int kObjectTexDetailLevels = 4;
 inline constexpr int kObjectTexDetailFull = 3;
+// The word a fresh profile starts at: the first-launch quality pass writes quality_levels[3] = 1, raised to 2
+// on a card with more than 120 MB of video memory and the shader-model-2 mark, set to 0 under 60 MB of video
+// memory or 255 MB of physical memory, plus the preset offset (0 on the first launch), then the 0..3 clamp;
+// the reference machine has the first two and neither of the last, so 2, one rung below full detail [orig:
+// Renderer_ComputeQualityLevels @0x5861C7..0x5861E4 (caps[3] && caps[8] ? 2 : 1, 0 for caps[5] || caps[4]),
+// the clamp @0x5862BF..0x5862C9; Renderer_ComputeHardwareQualityLevels's caps @0x587834 (display memory >
+// 0x7800000), @0x587840 (< 0x3C00000), @0x587855 (physical memory < 255 MB), @0x58787A (the SM2 mark); the
+// first launch's offset 0 @0x53ED0D]. The options' OBJECTTEX row offers every level on that machine: its
+// device maximum is 3 (RenderSettings_ComputeFromGPUCaps @0x587990, held at 2 under 511 MB of physical
+// memory @0x587A6C..0x587A6E).
+inline constexpr int kObjectTexDetailFreshProfile = 2;
 
 // The halving flag a model texture row of `slot` loads with at object texture detail `level`: the setter
 // stores one flag word for slot 1, one for slot 2 and one for slots 8 and 9 (level 0: two halvings each;
@@ -106,6 +117,12 @@ uint64_t device_level_bytes(uint32_t width, uint32_t height, DeviceTextureFormat
 // The levels of a full chain: one per halving of the larger side, to 1 x 1 (D3DX's complete chain).
 uint32_t full_chain_levels(uint32_t width, uint32_t height);
 
+// D3DX's complete chain of a file of `width` x `height` in `format`, over the sides D3DX adjusts it to: a
+// DXT side rounded up to a multiple of 4 (d3dx_texture_side) before the levels are counted [orig:
+// D3DXTex_ValidateAndAdjustTextureParams @ 0x690BB7..0x690BCE, the count @ 0x690C32..0x690C7D]. The power-of-two
+// rounding D3DX_DEFAULT's sides also take is D-RMAT-18's.
+uint32_t d3dx_chain_levels(uint32_t width, uint32_t height, DeviceTextureFormat format);
+
 // What the game's texture memory counter adds for a texture of `width` x `height`: DXT1 half a byte a
 // texel, DXT3 and DXT5 one, any other format its bytes a texel, the first level alone [orig:
 // GTexture_StatBytesForFormat @ 0x686EF0; added to g_TextureStatBytes by GTexture_CreateFromPixelData_0
@@ -164,8 +181,11 @@ struct DdsSource {
 // an all-opaque DXT5 stored as DXT1 on a card that takes DXT1 and keeps no DXT5 [orig:
 // GTexture_InitFromMemory @ 0x687E90..0x687EB9; GTexture_ConvertDXTAlphaBlocks @ 0x687AC0]; the detail's
 // halvings skip the top levels of its chain (0x20000 two, 0x10000 one [orig: @ 0x687E3B..0x687E49]), and
-// once a skip is taken so does each halving the cap or the card asks for [orig: @ 0x6881AC..0x6881FC]; a
-// chain too short for the skip loads whole [orig: @ 0x68820A, @ 0x6882DE]; with no skip the file goes
+// once a skip is taken so does each halving the cap or the card asks for [orig: @ 0x6881AC..0x6881FC]; the
+// chain the skip is taken from is D3DX's complete chain, the levels the file lacks made by D3DX [orig: the
+// system-memory load with MipLevels D3DX_DEFAULT @ 0x68812A, its level count @ 0x68819C..0x6881A0], and a
+// complete chain too short for the skip (a tiny texture) loads whole [orig: @ 0x688208..0x68820A,
+// @ 0x6882DE]; with no skip the file goes
 // through D3DX with MipLevels 0, its complete chain at the file's sides whatever the cap [orig: @ 0x688315].
 // On a card without the format the levels from the skip are decoded into A8R8G8B8 [orig: @ 0x687F5D,
 // @ 0x687F9F..0x6880E0]; the reference card takes both DXTs.

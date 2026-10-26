@@ -1,6 +1,9 @@
+#include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga_read.h>
 #include <runtime/renderer/d3dx_image_codecs.h>
+#include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/texture_dxt.h>
 #include <runtime/renderer/material_texture.h>
 #include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/texture_load_rules.h>
@@ -507,7 +510,8 @@ godot::Ref<godot::Texture> upload_material_pixels(
 } // namespace
 
 godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &load,
-        const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type) {
+        const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type,
+        uint32_t detail_flags) {
     using namespace opennova::renderer;
     const std::string native_name = name.utf8().get_data();
     // A row no producer takes makes nothing whatever its file holds: nothing is read for it.
@@ -530,6 +534,57 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
     const bool over_cap = cap != 0 &&
             (static_cast<uint32_t>(image->get_width()) > cap ||
              static_cast<uint32_t>(image->get_height()) > cap);
+    // The object texture detail's halvings: a texture built from pixels halved (engine
+    // renderer::pixel_texture_halvings), a DDS its chain's top levels skipped or loaded whole
+    // (renderer::dds_device_texture); both carry the witness.
+    const uint32_t detail = (detail_flags & kTextureFlagHalveTwice) != 0 ? 2u
+            : (detail_flags & kTextureFlagHalveOnce) != 0 ? 1u : 0u;
+    if (mode == MaterialTextureTransform::Unchanged && !over_cap && detail != 0) {
+        if (load.reader == TextureReader::Dds) {
+            // The skip counts D3DX's complete chain, the levels the file lacks made by D3DX; only a
+            // texture whose complete chain holds no more levels than the skip and one loads whole.
+            dds::DdsImage dds_file;
+            std::string dds_error;
+            const DeviceTextureFormat file_format = dds::dds_read(bytes.ptr(), static_cast<size_t>(bytes.size()),
+                    dds_file, dds_error) ? dds_device_format(dds_file.format.name) : DeviceTextureFormat::A8R8G8B8;
+            const uint32_t complete = d3dx_chain_levels(static_cast<uint32_t>(image->get_width()),
+                    static_cast<uint32_t>(image->get_height()), file_format);
+            if (complete > detail + 1) {
+                if (image->is_compressed() && image->decompress() != godot::OK) return {};
+                if (!image->has_mipmaps()) image->generate_mipmaps();
+            }
+            // A 1 x 1 DXT, its chain counted at 4 x 4, holds no level to skip to: it draws whole.
+            if (complete > detail + 1 && image->get_mipmap_count() >= static_cast<int>(detail)) {
+                const int64_t offset = image->get_mipmap_offset(static_cast<int>(detail));
+                const godot::PackedByteArray chain = image->get_data().slice(offset);
+                const godot::Ref<godot::Image> skipped = godot::Image::create_from_data(
+                        std::max(1, image->get_width() >> detail), std::max(1, image->get_height() >> detail), true,
+                        image->get_format(), chain);
+                if (skipped.is_valid() && !skipped->is_empty()) image = skipped;
+            }
+            const godot::Ref<godot::Texture2D> texture = texture_with_mipmaps(image);
+            if (texture.is_valid()) g_authored_mip_chains.insert(texture->get_instance_id());
+            return texture;
+        }
+        if (image->is_compressed() && image->decompress() != godot::OK) return {};
+        if (image->has_mipmaps()) image->clear_mipmaps();
+        image->convert(godot::Image::FORMAT_RGBA8);
+        const godot::PackedByteArray rgba = image->get_data();
+        std::vector<DeviceTextureLevel> levels = pixel_device_texture_levels(rgba.ptr(),
+                static_cast<uint32_t>(image->get_width()), static_cast<uint32_t>(image->get_height()), detail_flags);
+        extend_box_chain(levels, 0);
+        if (levels.empty()) return {};
+        godot::PackedByteArray bytes;
+        for (const DeviceTextureLevel &level : levels) {
+            const int64_t at = bytes.size();
+            bytes.resize(at + static_cast<int64_t>(level.rgba.size()));
+            std::memcpy(bytes.ptrw() + at, level.rgba.data(), level.rgba.size());
+        }
+        const godot::Ref<godot::Image> device = godot::Image::create_from_data(static_cast<int>(levels.front().width),
+                static_cast<int>(levels.front().height), true, godot::Image::FORMAT_RGBA8, bytes);
+        return device.is_valid() && !device->is_empty()
+                ? godot::Ref<godot::Texture>(godot::ImageTexture::create_from_image(device)) : godot::Ref<godot::Texture>();
+    }
     if (mode == MaterialTextureTransform::Unchanged && !over_cap) {
         const godot::Ref<godot::Texture2D> texture = texture_with_mipmaps(image);
         // The DDS reader hands the file whole to D3DXCreateTextureFromFileInMemoryEx, which
@@ -562,6 +617,8 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
     }
     if (cap != 0 && pixels && pixels.depth == 1)
         halve_rgba_to_cap(pixels.rgba, pixels.width, pixels.height, cap);
+    if (detail != 0 && pixels && pixels.depth == 1)
+        halve_rgba_times(pixels.rgba, pixels.width, pixels.height, detail);
     if (!pixels) return {};
     return upload_material_pixels(pixels, mode == MaterialTextureTransform::HorizonVolume);
 }

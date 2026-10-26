@@ -638,6 +638,48 @@ func test_dds_reader_takes_what_d3dx_takes_by_its_own_header_tests() -> void:
 	assert_engine_error('Condition "image.is_null()" is true')
 
 
+# The object texture detail (game.cfg's object_texdetail; engine renderer/device_texture.h): a model
+# row's texture of slot 1, 2, 8 or 9 loads halved by the session's level, a texture built from pixels
+# halved, a DDS its chain's top levels skipped, slots 3 to 7 never; full detail (3) leaves every texture
+# whole. The first row of a key decides the texture, and a changed level loads afresh.
+# [orig: Material_SetTextureDetailLoadFlags @ 0x5B1F40; GTexture_DownsampleToLimits @ 0x6871C8..0x6871E1;
+#  GTexture_InitFromMemory @ 0x687E3B..0x687E49]
+func test_object_texture_detail_halves_the_model_rows() -> void:
+	var root := _make_flat_root("object_texdetail")
+	var chained := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	chained.fill(Color.RED)
+	var flat: Image = chained.duplicate()
+	chained.generate_mipmaps()
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
+		{"name": "wall.tga", "bytes": TestFs.tga_bytes(Vector2i(16, 16), Color.WHITE)},
+		{"name": "trim.tga", "bytes": TestFs.tga_bytes(Vector2i(16, 16), Color.WHITE)},
+		{"name": "skin.dds", "bytes": chained.save_dds_to_buffer()},
+		{"name": "flat.dds", "bytes": flat.save_dds_to_buffer()},
+	])
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", false), OK)
+	assert_eq(resources.get_object_texdetail(), 3, "a root starts at full detail")
+	assert_eq(resources.load_material_texture("wall.tga", 1, 1).get_width(), 16,
+			"full detail leaves a slot-1 texture whole")
+	resources.set_object_texdetail(0)
+	assert_eq(resources.load_material_texture("wall.tga", 1, 1).get_width(), 4,
+			"level 0 halves a slot-1 texture twice, the changed level loading it afresh")
+	# The first row of a key decides the texture: a slot-3 row of trim.tga (no word) first.
+	assert_eq(resources.load_material_texture("trim.tga", 1, 3).get_width(), 16, "slot 3 is never halved")
+	assert_eq(resources.load_material_texture("trim.tga", 1, 1).get_width(), 16,
+			"a later row of the key draws the first row's texture")
+	resources.set_object_texdetail(1)
+	assert_eq(resources.load_material_texture("skin.dds", 0, 1).get_width(), 8,
+			"level 1 skips a slot-1 DDS's top level")
+	# The skip counts D3DX's complete chain, so a DDS of no chain is skipped too, from the levels
+	# D3DX makes [orig: GTexture_InitFromMemory @ 0x68812A, @ 0x688208].
+	assert_eq(resources.load_material_texture("flat.dds", 0, 1).get_width(), 8,
+			"a chainless DDS skips its top level all the same")
+	resources.set_object_texdetail(2)
+	assert_eq(resources.load_material_texture("wall.tga", 1, 1).get_width(), 16, "level 2 leaves slot 1 whole")
+	assert_eq(resources.load_material_texture("trim.tga", 1, 2).get_width(), 8, "and halves slot 2 once")
+
+
 func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> void:
 	var root := _make_flat_root("normal_sources")
 	var source := Image.create(4, 4, false, Image.FORMAT_RGBA8)

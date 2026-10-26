@@ -208,6 +208,28 @@ func test_terrain_texdetail_reaches_the_next_mission_start() -> void:
 			"a change made mid-mission waits for the next mission start")
 
 
+# The object texture detail (game.cfg's object_texdetail; engine renderer/device_texture.h):
+# a fresh profile starts one rung below full detail, and the options word reaches the model
+# textures the mission loads only through the copy each mission start takes (D-RMAT-20).
+func test_object_texdetail_reaches_the_next_mission_start() -> void:
+	assert_eq(GameWorld.object_texdetail_fresh_profile(), 2, "a fresh profile is level 2")
+	var world := WorldFixture.make_world(self)
+	assert_eq(world.get_session_object_texdetail(), GameWorld.object_texdetail_fresh_profile())
+	world.set_object_texdetail(1)
+	assert_eq(world.get_session_object_texdetail(),
+			GameWorld.object_texdetail_fresh_profile(), "the options word waits for a mission start")
+	assert_eq(WorldFixture.load_mission(
+			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
+	assert_eq(world.get_session_object_texdetail(), 1, "the mission start copies the word")
+	var resources: ResourceRoot = world.get_resource_root()
+	assert_not_null(resources)
+	if resources != null:
+		assert_eq(resources.get_object_texdetail(), 1, "the model textures load under the copy")
+	world.set_object_texdetail(3)
+	assert_eq(world.get_session_object_texdetail(), 1,
+			"a change made mid-mission waits for the next mission start")
+
+
 func _append_to_file(path: String, text: String) -> void:
 	var file := FileAccess.open(path, FileAccess.READ_WRITE)
 	assert_not_null(file, "the staged root carries %s to append to" % path.get_file())
