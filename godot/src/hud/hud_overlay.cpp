@@ -653,10 +653,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		Ref<Texture2D> border;
 		Ref<Texture2D> fill;
 		if (atlas.is_valid()) {
-			const int32_t cell_w = atlas->get_width() >> 2;
-			const int32_t cell_h = atlas->get_height() >> 2;
-			if (cell_w > 0 && cell_h > 0) {
-				const Rect2i brush(3 * cell_w, 0, cell_w, cell_h);
+			const opennova::hud::HudBrushCell cell =
+					opennova::hud::stdbox_brush_cell(atlas->get_width(), atlas->get_height());
+			if (cell.width > 0 && cell.height > 0) {
+				const Rect2i brush(cell.x, cell.y, cell.width, cell.height);
 				fill = ImageTexture::create_from_image(atlas->get_region(brush));
 				atlas->fill_rect(brush, Color(0.0f, 0.0f, 0.0f, 0.0f));
 			}

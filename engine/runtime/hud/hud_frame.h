@@ -165,6 +165,22 @@ static_assert(kHudTexMapIcons + kHudMapSpriteRadar == kHudTexMapRadar &&
 // of BOTH dest and source [orig: the flag arm @0x56b454-0x56b470,
 // flt_7C459C = 0.9].
 inline constexpr float kBoxScaleRef = 1600.0f;
+// The brush cell the style lifts out of its border atlas: cell (3, 0) of the atlas's 4 x 4
+// grid, each side a quarter of the atlas's (texW >> 2, texH >> 2), copied into the fill's own
+// texture and zeroed out of the atlas [orig: BoxTexture_LoadAndSetupUVRegions @0x56ACD0 - the
+// copy and zero loop @0x56ADBD..0x56AE44]. Empty for an atlas under 4 pixels a side.
+struct HudBrushCell {
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t width = 0;
+	int32_t height = 0;
+};
+inline HudBrushCell stdbox_brush_cell(int32_t atlas_w, int32_t atlas_h) {
+	const int32_t w = atlas_w >> 2;
+	const int32_t h = atlas_h >> 2;
+	if (w <= 0 || h <= 0) return {};
+	return {3 * w, 0, w, h};
+}
 inline constexpr float kBoxFillInsetX = 16.0f;
 inline constexpr float kBoxFillInsetY = 24.0f;
 inline constexpr float kBoxBottomCrop = 0.9f;

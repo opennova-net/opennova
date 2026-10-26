@@ -1882,6 +1882,16 @@ void test_compiler_end_round_box_fills_with_one_quad(const fnt_font_t *font) {
 //  the bottom-row crop flag1 @0x56b456 with flt_7C459C = 0.9]
 void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	using opennova::hud::HudQuad;
+	// The brush cell the style lifts: cell (3, 0) of the 4 x 4 grid, none under 4 px a side
+	// [orig: BoxTexture_LoadAndSetupUVRegions @0x56ADBD..0x56AE44].
+	{
+		const opennova::hud::HudBrushCell cell = opennova::hud::stdbox_brush_cell(128, 128);
+		CHECK(cell.x == 96 && cell.y == 0 && cell.width == 32 && cell.height == 32,
+				"the shipped atlas's cell (3, 0), 32 px");
+		const opennova::hud::HudBrushCell tall = opennova::hud::stdbox_brush_cell(64, 130);
+		CHECK(tall.x == 48 && tall.width == 16 && tall.height == 32, "each side's quarter");
+		CHECK(opennova::hud::stdbox_brush_cell(3, 128).width == 0, "too narrow: no cell");
+	}
 	HudFrameCompiler compiler;
 	HudLayout layout;
 	// The shipped border.tga is a 128 px 4x4 grid, so one source cell is 32 px.
