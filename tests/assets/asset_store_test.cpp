@@ -43,17 +43,17 @@ struct TestRoot {
 // word is below 0x103, and a GHDR mesh type other than 1 or 2; the standalone parse still
 // reads both. [orig: ThreediGp_LoadFromFile @0x5B5780 - @0x5B5819..0x5B5823,
 //  @0x5B5911..0x5B5922]
-static void the_mount_refuses_what_the_game_load_refuses(const fs::path &models) {
+static int the_mount_refuses_what_the_game_load_refuses(const fs::path &models) {
 	std::vector<uint8_t> bytes;
 	{
 		std::ifstream in(models / "crate.3di", std::ios::binary);
 		bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 	}
 	TEST_EXPECT(bytes.size() > 8);
-	if (bytes.size() <= 8) return;
+	if (bytes.size() <= 8) return 1;
 	size_t ghdr = std::string(bytes.begin(), bytes.end()).find("GHDR");
 	TEST_EXPECT(ghdr != std::string::npos && ghdr + 8 + 20 <= bytes.size());
-	if (ghdr == std::string::npos || ghdr + 8 + 20 > bytes.size()) return;
+	if (ghdr == std::string::npos || ghdr + 8 + 20 > bytes.size()) return 1;
 	const size_t mesh_type = ghdr + 8 + 16; // the GHDR data's mesh-type dword
 	struct Case { const char *name; uint32_t version; int32_t mesh; bool loads; };
 	const Case cases[] = {
@@ -81,6 +81,7 @@ static void the_mount_refuses_what_the_game_load_refuses(const fs::path &models)
 	TEST_EXPECT(index.scan(root.path.string(), {}, VfsMountMode::LooseOnly));
 	assets::AssetStore store{&index};
 	for (const Case &c : cases) TEST_EXPECT((store.model(c.name) != nullptr) == c.loads);
+	return 0;
 }
 
 int main() {
@@ -217,7 +218,7 @@ int main() {
 	retained_rig->eval_pose("anim_idle", 0.1, 0, pose);
 	TEST_EXPECT(pose.size() == retained_rig->bone_count());
 
-	the_mount_refuses_what_the_game_load_refuses(models);
+	if (the_mount_refuses_what_the_game_load_refuses(models) != 0) return 1;
 
 	assets::AssetStore empty;
 	TEST_EXPECT(!empty.model("thing"));
