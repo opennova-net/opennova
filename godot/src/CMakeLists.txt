@@ -138,6 +138,7 @@ add_library(opennova_bindings OBJECT
     render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
+    object/env_light_state.cpp
     object/object_model.cpp
     object/object_model_anim.cpp
     object/object_model_materials.cpp

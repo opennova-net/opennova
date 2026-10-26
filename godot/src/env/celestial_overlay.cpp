@@ -9,6 +9,7 @@
 #include "env/celestial.h"
 #include "env/mission_environment.h"
 #include "env/water.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "render/scene_overlay_compositor.h"
 

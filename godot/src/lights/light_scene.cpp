@@ -15,6 +15,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 
 #include "env/weather.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 
 #include <runtime/environment/water_mirror.h>

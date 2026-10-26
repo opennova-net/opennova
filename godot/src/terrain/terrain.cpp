@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>

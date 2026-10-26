@@ -18,6 +18,30 @@
 
 namespace godot {
 
+void PanmClock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("sample", "value_ms", "frame"), &PanmClock::sample);
+	ClassDB::bind_method(D_METHOD("get_time_ms"), &PanmClock::get_time_ms);
+	ClassDB::bind_method(D_METHOD("set_time_ms_for_test", "value_ms"),
+			&PanmClock::set_time_ms_for_test);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "time_ms", PROPERTY_HINT_NONE, "",
+						 PROPERTY_USAGE_NONE),
+			"", "get_time_ms");
+}
+
+bool PanmClock::sample(int64_t p_value_ms, int64_t p_frame) {
+	if (p_frame == sampled_frame_) {
+		return false;
+	}
+	sampled_frame_ = p_frame;
+	time_ms_ = p_value_ms & 0xffffffff;
+	return true;
+}
+
+void PanmClock::set_time_ms_for_test(int64_t p_value_ms) {
+	time_ms_ = p_value_ms & 0xffffffff;
+	sampled_frame_ = -1;
+}
+
 void ObjectModel::set_viewmodel_rig(bool p_viewmodel) {
 	if (viewmodel_rig_ == p_viewmodel) {
 		return;

@@ -68,6 +68,7 @@
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
 #include "object/object_data.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "object/post_multiply_draw.h"
 #include "object/object_shader_cache.h"

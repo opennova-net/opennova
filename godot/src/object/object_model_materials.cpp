@@ -3,6 +3,7 @@
 // de-scripting); the environment pull became the typed EnvLightState
 // channel — the model never touches the environment object.
 
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "object/material_info.h"
 

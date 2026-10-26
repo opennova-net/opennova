@@ -57,6 +57,7 @@
 #include "object/character_join_profile.h"
 #include "render/scene_overlay_compositor.h"
 #include "object/item_database.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 #include "object/weapon_database.h"
 #include "particle/effect_world.h"

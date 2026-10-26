@@ -11,6 +11,7 @@
 #include <runtime/environment/environment_state.h>
 
 #include "env/env_file.h"
+#include "object/env_light_state.h"
 #include "object/object_model.h"
 
 namespace godot {
