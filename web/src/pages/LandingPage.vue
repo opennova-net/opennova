@@ -357,11 +357,11 @@ function downloadUrl(file: string): string | undefined {
 // "release build", "debug build for staging": what the set is, when the manifest says.
 const buildKind = computed(() => {
   const m = manifest.value;
-  if (!m?.build) return '';
+  if (!m) return '';
   return m.build !== 'release' && m.talks_to ? `${m.build} build for ${m.talks_to}` : `${m.build} build`;
 });
 
-const shortCommit = computed(() => manifest.value?.commit?.slice(0, 7) ?? '');
+const shortCommit = computed(() => manifest.value?.commit.slice(0, 7) ?? '');
 
 // Where the builds came from (the release, or the CI run), which the commit links to.
 const sourceUrl = computed(() => {

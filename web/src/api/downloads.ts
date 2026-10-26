@@ -10,18 +10,18 @@ export interface DownloadsFile {
   version?: string;
 }
 
-// What manifest.json holds: the version the host serves, when it was published, where the
+// What manifest.json holds (scripts/stage_downloads.py writes every field, and each Publish
+// writes the whole file): the version the host serves, when it was published, where the
 // builds came from (a release's or a CI run's URL), the commit they were made from, the build
 // kind (release or debug) and the deployment its builds talk to (prod or staging), and each
-// file. A manifest published before the commit, the build kind and the files' versions were
-// added has none of them.
+// file.
 export interface DownloadsManifest {
   version: string;
   published: string;
   source: string;
-  commit?: string;
-  build?: string;
-  talks_to?: string;
+  commit: string;
+  build: string;
+  talks_to: string;
   files: Record<string, DownloadsFile>;
 }
 
@@ -29,7 +29,8 @@ export interface DownloadsManifest {
 // downloads.<the site's hostname> (prod's site opennova.net and www.opennova.net take
 // downloads.opennova.net, staging's staging.opennova.net takes downloads.staging.opennova.net),
 // so the one portal image serves either deployment. null for a site with no downloads host (a
-// local stack on localhost, an address), whose buttons fall back to the GitHub releases.
+// local stack on localhost, an address), whose buttons read "Not published yet" (ADR 0070 d4:
+// the site never links GitHub's releases for a build).
 export function downloadsBase(hostname: string): string | null {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (!host.includes('.') || /^[\d.]+$/.test(host) || host.includes(':') || host.endsWith('.localhost')) {
@@ -48,7 +49,7 @@ function isManifest(value: unknown): value is DownloadsManifest {
   if (typeof m.version !== 'string' || typeof m.published !== 'string' || typeof m.files !== 'object' || m.files === null) {
     return false;
   }
-  if (!optionalString(m.commit) || !optionalString(m.build) || !optionalString(m.talks_to)) return false;
+  if (typeof m.commit !== 'string' || typeof m.build !== 'string' || typeof m.talks_to !== 'string') return false;
   return Object.values(m.files as Record<string, unknown>).every((file) => {
     const f = file as Record<string, unknown> | null;
     return (

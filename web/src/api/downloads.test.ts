@@ -26,6 +26,9 @@ describe('fetchDownloadsManifest', () => {
     version: 'v0.0.21',
     published: '2026-10-26T12:00:00Z',
     source: 'https://github.com/opennova-net/opennova/releases/tag/v0.0.21',
+    commit: '2d23f67' + '0'.repeat(33),
+    build: 'release',
+    talks_to: 'prod',
     files: { 'opennova-game-windows.zip': { size: 53178900, sha256: 'ab'.repeat(32) } },
   };
 
@@ -36,12 +39,9 @@ describe('fetchDownloadsManifest', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://downloads.opennova.net/manifest.json');
   });
 
-  it("reads the commit, the build kind and the files' versions when the manifest has them", async () => {
+  it("reads the files' versions, and needs the commit, the build kind and what it talks to", async () => {
     const full = {
       ...manifest,
-      commit: '2d23f67' + '0'.repeat(33),
-      build: 'release',
-      talks_to: 'prod',
       files: {
         'opennova-game-windows.zip': { size: 53178900, sha256: 'ab'.repeat(32), version: '0.0.21' },
         'opennova-apps-windows.zip': { size: 5120318, sha256: 'cd'.repeat(32) },
@@ -51,6 +51,12 @@ describe('fetchDownloadsManifest', () => {
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toEqual(full);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...full, commit: 7 }), { status: 200 })));
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
+    for (const field of ['commit', 'build', 'talks_to']) {
+      const missing: Record<string, unknown> = { ...full };
+      delete missing[field];
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(missing), { status: 200 })));
+      expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
+    }
     const badVersion = { ...manifest, files: { 'opennova-game-windows.zip': { size: 1, sha256: 'ab', version: 20 } } };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(badVersion), { status: 200 })));
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();

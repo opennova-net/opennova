@@ -216,21 +216,6 @@ describe('LandingPage', () => {
     expect(buildLine(wrapper, 'jointops-game-windows.zip')).toBe('v0.0.21 (1a2b3c4), 1.1 MB, SHA-256 abababababab');
   });
 
-  it('shows what a manifest from before the build fields has', async () => {
-    host.mockReturnValue('https://downloads.example.com');
-    manifest.mockResolvedValue({
-      version: 'PR #1260 (2d23f67)',
-      published: '2026-10-26T01:56:58Z',
-      source: 'https://github.com/opennova-net/opennova/actions/runs/40255180333',
-      files: Object.fromEntries(BUILDS.map((file) => [file, { size: 53_185_054, sha256: 'ab'.repeat(32) }])),
-    });
-    const wrapper = await mountPage();
-    const line = wrapper.get('[data-test="downloads-version"]');
-    expect(line.text()).toBe('Version PR #1260 (2d23f67), published 2026-10-26 01:56 UTC.');
-    expect(line.find('a').exists()).toBe(false);
-    expect(buildLine(wrapper, 'opennova-game-windows.zip')).toBe('53 MB, SHA-256 abababababab');
-  });
-
   it('offers no download with no downloads host, and still names every build', async () => {
     const wrapper = await mountPage();
     expect(manifest).not.toHaveBeenCalled();
