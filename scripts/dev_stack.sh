@@ -3,27 +3,28 @@
 # six programs (gate, lobby, web, fleet, worker, data), each its own container
 # as a deployment runs each as its own ECS service, PostgreSQL, Valkey, the
 # portal (prod's nginx image in web's network, as in web's ECS task) and, with
-# a data set, hosted game servers on machines the worker launches as containers
-# of the hostd image (the real opennova-hostd and opennova-serve). The project
-# is opennova-dev; its state (the compose env file, the synthetic data set) is
-# build/dev-stack/.
+# a game install, hosted game servers on machines the worker launches as
+# containers of the hostd image (the real opennova-hostd and opennova-serve).
+# The project is opennova-dev; its state (the compose env file, the synthetic
+# install, the project made from an install) is build/dev-stack/.
 #
 #   scripts/dev_stack.sh up [options]   build the images and start the stack
-#     --data <dir>          host game servers on this game folder (a licensed
-#                           Joint Operations install): once the stack is up, its
-#                           base files (resource.pff, localres.pff,
-#                           language.pff; version.txt, score.ini, _NSTMOUT.TXT
-#                           and gt.ssc when present) are uploaded into the
-#                           stack's store as a data set through the site's
-#                           admin API, the way the Game data page does, and
-#                           its rotation is the data's multiplayer missions
-#     --data-set <slug>     the lobby (games slug) that data set lists in
-#                           (default jop_2_consumer)
+#     --data <dir>          host game servers on this game install (a licensed
+#                           one of the game --game names): once the stack is up,
+#                           the game's project is made from it (opennova-project's
+#                           new, import --all and create-missing, in the data
+#                           program's image), pushed through the editor's routes
+#                           as the dev admin, and a release built from that
+#                           revision, validated and published, out of which
+#                           release.apply makes the tree the servers run; the
+#                           rotation is the data's multiplayer missions
+#     --game <key>          that game, by its project key (default JO; DFX2,
+#                           ACIDGAMBIT)
 #     --mission <name.bms>  the smoke test's server runs this mission of the
 #                           data (default: the data's whole rotation)
-#     --synthetic-data      host on the synthetic data set instead (one
+#     --synthetic-data      host on the synthetic install instead (one
 #                           deathmatch map packed into the three archives, no
-#                           licensed byte: what CI runs)
+#                           licensed byte: what CI runs), as JO's project
 #     --no-hosting          no hosted servers, whatever --data or
 #                           --synthetic-data say
 #     --address <ipv4>      the address everything announces (default: this
@@ -44,9 +45,10 @@
 # `logs` volume, ONNET_LOG_STORE=file:///var/log/opennova), which the site's
 # admin pages read (GET /api/admin/logs) as a deployment's read CloudWatch.
 #
-# Seeding a data set needs curl and jq on this machine (the upload flow is the
-# admin API's, as the Game data page's: a tree, each file's parts PUT through
-# the site, a completion, a finalize).
+# Seeding a game needs curl and jq on this machine (the push is the editor's:
+# the files the store lacks, each PUT through the site, then the manifest as a
+# revision; the release's build and publish are the admin API's). Nothing is
+# uploaded by hand: a hosted server's data is the game's published release.
 # DEVELOPING.md "Run the NovaWorld servers locally" has the rest: the ports, the
 # dev accounts, pointing a retail client at it with the OpenNova Switcher.
 set -euo pipefail
@@ -59,7 +61,10 @@ project="opennova-dev"
 deployment="dev"
 admin_token="dev-admin-token"
 site_port=8000
-usage="usage: scripts/dev_stack.sh up [--data <dir>] [--data-set <slug>] [--mission <name.bms>]
+# The data program's image, which carries opennova-project (its release
+# builds' export): seeding makes a game's project in a container of it.
+data_image="opennova-novaworld-data:local"
+usage="usage: scripts/dev_stack.sh up [--data <dir>] [--game <key>] [--mission <name.bms>]
            [--synthetic-data] [--no-hosting] [--address <ipv4>] [--prebuilt <build dir>]
            [--no-build] [--vite]
        scripts/dev_stack.sh smoke | status | logs [args] | down | reset"
@@ -145,7 +150,8 @@ stage_prebuilt() {
     mkdir -p "$ctx/src/build/apps/serve" "$ctx/src/build/apps/hostd" "$ctx/src/build/tests" \
         "$ctx/src/build/apps/project" "$ctx/src/build/apps/update_tool" \
         "$ctx/src/backend" "$ctx/src/apps/novaworld_web" "$ctx/src/apps/novaworld_common/hosted/cloud/machine"
-    # The data program's release build runs these two (data_sets/release_build.h).
+    # The data program's release build runs these two (data_sets/release_build.h);
+    # seeding makes a game's project with the first in the data image (make_project).
     cp "$tree/apps/project/opennova-project" "$ctx/src/build/apps/project/"
     cp "$tree/apps/update_tool/opennova-update-tool" "$ctx/src/build/apps/update_tool/"
     cp "$tree/apps/serve/opennova-serve" "$ctx/src/build/apps/serve/"
@@ -184,8 +190,8 @@ build_images() {
     say "  opennova-portal:local"
 }
 
-# The synthetic data set, out of the smoke image (packed there at its build:
-# the three base archives and a version.txt, as an install's root holds them).
+# The synthetic install, out of the smoke image (packed there at its build: the
+# three base archives and a version.txt, as an install's root holds them).
 synthetic_data() {
     local dir="$state/synthetic-data" cid
     rm -rf "$dir"
@@ -196,180 +202,209 @@ synthetic_data() {
     printf '%s\n' "$dir"
 }
 
-# ---- the data set, seeded through the admin API --------------------------------
+# ---- the game, seeded as a published release of its project -------------------
 
-# The title a lobby's data set speaks (what opennova-serve's /game takes), by
-# the games slug; "" for a lobby the stack knows no title for.
-title_of() {
-    case "$1" in
-        jop_2_consumer | acidgambit_0_consumer) echo jo ;;
-        dfx2_consumer) echo dfx2 ;;
-        *) echo "" ;;
-    esac
-}
-
-# A file of the folder $1 named $2 (spelt in any case, as a retail install
-# spells them), or nothing.
-find_file() {
-    find "$1" -maxdepth 1 -type f -iname "$2" 2> /dev/null | head -n 1
-}
-
-file_size() {
-    wc -c < "$1" | tr -d ' '
-}
-
-# The site's API as the admin, through the portal (the Bearer token the stack's
-# web holds): METHOD PATH [BODY], BODY a JSON text or @<file> (a raw part, sent
-# as application/octet-stream). The reply's body on stdout, the HTTP status in
+# The site's API through the portal: AUTH METHOD PATH [BODY [TYPE]]. AUTH is
+# admin (the Bearer token the stack's web holds) or session (the dev admin's
+# own session, its cookie kept in the state: the editor's routes take no
+# token, so every revision names its author); BODY a JSON text or @<file>
+# (curl's --data-binary, the file as host_path spells it), sent as TYPE
+# (default application/json). The reply's body on stdout, the HTTP status in
 # $state/reply.code, which reply_code reads: callers run this in a command
 # substitution, where a variable set here would be lost.
-admin_api() {
-    local method="$1" path="$2" body="${3:-}"
-    local args=(-sS -o "$state/reply.json" -w '%{http_code}' -X "$method" \
-        -H "Authorization: Bearer $admin_token" "http://localhost:$site_port$path")
-    case "$body" in
-        "") ;;
-        @*) args+=(-H "Content-Type: application/octet-stream" --data-binary "$body") ;;
-        *) args+=(-H "Content-Type: application/json" --data-binary "$body") ;;
+call_api() {
+    local auth="$1" method="$2" path="$3" body="${4:-}" type="${5:-application/json}"
+    local args=(-sS -o "$state/reply.json" -w '%{http_code}' -X "$method")
+    case "$auth" in
+        admin) args+=(-H "Authorization: Bearer $admin_token") ;;
+        session) args+=(-b "$state/cookies.txt" -c "$state/cookies.txt" -H "X-OpenNova-Request: 1") ;;
     esac
-    curl "${args[@]}" > "$state/reply.code" || die "curl $method $path failed (is the stack up?)"
+    [[ -z "$body" ]] || args+=(-H "Content-Type: $type" --data-binary "$body")
+    curl "${args[@]}" "http://localhost:$site_port$path" > "$state/reply.code" \
+        || die "curl $method $path failed (is the stack up?)"
     cat "$state/reply.json"
     rm -f "$state/reply.json"
 }
 
-# The HTTP status of the last admin_api call.
+admin_api() { call_api admin "$@"; }
+session_api() { call_api session "$@"; }
+
+# The HTTP status of the last call_api.
 reply_code() {
     cat "$state/reply.code"
 }
 
-# One file of a tree, uploaded in parts of PART_SIZE bytes: each part PUT to
-# the admin API's part route through the portal (web hands it to the store,
-# as the Game data page's uploads go), the etag it answers collected, then
-# the file's completion.
-upload_file() {
-    local data_set="$1" tree="$2" name="$3" upload_id="$4" part_size="$5" path="$6"
-    local size parts n part="$state/part.bin" query etag reply
-    size="$(file_size "$path")"
-    parts=$(( (size + part_size - 1) / part_size ))
-    [[ "$parts" -ge 1 ]] || parts=1
-    query="upload_id=$(jq -rn --arg u "$upload_id" '$u | @uri')"
-    local list="[]"
-    for (( n = 1; n <= parts; n++ )); do
-        dd if="$path" of="$part" bs="$part_size" skip=$((n - 1)) count=1 status=none
-        reply="$(admin_api PUT "/api/admin/data-sets/$data_set/trees/$tree/files/$name/parts/$n?$query" "@$part")"
-        [[ "$(reply_code)" == 200 ]] || die "the PUT of part $n of $name failed: HTTP $(reply_code) $reply"
-        etag="$(jq -r '.etag // ""' <<< "$reply")"
-        [[ -n "$etag" ]] || die "the PUT of part $n of $name answered no etag: $reply"
-        list="$(jq -c --argjson n "$n" --arg e "$etag" '. + [{part_number: $n, etag: $e}]' <<< "$list")"
-    done
-    rm -f "$part"
-    reply="$(admin_api POST "/api/admin/data-sets/$data_set/trees/$tree/files/$name/complete" \
-        "$(jq -cn --arg u "$upload_id" --argjson parts "$list" '{upload_id: $u, parts: $parts}')")"
-    [[ "$(reply_code)" == 200 ]] || die "completing $name failed: HTTP $(reply_code) $reply"
-    say "  $name ($size bytes, $parts part$([[ "$parts" == 1 ]] || echo s))"
+# The field $4 of tree $3 of the game $2 in the GET /api/admin/data-sets reply
+# $1 ("" for none).
+tree_value() {
+    jq -r --argjson d "$2" --argjson t "$3" --arg f "$4" \
+        '[.data_sets[] | select(.id == $d) | .trees[] | select(.id == $t) | .[$f]] | first // ""' <<< "$1"
 }
 
-# The data set of lobby $2 (its games slug) from the folder $1, through the
-# admin API as the Game data page does: the row (made once; an `up` run again
-# finds it), a tree of the folder's base files, each uploaded, the finalize,
-# then the data program's verdict (ready, or failed with why). $3 names a mission
-# the data must hold. Writes the data set's id and the rotation to the state.
-seed_data_set() {
-    local dir="$1" game="$2" mission="$3"
-    local title display reply id tree part_size name path upload_id state_now error missions waited
-    local required=(resource.pff localres.pff language.pff) optional=(version.txt score.ini _NSTMOUT.TXT gt.ssc)
-    local -a files=()
+# The project of the game install $1 for the game whose title (opennova-project's
+# --game) is $2, named $3, made in $state/project/project as the editor makes a
+# retail game's stock revision (new on the install, then import --all), with
+# create-missing after, which makes from scratch each file a build needs that
+# the install lacks (the synthetic install holds one map and its text).
+# opennova-project runs in a container of the data program's image, which
+# carries it for its release builds. Each of the project's files but the
+# machine's own (.opennova/: the editor's push leaves out every dot-folder) is
+# listed in $state/project/files.tsv, one "<sha256> <size> <path>" line each,
+# tab-separated.
+make_project() {
+    local install="$1" title="$2" name="$3" work="$state/project"
+    rm -rf "$work"
+    mkdir -p "$work"
+    say "making $name's project from $install (opennova-project in $data_image)"
+    # shellcheck disable=SC2016 # the container's shell expands them
+    MSYS_NO_PATHCONV=1 docker run --rm --user "$(id -u):$(id -g)" --entrypoint sh \
+        -v "$(host_path "$install"):/install:ro" -v "$(host_path "$work"):/work" "$data_image" -c '
+            set -e
+            /app/opennova-project new /work/project --title "$2" --game "$1" --install /install
+            /app/opennova-project import /work/project --all --install /install
+            /app/opennova-project create-missing /work/project
+            cd /work/project
+            find . -mindepth 1 -type d -name ".*" -prune -o -type f -print | sed "s|^\./||" |
+                while IFS= read -r f; do
+                    printf "%s\t%s\t%s\n" "$(sha256sum < "$f" | cut -c 1-64)" "$(stat -c %s "$f")" "$f"
+                done > /work/files.tsv' \
+        sh "$title" "$name" > "$work/make.log" 2>&1 \
+        || { tail -n 30 "$work/make.log" >&2; die "making the project failed (its whole log: $work/make.log)"; }
+    say "  $(wc -l < "$work/files.tsv" | tr -d ' ') files"
+}
+
+# The game whose project key is $2 seeded from the game install $1 as a
+# deployment's game gets its data, nothing uploaded by hand: its project made
+# from the install (make_project) and pushed as the OpenNova Editor pushes, as
+# the dev admin `test` (the files the store lacks named, each PUT where its
+# upload says, the manifest pushed as the revision after the head); a release
+# built from that revision (the data program's release.build: the export,
+# packed whole), validated and published, which queues the release.apply that
+# makes the game's tree from it; then the data program's verdict on the tree
+# (ready, or failed with why). $3 names a mission the data must hold. Writes
+# the game's key and id, the release's version and the rotation to the state.
+seed_game() {
+    local install="$1" key="$2" mission="$3" work="$state/project"
+    local name reply row id title head root sha url path upload version release status tree state_now
+    local missions waited
     for name in curl jq; do
-        command -v "$name" > /dev/null || die "$name is needed to seed the data set (install it, or scripts/dev_stack.sh up --no-hosting)"
+        command -v "$name" > /dev/null || die "$name is needed to seed the game (install it, or scripts/dev_stack.sh up --no-hosting)"
     done
-    title="$(title_of "$game")"
-    for name in "${required[@]}"; do
-        path="$(find_file "$dir" "$name")"
-        [[ -n "$path" ]] || die "$dir holds no $name: a data set is a game install's root (its three base archives)"
-        files+=("$path")
-    done
-    for name in "${optional[@]}"; do
-        path="$(find_file "$dir" "$name")"
-        [[ -z "$path" ]] || files+=("$path")
-    done
-    case "$game" in
-        jop_2_consumer) display="Joint Operations (dev)" ;;
-        dfx2_consumer) display="Delta Force Xtreme 2 (dev)" ;;
-        acidgambit_0_consumer) display="OP: Acid Gambit (dev)" ;;
-        *) display="$game (dev)" ;;
-    esac
 
     reply="$(admin_api GET /api/admin/data-sets)"
     [[ "$(reply_code)" == 200 ]] || die "GET /api/admin/data-sets: HTTP $(reply_code) $reply"
     [[ "$(jq -r '.store.kind // ""' <<< "$reply")" != "" ]] \
-        || die "web names no store (ONNET_OBJECT_STORE_URL): hosting cannot take a data set"
-    id="$(jq -r --arg g "$game" '[.data_sets[] | select(.kind == "base" and .game == $g) | .id] | first // ""' <<< "$reply")"
-    if [[ -z "$id" ]]; then
-        reply="$(admin_api POST /api/admin/data-sets \
-            "$(jq -cn --arg d "$display" --arg t "$title" --arg g "$game" '{display_name: $d, kind: "base", title: $t, game: $g}')")"
-        [[ "$(reply_code)" == 201 ]] || die "making the data set failed: HTTP $(reply_code) $reply"
-        id="$(jq -r '.data_set.id' <<< "$reply")"
-        say "data set $id ($display, lobby $game, title $title) made"
-    else
-        say "data set $id ($game) is there: a new tree of $dir goes on it"
-    fi
+        || die "web names no store (ONNET_OBJECT_STORE_URL): hosting cannot take a game"
+    row="$(jq -c --arg k "$key" '[.data_sets[] | select(.key == $k)] | first // empty' <<< "$reply")"
+    [[ -n "$row" ]] || die "no game has the project key $key (the database seeds JO, DFX2 and ACIDGAMBIT)"
+    [[ "$(jq -r '.kind' <<< "$row")" == base ]] || die "$key is an expansion: a hosted server runs a base game"
+    id="$(jq -r '.id' <<< "$row")"
+    title="$(jq -r '.title' <<< "$row")"
+    head="$(jq -r '.head // 0' <<< "$row")"
+    make_project "$install" "$title" "$(jq -r '.display_name' <<< "$row")"
 
-    local list="[]"
-    for path in "${files[@]}"; do
-        list="$(jq -c --arg n "$(basename "$path")" --argjson s "$(file_size "$path")" '. + [{name: $n, size: $s}]' <<< "$list")"
-    done
-    reply="$(admin_api POST "/api/admin/data-sets/$id/trees" "$(jq -cn --argjson f "$list" '{files: $f}')")"
-    [[ "$(reply_code)" == 201 ]] || die "starting the tree failed: HTTP $(reply_code) $reply"
-    tree="$(jq -r '.tree.id' <<< "$reply")"
-    part_size="$(jq -r '.uploads[0].part_size' <<< "$reply")"
-    say "uploading tree $tree of data set $id from $dir (parts of $part_size bytes):"
-    for path in "${files[@]}"; do
-        # The canonical spelling the route gave the file, and its upload.
-        name="$(jq -r --arg n "$(basename "$path")" '[.uploads[] | select((.name | ascii_downcase) == ($n | ascii_downcase)) | .name] | first // ""' <<< "$reply")"
-        upload_id="$(jq -r --arg n "$name" '[.uploads[] | select(.name == $n) | .upload_id] | first // ""' <<< "$reply")"
-        [[ -n "$name" && -n "$upload_id" ]] || die "the tree names no upload for $(basename "$path")"
-        upload_file "$id" "$tree" "$name" "$upload_id" "$part_size" "$path"
-    done
-    reply="$(admin_api POST "/api/admin/data-sets/$id/trees/$tree/finalize")"
-    [[ "$(reply_code)" == 202 ]] || die "finalizing the tree failed: HTTP $(reply_code) $reply"
-    say "finalizing (the data program checks the files and lists the missions)..."
+    # The push, through the editor's routes as the dev admin's own session. The
+    # manifest is its canonical text (base/content/content_manifest.h: io::json_write's,
+    # its keys sorted, two spaces an indent, the files sorted by their paths' bytes),
+    # which jq's sorted output is.
+    : > "$state/cookies.txt"
+    reply="$(session_api POST /api/login '{"username":"test","password":"test"}')"
+    [[ "$(reply_code)" == 200 ]] || die "signing in as test failed: HTTP $(reply_code) $reply"
+    jq -R -s -S '{schema_version: 1, files: ([split("\n")[] | select(length > 0) | split("\t")
+            | {path: .[2], sha256: .[0], size: (.[1] | tonumber)}] | sort_by(.path))}' \
+        < "$work/files.tsv" | tr -d '\r' > "$work/manifest.json"
+    jq -c '{blobs: ([.files[] | {sha256, size}] | unique_by(.sha256))}' "$work/manifest.json" \
+        > "$work/missing.json"
+    root="$(host_path "$work")"
+    reply="$(session_api POST "/api/content/projects/$key/missing" "@$root/missing.json")"
+    [[ "$(reply_code)" == 200 ]] || die "POST /api/content/projects/$key/missing: HTTP $(reply_code) $reply"
+    say "pushing $key r$((head + 1)): $(jq '.missing | length' <<< "$reply") file(s) the store lacks"
+    while IFS=$'\t' read -r sha url; do
+        # The site's own blob route: the local stack's store is a directory, which
+        # signs no URL of its own.
+        [[ "$url" == /api/* ]] || die "the store signs its own uploads ($url): the local stack's is a directory"
+        path="$(grep -m 1 "^$sha"$'\t' "$work/files.tsv" | cut -f 3)"
+        upload="$(session_api PUT "$url" "@$root/project/$path" application/octet-stream)"
+        [[ "$(reply_code)" == 200 ]] || die "PUT $path: HTTP $(reply_code) $upload"
+    done < <(jq -r '.missing[] | [.sha256, .upload.url] | @tsv' <<< "$reply")
+    jq -cn --argjson parent "$head" --arg message "scripts/dev_stack.sh up: imported from $install" \
+        --rawfile manifest "$work/manifest.json" '{parent: $parent, message: $message, manifest: $manifest}' \
+        > "$work/push.json"
+    reply="$(session_api POST "/api/content/projects/$key/revisions" "@$root/push.json")"
+    [[ "$(reply_code)" == 201 ]] || die "the push failed: HTTP $(reply_code) $reply"
+    head="$(jq -r '.head' <<< "$reply")"
+
+    # A release built from that revision, validated, then published.
+    version="1.0.$head"
+    reply="$(admin_api POST "/api/admin/content/projects/$key/releases" \
+        "$(jq -cn --arg v "$version" --argjson r "$head" '{version: $v, revision: $r}')")"
+    [[ "$(reply_code)" == 201 ]] || die "building a release of $key r$head failed: HTTP $(reply_code) $reply"
+    release="$(jq -r '.release.id' <<< "$reply")"
+    say "release $release ($key $version) building from r$head (the data program exports and packs it)..."
     waited=0
     while :; do
-        reply="$(admin_api GET /api/admin/data-sets)"
-        state_now="$(jq -r --argjson d "$id" --argjson t "$tree" \
-            '[.data_sets[] | select(.id == $d) | .trees[] | select(.id == $t) | .state] | first // ""' <<< "$reply")"
-        case "$state_now" in
-            ready) break ;;
-            failed)
-                error="$(jq -r --argjson d "$id" --argjson t "$tree" \
-                    '[.data_sets[] | select(.id == $d) | .trees[] | select(.id == $t) | .error] | first // ""' <<< "$reply")"
-                die "the tree failed: $error" ;;
-            "") die "tree $tree of data set $id is gone" ;;
+        reply="$(admin_api GET /api/admin/releases)"
+        status="$(jq -r --argjson r "$release" '[.releases[] | select(.id == $r) | .status] | first // ""' <<< "$reply")"
+        case "$status" in
+            draft) break ;;
+            invalid)
+                jq -r --argjson r "$release" '.releases[] | select(.id == $r) | .build_log' <<< "$reply" \
+                    | tail -n 30 >&2
+                die "release $release is invalid: $(jq -r --argjson r "$release" \
+                    '.releases[] | select(.id == $r) | .error' <<< "$reply")" ;;
+            "") die "release $release is gone" ;;
         esac
-        [[ "$waited" -lt 300 ]] || die "the tree is still $state_now after 300 s (scripts/dev_stack.sh logs novaworld-data)"
+        [[ "$waited" -lt 900 ]] || die "release $release is still $status after 900 s (scripts/dev_stack.sh logs novaworld-data)"
         sleep 2
         waited=$((waited + 2))
     done
-    # How many multiplayer missions the data holds (the tree's row counts
-    # them; the owner's offer lists them): what a start may rotate.
-    missions="$(jq -r --argjson d "$id" --argjson t "$tree" \
-        '[.data_sets[] | select(.id == $d) | .trees[] | select(.id == $t) | .missions] | first // 0' <<< "$reply")"
+    reply="$(admin_api POST "/api/admin/releases/$release/publish")"
+    [[ "$(reply_code)" == 202 ]] || die "publishing release $release failed: HTTP $(reply_code) $reply"
+    say "release $release published: release.apply makes $key's tree from it..."
+    # The tree: its id from the release's section once the job made it, its
+    # state, missions and error from the game's row.
+    tree=""
+    state_now=""
+    waited=0
+    while :; do
+        if [[ -z "$tree" ]]; then
+            reply="$(admin_api GET /api/admin/releases)"
+            tree="$(jq -r --argjson r "$release" --argjson d "$id" \
+                '[.releases[] | select(.id == $r) | .sections[] | select(.data_set_id == $d) | .tree.id // empty] | first // ""' \
+                <<< "$reply")"
+        fi
+        if [[ -n "$tree" ]]; then
+            reply="$(admin_api GET /api/admin/data-sets)"
+            state_now="$(tree_value "$reply" "$id" "$tree" state)"
+            case "$state_now" in
+                ready) break ;;
+                failed) die "tree $tree failed: $(tree_value "$reply" "$id" "$tree" error)" ;;
+            esac
+        fi
+        [[ "$waited" -lt 600 ]] || die "release $release's tree is still ${state_now:-unmade} after 600 s (scripts/dev_stack.sh logs novaworld-data)"
+        sleep 2
+        waited=$((waited + 2))
+    done
+    # How many multiplayer missions the data holds (the tree's row counts them;
+    # the owner's offer lists them): what a start may rotate.
+    missions="$(tree_value "$reply" "$id" "$tree" missions)"
     say "tree $tree is ready: $missions multiplayer mission(s); new servers start on it"
     [[ "$missions" != 0 ]] || die "the data holds no multiplayer mission: no server can start on it"
     {
-        echo "STACK_DATA_SET=$game"
-        echo "STACK_DATA_SET_ID=$id"
+        echo "STACK_GAME=$key"
+        echo "STACK_GAME_ID=$id"
+        echo "STACK_RELEASE=$version"
         echo "STACK_MISSION=$mission"
     } >> "$env_file"
 }
 
 cmd_up() {
-    local data="" data_set="jop_2_consumer" mission="" synthetic=0 hosting_off=0 address=""
+    local data="" game="JO" mission="" synthetic=0 hosting_off=0 address=""
     local prebuilt="" build=1 vite=0
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --data) [[ $# -ge 2 ]] || die "$usage"; data="$2"; shift 2 ;;
-            --data-set) [[ $# -ge 2 ]] || die "$usage"; data_set="$2"; shift 2 ;;
+            --game) [[ $# -ge 2 ]] || die "$usage"; game="$2"; shift 2 ;;
             --mission) [[ $# -ge 2 ]] || die "$usage"; mission="$2"; shift 2 ;;
             --synthetic-data) synthetic=1; shift ;;
             --no-hosting) hosting_off=1; shift ;;
@@ -392,10 +427,11 @@ cmd_up() {
     local hosting=0
     if [[ "$synthetic" == 1 || -n "$data" ]]; then hosting=1; fi
     if [[ -n "$data" && ! -d "$data" ]]; then die "--data $data is no folder"; fi
-    [[ "$data_set" =~ ^[a-z0-9_]+$ ]] || die "--data-set takes a data set slug (jop_2_consumer)"
-    [[ "$synthetic" == 0 ]] || data_set="jop_2_consumer"
-    [[ "$hosting" == 0 || -n "$(title_of "$data_set")" ]] \
-        || die "--data-set $data_set: no title known for that lobby (jop_2_consumer, dfx2_consumer, acidgambit_0_consumer)"
+    # Absolute: docker mounts it (make_project), and takes a relative source as
+    # a volume's name.
+    [[ -z "$data" ]] || data="$(cd "$data" && pwd)"
+    [[ "$game" =~ ^[A-Z0-9_]{1,16}$ ]] || die "--game takes a game's project key (JO)"
+    [[ "$synthetic" == 0 ]] || game="JO"
     [[ -z "$mission" || "$mission" =~ ^[A-Za-z0-9_-]+\.[Bb][Mm][Ss]$ ]] || die "--mission takes a .bms name"
 
     mkdir -p "$state"
@@ -432,9 +468,10 @@ cmd_up() {
     stack_compose "${profiles[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 300 \
         || { stack_compose ps; die "the stack did not come up healthy (scripts/dev_stack.sh logs)"; }
 
-    # The data set reaches the stack as it reaches a deployment: uploaded into
-    # the store through the admin API, finalized by the data program.
-    [[ "$hosting" == 0 ]] || seed_data_set "$dir" "$data_set" "$mission"
+    # The game's data reaches the stack as it reaches a deployment: its project
+    # pushed, a release built from it and published, its tree applied by the
+    # data program.
+    [[ "$hosting" == 0 ]] || seed_game "$dir" "$game" "$mission"
 
     cat << EOF
 
@@ -450,10 +487,10 @@ The local NovaWorld stack runs (project $project).
   announced at    $address (gate udp 7597, lobby udp 64206, web http 8080)
 EOF
     if [[ "$hosting" == 1 ]]; then
-        echo "  hosting         on: data set $(state_value STACK_DATA_SET_ID) ($data_set) from $( [[ "$synthetic" == 1 ]] && echo "the synthetic data set" || echo "$data"), in the stack's store (the site's Game data page lists it)"
+        echo "  hosting         on: $game (game $(state_value STACK_GAME_ID)) release $(state_value STACK_RELEASE), its project from $( [[ "$synthetic" == 1 ]] && echo "the synthetic install" || echo "$data") (the site's Games page lists it)"
         [[ -z "$mission" ]] || echo "  mission         $mission (the smoke test's server runs it)"
     else
-        echo "  hosting         off: no data set (up --data <install> or --synthetic-data)"
+        echo "  hosting         off: no game install (up --data <install> or --synthetic-data)"
     fi
     [[ "$vite" == 1 ]] && echo "  vite            http://localhost:5173 (hot reload of web/)"
     echo "  smoke test      scripts/dev_stack.sh smoke"
@@ -467,8 +504,8 @@ cmd_smoke() {
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)
     if [[ "$(state_value STACK_HOSTING)" == "1" ]]; then
         local id mission
-        id="$(state_value STACK_DATA_SET_ID)"
-        [[ -n "$id" ]] || die "the stack hosts, but no data set was seeded (scripts/dev_stack.sh up again)"
+        id="$(state_value STACK_GAME_ID)"
+        [[ -n "$id" ]] || die "the stack hosts, but no game was seeded (scripts/dev_stack.sh up again)"
         # The static addresses' zone the worker writes (deploy/compose/docker-compose.hosting.yml).
         args+=(--hosting "$id" --zone-file /var/lib/opennova/zone/play.localhost.zone)
         mission="$(state_value STACK_MISSION)"
