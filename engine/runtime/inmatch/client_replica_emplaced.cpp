@@ -205,15 +205,34 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::EmplacedGunnerLook look{ occupant.heading_bam, occupant.pitch_bam,
 					occupant.recoil_pitch, occupant.handle == self_handle,
 					occupant.cls == EntityClass::Player };
+				// dfx2.exe's: the planar rate (DFX2-26; the slower one is the local gunner's on a
+				// carrier of one occupied seat, which this leg reads through the gun's world row
+				// when it has one), and a counter-rotating gun (DFX2-25) slews against the row's
+				// frame (the frame its world row held before this tick's pose, which the pool-1
+				// walk mirrored), turns from it to the world row's posed frame, and takes its
+				// window over the posed frame.
+				const bool counter = local_mount != nullptr &&
+						world::emplaced_counter_rotates_frame(world, *local_mount);
+				const int32_t planar_rate = world.rules.title != gameprofile::GAME_DFX2 ? 0
+						: local_mount != nullptr
+						? world::emplaced_turret_planar_rate(world, *local_mount, look.is_local_player)
+						: world::kEmplacedTurretSlewPerTick;
 				world::advance_emplaced_gun_channel(channel, look, mount.heading_bam,
 						mount.pitch_bam,
-						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0);
+						(spec->item_attrib2 & def::DEF_ITEM_ATTRIB2_ISTURRET) != 0, planar_rate);
+				const int32_t frame_before[3] = {mount.heading_bam, mount.pitch_bam,
+						mount.roll_bam};
+				const int32_t frame_posed[3] = {
+						counter ? world::emplaced_gun_frame_heading(*local_mount) : mount.heading_bam,
+						counter ? world::emplaced_gun_frame_pitch(*local_mount) : mount.pitch_bam,
+						counter ? world::emplaced_gun_frame_roll(*local_mount) : mount.roll_bam};
+				if (counter) world::counter_rotate_emplaced_gun_channel(channel, frame_before, frame_posed);
 				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
 				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
 				if (local_mount == nullptr || !local_mount->emplaced_update ||
 						world::emplaced_slot_def(world, *local_mount) != nullptr)
-					world::clamp_emplaced_gun_channel(channel, look, mount.heading_bam,
-							mount.pitch_bam, replica_window(mount, state, specs, *spec));
+					world::clamp_emplaced_gun_channel(channel, look, frame_posed[0],
+							frame_posed[1], replica_window(mount, state, specs, *spec));
 				mount.emplaced_gun_yaw_word = channel.yaw;
 				mount.emplaced_gun_pitch_word = channel.pitch;
 				occupant.heading_bam = look.heading;

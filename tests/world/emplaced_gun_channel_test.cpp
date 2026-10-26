@@ -23,6 +23,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <utility>
 
 using namespace opennova::world;
 using opennova::io::bam_add;
@@ -1142,9 +1143,171 @@ void test_overheat_emitter_anchor_by_walked_body() {
     CHECK(!slot.heat_glow.live);
 }
 
+// DFX2-26: dfx2.exe's IsTurret traverse holds the step's planar length to the rate, both axes
+// scaled by rate / length and truncated, where Jointops.exe's clamps each axis. A 30 deg / 20 deg
+// step from rest: Jointops.exe's words 0x93 / 0x93 (each axis at 0x92CF34), dfx2.exe's 122 / 81
+// at 0x92CF34 and 49 / 33 at the solo rate 0x3AB948.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - @0x440949..0x4409AB]
+void test_dfx2_planar_rate() {
+    const auto words = [](int32_t rate) {
+        EmplacedGunChannel channel;
+        EmplacedGunnerLook look{bam_sub(kGunHeading, 30 * kBamPerDegree), -20 * kBamPerDegree, 0,
+                /*is_local_player=*/false, /*is_player=*/true};
+        advance_emplaced_gun_channel(channel, look, kGunHeading, 0, /*is_turret=*/true, rate);
+        return std::pair<int, int>{channel.yaw, channel.pitch};
+    };
+    CHECK((words(0) == std::pair<int, int>{0x93, 0x93}));
+    CHECK((words(kEmplacedTurretSlewPerTick) == std::pair<int, int>{122, 81}));
+    CHECK((words(kDfx2EmplacedTurretSoloSlewPerTick) == std::pair<int, int>{49, 33}));
+}
+
+// The rate's pick: none for Jointops.exe; dfx2.exe's slower one for the local gunner of a gun
+// whose carrier counts one occupied seat at most (any rider dead, def-less or model-less makes
+// the count 0), the full one otherwise and for a gun with no carrier.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - @0x440875..0x4408A7;
+//  Entity_CountActiveWeaponSlots @0x434E70 (dfx2.exe)]
+void test_dfx2_rate_pick_and_seat_count() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.has_item_def = true;
+    carrier_seed.has_graphic_model = true;
+    carrier_seed.graphic_model_userpoints = 4;
+    Seat driver;
+    driver.type = SeatType::Driver;
+    Seat passenger;
+    passenger.type = SeatType::Passenger;
+    carrier_seed.seats = {driver, passenger};
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier_seed);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.emplacement_parent = carrier_h;
+    const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
+    Entity &carrier = *w.registry.get(carrier_h);
+    Entity &gun = *w.registry.get(gun_h);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == 0); // Jointops.exe's
+    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    CHECK(emplaced_turret_planar_rate(w, gun, false) == kEmplacedTurretSlewPerTick);
+    carrier.seats[0].occupant = EntityHandle::make(0, 1);
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 1);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    carrier.seats[1].occupant = EntityHandle::make(0, 2);
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 2);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
+    carrier.graphic_model_userpoints = 0; // a model with no userpoint counts 0
+    CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    gun.emplacement_parent = EntityHandle{};
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
+}
+
+// DFX2-25: an IsTurret child's words turn against its frame's turn: a 1/256 turn of the heading
+// adds 0x100 to the yaw word and leaves the pitch word; no turn leaves both.
+// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - @0x440FA1..0x440FFE]
+void test_dfx2_counter_rotation() {
+    EmplacedGunChannel channel{0x0123, 0x0040};
+    const int32_t before[3] = {kGunHeading, 0, 0};
+    const int32_t after[3] = {bam_add(kGunHeading, 0x01000000), 0, 0};
+    counter_rotate_emplaced_gun_channel(channel, before, after);
+    CHECK(channel.yaw == 0x0223);
+    CHECK(channel.pitch == 0x0040);
+    counter_rotate_emplaced_gun_channel(channel, after, after);
+    CHECK(channel.yaw == 0x0223 && channel.pitch == 0x0040);
+}
+
+// The counter-rotation's gate: dfx2.exe's, an IsTurret child resolved on a carrier userpoint with
+// an occupant, not over a dead PlayerControl hull.
+// [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) - @0x440B44..0x440B61,
+//  @0x440DAE..0x440DDB, @0x440F87, @0x440F94]
+void test_dfx2_counter_rotation_gate() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.has_item_def = true;
+    carrier_seed.has_graphic_model = true;
+    carrier_seed.graphic_model_userpoints = 4;
+    const EntityHandle carrier_h = w.registry.spawn(1, carrier_seed);
+    Entity gun_seed;
+    gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true;
+    gun_seed.item_attrib2 = opennova::def::DEF_ITEM_ATTRIB2_ISTURRET;
+    gun_seed.emplacement_parent = carrier_h;
+    gun_seed.emplacement_bone = 2;
+    gun_seed.emplacement_pose_metadata_resolved = true;
+    gun_seed.primary_occupant = EntityHandle::make(0, 1);
+    gun_seed.emplaced_update = true;
+    gun_seed.primary_weapon_slot_adm = 0;
+    w.tables.weapons.entries.resize(1);
+    w.tables.weapons.entries[0].valid = true;
+    const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
+    Entity &gun = *w.registry.get(gun_h);
+    CHECK(!emplaced_counter_rotates(w, gun)); // Jointops.exe's
+    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    CHECK(emplaced_counter_rotates(w, gun));
+    gun.emplaced_update = false; // the ewep class update's alone
+    CHECK(!emplaced_counter_rotates(w, gun));
+    gun.emplaced_update = true;
+    gun.emplacement_bone = 5; // past the carrier's userpoints: the root copy
+    CHECK(!emplaced_counter_rotates(w, gun));
+    gun.emplacement_bone = 2;
+    gun.primary_occupant = EntityHandle{};
+    CHECK(!emplaced_counter_rotates(w, gun) && emplaced_counter_rotates_frame(w, gun));
+}
+
+// DFX2-25 in the channel: the child posed ahead of its gunner's channel slews against its frame
+// before the pose (savedLivePose), publishes the slewed words to its carrier's brain, then turns
+// by the pose's turn and takes its window. A gunner on the old aim leaves the words 0 by the slew;
+// the GROUND brain takes that 0, and the 1/256 turn adds 0x100 to the stored word. Ours' Jointops
+// path (unchanged) slews against the posed frame, spending its rate on the turn, and publishes
+// that.
+// [orig: Entity_UpdateChildAttachment @0x4407A0 then Entity_UpdateTransformAndTurret @0x440B20
+//  (dfx2.exe) - the slew's +0x10 @0x44084E, the publication @0x440E01, the counter-rotation
+//  @0x440FF1 / @0x440FFE, the window @0x4410EA]
+void test_dfx2_channel_publishes_then_counter_rotates() {
+    for (const bool dfx2 : {false, true}) {
+        ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, /*parent_attrib=*/0);
+        Rig &r = pr.r;
+        if (dfx2) r.w.rules.title = opennova::gameprofile::GAME_DFX2;
+        Entity &parent = *r.w.registry.get(pr.parent_h);
+        parent.has_item_def = true;
+        parent.has_graphic_model = true;
+        parent.graphic_model_userpoints = 4;
+        Entity &gun = r.gun();
+        gun.item_attrib2 = opennova::def::DEF_ITEM_ATTRIB2_ISTURRET;
+        gun.emplacement_pose_metadata_resolved = true;
+        gun.primary_occupant = r.gunner_h;
+        gun.saved_live_yaw = kGunHeading; // the frame before this tick's pose
+        gun.saved_live_valid = true;
+        gun.heading = bam_add(kGunHeading, 0x01000000); // the posed frame
+        r.look(kGunHeading, 0);
+        r.tick_channel();
+        const int32_t brain_yaw = pr.parent_ai->brain.f[AiBrain::kActiveYaw];
+        if (dfx2) {
+            CHECK(r.gun().emplaced_gun_yaw_word == 0x100);
+            CHECK(brain_yaw == 0); // the slewed word, ahead of the counter-rotation
+        } else {
+            CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
+            CHECK(brain_yaw == emplaced_word_bam(static_cast<int16_t>(0x93)));
+        }
+        CHECK(r.gun().emplaced_gun_pitch_word == 0);
+    }
+}
+
 } // namespace
 
 int main() {
+    test_dfx2_planar_rate();
+    test_dfx2_rate_pick_and_seat_count();
+    test_dfx2_counter_rotation();
+    test_dfx2_counter_rotation_gate();
+    test_dfx2_channel_publishes_then_counter_rotates();
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
