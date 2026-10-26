@@ -4,11 +4,10 @@
 #include "core/proc_stats.h"
 #include "core/text_util.h"
 
-#include <base/io/file_io.h>
-#include <base/io/strutil.h>
-
 #include <algorithm>
 #include <cstdio>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -29,21 +28,6 @@ BindValue double_or_null(const std::optional<double> &value) {
 
 BindValue int_or_null(const std::optional<int64_t> &value) {
 	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
-bool read_text(const std::string &path, std::string &out) {
-	std::string error;
-	return io::read_file_text(path, out, error);
-}
-
-// A quota over a period ("50000 100000") as CPUs; 0 for none ("max ...") or
-// text that does not read.
-double quota_over_period(std::string_view quota, std::string_view period) {
-	const auto q = strutil::parse_llong(std::string(strutil::trim_view(quota)));
-	const auto p = strutil::parse_llong(std::string(strutil::trim_view(period)));
-	if (!q || !p || *q <= 0 || *p <= 0)
-		return 0;
-	return static_cast<double>(*q) / static_cast<double>(*p);
 }
 
 // `text` as a task id: its letters, digits, '.', '_' and '-', at most 64 of
@@ -69,26 +53,6 @@ std::string local_task_id() {
 	return id.empty() ? std::string("local") : id;
 }
 
-double read_cgroup_cpu_limit(const std::string &root) {
-	const std::string cgroup = root + "/sys/fs/cgroup";
-	std::string text;
-	if (read_text(cgroup + "/cpu.max", text)) {
-		const std::string_view line = strutil::trim_view(text);
-		const size_t space = line.find(' ');
-		return space == std::string_view::npos
-				? 0
-				: quota_over_period(line.substr(0, space), line.substr(space + 1));
-	}
-	for (const char *controller : { "/cpu", "/cpu,cpuacct" }) {
-		std::string quota;
-		std::string period;
-		if (read_text(cgroup + controller + "/cpu.cfs_quota_us", quota) &&
-				read_text(cgroup + controller + "/cpu.cfs_period_us", period))
-			return quota_over_period(quota, period);
-	}
-	return 0;
-}
-
 UsageTask find_usage_task(const std::string &root) {
 	UsageTask task;
 	ecs::TaskFacts facts;
@@ -103,7 +67,7 @@ UsageTask find_usage_task(const std::string &root) {
 	task.id = id_chars(facts.id);
 	if (task.id.empty())
 		task.id = local_task_id();
-	const double quota = read_cgroup_cpu_limit(root);
+	const double quota = proc_stats::read_cgroup_cpu_limit(root);
 	if (quota > 0)
 		task.cpu_limit = quota;
 	else if (facts.cpu > 0)

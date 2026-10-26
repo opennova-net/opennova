@@ -157,7 +157,7 @@ set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 
 # What each program's tasks use (apps/novaworld_common/program/program_usage.h) over
 # fixture trees standing in for a container's kernel files and
-# a migrated database: the cgroup's CPU limit (v2, v1, none), the sampler (no CPU for its
+# a migrated database: the sampler (no CPU for its
 # first minute, then the percent of the task's limit; the memory's limit from the cgroup,
 # the task or the machine; the network's bytes; null where nothing reads), the task found
 # off ECS, a minute written once, the hours rolled up from the minutes (a counter that
@@ -1232,7 +1232,8 @@ add_test(NAME object_store COMMAND object_store_test)
 # What a Linux machine or container uses (apps/novaworld_common/core/proc_stats.h: hostd's machine
 # stats, each program's own samples), read from fixture trees: /proc/stat's busy and total and
 # a percent between two readings, /proc/meminfo, /proc/net/dev less loopback, a cgroup v2 and a
-# v1 tree (CPU time, memory less the inactive file cache, the limit or none), statvfs.
+# v1 tree (CPU time, memory less the inactive file cache, the limit or none, the CPU quota: v2's
+# cpu.max, v1's quota over its period, none), statvfs.
 # Crow-free and database-free.
 add_executable(proc_stats_test novaworld/proc_stats_test.cpp)
 target_link_libraries(proc_stats_test PRIVATE opennova_novaworld_core Threads::Threads)

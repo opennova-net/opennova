@@ -48,10 +48,6 @@ std::string local_task_id();
 // hostname and the cgroup's limits, with a WARN line.
 UsageTask find_usage_task(const std::string &root = "");
 
-// The cgroup's CPU quota in CPUs (v2's cpu.max, else v1's cfs quota over its
-// period) under `root`; 0 when it sets none.
-double read_cgroup_cpu_limit(const std::string &root = "");
-
 // One minute of a task, as program_samples holds it.
 struct UsageSample {
 	std::string program;

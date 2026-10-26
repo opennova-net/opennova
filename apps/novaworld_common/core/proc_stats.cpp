@@ -50,6 +50,16 @@ std::vector<std::string_view> lines_of(std::string_view text) {
 	return out;
 }
 
+// A quota over a period ("50000 100000") as CPUs; 0 for none ("max ...") or
+// text that does not read.
+double quota_over_period(std::string_view quota, std::string_view period) {
+	const auto q = strutil::parse_llong(std::string(strutil::trim_view(quota)));
+	const auto p = strutil::parse_llong(std::string(strutil::trim_view(period)));
+	if (!q || !p || *q <= 0 || *p <= 0)
+		return 0;
+	return static_cast<double>(*q) / static_cast<double>(*p);
+}
+
 bool number(std::string_view word, uint64_t &out) {
 	if (word.empty() || !strutil::all_digits(word))
 		return false;
@@ -181,6 +191,26 @@ bool read_cgroup_cpu_usec(uint64_t &out, const std::string &root) {
 		}
 	}
 	return false;
+}
+
+double read_cgroup_cpu_limit(const std::string &root) {
+	const std::string cgroup = root + "/sys/fs/cgroup";
+	std::string text;
+	if (read_text(cgroup + "/cpu.max", text)) {
+		const std::string_view line = strutil::trim_view(text);
+		const size_t space = line.find(' ');
+		return space == std::string_view::npos
+				? 0
+				: quota_over_period(line.substr(0, space), line.substr(space + 1));
+	}
+	for (const char *controller : { "/cpu", "/cpu,cpuacct" }) {
+		std::string quota;
+		std::string period;
+		if (read_text(cgroup + controller + "/cpu.cfs_quota_us", quota) &&
+				read_text(cgroup + controller + "/cpu.cfs_period_us", period))
+			return quota_over_period(quota, period);
+	}
+	return 0;
 }
 
 bool read_cgroup_memory(CgroupMemory &out, const std::string &root) {

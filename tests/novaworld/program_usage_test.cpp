@@ -2,8 +2,6 @@
 // trees standing in for a container's kernel files and a migrated database of the run's own
 // (common/test_database.h):
 //
-//   - the cgroup's CPU limit: v2's cpu.max (a quota, "max"), v1's cfs quota over its period
-//     (-1 none), none at all;
 //   - the sampler: its first minute without CPU, then the CPU over the minute in percent of
 //     the task's limit; the memory and its limit (the cgroup's, else the task's, else the
 //     machine's); /proc/net/dev's bytes; a file that does not read leaves its field null;
@@ -65,23 +63,6 @@ std::string net_dev(uint64_t in, uint64_t out) {
 		   "    lo: 500 5 0 0 0 0 0 0 500 5 0 0 0 0 0 0\n"
 		   "  eth1: " +
 			std::to_string(in) + " 10 0 0 0 0 0 0 " + std::to_string(out) + " 12 0 0 0 0 0 0\n";
-}
-
-int test_cpu_limit() {
-	test_temp::TempDir dir("program_usage_limit");
-	TEST_EXPECT(program::read_cgroup_cpu_limit(dir.root()) == 0);
-	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu/cpu.cfs_quota_us", "25000\n") &&
-			put(dir, "sys/fs/cgroup/cpu/cpu.cfs_period_us", "100000\n"));
-	TEST_EXPECT(near(program::read_cgroup_cpu_limit(dir.root()), 0.25));
-	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu/cpu.cfs_quota_us", "-1\n"));
-	TEST_EXPECT(program::read_cgroup_cpu_limit(dir.root()) == 0);
-	// v2's file first where it is.
-	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu.max", "max 100000\n"));
-	TEST_EXPECT(program::read_cgroup_cpu_limit(dir.root()) == 0);
-	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu.max", "150000 100000\n"));
-	TEST_EXPECT(near(program::read_cgroup_cpu_limit(dir.root()), 1.5));
-	std::printf("  the cgroup's CPU limit: v2's cpu.max, v1's quota over its period, none\n");
-	return 0;
 }
 
 int test_sampler() {
@@ -250,7 +231,6 @@ int main(int argc, char **argv) {
 		int (*fn)();
 	};
 	const Case cases[] = {
-		{ "cpu_limit", test_cpu_limit },
 		{ "sampler", test_sampler },
 		{ "find_task", test_find_task },
 		{ "rows", test_rows },
