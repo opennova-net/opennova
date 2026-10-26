@@ -251,6 +251,82 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
 		bool phase_on);
 
+// The continue line's phase at a GetTickCount() reading: on (white) while bit 0x200 is set
+// [orig: Game_ShowStartMissionSplash - the blink select @ 0x5209b0-0x5209be].
+inline bool splash_blink_on(uint32_t tick_ms) {
+	return (tick_ms & static_cast<uint32_t>(kSplashBlinkMaskMs)) != 0;
+}
+
+// The arrow quad's size over a `surface_w` x `surface_h` display: the art's sides times the
+// display over 800 x 600, each an integer division [orig: Game_ShowStartMissionSplash - the
+// width (art_w * screen_w) / 800 @ 0x520876..0x52089d, the height (art_h * screen_h) / 600
+// @ 0x520889..0x5208ae, the signed magic divides]. Its top-left is the live cursor [orig:
+// xLeft / yTop @ 0x3342e48 / 0x3342e4c, the cursor position Input_DispatchMouseEvent
+// @ 0x761470 writes, scaled to the display @ 0x520920-0x520942].
+struct SplashArrowSize {
+	int width = 0;
+	int height = 0;
+};
+inline SplashArrowSize splash_arrow_size(int art_w, int art_h, int surface_w, int surface_h) {
+	return {art_w * surface_w / kSplashArrowScaleBaseW, art_h * surface_h / kSplashArrowScaleBaseH};
+}
+
+// The splash's input loop as states: raised over the held background (the key queue flushed at
+// entry, so a press made during the blocking load never dismisses it), it takes input until a
+// queued key, autorepeat included, or a mouse button exits, the live button mask read each pass
+// so a held button exits too; it then presents one background-only frame, no text and no
+// arrow, before the caller releases the loading screen's effect. Motion and key releases never
+// exit, and the START_MISSION sound never gates it [orig: Game_ShowStartMissionSplash
+// @ 0x520820 - Input_ResetKeyQueue @ 0x52085b, the exit test reading the button mask (the
+// WindowProc's button bits, g_MouseState.rawWParam @ 0x3342e50) and the key queue @ 0x520a2d,
+// Input_DequeueKeyEvent @ 0x520a36, the loop's draw @ 0x520993-0x520a28,
+// the closing present @ 0x520a48-0x520a79; the caller's release @ 0x525d45].
+class StartMissionSplash {
+public:
+	enum class State : uint8_t { kNone, kActive, kClosing };
+
+	State state() const { return state_; }
+	// Raised; false when one is up already.
+	bool raise() {
+		if (state_ != State::kNone) return false;
+		state_ = State::kActive;
+		closing_frames_ = 0;
+		return true;
+	}
+	// A key press (an autorepeat one too) or a button press: the loop's exit, its closing frame
+	// owed where frames present (`presents` false: no renderer to wait on, the release on the
+	// next frame). False when the splash takes no input.
+	bool exit(bool presents) {
+		if (state_ != State::kActive) return false;
+		state_ = State::kClosing;
+		closing_frames_ = presents ? 1 : 0;
+		return true;
+	}
+	// One display frame, `mouse_mask` the live button mask: an active splash exits on a held
+	// button; a closing one spends its background-only frame, then releases. True on the frame
+	// it releases (the owner's dismissal).
+	bool frame(uint32_t mouse_mask, bool presents) {
+		if (state_ == State::kActive) {
+			if (mouse_mask != 0u) exit(presents);
+			return false;
+		}
+		if (state_ != State::kClosing) return false;
+		if (closing_frames_ > 0) {
+			--closing_frames_;
+			return false;
+		}
+		state_ = State::kNone;
+		return true;
+	}
+	// The frame draws the continue line and the arrow (the loop's frames), else the background
+	// alone (the closing present).
+	bool draws_overlay() const { return state_ == State::kActive; }
+
+private:
+	State state_ = State::kNone;
+	int closing_frames_ = 0;
+};
+
 // --- the wrapped text block (loading_screen.cpp) --------------------------------
 // The original composites its text blocks with Render_DrawWrappedTextBlockEx
 // @ 0x580eb0: a line breaker and a line placer over one width measure. The
@@ -300,5 +376,36 @@ struct TextBlock {
 // vertical clip.
 TextBlock layout_text_block(const TextExtent &extent, int line_height, const std::string &text,
 		int left, int top, int right, int bottom, TextBlockAlign align, int skip_lines = 0);
+
+// One of the session block's text boxes, in the background's image space (the text composites
+// into the image before it stretches): the wrapped block's rect and alignment, and its colour.
+struct LoadingTextBox {
+	int x = 0;
+	int y = 0;
+	int width = 0;
+	int bottom = 0;
+	TextBlockAlign align = TextBlockAlign::kLeft;
+	uint32_t argb = 0xFFFFFFFFu;
+};
+
+// The session block over an `image_w` x `image_h` background whose band ends at `band_right`
+// (loading_band_right): the title, the mission and the game type share the band, left-, centre-
+// and right-aligned, all white [orig: Render_LoadingScreen @ 0x521fe1-0x522123 - the alignments
+// 3 / 4 / 5 @ 0x52200f / 0x52202e / 0x522050, folded @ 0x58106c / 0x581071; <cFFFFFF>
+// @ 0x51f42d]; the server message's label (its key's text and a colon, kLoadingMsgLabelRgb) and
+// body (white) at the image fractions, each box to the image's bottom [orig: the label
+// "<c80E0FF>%s:\r\n<cFFFFFF>" @ 0x7D01A8; the fractions' doubles @ 0x7D01A0 / 0x7D0198 /
+// 0x7D0190 / 0x7C4878]. The message draws only over a non-empty server text [orig: the
+// CUSTOMTEXT gate @ 0x52205f].
+struct LoadingSessionBoxes {
+	LoadingTextBox title;
+	LoadingTextBox mission;
+	LoadingTextBox game_type;
+	LoadingTextBox message_label;
+	LoadingTextBox message_body;
+};
+LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right);
+// The message label's text: the key's text and the format's colon.
+inline std::string loading_message_label_text(const std::string &label) { return label + ":"; }
 
 } // namespace opennova::hud

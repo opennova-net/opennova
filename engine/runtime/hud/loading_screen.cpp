@@ -151,6 +151,24 @@ TextBlock layout_text_block(const TextExtent &extent, int line_height, const std
 	return out;
 }
 
+LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right) {
+	LoadingSessionBoxes out;
+	const LoadingTextBox band{kLoadingBandLeft, kLoadingBandTop, band_right - kLoadingBandLeft,
+			kLoadingBandBottom, TextBlockAlign::kLeft, 0xFFFFFFFFu};
+	out.title = band;
+	out.mission = band;
+	out.mission.align = TextBlockAlign::kCenter;
+	out.game_type = band;
+	out.game_type.align = TextBlockAlign::kRight;
+	const int x = static_cast<int>(kLoadingMsgXFrac * image_w);
+	const int width = static_cast<int>(kLoadingMsgRightFrac * image_w) - x;
+	out.message_label = {x, static_cast<int>(kLoadingMsgLabelYFrac * image_h), width, image_h,
+			TextBlockAlign::kLeft, 0xFF000000u | kLoadingMsgLabelRgb};
+	out.message_body = {x, static_cast<int>(kLoadingMsgBodyYFrac * image_h), width, image_h,
+			TextBlockAlign::kLeft, 0xFFFFFFFFu};
+	return out;
+}
+
 LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed) {
 	// The placement and the extent each through the integer scaler [orig:
 	// LoadingScreen_UpdateAndPresent -- x, y stored @ 0x586c88 / @ 0x586c90 and scaled @ 0x586c98,

@@ -27,7 +27,8 @@ static func _selection_from_dict(source: Dictionary) -> PlayerInfoSideSelection:
 	selection.nationality = int(source.get("nationality", -1))
 	selection.division = int(source.get("division", -1))
 	selection.combo = int(source.get("combo", -1))
-	selection.player_class = int(source.get("player_class", 8))
+	selection.player_class = int(source.get("player_class",
+			PlayerInfoCharacterState.DEFAULT_PLAYER_CLASS))
 	selection.avatar_a = int(source.get("avatar_a", 0))
 	selection.avatar_b = int(source.get("avatar_b", 0))
 	selection.avatar_packed = int(source.get("avatar_packed", 0))

@@ -68,20 +68,18 @@ var _bar_fill: ColorRect = null
 ## present @ 0x520a48-0x520a79 precedes the caller's effect release @ 0x525d45].
 signal splash_dismissed
 
-enum SplashState { NONE, ACTIVE, CLOSING }
-
-
 # The size a .fnt without a fixed size is drawn at.
 const DEFAULT_TEXT_SIZE := 16
 
-var _splash_state := SplashState.NONE
+# The splash's input states: raised, taking input, closing on its background-only
+# frame (engine hud/loading_screen.h StartMissionSplash carries the witness).
+var _splash := StartMissionSplash.new()
 var _splash_arrow: Texture2D = null      # newarow1.tga, the menu cursor art
 var _splash_font: FntResource = null     # Impac22b.fnt (the large HUD label slot)
 var _splash_pages: Array = []            # its pages as textures (HudPos.font_page_textures)
 var _splash_text := ""                   # LoadingText/LT_Continue ("" -> no line)
 var _splash_arrow_anchor := Vector2.ZERO # live cursor pos, viewport px
 var _splash_blink_on := true
-var _splash_frames_until_emit := 0
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
@@ -447,17 +445,14 @@ func has_custom_background() -> bool:
 ## Public ADR-0018 read seam: the start-mission splash is raised (taking
 ## input, or presenting its final background-only frame).
 func is_splash_active() -> bool:
-	return _splash_state != SplashState.NONE
+	return _splash.get_state() != StartMissionSplash.STATE_NONE
 
 
 ## Leave the player-paced splash through the same closing-frame state machine
 ## as a witnessed key/button press. Render probes use this public seam so they
 ## never synthesize input or mistake the held loading background for gameplay.
 func dismiss_start_mission_splash() -> bool:
-	if _splash_state != SplashState.ACTIVE:
-		return false
-	_splash_exit_edge()
-	return true
+	return _splash_exit_edge()
 
 
 ## Public ADR-0018 read seam: the cursor-arrow art decoded (a miss degrades
@@ -479,7 +474,7 @@ func _ready() -> void:
 	# both off until the splash actually raises. Guarded: a splash raised
 	# before the screen entered the tree must not be silently disarmed here
 	# (it could then never dismiss).
-	if _splash_state == SplashState.NONE:
+	if _splash.get_state() == StartMissionSplash.STATE_NONE:
 		set_process(false)
 		set_process_input(false)
 
@@ -554,8 +549,8 @@ func _sync_bar_fill() -> void:
 		return
 	var fill: Rect2i = HudPos.loading_bar_rects(_layout_base_size, _progress)[3]
 	var fill_width := maxi(0, fill.size.x)
-	var should_draw := _texture != null and _splash_state == SplashState.NONE \
-			and fill_width > 0
+	var should_draw := _texture != null \
+			and _splash.get_state() == StartMissionSplash.STATE_NONE and fill_width > 0
 	# The rectangle's full draw command is submitted during the two-frame
 	# preparation barrier. Only its transform/modulate change during the
 	# synchronous loader, so force_draw can present the exact checkpoint
@@ -578,18 +573,15 @@ func _sync_bar_fill() -> void:
 ## Raise the start-mission splash over the held background: the cursor-arrow
 ## art, the large HUD label font, and the LoadingText/LT_Continue line, each
 ## degrading to "element skipped" on a miss exactly like the original's
-## unguarded loads [orig: Game_ShowStartMissionSplash @ 0x520820 — TGA
-## @ 0x520871, font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e, text fetch
-## @ 0x520975]. Keys pressed DURING the blocking load never dismiss it — the
-## original flushes its key queue at entry [orig: Input_ResetKeyQueue
-## @ 0x52085b] and Godot delivers no stale press events; held-key autorepeat
-## echoes DO dismiss, matching the re-queued autorepeat WM_KEYDOWNs.
-## The START_MISSION sound is the owner's to fire; it never gates dismissal
-## [orig: the exit tests read only input_mask + the key queue @ 0x520a2d].
+## unguarded loads (engine hud/loading_screen.h kSplash* carry the witnesses).
+## The engine's StartMissionSplash runs its input states: Godot delivers no
+## stale press from the blocking load (the original flushes its key queue), and
+## held-key autorepeat echoes dismiss as the re-queued WM_KEYDOWNs do. The
+## START_MISSION sound is the owner's to fire; it never gates dismissal.
 ## Returns false when no background is held (retail draws no splash without
 ## the loading-screen effect).
 func begin_start_mission_splash(root: ResourceRoot) -> bool:
-	if _texture == null or _splash_state != SplashState.NONE:
+	if _texture == null or _splash.get_state() != StartMissionSplash.STATE_NONE:
 		return false
 	if root != null:
 		_splash_arrow = root.load_texture(HudPos.loading_splash_arrow_image(),
@@ -605,7 +597,7 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 		glyph_material.shader = HudPos.glyph_shader()
 		material = glyph_material
 	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
-	_splash_state = SplashState.ACTIVE
+	_splash.raise()
 	_sync_bar_fill()
 	_splash_blink_on = _splash_blink_phase()
 	if is_inside_tree():
@@ -618,26 +610,19 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 
 
 func _input(event: InputEvent) -> void:
-	if _splash_state != SplashState.ACTIVE:
+	if not _splash.draws_overlay():
 		return
 	var motion := event as InputEventMouseMotion
 	if motion != null:
-		# The arrow tracks the live cursor [orig: xLeft/yTop @ 0x3342e48/
-		# 0x3342e4c ARE the cursor position, written by
-		# Input_DispatchMouseEvent @ 0x761470]. Motion never dismisses.
+		# The arrow tracks the live cursor; motion never dismisses.
 		_splash_arrow_anchor = _viewport_to_local(motion.position)
 		queue_redraw()
 		return
 	var key := event as InputEventKey
-	if key != null and key.pressed:
-		# Echo (autorepeat) presses dismiss too — the original's autorepeat
-		# WM_KEYDOWNs land in the same dequeued queue
-		# [orig: Input_QueueKeyEvent @ 0x760c10 -> dequeue @ 0x520a36].
-		accept_event()
-		_splash_exit_edge()
-		return
 	var button := event as InputEventMouseButton
-	if button != null and button.pressed:
+	# A key press (an echo too, the original's autorepeat WM_KEYDOWNs) or a
+	# button press is the exit, consumed as the original dequeues it.
+	if (key != null and key.pressed) or (button != null and button.pressed):
 		accept_event()
 		_splash_exit_edge()
 
@@ -649,46 +634,41 @@ func _viewport_to_local(point: Vector2) -> Vector2:
 
 
 func _process(_delta: float) -> void:
-	if _splash_state == SplashState.ACTIVE:
-		# A held mouse button dismisses without a fresh press — the original
-		# exit reads the live button mask each frame [orig: g_MouseState.rawWParam
-		# @ 0x3342e50 (WindowProc button bits), test @ 0x520a2d].
-		if Input.get_mouse_button_mask() != 0:
-			_splash_exit_edge()
-			return
+	var was_active := _splash.draws_overlay()
+	# The display frame's step: the live button mask (a held button exits), then
+	# a closing splash's background-only frame and its release.
+	if _splash.frame(Input.get_mouse_button_mask(), _splash_presents()):
+		set_process(false)
+		splash_dismissed.emit()
+		return
+	if was_active and not _splash.draws_overlay():
+		set_process_input(false)
+		queue_redraw()
+		return
+	if _splash.draws_overlay():
 		var phase := _splash_blink_phase()
 		if phase != _splash_blink_on:
 			_splash_blink_on = phase
 			queue_redraw()
-		return
-	if _splash_state == SplashState.CLOSING:
-		if _splash_frames_until_emit > 0:
-			_splash_frames_until_emit -= 1
-			return
-		_splash_state = SplashState.NONE
-		set_process(false)
-		splash_dismissed.emit()
 
 
-# The 512 ms two-phase pulse the continue line rides
-# [orig: GetTickCount() & 0x200 selects the color @ 0x5209b0-0x5209be].
+# The continue line's two-phase pulse (engine hud/loading_screen.h splash_blink_on).
 func _splash_blink_phase() -> bool:
-	return (GameWorld.tick_count_ms() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+	return HudPos.splash_blink_on(GameWorld.tick_count_ms())
 
 
-func _splash_exit_edge() -> void:
-	if _splash_state != SplashState.ACTIVE:
-		return
-	_splash_state = SplashState.CLOSING
+# Whether a frame presents the closing background-only frame: no live renderer
+# to wait on finishes on the next process tick.
+func _splash_presents() -> bool:
+	return is_inside_tree() and not GameRuntimeRoot.is_headless()
+
+
+func _splash_exit_edge() -> bool:
+	if not _splash.exit(_splash_presents()):
+		return false
 	set_process_input(false)
-	# One background-only frame before releasing to the owner [orig: the
-	# post-loop present without text or arrow @ 0x520a48-0x520a79, ahead of
-	# the caller's effect release @ 0x525d45].
-	_splash_frames_until_emit = 1
 	queue_redraw()
-	if not is_inside_tree() or GameRuntimeRoot.is_headless():
-		# No live renderer to wait on: finish on the next process tick.
-		_splash_frames_until_emit = 0
+	return true
 
 
 func _draw() -> void:
@@ -699,12 +679,11 @@ func _draw() -> void:
 	# neutral (docs/interface/loading-screen-re.md D-LOADSCR-6)
 	# [orig: LoadingScreen_DrawEffectFullscreen rect (0,0,width,height) @ 0x586ba0].
 	draw_texture_rect(_texture, Rect2(Vector2.ZERO, size), false)
-	if _splash_state != SplashState.NONE:
+	if _splash.get_state() != StartMissionSplash.STATE_NONE:
 		# Splash frames carry the background plus (while taking input) the
-		# continue line and the arrow — no bar, no session text; the closing
-		# frame is the original's final background-only present
-		# [orig: loop draw @ 0x520993-0x520a28; final @ 0x520a48-0x520a79].
-		if _splash_state == SplashState.ACTIVE:
+		# continue line and the arrow, no bar and no session text; the closing
+		# frame is the background alone (engine StartMissionSplash).
+		if _splash.draws_overlay():
 			_draw_splash_overlay()
 		return
 	if _in_session:
@@ -725,73 +704,40 @@ func _draw_splash_overlay() -> void:
 				Vector2i(roundi(size.x), roundi(size.y)), _splash_blink_on)
 	if _splash_arrow != null:
 		# The arrow is the cursor art, top-left at the live cursor position
-		# (identity in viewport px — the original keeps the cursor in 640x480
-		# space and scales by w/640, h/480 to the same point), sized
-		# tga_dims * (viewport / 800x600) [orig: pos @ 0x520920-0x520942;
-		# size @ 0x52089d/0x5208ae].
-		var asize := Vector2(
-				_splash_arrow.get_width() * size.x
-					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_W),
-				_splash_arrow.get_height() * size.y
-					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_H))
-		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, asize), false)
+		# (identity in viewport px: the original keeps the cursor in 640x480
+		# space and scales by w/640, h/480 to the same point [orig: pos
+		# @ 0x520920-0x520942]), sized by the engine's integer rule
+		# (hud/loading_screen.h splash_arrow_size).
+		var asize := HudPos.splash_arrow_size(
+				Vector2i(_splash_arrow.get_width(), _splash_arrow.get_height()),
+				Vector2i(roundi(size.x), roundi(size.y)))
+		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, Vector2(asize)), false)
 
 
 # The MP text overlay, drawn in image space under the image's stretch scale
 # (the original composites into the texture before stretching, so text scales
-# with the image) [orig: Render_LoadingScreen @ 0x521fe1-0x522123].
+# with the image): the engine's boxes, each block broken and placed by the
+# engine against the font's measure (HudPos.draw_loading_session_text;
+# hud/loading_screen.h loading_session_boxes carries the witness). Line metrics
+# ride the FontFile view of the .fnt; exact CGameFont glyph spacing is the
+# standing follow-up (docs/interface/loading-screen-re.md D-LOADSCR-2).
 func _draw_session_text() -> void:
-	var tex_size := Vector2(_texture.get_width(), _texture.get_height())
-	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
+	var tex_size := Vector2i(_texture.get_width(), _texture.get_height())
+	if tex_size.x <= 0 or tex_size.y <= 0:
 		return
-	draw_set_transform(Vector2.ZERO, 0.0, size / tex_size)
-	var band_width: int = _band_right - HudPos.LOADING_BAND_LEFT
-	# Title / mission / game type share one band: left-, center- and
-	# right-aligned [orig: alignment 3/4/5 @ 0x52200f/0x52202e/0x522050 ->
-	# left/center/right @ 0x58106c/0x581071]. All white (<cFFFFFF> @ 0x51f42d).
-	if _font_large != null:
-		_draw_wrapped(_font_large, _title, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
-		_draw_wrapped(_font_large, _mission_name, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_CENTER, Color.WHITE)
-		_draw_wrapped(_font_large, _game_type_text, HudPos.LOADING_BAND_LEFT,
-			HudPos.LOADING_BAND_TOP, band_width,
-			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_RIGHT, Color.WHITE)
-	# The server message block [orig: gate on a non-empty CUSTOMTEXT @ 0x52205f;
-	# the fraction/color witnesses live at the engine home, hud/loading_screen.h].
-	if _font_small != null and not _custom_text.is_empty():
-		var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
-				HudPos.loading_msg_label_fallback()) + ":"
-		var mx := int(HudPos.loading_msg_x_frac() * tex_size.x)
-		var mw := int(HudPos.loading_msg_right_frac() * tex_size.x) - mx
-		_draw_wrapped(_font_small, label, mx,
-			int(HudPos.loading_msg_label_y_frac() * tex_size.y),
-			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT,
-			HudPos.loading_msg_label_color())
-		_draw_wrapped(_font_small, _custom_text, mx,
-			int(HudPos.loading_msg_body_y_frac() * tex_size.y),
-			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
+	draw_set_transform(Vector2.ZERO, 0.0, size / Vector2(tex_size))
+	var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
+			HudPos.loading_msg_label_fallback())
+	HudPos.draw_loading_session_text(self, _font_large, _text_size(_font_large),
+			_font_small, _text_size(_font_small), _title, _mission_name, _game_type_text,
+			label, _custom_text, tex_size, _band_right)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-# Word-wrapped text in a box: the engine breaks and places the lines
-# (runtime/hud/loading_screen.h, the ported Render_DrawWrappedTextBlockEx)
-# against this font's measure and HudPos.draw_wrapped_text paints them.
-# `width` is the band width (retail's rect_right - rect_left). Line metrics
-# ride the FontFile view of the .fnt; exact CGameFont glyph spacing is the
-# standing follow-up (docs/interface/loading-screen-re.md D-LOADSCR-2).
-func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
-		bottom: int, align: HorizontalAlignment, color: Color,
-		skip_lines := 0) -> int:
-	if font == null:
-		return 0
-	var fs := font.get_fixed_size()
-	if fs <= 0:
-		fs = DEFAULT_TEXT_SIZE
-	return HudPos.draw_wrapped_text(self, font, fs, text, x, y, width, bottom,
-			align, color, skip_lines)
+# The size a .fnt draws at: its fixed size, else DEFAULT_TEXT_SIZE.
+func _text_size(font: FontFile) -> int:
+	var fs := font.get_fixed_size() if font != null else 0
+	return fs if fs > 0 else DEFAULT_TEXT_SIZE
 
 
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto

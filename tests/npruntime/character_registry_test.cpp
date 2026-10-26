@@ -311,6 +311,14 @@ int main() {
 		check(vars.char_id[0] == 0 && vars.char_id[1] == 0, "the own row over no table: 0 / 0");
 	}
 
+	// A class byte reads as one of 5..9, anything else the default rifleman.
+	check(join_player_class_valid(5) && join_player_class_valid(9) && !join_player_class_valid(4) &&
+			      !join_player_class_valid(10),
+	      "the classes are 5..9");
+	check(join_player_class_or_default(7) == 7 && join_player_class_or_default(0) == 8 &&
+			      join_player_class_or_default(10) == kJoinDefaultPlayerClass,
+	      "anything else the rifleman");
+
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return EXIT_FAILURE;

@@ -30,6 +30,14 @@ inline constexpr int kJoinPlayerClassMin = 5;
 inline constexpr int kJoinPlayerClassMax = 9;
 inline constexpr int kJoinDefaultAvatar = 1;
 
+// A class byte as the profile reads it: one of 5..9, anything else the default rifleman.
+inline bool join_player_class_valid(int cls) {
+	return cls >= kJoinPlayerClassMin && cls <= kJoinPlayerClassMax;
+}
+inline int join_player_class_or_default(int cls) {
+	return join_player_class_valid(cls) ? cls : kJoinDefaultPlayerClass;
+}
+
 struct JoinSideSelection {
 	bool present = false;
 	// The record's packed character word as the side block holds it, whatever the

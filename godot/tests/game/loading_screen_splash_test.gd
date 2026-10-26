@@ -350,7 +350,7 @@ func test_maybe_begin_positive_leg_raises_and_restores_the_cursor() -> void:
 
 func test_splash_survives_ready_after_pre_tree_begin() -> void:
 	# begin before add_child: _ready()'s callback disarm must not neuter an
-	# already-ACTIVE splash (the guard on _splash_state).
+	# already-ACTIVE splash (the guard on the splash's state).
 	var root := _art_root()
 	var screen: LoadingScreen = LoadingScreen.new()
 	screen.setup(root, LoadingScreenInfo.for_mission("00TRg.bms"))

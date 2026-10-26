@@ -114,6 +114,7 @@
 #include "hud/hud_entity_info.h"
 #include "hud/font_page_glyphs.h"
 #include "hud/loading_background.h"
+#include "hud/start_mission_splash.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_process_words_carry.h"
 #include "hud/hud_overlay.h"
@@ -358,6 +359,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(HudEntityInfo);
 	GDREGISTER_CLASS(LoadingBackground);
+	GDREGISTER_CLASS(StartMissionSplash);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);

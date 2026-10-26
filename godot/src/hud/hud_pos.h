@@ -71,21 +71,11 @@ public:
 		MESSAGE_EXPIRY_STAGGER = 186,
 		MESSAGE_TEXT_MAX = 119,
 		MESSAGE_SLOT_COUNT = 40,
-		// The loading screen's witnessed layout (hud/loading_screen.h is the
-		// single source; the cpp static_asserts pin these mirrors to it). The
-		// band values are image-space; the bar rides the loading_bar_* statics.
-		LOADING_BAND_LEFT = 21,
-		LOADING_BAND_TOP = 29,
-		LOADING_BAND_BOTTOM = 500,
+		// The loading screen's present throttle (hud/loading_screen.h is the
+		// single source; the cpp static_assert pins this mirror to it). The
+		// session block rides draw_loading_session_text, the bar the
+		// loading_bar_* statics.
 		LOADING_PRESENT_INTERVAL_MS = 100,
-		// The SP start-mission splash (hud/loading_screen.h kSplash*; same
-		// pinning): the centered continue-line virtual position, the 512 ms
-		// blink phase bit, and the 800x600/800 scale bases.
-		SPLASH_CONTINUE_X = 512,
-		SPLASH_CONTINUE_Y = 730,
-		SPLASH_BLINK_MASK_MS = 0x200,
-		SPLASH_ARROW_SCALE_BASE_W = 800,
-		SPLASH_ARROW_SCALE_BASE_H = 600,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -186,17 +176,25 @@ public:
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
 	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
-	static double loading_msg_x_frac();
-	static double loading_msg_right_frac();
-	static double loading_msg_label_y_frac();
-	static double loading_msg_body_y_frac();
-	static Color loading_msg_label_color();
+	// The MP session block painted into `p_item` in the background's image space (the caller's
+	// transform stretches it): the engine's boxes (hud::loading_session_boxes) over a `p_image`
+	// background whose band ends at `p_band_right`, each through draw_wrapped_text, the title,
+	// the mission and the game type in the large font, the server message's label (`p_label`
+	// and its colon) and body in the small one where `p_custom_text` is not empty.
+	static void draw_loading_session_text(CanvasItem *p_item, const Ref<Font> &p_large,
+			int p_large_size, const Ref<Font> &p_small, int p_small_size, const String &p_title,
+			const String &p_mission, const String &p_game_type, const String &p_label,
+			const String &p_custom_text, const Vector2i &p_image, int p_band_right);
 	// The bar's [outer, gray, track, fill] rects on a surface of `p_surface`
 	// px at `p_displayed` percent (engine hud/loading_screen.h loading_bar_rects).
 	static TypedArray<Rect2i> loading_bar_rects(const Vector2 &p_surface, int p_displayed);
 	static Color loading_bar_border_gray();
 	static Color loading_bar_fill_color();
-	// The SP start-mission splash strings.
+	// The SP start-mission splash strings, the continue line's blink phase at a GetTickCount()
+	// reading and the arrow's size of `p_art` over a `p_surface` display (engine
+	// hud/loading_screen.h splash_blink_on, splash_arrow_size).
+	static bool splash_blink_on(int64_t p_tick_ms);
+	static Vector2i splash_arrow_size(const Vector2i &p_art, const Vector2i &p_surface);
 	static String loading_splash_arrow_image();
 	static String loading_splash_sound_set();
 	static String loading_splash_continue_key();

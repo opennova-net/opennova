@@ -43,24 +43,8 @@ static_assert(godot::HudPos::MESSAGE_TEXT_MAX ==
 		opennova::hud::kMessageTextMax);
 static_assert(godot::HudPos::MESSAGE_SLOT_COUNT ==
 		opennova::hud::kMessageSlotCount);
-static_assert(godot::HudPos::LOADING_BAND_LEFT ==
-		opennova::hud::kLoadingBandLeft);
-static_assert(godot::HudPos::LOADING_BAND_TOP ==
-		opennova::hud::kLoadingBandTop);
-static_assert(godot::HudPos::LOADING_BAND_BOTTOM ==
-		opennova::hud::kLoadingBandBottom);
 static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
 		opennova::hud::kLoadingPresentIntervalMs);
-static_assert(godot::HudPos::SPLASH_CONTINUE_X ==
-		opennova::hud::kSplashContinueX);
-static_assert(godot::HudPos::SPLASH_CONTINUE_Y ==
-		opennova::hud::kSplashContinueY);
-static_assert(godot::HudPos::SPLASH_BLINK_MASK_MS ==
-		opennova::hud::kSplashBlinkMaskMs);
-static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_W ==
-		opennova::hud::kSplashArrowScaleBaseW);
-static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_H ==
-		opennova::hud::kSplashArrowScaleBaseH);
 static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
 		opennova::hud::kBinocularDigitStep);
 static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
@@ -152,11 +136,15 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_body_y_frac"), &HudPos::loading_msg_body_y_frac);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_color"), &HudPos::loading_msg_label_color);
+	ClassDB::bind_static_method("HudPos",
+			D_METHOD("draw_loading_session_text", "item", "large", "large_size", "small",
+					"small_size", "title", "mission", "game_type", "label", "custom_text", "image",
+					"band_right"),
+			&HudPos::draw_loading_session_text);
+	ClassDB::bind_static_method("HudPos", D_METHOD("splash_blink_on", "tick_ms"),
+			&HudPos::splash_blink_on);
+	ClassDB::bind_static_method("HudPos", D_METHOD("splash_arrow_size", "art", "surface"),
+			&HudPos::splash_arrow_size);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_rects", "surface", "displayed"),
 			&HudPos::loading_bar_rects);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_border_gray"), &HudPos::loading_bar_border_gray);
@@ -198,15 +186,7 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(MESSAGE_EXPIRY_STAGGER);
 	BIND_CONSTANT(MESSAGE_TEXT_MAX);
 	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
-	BIND_CONSTANT(LOADING_BAND_LEFT);
-	BIND_CONSTANT(LOADING_BAND_TOP);
-	BIND_CONSTANT(LOADING_BAND_BOTTOM);
 	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
-	BIND_CONSTANT(SPLASH_CONTINUE_X);
-	BIND_CONSTANT(SPLASH_CONTINUE_Y);
-	BIND_CONSTANT(SPLASH_BLINK_MASK_MS);
-	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_W);
-	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_H);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_MASK);
@@ -535,25 +515,39 @@ String HudPos::loading_gametype_text_key(int p_game_type) {
 			static_cast<uint32_t>(p_game_type)));
 }
 
-double HudPos::loading_msg_x_frac() {
-	return opennova::hud::kLoadingMsgXFrac;
+void HudPos::draw_loading_session_text(CanvasItem *p_item, const Ref<Font> &p_large,
+		int p_large_size, const Ref<Font> &p_small, int p_small_size, const String &p_title,
+		const String &p_mission, const String &p_game_type, const String &p_label,
+		const String &p_custom_text, const Vector2i &p_image, int p_band_right) {
+	const opennova::hud::LoadingSessionBoxes boxes =
+			opennova::hud::loading_session_boxes(p_image.x, p_image.y, p_band_right);
+	using opennova::hud::TextBlockAlign;
+	const auto paint = [p_item](const Ref<Font> &font, int size, const String &text,
+							   const opennova::hud::LoadingTextBox &box) {
+		int align = HORIZONTAL_ALIGNMENT_LEFT;
+		if (box.align == TextBlockAlign::kCenter) align = HORIZONTAL_ALIGNMENT_CENTER;
+		else if (box.align == TextBlockAlign::kRight) align = HORIZONTAL_ALIGNMENT_RIGHT;
+		HudPos::draw_wrapped_text(p_item, font, size, text, box.x, box.y, box.width, box.bottom,
+				align, opennova::color_from_argb(box.argb), 0);
+	};
+	paint(p_large, p_large_size, p_title, boxes.title);
+	paint(p_large, p_large_size, p_mission, boxes.mission);
+	paint(p_large, p_large_size, p_game_type, boxes.game_type);
+	if (p_custom_text.is_empty()) return;
+	paint(p_small, p_small_size,
+			opennova::to_gd(opennova::hud::loading_message_label_text(opennova::to_std(p_label))),
+			boxes.message_label);
+	paint(p_small, p_small_size, p_custom_text, boxes.message_body);
 }
 
-double HudPos::loading_msg_right_frac() {
-	return opennova::hud::kLoadingMsgRightFrac;
+bool HudPos::splash_blink_on(int64_t p_tick_ms) {
+	return opennova::hud::splash_blink_on(static_cast<uint32_t>(p_tick_ms));
 }
 
-double HudPos::loading_msg_label_y_frac() {
-	return opennova::hud::kLoadingMsgLabelYFrac;
-}
-
-double HudPos::loading_msg_body_y_frac() {
-	return opennova::hud::kLoadingMsgBodyYFrac;
-}
-
-Color HudPos::loading_msg_label_color() {
-	const uint32_t rgb = opennova::hud::kLoadingMsgLabelRgb;
-	return opennova::color_from_rgb24(rgb);
+Vector2i HudPos::splash_arrow_size(const Vector2i &p_art, const Vector2i &p_surface) {
+	const opennova::hud::SplashArrowSize size =
+			opennova::hud::splash_arrow_size(p_art.x, p_art.y, p_surface.x, p_surface.y);
+	return Vector2i(size.width, size.height);
 }
 
 TypedArray<Rect2i> HudPos::loading_bar_rects(const Vector2 &p_surface, int p_displayed) {

@@ -203,6 +203,7 @@ add_library(opennova_bindings OBJECT
     hud/player_hud_weapon_def.cpp
     hud/hud_entity_info.cpp
     hud/loading_background.cpp
+    hud/start_mission_splash.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp

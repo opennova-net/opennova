@@ -280,6 +280,63 @@ int main() {
 		      "the placement at 1600 x 900 rounds as retail's integer scaler");
 	}
 
+	// --- the start-mission splash [orig: Game_ShowStartMissionSplash @ 0x520820] ---
+	{
+		StartMissionSplash splash;
+		check(splash.state() == StartMissionSplash::State::kNone && !splash.draws_overlay(),
+				"no splash until raised");
+		check(!splash.exit(true) && !splash.frame(1, true), "nothing exits or steps unraised");
+		check(splash.raise() && !splash.raise(), "raised once");
+		check(splash.draws_overlay() && !splash.frame(0, true), "a frame with no button holds");
+		// A press: one background-only frame, then the release.
+		check(splash.exit(true) && !splash.exit(true), "the press exits once");
+		check(splash.state() == StartMissionSplash::State::kClosing && !splash.draws_overlay(),
+				"the closing frame draws the background alone");
+		check(!splash.frame(0, true), "the closing frame presents");
+		check(splash.frame(0, true) && splash.state() == StartMissionSplash::State::kNone,
+				"then the release");
+		// A held button exits on its frame, the closing frame after it.
+		splash.raise();
+		check(!splash.frame(1, true) && splash.state() == StartMissionSplash::State::kClosing,
+				"a held button exits");
+		check(!splash.frame(1, true) && splash.frame(1, true),
+				"its closing frame, then the release");
+		// No renderer to wait on: the release on the next frame.
+		splash.raise();
+		check(splash.exit(false) && splash.frame(0, false), "no closing frame to present");
+	}
+	check(splash_blink_on(0x200) && splash_blink_on(0x3FF) && !splash_blink_on(0x1FF) &&
+			      !splash_blink_on(0x400),
+	      "the continue line rides GetTickCount()'s bit 0x200");
+	{
+		// The arrow's sides divide as integers: 32 * 1024 / 800 = 40 (40.96), 32 * 768 / 600 = 40.
+		const SplashArrowSize at1024 = splash_arrow_size(32, 32, 1024, 768);
+		check(at1024.width == 40 && at1024.height == 40, "the arrow at 1024 x 768");
+		const SplashArrowSize at800 = splash_arrow_size(32, 32, 800, 600);
+		check(at800.width == 32 && at800.height == 32, "the arrow at its art's size at 800 x 600");
+	}
+	{
+		// The session block over an 800 x 600 custom background (band right 661).
+		const LoadingSessionBoxes boxes = loading_session_boxes(800, 600, kLoadingBandRightCustom);
+		check(boxes.title.x == 21 && boxes.title.y == 29 && boxes.title.width == 640 &&
+				      boxes.title.bottom == 500 && boxes.title.align == TextBlockAlign::kLeft &&
+				      boxes.title.argb == 0xFFFFFFFFu,
+		      "the title on the band, left");
+		check(boxes.mission.align == TextBlockAlign::kCenter &&
+				      boxes.game_type.align == TextBlockAlign::kRight &&
+				      boxes.mission.width == 640 && boxes.game_type.bottom == 500,
+		      "the mission centred and the game type right on the same band");
+		check(boxes.message_label.x == 16 && boxes.message_label.width == 768 &&
+				      boxes.message_label.y == 522 && boxes.message_label.bottom == 600 &&
+				      boxes.message_label.argb == 0xFF80E0FFu,
+		      "the message label at the image fractions, light blue");
+		check(boxes.message_body.y == 540 && boxes.message_body.argb == 0xFFFFFFFFu,
+		      "the message body under it, white");
+		check(loading_message_label_text("Message from Game Server") ==
+				      "Message from Game Server:",
+		      "the label's colon");
+	}
+
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return EXIT_FAILURE;
