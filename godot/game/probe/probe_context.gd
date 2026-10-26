@@ -281,7 +281,7 @@ func capture_png(label: String, target: Viewport = null) -> String:
 	var image: Image = texture.get_image() if texture != null else null
 	if image == null or image.is_empty():
 		return ""
-	var path := artifact_dir.path_join("%s.png" % _safe_label(label))
+	var path := artifact_dir.path_join("%s.png" % GameRenderCapture.safe_label(label, "capture"))
 	if image.save_png(path) != OK:
 		return ""
 	artifact(label, path, "png")
@@ -337,10 +337,3 @@ func _live(value: Variant) -> Variant:
 	if value is Object and not is_instance_valid(value):
 		return null
 	return value
-
-
-static func _safe_label(label: String) -> String:
-	var out := ""
-	for character in label:
-		out += character if character.is_valid_identifier() or character in ["-", "."] else "_"
-	return out if not out.is_empty() else "capture"
