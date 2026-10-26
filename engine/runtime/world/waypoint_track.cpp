@@ -105,9 +105,12 @@ void WaypointTrack::tick_advance(const WaypointFrameInputs &in) {
     const int32_t count = static_cast<int32_t>(entries.size());
     if (count > 1 && waypoint_game_type(in.game_type)) {
         const WaypointEntry *cur = current_entry();
-        // Authority: an event-linked waypoint never proximity-advances — its
-        // completion arrives via on_event_fired. [orig: @ 0x4de649 jge skip]
-        if (cur && cur->linked_event > 0) return;
+        // Authority: a marker holding a trigger never proximity-advances: the
+        // signed word against 0, so a trigger of 0 holds too, though no event
+        // completes it (on_event_fired skips 0); only -1 (none) advances
+        // (D-HUD-60). [orig: Player_UpdatePerFrame - `cmp word [eax+210h], bx`
+        // @0x4de649 (bx 0), `jge` past the advance @0x4de650]
+        if (cur && cur->linked_event >= 0) return;
         bool goals_met = false;
         if (!goals_pass(cur, in.subgoals_won, goals_met)) return; // [orig: @0x4de664]
         if (!cur) {

@@ -909,6 +909,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             WaypointEntry zeroed;
             zeroed.node = idx;
             zeroed.radius = 0;
+            zeroed.linked_event = 0; // the cleared word, which holds the advance (D-HUD-60)
             world.script.waypoints.entries.push_back(zeroed);
             continue;
         }
@@ -916,7 +917,9 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         WaypointEntry e;
         e.node = idx;
         if (!admit_record(mk, world, opts)) {
+            // The unspawned slot Pool_Clear zeroed, its trigger word 0 among it.
             e.radius = 0;
+            e.linked_event = 0;
             world.script.waypoints.entries.push_back(e);
             continue;
         }

@@ -197,6 +197,24 @@ int main() {
         CHECK(t.current == 1);
     }
 
+    // --- a trigger of 0 holds the marker too, and no event completes it; -1 advances
+    //     (D-HUD-60) [orig: Player_UpdatePerFrame `cmp word [eax+210h], bx; jge`
+    //     @0x4de649 / @0x4de650] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 50), wp(100, 0, 50)};
+        CHECK(t.entries[0].linked_event == -1); // a marker with no trigger
+        t.entries[0].linked_event = 0;
+        t.current = 0;
+        advance(t, 0, 0); // standing on it
+        CHECK(t.current == 0); // held
+        t.on_event_fired(0);
+        CHECK(!t.entries[0].done && t.current == 0); // event 0 completes nothing
+        t.entries[0].linked_event = -1;
+        advance(t, 0, 0);
+        CHECK(t.current == 1); // no trigger: the proximity advance runs
+    }
+
     // --- backward chaining through chain_back flags ---
     {
         WaypointTrack t;
