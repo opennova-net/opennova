@@ -265,6 +265,47 @@ const char *kLan = R"(<SCREEN>
 </SCREEN>
 )";
 
+// The updater's buttons: STARTUP's and OPTIONS's UPDATE, front end only, with no availability gate;
+// and an APPMSG row's "UPDATE" (without case, untrimmed), on any screen.
+// [orig: UI_RegisterStartupCallbacks @ 0x555890 (UPDATE @ 0x5558f2); UI_RegisterOptionsCallbacks
+//  @ 0x55d610 (UPDATE @ 0x55d7da); UI_DispatchScreenEvent @ 0x54e6a0 case 10 @ 0x54f3a4..0x54f3c1]
+const char *kUpdateScreens = R"(<SCREEN>
+	<NAME>STARTUP</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>OPTIONS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+<SCREEN>
+	<NAME>OTHER</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="button" name="UPDATE"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
+void test_update_routes() {
+	Run run;
+	CHECK(run.open(kUpdateScreens, "front.mnu"));
+	MenuCommands commands;
+	commands.wire(run.rt, false);
+	CHECK(commands.command_of("STARTUP", "update") == MenuCommand::Update);
+	CHECK(commands.command_of("options", "UPDATE") == MenuCommand::Update);
+	CHECK(commands.command_of("OTHER", "UPDATE") == MenuCommand::None);
+	commands.wire(run.rt, true);
+	CHECK(commands.command_of("STARTUP", "UPDATE") == MenuCommand::None);
+	CHECK(app_message_command("update") == MenuCommand::Update);
+	CHECK(app_message_command("UPDATE") == MenuCommand::Update);
+	CHECK(app_message_command(" UPDATE") == MenuCommand::None);
+	CHECK(app_message_command("UPDATER") == MenuCommand::None);
+	CHECK(std::string(menu_command_token(MenuCommand::Update)) == "update");
+}
+
 void test_commands() {
 	{
 		Run run;
@@ -355,6 +396,7 @@ int main() {
 	test_edit_sets_clamp_the_caret_and_reset_the_first_line();
 	test_a_focused_edit_types_at_its_start();
 	test_commands();
+	test_update_routes();
 	test_options_policy();
 	if (failures) {
 		std::printf("menu_state_frame: %d failure(s)\n", failures);

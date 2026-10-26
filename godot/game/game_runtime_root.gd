@@ -76,7 +76,6 @@ func _ready() -> void:
 	if not begin_game():
 		get_tree().quit(0)
 		return
-	RuntimeUpdates.begin_check()
 	if _can_embed_game_view():
 		_start_embedded_game()
 	else:

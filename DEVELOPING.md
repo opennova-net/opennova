@@ -202,10 +202,10 @@ jointops and dfx2 zips; every expansion folder holding a wizard is a product, as
 retail's); OpenNova's game never downloads into a retail folder. `--resource-dir` selects the content directory; otherwise an
 exported runtime uses its executable's directory.
 
-Startup checks do not block an installed game. An available update reveals the main
-menu's UPDATE control, which launches the updater and preserves the launch arguments
-when restarting. Editor Play uses `--no-update` so a temporary project run is never
-an update target. The delivery remains NovaLogic's wizard, command, SFS, NLZ, and TCP
+The game runs no update check of its own: the main menu's and the options screen's
+UPDATE controls (and an APPMSG UPDATE row) start the updater, as the original game's
+do, and it preserves the launch arguments when restarting. Editor Play uses
+`--no-update` so a temporary project run is never an update target. The delivery remains NovaLogic's wizard, command, SFS, NLZ, and TCP
 formats, with their existing checksums; no signature manifest or ownership database
 is part of this first implementation.
 

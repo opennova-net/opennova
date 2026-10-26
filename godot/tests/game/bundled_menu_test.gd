@@ -92,7 +92,7 @@ func test_explicit_authored_data_boots_its_menu() -> void:
 	var driver := menu.get_driver()
 	assert_eq(driver.get_current_screen(), "STARTUP")
 	# The original main menu's buttons by its names (SINGLE_PLAYER, LAN_MULTI_PLAYER,
-	# PLAYER_INFO, OPTIONS, EXIT), plus the update availability control.
+	# PLAYER_INFO, OPTIONS, EXIT), plus the updater button.
 	for widget_name in ["SINGLE_PLAYER", "LAN_MULTI_PLAYER", "PLAYER_INFO", "OPTIONS",
 			"UPDATE", "EXIT"]:
 		assert_true(driver.has_widget(widget_name), "%s is authored" % widget_name)

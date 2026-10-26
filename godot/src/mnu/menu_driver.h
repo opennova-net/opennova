@@ -226,6 +226,8 @@ public:
 	MenuFrame *get_frame() const { return frame_(); }
 	String get_menu_file() const;
 	String get_current_screen() const;
+	// The screen holding the widget `p_id` (engine MenuRuntime::widget_screen_of).
+	String widget_screen_of(int p_id) const;
 
 	// Bind a parsed document and show `target_screen` (empty = the first
 	// screen). Rebuilds every per-document cache; runtime widget state is dropped.

@@ -146,9 +146,8 @@ inline constexpr const char *kVideoPresetButtons[] = {
 };
 
 // The authored Options controls the reimpl does not service yet. Retail
-// serves every one of them (UPDATE -> UI_LaunchUpdateProcess @0x55b0b0; the
-// WDM channel/rate radios -> the Audio_ShutdownAll / Audio_InitSubsystems
-// re-init and PunkBuster, read by the dialog's Accept
+// serves every one of them (the WDM channel/rate radios -> the
+// Audio_ShutdownAll / Audio_InitSubsystems re-init and PunkBuster, read by the dialog's Accept
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
@@ -164,7 +163,7 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // (seed), UI_IngameOptionsDialogEventHandler @0x5552c8..0x555301 / Options_HandleAcceptOrBack
 // @0x55aca7..0x55ace0 (write back); hud/tip_system.h TipOptions].
 inline constexpr const char *kOptionsUnsupportedControls[] = {
-    "DIFFICULTY", "UPDATE",
+    "DIFFICULTY",
     "WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
     "WDM_AUDIO_8", "WDM_RATE",
     "CLIENT_PUNKBUSTER",

@@ -373,6 +373,10 @@ void MenuDriver::set_music_director(MusicDirector *p_director) {
 String MenuDriver::get_menu_file() const { return to_gd(runtime_.menu_file()); }
 String MenuDriver::get_current_screen() const { return to_gd(runtime_.current_screen()); }
 
+String MenuDriver::widget_screen_of(int p_id) const {
+	return to_gd(runtime_.widget_screen_of(p_id));
+}
+
 bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
 		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
 		const String &p_menu_file, const String &p_target_screen) {
@@ -491,7 +495,15 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			break;
 		case Kind::ServiceRequested:
 			// The service verbs' rows: the game serves its LAN and NovaWorld screens through the
-			// companions' controls by name, none through these rows yet.
+			// companions' controls by name; an APPMSG row's message is the game's to answer
+			// (engine menu_commands.h app_message_command).
+			if (p_event.text == "APPMSG") {
+				const opennova::menu::MenuCommand command =
+						opennova::menu::app_message_command(p_event.text2);
+				if (command != opennova::menu::MenuCommand::None)
+					emit_signal("app_command_requested",
+							String(opennova::menu::menu_command_token(command)));
+			}
 			break;
 	}
 }
@@ -1103,6 +1115,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame"), &MenuDriver::get_frame);
 	ClassDB::bind_method(D_METHOD("get_menu_file"), &MenuDriver::get_menu_file);
 	ClassDB::bind_method(D_METHOD("get_current_screen"), &MenuDriver::get_current_screen);
+	ClassDB::bind_method(D_METHOD("widget_screen_of", "id"), &MenuDriver::widget_screen_of);
 	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "override_text",
 								 "menu_file", "target_screen"),
 			&MenuDriver::open_document, DEFVAL(String()));
@@ -1243,6 +1256,9 @@ void MenuDriver::_bind_methods() {
 	// An edit's Enter commit, after the focus released (event 0x7000002).
 	ADD_SIGNAL(MethodInfo("edit_committed", PropertyInfo(Variant::INT, "id"),
 			PropertyInfo(Variant::STRING, "widget_name")));
+	// An APPMSG row's message the game answers, as its command token ("update";
+	// engine menu_commands.h app_message_command).
+	ADD_SIGNAL(MethodInfo("app_command_requested", PropertyInfo(Variant::STRING, "command")));
 	// A press on a table's data row, after the table's own selection write
 	// (the 0x8000001 cell event): the row's new state and the column's cell
 	// value; `double_click` for the double-click form.

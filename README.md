@@ -96,9 +96,9 @@ $GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" -
 ```
 
 In its own folder the packaged runtime plays the game its zip is set up for, and its
-first launch downloads that game through the adjacent `update.exe`. Existing content
-starts normally while an update check runs in the background; **UPDATE** appears
-in the main menu when a newer package is available. Installed content works offline.
+first launch downloads that game through the adjacent `update.exe`. The main menu's
+and the options screen's **UPDATE** start the updater, which finds out itself whether
+a newer package is waiting. Installed content works offline.
 
 To play a retail install, extract the runtime into the retail game's folder and run
 `opennova.exe`: without `/game`, the folder's `UPDATE.WIZ` says which game it holds

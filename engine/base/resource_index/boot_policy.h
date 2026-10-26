@@ -11,7 +11,7 @@
 //   /game <code>  the product: "acidgambit", "jo" or "dfx2". Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
 //                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
-//   --no-update  disable update checks and installation (editor Play and tests).
+//   --no-update  disable the updater's launch (editor Play and tests).
 //   --after-update
 //                 the launch update.exe relaunches after a first-run install: a game
 //                 that still finds no content stops instead of installing again.
