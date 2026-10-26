@@ -198,7 +198,7 @@ MissionInfo mission_info(const bms::File &file) {
 	out.wind_speed = static_cast<int>(header.wind_speed);
 	out.wind_direction = static_cast<int>(header.wind_direction);
 	out.map_zoom = header.map_zoom;
-	out.water_override = static_cast<int16_t>(header.water_override);
+	out.water_override = static_cast<int>(header.water_override); // the unsigned word (MissionInfo carries why)
 	out.fog_override = static_cast<int>(header.fog_override);
 	out.fog_color[0] = header.fog_color[0];
 	out.fog_color[1] = header.fog_color[1];

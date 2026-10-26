@@ -916,6 +916,9 @@ int main() {
 		TEST_EXPECT(set_header_string(hdr, "mission_name", "Grill Test", error));
 		TEST_EXPECT(set_header_int(hdr, "climate", 2, error));
 		TEST_EXPECT(set_header_int(hdr, "minutes_per_day", 1234, error));
+		// The water word is unsigned, 0..65535 [orig: Game_LoadTerrainDuringConnect @ 0x520757..0x520764;
+		// Terrain_Init @ 0x60FCB1..0x60FCBA]: 0x9000 reads back as 0x9000, not -28672.
+		TEST_EXPECT(set_header_int(hdr, "water_override", 0x9000, error));
 		const int coop_bit = 0x1000000; // ATTRIB_COOP
 		set_header_flag(hdr, coop_bit, true);
 		std::string unknown_error;
@@ -929,6 +932,7 @@ int main() {
 		TEST_EXPECT(reread_info.mission_name == "Grill Test");
 		TEST_EXPECT(reread_info.climate == 2);
 		TEST_EXPECT(reread_info.minutes_per_day == 1234);
+		TEST_EXPECT(reread_info.water_override == 0x9000);
 		TEST_EXPECT((reread_info.attrib_flags & coop_bit) != 0);
 	}
 

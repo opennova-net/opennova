@@ -1804,8 +1804,11 @@ BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_o
 	constexpr uint32_t kFogDistanceOverrideEnable = 0x2;
 	constexpr uint32_t kFogColorOverrideEnable = 0x4;
 	if ((attrib_flags & kWaterOverrideEnable) != 0) {
+		// The unsigned word in half units: (word | 0xFFFF0000) << 15 and the sign masked off is
+		// word << 15 in 16.16 [orig: Game_LoadTerrainDuringConnect @ 0x520757..0x520764 (or eax,
+		// 0FFFF0000h; shl eax, 0Fh); Terrain_Init @ 0x60FCB1..0x60FCBA (jns; and eax, 7FFFFFFFh)].
 		overrides.has_water_height = true;
-		overrides.water_height = static_cast<float>(water_override);
+		overrides.water_height = static_cast<float>(water_override & 0xFFFF);
 	}
 	if ((attrib_flags & kFogDistanceOverrideEnable) != 0) {
 		overrides.has_fog_level = true;

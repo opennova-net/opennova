@@ -309,8 +309,13 @@ int main() {
 		// water color/murk arm on any nonzero byte, bytes scale to 0..1.
 		const int fog_rgb[3] = {255, 0, 128};
 		const int water_rgb[3] = {0, 0, 0};
-		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, -7, 900, fog_rgb, water_rgb, 0);
-		if (!expect(gated.has_water_height && near(gated.water_height, -7.0f), "attrib 0x1 arms the water height")) return 1;
+		// The water word is unsigned: 0xFFF9 is 65529 half units, not -7 [orig: Game_LoadTerrainDuringConnect
+		// @ 0x520757..0x520764; Terrain_Init @ 0x60FCB1..0x60FCBA], and only its low 16 bits count.
+		const BmsEnvOverrides gated = bms_env_overrides_from_header(0x1 | 0x4, 0xFFF9, 900, fog_rgb, water_rgb, 0);
+		if (!expect(gated.has_water_height && gated.water_height == 65529.0f, "attrib 0x1 arms the water height, unsigned")) return 1;
+		if (!expect(bms_env_overrides_from_header(0x1, -7, 0, fog_rgb, water_rgb, 0).water_height == 65529.0f,
+		            "a negative int carries its low word"))
+			return 1;
 		if (!expect(!gated.has_fog_level, "no attrib 0x2: the fog distance stays unarmed")) return 1;
 		// The game reads the fog color as the dword over the three bytes: red the third, blue
 		// the first [orig: Game_StartMission @ 0x52538d; BMS_LoadAndValidateHeader @ 0x40e250].

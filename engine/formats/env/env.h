@@ -372,7 +372,7 @@ Vec3 compute_moon_direction(float tod_time);
 
 struct BmsEnvOverrides {
 	bool has_water_height = false; // attrib bit 0x1
-	float water_height = 0.0f;     // file s16, world half-units (engine <<15)
+	float water_height = 0.0f;     // the file's unsigned word, world half-units (engine <<15)
 	bool has_fog_level = false;    // attrib bit 0x2
 	float fog_level = 0.0f;        // world units
 	bool has_fog_color = false;    // attrib bit 0x4
@@ -402,6 +402,7 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 // red the first [orig: Game_LoadTerrainDuringConnect @ 0x520794..0x5207a5]. start_time is
 // local-play state the caller adds. [orig: Game_LoadTerrainDuringConnect @ 0x520710 +
 // Game_StartMission @ 0x525371]
+// `water_override` is the header's unsigned water word (MissionInfo::water_override).
 BmsEnvOverrides bms_env_overrides_from_header(uint32_t attrib_flags, int water_override,
                                               int fog_override, const int fog_color[3],
                                               const int water_color[3], int water_murk);

@@ -1437,6 +1437,13 @@ int main() {
 		rungs = opennova::env::mission_water_rungs(none, 0.0f, false);
 		ok &= expect(!rungs.has_mission_override && rungs.mission_override == 0.0f && !rungs.has_loaded_terrain,
 				"an unflagged header sets no override");
+		// The header's word is unsigned: 0x9000 << 15 in 16.16 is 18432 units, high above the map, where a
+		// signed read put it 14336 below [orig: Game_LoadTerrainDuringConnect @ 0x520757..0x520764; Terrain_Init
+		// @ 0x60FCB1..0x60FCBA].
+		const opennova::env::BmsEnvOverrides high =
+				opennova::env::bms_env_overrides_from_header(0x1, 0x9000, 0, no_colour, no_colour, 0);
+		ok &= expect(opennova::env::mission_water_rung(high, opennova::env::Config(), 0.0f).height == 18432.0f,
+				"a header word of 0x9000 sets the plane at 18432 units");
 		// The live Water node holds the override in world units (C-45): the same rungs.
 		const opennova::env::WaterHeightRungs held = opennova::env::water_height_rungs(12.0f, 10.5f, true);
 		ok &= expect(held.has_mission_override && held.mission_override == 12.0f && held.terrain_height == 10.5f &&
