@@ -101,6 +101,8 @@ func test_explicit_authored_data_boots_its_menu() -> void:
 	driver.process_mouse(Vector2(400, 300), false)
 	assert_not_null(frame.get_cursor_texture(),
 			"MAIN's pointer newarow1.tga decodes (a plain git blob, never an LFS pointer)")
+	assert_eq(driver.get_applied_pointer(), frame.get_cursor_texture(),
+			"the claim's CURSOR is the OS cursor")
 	assert_eq(frame.get_unresolved_asset_count(), 0, "every asset the menu names resolves")
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the synthetic font draws the menu text")
 

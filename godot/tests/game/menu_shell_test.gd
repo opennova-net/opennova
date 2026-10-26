@@ -133,6 +133,27 @@ func _fixture_bytes(source: String) -> PackedByteArray:
 	return xml.to_utf8_buffer()
 
 
+# A screen that loads no CURSOR shows no pointer, the game having hidden the
+# system one for good at boot: the driver makes a transparent image the OS
+# cursor, so the mouse still moves and hits the menu unseen (D-MNU-26).
+func test_a_screen_with_no_cursor_shows_no_pointer() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable in this environment")
+		_cleanup(dir)
+		return
+	var driver: MenuDriver = shell.get_driver()
+	driver.process_mouse(Vector2(400, 300), false)
+	var pointer = driver.get_applied_pointer()
+	assert_true(pointer is Image, "no CURSOR: the no-pointer image is the OS cursor")
+	if pointer is Image:
+		assert_eq(pointer.get_size(), Vector2i(1, 1))
+		assert_eq(pointer.get_pixel(0, 0).a, 0.0, "a transparent pointer")
+	shell.hide_menu()
+	_cleanup(dir)
+
+
 func test_hidden_menu_suspends_shell_frame_processing() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)

@@ -174,7 +174,8 @@ public:
 	virtual bool process_popup_mouse(int index, float x, float y, bool button_down) = 0;
 	virtual bool process_mouse_wheel(float x, float y, int steps) = 0;
 	virtual void set_cursor_state(bool visible, float x, float y) = 0;
-	// The claim's cursor becomes the live cursor / back to the stock cursor.
+	// The claim's cursor becomes the live cursor (none: no pointer, D-MNU-26) /
+	// a screen just configured shows none until its claim applies.
 	virtual void apply_claim_cursor() = 0;
 	virtual void reset_cursor() = 0;
 

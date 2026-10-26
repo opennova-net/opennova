@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -96,8 +97,14 @@ class MenuDriver : public RefCounted {
 	Ref<MnsStyleSheet> style_;
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
+	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
+	// transparent no-pointer image), and that image (D-MNU-26).
+	Ref<Resource> applied_pointer_;
+	Ref<Image> no_pointer_image_;
 
 	MenuFrame *frame_() const;
+	Ref<Resource> no_pointer_();
+	void show_pointer_(const Ref<Resource> &p_pointer);
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
@@ -226,6 +233,9 @@ public:
 	MenuFrame *get_frame() const { return frame_(); }
 	String get_menu_file() const;
 	String get_current_screen() const;
+	// The OS cursor the menu last applied: the claim's CURSOR texture, or with
+	// none the transparent no-pointer image (D-MNU-26); null before any.
+	Ref<Resource> get_applied_pointer() const;
 	// The screen holding the widget `p_id` (engine MenuRuntime::widget_screen_of).
 	String widget_screen_of(int p_id) const;
 

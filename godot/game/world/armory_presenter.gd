@@ -262,6 +262,8 @@ func close() -> void:
 	_driver.close_active_combo_popup()
 	_armory.on_menu_released()
 	_frame.visible = false
+	# The menu's pointer is the menu's alone (MenuFrameSurface.hide_frame).
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 	set_process(false)
 	closed.emit()
 

@@ -466,6 +466,9 @@ func show_menu() -> void:
 func hide_menu() -> void:
 	visible = false
 	set_process(false)
+	# The menu's pointer (its CURSOR, or none) is the menu's alone: the shell's
+	# other surfaces keep the system one (MenuDriver.get_applied_pointer).
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 
 
 ## Process-exit-only release for the retail menu cursor + the compiled menu's

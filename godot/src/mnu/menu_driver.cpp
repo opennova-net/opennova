@@ -269,12 +269,18 @@ public:
 		// The retail cursor rides the claim as the OS custom cursor — the ONE
 		// live cursor (both drawn showed the compiled one trailing by a pump
 		// frame; the frame's emit_cursor stays for surfaces without an OS cursor).
-		if (MenuFrame *f = frame())
-			Input::get_singleton()->set_custom_mouse_cursor(f->get_cursor_texture(),
-					Input::CURSOR_ARROW);
+		// A claim with no CURSOR loaded shows no pointer: the game hides the
+		// system one for good at boot and draws only a screen's CURSOR
+		// (docs/mnu/menu-re.md "No CURSOR, no pointer", D-MNU-26).
+		if (MenuFrame *f = frame()) {
+			const Ref<Texture2D> cursor = f->get_cursor_texture();
+			owner_->show_pointer_(
+					cursor.is_valid() ? Ref<Resource>(cursor) : owner_->no_pointer_());
+		}
 	}
 	void reset_cursor() override {
-		Input::get_singleton()->set_custom_mouse_cursor(Ref<Resource>(), Input::CURSOR_ARROW);
+		// A screen just configured: no pointer until its claim's CURSOR applies.
+		owner_->show_pointer_(owner_->no_pointer_());
 	}
 	int combo_popup_row_at(int index, float x, float y) const override {
 		MenuFrame *f = frame();
@@ -372,6 +378,25 @@ void MenuDriver::set_music_director(MusicDirector *p_director) {
 
 String MenuDriver::get_menu_file() const { return to_gd(runtime_.menu_file()); }
 String MenuDriver::get_current_screen() const { return to_gd(runtime_.current_screen()); }
+
+// The pointer a menu shows where its claim has no CURSOR: a transparent image as the OS
+// custom cursor, so the mouse still moves, presses and hits the menu unseen (D-MNU-26).
+Ref<Resource> MenuDriver::no_pointer_() {
+	if (no_pointer_image_.is_null()) {
+		no_pointer_image_ = Image::create_empty(1, 1, false, Image::FORMAT_RGBA8);
+		no_pointer_image_->fill(Color(0, 0, 0, 0));
+	}
+	return no_pointer_image_;
+}
+
+void MenuDriver::show_pointer_(const Ref<Resource> &p_pointer) {
+	applied_pointer_ = p_pointer;
+	Input::get_singleton()->set_custom_mouse_cursor(p_pointer, Input::CURSOR_ARROW);
+}
+
+Ref<Resource> MenuDriver::get_applied_pointer() const {
+	return applied_pointer_;
+}
 
 String MenuDriver::widget_screen_of(int p_id) const {
 	return to_gd(runtime_.widget_screen_of(p_id));
@@ -1115,6 +1140,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_frame"), &MenuDriver::get_frame);
 	ClassDB::bind_method(D_METHOD("get_menu_file"), &MenuDriver::get_menu_file);
 	ClassDB::bind_method(D_METHOD("get_current_screen"), &MenuDriver::get_current_screen);
+	ClassDB::bind_method(D_METHOD("get_applied_pointer"), &MenuDriver::get_applied_pointer);
 	ClassDB::bind_method(D_METHOD("widget_screen_of", "id"), &MenuDriver::widget_screen_of);
 	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "override_text",
 								 "menu_file", "target_screen"),
