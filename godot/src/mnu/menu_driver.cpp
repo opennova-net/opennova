@@ -392,12 +392,13 @@ Ref<Resource> MenuDriver::no_pointer_() {
 }
 
 void MenuDriver::show_pointer_(const Ref<Resource> &p_pointer) {
-	applied_pointer_ = p_pointer;
+	applied_pointer_id_ =
+			p_pointer.is_valid() ? ObjectID(p_pointer->get_instance_id()) : ObjectID();
 	Input::get_singleton()->set_custom_mouse_cursor(p_pointer, Input::CURSOR_ARROW);
 }
 
 Ref<Resource> MenuDriver::get_applied_pointer() const {
-	return applied_pointer_;
+	return Ref<Resource>(Object::cast_to<Resource>(ObjectDB::get_instance(applied_pointer_id_)));
 }
 
 String MenuDriver::widget_screen_of(int p_id) const {

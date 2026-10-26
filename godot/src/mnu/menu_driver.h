@@ -98,8 +98,9 @@ class MenuDriver : public RefCounted {
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
 	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
-	// transparent no-pointer image), and that image (D-MNU-26).
-	Ref<Resource> applied_pointer_;
+	// transparent no-pointer image), by id: the frame's texture stays the frame's
+	// to release; and that image (D-MNU-26).
+	ObjectID applied_pointer_id_;
 	Ref<Image> no_pointer_image_;
 
 	MenuFrame *frame_() const;
