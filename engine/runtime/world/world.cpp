@@ -1151,9 +1151,14 @@ void World::restore(const Snapshot &s) {
     script.squad_events = s.squad_events;
     script.forced_animation = s.forced_animation;
     diagnostics = s.diagnostics; // retain boot gaps, discard findings from the previous playthrough
-    // The restart's reload builds every table, the statics with them [orig: Mission_LoadBMSFile
-    //  re-run -> Entity_InitAllFromModels @0x40E460 - Entity_BuildAllProximityLists @0x40E5A1].
-    if (collision != nullptr) collision->build_all_tables(*this);
+    // The restart's reload builds every table, the statics with them, over rows its spawns
+    // cleared: a row the build skips has no slice (D-COL-19) [orig: Mission_LoadBMSFile re-run
+    //  -> Entity_SpawnFromBMSRecord - the memset @0x40EA27; Entity_InitAllFromModels @0x40E460 -
+    //  Entity_BuildAllProximityLists @0x40E5A1].
+    if (collision != nullptr) {
+        collision->forget_candidate_slices();
+        collision->build_all_tables(*this);
+    }
     registry.for_each([&](const Entity &vehicle) {
         if (vehicle.primary_occupant.valid())
             vehicles.emit_control_started(vehicle);

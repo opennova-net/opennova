@@ -3326,6 +3326,11 @@ target_link_libraries(emplaced_gun_channel_test PRIVATE opennova_runtime opennov
 target_compile_features(emplaced_gun_channel_test PRIVATE cxx_std_17)
 add_test(NAME emplaced_gun_channel COMMAND emplaced_gun_channel_test)
 
+add_executable(candidate_slice_lifetime_test world/candidate_slice_lifetime_test.cpp)
+target_link_libraries(candidate_slice_lifetime_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(candidate_slice_lifetime_test PRIVATE cxx_std_17)
+add_test(NAME candidate_slice_lifetime COMMAND candidate_slice_lifetime_test)
+
 add_executable(vehicle_motor_test world/vehicle_motor_test.cpp)
 target_link_libraries(vehicle_motor_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(vehicle_motor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

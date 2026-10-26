@@ -117,7 +117,11 @@ void squib_event(World &world, Entity &entity, int phase) {
     clone.death_tick = world.logic_tick;
     // includeInUse 0: a destroyed row is passed over (D-NET-485).
     // [orig: Entity_InitArcMovement - `push 0` @0x449BB3]
-    world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
+    const EntityHandle clone_handle = world.registry.spawn(1, clone, EntityRegistry::Reuse::Fresh);
+    // The copy carries the source's slice words (D-COL-19).
+    if (world.ai.collision != nullptr)
+        if (const Entity *clone_row = world.registry.get(clone_handle))
+            world.ai.collision->inherit_candidate_slice(entity.handle, *clone_row);
 }
 void tick_squib(World &world, Entity &entity) {
     if (!entity.death_tick || entity.squib.interval <= 0) return;

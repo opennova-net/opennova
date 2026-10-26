@@ -265,11 +265,11 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     devtools::ProfileLap lap(profile);
-    auto it = candidates_.find(source.packed);
+    const CandidateSlice *found = find_slice(source);
     dbg_last_contact = EntityHandle{};
     dbg_last_contact_item = 0;
-    if (it != candidates_.end()) {
-        const CandidateSlice slice = it->second;
+    if (found != nullptr) {
+        const CandidateSlice slice = *found;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         for (int pass = 0; pass < 2; ++pass) {

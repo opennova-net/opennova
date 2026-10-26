@@ -153,9 +153,35 @@ int32_t CollisionWorld::entity_husk_model_id(const Entity &e) const {
     return it == instances_.end() ? -1 : it->second.held_husk(e);
 }
 
+// A slot's +0x1BC / +0x1C0 belong to its record: a spawn into the slot clears them with
+// the rest of it, and a destroy with it, so a later lifetime reads no slice until a build
+// gives it one, between two builds as at one (D-COL-19).
+// [orig: Entity_SpawnFromBMSRecord - the 0x2B4-byte memset @0x40EA27; NapiNPClientMsg_0x00D
+//  @0x432D23; Entity_Destroy @0x43E810 - @0x43EA70]
+const CollisionWorld::CandidateSlice *CollisionWorld::find_slice(EntityHandle h) const {
+    const auto it = candidates_.find(h.packed);
+    if (it == candidates_.end()) return nullptr;
+    if (it->second.lifetime != 0) {
+        const Entity *row = slice_registry_ != nullptr ? slice_registry_->get(h) : nullptr;
+        if (row == nullptr || row->registry_spawn_id != it->second.lifetime) return nullptr;
+    }
+    return &it->second;
+}
+
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
-    auto it = candidates_.find(h.packed);
-    return it == candidates_.end() ? 0 : it->second.count;
+    const CandidateSlice *slice = find_slice(h);
+    return slice == nullptr ? 0 : slice->count;
+}
+
+void CollisionWorld::inherit_candidate_slice(EntityHandle source, const Entity &clone) {
+    const CandidateSlice *slice = find_slice(source);
+    if (slice == nullptr) {
+        candidates_.erase(clone.handle.packed);
+        return;
+    }
+    CandidateSlice copy = *slice;
+    copy.lifetime = clone.registry_spawn_id;
+    candidates_[clone.handle.packed] = copy;
 }
 
 bool CollisionWorld::dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const {
@@ -168,13 +194,13 @@ bool CollisionWorld::dynamic_table_radius_q16(EntityHandle h, int32_t &radius_ou
 }
 
 const EntityHandle *CollisionWorld::candidate_slice(EntityHandle h, int32_t &count_out) const {
-    auto it = candidates_.find(h.packed);
-    if (it == candidates_.end() || it->second.count <= 0) {
+    const CandidateSlice *slice = find_slice(h);
+    if (slice == nullptr || slice->count <= 0) {
         count_out = 0;
         return nullptr;
     }
-    count_out = it->second.count;
-    return arena_.data() + it->second.start;
+    count_out = slice->count;
+    return arena_.data() + slice->start;
 }
 
 const EntityHandle *CollisionWorld::wire_candidate_slice(
@@ -1011,6 +1037,7 @@ void CollisionWorld::build_candidate_slices(World &world) {
     //  @0x4B8ECA, the fill @0x4B8ED0]
     slice_refresh_counter_ = 0;
     candidate_slices_built_ = true;
+    slice_registry_ = &world.registry;
     if (arena_.size() < static_cast<size_t>(kCandidateArenaCap))
         arena_.resize(static_cast<size_t>(kCandidateArenaCap));
     arena_used_ = 0;

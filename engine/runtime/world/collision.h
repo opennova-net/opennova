@@ -54,6 +54,7 @@ struct TerrainHeightField;
 namespace opennova::world {
 
 class World;
+class EntityRegistry;
 
 // Static proximity coordinates are signed whole mission units stored in u16
 // table words. Decode explicitly instead of relying on signed left-shift wrap.
@@ -1937,8 +1938,20 @@ public:
     // The entity's proximity slice [orig: entity+444/448 — the g_ProxCandidateArena
     // window Entity_BuildProximityListsFromPools fills @ 0x4b8eb0]. Pointer into
     // the arena, valid until the next 17th-tick rebuild; null when the entity has
-    // no slice (retail's BSS-zero start: the first 16 ticks scan nothing).
+    // no slice (retail's BSS-zero start: the first 16 ticks scan nothing; a row
+    // spawned into the slot since the slice was built, D-COL-19).
     const EntityHandle *candidate_slice(EntityHandle h, int32_t &count_out) const;
+    // A clone's slice words: the clone copies its template's record, the slice's
+    // start and count with it, so it walks the template's slice until a build gives
+    // it its own (none when the template has none).
+    // [orig: Entity_CloneFromTemplateByType @0x4398A0 - the 0x2B4-byte copies
+    //  @0x4398DC / @0x43997D; Entity_InitArcMovement - the 0x310-byte copy @0x449BCC]
+    void inherit_candidate_slice(EntityHandle source, const Entity &clone);
+    // Every registry slice dropped: a restart's reload re-spawns every row through
+    // the spawn's memset, so a row the next build skips has none.
+    // [orig: Mission_LoadBMSFile -> Entity_SpawnFromBMSRecord - the 0x2B4-byte memset
+    //  @0x40EA27]
+    void forget_candidate_slices() { candidates_.clear(); }
     // Whether the pool-1 dynamic table holds a row for `h`, and that row's radius
     // [orig: g_DynProxRadius, the copy @0x4B9389].
     bool dynamic_table_radius_q16(EntityHandle h, int32_t &radius_out) const;
@@ -2137,6 +2150,9 @@ private:
         // respawn into the slot.
         uint64_t lifetime = 0;
     };
+    // The slot's slice as its current lifetime reads it (null for none). The
+    // replica resolve's staged slice carries no lifetime and reads as staged.
+    const CandidateSlice *find_slice(EntityHandle h) const;
     struct StableLosCandidate {
         EntityHandle h;
         int32_t pos[3] = {};
@@ -2305,6 +2321,9 @@ private:
     std::vector<EntityHandle> arena_;
     int32_t arena_used_ = 0;
     std::unordered_map<uint16_t, CandidateSlice> candidates_;
+    // The registry the slices were last built over: a slice belongs to the slot's
+    // lifetime it was built for (find_slice).
+    const EntityRegistry *slice_registry_ = nullptr;
     // A distinct identity domain for decoded rows. Using a second arena/map is
     // structural: wire H=0 and a registry L=0 are both valid simultaneously.
     std::vector<EntityHandle> wire_arena_;

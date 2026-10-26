@@ -49,9 +49,8 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
     ray.refresh();
 
     // Candidate narrow phase. [orig: the entity loop @ 0x4138c1-0x413abc]
-    auto it = candidates_.find(source.packed);
-    if (it != candidates_.end()) {
-        const CandidateSlice slice = it->second;
+    if (const CandidateSlice *found = find_slice(source)) {
+        const CandidateSlice slice = *found;
         CollisionTargetView view;
         std::vector<CollisionMatrix> mats;
         for (int32_t i = 0; i < slice.count; ++i) {
@@ -684,9 +683,8 @@ bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
     const int32_t clip_radius = height_offset; // [orig: the arg-5 reuse @ 0x53b167]
     const int32_t broad_r = clip_radius > 0 ? clip_radius : 0;
 
-    auto it = candidates_.find(listener.packed);
-    if (it != candidates_.end()) {
-        const CandidateSlice slice = it->second;
+    if (const CandidateSlice *found = find_slice(listener)) {
+        const CandidateSlice slice = *found;
         for (int32_t i = 0; i < slice.count; ++i) {
             const EntityHandle ch = arena_[slice.start + i];
 			if (ch == listener)
