@@ -938,7 +938,19 @@ void test_deploy_keys() {
 	CHECK(hud_deploy_key_pick(in) == kHudDeployKeyAutoTeam);
 }
 
+// Each row's token is its static catalog row's config token (controls::catalog).
+static void test_row_tokens_are_the_catalog_rows() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowHudDetail), "huddetail") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowPlayerList), "playerlist_alt") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowLockGame), "lockgame") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(-1), "") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(kHudToggleRowCount), "") == 0);
+	for (int row = 0; row < kHudToggleRowCount; ++row)
+		CHECK(hud_toggle_row_token(row)[0] != '\0');
+}
+
 int main() {
+	test_row_tokens_are_the_catalog_rows();
 	test_edge_latch();
 	test_event_rows_dispatch_once_per_event();
 	test_huddetail_and_hudcolor_cycles();
