@@ -208,12 +208,18 @@ inline constexpr int32_t kWorldMissionExitRestart = 4;
 // image (white) at that alpha; a solid fill draws its pixels' colour, whose
 // own alpha byte multiplies the node's (the epilog's two fades pass
 // 0x00FFFFFF). A TextFade line is the half-bright fold of the node's alpha
-// over its colour; a counter the half-bright fold of white.
+// over its colour, the alpha kept (the wrapper's fold, so the line fades); a
+// counter the half-bright fold of white, opaque.
 // [orig: CCineEventImageFade_Draw @0x5710B0 (8355711 - (alpha * -255) << 24) and the fill
 //  pixels CinematicFadeEvent_LoadTexture @0x570F1B; CCineEventTextFade_Draw @0x5730A3 /
 //  @0x57314C -> HUD_DrawWrappedText @0x580CBE; CineEventEpilogCounter_Draw
 //  @0x5734DE (color -1)]
 uint32_t cine_event_draw_argb(const CineEvent &e);
+
+// A TextFade's colour as its draw hands the wrapper: the node's alpha byte over its colour
+// [orig: CCineEventTextFade_Draw - the alpha * 255 ftol'd @0x57309d..0x5730a9, shl 18h @0x5730b4,
+//  + the +0xC0 colour @0x5730d9 / @0x57314c].
+uint32_t cine_text_fade_argb(const CineEvent &e);
 
 // The cinematic bars' height over a width x height viewport: the leftover of
 // the 16:9 band, halved, one bar at the top and one at the bottom (none when

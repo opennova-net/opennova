@@ -228,7 +228,6 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 //  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
 inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
 inline constexpr const char *kSplashContinueFont = "Impac22b.fnt";
-inline constexpr int kSplashContinueFontScaleBaseW = 800;
 inline constexpr int kSplashContinueX = 512;
 inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;

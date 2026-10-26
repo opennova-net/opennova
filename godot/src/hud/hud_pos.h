@@ -24,6 +24,7 @@
 
 namespace godot {
 
+class CineEventRecord;
 class FntResource;
 class ResourceRoot;
 class RtxtStringFile;
@@ -85,7 +86,6 @@ public:
 		SPLASH_BLINK_MASK_MS = 0x200,
 		SPLASH_ARROW_SCALE_BASE_W = 800,
 		SPLASH_ARROW_SCALE_BASE_H = 600,
-		SPLASH_FONT_SCALE_BASE_W = 800,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -208,6 +208,14 @@ public:
 	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
 	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
 			const String &p_text, const Vector2i &p_size, bool p_phase_on);
+	// The epilog cine's text node through the large label slot's glyph runs (engine
+	// hud/cine_text.h cine_event_text_run carries the witness): a TextFade's lines over
+	// `p_text`, an EpilogCounter's row with `p_text` its label, over a `p_size` screen, a
+	// triangle array per page run into `p_item` (none for a null item) over `p_pages`. Returns
+	// each run as drawn ({page, uvs, colors}).
+	static Array draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
+			const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
+			const Vector2i &p_size);
 	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
 	static Array font_page_textures(const Ref<FntResource> &p_font);
 	// The canvas_item shader an item whose glyph runs draw through their page's material carries.

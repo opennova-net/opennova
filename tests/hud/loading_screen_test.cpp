@@ -4,6 +4,8 @@
 
 #include <runtime/hud/hud_math.h> // loading_bar_fill_span
 #include <runtime/hud/loading_screen.h>
+#include <runtime/hud/cine_text.h>
+#include <runtime/world/epilog_cine.h>
 
 #include "common/test_font.h"
 
@@ -167,6 +169,76 @@ int main() {
 		const GameFontRun off = splash_continue_run(font, "GO", 1280, 720, false);
 		check(!off.quads.empty() && off.quads[0].color == 0xFF7F4040u, "the red phase halved");
 		check(splash_continue_run(font, "GO", 0, 720, true).quads.empty(), "no display, no line");
+	}
+
+	// The epilog cine's text through the large slot's glyph runs (D-LOADSCR-2's epilog screen): a
+	// TextFade's box over the viewport, its lines wrapped and centred on the box's middle in the
+	// node's colour halved keeping its alpha, so the line fades; a counter's label left and value
+	// right on its row, opaque half-white; the count-up column only while it runs.
+	// [orig: CCineEventTextFade_Draw @0x573020 -> HUD_DrawWrappedText @0x580C00 (mode 4);
+	//  CineEventEpilogCounter_Draw @0x573440]
+	{
+		const opennova::fnt::fnt_font_t uniform = test_font::uniform_test_font();
+		GameFont font;
+		font.set_font(&uniform);
+		opennova::world::CineEvent line;
+		line.kind = opennova::world::CineEventKind::TextFade;
+		line.x = 0;
+		line.y = 120;
+		line.box_width = 1024;
+		line.box_height = 100;
+		line.alpha = 0.5f;
+		line.color_mask = 0xFFFFFFu;
+		check(opennova::world::cine_text_fade_argb(line) == 0x7FFFFFFFu,
+		      "the alpha byte over the colour");
+		check(opennova::world::cine_event_draw_argb(line) == 0x7F7F7F7Fu, "halved, the alpha kept");
+		const CineViewport screen{0, 0, 1024, 768};
+		const GameFontRun run = cine_event_text_run(line, "GO", font, 1.0f, screen);
+		check(run.quads.size() == 2, "the line's two glyphs");
+		if (run.quads.size() == 2) {
+			const float left = run.quads[0].x_top_left + 0.5f;
+			const float right = run.quads[1].x_top_right + 0.5f;
+			check(run.quads[0].y_top == 120.0f - 0.5f, "from the box's top");
+			check((left + right) * 0.5f > 510.0f && (left + right) * 0.5f < 514.0f,
+			      "centred on the box's middle, x 0 + (1024 >> 1)");
+			check(run.quads[0].color == 0x7F7F7F7Fu, "the faded colour");
+		}
+		// Over a 1280 x 720 viewport the box lands at y = 120 / 768 * 720, truncated.
+		const CineViewport hd{0, 0, 1280, 720};
+		const GameFontRun wide = cine_event_text_run(line, "GO", font, 1.0f, hd);
+		check(!wide.quads.empty() && wide.quads[0].y_top == 112.0f - 0.5f,
+		      "the box's top truncated");
+		// A box too narrow for both words wraps them onto two lines, one line height apart.
+		line.box_width = 30;
+		const GameFontRun wrapped = cine_event_text_run(line, "GO ON", font, 1.0f, screen);
+		check(wrapped.quads.size() == 4 && wrapped.quads[2].y_top > wrapped.quads[0].y_top,
+		      "two lines");
+
+		opennova::world::CineEvent counter;
+		counter.kind = opennova::world::CineEventKind::EpilogCounter;
+		counter.label_x = 200;
+		counter.value_x = 800;
+		counter.count_x = 900;
+		counter.row_y = 300;
+		counter.value = 3;
+		counter.max = 5;
+		const GameFontRun row = cine_event_text_run(counter, "AB", font, 1.0f, hd);
+		// "AB" plus "3/5", no count-up column (its target and rate both -1).
+		check(row.quads.size() == 5, "the label and the value, no count");
+		if (row.quads.size() == 5) {
+			check(row.quads[0].x_top_left == 250.0f - 0.5f, "the label at 200 / 1024 * 1280");
+			check(row.quads[0].y_top == 281.0f - 0.5f, "the row at 300 / 768 * 720, truncated");
+			check(row.quads[4].x_top_right + 0.5f < 1001.0f && row.quads[4].x_top_right > 990.0f,
+			      "the value ends at 800 / 1024 * 1280");
+			check(row.quads[0].color == 0xFF7F7F7Fu && row.quads[4].color == 0xFF7F7F7Fu,
+			      "opaque half-white");
+		}
+		check(cine_epilog_count_text(-1, -1, 7).empty() && cine_epilog_count_text(10, -1, 7) == "7",
+		      "the count-up column runs on a target or a rate");
+		opennova::world::CineEvent image;
+		image.kind = opennova::world::CineEventKind::ImageFade;
+		check(cine_event_text_run(image, "X", font, 1.0f, screen).quads.empty(),
+		      "an image draws no text");
 	}
 
 	// The progress bar's rects: at the design size the placement is the

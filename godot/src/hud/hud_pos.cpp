@@ -14,6 +14,7 @@
 
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "simulation/epilog_cine_record.h"
 #include "simulation/hud_view_records.h"
 #include "util/data_format.h"
 
@@ -23,6 +24,7 @@
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/scope_circle_mask.h>
 #include <runtime/hud/sight_overlay.h>
+#include <runtime/hud/cine_text.h>
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/view_effects.h>
 #include <runtime/renderer/aspect_ratio.h>
@@ -59,8 +61,6 @@ static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_W ==
 		opennova::hud::kSplashArrowScaleBaseW);
 static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_H ==
 		opennova::hud::kSplashArrowScaleBaseH);
-static_assert(godot::HudPos::SPLASH_FONT_SCALE_BASE_W ==
-		opennova::hud::kSplashContinueFontScaleBaseW);
 static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
 		opennova::hud::kBinocularDigitStep);
 static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
@@ -73,6 +73,47 @@ double godot::HudPos::percent_to_alpha() {
 using namespace godot;
 
 namespace {
+
+// The line in the game's code page, a character it has no byte for drawn as '?'.
+std::string code_page_text(const String &p_text) {
+	std::string text;
+	for (int64_t i = 0; i < p_text.length(); ++i) {
+		std::uint8_t byte = '?';
+		opennova::cp1252_encode_codepoint(static_cast<char32_t>(p_text[i]), byte);
+		text.push_back(static_cast<char>(byte));
+	}
+	return text;
+}
+
+// One triangle array per page run of `p_run`, through the page's material: its MODULATE2X
+// stage rides the glyph shader's UV.y flag, doubling the drawer's halved colour
+// (hud::kFontPageMaterialWord). Returns each run as drawn.
+Array draw_glyph_runs(CanvasItem *p_item, const opennova::hud::GameFontRun &p_run,
+		const Array &p_pages) {
+	Array out;
+	const Vector2 uv_flag(0.0f, font_page_runs_modulate2x() ? kGlyphCanvasUvFlag : 0.0f);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (size_t first = 0; first < p_run.quads.size();) {
+		const uint32_t page = p_run.quads[first].page;
+		size_t end = first + 1;
+		while (end < p_run.quads.size() && p_run.quads[end].page == page) ++end;
+		GlyphRunArrays arrays;
+		append_glyph_quads(p_run.quads, first, end, uv_flag, arrays);
+		Ref<Texture2D> texture;
+		if (page < static_cast<uint32_t>(p_pages.size())) texture = p_pages[page];
+		if (p_item != nullptr && texture.is_valid())
+			rs->canvas_item_add_triangle_array(p_item->get_canvas_item(), arrays.indices,
+					arrays.points, arrays.colors, arrays.uvs, PackedInt32Array(),
+					PackedFloat32Array(), texture->get_rid());
+		Dictionary row;
+		row["page"] = static_cast<int64_t>(page);
+		row["uvs"] = arrays.uvs;
+		row["colors"] = arrays.colors;
+		out.push_back(row);
+		first = end;
+	}
+	return out;
+}
 
 } // namespace
 
@@ -125,6 +166,9 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
+	ClassDB::bind_static_method("HudPos",
+			D_METHOD("draw_cine_text", "item", "font", "pages", "event", "text", "size"),
+			&HudPos::draw_cine_text);
 	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader_code"), &HudPos::glyph_shader_code);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
@@ -163,7 +207,6 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(SPLASH_BLINK_MASK_MS);
 	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_W);
 	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_H);
-	BIND_CONSTANT(SPLASH_FONT_SCALE_BASE_W);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_MASK);
@@ -579,40 +622,27 @@ Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p
 	Array out;
 	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
 	if (parsed == nullptr) return out;
-	// The line in the game's code page, a character it has no byte for drawn as '?'.
-	std::string text;
-	for (int64_t i = 0; i < p_text.length(); ++i) {
-		std::uint8_t byte = '?';
-		opennova::cp1252_encode_codepoint(static_cast<char32_t>(p_text[i]), byte);
-		text.push_back(static_cast<char>(byte));
-	}
+	const std::string text = code_page_text(p_text);
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
 	const opennova::hud::GameFontRun run =
 			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on);
-	// One triangle array per page run, through the page's material: its MODULATE2X stage rides the glyph
-	// shader's UV.y flag, doubling the drawer's halved colour (hud::kFontPageMaterialWord).
-	const Vector2 uv_flag(0.0f, font_page_runs_modulate2x() ? kGlyphCanvasUvFlag : 0.0f);
-	RenderingServer *rs = RenderingServer::get_singleton();
-	for (size_t first = 0; first < run.quads.size();) {
-		const uint32_t page = run.quads[first].page;
-		size_t end = first + 1;
-		while (end < run.quads.size() && run.quads[end].page == page) ++end;
-		GlyphRunArrays arrays;
-		append_glyph_quads(run.quads, first, end, uv_flag, arrays);
-		Ref<Texture2D> texture;
-		if (page < static_cast<uint32_t>(p_pages.size())) texture = p_pages[page];
-		if (p_item != nullptr && texture.is_valid())
-			rs->canvas_item_add_triangle_array(p_item->get_canvas_item(), arrays.indices, arrays.points, arrays.colors,
-					arrays.uvs, PackedInt32Array(), PackedFloat32Array(), texture->get_rid());
-		Dictionary row;
-		row["page"] = static_cast<int64_t>(page);
-		row["uvs"] = arrays.uvs;
-		row["colors"] = arrays.colors;
-		out.push_back(row);
-		first = end;
-	}
-	return out;
+	return draw_glyph_runs(p_item, run, p_pages);
+}
+
+Array HudPos::draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
+		const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
+		const Vector2i &p_size) {
+	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
+	if (parsed == nullptr || p_event.is_null() || p_size.x <= 0 || p_size.y <= 0) return Array();
+	opennova::hud::GameFont font;
+	font.set_font(parsed);
+	// The large label slot at its scale for this width; the viewport the whole screen.
+	const float scale = opennova::hud::hud_label_font_choice(p_size.x).large_scale;
+	const opennova::hud::CineViewport view{0, 0, p_size.x, p_size.y};
+	const opennova::hud::GameFontRun run = opennova::hud::cine_event_text_run(p_event->value(),
+			code_page_text(p_text), font, scale, view);
+	return draw_glyph_runs(p_item, run, p_pages);
 }
 
 Array HudPos::font_page_textures(const Ref<FntResource> &p_font) {
