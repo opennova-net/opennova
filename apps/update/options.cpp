@@ -1,11 +1,14 @@
 #include "options.h"
 
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <limits>
+#include <thread>
 
 namespace opennova::updater {
 namespace {
@@ -155,6 +158,25 @@ bool read_revision_arguments(const std::vector<std::string> &args, RevisionArgum
 		relaunch.insert(relaunch.begin(), "0");
 	}
 	out = std::move(read);
+	return true;
+}
+
+bool install_staged_updater(const std::filesystem::path &runtime_dir, bool wait_first, std::string &error) {
+	const std::filesystem::path staged = io::os_path(runtime_dir / "update.new");
+	std::error_code ec;
+	if (!std::filesystem::exists(staged, ec)) return true;
+	if (wait_first) std::this_thread::sleep_for(std::chrono::seconds(2));
+	const std::filesystem::path image = io::os_path(runtime_dir / "update.exe");
+	if (!std::filesystem::remove(image, ec)) {
+		// DeleteFileA fails on a missing file too (ERROR_FILE_NOT_FOUND).
+		const int code = ec ? ec.value() : int(std::errc::no_such_file_or_directory);
+		error = "ERROR: Could not delete 'Update.exe'. (" + std::to_string(code) + ")";
+		return false;
+	}
+	if (!io::rename_with_retry(staged, image, ec)) {
+		error = "ERROR: Could not move 'Update.new' to 'Update.exe'. (" + std::to_string(ec.value()) + ")";
+		return false;
+	}
 	return true;
 }
 } // namespace opennova::updater

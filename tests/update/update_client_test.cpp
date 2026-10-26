@@ -347,6 +347,36 @@ int test_revision_handoff(const test_temp::TempDir &temp) {
 	return 0;
 }
 
+// revupdat's replacement of update.exe [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE)]: a
+// staged update.new takes update.exe's place; with none there is nothing to do; an update.exe that
+// cannot be deleted fails with retail's text (@0x4070d0), update.new kept for the next run.
+int test_staged_updater_install(const test_temp::TempDir &temp) {
+	std::string error;
+	const fs::path dir = io::os_path(temp.file("staged updater"));
+	std::error_code ec;
+	fs::create_directories(dir, ec);
+	TEST_EXPECT(updater::install_staged_updater(dir, false, error)); // nothing staged
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(dir / "update.exe"), "the old image"));
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(dir / "update.new"), "the new image"));
+	TEST_EXPECT(updater::install_staged_updater(dir, false, error));
+	std::string text;
+	TEST_EXPECT(io::read_file_text(io::utf8_path(dir / "update.exe"), text, error) && text == "the new image");
+	TEST_EXPECT(!fs::exists(dir / "update.new"));
+	// An update.exe that cannot be replaced (here a folder holding a file).
+	const fs::path blocked = io::os_path(temp.file("staged updater blocked"));
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(blocked / "update.exe" / "inside.txt"), "x"));
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(blocked / "update.new"), "the new image"));
+	error.clear();
+	TEST_EXPECT(!updater::install_staged_updater(blocked, false, error));
+	const std::string deleted = "ERROR: Could not delete 'Update.exe'. (";
+	TEST_EXPECT(error.compare(0, deleted.size(), deleted) == 0 && error.back() == ')');
+	TEST_EXPECT(fs::exists(blocked / "update.new"));
+	// The relaunch's text and the boxes' caption, retail's (@0x407054, @0x40703c (REVUPDAT.EXE)).
+	TEST_EXPECT(std::string(updater::kRevupdatRelaunchFailed) == "ERROR: Could not re-launch 'Update.exe'.");
+	TEST_EXPECT(std::string(updater::kRevupdatTitle) == "Update Revision Control");
+	return 0;
+}
+
 int test_options_and_discovery(const test_temp::TempDir &temp) {
 	updater::Options options;
 	std::string error;
@@ -449,6 +479,7 @@ int main() {
 	if (int rc = test_failures(temp)) return rc;
 	if (int rc = test_revision(temp)) return rc;
 	if (int rc = test_revision_handoff(temp)) return rc;
+	if (int rc = test_staged_updater_install(temp)) return rc;
 	if (int rc = test_options_and_discovery(temp)) return rc;
 	std::puts("update_client: ok");
 	return 0;

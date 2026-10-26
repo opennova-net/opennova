@@ -57,4 +57,24 @@ struct RevisionArguments {
 bool read_revision_arguments(const std::vector<std::string> &args, RevisionArguments &out,
 		std::string &error);
 
+// revupdat's step once the updater that started it has exited: a staged update.new put in
+// update.exe's place as retail's REVUPDAT does, update.exe deleted and then update.new moved over
+// it, each step's failure with its own text and the OS error code; nothing to do without an
+// update.new. With `wait_first` (no updater process was awaited: a stock UPDATE.EXE started this)
+// it first sleeps retail's 2 s, which retail sleeps only when there is an update.new. A failure
+// stops here, keeping update.new for the next run, where retail's box does not stop it: it goes
+// on and deletes update.new, then relaunches update.exe, the old image after a failed delete
+// (which fetches and hands over again), none after a failed move (PERMANENT, ours stops).
+// [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE): update.new's test @0x40136f, Sleep(2000)
+//  @0x40137e, DeleteFileA @0x40138f and its text @0x4070d0, MoveFileA @0x4013c4 and its text
+//  @0x407094; RevUpdate_FatalError @ 0x401140 (REVUPDAT.EXE) shows its box and returns]
+bool install_staged_updater(const std::filesystem::path &runtime_dir, bool wait_first, std::string &error);
+
+// The box revupdat shows when update.exe does not start again, and its caption, both retail's.
+// [orig: RevUpdate_WndProc @ 0x401290 (REVUPDAT.EXE), the relaunch @0x401419 and its text @0x407054;
+//  RevUpdate_FatalError @ 0x401140 (REVUPDAT.EXE): MessageBoxA(.., kRevUpdateTitle, 0x40000 = MB_TOPMOST)
+//  @0x401148..0x401159]
+inline constexpr const char *kRevupdatRelaunchFailed = "ERROR: Could not re-launch 'Update.exe'.";
+inline constexpr const char *kRevupdatTitle = "Update Revision Control";
+
 } // namespace opennova::updater
