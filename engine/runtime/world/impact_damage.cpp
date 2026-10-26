@@ -44,9 +44,9 @@ void apply_armor_deceleration(FixedVec3 &velocity, const AmmoTableEntry &ammo,
         return;
     }
     const double normalize = 65536.0 / length;
-    velocity.x = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.x * normalize));
-    velocity.y = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.y * normalize));
-    velocity.z = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.z * normalize));
+    velocity.x = io::mul_q16_rhu(new_speed, static_cast<int32_t>(velocity.x * normalize));
+    velocity.y = io::mul_q16_rhu(new_speed, static_cast<int32_t>(velocity.y * normalize));
+    velocity.z = io::mul_q16_rhu(new_speed, static_cast<int32_t>(velocity.z * normalize));
 }
 
 } // namespace
@@ -62,10 +62,10 @@ bool impact_is_critical(const Entity &target, int32_t hit_zone,
 bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
     if (cost == 0) return true;
     const int32_t squared = signed_from_u32(
-            uint32_t(retail_q16_mul_rhu(velocity.x, velocity.x)) +
-            uint32_t(retail_q16_mul_rhu(velocity.y, velocity.y)) +
-            uint32_t(retail_q16_mul_rhu(velocity.z, velocity.z)));
-    const int32_t energy = retail_q16_mul_rhu(squared, mass);
+            uint32_t(io::mul_q16_rhu(velocity.x, velocity.x)) +
+            uint32_t(io::mul_q16_rhu(velocity.y, velocity.y)) +
+            uint32_t(io::mul_q16_rhu(velocity.z, velocity.z)));
+    const int32_t energy = io::mul_q16_rhu(squared, mass);
     if (energy <= cost) return false; // [orig: signed `jle` @0x4E9116]
     const int32_t remaining_squared = static_cast<int32_t>(
             (int64_t(energy - cost) * io::kFp16OneInt) / mass);
@@ -74,9 +74,9 @@ bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
     if (speed == 0) return false; // [orig: `test ecx, ecx; jz` @0x4E916C]
     const int32_t ratio = static_cast<int32_t>(
             (int64_t(remaining_speed) * io::kFp16OneInt) / speed);
-    velocity.x = retail_q16_mul_rhu(velocity.x, ratio);
-    velocity.y = retail_q16_mul_rhu(velocity.y, ratio);
-    velocity.z = retail_q16_mul_rhu(velocity.z, ratio);
+    velocity.x = io::mul_q16_rhu(velocity.x, ratio);
+    velocity.y = io::mul_q16_rhu(velocity.y, ratio);
+    velocity.z = io::mul_q16_rhu(velocity.z, ratio);
     return true;
 }
 

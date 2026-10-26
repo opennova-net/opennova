@@ -79,7 +79,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 	// The inclusive reconciliation boundary follows the strict input boundary.
 	// [orig: Entity_UpdateAircraftPhysics @0x490310, collective/flare/steer block]
 	if (ground != INT32_MIN) {
-		const bool near = io::bam_sub(pz, ground) < bam_mul_wrap(veh.bound_radius.q16, 2);
+		const bool near = io::bam_sub(pz, ground) < io::bam_mul(veh.bound_radius.q16, 2);
 		const auto collective = [&](int32_t delta) {
 			if (near)
 				m.net_climb = io::bam_add(m.net_climb, delta);
@@ -104,7 +104,7 @@ static void stage_air_vehicle_input(World &world, Entity &veh, Entity &occ,
 			m.net_alt_target = ground;
 		}
 		world.vehicles.tick_flare_input(veh);
-		if (io::bam_sub(pz, ground) <= bam_mul_wrap(veh.bound_radius.q16, 2))
+		if (io::bam_sub(pz, ground) <= io::bam_mul(veh.bound_radius.q16, 2))
 			m.net_alt_target = io::bam_add(ground, m.net_climb);
 	}
 	if (m.net_climb != 0) {
@@ -325,7 +325,7 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 					(dir & 1) != 0) {
 				merge_occupant_free_look(world, *claimant);
 				if ((veh.flags & kEntityFlagInAir) != 0)
-					m.yaw_bam = io::bam_add(m.yaw_bam, bam_mul_wrap(traits.weathervane,
+					m.yaw_bam = io::bam_add(m.yaw_bam, io::bam_mul(traits.weathervane,
 							dir == 1 || dir == 5 ? kAnalogSteerScale : -kAnalogSteerScale));
 			}
 		}
@@ -557,16 +557,16 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
                    static_cast<int32_t>((static_cast<int64_t>(a_lat) * sy) >> 22);
         m.vel_y += static_cast<int32_t>((static_cast<int64_t>(a_fwd) * sy) >> 22) -
                    static_cast<int32_t>((static_cast<int64_t>(a_lat) * cy) >> 22);
-		m.vel_x = (io::bam_add(bam_mul_wrap(1019, m.vel_x), 512) >> 10);
-		m.vel_y = (io::bam_add(bam_mul_wrap(1019, m.vel_y), 512) >> 10);
+		m.vel_x = (io::bam_add(io::bam_mul(1019, m.vel_x), 512) >> 10);
+		m.vel_y = (io::bam_add(io::bam_mul(1019, m.vel_y), 512) >> 10);
 		// Occupied aircraft whose pilot lacks Flags 0x100 receive another
 		// planar drag pass. IMUL/ADD are low-dword operations, then SAR10.
 		// [orig: Entity_UpdateAircraftPhysics @0x49217E..0x4921C7]
 		const Entity *drag_pilot = world.registry.get(veh.primary_occupant);
 		if (drag_pilot != nullptr &&
 				((drag_pilot->flags | drag_pilot->engine_flags) & 0x100u) == 0) {
-			m.vel_x = io::bam_add(bam_mul_wrap(1019, m.vel_x), 512) >> 10;
-			m.vel_y = io::bam_add(bam_mul_wrap(1019, m.vel_y), 512) >> 10;
+			m.vel_x = io::bam_add(io::bam_mul(1019, m.vel_x), 512) >> 10;
+			m.vel_y = io::bam_add(io::bam_mul(1019, m.vel_y), 512) >> 10;
 		}
 		m.slide_z = static_cast<int32_t>((240LL * m.slide_z + 128) >> 8);
 		// Attitude self-righting + rate damping [orig: @0x4921CD..0x492246].
@@ -587,13 +587,13 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
                 io::bam_add(io::bam_sar(io::bam_add(m.air_pitch_rate, 8), 4),
                             io::bam_sar(m.air_pitch_rate, 31)));
         if (traits.speed_pitch != 0) {
-            const int32_t pc = bam_mul_wrap(traits.speed_pitch, 192426);
+            const int32_t pc = io::bam_mul(traits.speed_pitch, 192426);
             if (m.air_pitch_rate > pc) m.air_pitch_rate = pc;
             const int32_t neg_pc = io::bam_sub(0, pc);
             if (m.air_pitch_rate < neg_pc) m.air_pitch_rate = neg_pc;
         }
         if (traits.turn_roll != 0) {
-            const int32_t rc = bam_mul_wrap(traits.turn_roll, 192426);
+            const int32_t rc = io::bam_mul(traits.turn_roll, 192426);
             if (m.air_roll_rate > rc) m.air_roll_rate = rc;
             const int32_t neg_rc = io::bam_sub(0, rc);
             if (m.air_roll_rate < neg_rc) m.air_roll_rate = neg_rc;

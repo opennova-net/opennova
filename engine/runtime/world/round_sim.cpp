@@ -1976,9 +1976,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
 			// argument @0x4EA71B]
 			const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
 			const int32_t inverse = magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-			const int32_t incoming[3] = { retail_q16_mul_rhu(inverse, incoming_velocity_q16.x),
-				retail_q16_mul_rhu(inverse, incoming_velocity_q16.y),
-				retail_q16_mul_rhu(inverse, incoming_velocity_q16.z) };
+			const int32_t incoming[3] = { io::mul_q16_rhu(inverse, incoming_velocity_q16.x),
+				io::mul_q16_rhu(inverse, incoming_velocity_q16.y),
+				io::mul_q16_rhu(inverse, incoming_velocity_q16.z) };
 			const int32_t hit[3] = { impact_q16.x, impact_q16.y, impact_q16.z };
 			world.vehicles.projectile_impact(*target, ammo->weight_in_grains, incoming, hit);
 		}
@@ -2079,13 +2079,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
             const int32_t inverse =
                     magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
-            const int32_t ray_x = retail_q16_mul_rhu(incoming_velocity_q16.x, inverse);
-            const int32_t ray_y = retail_q16_mul_rhu(incoming_velocity_q16.y, inverse);
+            const int32_t ray_x = io::mul_q16_rhu(incoming_velocity_q16.x, inverse);
+            const int32_t ray_y = io::mul_q16_rhu(incoming_velocity_q16.y, inverse);
             imp.position = Vec3{
                 static_cast<float>(from_fixed(io::bam_add(
-                        impact_q16.x, retail_q16_mul_rhu(0x6000, ray_x)))),
+                        impact_q16.x, io::mul_q16_rhu(0x6000, ray_x)))),
                 static_cast<float>(from_fixed(io::bam_add(
-                        impact_q16.y, retail_q16_mul_rhu(0x6000, ray_y)))),
+                        impact_q16.y, io::mul_q16_rhu(0x6000, ray_y)))),
                 static_cast<float>(from_fixed(world.env.water_z))};
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
@@ -2296,8 +2296,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     int32_t(0x100000000LL / fixed_magnitude(incoming_velocity_q16));
             const int32_t along = collision.distance_q16 + 0x800;
             const auto beyond = [&](int32_t start, int32_t component) {
-                return start + retail_q16_mul_rhu(along,
-                        retail_q16_mul_rhu(component, inverse));
+                return start + io::mul_q16_rhu(along,
+                        io::mul_q16_rhu(component, inverse));
             };
             const FixedVec3 next_position{
                 beyond(position_q16.x, incoming_velocity_q16.x),
@@ -2334,8 +2334,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const int32_t along = signed_from_u32(uint32_t(collision.distance_q16) +
                     0x800u + uint32_t(collision.victim_bound_radius_q16));
             const auto beyond = [&](int32_t start, int32_t component) {
-                return start + retail_q16_mul_rhu(along,
-                        retail_q16_mul_rhu(component, inverse));
+                return start + io::mul_q16_rhu(along,
+                        io::mul_q16_rhu(component, inverse));
             };
             const FixedVec3 next_position{
                 beyond(position_q16.x, incoming_velocity_q16.x),

@@ -30,18 +30,6 @@ constexpr int32_t retail_signed_i16(int64_t value) noexcept {
                          : static_cast<int32_t>(low) - 0x10000;
 }
 
-// Retail's signed Q16.16 multiply used by Entity_InitFromModel when it folds
-// ItemDef/entity scale into the bbox midpoint and model bound. The x86 sequence
-// is `imul; add eax,0x8000; adc edx,0; shrd eax,edx,16`: the +0x8000 bias is
-// applied for both signs, then the signed product shifts arithmetically.
-// [orig: Entity_InitFromModel @ 0x40dc30]
-constexpr int32_t retail_q16_mul_rhu(int32_t value_q16,
-                                    int32_t scale_q16) noexcept {
-    const int64_t product = static_cast<int64_t>(value_q16) * scale_q16;
-    const int64_t shifted = (product + 0x8000LL) >> 16;
-    return static_cast<int32_t>(static_cast<uint32_t>(shifted));
-}
-
 // The retail signed-16 storage domain those fields live in (health, health_max,
 // armor classes, ...): the debug/edit surfaces clamp to it.
 inline constexpr int32_t kRetailI16Min = -32768;

@@ -1079,10 +1079,10 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 				vehicle_has_contact_direction(m) ? m.contact_direction[i] : basis.q22.m[i * 4] >> 6;
 	const auto force_dot = [&](const int64_t force[3]) {
 		int32_t unit[3];
-		q16_normalize(force, unit);
+		fixed_normalize(force, unit);
 		return io::bam_add(
-				io::bam_add(retail_q16_mul_rhu(unit[0], direction[0]), retail_q16_mul_rhu(unit[1], direction[1])),
-				retail_q16_mul_rhu(unit[2], direction[2]));
+				io::bam_add(io::mul_q16_rhu(unit[0], direction[0]), io::mul_q16_rhu(unit[1], direction[1])),
+				io::mul_q16_rhu(unit[2], direction[2]));
 	};
 	bool reverse_flag[13] = {};
     bool any_wall = false;
@@ -1446,11 +1446,11 @@ static CollisionMatrix light_axle_frame(const int32_t corners[4][3], const Colli
     const int32_t side[3] = {old.m[1] >> 6, old.m[5] >> 6, old.m[9] >> 6};
     int32_t forward[3], up[3];
     int64_t cross[3];
-    q16_normalize(axle, forward);
-    q16_cross(forward, side, cross);
-    q16_normalize(cross, up);
-    q16_cross(side, up, cross);
-    q16_normalize(cross, forward);
+    fixed_normalize(axle, forward);
+    fixed_cross_wide(forward, side, cross);
+    fixed_normalize(cross, up);
+    fixed_cross_wide(side, up, cross);
+    fixed_normalize(cross, forward);
     CollisionMatrix fitted = old;
     for (int k = 0; k < 3; ++k) {
         fitted.m[4*k] = bam_shl_wrap(forward[k], 6);
@@ -1486,9 +1486,9 @@ static void light_capture_launch(Entity &entity, const VehicleEulerBasis &basis,
     const int64_t displacement[3] = {
         io::bam_sub(x, previous[0]), io::bam_sub(y, previous[1]), io::bam_sub(z, previous[2])};
     int32_t direction[3];
-    q16_normalize(displacement, direction);
+    fixed_normalize(displacement, direction);
     const int64_t raw[3] = {basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, direction[2]};
-    q16_normalize(raw, entity.veh.bike_launch_direction);
+    fixed_normalize(raw, entity.veh.bike_launch_direction);
 }
 
 // The fallen-bike arm inside Entity_UpdateVehicleChassisOrientation

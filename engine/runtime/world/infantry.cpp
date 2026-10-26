@@ -76,15 +76,11 @@ constexpr int32_t kJumpImpulseVelZ = 0x1600;
 // at the one shared local/remote eligibility seam.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B7EA4..0x4B7EBD]
 constexpr uint32_t kPlayerJumpBlockedFlags = 0x1A002u;
-// [orig: degrees -> BAM32 = 2^32/360 = 11930464; same const as ai.cpp/promote.cpp.
-// Used only to mirror the local player's engine heading back to the registry Entity's
-// mission yaw — the precise (90 - deg) Q1 reconciliation lives with the present path.]
-int32_t abs_bam(int32_t v) { return opennova::io::bam_abs(v); } // x86 neg: INT32_MIN stays put, never UB
 
 
 int32_t damp_npc_slide(int32_t v) {
     const int32_t out = opennova::io::bam_sar(7 * v + 4, 3); // [orig: 0x4b9910 entity[38/39] decay]
-    return abs_bam(out) <= 8 ? 0 : out;
+    return io::bam_abs(out) <= 8 ? 0 : out;
 }
 
 // The quantized direction table + accessor moved to world/dir_table.h (shared
@@ -224,7 +220,7 @@ void AiSystem::infantry_route_think(AiEntity &e, World &world, int32_t &entry_he
         const double dx = static_cast<double>(out_target[0]) - e.self->position.x.q16;
         const double dy = static_cast<double>(out_target[1]) - e.self->position.y.q16;
         int32_t dzi = out_target[2] - e.self->position.z.q16;
-        dzi = abs_bam(dzi) - 0x10000;
+        dzi = io::bam_abs(dzi) - 0x10000;
         if (dzi < 0) dzi = 0;
         const double dz = static_cast<double>(dzi);
         // The shared sqrt-overflow guard: min(sqrt, flt_7C19E0 = 2147418112.0) before
@@ -502,8 +498,8 @@ void player_body_waypoint_visits(World &world, const Entity &body) {
         const NavEntry *marker = world.ai.nav.entry(route->entries[node]);
         if (marker == nullptr) continue;
         const uint32_t radius = static_cast<uint32_t>(marker->f[0]);
-        const uint32_t dx = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[1], ai->self->position.x.q16)));
-        const uint32_t dy = static_cast<uint32_t>(abs_bam(io::bam_sub(marker->f[2], ai->self->position.y.q16)));
+        const uint32_t dx = static_cast<uint32_t>(io::bam_abs(io::bam_sub(marker->f[1], ai->self->position.x.q16)));
+        const uint32_t dy = static_cast<uint32_t>(io::bam_abs(io::bam_sub(marker->f[2], ai->self->position.y.q16)));
         if (dx > radius || dy > radius) continue;
         const uint32_t reach = dx > dy ? dx + (dy >> 1) : dy + (dx >> 1);
         if (reach > radius) continue;
@@ -630,12 +626,12 @@ void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key) {
                 inf.target_heading,
                 io::bam_sar(io::bam_sub(inf.body_heading, inf.target_heading), 1));
             const int32_t dl = io::bam_sub(mid, inf.leg_target[1]);
-            if (abs_bam(dl) > kLegReplantMin &&
-                (abs_bam(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
+            if (io::bam_abs(dl) > kLegReplantMin &&
+                (io::bam_abs(dl) > kLegReplantSnap || ((key - 32) & 63u) == 0))
                 inf.leg_target[1] = mid;
             const int32_t dr = io::bam_sub(mid, inf.leg_target[0]);
-            if (abs_bam(dr) > kLegReplantMin &&
-                (abs_bam(dr) > kLegReplantSnap || (key & 63u) == 0))
+            if (io::bam_abs(dr) > kLegReplantMin &&
+                (io::bam_abs(dr) > kLegReplantSnap || (key & 63u) == 0))
                 inf.leg_target[0] = mid;
         }
         for (int leg = 0; leg < 2; ++leg) {
@@ -2129,10 +2125,6 @@ EyeTurn eye_turn(int32_t word) {
     return {static_cast<int32_t>(std::sin(a) * io::kQ22One),
             static_cast<int32_t>(std::cos(a) * io::kQ22One)};
 }
-// `imul; shrd eax, edx, 16h`: the Q22 product's low dword.
-int32_t eye_q22(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-}
 } // namespace
 
 void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t body_heading,
@@ -2148,20 +2140,20 @@ void player_body_capsule_eye(int32_t extent, int32_t lean, int32_t yaw, int32_t 
     const EyeTurn h = eye_turn(body_heading);
     // The lean's arc in the y / z plane, x 0 [orig: @0x4B6A0C..0x4B6A2A].
     const int32_t x0 = 0;
-    const int32_t y0 = eye_q22(l.s, extent);
-    const int32_t z0 = eye_q22(l.c, extent);
+    const int32_t y0 = io::mul_q22(l.s, extent);
+    const int32_t z0 = io::mul_q22(l.c, extent);
     // About z by the twist [orig: @0x4B6A32..0x4B6A6D, x @0x4B6ADB].
-    const int32_t x1 = io::bam_sub(eye_q22(tw.c, x0), eye_q22(tw.s, y0));
-    const int32_t y1 = io::bam_add(eye_q22(tw.c, y0), eye_q22(tw.s, x0));
+    const int32_t x1 = io::bam_sub(io::mul_q22(tw.c, x0), io::mul_q22(tw.s, y0));
+    const int32_t y1 = io::bam_add(io::mul_q22(tw.c, y0), io::mul_q22(tw.s, x0));
     // About x by Roll [orig: @0x4B6AE1..0x4B6B19, y @0x4B6B39].
-    const int32_t y2 = io::bam_sub(eye_q22(r.c, y1), eye_q22(r.s, z0));
-    const int32_t z2 = io::bam_add(eye_q22(r.c, z0), eye_q22(r.s, y1));
+    const int32_t y2 = io::bam_sub(io::mul_q22(r.c, y1), io::mul_q22(r.s, z0));
+    const int32_t z2 = io::bam_add(io::mul_q22(r.c, z0), io::mul_q22(r.s, y1));
     // About y by the body pitch [orig: @0x4B6B1D..0x4B6B37, @0x4B6B43..0x4B6B5D].
-    const int32_t x3 = io::bam_sub(eye_q22(p.c, x1), eye_q22(p.s, z2));
-    const int32_t z3 = io::bam_add(eye_q22(p.c, z2), eye_q22(p.s, x1));
+    const int32_t x3 = io::bam_sub(io::mul_q22(p.c, x1), io::mul_q22(p.s, z2));
+    const int32_t z3 = io::bam_add(io::mul_q22(p.c, z2), io::mul_q22(p.s, x1));
     // About z by the body heading [orig: @0x4B6B60..0x4B6B96].
-    out[0] = io::bam_sub(eye_q22(h.c, x3), eye_q22(h.s, y2));
-    out[1] = io::bam_add(eye_q22(h.c, y2), eye_q22(h.s, x3));
+    out[0] = io::bam_sub(io::mul_q22(h.c, x3), io::mul_q22(h.s, y2));
+    out[1] = io::bam_add(io::mul_q22(h.c, y2), io::mul_q22(h.s, x3));
     // [orig: the floor @0x4B6B98..0x4B6BA0; the stores @0x4B6BA5..0x4B6BAB]
     out[2] = z3 < 0x2000 ? 0x2000 : z3;
 }

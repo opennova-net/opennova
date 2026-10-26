@@ -30,6 +30,12 @@ constexpr int32_t bam_sub(int32_t a, int32_t b)
     return (int32_t)((uint32_t)a - (uint32_t)b);
 }
 
+// x86 imul's low dword: the product wraps two's-complement.
+constexpr int32_t bam_mul(int32_t a, int32_t b)
+{
+    return (int32_t)((uint32_t)a * (uint32_t)b);
+}
+
 // x86 shl/lea doubling (2*x): wraps like the add it is.
 constexpr int32_t bam_dbl(int32_t a)
 {

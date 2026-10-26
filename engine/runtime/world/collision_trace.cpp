@@ -1128,7 +1128,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                     ProjectileHit &eh,
                                     int32_t &hit_distance) {
         const int32_t center_lift = uniform_scale_q16 != 0
-            ? retail_q16_mul_rhu(kOrganicCenterZQ16, uniform_scale_q16)
+            ? io::mul_q16_rhu(kOrganicCenterZQ16, uniform_scale_q16)
             : kOrganicCenterZQ16;
         const int64_t scale_magnitude = uniform_scale_q16 < 0
             ? -static_cast<int64_t>(uniform_scale_q16)
@@ -1137,7 +1137,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             ? 0x10000
             : static_cast<int32_t>(
                   std::min<int64_t>(scale_magnitude, 0x7fffffffLL));
-        const int32_t fallback_radius = retail_q16_mul_rhu(
+        const int32_t fallback_radius = io::mul_q16_rhu(
             kFallbackAuthoredRadiusQ16, radius_scale);
         const int32_t center[3] = {
             feet.x, feet.y, feet.z + center_lift,

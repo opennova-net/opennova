@@ -522,9 +522,9 @@ void test_door_contact_and_player_collision_split() {
 void test_matrix_roundtrip() {
     // Entity_InitFromModel's signed Q16 multiply biases BOTH signs by +0x8000
     // before the arithmetic shift; it is not symmetric round-away-from-zero.
-    CHECK(retail_q16_mul_rhu(1, 0x8000) == 1);
-    CHECK(retail_q16_mul_rhu(-1, 0x8000) == 0);
-    CHECK(retail_q16_mul_rhu(fx(2.0), 0x18000) == fx(3.0));
+    CHECK(opennova::io::mul_q16_rhu(1, 0x8000) == 1);
+    CHECK(opennova::io::mul_q16_rhu(-1, 0x8000) == 0);
+    CHECK(opennova::io::mul_q16_rhu(fx(2.0), 0x18000) == fx(3.0));
 
     const int32_t pos[3] = {fx(5.0), fx(7.0), fx(2.0)};
     // Heading 1/4 turn (BAM 0x40000000): local +X -> world +Y.

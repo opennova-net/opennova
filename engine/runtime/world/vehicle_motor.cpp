@@ -340,7 +340,7 @@ void stage_player_vehicle_input(
         if (!braking) dir = 0; // analog control replaces the digital direction
         m.steer_target_bam = io::bam_sub(m.steer_target_bam, steer_delta);
         m.cmd_speed = io::bam_sar(io::bam_sub(0,
-                bam_mul_wrap(cmd_base, static_cast<int32_t>(occ.net_analog_x))), 7);
+                io::bam_mul(cmd_base, static_cast<int32_t>(occ.net_analog_x))), 7);
         // The bike clears analog throttle while the old brake latch is set;
         // ground vehicles keep it until the later current-input brake test.
         // [orig: Entity_UpdateLightVehiclePhysics @0x484BA7..0x484BAB]
@@ -932,9 +932,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits, bool pr
 			if (static_cast<int32_t>(std::min(length, detail::kFtolClamp)) > 0) {
 				const int32_t scale = static_cast<int32_t>(
 						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
-				m.vel_x = io::bam_add(m.vel_x, retail_q16_mul_rhu(dir[0], scale));
-				m.vel_y = io::bam_add(m.vel_y, retail_q16_mul_rhu(dir[1], scale));
-				m.slide_z = io::bam_add(m.slide_z, retail_q16_mul_rhu(dir[2], scale));
+				m.vel_x = io::bam_add(m.vel_x, io::mul_q16_rhu(dir[0], scale));
+				m.vel_y = io::bam_add(m.vel_y, io::mul_q16_rhu(dir[1], scale));
+				m.slide_z = io::bam_add(m.slide_z, io::mul_q16_rhu(dir[2], scale));
 			}
 			if (!m.chassis_contact_active)
 				std::fill_n(m.chassis_impulse_direction, 3, 0);
@@ -1111,7 +1111,7 @@ CollisionMatrix vehicle_occupant_matrix(const CollisionMatrix &head) {
 	for (int row = 0; row < 3; ++row) {
 		const int64_t extract[3] = { head.m[row] >> 6, head.m[4 + row] >> 6, head.m[8 + row] >> 6 };
 		int32_t unit[3];
-		q16_normalize(extract, unit);
+		fixed_normalize(extract, unit);
 		for (int k = 0; k < 3; ++k)
 			out.m[4 * k + row] = bam_shl_wrap(unit[k], 6);
 	}
@@ -1308,8 +1308,8 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 		// (@0x4623BF / @0x462C5F and @0x462C77): a 32-bit low dword, so pen * 2r
 		// wraps past 2^31 before the `cdq; idiv` — an elevated wheel probe over a
 		// slope takes the wrapped quotient, never the wide one.
-		const int64_t ax = gx ? bam_mul_wrap(int32_t(pen), int32_t(gz)) / int32_t(gx) : 0;
-        const int64_t ay = gy ? bam_mul_wrap(int32_t(pen), int32_t(gz)) / int32_t(gy) : 0;
+		const int64_t ax = gx ? io::bam_mul(int32_t(pen), int32_t(gz)) / int32_t(gx) : 0;
+        const int64_t ay = gy ? io::bam_mul(int32_t(pen), int32_t(gz)) / int32_t(gy) : 0;
         bool hit = false;
         if (std::llabs(ax) < std::llabs(fx)) { fx += ax; hit = true; }
         if (std::llabs(ay) < std::llabs(fy)) { fy += ay; hit = true; }
@@ -1336,8 +1336,8 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 
 } // namespace detail
 
-// q16_normalize / q16_cross moved to vehicle_motor_detail.h (the product is entity.h's retail_q16_mul_rhu)
-// (shared with the wheeled/light solves); the witness notes ride with them.
+// fixed_normalize / fixed_cross_wide live beside FixedVec3 (geom.h; the product is io::mul_q16_rhu),
+// shared with the wheeled/light solves; the witness notes ride with them.
 
 namespace detail {
 
@@ -1357,8 +1357,8 @@ void vehicle_platform_corners(const CollisionMatrix &raw, int32_t beam, int32_t 
 	for (int k = 0; k < 4; ++k)
 		for (int i = 0; i < 3; ++i)
 			out[k][i] = io::bam_add(position[i],
-					io::bam_add(retail_q16_mul_rhu(side_half[k], raw.m[4 * i + 1] >> 6),
-							retail_q16_mul_rhu(forward_half[k], raw.m[4 * i] >> 6)));
+					io::bam_add(io::mul_q16_rhu(side_half[k], raw.m[4 * i + 1] >> 6),
+							io::mul_q16_rhu(forward_half[k], raw.m[4 * i] >> 6)));
 }
 
 // The shared 4-normal plane fit, ported in the witnessed fixed/float mix
@@ -1374,7 +1374,7 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
 	auto edge = [&c](int i, int j, int32_t u[3]) {
 		const int64_t d[3] = { int64_t(c[i][0]) - c[j][0], int64_t(c[i][1]) - c[j][1],
 			int64_t(c[i][2]) - c[j][2] };
-		q16_normalize(d, u);
+		fixed_normalize(d, u);
 	};
 	// Edge sets, verbatim pairing (set 1 == set 2, real shipped duplication —
 	// a fourth distinct corner normal is never computed):
@@ -1385,10 +1385,10 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
     edge(0, 1, f4); // c0 - c1
     int64_t raw[3];
     int32_t n1[3], n2[3], n3[3], n4[3];
-    q16_cross(a, b, raw);   q16_normalize(raw, n1);
-    q16_cross(a, b, raw);   q16_normalize(raw, n2); // set 2 recomputes set 1
-    q16_cross(e3, b, raw);  q16_normalize(raw, n3);
-    q16_cross(e3, f4, raw); q16_normalize(raw, n4);
+    fixed_cross_wide(a, b, raw);   fixed_normalize(raw, n1);
+    fixed_cross_wide(a, b, raw);   fixed_normalize(raw, n2); // set 2 recomputes set 1
+    fixed_cross_wide(e3, b, raw);  fixed_normalize(raw, n3);
+    fixed_cross_wide(e3, f4, raw); fixed_normalize(raw, n4);
     // Set 1's edge is normalized a second time after its normal, and the forward sum reads that
     // copy beside set 2's once-normalized one [orig: Entity_ProcessWheeledVehicleSuspension
     // @0x46B140 - the second normalize @0x46BB96..0x46BBE6, the sum's read @0x46C29D;
@@ -1398,7 +1398,7 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
     int32_t a2[3];
     {
         const int64_t once[3] = { a[0], a[1], a[2] };
-        q16_normalize(once, a2);
+        fixed_normalize(once, a2);
     }
     int64_t up_s[3], fwd_s[3], side_s[3];
     for (int i = 0; i < 3; ++i) {
@@ -1414,9 +1414,9 @@ void plat_fit_corners(const int32_t c[4][3], PlatFit &out, CollisionMatrix *matr
         side_s[i] = static_cast<int64_t>(double(side_s[i]) * 0.25);
     }
     int32_t up[3], fwd[3], side[3];
-    q16_normalize(up_s, up);
-    q16_normalize(fwd_s, fwd);
-    q16_normalize(side_s, side);
+    fixed_normalize(up_s, up);
+    fixed_normalize(fwd_s, fwd);
+    fixed_normalize(side_s, side);
 	if (matrix != nullptr) {
 		*matrix = {};
 		for (int axis = 0; axis < 3; ++axis) {

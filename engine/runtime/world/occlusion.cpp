@@ -423,8 +423,8 @@ void OcclusionWorld::bound_sphere_fixed(const CollisionModel &m, int32_t center_
     radius = ftol(std::fmin(len, 2147418112.0));
     if (scale_q16 != 0) {
         for (int axis = 0; axis < 3; ++axis)
-            center_local[axis] = retail_q16_mul_rhu(center_local[axis], scale_q16);
-        radius = retail_q16_mul_rhu(radius, scale_q16);
+            center_local[axis] = io::mul_q16_rhu(center_local[axis], scale_q16);
+        radius = io::mul_q16_rhu(radius, scale_q16);
     }
 }
 

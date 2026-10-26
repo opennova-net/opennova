@@ -145,17 +145,17 @@ void test_the_fit_reads_the_edge_normalized_twice() {
 void test_the_normalize_divides_first() {
 	int32_t out[3];
 	const int64_t axis[3] = { 131019, 0, 0 };
-	detail::q16_normalize(axis, out);
+	fixed_normalize(axis, out);
 	CHECK(out[0] == 65535 && out[1] == 0 && out[2] == 0, "131019 along x reads 65535");
 	const int64_t short_axis[3] = { 0, -425, 0 };
-	detail::q16_normalize(short_axis, out);
+	fixed_normalize(short_axis, out);
 	CHECK(out[0] == 0 && out[1] == -65535 && out[2] == 0, "-425 along y reads -65535");
 	const int64_t clear[3] = { 3000, 4000, 0 };
-	detail::q16_normalize(clear, out);
+	fixed_normalize(clear, out);
 	CHECK(out[0] == 39321 && out[1] == 52428 && out[2] == 0,
 			"(3000, 4000, 0) reads (39321, 52428, 0)");
 	const int64_t zero[3] = { 0, 0, 0 };
-	detail::q16_normalize(zero, out);
+	fixed_normalize(zero, out);
 	CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0, "a zero vector reads 0");
 }
 

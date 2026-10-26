@@ -464,6 +464,18 @@ static int test_bam_wrap_arithmetic()
     TEST_EXPECT(io::bam_sar(7, 1) == 3);
     TEST_EXPECT(io::bam_abs(-5) == 5);
     TEST_EXPECT(io::bam_abs(kMin) == kMin);            // x86 neg: stays put
+    TEST_EXPECT(io::bam_mul(-3, 5) == -15);            // imul's low dword
+    TEST_EXPECT(io::bam_mul(0x10000, 0x10000) == 0);   // wraps
+    TEST_EXPECT(io::bam_mul(0x40000000, 2) == kMin);
+    // The Q22 product (`imul; shrd 16h`) and the round-half-up 16.16 product (`imul; add 8000h;
+    // adc; shrd 10h`): the low dword of the shifted 64-bit product, the shift arithmetic.
+    TEST_EXPECT(io::mul_q22(0x400000, 0x400000) == 0x400000); // 1.0 * 1.0
+    TEST_EXPECT(io::mul_q22(-1, 1) == -1);
+    TEST_EXPECT(io::mul_q22(kMax, kMax) == -1024);     // bits 22..53 of 2^62 - 2^32 + 1
+    TEST_EXPECT(io::mul_q16_rhu(1, 0x8000) == 1);      // the half rounds up
+    TEST_EXPECT(io::mul_q16_rhu(-1, 0x8000) == 0);     // the bias for both signs
+    TEST_EXPECT(io::mul_q16_rhu(-1, 0x8001) == -1);
+    TEST_EXPECT(io::mul_q16_rhu(0x20000, 0x18000) == 0x30000); // 2.0 * 1.5
     // Radians to the nearest BAM32 (the atan2 ports' scale, LocalPlayer::aim_at's), wrapped
     // to the signed turn: half a turn lands on the seam.
     TEST_EXPECT(io::bam_from_radians(io::kPi / 2) == 0x40000000);

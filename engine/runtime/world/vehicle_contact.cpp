@@ -29,11 +29,11 @@ CollisionMatrix vehicle_rebuild_rest_orientation(World &world, Entity &e, bool i
 	const auto basis = vehicle_euler_basis(m.yaw_bam, m.air_pitch_bam, m.air_roll_bam);
 	int64_t raw[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6, basis.q22.m[8] >> 6 };
 	int32_t forward[3], side[3], up[3] = { 0, 0, inverted ? -65536 : 65536 };
-	q16_normalize(raw, forward);
-	q16_cross(up, forward, raw);
-	q16_normalize(raw, side);
-	q16_cross(forward, side, raw);
-	q16_normalize(raw, up);
+	fixed_normalize(raw, forward);
+	fixed_cross_wide(up, forward, raw);
+	fixed_normalize(raw, side);
+	fixed_cross_wide(forward, side, raw);
+	fixed_normalize(raw, up);
 	// The rows set into the caller's matrix, the euler words read back from them.
 	// [orig: Math_SetRow2FromVec3Scaled / Row0 / Row1 @0x4634E0..0x4634F6, then
 	//  Math_FixedPointMatrixToEulerAngles @0x463501]
@@ -284,9 +284,9 @@ void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &
 										  our_mass / mass),
 		int32_t(int64_t(io::bam_sub(m.vel_y, other->veh.vel_y)) * our_mass / mass),
 		int32_t(int64_t(io::bam_sub(m.slide_z, other->veh.slide_z)) * our_mass / mass) };
-	other->veh.vel_x = io::bam_add(other->veh.vel_x, bam_mul_wrap(3, transfer[0]) >> 2);
-	other->veh.vel_y = io::bam_add(other->veh.vel_y, bam_mul_wrap(3, transfer[1]) >> 2);
-	other->veh.slide_z = io::bam_add(other->veh.slide_z, bam_mul_wrap(3, transfer[2]) >> 2);
+	other->veh.vel_x = io::bam_add(other->veh.vel_x, io::bam_mul(3, transfer[0]) >> 2);
+	other->veh.vel_y = io::bam_add(other->veh.vel_y, io::bam_mul(3, transfer[1]) >> 2);
+	other->veh.slide_z = io::bam_add(other->veh.slide_z, io::bam_mul(3, transfer[2]) >> 2);
 	other->position.x.q16 = io::bam_add(other->position.x.q16, transfer[0] >> 2);
 	other->position.y.q16 = io::bam_add(other->position.y.q16, transfer[1] >> 2);
 	other->position.z.q16 = io::bam_add(other->position.z.q16, transfer[2] >> 2);
@@ -319,7 +319,7 @@ void vehicle_landing_damage(World &world, Entity &e, const VehicleTraits &t, con
 	const double scale = tank ? double(0.0002500000118743628f)
 			: t.mass > 3	  ? double(0.02500000037252903f)
 							  : double(0.005000000353902578f);
-	double damage = double(bam_mul_wrap(fall, t.mass)) * scale;
+	double damage = double(io::bam_mul(fall, t.mass)) * scale;
 	if (t.family == VehicleFamily::Bike)
 		damage *= double(0.10000000149011612f);
 	if (tank ? up < 0 : up > 0)

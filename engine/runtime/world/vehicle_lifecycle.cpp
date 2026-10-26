@@ -16,9 +16,6 @@ namespace opennova::world {
 namespace {
 using io::bam_add;
 using io::bam_sub;
-int32_t mul22(int32_t a, int32_t b) {
-	return static_cast<int32_t>((int64_t(a) * b) >> 22);
-}
 struct Trig {
 	int32_t c[3], s[3];
 	explicit Trig(const int32_t pose[6], bool inverse = false) {
@@ -40,12 +37,12 @@ void transform_world_to_local(const int32_t parent[6], int32_t pose[6]) {
 	const int32_t x = bam_sub(pose[0], parent[0]);
 	const int32_t y = bam_sub(pose[1], parent[1]);
 	const int32_t z = bam_sub(pose[2], parent[2]);
-	const int32_t tx = bam_sub(mul22(x, t.c[0]), mul22(y, t.s[0]));
-	const int32_t ty = bam_add(mul22(x, t.s[0]), mul22(y, t.c[0]));
-	const int32_t tz = bam_add(mul22(tx, t.s[1]), mul22(z, t.c[1]));
-	pose[0] = bam_sub(mul22(tx, t.c[1]), mul22(z, t.s[1]));
-	pose[1] = bam_sub(mul22(ty, t.c[2]), mul22(tz, t.s[2]));
-	pose[2] = bam_add(mul22(ty, t.s[2]), mul22(tz, t.c[2]));
+	const int32_t tx = bam_sub(io::mul_q22(x, t.c[0]), io::mul_q22(y, t.s[0]));
+	const int32_t ty = bam_add(io::mul_q22(x, t.s[0]), io::mul_q22(y, t.c[0]));
+	const int32_t tz = bam_add(io::mul_q22(tx, t.s[1]), io::mul_q22(z, t.c[1]));
+	pose[0] = bam_sub(io::mul_q22(tx, t.c[1]), io::mul_q22(z, t.s[1]));
+	pose[1] = bam_sub(io::mul_q22(ty, t.c[2]), io::mul_q22(tz, t.s[2]));
+	pose[2] = bam_add(io::mul_q22(ty, t.s[2]), io::mul_q22(tz, t.c[2]));
 	pose[3] = bam_sub(pose[3], parent[3]);
 }
 } // namespace
@@ -53,12 +50,12 @@ void transform_world_to_local(const int32_t parent[6], int32_t pose[6]) {
 // See vehicle_motor.h. [orig: Entity_TransformLocalToWorld @0x43BD00]
 void entity_transform_local_to_world(const int32_t ref[6], int32_t pose[6]) {
 	const Trig t(ref);
-	const int32_t ry = bam_sub(mul22(pose[1], t.c[2]), mul22(pose[2], t.s[2]));
-	const int32_t rz = bam_add(mul22(pose[1], t.s[2]), mul22(pose[2], t.c[2]));
-	const int32_t px = bam_sub(mul22(pose[0], t.c[1]), mul22(rz, t.s[1]));
-	const int32_t pz = bam_add(mul22(pose[0], t.s[1]), mul22(rz, t.c[1]));
-	pose[0] = bam_add(ref[0], bam_sub(mul22(px, t.c[0]), mul22(ry, t.s[0])));
-	pose[1] = bam_add(ref[1], bam_add(mul22(px, t.s[0]), mul22(ry, t.c[0])));
+	const int32_t ry = bam_sub(io::mul_q22(pose[1], t.c[2]), io::mul_q22(pose[2], t.s[2]));
+	const int32_t rz = bam_add(io::mul_q22(pose[1], t.s[2]), io::mul_q22(pose[2], t.c[2]));
+	const int32_t px = bam_sub(io::mul_q22(pose[0], t.c[1]), io::mul_q22(rz, t.s[1]));
+	const int32_t pz = bam_add(io::mul_q22(pose[0], t.s[1]), io::mul_q22(rz, t.c[1]));
+	pose[0] = bam_add(ref[0], bam_sub(io::mul_q22(px, t.c[0]), io::mul_q22(ry, t.s[0])));
+	pose[1] = bam_add(ref[1], bam_add(io::mul_q22(px, t.s[0]), io::mul_q22(ry, t.c[0])));
 	pose[2] = bam_add(ref[2], pz);
 	pose[3] = bam_add(pose[3], ref[3]);
 }

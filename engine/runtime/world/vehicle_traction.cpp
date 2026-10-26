@@ -18,18 +18,6 @@ void clear_direction(Entity::VehicleMotorState &m) {
 	m.slip_started_tick = 0;
 }
 
-int32_t dot_q16(const int32_t a[3], const int32_t b[3]) {
-	return io::bam_add(
-			io::bam_add(retail_q16_mul_rhu(a[0], b[0]), retail_q16_mul_rhu(a[1], b[1])), retail_q16_mul_rhu(a[2], b[2]));
-}
-
-void cross_q16(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
-	int64_t raw[3];
-	q16_cross(a, b, raw);
-	for (int i = 0; i < 3; ++i)
-		out[i] = int32_t(raw[i]);
-}
-
 bool sharp_steering(const Entity::VehicleMotorState &m) {
 	// This is the wheel-angle register +0x2B4, not chassis pitch: its folded
 	// angle in degrees (x 360/2^32, +360 when negative, 360-x above 180) against
@@ -41,10 +29,10 @@ bool sharp_steering(const Entity::VehicleMotorState &m) {
 
 void velocity_from_direction(
 		Entity::VehicleMotorState &m, const int32_t dir[3], int32_t speed, bool replace_z) {
-	m.vel_x = retail_q16_mul_rhu(speed, dir[0]);
-	m.vel_y = retail_q16_mul_rhu(speed, dir[1]);
+	m.vel_x = io::mul_q16_rhu(speed, dir[0]);
+	m.vel_y = io::mul_q16_rhu(speed, dir[1]);
 	if (replace_z)
-		m.slide_z = retail_q16_mul_rhu(speed, dir[2]);
+		m.slide_z = io::mul_q16_rhu(speed, dir[2]);
 }
 
 // Assemble the direction frame with unnormalized Q16 cross products, rotate
@@ -56,8 +44,8 @@ void velocity_from_direction(
 void turn_contact_direction(
 		Entity::VehicleMotorState &m, const int32_t forward[3], const int32_t up[3], int32_t step) {
 	int32_t side[3], turn[3];
-	cross_q16(up, m.contact_direction, side);
-	cross_q16(m.contact_direction, forward, turn);
+	fixed_cross(up, m.contact_direction, side);
+	fixed_cross(m.contact_direction, forward, turn);
 	if (turn[2] <= 0)
 		step = io::bam_sub(0, step);
 	const int32_t c = cos22_of_bam_x87(step), s = sin22_of_bam_x87(step);
@@ -109,7 +97,7 @@ bool vehicle_traction_acceleration(
 		return false;
 	m.skid_effects_requested = true; // Entity_SpawnBoneEffectsAtMask @0x458750
 	const bool recovering = m.slip_started_tick != 0 && m.handbrake_latched == 0 &&
-			int32_t(world.logic_tick - m.slip_started_tick) > bam_mul_wrap(5, traits.tire_slip);
+			int32_t(world.logic_tick - m.slip_started_tick) > io::bam_mul(5, traits.tire_slip);
 	const int32_t amount = recovering ? traits.acceleration >> 4 : traits.deceleration;
 	if (m.speed > 0)
 		m.speed_accel = recovering ? amount : io::bam_sub(0, amount);
@@ -190,7 +178,7 @@ bool vehicle_traction_velocity(
 		if (!tank && !bike) {
 			if (m.slip_started_tick != 0 &&
 					int32_t(world.logic_tick - m.slip_started_tick) <=
-							bam_mul_wrap(5, traits.tire_slip))
+							io::bam_mul(5, traits.tire_slip))
 				m.slip_started_tick = world.logic_tick;
 			else
 				clear_direction(m);
@@ -212,10 +200,10 @@ bool vehicle_traction_velocity(
 				const int64_t raw[3] = {source[0], source[1],
 						m.wheelie_active ? int64_t(source[2]) : int64_t(0)};
 				int32_t direction[3];
-				q16_normalize(raw, direction);
+				fixed_normalize(raw, direction);
 				velocity_from_direction(m, direction, m.speed, false);
 				if (m.slip_started_tick != 0 &&
-						int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip))
+						int32_t(world.logic_tick - m.slip_started_tick) <= io::bam_mul(5, traits.tire_slip))
 					m.slip_started_tick = world.logic_tick;
 				else clear_direction(m);
 			} else if (!tank)
@@ -230,7 +218,7 @@ bool vehicle_traction_velocity(
 			//  `lea edx, [eax+ecx*2]` @0x48A75E)].
 			const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
 			int32_t dir[3];
-			q16_normalize(motion, dir);
+			fixed_normalize(motion, dir);
 			const int32_t stop = bam_shl_wrap(traits.deceleration, 1);
 			m.speed = m.speed > 0 ? io::bam_sub(m.speed, stop) : io::bam_add(m.speed, stop);
 			velocity_from_direction(m, dir, m.speed, true);
@@ -243,7 +231,7 @@ bool vehicle_traction_velocity(
 				m.speed = m.speed < 0 ? -0x6000 : 0x6000;
 			const int64_t motion[3] = { m.vel_x, m.vel_y, m.slide_z };
 			int32_t dir[3];
-			q16_normalize(motion, dir);
+			fixed_normalize(motion, dir);
 			m.speed = m.speed > 0 ? io::bam_sub(m.speed, traits.deceleration)
 								  : io::bam_add(m.speed, traits.deceleration);
 			velocity_from_direction(m, dir, m.speed, true);
@@ -254,7 +242,7 @@ bool vehicle_traction_velocity(
 			//  third ftol of a zero; the +0x98/+0x9C stores @0x48CF0E/@0x48CF46)].
 			const int64_t motion[3] = { m.vel_x, m.vel_y, 0 };
 			int32_t dir[3];
-			q16_normalize(motion, dir);
+			fixed_normalize(motion, dir);
 			velocity_from_direction(m, dir, m.speed, false);
 		}
 		// The shared tail [orig: cveh @0x48CF41..0x48CF95; cbik @0x486386..
@@ -279,7 +267,7 @@ bool vehicle_traction_velocity(
 			}
 			m.contact_direction[2] = std::min(0, m.contact_direction[2]);
 			velocity_from_direction(m, m.contact_direction, io::bam_abs(m.speed), true);
-			m.wheel_rate_bam = retail_q16_mul_rhu(-16384, m.steer_state >> 2);
+			m.wheel_rate_bam = io::mul_q16_rhu(-16384, m.steer_state >> 2);
 			return true;
 		}
 		// The straight arm leaves any retained skid frame alone, and only it
@@ -287,7 +275,7 @@ bool vehicle_traction_velocity(
 		// [orig: @0x48A1E6..0x48A2BE, crashed Z gate @0x48A28D..0x48A2AE]
 		if (target_speed != 0 && io::bam_abs(m.speed) > 8192) {
 			velocity_from_direction(m, forward, m.speed, m.crashed == 0);
-			m.wheel_rate_bam = retail_q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+			m.wheel_rate_bam = io::mul_q16_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
 			return true;
 		}
 		// The recovery arm advances the stored skid frame but drives along the
@@ -295,13 +283,13 @@ bool vehicle_traction_velocity(
 		// Its slideDecay store is unconditional, crashed or not.
 		// [orig: @0x48A2C3..0x48A607, store @0x48A5D4]
 		if (vehicle_has_contact_direction(m)) {
-			if (dot_q16(forward, m.contact_direction) >= 61439 || m.speed <= 1280)
+			if (fixed_dot(forward, m.contact_direction) >= 61439 || m.speed <= 1280)
 				clear_direction(m);
 			else
 				turn_contact_direction(m, forward, up, 59652323);
 		}
 		velocity_from_direction(m, forward, m.speed, true);
-		m.wheel_rate_bam = retail_q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+		m.wheel_rate_bam = io::mul_q16_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
 		return true;
 	}
 	if (m.handbrake_latched != 0 && m.speed != 0 && vehicle_has_contact_direction(m)) {
@@ -314,7 +302,7 @@ bool vehicle_traction_velocity(
         const int64_t raw[3] = {m.bike_launch_direction[0],
                 m.bike_launch_direction[1], m.bike_launch_direction[2]};
         int32_t direction[3];
-        q16_normalize(raw, direction);
+        fixed_normalize(raw, direction);
         velocity_from_direction(m, direction, m.speed, m.crashed == 0);
         return true;
     }
@@ -328,11 +316,11 @@ bool vehicle_traction_velocity(
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
 		return true;
 	}
-	if (int32_t(world.logic_tick - m.slip_started_tick) <= bam_mul_wrap(5, traits.tire_slip)) {
+	if (int32_t(world.logic_tick - m.slip_started_tick) <= io::bam_mul(5, traits.tire_slip)) {
 		velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
 		return true;
 	}
-	if (dot_q16(forward, m.contact_direction) < 0) {
+	if (fixed_dot(forward, m.contact_direction) < 0) {
 		if (io::bam_abs(m.speed) > 256) {
 			velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
 			if (m.speed >= 0)
@@ -345,9 +333,9 @@ bool vehicle_traction_velocity(
 		int32_t a[3], b[3];
 		const int64_t planar_a[3] = { forward[0], forward[1], 0 };
 		const int64_t planar_b[3] = { m.contact_direction[0], m.contact_direction[1], 0 };
-		q16_normalize(planar_a, a);
-		q16_normalize(planar_b, b);
-		if (dot_q16(a, b) < 61166 && m.speed > 0) {
+		fixed_normalize(planar_a, a);
+		fixed_normalize(planar_b, b);
+		if (fixed_dot(a, b) < 61166 && m.speed > 0) {
 			turn_contact_direction(m, forward, up, 11930464);
 			velocity_from_direction(m, m.contact_direction, m.speed, m.crashed == 0);
 			return true;
@@ -369,7 +357,7 @@ void vehicle_capture_contact_direction(Entity &vehicle, const VehicleEulerBasis 
 		return;
 	const int64_t raw[3] = { basis.q22.m[0] >> 6, basis.q22.m[4] >> 6,
 		std::min(0, basis.q22.m[8] >> 6) };
-	q16_normalize(raw, m.contact_direction);
+	fixed_normalize(raw, m.contact_direction);
 }
 
 // Tank/bike contact tails bias an existing skid vector downhill after an
@@ -381,7 +369,7 @@ void vehicle_contact_downhill_tail(Entity &vehicle, int32_t pz) {
 			!vehicle_has_contact_direction(m))
 		return;
 	const int64_t raw[3] = { m.contact_direction[0], m.contact_direction[1], -28672 };
-	q16_normalize(raw, m.contact_direction);
+	fixed_normalize(raw, m.contact_direction);
 }
 
 // The fxs emitter is transient at every masked userpoint, with no origin

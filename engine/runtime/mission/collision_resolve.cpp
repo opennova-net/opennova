@@ -297,7 +297,7 @@ world::ResolvedCollisionShape collision_shape_for_runtime_type(
 		int32_t scaled[3] = {center[0], center[1], center[2]};
 		if (shape.uniform_scale_q16 != 0) {
 			for (int axis = 0; axis < 3; ++axis)
-				scaled[axis] = world::retail_q16_mul_rhu(
+				scaled[axis] = io::mul_q16_rhu(
 						scaled[axis], shape.uniform_scale_q16);
 		}
 		shape.bbox_center_q16 = world::FixedVec3{
@@ -892,7 +892,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			int32_t scaled[3] = {bc[0], bc[1], bc[2]};
 			if (e->uniform_scale_q16 != 0) {
 				for (int axis = 0; axis < 3; ++axis) {
-					scaled[axis] = world::retail_q16_mul_rhu(
+					scaled[axis] = io::mul_q16_rhu(
 							scaled[axis], e->uniform_scale_q16);
 				}
 			}

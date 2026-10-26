@@ -5,23 +5,6 @@
 namespace opennova::world {
 namespace {
 
-int32_t dot16(const int32_t a[3], const int32_t b[3]) {
-	return io::bam_add(
-			io::bam_add(retail_q16_mul_rhu(a[0], b[0]), retail_q16_mul_rhu(a[1], b[1])),
-			retail_q16_mul_rhu(a[2], b[2]));
-}
-void normalize16(const int32_t in[3], int32_t out[3]) {
-	const double length =
-			std::sqrt(double(in[0]) * in[0] + double(in[1]) * in[1] + double(in[2]) * in[2]);
-	if (length == 0.0) {
-		std::fill_n(out, 3, 0);
-		return;
-	}
-	const double scale = 65536.0 / length;
-	for (int k = 0; k < 3; ++k)
-		out[k] = int32_t(double(in[k]) * scale);
-}
-
 // This footprint uses the full CMDL bounds. Each axis product rounds before
 // the two products are summed; negative odd extents truncate toward zero.
 // [orig: Entity_ComputeBoundingQuad @0x45B6E0, non-square arm]
@@ -35,11 +18,11 @@ void impulse_quad(const Entity &e, const VehicleTraits &t, const CollisionMatrix
 	for (int i = 0; i < 4; ++i) {
 		int32_t delta[3];
 		for (int k = 0; k < 3; ++k) {
-			delta[k] = io::bam_add(retail_q16_mul_rhu(xs[i], frame.m[4 * k] >> 6),
-					retail_q16_mul_rhu(ys[i], frame.m[4 * k + 1] >> 6));
+			delta[k] = io::bam_add(io::mul_q16_rhu(xs[i], frame.m[4 * k] >> 6),
+					io::mul_q16_rhu(ys[i], frame.m[4 * k + 1] >> 6));
 			corners[i][k] = io::bam_add(position[k], delta[k]);
 		}
-		normalize16(delta, directions[i]);
+		fixed_normalize(delta, directions[i]);
 	}
 }
 } // namespace
@@ -66,7 +49,7 @@ void detail::vehicle_recoil_impulse(World &world, Entity &e, const VehicleTraits
 	int quadrant = -1;
 	int32_t best = -1;
 	for (int i = 0; i < 4; ++i) {
-		const int32_t dot = dot16(direction, axes[i]);
+		const int32_t dot = fixed_dot(direction, axes[i]);
 		if (dot > 0 && dot > best) {
 			best = dot;
 			quadrant = i;
@@ -77,12 +60,12 @@ void detail::vehicle_recoil_impulse(World &world, Entity &e, const VehicleTraits
 		const int32_t length = io::bam_abs(io::bam_sub(t.box_x_hi, t.box_x_lo));
 		const int32_t width = io::bam_abs(io::bam_sub(t.box_y_hi, t.box_y_lo));
 		const double ratio = (quadrant & 1) != 0 ? 1.0 : length != 0 ? double(width) / length : 0.0;
-		const int32_t scale = bam_mul_wrap(300, amplitude);
+		const int32_t scale = io::bam_mul(300, amplitude);
 		for (int i = 0; i < 2; ++i) {
 			const int corner = (quadrant + i) & 3;
 			auto &force = m.chassis_forces[corner];
 			force.rate =
-					int32_t((double(dot16(direction, radial[corner])) / 65536.0) * ratio * scale);
+					int32_t((double(fixed_dot(direction, radial[corner])) / 65536.0) * ratio * scale);
 			for (int k = 0; k < 3; ++k)
 				force.direction[k] = io::bam_sub(0, frame.m[4 * k + 2] >> 6);
 		}
@@ -92,7 +75,7 @@ void detail::vehicle_recoil_impulse(World &world, Entity &e, const VehicleTraits
 	m.chassis_blend_tick = world.logic_tick;
 	m.chassis_blend_ticks = 40;
 	m.chassis_contact_active = true;
-	normalize16(direction, m.chassis_impulse_direction);
+	fixed_normalize(direction, m.chassis_impulse_direction);
 }
 
 // A heavy projectile rocks a wheeled/tank hull at the hit side. The force
@@ -107,19 +90,19 @@ static void impact_impulse(World &world, Entity &e, const VehicleTraits &t,
 	const int32_t offset[3] = { io::bam_sub(hit[0], e.position.x.q16),
 		io::bam_sub(hit[1], e.position.y.q16), 0 };
 	int32_t toward[3];
-	normalize16(offset, toward);
+	fixed_normalize(offset, toward);
 	int quadrant = -1;
 	int32_t best = -1;
 	for (int i = 0; i < 4; ++i) {
-		const int32_t dot = dot16(toward, radial[i]);
+		const int32_t dot = fixed_dot(toward, radial[i]);
 		if (dot > 0 && dot > best) {
 			best = dot;
 			quadrant = i;
 		}
 	}
 	const int32_t side[3] = { frame.m[1] >> 6, frame.m[5] >> 6, frame.m[9] >> 6 };
-	const int32_t threshold = dot16(side, radial[0]);
-	int32_t side_dot = dot16(side, toward);
+	const int32_t threshold = fixed_dot(side, radial[0]);
+	int32_t side_dot = fixed_dot(side, toward);
 	int pair = -1;
 	switch (quadrant) {
 		case 0:
@@ -162,7 +145,7 @@ static void impact_impulse(World &world, Entity &e, const VehicleTraits &t,
 	m.chassis_blend_ticks = 40;
 	m.chassis_contact_active = true;
 	m.chassis_impulse_amplitude = amplitude;
-	normalize16(direction, m.chassis_impulse_direction);
+	fixed_normalize(direction, m.chassis_impulse_direction);
 }
 
 // Projectile+680 is the wrapped ammo weight converted to Q16 / 250, not

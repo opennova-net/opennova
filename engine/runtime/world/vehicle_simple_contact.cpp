@@ -43,7 +43,7 @@ void vehicle_simple_contact(
 		{ rear, left, pad_z },
 		{ rear, right, pad_z },
 		{ io::bam_add(t.box_x_lo, length >> 2), mid_y, spine_z },
-		{ io::bam_add(t.box_x_lo, bam_mul_wrap(length, 3) >> 2), mid_y, spine_z },
+		{ io::bam_add(t.box_x_lo, io::bam_mul(length, 3) >> 2), mid_y, spine_z },
 		{ io::bam_add(t.box_x_lo, length >> 1), mid_y, spine_z },
 	};
 	const int32_t radii[7] = { radius, radius, radius, radius, spine_radius, spine_radius,
@@ -129,7 +129,7 @@ void vehicle_simple_contact(
 	m.plat_afloat = (e.flags & 0x8000u) != 0;
 	m.plat_solve_valid = true;
 	for (int i = 0; i < 4; ++i) {
-		m.plat_acc[i] = bam_mul_wrap(std::max(m.plat_acc[i], m.wheel_comp[i]), t.shock) >> 3;
+		m.plat_acc[i] = io::bam_mul(std::max(m.plat_acc[i], m.wheel_comp[i]), t.shock) >> 3;
 		m.wheel_comp[i] = std::max(0, io::bam_sub(m.wheel_comp[i], m.plat_acc[i]));
 	}
 	if (depth[0] == 0 && depth[1] == 0 && depth[2] == 0 && depth[3] == 0) {
@@ -152,10 +152,10 @@ void vehicle_simple_contact(
 	for (int i = 0; i < 4; ++i)
 		if (travel != 0 && depth[i] > (travel >> 6)) {
 			const int32_t limit = std::min(depth[i], io::bam_sub(travel, m.wheel_comp[i]));
-			const int32_t force = bam_mul_wrap(limit, t.spring) >> 3;
+			const int32_t force = io::bam_mul(limit, t.spring) >> 3;
 			const int32_t fraction =
 					io::bam_sub(256, bam_shl_wrap(io::bam_add(force, m.wheel_comp[i]), 6) / travel);
-			const int32_t transfer = bam_mul_wrap(force, fraction) >> 8;
+			const int32_t transfer = io::bam_mul(force, fraction) >> 8;
 			depth[i] = io::bam_sub(depth[i], transfer);
 			m.wheel_comp[i] = io::bam_add(m.wheel_comp[i], transfer);
 		}
