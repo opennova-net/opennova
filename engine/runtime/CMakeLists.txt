@@ -290,6 +290,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/parachute.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/person_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_eye.cpp # the eye restamp and the capsule eye (split of infantry.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
     ${CMAKE_CURRENT_SOURCE_DIR}/world/corpse_ragdoll.cpp         # the ragdoll's death reading + collider (ADR 0060)
