@@ -93,7 +93,8 @@ int test_migrations_create_expected_tables() {
 		"games", "host_keys", "host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
 		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
-		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "lobby_commands", "lobby_goodbyes", "lobby_instances",
+		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "join_tickets",
+		"lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
 		"program_hourly", "program_samples", "release_sections", "releases", "server_status",
 		"service_meta", "unknown_messages", "web_sessions" };

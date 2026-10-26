@@ -2,9 +2,11 @@
 
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
+#include <base/os_random/os_random.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 
 namespace opennova::hostdb {
 
@@ -608,6 +610,31 @@ std::size_t prune_host_keys(opennova::db::Database &db) {
 	const auto pruned = static_cast<std::size_t>(db.changes());
 	tx.commit();
 	return pruned;
+}
+
+std::string mint_join_ticket(opennova::db::Database &db, uint32_t host_rid, int64_t user_id,
+		const std::string &peer_ip) {
+	uint8_t bytes[kJoinTicketHexDigits / 2];
+	os_random_bytes(bytes, sizeof bytes);
+	const std::string ticket = "JT:" + strutil::bytes_to_hex(bytes, sizeof bytes);
+	db.exec("DELETE FROM join_tickets WHERE expires_at <= now();");
+	db.exec("INSERT INTO join_tickets (ticket_hash, host_rid, user_id, peer_ip, expires_at) "
+			"VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5));",
+			{ str(io::sha256_hex(io::sha256(ticket))), i64(host_rid), i64(user_id), str(peer_ip),
+					i64(kJoinTicketSeconds) });
+	return ticket;
+}
+
+JoinTicketCheck redeem_join_ticket(opennova::db::Database &db, std::string_view ticket,
+		uint32_t host_rid, const std::string &peer_ip) {
+	const auto rows = db.query("DELETE FROM join_tickets WHERE ticket_hash = $1 "
+							   "RETURNING host_rid, peer_ip, expires_at > now();",
+			{ str(io::sha256_hex(io::sha256(ticket))) });
+	if (rows.empty() || rows.front().as_int(0).value_or(0) != static_cast<int64_t>(host_rid) ||
+			rows.front().as_int(2).value_or(0) == 0)
+		return JoinTicketCheck::NotFound;
+	return rows.front().as_text(1).value_or("") == peer_ip ? JoinTicketCheck::Admitted
+														   : JoinTicketCheck::AddressMismatch;
 }
 
 } // namespace opennova::hostdb

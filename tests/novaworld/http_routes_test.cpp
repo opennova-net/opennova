@@ -4770,8 +4770,10 @@ std::string expected_joi(Harness &h, const std::string &server_name_as_sent) {
 // /NWJoin.dll takes its joiner from server-side state only: the request's own
 // retail login (its LOGINSESSIONTAG, else its PERSISTENTEXPRESSLOGINDATA pin),
 // never the NWHANDLE cookie, which names an account but proves nothing. An
-// identified joiner gets the PUB* identity and a host_players row, the .joi
-// page byte for byte; an NWHANDLE alone gets neither, and beside a login it
+// identified joiner gets the PUB* identity, a join ticket for the listing (its
+// PUBJOINTICKET, a join_tickets row naming its account and the listing's RID) and a
+// host_players row, the .joi page byte for byte; an NWHANDLE alone gets none of them (an
+// empty ticket), and beside a login it
 // changes nothing. A ban (an admin update) ends both cookies' standing, so the
 // banned joiner is anonymous; an account made inactive with no such update
 // (its login still standing) is refused with the msgbase failure page and the
@@ -4812,6 +4814,15 @@ int test_join_identity(Harness &h) {
 	forget_joins(h);
 	auto reply = join(h, { tag });
 	TEST_EXPECT(identified(reply));
+	const std::string ticket = set_cookie_value(reply, "PUBJOINTICKET");
+	TEST_EXPECT(ticket.size() == 3 + opennova::hostdb::kJoinTicketHexDigits &&
+			ticket.rfind("JT:", 0) == 0);
+	const auto ticket_rows = h.pool.acquire()->query(
+			"SELECT user_id, host_rid FROM join_tickets WHERE ticket_hash = $1;",
+			{ opennova::db::BindValue(opennova::io::sha256_hex(opennova::io::sha256(ticket))) });
+	TEST_EXPECT(ticket_rows.size() == 1 && ticket_rows[0].as_int(0) == joiner &&
+			ticket_rows[0].as_int(1) == static_cast<int64_t>(kJoinRid));
+	TEST_EXPECT(set_cookie_value(join(h, { tag }), "PUBJOINTICKET") != ticket);
 	TEST_EXPECT(body_text(reply) == expected_joi(h, "Plain Server 7"));
 	TEST_EXPECT(
 			body_text(reply).find("[NK=eifegjcjkqffqjh&CK=ef&NI=10.0.0.43&NP=32771&BK=986119&]") !=
@@ -4825,7 +4836,7 @@ int test_join_identity(Harness &h) {
 	// The handle cookie alone: nobody; beside the login: the login.
 	forget_joins(h);
 	reply = join(h, { "NWHANDLE=join_victim" });
-	TEST_EXPECT(anonymous(reply));
+	TEST_EXPECT(anonymous(reply) && has_set_cookie(reply, "PUBJOINTICKET=; Path=/"));
 	TEST_EXPECT(body_text(reply) == expected_joi(h, "Plain Server 7"));
 	TEST_EXPECT(joined_user(h) == -1);
 	TEST_EXPECT(identified(join(h, { "NWHANDLE=join_victim", tag })));

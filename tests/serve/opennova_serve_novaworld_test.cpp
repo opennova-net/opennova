@@ -365,8 +365,8 @@ int main() {
 	// Host list advertises, relayed as the [name\0][value\0] pairs of every PUB* cookie
 	// (LobbyHttpFlow::on_join_response). The host refuses a NovaWorld JOIN with no cookie (code
 	// 23) and one whose NAMEINFO or PCID does not decrypt (24 / 25), D-NET-702. This listener
-	// has no HTTP leg, so the test encodes them as /NWJoin.dll does; the service answers
-	// HostRequiresJoinTicket 0, so no JOINTICKET is read.
+	// has no HTTP leg, so the test encodes them as /NWJoin.dll does; its lobby has no database,
+	// so it asks for no join tickets (HostRequiresJoinTicket 0) and no JOINTICKET is read.
 	// [orig: Server_ValidatePlayerJoinRequest @0x512100 - 23 @0x512969, NAMEINFO @0x512648,
 	//  PCID @0x5126FE]
 	{

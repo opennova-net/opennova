@@ -32,7 +32,14 @@
 //     account with ServerHostResult Success=0 / MsgCode 200 (NWEC58), holds a
 //     keyless request (a listed connection's too, its row withdrawn) out of the
 //     browser until an update's key names its owner, and ends a held host whose
-//     key names none with ServerStopHosting (NWUSERVERMSGCODE_NEEDTOLOGIN).
+//     key names none with ServerStopHosting (NWUSERVERMSGCODE_NEEDTOLOGIN);
+//   * a join ticket (/NWJoin.dll's PUBJOINTICKET) is "JT:" and 48 hex digits, stored as
+//     its hash alone, redeemed once: another listing's, an expired one and an unknown
+//     one are not found, one minted at another address mismatches, and a mint deletes
+//     the expired ones and an account's delete its own; a lobby with a database asks its
+//     hosts for tickets (HostRequiresJoinTicket 1) and answers a ClientPlayerEnterRequest
+//     by its ticket (Success 1 with an AccessCodeList, else Success 0 and MsgCode 6001 or
+//     6002), reading the joiner's IpAddress as a stock host prints it ("%ld") or unsigned.
 
 #include <base/io/sha256.h>
 #include <net/napi/session.h>
@@ -199,6 +206,47 @@ NapiMessage player_added(int slot, const std::string &name) {
 std::optional<int64_t> row_owner(Database &db, uint32_t rid) {
 	const auto row = hostdb::find_host_by_rid(db, rid);
 	return row ? row->host_user_id : std::nullopt;
+}
+
+// The value of the ServerVar `name` in a ServerHostResult's HostCommands list.
+std::string host_command(const opennova::LobbyDispatchResult &r, const std::string &name) {
+	if (r.reply_containers.empty())
+		return "<absent>";
+	for (const NapiMessage &list : r.reply_containers[0].children) {
+		for (const NapiMessage &var : list.children) {
+			if (field(var, "VarName") == name)
+				return field(var, "VarValue");
+		}
+	}
+	return "<absent>";
+}
+
+// A host's ClientPlayerEnterRequest for its joiner `connection_id` at `ip_address` (as the
+// host prints it) carrying `ticket`.
+NapiMessage enter_request(const std::string &connection_id, const std::string &ip_address,
+		const std::string &ticket) {
+	NapiMessage in;
+	in.name = "ClientPlayerEnterRequest";
+	auto add = [&in](const char *field_name, const std::string &value) {
+		in.fields.push_back({ field_name, std::vector<uint8_t>(value.begin(), value.end()) });
+	};
+	add("ConnectionId", connection_id);
+	add("IpAddress", ip_address);
+	add("PortNumber", "32768");
+	add("JoinTicket", ticket);
+	return in;
+}
+
+// ServerPlayerEnterResult Success=1 (MsgCode 0, an AccessCodeList), or Success=0 with
+// `msg_code` (no AccessCodeList).
+bool entered(const opennova::LobbyDispatchResult &r, int msg_code) {
+	if (r.label != "ClientPlayerEnterRequest" || r.reply_containers.size() != 1 ||
+			r.reply_containers[0].name != "ServerPlayerEnterResult")
+		return false;
+	const NapiMessage &reply = r.reply_containers[0];
+	return field(reply, "Success") == (msg_code == 0 ? "1" : "0") &&
+			field(reply, "MsgCode") == std::to_string(msg_code) &&
+			(field(reply, "AccessCodeList") == "<absent>") == (msg_code != 0);
 }
 
 // ServerHostResult Success=0, MsgCode 200, no Rid.
@@ -745,6 +793,89 @@ int test_require_host_key() {
 	return 0;
 }
 
+// The join tickets in the database: the form, the hash alone, one redeem each.
+int test_join_tickets() {
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
+	const int64_t alice = make_player(db, "alice");
+	const uint32_t rid = 0x0A000101u;
+	const std::string at = "10.0.0.200";
+	const std::string ticket = hostdb::mint_join_ticket(db, rid, alice, at);
+	TEST_EXPECT(ticket.size() == 3 + hostdb::kJoinTicketHexDigits && ticket.rfind("JT:", 0) == 0 &&
+			ticket.find_first_not_of("0123456789abcdef", 3) == std::string::npos);
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM join_tickets WHERE ticket_hash = $1;", { BindValue(ticket) })
+					.empty());
+	TEST_EXPECT(db.query("SELECT host_rid, user_id, peer_ip FROM join_tickets "
+						 "WHERE ticket_hash = $1 AND expires_at > now() + interval '4 minutes';",
+						  { BindValue(opennova::io::sha256_hex(opennova::io::sha256(ticket))) })
+						.size() == 1);
+	TEST_EXPECT(hostdb::mint_join_ticket(db, rid, alice, at) != ticket);
+	using Check = hostdb::JoinTicketCheck;
+	// Another listing's: not found, and gone.
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid + 1, at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid, at) == Check::NotFound);
+	// Another address: a mismatch.
+	const std::string elsewhere = hostdb::mint_join_ticket(db, rid, alice, at);
+	TEST_EXPECT(
+			hostdb::redeem_join_ticket(db, elsewhere, rid, "10.0.0.9") == Check::AddressMismatch);
+	// Admitted once.
+	const std::string good = hostdb::mint_join_ticket(db, rid, alice, at);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at) == Check::Admitted);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, "", rid, at) == Check::NotFound);
+	// Expired: not found; a mint deletes the expired ones.
+	const std::string late = hostdb::mint_join_ticket(db, rid, alice, at);
+	db.exec("UPDATE join_tickets SET expires_at = now() - interval '1 second';");
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, late, rid, at) == Check::NotFound);
+	hostdb::mint_join_ticket(db, rid, alice, at);
+	db.exec("UPDATE join_tickets SET expires_at = now() - interval '1 second';");
+	hostdb::mint_join_ticket(db, rid, alice, at);
+	TEST_EXPECT(db.query("SELECT 1 FROM join_tickets;").size() == 1);
+	// An account's delete takes its tickets.
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(alice) });
+	TEST_EXPECT(db.query("SELECT 1 FROM join_tickets;").empty());
+	return 0;
+}
+
+// A lobby with a database asks its hosts for tickets and answers their enter requests by
+// them; one with none asks for none (lobby_session_test).
+int test_lobby_join_tickets() {
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
+	const int64_t alice = make_player(db, "alice");
+	LobbySession sess;
+	sess.set_database(&db);
+	LobbyState host;
+	const auto hosted = sess.dispatch(fresh_request("Ticketed"), host, "10.0.0.7", 40000);
+	TEST_EXPECT(answered_hosting(hosted));
+	TEST_EXPECT(host_command(hosted, "HostRequiresJoinTicket") == "1");
+	// The joiner at 10.0.0.200: its in_addr dword 0xC800000A, which a stock host prints
+	// signed ("%ld": -939524086) and an unsigned print 3355443210.
+	const std::string at = "10.0.0.200";
+	std::string ticket = hostdb::mint_join_ticket(db, host.rid, alice, at);
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("3", "-939524086", ticket), host, "10.0.0.7", 40000), 0));
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("3", "-939524086", ticket), host, "10.0.0.7", 40000),
+			6001));
+	ticket = hostdb::mint_join_ticket(db, host.rid, alice, at);
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("4", "3355443210", ticket), host, "10.0.0.7", 40000), 0));
+	ticket = hostdb::mint_join_ticket(db, host.rid, alice, "10.0.0.201");
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("5", "-939524086", ticket), host, "10.0.0.7", 40000),
+			6002));
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("6", "-939524086", ""), host, "10.0.0.7", 40000), 6001));
+	// A ticket another listing's joiner got.
+	ticket = hostdb::mint_join_ticket(db, host.rid + 1, alice, at);
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("7", "-939524086", ticket), host, "10.0.0.7", 40000),
+			6001));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -758,7 +889,11 @@ int main(int argc, char **argv) {
 	if (test_rehost_new_key() != 0) return 1;
 	if (test_owner_needs_live_claim() != 0) return 1;
 	if (test_require_host_key() != 0) return 1;
+	if (test_join_tickets() != 0)
+		return 1;
+	if (test_lobby_join_tickets() != 0)
+		return 1;
 	std::printf("OK: host keys (the store, the claims, the sweep, the lobby's links, "
-	            "ONNET_REQUIRE_HOST_KEY)\n");
+				"ONNET_REQUIRE_HOST_KEY) and the join tickets\n");
 	return 0;
 }

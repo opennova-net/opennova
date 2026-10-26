@@ -728,6 +728,18 @@ HostKey is unwitnessed.
   account, takes its row off when it stops playing there (`ClientStopPlaying`), asks to
   play on another server, or ends (`hostdb::remove_player`), so the roster is who plays on
   the server now; the listing's end takes every row, and an account's delete its own.
+- **The join tickets.** The lobby asks every host for join tickets (its `ServerHostResult`
+  sets `HostRequiresJoinTicket` 1), and `/NWJoin.dll` hands each joiner its retail login
+  names a ticket for the listing (`PUBJOINTICKET`, `JT:` and 48 hex digits; a
+  `join_tickets` row holding its hash, the account, the listing's RID and the request's
+  address, live 5 minutes). A stock host refuses a joiner whose JOIN carries none and
+  forwards the one it has in its `ClientPlayerEnterRequest`, which the lobby answers by
+  redeeming it once (`hostdb::redeem_join_ticket`): `Success` 1, or `Success` 0 with
+  `MsgCode` 6001 (no such ticket, an expired one, another listing's) or 6002 (minted for a
+  joiner at another address than the one the host saw: a joiner behind the host's own NAT,
+  which the host sees by its LAN address), which the host shows the joiner as
+  `NWU:NWPENTERFAIL`. Service policy: the retail service's ticket and checks are
+  unwitnessed; the codes are its table's.
 
 | Route | Access | Replies |
 | --- | --- | --- |

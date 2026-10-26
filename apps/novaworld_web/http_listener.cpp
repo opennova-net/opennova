@@ -2051,6 +2051,7 @@ void HttpListener::register_legacy_host_join_routes(
 		std::string pub_pcid;
 		std::string pub_nameinfo;
 		std::string pub_squadinfo;
+		std::string pub_join_ticket;
 		const std::string host_pcid_key = host.pcid_key;
 		std::string joiner_pcid;
 		std::string joiner_nwhandle;
@@ -2157,8 +2158,10 @@ void HttpListener::register_legacy_host_join_routes(
 					                : joiner_nwhandle;
 					p.peer_ip   = req.remote_ip_address;
 					hostdb::add_player(*db_conn, p);
+					pub_join_ticket =
+							hostdb::mint_join_ticket(*db_conn, host.rid, p.user_id, p.peer_ip);
 				} catch (const std::exception &e) {
-					std::fprintf(stderr, "[http] /NWJoin.dll WARN host_players add: %s\n", e.what());
+					std::fprintf(stderr, "[http] /NWJoin.dll WARN join rows: %s\n", e.what());
 				}
 			}
 		}
@@ -2166,17 +2169,14 @@ void HttpListener::register_legacy_host_join_routes(
 		add_cookie(res, "PUBPCID",       pub_pcid);
 		add_cookie(res, "PUBNAMEINFO",   pub_nameinfo);
 		add_cookie(res, "PUBSQUADINFO",  pub_squadinfo);
-		// JOINTICKET: onnet hardcodes a literal "JT:..." string (a retail
-		// capture's shape, its public address a documentation one); not
-		// derived per-session in dev.
-		add_cookie(res, "PUBJOINTICKET", "JT:0a00001314cb0071078000767fd748e1127304c5b6d728");
+		// The joiner's ticket (hostdb::mint_join_ticket), which its host forwards to the lobby.
+		add_cookie(res, "PUBJOINTICKET", pub_join_ticket);
 
-		// NW*/AFF* still stubbed empty — onnet sets them via setdefault to "",
-		// which is what we do here. They feed deeper post-game stat replication
-		// that we don't implement yet.
-		for (const char *name : {"NWPCID","NWNAMEINFO","NWSQUADINFO","NWTI","NWTV",
-		                          "NWJOINTICKET",
-		                          "AFFPCID","AFFNAMEINFO","AFFSQUADINFO","AFFJOINTICKET"}) {
+		// NW* and AFF* go out empty, as onnet sent them: a host reads a joiner's identity and
+		// ticket under its own prefix alone, "PUB" [orig: g_LocalNetAddressStr @0x7CA298, read
+		// only by CNapiNetwork_GetLocalAddress @0x4C4F60].
+		for (const char *name : { "NWPCID", "NWNAMEINFO", "NWSQUADINFO", "NWTI", "NWTV",
+					 "NWJOINTICKET", "AFFPCID", "AFFNAMEINFO", "AFFSQUADINFO", "AFFJOINTICKET" }) {
 			add_cookie(res, name, "");
 		}
 		add_cookie(res, "NWPF",  session->pfid);

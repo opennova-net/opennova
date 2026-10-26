@@ -3,6 +3,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
+#include <net/npwire/peer_addr.h>
 
 #include <algorithm>
 #include <chrono>
@@ -460,7 +461,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 	else if (name == "ClientPlayerEnterRequest") {
 		NapiMessage reply;
 		reply.name = "ServerPlayerEnterResult";
-		std::string connection_id, ip_field, port_field;
+		std::string connection_id, ip_field, port_field, join_ticket;
 		for (const auto &f : inner_message.fields) {
 			const auto value = field_to_string(&f);
 			if (f.name == "ConnectionId") {
@@ -469,12 +470,46 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 			} else {
 				if (f.name == "IpAddress")  ip_field = value;
 				if (f.name == "PortNumber") port_field = value;
+				if (f.name == "JoinTicket")
+					join_ticket = value;
 				set_field(reply, f.name, value);
 			}
 		}
 		if (connection_id.empty()) set_field(reply, "ConnectionID", "0");
-		set_field(reply, "Success", "1");
-		set_field(reply, "MsgCode", "0");
+		// The host's joiner admitted by the ticket the service minted it (hostdb::
+		// redeem_join_ticket, with a database: the hosts were asked for tickets), else
+		// refused with the code the host carries into the joiner's NWU:NWPENTERFAIL. The
+		// IpAddress is the joiner's address as the host's socket saw it, its in_addr dword
+		// printed "%ld" (signed; an unsigned print reads the same), compared as a.b.c.d.
+		// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D02A0 - IpAddress @0x4D03D0;
+		//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 - Success @0x4D1A43, MsgCode
+		//  @0x4D1A6A, the failure's event @0x4D1BA9..0x4D1BB1]
+		int msg_code = 0;
+		if (db_) {
+			PeerAddr joiner;
+			joiner.ip = static_cast<uint32_t>(std::strtoll(ip_field.c_str(), nullptr, 10));
+			hostdb::JoinTicketCheck check = hostdb::JoinTicketCheck::NotFound;
+			try {
+				check = hostdb::redeem_join_ticket(
+						*db_, join_ticket, state.rid, peer_addr_ip_to_string(joiner));
+			} catch (const std::exception &e) {
+				// No answer: the host's ticket deadline reaps the joiner, as it would for a
+				// service that never answered.
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+						"[lobby] WARN rid=%u join ticket redeem: %s", state.rid, e.what());
+				return { {}, "ClientPlayerEnterRequest:db-error" };
+			}
+			if (check == hostdb::JoinTicketCheck::NotFound)
+				msg_code = 6001; // NWUSERVERMSGCODE_JOINTICKETNOTFOUND
+			else if (check == hostdb::JoinTicketCheck::AddressMismatch)
+				msg_code = 6002; // NWUSERVERMSGCODE_JOINTICKETIPADDRESSDOESNOTMATCH
+		}
+		set_field(reply, "Success", msg_code == 0 ? "1" : "0");
+		set_field(reply, "MsgCode", std::to_string(msg_code));
+		// An admitted joiner's access codes: none (a stock host splits the list into tokens
+		// and keeps none [orig: NapiNPPlayer_ParseServerVarList @0x4C4310]).
+		if (msg_code == 0)
+			set_field(reply, "AccessCodeList", "");
 		// Surface the joiner's reported dcb + game endpoint so the host can stamp
 		// it into the in-match 0x0C entity_flags (see LobbyDispatchResult docs).
 		LobbyDispatchResult out{{std::move(reply)}, "ClientPlayerEnterRequest"};
@@ -710,7 +745,13 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	NapiMessage host_commands;
 	host_commands.name = "ServerVarList";
 	set_field(host_commands, "VarList", "HostCommands");
-	append_server_var(host_commands, "HostRequiresJoinTicket", "0");
+	// Join tickets with a database (hostdb::redeem_join_ticket): a stock host reads the var
+	// as an int, nonzero arming its join-ticket check and holding each joiner (state 3) for
+	// the enter request its hosting watchdog then sends.
+	// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 - the read @0x4D5BAE, kept
+	//  @0x4D5BCB; Server_ValidatePlayerJoinRequest @0x512100 - the check @0x5128F8;
+	//  NapiNPServerMsg_HandleJoinRequest @0x512ED0 - state 3 @0x512F99]
+	append_server_var(host_commands, "HostRequiresJoinTicket", db_ ? "1" : "0");
 	append_server_var(host_commands, "GSID", state.gsid);
 	reply.children.push_back(std::move(host_commands));
 

@@ -320,6 +320,25 @@ CREATE INDEX idx_host_keys_user_id ON host_keys(user_id);
 CREATE INDEX idx_host_keys_last_used_at ON host_keys(last_used_at);
 CREATE INDEX idx_host_keys_claimed_rid ON host_keys(claimed_rid);
 
+-- The join tickets /NWJoin.dll mints (a joiner's PUBJOINTICKET, "JT:" and 48
+-- hex digits), each bound to the joiner's account, the listing's RID and the
+-- address the request came from, live until expires_at (5 minutes). A host the
+-- service asked for tickets (HostRequiresJoinTicket 1) forwards the joiner's
+-- in its ClientPlayerEnterRequest, and the lobby redeems it once: 6001 for one
+-- unknown, expired or another listing's, 6002 for one minted at another
+-- address (engine/net/novaworld/host_repository.h "The join tickets"). Only the
+-- ticket's SHA-256 (hex) is stored. Each mint deletes the expired rows.
+CREATE TABLE join_tickets (
+    ticket_hash text PRIMARY KEY,
+    host_rid    bigint NOT NULL,
+    user_id     bigint NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    peer_ip     text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    expires_at  timestamptz NOT NULL
+);
+CREATE INDEX idx_join_tickets_expires ON join_tickets(expires_at);
+CREATE INDEX idx_join_tickets_user ON join_tickets(user_id);
+
 -- A password reset an account asked for (POST /api/auth/forgot): the SHA-256 of
 -- its link's token (32 random bytes, as 64 hex digits; the link alone carries the
 -- token), live until expires_at (an hour). One per account: a newer request

@@ -211,8 +211,12 @@ public:
 	// ClientHostPlayerRemoved upsert/delete `active_hosts` + `host_roster`
 	// rows, a Cookie list's LOGINSESSIONTAG pins the account (user_id), and
 	// ClientPlayRequest / ClientStopPlaying name the listing played on and take
-	// the joiner's `host_players` row off the one it left; null leaves the
-	// dispatcher purely in-memory (used by tests
+	// the joiner's `host_players` row off the one it left, and the hosts are asked
+	// for join tickets (ServerHostResult's HostRequiresJoinTicket 1), which a
+	// ClientPlayerEnterRequest's JoinTicket is redeemed against
+	// (hostdb::redeem_join_ticket: the tickets /NWJoin.dll mints into the same
+	// database); null leaves the dispatcher purely in-memory, asking for no
+	// tickets and admitting every enter request (used by tests
 	// that bring up no database). The connection belongs to the thread that
 	// calls dispatch() (Database is single-threaded; the NW UDP listener hands
 	// over the one its receive thread leases).

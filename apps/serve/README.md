@@ -137,9 +137,9 @@ The second listing:
 - **Registers under an AppId of its own,** as every retail host request mints one. Each
   service hands its joiners its own registration's AppId, so the match knows which service
   sent each joiner: it admits either AppId, holds a joiner to its own service's join-ticket
-  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service. NovaLogic's
-  service asks for join tickets (the S3 leg's hosts sent it enter requests); OpenNova's
-  does not.
+  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service, whose ticket it
+  carries. Both services ask for join tickets: NovaLogic's (the S3 leg's hosts sent it
+  enter requests) and OpenNova's (`apps/novaworld_common/README.md`, "The join tickets").
 - **Runs its service's commands on the match,** as a stock host listed there does: a rename
   or message change from either service renames the server on both. A `PuntPlayer` at the
   server's own slot from the second service ends only the second listing.
