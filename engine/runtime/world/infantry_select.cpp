@@ -436,11 +436,12 @@ void AiSystem::player_body_select(AiEntity &e, World &world, uint32_t entity_fla
 
     // Prone lean rolls from the lean bits; right (bit 7) wins when both are held.
     // The original gates on !(Flags & 0x112002): dead 0x2 and in-air 0x2000 are
-    // modeled (health/airborne); the 0x10000 leg (the terrain-slide bit, which
-    // infantry_terrain_motion writes) is not applied here (D-INF-17), and the
+    // modeled (health/airborne), the 0x10000 leg is the terrain-slide bit
+    // infantry_terrain_motion writes (a sliding prone body does not roll), and the
     // 0x100000 leg is subsumed by the climb block's same-tick state override.
-    // [orig: @0x4b731b-0x4b7354]
-    if (inf.stance == InfantryState::Stance::kProne && e.health > 0 && !inf.airborne) {
+    // [orig: @0x4b731b-0x4b7354 - the mask @0x4B7325]
+    if (inf.stance == InfantryState::Stance::kProne && e.health > 0 && !inf.airborne &&
+            (entity_flags & kEntityFlagTerrainSlide) == 0) {
         if (inf.lean_left) target = anim_state::kRollLeft;   // [orig: @0x4b7335]
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }

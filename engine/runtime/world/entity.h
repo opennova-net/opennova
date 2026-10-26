@@ -267,7 +267,7 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
 // witnessed meaning; the consolidated per-bit table is
 // docs/world/world-wac-ai-re.md § "The entity Flags dword". Remaining
-// known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
+// known-but-unnamed bits stay raw at use sites — do not name: 0x2000000,
 // and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context meanings
 // unwitnessed).
 inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
@@ -303,6 +303,12 @@ inline constexpr uint32_t kEntityFlagInAir = 0x2000;          // airborne/swimmi
 inline constexpr uint32_t kEntityFlagPriorityTarget = 0x4000; // set on every fire, decays per perception scan
                                                               // [orig: @0x4bf370 set; @0x4BBF88 clear; §16.2 x6 scoring]
 inline constexpr uint32_t kEntityFlagDrowning = 0x8000;       // zeroes vertical swim input [orig: §7 movement]
+// The terrain-gradient slide bit: both infantry motors set it while the gradient slides the body
+// and clear it otherwise (infantry_terrain_motion); the prone roll waits it out.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `or [esi+24h], 10000h` @0x4B7A93, the clears
+//  @0x4B7A9C / @0x4B7AA5, the prone roll's `and eax, 112002h` @0x4B7325;
+//  Entity_UpdateInfantryAI - the set @0x4BA947, the clears @0x4BA957 / @0x4BA960]
+inline constexpr uint32_t kEntityFlagTerrainSlide = 0x10000;
 inline constexpr uint32_t kEntityFlagMatrixBuilt = 0x20000;   // the entity matrix is current: set after every
                                                               // Math_BuildFixedPointMatrixFromEulerAngles of the
                                                               // entity (each mover tail, e.g. @0x48D451; respawn

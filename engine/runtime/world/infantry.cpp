@@ -569,14 +569,14 @@ static bool infantry_terrain_motion(AiEntity &e, Entity *entity,
         gradient = terrain::height_field_gradient_fixed(*field, e.self->position.x.q16, e.self->position.y.q16);
     if (!infantry_gradient_slide(gradient.dx, gradient.dy, dx, dy, e.inf.vel[2])) {
         if (entity != nullptr) {
-            entity->flags &= ~0x10000u;
-            entity->engine_flags &= ~0x10000u;
+            entity->flags &= ~kEntityFlagTerrainSlide;
+            entity->engine_flags &= ~kEntityFlagTerrainSlide;
         }
         return false;
     }
     if (entity != nullptr) {
-        entity->flags |= 0x10000u;
-        entity->engine_flags |= 0x10000u;
+        entity->flags |= kEntityFlagTerrainSlide;
+        entity->engine_flags |= kEntityFlagTerrainSlide;
     }
     if (npc) e.inf.path_state = 1; // [orig: @0x4BA94E; boarding reads @0x4BB325]
     return true;

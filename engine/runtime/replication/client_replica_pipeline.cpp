@@ -226,8 +226,9 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 // [orig: both legs of the single Entity_UpdateInfantryPlayerBody @0x4b40e0 pass —
 //  decay lean -= (lean+8)>>4 @0x4b5c97, then the on-foot ramp @0x4b7dbf (bit 6 left
 //  −0x3000000/tick) / @0x4b7dd6 (bit 7 right +0x3000000/tick)]
-// The producer's ramp gates (alive/prone, and the seated ±0x1400000 variant) are not
-// applied here: the decoded row carries no honest stance/seat state for them (D-INF-17).
+// Both run in the body ticks (tick_lean_decay / tick_lean_ramp, client_replica_body_ticks.cpp),
+// the ramp behind the producer's gates, and a seated row's ±0x1400000 variant in the seat leg
+// (client_replica_motion.cpp).
 void ClientReplicaPipeline::land_compact_pose(ClientEntityState &es, int32_t wx,
 		int32_t wy, int32_t wz, bool has_heading, int32_t heading_bam,
 		bool force_live_snap) {

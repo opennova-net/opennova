@@ -926,6 +926,36 @@ void test_registry_max_health_drives_wounded_gait() {
     CHECK(motor->inf.anim_state == anim_state::kWoundedWalk);
 }
 
+// The prone roll waits out the terrain-gradient slide: Flags 0x10000, with the dead and in-air
+// bits, holds the lean bits off the roll pair (D-INF-17).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - `and eax, 112002h` @0x4B7325, the rolls
+//  @0x4B7335 / @0x4B734C]
+void test_prone_roll_waits_out_the_slide() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.health = 100;
+    seed.flags |= kEntityFlagPlayer;
+    w.registry.spawn(0, seed);
+    AiSystem ai;
+    ai.bind_registry(&w.registry);
+    TestSource src;
+    src.clips.insert(anim_state::kIdleProne);
+    src.clips.insert(anim_state::kRollLeft);
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->health = 100;
+    e->inf.stance = InfantryState::Stance::kProne;
+    e->inf.lean_left = true;
+    ai.player_body_select(*e, w, kEntityFlagTerrainSlide, 4);
+    CHECK(e->inf.anim_state != anim_state::kRollLeft &&
+          e->inf.anim_pending != anim_state::kRollLeft);
+    ai.player_body_select(*e, w, 0, 8);
+    CHECK(e->inf.anim_state == anim_state::kRollLeft ||
+          e->inf.anim_pending == anim_state::kRollLeft);
+}
+
 // D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
 // its own function: main's frame already unions a dozen scoped World locals and MSVC
 // probes the whole frame at entry, so one more inline block overflowed the stack.
@@ -6783,6 +6813,7 @@ int main() {
     // Was defined but never invoked (a silently-dead test) — called since the leg-chase
     // change landed alongside it.
     test_remote_player_body_anim();
+    test_prone_roll_waits_out_the_slide();
     test_remote_player_same_tick_prone_jump_is_rejected();
     test_remote_player_airborne_jump_press_and_repress_are_rejected();
     test_remote_player_jump_respects_world_state_flag_gates();
