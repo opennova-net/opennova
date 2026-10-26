@@ -3,15 +3,14 @@
     <header class="flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 class="page-heading">Welcome back{{ user ? `, ${user.username}` : '' }}.</h1>
-        <p class="page-lead">Find your next game or pick up where your servers left off.</p>
+        <p class="page-lead">Your servers, billing and account.</p>
       </div>
       <button type="button" class="btn-secondary" :disabled="poll.loading.value" @click="poll.refresh">{{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}</button>
     </header>
 
     <section class="rounded-panel border border-border bg-panel p-6 sm:p-8" aria-labelledby="account-play">
-      <p class="eyebrow">Ready when you are</p>
-      <h2 id="account-play" class="mt-3 text-2xl font-semibold text-ink-bright">A good game starts here.</h2>
-      <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-muted">See who is playing on NovaWorld. Your account works on the website and in supported games.</p>
+      <h2 id="account-play" class="text-2xl font-semibold text-ink-bright">Play</h2>
+      <p class="mt-2 max-w-xl text-sm leading-relaxed text-ink-muted">See who's playing on NovaWorld. Your account works on this site and in the game.</p>
       <div class="mt-6 flex flex-wrap gap-3">
         <RouterLink to="/lobby" class="btn-primary">Find a server</RouterLink>
         <RouterLink to="/downloads" class="btn-secondary">Get OpenNova</RouterLink>
@@ -37,7 +36,7 @@
               </RouterLink>
             </li>
           </ul>
-          <p v-else class="mt-4 text-sm text-ink-muted">No active servers. You can still join any public game.</p>
+          <p v-else class="mt-4 text-sm text-ink-muted">No servers running.</p>
           <RouterLink v-if="canStart" to="/me/servers/new" class="btn-primary mt-5">Start a server</RouterLink>
           <RouterLink v-else-if="!hosting.entitlement.max_servers && hosting.enabled" to="/me/support" class="btn-secondary mt-5">Explore hosting</RouterLink>
           <p v-if="!hosting.enabled" class="mt-4 text-sm text-ink-muted">New hosted servers are unavailable right now.</p>

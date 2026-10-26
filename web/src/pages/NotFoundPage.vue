@@ -5,7 +5,7 @@
     <p class="mt-3 text-ink-muted">The link may be old, or the address mistyped.</p>
     <div class="mt-8 flex flex-wrap justify-center gap-3">
       <RouterLink to="/" class="btn-primary">Go home</RouterLink>
-      <RouterLink to="/lobby" class="btn-secondary">View lobbies</RouterLink>
+      <RouterLink to="/lobby" class="btn-secondary">Browse servers</RouterLink>
     </div>
   </section>
 </template>

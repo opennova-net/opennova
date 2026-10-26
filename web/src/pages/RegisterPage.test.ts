@@ -44,7 +44,7 @@ describe('RegisterPage', () => {
     const wrapper = await mountPage();
     expect(wrapper.get('input[type="email"]').attributes('required')).toBeDefined();
     await submit(wrapper, ' New@Example.com ');
-    expect(register).toHaveBeenCalledWith({ username: 'newplayer', password: 'secret', nwhandle: undefined, email: 'New@Example.com' });
+    expect(register).toHaveBeenCalledWith({ username: 'newplayer', password: 'secret', email: 'New@Example.com' });
     expect(wrapper.get('[role="status"]').text()).toContain('Account created for newplayer');
     expect(wrapper.get('[role="status"]').text()).not.toContain('PCID');
     expect(wrapper.get('[role="status"] a').attributes('href')).toContain('/login');

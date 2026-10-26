@@ -2,9 +2,9 @@
   <section class="page py-10 sm:py-14">
     <header class="flex flex-wrap items-end justify-between gap-5">
       <div>
-        <p class="eyebrow">NovaWorld / Server browser</p>
-        <h1 class="mt-3 text-4xl font-semibold tracking-tight text-ink-bright">Find your next match.</h1>
-        <p class="mt-4 max-w-xl text-sm leading-relaxed text-ink-muted">Explore servers on OpenNova and NovaLogic. Open a listing for its players and details, then join from your game's server browser.</p>
+        <p class="eyebrow">NovaWorld</p>
+        <h1 class="mt-3 text-4xl font-semibold tracking-tight text-ink-bright">Servers</h1>
+        <p class="mt-4 max-w-xl text-sm leading-relaxed text-ink-muted">Servers on OpenNova's NovaWorld and NovaLogic's. Open one to see its players and settings, then join from your game's server browser.</p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <RouterLink to="/play#online" class="btn-secondary">How to join</RouterLink>
@@ -38,7 +38,7 @@
     <ServerTable :rows="rows" directory :empty="emptyText" caption="Servers on OpenNova and NovaLogic" />
     <div class="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-ink-muted">
       <p>Each listing names the NovaWorld service to select in-game.</p>
-      <RouterLink to="/support" class="link">Host a server of your own</RouterLink>
+      <RouterLink to="/support" class="link">Host your own server</RouterLink>
     </div>
   </section>
 </template>

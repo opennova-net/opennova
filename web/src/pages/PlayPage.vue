@@ -1,12 +1,11 @@
 <template>
   <section class="page py-10 sm:py-14">
     <header class="max-w-2xl">
-      <p class="eyebrow">Start playing</p>
-      <h1 class="mt-3 text-4xl font-semibold tracking-tight text-ink-bright sm:text-5xl">Your next game starts here.</h1>
-      <p class="mt-5 text-base leading-relaxed text-ink-muted">A new game, a familiar one, or a return to NovaWorld. Choose what you want to play and we will point you to the right setup.</p>
+      <h1 class="text-4xl font-semibold tracking-tight text-ink-bright sm:text-5xl">Start playing</h1>
+      <p class="mt-5 text-base leading-relaxed text-ink-muted">Pick the game you want to play and follow its setup.</p>
     </header>
     <fieldset class="mt-9">
-      <legend class="text-sm font-semibold text-ink">What are you playing?</legend>
+      <legend class="text-sm font-semibold text-ink">Which game?</legend>
       <div class="mt-3 grid gap-3 sm:grid-cols-3">
         <label v-for="option in choices" :key="option.id" class="card flex cursor-pointer items-start gap-3 p-5 transition hover:border-accent" :class="choice === option.id ? 'border-accent bg-accent/5' : ''">
           <input v-model="choice" type="radio" name="game" :value="option.id" class="mt-1 h-4 w-4 shrink-0 accent-accent" />
@@ -22,25 +21,25 @@
         <p class="eyebrow">Your setup</p>
         <h2 id="setup-title" class="mt-3 text-2xl font-semibold text-ink-bright">{{ active.name }}</h2>
         <template v-if="choice === 'opennova'">
-          <p class="mt-4 leading-relaxed text-ink-muted">OP: Acid Gambit is OpenNova's own game, made with no file from the original games. Land on a jungle island, clear a rebel camp and try its OP: Nifty Package expansion at night in a storm.</p>
+          <p class="mt-4 leading-relaxed text-ink-muted">OP: Acid Gambit is OpenNova's own game, made without a single file from the original games. Clear a rebel camp on a jungle island, then play its expansion, OP: Nifty Package, at night in a storm.</p>
           <ol class="mt-6 list-decimal space-y-3 pl-5 text-sm text-ink">
             <li>Download OpenNova for Windows x64.</li>
             <li>Unzip it into an empty folder and run <code>opennova.exe</code>. The first launch downloads the game.</li>
-            <li>Play alone or in Co-op over LAN. Online play in our own game is coming.</li>
+            <li>Play alone, in co-op over LAN, or online through our NovaWorld.</li>
           </ol>
           <RouterLink to="/downloads#opennova" class="btn-primary mt-7">Download OpenNova</RouterLink>
         </template>
         <template v-else-if="choice === 'jointops'">
-          <p class="mt-4 leading-relaxed text-ink-muted">Play the Joint Operations you own. OpenNova runs in place of Jointops.exe; it ships no retail files. The aim is parity with the game as it shipped, not a remake.</p>
+          <p class="mt-4 leading-relaxed text-ink-muted">Play the Joint Operations you own. OpenNova runs in place of Jointops.exe and ships no files from the original game. It aims to play exactly like the original, not to remake it.</p>
           <ol class="mt-6 list-decimal space-y-3 pl-5 text-sm text-ink">
             <li>You need your own purchased copy of Joint Operations.</li>
             <li>Download the Joint Operations build, unzip it into an empty folder and run <code>opennova.exe</code>. Its first launch downloads Joint Operations and Escalation.</li>
-            <li>Or put OpenNova in your existing Joint Operations folder to use its maps, missions, models and sounds.</li>
+            <li>Already have Joint Operations installed? <code>opennova.exe</code> is a drop-in replacement for <code>Jointops.exe</code>: copy the build's files into your install's folder and run <code>opennova.exe</code> instead. It plays that install's maps, missions, models and sounds.</li>
           </ol>
           <RouterLink to="/downloads#jointops" class="btn-primary mt-7">Get the Joint Operations build</RouterLink>
         </template>
         <template v-else>
-          <p class="mt-4 leading-relaxed text-ink-muted">Returning with the original dfx2.exe? NovaLogic's NovaWorld for Delta Force Xtreme 2 is down. The OpenNova Switcher points your original game at our NovaWorld.</p>
+          <p class="mt-4 leading-relaxed text-ink-muted">Returning with the original dfx2.exe? NovaLogic's NovaWorld for Delta Force Xtreme 2 is down. The OpenNova Switcher points your original game at our NovaWorld instead.</p>
           <ol class="mt-6 list-decimal space-y-3 pl-5 text-sm text-ink">
             <li>Keep your original Delta Force Xtreme 2 installation.</li>
             <li>Download and run the OpenNova Switcher, then select OpenNova.</li>
@@ -54,27 +53,26 @@
       <section id="online" class="scroll-mt-24 space-y-5" aria-labelledby="online-title">
         <img :src="retailShots[0].thumb" :alt="retailShots[0].alt" class="aspect-video w-full rounded-panel border border-border object-cover" width="1600" height="900" />
         <div>
-          <p class="eyebrow">Play together</p>
-          <h2 id="online-title" class="mt-3 text-2xl font-semibold text-ink-bright">Choose the right NovaWorld.</h2>
+          <h2 id="online-title" class="text-2xl font-semibold text-ink-bright">Playing online</h2>
         </div>
-        <p class="text-sm leading-relaxed text-ink-muted">NovaWorld is the service your game signs in to. OpenNova's accounts and NovaLogic's accounts belong to separate services.</p>
+        <p class="text-sm leading-relaxed text-ink-muted">NovaWorld is the online service your game signs in to. OpenNova runs its own, and NovaLogic still runs theirs for Joint Operations. An account on one does not work on the other.</p>
         <div class="space-y-4 text-sm">
           <div>
             <h3 class="font-semibold text-ink">With OpenNova</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">Open NovaWorld from Joint Operations' multiplayer menu and choose OpenNova, or Original NovaWorld for NovaLogic's. Nothing else to install.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">In the multiplayer menu, open NovaWorld and choose OpenNova, or Original NovaWorld for NovaLogic's. Nothing else to install.</p>
           </div>
           <div>
             <h3 class="font-semibold text-ink">With the original Jointops.exe</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">Sign in to NovaLogic's NovaWorld as always. Joint Operations servers we host can also list there. Find one in the game's server browser. No Switcher needed.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">Sign in to NovaLogic's NovaWorld as usual. Joint Operations servers we host can list there too, so they show up in the game's server browser. No Switcher needed.</p>
           </div>
           <div>
             <h3 class="font-semibold text-ink">With the original dfx2.exe</h3>
-            <p class="mt-1 leading-relaxed text-ink-muted">Use the Switcher to select OpenNova, then sign in with your OpenNova NovaWorld account. OpenNova and the original Jointops.exe don't need the Switcher.</p>
+            <p class="mt-1 leading-relaxed text-ink-muted">Use the Switcher to choose OpenNova, then sign in with your OpenNova account. OpenNova itself and the original Jointops.exe don't need the Switcher.</p>
           </div>
         </div>
         <div class="card p-5">
-          <h3 class="font-semibold text-ink">Joining our NovaWorld?</h3>
-          <p class="mt-2 text-sm text-ink-muted">Create an account here. Its username and password are what you use in-game. Browse servers here, then join from your game's server browser.</p>
+          <h3 class="font-semibold text-ink">New to our NovaWorld?</h3>
+          <p class="mt-2 text-sm text-ink-muted">Create an account here; the game signs in with the same username and password. Browse servers here, then join from your game's server browser.</p>
           <div class="mt-4 flex flex-wrap gap-4">
             <RouterLink to="/register" class="btn-secondary">Create an account</RouterLink>
             <RouterLink to="/lobby" class="btn-secondary">Browse servers</RouterLink>
@@ -90,9 +88,9 @@ import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { retailShots } from '../utils/media';
 import { ISSUES_URL } from '../utils/links';
 const choices = [
-  { id: 'opennova', name: 'OP: Acid Gambit', detail: 'Our own game. Start fresh.' },
-  { id: 'jointops', name: 'Joint Operations', detail: 'The game you own, with OpenNova.' },
-  { id: 'dfx2', name: 'Delta Force Xtreme 2', detail: 'Return online with your original game.' },
+  { id: 'opennova', name: 'OP: Acid Gambit', detail: 'Our own game.' },
+  { id: 'jointops', name: 'Joint Operations', detail: 'The copy you own, run by OpenNova.' },
+  { id: 'dfx2', name: 'Delta Force Xtreme 2', detail: 'Your original game, back online.' },
 ];
 const route = useRoute();
 const router = useRouter();
