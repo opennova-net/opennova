@@ -621,6 +621,12 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
 	if (!missions) whole_install();
+	// An expansion project's import of an installed expansion's own files, as the Files window's Import
+	// offers it (list_installed_expansion_choices): one item for each expansion the game install has.
+	if (v.project.open && v.project.document && !v.project.document->expansion.standalone())
+		for (const ProjectView::InstallExpansion &installed : v.project.game_install_expansions)
+			if (menu_item(("Import the installed expansion " + installed.name + "...").c_str(), nullptr, lists))
+				request(request::import_installed_expansion(installed.name, v.project.retail_directory));
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		window_requests::set_workspace(*this, "settings", "open", io::JsonValue::make_bool(true));
