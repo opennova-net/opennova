@@ -2,6 +2,7 @@
 
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/ui_kit.h>
+#include <formats/env/env.h>
 #include <runtime/world/weather_state.h>
 
 #include <imgui.h>
@@ -28,18 +29,9 @@ std::string int_row(const char *label, int32_t value, const char *suffix = "") {
 constexpr int kNoTarget = -1;
 constexpr int kLightningTarget = -2;
 
-uint32_t pack_rgb(const std::array<float, 3> &rgb) {
-	const auto byte = [](float v) -> uint32_t {
-		const int scaled = static_cast<int>(v * 255.0f + 0.5f);
-		return static_cast<uint32_t>(scaled < 0 ? 0 : (scaled > 255 ? 255 : scaled));
-	};
-	return (byte(rgb[0]) << 16) | (byte(rgb[1]) << 8) | byte(rgb[2]);
-}
-
 ImVec4 swatch(uint32_t packed) {
-	return ImVec4(static_cast<float>((packed >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((packed >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(packed & 0xFFu) / 255.0f, 1.0f);
+	const env::Rgb c = env::packed_to_rgb01(packed);
+	return ImVec4(c.r, c.g, c.b, 1.0f);
 }
 
 }  // namespace
@@ -268,7 +260,7 @@ void EnvironmentWindow::draw_rows() {
 					if (ImGui::ColorPicker3("##color", rgb.data(),
 								ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoSmallPreview |
 										ImGuiColorEditFlags_DisplayRGB)) {
-						const int32_t packed = static_cast<int32_t>(pack_rgb(rgb));
+						const int32_t packed = static_cast<int32_t>(env::rgb01_to_packed({rgb[0], rgb[1], rgb[2]}));
 						if (block_targets[i] == kLightningTarget) {
 							enqueue_request({control_id::kEnvironmentLightningColor,
 									{ControlArg::integer(packed)}});
