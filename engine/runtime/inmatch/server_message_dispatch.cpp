@@ -53,6 +53,7 @@
 #include <cstdint>
 #include <cctype>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -367,18 +368,33 @@ std::vector<uint8_t> build_tag75_player_state(const GameConfig &config,
 	return {static_cast<uint8_t>(spectator ? 0x01u : 0x00u), team};
 }
 
-// Build a 0x46 player-sync for a SPECIFIC roster slot (the one the client's C2S 0x22 requests). Finds
-// the connection bound to that slot and serializes its real entity/team/name; falls back to `rep` (the
-// requesting connection's own binding) when no other player owns the slot. [orig: NapiNPServerMsg_0x022
-// @0x514C90 serializes the requested playerSlot from dword_A87048]
-PlayerReplicationState rep_for_slot(const GameConfig &config,
-                                    const std::vector<NapiNPConnection> &roster, uint8_t slot,
-                                    const PlayerReplicationState &fallback, const world::World *world) {
-	for (const NapiNPConnection &c : roster) {
-		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
-		if (c.reply.player_slot == slot) return make_rep_state(config, c, world);
+// The 0x46 a C2S 0x22 asks for: the requested slot's row serialized, an added row with a body,
+// the connection's own or one a re-add left behind (D-NET-NEW-L1-24), whose net-player legs (the
+// account's PCID and squad id) read the live connection orphan_net_player finds, none past the
+// player's leave; any other slot in the table answers the 0x8000 removal record.
+// [orig: NapiNPServerMsg_0x022 @0x514C90 - g_PlayerSlots[slot] @0x514CF9..0x514CFF,
+//  NetPacket_SerializePlayerSync0x46 @0x514D16; NetPacket_SerializePlayerSync0x46 @0x505E80 -
+//  the net player +0x1C @0x505EA6, the removal for an inactive slot @0x505ECB or a null entity
+//  @0x505EDC, the PCID through the net player @0x506041..0x5060AC]
+std::optional<PlayerReplicationState> rep_for_slot(const GameConfig &config,
+		const std::vector<NapiNPConnection> &roster, NapiNPServerCtx *ctx, uint8_t slot,
+		const world::World *world) {
+	const auto added_row = [slot](const NapiNPConnection &c) {
+		return c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
+				c.reply.player_slot == slot;
+	};
+	for (const NapiNPConnection &c : roster)
+		if (added_row(c)) return make_rep_state(config, c, world);
+	if (ctx == nullptr) return std::nullopt;
+	for (OrphanedPlayerRow &orphan : ctx->orphaned_player_rows) {
+		if (!added_row(orphan.row)) continue;
+		PlayerReplicationState prs = make_rep_state(config, orphan.row, world);
+		const NapiNPConnection *net_player = orphan_net_player(*ctx, orphan);
+		prs.account_pcid = net_player != nullptr ? net_player->account.pcid : std::string();
+		prs.account_squad_id = net_player != nullptr ? net_player->account.squad_id : 0u;
+		return prs;
 	}
-	return fallback;
+	return std::nullopt;
 }
 
 // tag=0x0C C2S player-input uplink — cache the joiner's pre-spawn pose. [orig: NapiNPServerMsg_0x00C
@@ -508,7 +524,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	//  NapiNPProtocol_FindMsgInfo called @0x622687, `cmp byte ptr [esi+70Dh], 0` @0x622697 /
 	//  `jnz` @0x62269E past the handler's call @0x6226EF]
 	SessionReplyState &st = conn.reply;
-	const PlayerReplicationState rep = make_rep_state(config, conn, world);
 	const IntegritySources &integrity = config.integrity_sources;
 
 	// The admission records first, each through its handler; the records after the one that
@@ -730,14 +745,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: `cmp eax, g_PlayerSlotCapacity` @0x514cf1, `jge` @0x514cf7]. The retail
 				// walk's inclusive final request (slot == the 0x04 capacity byte) lands here.
 				if (req_slot >= config.total_player_slot_capacity()) break;
-				bool slot_has_player = false;
-				for (const NapiNPConnection &c : roster) {
-					if (c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
-					    c.reply.player_slot == req_slot) {
-						slot_has_player = true;
-						break;
-					}
-				}
+				const std::optional<PlayerReplicationState> slot_rep =
+						rep_for_slot(config, roster, inputs.server_ctx, req_slot, world);
 				// An active slot answers the request mask minus bit 0x8000, the ack bit riding
 				// along; there is no default field set, so a zero or ack-only mask answers the
 				// header and the pool index alone [orig: NetPacket_SerializePlayerSync0x46
@@ -746,10 +755,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// our 0x04 slot-config byte 18).
 				const bool echo_ack = (req_flags & kPlayerSyncAck) != 0;
 				const uint16_t reply_flags = static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval);
-				if (slot_has_player) {
-					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
-					replies.push_back(
-							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync(prs, reply_flags)));
+				if (slot_rep.has_value()) {
+					replies.push_back(make_protocol_message(
+							s2c::PLAYER_SYNC, encode_player_sync(*slot_rep, reply_flags)));
 				} else {
 					// An in-table empty or disconnected slot: the 0x8000 removal record (|0x4000
 					// when the request asked for the ack) [orig: @0x505ecb..0x505ee0, @0x505f37].

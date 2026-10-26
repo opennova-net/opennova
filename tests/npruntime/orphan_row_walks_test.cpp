@@ -13,7 +13,9 @@
 //     alone steps); the downed resend sends the row's downed body to its team;
 //   - the scoreboard boundary's integrity family sends the row's request to its net player;
 //   - the round end sends the row's 0x61 and 0x1D to its net player, in slot order with the
-//     player's own row's pair, and moves the row to state 7.
+//     player's own row's pair, and moves the row to state 7;
+//   - a C2S 0x22 naming the row's slot answers the row's 0x46, its PCID the live net
+//     player's (none past the player's leave), not the removal record.
 // [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19);
 //  Server_AutoBalanceTeams @0x4FCC30 (+4 @0x4FCC74, +5 @0x4FCC7A, the key @0x4FCC82, the walk
 //  @0x4FCCDC..0x4FCDD8); CPairList_ShellSort @0x526C00 (`cmp` @0x526C77, `jl` @0x526C7B);
@@ -35,11 +37,14 @@
 #include <runtime/inmatch/server_files.h>  // ServerFileSink
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
 #include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
+#include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the C2S 0x22)
 #include <runtime/inmatch/server_net_quality.h>  // Server_SampleHostNetQuality
 #include <runtime/inmatch/server_tick.h>         // Server_ProcessRoundEnd
 #include <runtime/inmatch/server_tick_maintenance.h> // the play ticks, the periodic walk
 #include <runtime/inmatch/udp_session_transport.h>
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/protocol_message.h>
 #include <runtime/inmatch/server_team_change.h>  // the imbalance and the auto-balance
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_spawn.h>
@@ -560,6 +565,48 @@ void test_a_punted_row_takes_its_integrity_draw() {
 	CHECK(r.drain().empty());
 }
 
+// D-NET-1404: a C2S 0x22 naming an orphaned row's slot answers the row's record (its slot, its
+// body), the PCID read through the row's live net player and empty once the player has left; the
+// row is active with a body, so it is never the 0x8000 removal record.
+// [orig: NapiNPServerMsg_0x022 @0x514C90 - g_PlayerSlots[slot] @0x514CF9..0x514CFF;
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 - the removal tests @0x505ECB / @0x505EDC, the
+//  PCID through the net player @0x506041..0x5060AC]
+void test_the_player_sync_reply_takes_an_orphaned_row() {
+	OrphanRig r;
+	r.ctx->config.max_players = 8; // slots 2 and 5 in the table
+	r.net_player().account.pcid = "PC-NOW";
+	r.net_player().account.squad_id = 77;
+	r.orphan().account.pcid = "PC-OLD";
+	// The asker: another added player.
+	inmatch::NapiNPConnection asker = row(4, 2, 0);
+	asker.connection_id = 9;
+	r.ctx->np_protocol.connection_list.push_back(asker);
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = r.ctx.get();
+	const auto ask = [&](uint8_t slot, PlayerSync &out) {
+		inmatch::NapiNPConnection &from = r.ctx->np_protocol.connection_list.back();
+		const std::vector<ProtocolMessage> msgs{
+				make_protocol_message(c2s::PLAYER_SYNC_REQUEST, {slot, 0x10, 0x08})};
+		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
+				r.ctx->config, from, msgs, 100, r.ctx->np_protocol.connection_list, r.world.get(),
+				inputs);
+		return replies.size() == 1 && replies[0].tag == s2c::PLAYER_SYNC &&
+				decode_player_sync(replies[0].payload.data(), replies[0].payload.size(), out);
+	};
+	PlayerSync sync;
+	CHECK(ask(2, sync) && !sync.removal && sync.slot_id == 2 && sync.id_label == "PC-NOW" &&
+			sync.account_id == 77 &&
+			sync.entity_slot_id == static_cast<uint8_t>(r.orphan_body.packed & 0xFFu));
+	// The player leaves: the row still answers, through no net player.
+	r.ctx->np_protocol.connection_list.erase(r.ctx->np_protocol.connection_list.begin());
+	sync = PlayerSync{};
+	CHECK(ask(2, sync) && !sync.removal && sync.slot_id == 2 && sync.id_label.empty() &&
+			sync.account_id == 0);
+	// A slot no row holds answers the removal record.
+	sync = PlayerSync{};
+	CHECK(ask(5, sync) && sync.removal);
+}
+
 } // namespace
 
 int main() {
@@ -580,6 +627,7 @@ int main() {
 	test_the_violation_sweep_takes_an_orphaned_row();
 	test_the_violation_sweep_takes_no_row_after_the_round_end();
 	test_a_punted_row_takes_its_integrity_draw();
+	test_the_player_sync_reply_takes_an_orphaned_row();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;
