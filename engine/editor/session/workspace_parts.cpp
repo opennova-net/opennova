@@ -289,7 +289,7 @@ struct FocusRow {
 constexpr FocusRow kWindows[] = {
 	{ "files", "Files" },     { "document", "Document" }, { "preview", "Preview" },
 	{ "inspector", "Inspector" }, { "problems", "Problems" }, { "output", "Output" },
-	{ "content", "Content" },
+	{ "content", "NovaWorld" },
 };
 
 const WorkspacePartRow *part_of(const std::string &token) {

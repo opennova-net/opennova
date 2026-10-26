@@ -1,4 +1,4 @@
-// The Content window and the content store's place in the workspace (ADR 0069): over a hand-made view, what the
+// The NovaWorld window and the content store's place in the workspace (ADR 0069): over a hand-made view, what the
 // window shows of a bound project (its revision, the store's, its changes) and the status bar's words for it; a
 // push's message typed and Push raising content_push, refused while there is nothing to push; a conflict's Keep
 // mine; an admin's Bind of an unbound project; the sign-in's form raising content_sign_in with what was typed; the
@@ -49,7 +49,7 @@ SessionView bound_view() {
 	return v;
 }
 
-ImGuiID content_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("Content"), steps); }
+ImGuiID content_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("NovaWorld"), steps); }
 
 void test_bound_project() {
 	Ui ui;
@@ -59,7 +59,7 @@ void test_bound_project() {
 	ui.away();
 	const std::string text = logged_frame(ui);
 	CHECK(text.find("taylor (admin) on content.test") != std::string::npos, "who is signed in, and where");
-	CHECK(text.find("MOD r3, r5 in the store") != std::string::npos, "the revision and the store's newest");
+	CHECK(text.find("MOD r3, r5 on NovaWorld") != std::string::npos, "the revision and NovaWorld's newest");
 	CHECK(text.find("Changes (2)") != std::string::npos && text.find("modified  defs/a.def") != std::string::npos &&
 	              text.find("added  models/b.3di") != std::string::npos,
 	      "the changes, each with what it did");
@@ -91,7 +91,7 @@ void test_bound_project() {
 	// A change's Discard: the file put back as the revision has it (in the changes' own child window).
 	{
 		char name[96];
-		std::snprintf(name, sizeof(name), "Content/changes_%08X", content_item({"changes"}));
+		std::snprintf(name, sizeof(name), "NovaWorld/changes_%08X", content_item({"changes"}));
 		ui.activate(item_id(Ui::window_id(name), {"changes_table", "defs/a.def", "Discard"}));
 		raised = ui.drain();
 		const EditorRequest *discard = one(raised, EditorRequestKind::ContentRestore);
@@ -153,7 +153,7 @@ void test_bind_and_sign_in() {
 	ui.focus("Content");
 	ui.away();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("Not in the content store.") != std::string::npos, "an unbound project says so");
+	CHECK(text.find("Not on NovaWorld.") != std::string::npos, "an unbound project says so");
 	CHECK(text.find("MOD r") == std::string::npos, "the bar says nothing of the store");
 	ui.activate(content_item({"Bind"}));
 	std::vector<EditorRequest> raised = ui.drain();
@@ -194,9 +194,9 @@ void test_get_a_project() {
 	const std::string home = logged_frame(ui);
 	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  MOD r5") != std::string::npos,
 	      "the welcome page lists the store's projects");
-	// The Content window shown over the welcome page lists them too; Get... asks for a folder.
-	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "Content"));
-	CHECK(content != nullptr, "the Content window");
+	// The NovaWorld window shown over the welcome page lists them too; Get... asks for a folder.
+	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
+	CHECK(content != nullptr, "the NovaWorld window");
 	if (!content) return;
 	content->show_anyway();
 	ui.focus("Content");

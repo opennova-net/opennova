@@ -39,7 +39,7 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	// the project's .opennova/content/, so a close waits or cancels it), and a pull writes the files and the
 	// documents read again, as an import's write; each gives way to content_cancel.
 	{OperationKind::ContentCheck, "content_check", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Checking",
-	 "the content check"},
+	 "the NovaWorld check"},
 	{OperationKind::ContentBind, "content_bind", HoldsProject, HoldsSlot, {}, {K::ContentCancel}, "Binding",
 	 "the binding"},
 	{OperationKind::ContentPull, "content_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},

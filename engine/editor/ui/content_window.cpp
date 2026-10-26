@@ -47,7 +47,7 @@ bool ContentSignInForm::draw(Workspace &workspace) {
 		server_taken_ = v.content.server;
 	}
 	if (ImGui::InputText("Server", server_, sizeof(server_))) server_edited_ = true;
-	ui_kit::tooltip("The NovaWorld site whose content store you sign in to.");
+	ui_kit::tooltip("The NovaWorld site you sign in to.");
 	ImGui::InputText("Account", username_, sizeof(username_));
 	ui_kit::tooltip("Your NovaWorld account's name, as you sign in on the site.");
 	const bool enter = ImGui::InputText("Password", password_, sizeof(password_),
@@ -72,7 +72,7 @@ void draw_content_projects(Workspace &workspace) {
 	if (c.projects.empty()) {
 		if (c.calling) ui_kit::quiet_text("Listing the projects...");
 		else if (!c.projects_error.empty()) ui_kit::refusal_text(c.projects_error);
-		else ui_kit::empty_state("No projects listed.", "List asks the content store for its projects.");
+		else ui_kit::empty_state("No projects listed.", "List asks NovaWorld for its projects.");
 		ImGui::BeginDisabled(!lists);
 		if (ImGui::Button("List projects") && lists) workspace.request(request::content_check());
 		ImGui::EndDisabled();
@@ -142,8 +142,8 @@ void ContentWindow::draw_account(const ContentView &c) {
 }
 
 void ContentWindow::draw_binding(const ContentView &c) {
-	ui_kit::empty_state("Not in the content store.", "An admin binds the project's folder to a project of the store; "
-	                                                  "its files are then pushed and pulled.");
+	ui_kit::empty_state("Not on NovaWorld.", "An admin binds the project's folder to a project on NovaWorld; "
+	                                          "its files are then pushed and pulled.");
 	draw_bind(c);
 }
 
@@ -159,14 +159,14 @@ void ContentWindow::draw_bind(const ContentView &c) {
 			if (ImGui::Selectable(project.key.c_str(), project.key == bind_key_)) bind_key_ = project.key;
 		ImGui::EndCombo();
 	}
-	ui_kit::tooltip("The store's project this folder is a working copy of.");
+	ui_kit::tooltip("The NovaWorld project this folder is a working copy of.");
 	ImGui::SameLine();
 	const bool binds = v.allows(EditorRequestKind::ContentBind) && !bind_key_.empty();
 	ImGui::BeginDisabled(!binds);
 	if (ImGui::Button("Bind") && binds) workspace_.request(request::content_bind(bind_key_));
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Makes this folder a working copy of " + (bind_key_.empty() ? std::string("the project") : bind_key_) +
-	                ": what it changed since the store's newest revision is then its push.");
+	                ": what it changed since the project's newest revision is then its push.");
 	if (c.projects.empty()) {
 		ImGui::BeginDisabled(!v.allows(EditorRequestKind::ContentCheck) || c.calling);
 		if (ImGui::Button("List projects") && v.allows(EditorRequestKind::ContentCheck) && !c.calling)
@@ -179,18 +179,18 @@ void ContentWindow::draw_standing(const ContentView &c) {
 	const SessionView &v = workspace_.view();
 	std::string line = c.key + " r" + std::to_string(c.revision);
 	std::string tip = "The revision this folder was last pulled or pushed at.";
-	if (c.head_known) line += c.head > c.revision ? ", r" + std::to_string(c.head) + " in the store" : ", up to date";
+	if (c.head_known) line += c.head > c.revision ? ", r" + std::to_string(c.head) + " on NovaWorld" : ", up to date";
 	else if (!c.head_error.empty()) {
-		line += ", the store not reached";
+		line += ", NovaWorld not reached";
 		tip = c.head_error;
 	}
 	ui_kit::clipped_text(line, tip);
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::ContentCheck),
-	                 "Looks for what changed here and in the store."))
+	                 "Looks for what changed here and on NovaWorld."))
 		workspace_.request(request::content_check());
 	if (ui_kit::tool(row, "Pull", v.allows(EditorRequestKind::ContentPull) && c.conflicts.empty(),
-	                 c.conflicts.empty() ? "Brings in the store's newest revision; your own changes stay."
+	                 c.conflicts.empty() ? "Brings in the newest revision on NovaWorld; your own changes stay."
 	                                     : "Settle every conflict first."))
 		workspace_.request(request::content_pull());
 
@@ -247,13 +247,13 @@ void ContentWindow::draw_standing(const ContentView &c) {
 	const char *why = c.changes.empty()      ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
-	                                         : "Sends every change as the store's next revision; players get it "
-	                                           "only once an admin releases it.";
+	                                         : "Sends every change as the project's next revision; players get "
+	                                           "it only once an admin releases it.";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::content_push(message_));
 
 	// A release of the revision the folder is at, built on the service (ADR 0069 d7): a draft once the
-	// service has packed and checked it, published in the web admin's Game data.
+	// service has packed and checked it, published in the web admin's Releases.
 	ImGui::SeparatorText("Release");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
@@ -263,10 +263,10 @@ void ContentWindow::draw_standing(const ContentView &c) {
 	ImGui::BeginDisabled(!releases);
 	const bool released = ImGui::Button(("Release r" + std::to_string(c.revision) + "###release").c_str()) && releases;
 	ImGui::EndDisabled();
-	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision of the store's."
+	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision on NovaWorld."
 	                : !version_[0]  ? "Name its version first."
 	                                : "Builds a release of r" + std::to_string(c.revision) +
-	                                          " on the service; publish it in the web admin's Game data once it is a draft.");
+	                                          " on the service; publish it in the web admin's Releases once it is a draft.");
 	if (released) {
 		workspace_.request(request::content_release(version_));
 		version_[0] = '\0';
@@ -288,7 +288,7 @@ void ContentWindow::draw_conflicts(const ContentView &c) {
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();
 		ui_kit::clipped_text(conflict.path, conflict.path + "\nYou: " + change_of(conflict.mine) +
-		                                            ". The store: " + change_of(conflict.theirs) + ".");
+		                                            ". NovaWorld: " + change_of(conflict.theirs) + ".");
 		ImGui::TableNextColumn();
 		ImGui::BeginDisabled(!resolves);
 		if (ImGui::SmallButton("Keep mine") && resolves)
@@ -297,7 +297,7 @@ void ContentWindow::draw_conflicts(const ContentView &c) {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Take theirs") && resolves)
 			workspace_.request(request::content_resolve(conflict.path, Resolution::TakeTheirs));
-		ui_kit::tooltip("Puts the store's file in its place; yours goes to the project's trash.");
+		ui_kit::tooltip("Puts NovaWorld's file in its place; yours goes to the project's trash.");
 		ImGui::EndDisabled();
 		ImGui::PopID();
 	}
@@ -327,7 +327,7 @@ void ContentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
 	const ContentView &c = v.content;
 	if (!c.available) {
-		ui_kit::empty_state("No content store.", "This editor reaches no content store.");
+		ui_kit::empty_state("No NovaWorld service.", "This editor reaches no NovaWorld service.");
 		return;
 	}
 	draw_account(c);

@@ -145,7 +145,7 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 			request_kind_row(kind).served_by == ServedBy::SessionNeedsPerson) {
 		ok = false;
 		error = std::string(request_kind_row(kind).token) +
-				" needs a person: a password is typed into the Content window, never sent over the wire.";
+				" needs a person: a password is typed into the NovaWorld window, never sent over the wire.";
 	}
 	// Whether a request's edits are a text document's spans (S13 D9): the document open at the path
 	// (the active one for none), else the file the project's scan lists there, by the kind the scan

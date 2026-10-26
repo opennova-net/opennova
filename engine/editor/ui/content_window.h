@@ -31,7 +31,7 @@ private:
 // its title with its key and its newest revision, with Get..., which asks the Shell for a folder
 // (PickPurpose::ContentFolder; the windows keep the key until the pick comes back): the project is got into a
 // folder of its key's name inside the one chosen, and opens. Listed none yet, List asks the store
-// (content_check). The welcome page and the Content window draw it.
+// (content_check). The welcome page and the NovaWorld window draw it.
 void draw_content_projects(Workspace &workspace);
 
 // The words the status bar gives the open project's standing in the content store: "ACIDGAMBIT r41", then its
@@ -39,21 +39,20 @@ void draw_content_projects(Workspace &workspace);
 // 2 incoming"); "" for a project the store does not hold.
 std::string content_status_text(const ContentView &content);
 
-// The Content window (ADR 0069), a tab beside Files: the account (who is signed in, and where; Sign in... and
-// Sign out), then the open project's place in the store. A project the store does not hold says so, and an admin
-// binds it to a project of the store (Bind). One it holds shows its revision and the store's newest, Check and
-// Pull, its changes since its revision (what each did to the file, and Discard, which puts the revision's file
-// back), what kept a file out of them, and for an admin
-// a message and Push, which sends every change, and a version and Release rN, which the service builds the
-// release of the revision from (ADR 0069 d7). A pull stopped on conflicts lists them, each with Keep mine and
-// Take theirs, and Pull goes on once none is left. Its history lists the project's revisions, newest first. Then
-// what the last content job came to. With no project open
-// it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
+// The NovaWorld window (ADR 0069; its window id "content"), a tab beside Files: the account (who is signed in, and
+// where; Sign in... and Sign out), then the open project's place in the store. A project the store does not hold
+// says so, and an admin binds it to a project of the store (Bind). One it holds shows its revision and the store's
+// newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the
+// revision's file back), what kept a file out of them, and for an admin a message and Push, which sends every
+// change, and a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A
+// pull stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left.
+// Its history lists the project's revisions, newest first. Then what the last content job came to. With no project
+// open it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
 class ContentWindow : public devtools::Window {
 public:
 	explicit ContentWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
 
-	const char *title() const override { return "Content"; }
+	const char *title() const override { return "NovaWorld"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override {
 		return devtools::InitialDockPlacement::Left;
 	}
