@@ -6,8 +6,8 @@
 // request — including the GSB browse fetch (grill NW-S5/B3).
 //
 // The body parsing below replicates the server's parse_form_body + EPASK decode
-// (apps/novaworld_web/http_listener.cpp: the anon-ns form helpers and
-// handle_login_post in register_legacy_login_routes) so a green here means
+// (apps/novaworld_web/retail_pages.cpp: the form helpers, and handle_login_post in
+// retail_login_routes.cpp) so a green here means
 // a real POST from this body authenticates without booting a socket.
 
 #include <net/novacrypto/epask.h>
@@ -48,7 +48,7 @@ opennova::EpaskParams fresh_epask() {
 	return params;
 }
 
-// Mirror of apps/novaworld_web/http_listener.cpp url_decode (the body is
+// Mirror of apps/novaworld_web/retail_pages.cpp url_decode (the body is
 // emitted raw by the helpers, so this only collapses '+' and '%XX' if present).
 std::string url_decode(const std::string &s) {
 	std::string out;
@@ -72,7 +72,7 @@ std::string url_decode(const std::string &s) {
 	return out;
 }
 
-// Mirror of apps/novaworld_web/http_listener.cpp parse_form_body.
+// Mirror of apps/novaworld_web/retail_pages.cpp parse_form_body.
 std::map<std::string, std::string> parse_form_body(const std::string &body) {
 	std::map<std::string, std::string> out;
 	size_t pos = 0;

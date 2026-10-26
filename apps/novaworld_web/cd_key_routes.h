@@ -17,7 +17,7 @@
 //                                             machine (a manual activation), recorded
 //   GET  /api/admin/users/<id>/cd-keys        an account's keys and activations
 //
-// and the retail login's hook (http_listener.cpp): the NWACT a completed DFX2
+// and the retail login's hook (retail_login_routes.cpp): the NWACT a completed DFX2
 // login hands an unactivated client for its machine, as the NWACT cookie the
 // client's NovaWorld screen reads (cd_keys.h, cdkey.h). Every reply is an
 // error code with our own message, never database text. The HttpListener owns

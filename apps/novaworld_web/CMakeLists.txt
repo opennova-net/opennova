@@ -7,6 +7,11 @@
 # the cloud's. The retail pages (templates/, static/) ship in its image.
 add_library(opennova_novaworld_web_core STATIC
     http_listener.cpp
+    # The retail pages' routes, split out of http_listener.cpp whole: the login chain, the
+    # host and join flow, and the helpers they share.
+    retail_login_routes.cpp
+    retail_host_join_routes.cpp
+    retail_pages.cpp
     # The admin's user routes (moved out of http_listener.cpp whole).
     admin_user_routes.cpp
     host_routes.cpp

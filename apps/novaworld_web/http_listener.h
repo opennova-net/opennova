@@ -43,8 +43,10 @@ namespace infra { class AlarmStore; class CostStore; class InfraStatus; class Lo
 namespace content { class ContentUrls; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
-// its own registrar (bodies in http_listener.cpp, the listed servers' in
-// host_routes.cpp). The machine agents' routes are never here: they are the
+// its own registrar (bodies in http_listener.cpp, the retail login chain's in
+// retail_login_routes.cpp, the retail host and join flow's in
+// retail_host_join_routes.cpp, the listed servers' in host_routes.cpp; its
+// state, Impl, in http_listener_impl.h). The machine agents' routes are never here: they are the
 // internal listener's alone (hosted/internal_listener.h).
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
