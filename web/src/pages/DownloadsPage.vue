@@ -67,6 +67,7 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
 import { formatBytes, formatUtc, isoTime } from '../utils/format';
+import { GITHUB_URL } from '../utils/links';
 const games = [
   {
     name: 'OpenNova',
@@ -129,10 +130,14 @@ const buildKind = computed(() => {
 
 const shortCommit = computed(() => manifest.value?.commit?.slice(0, 7) ?? '');
 
-// Where the builds came from (the release, or the CI run), which the commit links to.
+// Where the commit links: the CI run a pull request's set came from, or for a release (whose source
+// is its GitHub release page, which the site never links) the commit itself.
 const sourceUrl = computed(() => {
-  const source = manifest.value?.source;
-  return source && /^https:\/\//i.test(source) ? source : undefined;
+  const m = manifest.value;
+  const source = m?.source;
+  if (!source || !/^https:\/\//i.test(source)) return undefined;
+  if (/\/releases(\/|$)/.test(source)) return m?.commit ? `${GITHUB_URL}/commit/${m.commit}` : undefined;
+  return source;
 });
 
 // A build's line under its file name: its version when its name carried one, the set's commit and,

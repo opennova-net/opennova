@@ -106,7 +106,8 @@ describe('DownloadsPage', () => {
     const wrapper = await mountPage();
     const line = wrapper.get('[data-test="downloads-version"]');
     expect(line.text()).toBe('Version v0.0.21, a release build from commit 1a2b3c4, published 2026-10-26 12:00 UTC.');
-    expect(line.get('a').attributes('href')).toBe('https://github.com/opennova-net/opennova/releases/tag/v0.0.21');
+    // A release's commit links to the commit, never to its GitHub release page.
+    expect(line.get('a').attributes('href')).toBe(`https://github.com/opennova-net/opennova/commit/1a2b3c4${'b'.repeat(33)}`);
     // A release's cards name its commit and no deployment.
     expect(buildLine(wrapper, 'jointops-game-windows.zip')).toBe('v0.0.21 (1a2b3c4), 1.1 MB, SHA-256 abababababab');
   });
