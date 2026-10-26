@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::world {
@@ -45,9 +46,10 @@ void normalise_q16(int32_t v[3], int32_t *length_q16) {
     }
 }
 
-// dbl_7C19D8 = 2^32 / (2 pi): radians -> BAM32 [orig: @0x7c19d8].
+// dbl_7C19D8 = 2^32 / (2 pi): radians -> BAM32 [orig: @0x7c19d8]. The product reaches 2^31
+// for y == +0 and x < 0, which the game's ftol stores as 0x80000000 (io::retail_ftol_sse2).
 inline int32_t atan2_bam(double y, double x) {
-    return static_cast<int32_t>(std::atan2(y, x) * io::kBamPerRadian);
+    return io::retail_ftol_sse2(std::atan2(y, x) * io::kBamPerRadian);
 }
 
 } // namespace

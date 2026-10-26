@@ -13,6 +13,7 @@
 //     the local player's LocalResolveDebug capture).
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -6607,7 +6608,25 @@ void test_palm_sector_collision_is_the_fragments() {
     }
 }
 
+// A face-vertex section's bounds scale its int16 words by 256, negative words included (a left
+// shift of a negative word is undefined in C++17; the product is the same value).
+static void test_face_vertex_bounds_scale_negative_words() {
+    CollisionModel model;
+    model.face_vertices.push_back({-300, 20, -5});
+    model.face_vertices.push_back({40, -128, 7});
+    model.face_vertices.push_back({0, 0, 0});
+    model.sections.assign(1, CollisionSection{});
+    model.sections[0].face_vertex_start = 0;
+    model.sections[0].face_vertex_count = 3;
+    model.finalize_sections();
+    const CollisionSection &s = model.sections[0];
+    CHECK(s.min_x == -300 * 256 && s.max_x == 40 * 256);
+    CHECK(s.min_y == -128 * 256 && s.max_y == 20 * 256);
+    CHECK(s.min_z == -5 * 256 && s.max_z == 7 * 256);
+}
+
 int main() {
+	test_face_vertex_bounds_scale_negative_words();
 	test_run_over_kills_an_enemy_and_plays_the_bump();
 	test_run_over_spares_a_protected_player();
 	test_fixed_matrix_euler_witnessed_vector();

@@ -3452,6 +3452,16 @@ void test_client_local_boat_driver_runs_its_block() {
 	}
 }
 
+// A due -X direction (y == +0 or -0, x < 0) makes atan2 * 2^31/pi exactly +-2^31; the game's ftol
+// stores 0x80000000 for both, and the conversion is defined (io::retail_ftol_sse2), where a plain
+// int32 cast of 2^31 is undefined. [orig: dbl_7C19D8 = 683565275.5764316]
+static void test_bam_of_atan2_due_minus_x_is_the_ftol_word() {
+    CHECK(bam_of_atan2(0.0, -1.0) == std::numeric_limits<int32_t>::min());
+    CHECK(bam_of_atan2(-0.0, -1.0) == std::numeric_limits<int32_t>::min());
+    CHECK(bam_of_atan2(0.0, 1.0) == 0);
+    CHECK(bam_of_atan2(0.0, 0.0) == 0);
+}
+
 int main() {
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
@@ -3530,6 +3540,7 @@ int main() {
 	test_claimant_detach_at_water_plane_clears_without_stop_oneshot();
 	test_vehicle_sound_extreme_ints_are_saturating();
 	test_helo_waits_for_its_boarders();
+	test_bam_of_atan2_due_minus_x_is_the_ftol_word();
     if (failures == 0) std::printf("vehicle_motor_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

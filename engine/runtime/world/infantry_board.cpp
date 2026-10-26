@@ -21,9 +21,6 @@
 
 namespace opennova::world {
 namespace {
-int32_t board_bearing_to(int32_t dx, int32_t dy) {
-	return static_cast<int32_t>(std::atan2(double(dy), double(dx)) * io::kBamPerRadian);
-}
 int32_t board_dist(const int32_t pos[3], const int32_t tgt[3]) {
 	const double dx = double(tgt[0]) - pos[0], dy = double(tgt[1]) - pos[1];
 	const double dz = std::max(0.0, std::abs(double(tgt[2]) - pos[2]) - 65536.0);
@@ -207,7 +204,7 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 			// Walk around the near side of the target's bound when the E point
 			// is hidden by its hull. [orig: @0x4BB4A2..0x4BB591]
 			// The body's X/Y less the target's [orig: @0x4BB4C1..0x4BB4D3].
-			const int32_t yaw = board_bearing_to(io::bam_sub(0, dx), io::bam_sub(0, dy));
+			const int32_t yaw = bearing_to(io::bam_sub(0, dx), io::bam_sub(0, dy));
 			// [orig: `fmul dbl_7C3608` @0x4BB4FB]
 			const double angle = yaw * io::kRadiansPerBamX87;
 			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);

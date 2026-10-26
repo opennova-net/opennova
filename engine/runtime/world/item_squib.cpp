@@ -7,6 +7,7 @@
 #include <runtime/world/fire_sound.h> // play_round_impact_sound (full volume)
 #include <runtime/world/angle.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include "collision_detail.h"
 #include <algorithm>
 #include <cmath>
@@ -93,7 +94,8 @@ void squib_event(World &world, Entity &entity, int phase) {
         direction = {int32_t(int64_t(direction.x)*65536/distance),
                 int32_t(int64_t(direction.y)*65536/distance),
                 int32_t(int64_t(direction.z)*65536/distance)};
-        heading = int32_t(std::atan2(double(direction.y), double(direction.x)) *
+        // The ftol stores the 2^31 of a due -X direction as 0x80000000 (io::retail_ftol_sse2).
+        heading = io::retail_ftol_sse2(std::atan2(double(direction.y), double(direction.x)) *
                 io::kBamPerRadian); // [orig: dbl_7C19D8 = 2^31/pi]
         if (direction.x > 0) first = rotation(0,-1073741760);
         else {

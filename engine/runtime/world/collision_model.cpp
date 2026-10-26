@@ -91,14 +91,16 @@ void CollisionModel::finalize_sections() {
             }
         } else if (s.face_vertex_count > 0) {
             const CollisionFaceVertex &v0 = face_vertices[s.face_vertex_start];
-            s.min_x = s.max_x = static_cast<int32_t>(v0.x) << 8;
-            s.min_y = s.max_y = static_cast<int32_t>(v0.y) << 8;
-            s.min_z = s.max_z = static_cast<int32_t>(v0.z) << 8;
+            // The int16 face words scale by 256 (a left shift of a negative word is
+            // undefined in C++17; the product is the same value).
+            s.min_x = s.max_x = static_cast<int32_t>(v0.x) * 256;
+            s.min_y = s.max_y = static_cast<int32_t>(v0.y) * 256;
+            s.min_z = s.max_z = static_cast<int32_t>(v0.z) * 256;
             for (int32_t i = 1; i < s.face_vertex_count; ++i) {
                 const CollisionFaceVertex &v = face_vertices[s.face_vertex_start + i];
-                const int32_t p[3] = {static_cast<int32_t>(v.x) << 8,
-                                      static_cast<int32_t>(v.y) << 8,
-                                      static_cast<int32_t>(v.z) << 8};
+                const int32_t p[3] = {static_cast<int32_t>(v.x) * 256,
+                                      static_cast<int32_t>(v.y) * 256,
+                                      static_cast<int32_t>(v.z) * 256};
                 if (p[0] < s.min_x) s.min_x = p[0];
                 if (p[0] > s.max_x) s.max_x = p[0];
                 if (p[1] < s.min_y) s.min_y = p[1];

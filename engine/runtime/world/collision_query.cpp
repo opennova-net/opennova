@@ -14,6 +14,7 @@
 
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -1005,9 +1006,11 @@ bool collision_contact_force(const CollisionTargetView &target, const ContactQue
                             // atan2 * -BAM (net +). The XY length is ftol'd to int
                             // before the pitch atan2. [orig: @ 0x4ae938-0x4ae9d9,
                             // g_NegBamPerRadian = -2^31/pi]
+                            // A plane facing +X (ny == 0, nx > 0) gives -pi * -BAM = 2^31,
+                            // which the ftol stores as 0x80000000 (io::retail_ftol_sse2).
                             ladder.yaw =
                                 target.yaw_bam -
-                                static_cast<int32_t>(std::atan2(-static_cast<double>(p0.ny),
+                                io::retail_ftol_sse2(std::atan2(-static_cast<double>(p0.ny),
                                                                 -static_cast<double>(p0.nx)) *
                                                      -io::kBamPerRadian);
                             const int32_t lxy_int = sqrt_ftol(

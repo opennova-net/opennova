@@ -18,6 +18,7 @@
 #include <runtime/world/entity.h> // retail_q16_mul_rhu, the round-half-up 16.16 product
 #include <runtime/world/vehicle_motor.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
@@ -96,9 +97,11 @@ struct VehicleEulerBasis {
 // atan2 in this engine's BAM convention: radians * 2^31/pi, with the exact
 // binary constant (the pair with the sin/cos scale is deliberately NOT an
 // exact inverse — port both verbatim) [orig: dbl_7C19D8 = 683565275.5764316].
+// The product reaches 2^31 for y == +0 and x < 0 (a hull moving due -X), which the game's
+// ftol stores as 0x80000000 (io::retail_ftol_sse2), where a plain int32 cast is undefined.
 inline int32_t bam_of_atan2(double y, double x) {
     if (y == 0.0 && x == 0.0) return 0; // fpatan(0,0) == 0
-    return static_cast<int32_t>(std::atan2(y, x) * 683565275.5764316);
+    return io::retail_ftol_sse2(std::atan2(y, x) * 683565275.5764316);
 }
 
 // The witnessed solver normalize: the length of the three squares' sum, compared with 0 (a zero

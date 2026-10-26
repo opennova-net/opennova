@@ -26,6 +26,7 @@
 #include <base/io/bam.h>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <array>
 #include <map>
 #include <set>
@@ -5470,6 +5471,14 @@ void test_slope_probes_include_candidate_models() {
  CHECK(e->body_pitch == 0); // the flat height field alone has no slope
 }
 
+// A target due -X (dy == 0, dx < 0) is a bearing of exactly 2^31 BAM, which the game's ftol
+// stores as 0x80000000; the conversion is defined (io::retail_ftol_sse2), where a plain int32
+// cast of 2^31 is undefined. [orig: dbl_7C19D8 = 2^31/pi]
+static void test_bearing_due_minus_x_is_the_ftol_word() {
+    CHECK(bearing_to(-5, 0) == std::numeric_limits<int32_t>::min());
+    CHECK(bearing_to(5, 0) == 0);
+}
+
 int main() {
     test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
@@ -6772,6 +6781,7 @@ int main() {
     test_infantry_parity_pins_2026_08_28();
     test_pre_attack_wins_when_previously_idle();
     test_weapon_channel_holds();
+    test_bearing_due_minus_x_is_the_ftol_word();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

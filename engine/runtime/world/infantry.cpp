@@ -21,6 +21,7 @@
 
 #include <runtime/audio/footstep_slot.h>
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/terrain_query/height_field.h>
 
 #include <runtime/world/ai.h>
@@ -106,11 +107,13 @@ RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body) {
     return r;
 }
 
-// Shared with infantry_combat.cpp (declared in infantry_internal.h).
+// Shared with infantry_combat.cpp and infantry_board.cpp (declared in infantry_internal.h).
+// The product reaches 2^31 for a target due -X (dy == +0, dx < 0), which the game's ftol
+// stores as 0x80000000 (io::retail_ftol_sse2), where a plain int32 cast is undefined.
 // [orig: BAM bearing scale 683565275.5764316 = 2^31/pi (dbl_7C19D8)]
 int32_t bearing_to(int32_t dx, int32_t dy) {
-    return static_cast<int32_t>(std::atan2(static_cast<double>(dy), static_cast<double>(dx)) *
-                                io::kBamPerRadian);
+    return io::retail_ftol_sse2(
+            std::atan2(static_cast<double>(dy), static_cast<double>(dx)) * io::kBamPerRadian);
 }
 
 // The two halves of the org2 jump gate's Flags reads. The 0x1A002 word test
