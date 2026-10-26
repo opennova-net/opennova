@@ -1732,6 +1732,10 @@ float GameWorld::surface_width() const {
 	return is_inside_tree() ? get_viewport()->get_visible_rect().size.x : 0.0f;
 }
 
+float GameWorld::surface_height() const {
+	return is_inside_tree() ? get_viewport()->get_visible_rect().size.y : 0.0f;
+}
+
 // The view the imminent render uses: the live camera AFTER the local-view
 // leg placed it; the frame-entry stash only when no camera exists (headless
 // worlds/tests) (D-RORD-8).
@@ -1765,7 +1769,7 @@ void GameWorld::apply_occlusion_frame() {
 	// (D-RORD-8).
 	// (engine: runtime/world/occlusion.cpp)
 	if (world_ready_ && !frame_skip_occlusion_) {
-		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
+		occlusion_->apply_frame(image_camera(), surface_width(), surface_height(), render_camera_xform(),
 				mission_forces_indoors(), object_detail_, main_mirror_collect_eye());
 	}
 }

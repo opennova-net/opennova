@@ -19,6 +19,7 @@
 #include <runtime/world/occlusion.h>
 #include <runtime/world/presentation_frame.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <base/io/fixed.h>
@@ -34,19 +35,22 @@ inline bool mission_forces_indoors(uint32_t bms_attrib_flags) {
 }
 
 // The shell's view, presentation frame: a unit forward/right/up triad, the
-// eye, the vertical field of view, the aspect (tan_h / tan_v of the drawn
-// frustum) and the viewport width in pixels, plus the environment words and
-// the session's object detail the occlusion frame carries. No near distance: retail's occlusion planes pass
-// through the eye and its projector carries its own near word
-// (kViewportNearQ16, world/occlusion.h).
+// eye, and the viewport the game builds the view over: its horizontal field of
+// view (the fov word, Q16 degrees, here in degrees) and its rect's sides in
+// pixels (the main view's the screen's, whatever the aspect mode stretches the
+// drawn picture to; the Inset's its own; a water mirror's its square target),
+// plus the environment words and the session's object detail the occlusion
+// frame carries. No near distance: retail's occlusion planes pass through the
+// eye and its projector carries its own near word (kViewportNearQ16,
+// world/occlusion.h).
 struct OcclusionViewSpec {
 	float eye[3] = { 0.0f, 0.0f, 0.0f };
 	float forward[3] = { 0.0f, 0.0f, -1.0f };
 	float right[3] = { 1.0f, 0.0f, 0.0f };
 	float up[3] = { 0.0f, 1.0f, 0.0f };
-	float fov_y_deg = 90.0f;
-	float aspect = 1.0f;
+	float fov_h_deg = 90.0f;
 	float viewport_width = 0.0f;
+	float viewport_height = 0.0f;
 	float fog_dist_units = 0.0f;
 	float water_z_units = 0.0f;
 	uint32_t local_blink_flags = 0;
@@ -136,20 +140,38 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	//  view @ 0x411577..0x41158c with d = -(n . eye) @ 0x4115b0..0x4115c6;
 	//  the seeds Terrain_TraversePortalsFromSection @ 0x5c7448..0x5c745b /
 	//  Terrain_TraversePortalsFromExterior @ 0x5c7377]
-	const double half_v = static_cast<double>(view.fov_y_deg) * io::kRadiansPerDegree * 0.5;
-	const double tan_v = std::tan(half_v);
-	const double tan_h = tan_v * (view.aspect > 0.0f ? static_cast<double>(view.aspect) : 1.0);
-	const float th = static_cast<float>(tan_h);
-	const float tv = static_cast<float>(tan_v);
+	//
+	// The side planes are the viewport's, never the drawn frustum's: the
+	// horizontal half-angle the fov word's half, the focal the rect's
+	// half-width over its tangent rounded half up, the vertical half-angle the
+	// rect's half-height (bottom - top + 2) >> 1 over that focal, each sine and
+	// cosine truncated to Q22 and read back * 2^-22. So a view whose picture
+	// the aspect mode stretches culls by the rect's own ratio (D-OCC-12).
+	// [orig: Viewport_BuildProjectionMatrix @ 0x410fb0 - the half fov
+	//  @ 0x410fc0..0x410fdb, the focal @ 0x410fe1..0x410ff7, the Q22 cosine and
+	//  sine @ 0x410ffc..0x41101d, the half-height over the focal and its
+	//  atan @ 0x411022..0x411041, its cosine and sine @ 0x411043..0x411056,
+	//  the side planes' rows * flt_7C3610 (2^-22) @ 0x4113b4..0x411571]
+	const int32_t fov_q16 = static_cast<int32_t>(std::lround(static_cast<double>(view.fov_h_deg) * 65536.0));
+	const double half_h = static_cast<double>(fov_q16 >> 1) * (io::kRadiansPerDegree / 65536.0);
+	const int32_t width = std::max<int32_t>(1, static_cast<int32_t>(std::lround(view.viewport_width)));
+	const int32_t height = std::max<int32_t>(1, static_cast<int32_t>(std::lround(view.viewport_height)));
+	const double tan_h = std::tan(half_h);
+	const int32_t focal = static_cast<int32_t>(static_cast<double>(width) * 0.5 / tan_h + 0.5);
+	const double half_v = std::atan2(static_cast<double>((height + 1) >> 1), static_cast<double>(focal));
+	const auto q22 = [](double v) {
+		return static_cast<float>(static_cast<double>(static_cast<int32_t>(v * 4194304.0)) * (1.0 / 4194304.0));
+	};
+	const float ch = q22(std::cos(half_h)), sh = q22(std::sin(half_h));
+	const float cv = q22(std::cos(half_v)), sv = q22(std::sin(half_v));
 	float normals[5][3];
 	for (int i = 0; i < 3; ++i) {
 		normals[0][i] = f[i];
-		normals[1][i] = f[i] * th + r[i]; // left
-		normals[2][i] = f[i] * th - r[i]; // right
-		normals[3][i] = f[i] * tv + u[i]; // bottom
-		normals[4][i] = f[i] * tv - u[i]; // top
+		normals[1][i] = r[i] * ch + f[i] * sh; // left
+		normals[2][i] = -r[i] * ch + f[i] * sh; // right
+		normals[3][i] = u[i] * cv + f[i] * sv; // bottom
+		normals[4][i] = -u[i] * cv + f[i] * sv; // top
 	}
-	for (int i = 1; i < 5; ++i) detail::normalize3(normals[i]);
 	cam.frustum_count = 5;
 	for (int i = 0; i < 5; ++i) {
 		cam.frustum[i][0] = normals[i][0];
@@ -166,7 +188,7 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 
 	// The projector's focal length over the viewport width and the horizontal
 	// half-angle (the person leg's sub-pixel floor reads it).
-	cam.focal_pixels = renderer::object_lod_focal_pixels(view.viewport_width, tan_h);
+	cam.focal_pixels = renderer::object_lod_focal_pixels(view.viewport_width, static_cast<float>(tan_h));
 	cam.fog_dist = to_fixed(view.fog_dist_units);
 	cam.water_z = to_fixed(view.water_z_units);
 	// The mission-attribute force-indoors override ORs the indoors bit into

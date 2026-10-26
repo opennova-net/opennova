@@ -2145,8 +2145,8 @@ public:
 	// attribute override (engine: formats/mission/bms.h). No near distance:
 	// the occlusion planes pass through the eye (engine: world/occlusion_camera.h).
 	// (engine: runtime/world/occlusion.cpp)
-	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-	                         double p_aspect, double p_viewport_width,
+	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+	                         double p_viewport_width, double p_viewport_height,
 	                         double p_fog_dist_units, double p_water_z_units,
 	                         bool p_force_indoors,
 	                         int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);

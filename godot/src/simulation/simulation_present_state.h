@@ -41,9 +41,9 @@ struct SimulationPresentSnapshot {
 // units.
 struct InsetOcclusionRequest {
 	Transform3D camera;
-	double fov_y_deg = 70.0;
-	double aspect = 1.0;
+	double fov_h_deg = 70.0;
 	double viewport_width = 0.0;
+	double viewport_height = 0.0;
 	double fog_dist_units = 1000.0;
 	double water_z_units = -100000.0;
 	bool force_indoors = false;

@@ -51,9 +51,15 @@ int64_t ticks_usec() {
 // A water mirror's collect view: the scene view's horizontal field on both
 // axes of the square reflection target (engine world/occlusion.h
 // OcclusionWorld::mirror_water_visible).
-double mirror_collect_fov(double p_fov_y_deg, double p_aspect) {
-	const double tan_h = std::tan(Math::deg_to_rad(p_fov_y_deg) * 0.5) * p_aspect;
-	return Math::rad_to_deg(2.0 * std::atan(tan_h));
+// A camera's horizontal field of view in degrees: the fov word its viewport is built with (its
+// keep-aspect mode decides which axis the camera's own fov names).
+double camera_fov_h_deg(Camera3D *p_camera, double p_default) {
+	float tan_h = 0.0f;
+	float tan_v = 0.0f;
+	if (p_camera == nullptr || !ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
+		return p_default;
+	}
+	return Math::rad_to_deg(2.0 * std::atan(static_cast<double>(tan_h)));
 }
 
 } // namespace
@@ -62,8 +68,8 @@ void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "terrain", "foliage", "sky", "celestial", "water",
 			"env"), &OcclusionFrame::setup);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "board"), &OcclusionFrame::set_frame_stats);
-	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "viewport_width", "camera_xform",
-			"forces_indoors"), &OcclusionFrame::apply_frame);
+	ClassDB::bind_method(D_METHOD("apply_frame", "camera", "viewport_width", "viewport_height",
+			"camera_xform", "forces_indoors", "object_detail", "mirror_eye"), &OcclusionFrame::apply_frame);
 	ClassDB::bind_method(D_METHOD("reset"), &OcclusionFrame::reset);
 }
 
@@ -141,7 +147,7 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	return edges;
 }
 
-void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
+void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, float p_viewport_height,
 		const Transform3D &p_camera_xform, bool p_forces_indoors, int p_object_detail,
 		const Transform3D &p_mirror_eye) {
 	Simulation *s = sim();
@@ -152,18 +158,10 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	if (registry == nullptr) {
 		return;
 	}
-	double fov_y = 70.0;
-	double aspect = 16.0 / 9.0;
-	if (p_camera != nullptr) {
-		// The frustum the camera actually draws (its keep-aspect mode decides
-		// which axis its fov names), as a vertical fov plus aspect.
-		float tan_h = 0.0f;
-		float tan_v = 0.0f;
-		if (ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
-			fov_y = Math::rad_to_deg(2.0 * std::atan(static_cast<double>(tan_v)));
-			aspect = static_cast<double>(tan_h) / static_cast<double>(tan_v);
-		}
-	}
+	// The viewport the view is built over: the camera's horizontal field (mode-invariant) over the
+	// screen's rect, which the aspect mode's stretch never changes (engine world/occlusion_camera.h
+	// occlusion_camera_from_view carries the witness, D-OCC-12).
+	const double fov_h = camera_fov_h_deg(p_camera, 90.0);
 	double fog = 1000.0;
 	MissionEnvironment *env = environment();
 	if (env != nullptr) {
@@ -182,7 +180,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	const bool mirror_ran = w != nullptr && w->is_water_pass_active();
 	const bool mirror_verdict = mirror_ran &&
 			s->run_mirror_occlusion(Simulation::MIRROR_MAIN, p_mirror_eye, p_camera_xform,
-					mirror_collect_fov(fov_y, aspect),
+					fov_h,
 					opennova::env::kReflectionRttSize, fog, water_z, p_forces_indoors,
 					p_object_detail);
 	main_water_label_ = blink_water_word_.label(blink_letters_, mirror_ran, mirror_verdict);
@@ -191,7 +189,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
-	s->run_occlusion_frame(p_camera_xform, fov_y, aspect, p_viewport_width, fog, water_z,
+	s->run_occlusion_frame(p_camera_xform, fov_h, p_viewport_width, p_viewport_height, fog, water_z,
 			p_forces_indoors, p_object_detail);
 	const int64_t native_end = timing ? ticks_usec() : 0;
 	int64_t building_query_us = 0;
@@ -386,13 +384,12 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	}
 	InsetOcclusionRequest request;
 	request.camera = p_camera->get_global_transform();
+	// The Inset's own viewport: its camera's horizontal field over its target's rect.
 	request.viewport_width = p_viewport_width;
-	float tan_h = 0.0f;
-	float tan_v = 0.0f;
-	if (ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
-		request.fov_y_deg = Math::rad_to_deg(2.0 * std::atan(static_cast<double>(tan_v)));
-		request.aspect = static_cast<double>(tan_h) / static_cast<double>(tan_v);
-	}
+	request.viewport_height = p_camera->get_viewport() != nullptr
+			? p_camera->get_viewport()->get_visible_rect().size.y
+			: p_viewport_width;
+	request.fov_h_deg = camera_fov_h_deg(p_camera, request.fov_h_deg);
 	if (MissionEnvironment *env = environment()) {
 		request.fog_dist_units = env->get_fog_distance();
 	}
@@ -416,7 +413,7 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 	}
 	const bool mirror_verdict = mirror_ran &&
 			s->run_mirror_occlusion(Simulation::MIRROR_INSET, *p_mirror_block, *p_mirror_block,
-					mirror_collect_fov(request.fov_y_deg, request.aspect),
+					request.fov_h_deg,
 					opennova::env::kReflectionRttSize, request.fog_dist_units,
 					request.water_z_units, p_forces_indoors, p_object_detail);
 	const bool inset_water_label =

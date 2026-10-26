@@ -27,7 +27,7 @@ namespace {
 // engine's (runtime/world/occlusion_camera.h). No near distance: the
 // occlusion planes pass through the eye.
 opennova::world::OcclusionViewSpec occlusion_view_spec(const Transform3D &p_camera,
-		double p_fov_y_deg, double p_aspect, double p_viewport_width,
+		double p_fov_h_deg, double p_viewport_width, double p_viewport_height,
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
 		uint32_t p_local_blink_flags, int p_object_detail) {
 	opennova::world::OcclusionViewSpec view;
@@ -44,9 +44,9 @@ opennova::world::OcclusionViewSpec occlusion_view_spec(const Transform3D &p_came
 	store(fwd_g, view.forward);
 	store(right_g, view.right);
 	store(up_g, view.up);
-	view.fov_y_deg = static_cast<float>(p_fov_y_deg);
-	view.aspect = static_cast<float>(p_aspect);
+	view.fov_h_deg = static_cast<float>(p_fov_h_deg);
 	view.viewport_width = static_cast<float>(p_viewport_width);
+	view.viewport_height = static_cast<float>(p_viewport_height);
 	view.fog_dist_units = static_cast<float>(p_fog_dist_units);
 	view.water_z_units = static_cast<float>(p_water_z_units);
 	view.local_blink_flags = p_local_blink_flags;
@@ -56,12 +56,12 @@ opennova::world::OcclusionViewSpec occlusion_view_spec(const Transform3D &p_came
 }
 
 opennova::world::OcclusionFrameCamera occlusion_frame_camera(const Transform3D &p_camera,
-		double p_fov_y_deg, double p_aspect, double p_viewport_width,
+		double p_fov_h_deg, double p_viewport_width, double p_viewport_height,
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
 		uint32_t p_local_blink_flags, int p_object_detail) {
 	opennova::world::OcclusionFrameCamera cam;
-	opennova::world::occlusion_camera_from_view(occlusion_view_spec(p_camera, p_fov_y_deg,
-			p_aspect, p_viewport_width, p_fog_dist_units, p_water_z_units, p_force_indoors,
+	opennova::world::occlusion_camera_from_view(occlusion_view_spec(p_camera, p_fov_h_deg,
+			p_viewport_width, p_viewport_height, p_fog_dist_units, p_water_z_units, p_force_indoors,
 			p_local_blink_flags, p_object_detail), cam);
 	return cam;
 }
@@ -121,14 +121,14 @@ void Simulation::occlusion_init_mission() {
 	kernel_->occlusion_init_mission();
 }
 
-void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y_deg,
-                                         double p_aspect, double p_viewport_width,
+void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+                                         double p_viewport_width, double p_viewport_height,
                                          double p_fog_dist_units,
                                          double p_water_z_units, bool p_force_indoors,
                                          int p_object_detail) {
 	if (!kernel_) return;
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
-			p_fov_y_deg, p_aspect, p_viewport_width, p_fog_dist_units,
+			p_fov_h_deg, p_viewport_width, p_viewport_height, p_fog_dist_units,
 			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags,
 			p_object_detail);
 	// The main scene's collect runs over the main view's frame words.
@@ -168,7 +168,7 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 	inset.culled_wire_changes = PackedInt32Array();
 	if (!kernel_) return inset;
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_request.camera,
-			p_request.fov_y_deg, p_request.aspect, p_request.viewport_width,
+			p_request.fov_h_deg, p_request.viewport_width, p_request.viewport_height,
 			p_request.fog_dist_units, p_request.water_z_units, p_request.force_indoors,
 			kernel_->collision.local_player_blink_flags, p_request.object_detail);
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
@@ -200,7 +200,7 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 	view.culled_wire_changes = PackedInt32Array();
 	if (!kernel_) return false;
 	const opennova::world::OcclusionViewSpec spec = occlusion_view_spec(p_collect_eye,
-			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
+			p_fov_deg, p_viewport_width, p_viewport_width, p_fog_dist_units, p_water_z_units,
 			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
 	opennova::world::OcclusionFrameCamera cam;
 	opennova::world::occlusion_camera_from_view(spec, cam);
@@ -226,7 +226,7 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 	// max-quality water detail runs it, which environment/water_mirror.h fixes):
 	// the mirrored block takes the scene's optics offsets the collect's lacks.
 	const opennova::world::OcclusionViewSpec drawn = occlusion_view_spec(p_reflected_eye,
-			p_fov_deg, 1.0, p_viewport_width, p_fog_dist_units, p_water_z_units,
+			p_fov_deg, p_viewport_width, p_viewport_width, p_fog_dist_units, p_water_z_units,
 			p_force_indoors, kernel_->collision.local_player_blink_flags, p_object_detail);
 	opennova::world::OcclusionFrameCamera reflected;
 	opennova::world::occlusion_camera_from_view(opennova::world::mirror_reflected_view(drawn),

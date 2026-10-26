@@ -851,6 +851,7 @@ private:
 	Camera3D *image_camera() const;
 	// The surface (window) width in pixels: the retail viewport width.
 	float surface_width() const;
+	float surface_height() const;
 	// The weapon Inset pass's camera while that pass renders this frame (the
 	// local-view leg's hand-over), else null.
 	Camera3D *inset_pass_camera() const;

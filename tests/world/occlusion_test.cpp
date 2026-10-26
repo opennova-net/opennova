@@ -1868,9 +1868,9 @@ void test_eye_in_front_of_a_window_keeps_the_exterior() {
     view.forward[0] = 1.0f; view.forward[1] = 0.0f; view.forward[2] = 0.0f;  // mission +X
     view.right[0] = 0.0f; view.right[1] = 0.0f; view.right[2] = 1.0f;        // mission -Y
     view.up[0] = 0.0f; view.up[1] = 1.0f; view.up[2] = 0.0f;                 // mission +Z
-    view.fov_y_deg = 53.4468f;
-    view.aspect = 1.6667f;
+    view.fov_h_deg = 80.0f; // 53.4468 degrees vertical over a 5:3 rect
     view.viewport_width = 640.0f;
+    view.viewport_height = 384.0f;
     view.fog_dist_units = 500.0f;
     view.water_z_units = -100.0f;
     OcclusionFrameCamera cam;

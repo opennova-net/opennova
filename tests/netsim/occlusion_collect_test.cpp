@@ -52,9 +52,9 @@ w::OcclusionFrameCamera camera_down_x(float water_z_units = -1000.0f) {
 		view.right[i] = right[i];
 		view.up[i] = up[i];
 	}
-	view.fov_y_deg = 60.0f;
-	view.aspect = 16.0f / 9.0f;
+	view.fov_h_deg = 91.4928f; // 60 degrees vertical over a 16:9 rect
 	view.viewport_width = 1920.0f;
+	view.viewport_height = 1080.0f;
 	view.fog_dist_units = 1000.0f;
 	view.water_z_units = water_z_units;
 	w::OcclusionFrameCamera cam;

@@ -584,7 +584,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.occlusion_init_mission()
 	assert_true(sim.step())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var unprofiled_snapshot: PackedFloat32Array = sim.get_present_snapshot()
 	# The full verdict set through the delta forms: a baseline reset re-arms
 	# the complete emission (the same walk the occlusion frame consumes).
@@ -602,7 +602,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	sim.set_runtime_profiling_enabled(true)
 	assert_true(sim.is_runtime_profiling_enabled())
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	sim.reset_occlusion_apply_baseline()
 	assert_eq(sim.get_building_visibility_changes(), unprofiled_buildings,
 			"profiling does not change building submission")
@@ -661,7 +661,7 @@ func test_runtime_profiling_is_opt_in_reset_stable_and_behavior_neutral() -> voi
 	_assert_native_runtime_timings_zero(sim.get_runtime_perf_counters())
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(
-			Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+			Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	assert_true(sim.step())
 	sim.get_present_snapshot()
 	counters = sim.get_runtime_perf_counters()
@@ -2551,7 +2551,7 @@ const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
 
 
 func _occlusion_frame(sim: Simulation, camera: Transform3D = Transform3D.IDENTITY) -> void:
-	sim.run_occlusion_frame(camera, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(camera, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 
 
 func test_foliage_mask_anchors_track_local_player_stance() -> void:
@@ -2899,7 +2899,7 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3, "collision-backed no-OOBJ building stays in the host batch")
 	if visibility.size() == 3:
@@ -2940,7 +2940,7 @@ end
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(visibility.size(), 3)
 	if visibility.size() == 3:
@@ -2970,14 +2970,14 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	_native_asset_root(sim, dir)
 	assert_eq(sim.resolve_collision_instances(item_db), 1)
 	sim.occlusion_init_mission()
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 
 	var first: PackedInt64Array = sim.get_building_visibility_changes()
 	assert_eq(first.size(), 3, "the first delta call emits the building's state")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),
 			"no entities to cull in this mission")
 
-	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 640.0, 500.0, -100.0, false)
+	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 640.0, 640.0, 500.0, -100.0, false)
 	assert_eq(sim.get_building_visibility_changes().size(), 0,
 			"an unchanged frame emits no building deltas")
 	assert_eq(sim.get_render_culled_changes(), PackedInt32Array([0, 0]),

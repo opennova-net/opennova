@@ -408,8 +408,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::resolve_collision_instances);
 	ClassDB::bind_method(D_METHOD("occlusion_init_mission"),
 	                     &Simulation::occlusion_init_mission);
-	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_y_deg", "aspect",
-	                              "viewport_width", "fog_dist_units", "water_z_units",
+	ClassDB::bind_method(D_METHOD("run_occlusion_frame", "camera", "fov_h_deg", "viewport_width",
+	                              "viewport_height", "fog_dist_units", "water_z_units",
 	                              "force_indoors", "object_detail"),
 	                     &Simulation::run_occlusion_frame,
 	                     DEFVAL(opennova::renderer::kObjectLodDetailLevelMax));

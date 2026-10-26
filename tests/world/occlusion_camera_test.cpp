@@ -34,9 +34,11 @@ int main() {
 	view.eye[0] = 10.0f;
 	view.eye[1] = 5.0f;
 	view.eye[2] = -20.0f;
-	view.fov_y_deg = 90.0f; // tan_v = 1
-	view.aspect = 2.0f;     // tan_h = 2
+	// The viewport: tan_h = 2 (the fov word 2 atan 2), the focal 320 / 2 + 0.5 truncated to 160, and a rect
+	// 320 high, (320 + 1) >> 1 = 160 over that focal: tan_v = 1.
+	view.fov_h_deg = 126.869898f;
 	view.viewport_width = 640.0f;
+	view.viewport_height = 320.0f;
 	view.fog_dist_units = 300.0f;
 	view.water_z_units = 2.5f;
 	view.local_blink_flags = 0x8;
@@ -93,6 +95,18 @@ int main() {
 	check(plane_eval(cam.frustum[2], wide) >= 0.0f, "8 right of 5 ahead inside the right plane (tan_h 2)");
 	float tall[3] = { ahead[0] + 8.0f * u[0], ahead[1] + 8.0f * u[1], ahead[2] + 8.0f * u[2] };
 	check(plane_eval(cam.frustum[4], tall) < 0.0f, "8 up of 5 ahead outside the top plane (tan_v 1)");
+	// The vertical planes are the rect's, whatever the drawn picture's ratio: the same fov over a rect 640
+	// high gives (640 + 1) >> 1 = 320 over the focal 160, tan_v 2, and the 8 up is inside (D-OCC-12)
+	// [orig: Viewport_BuildProjectionMatrix @ 0x411022..0x411056].
+	{
+		OcclusionViewSpec square = view;
+		square.viewport_height = 640.0f;
+		OcclusionFrameCamera tall_cam;
+		occlusion_camera_from_view(square, tall_cam);
+		check(plane_eval(tall_cam.frustum[4], tall) >= 0.0f, "a taller rect's top plane takes the 8 up in");
+		check(near_eq(tall_cam.frustum[1][0], cam.frustum[1][0]) && near_eq(tall_cam.frustum[1][2], cam.frustum[1][2]),
+				"the side planes stay the fov word's");
+	}
 
 	// Q22 rows: presentation -z forward = mission +y; right = +x; up = +z.
 	check(cam.view_rows_q22[0][0] == 0 && cam.view_rows_q22[0][1] == (1 << 22) && cam.view_rows_q22[0][2] == 0,
