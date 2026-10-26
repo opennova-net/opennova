@@ -328,6 +328,8 @@ void run_chat_reads_the_squad_key() {
 	foe.reply.player_name = "Foe";
 	foe.link.owned_entity = body(2, 2.0f);
 	inmatch::NapiNPConnection &sender = list[0];
+	// The join's game state 10 on every slot, which the relay's gate reads.
+	for (inmatch::NapiNPConnection &conn : list) conn.burst.game_state = 10;
 
 	opennova::ChatUplink line;
 	line.channel = 12;

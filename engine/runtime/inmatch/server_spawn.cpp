@@ -1400,6 +1400,9 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->spawn_queue_unlinked = true; // added as the pump adds: off the pending list
 	conn->burst.spawned = true; // in-match (is_in_match): drained + emitted by Server_TickUpdate
 	conn->slot_state = PlayerSlotState::Joined;
+	// The join's game state 10 [orig: Server_OnPlayerJoin - CNetPlayer_SetGameState(.., 10)
+	//  @0x51A6FD].
+	conn->burst.game_state = 10;
 	// Armed as the join's state-6 entry arms it [orig: Server_OnPlayerJoin @0x51A74C].
 	conn->link.round_watermark = world.out.rounds.frame_clock - 1;
 	conn->reply.player_slot = *player_slot;

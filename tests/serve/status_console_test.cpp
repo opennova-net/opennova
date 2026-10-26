@@ -236,6 +236,8 @@ std::vector<std::vector<uint8_t>> drain_chat(replication::LoopbackChannel &wire)
 void test_console_chat() {
 	ConsoleRig rig;
 	inmatch::NapiNPServerCtx &ctx = rig.ctx;
+	// The join's game state 10 on both, which the relay's gate reads.
+	for (inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) conn.burst.game_state = 10;
 
 	// A player's line: fanned, then posted into the host's own ring.
 	ChatUplink up;

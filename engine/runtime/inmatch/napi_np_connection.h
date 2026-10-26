@@ -952,6 +952,17 @@ inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }
 
+// The net player's game state reads in the round (10) or past its end (11): the chat relay's
+// sender gate and loop heads, which a connection resyncing (9, a C2S player-sync request) or
+// re-adding (7) fails while it stays spawned.
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - `cmp eax, 0Ah` / `cmp eax, 0Bh`
+//  @0x5137B3 / @0x5137B8, each channel's loop head (@0x513A9B, @0x513BAB, @0x513C9B,
+//  @0x513EA0, @0x513FAB, @0x5140B7); NapiNPServerMsg_HandlePlayerSyncRequest @0x51322D (9);
+//  NapiNPServerMsg_0x002 @0x51319C (7)]
+inline bool net_player_in_game(const NapiNPConnection &conn) {
+	return conn.burst.game_state == 10 || conn.burst.game_state == 11;
+}
+
 // The player slot's state word read as in match (6, or 7 once the round ends): from the
 // initial-state burst's end until the teardown erases the row. A punt writes no slot byte (the
 // punt fills the connection's disconnect event alone), so a reader of the slot itself keeps

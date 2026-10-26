@@ -238,7 +238,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	// is over (g_RoundOver, our match outcome's `ended`) [orig: @0x5137D7; the net player's
 	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1, the spectator byte
 	//  +0x188D7 @0x5137C7, `cmp g_RoundOver, 0` @0x5137D0]
-	if (!(is_in_match(sender) || local_slot)) return replies;
+	if (!(net_player_in_game(sender) || local_slot)) return replies;
 	if (sender.link.spectator && !world.match.outcome().ended) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].
 	if (sender.reply.chat_last_ms != 0 && now_ms < sender.reply.chat_last_ms + kChatThrottleMs)
@@ -289,8 +289,11 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 
 	std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	for (NapiNPConnection &recipient : roster) {
-		// slot active, NetPlayer state 10/11 [orig: each loop head]
-		if (!is_in_match(recipient) || recipient.link.transport == nullptr) continue;
+		// slot active, NetPlayer state 10/11 [orig: each loop head], through the sends' punt
+		// leg (is_in_match)
+		if (!is_in_match(recipient) || !net_player_in_game(recipient) ||
+				recipient.link.transport == nullptr)
+			continue;
 		const bool is_sender = &recipient == &sender;
 		if (sender_only && !is_sender) continue;                   // (!dy || v == sender)
 		const world::Entity *recipient_entity = recipient.link.owned_entity.valid()
@@ -306,7 +309,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		case 11: // game state 10 only (none once the round end sets 11), same carrier vehicle
 			// [orig: @0x513D90..0x513DC5 - `cmp dword [eax+0A0h], 0Ah` @0x513DA5, the carrier
 			//  compare @0x513DC1; Server_ProcessRoundEnd's CNetPlayer_SetGameState(11) @0x516846]
-			admit = recipient.burst.game_state != 11 && recipient_entity != nullptr &&
+			admit = recipient.burst.game_state == 10 && recipient_entity != nullptr &&
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
 		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team

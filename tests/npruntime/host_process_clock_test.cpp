@@ -191,6 +191,7 @@ void test_cookie_ring_reads_the_process_clock() {
 //  GetTickCount @0x519A1E, the stamp @0x519A3C]
 void test_chat_stamp_reads_the_process_clock() {
 	ClockHost host;
+	host.conn().burst.game_state = 10; // the join's game state, which the relay's gate reads
 	const auto line = [](const char *text, bool with_channel) {
 		std::vector<uint8_t> body;
 		if (with_channel) body.push_back(0);

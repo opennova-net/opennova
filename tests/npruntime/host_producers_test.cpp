@@ -486,8 +486,9 @@ std::vector<uint8_t> chat_uplink(uint8_t channel, const std::string &text) {
 }
 
 bool check_chat_routing() {
-	// Four players: P1/P3 team 1, P2/P4 team 2.
+	// Four players: P1/P3 team 1, P2/P4 team 2, each net player in the join's game state 10.
 	HostFixture f(4);
+	for (size_t i = 0; i < 4; ++i) f.conn(i).burst.game_state = 10;
 	for (auto &t : f.transports) (void)drain(t);
 	// Team chat from P1: P3 (same team) receives it, P2/P4 do not, P1 gets its
 	// own copy as the reply.
@@ -542,6 +543,21 @@ bool check_chat_routing() {
 	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(7, "x"), 100 + 210);
 	if (!expect(replies.empty() && drain(f.transports[0]).empty(), "channel 7 is dropped"))
 		return false;
+	// A net player resyncing (game state 9, a player-sync request) neither hears nor sends a line,
+	// though it stays spawned [orig: @0x5137B3..0x5137C1; the loop head @0x5140B7;
+	//  NapiNPServerMsg_HandlePlayerSyncRequest @0x51322D].
+	f.conn(3).burst.game_state = 9;
+	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "sync"), 100 + 280);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1 &&
+					drain(f.transports[3]).empty(),
+			"a resyncing net player hears no line"))
+		return false;
+	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 280);
+	if (!expect(replies.empty() && drain(f.transports[0]).empty(),
+			"a resyncing net player sends no line"))
+		return false;
+	f.conn(3).burst.game_state = 10;
+	(void)drain(f.transports[1]);
 	// Channel 11, the crew: P1 and P3 ride one carrier, P2 and P4 none.
 	w::Entity hull;
 	hull.has_item_def = true;
@@ -589,6 +605,7 @@ bool check_chat_routing() {
 //  @0x62864D..0x628654]
 bool check_punted_sender_chat_is_not_handled() {
 	HostFixture f(4);
+	for (size_t i = 0; i < 4; ++i) f.conn(i).burst.game_state = 10; // the join's: the gate passes
 	for (auto &t : f.transports) (void)drain(t);
 	if (!expect(inmatch::Server_StageHostPunt(f.conn(0), 35) && f.conn(0).host_disconnect_sent,
 			"the punt stages P1's description"))
