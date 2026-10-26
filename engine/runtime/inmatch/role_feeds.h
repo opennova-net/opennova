@@ -142,7 +142,8 @@ uint32_t round_over_key(const RoleView &view, Role &role, int vk, int restart_vk
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 //  g_RoundOver, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
 //  g_EndRoundDrawFlag, g_EndRoundTransitionStartMs = GetTickCount; the 0x56 board
-//  completion.] Role-agnostic: every role's view folds both lanes.
+//  completion.] Role-agnostic: every role's view folds both lanes; a host out of a session
+//  reports neither (no end-round screen runs there).
 EndRoundSessionState end_round_session_state(const RoleView &view);
 
 // The overlay ladder's input off the folded 0x1D header and the round clock.

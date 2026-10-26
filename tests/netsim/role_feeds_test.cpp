@@ -339,6 +339,16 @@ static void serve_only_end_round_cases() {
 	RoleView listen = serve_only;
 	listen.runtime = &own;
 	CHECK(!end_round_session_state(listen).header_known);
+	// The folded 0x1D runs the end-round screens in a session alone: single player's own client
+	// folds the one its round end sends, and no end-round screen runs out of a session.
+	// [orig: HUD_DrawOverlayPanels @0x5C0060 - `g_RoundOver && is_in_session` @0x5C0069]
+	own.view().state().end_round.header_known = true;
+	own.view().state().end_round.known = true;
+	CHECK(end_round_session_state(listen).header_known && end_round_session_state(listen).board_known);
+	w.rules.mp_session = false;
+	CHECK(!end_round_session_state(listen).header_known &&
+	      !end_round_session_state(listen).board_known);
+	w.rules.mp_session = true;
 }
 
 // The scene frame's call of its HUD pass (the session's radar step runs on it): no call

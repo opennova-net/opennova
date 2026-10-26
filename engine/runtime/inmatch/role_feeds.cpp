@@ -229,6 +229,15 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 	// dies with the host's exit.
 	v.session_open = view.joiner ? !view.runtime->session_lost()
 								 : view.host != nullptr && view.host->is_in_session != 0;
+	// Out of a session no end-round screen runs: single player's own client folds the 0x1D its
+	// round end sends, and the overlay panels' pass takes the end-round transition only in a
+	// session (world.rules.mp_session is single player's is_in_session; a joiner is always in
+	// one) [orig: HUD_DrawOverlayPanels @0x5C0060 - `g_RoundOver && is_in_session` @0x5C0069,
+	// else Game_CloseInGameScreens @0x5C0079 / UI_ProcessMenuScreenFrame @0x5C007E].
+	if (!view.joiner && view.kernel != nullptr && !view.kernel->world.rules.mp_session) {
+		v.header_known = false;
+		v.board_known = false;
+	}
 	return v;
 }
 

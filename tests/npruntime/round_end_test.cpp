@@ -1467,6 +1467,40 @@ void test_sp_auto_lose_reads_the_dead_bit() {
 			"the dead bit alone ends it, winner 2");
 }
 
+// The SP round end runs the slot walk as a session's does: retail's Server_ProcessRoundEnd walks
+// every state-6 slot whatever the session (the 0x61, the 0x1D, game state 11, slot state 7);
+// only the linger is a session's.
+// [orig: Server_ProcessRoundEnd @0x5164F0 - the walk @0x516730..0x51687D, the 0x61 @0x516790,
+//  the 0x1D @0x516839, CNetPlayer_SetGameState(11) @0x516846, slot state 7 @0x51685E;
+//  `cmp is_in_session` @0x5166BC ahead of the linger store @0x5166C4]
+void test_sp_round_end_runs_the_slot_walk() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.team = 1;
+	body.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	const w::EntityHandle player = world.registry.spawn(0, body);
+	world.cached.local_player = player;
+	ns::LoopbackChannel loop;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 0;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
+	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	EndRoundHeader header;
+	expect(world.match.outcome().ended && ctx.round_end_announced &&
+					ctx.round_end_linger_ticks == 0,
+			"the SP round end is announced with no linger");
+	expect(drain_round_header(loop, header) && header.winner_team == 2,
+			"the SP slot takes its 0x61, then its 0x1D naming the winner");
+	expect(conn.burst.game_state == 11 && conn.slot_state == inmatch::PlayerSlotState::RoundOver,
+			"the SP slot enters game state 11 and slot state 7");
+}
+
 // The 0x56 row's sixth i16 is stats field 11, the FLAGSAVE counter
 // [orig: CRenderState_GetFieldByIndex(stats, 0xA) @0x50918a -> the seventh
 // sub_455540 word @0x509509; field 11 = GameEvent_ProcessScoring case 8
@@ -1710,6 +1744,7 @@ void test_census_counts_pool_one_vehicles() {
 int main() {
 	test_census_counts_pool_one_vehicles();
 	test_sp_auto_lose_reads_the_dead_bit();
+	test_sp_round_end_runs_the_slot_walk();
 	test_end_round_row_flags_word_is_field_11();
 	test_org1_death_transaction_is_the_motor_edge();
 	test_kill_event_unit_score_rides_every_session();

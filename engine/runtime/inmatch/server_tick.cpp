@@ -204,9 +204,11 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
-	if (!world.rules.mp_session || ctx.round_end_announced ||
-			!world.match.result().ready)
-		return false;
+	// Single player runs it too: the board, the slot walk and the tallies take no session test;
+	// only the linger is a session's (below).
+	// [orig: Server_ProcessRoundEnd @0x5164F0 - the board @0x516590, the walk
+	//  @0x516730..0x51687D, the tallies @0x516888..0x5168D8]
+	if (ctx.round_end_announced || !world.match.result().ready) return false;
 	const world::MatchResult &result = world.match.result();
 	// The board stream is frozen ONCE here, before the per-slot push; the C2S
 	// 0x2B service only cuts chunks from it.
@@ -300,7 +302,11 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 			++ctx.round_wins[static_cast<size_t>(result.winner_team - 1)];
 	}
 	ctx.round_end_announced = true;
-	ctx.round_end_linger_ticks = round_end_linger_ticks_for(ctx.config.title);
+	// The linger is a session's: single player stores none (world.rules.mp_session is its
+	// is_in_session) [orig: Server_ProcessRoundEnd - `cmp is_in_session` @0x5166BC, the store
+	// @0x5166C4].
+	ctx.round_end_linger_ticks =
+			world.rules.mp_session ? round_end_linger_ticks_for(ctx.config.title) : 0;
 	return true;
 }
 

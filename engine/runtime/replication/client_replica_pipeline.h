@@ -812,8 +812,9 @@ public:
 
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
-	// listen host's loopback replica passes world.mp_session (retail SP never
-	// runs this client path at all). [orig: NapiNPClientMsg_0x01D @0x43086c]
+	// listen host's loopback replica passes world.mp_session (single player's
+	// own client takes its round end's 0x1D in the team form).
+	// [orig: NapiNPClientMsg_0x01D @0x43086c]
 	void set_mp_session(bool mp_session) { mp_session_ = mp_session; }
 	// The listen host's own local client: its loopback 0x0A is the retail
 	// header-only frame (anchor, flags1, phase byte, phase-0 block) and the fold
