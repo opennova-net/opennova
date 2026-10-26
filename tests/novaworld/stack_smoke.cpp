@@ -11,12 +11,13 @@
 //          GET /api/me; the gate's answer to a retail client's probe naming a live
 //          lobby (the engine's own probe and reply codecs), and a NovaWorld session
 //          verified on that lobby (the engine's ClientSession); the jobs admin API
-//          (GET /api/admin/jobs/overview, the admin token). With --hosting <data
-//          set id> (as GET /api/me/servers offers it, once its tree is ready): the
-//          admin grants the account a server, the account starts one on that data
-//          set (POST /api/me/servers, with --mission's rotation or the data's
-//          whole one) on a machine the worker launches (its machine.launch job
-//          done by a worker process, never the fleet or the data program), which
+//          (GET /api/admin/jobs/overview, the admin token). With --hosting <game
+//          id> (its data set's, as GET /api/me/servers offers it once its published
+//          release's tree is ready): the admin grants the account a server, the
+//          account starts one on that game (POST /api/me/servers, with --mission's
+//          rotation or the data's whole one) on a machine the worker launches (its
+//          machine.launch job done by a worker process, never the fleet or the
+//          data program), which
 //          reaches running and is listed in the lobby (its listing's RID), takes
 //          console commands
 //          through the fleet's admin link (PLAYER LIST, CHAT SEND), shows on
@@ -27,13 +28,14 @@
 //          writes. Last, the attention list holds no danger (and reads no
 //          alarm: the local stack has none).
 //   data-set <dir>
-//          writes the synthetic Joint Operations data set the stack's machines can
+//          writes the synthetic Joint Operations install the stack's machines can
 //          serve without licensed data: the serve tests' deathmatch map
 //          SERVETST.BMS and game text packed into the three base archives a
-//          data set's tree holds (resource.pff, localres.pff, language.pff:
+//          game's tree holds (resource.pff, localres.pff, language.pff:
 //          apps/novaworld_common/data_sets/data_set_files.h), with a version.txt,
-//          as an install's root. What `dev_stack.sh up --synthetic-data` uploads
-//          and CI hosts on.
+//          as an install's root. What `dev_stack.sh up --synthetic-data` makes JO's
+//          project of (imported whole, then what a build needs besides made from
+//          scratch), pushes, releases and publishes, and CI hosts on.
 //
 // Infrastructure only, POSIX only.
 
@@ -183,7 +185,7 @@ struct Options {
 	std::string gate = "novaworld-gate:7597";
 	std::vector<std::string> livez; // host:port of each other program's health listener
 	std::string admin_token;
-	std::string hosting; // the id of a data set to host on, "" for none
+	std::string hosting; // the id of a game (its data set) to host on, "" for none
 	std::string mission; // the start's rotation; "" for the data's whole one
 	std::string zone_file; // the static addresses' zone file the worker writes, "" for none
 	int timeout_s = 300;
@@ -339,8 +341,8 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	if (!check(reply.code == 200 && enabled && enabled->is_bool() && enabled->boolean,
 				"hosting is on (GET /api/me/servers: enabled)", status_text(reply)))
 		return;
-	// The data set --hosting names, among the ones the start may pick (a base
-	// with a ready tree): its id, and the missions its data holds.
+	// The game --hosting names, among the ones the start may pick (a base with
+	// a ready tree): its id, and the missions its data holds.
 	const int64_t wanted = std::strtoll(o.hosting.c_str(), nullptr, 10);
 	const io::JsonValue *data_sets = at(*list, { "data_sets" });
 	const io::JsonValue *offered = nullptr;
@@ -354,7 +356,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 				offered = &d;
 		}
 	}
-	if (!check(offered != nullptr, "data set " + o.hosting + " is offered (its tree is ready)",
+	if (!check(offered != nullptr, "game " + o.hosting + " is offered (its release's tree is ready)",
 				"offered: " + (offered_text.empty() ? std::string("none") : offered_text)))
 		return;
 	const io::JsonValue *mission_list = at(*offered, { "missions" });
@@ -629,13 +631,13 @@ int run(const Options &o) {
 		check_static_address(site, user_id, o);
 	}
 	else if (o.hosting.empty())
-		note("hosting not checked: no data set (dev_stack.sh up --data <dir> or --synthetic-data)");
+		note("hosting not checked: no game (dev_stack.sh up --data <dir> or --synthetic-data)");
 	check_attention(site);
 	std::printf("%s: %d failure(s)\n", g_failures == 0 ? "PASSED" : "FAILED", g_failures);
 	return g_failures;
 }
 
-// One archive of the synthetic data set: `entries` packed under `path` by the
+// One archive of the synthetic install: `entries` packed under `path` by the
 // engine's own writer (new entries: no flags, the writer's fixed timestamp).
 bool write_archive(const fs::path &path,
 		const std::vector<std::pair<std::string, std::vector<uint8_t>>> &entries) {
@@ -652,16 +654,18 @@ bool write_archive(const fs::path &path,
 	return rc == opennova::pff::PFF_WRITE_OK;
 }
 
-// The synthetic data set: an install's root of one deathmatch map (servetst.bms)
+// The synthetic install: an install's root of one deathmatch map (servetst.bms)
 // and the game text a server's listing reads, packed into the retail boot
 // table's three archives (the mission in localres.pff, the texts in
 // language.pff, as the mission catalog reads a base's pair; resource.pff a
 // placeholder, since the table mounts no install without it) with a
-// version.txt: the files a base data set's tree holds and nothing else.
+// version.txt. Its project's export packs the mission and the text into those
+// two archives again (their kinds' slots), so the tree its release makes lists
+// the mission as this install does.
 int write_data_set(const fs::path &dir) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
-	const std::string placeholder = "OpenNova's synthetic data set: one deathmatch map.\n";
+	const std::string placeholder = "OpenNova's synthetic install: one deathmatch map.\n";
 	const bool written =
 			write_archive(dir / "resource.pff",
 					{ { "readme.txt", std::vector<uint8_t>(placeholder.begin(), placeholder.end()) } }) &&
@@ -678,10 +682,10 @@ int write_data_set(const fs::path &dir) {
 							}) } }) &&
 			serve_test::write_text(dir / "version.txt", "OpenNova Synthetic Data, V1.0.0.0; English\r\n");
 	if (!written) {
-		std::fprintf(stderr, "cannot write the data set to %s\n", dir.string().c_str());
+		std::fprintf(stderr, "cannot write the install to %s\n", dir.string().c_str());
 		return 1;
 	}
-	std::printf("the synthetic data set (resource.pff, localres.pff with SERVETST.BMS, "
+	std::printf("the synthetic install (resource.pff, localres.pff with SERVETST.BMS, "
 				"language.pff with gametext.bin, version.txt) is in %s\n",
 			dir.string().c_str());
 	return 0;
@@ -691,7 +695,7 @@ int usage() {
 	std::fprintf(stderr,
 			"usage: opennova-novaworld-stack-smoke run [--web <host:port>] [--site <host:port>]\n"
 			"           [--gate <host:port>] [--livez <host:port>]... --admin-token <token>\n"
-			"           [--hosting <data set id> [--mission <name.bms>] [--zone-file <path>]]\n"
+			"           [--hosting <game id> [--mission <name.bms>] [--zone-file <path>]]\n"
 			"           [--timeout <seconds>]\n"
 			"       opennova-novaworld-stack-smoke data-set <dir>\n");
 	return 2;
