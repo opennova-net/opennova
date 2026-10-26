@@ -4,7 +4,7 @@
 // issue), a murk past 0.99; a block's codes past four or past a byte, an attrib word no arm reads,
 // a colour mode past 0..2, a line no block arm reads; a fifth block swallowing the rest; a cut last
 // line (a block's "end" read "en"); polytrn_depthmap (stored, never read back); an environment keyword the
-// record does not hold and polytrn_scale (blocking) [orig: Terrain_ParseConfigCallback @ 0x60F330;
+// record does not hold (blocking); polytrn_scale, the record's own [orig: Terrain_ParseConfigCallback @ 0x60F330;
 // Environment_LoadTimeOfDayConfig @ 0x57DB30's .trn pass; File_ParseASCIIFile
 // @ 0x53D8C7..0x53D8F5].
 #include <formats/trn/trn_source_issue.h>
@@ -135,8 +135,8 @@ int test_structure() {
 }
 
 int test_blocking() {
-	// An environment keyword the record does not hold, polytrn_scale: each blocks. polytrn_depthmap, stored and never
-	// read back, does not.
+	// An environment keyword the record does not hold blocks. polytrn_depthmap, stored and never read back, does
+	// not.
 	const auto one = [](const std::string &line, TrnSourceRule rule, bool blocks) {
 		const std::vector<TrnSourceIssue> issues = trn_source_issues(kHead + line + "\r\n");
 		const TrnSourceIssue *issue = issues.size() == 1 ? find(issues, rule, 4) : nullptr;
@@ -144,7 +144,8 @@ int test_blocking() {
 	};
 	TEST_EXPECT(one("fog_level 600", TrnSourceRule::EnvironmentKey, true));
 	TEST_EXPECT(one("tod_begin 0600", TrnSourceRule::EnvironmentKey, true));
-	TEST_EXPECT(one("polytrn_scale 128", TrnSourceRule::ScaleKey, true));
+	// polytrn_scale: the record's own (TrnConfig::scale), nothing said.
+	TEST_EXPECT(trn_source_issues(kHead + "polytrn_scale 256\r\n").empty());
 	TEST_EXPECT(one("polytrn_depthmap d.raw", TrnSourceRule::DepthmapKey, false));
 	// horizon: no arm reads it and the record does not keep it (D-TERRAIN-20): skipped, as any unknown key.
 	TEST_EXPECT(one("horizon 0", TrnSourceRule::Skipped, false));
@@ -152,7 +153,7 @@ int test_blocking() {
 	TEST_EXPECT(trn_source_issues(kHead + "terrain_name \"x\"\r\nterrain_creator \"y\"\r\nwater_height 21\r\n"
 	                                      "water_rgb 108,81,48\r\nwater_murk .3\r\n")
 	                    .empty());
-	std::printf("blocking: an environment keyword, polytrn_scale; polytrn_depthmap and horizon not; the record's own "
+	std::printf("blocking: an environment keyword; polytrn_depthmap and horizon not; the record's own, polytrn_scale "
 	            "keys read\n");
 	return 0;
 }

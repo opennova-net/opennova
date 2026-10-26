@@ -183,6 +183,7 @@ std::string config_difference(const TrnConfig &a, const TrnConfig &b) {
 	if (a.detail_density != b.detail_density || a.detail_density2 != b.detail_density2) return "densities";
 	if (a.sector_count != b.sector_count || a.sector_rows != b.sector_rows) return "grid size";
 	if (a.origin_x != b.origin_x || a.origin_y != b.origin_y) return "origin";
+	if (a.scale != b.scale) return "scale";
 	if (a.wrap_x != b.wrap_x || a.wrap_y != b.wrap_y) return "wraps";
 	const auto lock = [](const opennova::TerrainLockCoord &l) { return l.x * 1000 + l.y; };
 	if (lock(a.lock_topleft) != lock(b.lock_topleft) || lock(a.lock_topright) != lock(b.lock_topright) ||
@@ -398,15 +399,20 @@ int test_source_issues() {
 		if (odd) odd->undo();
 		TEST_EXPECT(odd && odd->config()->polydata.empty() && line_end_findings(*odd, "jo").size() == 1);
 	}
-	// An environment keyword the record does not hold, polytrn_scale: the file blocks.
+	// An environment keyword the record does not hold: the file blocks. polytrn_scale is the record's own: kept, and
+	// written where it is not 128.
 	{
 		auto fog = load(head + "fog_level 600\r\n");
 		TEST_EXPECT(fog && fog->blocked() && has_issue(*fog, 4, true, "environment keyword"));
 		const std::vector<Diagnostic> blocking = validate_terrain_file(*fog);
 		TEST_EXPECT(blocking.size() == 1 && blocking[0].code() == "terrain.invalid_input" &&
 		            blocking[0].severity == DiagnosticSeverity::Error);
-		auto scale = load(head + "polytrn_scale 128\r\n");
-		TEST_EXPECT(scale && scale->blocked() && has_issue(*scale, 4, true, "multiplayer"));
+		auto scale = load(head + "polytrn_scale 256\r\n");
+		TEST_EXPECT(scale && !scale->blocked() && scale->config()->scale == 256 &&
+		            scale->serialize().text.find("polytrn_scale\t\t\t256\r\n") != std::string::npos);
+		auto unscaled = load(head);
+		TEST_EXPECT(unscaled && unscaled->config()->scale == 128 &&
+		            unscaled->serialize().text.find("polytrn_scale") == std::string::npos);
 		// polytrn_depthmap: stored and never read back, so the file stays editable and a save leaves it out.
 		auto depth = load(head + "polytrn_depthmap d.raw\r\n");
 		TEST_EXPECT(depth && !depth->blocked() && has_issue(*depth, 4, false, "never reads it back"));
@@ -419,7 +425,7 @@ int test_source_issues() {
 	}
 	std::printf("source issues: a row before the width, short, wide; a key skipped, written again; a murk past 0.99; a "
 	            "block's codes past four, a line no arm reads; a fifth block; a cut last line; LF line ends restored; an "
-	            "environment keyword, polytrn_scale; polytrn_depthmap and horizon skipped\n");
+	            "environment keyword; polytrn_scale kept; polytrn_depthmap and horizon skipped\n");
 	return 0;
 }
 

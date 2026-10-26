@@ -330,6 +330,13 @@ void terrain_fields(TableKind &kind) {
 	                      [](TrnConfig &c) -> int & { return c.origin_x; }));
 	kind.field(pair_field("origin_y", "North", "Sector grid", "Origin", "polytrn_origin", origin_words,
 	                      [](TrnConfig &c) -> int & { return c.origin_y; }));
+	// The scale [orig: Terrain_ParseConfigCallback @ 0x60facb..0x60fae5; its default, Terrain_LoadEnvironmentConfig
+	// @ 0x61096D; its one reader, PolyTrn_InitTextures @ 0x60C5F7..0x60C5FD into the multiplayer file check's word,
+	// Server_HandleClientCRCValidation @ 0x519573].
+	kind.field(int_field("polytrn_scale", "Height scale", "Sector grid",
+	                     "A number the game reads for its multiplayer file check alone (128 by default): it draws nothing "
+	                     "by it. The original mission editor measures a placed entity's terrain height times it over 128.",
+	                     &T::scale));
 	// The quadrant locks [orig: Terrain_ParseConfigCallback @ 0x60FAF7..0x60FBC8; the taps @ 0x60327A..0x6032EC].
 	const std::string lock_words = "How the heights' neighbour taps cross this quadrant's edges along the axis: 0 crosses "
 	                               "into the next quadrant, any other number wraps inside the quadrant's own 512 texels.";
@@ -746,9 +753,6 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 	case TrnSourceRule::TooManyRows:
 		return "The grid has " + std::to_string(read.read) +
 		       " rows: the game refuses a terrain of more than 16, and a save writes the first 16.";
-	case TrnSourceRule::ScaleKey:
-		return "polytrn_scale feeds only the multiplayer file check, which the editor's terrain cannot keep: remove the "
-		       "line, or keep editing the file as a text.";
 	case TrnSourceRule::DepthmapKey:
 		return "The game stores polytrn_depthmap and never reads it back: a save leaves the line out.";
 	case TrnSourceRule::Skipped: return "The game's readers skip '" + read.token + "': a save leaves the line out.";
@@ -765,8 +769,7 @@ std::string source_issue_words(const TrnSourceIssue &read) {
 // line left), a row past the width's columns, a fifth foliage block (from it on the file is read by no arm), a
 // block's line its arms do not read, a match past its fourth code or past a byte, a murk past 0.99, a last line
 // no CR LF ends, a polytrn_depthmap (stored, never read back); and, blocking, an environment keyword the record
-// does not hold (the environment's reader takes it in the terrain's pass) and polytrn_scale (the multiplayer
-// check's alone).
+// does not hold (the environment's reader takes it in the terrain's pass).
 void terrain_source_issues(const std::string &text, std::vector<SourceIssue> &issues) {
 	// What the readers read otherwise than the record holds (formats/trn trn_source_issues), each a source issue.
 	for (const TrnSourceIssue &read : trn_source_issues(text)) {

@@ -141,12 +141,6 @@ std::vector<TrnSourceIssue> trn_source_issues(const std::string &text) {
 			return;
 		}
 		if (key == "polytrn_sectorcount") sector_count = io::retail_atol(value);
-		if (key == "polytrn_scale") {
-			// Read for the multiplayer check alone [orig: Terrain_LoadEnvironmentConfig @ 0x61096D, its default;
-			// @ 0x60C5FD feeds the CRC]: the record does not hold it.
-			issue(TrnSourceRule::ScaleKey, true, line, key);
-			return;
-		}
 		if (key == "polytrn_depthmap") {
 			// Stored and never read back (TrnSourceRule::DepthmapKey): the record (TrnConfig) need not hold it.
 			issue(TrnSourceRule::DepthmapKey, false, line, key);

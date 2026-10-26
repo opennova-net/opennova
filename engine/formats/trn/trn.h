@@ -51,6 +51,12 @@ struct TrnConfig {
 	int sector_count = 0;
 	int origin_x = 0;
 	int origin_y = 0;
+	// polytrn_scale: atol of its first value, the last line's [orig:
+	// Terrain_ParseConfigCallback @ 0x60facb, the store @ 0x60fae5], 128 where the file names
+	// none [orig: Terrain_LoadEnvironmentConfig @ 0x61096D]. The game reads it for its
+	// multiplayer file check alone [orig: PolyTrn_InitTextures @ 0x60C5F7..0x60C5FD, the word
+	// Server_HandleClientCRCValidation @ 0x519573 compares]; save_trn writes it where it is not 128.
+	int scale = 128;
 	int water_height = 0;
 	// The environment's keywords a terrain carries, which its reader reads in the terrain's pass
 	// (the .trn is parsed by the time-of-day parser too, before the mission's .env [orig:

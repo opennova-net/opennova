@@ -157,7 +157,7 @@ bool write_trn_key_line(std::string &out, const TrnKeyLine &line, std::string &e
 
 // The value a configuration holds for a keyword whose arm sets it whole (a map's name, a density, the grid's width, a
 // wrap, the origin's or a lock's two numbers), as a line writes it; "" for one it holds no such value of (a foliage
-// block's keys, a grid row, polytrn_scale and polytrn_depthmap, which TrnConfig does not keep).
+// block's keys, a grid row, and polytrn_depthmap, which TrnConfig does not keep).
 std::string trn_key_value(const TrnConfig &config, const std::string &key);
 
 // Whether the arm of `key` reads its first value alone, so values after it change nothing (a map's name, a number);
