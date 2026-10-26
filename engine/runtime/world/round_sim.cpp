@@ -1066,6 +1066,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // slot+4 & 0x200 0xFF override is unmodeled].
     r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                   : params.shooter_team;
+    // The same source copy carries the shooter's four blink-hit words, which the round keeps
+    // until its first BB refresh after its motor (throwables.cpp's refresh_round_blink); a
+    // decoded shooter with no entity of ours carries none (its row keeps no blink words).
+    // [orig: RoundData_SpawnRound - the source test @0x4EC6B5 / jz @0x4EC6C7, the copies
+    //  +0x1D0..+0x1DC @0x4EC6C9..0x4EC6F3]
+    if (owner_ent != nullptr)
+        for (int i = 0; i < 4; ++i) r.blink_hits[i] = owner_ent->blink_hits[i];
 
     // The tracer VISUAL — a trail channel allocated at spawn, styled friendly/enemy
     // against the presenting client's team [orig: RoundData_SpawnRound @ 0x4ec740:

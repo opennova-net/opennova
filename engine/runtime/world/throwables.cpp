@@ -1029,19 +1029,22 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
 }
 
 // The round's own BB refresh after its motor: its Flags 0x800000 clears and
-// is set again from the blink walk its def's type picks: none for a building
-// (type 5); for a vehicle or a person (1 / 3) its own candidate slice, which
-// a round never holds (the slot allocator zeroes all 0x30C bytes); the static
-// building prefix for any other type (every shipped throwable's def is
-// `type object`) or no def. The +0x114 bit stays as the spawn stamped it.
+// is set again, and its four blink-hit words written, from the blink walk its
+// def's type picks: none for a building (type 5); for a vehicle or a person
+// (1 / 3) its own candidate slice, which a round never holds (the slot
+// allocator zeroes all 0x30C bytes); the static building prefix for any other
+// type (every shipped throwable's def is `type object`) or no def. A walk that
+// does not run leaves the words 0. The +0x114 bit stays as the spawn stamped it.
 // [orig: Projectile_UpdatePhysics - the motor call @0x4E9F1E, the
 //  Entity_BuildProximityList call @0x4E9F21; Entity_BuildProximityList
 //  @0x4B3DC0 - the clear @0x4B3E0C, the def+0x5C read @0x4B3E47, the type
-//  tests @0x4B3E4A..0x4B3E5F, the static walk @0x4B3E65..0x4B3F39, the set
-//  @0x4B40C5; CEntityManager_AllocateSlot @0x4EAAD0, the memset @0x4EABC8]
-static void refresh_round_indoors(World &world, LiveRound &round,
-                                  CollisionWorld *collision) {
+//  tests @0x4B3E4A..0x4B3E5F, the static walk @0x4B3E65..0x4B3F39, the
+//  words @0x4B406B..0x4B408E, the set @0x4B40C5; CEntityManager_AllocateSlot
+//  @0x4EAAD0, the memset @0x4EABC8]
+static void refresh_round_blink(World &world, LiveRound &round,
+                                CollisionWorld *collision) {
     round.indoors_flags = false;
+    for (uint32_t &hit : round.blink_hits) hit = 0;
     if (collision == nullptr) return;
     const ThrowableClassRow *row = world.throwables.classes.get(round.item_type_id);
     const int32_t type = row != nullptr ? row->def_type : 0;
@@ -1052,6 +1055,7 @@ static void refresh_round_indoors(World &world, LiveRound &round,
     BlinkAccum accum;
     collision->query_blink_boxes_at_point(world, at, accum);
     round.indoors_flags = (accum.flags & kBlinkIndoorsBit) != 0;
+    for (int i = 0; i < 4; ++i) round.blink_hits[i] = accum.hits[i];
 }
 
 // The arti row's motor: the shell a mortar fires (AMMO_60MM_MORTAR's TrcrID item binds
@@ -1140,7 +1144,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
     //  @0x4E9F1E; Entity_InitFromItemDef @0x49E550 (+0x1C4 @0x49E586..0x49E58C)]
     if (round.move_row == PhysicsClass::Arti) {
         alive = motor_arti(world, sim, round, ammo, collision, terrain);
-        refresh_round_indoors(world, round, collision);
+        refresh_round_blink(world, round, collision);
         return alive;
     }
     switch (round.motor) {
@@ -1167,7 +1171,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
         //  Projectile_UpdatePhysics @0x4E9F1E..0x4E9F21].
         if (round.rest_follows_parent) {
             if (round.parent.valid()) follow_parent(world, round);
-            refresh_round_indoors(world, round, collision);
+            refresh_round_blink(world, round, collision);
             return true;
         }
         // no motor bound: the round drifts unmoved and takes no BB refresh,
@@ -1175,7 +1179,7 @@ bool throwable_motor_tick(World &world, RoundSim &sim, LiveRound &round,
         // [orig: @0x4E9F0C..0x4E9F1B]
         return true;
     }
-    refresh_round_indoors(world, round, collision);
+    refresh_round_blink(world, round, collision);
     return alive;
 }
 
@@ -1333,13 +1337,15 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     seed.ground_target = parent_handle;
     seed.team = round.team;
     seed.item_id = item_id;
-    // The copy carries the round's Flags 0x800000, its BB state as the last
-    // tick's refresh left it (this tick's runs after the motor), which the
-    // device keeps until its first think visit rebuilds it; the +0x114 Indoors
-    // bit rides along too, read by no device leg.
+    // The copy carries the round's Flags 0x800000 and its four blink-hit
+    // words, its BB state as the last tick's refresh left it (this tick's runs
+    // after the motor), which the device keeps until its first think visit
+    // rebuilds it (the contained lighting keys on the first word); the +0x114
+    // Indoors bit rides along too, read by no device leg.
     // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy
-    //  @0x5455D6; Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
+    //  @0x5455D6 (+0x1D0..+0x1DC); Entity_UpdatePool1Slot @0x4B8E1B..0x4B8E25]
     if (round.indoors_flags) seed.flags |= kEntityFlagIndoors;
+    for (int i = 0; i < 4; ++i) seed.blink_hits[i] = round.blink_hits[i];
     // The same copy carries the round's ammo-flags word with its noage bit, as
     // the spawn stored it; the authority's round keeps the bit until the
     // conversion clears it on the ROUND after the copy. The device is then no

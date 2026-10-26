@@ -2547,29 +2547,50 @@ void test_indoors_grenade_skips_the_terrain_test() {
 }
 
 // The refresh: a round an outdoors body throws inside a BB takes the Flags
-// bit after its first motor tick, and loses it once it leaves; the +0x114
-// bit stays clear. [orig: Projectile_UpdatePhysics @0x4E9F1E / @0x4E9F21;
+// bit and the building's blink-hit word after its first motor tick, and loses
+// both once it leaves; the +0x114 bit stays clear. A device placed from the
+// round inside carries its words (D-COL-18), which the contained lighting keys
+// on. [orig: Projectile_UpdatePhysics @0x4E9F1E / @0x4E9F21;
 // Entity_BuildProximityList @0x4B3DC0 - the clear @0x4B3E0C, the static walk
-// @0x4B3E65..0x4B3F39, the set @0x4B40C5]
+// @0x4B3E65..0x4B3F39, the words @0x4B406B..0x4B408E, the set @0x4B40C5;
+// Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6]
 void test_throwable_round_refreshes_its_indoors_flag() {
     Rig rig(0);
     CollisionWorld cw;
     cw.terrain = &rig.flat.field;
-    add_blink_building(rig, cw, Vec3{30, 30, 0});
+    const EntityHandle building = add_blink_building(rig, cw, Vec3{30, 30, 0});
     cw.build_initial_tables(rig.w);
     rig.w.collision = &cw;
+    // The spawn copies the thrower's four words [orig: RoundData_SpawnRound
+    // @0x4EC6C9..0x4EC6F3]; the first refresh writes the round's own.
+    constexpr uint32_t kThrowerHit = 0x123000u;
+    rig.w.registry.get(rig.thrower)->blink_hits[1] = kThrowerHit;
     const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{30, 30, 2}, 0, 0);
     CHECK(slot >= 0);
     if (slot < 0) return;
     LiveRound &r = rig.w.round_sim.rounds[size_t(slot)];
     CHECK(!r.indoors_word && !r.indoors_flags);
+    CHECK(r.blink_hits[0] == 0 && r.blink_hits[1] == kThrowerHit);
     rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
     CHECK(r.active);
     CHECK(!r.indoors_word && r.indoors_flags);
+    CHECK(BlinkAccum::hit_owner(r.blink_hits[0]) == building && r.blink_hits[1] == 0);
+    const LiveRound inside = r;
+    const AmmoTableEntry &ammo = rig.w.tables.ammo.entries[kAmmoSatchel];
+    CHECK(rig.w.throwables.place_from_round(rig.w, inside, ammo));
+    if (!rig.w.throwables.devices.empty()) {
+        const Entity *device = rig.w.registry.get(rig.w.throwables.devices.back().entity);
+        CHECK(device != nullptr);
+        if (device != nullptr) {
+            for (int i = 0; i < 4; ++i) CHECK(device->blink_hits[i] == inside.blink_hits[i]);
+            CHECK((device->flags & kEntityFlagIndoors) != 0);
+        }
+    }
     r.pos = Vec3{50, 50, 2}; // outside the BB
     rig.w.round_sim.tick(rig.w, &rig.flat.field, &cw);
     CHECK(r.active);
     CHECK(!r.indoors_word && !r.indoors_flags);
+    CHECK(r.blink_hits[0] == 0 && r.blink_hits[1] == 0);
     rig.w.collision = nullptr;
 }
 

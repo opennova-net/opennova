@@ -379,6 +379,14 @@ struct LiveRound {
     // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
     bool indoors_word = false;
     bool indoors_flags = false;
+    // The four blink-hit words (+0x1D0..+0x1DC): the spawn copies the shooter's, the
+    // round's BB refresh after its motor writes its own beside its Flags bit
+    // (throwables.cpp's refresh_round_blink), and the conversion's copy carries them into
+    // the placed device.
+    // [orig: RoundData_SpawnRound @0x4EC6C9..0x4EC6F3; Entity_BuildProximityList @0x4B3DC0 -
+    //  the stores @0x4B406B / @0x4B4077 / @0x4B4082 / @0x4B408E;
+    //  Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6]
+    uint32_t blink_hits[4] = {};
     // Two more bits of that +0x114 copy of the ammo flags: noage (0x4000), which
     // a non-authority charge rest and a joiner's S2C 0x59 match clear, and
     // Priority (0x800000), which keeps an occupied slot from the allocator's
