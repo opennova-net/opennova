@@ -10,7 +10,6 @@
 #include <formats/avatars/avatars.h>
 #include <formats/avatars/preview_animation.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
-#include <base/io/bam.h>
 #include <runtime/inmatch/join_character_profile.h>
 #include <runtime/menu/player_info_avatars.h>
 #include <net/npwire/character_id.h>
@@ -22,20 +21,8 @@ using namespace godot;
 using namespace opennova::avatars;
 using namespace opennova::threedi;
 
-float AvatarDatabase::preview_zoom_damp_per_tick() {
-	return opennova::avatars::kPreviewZoomDampPerTick;
-}
 float AvatarDatabase::preview_zoom_in_scale() {
 	return opennova::avatars::kPreviewZoomInScale;
-}
-float AvatarDatabase::preview_idle_speed_deg_per_sec() {
-	return opennova::avatars::kPreviewIdleSpeedDegPerSec;
-}
-float AvatarDatabase::preview_sway_freq_rad_per_sec() {
-	return opennova::avatars::kPreviewSwayFreqRadPerSec;
-}
-float AvatarDatabase::preview_sway_amp_deg() {
-	return opennova::avatars::kPreviewSwayAmpDeg;
 }
 String AvatarDatabase::preview_skeleton_bad() {
 	return String(opennova::avatars::kPreviewSkeletonBad);
@@ -43,11 +30,20 @@ String AvatarDatabase::preview_skeleton_bad() {
 String AvatarDatabase::preview_idle_bad() {
 	return String(opennova::avatars::kPreviewIdleBad);
 }
-double AvatarDatabase::preview_initial_yaw_rad() {
+int64_t AvatarDatabase::preview_initial_yaw_bam() {
 	// The clock word the reseed takes (the CRT _time64's seconds, a platform primitive).
-	const int32_t bam = opennova::menu::player_info_preview_initial_yaw_bam(
+	return opennova::menu::player_info_preview_initial_yaw_bam(
 			static_cast<uint32_t>(std::time(nullptr)));
-	return static_cast<double>(bam) * opennova::io::kRadiansPerBam;
+}
+
+float AvatarDatabase::preview_blend_step(float p_blend, bool p_hovered) {
+	return opennova::menu::player_info_preview_blend_step(p_blend, p_hovered);
+}
+
+int64_t AvatarDatabase::preview_yaw_step(int64_t p_yaw, bool p_hovered, int64_t p_tick_ms) {
+	// GetTickCount's word: the low 32 bits of the millisecond clock.
+	return opennova::menu::player_info_preview_yaw_step(static_cast<int32_t>(p_yaw), p_hovered,
+			static_cast<uint32_t>(p_tick_ms));
 }
 
 PackedStringArray AvatarDatabase::part_camo_registers() {
@@ -74,27 +70,21 @@ void AvatarDatabase::apply_part_camo(ObjectModel *p_model, const Vector3i &p_cam
 
 void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_zoom_damp_per_tick"),
-			&AvatarDatabase::preview_zoom_damp_per_tick);
-	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_zoom_in_scale"),
 			&AvatarDatabase::preview_zoom_in_scale);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_idle_speed_deg_per_sec"),
-			&AvatarDatabase::preview_idle_speed_deg_per_sec);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_sway_freq_rad_per_sec"),
-			&AvatarDatabase::preview_sway_freq_rad_per_sec);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_sway_amp_deg"),
-			&AvatarDatabase::preview_sway_amp_deg);
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_skeleton_bad"),
 			&AvatarDatabase::preview_skeleton_bad);
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
 	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_initial_yaw_rad"), &AvatarDatabase::preview_initial_yaw_rad);
+			D_METHOD("preview_initial_yaw_bam"), &AvatarDatabase::preview_initial_yaw_bam);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_blend_step", "blend", "hovered"),
+			&AvatarDatabase::preview_blend_step);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_yaw_step", "yaw", "hovered", "tick_ms"),
+			&AvatarDatabase::preview_yaw_step);
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("apply_part_camo", "model", "camo", "owner"),
 			&AvatarDatabase::apply_part_camo);

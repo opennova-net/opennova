@@ -41,4 +41,24 @@ inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
 //  @0x560120..0x560128, rand() @0x5601a2, cdq / idiv 0B4h @0x5601a7..0x5601ad,
 //  imul 0B60B60h into dword_25DC53C @0x5601b1..0x5601b7].
 int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
+
+// The PLAYER_INFO portrait's motion, stepped once a menu update (the game loop's
+// fixed 62.5 Hz cadence: MainMenu's update slot runs on the drained 16 ms ticks,
+// Game_MainLoop @0x52b630 - @0x52ba47 / @0x52ba5a, the bank clamped to 500 ms
+// @0x52b836..0x52b83e) while the screen is up. The
+// hover zoom blend moves 5% of the way to 1 hovered, to 0 otherwise. The yaw (BAM)
+// spins 0x800000 an update at rest; hovered it closes 5% of its error each update on a sway about
+// a fixed facing: sway = ftol(sin(ticks * 0.0008) * 2^28), the yaw moved by
+// ftol((yaw - sway + 0x58000000) * -0.05), all in 32-bit words. The hover is
+// the pointer over PLAYER_PREVIEW alone.
+// [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0, from Menu_UpdateFrame
+//  @0x5528f7 - the hover walk exiting after PLAYER_PREVIEW @0x55dc36, the blend
+//  flt_25DC538 * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,
+//  GetTickCount @0x55dc71 (the unsigned fix-up @0x55dc7b), * 0.0008 (flt_7D5B78),
+//  fsin, * 2^28 (flt_7D5B74) @0x55dc81..0x55dc8f, the error + 0x58000000
+//  @0x55dca4, * -0.05 (flt_7D5B70) @0x55dca8..0x55dcb2, the yaw store dword_25DC53C
+//  @0x55dcb9, the rest spin @0x55dcc4; PlayerInfo_RenderPlayerPreview3D @0x5609c0
+//  reads both @0x560a67 / @0x560c3b] (D-PLAYERINFO-37).
+float player_info_preview_blend_step(float blend, bool hovered);
+int32_t player_info_preview_yaw_step(int32_t yaw, bool hovered, uint32_t tick_ms);
 } // namespace opennova::menu

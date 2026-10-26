@@ -6,6 +6,7 @@
 #include <runtime/menu/player_info_kit.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace opennova::menu {
 namespace {
@@ -160,6 +161,23 @@ std::string PlayerInfoAvatars::voice_preview_trigger(const MenuRuntime &menu,
 	}
 	return saved_voice < 0 ? std::string() : "VOICE_" + std::to_string(saved_voice);
 }
+float player_info_preview_blend_step(float blend, bool hovered) {
+	// [orig: @0x55dc43..0x55dc61, the x87 at single precision]
+	const float target = hovered ? 1.0f : 0.0f;
+	return blend * 0.95f + target * 0.05f;
+}
+
+int32_t player_info_preview_yaw_step(int32_t yaw, bool hovered, uint32_t tick_ms) {
+	if (!hovered) return static_cast<int32_t>(static_cast<uint32_t>(yaw) + 0x800000u);
+	// [orig: @0x55dc71..0x55dcb9]
+	const float phase = static_cast<float>(tick_ms) * 0.0008f;
+	const int32_t sway = static_cast<int32_t>(std::sin(phase) * 268435456.0f);
+	const int32_t error = static_cast<int32_t>(
+			static_cast<uint32_t>(yaw) - static_cast<uint32_t>(sway) + 0x58000000u);
+	const int32_t move = static_cast<int32_t>(static_cast<float>(error) * -0.05f);
+	return static_cast<int32_t>(static_cast<uint32_t>(yaw) + static_cast<uint32_t>(move));
+}
+
 int32_t player_info_preview_initial_yaw_bam(uint32_t seed) {
 	// [orig: PlayerInfo_InitPreviewModel @0x560128 (srand), @0x5601a2..0x5601b7]
 	constexpr int32_t kBamPerWholeDegree = 0xB60B60;
