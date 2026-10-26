@@ -1305,13 +1305,17 @@ public:
     static constexpr uint32_t kMissionPrng16BSeed = 0x5ADEADA5u;
     uint32_t prng16_b_state = kMissionPrng16BSeed;
     uint16_t next_prng16_b() noexcept;
-	// PRESENTATION-ONLY stream: every consumer (rotor-wash particles, wreck
-	// fire crackle, the occlusion focal-wind sampler) draws behind listener,
-	// camera-distance or render gates, or for the death pieces' probability roll,
-	// a pool each peer spawns for itself, so its value diverges per machine and
-	// no authoritative system may read it or compare it across peers. It is
-	// snapshotted only so an editor play/stop cycle restores the mission-start
-	// state. Seeded at every mission start like streams A and B: Game_StartMission
+	// Stream C. Its presentation consumers (rotor-wash particles, wreck fire
+	// crackle, the occlusion focal-wind sampler) draw behind listener,
+	// camera-distance or render gates, and the death pieces' probability roll
+	// draws for a pool each peer spawns for itself, so those draws diverge per
+	// machine. One sim consumer draws it too: the vehicle AI's class init seeds
+	// brain word 200 from it at the mission start (promote.cpp) [orig:
+	// Entity_InitVehicleAI @0x460200 - the draw @0x46035E], so the stream's position
+	// at that init is part of each brained vehicle's start state; nothing compares
+	// it across peers. It is
+	// snapshotted so an editor play/stop cycle restores the mission-start state.
+	// Seeded at every mission start like streams A and B: Game_StartMission
 	// pushes 0x10101010 into the stream-C setter right after the A seeds
 	// [orig: `push 10101010h; call sub_6131A0` @0x524601/@0x524606 -> dword_31BFBB4;
 	//  PRNG_Next16_C @0x6131B0 reads/writes it @0x6131b3/@0x6131dd;
