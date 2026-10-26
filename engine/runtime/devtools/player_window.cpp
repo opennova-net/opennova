@@ -32,8 +32,6 @@ const char *stance_name(int32_t stance) {
 	}
 }
 
-double units(int32_t q16) { return static_cast<double>(q16) / io::kFp16OneD; }
-
 }  // namespace
 
 void PlayerWindow::on_visibility(bool visible) {
@@ -102,8 +100,8 @@ void PlayerWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		ImGui::TextUnformatted(body_text_.c_str());
 		ImGui::Text("position (%.2f, %.2f, %.2f) | anim %s", static_cast<double>(r.position.x),
 				static_cast<double>(r.position.y), static_cast<double>(r.position.z), r.anim_key.c_str());
-		ImGui::Text("motor speed %.3f u/t | velocity (%.3f, %.3f, %.3f) u/t", units(r.motor_speed_q16),
-				units(r.velocity_q16[0]), units(r.velocity_q16[1]), units(r.velocity_q16[2]));
+		ImGui::Text("motor speed %.3f u/t | velocity (%.3f, %.3f, %.3f) u/t", io::fp16_16_to_double(r.motor_speed_q16),
+				io::fp16_16_to_double(r.velocity_q16[0]), io::fp16_16_to_double(r.velocity_q16[1]), io::fp16_16_to_double(r.velocity_q16[2]));
 		if (r.mounted) {
 			ImGui::Text("mounted on 0x%04X seat %d", static_cast<unsigned>(r.mount_target), r.mount_seat);
 		}
@@ -114,12 +112,12 @@ void PlayerWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				r.weapon_action_name.empty() ? "?" : r.weapon_action_name.c_str(), r.clip, r.clip_capacity,
 				r.reserve, r.medic_cooldown_ticks > 0 ? " | medic cooldown" : "");
 		if (r.resolve.valid && ImGui::CollapsingHeader("Movement resolver (last pass)")) {
-			ImGui::Text("resolved (%.2f, %.2f, %.2f) | foot clearance %.3f", units(r.resolve.pos[0]),
-					units(r.resolve.pos[1]), units(r.resolve.pos[2]), units(r.resolve.foot_clearance));
-			ImGui::Text("capsule %.2f .. %.2f", units(r.resolve.capsule_bottom), units(r.resolve.capsule_top));
+			ImGui::Text("resolved (%.2f, %.2f, %.2f) | foot clearance %.3f", io::fp16_16_to_double(r.resolve.pos[0]),
+					io::fp16_16_to_double(r.resolve.pos[1]), io::fp16_16_to_double(r.resolve.pos[2]), io::fp16_16_to_double(r.resolve.foot_clearance));
+			ImGui::Text("capsule %.2f .. %.2f", io::fp16_16_to_double(r.resolve.capsule_bottom), io::fp16_16_to_double(r.resolve.capsule_top));
 			for (int i = 0; i < 3; ++i) {
-				ImGui::Text("point %d (%.2f, %.2f, %.2f) r %.2f", i, units(r.resolve.points[i][0]),
-						units(r.resolve.points[i][1]), units(r.resolve.points[i][2]), units(r.resolve.radii[i]));
+				ImGui::Text("point %d (%.2f, %.2f, %.2f) r %.2f", i, io::fp16_16_to_double(r.resolve.points[i][0]),
+						io::fp16_16_to_double(r.resolve.points[i][1]), io::fp16_16_to_double(r.resolve.points[i][2]), io::fp16_16_to_double(r.resolve.radii[i]));
 			}
 		}
 	}

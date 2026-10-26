@@ -244,7 +244,7 @@ void AiWindow::format_detail() {
 	push_line(out, "fov %d/%d  range %d/%d  approach %.1f",
 			d.profile_fov_primary, d.profile_fov_secondary,
 			d.profile_range_primary, d.profile_range_secondary,
-			static_cast<float>(d.profile_approach_cap) / 65536.0f);
+			io::fp16_16_to_float(d.profile_approach_cap));
 }
 
 void AiWindow::draw_detail_pane() {
@@ -347,8 +347,8 @@ void AiWindow::draw_brains() {
 			ImGui::TableSetColumnIndex(2);
 			ImGui::TextUnformatted(r.alive ? alert_name(r.alert) : "DEAD");
 			ImGui::TableSetColumnIndex(3);
-			ImGui::Text("%.1f %.1f %.1f", r.pos[0] / io::kFp16OneD, r.pos[1] / io::kFp16OneD,
-					r.pos[2] / io::kFp16OneD);
+			ImGui::Text("%.1f %.1f %.1f", io::fp16_16_to_double(r.pos[0]),
+					io::fp16_16_to_double(r.pos[1]), io::fp16_16_to_double(r.pos[2]));
 			ImGui::TableSetColumnIndex(4);
 			ImGui::TextUnformatted(r.state_name.empty() ? "?" : r.state_name.c_str());
 			ImGui::TableSetColumnIndex(5);
