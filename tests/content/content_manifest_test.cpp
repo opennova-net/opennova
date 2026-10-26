@@ -15,7 +15,7 @@ using namespace opennova::content;
 
 namespace {
 
-const std::string kShaA(64, 'a'), kShaB(64, 'b');
+const std::string kShaA(64, 'a'), kShaB(64, 'b'), kShaC(64, 'c');
 
 bool path_ok(const std::string &path) {
 	std::string why;
@@ -93,7 +93,7 @@ static int test_files() {
 
 static int test_canonical_form() {
 	const std::vector<ContentFile> files = { { "weapon.def", kShaB, 8650 },
-		{ "art/a.png", kShaA, 12 }, { "Zed.txt", kShaA, 0 } };
+		{ "art/a.png", kShaA, 12 }, { "Zed.txt", kShaC, 0 } };
 	const std::string text = encode_manifest(files);
 	// Sorted by the paths' bytes: upper case before lower.
 	TEST_EXPECT(text.find("Zed.txt") < text.find("art/a.png") &&
