@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <base/content/case_fold.h>
+#include <base/io/cp1252.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
@@ -38,41 +39,9 @@ bool is_sha256_hex(std::string_view text) {
 	return true;
 }
 
+// The io layer's strict check (base/io/cp1252.h), the store's rule.
 bool is_utf8(std::string_view text) {
-	for (size_t i = 0; i < text.size();) {
-		const unsigned char lead = static_cast<unsigned char>(text[i]);
-		if (lead < 0x80) {
-			++i;
-			continue;
-		}
-		size_t length = 0;
-		uint32_t code = 0;
-		if ((lead & 0xE0) == 0xC0) {
-			length = 2;
-			code = lead & 0x1F;
-		} else if ((lead & 0xF0) == 0xE0) {
-			length = 3;
-			code = lead & 0x0F;
-		} else if ((lead & 0xF8) == 0xF0) {
-			length = 4;
-			code = lead & 0x07;
-		} else {
-			return false;
-		}
-		if (i + length > text.size())
-			return false;
-		for (size_t k = 1; k < length; ++k) {
-			const unsigned char next = static_cast<unsigned char>(text[i + k]);
-			if ((next & 0xC0) != 0x80)
-				return false;
-			code = (code << 6) | (next & 0x3F);
-		}
-		constexpr uint32_t kShortest[] = { 0, 0, 0x80, 0x800, 0x10000 };
-		if (code < kShortest[length] || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
-			return false;
-		i += length;
-	}
-	return true;
+	return io::is_valid_utf8(text);
 }
 
 bool is_content_path(std::string_view path, std::string &why) {
@@ -141,22 +110,7 @@ std::string folded_path(std::string_view path) {
 			out += path[i++];
 			continue;
 		}
-		code = simple_case_fold(code);
-		if (code < 0x80) {
-			out += static_cast<char>(code);
-		} else if (code < 0x800) {
-			out += static_cast<char>(0xC0 | (code >> 6));
-			out += static_cast<char>(0x80 | (code & 0x3F));
-		} else if (code < 0x10000) {
-			out += static_cast<char>(0xE0 | (code >> 12));
-			out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-			out += static_cast<char>(0x80 | (code & 0x3F));
-		} else {
-			out += static_cast<char>(0xF0 | (code >> 18));
-			out += static_cast<char>(0x80 | ((code >> 12) & 0x3F));
-			out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-			out += static_cast<char>(0x80 | (code & 0x3F));
-		}
+		io::utf8_append(out, simple_case_fold(code));
 		i += length;
 	}
 	return out;

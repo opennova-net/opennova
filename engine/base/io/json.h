@@ -21,6 +21,8 @@
 #include <string_view>
 #include <vector>
 
+#include <base/io/cp1252.h>
+
 namespace opennova {
 namespace io {
 
@@ -385,24 +387,6 @@ private:
 		}
 	}
 
-	static void append_utf8(std::string &out, uint32_t cp) {
-		if (cp < 0x80) {
-			out.push_back(static_cast<char>(cp));
-		} else if (cp < 0x800) {
-			out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else if (cp < 0x10000) {
-			out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		} else {
-			out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-			out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-		}
-	}
-
 	bool parse_hex4(uint32_t &value) {
 		value = 0;
 		for (int i = 0; i < 4; ++i) {
@@ -478,7 +462,7 @@ private:
 				} else if (cp >= 0xDC00 && cp <= 0xDFFF) {
 					return fail("lone low surrogate");
 				}
-				append_utf8(out, cp);
+				io::utf8_append(out, cp);
 				break;
 			}
 			default: return fail("invalid escape");
