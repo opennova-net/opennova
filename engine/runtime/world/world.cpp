@@ -859,7 +859,8 @@ void World::process_round_end(int32_t winning_team) {
     // tails, matching retail's double-run guard without copying its global.
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
-    // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390)
+    // world-sound volume option (sub_5280B0 @0x516958; EpilogCine::world_sound_parked
+    // carries the witness), then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390)
     // + MusicCtx_SelectEndTrack(1) @0x51696b; anything else -> the LOSE cine
     // (Cine_StartPlayback @0x577840) + MusicCtx_SelectEndTrack(2) @0x51698f. The
     // cine is the world's (world/epilog_cine.h); the entity update steps it from
@@ -882,6 +883,7 @@ void World::process_round_end(int32_t winning_team) {
         // [orig: DialogAudio_PlayNextChunkOrStop(0) @0x51694B]
         out.dialog_line_stop = true;
         script.dialog.reset(); // [orig: Dialog_ResetAll @0x516953 -> @0x44dc90]
+        epilog.world_sound_parked = true; // [orig: sub_5280B0 called @0x516958]
         if (winning_team == 1) {
             epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
         } else {

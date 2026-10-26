@@ -118,6 +118,9 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_occlusion_override", "override"), &MissionAudio::set_occlusion_override);
 	ClassDB::bind_method(D_METHOD("tick", "camera_pos", "delta"), &MissionAudio::tick, DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("teardown"), &MissionAudio::teardown);
+	ClassDB::bind_method(D_METHOD("set_world_sound_parked", "parked"),
+			&MissionAudio::set_world_sound_parked);
+	ClassDB::bind_method(D_METHOD("is_world_sound_parked"), &MissionAudio::is_world_sound_parked);
 	ClassDB::bind_method(D_METHOD("recent_fired_soundsets"), &MissionAudio::recent_fired_soundsets);
 	BIND_CONSTANT(MIX_CHANNELS);
 	BIND_CONSTANT(RECENT_FIRES);
@@ -553,6 +556,24 @@ void MissionAudio::shutdown_audio_channels() {
 	}
 	if (AudioStreamPlayer *wac = _wac_voice_node()) {
 		wac->stop();
+	}
+}
+
+void MissionAudio::set_world_sound_parked(bool p_parked) {
+	if (p_parked == world_sound_parked_) return;
+	world_sound_parked_ = p_parked;
+	AudioServer *server = AudioServer::get_singleton();
+	if (server == nullptr) return;
+	const char *const buses[2] = {kSfxBus, kAmbientBus};
+	for (int i = 0; i < 2; ++i) {
+		const int bus = server->get_bus_index(StringName(buses[i]));
+		if (bus < 0) continue;
+		if (p_parked) {
+			parked_bus_volume_db_[i] = server->get_bus_volume_db(bus);
+			server->set_bus_volume_db(bus, static_cast<float>(SoundBank::volume_db_from_255(0)));
+		} else {
+			server->set_bus_volume_db(bus, parked_bus_volume_db_[i]);
+		}
 	}
 }
 
@@ -1036,7 +1057,10 @@ void MissionAudio::_reset_mission_playback_state() {
 
 void MissionAudio::teardown() {
 	// Freeing the voice children drops the dialog + wac voice nodes too; the
-	// queue and its voices are cleared so nothing crosses missions.
+	// queue and its voices are cleared so nothing crosses missions. A parked
+	// world-sound volume is released first, as the teardown's cine release puts the
+	// saved option back (engine EpilogCine::world_sound_parked carries the witness).
+	set_world_sound_parked(false);
 	_apply_reverb(0);
 	_stop_all_ambient_channels();
 	_reset_mission_playback_state();

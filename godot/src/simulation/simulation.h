@@ -629,6 +629,10 @@ public:
 	// either is owed. NOT ClassDB-bound: the frame's audio leg runs them on
 	// MissionAudio.
 	bool take_audio_stops(bool &r_dialog_line, bool &r_channels);
+	// The world-sound park the single-player round end holds until the next mission
+	// start (engine EpilogCine::world_sound_parked carries the witness); false without
+	// a world. NOT ClassDB-bound: the frame's audio leg applies it on MissionAudio.
+	bool world_sound_parked() const;
 	// The F3 Environment record (devtools/environment_snapshot.h) as a typed
 	// read for the GUT/probe side; null without a world.
 	Ref<EnvironmentSnapshot> get_environment_snapshot() const;

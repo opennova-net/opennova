@@ -247,6 +247,19 @@ struct EpilogCine {
 	// The end screen is up: the script tick, the BMS quarter pass and most of
 	// the entity update hold [orig: g_EpilogScreenActive @0xA87054].
 	bool screen_active = false;
+	// The world-sound volume is parked: the single-player round end saves the
+	// sound-effects volume option and zeroes it, so every world, ambient and
+	// interface sound falls silent through the end screens; Cine_ReleaseAll
+	// (each mission start, and the mission teardown) puts the saved option
+	// back. The embedder's audio device applies it to the sound-effects buses.
+	// [orig: Server_ProcessRoundEnd @0x5164F0 - the sub_5280B0 call @0x516958
+	//  (dword_24E0898 = g_SoundVolumeOption, then 0, unless one is saved);
+	//  Cine_ReleaseAll @0x577940 -> sub_5280D0 (the saved option back); the
+	//  option's readers SoundEmitter_UpdateAndMixTop8 @0x52891A,
+	//  Sound_PlayTriggerSetScaled @0x527B9D, Sound_PlayInterfaceTriggerSet
+	//  @0x527BED, Sound_Play3DPositional @0x527DFA, Sound_TickPendingSlots
+	//  @0x52933B]
+	bool world_sound_parked = false;
 	// A cine frame has rendered since the process started: the end screens
 	// build only once one has. Process-lifetime: only the cine render pass
 	// writes it (Cine_RenderOverlays @0x570C66), so it crosses every load.

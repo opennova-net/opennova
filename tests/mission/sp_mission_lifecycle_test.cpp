@@ -292,6 +292,7 @@ int main() {
 		CHECK(cine.mode == w::EpilogCineMode::None);
 		CHECK(cine.events.empty());
 		CHECK(!cine.screen_active);
+		CHECK(!cine.world_sound_parked);
 		m.frames(1);
 		CHECK(!m.world().epilog.active);
 		CHECK(!m.world().epilog.frame_drawn);
@@ -320,6 +321,9 @@ int main() {
 		// start shuts no audio channel down (only the LOSE cine's does).
 		CHECK(world.out.dialog_line_stop);
 		CHECK(!world.out.audio_channels_shutdown);
+		// The SP tail parks the world-sound volume option until the next mission
+		// start's cine release [orig: sub_5280B0 called @0x516958].
+		CHECK(cine.world_sound_parked);
 		CHECK(cine.win_state == 0 && cine.win_build_frame == 95);
 		CHECK(cine.events.size() == 2);
 		const w::CineEvent *camera = find_event(cine, w::CineEventKind::CacheCamera);
@@ -430,6 +434,12 @@ int main() {
 		CHECK(cine.win_age == 18601);
 		CHECK(im::main_frame_exit(world.mission_exit_reason, false, true) ==
 				im::MainFrameExit::PostMenu);
+		// Parked through the whole end screen; the mission start's cine release puts
+		// the option back [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll
+		// @0x577940 -> sub_5280D0].
+		CHECK(cine.world_sound_parked);
+		cine.mission_start(false, false, world);
+		CHECK(!cine.world_sound_parked);
 	}
 
 	// --- the LOSE screen -------------------------------------------------------
@@ -445,8 +455,10 @@ int main() {
 		// The SP tail's Dialog_ResetAll clears the world's dialog table, its
 		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
-		// The playing line stops ahead of that reset [orig: @0x51694B].
+		// The playing line stops ahead of that reset [orig: @0x51694B], and the
+		// world-sound volume option parks [orig: sub_5280B0 called @0x516958].
 		CHECK(world.out.dialog_line_stop);
+		CHECK(cine.world_sound_parked);
 		CHECK(world.out.effects.count("round_end") == 1);
 		// Cine_StartPlayback: the 100-frame letterbox and the edit fade.
 		CHECK(cine.mode == w::EpilogCineMode::Lose && cine.lose_state == 0);

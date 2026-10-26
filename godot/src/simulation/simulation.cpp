@@ -344,6 +344,10 @@ bool Simulation::take_audio_stops(bool &r_dialog_line, bool &r_channels) {
 	return r_dialog_line || r_channels;
 }
 
+bool Simulation::world_sound_parked() const {
+	return world_installed_ && kernel_ != nullptr && kernel_->world.epilog.world_sound_parked;
+}
+
 Ref<EnvironmentSnapshot> Simulation::get_environment_snapshot() const {
 	opennova::devtools::EnvironmentSnapshot snapshot;
 	if (!native_environment_snapshot(snapshot)) return Ref<EnvironmentSnapshot>();

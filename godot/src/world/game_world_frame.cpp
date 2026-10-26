@@ -1873,6 +1873,9 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 				if (dialog_line) audio->stop_dialog_line();
 				if (channels) audio->shutdown_audio_channels();
 			}
+			// The world-sound park as the world holds it (engine
+			// EpilogCine::world_sound_parked).
+			if (stop_sim.is_valid()) audio->set_world_sound_parked(stop_sim->world_sound_parked());
 		}
 		// The listener and emitter mix is the render callback's head: a frame inside a joiner's
 		// final wait runs no render callback, so it mixes nothing; the drains above are the

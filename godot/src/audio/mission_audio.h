@@ -148,6 +148,14 @@ public:
 	// channel's last loaded line plays on falls silent (engine
 	// WorldOutbox::dialog_line_stop carries the witness).
 	void stop_dialog_line();
+	// The single-player round end's world-sound park, as a device: parking saves the
+	// volumes of the sound-effects option's buses (SFX and Ambient, the pair the
+	// options map the option to) and gives them a zero option's volume; releasing
+	// puts the saved volumes back, as the mission teardown does (engine
+	// EpilogCine::world_sound_parked carries the witness). The frame's audio leg
+	// sets it from the world every frame; a repeat of the current state is a no-op.
+	void set_world_sound_parked(bool p_parked);
+	bool is_world_sound_parked() const { return world_sound_parked_; }
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -354,6 +362,10 @@ private:
 	// The device ran the voice's clip out (its `finished`): the physical channel's release,
 	// which the next scene frame's validation reads (update_script_voice).
 	bool script_voice_released_ = false;
+	// The world-sound park's device state: whether the buses are parked, and the
+	// SFX / Ambient volumes they held when they were.
+	bool world_sound_parked_ = false;
+	float parked_bus_volume_db_[2] = {};
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;
