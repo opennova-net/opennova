@@ -19,7 +19,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <map>
+#include <new>
 #include <set>
 
 namespace opennova::updater {
@@ -126,9 +128,11 @@ struct Worker {
 		error = "Unable to open update server " + host + ":" + std::to_string(port);
 		return false;
 	}
-	// A reply's bytes. The 90 s silence limit restarts whenever bytes arrive.
+	// A reply's bytes. The 90 s silence limit restarts whenever bytes arrive. `done` and `total`
+	// place them in the whole file for the progress line (a file read a buffer at a time).
 	// [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_WAIT_REPLY's 0x15F90 ms and US_FETCH_WAIT]
-	bool receive(net::Socket &socket, uint8_t *out, size_t size, const std::string &file = "") {
+	bool receive(net::Socket &socket, uint8_t *out, size_t size, const std::string &file = "",
+			uint64_t done = 0, uint64_t total = 0) {
 		size_t received = 0;
 		auto last = Clock::now();
 		while (received < size) {
@@ -142,17 +146,18 @@ struct Worker {
 			if (count <= 0) { error = "The server closed an incomplete update reply."; return false; }
 			received += static_cast<size_t>(count);
 			last = Clock::now();
-			if (!file.empty()) status("Fetching files...", file, received, size);
+			if (!file.empty()) status("Fetching files...", file, done + received, total ? total : size);
 		}
 		return true;
 	}
-	// One request and its reply, which must echo the request's verb and id; a GET reply must
-	// name the file asked for (D-UPD-3). [orig: NLUpdateProtocol_ParseReplyHeader @ 0x4011d0
-	// (UPDATE.EXE); NLUpdateProtocol_DispatchReply @ 0x4017a0 (UPDATE.EXE)]
-	bool exchange(net::Socket &socket, const std::string &request, update::Verb verb,
+	// One request and its reply's header, which must echo the request's verb and id; a GET reply
+	// must name the file asked for (D-UPD-3). The body is the caller's to read: `reply.size` bytes.
+	// [orig: NLUpdateProtocol_ParseReplyHeader @ 0x4011d0 (UPDATE.EXE); NLUpdateProtocol_DispatchReply
+	// @ 0x4017a0 (UPDATE.EXE)]
+	bool request(net::Socket &socket, const std::string &text, update::Verb verb,
 			int32_t id, uint64_t limit, update::Reply &reply, const std::string &name = "") {
 		if (interrupted()) return false;
-		if (!net::tcp_send_all(socket, reinterpret_cast<const uint8_t *>(request.data()), request.size())) {
+		if (!net::tcp_send_all(socket, reinterpret_cast<const uint8_t *>(text.data()), text.size())) {
 			error = "Unable to send update request."; return false;
 		}
 		std::vector<uint8_t> header;
@@ -172,8 +177,43 @@ struct Worker {
 			error = "Update server refused the request or returned an unexpected reply: " + name;
 			return false;
 		}
+		return true;
+	}
+	// One request and its whole reply, the body held: the small replies (a login, a CRC, SERVER.LST,
+	// the command file).
+	bool exchange(net::Socket &socket, const std::string &text, update::Verb verb,
+			int32_t id, uint64_t limit, update::Reply &reply, const std::string &name = "") {
+		if (!request(socket, text, verb, id, limit, reply, name)) return false;
 		reply.payload.resize(static_cast<size_t>(reply.size));
 		return receive(socket, reply.payload.data(), reply.payload.size(), name);
+	}
+	// A row's GET, its reply's body written to `path` as it arrives, a buffer at a time, so a whole
+	// game's release is never held in memory. [orig: NLUpdateProtocol_OnGetReply @ 0x4013e0
+	// (UPDATE.EXE): the payload written to <download dir>\<name> ("wb")]
+	bool fetch(net::Socket &socket, const std::string &name, int32_t id, uint64_t limit, const fs::path &path) {
+		update::Reply reply;
+		if (!request(socket, update::encode_get({name}, id), update::Verb::Get, id, limit, reply, name))
+			return false;
+		std::FILE *file = io::fopen_utf8(io::utf8_path(path).c_str(), "wb");
+		if (file == nullptr) { error = "Cannot write " + io::utf8_path(path) + "."; return false; }
+		std::vector<uint8_t> buffer(64 * 1024);
+		const uint64_t total = static_cast<uint64_t>(reply.size);
+		uint64_t done = 0;
+		bool ok = true;
+		while (ok && done < total) {
+			const size_t count = static_cast<size_t>(std::min<uint64_t>(total - done, buffer.size()));
+			ok = receive(socket, buffer.data(), count, name, done, total);
+			if (ok && std::fwrite(buffer.data(), 1, count, file) != count) {
+				error = "Cannot write " + io::utf8_path(path) + ".";
+				ok = false;
+			}
+			done += count;
+		}
+		if (std::fclose(file) != 0 && ok) {
+			error = "Cannot write " + io::utf8_path(path) + ".";
+			ok = false;
+		}
+		return ok;
 	}
 	bool login(net::Socket &socket, const Product &product, int32_t id) {
 		update::Reply reply;
@@ -257,11 +297,42 @@ struct Precheck {
 	}
 };
 
+// A product's download directory, update\ beside its files, where the rows' GETs land as
+// UPDATE.EXE's do: made at the first fetch, as the protocol's download directory is set to
+// "update" and made at FETCH_FILES, and deleted with what it holds once the product is
+// done, as US_DONE deletes it. A failed run deletes it too, where retail leaves it for its
+// next precheck's staged-file lookups, which ours has none of (D-UPD-4); a product folder
+// the first fetch made, and nothing filled, goes with it.
+// [orig: NLUpdateProtocol_SetDownloadDir @ 0x401580 (UPDATE.EXE), "update" from
+//  Cupdate2Dlg_StateTick @ 0x408920; Update_DeleteWorkDir @ 0x405100 (UPDATE.EXE),
+//  SHFileOperation FO_DELETE of "update", from US_DONE @ 0x408ab3]
+struct DownloadDir {
+	fs::path path;
+	fs::path product;
+	bool made = false;
+	bool product_made = false;
+	bool make(std::string &error) {
+		if (made) return true;
+		std::error_code ec;
+		product_made = !fs::exists(product, ec);
+		fs::create_directories(path, ec);
+		if (ec) { error = "Cannot create " + io::utf8_path(path) + "."; return false; }
+		made = true;
+		return true;
+	}
+	~DownloadDir() {
+		if (!made) return;
+		std::error_code ec;
+		fs::remove_all(path, ec);
+		if (product_made) fs::remove(product, ec); // only while it is empty
+	}
+};
+
 // One product: the command file's CRC against the local copy's (equal: keep it, else GET it),
-// the rows the precheck finds, fetched, then installed in one pass, update.exe landing as
-// update.new for revupdat (D-UPD-4). The command file is written only once every row is in
-// (D-UPD-5). [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), states 11-16;
-// Cupdate2Dlg_InstallLooseRows @ 0x406860 (UPDATE.EXE)]
+// the rows the precheck finds, fetched into the download directory, then installed in one pass
+// from there, update.exe landing as update.new for revupdat (D-UPD-4). The command file is
+// written only once every row is in (D-UPD-5). [orig: Cupdate2Dlg_StateTick @ 0x408170
+// (UPDATE.EXE), states 11-16; Cupdate2Dlg_InstallLooseRows @ 0x406860 (UPDATE.EXE)]
 bool update_product(Worker &worker, const Product &product, Result &result) {
 	if (!update::is_safe_row_name(product.command)) { worker.error = "Unsafe command file name."; return false; }
 	net::ScopedSocket socket;
@@ -293,7 +364,12 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 	update::CommandFile selected = *command;
 	selected.rows.clear();
 	std::string target = ".";
-	std::map<std::string, update::SfsEntry> blobs;
+	DownloadDir download{product.dir / "update", product.dir};
+	// The files fetched, by the GET's name (lower case), and each selected row's file by the row's
+	// name as the install reads it (lower case): update.exe's row reads as update.new from
+	// update\update.exe.
+	std::map<std::string, fs::path> fetched;
+	std::map<std::string, fs::path> files;
 	bool revised = false;
 	std::error_code revision_error;
 	const bool pending_revision = product.dir == worker.options.runtime_dir &&
@@ -318,19 +394,18 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 		if (worker.options.check) continue;
 		if (row.type == update::CommandType::Loose || row.type == update::CommandType::Copy) {
 			if (worker.interrupted()) return false;
-			if (!blobs.count(strutil::to_lower(row.name))) {
-				update::Reply reply;
+			// A name two rows share is fetched once: the update directory is flat.
+			const auto [at, fresh] = fetched.emplace(strutil::to_lower(row.name), download.path / io::os_path(row.name));
+			if (fresh) {
+				if (!download.make(worker.error)) return false;
 				const uint64_t bound = uint64_t(row.size) + uint64_t(row.size) / 100 + 65536;
-				if (!worker.exchange(socket.get(), update::encode_get({row.name}, int32_t(i)),
-							update::Verb::Get, int32_t(i), bound, reply, row.name)) return false;
-				blobs[strutil::to_lower(row.name)] = {row.name, std::move(reply.payload)};
+				if (!worker.fetch(socket.get(), row.name, int32_t(i), bound, at->second)) return false;
 			}
 			if (updater_image) {
-				auto &blob = blobs[strutil::to_lower(row.name)];
-				blob.name = "update.new";
 				row.name = "update.new";
 				revised = true;
 			}
+			files[strutil::to_lower(row.name)] = at->second;
 		}
 		selected.rows.push_back(row);
 	}
@@ -338,14 +413,23 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 	if (worker.options.check) return true;
 	if (worker.interrupted()) return false;
 	precheck.close(); // Windows must release the source archive before replacement.
-	update::SfsSection section;
 	const std::string selected_text = update::write_command_file(selected);
 	if (selected_text.empty()) { worker.error = "Cannot prepare update commands."; return false; }
-	section.entries.push_back({product.command, std::vector<uint8_t>(selected_text.begin(), selected_text.end())});
-	for (auto &[key, blob] : blobs) section.entries.push_back(std::move(blob));
+	const std::vector<uint8_t> selected_bytes(selected_text.begin(), selected_text.end());
+	// The install reads each row's file back from the download directory, one at a time.
+	const update::SectionBlobs read_fetched = [&files](std::string_view name, std::vector<uint8_t> &packed,
+			std::string &why) {
+		const auto found = files.find(strutil::to_lower(name));
+		if (found == files.end()) {
+			why = "the update has no file for the row " + std::string(name);
+			return false;
+		}
+		return io::read_file_bytes(io::utf8_path(found->second), packed, why);
+	};
 	worker.status("Integrating update...", product.login);
 	update::ApplyReport report;
-	if (!update::apply_section(section, product.command, product.dir, report, worker.error)) return false;
+	if (!update::apply_commands(selected_bytes, product.command, read_fetched, product.dir, report, worker.error))
+		return false;
 	// Persist the remote command only after every selected row succeeded. An interrupted
 	// first install therefore checks/fetches again, rather than becoming a false no-op.
 	if (!io::write_file_atomic(io::utf8_path(command_path), command_bytes.data(), command_bytes.size(), worker.error))
@@ -437,7 +521,17 @@ bool run(const Options &options, const std::vector<Product> &products, Result &r
 	Worker worker{options, progress, cancel, Clock::now() + std::chrono::seconds(10), error};
 	std::string failure;
 	for (const Product &product : products) {
-		if (!update_product(worker, product, result)) {
+		bool updated = false;
+		try {
+			updated = update_product(worker, product, result);
+		} catch (const std::bad_alloc &) {
+			// Memory a file's install could not have is that product's failure, in retail's words for
+			// one it has no text of its own for, never the process's end (a worker thread's escaping
+			// exception would end it). [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE), the
+			// default text @0x405277]
+			error = "An error has occurred during operation.  Please re-run update.";
+		}
+		if (!updated) {
 			// A check (D-UPD-7) goes on: one dead or unpublished product (a registered expansion's) must
 			// not hide another product's update.
 			if (options.check) {

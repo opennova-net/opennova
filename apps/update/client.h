@@ -44,6 +44,8 @@ struct Result {
 // Read-only discovery: runtime, selected content, and installed expansions with a wizard.
 bool discover_products(const Options &options, std::vector<Product> &out, std::string &error);
 // The same worker drives the dialog, --check and loopback tests. Checks write no files.
+// A product's fetched files land in its update\ directory as they arrive, the install reads
+// them back one at a time, and the directory goes when the product is done, installed or not.
 // Downloads are validated before a product is changed; a failed write can leave a partial
 // install, which a subsequent run rechecks. Cancellation is checked before installation.
 // An install stops at a failing runtime or game product; an expansion's failure is recorded

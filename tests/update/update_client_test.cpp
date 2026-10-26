@@ -82,6 +82,9 @@ int test_first_install(const test_temp::TempDir &temp) {
 	std::string installed;
 	TEST_EXPECT(io::read_file_text(io::utf8_path(options.resource_dir / "version.txt"), installed, error));
 	TEST_EXPECT(installed == "First complete content release");
+	// The rows' files were fetched into the product's update\ directory, which the install
+	// leaves behind it no more than UPDATE.EXE's DONE does.
+	TEST_EXPECT(!fs::exists(options.resource_dir / "update"));
 	options.check = true;
 	TEST_EXPECT(updater::run(options, products, result, error));
 	TEST_EXPECT(!result.available && !result.applied && result.files == 0);
@@ -96,6 +99,17 @@ int test_first_install(const test_temp::TempDir &temp) {
 	TEST_EXPECT(updater::run(options, products, result, error) && result.available);
 	options.check = false;
 	TEST_EXPECT(updater::run(options, products, result, error) && result.applied);
+
+	// An update\ directory an earlier run left (a file of a row's name, another of none) is
+	// written over and goes with the install: what is installed is what this run fetched.
+	fs::remove(options.resource_dir / "version.txt", ec);
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(options.resource_dir / "update" / "version.txt"),
+			"A stale download"));
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(options.resource_dir / "update" / "left.bin"), "left"));
+	TEST_EXPECT(updater::run(options, products, result, error) && result.applied);
+	TEST_EXPECT(io::read_file_text(io::utf8_path(options.resource_dir / "version.txt"), installed, error) &&
+			installed == "First complete content release");
+	TEST_EXPECT(!fs::exists(options.resource_dir / "update"));
 	return 0;
 }
 
@@ -197,6 +211,15 @@ int test_failures(const test_temp::TempDir &temp) {
 	options.check = true;
 	TEST_EXPECT(!updater::run(options, products, result, error));
 	TEST_EXPECT(!fs::exists(options.resource_dir));
+	// The same refusal over an installed folder: the folder keeps what it had, and the files the
+	// run fetched go with their update\ directory.
+	options.check = false;
+	products[0].login = "TEST";
+	products[0].dir = options.resource_dir = io::os_path(temp.file("corrupt over an install"));
+	TEST_EXPECT(synthetic_trees::write_text(io::utf8_path(options.resource_dir / "keep.txt"), "the player's"));
+	TEST_EXPECT(!updater::run(options, products, result, error) && !error.empty());
+	TEST_EXPECT(fs::exists(options.resource_dir / "keep.txt") && !fs::exists(options.resource_dir / "update") &&
+			!fs::exists(options.resource_dir / "version.txt"));
 	return 0;
 }
 
@@ -223,6 +246,8 @@ int test_revision(const test_temp::TempDir &temp) {
 	std::string text;
 	TEST_EXPECT(io::read_file_text(io::utf8_path(options.runtime_dir / "update.exe"), text, error) && text == running);
 	TEST_EXPECT(io::read_file_text(io::utf8_path(options.runtime_dir / "update.new"), text, error) && text == replacement);
+	// update.exe's row was fetched as update\update.exe and installed from there as update.new.
+	TEST_EXPECT(!fs::exists(options.runtime_dir / "update"));
 	// A failed helper launch can retry despite the cached command and colliding old CRC.
 	TEST_EXPECT(updater::run(options, products, result, error) && result.revision_pending && result.files == 1);
 	// The helper's successful replacement leaves the runtime current and allows the
