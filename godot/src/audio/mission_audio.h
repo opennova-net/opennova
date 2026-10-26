@@ -371,9 +371,23 @@ private:
 	int perf_markers_ = 0;
 	int perf_voice_writes_ = 0;
 	// The last RECENT_FIRES positional one-shots (fire_soundset / slot_soundset),
-	// oldest first: a bounded diagnostic ring the F3 audio rows and the GUT pins
-	// read (ADR 0018 read seam); the players themselves live under this node.
-	Vector<Ref<FiredSoundset>> recent_fires_;
+	// oldest first from recent_fire_head_: a bounded diagnostic ring of plain
+	// records the F3 audio rows and the GUT pins read (ADR 0018 read seam,
+	// recent_fired_soundsets makes the objects on asking); the players
+	// themselves live under this node. Teardown empties it.
+	struct RecentFire {
+		String set_name;
+		Vector3 position;
+		int source_bms_id = 0;
+		bool slot = false;
+		bool played = false;
+	};
+	RecentFire recent_fires_[RECENT_FIRES];
+	int recent_fire_head_ = 0;
+	int recent_fire_count_ = 0;
+	// The ambient mix's per-frame lists, their storage kept from frame to frame.
+	std::vector<opennova::audio::AmbientCandidate> describable_rows_;
+	opennova::audio::AmbientChannelPlan channel_plan_;
 };
 
 } // namespace godot

@@ -106,6 +106,29 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 	presenter.teardown()
 
 
+# The fire ring keeps the last MissionAudio.RECENT_FIRES rows, oldest first,
+# and the mission teardown empties it, so the next mission reads none of the
+# last mission's fires.
+func test_the_fire_ring_keeps_the_last_rows_and_teardown_empties_it() -> void:
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio := _staged_audio(container)
+	var presenter := _make_presenter(audio)
+	var rows := []
+	for i in MissionAudio.RECENT_FIRES + 2:
+		rows.append(_fire_sound("GS_END", Vector3(i, 0, 0), i))
+	presenter.present_fire_sounds(rows)
+	var fired := audio.recent_fired_soundsets()
+	assert_eq(fired.size(), MissionAudio.RECENT_FIRES, "the ring keeps its capacity's rows")
+	if fired.size() == MissionAudio.RECENT_FIRES:
+		assert_eq(fired[0].source_bms_id, 2, "the two oldest rows left the ring")
+		assert_eq(fired[MissionAudio.RECENT_FIRES - 1].source_bms_id, MissionAudio.RECENT_FIRES + 1,
+				"the newest row is last")
+	presenter.teardown()
+	audio.teardown()
+	assert_true(audio.recent_fired_soundsets().is_empty(), "the teardown empties the fire ring")
+
+
 func test_no_audio_skips_the_sound_legs_but_not_the_effect_legs() -> void:
 	# The dedicated-host tri-state: a presenter with no MissionAudio plays no
 	# fire or slot sound (nothing to play them on) while the fire drain's

@@ -63,6 +63,7 @@ private:
 	int budget_;
 	std::vector<int32_t> channels_; // the candidate per channel, -1 = free
 	std::unordered_set<int32_t> failed_;
+	std::vector<const AmbientCandidate *> selected_; // plan()'s top set, its storage kept
 };
 
 } // namespace opennova::audio
