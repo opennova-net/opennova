@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace opennova::hostdb {
 
@@ -625,16 +626,33 @@ std::string mint_join_ticket(opennova::db::Database &db, uint32_t host_rid, int6
 	return ticket;
 }
 
+namespace {
+
+// Whether `dotted` (a.b.c.d) is a private IPv4 address: 10/8, 172.16/12, 192.168/16 (RFC 1918)
+// or loopback, 127/8.
+bool private_ipv4(const std::string &dotted) {
+	unsigned a = 256, b = 256, c = 256, d = 256;
+	char tail = 0;
+	if (std::sscanf(dotted.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4 || a > 255 ||
+			b > 255 || c > 255 || d > 255)
+		return false;
+	return a == 10 || (a == 172 && (b & 0xF0u) == 16) || (a == 192 && b == 168) || a == 127;
+}
+
+} // namespace
+
 JoinTicketCheck redeem_join_ticket(opennova::db::Database &db, std::string_view ticket,
-		uint32_t host_rid, const std::string &peer_ip) {
+		uint32_t host_rid, const std::string &joiner_ip, const std::string &host_ip) {
 	const auto rows = db.query("DELETE FROM join_tickets WHERE ticket_hash = $1 "
 							   "RETURNING host_rid, peer_ip, expires_at > now();",
 			{ str(io::sha256_hex(io::sha256(ticket))) });
 	if (rows.empty() || rows.front().as_int(0).value_or(0) != static_cast<int64_t>(host_rid) ||
 			rows.front().as_int(2).value_or(0) == 0)
 		return JoinTicketCheck::NotFound;
-	return rows.front().as_text(1).value_or("") == peer_ip ? JoinTicketCheck::Admitted
-														   : JoinTicketCheck::AddressMismatch;
+	const std::string minted_at = rows.front().as_text(1).value_or("");
+	if (minted_at == joiner_ip || (private_ipv4(joiner_ip) && minted_at == host_ip))
+		return JoinTicketCheck::Admitted;
+	return JoinTicketCheck::AddressMismatch;
 }
 
 } // namespace opennova::hostdb

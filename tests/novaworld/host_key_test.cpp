@@ -35,7 +35,9 @@
 //     key names none with ServerStopHosting (NWUSERVERMSGCODE_NEEDTOLOGIN);
 //   * a join ticket (/NWJoin.dll's PUBJOINTICKET) is "JT:" and 48 hex digits, stored as
 //     its hash alone, redeemed once: another listing's, an expired one and an unknown
-//     one are not found, one minted at another address mismatches, and a mint deletes
+//     one are not found, one minted at another address mismatches (but for a joiner the
+//     host reports at a private address whose ticket was minted at the host's own address,
+//     behind the host's NAT), and a mint deletes
 //     the expired ones and an account's delete its own; a lobby with a database asks its
 //     hosts for tickets (HostRequiresJoinTicket 1) and answers a ClientPlayerEnterRequest
 //     by its ticket (Success 1 with an AccessCodeList, else Success 0 and MsgCode 6001 or
@@ -813,21 +815,42 @@ int test_join_tickets() {
 	TEST_EXPECT(hostdb::mint_join_ticket(db, rid, alice, at) != ticket);
 	using Check = hostdb::JoinTicketCheck;
 	// Another listing's: not found, and gone.
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid + 1, at) == Check::NotFound);
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid, at) == Check::NotFound);
+	const std::string host_at = "10.0.0.7";
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid + 1, at, host_at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, ticket, rid, at, host_at) == Check::NotFound);
 	// Another address: a mismatch.
 	const std::string elsewhere = hostdb::mint_join_ticket(db, rid, alice, at);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, elsewhere, rid, "10.0.0.9", host_at) ==
+			Check::AddressMismatch);
+	// The same-NAT joiner: the host reports it at a private address, and its ticket was minted
+	// at the host's own public address, admitted; a private address behind another public
+	// address than the host's, and a public address the ticket was not minted at, mismatch.
+	const std::string nat = "203.0.113.5";
+	std::string behind = hostdb::mint_join_ticket(db, rid, alice, nat);
 	TEST_EXPECT(
-			hostdb::redeem_join_ticket(db, elsewhere, rid, "10.0.0.9") == Check::AddressMismatch);
+			hostdb::redeem_join_ticket(db, behind, rid, "192.168.1.20", nat) == Check::Admitted);
+	for (const char *lan : { "10.1.2.3", "172.16.0.9", "172.31.255.1", "127.0.0.1" }) {
+		behind = hostdb::mint_join_ticket(db, rid, alice, nat);
+		TEST_EXPECT(hostdb::redeem_join_ticket(db, behind, rid, lan, nat) == Check::Admitted);
+	}
+	behind = hostdb::mint_join_ticket(db, rid, alice, nat);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, behind, rid, "192.168.1.20", "198.51.100.7") ==
+			Check::AddressMismatch);
+	behind = hostdb::mint_join_ticket(db, rid, alice, nat);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, behind, rid, "198.51.100.9", nat) ==
+			Check::AddressMismatch);
+	behind = hostdb::mint_join_ticket(db, rid, alice, nat);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, behind, rid, "172.32.0.1", nat) ==
+			Check::AddressMismatch);
 	// Admitted once.
 	const std::string good = hostdb::mint_join_ticket(db, rid, alice, at);
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at) == Check::Admitted);
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at) == Check::NotFound);
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, "", rid, at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at, host_at) == Check::Admitted);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, good, rid, at, host_at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, "", rid, at, host_at) == Check::NotFound);
 	// Expired: not found; a mint deletes the expired ones.
 	const std::string late = hostdb::mint_join_ticket(db, rid, alice, at);
 	db.exec("UPDATE join_tickets SET expires_at = now() - interval '1 second';");
-	TEST_EXPECT(hostdb::redeem_join_ticket(db, late, rid, at) == Check::NotFound);
+	TEST_EXPECT(hostdb::redeem_join_ticket(db, late, rid, at, host_at) == Check::NotFound);
 	hostdb::mint_join_ticket(db, rid, alice, at);
 	db.exec("UPDATE join_tickets SET expires_at = now() - interval '1 second';");
 	hostdb::mint_join_ticket(db, rid, alice, at);
@@ -873,6 +896,17 @@ int test_lobby_join_tickets() {
 	TEST_EXPECT(entered(
 			sess.dispatch(enter_request("7", "-939524086", ticket), host, "10.0.0.7", 40000),
 			6001));
+	// Behind the host's NAT: the host reports its joiner at 192.168.1.20 (0x1401A8C0), whose
+	// ticket /NWJoin.dll minted at the public address the lobby sees the host at: admitted;
+	// the same from a host at another public address: 6002.
+	const std::string nat = "203.0.113.5";
+	ticket = hostdb::mint_join_ticket(db, host.rid, alice, nat);
+	TEST_EXPECT(
+			entered(sess.dispatch(enter_request("8", "335653056", ticket), host, nat, 40000), 0));
+	ticket = hostdb::mint_join_ticket(db, host.rid, alice, nat);
+	TEST_EXPECT(entered(
+			sess.dispatch(enter_request("9", "335653056", ticket), host, "198.51.100.7", 40000),
+			6002));
 	return 0;
 }
 

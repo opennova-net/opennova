@@ -275,10 +275,15 @@ enum class JoinTicketCheck {
 	NotFound, // no such ticket, one expired, or one minted for another listing (6001)
 	AddressMismatch, // minted for a joiner at another address (6002)
 };
-// The ticket a host's ClientPlayerEnterRequest carries for its joiner at `peer_ip` (a.b.c.d),
-// the host's listing `host_rid`: redeemed once, whatever the answer. Throws db::Error.
-JoinTicketCheck redeem_join_ticket(
-		db::Database &db, std::string_view ticket, uint32_t host_rid, const std::string &peer_ip);
+// The ticket a host's ClientPlayerEnterRequest carries for its joiner at `joiner_ip` (a.b.c.d,
+// the address the host reports), redeemed by the host's listing `host_rid`, whose own address
+// the lobby observes as `host_ip`: redeemed once, whatever the answer. A joiner the host reports
+// at a private address (RFC 1918, or loopback) is behind the host's own NAT when its ticket was
+// minted at the host's address, and is admitted (the maintainer's decision, 2026-10-26: the
+// same-NAT joiner); any other address the ticket was not minted at mismatches. Throws
+// db::Error.
+JoinTicketCheck redeem_join_ticket(db::Database &db, std::string_view ticket, uint32_t host_rid,
+		const std::string &joiner_ip, const std::string &host_ip);
 
 // What a game's listing shows in a column its host reported nothing for: the
 // game's own values, its `games` row's ver1 and exp_bits

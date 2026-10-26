@@ -480,7 +480,9 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		// redeem_join_ticket, with a database: the hosts were asked for tickets), else
 		// refused with the code the host carries into the joiner's NWU:NWPENTERFAIL. The
 		// IpAddress is the joiner's address as the host's socket saw it, its in_addr dword
-		// printed "%ld" (signed; an unsigned print reads the same), compared as a.b.c.d.
+		// printed "%ld" (signed; an unsigned print reads the same), compared as a.b.c.d; the
+		// host's own address is this connection's observed source (`remote_ip`), which a
+		// joiner behind the host's NAT got its ticket from.
 		// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D02A0 - IpAddress @0x4D03D0;
 		//  CNapiGameSession_HandlePlayEnterResponse @0x4D1940 - Success @0x4D1A43, MsgCode
 		//  @0x4D1A6A, the failure's event @0x4D1BA9..0x4D1BB1]
@@ -491,7 +493,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 			hostdb::JoinTicketCheck check = hostdb::JoinTicketCheck::NotFound;
 			try {
 				check = hostdb::redeem_join_ticket(
-						*db_, join_ticket, state.rid, peer_addr_ip_to_string(joiner));
+						*db_, join_ticket, state.rid, peer_addr_ip_to_string(joiner), remote_ip);
 			} catch (const std::exception &e) {
 				// No answer: the host's ticket deadline reaps the joiner, as it would for a
 				// service that never answered.

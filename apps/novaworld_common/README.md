@@ -736,9 +736,11 @@ HostKey is unwitnessed.
   forwards the one it has in its `ClientPlayerEnterRequest`, which the lobby answers by
   redeeming it once (`hostdb::redeem_join_ticket`): `Success` 1, or `Success` 0 with
   `MsgCode` 6001 (no such ticket, an expired one, another listing's) or 6002 (minted for a
-  joiner at another address than the one the host saw: a joiner behind the host's own NAT,
-  which the host sees by its LAN address), which the host shows the joiner as
-  `NWU:NWPENTERFAIL`. Service policy: the retail service's ticket and checks are
+  joiner at another address than the one the host saw), which the host shows the joiner as
+  `NWU:NWPENTERFAIL`. A joiner behind the host's own NAT is admitted: the host reports it at
+  a private address (RFC 1918, or loopback) and its ticket was minted at the address the
+  lobby sees the host at (the maintainer's decision, 2026-10-26); a hosted cloud server's
+  joiners never take that leg. Service policy: the retail service's ticket and checks are
   unwitnessed; the codes are its table's.
 
 | Route | Access | Replies |

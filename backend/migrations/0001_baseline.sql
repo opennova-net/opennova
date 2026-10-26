@@ -326,7 +326,8 @@ CREATE INDEX idx_host_keys_claimed_rid ON host_keys(claimed_rid);
 -- service asked for tickets (HostRequiresJoinTicket 1) forwards the joiner's
 -- in its ClientPlayerEnterRequest, and the lobby redeems it once: 6001 for one
 -- unknown, expired or another listing's, 6002 for one minted at another
--- address (engine/net/novaworld/host_repository.h "The join tickets"). Only the
+-- address, a joiner behind the host's own NAT excepted
+-- (engine/net/novaworld/host_repository.h "The join tickets"). Only the
 -- ticket's SHA-256 (hex) is stored. Each mint deletes the expired rows.
 CREATE TABLE join_tickets (
     ticket_hash text PRIMARY KEY,
