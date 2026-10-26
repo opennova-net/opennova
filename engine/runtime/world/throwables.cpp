@@ -124,15 +124,24 @@ ThrowClass throw_motor_from_move_function(const char *move_function) {
 }
 
 // [orig: the release leg of the fire binding @ 0x4e07e9 — held < 0x1F ticks ->
-// 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 (flt_7CD390 = 1/93,
-// flt_7C69F4 = 0.1, flt_7CA29C = 255); a 0 result falls back to 1 (@0x4E0856..0x4E085A,
-// ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least) never reaches.]
+// 0xFF; else clamp((held - 31) * (1/93), 0.1, 1.0) * 255 over the binary32
+// constants flt_7CD390 (1/93 rounded to float, 0x3C302C0B, a hair under 1/93),
+// flt_7C69F4 (0.1f) and flt_7CA29C (255.0f): fild, fmul @0x4E081F; above 1.0 takes
+// 1.0 @0x4E0825..0x4E0832, under 0.1f takes 0.1f @0x4E0836..0x4E0847; fmul
+// @0x4E084B, _ftol2 truncating @0x4E0851. A 0 result falls back to 1
+// (@0x4E0856..0x4E085A, ebx = 1 @0x4E0446), which the 0.1 floor (25 at the least)
+// never reaches.]
+// The products run at the 53-bit double, the precision ours keeps for the x87's
+// arithmetic (net-re Q3-11). The x87's own result depends on its control word at
+// three holds, where the product lands within a rounding of a whole: 62, 93 and
+// 124 ticks give 85, 170 and 255 at base JO's 24-bit device precision, and 84, 169
+// and 254 at 53 bits and at JO:CA's 64 (D-MNU-35 / D-MNU-36).
 uint8_t power_throw_charge_from_hold(int32_t held_ticks) {
     if (held_ticks < 31) return 255;
-    double v = double(held_ticks - 31) * (1.0 / 93.0);
+    double v = double(held_ticks - 31) * double(1.0f / 93.0f);
     if (v > 1.0) v = 1.0;
-    if (v < 0.1) v = 0.1;
-    const int32_t charge = static_cast<int32_t>(v * 255.0);
+    else if (!(v >= double(0.1f))) v = double(0.1f);
+    const int32_t charge = static_cast<int32_t>(v * double(255.0f));
     return static_cast<uint8_t>(charge);
 }
 

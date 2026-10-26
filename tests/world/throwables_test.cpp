@@ -396,14 +396,19 @@ std::vector<uint16_t> device_removals(const World &w) {
 
 // ---------------------------------------------------------------------------
 // The PowerThrow charge curve [orig: @ 0x4e07e9 — tap < 31 ticks = 255 (full),
-// then clamp((held - 31)/93, 0.1, 1.0) * 255].
+// then clamp((held - 31) * flt_7CD390, 0.1f, 1.0) * 255.0f, the factor 1/93 rounded
+// to float (0x3C302C0B)]. The holds 62, 93 and 124 land within a rounding of a whole
+// and differ by the x87's precision (throwables.cpp), so no pin sits on them
+// (net-re Q3-11); the pins below hold at 24, 53 and 64 bits.
 // ---------------------------------------------------------------------------
 void test_power_throw_charge() {
     CHECK(power_throw_charge_from_hold(0) == 255);
     CHECK(power_throw_charge_from_hold(30) == 255);
     CHECK(power_throw_charge_from_hold(31) == 25);      // the 0.1 floor
+    CHECK(power_throw_charge_from_hold(40) == 25);      // 9 * 1/93 is under 0.1f
+    CHECK(power_throw_charge_from_hold(41) == 27);      // 10 * 1/93 is past it
     CHECK(power_throw_charge_from_hold(31 + 46) == 126); // 46/93 * 255
-    CHECK(power_throw_charge_from_hold(31 + 93) == 255); // full at ~2.5 s
+    CHECK(power_throw_charge_from_hold(31 + 94) == 255); // the 1.0 clamp, ~2.5 s
     CHECK(power_throw_charge_from_hold(1000) == 255);
 }
 

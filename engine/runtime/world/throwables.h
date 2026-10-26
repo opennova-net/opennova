@@ -312,7 +312,8 @@ private:
 // ----------------------------------------------------------------------------
 // The PowerThrow charge [orig: press gate @ 0x4e08fd (weapon def Flags sign bit
 // 0x80000000), release @ 0x4e07e9: held < 31 ticks -> 255 (full), else
-// clamp((held - 31) / 93, 0.1, 1.0) * 255; charge byte 0/255 = unscaled full
+// clamp((held - 31) * float(1/93), 0.1f, 1.0) * 255, truncated (throwables.cpp
+// names the precision); charge byte 0/255 = unscaled full
 // speed, 1..254 scale ammo velocity by charge/256 @ 0x4ec5bb].
 // ----------------------------------------------------------------------------
 uint8_t power_throw_charge_from_hold(int32_t held_ticks);
