@@ -88,10 +88,6 @@ public:
 		VIEW_TEXTURE_NVG_SCALE = opennova::hud::kViewTexNvgScale,
 		VIEW_TEXTURE_VIGNETTE = opennova::hud::kViewTexVignette,
 	};
-	// kPercentToAlpha (2.55 — authored percent -> 0..255 alpha), bound as a
-	// method because class constants are integer-only.
-	static double percent_to_alpha();
-
 	// The HUD view-helper math (one impl in engine/runtime/hud hud_math.h;
 	// the GDScript Hud* helpers delegate here and keep only the CanvasItem
 	// work). Each carries its witness at the engine impl.
@@ -105,37 +101,13 @@ public:
 	// the Y correction (hud/sight_overlay.h sight_rect_to_viewport_at_ratio).
 	static Rect2 nvg_scene_sight_rect(const Rect2 &p_design, const Vector2 &p_surface,
 			int p_aspect_mode);
-	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
 	// Where a HUD draw lands on this raster: the original's window coordinate
 	// plus D3D9's pixel centre on both axes (engine renderer/d3d9_raster.h). A
 	// GDScript HUD drawer that draws the original's coordinates opens its
 	// _draw with draw_set_transform(HudPos.d3d9_screen_offset()).
 	static Vector2 d3d9_screen_offset();
-	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
-	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
-			int p_base_alpha, int p_max_alpha);
-	static int stance_current_alpha(int p_elapsed_ticks, int p_ramp_ticks,
-			int p_base_alpha);
-	static int stance_prev_alpha(int p_elapsed_ticks, int p_ramp_ticks);
-	static int stance_scale_q16(const Vector2i &p_frame0_size);
-	static int stance_scaled_dim(int p_dim, int p_q16);
-	static Vector2i stance_center_offset(const Vector2i &p_frame0_size, int p_q16);
-	static int health_color_band(float p_fraction);
-	static int message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev);
-	static String format_ammo(int p_clip, int p_reserve, int p_capacity);
-	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
-	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);
 	static int waypoint_distance_m(const Vector2 &p_ground_delta);
-	static int heat_fill_span(int p_extent_px, int p_heat);
-	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
-	static int power_fill_span(int p_progress_fp16, int p_extent_px);
 	static Vector2i loading_bar_fill_span(int p_x, int p_w, int p_displayed);
-	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
-			double p_screen_w);
-	static int crosshair_total_spread_fp16(int p_error_fp16,
-			int p_recoil_pitch_bam, int p_weight_spread_bam);
-	static int crosshair_error_row(int p_stance, bool p_scoped);
-	static bool crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed);
 
 	// The mission loading screen's engine spec (hud/loading_screen.h carries
 	// the values and witnesses): the GAMETYPE -> LoadingText key policy ("" =
@@ -202,7 +174,7 @@ public:
 	// The continue line through its font page's material (D-LOADSCR-10): the engine's run
 	// (hud::splash_continue_run) over a `p_size` display, a triangle array per page run into `p_item`
 	// (none for a null item) over `p_pages` (font_page_textures'), its UVs flagged for the item's glyph
-	// shader (glyph_shader_code), which runs the page's MODULATE2X stage over the halved colours. Returns
+	// shader (glyph_shader), which runs the page's MODULATE2X stage over the halved colours. Returns
 	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
 	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
 			const String &p_text, const Vector2i &p_size, bool p_phase_on);
@@ -216,9 +188,8 @@ public:
 			const Vector2i &p_size);
 	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
 	static Array font_page_textures(const Ref<FntResource> &p_font);
-	// The canvas_item shader an item whose glyph runs draw through their page's material carries.
-	static String glyph_shader_code();
-	// That shader as the one process-wide glyph program every glyph-shader item shares (font_page_glyphs
+	// The canvas_item shader an item whose glyph runs draw through their page's material carries,
+	// the one process-wide glyph program every glyph-shader item shares (font_page_glyphs
 	// glyph_canvas_shader: each menu frame, the loading screen's splash, the editor's font viewport).
 	static Ref<Shader> glyph_shader();
 
@@ -258,14 +229,6 @@ public:
 	static PackedInt32Array scope_mask_indices(const Vector2 &p_surface,
 			int p_screen_width, bool p_draw_crosshair, int p_batch, int p_aspect_mode,
 			bool p_nvg_lens);
-	// The derived frame, in order: center x, center y, ring size, inner radius,
-	// outer radius, scale x, scale y, arm half thickness, tick pitch.
-	static PackedFloat32Array scope_mask_frame(const Vector2 &p_surface,
-			int p_screen_width, int p_aspect_mode);
-	// The two selector bytes' def halves (the overlay fork itself is the HUD
-	// info record's, HudEntityInfo).
-	static bool scoped_selector_from_def(int p_weapon_flags, int p_weapon_flags2);
-	static bool sighted_selector_from_def(int p_weapon_flags, bool p_slot_switching_from);
 
 	Error load(const String &path);
 	// Load hudpos.def by flat name through the mounted resource root (VFS), so the
