@@ -295,8 +295,8 @@ scripts/dev_stack.sh up --no-hosting                          # neither
 `--data` seeds Joint Operations from the folder the way a deployment gets a game, with no
 tree uploaded: the install imported into a project, pushed as the game's project through
 the editor's routes (signed in as the seeded admin), a release built from that revision and
-published, and the data program's apply building the game's tree from it (`--data-set`
-names another seeded base game). `--synthetic-data` seeds a minted project of one synthetic
+published, and the data program's apply building the game's tree from it (`--game <key>`
+names another game by its project key: DFX2, ACIDGAMBIT). `--synthetic-data` seeds a minted project of one synthetic
 deathmatch map the same way. The tree's multiplayer missions are the rotation (`--mission`
 names the one the smoke test's server runs). Retail data never enters the repository or an
 image. With neither, hosting stays off (web logs `hosted servers: off (provider none ...)`

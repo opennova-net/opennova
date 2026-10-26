@@ -2,9 +2,9 @@
 
 // A packed update's section applied to a product's tree: what UPDATE.EXE's PACK installs once
 // the rows are fetched (docs/update/updater-re.md §7, §8), run over a directory in one pass with
-// no precheck, no download and no second pass. The hosted fleet's data trees are built with it
-// (a published release applied to a data set's baseline, ADR 0064) and our own update.exe will
-// install with it (ADR 0061 phase 3). Service policy and tooling over the witnessed formats; the
+// no precheck, no download and no second pass. The data program builds the hosted fleet's trees
+// with it (a published release applied from empty, ADR 0071) and our own update.exe installs with
+// it (apps/update, apply_commands). Service policy and tooling over the witnessed formats; the
 // row semantics are the record's:
 //
 //   Loose   (UPD, RESEXE, REVEXE, WIZ) the row's blob, inflated (nlz.h), written to
