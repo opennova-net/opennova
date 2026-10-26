@@ -243,6 +243,13 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("defs")
 	        .row,
+	// overcast.def: the environment's keywords (F-11), so the environment document edits it, its save writing the
+	// keywords it holds alone (a keyword it never wrote stays the .trn's).
+	Kind(AssetKind::OvercastDefs, "overcast_defs", "Overcast colours")
+	        .edited_by(DocumentTypeId::Environment)
+	        .names_files()
+	        .folder("defs")
+	        .row,
 	Kind(AssetKind::OtherDefs, "other_defs", "Definitions")
 	        .edited_by(DocumentTypeId::Text)
 	        .names_files()

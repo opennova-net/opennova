@@ -15,6 +15,7 @@
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
 #include <editor/graph/asset_graph.h>
@@ -939,6 +940,48 @@ int test_mission_terrain() {
 	return 0;
 }
 
+// overcast.def (F-11): a kind of its own, which the environment document edits, packed where every .def is. Its save
+// writes the keywords the file holds and those an edit sets, alone, so a keyword it never wrote stays what the
+// mission's .trn made it: the mission's load over the saved file makes what it made over the read one, which a write
+// of every keyword (the .trn's water and fog type set back to the defaults) did not [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57DB30, overcast.def's pass @ 0x57DC3B between the .trn's and the .env's].
+int test_overcast() {
+	TEST_EXPECT(classify_asset("overcast.def", nullptr) == AssetKind::OvercastDefs &&
+	            classify_asset("defs/OVERCAST.DEF", nullptr) == AssetKind::OvercastDefs &&
+	            classify_asset("reverb.def", nullptr) == AssetKind::OtherDefs);
+	const DocumentType *type = document_type_for(AssetKind::OvercastDefs);
+	TEST_EXPECT(type && type == document_type_for(AssetKind::Environment) && asset_kind_packed(AssetKind::OvercastDefs));
+	const std::string overcast =
+	        "fog_level 900\r\ntod_begin 1200\r\n    sun_rgb 10,20,30\r\n    fog_rgb 40,50,60\r\ntod_end\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("fog_level 900\r\n") != std::string::npos && saved.find("tod_begin 1200\r\n") != std::string::npos &&
+	            saved.find("    sun_rgb 10,20,30\r\n") != std::string::npos && saved.find("water_rgb") == std::string::npos &&
+	            saved.find("fog_type") == std::string::npos && saved.find("sky_map1") == std::string::npos &&
+	            saved.find("curtime") == std::string::npos && saved.find("enviro_name") == std::string::npos &&
+	            saved.find("envscale") == std::string::npos && saved.find("\r\n\r\n\r\n") == std::string::npos);
+	const std::string trn = "polytrn_colormap c.tga\r\nwater_rgb 1,2,3\r\nfog_type 3\r\n";
+	opennova::env::MissionEnv as_read, as_saved;
+	opennova::env::load_mission_env({&trn, &overcast, nullptr}, as_read);
+	opennova::env::load_mission_env({&trn, &saved, nullptr}, as_saved);
+	TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+	            config_difference(as_read.overcast, as_saved.overcast).empty() && as_saved.config.fog_type == 3);
+	// An edit's keyword joins them, and no other.
+	TEST_EXPECT(set(*document, row_address(*document), "sky_speed", int64_t(5)));
+	const std::string edited = document->serialize().text;
+	TEST_EXPECT(edited.find("sky_speed 5\r\n") != std::string::npos && edited.find("water_rgb") == std::string::npos &&
+	            edited.find("fog_level 900\r\n") != std::string::npos);
+	{
+		auto again = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(again->load_bytes(bytes_of(edited), "overcast.def", AssetKind::OvercastDefs, "jo", error) &&
+		            again->serialize().text == edited);
+	}
+	std::printf("overcast.def: the environment document, its save the keywords it holds\n");
+	return 0;
+}
+
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
@@ -949,6 +992,7 @@ int main() {
 	failures += test_session();
 	failures += test_mission_terrain();
 	failures += test_fixtures(repo);
+	failures += test_overcast();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

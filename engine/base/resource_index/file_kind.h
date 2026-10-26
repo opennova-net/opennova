@@ -56,6 +56,7 @@ enum class FileKind {
 	SoundProfileDefs, // SndProf.def
 	CharAttrDefs,   // charattr.def
 	PowerupDefs,    // powerup.def
+	OvercastDefs,   // overcast.def (the overcast table's keyframes, in the environment's keywords)
 	OtherDefs,      // any other .def
 	StringTableCoo, // .coo (the menu browser's NovaWorld cookie jar, nw_cdata.coo)
 	NovaWorldScreen, // .mnx (a NovaWorld screen's markup; retail ships it loose, a packed set holds it)

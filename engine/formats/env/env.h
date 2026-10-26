@@ -4,6 +4,7 @@
 #include <functional>
 #include <istream>
 #include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -239,6 +240,18 @@ bool load_env(std::istream &input, Config &out, std::string &error);
 // back as the same float, a name quoted where it holds a separator. False, with `error`, for a
 // name no line can carry (a '"', a control character).
 bool save_env(std::ostream &output, const Config &cfg, std::string &error);
+// The same file holding only the keywords `keys` names (lower case, as env_keys_written lists them), each line where
+// save_env writes it (a scratch colour named whatever its seed, the optional lines where the Config holds them), a
+// blank line between two groups that each write one, and every keyframe. What a file a later pass reads writes: a
+// keyword a mission's .trn sets stands where overcast.def, or the .env, writes none [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57db30, one set of globals under the three passes].
+bool save_env_keys(std::ostream &output, const Config &cfg, const std::set<std::string> &keys, std::string &error);
+// The keywords a text's lines write, lower case, as the parser reads its lines (load_env): every keyword the parser
+// takes, but a keyframe colour (a colour line while a tod_begin's slot is the pointer's) and tod_begin and tod_end,
+// whose keyframes the Config holds.
+std::set<std::string> env_keys_written(const std::string &text);
+// The keywords whose lines `a` and `b` write otherwise (save_env's lines, a keyframe's aside).
+std::set<std::string> env_keys_differing(const Config &a, const Config &b);
 
 // What the parser makes of one line's key and value, for a caller that reads a file's lines
 // itself (the editor's source findings): the HHMM time a token reads as, by position
