@@ -14,8 +14,8 @@ namespace opennova::editor {
 
 struct SessionView;
 
-// A name drawn where the editor shows it, as every reference is (ADR 0046 DI-17, DI-18, "deep integration": every
-// name a field holds is a jump): a record's field (the Inspector's, by its FieldUse and value), a name a readout
+// A name drawn where the editor shows it, as every reference is (ADR 0046 DI-17 and DI-18, the deep integration the
+// maintainer asked for: every name a field holds is a jump): a record's field (the Inspector's, by its FieldUse and value), a name a readout
 // shows (a viewport's board, log or listen line: a ReferenceSubject, the kind, the name, its scope and its loader's
 // argument, as a Problems row's subject names one), and a name a text writes at a span (a particle file's, a HUD
 // layout's: a TextPlace). Each resolves through the graph's one lookup (reference_queries' reference_targets: a
