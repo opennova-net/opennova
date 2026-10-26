@@ -1,6 +1,6 @@
 // Pins the detail tier's c24.x wind sway phase: the signed ms clock x 0.003f plus the
 // weather oscillator's g_EnvWaveOscRing[0] x flt_7DE9D0 (0x35CCCCCD, the float
-// nearest 1/655360), folded modulo 2 pi on the clock term, and the patch's
+// nearest 1/655360), each rounded to a float and never reduced, and the patch's
 // sector origin the sway's v0.x is measured from
 // [orig: Foliage_SetupVertexShaderConstants @ 0x60074a..0x60079d;
 // Terrain_CollectNearFoliagePatches @ 0x603fc1].
@@ -60,31 +60,30 @@ void test_sector_origin_of_the_cell_key() {
 	CHECK(r::foliage_detail_wind_sector_origin_z(0x00107c00u) == -1024.0f);
 }
 
-// The 2-pi fold keeps a long session's phase in [0, 2 pi) without losing the
-// sine's float precision: at 2094395 ms the raw product is 6283.185 rad and
-// the folded phase must be its double-math residue, not a degraded float. The
-// scale is the float flt_7DE9D4 (0x3B449BA6 = 0.0030000000260770321), not the
-// double 0.003: by three hours the two part by 2.8e-4 rad, by five days by 0.011
-// [orig: `fmul flt_7DE9D4` @0x600757].
-void test_two_pi_fold_precision() {
-	const float folded = r::foliage_detail_wind_phase(2094395, 0);
-	CHECK(near(folded, 6.28293274f));
-	CHECK(folded >= 0.0f && folded < 6.2831854f);
-	// Three hours in: still in range, still the exact residue.
-	const float three_hours = r::foliage_detail_wind_phase(10800000, 0);
-	CHECK(near(three_hours, 3.89683781f));
-	CHECK(three_hours >= 0.0f && three_hours < 6.2831854f);
-	// Five days in (432000000 ms): the float scale's residue, 0.011 rad from the
-	// double scale's 5.06579991.
-	CHECK(near(r::foliage_detail_wind_phase(432000000u, 0), 5.07706519f, 1e-5f));
+// Nothing reduces the phase: each product rounds to a float from the exact
+// one (the tick loaded whole by `fild`, then `fmul flt_7DE9D4`) and the sum
+// rounds again, at the x87 unit's single precision; a long uptime's phase keeps
+// only its float ulp [orig: Foliage_SetupVertexShaderConstants
+// @ 0x60074a..0x60076f; CGfxDevice_CreateDevice @ 0x67e9fd, no
+// D3DCREATE_FPU_PRESERVE]. The scale is the float flt_7DE9D4 (0x3B449BA6 =
+// 0.0030000000260770321), not the double 0.003.
+void test_the_phase_is_unreduced() {
+	CHECK(r::foliage_detail_wind_phase(2094395, 0) == 6283.18505859375f);
+	CHECK(r::foliage_detail_wind_phase(10800000, 0) == 32400.0f);
+	CHECK(r::foliage_detail_wind_phase(432000000u, 0) == 1296000.0f);
+	// Past 2^24 ms the tick is no float: the product rounds once from the
+	// whole tick (50331.65234375), where float(tick) x 0.003f gives 50331.6484375.
+	CHECK(r::foliage_detail_wind_phase(16777217u, 0) == 50331.65234375f);
+	// Both terms rounded, then their sum.
+	CHECK(r::foliage_detail_wind_phase(20000001u, 123457) == 60000.19140625f);
 }
 
 // The DWORD is read signed (`fild` with no unsigned fix-up): past 2^31 ms of
-// uptime the term is (tick - 2^32) x 0.003f, folded with its sign kept, where an
-// unsigned read gives the opposite phase [orig: the store @0x60070C, the read
-// @0x60074A, `fmul flt_7DE9D4` @0x600757].
+// uptime the term is (tick - 2^32) x 0.003f, where an unsigned read gives the
+// opposite phase [orig: the store @0x60070C, the read @0x60074A, `fmul
+// flt_7DE9D4` @0x600757].
 void test_the_clock_is_read_signed() {
-	CHECK(near(r::foliage_detail_wind_phase(0x80000000u, 0), -5.79483933f, 1e-5f));
+	CHECK(r::foliage_detail_wind_phase(0x80000000u, 0) == -6442451.0f);
 	CHECK(near(r::foliage_detail_wind_phase(0xFFFFFFFFu, 0), -0.00300000003f));
 }
 
@@ -95,7 +94,7 @@ int main() {
 	test_ring_term_scale_and_sign();
 	test_terms_add();
 	test_sector_origin_of_the_cell_key();
-	test_two_pi_fold_precision();
+	test_the_phase_is_unreduced();
 	test_the_clock_is_read_signed();
 	if (failures == 0) std::printf("foliage_frame_wind_test: all passed\n");
 	return failures == 0 ? 0 : 1;
