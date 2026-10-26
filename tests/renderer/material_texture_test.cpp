@@ -1,4 +1,5 @@
 #include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <formats/threedi/threedi_3di3.h>
@@ -347,6 +348,33 @@ int main() {
     const auto put = [](std::vector<uint8_t> &b, size_t at, uint32_t v) {
         for (int i=0;i<4;++i) b[at+i]=uint8_t(v>>(8*i));
     };
+    for (uint8_t type : {16,18}) {
+        // The 2D chunks halved by the row's detail word as their creator halves them: the NQ8B map
+        // (A8R8G8B8) texel by texel, the AOC8 map (A8) as the box takes its bytes, four to a 32-bit
+        // texel at the map's sides, read back as A8 at the halved sides [orig: Texture_LoadNQ8BChunk
+        // @0x58F42E, Texture_LoadAOC8Chunk @0x58F66E -> GTexture_CreateFromPixelData_0 @0x6876C0;
+        // GTexture_DownsampleToLimits @0x687200..0x68723C; D3DXLoadSurfaceFromMemory @0x6878A0].
+        const size_t texels = 16, bpp = type == 16 ? 4 : 1;
+        std::vector<uint8_t> bytes(8+8+28+texels*bpp,0);
+        const char *tag = type==16 ? "NQ8B" : "AOC8";
+        for (int i=0;i<4;++i) bytes[8+i]=tag[i];
+        put(bytes,12,uint32_t(bytes.size()-16));
+        put(bytes,28,4); put(bytes,32,4); put(bytes,36,1);
+        for (size_t i=44;i<bytes.size();++i) bytes[i]=uint8_t(i-44+1);
+        const auto halved = load_material_chunk(bytes.data(),bytes.size(),type,kTextureFlagHalveOnce);
+        expect(halved.width==2 && halved.height==2 && halved.depth==1, "a 4 x 4 map halved once is 2 x 2");
+        if (type == 16) {
+            // Texels 0, 1, 4 and 5 (bytes 1..4, 5..8, 17..20, 21..24, BGRA): A (4+8+20+24)/4, R (3+7+19+23)/4.
+            expect(halved.rgba[3]==14 && halved.rgba[0]==13, "the NQ8B texels' truncated mean");
+        } else {
+            // The bytes 1..16 as the 32-bit texels (1,2,3,4) .. (13,14,15,16) of the map's first row, the
+            // rows under it past the map's bytes: the first texel's lanes (1+5)/4, (2+6)/4, (3+7)/4, (4+8)/4
+            // are the halved map's four A8 bytes.
+            expect(halved.rgba[3]==1 && halved.rgba[7]==2 && halved.rgba[11]==2 && halved.rgba[15]==3,
+                "the AOC8 bytes boxed as 32-bit texels");
+        }
+        expect(load_material_chunk(bytes.data(),bytes.size(),type).width==4, "no word, no halving");
+    }
     for (uint8_t type : {16,17,18}) {
         const size_t count = type == 17 ? 8 : 4;
         std::vector<uint8_t> bytes(8+8+28+count*(type==16?4:1),0);
@@ -367,6 +395,11 @@ int main() {
         put(nested,12,uint32_t(bytes.size()-8)|0x80000000u);
         expect(load_material_chunk(nested.data(),nested.size(),type).rgba==pixels.rgba,"nested producer chunk");
         expect(!load_material_chunk(bytes.data(),bytes.size()-1,type), "truncated chunk is a failed load");
+        // The volume's creator reads no halving bit [orig: Texture_LoadHRZ8Chunk @0x58F552 ->
+        // GTexture_CreateFromPixelData @0x686950].
+        if (type == 17)
+            expect(load_material_chunk(bytes.data(),bytes.size(),type,kTextureFlagHalveTwice).rgba==pixels.rgba,
+                "the HRZ8 volume is never halved");
         // A container of any of the three chunks, whatever its name; read whole or by its headers.
         expect(is_material_chunk_container(bytes) && is_material_chunk_container(nested), "a chunk container");
         const std::vector<uint8_t> truncated(bytes.begin(), bytes.end()-1);

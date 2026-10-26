@@ -159,7 +159,21 @@ MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t w
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 // [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
 // Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
-MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type);
+// `flags` is the row's creation flags, the slot's object texture detail word (object_texdetail_flags):
+// the 2D chunks go to the creator that halves a texture built from pixels (pixel_texture_halvings
+// times, each GTexture_Downsample2x2_RGBA8), the NQ8B normal map (16, A8R8G8B8) texel by texel and the
+// AOC8 occlusion map (18, A8) as that box takes its one-byte texels, four to a 32-bit lane group at the
+// map's sides, the result read back as A8 at the halved sides (its first bytes, which only the map's own
+// bytes make); the HRZ8 horizon volume (17) goes to the volume creator, which reads no halving bit, as
+// the stage's own horizon volume (6) does.
+// [orig: Material_LoadStageTexture @0x5B17D4..0x5B17E8 (the word, as the chunk loader's flags);
+//  Texture_LoadNQ8BChunk @0x58F426..0x58F42E (format 1) and Texture_LoadAOC8Chunk @0x58F666..0x58F66E
+//  (format 2, D3DFMT_A8 @0x686D93, one byte a texel @0x686DF0) -> GTexture_CreateFromPixelData_0
+//  @0x6876C0, its GTexture_DownsampleToLimits @0x687785 (the box loop @0x687200..0x68723C, no format
+//  test) and D3DXLoadSurfaceFromMemory @0x6878A0 (the pitch @0x687876..0x68788A);
+//  Texture_LoadHRZ8Chunk @0x58F546..0x58F552 and Texture_LoadHorizonMap @0x58A646..0x58A654 ->
+//  GTexture_CreateFromPixelData @0x686950, its flags read @0x686953, @0x6869DD, @0x6869EC alone]
+MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type, uint32_t flags = 0);
 // The bytes of a chunk container at [position, position + size) into `out`; false past its end.
 using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, size_t size)>;
 // Whether load_material_chunk would load a chunk of `type` from the `size` bytes `read` serves:

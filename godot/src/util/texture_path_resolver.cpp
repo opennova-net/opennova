@@ -623,8 +623,11 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
     return upload_material_pixels(pixels, mode == MaterialTextureTransform::HorizonVolume);
 }
 
-godot::Ref<godot::Texture> prepare_material_chunk(const godot::PackedByteArray &bytes, uint8_t type) {
-    const auto pixels = renderer::load_material_chunk(bytes.ptr(), bytes.size(), type);
+godot::Ref<godot::Texture> prepare_material_chunk(const godot::PackedByteArray &bytes, uint8_t type,
+        uint32_t detail_flags) {
+    // A 2D chunk halved by its row's detail word as its creator halves it, the volume never (engine
+    // renderer/material_texture.h load_material_chunk carries the witness).
+    const auto pixels = renderer::load_material_chunk(bytes.ptr(), bytes.size(), type, detail_flags);
     return upload_material_pixels(pixels, type == 17);
 }
 

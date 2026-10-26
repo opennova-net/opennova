@@ -104,9 +104,10 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
 		const std::function<godot::PackedByteArray()> &read, const godot::String &name, uint8_t type,
 		uint32_t detail_flags = 0);
 
-// A chunk producer's texture (types 16 to 18); null when the chunk does not load.
+// A chunk producer's texture (types 16 to 18); null when the chunk does not load. `detail_flags` is
+// the row's object-texture-detail word, which halves a 2D chunk (renderer::load_material_chunk).
 godot::Ref<godot::Texture> prepare_material_chunk(
-        const godot::PackedByteArray &bytes, uint8_t type);
+        const godot::PackedByteArray &bytes, uint8_t type, uint32_t detail_flags = 0);
 
 // The dispatcher's missing-texture checkerboard, bound where a row's loader made
 // nothing (renderer::missing_material_texture_rgba).

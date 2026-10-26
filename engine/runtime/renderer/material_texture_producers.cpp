@@ -1,4 +1,6 @@
 #include "material_texture.h"
+#include "device_texture.h"
+#include "texture_load_rules.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -91,12 +93,26 @@ MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *source, uint3
     if (!source || !dimensions(w,h,1)) return {};
     return {w,h,1,std::vector<uint8_t>(size_t(w)*h*4,255)};
 }
-MaterialTexturePixels load_material_chunk(const uint8_t *data, size_t size, uint8_t type) {
+MaterialTexturePixels load_material_chunk(const uint8_t *data, size_t size, uint8_t type, uint32_t flags) {
     if (!data || size<8 || (type!=16 && type!=17 && type!=18)) return {};
     const Span payload=find_chunk({data+8,size-8},chunk_tag(type));
     uint32_t w=0,h=0,d=0;
     if (!payload.p || !chunk_holds(payload.p,payload.n,type,w,h,d)) return {};
     const uint64_t count=uint64_t(w)*h*d;
+    // The 2D chunks' creator halves them by the row's flags; the volume's reads no halving bit.
+    const uint32_t halvings = type == 17 ? 0u : pixel_texture_halvings(w, h, flags);
+    if (type == 18 && halvings != 0) {
+        // The box over the A8 bytes as four-byte texels at the map's sides, read back as A8 at the
+        // halved ones: their first bytes, which come from the map's own bytes alone (the lanes past
+        // them are zero here, the creator's heap there).
+        std::vector<uint8_t> lanes(size_t(count) * 4, 0);
+        std::memcpy(lanes.data(), payload.p + 28, size_t(count));
+        uint32_t hw = w, hh = h;
+        halve_rgba_times(lanes, hw, hh, halvings);
+        MaterialTexturePixels halved{hw, hh, 1, std::vector<uint8_t>(size_t(hw) * hh * 4, 255)};
+        for (size_t i = 0; i < size_t(hw) * hh; ++i) halved.rgba[4 * i + 3] = lanes[i];
+        return halved;
+    }
     MaterialTexturePixels result{w,h,d,std::vector<uint8_t>(size_t(count)*4,255)};
     for (size_t i=0;i<count;++i) {
         if (type==16) { // format 1 -> D3DFMT_A8R8G8B8, little-endian BGRA
@@ -104,6 +120,8 @@ MaterialTexturePixels load_material_chunk(const uint8_t *data, size_t size, uint
             result.rgba[4*i+2]=payload.p[28+4*i]; result.rgba[4*i+3]=payload.p[28+4*i+3];
         } else result.rgba[4*i+3]=payload.p[28+i]; // format 2 -> D3DFMT_A8
     }
+    // The box takes each lane on its own, so the BGRA order the A8R8G8B8 texels came in is no matter.
+    if (halvings != 0) halve_rgba_times(result.rgba, result.width, result.height, halvings);
     return result;
 }
 bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_t type) {

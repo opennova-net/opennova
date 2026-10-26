@@ -880,7 +880,8 @@ Ref<Texture> ResourceRoot::material_row_texture_(const String &name, uint8_t typ
 				[this](const std::string &file) { return index_.prefers_loose_file(file); });
 	}
 	if (source.reader == MaterialTextureReader::Chunk) {
-		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type);
+		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type,
+				opennova::renderer::object_texdetail_flags(object_texdetail_, slot));
 	}
 	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
 	return opennova::make_material_texture(load, [this, &load] { return read_file(opennova::to_gd(load.file)); },
