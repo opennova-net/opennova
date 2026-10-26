@@ -542,10 +542,41 @@ bool check_chat_routing() {
 	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(7, "x"), 100 + 210);
 	if (!expect(replies.empty() && drain(f.transports[0]).empty(), "channel 7 is dropped"))
 		return false;
-	// A spectator sender is refused.
-	f.conn(0).link.spectator = true;
-	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 280);
-	return expect(replies.empty(), "a spectator cannot chat");
+	// Channel 11, the crew: P1 and P3 ride one carrier, P2 and P4 none.
+	w::Entity hull;
+	hull.has_item_def = true;
+	hull.item_type = 1;
+	const w::EntityHandle hull_handle = f.world.registry.spawn(1, hull);
+	f.world.registry.get(f.players[0])->ground_target = hull_handle;
+	f.world.registry.get(f.players[2])->ground_target = hull_handle;
+	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(11, "crew"), 100 + 280);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[2]), s2c::CHAT_BROADCAST) == 1 &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty(),
+			"channel 11 reaches the sender's carrier"))
+		return false;
+	// A spectator sender is refused while the round runs.
+	// [orig: NapiNPServer_HandleChatMessage - +0x188D7 @0x5137C7, g_RoundOver @0x5137D0]
+	f.conn(1).link.spectator = true;
+	replies = f.dispatch(1, c2s::CHAT_MESSAGE, chat_uplink(1, "x"), 100 + 350);
+	if (!expect(replies.empty() && drain(f.transports[0]).empty(),
+			"a spectator cannot chat while the round runs"))
+		return false;
+	// The round over: the spectator's line goes out, and channel 11 reaches nobody, the sender
+	// included (the round end sets every net player's game state 11; the crew fan takes 10 alone).
+	// [orig: Server_ProcessRoundEnd - CNetPlayer_SetGameState(11) @0x516846; the crew fan's
+	//  state test @0x513DA5]
+	(void)inmatch::Server_ExecuteServerCommand(f.ctx, &f.world, "EndMission", "", {"Red"});
+	for (auto &t : f.transports) (void)drain(t);
+	if (!expect(f.world.match.outcome().ended && f.conn(2).burst.game_state == 11,
+			"EndMission ends the round"))
+		return false;
+	replies = f.dispatch(1, c2s::CHAT_MESSAGE, chat_uplink(1, "gg"), 100 + 420);
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1,
+			"a spectator chats once the round is over"))
+		return false;
+	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(11, "crew"), 100 + 490);
+	return expect(replies.empty() && drain(f.transports[2]).empty(),
+			"channel 11 reaches nobody once the round is over");
 }
 
 // A punted sender's records are parsed but never handled: the per-record dispatch tests the

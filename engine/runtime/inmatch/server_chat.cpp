@@ -234,10 +234,12 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	const world::Entity *sender_entity = world.registry.get(sender.link.owned_entity);
 	if (sender_entity == nullptr) return replies;
 	const bool local_slot = sender.link.mode == replication::TransportMode::Loopback;
-	// (state 10/11 || slot+5) && (!spectator || g_RoundOver) [orig: @0x5137D7; the net player's
-	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1]
+	// (state 10/11 || slot+5) && (!spectator || g_RoundOver): a spectator chats once the round
+	// is over (g_RoundOver, our match outcome's `ended`) [orig: @0x5137D7; the net player's
+	//  game state 10 / 11 @0x5137AD..0x5137BB, slot+5 @0x5137BD..0x5137C1, the spectator byte
+	//  +0x188D7 @0x5137C7, `cmp g_RoundOver, 0` @0x5137D0]
 	if (!(is_in_match(sender) || local_slot)) return replies;
-	if (sender.link.spectator) return replies;
+	if (sender.link.spectator && !world.match.outcome().ended) return replies;
 	// The 1000 ms per-sender throttle [orig: slot+100360 @0x5137FF..0x513820].
 	if (sender.reply.chat_last_ms != 0 && now_ms < sender.reply.chat_last_ms + kChatThrottleMs)
 		return replies;
@@ -301,8 +303,10 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			break;
 		case 4: admit = recipient_team == 2; break;
 		case 5: admit = recipient_team == 1; break;
-		case 11: // state 10 only, same carrier vehicle
-			admit = recipient_entity != nullptr &&
+		case 11: // game state 10 only (none once the round end sets 11), same carrier vehicle
+			// [orig: @0x513D90..0x513DC5 - `cmp dword [eax+0A0h], 0Ah` @0x513DA5, the carrier
+			//  compare @0x513DC1; Server_ProcessRoundEnd's CNetPlayer_SetGameState(11) @0x516846]
+			admit = recipient.burst.game_state != 11 && recipient_entity != nullptr &&
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
 		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
