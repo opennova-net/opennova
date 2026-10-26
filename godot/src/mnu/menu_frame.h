@@ -365,6 +365,9 @@ public:
 	// brush, material}] (the piece's window rect, its stencil UV rect, its diffuse, its two
 	// textures and its two-stage material's server canvas texture).
 	Array get_frame_piece_submissions();
+	// The frame pieces' two-stage materials held now, one per stencil and brush pair (a read
+	// seam: a screen no longer shown lets its pairs go).
+	int get_piece_material_count() const;
 
 	void _draw() override;
 
@@ -433,11 +436,13 @@ private:
 	};
 	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
 	// The frame pieces' two-stage materials by the stencil's and the brush's keys: the
-	// server canvas texture and the two textures it binds (kept with it), freed with this.
+	// server canvas texture and the two textures it binds (kept with it), freed with this or
+	// let go as frame_texture_cache_'s entries are, once no configure since the last one drew it.
 	struct PieceMaterial {
 		RID canvas;
 		Ref<Texture2D> stencil;
 		Ref<Texture2D> brush;
+		uint64_t used = 0; // the configure that last drew it
 	};
 	std::map<std::string, PieceMaterial> piece_materials_;
 	// The slots the draw composed fill tiles from, each image's texels read once (let go as

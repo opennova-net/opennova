@@ -179,6 +179,10 @@ Array MenuFrame::get_glyph_submissions() {
 	return out;
 }
 
+int MenuFrame::get_piece_material_count() const {
+	return static_cast<int>(piece_materials_.size());
+}
+
 Array MenuFrame::get_frame_piece_submissions() {
 	Array out;
 	if (!configured_ || !is_inside_tree()) {
@@ -392,6 +396,17 @@ void MenuFrame::adopt_slots_() {
 			++it;
 		}
 	}
+	// The pieces' materials go by the same rule, their server canvas texture with them: no
+	// draw of the current or the previous configure references one this drops.
+	for (auto it = piece_materials_.begin(); it != piece_materials_.end();) {
+		if (it->second.used + 1 < configure_count_) {
+			if (it->second.canvas.is_valid())
+				RenderingServer::get_singleton()->free_rid(it->second.canvas);
+			it = piece_materials_.erase(it);
+		} else {
+			++it;
+		}
+	}
 	for (auto it = font_pages_by_serial_.begin(); it != font_pages_by_serial_.end();) {
 		if (assets_.font_alive(it->first)) {
 			++it;
@@ -515,6 +530,7 @@ RID MenuFrame::frame_piece_material_(const opennova::menu::MenuQuad &p_quad) {
 	const std::string key = texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
 			texture_keys_[static_cast<size_t>(p_quad.texture2)];
 	PieceMaterial &material = piece_materials_[key];
+	material.used = configure_count_;
 	if (material.canvas.is_valid()) {
 		return material.canvas;
 	}
@@ -1361,6 +1377,8 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);
 	ClassDB::bind_method(D_METHOD("get_frame_piece_submissions"),
 			&MenuFrame::get_frame_piece_submissions);
+	ClassDB::bind_method(D_METHOD("get_piece_material_count"),
+			&MenuFrame::get_piece_material_count);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
 					"override_text"),

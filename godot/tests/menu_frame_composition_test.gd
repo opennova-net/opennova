@@ -139,6 +139,45 @@ func test_a_framed_screen_draws_its_pieces_through_their_material() -> void:
 	assert_eq(again.size(), 8)
 
 
+const MNU_PLAIN := """
+<SCREEN>
+  <NAME>PLAIN</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">102030</APPEARANCE>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+func test_a_screen_no_longer_shown_lets_its_piece_materials_go() -> void:
+	# The pieces' materials are let go as the composed frame textures are (E-13): a
+	# pair no draw of the current or the previous configure used is dropped, its server
+	# canvas texture freed with it, so the stencil and brush it held are not kept alive.
+	var dir := TestFs.cache_dir(self, "menu_frame_piece_prune")
+	_temp_dirs.append(dir)
+	TestFs.write_bytes(self, dir.path_join("border.tga"), _gradient_tga(Vector2i(32, 32), 11))
+	TestFs.write_bytes(self, dir.path_join("tile.tga"), _gradient_tga(Vector2i(16, 8), 5))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var framed := MnuDocument.new()
+	assert_eq(framed.load_from_bytes(MNU_FRAMED.to_utf8_buffer()), OK)
+	var plain := MnuDocument.new()
+	assert_eq(plain.load_from_bytes(MNU_PLAIN.to_utf8_buffer()), OK)
+	var frame := MenuFrame.new()
+	frame.size = Vector2(1600, 1200)
+	add_child_autofree(frame)
+	assert_true(frame.configure(framed, "", root, null, null))
+	assert_eq(frame.get_frame_piece_submissions().size(), 8)
+	assert_eq(frame.get_piece_material_count(), 1, "one stencil and brush pair")
+	assert_true(frame.configure(plain, "", root, null, null))
+	frame.get_frame_piece_submissions()
+	assert_eq(frame.get_piece_material_count(), 1, "the previous configure's pair stays")
+	assert_true(frame.configure(plain, "", root, null, null))
+	frame.get_frame_piece_submissions()
+	assert_eq(frame.get_piece_material_count(), 0, "a pair two configures unused goes")
+
+
 func test_the_shader_runs_the_two_stage_border_branch() -> void:
 	var code := MenuFrame.glyph_shader_code()
 	assert_true(code.contains("NORMAL_TEXTURE"), "the brush rides the material's normal slot")
