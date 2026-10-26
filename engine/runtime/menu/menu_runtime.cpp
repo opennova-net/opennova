@@ -337,6 +337,13 @@ bool MenuRuntime::return_to_menu_mode(ScreenHistoryRow *out) {
 	return history_.return_to_mark(true, out);
 }
 
+std::string runtime_build_label(const std::string &version, const std::string &commit, bool staging) {
+	std::string label = "OpenNova " + (version.empty() ? std::string("(unversioned)") : version);
+	std::string notes = commit;
+	if (staging) notes += notes.empty() ? "staging" : ", staging";
+	return notes.empty() ? label : label + " (" + notes + ")";
+}
+
 void MenuRuntime::on_screen_shown_() {
 	// The activate dispatch's STARTUP leg sets the screen's VERSION label to the
 	// build's version text, the game's own (gameprofile::GameProfile::version_text;
@@ -349,8 +356,12 @@ void MenuRuntime::on_screen_shown_() {
 	//  @0x555852)]
 	if (strutil::iequals(current_screen_, "STARTUP")) {
 		const int version = find_screen_control("STARTUP", "VERSION");
-		const char *text = gameprofile::gameprofile_version_text_for_code(game_code_.c_str());
-		if (version >= 0) set_widget_text(version, text != nullptr ? text : "");
+		const char *game = gameprofile::gameprofile_version_text_for_code(game_code_.c_str());
+		// OpenNova's own build before it, where the runtime names one (D-MNU-76: which runtime runs, so an
+		// update is seen to land); the label is right-justified across the bar, room the stock text leaves.
+		std::string text = game != nullptr ? game : "";
+		if (!runtime_build_.empty()) text = text.empty() ? runtime_build_ : runtime_build_ + "   " + text;
+		if (version >= 0) set_widget_text(version, text);
 	}
 	MenuEvent changed;
 	changed.kind = MenuEvent::Kind::ScreenChanged;

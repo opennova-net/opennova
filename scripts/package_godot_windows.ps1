@@ -575,14 +575,31 @@ function Assert-StageHoldsOnly {
     Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
-Write-Host "=== Exporting opennova.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+# The build's commit in the exported project settings (application/config/build_commit), which the
+# STARTUP screen's VERSION label names beside config/version (D-MNU-76, godot/src/mnu/menu_driver.cpp):
+# OPENNOVA_BUILD_COMMIT where CI sets it (a pull request's head, not the merge ref it checks out), else
+# the checkout's HEAD. project.godot is put back as it was once the exports end.
+$BuildCommit = if ($env:OPENNOVA_BUILD_COMMIT) { $env:OPENNOVA_BUILD_COMMIT } else { (& git -C $ROOT rev-parse HEAD).Trim() }
+$BuildCommit = $BuildCommit.Substring(0, [Math]::Min(7, $BuildCommit.Length))
+$projectGodotPath = "$ROOT\godot\project.godot"
+$projectGodotText = [System.IO.File]::ReadAllText($projectGodotPath)
+if ($projectGodotText -notmatch '(?m)^config/version=.*$') { throw "project.godot names no config/version to stamp the commit beside" }
+[System.IO.File]::WriteAllText($projectGodotPath,
+    ($projectGodotText -replace '(?m)^(config/version=.*)$', "`$1`nconfig/build_commit=`"$BuildCommit`""))
+Write-Host "=== Build commit: $BuildCommit ==="
+try {
+    Write-Host "=== Exporting opennova.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 
-Write-Host "=== Exporting the editor's Play runtime ==="
-Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
+    Write-Host "=== Exporting the editor's Play runtime ==="
+    Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
 
-Write-Host "=== Exporting opennova-editor.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
+    Write-Host "=== Exporting opennova-editor.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
+}
+finally {
+    [System.IO.File]::WriteAllText($projectGodotPath, $projectGodotText)
+}
 
 # --- the game zips: opennova.exe + its runtime DLL + the updater pair side by side, one
 #     zip per game, each with the wizards naming its game's update products. The runtime
