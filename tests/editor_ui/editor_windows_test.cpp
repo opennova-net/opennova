@@ -380,10 +380,12 @@ void test_inspector_hides_unread_defaults() {
 	      "top_heavy: hidden at its default, shown and ignored where the file sets it");
 	CHECK(!shown(items, plain, "shadow_texture", nullptr) && !shown(items, plain, "max_attack_dist", nullptr),
 	      "the shadow line and the mission editor's keys: hidden while unset");
-	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Unverified,
-	      "an unwitnessed member shows unset, marked");
+	CHECK(shown(items, plain, "husk_swap_at", &applies) && applies == Applicability::Reads,
+	      "husk_swap_at: the wreck's swap reads it, shown");
 	CHECK(shown(items, plain, "hp", &applies) && applies == Applicability::Reads, "a member the game reads shows");
 	const NodeAddress bare{weapons.rows()[0]->id, weapon, 0}, arms{weapons.rows()[1]->id, weapon, 0};
+	CHECK(shown(weapons, bare, "statid", &applies) && applies == Applicability::Unverified,
+	      "an unwitnessed member shows unset, marked");
 	CHECK(!shown(weapons, bare, "gfx1a", nullptr) && shown(weapons, arms, "gfx1a", &applies) &&
 	              applies == Applicability::Ignored,
 	      "gfx1a: shown only where the file names one");
