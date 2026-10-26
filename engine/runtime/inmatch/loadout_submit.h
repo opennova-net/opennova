@@ -1,7 +1,7 @@
 // The joiner loadout-submission seam (ADR 0031 PR E, re-opening S7b's "the
 // joiner 0x2F pushes" leg): the Game_StartMission profile-page copy into the
 // resident kit buffer, the side-change re-copy rule, and the C2S 0x2F
-// submission content builder. The embedding shell keeps the role gates
+// submission content builder. The embedding shell keeps the role it reads
 // (listen-host/joiner), the re-entry latch, and the pump wiring
 // (set_loadout_kit); everything here reads engine state only — the world's
 // weapon catalog, the playersav profile record, and the resident
@@ -94,6 +94,27 @@ bool reseed_session_kit_on_side_change(world::World &world,
 //  @0x4E1882]
 bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
+
+// The player's weapon profile record the mission starts copy their kit from (retail's
+// g_CharSelClass slot), with the side the resident buffer was last copied from. It is
+// player-scoped: it outlives every mission's kernel and is installed before the first, so
+// its embedder holds it. It starts as the shipped defaults' record, never empty with no
+// weapon.sav.
+struct SessionWeaponProfile {
+	playersav::Record record = playersav::make_defaults().slots[0];
+	bool loaded = false;  // a profile's record was installed (use)
+	int seeded_side = -1; // -1: the buffer not yet copied from a side
+
+	// A profile's current weapon record, with the session start's class clamp
+	// (playersav::clamp_classes carries the witness).
+	void use(const playersav::Record &current);
+	// The mission start's kit from the record: a session peer (a listen host or a
+	// joiner) copies its side's page (seed_session_kit_from_profile), single player its
+	// page arm over the record once one is installed (seed_single_player_kit_from_profile).
+	// Returns true when it wrote (the caller rebuilds the slot pool).
+	bool seed_kit(world::World &world, bool session_peer, uint8_t assigned_team,
+			world::LocalPlayerLoadout &loadout);
+};
 
 // The joiner's C2S 0x2F submission content — the wire seam D-NET-168
 // tracked. Builds the full LoadoutKit: the ONE class integer that drives

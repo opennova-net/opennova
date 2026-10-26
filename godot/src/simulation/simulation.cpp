@@ -187,11 +187,11 @@ void Simulation::reset_world() {
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
 	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
 	kernel_->profile.set_active(runtime_profiling_enabled_);
-	// player_.weapon_profile is player-scoped and outlives every load [orig:
+	// player_.weapon is player-scoped and outlives every load [orig:
 	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
 	// ClientProcessState's); every peer's mission start re-copies its side's page.
-	player_.weapon_profile_seeded_side = -1;
+	player_.weapon.seeded_side = -1;
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).

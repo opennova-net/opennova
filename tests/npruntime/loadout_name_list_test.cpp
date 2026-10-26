@@ -289,6 +289,41 @@ void test_the_single_players_page_fills_the_spawn_buffer() {
 	}
 }
 
+// The player's weapon profile record the mission starts seed from (SessionWeaponProfile):
+// the shipped defaults' record until a profile's is installed, each side's class byte
+// clamped into 5..9 at the install, the seed's single-player arm out of a session (the
+// static page with no record installed, the record's page after) and its session arm on a
+// session peer (the side's page at its class, the cursor set).
+// [orig: Game_ApplySessionSettingsToGlobals @0x5516d0..0x5516ec (the clamp); the seeds'
+//  witnesses at their declarations]
+void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
+	inmatch::SessionWeaponProfile profile;
+	CHECK(!profile.loaded && profile.seeded_side == -1);
+	Rig r(inmatch::ConnectionMode::HostOnly);
+	r.world.rules.mp_session = false;
+	w::LocalPlayerLoadout loadout;
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, 0, loadout));
+	const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title);
+	CHECK(loadout.spawn_kit().size() == page.size());
+	playersav::Record current;
+	current.blue.player_class = 12;
+	current.red.player_class = 2;
+	current.single_player.entries = {playersav::KitEntry{"WPN_AK47AUTO", 4, -1, -1}};
+	profile.use(current);
+	CHECK(profile.loaded);
+	CHECK(profile.record.side(playersav::SideId::Blue).player_class == 9);
+	CHECK(profile.record.side(playersav::SideId::Red).player_class == 5);
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, 0, loadout));
+	CHECK(loadout.spawn_kit().size() == 1 && loadout.spawn_kit()[0].name == "WPN_AK47AUTO");
+	// A session peer copies its side's page: team 1 the blue block's, at its clamped class
+	// 9 (the fifth page), and the cursor names the side.
+	profile.record.blue.pages[4].entries = {playersav::KitEntry{"WPN_M4AUTO", 3, -1, -1}};
+	w::LocalPlayerLoadout session;
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/true, 1, session));
+	CHECK(session.spawn_kit().size() == 1 && session.spawn_kit()[0].name == "WPN_M4AUTO");
+	CHECK(profile.seeded_side == static_cast<int>(playersav::SideId::Blue));
+}
+
 } // namespace
 
 int main() {
@@ -297,6 +332,7 @@ int main() {
 	test_the_accept_writes_the_list_not_the_resident_kit();
 	test_the_single_players_page_fills_the_spawn_buffer();
 	test_an_out_of_session_accept_writes_the_list();
+	test_the_session_weapon_profile_clamps_and_routes_its_seed();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
