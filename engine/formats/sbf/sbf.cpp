@@ -22,7 +22,11 @@
 
 namespace opennova::sbf {
 
-/* Witnessed: [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0] (magic + flags check).
+/* The live bank open tests the magic alone and reads the index where the
+   header's index offset puts it [orig: AudioVM_OpenContextFile @ 0x672160 -
+   the magic @ 0x67222B, the seek @ 0x672245]; the flags word is the stream
+   paths' (1 byte-paired, any other IMA ADPCM stereo). The flags <= 2 and
+   index-at-24 tests are Sbf_OpenFile_Gamemus @ 0x4ED6C0's, which nothing calls.
    The whole entry index must lie inside the bytes: a header's entry count past
    them is refused, whatever the size (a 24-byte bank holds an empty index). */
 int sbf_validate(const uint8_t *data, size_t size) {
@@ -30,15 +34,14 @@ int sbf_validate(const uint8_t *data, size_t size) {
     SbfHeader h;
     memcpy(&h, data, SBF_HEADER_SIZE);
     if (h.magic != SBF_MAGIC) return -2;
-    if (h.flags > 2) return -5;
-    if (h.index_offset != SBF_HEADER_SIZE) return -3;
-    if ((uint64_t)h.entry_count * SBF_ENTRY_SIZE > size - SBF_HEADER_SIZE) {
+    if ((uint64_t)h.index_offset + (uint64_t)h.entry_count * SBF_ENTRY_SIZE > size) {
         return -4;
     }
     return 0;
 }
 
-/* Witnessed: [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0] (header + entry-loop reads).
+/* Witnessed: [orig: AudioVM_OpenContextFile @ 0x672160] (the header, the seek to
+   its index offset, the entry-loop reads @ 0x672275).
    Ingests header + index from a caller-provided buffer. */
 int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
     if (!arc || !data) return -1;
@@ -52,7 +55,7 @@ int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
     if (n > 0) {
         arc->entries = (SbfRawEntry *)malloc((size_t)n * SBF_ENTRY_SIZE);
         if (!arc->entries) return -5;
-        memcpy(arc->entries, data + SBF_HEADER_SIZE, (size_t)n * SBF_ENTRY_SIZE);
+        memcpy(arc->entries, data + arc->header.index_offset, (size_t)n * SBF_ENTRY_SIZE);
     }
     return 0;
 }
@@ -308,20 +311,21 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
     error.clear();
     const int valid = sbf_validate(data, size);
     if (valid != 0) {
-        error = valid == -2 ? "not an SBF0 bank" : valid == -5 ? "its flags word is above 2, which the engine refuses"
-              : valid == -3 ? "its index is not at byte 24" : "its header or its index is cut short";
+        error = valid == -2 ? "not an SBF0 bank" : "its header or its index is cut short";
         return false;
     }
     SbfFile bank;
     SbfHeader header;
     memcpy(&header, data, SBF_HEADER_SIZE);
     bank.flags = header.flags;
+    /* Where the writer's streams start: its index at byte 24, the header's
+       index offset the game's [orig: AudioVM_OpenContextFile @ 0x672245]. */
     const size_t index_end = SBF_HEADER_SIZE + (size_t)header.entry_count * SBF_ENTRY_SIZE;
     std::vector<SbfRawEntry> entries(header.entry_count);
     uint64_t streamed = 0;
     for (uint32_t i = 0; i < header.entry_count; ++i) {
         SbfRawEntry &entry = entries[i];
-        memcpy(&entry, data + SBF_HEADER_SIZE + (size_t)i * SBF_ENTRY_SIZE, SBF_ENTRY_SIZE);
+        memcpy(&entry, data + header.index_offset + (size_t)i * SBF_ENTRY_SIZE, SBF_ENTRY_SIZE);
         const std::string at = "entry " + std::to_string(i + 1);
         if ((uint64_t)entry.data_offset + entry.total_size > size) {
             error = at + "'s audio runs past the end of the file";
@@ -348,7 +352,7 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
     }
     /* Streams that share bytes: the packed writer could only copy them, and a
        few kilobytes of entries over one range would be gigabytes of chunks. */
-    if (streamed > (uint64_t)(size - index_end)) {
+    if (streamed > (uint64_t)(size - std::min(size, index_end))) {
         error = "its streams' sizes add up past the file: entries share bytes";
         return false;
     }
@@ -357,6 +361,7 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
        against the writer's constants (a write keeps neither). */
     SbfFileLayout found;
     found.header_words_other = (header.version != SBF_VERSION_DEFAULT ? 1 : 0) + (header.reserved != SBF_HEADER_RESERVED ? 1 : 0);
+    found.index_moved = header.index_offset != SBF_HEADER_SIZE;
     size_t expected = index_end;
     bank.streams.reserve(header.entry_count);
     for (uint32_t i = 0; i < header.entry_count; ++i) {
@@ -412,7 +417,7 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
         expected = (size_t)entry.data_offset + entry.total_size;
         bank.streams.push_back(std::move(stream));
     }
-    if (found.packed && expected < size) found.trailing_bytes = size - expected;
+    if (found.packed && !found.index_moved && expected < size) found.trailing_bytes = size - expected;
     out = std::move(bank);
     if (layout) *layout = found;
     return true;
@@ -421,10 +426,6 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
 bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string &error) {
     error.clear();
     out.clear();
-    if (bank.flags > 2) {
-        error = "the flags word is above 2, which the engine refuses";
-        return false;
-    }
     uint64_t total = SBF_HEADER_SIZE + (uint64_t)bank.streams.size() * SBF_ENTRY_SIZE;
     for (size_t i = 0; i < bank.streams.size(); ++i) {
         const SbfStream &stream = bank.streams[i];

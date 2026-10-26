@@ -12,6 +12,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -178,9 +179,11 @@ int main() {
 	bad = bank;
 	bad.streams[1].chunks[2].audio.resize(SBF_CHUNK_AUDIO + 1);
 	TEST_EXPECT(!sbf_write_bank(bad, written, error));
+	// Any flags word is written, the game playing every one but 1 as IMA ADPCM stereo [orig:
+	// AudioStream_Update @ 0x671CCA].
 	bad = bank;
 	bad.flags = 3;
-	TEST_EXPECT(!sbf_write_bank(bad, written, error));
+	TEST_EXPECT(sbf_write_bank(bad, written, error) && get_u32(written, 8) == 3);
 
 	// What the reader refuses: another magic, an entry past the file's end, a block under its header,
 	// a last chunk shorter than its header, entries whose sizes add up past the file (sharing bytes).
@@ -219,6 +222,15 @@ int main() {
 	broken = bytes;
 	broken.push_back(0);
 	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.trailing_bytes == 1);
+	// An index the header places past the streams: read there, the old place zeroed [orig:
+	// AudioVM_OpenContextFile @ 0x672245], and written back at byte 24.
+	broken = bytes;
+	broken.insert(broken.end(), bytes.begin() + SBF_HEADER_SIZE, bytes.begin() + SBF_HEADER_SIZE + 13 * SBF_ENTRY_SIZE);
+	std::fill(broken.begin() + SBF_HEADER_SIZE, broken.begin() + SBF_HEADER_SIZE + 13 * SBF_ENTRY_SIZE, uint8_t(0));
+	put_u32(broken, 16, uint32_t(bytes.size()));
+	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.index_moved &&
+	            layout.trailing_bytes == 0 && again.streams.size() == 13 && again.streams[0].name == "SILENCE");
+	TEST_EXPECT(sbf_write_bank(again, written, error) && written == bytes);
 	broken = bytes;
 	broken[SBF_HEADER_SIZE + 10] = 'Z';
 	TEST_EXPECT(sbf_read_bank(broken.data(), broken.size(), again, error, &layout) && layout.names_with_tails == 1 &&

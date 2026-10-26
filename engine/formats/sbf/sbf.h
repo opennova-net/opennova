@@ -44,9 +44,9 @@ inline constexpr int SBF_BITS_PER_SAMPLE = 16;
 typedef struct SbfHeader {
     uint32_t magic;
     uint32_t version;        /* 0x00000100; engine never reads */
-    uint32_t flags;          /* channel-format selector; engine accepts <= 2 */
+    uint32_t flags;          /* the stream paths' form: 1 byte-paired, any other IMA ADPCM stereo */
     uint32_t reserved;
-    uint32_t index_offset;   /* always 0x18 */
+    uint32_t index_offset;   /* where the live open reads the index; the writer's 0x18 */
     uint32_t entry_count;
 } SbfHeader;
 
@@ -76,8 +76,8 @@ typedef struct SbfArchive {
 
 /* --- API --- */
 
-/* Validate a bank's bytes: the header and the whole entry index inside `size`.
-   0 = OK, negative = error. */
+/* Validate a bank's bytes: the SBF0 magic, the header and the whole entry index
+   (at the header's index offset) inside `size`. 0 = OK, negative = error. */
 int sbf_validate(const uint8_t *data, size_t size);
 
 /* Open from a contiguous buffer (caller retains ownership of `data`).
@@ -274,9 +274,12 @@ struct SbfFile {
    last stream, a name with bytes after its terminator, chunks whose reserved
    pair is not the writer's, chunk tails not the writer's SBF_CHUNK_TAIL, and
    short chunks (a last chunk shorter than its block, written whole; a valid
-   count past its block, cut to it). A write keeps none of those. */
+   count past its block, cut to it), and an index the header places past byte
+   24 (written at 24; the bytes past the last stream are then not counted). A
+   write keeps none of those. */
 struct SbfFileLayout {
     size_t header_words_other = 0;
+    bool index_moved = false;
     bool packed = true;
     size_t trailing_bytes = 0;
     size_t names_with_tails = 0;
@@ -297,7 +300,8 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
 /* The bank's bytes from its fields alone, every chunk a whole block: false,
    with `error`, for a name past SBF_STREAM_NAME_MAX or holding a NUL, a
    block_size under a chunk header, a chunk playing more bytes than its block
-   holds, a flags word the engine refuses (above 2), or a bank past 4 GiB. */
+   holds, or a bank past 4 GiB. Any flags word is written: the game's stream
+   paths play 1 as byte-paired and any other as IMA ADPCM stereo. */
 bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string &error);
 
 /* A stream's audio as int16 PCM, byte-paired stereo interleaved (left then

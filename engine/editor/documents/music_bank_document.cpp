@@ -49,9 +49,9 @@ RecordTable make_table() {
 	TableKind bank(RecordKindRow{kBank, "bank", "Bank", "", true});
 	{
 		FieldSchema flags = schema_of("flags", FieldType::Integer, "Channel format",
-				"The header's channel-format word: the game opens a bank whose word is 2 at the most [orig: "
-				"AudioVM_OpenContextFile @ 0x672160, Sbf_OpenFile_Gamemus @ 0x4ED6C0]; every shipped bank says 1, byte-paired "
-				"stereo.");
+				"The header's channel-format word: the game opens a bank whatever it says and plays a stream of 1 as "
+				"byte-paired stereo, of any other as IMA ADPCM stereo [orig: AudioVM_OpenContextFile @ 0x672160; "
+				"AudioStream_Update @ 0x671CCA]; every shipped bank says 1.");
 		flags.read_only = true;
 		bank.field(RF{flags, {[](const RecordHandle &r, Value &out) { return out = int64_t(bank_of(r).flags), true; }}});
 		FieldSchema streams = schema_of("stream_count", FieldType::Integer, "Streams",
@@ -263,6 +263,10 @@ bool MusicBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The header's version or reserved word, which the game never reads, is not the writer's: a save "
 		                  "writes the writer's."});
+	if (layout.index_moved)
+		issues.push_back({false, 0, std::string(), std::string(),
+		                  "The header places the index elsewhere than byte 24, where the game reads it as the header says: "
+		                  "a save writes it at byte 24, the streams after it."});
 	if (!layout.packed)
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The streams are not laid out one after another in the index's order: a save writes them so."});
