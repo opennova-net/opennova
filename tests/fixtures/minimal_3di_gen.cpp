@@ -1335,7 +1335,10 @@ void check_facts(const std::string &name, const std::vector<uint8_t> &bytes) {
 						!std::strcmp(p.model.materials[0].shader_name, "FF_ST_OP#UV"),
 				name + ": material");
 	if (base == "panm") {
-		const bool expected_live = name.rfind("panm_live", 0) == 0;
+		// The spinner keeps its name from before JO's loader was witnessed: a type-1 row sets no
+		// runtime flag, so it stands still and is never live (simulation_test.gd says the same)
+		// [orig: GPM_LoadRenderModel @ 0x5B54C7..0x5B54F3].
+		const bool expected_live = name.rfind("panm_live", 0) == 0 && name != "panm_live_01_spinner";
 		expect(p.rows(0) == 1 && p.live(0) == expected_live, name + ": liveness");
 	}
 }
