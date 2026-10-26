@@ -1181,6 +1181,43 @@ void tank_sleep_gate_compares_attitude() {
         CHECK(v.veh.contact_solved_once == turned);
     }
 }
+// Every family's solve head runs the wheeled arm's two legs: the critical-drain smoke release,
+// a sleeping hull included, and the sleep gate's compare of X, Y and the attitude with the pose
+// the mover stamped at its entry, not with the caller's start (a carrier's ride moves that).
+// [orig: tracked @0x47C232..0x47C257 / @0x47C2E0..0x47C2F5; aircraft @0x47EF42..0x47EF67 /
+//  @0x47EFF0..0x47F005; light @0x479642..0x479676 / @0x4796E8..0x4796FA; Transform_ComparePartial
+//  @0x459180]
+void every_solve_head_releases_smoke_and_reads_the_entry_pose() {
+    for (const VehicleFamily family :
+            {VehicleFamily::Ground, VehicleFamily::Bike, VehicleFamily::Helicopter}) {
+        {
+            Rig r;
+            auto t = r.traits(family, true);
+            t.critical_drain = 7;
+            auto &v = r.entity();
+            v.health = 7;
+            v.veh.damage_smoke_active = true;
+            int32_t z = 65536;
+            r.contact(t, z);
+            CHECK(!v.veh.damage_smoke_active);
+        }
+        for (bool moved : {false, true}) {
+            Rig r;
+            auto t = r.traits(family, true);
+            auto &v = r.entity();
+            v.primary_occupant = {};
+            v.veh.speed = v.veh.cmd_speed = 0;
+            v.veh.slide_z = -100;
+            v.veh.contact_solved_once = false;
+            stamp_saved_live_pose(v);
+            if (moved) v.saved_live_yaw = opennova::io::bam_add(v.saved_live_yaw, 1);
+            int32_t z = 65536;
+            r.contact(t, z);
+            CHECK(v.veh.contact_solved_once == moved);
+        }
+    }
+}
+
 // The contact solves' in-water flag compares the pads' average with the water word
 // raw: a map with no water authored keeps it 0, so pads averaging below Z 0 are in
 // water and above it dry, no dry sentinel [orig: Entity_ProcessTrackedVehiclePhysics
@@ -1274,6 +1311,7 @@ int main() {
     tank_crash_state_precedes_growth();
     tank_sinks_survive_water();
     tank_sleep_gate_compares_attitude();
+    every_solve_head_releases_smoke_and_reads_the_entry_pose();
     tank_landing_pass_consumes_queued_forces();
     tank_critical_drain_releases_smoke();
     tank_wall_contact_stops_hull();

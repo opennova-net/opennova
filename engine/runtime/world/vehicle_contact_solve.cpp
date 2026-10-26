@@ -64,9 +64,34 @@ void contact_enter_crash(Entity::VehicleMotorState &m) {
 	vehicle_clear_chassis(m);
 }
 
+// Every solve head's two legs ahead of its sleep gate. A hull at or below its critical drain
+// drops the smoke emitter, a sleeping hull included (both sides signed words). The sleep gate's
+// pose test: X, Y and the attitude still equal the pose the mover stamped at its entry
+// (savedLivePose +0x80); a row the mover did not stamp compares X / Y against the caller's start.
+// [orig: Health vs def+0x182 then CEffectEmitter_ReleaseSafe of +0x1CC - tracked
+//  @0x47C232..0x47C257, aircraft @0x47EF42..0x47EF67, wheeled @0x475E25..0x475E65, light
+//  @0x479642..0x479676; Transform_ComparePartial @0x459180 (dwords 0, 1, 3, 4, 5) of [esi+4] vs
+//  [esi+80h] - tracked @0x47C2E0..0x47C2F5, aircraft @0x47EFF0..0x47F005, wheeled @0x475EFB,
+//  light @0x4796E8..0x4796FA]
+void release_critical_smoke(World &world, Entity &veh, const VehicleTraits &traits) {
+	if (static_cast<int16_t>(veh.health) <= static_cast<int16_t>(traits.critical_drain))
+		vehicle_smoke_effect(world, veh, true);
+}
+
+bool rest_pose_unchanged(const Entity &veh, int32_t px, int32_t py, int32_t start_x,
+		int32_t start_y) {
+	if (!veh.saved_live_valid) return px == start_x && py == start_y;
+	int32_t pose_now[3], yaw_now = 0, pitch_now = 0, roll_now = 0;
+	carrier_pose_fixed(veh, pose_now, yaw_now, pitch_now, roll_now);
+	return px == veh.saved_live_pos[0] && py == veh.saved_live_pos[1] &&
+			yaw_now == veh.saved_live_yaw && pitch_now == veh.saved_live_pitch &&
+			roll_now == veh.saved_live_roll;
+}
+
 } // namespace
 
 void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
+	release_critical_smoke(world, veh, traits);
     // A model with no box extents would fault the solve, which reads its
     // collision block unchecked (no stock model lacks one): ours keeps the
     // terrain-clamp stand-in for it (lib embedders, unit rigs).
@@ -84,7 +109,7 @@ void aircraft_contact_solve(World &world, Entity &veh, const VehicleTraits &trai
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
 			m.air_pitch_rate == 0 && m.air_roll_rate == 0 && (veh.flags & kEntityFlagInAir) == 0 &&
 			((veh.flags | veh.engine_flags) & 0x40u) == 0 && m.slide_z > -350 && m.slide_z < 0 &&
-			px == start_x && py == start_y && !veh.primary_occupant.valid() &&
+			rest_pose_unchanged(veh, px, py, start_x, start_y) && !veh.primary_occupant.valid() &&
 			m.spring_energy == 0 &&
 			std::all_of(
 					std::begin(m.plat_acc), std::end(m.plat_acc),
@@ -424,13 +449,14 @@ bool ground_contact_solve_active(const VehicleTraits &traits) {
 }
 
 void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
+	release_critical_smoke(world, veh, traits);
 	// Sleep requires the family velocity, occupancy, spring-energy and wreck-latch gates, then
 	// restores the vertical dribble.
 	// Witness sites: [orig: @0x47C244, @0x47C44B, @0x47C302]
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
 			m.air_pitch_rate == 0 && m.air_roll_rate == 0 &&
 			((veh.flags | veh.engine_flags) & (kEntityFlagInAir | 0x40u)) == 0 &&
-			m.slide_z > -350 && m.slide_z < 0 && px == start_x && py == start_y &&
+			m.slide_z > -350 && m.slide_z < 0 && rest_pose_unchanged(veh, px, py, start_x, start_y) &&
 			!veh.primary_occupant.valid() && m.spring_energy == 0 &&
 			std::all_of(
 					std::begin(m.plat_acc), std::end(m.plat_acc),
@@ -911,24 +937,13 @@ void wheeled_second_pass(World &world, Entity &veh, int32_t (&probes)[13][3],
 // dispatcher @0x48F004; Suspension_CompressWheelLinear @0x45CEB0; Suspension_OscillateWheel
 // @0x45D240]
 void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
-	// A hull at or below its critical drain drops the smoke emitter before
-	// anything else, a sleeping hull included. Both sides are signed words.
-	// [orig: Health vs def+0x182 @0x475E25..0x475E50 (`cmp cx, [eax+182h]; jg`);
-	//  CEffectEmitter_ReleaseSafe of +0x1CC @0x475E52..0x475E65]
-	if (static_cast<int16_t>(veh.health) <= static_cast<int16_t>(traits.critical_drain))
-		vehicle_smoke_effect(world, veh, true);
+	// The critical-drain smoke release, before anything else (release_critical_smoke).
+	release_critical_smoke(world, veh, traits);
 
-	// The wheeled sleep gate checks zero motion, the family flags, occupancy and spring energy.
-	// X/Y and the attitude must still equal the mover-entry pose; a row the mover did not stamp
-	// compares X/Y against the caller's start.
+	// The wheeled sleep gate checks zero motion, the family flags, occupancy and spring energy,
+	// and the mover-entry pose (rest_pose_unchanged).
 	// [orig: @0x475E6B..0x475F4D; Transform_ComparePartial @0x459180, call @0x475EFB]
-	int32_t pose_now[3], yaw_now = 0, pitch_now = 0, roll_now = 0;
-	carrier_pose_fixed(veh, pose_now, yaw_now, pitch_now, roll_now);
-	const bool pose_unchanged = veh.saved_live_valid
-			? px == veh.saved_live_pos[0] && py == veh.saved_live_pos[1] &&
-					yaw_now == veh.saved_live_yaw && pitch_now == veh.saved_live_pitch &&
-					roll_now == veh.saved_live_roll
-			: px == start_x && py == start_y;
+	const bool pose_unchanged = rest_pose_unchanged(veh, px, py, start_x, start_y);
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
 			m.air_pitch_rate == 0 && m.air_roll_rate == 0 &&
 			((veh.flags | veh.engine_flags) & (kEntityFlagInAir | 0x40u)) == 0 &&
@@ -1644,6 +1659,7 @@ void light_landing_compression(Entity::VehicleMotorState &m, const PlatProbeForc
 }
 
 void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits, Entity::VehicleMotorState &m, int32_t start_x, int32_t start_y, int32_t &px, int32_t &py, int32_t &pz) {
+	release_critical_smoke(world, veh, traits);
     // ---- sleep fast-path [orig: @0x47972C..0x479790]: velocities/speed/
     // rates zero, not airborne, not carried, slideDecay in (-300,-1] (the
     // unsigned `> 0xFFFFFED4` compare — the bike window is 300, not the
@@ -1654,8 +1670,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 	if (m.vel_x == 0 && m.vel_y == 0 && m.speed == 0 && m.wheel_rate_bam == 0 &&
 			m.air_pitch_rate == 0 && m.air_roll_rate == 0 &&
 			((veh.flags | veh.engine_flags) & (kEntityFlagInAir | 0x40u)) == 0 && m.crashed == 0 &&
-			m.slide_z > -300 && m.slide_z < 0 && px == start_x && py == start_y &&
-			m.spring_energy == 0) {
+			m.slide_z > -300 && m.slide_z < 0 &&
+			rest_pose_unchanged(veh, px, py, start_x, start_y) && m.spring_energy == 0) {
 		pz -= m.slide_z;
 		m.slide_z >>= 1;
 		if (world.ai.for_handle(veh.handle) == nullptr || m.cmd_speed == 0)
