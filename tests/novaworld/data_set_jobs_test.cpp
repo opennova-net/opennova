@@ -117,8 +117,9 @@ constexpr const char *kExpVersionUpdated = "Synthetic Expansion, V1.0.0.11; Engl
 // A base product's tree at `dir` as an install holds it: the boot table's three archives,
 // version.txt and score.ini. `updated` is the tree a release takes it to: an entry changed
 // and one added in resource.pff, one dropped; a mission added to localres.pff with its title
-// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt, a
-// loose file no tree holds.
+// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt and
+// loose.bms, loose files no tree holds (the second a mission the loose leg of an install's
+// catalog lists, D-MNU-25, which the tree's mission list must not).
 bool make_base_tree(const std::string &dir, bool updated) {
 	std::vector<pff::PffEditEntry> resource = { { "keep.def", bytes("kept"), 1100000000 },
 		{ "wpn.def", bytes(updated ? "rifle 2" : "rifle 1"),
@@ -143,11 +144,16 @@ bool make_base_tree(const std::string &dir, bool updated) {
 			make_archive(dir + "/localres.pff", localres) &&
 			make_archive(dir + "/language.pff", language) &&
 			write_text(dir + "/version.txt", updated ? kBaseVersionUpdated : kBaseVersion);
-	if (updated)
+	if (updated) {
+		const std::vector<uint8_t> loose = bms_blob("Loose Header", kCoop);
+		const std::string_view loose_bytes(
+				reinterpret_cast<const char *>(loose.data()), loose.size());
 		ok = ok && write_text(dir + "/_NSTMOUT.TXT", "60\r\n") &&
-				write_text(dir + "/readme.txt", "not a file of the tree");
-	else
+				write_text(dir + "/readme.txt", "not a file of the tree") &&
+				write_text(dir + "/loose.bms", loose_bytes);
+	} else {
 		ok = ok && write_text(dir + "/score.ini", "[score]\r\nkills=1\r\n");
+	}
 	return ok;
 }
 
@@ -461,12 +467,12 @@ int test_validate() {
 	TEST_EXPECT(sections.size() == 2);
 	if (sections.size() != 2)
 		return 1;
-	// The base: version.txt, _NSTMOUT.TXT and readme.txt written, score.ini removed; the three
-	// archives each a TARGET with their rows (charlie.bin; charlie.bms; wpn.def, add.def,
-	// drop.def).
+	// The base: version.txt, _NSTMOUT.TXT, readme.txt and loose.bms written, score.ini removed;
+	// the three archives each a TARGET with their rows (charlie.bin; charlie.bms; wpn.def,
+	// add.def, drop.def).
 	TEST_EXPECT(sections[0].data_set_id == base && sections[0].expansion.empty() &&
 			sections[0].command_file == "SYNPTR.CMD" && sections[0].version == "1.0.0.10" &&
-			sections[0].row_count == 12 && sections[0].blob_bytes > 0 && !sections[0].tree_id);
+			sections[0].row_count == 13 && sections[0].blob_bytes > 0 && !sections[0].tree_id);
 	// The expansion: version.txt; delta.bms and delta.bin under their archives.
 	TEST_EXPECT(sections[1].data_set_id == expansion && sections[1].expansion == "jox01" &&
 			sections[1].command_file == "SYNEPTR.CMD" && sections[1].version == "1.0.0.11" &&
@@ -631,7 +637,8 @@ int test_apply() {
 	for (size_t i = 0; i < 5 && i < tree->files.size(); ++i)
 		TEST_EXPECT(tree->files[i].name == names[i]);
 	TEST_EXPECT(file_named(tree->files, "score.ini") == nullptr &&
-			file_named(tree->files, "readme.txt") == nullptr);
+			file_named(tree->files, "readme.txt") == nullptr &&
+			file_named(tree->files, "loose.bms") == nullptr);
 	// The loose files byte for byte, the archives entry for entry, as the updated tree holds
 	// them: made from nothing, so the entries the release left as they were (keep.def) are there
 	// beside the changed and added ones; the stray object gone.
@@ -654,6 +661,7 @@ int test_apply() {
 		return rc;
 	// The release's version, its command file's (no version file read for a release, ADR 0067).
 	TEST_EXPECT(tree->version_text == "1.0.0.10");
+	// The scratch folder's loose.bms lists in an install's catalog, never in the tree's.
 	TEST_EXPECT(tree->missions.size() == 3);
 	TEST_EXPECT(tree->missions.size() == 3 && tree->missions[0].file == "ALPHA.BMS" &&
 			tree->missions[1].file == "BRAVO.BMS" && tree->missions[2].file == "CHARLIE.BMS" &&

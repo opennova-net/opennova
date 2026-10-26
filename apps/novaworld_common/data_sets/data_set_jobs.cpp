@@ -170,6 +170,8 @@ bool scan_missions(const DataSetRow &data_set, const std::string &dir,
 	for (const mission_catalog::Row &row : rows) {
 		if (row.game_mode == 0)
 			continue; // a single-player mission: no server rotates it
+		if (row.loose)
+			continue; // a stray file in the scratch folder: the tree keeps no loose mission
 		out.push_back({ row.file, row.title });
 	}
 	return true;
