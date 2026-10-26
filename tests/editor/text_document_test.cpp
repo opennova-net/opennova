@@ -74,7 +74,6 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
 #include <formats/cbin/binary_config.h>
-#include <formats/cbin/cbin.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mus/mus.h>

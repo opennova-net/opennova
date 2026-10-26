@@ -35,7 +35,6 @@ add_library(opennova_formats STATIC
     # cbin — credits binary
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config.cpp # the CBIN form read and written exactly
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config_text.cpp # the CBIN form <-> its ConfigFile text form
-    ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
     # charattr — charattr.def, the character classes' attributes (read and written)
     ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/charattr/charattr_write.cpp

@@ -10,7 +10,6 @@
 #include <editor/model/text_document.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/binary_config_text.h>
-#include <formats/cbin/cbin.h>
 #include <formats/configfile/config_file.h>
 
 namespace opennova::editor {

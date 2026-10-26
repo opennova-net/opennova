@@ -1212,7 +1212,7 @@ target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
 # fixtures/cbin: the synthetic credits lists (synth_nlist*.kda through
-# cbin::encode, in the JO, JOX01 and BHD shapes the shipped lists take),
+# cbin::encode_binary_config, in the JO, JOX01 and BHD shapes the shipped lists take),
 # credits_image.png (the 8x8 PNG the credits tests stage under the image name
 # the minted .kda references; a self-contained PNG writer) and particle_dot.tga
 # (the effect-world test's particle sprite).
@@ -2430,23 +2430,12 @@ target_include_directories(particle_gore_set_catalog_test PRIVATE ${CMAKE_CURREN
 target_compile_features(particle_gore_set_catalog_test PRIVATE cxx_std_17)
 add_test(NAME particle_gore_set_catalog COMMAND particle_gore_set_catalog_test)
 
-# CBIN tests
-add_executable(cbin_unit_test cbin/cbin_unit_test.cpp)
-target_link_libraries(cbin_unit_test PRIVATE opennova_formats)
-target_include_directories(cbin_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME cbin_unit COMMAND cbin_unit_test)
-
+# CBIN tests: the minted credits lists through the form's reader and writer, byte for byte.
 add_executable(cbin_roundtrip_test cbin/cbin_roundtrip_test.cpp)
 target_link_libraries(cbin_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(cbin_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(cbin_roundtrip_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME cbin_roundtrip COMMAND cbin_roundtrip_test)
-
-add_executable(cbin_display_view_test cbin/cbin_display_view_test.cpp)
-target_link_libraries(cbin_display_view_test PRIVATE opennova_formats)
-target_include_directories(cbin_display_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(cbin_display_view_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME cbin_display_view COMMAND cbin_display_view_test)
 
 # The CBIN form and its ConfigFile text form, each into the other (formats/cbin/binary_config_text.h):
 # a credits-shaped CBIN through its text and back byte for byte, what the text form cannot carry, and

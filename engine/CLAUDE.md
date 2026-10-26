@@ -131,12 +131,9 @@
   its Windows call needs `<windows.h>`. A child process starts through `base/proc`
   (`proc::ChildProcess`: an argv array with no shell, the identity, `process_liveness`,
   release without a kill), the one process seam of the apps and the front ends; it is
-  platform plumbing (citation allowlist). The one `std::random_device` left in `engine/`
-  is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
-  file with no preserved key) is written in the clear in the file's own header, so it
-  only obfuscates and is neither a secret nor an id, and formats cannot link base. The
-  second named exception is the game protocol's wire-parity values, which retail derives
-  from the NAPI manager's 16-bit LCG or the protocol's connection counter: the host key
+  platform plumbing (citation allowlist). The one named exception is the game
+  protocol's wire-parity values, which retail derives from the NAPI manager's 16-bit
+  LCG or the protocol's connection counter: the host key
   (HK), each connection's SK / CK and SCRK, and the CI (`net/npwire/nw_session_framing.h`:
   `manager_session_key`, `manager_connection_keys`, `next_connection_index`; D-NET-524,
   D-NET-521), and the NovaWorld lobby client's CK and SCRK (the same manager) and CI (its

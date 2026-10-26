@@ -5,8 +5,7 @@
 // integer, a float or a string, by the value's flags), and what the form keeps beside
 // them (the cipher's key, the string table's order, each label's terminator), so decode then encode
 // writes the bytes read, whatever words the game's reader takes: a null name (index 0), an entry of any number
-// of values, a value of any flags, a terminator that names an entry. cbin.h's Credits is the credits' view
-// of the same bytes.
+// of values, a value of any flags, a terminator that names an entry.
 #pragma once
 
 #include <cstddef>
@@ -19,6 +18,15 @@ struct ConfigSection;
 }
 
 namespace opennova::cbin {
+
+// The form's magic, "CBIN" read as a little-endian word, the first of its 20-byte header: the magic, the
+// string table's offset, the table's length, its string count and the cipher's key [orig:
+// ConfigFile_LoadFromFile @ 0x760a10 - the magic test @ 0x760aa3; ConfigFile_ParseBinary @ 0x75e8a0].
+inline constexpr uint32_t kMagic = 0x4E494243u;
+inline constexpr size_t kHeaderSize = 20;
+
+// Whether `data` opens with the form's magic (the 20-byte header there to read).
+bool is_cbin(const uint8_t *data, size_t size);
 
 struct BinaryConfig {
 	// A value's flags as the writer sets them: an integer, a float's bits, a string's index.

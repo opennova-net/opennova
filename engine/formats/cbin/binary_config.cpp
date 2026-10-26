@@ -1,11 +1,10 @@
-// The CBIN form read and written exactly (binary_config.h). The layout is the one cbin.cpp's
-// Credits reader walks and its writer lays out [orig: the writer @ 0x75e250: magic @ 0x75e311,
-// the 20-byte header, the cipher loop @ 0x75e348], read here whatever the labels.
+// The CBIN form read and written exactly (binary_config.h): the layout the game's ConfigFile writer
+// lays out [orig: the writer @ 0x75e250: magic @ 0x75e311, the 20-byte header, the cipher loop
+// @ 0x75e348], read here whatever the labels.
 #include <formats/cbin/binary_config.h>
 
 #include <base/io/bits.h>
 #include <base/io/le.h>
-#include <formats/cbin/cbin.h>
 #include <formats/configfile/config_file.h>
 
 #include <cstring>
@@ -15,14 +14,16 @@ namespace opennova::cbin {
 
 namespace {
 
-constexpr size_t kHeaderSize = 20;
-
 bool fail(std::string &error, const char *why) {
 	error = why;
 	return false;
 }
 
 } // namespace
+
+bool is_cbin(const uint8_t *data, size_t size) {
+	return data != nullptr && size >= kHeaderSize && io::read_u32_le(data) == kMagic;
+}
 
 void apply_cipher(uint8_t *data, size_t size, uint32_t key) {
 	for (size_t i = 0; i < size; ++i) {
