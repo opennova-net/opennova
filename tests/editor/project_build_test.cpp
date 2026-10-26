@@ -1312,6 +1312,59 @@ static int test_export() {
 	return 0;
 }
 
+// The base game's version text (a standalone project's version.txt, its install's root one as a game you own
+// imports it): the game never reads it and the updater reads it alone, loose in the game's folder, its CRC at
+// its start and at its end, then "No Update Needed!" or "Current Version:" and its text [orig:
+// Cupdate2Dlg_OnInitDialog @ 0x4090e0 (UPDATE.EXE); Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]. The
+// build copies it loose beside the archives, never into one; the export carries it there with its bytes,
+// where a release packs it as a loose row of the base's command file. A build of the same project as an
+// expansion puts it in the expansion's folder instead, its own version text.
+static int test_base_version_text_ships_loose_at_the_root() {
+	Project p("opennova_editor_build_base_version_test");
+	TEST_EXPECT(p.create() && p.fill());
+	const std::string version = "Synthetic Game: Base, V1.0.0.1; English";
+	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", version));
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok);
+	size_t loose = 0;
+	for (const BuildEntry &entry : plan.loose)
+		if (entry.logical_name == "version.txt") {
+			++loose;
+			TEST_EXPECT(entry.build_path == "version.txt" && entry.kind == AssetKind::Text);
+		}
+	TEST_EXPECT(loose == 1);
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "version.txt");
+	const AssetEntry asset = entry_of("version.txt", AssetKind::Text);
+	const BuildPlaceWords standalone = build_place_words(asset), expansion = build_place_words(asset, "jxm");
+	TEST_EXPECT(standalone.packed && standalone.words.find("beside the archives") != std::string::npos);
+	TEST_EXPECT(expansion.packed && expansion.words.find("expansion/jxm/version.txt") != std::string::npos);
+
+	const BuildReport build = run_build(plan, p.output_root());
+	for (const Diagnostic &d : build.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(build.ok && test_io::read_file_text(build.build_dir + "/version.txt") == version);
+	TEST_EXPECT(std::find(build.loose_written.begin(), build.loose_written.end(), "version.txt") != build.loose_written.end());
+	ExportRequest request;
+	request.build_dir = build.build_dir;
+	request.build_id = build.build_id;
+	request.export_dir = p.dir.file("shipped/Game");
+	request.project_id = p.doc.project_id;
+	const ExportReport shipped = export_build(request);
+	for (const Diagnostic &d : shipped.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(shipped.ok && std::find(shipped.files.begin(), shipped.files.end(), "version.txt") != shipped.files.end());
+	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/version.txt") == version);
+	// No archive of the export holds it: the game's own mount, archives alone over the boot table, has no such name.
+	{
+		opennova::Vfs vfs;
+		TEST_EXPECT(vfs.mount_game(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
+		                           opennova::VfsArchiveDiscovery::RetailTable));
+		TEST_EXPECT(vfs.has_mounted_archive() && vfs.has_file("main.mnu") && !vfs.has_file("version.txt"));
+	}
+	return 0;
+}
+
 // A file of `size` bytes that is no text the game reads: a loose music bank's bytes.
 static bool write_filler(const std::string &path, size_t size) {
 	std::vector<uint8_t> bytes(size);
@@ -2092,6 +2145,7 @@ int main() {
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();
+	failures += test_base_version_text_ships_loose_at_the_root();
 	failures += test_lean_packing();
 	failures += test_base_gate();
 	failures += test_expansion_table_texts();

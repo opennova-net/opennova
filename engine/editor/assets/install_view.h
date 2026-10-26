@@ -38,21 +38,26 @@ namespace opennova::editor {
 // as M<b>.* and G<b>.*, which the game reads in their place under /exp <b>. The expansion's version
 // text is listed only where the project is that expansion (installed_expansion_spec: it keeps the install's),
 // a project of another expansion making its own; the player's own files never (gameprofile/player_files.h).
+// The base game's version text, the install's root version.txt, which the game never reads and the updater
+// reads alone [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)], is listed only where the project is
+// the base game (`standalone_project`: install_spec of a standalone project), loose from the root, never an
+// archived copy; an expansion project's base game (base_install_spec) leaves it out.
 struct InstallSpec {
 	std::string root;              // the install's folder
 	std::string game;              // the gameprofile code its archives are keyed by
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
+	bool standalone_project = false; // the view of a standalone project, which is the base game (install_spec)
 
 	bool operator==(const InstallSpec &other) const {
 		return root == other.root && game == other.game && expansion == other.expansion &&
-		       project_expansion == other.project_expansion;
+		       project_expansion == other.project_expansion && standalone_project == other.standalone_project;
 	}
 	bool operator!=(const InstallSpec &other) const { return !(*this == other); }
 };
 
 // The view of an install a project imports from: its game, `/exp` the expansion it builds on, its own
-// expansion's name.
+// expansion's name; a standalone project's, the base game's version text too.
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document);
 // The base game's view of the same install: no expansion, no renames.
 InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document);
@@ -82,7 +87,8 @@ public:
 	bool is_open() const { return open_; }
 	const InstallSpec &spec() const { return spec_; }
 
-	// Every file, each name once: the archives' in their names' order, then the loose files in theirs.
+	// Every file, each name once: the archives' in their names' order, then the loose files in theirs (a
+	// standalone project's version text last).
 	const std::vector<InstallFile> &files() const { return files_; }
 	// The file the project gets as `project_name` (compared without case, as the game compares
 	// names); null when the view has none.
