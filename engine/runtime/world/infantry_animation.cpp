@@ -269,21 +269,6 @@ RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t lo
     return frame;
 }
 
-void advance_primary_channel_fallback(InfantryState &inf) {
-    prepare_primary_channel(inf, nullptr, nullptr);
-    if (primary_blend_active(inf)) {
-        inf.anim_prev_clip_phase = (inf.anim_prev_clip_phase + 1) % 62;
-        inf.clip_phase = (inf.clip_phase + 1) % 62;
-        inf.anim_blend_weight += inf.anim_blend_step;
-        if (inf.anim_blend_weight >= 1.0f) {
-            inf.anim_blend_weight = 1.0f;
-            inf.anim_blend_step = 0.0f;
-        }
-        return;
-    }
-    inf.clip_phase = (inf.clip_phase + 1) % 62;
-}
-
 // The re-init serves the played state's ring entry: the insert's when one
 // replaces the request. [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
 void begin_body_transition_with_insert(InfantryState &inf, int resolved,

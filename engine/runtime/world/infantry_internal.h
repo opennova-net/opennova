@@ -117,7 +117,6 @@ int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, i
 // `rings` (AnimVariantRings).
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
                              AnimVariantRings &rings, RootMotionFrame &out);
-void advance_primary_channel_fallback(InfantryState &inf);
 // The SHARED secondary-channel advance — the part of the upper-body channel that runs for
 // EVERY organic body, player or AI: the clip-end deferred promotion and the playhead/blend
 // step, its re-inits and wraps serving `rings`. Both body updaters run it at their motor
