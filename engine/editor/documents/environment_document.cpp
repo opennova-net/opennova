@@ -44,31 +44,10 @@ TrnKeyLine &terrain_key_of(const RecordHandle &record) { return record.as<TrnKey
 
 // --- values -------------------------------------------------------------------------------------
 
-// A whole number from a Value: a whole number, or a real holding one (the wire's numbers).
-bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (whole_number(value, out)) return true;
-	error = "A whole number.";
-	return false;
-}
-
 bool in_range(int64_t value, int64_t min, int64_t max, const char *words, std::string &error) {
 	if (value >= min && value <= max) return true;
 	error = words;
 	return false;
-}
-
-bool real_of(const Value &value, double &out, std::string &error) {
-	if (const auto *real = std::get_if<double>(&value)) out = *real;
-	else if (const auto *whole = std::get_if<int64_t>(&value)) out = static_cast<double>(*whole);
-	else {
-		error = "A number.";
-		return false;
-	}
-	if (!std::isfinite(out)) {
-		error = "A finite number.";
-		return false;
-	}
-	return true;
 }
 
 // A colour channel's byte where the record holds bytes (terrain_rgb, held to them at the parse, and

@@ -121,6 +121,12 @@ inline std::string fixed_string(const char *data, size_t max_len)
         ++len;
     return std::string(data, len);
 }
+// The same of a char array field, its whole width.
+template <size_t N>
+inline std::string fixed_string(const char (&field)[N])
+{
+    return fixed_string(field, N);
+}
 
 // Decode an even-length ASCII hex string (either case) into bytes; false on
 // an odd length or a non-hex digit. The .hexcap capture format and the

@@ -45,8 +45,6 @@ std::string bit_words(uint32_t bit) {
 	return "the walking fire's latch";
 }
 
-template <size_t N> std::string text_of(const char (&field)[N]) { return strutil::fixed_string(field, N); }
-
 } // namespace
 
 io::JsonValue clip_fire_options_to_json(const ClipFireOptions &options) {
@@ -240,7 +238,7 @@ PreviewVec3 ClipFire::launch_point_(int launch_slot, int32_t clip_tick, std::str
 	// A zero byte: the body's raw position [orig: Entity_GetAttachmentWorldPosition @0x4b2767..0x4b278e].
 	if (byte == 0 || !model_ || byte > model_->user_point_count) return PreviewVec3{};
 	const threedi::ThreediUserPoint &point = model_->user_points[byte - 1];
-	name = text_of(point.name);
+	name = strutil::fixed_string(point.name);
 	float p[3];
 	threedi::threedi_user_point_position(&point, p);
 	PreviewVec3 at = preview_from_model(p);

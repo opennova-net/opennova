@@ -35,19 +35,6 @@ const BankSet &set_of(const RecordHandle &r) { return r.as<BankSet>(); }
 const BankLayer &layer_of(const RecordHandle &r) { return r.as<BankLayer>(); }
 const BankMember &member_of(const RecordHandle &r) { return r.as<BankMember>(); }
 
-// A number a field takes, whole or not (the wire and the widgets give either).
-bool number_of(const Value &value, double &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = double(*whole);
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value)) {
-		out = *real;
-		return std::isfinite(out);
-	}
-	return false;
-}
-
 // A name the game looks up: plain printable ASCII within the bytes its field keeps.
 bool set_name(std::string &field, size_t bytes, const char *what, const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
@@ -74,7 +61,7 @@ Value ratio_value(uint32_t q16) { return double(q16) / double(lwf::kPitchUnityQ1
 
 bool set_ratio(uint32_t &field, const Value &value, const char *what, std::string &error) {
 	double number = 0.0;
-	if (!number_of(value, number) || number < 0.0 || number * lwf::kPitchUnityQ16 > double(INT32_MAX)) {
+	if (!real_number(value, number) || number < 0.0 || number * lwf::kPitchUnityQ16 > double(INT32_MAX)) {
 		error = std::string(what) + " is a number from 0 to 32767.";
 		return false;
 	}

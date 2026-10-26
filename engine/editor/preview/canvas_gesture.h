@@ -104,6 +104,9 @@ inline bool operator==(const CanvasSubject &a, const CanvasSubject &b) {
 inline bool operator!=(const CanvasSubject &a, const CanvasSubject &b) {
 	return !(a == b);
 }
+class ViewportModel;
+// A viewport's own subject: its document's path alone (the definition and the orbit canvases).
+CanvasSubject canvas_subject(const ViewportModel &viewport);
 
 // What a canvas asks of the session (ADR 0046 S13 V2, V5): every change a request, raised by the
 // editor's windows as a window request (ui/viewport_canvas), recorded by a test: a record selected,

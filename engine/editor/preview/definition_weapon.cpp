@@ -30,8 +30,6 @@ using io::json_string;
 // A long hold or a long run is many events: the envelope carries the last of them.
 constexpr size_t kEventsShown = 64;
 
-template <size_t N> std::string text_of(const char (&field)[N]) { return strutil::fixed_string(field, N); }
-
 PreviewVec3 add(const PreviewVec3 &a, const PreviewVec3 &b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 PreviewVec3 scale(const PreviewVec3 &a, float s) { return {a.x * s, a.y * s, a.z * s}; }
 float length(const PreviewVec3 &a) { return std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z); }
@@ -167,7 +165,7 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	bool moved = !active_ || first != first_ || gun_moved;
 	active_ = true;
 	first_ = first;
-	record_ = text_of(row.weapon_name);
+	record_ = strutil::fixed_string(row.weapon_name);
 	gun_ = gun;
 	gun_file_ = gun_file;
 	width_ = width;
@@ -182,7 +180,7 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 		// The first person (DI-13): the weapon paired with its map, its gfx1 the rig's model, its animadm the rig.
 		PreviewRig rig;
 		rig.model = gun_file;
-		rig.table = adm_file(scan, text_of(row.animadm));
+		rig.table = adm_file(scan, strutil::fixed_string(row.animadm));
 		rig.record_file = catalog;
 		rig.record = record_;
 		rig.record_field = "animadm";
@@ -301,7 +299,7 @@ void DefinitionWeapon::frame_(const def::DefWeaponDef &row, const OrbitCamera &o
 	origin_ = PreviewVec3{0.0f, 0.0f, 0.0f};
 	forward_ = PreviewVec3{0.0f, 0.0f, 1.0f};
 	up_ = PreviewVec3{0.0f, 1.0f, 0.0f};
-	const std::string launch = text_of(row.launch_user_point);
+	const std::string launch = strutil::fixed_string(row.launch_user_point);
 	PreviewVec3 at, direction;
 	if (!launch.empty() && model_point_(launch, at, direction)) {
 		origin_ = at;

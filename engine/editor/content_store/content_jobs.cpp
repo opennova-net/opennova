@@ -22,10 +22,6 @@ constexpr size_t kMissingBatch = 20000;
 // The files one downloads request names: the service's ContentRoutes::kDownloadsMax.
 constexpr size_t kDownloadsBatch = 1000;
 
-std::string count_text(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
-}
-
 // A head before the folder's base: the store was reset (a NovaWorld database reset) since the
 // folder last pulled or pushed, so its revision numbers name other revisions now.
 std::string reset_text(const ContentBinding &binding, int64_t head) {

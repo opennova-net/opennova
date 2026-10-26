@@ -33,6 +33,11 @@
 
 namespace opennova::editor {
 
+// "<n> <one>" or "<n> <many>": a count in the content store's words (its jobs' and the controller's status).
+inline std::string count_text(size_t n, const char *one, const char *many) {
+	return std::to_string(n) + " " + (n == 1 ? one : many);
+}
+
 enum class ContentJobState : uint8_t {
 	Running,
 	NeedsResolution, // a pull's conflicts: settle each (resolve), then resume

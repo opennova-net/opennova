@@ -14,8 +14,6 @@ namespace {
 
 constexpr NodeKind kMaterial = node_kind(ModelKind::Material);
 
-JsonValue number(double value) { return json_number(value); }
-
 } // namespace
 
 JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &page) {
@@ -24,13 +22,13 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 	for (const FieldChoice &choice : model_surface_choices()) {
 		const ModelSurfaceWords words = model_surface_words(choice.value);
 		JsonValue entry = JsonValue::make_object();
-		entry.set("surface", number(double(choice.value)));
+		entry.set("surface", json_number(double(choice.value)));
 		entry.set("name", json_string(words.name));
 		entry.set("tag", json_string(words.tag));
 		entry.set("label", json_string(choice.label));
 		// Whether rounds go on through it and what that costs them (the game's pass-through table).
 		entry.set("passes", JsonValue::make_bool(words.passes));
-		if (words.passes) entry.set("energy_cost", number(words.energy_cost));
+		if (words.passes) entry.set("energy_cost", json_number(words.energy_cost));
 		if (!words.note.empty()) entry.set("note", json_string(words.note));
 		surfaces.push(std::move(entry));
 	}
@@ -39,7 +37,7 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 	for (const ModelFaceFlag &flag : model_face_flags()) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("flag", json_string(flag.token));
-		entry.set("bit", number(double(flag.bit)));
+		entry.set("bit", json_number(double(flag.bit)));
 		entry.set("label", json_string(flag.label));
 		entry.set("tip", json_string(flag.tip));
 		flags.push(std::move(entry));
@@ -47,15 +45,15 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 	out.set("flags", std::move(flags));
 	const ModelRow *row = model.model_row();
 	const CollisionRow *collision = model.collision_row();
-	out.set("faces", number(collision ? double(collision->faces.size()) : 0.0));
-	out.set("without_material", number(double(model_faces_without_material(model))));
+	out.set("faces", json_number(collision ? double(collision->faces.size()) : 0.0));
+	out.set("without_material", json_number(double(model_faces_without_material(model))));
 	const std::shared_ptr<const ModelFaceMaterials> made =
 			row ? model_face_materials(row->base) : std::make_shared<const ModelFaceMaterials>();
-	out.set("collision_lod", number(double(made->lod)));
+	out.set("collision_lod", json_number(double(made->lod)));
 	// Faces with triangles of more than one material about them (the winding decided which), and those
 	// left a triangle wound against them.
-	out.set("ambiguous", number(double(made->ambiguous)));
-	out.set("against_winding", number(double(made->against)));
+	out.set("ambiguous", json_number(double(made->ambiguous)));
+	out.set("against_winding", json_number(double(made->against)));
 	const size_t count = row ? row->materials.size() : 0;
 	set_page(out, page, count);
 	JsonValue list = JsonValue::make_array();
@@ -65,20 +63,20 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 		ModelMaterialSurface surface;
 		model_material_surface(model, id, surface);
 		JsonValue entry = JsonValue::make_object();
-		entry.set("id", number(double(id)));
-		entry.set("index", number(double(i)));
+		entry.set("id", json_number(double(id)));
+		entry.set("index", json_number(double(i)));
 		entry.set("title", json_string(model_record_label(model, address, nullptr)));
-		entry.set("faces", number(double(surface.faces)));
-		entry.set("surface", surface.faces && !surface.mixed() ? number(double(surface.common())) : JsonValue::make_null());
+		entry.set("faces", json_number(double(surface.faces)));
+		entry.set("surface", surface.faces && !surface.mixed() ? json_number(double(surface.common())) : JsonValue::make_null());
 		entry.set("words", json_string(model_material_surface_words(surface)));
 		entry.set("mixed", JsonValue::make_bool(surface.mixed()));
 		JsonValue counts = JsonValue::make_array();
 		for (const ModelSurfaceCount &c : surface.surfaces) {
 			JsonValue one = JsonValue::make_object();
-			one.set("surface", number(double(c.surface)));
+			one.set("surface", json_number(double(c.surface)));
 			one.set("name", json_string(model_surface_words(c.surface).name));
 			one.set("passes", JsonValue::make_bool(model_surface_words(c.surface).passes));
-			one.set("faces", number(double(c.faces)));
+			one.set("faces", json_number(double(c.faces)));
 			counts.push(std::move(one));
 		}
 		entry.set("counts", std::move(counts));
@@ -86,11 +84,11 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 		for (size_t f = 0; f < surface.flags.size() && f < model_face_flags().size(); ++f) {
 			JsonValue one = JsonValue::make_object();
 			one.set("flag", json_string(model_face_flags()[f].token));
-			one.set("on", number(double(surface.flags[f].on)));
+			one.set("on", json_number(double(surface.flags[f].on)));
 			on.push(std::move(one));
 		}
 		entry.set("flags", std::move(on));
-		entry.set("differing", number(double(surface.differing.size())));
+		entry.set("differing", json_number(double(surface.differing.size())));
 		list.push(std::move(entry));
 	}
 	out.set("materials", std::move(list));
@@ -99,7 +97,7 @@ JsonValue model_surfaces_to_json(const ModelDocument &model, const JsonPage &pag
 
 JsonValue model_differing_faces_to_json(const ModelDocument &model, NodeId material, const JsonPage &page) {
 	JsonValue out = JsonValue::make_object();
-	out.set("material", number(double(material)));
+	out.set("material", json_number(double(material)));
 	ModelMaterialSurface surface;
 	model_material_surface(model, material, surface);
 	const CollisionRow *collision = model.collision_row();
@@ -109,9 +107,9 @@ JsonValue model_differing_faces_to_json(const ModelDocument &model, NodeId mater
 	for (size_t i = page.first(count); i < page.last(count); ++i) {
 		const size_t face = surface.differing[i];
 		JsonValue entry = JsonValue::make_object();
-		entry.set("id", number(double(collision->ids.lists[kCollisionFaces][face].id)));
-		entry.set("index", number(double(face)));
-		entry.set("surface", number(double(collision->faces[face].poly_type)));
+		entry.set("id", json_number(double(collision->ids.lists[kCollisionFaces][face].id)));
+		entry.set("index", json_number(double(face)));
+		entry.set("surface", json_number(double(collision->faces[face].poly_type)));
 		entry.set("name", json_string(model_surface_words(collision->faces[face].poly_type).name));
 		list.push(std::move(entry));
 	}

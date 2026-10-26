@@ -23,12 +23,6 @@ constexpr float kLookReach = 0.25f;
 // How far before the game's camera its frustum's picture stands, metres.
 constexpr float kFrustumDepth = 0.12f;
 
-CanvasSubject subject_of(const ViewportModel &viewport) {
-	CanvasSubject subject;
-	subject.path = viewport.path();
-	return subject;
-}
-
 PreviewVec3 along(const PreviewVec3 &at, const PreviewVec3 &way, float metres) {
 	return PreviewVec3{at.x + way.x * metres, at.y + way.y * metres, at.z + way.z * metres};
 }
@@ -66,7 +60,7 @@ void frustum(OverlayList &list, const OrbitCamera &camera, const DefinitionViewp
 
 void DefinitionCanvas::follow(const ViewportModel &viewport, const ViewportContext &, CanvasRequests &out) {
 	viewport_ = static_cast<const DefinitionViewport *>(&viewport);
-	gesture_.frame(subject_of(viewport), out);
+	gesture_.frame(canvas_subject(viewport), out);
 }
 
 int DefinitionCanvas::eye_under(const ViewportContext &context, float x, float y) const {
@@ -93,7 +87,7 @@ void DefinitionCanvas::input(const ViewportContext &context, const CanvasInput &
 	bool moved = false;
 	const std::vector<DefinitionViewport::Eye> eyes = viewport.eyes(in.width, in.height);
 	if (in.pressed) {
-		gesture_.press(subject_of(viewport), in.screen, out);
+		gesture_.press(canvas_subject(viewport), in.screen, out);
 		pan_ = in.middle || in.keys.shift;
 		grabbed_ = in.middle ? -1 : eye_under(context, in.mouse.x, in.mouse.y);
 		if (grabbed_ >= 0) {

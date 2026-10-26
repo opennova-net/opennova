@@ -228,4 +228,12 @@ io::JsonValue PreviewAmbientMix::channels_json(const std::function<io::JsonValue
 	return channels;
 }
 
+io::JsonValue listen_point_json(const PreviewVec3 &at) {
+	double mission[3];
+	preview_to_mission(at, mission);
+	io::JsonValue out = io::JsonValue::make_array();
+	for (const double axis : mission) out.push(io::json_number(std::round(axis * 100.0) / 100.0));
+	return out;
+}
+
 } // namespace opennova::editor

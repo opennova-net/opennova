@@ -37,14 +37,10 @@ using opennova::editor::DiagnosticSeverity;
 constexpr int kIconSize = 16;
 constexpr int kGutterWidth = kIconSize + 4;
 
-// The windows' colours of a severity (ui_kit::severity_color).
+// The windows' colours of a severity (editor/model/diagnostic.h severity_rgb, ui_kit's too).
 Color severity_color(DiagnosticSeverity severity) {
-	switch (severity) {
-	case DiagnosticSeverity::Info: return Color(0.75f, 0.75f, 0.75f);
-	case DiagnosticSeverity::Warning: return Color(0.95f, 0.80f, 0.40f);
-	case DiagnosticSeverity::Error: return Color(0.95f, 0.55f, 0.45f);
-	}
-	return Color(1.0f, 1.0f, 1.0f);
+	const opennova::editor::SeverityRgb rgb = opennova::editor::severity_rgb(severity);
+	return Color(rgb.r, rgb.g, rgb.b);
 }
 
 size_t severity_index(DiagnosticSeverity severity) {

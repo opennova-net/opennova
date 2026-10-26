@@ -23,10 +23,6 @@ namespace opennova::editor {
 
 namespace {
 
-std::string count_text(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
-}
-
 // Whether the folder at `dir` may take a get: missing, empty, or holding the machine's own folder
 // alone (a get cut short before its first file).
 bool empty_folder(const std::string &dir) {

@@ -39,31 +39,10 @@ int *cells_of(const RecordHandle &record) { return &record.as<int>(); }
 
 // --- values -------------------------------------------------------------------------------------
 
-// A whole number from a Value (model/value.h whole_number: a real holding one within 9e15).
-bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (whole_number(value, out)) return true;
-	error = "A whole number.";
-	return false;
-}
-
 bool in_range(int64_t value, int64_t min, int64_t max, const std::string &words, std::string &error) {
 	if (value >= min && value <= max) return true;
 	error = words;
 	return false;
-}
-
-bool real_of(const Value &value, double &out, std::string &error) {
-	if (const auto *real = std::get_if<double>(&value)) out = *real;
-	else if (const auto *whole = std::get_if<int64_t>(&value)) out = static_cast<double>(*whole);
-	else {
-		error = "A number.";
-		return false;
-	}
-	if (!std::isfinite(out)) {
-		error = "A finite number.";
-		return false;
-	}
-	return true;
 }
 
 // The next power of two at or past `n`, at most 16.
