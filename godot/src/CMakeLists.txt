@@ -77,6 +77,7 @@ add_library(opennova_bindings OBJECT
     terrain/terrain_data.cpp
     terrain/terrain_foliage_def.cpp
     terrain/terrain_foliage_map.cpp
+    terrain/foliage_asset_cache.cpp
     terrain/foliage_dispatcher.cpp
     terrain/foliage_frame_stats.cpp
     terrain/foliage_mask_pass.cpp
