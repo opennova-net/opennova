@@ -5,7 +5,10 @@
 
 # The service's programs (programs.tf) keep their defaults: a task each, gate,
 # lobby and fleet at 0.25 vCPU and 0.5 GiB, web and worker at 0.5 vCPU and
-# 1 GiB, data at 0.25 vCPU and 2 GiB with 40 GiB of task storage.
+# 1 GiB, data with 40 GiB of task storage. The data program packs a whole retail
+# release (JO's export is 1.2 GB): at its default 2 GiB opennova-update-tool build
+# was killed for memory on staging, so it runs at 1 vCPU and 8 GiB as staging's does.
+data = { cpu = 1024, memory = 8192 }
 
 # The gate's Elastic IP retail clients reach (54.162.79.147), adopted, never
 # managed (the load balancer's zone-a address), is no knob here: its

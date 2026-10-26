@@ -164,3 +164,22 @@ jobs:
           files: |
             apps/novaworld_common/docker-bake.hcl
             ${{ steps.meta.outputs.bake-file }}
+
+      # A push assembled from the layer cache once shipped a worker image of its last three layers
+      # alone, no base and no program (sha-061caf4, 2026-10-26), which no task could start. The
+      # image is pulled back and must hold the file its entrypoint names, or the job fails before a
+      # deploy can take the tag.
+      - name: Check the pushed image holds its entrypoint
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+        run: |
+          image="$IMAGE:sha-${GITHUB_SHA::7}"
+          docker pull --quiet "$image" >/dev/null
+          entry="$(docker image inspect --format '{{index .Config.Entrypoint 0}}' "$image")"
+          cid="$(docker create "$image")"
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+          if ! docker cp "$cid:$entry" - >/dev/null; then
+            echo "::error::$image holds no $entry, the program its entrypoint names"
+            exit 1
+          fi
+          echo "$image holds $entry ($(docker image inspect --format '{{len .RootFS.Layers}}' "$image") layers)"
