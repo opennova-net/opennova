@@ -54,6 +54,7 @@ ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	p.index_dir = join(p.cache_dir, "index");
 	p.build_dir = join(p.cache_dir, "build");
 	p.build_cache_file = join(p.cache_dir, kBuildCacheFileName);
+	p.texture_headers_file = join(p.cache_dir, kTextureHeaderCacheFileName);
 	p.run_dir = join(p.cache_dir, "run");
 	p.staging_dir = join(p.cache_dir, "staging");
 	p.install_copy_dir = join(p.cache_dir, "install_copy");

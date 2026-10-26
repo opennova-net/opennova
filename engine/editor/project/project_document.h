@@ -23,6 +23,7 @@ inline constexpr const char *kLocalSettingsFileName = "local.json";
 inline constexpr const char *kImportSidecarSuffix = ".import";
 inline constexpr const char *kImportCacheFileName = "import_cache.json";
 inline constexpr const char *kBuildCacheFileName = "build_cache.json";
+inline constexpr const char *kTextureHeaderCacheFileName = "texture_headers.json";
 inline constexpr const char *kDefaultTargetGame = "jo";
 inline constexpr const char *kDefaultExportOutput = "build/export";
 
@@ -101,6 +102,8 @@ struct ProjectPaths {
 	std::string index_dir;
 	std::string build_dir;
 	std::string build_cache_file; // each file's content hash by its size and last write (BuildRun)
+	// Each texture's header as a reader reads it, by its size and last write (graph/texture_checks.cpp).
+	std::string texture_headers_file;
 	std::string run_dir;     // where Play runs the game: a directory per mode, a numbered one a run in it
 	                         // (`<mode>/<n>`, run/run_directory.h)
 	std::string staging_dir; // an import's files before they are published (import_assets)
