@@ -993,7 +993,7 @@ constexpr ReferenceKindRow kRows[] = {
 	// A particle's curve, by its table's id among every particle file's [tabledef]s, without case [orig:
 	// CEffectDef_ResolveTblDefReference @ 0x5E9630; CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @
 	// 0x76FDF6]. A miss is the particle file's own finding (particle.curve_unresolved, the project check's), with
-	// what the game draws without the curve: the graph's Missing is its badge alone.
+	// what the game makes of the particle that fails to resolve: the graph's Missing is its badge alone.
 	Row(ReferenceKind::ParticleTable, "particle_table", "the particle table", "particle table")
 	        .symbol(NameCase::NoCase, AssetKind::Particles)
 	        .never_missing()
@@ -1002,8 +1002,8 @@ constexpr ReferenceKindRow kRows[] = {
 	// name answering (the files register in the effect system's order [orig: CEffectSystem_Init @ 0x5F6070]): an
 	// effect's pdefs member [orig: CEffectBank_ResolveAllEntries @ 0x5E4920; CEffectWorld_FindParticleDefByName @
 	// 0x5E41D0, _stricmp @ 0x5E420C] and a particle's child_id [orig: CEffectDef_ResolveAllReferences @ 0x5E9D70]. A
-	// member's miss is the particle file's own finding (particle.effect_unresolved, the project check's), with what the
-	// game makes of the effect, and a child_id's none (unwitnessed): the graph's Missing is its badge alone.
+	// member's miss and a child_id's are the particle file's own finding (particle.effect_unresolved, the project
+	// check's), with what the game makes of the effect: the graph's Missing is its badge alone.
 	Row(ReferenceKind::ParticleDefinition, "particle_definition", "the particle", "particle")
 	        .symbol(NameCase::NoCase, AssetKind::Particles)
 	        .never_missing()

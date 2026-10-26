@@ -318,6 +318,35 @@ int test_fixes_at_the_end() {
 	return 0;
 }
 
+// A particle's child_id no file defines: the particle fails its resolve, which empties the effect naming it
+// (particle.effect_unresolved at the child_id's value, its fix the child written into the file); a curve no file
+// defines says the same of the particle, the game's log line with it.
+int test_child_and_curve_misses() {
+	test_temp::TempDir dir("opennova_editor_particle_project_check_child");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Particles"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_text(root + "/particles/a.ptl",
+	                                effect("Spark", "spark") + particle("spark", "\tchild_id = nokid;\r\n") +
+	                                        particle("trail", "\talpha_func = notable;\r\n")));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const Diagnostic *child = nullptr, *curve = nullptr;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		if (d.code() == std::string("particle.effect_unresolved") && d.message.find("The particle nokid,") == 0) child = &d;
+		if (d.code() == std::string("particle.curve_unresolved") && d.message.find("The table notable,") == 0) curve = &d;
+	}
+	TEST_EXPECT(child && child->asset == "particles/a.ptl" && child->line == 10 && child->column == 13 &&
+	            child->message.find("spark fails to resolve") != std::string::npos &&
+	            child->message.find("spawns nothing") != std::string::npos);
+	TEST_EXPECT(child && child->planned.size() == 1 && child->planned[0].label == "Add particle nokid to a.ptl");
+	TEST_EXPECT(curve && curve->message.find("UNRESOLVED: missing TBLDEF notable") != std::string::npos &&
+	            curve->message.find("trail fails to resolve") != std::string::npos);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -326,6 +355,7 @@ int main() {
 	failed += test_session();
 	failed += test_fixes();
 	failed += test_fixes_at_the_end();
+	failed += test_child_and_curve_misses();
 	if (failed == 0) std::printf("editor particle project check: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

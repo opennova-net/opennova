@@ -168,7 +168,7 @@ struct LoadedParticles {
 // 0x5E4D70, formats/particle save_particles), after the file's last particle, where the writer puts every particle,
 // else at its end; false for a name the reader does not read whole as an id.
 bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &lines, const std::string &id,
-		PlannedFix &out) {
+		PlannedFix &out, const char *found_by = "the effect's pdefs") {
 	particle::ParticleFile alone;
 	particle::ParseError error;
 	const std::string block = "[particledef]\r\n{\r\n\tid = " + id + ";\r\n}\r\n";
@@ -188,8 +188,8 @@ bool add_particle_fix(const LoadedParticles &read, const std::vector<size_t> &li
 	out.label = "Add particle " + id + " to " + file;
 	out.detail = "Writes a particle block of id " + id + " into " + file + " " +
 	             (last ? "after its last particle" : "at its end") + ", as the game's own particle writer writes one at "
-	             "the game's defaults (a graphic of no texture yet): the game then holds a particle of that name, which "
-	             "the effect's pdefs finds.";
+	             "the game's defaults (a graphic of no texture yet): the game then holds a particle of that name, which " +
+	             std::string(found_by) + " finds.";
 	return true;
 }
 
@@ -327,37 +327,56 @@ private:
 				if (place && take_member_fix(read, lines, *place, words, nth, shown, fix)) d.planned.push_back(std::move(fix));
 			}
 		}
-		// A particle's curves, each by its table's id among every file's [tabledef]s, without case: a miss is a
-		// null curve [orig: CEffectDef_ResolveTblDefReference @ 0x5E9630; CParticleManager_FindTableDefByName @
-		// 0x5E9540, _stricmp @ 0x76FDF6].
+		// A particle's own names resolve when the game loads it, a member or not: its child among every file's
+		// [particledef]s and each curve among every file's [tabledef]s, without case. A miss fails the particle's
+		// resolve, which empties every effect naming it among its pdefs; a particle drawn only as another's child
+		// draws without the curve that missed and those its resolve walks after it [orig:
+		// CParticleManager_ResolveAllReferences @ 0x5EC8DC..0x5EC90B; CEffectDef_ResolveAllReferences @ 0x5E9D70,
+		// the child @ 0x5E9D90..0x5E9DA2, the curves @ 0x5E9DC1..0x5E9F65; CEffectBank_ResolveAllEntries @
+		// 0x5E4966..0x5E496E; CParticleManager_FindTableDefByName @ 0x5E9540, _stricmp @ 0x76FDF6].
 		for (size_t p = 0; p < read.file.particles.size(); ++p) {
 			const particle::ParticleDef &definition = read.file.particles[p];
-			const auto curve = [&](const particle::CurveRef &ref, const std::string &key, const char *channel) {
+			if (!definition.child_id.empty() && !particles.count(strutil::to_lower(definition.child_id))) {
+				const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Particle, p, "child_id");
+				Diagnostic &d = add_(ParticleFinding::EffectUnresolved,
+						"The particle " + definition.child_id + ", which child_id of the particle " + definition.id +
+								" names, is defined by no particle file the game loads: " + definition.id +
+								" fails to resolve (the game logs nothing), so an effect naming it among its pdefs spawns "
+								"nothing. Define the particle, or name another.",
+						read, place, 0, definition.child_id, 0, 0);
+				PlannedFix fix;
+				if (add_particle_fix(read, lines, definition.child_id, fix, "the particle's child_id"))
+					d.planned.push_back(std::move(fix));
+			}
+			const auto curve = [&](const particle::CurveRef &ref, const std::string &key) {
 				if (!ref.present || ref.name.empty() || tables.count(strutil::to_lower(ref.name))) return;
 				const particle::KeyPlace *place = particle_key_place(read.places, BlockKind::Particle, p, key);
 				// A graphic's curve no line of its own wrote: the copy its graphicN line took of the particle's.
 				if (!place && key[0] == 'g') return;
 				add_(ParticleFinding::CurveUnresolved,
 						"The table " + ref.name + ", which " + key + " of the particle " + definition.id + " names, is "
-						"defined by no particle file the game loads: the game logs it not found and draws the particle's " +
-								channel + " without its curve. Define the table, or name another.",
+						"defined by no particle file the game loads: " + definition.id + " fails to resolve (the game "
+								"logs the first table it misses: UNRESOLVED: missing TBLDEF " + ref.name +
+								"), so an effect naming it among "
+								"its pdefs spawns nothing (drawn as another particle's child, it draws without this curve "
+								"and the ones the game resolves after it). Define the table, or name another.",
 						read, place, 0, ref.name, 0, 0);
 			};
-			curve(definition.scale_func, "scale_func", "scale");
-			curve(definition.alpha_func, "alpha_func", "alpha");
-			curve(definition.red_func, "red_func", "red");
-			curve(definition.green_func, "green_func", "green");
-			curve(definition.blue_func, "blue_func", "blue");
-			curve(definition.emit_rate_func, "emit_rate_func", "emission rate");
+			curve(definition.scale_func, "scale_func");
+			curve(definition.alpha_func, "alpha_func");
+			curve(definition.red_func, "red_func");
+			curve(definition.green_func, "green_func");
+			curve(definition.blue_func, "blue_func");
+			curve(definition.emit_rate_func, "emit_rate_func");
 			for (size_t g = 0; g < definition.graphics.size(); ++g) {
 				const particle::GraphicLayer &layer = definition.graphics[g];
 				if (!layer.present) continue;
 				const std::string prefix = "g" + std::to_string(g + 1) + "_";
-				curve(layer.scale_func, prefix + "scale_func", "graphic's scale");
-				curve(layer.alpha_func, prefix + "alpha_func", "graphic's alpha");
-				curve(layer.red_func, prefix + "red_func", "graphic's red");
-				curve(layer.green_func, prefix + "green_func", "graphic's green");
-				curve(layer.blue_func, prefix + "blue_func", "graphic's blue");
+				curve(layer.scale_func, prefix + "scale_func");
+				curve(layer.alpha_func, prefix + "alpha_func");
+				curve(layer.red_func, prefix + "red_func");
+				curve(layer.green_func, prefix + "green_func");
+				curve(layer.blue_func, prefix + "blue_func");
 			}
 		}
 	}
