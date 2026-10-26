@@ -488,7 +488,9 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
 package jobs then build the game, editor, Blender add-on, apps and switcher zips and the
-runtime's packed update, `opennova-runtime-windows-<tag>.sfs`. Then `release.yml` starts
+runtime's packed update, `opennova-runtime-windows-<tag>.sfs`, every one stamped with the
+tag's version (the exes' file versions and the runtime update's VERSION, which the updater
+shows a player), whatever `godot/project.godot`'s `config/version` says. Then `release.yml` starts
 Publish for prod (`.github/workflows/publish.yml`; ADR 0071), which waits for the prod
 environment's reviewers: it publishes the runtime's update as the runtime's release on prod's
 update service through the admin API, then the tag's builds on prod's downloads host

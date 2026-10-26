@@ -120,11 +120,15 @@ jobs:
             "package=$(Join-Path $folder $packages[0].name)" >> $env:GITHUB_OUTPUT
           }
 
+      # The packages carry the tag's version (its name without the "v"): the zips', the
+      # exes' VERSIONINFO and the runtime update's VERSION, whatever project.godot says.
       - name: Package Godot Windows apps
         shell: pwsh
         env:
           PREVIOUS_RUNTIME_PACKAGE: ${{ steps.previous.outputs.package }}
-        run: scripts/package_godot_windows.ps1 -PreviousRuntimePackage $env:PREVIOUS_RUNTIME_PACKAGE
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          scripts/package_godot_windows.ps1 -PreviousRuntimePackage $env:PREVIOUS_RUNTIME_PACKAGE -Version $version
 
       - name: Upload OpenNova Windows game zip
         id: upload_game

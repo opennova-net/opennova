@@ -3,9 +3,15 @@
 # with the wizards naming its game; update.exe installs that game on the first launch, so this
 # script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-PreviousRuntimePackage <prior.sfs>]
+#        [-PreviousRuntimePackage <prior.sfs>] [-Version <n.n.n>]
 
 param(
+    # The version the packages carry: the zips' names, the exes' VERSIONINFO, the
+    # project's config/version in the exports and every update package's VERSION
+    # (ADR 0067 d8: the one a player is told). release.yml passes the release tag
+    # without its "v"; empty (PR CI, local runs) takes godot/project.godot's
+    # config/version.
+    [string]$Version = "",
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
     # and downloads the DLLs into godot\bin; -SkipBuild then skips the per-job
     # rebuild. Local runs omit it and build normally. See
@@ -35,26 +41,23 @@ Write-Host "=== Installing the imgui-godot addon ==="
 & bash "scripts/bootstrap_imgui_godot.sh"
 if ($LASTEXITCODE -ne 0) { throw "bootstrap_imgui_godot.sh failed (exit $LASTEXITCODE)" }
 
-# Read Godot apps' component version from project.godot
-$projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
-if ($projectGodot -notmatch '(?m)^config/version\s*=\s*"([^"]+)"') {
-    throw "Could not extract config/version from godot/project.godot"
+# The packages' version: -Version (a release's tag), else Godot apps' component version
+# from project.godot.
+if ($Version) {
+    if ($Version -notmatch '^\d+(\.\d+){0,3}$') { throw "-Version must be one to four numbers joined by dots, not '$Version'" }
+} else {
+    $projectGodot = Get-Content "$ROOT\godot\project.godot" -Raw
+    if ($projectGodot -notmatch '(?m)^config/version\s*=\s*"([^"]+)"') {
+        throw "Could not extract config/version from godot/project.godot"
+    }
+    $Version = $Matches[1]
 }
-$Version = $Matches[1]
 Write-Host "=== Godot apps version: $Version ==="
 
 # Pad to 4 numeric parts for Windows VERSIONINFO (Godot requires major.minor.patch.build)
 $versionParts = @($Version.Split("."))
 while ($versionParts.Count -lt 4) { $versionParts += "0" }
 $WinVersion = $versionParts -join "."
-
-# Stamp version into the export presets so Godot embeds it in the .exe VERSIONINFO
-$presetsPath = "$ROOT\godot\export_presets.cfg"
-$presets = Get-Content $presetsPath -Raw
-$presets = $presets -replace 'application/file_version="[^"]*"',    "application/file_version=`"$WinVersion`""
-$presets = $presets -replace 'application/product_version="[^"]*"', "application/product_version=`"$WinVersion`""
-Set-Content -Path $presetsPath -Value $presets -NoNewline
-Write-Host "    file_version / product_version -> $WinVersion"
 
 $GODOT_VERSION = "4.6.1-stable"
 $GODOT_VERSION_PLAIN = "4.6.1"
@@ -575,14 +578,33 @@ function Assert-StageHoldsOnly {
     Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
-Write-Host "=== Exporting opennova.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
+# The version stamped for the three exports: the export presets' file and product versions
+# (Godot embeds them in each exe's VERSIONINFO) and the project's config/version, then both
+# tracked files put back as they were, so a run leaves the tree as it found it.
+$presetsPath = "$ROOT\godot\export_presets.cfg"
+$projectPath = "$ROOT\godot\project.godot"
+$presetsOriginal = [IO.File]::ReadAllText($presetsPath)
+$projectOriginal = [IO.File]::ReadAllText($projectPath)
+try {
+    $presets = $presetsOriginal -replace 'application/file_version="[^"]*"', "application/file_version=`"$WinVersion`""
+    $presets = $presets -replace 'application/product_version="[^"]*"', "application/product_version=`"$WinVersion`""
+    [IO.File]::WriteAllText($presetsPath, $presets)
+    [IO.File]::WriteAllText($projectPath, ($projectOriginal -replace '(?m)^config/version\s*=\s*"[^"]*"', "config/version=`"$Version`""))
+    Write-Host "    file_version / product_version -> $WinVersion, config/version -> $Version"
 
-Write-Host "=== Exporting the editor's Play runtime ==="
-Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
+    Write-Host "=== Exporting opennova.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 
-Write-Host "=== Exporting opennova-editor.exe ==="
-Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
+    Write-Host "=== Exporting the editor's Play runtime ==="
+    Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
+
+    Write-Host "=== Exporting opennova-editor.exe ==="
+    Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
+}
+finally {
+    [IO.File]::WriteAllText($presetsPath, $presetsOriginal)
+    [IO.File]::WriteAllText($projectPath, $projectOriginal)
+}
 
 # --- the game zips: opennova.exe + its runtime DLL + the updater pair side by side, one
 #     zip per game, each with the wizards naming its game's update products. The runtime
