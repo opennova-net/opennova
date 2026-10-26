@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/array.hpp>

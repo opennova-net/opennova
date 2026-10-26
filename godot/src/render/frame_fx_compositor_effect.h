@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/render_data.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>

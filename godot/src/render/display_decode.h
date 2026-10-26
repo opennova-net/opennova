@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
