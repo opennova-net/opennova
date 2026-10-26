@@ -363,9 +363,10 @@ NapiMessage make_client_host_player_added(int player_number, const std::string &
 NapiMessage make_client_host_player_removed(int player_number);
 
 // ClientPlayerEnterRequest: the HOST's admission statement for a player entering its game —
-// ConnectionId (the joiner's dcb), IpAddress (the joiner's game address as a decimal u32),
-// PortNumber, and the JoinTicket the joiner's "<localaddr>JOINTICKET" key-value carried
-// (empty when absent). Answered by ServerPlayerEnterResult.
+// ConnectionId (the joiner's dcb), IpAddress (the joiner's UDP source, its in_addr dword),
+// PortNumber, each printed as retail's "%ld" does (signed 32-bit: an address whose last octet
+// is 128 or more prints negative), and the JoinTicket the joiner's "<localaddr>JOINTICKET"
+// key-value carried (empty when absent). Answered by ServerPlayerEnterResult.
 // [orig: CNapiGameSession_SendPlayEnterRequest @0x4d02a0]
 NapiMessage make_client_player_enter_request(uint32_t connection_id, uint32_t ip_address,
                                              uint32_t port_number,
