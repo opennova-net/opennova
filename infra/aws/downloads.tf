@@ -12,7 +12,7 @@
 # current set alone, each file under its stable name (opennova-game-windows.zip)
 # beside manifest.json (the version, and each file's size and SHA-256), which
 # .github/workflows/downloads.yml writes; the site reads the manifest from any
-# origin (CloudFront's managed SimpleCORS response headers).
+# origin (the distribution's own CORS response headers).
 # ---------------------------------------------------------------------------
 
 locals {
@@ -21,11 +21,10 @@ locals {
   downloads_host        = local.dns_enabled ? (local.is_prod ? "downloads.${var.cloudflare_domain}" : "downloads.${local.deployment}.${var.cloudflare_domain}") : ""
   downloads_bucket_name = "${local.name}-downloads-${local.account_id}"
 
-  # CloudFront's managed policies, by their fixed ids: CachingOptimized (the
+  # CloudFront's managed CachingOptimized cache policy, by its fixed id (the
   # origin's Cache-Control honoured, which the workflow sets short on the
-  # stable names) and SimpleCORS (Access-Control-Allow-Origin: *).
+  # stable names).
   cloudfront_caching_optimized = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-  cloudfront_simple_cors       = "60669652-455b-4ae9-85a4-c4c02393f86c"
 }
 
 resource "aws_s3_bucket" "downloads" {
@@ -94,6 +93,31 @@ resource "aws_acm_certificate_validation" "downloads" {
   validation_record_fqdns = [cloudflare_record.downloads_validation[0].hostname]
 }
 
+# Access-Control-Allow-Origin: * on every answer, whatever the request's headers. The managed
+# CORS policies allow no request header beyond the safelisted ones, and CloudFront then leaves
+# the header off: a browser's fetch carries Priority (and Cache-Control on a revalidation), so
+# the site could never read the manifest.
+resource "aws_cloudfront_response_headers_policy" "downloads" {
+  count   = local.dns_enabled ? 1 : 0
+  name    = "${local.name}-downloads-cors"
+  comment = "The ${local.deployment} downloads host: any origin reads it"
+
+  cors_config {
+    access_control_allow_credentials = false
+    origin_override                  = true
+
+    access_control_allow_headers {
+      items = ["*"]
+    }
+    access_control_allow_methods {
+      items = ["GET", "HEAD"]
+    }
+    access_control_allow_origins {
+      items = ["*"]
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "downloads" {
   count               = local.dns_enabled ? 1 : 0
   enabled             = true
@@ -117,7 +141,7 @@ resource "aws_cloudfront_distribution" "downloads" {
     cached_methods             = ["GET", "HEAD"]
     compress                   = true
     cache_policy_id            = local.cloudfront_caching_optimized
-    response_headers_policy_id = local.cloudfront_simple_cors
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.downloads[0].id
   }
 
   restrictions {

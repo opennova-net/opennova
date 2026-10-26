@@ -70,6 +70,17 @@
       "Resource": "arn:aws:cloudfront::${account_id}:distribution/*"
     },
     {
+      "Sid": "ResponseHeadersPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateResponseHeadersPolicy",
+        "cloudfront:GetResponseHeadersPolicy",
+        "cloudfront:UpdateResponseHeadersPolicy",
+        "cloudfront:DeleteResponseHeadersPolicy"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:response-headers-policy/*"
+    },
+    {
       "Sid": "OriginAccessControls",
       "Effect": "Allow",
       "Action": [
