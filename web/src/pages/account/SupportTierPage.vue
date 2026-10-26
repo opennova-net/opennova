@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-8">
     <header>
-      <h1 class="text-3xl font-semibold text-ink">Support tier</h1>
+      <h1 class="page-heading">Hosting & billing</h1>
       <p class="mt-1 max-w-3xl text-sm text-ink-muted">
         A monthly tier funds OpenNova and lets you run hosted servers on shared machines; a dedicated machine adds one
         more on a machine of its own, with or without a tier. It supports the project; it is not the sale of a game.
@@ -126,9 +126,20 @@
           :used="billing.shared_used - billing.shared_stopping"
           :busy="busy || waiting"
           :disabled="liveTier ? !billing.can_manage : !billing.can_subscribe"
+          :selected-tier="liveTier ? null : selectedTier"
+          :selection-only="!liveTier"
           base-id="support"
           @choose="onChoose"
         />
+        <section v-if="!liveTier && selectedOffer" id="support-review" class="space-y-3 rounded-panel border border-accent/40 bg-panel p-5" aria-labelledby="support-review-heading">
+          <h3 id="support-review-heading" ref="reviewHeading" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Your selection: Tier {{ selectedOffer.tier }}</h3>
+          <p class="text-sm text-ink-muted">Up to {{ selectedOffer.max_servers }} hosted server{{ selectedOffer.max_servers === 1 ? '' : 's' }} on shared machines.</p>
+          <p v-if="selectedOffer.amount !== null" class="text-xl font-semibold text-ink">{{ formatMoney(selectedOffer.amount, tiers.currency) }} <span class="text-sm font-normal text-ink-muted">a month, renewed monthly until canceled</span></p>
+          <p v-else class="text-sm text-warn">This tier has no price available yet.</p>
+          <p v-if="!selectedOffer.available" class="text-sm text-warn">This tier is currently sold out. Choose another tier or check back later.</p>
+          <button type="button" :class="primaryButton" :disabled="busy || waiting || !billing.can_subscribe || selectedOffer.amount === null || !selectedOffer.available" @click="checkout(tierItem(selectedOffer.tier))">Continue to checkout</button>
+          <p class="text-xs text-ink-muted">Review your payment details in Stripe before you subscribe.</p>
+        </section>
         <p class="text-xs text-ink-muted">
           Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel. Payment goes
           through Stripe; NovaWorld never sees your card. Read the
@@ -240,7 +251,8 @@
 // status and renewal) and the static addresses (each a checkout of its own;
 // an item the fleet is sold out of says so and cannot be bought, nor a
 // dedicated machine or an address while a payment is past due). With no
-// tier, Subscribe starts a Stripe Checkout (POST /api/billing/checkout); with
+// tier, choosing one reviews its current price, then Continue to checkout
+// starts a Stripe Checkout (POST /api/billing/checkout); with
 // one, every change, the payment method and the cancellation open Stripe's
 // billing portal (POST
 // /api/billing/portal); a checkout for a tier the account already has
@@ -259,7 +271,7 @@
 // address's) shows a banner to the portal; the tier box counts the servers on
 // shared machines and says what the tier's end leaves (an admin's grant of
 // servers keeps them running; the dedicated machines need no tier).
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
 import {
@@ -317,6 +329,11 @@ const busy = ref(false);
 const alertText = ref('');
 const notice = ref('');
 const confirm = ref<'idle' | 'confirming' | 'pending' | 'done'>('idle');
+const selectedTier = ref<TierNumber | null>(
+  typeof route.query.tier === 'string' && /^[123]$/.test(route.query.tier) ? Number(route.query.tier) as TierNumber : null,
+);
+const selectedOffer = computed(() => tiers.value?.tiers.find((offer) => offer.tier === selectedTier.value) ?? null);
+const reviewHeading = ref<HTMLElement | null>(null);
 
 const liveTier = computed(() => hasLiveTier(billing.value));
 // A payment past due: the tier's, a dedicated machine's or a static
@@ -523,9 +540,13 @@ async function checkout(item: BillingItem) {
   go(result.value);
 }
 
-function onChoose(tier: TierNumber) {
+async function onChoose(tier: TierNumber) {
   if (liveTier.value) void portal();
-  else void checkout(tierItem(tier));
+  else {
+    selectedTier.value = tier;
+    await nextTick();
+    reviewHeading.value?.focus();
+  }
 }
 
 // ---------------------------------------------------------------------------

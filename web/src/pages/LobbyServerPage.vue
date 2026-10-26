@@ -1,6 +1,6 @@
 <template>
   <section class="page py-10 sm:py-14">
-    <RouterLink to="/lobby" class="text-sm text-accent hover:text-ink-bright">All lobbies</RouterLink>
+    <RouterLink to="/lobby" class="text-sm text-accent hover:text-ink-bright">All servers</RouterLink>
 
     <p v-if="gone" class="mt-6 rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
       This server is no longer listed.
@@ -21,6 +21,14 @@
           {{ server.players }} / {{ server.maxPlayers || 0 }}
         </span>
       </header>
+
+      <section class="mt-6 rounded-panel border border-accent/30 bg-accent/5 p-5" aria-labelledby="join-server">
+        <h2 id="join-server" class="font-semibold text-ink-bright">Join through OpenNova's NovaWorld</h2>
+        <p class="mt-2 text-sm leading-relaxed text-ink-muted">Sign in to OpenNova's NovaWorld with the account you created here, then find <span class="font-medium text-ink"><GameText :text="name" /></span> in your game's server browser.</p>
+        <p v-if="server.locked" class="mt-2 text-sm text-warn">This server needs a password from its host.</p>
+        <RouterLink to="/play#online" class="link mt-3 inline-block text-sm">Setup instructions for your game</RouterLink>
+      </section>
+      <p v-if="loadedAt !== null" class="mt-3 text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /><span v-if="stale" class="text-warn">. The last refresh failed; showing the last details received.</span></p>
 
       <dl class="mt-6 grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
         <template v-if="server.mission">
@@ -88,6 +96,7 @@
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import GameText from '../components/GameText.vue';
+import RelativeTime from '../components/RelativeTime.vue';
 import { fetchLobbyServer, LobbyGone } from '../api/lobbies';
 import { usePolling } from '../composables/usePolling';
 import { stripGameText } from '../utils/gameText';
@@ -103,6 +112,9 @@ const route = useRoute();
 const server = ref<LobbyServer | null>(null);
 const gone = ref(false);
 const error = ref('');
+const loadedAt = ref<number | null>(null);
+const now = ref(Date.now());
+const stale = ref(false);
 
 const name = computed(() => {
   const text = server.value?.serverName ?? '';
@@ -122,12 +134,18 @@ const sortedScores = computed(() => [...(server.value?.scoreboard ?? [])].sort((
 const poll = usePolling({
   async read(signal, background) {
     try {
-      server.value = await fetchLobbyServer(Number(route.params.id), signal);
+      const result = await fetchLobbyServer(Number(route.params.id), signal);
+      if (signal.aborted) return false;
+      server.value = result;
+      loadedAt.value = now.value = Date.now();
+      stale.value = false;
       gone.value = false;
       error.value = '';
       return true;
     } catch (e) {
       if (signal.aborted) return false;
+      now.value = Date.now();
+      stale.value = true;
       if (e instanceof LobbyGone) {
         gone.value = true;
         return true;
@@ -144,6 +162,9 @@ watch(
   () => {
     server.value = null;
     gone.value = false;
+    loadedAt.value = null;
+    stale.value = false;
+    error.value = '';
     void poll.refresh();
   },
 );

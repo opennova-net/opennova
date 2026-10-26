@@ -52,7 +52,7 @@ describe('SupportPage', () => {
     await wrapper.get('#public-support-tier-3 button').trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.path).toBe('/login');
-    expect(router.currentRoute.value.query.redirect).toBe('/me/support');
+    expect(router.currentRoute.value.query.redirect).toBe('/me/support?tier=3');
   });
 
   it('says when the tiers are not open', async () => {

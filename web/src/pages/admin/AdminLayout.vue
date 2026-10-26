@@ -1,143 +1,78 @@
 <template>
   <AdminGate>
-    <div class="page-wide py-10">
-      <!-- The nav's Log out ends a session and forgets the token; a token
-           alone (no session) is forgotten here. -->
-      <div v-if="hasAdminToken && !isAdmin" class="mb-6 flex items-center justify-end gap-4">
-        <span class="text-xs text-ink-muted">Admin token</span>
-        <button
-          type="button"
-          class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover"
-          @click="clearAdminToken"
-        >
-          Forget token
-        </button>
+    <div class="admin-workspace min-h-[calc(100vh-4rem)] lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div class="flex items-center justify-between border-b border-border bg-panel px-5 py-3 lg:hidden">
+        <span class="text-sm font-semibold text-ink">Administration</span>
+        <button ref="menuButton" type="button" class="rounded-control border border-border px-3 py-2 text-sm text-ink" aria-controls="admin-drawer" :aria-expanded="drawerOpen" @click="openDrawer">Browse admin</button>
       </div>
-
-      <div class="flex flex-col gap-8 md:flex-row">
-        <nav aria-label="Admin" class="shrink-0 md:w-56">
-          <!-- One scrolling row on a phone (the areas side by side), a column
-               from md up: each area set off by a rule, its name above its pages,
-               and its pages on a rail under the name. -->
-          <div
-            ref="menu"
-            class="flex items-stretch gap-1 overflow-x-auto rounded-panel border border-border bg-panel p-2 [scrollbar-width:none] md:flex-col md:gap-3 md:overflow-visible [&::-webkit-scrollbar]:hidden"
-          >
-            <ul class="flex gap-1 md:flex-col">
-              <li>
-                <RouterLink
-                  :to="OVERVIEW.to"
-                  class="flex items-center whitespace-nowrap rounded-control px-3 py-2 text-sm font-medium transition"
-                  :class="linkClass(OVERVIEW)"
-                  :aria-current="isActive(OVERVIEW) ? 'page' : undefined"
-                >
-                  {{ OVERVIEW.label }}
-                  <!-- What needs an admin, counted on the page that lists it; a
-                       mark of its own while the read fails, never a stale count. -->
-                  <span
-                    v-if="unread"
-                    class="admin-attention-unknown ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full border border-border bg-raised px-1.5 text-xs font-semibold text-ink-muted"
-                    title="What needs you could not be read"
-                  >
-                    <span aria-hidden="true">?</span><span class="sr-only">What needs you could not be read</span>
-                  </span>
-                  <span
-                    v-else-if="needing > 0"
-                    class="admin-attention-count ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger px-1.5 text-xs font-semibold text-on-accent"
-                    :title="`${needing} ${needing === 1 ? 'thing needs' : 'things need'} you`"
-                  >
-                    {{ needing }}<span class="sr-only">{{ ` ${needing === 1 ? 'thing needs' : 'things need'} you` }}</span>
-                  </span>
-                </RouterLink>
-              </li>
-            </ul>
-            <div
-              v-for="area in ADMIN_AREAS"
-              :key="area.id"
-              class="admin-nav-area flex shrink-0 items-center gap-1 border-l border-border pl-1 md:block md:border-l-0 md:border-t md:pl-0 md:pt-3"
-              role="group"
-              :aria-labelledby="`admin-nav-${area.id}`"
-            >
-              <p
-                :id="`admin-nav-${area.id}`"
-                class="sr-only md:not-sr-only md:px-3 md:pb-1.5 md:text-xs md:font-semibold md:uppercase md:tracking-wider md:text-ink-bright"
-              >
-                {{ area.label }}
-              </p>
-              <ul class="flex gap-1 md:ml-3 md:flex-col md:gap-0.5 md:border-l md:border-border md:pl-2">
-                <li v-for="item in area.sections" :key="item.to">
-                  <RouterLink
-                    :to="item.to"
-                    class="block whitespace-nowrap rounded-control px-3 py-2 text-sm font-medium transition"
-                    :class="linkClass(item)"
-                    :aria-current="isActive(item) ? 'page' : undefined"
-                  >
-                    {{ item.label }}
-                  </RouterLink>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </nav>
-
-        <div class="min-w-0 flex-1">
-          <RouterView />
+      <aside class="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-r border-border bg-panel p-4 lg:block">
+        <div class="mb-7 px-3 pt-2">
+          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Workspace</p>
+          <p class="mt-1 text-sm font-semibold text-ink">Administration</p>
         </div>
-      </div>
+        <AdminNavigation id-base="admin-nav" :unread="unread" :needing="needing" />
+        <div v-if="hasAdminToken && !isAdmin" class="mt-8 border-t border-border px-3 pt-4">
+          <p class="mb-2 text-xs text-ink-muted">Using an admin token</p>
+          <button type="button" class="text-sm text-accent hover:text-ink" @click="clearAdminToken">Forget token</button>
+        </div>
+      </aside>
+      <dialog id="admin-drawer" ref="drawer" aria-label="Admin navigation" class="admin-drawer m-0 h-dvh max-h-none w-72 max-w-[85vw] border-r border-border bg-panel p-5 text-ink backdrop:bg-black/60" @close="onClosed" @click="onBackdrop">
+        <div class="mb-6 flex items-center justify-between">
+          <h2 class="font-semibold">Administration</h2>
+          <button type="button" class="rounded-control border border-border px-3 py-2 text-sm" @click="closeDrawer">Close</button>
+        </div>
+        <AdminNavigation v-if="drawerOpen" id-base="admin-drawer-nav" :unread="unread" :needing="needing" @navigate="closeDrawer" />
+        <button v-if="drawerOpen && hasAdminToken && !isAdmin" type="button" class="mt-6 px-3 text-sm text-accent" @click="clearAdminToken">Forget token</button>
+      </dialog>
+      <div class="min-w-0 px-5 py-7 sm:px-8 lg:px-10 lg:py-9 2xl:px-14"><RouterView /></div>
     </div>
   </AdminGate>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminGate from '../../components/AdminGate.vue';
+import AdminNavigation from './AdminNavigation.vue';
 import { attentionCount } from '../../api/attention';
 import { clearAdminToken, hasAdminToken } from '../../api/authToken';
 import { provideAttention } from '../../composables/useAttention';
 import { useSession } from '../../composables/useSession';
-import { ADMIN_AREAS, OVERVIEW, isUnder, type AdminSection } from '../../utils/adminNav';
-
-// /admin is a pure redirect to /admin/overview, so the route path is always
-// the Overview's or a section's page, or a page under one (a user's, a fleet
-// server's, a job's): utils/adminNav.ts places it.
 const route = useRoute();
-
-// An explicit active check: RouterLink's default active class would light up
-// every item whose path is a prefix of the route's.
-function isActive(item: AdminSection): boolean {
-  return isUnder(route.path, item);
-}
-
-function linkClass(item: AdminSection): string {
-  return isActive(item) ? 'bg-raised text-accent' : 'text-ink-muted hover:bg-hover hover:text-ink';
-}
-
 const { isAdmin } = useSession();
-
-// What needs an admin (GET /api/admin/attention), read every 60 s while the
-// gate is open and shared with the pages that list it (useAttention.ts); the
-// nav counts the danger and warn findings and the firing alarms, or shows a
-// question mark while the read fails (the last count may be out of date).
+const drawer = ref<HTMLDialogElement | null>(null);
+const menuButton = ref<HTMLButtonElement | null>(null);
+const drawerOpen = ref(false);
+let previousOverflow = '';
+async function openDrawer() {
+  if (drawerOpen.value) return;
+  previousOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  drawerOpen.value = true;
+  await nextTick();
+  drawer.value?.showModal();
+  drawer.value?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+}
+function closeDrawer() { drawer.value?.close(); }
+function onClosed() {
+  drawerOpen.value = false;
+  document.body.style.overflow = previousOverflow;
+  menuButton.value?.focus();
+}
+function onBackdrop(event: MouseEvent) {
+  const element = drawer.value;
+  if (!element || event.target !== element) return;
+  const bounds = element.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeDrawer();
+}
+function onResize() { if (drawerOpen.value && window.innerWidth >= 1024) closeDrawer(); }
+watch(() => route.fullPath, () => { if (drawerOpen.value) closeDrawer(); });
+onMounted(() => window.addEventListener('resize', onResize));
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize);
+  if (drawerOpen.value) document.body.style.overflow = previousOverflow;
+});
 const attention = provideAttention(computed(() => isAdmin.value || hasAdminToken.value));
 const unread = computed(() => attention.error.value !== '');
-const needing = computed(() => (attention.attention.value ? attentionCount(attention.attention.value) : 0));
-
-// On a phone the menu is one scrolling row: the current section is scrolled
-// into it (the row, not the page).
-const menu = ref<HTMLElement | null>(null);
-function revealCurrent() {
-  const row = menu.value;
-  const current = row?.querySelector<HTMLElement>('[aria-current="page"]');
-  if (!row || !current || row.scrollWidth <= row.clientWidth) return;
-  const offset = current.getBoundingClientRect().left - row.getBoundingClientRect().left;
-  row.scrollLeft += offset - (row.clientWidth - current.offsetWidth) / 2;
-}
-// The menu renders once the gate opens (after mount, the session read), then
-// on every move between sections.
-watch(
-  [() => route.path, menu],
-  () => void nextTick(revealCurrent),
-  { immediate: true },
-);
+const needing = computed(() => attention.attention.value ? attentionCount(attention.attention.value) : 0);
 </script>

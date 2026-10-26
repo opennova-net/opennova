@@ -1,8 +1,8 @@
 <template>
   <div class="space-y-8">
     <header>
-      <h1 class="text-3xl font-semibold text-ink">Account</h1>
-      <p class="mt-1 text-sm text-ink-muted">Your NovaWorld account: the handle and password you log in with in-game.</p>
+      <h1 class="page-heading">Account</h1>
+      <p class="page-lead">Your sign-in details and this browser's session.</p>
     </header>
 
     <section v-if="user" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" aria-labelledby="account-details">

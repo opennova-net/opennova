@@ -57,6 +57,7 @@ describe('AttentionList', () => {
     expect(alarm.text()).toContain('opennova-prod-machines-lost');
     expect(alarm.text()).toContain('A machine was lost. See the Fleet page.');
     expect(alarm.text()).toContain('Firing for 5 minutes');
+    expect(alarm.get('a').attributes('href')).toBe('/admin/fleet');
     expect(page.find('.attention-no-alarms').exists()).toBe(false);
   });
 
@@ -67,7 +68,7 @@ describe('AttentionList', () => {
     });
     const page = await mountList();
     expect(page.get('.attention-empty').text()).toBe(
-      'Nothing needs you: every machine reports and every server is running or starting on time.',
+      'No actionable findings in the checks available here.',
     );
     expect(page.get('.attention-no-alarms').text()).toBe('Alarms are not read here (local stack).');
     // A link that is no page of the site is text.

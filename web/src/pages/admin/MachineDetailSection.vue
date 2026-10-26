@@ -38,9 +38,21 @@
         </li>
       </ul>
 
+      <nav aria-label="Machine details" class="flex flex-wrap gap-2 border-b border-border pb-4 text-sm">
+        <a href="#machine-slots" class="rounded-control bg-raised px-3 py-2 text-accent">Servers</a>
+        <a href="#machine-usage-heading" class="rounded-control bg-raised px-3 py-2 text-accent">Usage</a>
+        <a href="#machine-timeline" class="rounded-control bg-raised px-3 py-2 text-accent">Timeline</a>
+        <a href="#machine-log-heading" class="rounded-control bg-raised px-3 py-2 text-accent">Logs</a>
+      </nav>
+      <dl class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Server slots</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ machine!.slots_used }} <span class="text-sm font-normal text-ink-muted">of {{ machine!.slots }}</span></dd></div>
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Free disk</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ machine!.stats?.disk_free_bytes != null ? formatBytes(machine!.stats.disk_free_bytes) : 'Not reported' }}</dd></div>
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Data sent this month</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ formatBytes(machine!.egress_bytes_month) }}</dd></div>
+      </dl>
+
       <!-- Its facts against the release's. -->
       <section class="space-y-3" aria-labelledby="machine-facts">
-        <h2 id="machine-facts" class="text-xl font-semibold text-ink">Facts</h2>
+        <h2 id="machine-facts" class="text-xl font-semibold text-ink">Machine details</h2>
         <dl class="machine-facts grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">hostd image</dt>
           <dd class="min-w-0">
@@ -65,7 +77,7 @@
           <dt class="text-ink-muted">Address</dt>
           <dd class="text-ink">
             <span class="font-mono text-xs">{{ machine!.public_address || 'None yet' }}</span>
-            <template v-if="machine!.address">, the static address <span class="font-mono text-xs">{{ machine!.address.name }}</span></template>
+            <template v-if="machine!.address">, the static address <RouterLink to="/admin/addresses" class="font-mono text-xs text-accent hover:text-ink">{{ machine!.address.name }}</RouterLink></template>
           </dd>
           <dt class="text-ink-muted">Launched</dt>
           <dd class="text-ink">

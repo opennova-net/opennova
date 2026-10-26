@@ -21,8 +21,8 @@ function refusal(data: unknown): AxiosError {
   } as AxiosResponse);
 }
 
-async function mountPage() {
-  const router = await testRouter('/register');
+async function mountPage(path = '/register') {
+  const router = await testRouter(path);
   const wrapper = mount(RegisterPage, { global: { plugins: [router] }, attachTo: document.body });
   await flushPromises();
   return wrapper;
@@ -39,13 +39,15 @@ async function submit(wrapper: Awaited<ReturnType<typeof mountPage>>, email: str
 describe('RegisterPage', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('requires the email, sends it, and says where the welcome mail went', async () => {
+  it('requires the email and offers login without exposing internal account identifiers', async () => {
     register.mockResolvedValue(user(7, { username: 'newplayer', email: 'new@example.com' }));
     const wrapper = await mountPage();
     expect(wrapper.get('input[type="email"]').attributes('required')).toBeDefined();
     await submit(wrapper, ' New@Example.com ');
     expect(register).toHaveBeenCalledWith({ username: 'newplayer', password: 'secret', nwhandle: undefined, email: 'New@Example.com' });
-    expect(wrapper.get('[role="status"]').text()).toContain('A welcome mail is on its way to new@example.com.');
+    expect(wrapper.get('[role="status"]').text()).toContain('Account created for newplayer');
+    expect(wrapper.get('[role="status"]').text()).not.toContain('PCID');
+    expect(wrapper.get('[role="status"] a').attributes('href')).toContain('/login');
     expect(wrapper.text()).not.toContain('—');
     wrapper.unmount();
   });
@@ -59,6 +61,21 @@ describe('RegisterPage', () => {
     await submit(wrapper, '');
     expect(register).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it('carries a selected tier through explicit login and rejects an external return address', async () => {
+    register.mockResolvedValue(user(7, { username: 'newplayer', email: 'new@example.com' }));
+    const page = await mountPage('/register?redirect=%2Fme%2Fsupport%3Ftier%3D2');
+    await submit(page, 'new@example.com');
+    const target = new URL(page.get('[role="status"] a').attributes('href')!, 'https://opennova.test');
+    expect(target.pathname).toBe('/login');
+    expect(target.searchParams.get('redirect')).toBe('/me/support?tier=2');
+    expect(target.searchParams.get('username')).toBe('newplayer');
+    page.unmount();
+    const external = await mountPage('/register?redirect=https%3A%2F%2Fevil.example');
+    await submit(external, 'new@example.com');
+    expect(external.get('[role="status"] a').attributes('href')).not.toContain('evil');
+    external.unmount();
   });
 
   it("puts the server's refusal of the email under the field, any other in the alert", async () => {

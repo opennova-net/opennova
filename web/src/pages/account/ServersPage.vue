@@ -8,6 +8,7 @@
         </p>
       </div>
       <div class="flex items-center gap-3">
+        <RouterLink to="/me/addresses" class="text-sm text-accent hover:text-ink-bright">Static addresses</RouterLink>
         <p v-if="loadedAt" class="text-xs text-ink-muted">Updated <RelativeTime :value="loadedAt" :now="now" /></p>
         <button
           type="button"

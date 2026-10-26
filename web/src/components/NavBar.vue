@@ -6,17 +6,19 @@
         <span>Open<span class="text-accent">Nova</span></span>
       </RouterLink>
 
-      <nav aria-label="Primary" class="hidden flex-1 items-center gap-6 text-sm text-ink-muted lg:flex">
+      <span v-if="adminArea" class="mr-auto hidden border-l border-border-strong pl-5 text-xs font-medium uppercase tracking-widest text-ink-muted sm:block">Admin workspace</span>
+      <nav v-if="!adminArea" aria-label="Primary" class="hidden flex-1 items-center gap-6 text-sm text-ink-muted lg:flex">
         <RouterLink v-for="link in siteLinks" :key="link.to" :to="link.to" class="transition hover:text-ink-bright" active-class="text-ink">
           {{ link.label }}
         </RouterLink>
         <RouterLink v-if="isAdmin" to="/admin" class="transition hover:text-ink-bright" active-class="text-ink">Admin</RouterLink>
       </nav>
 
-      <div class="hidden items-center gap-4 text-sm lg:flex">
+      <div :class="[adminArea ? 'flex' : 'hidden lg:flex', 'items-center gap-4 text-sm']">
+        <RouterLink v-if="adminArea" to="/" class="hidden text-ink-muted hover:text-ink-bright sm:inline">View website <span aria-hidden="true">↗</span></RouterLink>
         <template v-if="ready">
           <template v-if="user">
-            <RouterLink to="/me/servers" class="text-ink-muted transition hover:text-ink-bright" active-class="text-ink">My servers</RouterLink>
+            <RouterLink v-if="!adminArea" to="/me" class="text-ink-muted transition hover:text-ink-bright" active-class="text-ink">My account</RouterLink>
             <RouterLink to="/me/account" class="max-w-[10rem] truncate font-medium text-ink transition hover:text-ink-bright">
               <span class="sr-only">Your account: logged in as </span>{{ user.username }}
             </RouterLink>
@@ -29,10 +31,11 @@
             <RouterLink to="/register" class="text-ink-muted transition hover:text-ink-bright">Register</RouterLink>
           </template>
         </template>
-        <RouterLink :to="downloadsLink" class="btn-primary px-4 py-2">Download</RouterLink>
+        <RouterLink v-if="!adminArea" :to="downloadsLink" class="btn-primary px-4 py-2">Download</RouterLink>
       </div>
 
       <button
+        v-if="!adminArea"
         ref="menuToggle"
         class="inline-flex h-11 w-11 items-center justify-center rounded-control border border-border-strong text-ink transition hover:bg-hover lg:hidden"
         type="button"
@@ -66,7 +69,7 @@
           <RouterLink v-if="isAdmin" to="/admin" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">Admin</RouterLink>
           <template v-if="ready">
             <template v-if="user">
-              <RouterLink to="/me/servers" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">My servers</RouterLink>
+              <RouterLink to="/me" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">My account</RouterLink>
               <RouterLink to="/me/account" class="rounded-control px-3 py-2.5 text-ink-muted hover:bg-hover" @click="closeMenu">
                 Account: <span class="font-medium text-ink">{{ user.username }}</span>
               </RouterLink>
@@ -83,6 +86,7 @@
         </div>
       </nav>
     </Transition>
+    <p v-if="signOutError" role="alert" class="border-t border-danger/30 bg-panel px-4 py-3 text-center text-sm text-danger">{{ signOutError }}</p>
   </header>
 </template>
 
@@ -92,13 +96,13 @@ import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useSession } from '../composables/useSession';
 
 const siteLinks = [
-  { to: '/lobby', label: 'Lobbies' },
-  { to: '/support', label: 'Support tiers' },
+  { to: '/play', label: 'Play' },
+  { to: '/lobby', label: 'Servers' },
+  { to: '/support', label: 'Hosting' },
 ];
 
-// Download goes to the home page's downloads section, which says what each
-// release file is.
-const downloadsLink = { path: '/', hash: '#downloads' };
+// The downloads page explains each release file and its availability.
+const downloadsLink = '/downloads';
 
 const isMenuOpen = ref(false);
 const toggleMenu = () => {
@@ -117,6 +121,7 @@ const closeMenuToToggle = () => {
 const route = useRoute();
 // The admin pages are wide; the nav lines up with them.
 const wide = computed(() => route.matched.some((record) => record.meta.wide));
+const adminArea = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'));
 const router = useRouter();
 watch(
   () => route.fullPath,
@@ -127,6 +132,7 @@ watch(
 
 const { user, ready, isAdmin, signOut } = useSession();
 const signingOut = ref(false);
+const signOutError = ref('');
 
 // The login link brings the visitor back to the page they were on, but not to
 // one of the account pages a login leaves behind.
@@ -144,20 +150,26 @@ const menuToggle = ref<HTMLButtonElement | null>(null);
 // its place: the Log in link on desktop, the menu toggle on mobile (the menu
 // closes).
 async function handleSignOut(from: 'desktop' | 'mobile') {
+  if (signingOut.value) return;
   signingOut.value = true;
-  const result = await signOut();
-  signingOut.value = false;
-  closeMenu();
-  if (!result.ok) {
-    window.alert(result.error.message);
-    return;
+  signOutError.value = '';
+  try {
+    // Let dirty forms veto leaving before revoking the user's session.
+    if (adminArea.value || route.matched.some((record) => record.meta.requiresUser)) {
+      const failure = await router.push('/');
+      if (failure) return;
+    }
+    const result = await signOut();
+    closeMenu();
+    if (!result.ok) {
+      signOutError.value = result.error.message;
+      return;
+    }
+    await nextTick();
+    if (from === 'desktop') desktopLogin.value?.$el.focus();
+    else menuToggle.value?.focus();
+  } finally {
+    signingOut.value = false;
   }
-  // A page only a logged-in visitor may see is left for the home page.
-  if (route.matched.some((record) => record.meta.requiresUser)) {
-    await router.push('/');
-  }
-  await nextTick();
-  if (from === 'desktop') desktopLogin.value?.$el.focus();
-  else menuToggle.value?.focus();
 }
 </script>

@@ -1,20 +1,22 @@
 <template>
   <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-3xl rounded-panel border border-border bg-panel p-8">
-      <h1 class="text-3xl font-semibold text-ink">Register</h1>
+    <div class="mx-auto max-w-lg rounded-panel border border-border bg-panel p-6 sm:p-8">
+      <p class="eyebrow">Join NovaWorld</p>
+      <h1 class="page-heading mt-3">Create your account</h1>
       <p class="mt-2 text-sm text-ink-muted">
-        Pick a handle and a password. That is what you log in with in-game.
+        One account for this website and your games. Playing on NovaWorld is free.
       </p>
       <form class="mt-8 grid gap-6" novalidate @submit.prevent="handleSubmit">
         <label class="grid gap-2 text-sm text-ink">
-          Game Handle
+          Username
           <input v-model="form.username" type="text" required minlength="2" maxlength="30"
+                 autocomplete="username" autocapitalize="none" spellcheck="false"
                  class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
-          Display Name (NW Handle)
+          Player name (optional)
           <input v-model="form.nwhandle" type="text" maxlength="30"
-                 placeholder="defaults to handle"
+                 placeholder="Defaults to your username" autocomplete="nickname"
                  class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
@@ -30,6 +32,7 @@
         <label class="grid gap-2 text-sm text-ink">
           Password
           <input v-model="form.password" type="password" required minlength="3" maxlength="72"
+                 autocomplete="new-password"
                  class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <button type="submit" :disabled="busy"
@@ -42,10 +45,8 @@
           class="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online"
         >
           <p>
-            Account created! Username <code class="font-mono">{{ success.username }}</code>, PCID
-            <code class="font-mono">{{ success.pcid }}</code>. You can now log in from the game, or log in
-            to this site.
-            <template v-if="success.email">A welcome mail is on its way to {{ success.email }}.</template>
+            Account created for <strong>{{ success.username }}</strong>. Log in to continue, or use this username
+            and password in your game.
           </p>
           <RouterLink
             ref="loginOffer"

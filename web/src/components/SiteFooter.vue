@@ -10,15 +10,16 @@
       <nav aria-label="Project" class="space-y-2">
         <p class="font-semibold text-ink">Project</p>
         <ul class="space-y-1.5 text-ink-muted">
-          <li><RouterLink :to="{ path: '/', hash: '#downloads' }" class="transition hover:text-ink-bright">Downloads</RouterLink></li>
+          <li><RouterLink to="/play" class="transition hover:text-ink-bright">Start playing</RouterLink></li>
+          <li><RouterLink to="/downloads" class="transition hover:text-ink-bright">Downloads</RouterLink></li>
           <li><a :href="GITHUB_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">GitHub</a></li>
         </ul>
       </nav>
       <nav aria-label="NovaWorld" class="space-y-2">
         <p class="font-semibold text-ink">NovaWorld</p>
         <ul class="space-y-1.5 text-ink-muted">
-          <li><RouterLink to="/lobby" class="transition hover:text-ink-bright">Lobbies</RouterLink></li>
-          <li><RouterLink to="/support" class="transition hover:text-ink-bright">Support tiers</RouterLink></li>
+          <li><RouterLink to="/lobby" class="transition hover:text-ink-bright">Servers</RouterLink></li>
+          <li><RouterLink to="/support" class="transition hover:text-ink-bright">Hosting and support</RouterLink></li>
           <li><RouterLink to="/register" class="transition hover:text-ink-bright">Create an account</RouterLink></li>
         </ul>
       </nav>

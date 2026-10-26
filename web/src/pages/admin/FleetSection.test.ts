@@ -1,5 +1,7 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import type { Router } from 'vue-router';
 import FleetSection from './FleetSection.vue';
 import { fetchHostedFleet, fetchRollPlan, machineAction, stopAllFleetServers, stopFleetServer } from '../../api/admin';
 import { updateAllServers } from '../../api/dataSets';
@@ -34,10 +36,11 @@ const infra = vi.mocked(fetchInfrastructure);
 
 describe('FleetSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
-  let confirm: MockInstance<typeof window.confirm>;
+  let router: Router;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountSection(path = '/admin/fleet') {
-    const router = await testRouter(path);
+    router = await testRouter(path);
     wrapper = mount(FleetSection, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -47,7 +50,7 @@ describe('FleetSection', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     fleet.mockResolvedValue({ ok: true, value: fleetResponse() });
     infra.mockResolvedValue({ ok: true, value: overview() });
   });
@@ -221,6 +224,22 @@ describe('FleetSection', () => {
     expect(page.get('[role="status"]').text()).toBe('1 server is updating.');
   });
 
+  it('keeps a game link scoped to its servers and update action', async () => {
+    const first = fleetServer(1, { outdated: true });
+    const other = fleetServer(2, { outdated: true, data_set: { id: 99, display_name: 'Another game' } });
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [first, other] }) });
+    updateAll.mockResolvedValue({ ok: true, value: 1 });
+    const page = await mountSection('/admin/fleet?game=' + first.data_set!.id);
+    expect(page.findAll('.fleet-server-row')).toHaveLength(1);
+    const row = page.get('.fleet-server-row');
+    expect(row.findAll('a').map((a) => a.attributes('href'))).toContain('/admin/users/' + first.owner!.id);
+    expect(row.findAll('a').map((a) => a.attributes('href'))).toContain('/admin/fleet/machines/' + first.machine_ref);
+    const update = page.findAll('button').find((b) => b.text().startsWith('Update outdated servers'))!;
+    await update.trigger('click');
+    await flushPromises();
+    expect(updateAll).toHaveBeenCalledWith(first.data_set!.id);
+  });
+
   it('filters by owner and state', async () => {
     const page = await mountSection();
     await page.get('#fleet-filter-owner').setValue(' owner1 ');
@@ -228,6 +247,21 @@ describe('FleetSection', () => {
     await page.get('#fleet-filter-owner').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(fleet).toHaveBeenLastCalledWith({ owner: 'owner1', state: 'ended' }, expect.anything());
+  });
+
+  it('keeps the reviewed game scope if the URL changes while confirmation is open', async () => {
+    const first = fleetServer(1, { outdated: true });
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [first] }) });
+    updateAll.mockResolvedValue({ ok: true, value: 1 });
+    let finishReview!: (confirmed: boolean) => void;
+    confirm.mockImplementationOnce(() => new Promise((resolve) => { finishReview = resolve; }));
+    const page = await mountSection('/admin/fleet?game=' + first.data_set!.id);
+    await page.findAll('button').find((button) => button.text().startsWith('Update outdated servers'))!.trigger('click');
+    expect(updateAll).not.toHaveBeenCalled();
+    await router.push('/admin/fleet');
+    finishReview(true);
+    await flushPromises();
+    expect(updateAll).toHaveBeenCalledWith(first.data_set!.id);
   });
 
   it('drains and ends a machine after a confirmation', async () => {
@@ -242,7 +276,7 @@ describe('FleetSection', () => {
     expect(machine).toHaveBeenCalledWith('3', 'drain');
     expect(page.get('[role="status"]').text()).toBe('Machine 3 is draining.');
 
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await row.findAll('button').find((b) => b.text().startsWith('End'))!.trigger('click');
     await flushPromises();
     expect(machine).toHaveBeenCalledTimes(1);

@@ -66,8 +66,8 @@ const USERS = [
   }),
 ];
 
-async function mountSection() {
-  const router = await testRouter('/admin/users');
+async function mountSection(path = '/admin/users') {
+  const router = await testRouter(path);
   const wrapper = mount(UsersSection, { global: { plugins: [router] } });
   await flushPromises();
   return wrapper;
@@ -109,9 +109,53 @@ describe('UsersSection', () => {
   it('finds an account by name', async () => {
     const wrapper = await mountSection();
     await wrapper.get('#users-filter').setValue('BRA');
+    await flushPromises();
     expect(wrapper.findAll('tr.user-row').map((r) => r.get('a').text())).toEqual(['bravo']);
     await wrapper.get('#users-filter').setValue('zulu');
+    await flushPromises();
     expect(wrapper.text()).toContain('No account matches.');
+  });
+
+  it('searches existing identity fields and restores filters from the URL', async () => {
+    list.mockResolvedValue({ ok: true, value: [
+      userEntry(700, { username: 'pilot', nwhandle: 'Night Flyer', email: 'pilot@example.com', pcid: 'ABCDEF12', role: 'admin', account_status: 'banned' }),
+      userEntry(701, { username: 'other', role: 'player', account_status: 'active' }),
+    ] });
+    const wrapper = await mountSection('/admin/users?role=admin&status=banned&q=Night');
+    expect(wrapper.findAll('tr.user-row')).toHaveLength(1);
+    expect(wrapper.get('tr.user-row').text()).toContain('pilot');
+    for (const query of ['EXAMPLE.COM', 'abcdef12', '700']) {
+      await wrapper.get('#users-filter').setValue(query);
+      await flushPromises();
+      expect(wrapper.findAll('tr.user-row')).toHaveLength(1);
+    }
+    expect(wrapper.vm.$route.query).toMatchObject({ role: 'admin', status: 'banned', q: '700' });
+    await wrapper.get('#users-role').setValue('player');
+    await flushPromises();
+    expect(wrapper.findAll('tr.user-row')).toHaveLength(0);
+    await wrapper.vm.$router.push('/admin/users?q=Night&role=admin&status=banned');
+    await flushPromises();
+    expect(wrapper.get('#users-role').element).toHaveProperty('value', 'admin');
+    expect(wrapper.findAll('tr.user-row')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('pages the full collection locally and resets the page when a filter changes', async () => {
+    list.mockResolvedValue({ ok: true, value: Array.from({ length: 101 }, (_, i) => userEntry(i + 1)) });
+    const wrapper = await mountSection('/admin/users?page=2');
+    expect(wrapper.findAll('tr.user-row')).toHaveLength(50);
+    expect(wrapper.get('tr.user-row').text()).toContain('Account 51');
+    expect(wrapper.get('nav[aria-label="Account pages"]').text()).toContain('Page 2 of 3');
+    const next = wrapper.get('nav[aria-label="Account pages"]').findAll('a').find((a) => a.text() === 'Next')!;
+    await next.trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('tr.user-row')).toHaveLength(1);
+    await wrapper.get('#users-filter').setValue('player1@example.com');
+    await flushPromises();
+    expect(wrapper.vm.$route.query.page).toBeUndefined();
+    expect(wrapper.get('tr.user-row').text()).toContain('Account 1');
+    expect(list).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
   });
 
   it('creates an account, and shows a refusal in words', async () => {

@@ -1,10 +1,10 @@
 <template>
-  <div class="admin-page-header space-y-2">
+  <div class="admin-page-header space-y-3 border-b border-border pb-6">
     <AdminCrumbs v-if="crumbs" :trail="trail" />
     <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0 space-y-1">
-        <h1 class="break-words text-3xl font-semibold text-ink">{{ title }}</h1>
-        <p v-if="description || $slots.description" class="text-sm text-ink-muted">
+        <h1 class="page-heading break-words">{{ title }}</h1>
+        <p v-if="description || $slots.description" class="max-w-3xl text-sm leading-relaxed text-ink-muted">
           <slot name="description">{{ description }}</slot>
         </p>
         <slot />

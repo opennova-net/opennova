@@ -261,6 +261,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../composables/useConfirm';
 // One of the account's listed servers with the owner's pushes to it
 // (api/myServers.ts), on the account's Servers page. `embedded` puts it on a
 // hosted server's own page (its Overview tab) for that server's listing, with
@@ -424,7 +425,7 @@ async function sendMessage() {
 async function endMission(verb: 'Cycle' | 'EndMission' | 'GameOver') {
   const label = { Cycle: 'Move to the next map', EndMission: 'End the mission', GameOver: 'End the game' }[verb];
   const outcome = winner.value ? `${winner.value} wins.` : 'No team wins.';
-  if (!window.confirm(`${label} on ${serverLabel()}? The running mission ends for everyone playing. ${outcome}`)) return;
+  if (!await confirmAction(`${label} on ${serverLabel()}? The running mission ends for everyone playing. ${outcome}`)) return;
   await push('mission', { verb, args: winner.value ? [winner.value] : [] }, `${label}: sent to ${serverLabel()}.`);
 }
 
@@ -451,6 +452,8 @@ async function sendTimeOfDay() {
 
 async function playerAction(verb: Extract<OwnerVerb, 'PuntPlayer' | 'KillPlayer' | 'ChangeTeam'>, slot: RosterSlot) {
   const who = slot.player_name || `slot ${slot.slot}`;
+  const expectedName = slot.player_name;
+  const serverId = props.server.rid;
   const prompts: Record<typeof verb, string> = {
     PuntPlayer:
       slot.slot === 0
@@ -459,7 +462,14 @@ async function playerAction(verb: Extract<OwnerVerb, 'PuntPlayer' | 'KillPlayer'
     KillPlayer: `Kill ${who}?`,
     ChangeTeam: `Move ${who} to the other team?`,
   };
-  if (!window.confirm(prompts[verb])) return;
+  if (!await confirmAction(prompts[verb])) return;
+  const current = props.server.roster.find((entry) => entry.slot === slot.slot);
+  if (props.server.rid !== serverId || !current || current.player_name !== expectedName) {
+    status.value = '';
+    failedForm.value = null;
+    alertText.value = 'The player list changed. Choose a player from the current list and try again.';
+    return;
+  }
   const done: Record<typeof verb, string> = {
     PuntPlayer: `Asked ${serverLabel()} to kick ${who}.`,
     KillPlayer: `Asked ${serverLabel()} to kill ${who}.`,

@@ -33,9 +33,8 @@ module.exports = {
         DEFAULT: 'rgb(var(--border) / <alpha-value>)'
       },
       borderRadius: {
-        // Semantic radius scale matching the editor StyleBoxes.
-        control: '2px', // buttons, inputs, chips, list items
-        panel: '4px' // cards, panels, tables, popups
+        control: '6px',
+        panel: '12px'
       }
     }
   },

@@ -73,9 +73,40 @@ describe('SupportTierPage', () => {
     const page = await mountAt('/me/support');
     expect(page.findAll('article[aria-current]')).toHaveLength(0);
     await page.get('#support-tier-2 button').trigger('click');
+    expect(checkout).not.toHaveBeenCalled();
+    await page.get('#support-review button').trigger('click');
     await flushPromises();
     expect(checkout).toHaveBeenCalledWith('tier2');
     expect(navigate).toHaveBeenCalledWith(CHECKOUT_URL);
+  });
+
+  it('preserves a public tier selection and shows its current price before explicit checkout', async () => {
+    checkout.mockResolvedValue({ ok: true, value: CHECKOUT_URL });
+    const page = await mountAt('/me/support?tier=3');
+    expect(page.get('#support-review').text()).toContain('Your selection: Tier 3');
+    expect(page.get('#support-review').text()).toContain('$15');
+    expect(page.get('#support-tier-3 button').text()).toContain('Selected');
+    expect(checkout).not.toHaveBeenCalled();
+    expect(portal).not.toHaveBeenCalled();
+    await page.get('#support-review button').trigger('click');
+    await flushPromises();
+    expect(checkout).toHaveBeenCalledWith('tier3');
+  });
+
+  it('does not silently substitute or buy an unavailable selected tier', async () => {
+    const offers = tiersResponse();
+    offers.tiers[1].available = false;
+    tiers.mockResolvedValue({ ok: true, value: offers });
+    const page = await mountAt('/me/support?tier=2');
+    expect(page.get('#support-review').text()).toContain('currently sold out');
+    expect(page.get('#support-review button').attributes('disabled')).toBeDefined();
+    expect(checkout).not.toHaveBeenCalled();
+  });
+
+  it('ignores an invalid tier query instead of selecting or buying anything', async () => {
+    const page = await mountAt('/me/support?tier=999');
+    expect(page.find('#support-review').exists()).toBe(false);
+    expect(checkout).not.toHaveBeenCalled();
   });
 
   it("marks the account's tier and sends every change to the billing portal", async () => {
@@ -123,6 +154,7 @@ describe('SupportTierPage', () => {
     portal.mockResolvedValue({ ok: true, value: PORTAL_URL });
     const page = await mountAt('/me/support');
     await page.get('#support-tier-1 button').trigger('click');
+    await page.get('#support-review button').trigger('click');
     await flushPromises();
     expect(portal).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith(PORTAL_URL);
@@ -133,6 +165,7 @@ describe('SupportTierPage', () => {
     navigate.mockReturnValueOnce(false);
     const page = await mountAt('/me/support');
     await page.get('#support-tier-1 button').trigger('click');
+    await page.get('#support-review button').trigger('click');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toContain('looked wrong');
   });
@@ -225,6 +258,7 @@ describe('SupportTierPage', () => {
     const offer = tiersResponse();
     tiers.mockResolvedValue({ ok: true, value: tiersResponse({ tiers: offer.tiers.map((t) => ({ ...t, available: false })) }) });
     await page.get('#support-tier-1 button').trigger('click');
+    await page.get('#support-review button').trigger('click');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toContain('no payment was taken');
     expect(tiers).toHaveBeenCalledTimes(2);

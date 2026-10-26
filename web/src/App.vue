@@ -6,15 +6,28 @@
     <NavBar />
     <!-- The one <main>: its top padding clears the fixed header, so a page
          starts its own spacing from zero. -->
-    <main id="content" class="flex-1 pt-16 pb-16">
+    <main id="content" ref="content" tabindex="-1" class="flex-1 pt-16 focus:outline-none" :class="admin ? '' : 'pb-16'">
       <RouterView />
     </main>
-    <SiteFooter />
+    <SiteFooter v-if="!admin" />
+    <ConfirmDialog />
   </div>
 </template>
 
 <script setup lang="ts">
-import { RouterView } from 'vue-router';
+import { computed, nextTick, ref, watch } from 'vue';
+import { RouterView, useRoute } from 'vue-router';
 import NavBar from './components/NavBar.vue';
 import SiteFooter from './components/SiteFooter.vue';
+import ConfirmDialog from './components/ConfirmDialog.vue';
+import { settleConfirmation } from './composables/useConfirm';
+
+const route = useRoute();
+const admin = computed(() => route.path === '/admin' || route.path.startsWith('/admin/'));
+const content = ref<HTMLElement | null>(null);
+watch(() => route.fullPath, () => settleConfirmation(false));
+watch(() => route.path, async () => {
+  await nextTick();
+  content.value?.focus({ preventScroll: true });
+});
 </script>

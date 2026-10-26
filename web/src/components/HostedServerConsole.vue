@@ -284,6 +284,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../composables/useConfirm';
 // A running hosted server's console (ADR 0053 d5): its players, its rotation,
 // its chat and its console log, read through the service's console routes
 // (api/hostedServer.ts) by useHostedConsole, every call the service admits in
@@ -458,9 +459,19 @@ function serverLabel(): string {
 // Ban and kill ask first; a kick and a swap go at once.
 async function onPlayer(player: ConsolePlayer, action: PlayerAction) {
   const who = playerName(player);
-  if (action === 'ban' && !window.confirm(`Ban ${who} from ${serverLabel()}? They are kicked, and their PCID goes on the server's ban list.`)) return;
-  if (action === 'kill' && !window.confirm(`Kill ${who}?`)) return;
-  await playerAction(player, action);
+  const expectedName = player.name;
+  if (action === 'ban' && !await confirmAction(`Ban ${who} from ${serverLabel()}? They are kicked, and their PCID goes on the server's ban list.`)) return;
+  if (action === 'kill' && !await confirmAction(`Kill ${who}?`)) return;
+  // Polls keep running while the confirmation is open. Never send the old
+  // slot's command after its player has changed in the latest roster.
+  const current = players.value?.find((entry) => entry.slot === player.slot);
+  if (!current || current.name !== expectedName) {
+    const text = 'The player list changed. Choose a player from the current list and try again.';
+    notices.value = { ...notices.value, players: { tone: 'error', text } };
+    alertText.value = text;
+    return;
+  }
+  await playerAction(current, action);
 }
 
 async function onEntry(entry: RotationEntry, action: RotationEntryAction) {
@@ -468,7 +479,7 @@ async function onEntry(entry: RotationEntry, action: RotationEntryAction) {
 }
 
 async function onCycle() {
-  if (!window.confirm(`Cycle ${serverLabel()} to the next map? The round ends now for everyone playing.`)) return;
+  if (!await confirmAction(`Cycle ${serverLabel()} to the next map? The round ends now for everyone playing.`)) return;
   await cycle();
 }
 

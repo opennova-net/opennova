@@ -49,7 +49,7 @@ describe('NovaWorldSection', () => {
 
   it('is the NovaWorld service in one page: its sign-in, who is signed in, then the lobbies', async () => {
     const page = await mountSection();
-    expect(page.get('nav[aria-label="Breadcrumb"]').text()).toBe('NovaWorld');
+    expect(page.get('nav[aria-label="Breadcrumb"]').text()).toBe('Service');
     expect(page.get('h1').text()).toBe('Status and sessions');
     expect(page.findAll('h2').map((h) => h.text())).toEqual(['Sign-in', 'Signed in now', 'Lobbies']);
     expect(page.findAll('#sessions h3').map((h) => h.text())).toEqual(['Clients', 'Servers']);

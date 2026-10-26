@@ -29,6 +29,16 @@
     <div v-else-if="!game" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">Loading the game…</div>
 
     <template v-else>
+      <dl v-if="game.kind !== 'update'" class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Current server release</dt><dd class="mt-2 text-xl font-semibold text-ink">{{ game.current_tree?.version || 'None ready' }}</dd></div>
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Live servers</dt><dd class="mt-2 text-2xl font-semibold text-ink">{{ game.servers_live }}</dd></div>
+        <div class="rounded-panel border border-border bg-panel p-5"><dt class="text-xs text-ink-muted">Awaiting update</dt><dd class="mt-2 text-2xl font-semibold" :class="game.servers_outdated ? 'text-warn' : 'text-ink'">{{ game.servers_outdated }}</dd></div>
+      </dl>
+      <nav aria-label="Game details" class="flex flex-wrap gap-2 border-b border-border pb-4 text-sm">
+        <a v-if="game.kind !== 'update'" href="#game-project" class="rounded-control bg-raised px-3 py-2 text-accent">Project</a>
+        <a href="#game-releases" class="rounded-control bg-raised px-3 py-2 text-accent">Releases</a>
+        <a v-if="game.kind !== 'update'" href="#game-servers" class="rounded-control bg-raised px-3 py-2 text-accent">Servers</a>
+      </nav>
       <!-- The game's settings. -->
       <form v-if="editing" id="game-edit-form" class="space-y-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="saveEdit">
         <h2 class="text-lg font-semibold text-ink">Edit {{ game.display_name }}</h2>
@@ -261,6 +271,7 @@
       <!-- The hosted servers running it. -->
       <section v-if="game.kind !== 'update'" class="space-y-3" aria-labelledby="game-servers">
         <h2 id="game-servers" class="text-xl font-semibold text-ink">Servers</h2>
+        <RouterLink :to="{ path: '/admin/fleet', query: { game: game.id } }" class="inline-block text-sm text-accent hover:text-ink">View these servers in the fleet</RouterLink>
         <p id="game-servers-line" class="text-sm text-ink">
           {{ game.servers_live }} live server{{ game.servers_live === 1 ? '' : 's' }}.
           <template v-if="game.current_tree">New servers start on {{ game.current_tree.version || 'the published release' }}.</template>
@@ -278,6 +289,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/games/<key or id>: one game (GET /api/admin/data-sets, and
 // GET /api/admin/releases for its releases). Its settings (PATCH) and its
 // deletion behind its key typed (DELETE); its project (key, visibility, the
@@ -305,6 +317,7 @@ import {
   updateDataSet,
 } from '../../api/dataSets';
 import { usePolling } from '../../composables/usePolling';
+import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { DataSetsResponse, ProjectRevision, Release } from '../../types/dataSets';
 import { formatBytes } from '../../utils/format';
 import {
@@ -531,6 +544,9 @@ async function confirmDelete() {
     fail(result.error.message);
     return;
   }
+  editing.value = null;
+  renaming.value = false;
+  building.value = false;
   await router.push('/admin/games');
 }
 
@@ -593,6 +609,16 @@ const buildRevision = ref(0);
 const buildTried = ref(false);
 const versionProblem = computed(() => (buildTried.value && !VERSION_RULE.test(buildVersion.value.trim()) ? 'A version is one to four numbers between dots.' : ''));
 
+useUnsavedChanges(() => {
+  const g = game.value;
+  const edit = editing.value;
+  return !!g && (
+    (!!edit && (edit.display_name !== g.display_name || edit.game !== g.game ||
+      edit.updater_login !== g.updater_login || edit.command_file !== g.command_file || edit.retail_updater !== g.retail_updater)) ||
+    (renaming.value && newKey.value.trim().toUpperCase() !== g.key) ||
+    (building.value && (buildVersion.value.trim() !== '' || buildRevision.value !== g.head))
+  );
+});
 function beginBuild() {
   building.value = true;
   buildVersion.value = '';
@@ -621,7 +647,7 @@ async function confirmBuild() {
 async function publish(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!window.confirm(`Publish ${name}? The update service serves it to players, and new servers run it once its data is built; running servers move when their owners choose.`)) return;
+  if (!await confirmAction(`Publish ${name}? The update service serves it to players, and new servers run it once its data is built; running servers move when their owners choose.`)) return;
   busy.value = true;
   const result = await publishRelease(r.id);
   busy.value = false;
@@ -636,7 +662,7 @@ async function publish(r: Release) {
 async function retire(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!window.confirm(`Retire ${name}? The update service stops serving it; servers keep what they run.`)) return;
+  if (!await confirmAction(`Retire ${name}? The update service stops serving it; servers keep what they run.`)) return;
   busy.value = true;
   const result = await retireRelease(r.id);
   busy.value = false;
@@ -651,7 +677,7 @@ async function retire(r: Release) {
 async function removeRelease(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!window.confirm(`Delete ${name}? Its package is removed from the store.`)) return;
+  if (!await confirmAction(`Delete ${name}? Its package is removed from the store.`)) return;
   busy.value = true;
   const result = await deleteRelease(r.id);
   busy.value = false;
@@ -671,7 +697,7 @@ async function updateServers() {
   if (!g || busy.value) return;
   const n = g.servers_outdated;
   const version = g.current_tree?.version || 'the published release';
-  if (!window.confirm(`Move the ${n} server${n === 1 ? '' : 's'} of ${g.display_name} on an older release to ${version}? Each restarts, and its players drop while it does.`)) {
+  if (!await confirmAction(`Move the ${n} server${n === 1 ? '' : 's'} of ${g.display_name} on an older release to ${version}? Each restarts, and its players drop while it does.`)) {
     return;
   }
   busy.value = true;

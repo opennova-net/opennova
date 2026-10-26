@@ -20,7 +20,7 @@ async function header(path: string, props: HeaderProps, slots: Record<string, st
 describe('AdminPageHeader', () => {
   it('says where the page sits, its name and what it holds', async () => {
     const page = await header('/admin/fleet', { description: 'The machines and their servers.' });
-    expect(page.get('nav[aria-label="Breadcrumb"]').text()).toBe('Hosting');
+    expect(page.get('nav[aria-label="Breadcrumb"]').text()).toBe('Service');
     expect(page.get('h1').text()).toBe('Fleet');
     expect(page.get('header p').text()).toBe('The machines and their servers.');
   });
