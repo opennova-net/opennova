@@ -111,18 +111,22 @@ bool test_world_rows_carry_the_authoritative_record() {
 					static_cast<int>(r[w::PF_BMS_ID]) == 4242 && static_cast<int>(r[w::PF_NET_ID]) == 99,
 			"the placed identity rides kind/index/bms/net") && ok;
 	ok = expect(static_cast<int>(r[w::PF_STANCE_BITS]) == 2, "the stance latch is masked to its two bits") && ok;
-	// Only the person bone walk hides a +0x134 section: this item row's
-	// section mask stays drawn, an organic's splits into its two 16-bit words.
-	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
+	// Only the person bone walk hides a +0x134 section, and it folds the
+	// section's bone: this item row's section mask stays drawn and carries no
+	// cut, an organic's word rides PF_CUT_SECTIONS in its two 16-bit halves and
+	// hides no part. [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test
+	// @0x4B1F1D, the zeroed row @0x4B1F25..0x4B1F31)]
 	ok = expect(r[w::PF_SECTION_MASK_VALID] == 1.0f && static_cast<int>(r[w::PF_SECTION_MASK_LO]) == 0 &&
-					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 0,
-			"an item row's +0x134 sections stay drawn") && ok;
+					static_cast<int>(r[w::PF_SECTION_MASK_HI]) == 0 &&
+					r[w::PF_CUT_SECTIONS_LO] == 0.0f && r[w::PF_CUT_SECTIONS_HI] == 0.0f,
+			"an item row's +0x134 sections stay drawn and fold nothing") && ok;
 	e->kind = w::EntityKind::Organic;
 	im::build_world_present_rows(context, lifecycle, rows, doors);
-	ok = expect(row_at(rows, 0)[w::PF_SECTION_MASK_VALID] == 1.0f &&
-					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_LO]) == 2 &&
-					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_HI]) == 1,
-			"a person's section mask splits into its two 16-bit words") && ok;
+	ok = expect(static_cast<int>(row_at(rows, 0)[w::PF_CUT_SECTIONS_LO]) == 2 &&
+					static_cast<int>(row_at(rows, 0)[w::PF_CUT_SECTIONS_HI]) == 1 &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_LO]) == 0 &&
+					static_cast<int>(row_at(rows, 0)[w::PF_SECTION_MASK_HI]) == 0,
+			"a person's cut sections split into its two 16-bit words and hide no part") && ok;
 	e->kind = w::EntityKind::Item;
 	im::build_world_present_rows(context, lifecycle, rows, doors);
 	r = row_at(rows, 0);

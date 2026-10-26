@@ -1690,9 +1690,12 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		robj_changed = apply_robj_transforms();
 	}
 	// A clip-posed model's parts take the same tracks over the bone matrices
-	// its clip built (apply_skeletal_panm), after this frame's pose write.
-	if (skeletal_scene_ && (has_live_panm_ || skin_binds_layered_)) {
-		apply_skeletal_panm();
+	// its clip built, and its collapsed bones fold, in the skin's binds
+	// (apply_skeletal_binds), after this frame's pose write; a pose written
+	// later this frame re-solves them where the skeleton settles
+	// (settle_skeleton_pose).
+	if (skeletal_scene_ && skeletal_binds_live() && apply_skeletal_binds()) {
+		publish_skin_palette();
 	}
 	if (focal_sway_active_) {
 		apply_focal_sway();
@@ -2377,6 +2380,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_right_hand_collapsed);
 	ClassDB::bind_method(D_METHOD("is_right_hand_collapsed"),
 			&ObjectModel::is_right_hand_collapsed);
+	ClassDB::bind_method(D_METHOD("set_cut_sections", "mask"), &ObjectModel::set_cut_sections);
+	ClassDB::bind_method(D_METHOD("get_cut_sections"), &ObjectModel::get_cut_sections);
+	ClassDB::bind_method(D_METHOD("get_bone_skin_transform", "bone"),
+			&ObjectModel::get_bone_skin_transform);
 	ClassDB::bind_method(D_METHOD("has_body_blend"),
 			&ObjectModel::has_body_blend);
 	ClassDB::bind_method(D_METHOD("get_body_blend_source_key"),

@@ -7,6 +7,9 @@ extends GameProbe
 ## dump the camera aim ray against every live effect-world group (name, sim
 ## position, rendered bounds) to localize "impacts spawn in the wrong place"
 ## reports, and capture the frame. Fails when the burst left no live group.
+## With `aim_entity` (a game_entities ai_index) the walk and look give way to
+## the aim lock (ProbeAim): the view holds on that entity's body plus
+## `aim_height` m from before the trigger through the burst.
 ## Needs a window (input and capture).
 
 const AIM_RAY_DISTANCES := [5.0, 10.0, 20.0, 40.0]
@@ -23,6 +26,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var walk_frames := int(ctx.args.get("walk_frames", 120))
 	var look_px := float(ctx.args.get("look_px", 37.5))
 	var burst_frames := int(ctx.args.get("burst_frames", 20))
+	var aim_entity := int(ctx.args.get("aim_entity", -1))
+	var aim_height := float(ctx.args.get("aim_height", 0.4))
 	var out_dir := ProbeOutput.resolve(ctx, String(ctx.args.get("output_dir", "")))
 	ctx.defer_restore(func() -> void:
 		ProbeInput.hold(KEY_W, false)
@@ -37,14 +42,25 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		await ctx.wait_frames(EQUIP_SETTLE_FRAMES)
 		ctx.log("equipped %s" % weapon)
 
-	# Walk forward a little, then aim down so the burst lands near the ground
-	# a few metres ahead.
-	ProbeInput.hold(KEY_W, true)
-	await ctx.wait_frames(walk_frames)
-	ProbeInput.hold(KEY_W, false)
-	await ctx.wait_frames(SETTLE_AFTER_WALK)
-	ProbeInput.look(Vector2(0, look_px))
-	await ctx.wait_frames(SETTLE_AFTER_LOOK)
+	var aim_handle := -1
+	if aim_entity >= 0:
+		var target := ProbeAim.row_by_ai_index(ctx.sim(), aim_entity) if ctx.sim() != null else null
+		if target == null:
+			return ProbeVerdict.failed("aim_entity %d names no entity" % aim_entity)
+		aim_handle = target.get_wire_handle()
+		for _f in range(SETTLE_AFTER_LOOK):
+			ProbeAim.at(ctx.sim(), ctx.camera(), aim_handle, aim_height)
+			await ctx.wait_frames(1)
+		ctx.log("aim locked on %s (ai_index %d)" % [target.get_item_name(), aim_entity])
+	else:
+		# Walk forward a little, then aim down so the burst lands near the
+		# ground a few metres ahead.
+		ProbeInput.hold(KEY_W, true)
+		await ctx.wait_frames(walk_frames)
+		ProbeInput.hold(KEY_W, false)
+		await ctx.wait_frames(SETTLE_AFTER_WALK)
+		ProbeInput.look(Vector2(0, look_px))
+		await ctx.wait_frames(SETTLE_AFTER_LOOK)
 
 	var cam := ctx.camera()
 	if cam == null:
@@ -62,7 +78,10 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# impact (a few hundred m/s over tens of metres = a handful of ticks) while
 	# the groups stay alive for the report.
 	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, true)
-	await ctx.wait_frames(burst_frames)
+	for _f in range(burst_frames):
+		if aim_handle >= 0:
+			ProbeAim.at(ctx.sim(), ctx.camera(), aim_handle, aim_height)
+		await ctx.wait_frames(1)
 	ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 	await ctx.wait_frames(SETTLE_AFTER_BURST)
 	if ctx.cancelled:

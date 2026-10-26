@@ -176,6 +176,8 @@ struct SimulationConstants {
 		PF_SLOT_MARCH_OFFSET_Z = opennova::world::PF_SLOT_MARCH_OFFSET_Z,
 		PF_ANIM_PHASE_PARKED = opennova::world::PF_ANIM_PHASE_PARKED,
 		PF_WPN_PHASE_PARKED = opennova::world::PF_WPN_PHASE_PARKED,
+		PF_CUT_SECTIONS_LO = opennova::world::PF_CUT_SECTIONS_LO,
+		PF_CUT_SECTIONS_HI = opennova::world::PF_CUT_SECTIONS_HI,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 

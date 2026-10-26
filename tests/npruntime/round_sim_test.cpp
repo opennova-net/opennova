@@ -1616,6 +1616,70 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 	return true;
 }
 
+// An ammo whose +72 word names a hit emitter (`secondary_effect`, the incendiary round): the live
+// hit's org callback releases the body's +0x1CC emitter and spawns the effect at the body on every
+// hit, and its fire death 173 follows the cut, so a clone keeps the section's clip and no emitter.
+// [orig: OrganicClass_HandleEvent @0x407310 - the +72 read @0x407453, the release
+//  @0x4074DB..0x4074F9, the descriptor @0x4074FF..0x40753A, the store @0x40754A, the clone's
+//  +0x1CC = 0 @0x40769E, the override @0x4076D3..0x4076D5]
+bool test_an_incendiary_hit_burns_the_body() {
+	const auto burn_events = [](const w::World &world, w::EntityHandle body) {
+		std::vector<w::DestructionEffectEvent> out;
+		for (const w::DestructionEffectEvent &effect : world.out.destruction.effects)
+			if (effect.family == 1 && effect.bank_slot == 0 && effect.attach_wire_handle == body.packed)
+				out.push_back(effect);
+		return out;
+	};
+	{
+		DismembermentRig rig(3);
+		rig.world.tables.ammo.entries[0].secondary_effect = "Effect_Burn";
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		victim->health = 100;
+		victim->death_effect_active[0] = 1; // an earlier hit's emitter in +0x1CC
+		rig.ai.for_handle(rig.victim)->health = 100;
+		rig.fire();
+		const auto events = burn_events(rig.world, rig.victim);
+		if (!expect(victim->health == 90 && events.size() == 2 && events[0].release &&
+		                    !events[1].release && events[1].effect == "Effect_Burn" &&
+		                    events[1].dir.z == -0.5f && events[1].section_tagged && events[1].positioned,
+		            "a non-lethal incendiary hit releases the body's emitter and attaches its own"))
+			return false;
+		if (!expect((victim->death_effect_active[0] & 1u) != 0 &&
+		                    victim->death_anim_state == w::anim_state::kDeathFire,
+		            "a non-lethal incendiary hit stages the fire death"))
+			return false;
+	}
+	{
+		DismembermentRig rig(3);
+		rig.world.tables.ammo.entries[0].secondary_effect = "Effect_Burn";
+		rig.fire();
+		const w::Entity *victim = rig.world.registry.get(rig.victim);
+		const w::Entity *piece = rig.piece();
+		if (!expect(victim != nullptr && victim->health == 0 && piece != nullptr,
+		            "a lethal incendiary bone hit kills and cuts"))
+			return false;
+		if (!expect(victim->death_anim_state == w::anim_state::kDeathFire &&
+		                    piece->death_anim_state ==
+		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet) &&
+		                    (piece->death_effect_active[0] & 1u) == 0,
+		            "the victim burns; the clone keeps the section's clip and no emitter"))
+			return false;
+	}
+	{
+		DismembermentRig rig(3);
+		w::Entity *victim = rig.world.registry.get(rig.victim);
+		victim->health = 100;
+		rig.ai.for_handle(rig.victim)->health = 100;
+		rig.fire();
+		if (!expect(burn_events(rig.world, rig.victim).empty() &&
+		                    victim->death_anim_state ==
+		                            w::compute_death_anim_state(3, 2, w::death_cause::kBullet),
+		            "a round with no secondary_effect attaches nothing and stages the bullet death"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 // The round ids come from the pool's one counter: a fresh word mints (local slot << 9)
@@ -1846,6 +1910,7 @@ int main() {
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;
+	if (!test_an_incendiary_hit_burns_the_body()) return 1;
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);

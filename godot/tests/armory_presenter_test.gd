@@ -432,6 +432,56 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 			"the ArmoryPresenter ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
 
 
+# The armory answers the shell menu's game_menu seams over its own surface: nothing
+# while closed; its state names the surface and lists the PRIMARY combo's rows (NONE,
+# then the class's primaries); press_at hits a widget; key takes only the useitem
+# ACCEPT accelerator. (The adapter's routing to it: main_game_lifecycle_test.)
+func test_menu_seams_drive_the_open_armory() -> void:
+	var simulation := _real_sim(2)
+	var weapons := _make_weapons()
+	var primary_rows: Array[WeaponDef] = weapons.get_slot_weapons(
+			WeaponDatabase.SLOT_PRIMARY, 8, 1)
+	assert_gt(primary_rows.size(), 0, "the fixture weapon.def has a selectable primary")
+	var kit: Array[WeaponKitEntry] = [WeaponKitEntry.make(primary_rows[0].name)]
+	assert_true(simulation.apply_local_player_loadout(kit, 8))
+	var overlay := Control.new()
+	overlay.size = Vector2(MenuFrame.DESIGN_WIDTH, MenuFrame.DESIGN_HEIGHT) # design coords map 1:1
+	add_child_autofree(overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(_make_world(simulation, weapons), null, overlay)
+
+	assert_eq(presenter.menu_snapshot(), {}, "a closed armory answers nothing")
+	assert_eq(presenter.menu_press_at(Vector2(400, 300)), -1)
+	assert_true(presenter.open())
+	var state := presenter.menu_snapshot()
+	assert_eq(state.get("surface"), "armory")
+	assert_eq(state.get("file"), "weapon.mnu")
+	assert_eq(state.get("screen"), "WEAPON")
+	var primary := {}
+	for row: Dictionary in state.get("widgets", []):
+		if row.get("name") == "PRIMARY":
+			primary = row
+	assert_false(primary.is_empty(), "the state lists the PRIMARY combo")
+	var driver := presenter.get_menu_driver()
+	var rows: PackedStringArray = primary.get("rows", PackedStringArray())
+	assert_eq(rows.size(), driver.item_count(driver.widget_id("PRIMARY")),
+		"the combo's rows are the driver's")
+	assert_has(rows, _weapon_display_text(primary_rows[0]),
+		"the class's primary is a row of the combo")
+
+	var rect: Array = primary.get("rect", [])
+	var center := Vector2(float(rect[0]) + float(rect[2]) / 2.0,
+			float(rect[1]) + float(rect[3]) / 2.0)
+	assert_eq(presenter.menu_press_at(center), int(primary.get("index", -1)),
+		"press_at hits the PRIMARY combo")
+
+	assert_false(presenter.menu_key(KEY_A), "the screen takes no key but the ACCEPT accelerator")
+	var use_keys := ControlsBindings.model().godot_keys_for_token("useitem")
+	assert_false(use_keys.is_empty(), "the useitem row has a key")
+	assert_true(presenter.menu_key(int(use_keys[0])), "the useitem key is the ACCEPT accelerator")
+
+
 func test_multiplayer_open_is_live() -> void:
 	# The 0x2F loadout service exists now: a joiner's ACCEPT re-submits from the
 	# applied kit (the sim's in-match queue leg) and the listen presenter applies

@@ -542,6 +542,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
+		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
@@ -573,6 +574,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
+		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
@@ -636,6 +638,10 @@ private:
 	// to the value change; true when the model was written.
 	static bool stamp_right_hand_collapsed(ObjectModel *model, const float *p,
 			int base, int32_t &last_rhc);
+	// A person's cut sections (PF_CUT_SECTIONS, the +0x134 word its bone walk
+	// folds), edge-gated the same way; true when the model was written.
+	static bool stamp_cut_sections(ObjectModel *model, const float *p, int base,
+			int64_t &last_cut);
 	// Compare-and-refresh the aim payload cache: true when it changed (apply),
 	// false when every float is bit-identical to the last applied set. A NaN
 	// field never compares equal, so a poisoned row degrades to per-frame

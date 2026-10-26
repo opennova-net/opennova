@@ -61,8 +61,9 @@ static func definitions() -> Array[McpToolDef]:
 			+ "Pause/step retain the runtime's multiplayer transport restrictions. "
 			+ "open_ingame_menu raises the ESC pause overlay (game.mnu) over a loaded "
 			+ "world — game_menu drives it from there; open_armory opens the in-world "
-			+ "armory (weapon.mnu WEAPON) over live play — presenter-owned, so inspect "
-			+ "it via game_screenshot, and resume hands play back from either screen.",
+			+ "armory (weapon.mnu WEAPON) over live play, which game_menu then drives "
+			+ "(its state, press, press_at, move_at, hold_at, click_at and key; screen and "
+			+ "open stay the shell menu's), and resume hands play back from either screen.",
 			{
 				"action": {
 					"type": "string",
@@ -142,8 +143,10 @@ static func definitions() -> Array[McpToolDef]:
 				"include_image": {"type": "boolean", "default": true},
 			}, [], true, McpScreenshot.CAPTURE_TIMEOUT_MS),
 		McpToolDef.make("game_menu",
-			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
-			+ "(design-space rects); press activates a named widget through the real mouse pump "
+			"Drive the compiled menu: the in-world armory (weapon.mnu WEAPON) while it is up, else "
+			+ "the shell's (state's surface says which). op=state returns the current file/screen + "
+			+ "widget rows (design-space rects; a list's or a combo's rows and its selected row); "
+			+ "press activates a named widget through the real mouse pump "
 			+ "(press+release at its center); press_at pumps at design coords x,y (list rows, "
 			+ "combo popups, spin arrows) and returns the hit widget index; move_at (hold_at) "
 			+ "pumps one sample there with the button up (held), as a motion does (the hover and "
