@@ -38,15 +38,26 @@ namespace opennova::editor {
 
 namespace {
 
-void append_game_flags(LaunchPlan &plan, const std::string &game_code, const std::string &mission) {
+// The retail switches a run hands the game (an expansion's /exp), at the head of the line the game walks: its walk
+// reads its config tokenizer's split, which a "//" or a ';' outside quotes ends and which holds 30 tokens with the
+// program's [orig: Game_ParseCommandLineAndInit @ 0x4a7310 -> Config_TokenizeLine @ 0x53CB60] (boot_policy
+// walk_retail_switches), so a switch behind a path option (a run directory on a share, "//server/...", a folder named
+// with a ';') or behind a long run of options would be cut off. A packaged runtime walks its whole process line, a
+// source run the arguments after `--` (the shell's LaunchFlags::parse); the OpenNova options are read from the
+// argument list wherever they stand.
+void append_retail_switches(LaunchPlan &plan) {
+	if (plan.expansion.empty()) return;
+	plan.args.push_back(kLaunchFlagExpansion);
+	plan.args.push_back(plan.expansion);
+}
+
+// `--`, then (a source run's walked arguments: `switches_here`) the retail switches, then the OpenNova options.
+void append_game_flags(LaunchPlan &plan, const std::string &game_code, const std::string &mission, bool switches_here) {
 	plan.args.push_back("--");
+	if (switches_here) append_retail_switches(plan);
 	plan.args.push_back("--no-update");
 	plan.args.push_back(kLaunchFlagResourceDir);
 	plan.args.push_back(plan.resource_dir);
-	if (!plan.expansion.empty()) {
-		plan.args.push_back(kLaunchFlagExpansion);
-		plan.args.push_back(plan.expansion);
-	}
 	if (!game_code.empty()) {
 		plan.args.push_back(kLaunchFlagGame);
 		plan.args.push_back(game_code);
@@ -650,10 +661,12 @@ LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const st
                                  const std::string &expansion, bool on_run_dir) {
 	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port, expansion, on_run_dir);
 	plan.executable = runtime_executable;
-	plan.args = engine_args;
+	// The packaged runtime walks its whole process line: the retail switches lead it.
+	append_retail_switches(plan);
+	plan.args.insert(plan.args.end(), engine_args.begin(), engine_args.end());
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
-	append_game_flags(plan, game_code, mission);
+	append_game_flags(plan, game_code, mission, false);
 	return plan;
 }
 
@@ -670,7 +683,8 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 	for (const std::string &arg : engine_args) plan.args.push_back(arg);
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
-	append_game_flags(plan, game_code, mission);
+	// A source run walks the arguments after `--` alone (Godot's own hold the scene's res:// path).
+	append_game_flags(plan, game_code, mission, true);
 	// Godot's --path moves the process's working directory to the project, so the run directory
 	// is named: the runtime keeps the files it writes beside itself there (LaunchFlags.working_dir),
 	// as the packaged runtime does in the working directory it is started in.
