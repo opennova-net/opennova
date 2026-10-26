@@ -131,7 +131,7 @@ describe('ServerOverviewTab', () => {
         phase: { name: 'downloading_data', bytes_done: 1_200_000_000, bytes_total: 2_300_000_000 },
       }),
     );
-    expect(page.get('.server-phase').text()).toBe('Downloading game data: 1.2 of 2.3 GB.');
+    expect(page.get('.server-phase').text()).toBe("Downloading the game's release: 1.2 of 2.3 GB.");
     expect(page.get('.server-phase-slow').text()).toBe('This is taking longer than usual.');
     expect(page.find('.launches-held').exists()).toBe(false);
   });
@@ -145,17 +145,17 @@ describe('ServerOverviewTab', () => {
     expect(page.find('.server-phase-slow').exists()).toBe(false);
   });
 
-  it("says the game data could not be fetched, the machine's reason on an admin's page alone", async () => {
+  it("says the game's release could not be fetched, the machine's reason on an admin's page alone", async () => {
     const waiting = hostedServer(1, {
       state: 'provisioning',
       phase: { name: 'data_unavailable', line: 'its data could not be fetched: aws s3 sync exited 1: AccessDenied' },
     });
     let page = await mountTab(waiting, 'admin');
-    expect(page.get('.server-phase').text()).toBe('The game data could not be fetched; the service is retrying.');
+    expect(page.get('.server-phase').text()).toBe("The game's release could not be fetched; the service is retrying.");
     expect(page.get('.server-phase-line').text()).toContain('aws s3 sync exited 1: AccessDenied');
     wrapper?.unmount();
     page = await mountTab(waiting);
-    expect(page.get('.server-phase').text()).toBe('The game data could not be fetched; the service is retrying.');
+    expect(page.get('.server-phase').text()).toBe("The game's release could not be fetched; the service is retrying.");
     expect(page.find('.server-phase-line').exists()).toBe(false);
   });
 

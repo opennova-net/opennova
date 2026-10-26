@@ -143,7 +143,7 @@ export function phaseText(phase: ServerPhase): string {
     case 'moving':
       return 'Moving to another machine. This is not a restart and does not count toward the restart limit.';
     case 'data_unavailable':
-      return 'The game data could not be fetched; the service is retrying.';
+      return "The game's release could not be fetched; the service is retrying.";
     case 'launches_held':
       return 'Waiting for a machine: new machines are held for a moment.';
     case 'launching_machine':
@@ -154,8 +154,8 @@ export function phaseText(phase: ServerPhase): string {
       return 'Waiting for your static address to reach its machine.';
     case 'downloading_data':
       return phase.bytes_done !== undefined && phase.bytes_total !== undefined && phase.bytes_total > 0
-        ? `Downloading game data: ${bytesOf(phase.bytes_done, phase.bytes_total)}.`
-        : 'Downloading game data.';
+        ? `Downloading the game's release: ${bytesOf(phase.bytes_done, phase.bytes_total)}.`
+        : "Downloading the game's release.";
     case 'downloading_server':
       return 'Downloading the game server.';
     case 'starting_server':
@@ -169,7 +169,7 @@ export function phaseText(phase: ServerPhase): string {
 
 // How long a phase usually lasts from the server's last change of state, in
 // seconds; null for one that has no usual length (a hold, the states
-// themselves). The game data's grows with its size.
+// themselves). The download's grows with the release's size.
 export function expectedPhaseSeconds(phase: ServerPhase): number | null {
   switch (phase.name) {
     case 'queued':
@@ -236,7 +236,7 @@ export function stoppedBecauseText(b: StoppedBecause, scope: 'owner' | 'admin'):
     case 'no_data':
       return 'Its game is no longer offered, so it could not run.';
     case 'data_unavailable':
-      return 'Its game data could not be fetched.';
+      return "Its game's release could not be fetched.";
     case 'link_lost':
       return 'The service lost its link to it.';
     default:
