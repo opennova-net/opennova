@@ -511,6 +511,22 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 			[db](int p_id) { return db->has_item(p_id); });
 }
 
+// The engine's resolve (runtime/inmatch/character_registry.h), no combo when no
+// Avatars.def is loaded.
+static opennova::inmatch::PlayerVisualSpec engine_player_visual_spec(
+		const Ref<AvatarDatabase> &p_avatar_db, int p_character_id) {
+	if (p_avatar_db.is_valid()) {
+		return p_avatar_db->player_visual_spec(p_character_id);
+	}
+	opennova::inmatch::PlayerVisualSpec none;
+	none.character_id = p_character_id;
+	return none;
+}
+
+static Vector3i camo_vector(const std::array<int, 3> &p_camo) {
+	return Vector3i(p_camo[0], p_camo[1], p_camo[2]);
+}
+
 // The player's visual = the combo its packed character id resolves to: head +
 // body models in the world (retail draws BOTH with the entity's skeleton, each
 // after its own camo store [orig: Terrain_RenderSectorEntitiesBySide
@@ -532,54 +548,42 @@ Ref<PlayerVisualSpec> MissionObjectPlacer::resolve_player_visual_spec(
 	out.instantiate();
 	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
 	out->set_item_id(item_id);
-	if (avatar_db_.is_valid()) {
-		const Ref<AvatarComboRow> resolved = avatar_db_->resolve_character_id(
-				p_character_id);
-		if (resolved.is_valid()) {
-			const Ref<AvatarPartRow> head = resolved->get_head();
-			const Ref<AvatarPartRow> body = resolved->get_body();
-			const Ref<AvatarPartRow> arms = resolved->get_arms();
-			out->set_character_id(p_character_id & 0xffff);
-			out->set_head(head->get_graphic());
-			out->set_head_camo(head->get_camo());
-			out->set_body(body->get_graphic());
-			out->set_body_camo(body->get_camo());
-			if (arms.is_valid()) {
-				out->set_arms(arms->get_graphic());
-				out->set_arms_camo(arms->get_camo());
-			}
-			out->set_avatar(head->get_voice());
-			out->set_sex(head->get_sex());
-			out->set_nationality_index(resolved->get_nationality_index());
-			out->set_division_index(resolved->get_division_index());
-			out->set_combo_index(resolved->get_combo_index());
-			out->set_fallback(false);
-			return out;
-		}
+	const opennova::inmatch::PlayerVisualSpec spec =
+			engine_player_visual_spec(avatar_db_, p_character_id);
+	out->set_character_id(spec.character_id);
+	out->set_fallback(spec.fallback);
+	if (spec.fallback) {
+		out->set_body(item_db_.is_valid() ? item_db_->get_graphic(item_id) : String());
+		return out;
 	}
-	out->set_character_id(p_character_id);
-	out->set_body(item_db_.is_valid() ? item_db_->get_graphic(item_id) : String());
-	out->set_fallback(true);
+	out->set_head(opennova::to_gd(spec.head));
+	out->set_head_camo(camo_vector(spec.head_camo));
+	out->set_body(opennova::to_gd(spec.body));
+	out->set_body_camo(camo_vector(spec.body_camo));
+	out->set_arms(opennova::to_gd(spec.arms));
+	out->set_arms_camo(camo_vector(spec.arms_camo));
+	out->set_avatar(spec.voice);
+	out->set_sex(spec.sex);
+	out->set_nationality_index(spec.nationality_index);
+	out->set_division_index(spec.division_index);
+	out->set_combo_index(spec.combo_index);
 	return out;
 }
 
 ObjectModel *MissionObjectPlacer::build_player_animated_model(
 		int p_runtime_type_id, Node3D *p_parent, int p_character_id) {
+	_ensure_item_db();
+	_ensure_avatar_db();
 	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
-	const Ref<PlayerVisualSpec> spec = resolve_player_visual_spec(
-			p_runtime_type_id, p_character_id);
-	if (spec->get_fallback()) {
+	const opennova::inmatch::PlayerVisualSpec spec =
+			engine_player_visual_spec(avatar_db_, p_character_id);
+	// The compose-or-item-model verdict is the engine's
+	// (inmatch::PlayerVisualSpec::composes); this builds the nodes it names.
+	if (!spec.composes()) {
 		return build_animated_model(item_id, p_parent);
 	}
-	const String body_graphic = spec->get_body();
-	const String head_graphic = spec->get_head();
-	// Retail composes head + body only when BOTH blip model handles are
-	// nonzero; either missing falls to the entity's own item model.
-	// [orig: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
-	//  jz to the forced_model 0 item path on either zero handle]
-	if (body_graphic.is_empty() || head_graphic.is_empty()) {
-		return build_animated_model(item_id, p_parent);
-	}
+	const String body_graphic = opennova::to_gd(spec.body);
+	const String head_graphic = opennova::to_gd(spec.head);
 	const String adm_name = item_db_.is_valid()
 			? item_db_->get_anim_def(item_id)
 			: String();
@@ -595,7 +599,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	body->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
 	// @0x5c800f, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(body, spec->get_body_camo(),
+	AvatarDatabase::apply_part_camo(body, camo_vector(spec.body_camo),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_scale(body, item_id);
@@ -619,7 +623,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	head->set_character_id(p_character_id & 0xffff);
 	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
 	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
-	AvatarDatabase::apply_part_camo(head, spec->get_head_camo(),
+	AvatarDatabase::apply_part_camo(head, camo_vector(spec.head_camo),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	_configure_item_shadow(head, item_id);

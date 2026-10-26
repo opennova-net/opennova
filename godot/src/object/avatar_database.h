@@ -154,6 +154,9 @@ public:
 	// (engine: runtime/inmatch/admin_console_player.cpp).
 	Ref<AvatarComboRow> resolve_character_id(int character_id,
 			int expected_alignment = -1) const;
+	// The player visual the packed id resolves to (engine:
+	// inmatch::resolve_player_visual_spec over this file and its registry).
+	opennova::inmatch::PlayerVisualSpec player_visual_spec(int character_id) const;
 	// Retail's per-side default character: the packed id of the first combo (file
 	// order) whose nationality alignment matches; no match -> the first combo of
 	// all; empty -> 0 (engine: runtime/inmatch/character_registry.h).

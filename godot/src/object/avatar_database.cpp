@@ -350,6 +350,10 @@ Ref<AvatarComboRow> AvatarDatabase::resolve_character_id(
 	return combo_row(entry->nationality_index, entry->division_index, entry->combo_index);
 }
 
+opennova::inmatch::PlayerVisualSpec AvatarDatabase::player_visual_spec(int character_id) const {
+	return opennova::inmatch::resolve_player_visual_spec(file_, character_registry(), character_id);
+}
+
 int AvatarDatabase::first_character_id(int alignment) const {
 	return character_registry().first_character_id(alignment);
 }

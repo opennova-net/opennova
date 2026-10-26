@@ -10,6 +10,7 @@
 
 #include <formats/avatars/avatars.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -42,6 +43,48 @@ const char kDef[] =
 		"nationality N07 AV_REBEL\r\n{\r\n\talignment evil\r\n\tdivision D00 AV_REB\r\n\t{\r\n"
 		"\t\tcombo 001 HEAD_E BODY_A\r\n"
 		"\t}\r\n}\r\n";
+
+// The visual resolve's fixture: a combo with graphics, camo and arms, and one whose head
+// names no graphic.
+const char kVisualDef[] =
+		"define head HEAD_V\r\n{\r\n\tgraphic head_v.3di\r\n\tcamo 1 2 3\r\n\tvoice 4\r\n\tsex f\r\n}\r\n"
+		"define head HEAD_BARE\r\n{\r\n\tvoice 2\r\n\tsex m\r\n}\r\n"
+		"define body BODY_V\r\n{\r\n\tgraphic body_v.3di\r\n\tcamo 4 5 6\r\n}\r\n"
+		"define arms ARMS_V\r\n{\r\n\tgraphic arms_v.3di\r\n\tcamo 7 8 9\r\n}\r\n"
+		"nationality N00 AV_US\r\n{\r\n\talignment good\r\n\tdivision D00 AV_SEAL\r\n\t{\r\n"
+		"\t\tcombo 001 HEAD_V BODY_V ARMS_V\r\n"
+		"\t\tcombo 002 HEAD_BARE BODY_V\r\n"
+		"\t}\r\n}\r\n";
+
+// A player's visual from its packed id: the combo's parts, camos, head voice and sex and
+// tree indices; head and body compose only when both name a graphic; an unknown id falls
+// to the item model. [orig: Terrain_RenderSectorEntitiesBySide @0x5C7FDF..0x5C8039;
+//  CAvatarDefs_FindComboByPackedId @0x57A270]
+void test_player_visual_spec() {
+	using namespace opennova::inmatch;
+	AvatarsFile file;
+	check(avatars_parse_memory(kVisualDef, sizeof(kVisualDef) - 1, &file) == 0,
+			"the visual fixture parses");
+	const CharacterRegistry registry = CharacterRegistry::from_file(file);
+	const PlayerVisualSpec full = resolve_player_visual_spec(file, registry, 0x10200);
+	check(!full.fallback && full.composes(), "0x0200 composes head and body");
+	check(full.character_id == 0x0200, "the spec keeps the packed low word");
+	check(full.head == "head_v.3di" && full.body == "body_v.3di" && full.arms == "arms_v.3di",
+			"the combo's three graphics");
+	check(full.head_camo == (std::array<int, 3>{1, 2, 3}) &&
+			full.body_camo == (std::array<int, 3>{4, 5, 6}) &&
+			full.arms_camo == (std::array<int, 3>{7, 8, 9}), "each part's camo");
+	check(full.voice == 4 && full.sex == AVATAR_SEX_FEMALE, "the head's voice and sex");
+	check(full.nationality_index == 0 && full.division_index == 0 && full.combo_index == 0,
+			"the combo's tree indices");
+	const PlayerVisualSpec bare = resolve_player_visual_spec(file, registry, 0x0400);
+	check(!bare.fallback && !bare.composes() && bare.arms.empty() && bare.voice == 2,
+			"a head with no graphic resolves the combo but does not compose");
+	const PlayerVisualSpec unknown = resolve_player_visual_spec(file, registry, 0x0600);
+	check(unknown.fallback && !unknown.composes() && unknown.character_id == 0x0600,
+			"an unknown id falls to the item model, keeping its id");
+	avatars_free(&file);
+}
 
 } // namespace
 
@@ -318,6 +361,8 @@ int main() {
 	check(join_player_class_or_default(7) == 7 && join_player_class_or_default(0) == 8 &&
 			      join_player_class_or_default(10) == kJoinDefaultPlayerClass,
 	      "anything else the rifleman");
+
+	test_player_visual_spec();
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
