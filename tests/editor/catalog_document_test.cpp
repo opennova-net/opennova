@@ -1049,7 +1049,8 @@ static int unread_members() {
 	        {DefRecordKind::Item, "max_attack_dist", Applicability::Ignored},
 	        {DefRecordKind::Item, "attrib_evil", Applicability::Ignored},
 	        {DefRecordKind::Item, "particlefxw4.secondary_effect", Applicability::Ignored},
-	        {DefRecordKind::Item, "husk_swap_at", Applicability::Unverified},
+	        {DefRecordKind::Item, "husk_swap_at", Applicability::Reads},
+	        {DefRecordKind::Item, "husk_swap_at_sec", Applicability::Reads},
 	        {DefRecordKind::Item, "soundloops[6]", Applicability::Unverified},
 	        {DefRecordKind::Item, "graphic_enemy", Applicability::Reads},
 	        {DefRecordKind::Item, "text_id", Applicability::Reads},
@@ -1087,8 +1088,8 @@ static int unread_members() {
 		if (f.id == "top_heavy") top_heavy = &f;
 	TEST_EXPECT(top_heavy && !top_heavy->optional && items.field_on(heavy, *top_heavy).applies == Applicability::Ignored);
 	TEST_EXPECT(!items.present(plain, "top_heavy") && items.present(heavy, "top_heavy"));
-	TEST_EXPECT(!items.present(plain, "husk_swap_at") && !items.present(plain, "shadow_texture"));
-	TEST_EXPECT(items.present(plain, "hp") && items.present(plain, "score"));
+	TEST_EXPECT(!items.present(plain, "soundloops[6]") && !items.present(plain, "shadow_texture"));
+	TEST_EXPECT(items.present(plain, "hp") && items.present(plain, "score") && items.present(plain, "husk_swap_at"));
 	Edit clear; clear.operation = EditOperation::Clear; clear.address = heavy; clear.field = "top_heavy";
 	TEST_EXPECT(!items.apply(clear, error) && items.present(heavy, "top_heavy"));
 	TEST_EXPECT(items.apply(field(heavy, "top_heavy", int64_t(0)), error) && !items.present(heavy, "top_heavy"));
