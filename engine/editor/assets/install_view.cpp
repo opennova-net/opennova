@@ -25,12 +25,18 @@ namespace opennova::editor {
 
 namespace {
 
-// The version text, which has one reader, the CRC a joiner must match: a project of another expansion makes
-// its own, so the view offers the install's only to a project that is that expansion (S16;
-// installed_expansion_spec).
+// The version text's name, an expansion's and the base game's alike (the manifest's row, the one name no
+// expansion's forms).
+std::string version_text_name() {
+	return expansion_file_name(expansion_file_row(ExpansionFileRole::Version), std::string());
+}
+
+// An expansion's version text, which has one reader, the CRC a joiner must match: a project of another
+// expansion makes its own, so the view offers the install's only to a project that is that expansion (S16;
+// installed_expansion_spec). The base game's, in the install's root, the view offers only to a standalone
+// project, from the root alone (InstallSpec::standalone_project).
 bool version_text(const std::string &name) {
-	const ExpansionFileRow &row = expansion_file_row(ExpansionFileRole::Version);
-	return strutil::iequals(name, expansion_file_name(row, std::string()));
+	return strutil::iequals(name, version_text_name());
 }
 
 // What the project calls the install's files the game reads by an expansion's name: under its own
@@ -55,6 +61,7 @@ InstallSpec install_spec(const std::string &root, const ProjectDocument &documen
 	InstallSpec spec = base_install_spec(root, document);
 	spec.expansion = document.expansion.builds_on;
 	spec.project_expansion = document.expansion.name;
+	spec.standalone_project = document.expansion.standalone();
 	return spec;
 }
 
@@ -124,7 +131,7 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 		for (const std::string &loose : folder)
 			add({ loose, loose, InstallFile::Layer::Expansion, join_path(expansion_dir, loose) });
 		if (own_version) {
-			const std::string version = expansion_file_name(expansion_file_row(ExpansionFileRole::Version), std::string());
+			const std::string version = version_text_name();
 			std::error_code exists;
 			if (fs::is_regular_file(system_path(join_path(expansion_dir, version)), exists))
 				add({ version, version, InstallFile::Layer::Expansion, join_path(expansion_dir, version) });
@@ -160,6 +167,20 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 	// The loose files the game reads by path from the install's folder.
 	for (const std::string &loose : list_install_loose_files(spec.root))
 		add({ loose, loose, InstallFile::Layer::Base, join_path(spec.root, loose) });
+	// The project is the base game itself: its version text is the install's root version.txt, which the game
+	// never reads and the updater reads alone, its CRC at its start and at its end, then "No Update Needed!" or
+	// "Current Version:" and its text [orig: Cupdate2Dlg_OnInitDialog @ 0x4090e0 (UPDATE.EXE);
+	// Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]. The project keeps the install's, which its build copies
+	// loose beside the archives, where the stock install holds it and a release ships it as a loose row; an
+	// archived copy is read by nothing (`add` leaves it out).
+	if (spec.standalone_project && spec.expansion.empty() && spec.project_expansion.empty()) {
+		const std::string version = version_text_name();
+		const std::string path = join_path(spec.root, version);
+		std::error_code exists;
+		if (fs::is_regular_file(system_path(path), exists) &&
+		    by_name_.emplace(pff::normalized_logical_name(version), files_.size()).second)
+			files_.push_back({ version, version, InstallFile::Layer::Base, path });
+	}
 	open_ = true;
 	return true;
 }

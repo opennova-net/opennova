@@ -2323,6 +2323,23 @@ void test_startup_version() {
 		CHECK(game.get_widget_text(9) == text);
 	}
 
+	// An exported runtime names its build before the game's text (D-MNU-76), a debug export's as
+	// staging's; one with no commit leaves it out; a game with no text shows the build alone.
+	CHECK(runtime_build_label("0.0.20", "8999cef", true) == "OpenNova 0.0.20 (8999cef, staging)");
+	CHECK(runtime_build_label("0.0.21", "abc1234", false) == "OpenNova 0.0.21 (abc1234)");
+	CHECK(runtime_build_label("0.0.20", "", true) == "OpenNova 0.0.20 (staging)");
+	CHECK(runtime_build_label("0.0.21", "", false) == "OpenNova 0.0.21");
+	for (const auto &[code, text] : std::vector<std::pair<std::string, std::string>>{
+				 {"jo", "OpenNova 0.0.20 (8999cef, staging)   V1.7.5.7"},
+				 {"bhd", "OpenNova 0.0.20 (8999cef, staging)"}}) {
+		MenuRuntime built;
+		built.set_game_code(code);
+		built.set_runtime_build(runtime_build_label("0.0.20", "8999cef", true));
+		CHECK(built.open_document(&doc, "main.mnu", "OTHER") && built.show_screen("STARTUP"));
+		CHECK(built.get_widget_text(9) == text);
+		CHECK(built.get_widget_text(10) == "(c) 2009, NovaLogic, Inc.");
+	}
+
 	// A STARTUP screen whose VERSION sits only under an unnamed window draws none.
 	mnu::Document bare;
 	mnu::Screen bare_startup;

@@ -518,11 +518,14 @@ int test_validate() {
 }
 
 // Our own game's first release, built from its project's revision (a game with a project): its
-// tree and its expansion's built from nothing.
+// tree and its expansion's built from nothing, each with its gate-tag override (gt.ssc, ADR 0055
+// d5: a game's own data, loose beside its archives).
 int test_native_first_release() {
 	Rig rig("data_set_jobs_native_first");
 	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
 	TEST_EXPECT(make_expansion_tree(rig.temp.file("to/expansion/nifty"), true, "nifty"));
+	TEST_EXPECT(write_text(rig.temp.file("to") + "/gt.ssc", "the game's gate tag") &&
+			write_text(rig.temp.file("to/expansion/nifty") + "/gt.ssc", "the expansion's gate tag"));
 	const int64_t native = rig.seeded("OP: Acid Gambit");
 	const int64_t expansion = rig.seeded("OP: Nifty Package");
 	update::SfsPackage package;
@@ -545,6 +548,8 @@ int test_native_first_release() {
 		const std::string installed = rig.store.path_of(tree_prefix(tree->id) + name);
 		TEST_EXPECT(archive_entries(installed) == archive_entries(rig.temp.file("to") + "/" + name));
 	}
+	TEST_EXPECT(file_named(tree->files, "gt.ssc") != nullptr &&
+			rig.get(tree_prefix(tree->id) + "gt.ssc") == read_bytes(rig.temp.file("to") + "/gt.ssc"));
 	const auto installed_expansion = find_data_set(rig.db, expansion);
 	TEST_EXPECT(installed_expansion && installed_expansion->current_tree_id);
 	if (!installed_expansion || !installed_expansion->current_tree_id)
@@ -556,6 +561,10 @@ int test_native_first_release() {
 		TEST_EXPECT(archive_entries(installed) ==
 				archive_entries(rig.temp.file("to/expansion/nifty") + "/" + name));
 	}
+	const auto expansion_tree = find_tree(rig.db, *installed_expansion->current_tree_id);
+	TEST_EXPECT(expansion_tree && file_named(expansion_tree->files, "gt.ssc") != nullptr &&
+			rig.get(tree_prefix(expansion_tree->id) + "gt.ssc") ==
+					read_bytes(rig.temp.file("to/expansion/nifty") + "/gt.ssc"));
 	return 0;
 }
 

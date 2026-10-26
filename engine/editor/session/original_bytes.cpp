@@ -17,7 +17,7 @@ std::set<std::string> OriginalBytes::identical(const InstallSpec &install, const
                                                const std::vector<std::string> &files) {
 	std::set<std::string> out;
 	const std::string key = root + '\x1f' + install.root + '\x1f' + install.game + '\x1f' + install.expansion + '\x1f' +
-	                        install.project_expansion;
+	                        install.project_expansion + '\x1f' + (install.standalone_project ? '1' : '0');
 	if (key != key_) {
 		known_.clear();
 		key_ = key;

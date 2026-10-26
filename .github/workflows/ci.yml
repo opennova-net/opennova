@@ -1031,7 +1031,9 @@ jobs:
           CMAKE_GENERATOR: Ninja
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
           CMAKE_C_COMPILER_LAUNCHER: sccache
-        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+        # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
+        # page names it.
+        run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }} -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Save Godot export templates
         if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'

@@ -3,7 +3,7 @@
 # with the wizards naming its game; update.exe installs that game on the first launch, so this
 # script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-PreviousRuntimePackage <prior.sfs>] [-Version <n.n.n>]
+#        [-PreviousRuntimePackage <prior.sfs>] [-Version <n.n.n>] [-BuildCommit <sha>]
 
 param(
     # The version the packages carry: the zips' names, the exes' VERSIONINFO, the
@@ -27,7 +27,10 @@ param(
     # always loads template_debug while it scans scripts for the export, so that
     # DLL is required in both modes.
     [ValidateSet("debug", "release")]
-    [string]$ExportMode = "release"
+    [string]$ExportMode = "release",
+    # The commit the build names on the main menu (D-MNU-76): CI passes a pull request's head (the
+    # merge ref it checks out is another commit) or the tag's; a local run takes its checkout's HEAD.
+    [string]$BuildCommit = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -578,19 +581,28 @@ function Assert-StageHoldsOnly {
     Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
-# The version stamped for the three exports: the export presets' file and product versions
-# (Godot embeds them in each exe's VERSIONINFO) and the project's config/version, then both
-# tracked files put back as they were, so a run leaves the tree as it found it.
+# The version and build stamped for the three exports: the export presets' file and product
+# versions (Godot embeds them in each exe's VERSIONINFO), the project's config/version, and the
+# build's commit in the exported project settings (application/config/build_commit), which the
+# STARTUP screen's VERSION label names beside config/version (D-MNU-76,
+# godot/src/mnu/menu_driver.cpp): -BuildCommit where CI passes it, else the checkout's HEAD.
+# Both tracked files are put back as they were once the exports end, so a run leaves the tree
+# as it found it.
+if (-not $BuildCommit) { $BuildCommit = (& git -C $ROOT rev-parse HEAD).Trim() }
+$BuildCommit = $BuildCommit.Substring(0, [Math]::Min(7, $BuildCommit.Length))
 $presetsPath = "$ROOT\godot\export_presets.cfg"
 $projectPath = "$ROOT\godot\project.godot"
 $presetsOriginal = [IO.File]::ReadAllText($presetsPath)
 $projectOriginal = [IO.File]::ReadAllText($projectPath)
+if ($projectOriginal -notmatch '(?m)^config/version\s*=.*$') { throw "project.godot names no config/version to stamp" }
 try {
     $presets = $presetsOriginal -replace 'application/file_version="[^"]*"', "application/file_version=`"$WinVersion`""
     $presets = $presets -replace 'application/product_version="[^"]*"', "application/product_version=`"$WinVersion`""
     [IO.File]::WriteAllText($presetsPath, $presets)
-    [IO.File]::WriteAllText($projectPath, ($projectOriginal -replace '(?m)^config/version\s*=\s*"[^"]*"', "config/version=`"$Version`""))
-    Write-Host "    file_version / product_version -> $WinVersion, config/version -> $Version"
+    $project = $projectOriginal -replace '(?m)^config/version\s*=\s*"[^"]*"', "config/version=`"$Version`""
+    $project = $project -replace '(?m)^(config/version=.*)$', "`$1`nconfig/build_commit=`"$BuildCommit`""
+    [IO.File]::WriteAllText($projectPath, $project)
+    Write-Host "    file_version / product_version -> $WinVersion, config/version -> $Version, build commit -> $BuildCommit"
 
     Write-Host "=== Exporting opennova.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE

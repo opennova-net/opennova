@@ -329,6 +329,12 @@ struct MenuWidgetRuntimeState {
 	}
 };
 
+// The OpenNova build an exported runtime names on the STARTUP screen's VERSION label, before the game's
+// version text (D-MNU-76): "OpenNova <version> (<commit>, staging)" for a debug export (a pull request's
+// build, which updates from and plays on staging), "OpenNova <version> (<commit>)" for a release; the
+// commit left out where the build names none.
+std::string runtime_build_label(const std::string &version, const std::string &commit, bool staging);
+
 // ---- The runtime ------------------------------------------------------------
 
 class MenuRuntime {
@@ -340,6 +346,9 @@ public:
 	// game's version text (gameprofile_version_text_for_code: JO's for an empty or
 	// unknown code, none for a game whose binary is unwitnessed).
 	void set_game_code(std::string code) { game_code_ = std::move(code); }
+	// The OpenNova build the label shows before the game's version text (runtime_build_label; empty for
+	// none, as a source run, a test and the editor's preview show the game's alone). D-MNU-76.
+	void set_runtime_build(std::string label) { runtime_build_ = std::move(label); }
 
 	// Bind a parsed document (null unbinds) and show `target_screen` (empty or
 	// unknown = the first screen). Every per-document cache is rebuilt and the
@@ -752,6 +761,7 @@ private:
 	MenuDocIndex index_;
 	std::string menu_file_;
 	std::string game_code_; // set_game_code
+	std::string runtime_build_; // set_runtime_build
 	std::string current_screen_;
 	std::vector<std::string> nav_stack_;
 	ScreenHistory history_; // kept across open_document

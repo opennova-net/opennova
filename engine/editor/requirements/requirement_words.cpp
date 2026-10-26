@@ -21,6 +21,7 @@ constexpr RequirementWords kWords[] = {
 	{ "weapon_def", "The game starts with no weapons: its weapon list holds only \"None\"." },
 	{ "avatars_def", "The game starts without avatar definitions." },
 	{ "sndprof_def", "A mission can hang or crash: with no profile, every item takes its sounds from memory the game never cleared. One empty \"default\" profile is enough." },
+	{ "gt_ssc", "The game uses its title's own gate tag, so it lists in that title's NovaWorld lobby." },
 	{ "items_def", "The game starts with no item definitions." },
 	{ "charattr_def", "The game logs \"Could not load charattr definitions\" and goes on without them." },
 	{ "loading_pcx", "The loading screen shows no picture." },
