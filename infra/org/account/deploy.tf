@@ -5,7 +5,7 @@
 # opennova-deploy is what the toolbox and every infra/aws run act as in this
 # account: an IAM user whose key the org stack makes and the toolbox writes
 # into the deployment's vault item (never printed). Its permissions are the
-# six policies under infra/aws/iam/, OpenNova's names and tags alone, and two
+# seven policies under infra/aws/iam/, OpenNova's names and tags alone, and two
 # inline ones: the Terraform states it runs, and a guard that keeps it off the
 # state bucket's settings and old versions. Every role infra/aws makes carries
 # a boundary, which the deploy user can neither change nor take off: the
@@ -20,7 +20,7 @@
 
 locals {
   policy_dir      = "${path.module}/../../aws/iam"
-  deploy_policies = toset(["network", "compute", "ecs", "iam", "data", "observability"])
+  deploy_policies = toset(["network", "compute", "ecs", "iam", "data", "observability", "downloads"])
   policy_vars     = { account_id = var.account_id, region = var.region }
 
   deploy_policy_documents = {

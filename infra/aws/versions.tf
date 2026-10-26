@@ -88,6 +88,20 @@ provider "aws" {
   }
 }
 
+# The same account in us-east-1, where CloudFront takes its certificates from:
+# the downloads host's (downloads.tf).
+provider "aws" {
+  alias               = "us_east_1"
+  region              = "us-east-1"
+  allowed_account_ids = [var.aws_account_id]
+
+  default_tags {
+    tags = {
+      "opennova:deployment" = local.hosted_deployment
+    }
+  }
+}
+
 provider "cloudflare" {
   api_token = var.cloudflare_api_token
 }

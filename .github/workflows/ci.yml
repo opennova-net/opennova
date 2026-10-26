@@ -182,6 +182,8 @@ jobs:
           python -B -m unittest discover -s scripts -p test_publish_update.py
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
+          # The downloads host's layout (downloads.yml's stable names and manifest).
+          python -B -m unittest discover -s scripts -p test_stage_downloads.py
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it

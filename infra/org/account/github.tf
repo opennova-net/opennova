@@ -16,7 +16,9 @@
 # admin API which hostd image each machine's agent runs (ECS Exec into this
 # deployment's web container alone: `app deploy`'s check after hostd's roll),
 # and point the nightly backup's schedule at the release's backup revision
-# (handing it the schedule's role). It names
+# (handing it the schedule's role); and publish the downloads host's files
+# (.github/workflows/downloads.yml: the bucket's objects listed, written and
+# removed, nothing of its settings). It names
 # infra/aws's resources by the names infra/aws gives them (opennova-<deployment>-*;
 # a renamed one there is a change here too). It carries the role boundary.
 
@@ -26,6 +28,7 @@ locals {
   arn_iam   = "arn:aws:iam::${var.account_id}"
   arn_ssm   = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/opennova/${var.deployment}"
   ops_arn   = "arn:aws:s3:::${local.name}-ops-${var.account_id}"
+  downloads = "arn:aws:s3:::${local.name}-downloads-${var.account_id}"
   programs  = ["data", "fleet", "gate", "lobby", "web", "worker"]
   families  = concat([for p in local.programs : "${local.name}-${p}"], ["${local.name}-backup", "${local.name}-hostd"])
   task_role = concat(["${local.name}-execution", "${local.name}-backup", "${local.name}-hostd"], [for p in local.programs : "${local.name}-${p}"])
@@ -78,6 +81,9 @@ resource "aws_iam_role_policy" "github_deploy" {
         Condition = { StringLike = { "s3:prefix" = "releases/*" } }
       },
       { Sid = "WriteReleases", Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject"], Resource = "${local.ops_arn}/releases/*" },
+      # The downloads host's files (infra/aws/downloads.tf), which the downloads workflow publishes.
+      { Sid = "ListDownloads", Effect = "Allow", Action = "s3:ListBucket", Resource = local.downloads },
+      { Sid = "PublishDownloads", Effect = "Allow", Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"], Resource = "${local.downloads}/*" },
       # Reading and registering task definitions takes no resource scope.
       { Sid = "RegisterRevisions", Effect = "Allow", Action = ["ecs:DescribeTaskDefinition", "ecs:RegisterTaskDefinition"], Resource = "*" },
       {

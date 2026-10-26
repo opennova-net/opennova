@@ -294,3 +294,18 @@ jobs:
           python scripts/publish_update.py --url "$UPDATE_PUBLISH_URL" --token-file "$token_file" \
             --package "dist/opennova-runtime-windows-${GITHUB_REF_NAME}.sfs" \
             --name "OpenNova runtime ${GITHUB_REF_NAME}" --publish
+
+  # Opt in once the downloads hosts exist (DEPLOY.md, "The downloads host"):
+  # the release's builds onto prod's downloads host, through downloads.yml,
+  # whose prod run waits for the prod environment's reviewers.
+  publish-downloads:
+    needs: release
+    if: vars.PUBLISH_DOWNLOADS == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write   # starts downloads.yml
+    steps:
+      - name: Start the prod downloads publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run downloads.yml --repo "$GITHUB_REPOSITORY" --ref master -f deployment=prod -f release="$GITHUB_REF_NAME"

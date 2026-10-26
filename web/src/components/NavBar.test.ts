@@ -36,7 +36,8 @@ describe('NavBar', () => {
     const found = links(await mountAt('/'));
     expect(found['Lobbies']).toBe('/lobby');
     expect(found['Support tiers']).toBe('/support');
-    expect(found['GitHub']).toBe('https://github.com/opennova-net/opennova');
+    // GitHub is the footer's (SiteFooter.vue), not the header's.
+    expect(found['GitHub']).toBeUndefined();
     expect(found['Download']).toBe('/#downloads');
     expect(found['Log in']).toBe('/login');
     expect(found['Register']).toBe('/register');
