@@ -390,7 +390,8 @@ void ProblemsService::compose_rows_now(bool keep_reported) {
 	const std::vector<Diagnostic> open = core_.documents().findings();
 	const ProjectFindingsInput input{core_.paths(),        *view_.project.document,    *view_.project.scan,
 	                                 *view_.project.requirements, view_.documents.open, view_.activity.boot_missing,
-	                                 play_findings_,              open,                 build_findings_};
+	                                 play_findings_,              open,                 build_findings_,
+	                                 base_files_.get()};
 	// The graph, each file's own findings and the project checks (the pass that ended) first: when
 	// none of them moved, no other input the rows are made of did, no reported finding waits on this
 	// validation and the rows are as it left them, they stand. No row is composed, copied or compared
@@ -454,7 +455,7 @@ void ProblemsService::show_requirements() {
 }
 
 bool ProblemsService::Composed::same(const ProjectFindingsInput &input, size_t rows_now) const {
-	return made && rows == rows_now && scan == input.scan.diagnostics &&
+	return made && rows == rows_now && base == input.base && scan == input.scan.diagnostics &&
 	       requirements == input.requirements.diagnostics && boot_missing == input.boot_missing &&
 	       play == input.play && open == input.open_findings && build == input.build;
 }
@@ -462,6 +463,7 @@ bool ProblemsService::Composed::same(const ProjectFindingsInput &input, size_t r
 void ProblemsService::Composed::keep(const ProjectFindingsInput &input, size_t rows_now) {
 	made = true;
 	rows = rows_now;
+	base = input.base;
 	scan = input.scan.diagnostics;
 	requirements = input.requirements.diagnostics;
 	boot_missing = input.boot_missing;

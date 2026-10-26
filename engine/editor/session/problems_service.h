@@ -137,9 +137,13 @@ public:
 	}
 	// An expansion's base game under the project's files (ProjectAssetSource::set_base; null for none): what the
 	// previews, the terrain tools' reads and the project checks read of a name the project lacks, as the game does.
+	// Another base with a project open: the validation is due again, as the checks that walk the base's files (the
+	// particle token slots) read it.
 	void set_base_files(std::shared_ptr<const InstallFileSource> files) {
+		const bool moved = files != base_files_;
 		base_files_ = files;
 		assets_->set_base(std::move(files));
+		if (moved && view_.project.open) validate_later();
 	}
 	// The last build's own findings, Problems rows until the next build starts or the project closes.
 	void set_build_findings(std::vector<Diagnostic> findings) { build_findings_ = std::move(findings); }
@@ -194,6 +198,7 @@ private:
 	struct Composed {
 		bool made = false;
 		size_t rows = 0;
+		const InstallFileSource *base = nullptr; // the base's files the rows were made over
 		std::vector<Diagnostic> scan, requirements, play, open, build;
 		std::vector<std::string> boot_missing;
 		bool same(const ProjectFindingsInput &input, size_t rows_now) const;

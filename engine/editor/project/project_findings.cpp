@@ -122,7 +122,7 @@ ProjectFindings compose_project_findings(const ProjectFindingsInput &input, Asse
 
 bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                               ProjectChecks &checks, const FileSource &files) {
-	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
+	const ValidationInput validation{ input.paths, input.project, input.scan, input.open, nullptr, input.base };
 	const bool files_moved = refresh_project(validation, graph, cache);
 	// After the files' own findings: a check reads which files' records their own checks read.
 	const bool checks_moved = checks.update({ validation, cache, files });
@@ -133,7 +133,7 @@ ProjectFindings collect_project_findings(const ProjectFindingsInput &input, cons
                                          const ValidationCache &cache, const ProjectChecks &checks) {
 	ProjectFindings out;
 	std::vector<Diagnostic> &rows = out.rows;
-	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
+	const ValidationInput validation{ input.paths, input.project, input.scan, input.open, nullptr, input.base };
 	std::vector<Diagnostic> documents = project_rows(validation, graph, cache);
 	rows.reserve(input.scan.diagnostics.size() + input.requirements.diagnostics.size() +
 			input.boot_missing.size() + input.play.size() + documents.size() +
