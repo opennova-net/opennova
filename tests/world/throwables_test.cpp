@@ -2558,6 +2558,9 @@ void test_throwable_round_refreshes_its_indoors_flag() {
     Rig rig(0);
     CollisionWorld cw;
     cw.terrain = &rig.flat.field;
+    // A row ahead of the building in pool 2: the hit key packs the building's slot (key >> 20)
+    // and its section, so slot 0's section 0 would pack to 0, the no-hit word.
+    rig.w.registry.spawn(2, Entity{});
     const EntityHandle building = add_blink_building(rig, cw, Vec3{30, 30, 0});
     cw.build_initial_tables(rig.w);
     rig.w.collision = &cw;
