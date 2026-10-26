@@ -231,22 +231,34 @@
         <p class="mt-3 max-w-2xl text-ink-muted">
           Windows x64. Pre-1.0 and experimental. There is a zip for each game, and its first launch downloads that
           game: OP: Acid Gambit, Joint Operations or Delta Force Xtreme 2. Playing Joint Operations needs your own
-          purchased copy. Each release on GitHub carries these files:
+          purchased copy. Unzip one into an empty folder and run opennova.exe.
         </p>
-        <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <li v-for="item in downloads" :key="item.file" class="card p-5">
-            <p class="font-semibold text-ink-bright">{{ item.name }}</p>
-            <p class="mt-1 text-sm text-ink-muted">{{ item.body }}</p>
-            <p class="mt-3 font-mono text-xs text-ink-muted">{{ item.file }}</p>
+        <p v-if="manifest" class="mt-2 text-sm text-ink-muted" data-test="downloads-version">
+          Version {{ manifest.version }}, published {{ formatDate(manifest.published) }}.
+        </p>
+
+        <ul class="mt-10 grid gap-4 lg:grid-cols-3">
+          <li v-for="item in games" :key="item.file" class="card flex flex-col p-6">
+            <p class="text-lg font-semibold text-ink-bright">{{ item.name }}</p>
+            <p class="mt-2 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
+            <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <a :href="downloadUrl(item.file)" class="btn-primary" :aria-label="`Download ${item.name}`">Download</a>
+              <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
+            </div>
           </li>
         </ul>
-        <div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
-          <a :href="RELEASES_URL" target="_blank" rel="noopener" class="btn-primary">Download the latest release</a>
-          <p class="text-sm text-ink-muted">
-            The source, the issues and every release are on
-            <a :href="GITHUB_URL" target="_blank" rel="noopener" class="link">GitHub</a>.
-          </p>
-        </div>
+
+        <h3 class="mt-12 text-lg font-semibold text-ink-bright">Tools</h3>
+        <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <li v-for="item in tools" :key="item.file" class="card flex flex-col p-5">
+            <p class="font-semibold text-ink-bright">{{ item.name }}</p>
+            <p class="mt-1 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
+            <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <a :href="downloadUrl(item.file)" class="btn-secondary px-4 py-2" :aria-label="`Download ${item.name}`">Download</a>
+              <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
+            </div>
+          </li>
+        </ul>
       </div>
     </section>
   </div>
@@ -259,8 +271,9 @@ import { fetchStats } from '../api/stats';
 import { fetchTiers } from '../api/billing';
 import RunItYourself from '../components/RunItYourself.vue';
 import type { TiersResponse } from '../types/billing';
-import { formatMoney } from '../utils/format';
-import { GITHUB_URL, ISSUES_URL, RELEASES_URL } from '../utils/links';
+import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
+import { formatBytes, formatDate, formatMoney } from '../utils/format';
+import { ISSUES_URL, RELEASES_URL } from '../utils/links';
 import { editorShots, hero, retailShots, timelapse } from '../utils/media';
 
 const editorFeatures = [
@@ -271,43 +284,63 @@ const editorFeatures = [
   'Build packs the game archives; Play runs them in OpenNova or the original game',
 ];
 
-const downloads = [
+// The downloads host's builds, by their stable names (scripts/stage_downloads.py): the games
+// first, then the tools.
+const games = [
   {
     name: 'OpenNova',
-    body: 'The game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
-    file: 'opennova-game-windows',
+    body: 'Our own game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
+    file: 'opennova-game-windows.zip',
   },
   {
     name: 'OpenNova for Joint Operations',
     body: 'The same game, set up for Joint Operations: unzip it into an empty folder and its first launch downloads Joint Operations and its Escalation expansion.',
-    file: 'jointops-game-windows',
+    file: 'jointops-game-windows.zip',
   },
   {
     name: 'OpenNova for Delta Force Xtreme 2',
     body: 'The same game, set up for Delta Force Xtreme 2: unzip it into an empty folder and its first launch downloads Delta Force Xtreme 2.',
-    file: 'dfx2-game-windows',
+    file: 'dfx2-game-windows.zip',
   },
+];
+
+const tools = [
   {
     name: 'OpenNova Editor',
     body: 'The editor that made our game, ready to run on its own.',
-    file: 'opennova-editor-windows',
+    file: 'opennova-editor-windows.zip',
   },
   {
     name: 'Blender add-on',
     body: 'Imports and exports .3di models and their animations in Blender 5.',
-    file: 'opennova-blender-addon-windows',
+    file: 'opennova-blender-addon-windows.zip',
   },
   {
     name: 'Tools and dedicated server',
     body: 'The command-line tools and opennova-serve, the server our hosted servers run. Retail and OpenNova players both join it.',
-    file: 'opennova-apps-windows',
+    file: 'opennova-apps-windows.zip',
   },
   {
     name: 'OpenNova Switcher',
     body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address of your own. OpenNova and the original Jointops.exe don't need it.",
-    file: 'opennova-switcher-windows',
+    file: 'opennova-switcher-windows.zip',
   },
 ];
+
+// This deployment's downloads host (downloads.<the site's hostname>), and what its manifest
+// says: the version and each file's size. A site with no host (a local stack) sends the
+// buttons to the GitHub releases.
+const downloadsHost = downloadsBase(window.location.hostname);
+const manifest = ref<DownloadsManifest | null>(null);
+
+function downloadUrl(file: string): string {
+  return downloadsHost ? `${downloadsHost}/${file}` : RELEASES_URL;
+}
+
+function fileLine(file: string): string {
+  const size = manifest.value?.files[file]?.size;
+  return size === undefined ? file : `${file}, ${formatBytes(size)}`;
+}
 
 // NovaWorld's live counts (GET /api/stats), as of the page's load.
 const stats = ref<{ players: number; lobbies: number } | null>(null);
@@ -361,6 +394,11 @@ const ownMachine = computed(() => {
 });
 
 onMounted(() => {
+  if (downloadsHost) {
+    fetchDownloadsManifest(downloadsHost).then((found) => {
+      manifest.value = found;
+    });
+  }
   fetchStats()
     .then((value) => {
       if (value) stats.value = { players: value.players, lobbies: value.lobbies };

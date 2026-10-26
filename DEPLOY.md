@@ -53,6 +53,7 @@ There are three places the service runs, and nothing of one reaches another by a
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
 | Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` (a debug game export's own) | `nw.<domain>` (a release export's own) |
 | Update service (OpenNova's `update.exe`) | none (`update.exe --server`) | `update.staging.<domain>` (a debug game zip's `OPENNOVA.WIZ`) | `update.<domain>` (a release zip's) |
+| Downloads host (the site's download buttons) | none (the buttons open the GitHub releases) | `downloads.staging.<domain>` (a pull request's debug builds, which talk to staging) | `downloads.<domain>` (the tagged releases) |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -236,7 +237,7 @@ own, change these on your fork:
 | Where | What it names | For your own |
 |---|---|---|
 | `OP_VAULT` | the vault, `OpenNova-Deploy` by default | `export OP_VAULT=<name>` before `./deploy/run.sh`; the commands in sections 1 and 2, `infra/aws/iam/README.md` and `deploy/env/billing.*.env.tpl` write the default out |
-| `cloudflare/domain` (the vault) | your domain | the hosts follow from it: `<domain>` and `www`, `staging.<domain>`, `nw.<domain>` and `nw.staging.<domain>` (the gates), `update.<domain>` and `update.staging.<domain>` (the update service) |
+| `cloudflare/domain` (the vault) | your domain | the hosts follow from it: `<domain>` and `www`, `staging.<domain>`, `nw.<domain>` and `nw.staging.<domain>` (the gates), `update.<domain>` and `update.staging.<domain>` (the update service), `downloads.<domain>` and `downloads.staging.<domain>` (the downloads hosts, which the site finds as `downloads.` before its own hostname, `web/src/api/downloads.ts`) |
 | `infra/aws/prod.tfvars`, `staging.tfvars` | `image_registry` (default `ghcr.io/opennova-net`), `azs` (`us-east-1a`, `us-east-1b`) | `image_registry = "ghcr.io/<your owner>"` in both. Another region is the `region` fields of `aws-org` and `aws-<deployment>` (`secrets init` writes `us-east-1`) and `azs`; the Route 53 health check's alarm exists in `us-east-1` alone |
 | `infra/org/variables.tf` | `github_repository`, `opennova-net/opennova`: the repository whose deploy workflow may assume each account's deploy role | its default (the toolbox passes none) |
 | `infra/ci/variables.tf` | `github_organization`, `opennova-net`: the organization whose GitHub App the RunsOn setup page registers | its default |
@@ -1065,9 +1066,64 @@ write its release manifests and point its release, register task definition revi
 (handing them the stack's task roles alone), point its cluster's services, its fleet
 cluster's hostd and its backup schedule at them, open ECS Exec into its web container
 (the admin API on the task's loopback: after hostd's roll, `app deploy` asks which hostd
-image each machine's agent reports, as an operator's run does), and nothing else. A run
-whose exec is refused (the org stack not yet applied) logs the refused call, confirms
-nothing, and goes on.
+image each machine's agent reports, as an operator's run does), publish its downloads
+host's files (below), and nothing else. A run whose exec is refused (the org stack not
+yet applied) logs the refused call, confirms nothing, and goes on.
+
+### The downloads host
+
+Each deployment serves its builds at a host of its own (ADR 0070), which the site's
+download buttons fetch: prod's `downloads.<domain>` the tagged releases (release builds,
+which talk to prod), staging's `downloads.staging.<domain>` a pull request's CI build
+(debug builds, which talk to staging). `infra/aws/downloads.tf` makes it: a private bucket,
+`opennova-<deployment>-downloads-<account id>`, which a CloudFront distribution alone reads
+(origin access control; the account's S3 public access block stands), a certificate ACM
+issues in us-east-1 (the stack's `aws.us_east_1` provider; CloudFront takes its
+certificates from there alone) and validates through a record in the Cloudflare zone, and
+an unproxied CNAME to the distribution. Cloudflare's proxy stays the site's: game archives
+go through CloudFront, whose free tier covers a terabyte a month. Without a zone there is
+none of it.
+
+The host holds the current set alone, each build under its stable name
+(`opennova-game-windows.zip`, `jointops-game-windows.zip`, `dfx2-game-windows.zip`,
+`opennova-editor-windows.zip`, `opennova-blender-addon-windows.zip`,
+`opennova-apps-windows.zip`, `opennova-switcher-windows.zip`) beside `manifest.json` (the
+version, when it was published, where the builds came from, and each file's size and
+SHA-256; `scripts/stage_downloads.py`). The site reads the manifest for the version and
+the sizes; its buttons work without it. Older releases and the Switcher's checksum stay on
+the GitHub releases, which the site's footer links.
+
+**Publishing** is `.github/workflows/downloads.yml`, run from the Actions tab in the
+deployment's environment, with its GitHub deploy role (which may list, write and remove
+the downloads bucket's objects and nothing of its settings):
+
+- `prod` with a release tag (`v0.0.21`): the release's assets, after prod's reviewers
+  approve. With the repository variable `PUBLISH_DOWNLOADS` set to `true`, `release.yml`
+  starts this run itself for every tag.
+- `staging` with a CI run id (a pull request's run: its Actions URL's number). A master run
+  is refused: its builds are release builds, which talk to prod.
+
+The builds go up first, a build the set no longer has removed, then the manifest, each with
+a short `Cache-Control` (five minutes, the manifest one), so the new set is what the host
+serves within minutes, with no invalidation.
+
+**Bringing it up**, once per deployment, staging first:
+
+1. `./deploy/run.sh org apply` (type `org`): the deploy user's `opennova-deploy-downloads`
+   policy (CloudFront, the us-east-1 certificate, the bucket's policy) and each GitHub
+   deploy role's grant on its downloads bucket.
+2. `./deploy/run.sh --deployment staging infra apply`: the bucket, the certificate and its
+   validation record, the distribution and the CNAME (`infra output downloads_host`,
+   `downloads_bucket`). The apply waits for ACM to validate (minutes) and not for
+   CloudFront to deploy, which takes up to a quarter of an hour more before the host
+   answers.
+3. Run the Downloads workflow for `staging` with a pull request's run id, and check:
+   `curl -s https://downloads.staging.<domain>/manifest.json`.
+4. `--deployment staging app deploy` with a portal image of this change or later: the
+   site's buttons point at the host.
+5. The same for prod (`--deployment prod infra apply`, the workflow with a release tag,
+   `app deploy --promote staging`), then set `PUBLISH_DOWNLOADS` to `true` (the repository's
+   Actions variables) for the releases to come.
 
 ## 6. Backups
 
@@ -2073,6 +2129,7 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 | the cache, one `cache.t4g.micro` Valkey node | $9 |
 | CloudWatch logs, metrics, about 50 alarms; the health check; Cloud Map's zone | $13 |
 | S3 (releases, dumps), SSM, the nightly backup task, the schedule | about $1 |
+| the downloads host: its bucket (about 400 MB) and CloudFront, whose free tier is a terabyte and ten million requests a month ($0.085 a GB past it) | under $1 |
 
 Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
 doubles the database's $14, and each further cache node adds $9. Staging has prod's shape

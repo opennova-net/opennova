@@ -10,7 +10,7 @@ with the account's id and region from the vault.
 | Document | Who carries it | Applied by |
 | --- | --- | --- |
 | `opennova-org.json` | the IAM user `opennova-org` in the management account | the management account's administrator, by hand (below) |
-| `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
+| `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability`, `-downloads` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
 | `opennova-role-boundary.json` | every role `infra/aws` makes in a member account but the machines' two (permissions boundary), and the GitHub deploy role; org appends the exact CI billing reader ARN to prod's boundary alone | the org stack |
 | `opennova-machine-boundary.json` | the machines' instance role and hostd's task role (permissions boundary) | the org stack |
 
@@ -65,6 +65,7 @@ hand.
 | `opennova-deploy-iam` | the stack's roles (under either boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
 | `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its versioning, lifecycle and encryption; its releases read and written, its dumps read and written, never deleted; the game data, `data/*`, is the tasks' roles' alone, never the deploy user's), SSM parameters, its own sessions (ECS Exec), CloudWatch Logs |
 | `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check, the private zone Cloud Map keeps for the fleet program and the static addresses' public zone (`play.<domain>`, `infra/aws/edge.tf`), budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
+| `opennova-deploy-downloads` | the downloads host (`infra/aws/downloads.tf`): its bucket's policy (the bucket itself is `-data`'s `opennova-*` buckets), its CloudFront distribution (tagged with the deployment) and origin access control, and its certificate in us-east-1 (ACM, tagged) |
 
 Beside them the org stack gives the user two inline policies: its Terraform states (in its
 account's state bucket, `infra/aws/*`; prod's also `infra/zone/*` and `infra/github/*`, the shared

@@ -118,6 +118,12 @@ Editor project or an existing retail install.
 
 ## Downloads
 
+The latest release is on [opennova.net](https://opennova.net/#downloads), whose download
+buttons fetch it from `downloads.opennova.net`; staging's site
+(`staging.opennova.net`) serves a pull request's debug builds from
+`downloads.staging.opennova.net` the same way (DEPLOY.md, "The downloads host"). Every
+release stays on the [GitHub releases](https://github.com/opennova-net/opennova/releases).
+
 CI and tagged releases publish one game zip per game, each the same runtime set up
 for its game: `opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty
 Package), `jointops-game-windows-v<version>.zip` (Joint Operations and Escalation) and

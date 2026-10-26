@@ -1,0 +1,130 @@
+name: Downloads
+# Publishes a deployment's downloads host (ADR 0070; DEPLOY.md, "The downloads
+# host"; infra/aws/downloads.tf), the builds its site's download buttons fetch:
+#
+# - prod (downloads.<domain>): a tagged release's assets, release builds that
+#   talk to prod. In the environment `prod`, whose required reviewers approve
+#   each run; release.yml starts one for every tag where the repository
+#   variable PUBLISH_DOWNLOADS is true.
+# - staging (downloads.staging.<domain>): a pull request's CI build (its run
+#   id), debug builds that talk to staging. In the environment `staging`. A
+#   master run's builds are release builds, which talk to prod, so a staging
+#   publish takes a pull request's run alone.
+#
+# The host holds the current set alone: each build under its stable name
+# (scripts/stage_downloads.py) beside manifest.json, the builds uploaded first
+# and the manifest last, each with a short Cache-Control so the CDN serves the
+# new set within minutes. The deployment's GitHub deploy role writes the
+# bucket's objects alone (infra/org/account/github.tf).
+on:
+  workflow_dispatch:
+    inputs:
+      deployment:
+        description: "prod (a release tag) or staging (a pull request's CI run)"
+        type: choice
+        options: [staging, prod]
+        required: true
+      release:
+        description: "prod: the release tag (v0.0.21)"
+        required: false
+        default: ""
+      run_id:
+        description: "staging: the CI run id of a pull request's build (its Actions URL's number)"
+        required: false
+        default: ""
+
+# One publish of a deployment's host at a time.
+concurrency:
+  group: downloads-${{ inputs.deployment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deployment }}
+    permissions:
+      contents: read
+      actions: read     # a pull request run's artifacts
+      id-token: write   # the deployment's deploy role (OIDC)
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEPLOYMENT: ${{ inputs.deployment }}
+      RELEASE: ${{ inputs.release }}
+      RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Check what to publish
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOYMENT" == prod ]]; then
+            [[ -z "$RUN_ID" ]] || { echo "::error::prod publishes a release tag alone (a CI run's builds are not a release)"; exit 1; }
+            [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "::error::prod needs a release tag (v0.0.21)"; exit 1; }
+            gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null
+            echo "version=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE" >> "$GITHUB_OUTPUT"
+          else
+            [[ -z "$RELEASE" ]] || { echo "::error::staging publishes a pull request's CI run alone (a release's builds talk to prod)"; exit 1; }
+            [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::staging needs a CI run id"; exit 1; }
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+            event="$(jq -r .event <<<"$run")"
+            workflow="$(jq -r .path <<<"$run")"
+            conclusion="$(jq -r .conclusion <<<"$run")"
+            [[ "$workflow" == .github/workflows/ci.yml ]] || { echo "::error::run $RUN_ID is not a CI run ($workflow)"; exit 1; }
+            [[ "$event" == pull_request ]] || { echo "::error::run $RUN_ID is a $event run: its builds are release builds, which talk to prod"; exit 1; }
+            [[ "$conclusion" == success ]] || { echo "::error::run $RUN_ID did not succeed ($conclusion)"; exit 1; }
+            sha="$(jq -r .head_sha <<<"$run" | cut -c1-7)"
+            pr="$(jq -r '.pull_requests[0].number // empty' <<<"$run")"
+            echo "version=${pr:+PR #$pr }($sha)" >> "$GITHUB_OUTPUT"
+            echo "url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download the release's assets
+        if: inputs.deployment == 'prod'
+        shell: bash
+        run: gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir dist --pattern "*-windows-$RELEASE.zip"
+
+      # The package jobs upload with `archive: false`: skip-decompress keeps each
+      # zip the zip it is (release.yml does the same).
+      - name: Download the run's builds
+        if: inputs.deployment == 'staging'
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: "*-windows*"
+          merge-multiple: true
+          skip-decompress: true
+          path: dist
+
+      - name: Lay out the stable names and the manifest
+        run: python scripts/stage_downloads.py --from dist --to stage --version "${{ steps.source.outputs.version }}" --source "${{ steps.source.outputs.url }}"
+
+      - name: AWS credentials (OIDC, the deployment's account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Publish
+        shell: bash
+        env:
+          BUCKET: opennova-${{ inputs.deployment }}-downloads-${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # The builds first (a build the set no longer has removed), then the
+          # manifest that names them.
+          aws s3 sync stage "s3://$BUCKET/" --exclude manifest.json --delete \
+            --content-type application/zip --cache-control "public, max-age=300"
+          aws s3 cp stage/manifest.json "s3://$BUCKET/manifest.json" \
+            --content-type application/json --cache-control "public, max-age=60"
+          echo "### Published to the ${DEPLOYMENT} downloads host" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.source.outputs.version }} from ${{ steps.source.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
