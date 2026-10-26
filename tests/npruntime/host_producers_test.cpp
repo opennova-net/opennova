@@ -590,6 +590,7 @@ bool check_chat_routing() {
 	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1,
 			"a spectator chats once the round is over"))
 		return false;
+	for (auto &t : f.transports) (void)drain(t); // the "gg" line the others took
 	replies = f.dispatch(0, c2s::CHAT_MESSAGE, chat_uplink(11, "crew"), 100 + 490);
 	return expect(replies.empty() && drain(f.transports[2]).empty(),
 			"channel 11 reaches nobody once the round is over");
