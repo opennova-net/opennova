@@ -98,6 +98,17 @@ jobs:
             [[ "$workflow" == .github/workflows/ci.yml ]] || { echo "::error::run $RUN_ID is not a CI run ($workflow)"; exit 1; }
             [[ "$event" == pull_request ]] || { echo "::error::run $RUN_ID is a $event run: its builds are release builds, which talk to prod"; exit 1; }
             [[ "$conclusion" == success ]] || { echo "::error::run $RUN_ID did not succeed ($conclusion)"; exit 1; }
+            # The build's runtime package carries the removals since the one staging served when
+            # it was built (ci.yml, --previous). A package staging published after the run
+            # started leaves them stale (what that one added would stay installed): run the CI
+            # again. ISO 8601 UTC times compare as text.
+            started="$(jq -r .run_started_at <<<"$run")"
+            kept="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=staging-runtime-package&per_page=1" \
+              --jq '[.artifacts[] | select(.expired | not)][0].created_at // empty')"
+            if [[ -n "$kept" && "$kept" > "$started" ]]; then
+              echo "::error::staging published a runtime package at $kept, after run $RUN_ID started ($started): its removals are since the one before; re-run the pull request's CI and publish that run"
+              exit 1
+            fi
             commit="$(jq -r .head_sha <<<"$run")"
             pr="$(jq -r '.pull_requests[0].number // empty' <<<"$run")"
             echo "version=${pr:+PR #$pr }(${commit:0:7})" >> "$GITHUB_OUTPUT"
