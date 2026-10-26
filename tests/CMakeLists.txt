@@ -2401,8 +2401,8 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Particle (.ptl) tests. Format half (engine/formats/particle: model/parser/writer/
 # tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
 # effect scene) links opennova_runtime. Witness matrix:
-# docs/particles/ptl-format-re.md (CParticleDef_ParseFromConfigMap @ 0x5ed210,
-# Jointops.exe IDB).
+# docs/particles/ptl-format-re.md (the game's reader CParticleDef_ParseProperties
+# @ 0x5ea320, Jointops.exe IDB; CParticleDef_ParseFromConfigMap is unreachable, D-PTL-38).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
         lenient_lines effect_places key_places)
