@@ -29,7 +29,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 
 Runtime asset loading is native and the supported object input is 3DI. The
 repository holds no game data: OpenNova's own game downloads through the updater
-on first launch, built from OpenNova Editor projects outside the repository. The
+on first launch, a release NovaWorld builds from the game's OpenNova Editor project,
+which NovaWorld keeps outside the repository. The
 experimental [Blender add-on](tools/blender/opennova_3di/README.md) imports and
 exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for

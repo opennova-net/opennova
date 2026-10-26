@@ -156,11 +156,11 @@ AccessDenied naming the action):
   under `ecs:container-name` `web`, the session plugin's `ssmmessages:OpenDataChannel`; no
   `ssm:StartSession`, which ECS makes itself): the deploy's log says "every ready machine's
   agent reports ..." rather than naming a refused call;
-- the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
-  the first upload on the Game data page, web's `s3:PutObject` of the parts the browser
-  sends it (as its task role, under the role boundary); at the first tree deleted on the page or
-  pruned by the data program, `s3:ListBucketMultipartUploads` (no prefix condition: the action's
-  context carries none) and `s3:DeleteObject`; at the first server, hostd's task role's
+- the first `infra apply` with `hosted_enabled`: the store's lifecycle rules; then, at
+  the first runtime release Publish uploads, web's `s3:PutObject` of the parts it sends (as
+  its task role, under the role boundary); at the first release deleted or tree pruned by the
+  data program, `s3:ListBucketMultipartUploads` (no prefix condition: the action's context
+  carries none) and `s3:DeleteObject`; at the first server, hostd's task role's
   `aws s3 sync` of a tree (`s3:ListBucket` with `s3:prefix` `data/trees/*`, `s3:GetObject`);
 - a worker's first machine launch under the role boundary (the pinned image, by `ec2:ImageID`),
   that machine's ECS agent registering in the fleet cluster and polling (the instance role's ECS

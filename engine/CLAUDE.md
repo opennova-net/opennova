@@ -92,7 +92,7 @@
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
   partition acyclic), `opennova_base` (content, vfs, resource_index, gameprofile, pcapio,
-  os_random, proc; `content` is the content store's manifest, shared by the service and the
+  os_random, proc; `content` is a project revision's manifest, shared by the service and the
   editor, ADR 0069), `opennova_net` (novacrypto, napi, npwire, admin, title, update and the
   novaworld session/gate: the wire), `opennova_runtime` (the rest of runtime/, `inmatch` and
   `replication` included),
