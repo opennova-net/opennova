@@ -7,6 +7,7 @@
 
 add_library(opennova_base STATIC
     # content — the content store's revision manifest and path rules (ADR 0069), the service's and the editor's
+    ${CMAKE_CURRENT_SOURCE_DIR}/content/case_fold.cpp # Unicode's simple case folding (scripts/content/case_fold_table.py)
     ${CMAKE_CURRENT_SOURCE_DIR}/content/content_manifest.cpp
     # gameprofile — game identity, required-resource tables, the player's own files, the graphics log
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.cpp

@@ -46,8 +46,10 @@ bool is_utf8(std::string_view text);
 // with `why`.
 bool is_content_path(std::string_view path, std::string &why);
 
-// `path` with its ASCII letters folded to lower case: two paths that fold the same are one file on
-// Windows and macOS.
+// `path` with each character case-folded (Unicode's simple case folding, case_fold.h: "A" and "a", "Ä" and "ä",
+// "Σ", "σ" and "ς" fold alike): two paths that fold the same are one file on Windows and macOS, whose
+// case-insensitive names compare so (NTFS by its upcase table, APFS by Unicode case folding). A byte of no whole
+// UTF-8 character stands as it is.
 std::string folded_path(std::string_view path);
 
 // Whether `files` is a revision's file list: every path a content path, every sha a SHA-256, every

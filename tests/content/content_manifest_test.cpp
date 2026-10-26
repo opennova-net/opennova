@@ -3,6 +3,7 @@
 // two paths one file on Windows and macOS; the canonical text sorted by path, read back to the same
 // files, and every other text of them refused, so a manifest's SHA-256 is its files' one name.
 
+#include <base/content/case_fold.h>
 #include <base/content/content_manifest.h>
 
 #include <cstdio>
@@ -72,6 +73,19 @@ static int test_files() {
 	TEST_EXPECT(check_files({ { "a.def", kShaA, 1 }, { "b.def", kShaB, 2 } }, why));
 	TEST_EXPECT(!check_files({ { "Art/A.tga", kShaA, 1 }, { "art/a.tga", kShaB, 2 } }, why) &&
 			why.find("one file on Windows") != std::string::npos);
+	// A pair of letters past ASCII is one file there too (Unicode's simple case folding): "\xc3\x84" (U+00C4) and
+	// "\xc3\xa4" (U+00E4), which an ASCII fold had kept apart, so a pull on Windows wrote both through one file.
+	TEST_EXPECT(!check_files({ { "art/\xc3\x84.txt", kShaA, 1 }, { "art/\xc3\xa4.txt", kShaB, 2 } }, why) &&
+			why.find("one file on Windows") != std::string::npos);
+	TEST_EXPECT(folded_path("Art/\xc3\x84\xc3\x96.TGA") == "art/\xc3\xa4\xc3\xb6.tga");
+	// Sigma, small sigma and final sigma fold alike (U+03A3, U+03C3, U+03C2); the Kelvin sign (U+212A) is "k";
+	// capital sharp s (U+1E9E) folds to sharp s (U+00DF), its simple fold, and sharp s stays itself (its full fold
+	// "ss" is no one character); a letter past the BMP folds (U+10400 to U+10428); a stray byte stands.
+	TEST_EXPECT(folded_path("\xce\xa3") == "\xcf\x83" && folded_path("\xcf\x82") == "\xcf\x83" &&
+			folded_path("\xe2\x84\xaa") == "k" && folded_path("\xe1\xba\x9e") == "\xc3\x9f" &&
+			folded_path("\xc3\x9f") == "\xc3\x9f" && folded_path("\xf0\x90\x90\x80") == "\xf0\x90\x90\xa8" &&
+			folded_path("a\xff" "B") == "a\xff" "b");
+	TEST_EXPECT(simple_case_fold('Z') == 'z' && simple_case_fold('z') == 'z' && simple_case_fold(0x0130) == 0x0130);
 	TEST_EXPECT(!check_files({ { "a.def", kShaA, 1 }, { "a.def", kShaA, 1 } }, why) &&
 			why.find("listed twice") != std::string::npos);
 	TEST_EXPECT(!check_files({ { "a.def", "ABC", 1 } }, why));

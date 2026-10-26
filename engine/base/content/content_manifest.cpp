@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <base/content/case_fold.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
@@ -123,7 +124,42 @@ bool is_content_path(std::string_view path, std::string &why) {
 }
 
 std::string folded_path(std::string_view path) {
-	return strutil::to_lower(path);
+	std::string out;
+	out.reserve(path.size());
+	for (size_t i = 0; i < path.size();) {
+		const unsigned char lead = static_cast<unsigned char>(path[i]);
+		const size_t length = lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 0;
+		uint32_t code = length == 1 ? lead : length == 2 ? lead & 0x1F : length == 3 ? lead & 0x0F : lead & 0x07;
+		bool whole = length != 0 && i + length <= path.size();
+		for (size_t k = 1; whole && k < length; ++k) {
+			const unsigned char next = static_cast<unsigned char>(path[i + k]);
+			whole = (next & 0xC0) == 0x80;
+			code = (code << 6) | (next & 0x3F);
+		}
+		// A byte of no whole character (no content path holds one: is_utf8) stands as it is.
+		if (!whole) {
+			out += path[i++];
+			continue;
+		}
+		code = simple_case_fold(code);
+		if (code < 0x80) {
+			out += static_cast<char>(code);
+		} else if (code < 0x800) {
+			out += static_cast<char>(0xC0 | (code >> 6));
+			out += static_cast<char>(0x80 | (code & 0x3F));
+		} else if (code < 0x10000) {
+			out += static_cast<char>(0xE0 | (code >> 12));
+			out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+			out += static_cast<char>(0x80 | (code & 0x3F));
+		} else {
+			out += static_cast<char>(0xF0 | (code >> 18));
+			out += static_cast<char>(0x80 | ((code >> 12) & 0x3F));
+			out += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+			out += static_cast<char>(0x80 | (code & 0x3F));
+		}
+		i += length;
+	}
+	return out;
 }
 
 bool check_files(const std::vector<ContentFile> &files, std::string &why) {
