@@ -112,8 +112,8 @@ run "each_environment_its_own_account" {
   command = plan
 
   assert {
-    condition     = length(github_actions_environment_variable.deploy) == 6
-    error_message = "each environment holds its role, its region and its account"
+    condition     = length(github_actions_environment_variable.deploy) == 8
+    error_message = "each environment holds its role, its region, its account and its site"
   }
   assert {
     condition = (

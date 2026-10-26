@@ -418,7 +418,7 @@ besides its one `op whoami` (`deploy/bin/tests/vault_requests_test.sh` counts th
 | `org plan` | 7 |
 | `org apply` | 10, and its 3 writes |
 | `zone plan` | 8 |
-| `github plan` | 7 |
+| `github plan` | 10 |
 | `ci plan` | 8 |
 
 `op service-account ratelimit` (with the token in `OP_SERVICE_ACCOUNT_TOKEN`) shows what

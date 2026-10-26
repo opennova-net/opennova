@@ -60,11 +60,11 @@ resource "github_repository_environment" "staging" {
 # a build's runtime release to the deployment's NOVAWORLD_URL: the deployment's own
 # (app-<deployment>/admin_api_token, the vault's; DEPLOY.md, "The downloads host").
 resource "github_actions_environment_secret" "admin_api_token" {
-  for_each        = toset(keys(local.deploy_accounts))
-  repository      = var.repository
-  environment     = each.key == "prod" ? github_repository_environment.prod.environment : github_repository_environment.staging.environment
-  secret_name     = "ADMIN_API_TOKEN"
-  plaintext_value = local.deploy_accounts[each.key].admin_api_token
+  for_each    = toset(keys(local.deploy_accounts))
+  repository  = var.repository
+  environment = each.key == "prod" ? github_repository_environment.prod.environment : github_repository_environment.staging.environment
+  secret_name = "ADMIN_API_TOKEN"
+  value       = local.deploy_accounts[each.key].admin_api_token
 }
 
 resource "github_actions_environment_variable" "deploy" {
