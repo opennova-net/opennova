@@ -3456,10 +3456,10 @@ void test_client_local_boat_driver_runs_its_block() {
 // stores 0x80000000 for both, and the conversion is defined (io::retail_ftol_sse2), where a plain
 // int32 cast of 2^31 is undefined. [orig: dbl_7C19D8 = 683565275.5764316]
 static void test_bam_of_atan2_due_minus_x_is_the_ftol_word() {
-    CHECK(bam_of_atan2(0.0, -1.0) == std::numeric_limits<int32_t>::min());
-    CHECK(bam_of_atan2(-0.0, -1.0) == std::numeric_limits<int32_t>::min());
-    CHECK(bam_of_atan2(0.0, 1.0) == 0);
-    CHECK(bam_of_atan2(0.0, 0.0) == 0);
+    CHECK(detail::bam_of_atan2(0.0, -1.0) == std::numeric_limits<int32_t>::min());
+    CHECK(detail::bam_of_atan2(-0.0, -1.0) == std::numeric_limits<int32_t>::min());
+    CHECK(detail::bam_of_atan2(0.0, 1.0) == 0);
+    CHECK(detail::bam_of_atan2(0.0, 0.0) == 0);
 }
 
 int main() {
