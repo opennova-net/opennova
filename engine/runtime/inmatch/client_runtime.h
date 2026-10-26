@@ -1123,14 +1123,6 @@ public:
 	// included; the embedder's after-receive runs one leg per entry, the frame's at their marks
 	// (receive_legs) [orig: NapiNPClientMsg_TeamAssign @0x431A1B..0x431AAD, once per message].
 	std::vector<uint8_t> drain_self_team_assigns() { return std::move(self_team_assigns_); }
-	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
-	// keeps it a one-shot; the associated ENTITY row is deliberately untouched
-	// (only S2C 0x5D retires an entity). [orig: @0x431411..0x43144c]
-	std::vector<uint8_t> drain_cleared_player_slots() {
-		std::vector<uint8_t> out;
-		out.swap(cleared_player_slots_);
-		return out;
-	}
 
 	// Session loss (Joiner only): empty while healthy, else a player-facing reason.
 	// Either the host explicitly closed the session (its connection-description punt,
@@ -1564,7 +1556,6 @@ private:
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
 	uint8_t self_assigned_team_ = 0;            // self_assigned_team
 	std::vector<uint8_t> self_team_assigns_;    // drain_self_team_assigns
-	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT

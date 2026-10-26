@@ -474,7 +474,6 @@ std::vector<uint8_t> ClientRuntime::start() {
 	local_respawn_arm_pending_ = false;
 	local_entity_health_ = 0;
 	self_team_assigns_.clear();
-	cleared_player_slots_.clear();
 	current_tick_ = 0;
 	last_keepalive_tick_ = 0;
 	// The 0x4C report's count, the revive countdown's and the vehicle screen's state are the
@@ -564,7 +563,6 @@ bool ClientRuntime::begin_mission_reload() {
 	local_entity_health_ = 0;
 	local_dead_latch_ = false; // the next mission start's Player_InitPlayer
 	local_respawn_arm_pending_ = false;
-	cleared_player_slots_.clear();
 	// The previous mission's replica goes with its world. The round gate the
 	// 0x25 raised holds until the reload's mission start clears it
 	// (JoinerConnection's mission_started) [orig: g_RoundOver, cleared
@@ -1569,10 +1567,6 @@ bool ClientRuntime::client_receive_pass(std::vector<std::vector<uint8_t>> &outbo
 		// [orig: @0x431A27, @0x431B14].
 		self_team_assigns_.insert(self_team_assigns_.end(), pr.local_resubmit_teams.begin(),
 				pr.local_resubmit_teams.end());
-		// S2C 0x46 bit15 — roster bookkeeping only; the entity row stays.
-		// [orig: PlayerSlot_ClearAndUnlink @0x434730 via @0x431411..0x43144c]
-		for (uint8_t slot : pr.cleared_player_slots)
-			cleared_player_slots_.push_back(slot);
 		// WeaponLoadout_ApplyFromBuffer clears g_ClientDeployHold for EVERY valid
 		// S2C 0x5A. That is distinct from the causal spawn release below.
 		if (pr.gameplay_release_applied || pr.reached_in_match || respawn_release_in_poll)

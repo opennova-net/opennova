@@ -265,12 +265,6 @@ public:
 		// Diagnostic summary of S2C 0x5D; entity state is folded only from the
 		// corresponding raw inbound_gameplay record.
 		std::vector<uint16_t> destroyed_pool0_slots;
-		// S2C 0x46 with bit15 (0x8000): the roster slot's BOOKKEEPING is cleared
-		// (active flag, names, team, entity ref). The ENTITY IS NOT DESTROYED on this
-		// leg — the entity-field wipes @0x431437 are dead code there because
-		// entitySlotPtr is null. [orig: NapiNPClientMsg_PlayerSync @0x431370
-		//  @0x431411..0x43144c -> PlayerSlot_ClearAndUnlink @0x434730]
-		std::vector<uint8_t> cleared_player_slots;
 	};
 
 	// `player_name` is the displayed game ClientAuth.NA callsign; numeric connection

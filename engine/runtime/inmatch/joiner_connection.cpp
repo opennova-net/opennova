@@ -1670,8 +1670,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 				// beside the connection-level bookkeeping below.
 				// [orig: NapiNPClientMsg_PlayerSync @0x431370]
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				if (sync.removal)
-					out.cleared_player_slots.push_back(sync.slot_id);
 				// Bit 0x4000 is the ACK-driven roster cursor. Retail advances
 				// through EMPTY rows too and treats the 0x04 capacity byte as an
 				// inclusive final slot: max=4 requests 0,1,2,3,4, then stops.

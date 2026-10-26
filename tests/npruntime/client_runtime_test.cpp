@@ -7902,8 +7902,7 @@ bool run_player_sync_ack_walks_inclusive_roster_capacity() {
 	const inmatch::JoinerConnection::PollResult empty_slot_one = apply_sync({
 			0x01, 0x00, 0xC0, // removal|queue-ack
 	});
-	if (!expect(empty_slot_one.cleared_player_slots == std::vector<uint8_t>({0x01}) &&
-				empty_slot_one.queued_send_messages.size() == 1 &&
+	if (!expect(empty_slot_one.queued_send_messages.size() == 1 &&
 				empty_slot_one.queued_send_messages[0].payload ==
 						std::vector<uint8_t>({0x02, 0xF7, 0x5C}),
 			"an empty player-sync row still advances the roster cursor")) {

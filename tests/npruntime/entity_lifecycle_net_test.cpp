@@ -721,7 +721,9 @@ bool run_entity_death_notify_reaches_the_sim() {
 			"0x26: the signed hit section reaches the native class-state route");
 }
 
-// S2C 0x46 bit15: bookkeeping only. The entity row must SURVIVE.
+// S2C 0x46 bit15: bookkeeping only. The replica's roster slot unbinds; the entity row must
+// SURVIVE. [orig: NapiNPClientMsg_PlayerSync @0x431370 @0x431411..0x43144c ->
+//  PlayerSlot_ClearAndUnlink @0x434730]
 bool run_player_sync_removal_keeps_the_entity() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kPeer = 0x0004;
@@ -731,15 +733,17 @@ bool run_player_sync_removal_keeps_the_entity() {
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	{
 		const std::vector<uint8_t> dg = frame_server_session(
-				server_tx, {make_protocol_message(0x0C, organic_spawn(kPeer, "Peer", 1))});
+				server_tx, {make_protocol_message(0x0C, organic_spawn(kPeer, "Peer", 1)),
+						// A bare 0x46 for slot 4 (no field bits): the roster slot binds.
+						make_protocol_message(0x46, {0x04, 0x00, 0x00, 0x04})});
 		client.receive(dg.data(), dg.size());
 		(void)client.Client_ProcessNetworkFrame(1);
 	}
 	if (!expect(row_for(client.state(), kPeer) != nullptr,
 			"0x46-bit15: the peer's row exists before the removal"))
 		return false;
-	if (!expect(client.drain_cleared_player_slots().empty(),
-			"0x46-bit15: no roster clear recorded before the removal"))
+	if (!expect(client.state().roster[4].bound,
+			"0x46-bit15: the roster slot is bound before the removal"))
 		return false;
 
 	const std::vector<uint8_t> dg = frame_server_session(
@@ -748,8 +752,8 @@ bool run_player_sync_removal_keeps_the_entity() {
 	client.receive(dg.data(), dg.size());
 	(void)client.Client_ProcessNetworkFrame(2);
 
-	if (!expect(client.drain_cleared_player_slots() == std::vector<uint8_t>{4},
-			"0x46-bit15: the roster slot's bookkeeping clear is surfaced"))
+	if (!expect(!client.state().roster[4].bound,
+			"0x46-bit15: the roster slot's bookkeeping is cleared"))
 		return false;
 	// The witnessed entity-field wipes @0x431437 are dead code on this leg.
 	return expect(row_for(client.state(), kPeer) != nullptr,
