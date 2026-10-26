@@ -62,6 +62,13 @@ bool release_version(const std::string &version) {
 	return digits > 0 && dots < 4;
 }
 
+// Why a get of the project `key` gets nothing: it has no revision yet (the NovaWorld window offers
+// no Get for one).
+std::string no_revision_text(const std::string &key) {
+	return key + " has no revision yet, so there is nothing to get: open a project, bind it to " +
+			key + " and push its first revision.";
+}
+
 // Where the expansion's project at `dir` finds its base game's project: its project file's
 // expansion.base_project resolved against `dir`; false when it names none.
 bool base_project_folder(const std::string &dir, std::string &out) {
@@ -228,14 +235,19 @@ void ContentController::get(const EditorRequest &request) {
 				" holds files: a project is got into an empty folder.");
 		return;
 	}
+	const RemoteProject *listed = nullptr;
+	for (const RemoteProject &project : core_.view().content.projects)
+		if (project.key == request.project_key)
+			listed = &project;
+	if (listed && listed->head <= 0) {
+		refuse(no_revision_text(request.project_key));
+		return;
+	}
 	ContentBinding binding{ account_.server, request.project_key, 0 };
 	get_dir_ = request.dir;
 	get_open_after_.clear();
 	// An expansion's project builds on its base game's, which comes along beside it.
-	get_base_key_.clear();
-	for (const RemoteProject &project : core_.view().content.projects)
-		if (project.key == request.project_key)
-			get_base_key_ = project.base;
+	get_base_key_ = listed ? listed->base : std::string();
 	paused_.reset();
 	show_conflicts();
 	start(OperationKind::ContentPull,
@@ -525,6 +537,22 @@ void ContentController::finish_pull(ContentPull &pull) {
 		view.checked = false; // the changes are counted again by the next check
 		view.changes.clear();
 	} else {
+		if (pull.up_to_date() && !get_dir_.empty()) {
+			// A get of a project with no revision yet (one the list did not hold, as over the MCP):
+			// nothing written, no folder bound. An expansion's base with none: the expansion opens.
+			const std::string open_after = std::move(get_open_after_);
+			get_dir_.clear();
+			get_base_key_.clear();
+			get_open_after_.clear();
+			view.last = no_revision_text(pull.remote().key);
+			if (!open_after.empty()) {
+				core_.note("NovaWorld: " + view.last);
+				core_.open_project(open_after);
+				return;
+			}
+			refuse(view.last);
+			return;
+		}
 		if (pull.up_to_date()) {
 			view.last = "The project is at the head, revision " + std::to_string(pull.revision()) + ".";
 			show_binding();

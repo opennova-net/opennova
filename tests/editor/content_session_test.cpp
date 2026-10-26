@@ -8,8 +8,9 @@
 // into the other, its file read again; a push on a stale base refused until a pull; a conflict
 // stopping a pull, settled by taking theirs, the pull going on, its standing counted again by the
 // next check; a get given up on taking a waiting pull's conflicts with it; a working copy of
-// another service's project refused; the history gone with the project; a check's standing; and the
-// content section's JSON, which holds no session.
+// another service's project refused; the history gone with the project; a check's standing; a get
+// of a project with no revision yet refused; and the content section's JSON, which holds no
+// session.
 
 #include <cstdio>
 #include <string>
@@ -281,12 +282,64 @@ static int test_get_expansion() {
 	return 0;
 }
 
+// A get of a project with no revision yet gets nothing: refused where the list holds it at none,
+// refused once its head is read where the list does not hold it (as over the MCP), no folder bound
+// and no project opened; an expansion whose base game's project has none still opens, its base
+// folder left unbound (F-4).
+static int test_get_without_revision() {
+	test_temp::TempDir dir("opennova_content_session_no_revision");
+	const auto bound = [&](const std::string &folder) {
+		editor::ContentBinding binding;
+		std::string error;
+		return editor::read_content_binding(
+				editor::ContentPaths::for_project(editor::ProjectPaths::for_root(folder)), binding,
+				error);
+	};
+	{
+		FakeService service; // MOD at no revision
+		Session s(&service);
+		s.send(request::content_sign_in(kServer, "taylor", "pw"));
+		TEST_EXPECT(s.content().projects.size() == 1 && s.content().projects[0].head == 0);
+		s.send(request::content_get("MOD", dir.file("Listed")));
+		TEST_EXPECT(s.refused("content.refused") && !s.session.view().project.open &&
+				!bound(dir.file("Listed")));
+	}
+	{
+		FakeService service;
+		Session s(&service);
+		s.send(request::content_sign_in(kServer, "taylor", "pw"));
+		service.expansion = true; // EXP at no revision, not in the session's list
+		s.send(request::content_get("EXP", dir.file("Unlisted")));
+		TEST_EXPECT(!s.session.view().project.open && !bound(dir.file("Unlisted")) &&
+				s.content().last.find("no revision yet") != std::string::npos);
+	}
+	{
+		FakeService service; // MOD, the base, at no revision; EXP at revision 1
+		const std::string project = "{\"expansion\": {\"base_project\": \"../MOD\"}}";
+		const std::string sha = opennova::io::sha256_hex(project.data(), project.size());
+		service.blobs[sha] = project;
+		service.expansion = true;
+		service.expansion_manifests[1] = opennova::content::encode_manifest(
+				{ ContentFile{ "project.opennova", sha, project.size() } });
+		service.expansion_head = 1;
+		Session s(&service);
+		s.send(request::content_sign_in(kServer, "taylor", "pw"));
+		s.send(request::content_get("EXP", dir.file("work/EXP")));
+		TEST_EXPECT(bound(dir.file("work/EXP")) && !bound(dir.file("work/MOD")) &&
+				s.content().last.find("MOD has no revision yet") != std::string::npos);
+	}
+	std::printf("get: a project with no revision yet gets nothing, listed or not; an expansion "
+				"over a base with none opens\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_offline();
 	failures += test_sign_in();
 	failures += test_share_through_sessions();
 	failures += test_get_expansion();
+	failures += test_get_without_revision();
 	if (failures == 0)
 		std::printf("content_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
