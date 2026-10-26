@@ -41,10 +41,9 @@ struct ConfigTextRefusal {
 bool binary_config_text_readable(const std::string &text, ConfigTextRefusal &refusal);
 
 // `text` read as the game's text reader reads it, in the CBIN form under `key`: its labels, entries and
-// values (an integer, a float's bits, a string), the string table `strings` first in its order, each
-// other string interned after them in the order first read. A text binary_config_text_readable refuses
-// is read as the reader reads it, short.
-BinaryConfig binary_config_from_text(const std::string &text, const std::vector<std::string> &strings,
-		uint32_t key);
+// values (an integer, a float's bits, a string), the string table the game's writer makes of them
+// (binary_config_writer_order). A text binary_config_text_readable refuses is read as the reader reads
+// it, short.
+BinaryConfig binary_config_from_text(const std::string &text, uint32_t key);
 
 } // namespace opennova::cbin

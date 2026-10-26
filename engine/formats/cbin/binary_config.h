@@ -84,6 +84,14 @@ void apply_cipher(uint8_t *data, size_t size, uint32_t key);
 // the header names and walks only the strings it counts [orig: @ 0x75e8e5..0x75e8ed, @ 0x75e94e..0x75e972]
 // and reads no check that the value table meets the strings (D-CBIN-3, open).
 bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, std::string &error);
+// The string table as the game's writer makes it: each string at its first use in the order the writer lays
+// the form out, the label names, then every label's entry names (and a terminator's), then the string values,
+// each string once, a string no word names gone; every word renumbered to it. A null word (0) and one past
+// the table stay as they are. [orig: the ConfigFile writer @ 0x75e250 - its intern sub_75E090 called
+// @ 0x75e3a0 (the label names), @ 0x75e450 (the entry names), @ 0x75e53f (the string values), each search
+// for the string before an append]
+void binary_config_writer_order(BinaryConfig &config);
+
 // The same layout written from `config`, under its key: decode then encode gives the bytes back.
 // False with the reason for a label of no entry with a terminator other than the writer's (0, 0), whose
 // bytes have no place for it.

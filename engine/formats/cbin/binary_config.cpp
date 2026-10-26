@@ -8,7 +8,9 @@
 #include <formats/configfile/config_file.h>
 
 #include <cstring>
+#include <map>
 #include <memory>
+#include <utility>
 
 namespace opennova::cbin {
 
@@ -115,6 +117,35 @@ bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, s
 	}
 	if (cursor != table_end) return fail(error, "The CBIN value table holds values no entry reads.");
 	return true;
+}
+
+void binary_config_writer_order(BinaryConfig &config) {
+	std::vector<std::string> table;
+	std::map<std::string, uint32_t> index;
+	const auto intern = [&](uint32_t &word) {
+		const std::string *text = config.string_at(word);
+		if (text == nullptr) return;
+		auto it = index.find(*text);
+		if (it == index.end()) {
+			table.push_back(*text);
+			it = index.emplace(*text, static_cast<uint32_t>(table.size())).first;
+		}
+		word = it->second;
+	};
+	for (BinaryConfig::Label &label : config.labels) intern(label.name);
+	for (BinaryConfig::Label &label : config.labels) {
+		for (BinaryConfig::Entry &entry : label.entries) intern(entry.name);
+		if (!label.entries.empty()) intern(label.terminator.name);
+	}
+	for (BinaryConfig::Label &label : config.labels) {
+		if (label.entries.empty()) continue;
+		for (size_t j = 0; j <= label.entries.size(); ++j) {
+			BinaryConfig::Entry &entry = j < label.entries.size() ? label.entries[j] : label.terminator;
+			for (BinaryConfig::Value &value : entry.values)
+				if (value.flags == BinaryConfig::kString) intern(value.raw);
+		}
+	}
+	config.strings = std::move(table);
 }
 
 bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out, std::string &error) {

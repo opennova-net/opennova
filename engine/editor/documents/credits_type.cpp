@@ -30,17 +30,18 @@ constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Credit
 static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
 // The text read as the game's text reader reads it, in the CBIN form under the file's key, its
-// string table first in its order; false with the issue for a text that does not go in it.
+// string table the game's writer's (binary_config_writer_order); false with the issue for a text that
+// does not go in it.
 class CreditsEncoding : public TextEncoding {
 public:
-	CreditsEncoding(std::vector<std::string> strings, uint32_t key) :
-			strings_(std::move(strings)), key_(key) {}
+	explicit CreditsEncoding(uint32_t key) :
+			key_(key) {}
 
 	bool encode(const std::string &text, std::string &stored,
 			std::vector<SourceIssue> &issues) const override {
 		// What the reader does not read whole is no part of the form: refused, never written short.
 		if (!credits_text_readable(text, issues)) return false;
-		const BinaryConfig config = cbin::binary_config_from_text(text, strings_, key_);
+		const BinaryConfig config = cbin::binary_config_from_text(text, key_);
 		std::vector<uint8_t> bytes;
 		std::string error;
 		if (!cbin::encode_binary_config(config, bytes, error)) {
@@ -52,7 +53,6 @@ public:
 	}
 
 private:
-	std::vector<std::string> strings_;
 	uint32_t key_;
 };
 
@@ -65,7 +65,7 @@ bool decode_credits(const std::string &, const std::vector<uint8_t> &stored, std
 	}
 	BinaryConfig config;
 	if (!cbin::decode_binary_config(stored.data(), stored.size(), config, error)) return false;
-	auto kept = std::make_shared<CreditsEncoding>(config.strings, config.xor_key);
+	auto kept = std::make_shared<CreditsEncoding>(config.xor_key);
 	std::string why;
 	if (!cbin::binary_config_text(config, text, why)) {
 		issues.push_back({true, 0, std::string(), std::string(),
@@ -83,8 +83,9 @@ bool decode_credits(const std::string &, const std::vector<uint8_t> &stored, std
 			std::memcmp(again.data(), stored.data(), stored.size()) != 0)
 		issues.push_back({true, 0, std::string(), std::string(),
 				"This credits file's CBIN form would not be written back as it is from its text "
-				"(its string table holds a text twice, or what reads back differs): the editor "
-				"shows it read only and cannot save this file yet (the game keeps showing it as it is)."});
+				"(its string table is not the one the game's writer makes, or what reads back "
+				"differs): the editor shows it read only and cannot save this file yet (the game "
+				"keeps showing it as it is)."});
 	encoding = std::move(kept);
 	return true;
 }
