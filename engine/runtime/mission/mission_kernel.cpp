@@ -682,6 +682,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
 	world.rules.mp_session = options.mp_session || options.joiner;
 	world.rules.projectile_authority = !options.joiner;
+	world.facials.set_shadow_quality(options.shadow_quality);
 	// The shared model source, wired before the seat step runs (S16).
 	collision_pose.set_assets(&assets());
 	bringup_net_session_ = options.bringup_net_session;

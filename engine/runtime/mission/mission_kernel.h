@@ -71,6 +71,10 @@ struct KernelBootOptions {
 	// The bare kernel's own player after load (no role installed a round init: a
 	// session's bodies spawn at its round init, MissionKernel::round_init).
 	bool playable = true;
+	// The cfg's Shadow Quality word, which gates every person's face slot
+	// (world::FacialSystem::set_shadow_quality carries the witness): the embedder's
+	// cfg block; 1 (faces on) for a kernel that has none (the ctests, the tools).
+	int32_t shadow_quality = 1;
 	std::shared_ptr<opennova::mus::MusGlobals> music_globals;
 	bool wac = true;        // game.wac / server.wac / <mission>.wac when present
 	// A world presenter seeds weather after boot, then completes mission start.

@@ -330,8 +330,25 @@ void test_the_local_body_in_place_destroy_frees_its_face() {
 
 } // namespace
 
+// At Shadow Quality 0 no person takes a face slot, so ssnface finds none; any other word
+// allocates as before (D-GRM-2).
+// [orig: Entity_InitFromModel @0x40DC30 - `cmp g_RenderSlotShadowQualityCfg, 0; jle`
+//  @0x40E211..0x40E218, FaceAnim_AllocEntitySlot @0x40E22E]
+void test_shadow_quality_zero_takes_no_face() {
+	Fixture f;
+	f.world.facials.set_shadow_quality(0);
+	const auto a = f.spawn(7);
+	CHECK(f.world.facials.for_entity(f.entity(a)) == nullptr && f.entity(a).facial_slot == 0);
+	f.script("ssnface(7,FACE_ANGRY) store(v1)\n");
+	CHECK(f.world.script.vars.get_mission(1) == 0);
+	f.world.facials.set_shadow_quality(2);
+	const auto b = f.spawn(8);
+	CHECK(f.world.facials.for_entity(f.entity(b)) != nullptr);
+}
+
 int main() {
 	test_commands_and_retry();
+	test_shadow_quality_zero_takes_no_face();
 	test_transition_and_eye_timing();
 	test_mesh_and_texture_schedule();
 	test_slot_lifetime_and_capacity();

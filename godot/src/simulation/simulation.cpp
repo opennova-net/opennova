@@ -42,6 +42,10 @@ namespace {
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 		const godot::SimulationNetState &net, bool host_listening,
 		const opennova::inmatch::ClientRuntime *joined) {
+	// The cfg block's Shadow Quality word, which gates the face slots (engine
+	// KernelBootOptions::shadow_quality carries the witness).
+	if (net.game_config.is_valid())
+		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,

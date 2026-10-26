@@ -173,6 +173,9 @@ int main() {
 		TEST_EXPECT(block.cfg().object_polydetail == 2 && block.cfg().texfilter_level == 1);
 		TEST_EXPECT(block.cfg().particle_density == 2 && block.cfg().texcompression_level == 1);
 		TEST_EXPECT(block.cfg().terrain_texdetail == 3); // full detail
+		// The shadow word: 3 on the capable device (Renderer_ComputeQualityLevels
+		// @0x58620D), which the face slots read (D-GRM-2).
+		TEST_EXPECT(block.cfg().shadow_quality == 3);
 		TEST_EXPECT(block.cfg().game_name == "Untitled");
 		TEST_EXPECT(block.file_read() && !block.version_reset()); // the entry read the saved file
 		const std::string saved = read_text(dir.file("game.cfg"));

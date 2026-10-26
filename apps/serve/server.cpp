@@ -740,6 +740,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	options.terrain = true;
 	options.wac = true;
 	options.game_type = config.game_type;
+	// The cfg block's Shadow Quality word gates the face slots, ssnface's answer with them
+	// (engine KernelBootOptions::shadow_quality carries the witness).
+	options.shadow_quality = config_.cfg().shadow_quality;
 	options.player_limit = static_cast<int32_t>(config.player_slot_limit());
 	options.team_count = config.num_teams;
 	request.fresh_kernel = [this]() -> mission::MissionKernel & {

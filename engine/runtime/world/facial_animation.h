@@ -72,6 +72,21 @@ public:
 	static constexpr size_t kModelCapacity = 64;
 
 	void configure(World &world, const ResourceIndex *index, const def::DefItemsFile &items);
+	// The cfg's Shadow Quality word (GameCfg::shadow_quality): at 0 or below no person takes a
+	// face slot. A world no embedder sets it on (a tool's) keeps faces on.
+	// [orig: Entity_InitFromModel @0x40DC30 - `cmp g_RenderSlotShadowQualityCfg, 0; jle`
+	//  @0x40E211..0x40E218 ahead of FaceAnim_AllocEntitySlot @0x40E22E; the word is the cfg
+	//  block's +0x14 (dword_24D2040 + 0x14)]
+	void set_shadow_quality(int32_t quality) { shadow_quality_ = quality; }
+	// The word a fresh profile starts at: the first-launch video test writes quality_levels[5] =
+	// 2, raised to 3 on a card with the shader-feature mark (caps[7]), a CPU past 2980 MHz and
+	// more than 120 MB of video memory (the reference machine the other fresh-profile words
+	// model), plus the first launch's offset 0, then the 0..3 clamp.
+	// [orig: Renderer_ComputeQualityLevels @0x5860C0 - quality_levels[5] = 2 @0x5861F8, 3 under
+	//  caps[7] && caps[0] && caps[3] @0x58620D; Game_RunVideoTestDialog @0x53ED1B ->
+	//  Renderer_ComputeHardwareQualityLevels @0x587790 (offset 0)]
+	static constexpr int32_t kShadowQualityFreshProfile = 3;
+	int32_t shadow_quality() const { return shadow_quality_; }
 	void initialize(World &world);
 	void release(Entity &entity);
 	void tick(World &world);
@@ -118,6 +133,7 @@ public:
 
 private:
 	const ResourceIndex *index_ = nullptr;
+	int32_t shadow_quality_ = 1;
 	std::unordered_map<int32_t, std::string> model_names_;
 	std::vector<std::pair<std::string, std::shared_ptr<const grm::File>>> models_;
 	std::vector<FacialSlot> slots_;
