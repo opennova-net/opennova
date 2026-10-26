@@ -567,6 +567,12 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	// A terrain's detail map, made into its coefficient by its own name (use_target): its sizes are that file's.
 	if (role == R::TerrainDetailCoefficient) {
 		const TextureReader by = target.detail;
+		// A name the project lacks that an expansion's base game serves: the game makes the coefficient of the base's
+		// file, which it reads through the archives below the expansion's pair [orig: PFF_OpenAllArchives @
+		// 0x4a4310, slots 2..4]. No check here reads a base file's bytes (header_of reads the project's), as a use
+		// whose loader opens one goes unchecked: nothing said (Escalation's G11.trn naming the JO project's
+		// Det_d1.tga read "the project lacks it", 2026-10-26).
+		if (!written && by != TextureReader::None && graph.has_file(basename_of(edge.value))) return;
 		const TextureHeader *source = written && by != TextureReader::None ? header_of(input, written->relative_path, by) : nullptr;
 		if (!source || !source->read) {
 			add(F::TextureWrongReader, DiagnosticSeverity::Warning,

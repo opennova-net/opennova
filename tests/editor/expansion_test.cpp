@@ -955,6 +955,48 @@ static int test_base_string_tables() {
 	return 0;
 }
 
+// An expansion's terrain naming a detail map its base game serves: the game makes the detail coefficient of the
+// base's file by its name, read through the archives below the expansion's pair [orig: PFF_OpenAllArchives @
+// 0x4a4310, slots 2..4], so no texture.wrong_reader says "the project lacks it" (Escalation's G11.trn, g14.trn and
+// I7.trn over the JO project's Det_d1.tga and Det_m2.tga, 2026-10-26); a name neither has, whose .dds alone the
+// project holds, still does.
+static int test_base_detail_map() {
+	test_temp::TempDir dir("opennova_editor_expansion_base_detail");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "det_base.tga", "the base's detail map" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	const auto terrain = [](const char *detail) {
+		return std::string("polytrn_detailmap ") + detail +
+		       "\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\npolytrn_colormap colour.tga\n";
+	};
+	TEST_EXPECT(test_io::write_text(root + "/terrain/served.trn", terrain("det_base.tga")) &&
+	            test_io::write_text(root + "/terrain/lacking.trn", terrain("det_own.tga")) &&
+	            test_io::write_text(root + "/textures/det_own.dds", "the near texture alone"));
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(view.project.open && view.project.scan->find("served.trn") && view.project.scan->find("lacking.trn"));
+	size_t served = 0, lacking = 0;
+	for (const Diagnostic &d : view.findings.diagnostics) {
+		if (d.code() != "texture.wrong_reader") continue;
+		if (d.asset == "terrain/served.trn") ++served;
+		if (d.asset == "terrain/lacking.trn" && d.message.find("the project lacks it") != std::string::npos) ++lacking;
+	}
+	TEST_EXPECT(served == 0 && lacking == 1);
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -1104,6 +1146,7 @@ int main() {
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
 	failures += test_base_string_tables();
+	failures += test_base_detail_map();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
