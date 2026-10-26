@@ -718,6 +718,9 @@ bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const Peer
 	conn.client_scrk = auth.scrk;
 	conn.client_ck = auth.ck;
 	conn.client_ci = auth.ci;
+	// [orig: HandleClientJoin @0x62BF91 / @0x62BF96 (conn+0x38 / +0x3C)]
+	conn.reported_ip = auth.sip;
+	conn.reported_port = auth.spn;
 	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
 	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
 	conn.dcnt = auth.dcnt;

@@ -1107,6 +1107,14 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 			if (live != nullptr)
 				live->host_role().update_server_info();
 		};
+		// A LAN-only host's admitted joiner's LANIP / LANPORT (engine: inmatch::
+		// lan_listing_address_owed, D-GAMECFG-8).
+		ctx->on_lan_listing_address = [columns_client_id](uint8_t, uint32_t ip, uint32_t port) {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+			if (live != nullptr)
+				live->host_role().set_lan_address(ip, port);
+		};
 		// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
 		// registration's and the gate reply's (engine: inmatch/gate_metrics_reports.h,
 		// D-NET-NEW-L9-22).
@@ -1251,6 +1259,7 @@ void SessionDrive::unbind_nw_host() {
 	if (sim.is_valid()) {
 		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx()) {
 			ctx->on_update_server_info = nullptr;
+			ctx->on_lan_listing_address = nullptr;
 			ctx->gate_metrics = opennova::inmatch::GateMetricsSink{};
 		}
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());

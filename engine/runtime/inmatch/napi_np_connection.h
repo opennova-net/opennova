@@ -646,6 +646,12 @@ struct NapiNPConnection {
 	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
+	// The 0x42's SIP / SPN: the address and port the joiner dialed (its session record's), which
+	// the C2S 0x02's LAN-only leg lists as LANIP / LANPORT (D-GAMECFG-8).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SIP @0x62BBA9, SPN @0x62BBCA, stored
+	//  to conn+0x38 / +0x3C @0x62BF91 / @0x62BF96]
+	uint32_t reported_ip = 0;
+	uint32_t reported_port = 0;
 	// The reconnect counters a 0x42 hands the node: DCNT as sent, RCNT = the 0x42's RCNT + 1
 	// when it counted a disconnect; the 0x82 echoes RCNT. [orig: NapiNPProtocol_HandleClientJoin
 	//  @0x62c28d..0x62c2a3 (conn+0x734 / +0x738); SendSessionInit @0x62125d]

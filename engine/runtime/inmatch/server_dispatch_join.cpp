@@ -533,6 +533,11 @@ static void complete_admission(const GameConfig &config, NapiNPConnection &conn,
 		const ServerDispatchInputs &inputs, std::vector<ProtocolMessage> &replies) {
 	SessionReplyState &st = conn.reply;
 	emit_admission_metadata(config, conn, inputs.server_ctx, replies);
+	// Behind the 0x7B, a LAN-only NovaWorld host lists the joiner's reported address and port
+	// (D-GAMECFG-8). [orig: NapiNPServerMsg_0x002 @0x513123..0x51318C]
+	if (const NapiNPServerCtx *ctx = inputs.server_ctx;
+			ctx != nullptr && lan_listing_address_owed(*ctx) && ctx->on_lan_listing_address)
+		ctx->on_lan_listing_address(conn.novaworld_listing, conn.reported_ip, conn.reported_port);
 	if (!st.admission_metadata_pushed) {
 		st.admission_metadata_pushed = true;
 		st.admission_completed_tick = now_tick;

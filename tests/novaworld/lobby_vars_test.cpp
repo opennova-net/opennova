@@ -112,6 +112,19 @@ int main() {
 		expect(value_of(setup, "ServerPortNumber") == "<absent>", "no ServerPortNumber var exists in retail");
 	}
 
+	// The LAN-only host's admitted joiner (D-GAMECFG-8): LANIP as inet_ntoa prints the reported
+	// address (PeerAddr's packing), LANPORT the reported port "%ld", a signed print.
+	// [orig: NapiNPServerMsg_0x002 @0x51315E / @0x51317A / @0x51318C; the "%ld" @0x631981]
+	{
+		const auto lan = nw::make_host_lan_vars(0x0A00A8C0u, 2302u);
+		expect(names_are(lan, {"LANIP", "LANPORT"}) && lan[0].fnum == 0 && lan[1].fnum == 0,
+		       "the LAN vars are LANIP then LANPORT, no slot");
+		expect(value_of(lan, "LANIP") == "192.168.0.10", "LANIP is the reported address's dotted quad");
+		expect(value_of(lan, "LANPORT") == "2302", "LANPORT is the reported port");
+		expect(value_of(nw::make_host_lan_vars(0u, 0xFFFFFFFFu), "LANPORT") == "-1",
+		       "LANPORT prints the dword with %ld");
+	}
+
 	// 2. The initial Host list (the ClientHostRequest's): BuildHostVarLists' eight.
 	{
 		const auto host = nw::make_host_var_list(cfg, text, /*full=*/false);

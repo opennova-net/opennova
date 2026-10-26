@@ -792,6 +792,13 @@ struct NapiNPServerCtx {
 		uint8_t listing = 0;
 	};
 	std::function<void(const PlayerEnterRequest &)> on_player_enter_request;
+	// The C2S 0x02's LAN-only leg (lan_listing_address_owed): the admitted joiner's reported
+	// address and port (NapiNPConnection::reported_ip / reported_port) go to the hosting
+	// session's Host list as LANIP / LANPORT, the listing whose service sent the joiner the one
+	// (PlayerEnterRequest::listing). The NovaWorld embedder installs it; unset, nothing is listed.
+	// [orig: NapiNPServerMsg_0x002 @0x512FD0 - CNapiVarList_SetOrCreate(dword_B601F4, "LANIP")
+	//  @0x51317A, CNapiVarList_SetOrCreateFormatted("LANPORT") @0x51318C]
+	std::function<void(uint8_t listing, uint32_t ip, uint32_t port)> on_lan_listing_address;
 
 	// The host EntityLimit table behind the vehicle-spawn availability reply
 	// (C2S 0x42 -> S2C 0x70) and the C2S 0x40 spawn gate: one row per spawnable
@@ -964,6 +971,16 @@ inline bool join_tickets_armed_for(const NapiNPServerCtx &ctx, const NapiNPConne
 inline bool join_tickets_required(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
 			join_tickets_armed_for(ctx, conn);
+}
+
+// The C2S 0x02 lists the joiner's reported address on a LAN-only NovaWorld host: in session on
+// the NovaWorld transport, with the session's LAN-only word (game.cfg's, the /LAN switch's) and
+// the NovaWorld UDP session in use (D-GAMECFG-8).
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_in_session @0x513123, the transport @0x51312C,
+//  hostLanOnly @0x513134, dword_B5FD2C @0x51313D, the connection @0x513146..0x51314E]
+inline bool lan_listing_address_owed(const NapiNPServerCtx &ctx) {
+	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
+			ctx.config.server_lan_only != 0 && ctx.nwu_in_use;
 }
 
 // The host's local address: "PUB" while it is in a session on the NovaWorld

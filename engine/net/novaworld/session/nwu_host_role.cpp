@@ -353,6 +353,10 @@ bool NwuHostRole::requires_join_ticket() const {
 	return session != nullptr && session->host_requires_join_ticket() != 0;
 }
 
+void NwuHostRole::set_lan_address(uint32_t ip, uint32_t port) {
+	if (ClientSession *session = lobby_.session()) session->set_host_list_vars(make_host_lan_vars(ip, port));
+}
+
 void NwuHostRole::request_player_enter(uint32_t connection_id, uint32_t ip_address, uint32_t port,
                                        const std::string &join_ticket) {
 	ClientSession *session = lobby_.session();

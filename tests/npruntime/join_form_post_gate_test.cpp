@@ -296,6 +296,70 @@ void test_the_echo_zeroes_the_nag_stamp() {
 	}
 }
 
+// D-GAMECFG-8: behind its 0x7B the 0x02 lists the joiner's reported address and port (the 0x42's
+// SIP / SPN) as LANIP / LANPORT on a LAN-only NovaWorld host: in session, on the NovaWorld
+// transport, with the LAN-only word and the NovaWorld UDP session in use; any of the four clear,
+// nothing is listed. The joiner's listing routes it.
+// [orig: NapiNPServerMsg_0x002 @0x512FD0 - is_in_session @0x513123, the transport @0x51312C,
+//  hostLanOnly @0x513134, dword_B5FD2C @0x51313D, the connection's +0x38 / +0x3C @0x513150 /
+//  @0x513163, "LANIP" @0x51317A, "LANPORT" @0x51318C]
+void test_a_lan_only_novaworld_host_lists_the_reported_address() {
+	struct Gates {
+		uint32_t in_session;
+		inmatch::NetworkType transport;
+		int32_t lan_only;
+		bool nwu_in_use;
+		bool lists;
+	};
+	const Gates cases[] = {
+		{1, inmatch::NetworkType::NovaWorld, 1, true, true},
+		{0, inmatch::NetworkType::NovaWorld, 1, true, false},
+		{1, inmatch::NetworkType::Lan, 1, true, false},
+		{1, inmatch::NetworkType::NovaWorld, 0, true, false},
+		{1, inmatch::NetworkType::NovaWorld, 1, false, false},
+	};
+	for (const Gates &g : cases) {
+		auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+		inmatch::NapiNPServerCtx ctx;
+		ctx.is_authority = 1;
+		ctx.is_in_session = g.in_session;
+		ctx.transport_mode = g.transport;
+		ctx.config.server_lan_only = g.lan_only;
+		ctx.nwu_in_use = g.nwu_in_use;
+		ctx.world = world.get();
+		struct Listed {
+			uint8_t listing;
+			uint32_t ip;
+			uint32_t port;
+		};
+		std::vector<Listed> listed;
+		ctx.on_lan_listing_address = [&listed](uint8_t listing, uint32_t ip, uint32_t port) {
+			listed.push_back({listing, ip, port});
+		};
+		ns::LoopbackChannel wire;
+		ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+				20, inmatch::NapiNPConnection::kTypeServerSide, &wire, ns::TransportMode::Client,
+				w::EntityHandle{}, false));
+		inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+		conn.admission_stage = inmatch::GameAdmissionStage::AwaitPaddingEcho;
+		conn.reported_ip = 0x0A00A8C0u;
+		conn.reported_port = 2302;
+		conn.novaworld_listing = 1;
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
+		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(ctx.config,
+				conn, {make_protocol_message(0x02, {})}, 7, ctx.np_protocol.connection_list,
+				world.get(), inputs);
+		CHECK(game_tags(replies) == kCompletion);
+		if (g.lists) {
+			CHECK(listed.size() == 1 && listed[0].listing == 1 && listed[0].ip == 0x0A00A8C0u &&
+					listed[0].port == 2302);
+		} else {
+			CHECK(listed.empty());
+		}
+	}
+}
+
 void test_each_admission_record_reaches_its_handler() {
 	using S = inmatch::GameAdmissionStage;
 	// JOIN then form post in one datagram: the INIT, then the probe (500 draws).
@@ -429,6 +493,7 @@ int main() {
 	test_the_echo_has_no_gate();
 	test_each_admission_record_reaches_its_handler();
 	test_the_echo_zeroes_the_nag_stamp();
+	test_a_lan_only_novaworld_host_lists_the_reported_address();
 	test_records_ahead_of_the_add_answer_nothing();
 	test_a_reject_ends_the_handling();
 	std::printf("join_form_post_gate: %d failure(s)\n", g_failures);

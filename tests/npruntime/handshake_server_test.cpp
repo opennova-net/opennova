@@ -2820,6 +2820,28 @@ bool run_reconnect_counters_echo_rcnt() {
 	return true;
 }
 
+// The 0x42's SIP / SPN, the address and port the joiner dialed, stay on the node (conn+0x38 /
+// +0x3C), the C2S 0x02's LAN-only leg's source (D-GAMECFG-8).
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SIP @0x62BBA9, SPN @0x62BBCA, the stores
+//  @0x62BF91 / @0x62BF96]
+bool run_the_join_keeps_the_reported_address() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	const PeerAddr peer{0x0100007Fu, 30950};
+	ClientAuth auth = make_valid_client_auth(1, 0x24681357u, kHostKey, "Reporter",
+			"REPORTEDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD");
+	auth.sip = 0x0A00A8C0u; // 192.168.0.10, the address the joiner dialed
+	auth.spn = 2302;
+	const std::vector<uint8_t> bytes = client_auth_to_bytes(auth);
+	const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, bytes);
+	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+	if (!expect(!r.outbound.empty() && !ctx.np_protocol.connection_list.empty(),
+	            "the 0x42 is accepted")) return false;
+	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	return expect(conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
+	              "the node keeps the reported address beside its UDP source");
+}
+
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
 // installed (CO, AP the running executable's file name (D-NET-NEW-L9-2), the 2009 build stamp,
 // PN, PG, PV1, PV2 "16", and the PV3 build string, D-NET-520) -- whatever the prober sent,
@@ -4544,6 +4566,7 @@ int main(int argc, char **argv) {
 	ok = run_zero_ck_join_is_admitted() && ok;
 	ok = run_scrkless_join_keys_the_session_crypt() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
+	ok = run_the_join_keeps_the_reported_address() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_host_server_keys_draw_from_the_manager_lcg() && ok;

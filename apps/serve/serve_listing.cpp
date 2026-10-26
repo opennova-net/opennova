@@ -39,6 +39,12 @@ void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel,
 		if (lister_ != nullptr) lister_->host_role().update_server_info();
 		if (second_ != nullptr) second_->host_role().update_server_info();
 	};
+	// A LAN-only host's admitted joiner's LANIP / LANPORT, on the listing that sent it
+	// (D-GAMECFG-8). [orig: NapiNPServerMsg_0x002 @0x513146..0x51318C]
+	ctx.on_lan_listing_address = [this](uint8_t listing, uint32_t ip, uint32_t port) {
+		Lister *target = listing == 1 ? second_ : lister_;
+		if (target != nullptr) target->host_role().set_lan_address(ip, port);
+	};
 	install_column_source(lister);
 	if (second_ != nullptr) install_column_source(*second_);
 	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
@@ -94,6 +100,7 @@ void ServeListing::unbind() {
 		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
 		ctx.on_player_enter_request = nullptr;
 		ctx.on_update_server_info = nullptr;
+		ctx.on_lan_listing_address = nullptr;
 		ctx.gate_metrics = inmatch::GateMetricsSink{};
 		ctx.novaworld_join_tickets_armed = false;
 		ctx.novaworld_gsid.clear();

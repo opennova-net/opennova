@@ -181,6 +181,14 @@ std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg);
 std::vector<ClientVar> make_host_var_list(const HostRegistration &cfg, const HostLobbyText &text,
                                           bool full);
 
+// The two vars a LAN-only NovaWorld host's C2S 0x02 sets on its Host list for the admitted
+// joiner: LANIP, its reported address as inet_ntoa prints it (PeerAddr's packing), and LANPORT,
+// its reported port "%ld". [orig: NapiNPServerMsg_0x002 @0x512FD0 -
+//  Network_FormatIPAddressToString(conn+0x38) @0x51315E (inet_ntoa @0x62DE98), "LANIP"
+//  @0x51317A; CNapiVarList_SetOrCreateFormatted("LANPORT", conn+0x3C) @0x51318C ("%ld"
+//  @0x631981)]
+std::vector<ClientVar> make_host_lan_vars(uint32_t ip, uint32_t port);
+
 // The "PlayerList" var-list: five VarFNum-keyed vars per slot.
 std::vector<ClientVar> make_player_list(const std::vector<HostPlayerSlot> &players);
 
