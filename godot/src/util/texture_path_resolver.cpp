@@ -275,6 +275,40 @@ godot::Ref<godot::Image> read_image(renderer::TextureReader reader, const godot:
 	if (image->get_format() != godot::Image::FORMAT_RGBA8) {
 		image->convert(godot::Image::FORMAT_RGBA8);
 	}
+	if (reader == renderer::TextureReader::Dds) {
+		// The texture D3DX makes of the file at D3DX_DEFAULT sides: a side no power of two rounded up, each
+		// level the file's in its top-left corner, transparent black past it (engine
+		// renderer/device_texture.h dds_reader_levels carries the witness, D-RMAT-18).
+		const uint32_t width = static_cast<uint32_t>(image->get_width());
+		const uint32_t height = static_cast<uint32_t>(image->get_height());
+		if (renderer::d3dx_default_texture_side(width) != width ||
+				renderer::d3dx_default_texture_side(height) != height) {
+			const godot::PackedByteArray data = image->get_data();
+			const int count = image->has_mipmaps() ? image->get_mipmap_count() + 1 : 1;
+			std::vector<renderer::DeviceTextureLevel> levels;
+			for (int i = 0; i < count; ++i) {
+				renderer::DeviceTextureLevel level;
+				level.width = std::max(1u, width >> i);
+				level.height = std::max(1u, height >> i);
+				const int64_t offset = i == 0 ? 0 : image->get_mipmap_offset(i);
+				const size_t bytes = static_cast<size_t>(level.width) * level.height * 4;
+				if (offset < 0 || static_cast<size_t>(offset) + bytes > static_cast<size_t>(data.size())) break;
+				level.rgba.assign(data.ptr() + offset, data.ptr() + offset + bytes);
+				levels.push_back(std::move(level));
+			}
+			levels = renderer::dds_reader_levels(std::move(levels));
+			godot::PackedByteArray chain;
+			for (const renderer::DeviceTextureLevel &level : levels) {
+				const int64_t at = chain.size();
+				chain.resize(at + static_cast<int64_t>(level.rgba.size()));
+				std::memcpy(chain.ptrw() + at, level.rgba.data(), level.rgba.size());
+			}
+			if (!levels.empty()) {
+				image = godot::Image::create_from_data(static_cast<int>(levels.front().width),
+						static_cast<int>(levels.front().height), levels.size() > 1, godot::Image::FORMAT_RGBA8, chain);
+			}
+		}
+	}
 	return image;
 }
 

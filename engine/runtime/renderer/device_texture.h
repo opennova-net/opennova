@@ -206,6 +206,15 @@ DeviceTextureFormat dds_device_format(std::string_view format_name);
 // @ 0x69150B..0x691520; CBlt::BltNone @ 0x6E0D57] (render-material-re D-RMAT-18).
 uint32_t d3dx_default_texture_side(uint32_t side);
 
+// The DDS reader's texture of a file's levels (RGBA8, the first its top level, each next one halved,
+// at least 1): made at D3DX_DEFAULT sides (d3dx_default_texture_side) with D3DX's complete chain, each
+// file level copied into its level's top-left corner under Filter NONE, transparent black past it, the
+// levels the file lacks D3DX's box filter of the level before (extend_box_chain). The levels as they
+// are where both sides already are powers of two. [orig: GTexture_InitFromMemory @ 0x68830E..0x688315
+// (D3DX_DEFAULT sides, MipLevels 0, Filter NONE); D3DXCreateTextureFromFileInMemoryEx_Internal
+// @ 0x6914D9..0x691520; CBlt::BltNone @ 0x6E0D57; D3DXFilterTexture @ 0x6910C9]
+std::vector<DeviceTextureLevel> dds_reader_levels(std::vector<DeviceTextureLevel> file_levels);
+
 // The creation flags a model texture row's loader (`loader` Stage, Plain or Normal: material_texture
 // .h's dispatch by the row's runtime type) makes its texture with at object texture detail `level`:
 // the stage and plain loaders the row's slot's detail word (object_texdetail_flags), the normal-map

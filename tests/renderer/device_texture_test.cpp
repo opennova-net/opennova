@@ -218,6 +218,26 @@ std::vector<uint8_t> dxt5_dds(uint32_t side, bool two_levels, uint8_t alpha) {
 	return file;
 }
 
+void test_dds_reader_levels() {
+	// A 3 x 2 image under the DDS reader: a 4 x 2 texture, the image in its top-left corner, transparent
+	// black past it, then D3DX's box chain to 1 x 1 [orig: GTexture_InitFromMemory @ 0x68830E..0x688315;
+	// CBlt::BltNone @ 0x6E0D57; D3DXFilterTexture @ 0x6910C9].
+	DeviceTextureLevel file;
+	file.width = 3;
+	file.height = 2;
+	file.rgba.assign(3 * 2 * 4, 200);
+	const std::vector<DeviceTextureLevel> levels = dds_reader_levels({file});
+	CHECK(levels.size() == 3 && levels[0].width == 4 && levels[0].height == 2, "4 x 2, then 2 x 1 and 1 x 1");
+	CHECK(levels[0].rgba[2 * 4] == 200 && levels[0].rgba[3 * 4] == 0 && levels[0].rgba[3 * 4 + 3] == 0,
+			"the image top-left, column 3 transparent black");
+	CHECK(levels[1].width == 2 && levels[1].height == 1 && levels[2].width == 1, "the box chain to 1 x 1");
+	// A power-of-two image stays as it is, its own levels.
+	DeviceTextureLevel square;
+	square.width = square.height = 4;
+	square.rgba.assign(4 * 4 * 4, 7);
+	CHECK(dds_reader_levels({square}).size() == 1, "a power-of-two file keeps its levels");
+}
+
 void test_dxt5_made_dxt1() {
 	// An all-opaque DXT5 on the reference card: the colour halves packed, the pitch halved, the FourCC "DXT1"
 	// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0].
@@ -442,6 +462,7 @@ int main() {
 	test_level_bytes();
 	test_dxt5_opaque();
 	test_dxt5_made_dxt1();
+	test_dds_reader_levels();
 	if (failures != 0) {
 		std::fprintf(stderr, "device_texture: %d failure(s)\n", failures);
 		return 1;

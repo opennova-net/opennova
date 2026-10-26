@@ -330,6 +330,32 @@ uint32_t d3dx_default_texture_side(uint32_t side) {
 	return out;
 }
 
+std::vector<DeviceTextureLevel> dds_reader_levels(std::vector<DeviceTextureLevel> file_levels) {
+	if (file_levels.empty()) return file_levels;
+	const uint32_t width = d3dx_default_texture_side(std::max(1u, file_levels.front().width));
+	const uint32_t height = d3dx_default_texture_side(std::max(1u, file_levels.front().height));
+	if (width == file_levels.front().width && height == file_levels.front().height) return file_levels;
+	std::vector<DeviceTextureLevel> out;
+	for (size_t i = 0; i < file_levels.size(); ++i) {
+		const DeviceTextureLevel &file = file_levels[i];
+		DeviceTextureLevel level;
+		level.width = std::max(1u, width >> std::min<size_t>(i, 31));
+		level.height = std::max(1u, height >> std::min<size_t>(i, 31));
+		level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
+		const uint32_t rows = std::min(file.height, level.height), row_bytes = std::min(file.width, level.width) * 4;
+		for (uint32_t y = 0; y < rows; ++y) {
+			const size_t from = static_cast<size_t>(y) * file.width * 4;
+			if (from + row_bytes > file.rgba.size()) break;
+			std::copy_n(file.rgba.begin() + static_cast<std::ptrdiff_t>(from), row_bytes,
+					level.rgba.begin() + static_cast<std::ptrdiff_t>(static_cast<size_t>(y) * level.width * 4));
+		}
+		out.push_back(std::move(level));
+		if (out.back().width == 1 && out.back().height == 1) break;
+	}
+	extend_box_chain(out, 0);
+	return out;
+}
+
 // [orig: Material_LoadStageTexture @ 0x5B173E..0x5B1742 (stage), @ 0x5B174F..0x5B1758 (plain),
 // @ 0x5B1782..0x5B1790 (normal: or eax, 1000h)]
 uint32_t model_row_texture_flags(TextureLoader loader, uint8_t slot, int level) {
