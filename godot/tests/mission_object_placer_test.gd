@@ -1350,55 +1350,6 @@ func test_dense_shadow_twin_and_shadow_row_map_follow_the_compaction() -> void:
 			"the live-population read-back names visible populations only")
 
 
-func _device_multimesh_rows_available() -> bool:
-	return DisplayServer.get_name() != "headless" and \
-			RenderingServer.get_current_rendering_method() == "forward_plus"
-
-
-func test_dense_population_device_rows_match_the_bookkeeping() -> void:
-	if not _device_multimesh_rows_available():
-		pending("MultiMesh instance rows need a windowed Forward+ run")
-		return
-	var parent := Node3D.new()
-	add_child_autofree(parent)
-	var fixture := _dense_fixture(parent, false)
-	var placer: MissionObjectPlacer = fixture.placer
-	var bms: Array[int] = fixture.bms
-	var container: Node3D = fixture.container
-	if container == null:
-		return
-	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
-	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
-	if level0 == null or level1 == null:
-		return
-	var expected := {}
-	for index in range(3):
-		expected[bms[index]] = MissionObjectPlacer.entity_transform(
-				Vector3(10, [-10.0, -100.0, -200.0][index], 0), Vector3.ZERO)
-	var check := func(population: MultiMeshInstance3D, label: String) -> void:
-		var rows := _live_bms(placer, population)
-		assert_eq(population.multimesh.visible_instance_count, rows.size(),
-				"%s draws exactly its live rows" % label)
-		for row in range(rows.size()):
-			var device: Transform3D = population.multimesh.get_instance_transform(row)
-			assert_true(device.is_equal_approx(expected[rows[row]]),
-					"%s row %d carries the entity it is booked for" % [label, row])
-			assert_gt(absf(device.basis.determinant()), 0.5,
-					"no zero-scaled row inside the live range")
-	check.call(level0, "level 0 at placement")
-	assert_eq(level1.multimesh.visible_instance_count, 0)
-	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 2)
-	check.call(level0, "level 0 after the switch")
-	check.call(level1, "level 1 after the switch")
-	assert_eq(_dense_lod_switches(placer, DENSE_MID_CAMERA), 1)
-	check.call(level0, "level 0 after the return")
-	check.call(level1, "level 1 after the return")
-	assert_true(placer.hide_static_instance(bms[2]) is Transform3D)
-	check.call(level0, "level 0 after the carve")
-	assert_true(placer.show_static_instance(bms[2]))
-	check.call(level0, "level 0 after the restore")
-
-
 func test_static_and_live_placement_share_initialized_entity_light_radius() -> void:
 	var db := ItemDatabase.new()
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK)

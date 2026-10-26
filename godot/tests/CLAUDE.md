@@ -11,12 +11,13 @@
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
 - One suite, no retail data: a script's inputs are minted or authored fixtures
   under `fixtures/`, and `scripts/ci/test_suites.py --check-layout`
-  fails a script that names a retail root. Scripts whose every test needs a
-  RenderingDevice live under `tests/windowed/`: excluded from the headless
-  selection, they run only with `--windowed`, where a pending test is a failure.
-  Headless scripts that mix in RD-gated methods keep them `pending` there until
-  they are split into windowed siblings. The runner snapshots selected
-  scripts/methods and checks the JUnit report for missing coverage.
+  fails a script that names a retail root. A test that needs a RenderingDevice
+  lives under `tests/windowed/` (a headless script's one goes to a windowed
+  sibling, `<script>_device_test.gd`, never stays `pending` headless): excluded
+  from the headless selection, they run only with `--windowed`, where a pending
+  test is a failure, and CI runs them on a software GPU (`godot-tests-windowed`:
+  lavapipe under Xvfb). The runner snapshots selected scripts/methods and checks
+  the JUnit report for missing coverage.
 - No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`
   (`docs/mcp.md`, ADR 0041): registered in `ProbeDef.definitions()`
   (`godot/game/probe/`), driven through the game's MCP endpoint with typed

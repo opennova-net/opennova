@@ -86,11 +86,12 @@ are collected). Repo fixtures are reached one level above `res://`:
 `ProjectSettings.globalize_path("res://").path_join("../fixtures/...")`. No test
 reads retail data: its inputs are minted or authored fixtures under `fixtures/`
 (`godot/tests/CLAUDE.md`; `scripts/ci/test_suites.py --check-layout`
-fails a script that names a retail root). A script whose every test needs a
-RenderingDevice lives under `godot/tests/windowed/` and runs only with
-`--windowed`; headless it is never selected. A headless script that mixes in
-RD-gated methods keeps them `pending` until they are split into a windowed
-sibling, so a green count does not prove coverage: check for pending lines.
+fails a script that names a retail root). A test that needs a RenderingDevice
+lives under `godot/tests/windowed/` (a headless script's one in a windowed
+sibling, `<script>_device_test.gd`) and runs only with `--windowed`, which CI
+runs on a software GPU (`godot-tests-windowed`, lavapipe under Xvfb); headless
+it is never selected. A headless `pending` is a fixture's limit, never a missing
+device: check for pending lines all the same.
 Runtime probes are not GUT scripts: they live under `godot/probes/` as `game_probe`
 tools (`docs/mcp.md`); only their contract tests live here. Never bulk-edit `.gd` files with
 PowerShell 5.1 Get/Set-Content (BOM mangling) — do bulk text rewrites with bash

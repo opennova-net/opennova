@@ -854,14 +854,14 @@ const std::vector<Recipe> &recipes() {
 			m.materials[0].emissive_type = THREEDI_EMISSIVE_FULL;
 			m.set_rgb_gen(0, THREEDI_PANM_STYLE_CONTROL_REGISTER, 1, 0.0, kBlack, kWhite);
 		}},
-		// --- Q3 bloom source (framefx_test.gd): the heat slab as an AlphaBlend
+		// --- Q3 bloom source (windowed/framefx_device_test.gd): the heat slab as an AlphaBlend
 		// LUM (its SELFLUM copy carries alpha 0 into the Q3 target) ---
 		{"mount_mtrl2_ab_lum", make_mount, [](Model &m) {
 			std::snprintf(m.materials[2].shader_name, sizeof(m.materials[2].shader_name), "FF_ST_AB_LUM");
 		}},
-		// --- Q3 bloom source (framefx_test.gd): a per-vertex skinned model wearing
+		// --- Q3 bloom source (windowed/framefx_device_test.gd): a per-vertex skinned model wearing
 		// a LUM material; retail's bone path never copies it into Q3 ---
-		// --- celestial bodies (celestial_test.gd): the crate as a stock-style
+		// --- celestial bodies (celestial_test.gd, windowed/celestial_device_test.gd): the crate as a stock-style
 		// sky body, an FF_ST_AD_LUM surface whose RGB generator style 113 reads
 		// CTRL UPL_INTENSITY black to white (the msun/fmoon4/mglare authoring) ---
 		{"crate_mtrl0_ad_lum_upl113", make_crate, [](Model &m) {

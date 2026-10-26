@@ -137,12 +137,12 @@ control register 0, values 0..4, no speed):
 | `mount_yaw_style114` | mount | the first LOD0 track with control 113 on register 1 (the cradle's yaw) becomes style 114 | ctrl_bus wave style, normal |
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
 | `mount_mtrl0_rgbgen113_reg1` | mount | material 0 as FF_ST_OP_LUM (emissive 2), RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
-| `mount_mtrl2_ab_lum` | mount | material 2 (the heat slab) as `FF_ST_AB_LUM` | `framefx_test.gd` alpha-blend LUM adds nothing to Q3; `slot_shadow_test.gd` |
-| `person_mtrl0_ad_lum` | person | material 0 `FF_ST_AD_LUM` (emissive full) | `framefx_test.gd` skinned LUM never reaches Q3 |
+| `mount_mtrl2_ab_lum` | mount | material 2 (the heat slab) as `FF_ST_AB_LUM` | `windowed/framefx_device_test.gd` alpha-blend LUM adds nothing to Q3; `windowed/slot_shadow_device_test.gd` |
+| `person_mtrl0_ad_lum` | person | material 0 `FF_ST_AD_LUM` (emissive full) | `windowed/framefx_device_test.gd` skinned LUM never reaches Q3 |
 | `person_part9_trigger_scale` | person | CTRL 0 `WPN_TRIGGER`; LOD0 row 9 (the left upper arm) uniform scale, style 113 on register 0, 1.0 to 0 | `object_model_skeletal_panm_test.gd` part tracks over the clip pose |
 | `pump_mtrl1_mt_alphatest` | pump | material 1 (the `FF_MT_OP` post) alpha test on, threshold byte 32 | `render_swatch_pass_modes.gd` probe, the `_MT` alpha-test projshadow caster |
-| `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd` sky bodies |
-| `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `celestial_test.gd` Q3 glow blend |
+| `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd`, `windowed/celestial_device_test.gd` sky bodies |
+| `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `windowed/celestial_device_test.gd` Q3 glow blend |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |
 | `pump_minefield` | pump | ignored USRP followed by sixteen mixed-case mine names across the existing five parts; only the first fourteen bind | native `minefield`; GUT `minefield_present_test` |
 | `pump_anim0_noise_translation` | pump | LOD0 row 0: translation z enabled, control 0x36, end 32767 | `object_data_panm_apply_test.gd` same-time noise |
