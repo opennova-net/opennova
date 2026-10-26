@@ -4,7 +4,6 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <limits>
@@ -126,12 +125,11 @@ std::vector<std::string> revision_handoff_arguments(const Options &options,
 bool read_revision_arguments(const std::vector<std::string> &args, RevisionArguments &out,
 		std::string &error) {
 	RevisionArguments read;
-	bool explicit_forwarding = false;
+	bool forwarded = false;
 	for (size_t i = 0; i < args.size(); ++i) {
 		if (args[i] == "--forward-options") {
-			explicit_forwarding = true;
+			forwarded = true;
 		} else if (args[i] == "--update-arg") {
-			explicit_forwarding = true;
 			if (++i == args.size()) { error = "Missing --update-arg value."; return false; }
 			read.relaunch.push_back(args[i]);
 		} else if (args[i] == "--runtime-dir" || args[i] == "--parent-pid") {
@@ -139,24 +137,11 @@ bool read_revision_arguments(const std::vector<std::string> &args, RevisionArgum
 			if (++i == args.size()) { error = "Missing helper option value."; return false; }
 			read.own.push_back(args[i]);
 		} else {
-			// Stock UPDATE launches REVUPDAT with /RUN and its original command line.
-			read.relaunch.push_back(args[i]);
+			error = "unknown option " + args[i];
+			return false;
 		}
 	}
-	if (!explicit_forwarding) {
-		std::vector<std::string> &relaunch = read.relaunch;
-		if (relaunch.empty()) relaunch.push_back("/RUN");
-		// Retail prepends /RUN before UPDATE's original positional hwnd. Give the new
-		// updater its own harmless positional handle and discard the original one.
-		for (size_t i = 0; i < std::min<size_t>(2, relaunch.size()); ++i) {
-			if (!relaunch[i].empty() && std::all_of(relaunch[i].begin(), relaunch[i].end(),
-						[](char c) { return c >= '0' && c <= '9'; })) {
-				relaunch.erase(relaunch.begin() + static_cast<std::ptrdiff_t>(i));
-				break;
-			}
-		}
-		relaunch.insert(relaunch.begin(), "0");
-	}
+	if (!forwarded) { error = "revupdat is started by update.exe (--forward-options)."; return false; }
 	out = std::move(read);
 	return true;
 }

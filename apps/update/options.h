@@ -44,12 +44,12 @@ const char *usage();
 std::vector<std::string> revision_handoff_arguments(const Options &options,
 		const std::vector<std::string> &original, uint64_t updater_pid);
 
-// revupdat's reading of its command line: its own options (--runtime-dir, --parent-pid), for
-// parse_options, and the arguments it relaunches update.exe with. From update.exe those are the
-// --update-arg values; from a stock UPDATE.EXE (no --forward-options), which starts REVUPDAT as
-// `revupdat.exe /RUN <its command line>`, its own command line, a numeric window handle among its
-// first two dropped and "0" put first, as the new updater's own stand-in handle. False with
-// `error` when one of its own options lacks its value.
+// revupdat's reading of its command line, the one revision_handoff_arguments writes: its own
+// options (--runtime-dir, --parent-pid), for parse_options, and the arguments it relaunches
+// update.exe with, the --update-arg values. False with `error` when one of its own options lacks
+// its value, when an argument is none of these, or without --forward-options (a stock
+// UPDATE.EXE's `revupdat.exe /RUN <its command line>` is not read: both packages ship our
+// update.exe beside it).
 struct RevisionArguments {
 	std::vector<std::string> own;
 	std::vector<std::string> relaunch;
@@ -60,8 +60,8 @@ bool read_revision_arguments(const std::vector<std::string> &args, RevisionArgum
 // revupdat's step once the updater that started it has exited: a staged update.new put in
 // update.exe's place as retail's REVUPDAT does, update.exe deleted and then update.new moved over
 // it, each step's failure with its own text and the OS error code; nothing to do without an
-// update.new. With `wait_first` (no updater process was awaited: a stock UPDATE.EXE started this)
-// it first sleeps retail's 2 s, which retail sleeps only when there is an update.new. A failure
+// update.new. With `wait_first` (no updater process was named to wait on) it first sleeps
+// retail's 2 s, which retail sleeps only when there is an update.new. A failure
 // stops here, keeping update.new for the next run, where retail's box does not stop it: it goes
 // on and deletes update.new, then relaunches update.exe, the old image after a failed delete
 // (which fetches and hands over again), none after a failed move (PERMANENT, ours stops).

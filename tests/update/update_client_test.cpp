@@ -361,6 +361,14 @@ int test_revision_handoff(const test_temp::TempDir &temp) {
 	// revupdat's own options need their values.
 	TEST_EXPECT(!updater::read_revision_arguments({"--runtime-dir"}, revision, error) && !error.empty());
 	TEST_EXPECT(!updater::read_revision_arguments({"--forward-options", "--update-arg"}, revision, error));
+	// Only update.exe's own hand-off is read: a stock UPDATE.EXE's `/RUN <its command line>`, or
+	// any argument not revupdat's, is refused, as is a command line with no --forward-options.
+	error.clear();
+	TEST_EXPECT(!updater::read_revision_arguments({"/RUN", "123456", "/DIR", "x"}, revision, error) &&
+			error == "unknown option /RUN");
+	TEST_EXPECT(!updater::read_revision_arguments({"--runtime-dir", "x", "--parent-pid", "7"}, revision, error));
+	TEST_EXPECT(updater::read_revision_arguments({"--forward-options"}, revision, error) &&
+			revision.own.empty() && revision.relaunch.empty());
 	return 0;
 }
 

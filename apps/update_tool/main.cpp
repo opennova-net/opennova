@@ -40,7 +40,7 @@ const char kUsage[] =
 		"  opennova-update-tool build --from <dir> --to <dir> --out <file.sfs>\n"
 		"      --base <CMD> [--expansion <name>=<CMD>]... --version <version> [--product <name>]\n"
 		"      [--product-name <registry name>] [--exe <file>] [--exclude <path|dir/>]...\n"
-		"      [--no-remove] [--prefix <update.exe>] [--full [--previous <file.sfs>]]\n"
+		"      [--no-remove] [--full [--previous <file.sfs>]]\n"
 		"      [--command-out <file>]\n"
 		"  opennova-update-tool inspect <file.sfs>\n"
 		"  opennova-update-tool serve --package <file.sfs>... --product <LOGIN>=<CMD>...\n"
@@ -109,19 +109,17 @@ bool read_command_files(const std::string &path, update::SfsPackage &package, st
 	return ok;
 }
 
-// `prefix` (an updater executable, or nothing) and the package written to `out` through a
-// partial file, the package a piece at a time: a whole game's is never copied whole in memory.
-bool write_package(const std::string &out, const std::vector<uint8_t> &prefix,
-		const update::SfsPackage &package, uint64_t &package_bytes, std::string &error) {
+// The package written to `out` through a partial file, a piece at a time: a whole game's is never
+// copied whole in memory.
+bool write_package(const std::string &out, const update::SfsPackage &package, uint64_t &package_bytes,
+		std::string &error) {
 	if (!update::sfs_writable(package, &package_bytes)) {
 		error = "the package cannot be written";
 		return false;
 	}
 	const std::string partial = out + ".partial";
 	std::FILE *file = io::fopen_utf8(partial.c_str(), "wb");
-	bool ok = file != nullptr &&
-			(prefix.empty() || std::fwrite(prefix.data(), 1, prefix.size(), file) == prefix.size()) &&
-			update::sfs_write_file(package, file);
+	bool ok = file != nullptr && update::sfs_write_file(package, file);
 	if (file != nullptr && std::fclose(file) != 0)
 		ok = false;
 	if (!ok) {
@@ -135,7 +133,7 @@ bool write_package(const std::string &out, const std::vector<uint8_t> &prefix,
 
 int run_build(int argc, char **argv) {
 	update_tool::BuildSpec spec;
-	std::string out, prefix, base_cmd, exe, previous, command_out, product, version;
+	std::string out, base_cmd, exe, previous, command_out, product, version;
 	std::vector<std::pair<std::string, std::string>> expansions;
 	for (int i = 0; i < argc; ++i) {
 		const std::string arg = argv[i];
@@ -166,8 +164,6 @@ int run_build(int argc, char **argv) {
 			exe = v;
 		} else if (arg == "--exclude") {
 			spec.excludes.push_back(v);
-		} else if (arg == "--prefix") {
-			prefix = v;
 		} else if (arg == "--previous") {
 			previous = v;
 		} else if (arg == "--product") {
@@ -208,13 +204,8 @@ int run_build(int argc, char **argv) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
 	}
-	std::vector<uint8_t> bytes;
-	if (!prefix.empty() && !io::read_file_bytes(prefix, bytes, error)) {
-		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
-		return 1;
-	}
 	uint64_t package_bytes = 0;
-	if (!write_package(out, bytes, package, package_bytes, error)) {
+	if (!write_package(out, package, package_bytes, error)) {
 		std::fprintf(stderr, "opennova-update-tool: %s\n", error.c_str());
 		return 1;
 	}
