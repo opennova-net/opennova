@@ -1,5 +1,6 @@
 #include <runtime/world/item_effects.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <base/io/bam.h>
 #include <runtime/world/world.h>
@@ -142,6 +143,7 @@ ItemEmitterSystem &ItemEmitterSystem::operator=(ItemEmitterSystem &&other) noexc
     reset();
     scene_ = std::move(other.scene_);
     bindings_ = std::move(other.bindings_);
+    held_ = std::move(other.held_);
     next_owner_ = other.next_owner_;
     owns_clock_ = other.owns_clock_;
     return *this;
@@ -161,21 +163,42 @@ void ItemEmitterSystem::reset() {
         scene_->apply_owner_poses(absent);
     }
     bindings_.clear();
+    held_.clear();
+}
+
+void ItemEmitterSystem::hold_slot(const Entity &entity) {
+    for (HeldSlot &held : held_)
+        if (held.handle == entity.handle.packed) {
+            held.lifetime = entity.registry_spawn_id;
+            return;
+        }
+    held_.push_back({entity.handle.packed, entity.registry_spawn_id});
+}
+
+void ItemEmitterSystem::release_slot(const Entity &entity) {
+    if (scene_) scene_->detach_slot(entity_effect_slot(entity.handle.packed));
+    for (auto it = bindings_.begin(); it != bindings_.end();) {
+        if (it->handle == entity.handle.packed) {
+            if (scene_) scene_->apply_owner_poses({{it->owner, {}, false}});
+            it = bindings_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    held_.erase(std::remove_if(held_.begin(), held_.end(),
+            [&entity](const HeldSlot &held) { return held.handle == entity.handle.packed; }), held_.end());
 }
 
 void ItemEmitterSystem::event(World &world, Entity &entity,
         const ItemDeathTraits &traits, int phase) {
     if (phase != 0 || !traits.model_loaded || !entity.has_item_def) return;
-    for (auto it = bindings_.begin(); it != bindings_.end(); ++it) {
-        if (it->handle != entity.handle.packed || it->lifetime != entity.registry_spawn_id) continue;
-        const bool live = scene_ && scene_->contains_group(it->group);
-        if (live) scene_->apply_owner_poses({{it->owner, {}, false}});
-        bindings_.erase(it);
-        if (live) {
-            entity.class_think_ticks = 15;
-            return;
-        }
-        break;
+    // A group the entity's slot holds, whichever producer stored it, is destroyed, the slot
+    // cleared and the class clock set to 15 [orig: @0x43F91A..0x43F949].
+    const particle::EffectSlotToken slot = entity_effect_slot(entity.handle.packed);
+    if (scene_ && scene_->slot_group(slot)) {
+        release_slot(entity);
+        entity.class_think_ticks = 15;
+        return;
     }
     // The draw precedes the point/effect allocation checks, even on a miss.
     // It is one step of the inline dword_31BFBB8 rotate LCG (the owner of the
@@ -188,6 +211,10 @@ void ItemEmitterSystem::event(World &world, Entity &entity,
     particle::EffectSpawnRequest request;
     request.effect = scene_->intern(traits.particlefx);
     request.binding = particle::EffectBinding::FollowOwner;
+    // Stored in the entity's slot, with Entity_ClearOwnerSessionIfMatches as its death callback
+    // [orig: @0x43FA4F..0x43FA57, the store @0x43FB14].
+    request.admission = particle::EffectAdmission::StoreOwned;
+    request.slot = slot;
     // Native world owners use the upper half of the token domain. Device owner
     // keys allocate upward from one; no reverse Godot key is needed here.
     request.owner.value = 0x8000000000000000ull | next_owner_++;
@@ -196,13 +223,28 @@ void ItemEmitterSystem::event(World &world, Entity &entity,
     request.source_tick = world.logic_tick;
     scene_->apply_owner_poses({{request.owner, emitter_owner_pose(entity), true}});
     const auto receipt = scene_->spawn(request);
-    if (receipt.spawned()) bindings_.push_back({entity.handle.packed,
-            entity.registry_spawn_id, receipt.group, request.owner});
-    else scene_->apply_owner_poses({{request.owner, {}, false}});
+    if (receipt.spawned()) {
+        bindings_.push_back({entity.handle.packed, entity.registry_spawn_id, receipt.group, request.owner});
+        hold_slot(entity);
+    } else {
+        scene_->apply_owner_poses({{request.owner, {}, false}});
+    }
 }
 
 void ItemEmitterSystem::sync_owners(World &world) {
     if (!scene_) return;
+    // A held slot whose row was destroyed, or taken by another entity, is released: the destroy
+    // releases the row's +0x1CC group and the allocation of the row clears it
+    // [orig: Entity_Destroy @0x43E8EC..0x43E8F5; CEntityManager_AllocateSlot @0x4EAB70 / @0x4EABB2].
+    for (auto it = held_.begin(); it != held_.end();) {
+        const Entity *entity = world.registry.get(EntityHandle{it->handle});
+        if (entity != nullptr && entity->registry_spawn_id == it->lifetime) {
+            ++it;
+            continue;
+        }
+        scene_->detach_slot(entity_effect_slot(it->handle));
+        it = held_.erase(it);
+    }
     std::vector<particle::EffectOwnerPoseUpdate> poses;
     for (auto it = bindings_.begin(); it != bindings_.end();) {
         const Entity *entity = world.registry.get(EntityHandle{it->handle});

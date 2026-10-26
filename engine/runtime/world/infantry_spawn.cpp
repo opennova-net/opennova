@@ -61,8 +61,13 @@ bool player_watches(World &world, AiSystem &ai, const Entity &entity,
 
 // See entity_spawn.h.
 void release_corpse_effect(World &world, Entity &entity) {
-    if (entity.death_effect_active[0] != 0)
+    // A person's family-1 slot 0 is the hit's and the decay's +0x1CC group; an item's family 1 is
+    // its Dead bank (+0x2B4), which the reset never releases [orig: Entity_ResetToSpawnState
+    // @0x4B97CB..0x4B97F5, the one release; Entity_InitDeathSounds @0x493A0F, the bank's handles].
+    if (entity.handle.pool() == 0 && entity.death_effect_active[0] != 0)
         release_death_effect_bank(entity, 1, world.out.destruction);
+    // The slot is the one every +0x1CC producer shares: a script effect stored there goes too.
+    world.item_emitters.release_slot(entity);
 }
 
 namespace {
@@ -740,6 +745,7 @@ static void spawn_corpse_decay(World &world, Entity &entity, const std::string &
     effect.family = 1;
     effect.section_tagged = true;
     effect.positioned = true;
+    effect.entity_slot = entity_effect_slot(entity.handle.packed).value;
     entity.death_effect_active[0] = 1;
     world.out.destruction.effects.push_back(std::move(effect));
 }

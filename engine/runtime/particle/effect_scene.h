@@ -437,6 +437,9 @@ public:
 			const Vec3 &forward, std::uint16_t force_zone);
 	// True until the last child is reaped, including detached groups draining particles.
 	bool contains_group(EffectGroupId group) const;
+	// The live group a slot holds: the last one stored there, until a detach or its death clears it
+	// (none for an empty slot).
+	EffectGroupId slot_group(EffectSlotToken slot) const;
 	void detach(EffectGroupId group);
 	void detach_slot(EffectSlotToken slot);
 

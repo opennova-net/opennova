@@ -89,6 +89,8 @@ static void test_handles_gates_pose_and_restore() {
     CHECK(f.world.out.script_effects.size() == 2);
     const auto &event = f.world.out.script_effects[0];
     CHECK(event.name == "FLASH" && event.owner == owner && event.release_previous);
+    // The entity's +0x1CC slot, the one every producer storing there shares (D-PTL-26).
+    CHECK(event.store_slot && event.slot == entity_effect_slot(owner.packed).value);
     CHECK(event.position[0] == 10 * 65536 && event.position[1] == 20 * 65536);
     CHECK(event.position[2] == 30 * 65536);
     CHECK(event.direction[0] == 65536 && event.direction[1] == 0 && event.direction[2] == 0);

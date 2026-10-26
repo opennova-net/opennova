@@ -1053,6 +1053,18 @@ bool EffectScene::contains_group(EffectGroupId group) const {
 	return impl_->find_group(group) != nullptr;
 }
 
+EffectGroupId EffectScene::slot_group(EffectSlotToken slot) const {
+	if (!slot) {
+		return {};
+	}
+	const auto found = impl_->group_by_slot.find(slot.value);
+	if (found == impl_->group_by_slot.end()) {
+		return {};
+	}
+	const EffectGroupId group{found->second};
+	return impl_->find_group(group) != nullptr ? group : EffectGroupId{};
+}
+
 void EffectScene::detach(EffectGroupId group_id) {
 	Impl::GroupRecord *group = impl_->find_group(group_id);
 	if (group != nullptr) {

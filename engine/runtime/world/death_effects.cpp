@@ -1,5 +1,6 @@
 #include "destruction.h"
 #include "carrier_motion.h"
+#include "item_effects.h"
 #include "collision.h"
 #include "world.h"
 
@@ -146,6 +147,7 @@ void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
 	event.dir = { 0.0f, 0.0f, -0.5f };
 	event.section_tagged = true;
 	event.positioned = true;
+	event.entity_slot = entity_effect_slot(victim.handle.packed).value;
 	victim.death_effect_active[0] |= 1u;
 	events.effects.push_back(std::move(event));
 }

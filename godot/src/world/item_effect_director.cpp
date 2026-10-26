@@ -6,6 +6,7 @@
 #include "object/model_user_point.h"
 #include "object/object_data.h"
 #include "particle/effect_world.h"
+#include "simulation/simulation.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/node3d.hpp>
@@ -453,6 +454,19 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 	int attached = 0;
 	const Ref<EntityRef> entity_ref = p_node->get_entity_ref();
 	const Transform3D node_transform = p_node->get_global_transform();
+	// The emitters go to the entity's +0x1CC slot, which the script effects, the emit class and a
+	// person's hit and decay share (engine world/item_effects.h entity_effect_slot, D-PTL-26): what
+	// it holds is released first, then each masked point's emitter is stored there, the last
+	// remaining. The origin leg's descriptor is stored nowhere: the store after it writes the
+	// stale local, never that group (Entity_SpawnBoneTrailEffect's LABEL_18).
+	int64_t entity_slot = 0;
+	if (MissionRoot *runtime = _runtime()) {
+		const Ref<Simulation> sim = runtime->get_sim();
+		if (sim.is_valid() && entity_ref.is_valid()) {
+			entity_slot = sim->entity_effect_slot_for(entity_ref->get_bms_id(), entity_ref->get_wire_handle());
+		}
+	}
+	effect_world->detach_entity_slot(entity_slot);
 	// The first-16 case-insensitive scan and the spawn_count==0 origin leg
 	// are the engine's attach plan (engine: formats/threedi/threedi_3di3.h).
 	const opennova::world::ItemEffectAttachPlan plan =
@@ -463,7 +477,8 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 		// The item's own descriptor tag gates the group by building section
 		// (retail Entity_SpawnBoneEffectsAtMask @ 0x458750).
 		const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_attached_request(
-				key, effect, node_transform, info->get_position(), info->get_rotation(), true);
+				key, effect, node_transform, info->get_position(), info->get_rotation(), true,
+				entity_slot);
 		if (receipt->get_spawned()) {
 			item_fx_nodes_.insert(key, ObjectID(node_id));
 			item_fx_owner_refs_.insert(key, entity_ref);

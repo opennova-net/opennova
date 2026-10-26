@@ -455,6 +455,9 @@ struct DestructionEffectEvent {
 	// A slot-held group that stays where it spawned: the slot keeps only its
 	// handle for the next release (spawn_victim_hit_emitter).
 	bool positioned = false;
+	// The entity's +0x1CC slot (entity_effect_slot's token value) the positioned group is stored
+	// in, the one the script effects share (D-PTL-26); 0 = none.
+	uint64_t entity_slot = 0;
 };
 
 struct DestructionEvents;

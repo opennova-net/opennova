@@ -1492,6 +1492,10 @@ public:
 	void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
 	std::vector<std::string> script_effect_names() const;
 	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
+	// The +0x1CC slot token (engine world/item_effects.h entity_effect_slot) of the entity a
+	// presented node stands for: its wire handle when it has one, else the placed row with that
+	// BMS id; 0 for none.
+	int64_t entity_effect_slot_for(int p_bms_id, int p_wire_handle) const;
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions and the
 	// destroyed-entity page invalidations (mission 16.16 bounds; the consumer

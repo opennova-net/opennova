@@ -1641,6 +1641,10 @@ bool test_an_incendiary_hit_burns_the_body() {
 		                    events[1].dir.z == -0.5f && events[1].section_tagged && events[1].positioned,
 		            "a non-lethal incendiary hit releases the body's emitter and attaches its own"))
 			return false;
+		// Its own goes to the body's +0x1CC slot, the one the script effects share (D-PTL-26).
+		if (!expect(events[1].entity_slot == w::entity_effect_slot(rig.victim.packed).value,
+		            "the incendiary hit's emitter is stored in the body's entity slot"))
+			return false;
 		if (!expect((victim->death_effect_active[0] & 1u) != 0 &&
 		                    victim->death_anim_state == w::anim_state::kDeathFire,
 		            "a non-lethal incendiary hit stages the fire death"))

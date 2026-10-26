@@ -388,7 +388,9 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	const int admission = options->get_admission();
 	int64_t slot_token = 0;
 	int64_t owner_token = 0;
-	if (options->get_slot_key().get_type() != Variant::NIL) {
+	if (options->get_entity_slot() != 0) {
+		slot_token = options->get_entity_slot();
+	} else if (options->get_slot_key().get_type() != Variant::NIL) {
 		slot_token = _slot_token_for(options->get_slot_key());
 	}
 	if (options->get_owner_key().get_type() != Variant::NIL) {
@@ -432,7 +434,9 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 void EffectWorld::spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks) {
     if (particles_disabled_) return;
     const String key = vformat("script_entity:%d", int(event.owner.packed));
-    const int64_t slot = event.store_slot ? _slot_token_for(key) : 0;
+    // The entity's +0x1CC slot, the one every producer storing there shares (engine
+    // world/item_effects.h entity_effect_slot carries the witness, D-PTL-26).
+    const int64_t slot = event.store_slot ? static_cast<int64_t>(event.slot) : 0;
     const int64_t owner = event.owner.valid() ? _owner_token_for(key) : 0;
     // Every script handler tags its descriptor with its entity
     // (particle::spawn_script_effect); the blink query runs at the
@@ -582,13 +586,18 @@ int64_t EffectWorld::spawn_effect_owned(const Variant &p_owner_key, const String
 
 Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_attached_request(const Variant &p_owner_key,
 		const String &p_name, const Transform3D &p_initial_transform,
-		const Vector3 &p_local_pos, const Vector3 &p_local_dir, bool p_section_tagged) {
+		const Vector3 &p_local_pos, const Vector3 &p_local_dir, bool p_section_tagged,
+		int64_t p_entity_slot) {
 	if (particles_disabled_) {
 		return _disabled_receipt();
 	}
 	const Transform3D local_transform = forward_pose(p_local_pos, p_local_dir);
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
+	if (p_entity_slot != 0) {
+		options->set_admission(ADMISSION_STORE_OWNED);
+		options->set_entity_slot(p_entity_slot);
+	}
 	options->set_binding(BINDING_FOLLOW_OWNER);
 	options->set_owner_key(p_owner_key);
 	options->set_owner_transform(p_initial_transform);
@@ -640,6 +649,12 @@ std::shared_ptr<opennova::particle::EffectScene> EffectWorld::shared_native_scen
 
 void EffectWorld::stop_group(int64_t p_group_id) {
 	scene_->detach(p_group_id);
+}
+
+void EffectWorld::detach_entity_slot(int64_t p_entity_slot) {
+	if (p_entity_slot != 0) {
+		scene_->detach_slot(p_entity_slot);
+	}
 }
 
 bool EffectWorld::set_group_parameters(int64_t p_group_id, float p_rate_control,

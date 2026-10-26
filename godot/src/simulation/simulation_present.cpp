@@ -279,6 +279,18 @@ void Simulation::bind_item_effect_scene(std::shared_ptr<opennova::particle::Effe
     kernel_->world.item_emitters.bind_scene(std::move(scene));
 }
 
+int64_t Simulation::entity_effect_slot_for(int p_bms_id, int p_wire_handle) const {
+    if (!world_installed_) return 0;
+    uint16_t packed = opennova::world::EntityHandle::kInvalid;
+    if (p_wire_handle >= 0 && p_wire_handle < opennova::world::EntityHandle::kInvalid) {
+        packed = static_cast<uint16_t>(p_wire_handle);
+    } else if (p_bms_id != 0) {
+        if (const opennova::world::Entity *entity = kernel_->world.registry.by_bms_id(p_bms_id))
+            packed = entity->handle.packed;
+    }
+    return static_cast<int64_t>(opennova::world::entity_effect_slot(packed).value);
+}
+
 std::vector<std::string> Simulation::script_effect_names() const {
     return world_installed_ ? kernel_->script_effect_catalog.interned_names() : std::vector<std::string>{};
 }

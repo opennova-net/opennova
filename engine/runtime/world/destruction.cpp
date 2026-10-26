@@ -1050,8 +1050,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (!ammo->kz_sound.empty())
                     world.out.fire_sounds.play_immediate(ammo->kz_sound.c_str(),
                             t->position, t->bms_id, t->handle.packed);
-                if (!ammo->secondary_effect.empty())
+                if (!ammo->secondary_effect.empty()) {
+                    // What the slot holds goes first, whoever stored it (a script effect too).
+                    world.item_emitters.release_slot(*t);
                     spawn_victim_hit_emitter(*t, ammo->secondary_effect, events);
+                }
                 // An entry that deals no damage here stops after the burn:
                 // a zero kz_damage, or any entry on a non-authority session
                 // peer, where the damage read returns 0; the medic kit is

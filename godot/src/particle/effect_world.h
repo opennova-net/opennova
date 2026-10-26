@@ -220,10 +220,12 @@ public:
 	int64_t spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
 			const Vector3 &p_position, const Vector3 &p_orientation = Vector3(),
 			bool p_section_tagged = false);
+	// `p_entity_slot` nonzero: the group is stored in that entity's +0x1CC slot (StoreOwned;
+	// engine world/item_effects.h entity_effect_slot).
 	Ref<EffectSpawnReceipt> spawn_effect_attached_request(const Variant &p_owner_key,
 			const String &p_name, const Transform3D &p_initial_transform,
 			const Vector3 &p_local_pos, const Vector3 &p_local_dir,
-			bool p_section_tagged = false);
+			bool p_section_tagged = false, int64_t p_entity_slot = 0);
 	int64_t spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
 			const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
 			const Vector3 &p_local_dir, bool p_section_tagged = false);
@@ -233,6 +235,8 @@ public:
 			const Vector3 &p_orientation = Vector3());
     std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const;
 	void stop_group(int64_t p_group_id);
+	// Detach what an entity's +0x1CC slot holds (engine world/item_effects.h entity_effect_slot).
+	void detach_entity_slot(int64_t p_entity_slot);
 	// The rotor-wash re-trigger: every child emitter of a live group spawns
 	// one particle at `p_position` along `p_forward`, bound to `p_force_zone`
 	// (the retail dword_29D6BB0 spawn window). False for a dead group, which

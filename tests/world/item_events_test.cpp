@@ -11,6 +11,7 @@
 #include <runtime/mission/item_traits.h>
 #include <cstring>
 #include "item_pool_step.h"
+#include <runtime/particle/script_effects.h>
 using namespace opennova::world;
 using test_world::step_item_pool;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1; } } while(0)
@@ -446,6 +447,66 @@ int test_emitter_lifetime() {
     w.registry.despawn(h);
     w.item_emitters.sync_owners(w);
     CHECK(scene->inspect(false).groups.front().detached);
+    return 0;
+}
+// D-PTL-26: the entity's one +0x1CC slot (entity_effect_slot), shared by the emit class and the
+// script effects. The emit callback destroys whatever group the slot holds, an fx2ssn's release
+// ahead of its spawn detaches the emit class's group, and the row's destroy releases what a script
+// stored there. [orig: Entity_SpawnBoneTrailEffect_0 @0x43F91A..0x43F949;
+// WacScript_SpawnEffectAtSsnEntity @0x4F2410; Entity_Destroy @0x43E8EC..0x43E8F5]
+int test_entity_slot_shared() {
+    namespace p = opennova::particle;
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(2, 8);
+    const auto h = spawn(w, 2, 40, ItemDeathClass::kEmitter);
+    auto &entity = *w.registry.get(h);
+    auto *traits = w.tables.item_death_traits.get_mutable(40);
+    traits->model_loaded = traits->has_particlefx_point = true;
+    traits->particlefx = "Puff";
+    traits->regional_sounds[0].base_ticks = 40;
+    auto scene = std::make_shared<p::EffectScene>();
+    p::ParticleDef definition;
+    definition.id = "Smoke";
+    definition.emit_dur = 0.016f;
+    definition.emit_burst = 1;
+    definition.age = 0.016f;
+    p::EffectSceneConfig config;
+    config.documents.push_back({"emit.ptl", {}});
+    config.documents[0].file.particles.push_back(definition);
+    config.documents[0].file.effects.push_back({"Puff", {"Smoke"}});
+    scene->open(config);
+    w.item_emitters.bind_scene(scene);
+    const p::EffectSlotToken slot = entity_effect_slot(h.packed);
+    const auto detached = [&scene](p::EffectGroupId id) {
+        for (const auto &group : scene->inspect(false).groups)
+            if (group.id == id) return group.detached;
+        return true;
+    };
+    // A script group in the slot, as the shell's drain spawns an fx2ssn there: the emit callback
+    // finds the slot held, destroys that group and takes the 15-tick gap, spawning none.
+    ScriptEffectEvent script;
+    script.owner = h;
+    script.name = "Puff";
+    script.slot = slot.value;
+    const auto stored = p::spawn_script_effect(*scene, script, slot, {});
+    CHECK(stored.spawned() && scene->slot_group(slot) == stored.group);
+    destruction_notify_item_damage(w, entity, 0);
+    CHECK(entity.class_think_ticks == 15 && scene->live_counts().group_count == 1);
+    CHECK(detached(stored.group) && !scene->slot_group(slot));
+    // The emit class's own group in the slot: the fx2ssn release ahead of its spawn detaches it.
+    destruction_notify_item_damage(w, entity, 0);
+    CHECK(entity.class_think_ticks == 40);
+    const p::EffectGroupId emitted = scene->slot_group(slot);
+    CHECK(static_cast<bool>(emitted) && emitted != stored.group);
+    script.release_previous = true;
+    const auto replaced = p::spawn_script_effect(*scene, script, slot, {});
+    CHECK(replaced.spawned() && detached(emitted) && scene->slot_group(slot) == replaced.group);
+    // A script's store is held by the world (EntityCommands' emit): the row's destroy releases it.
+    w.item_emitters.hold_slot(entity);
+    w.registry.despawn(h);
+    w.item_emitters.sync_owners(w);
+    CHECK(detached(replaced.group) && !scene->slot_group(slot));
     return 0;
 }
 struct TestPieceSpawner : IItemPieceSpawner {
@@ -1182,6 +1243,7 @@ int main() {
     if (test_palm_sections() != 0) return 1;
     if (test_psec_tower_section_clone_stays_inert() != 0) return 1;
     if (test_emitter_lifetime() != 0) return 1;
+    if (test_entity_slot_shared() != 0) return 1;
     if (test_crane_pair_and_fade() != 0) return 1;
     if (test_building_collapse() != 0) return 1;
     if (test_flag_callback() != 0) return 1;

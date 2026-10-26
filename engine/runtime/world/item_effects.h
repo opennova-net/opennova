@@ -29,8 +29,30 @@ class World;
 struct Entity;
 struct ItemDeathTraits;
 
-// The emit class owns a live group at entity+0x1CC. The scene is shared with
-// the embedder's particle renderer; its ordinary fixed-tick advance reaps groups.
+// The entity row's one effect group pointer, entity+0x1CC (the IDB's ownerSession), as a scene
+// slot (D-PTL-26). Every producer that stores a group there stores it in this slot: the mission
+// start's particlefx emitters (the last one spawned), the emit death class, a hit's ammo
+// secondary effect and a corpse's decay on a person, and the script effects (fx2ssn, fx2tgt,
+// BMS 27 / targetfx). A release detaches what the slot holds, whoever stored it: fx2ssn before
+// its spawn, the emit class's toggle, a hit or a decay before theirs, the respawn reset, and the
+// row's destroy or reuse. A group's death clears the slot only while it still holds that group,
+// the scene's StoreOwned rule. One slot per pool row, as the field is the row's.
+// [orig: Entity_SpawnBoneTrailEffect @ 0x43BF0B..0x43BF22, the stores @ 0x43C074;
+//  Entity_SpawnBoneTrailEffect_0 @ 0x43F91A..0x43F949, the store @ 0x43FB14;
+//  Projectile_ProcessExplosionQueue @ 0x4EB20A..0x4EB224, the store @ 0x4EB292;
+//  WacScript_SpawnEffectAtSsnEntity @ 0x4F2410 (the release ahead of the spawn);
+//  EventAction_SpawnParticleEffect @ 0x45418C; Entity_ResetToSpawnState @ 0x4B97CB..0x4B97F5;
+//  Entity_Destroy @ 0x43E8EC..0x43E8F5 -> Entity_ReleaseEffectEmitter @ 0x5F75D0;
+//  CEntityManager_AllocateSlot @ 0x4EAB70 / @ 0x4EABB2; Entity_ClearOwnerSessionIfMatches
+//  @ 0x453580]
+inline constexpr uint64_t kEntityEffectSlotDomain = 0x4000000000000000ull;
+inline particle::EffectSlotToken entity_effect_slot(uint16_t packed_handle) {
+    return {packed_handle != 0xFFFF ? kEntityEffectSlotDomain | packed_handle : 0};
+}
+
+// The emit class's groups and the entity slots (entity_effect_slot) the world stored a group in.
+// The scene is shared with the embedder's particle renderer; its ordinary fixed-tick advance reaps
+// groups.
 // [orig: Entity_SpawnBoneTrailEffect_0 @ 0x43F8F0;
 // Entity_ClearOwnerSessionIfMatches @ 0x453580]
 class ItemEmitterSystem {
@@ -43,6 +65,13 @@ public:
     ItemEmitterSystem &operator=(const ItemEmitterSystem &) = delete;
     void bind_scene(std::shared_ptr<particle::EffectScene> scene, bool owns_clock = false);
     void event(World &world, Entity &entity, const ItemDeathTraits &traits, int phase);
+    // The entity's slot may hold a group a producer stored (the script effects, which the embedder
+    // spawns): its row's destroy or reuse releases it (sync_owners).
+    void hold_slot(const Entity &entity);
+    // Detach what the entity's slot holds, whoever stored it.
+    void release_slot(const Entity &entity);
+    // The emit owners' poses, and the release of every held slot whose row was destroyed or
+    // taken by another entity since.
     void sync_owners(World &world);
     void reset();
 private:
@@ -52,8 +81,13 @@ private:
         particle::EffectGroupId group;
         particle::EffectOwnerToken owner;
     };
+    struct HeldSlot {
+        uint16_t handle = 0xFFFF;
+        uint64_t lifetime = 0;
+    };
     std::shared_ptr<particle::EffectScene> scene_;
     std::vector<Binding> bindings_;
+    std::vector<HeldSlot> held_;
     uint64_t next_owner_ = 1;
     bool owns_clock_ = false;
 };
