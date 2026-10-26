@@ -12,6 +12,7 @@
 #include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
+#include <runtime/inmatch/chat_filter.h>     // ChatFilter::is_text_filtered (the sender-only gate)
 #include <runtime/inmatch/server_message_dispatch.h> // is_medic_recipient
 #include <runtime/inmatch/server_squad_registry.h>    // the sender's squad tag
 #include <runtime/world/entity.h>
@@ -224,19 +225,6 @@ std::string chat_squad_tag_text(const std::string &tag, bool wrapped) {
 	return wrapped ? "<ch>" + tag + "<co>" : tag;
 }
 
-bool chat_text_is_int_triplet(const std::string &text) {
-	int values[3] = {0, 0, 0};
-	const char *cursor = text.c_str();
-	for (int &value : values) {
-		char *end = nullptr;
-		const long parsed = std::strtol(cursor, &end, 10);
-		if (end == cursor) return false;
-		value = static_cast<int>(parsed);
-		cursor = end;
-	}
-	return values[0] != 0 || values[1] != 0 || values[2] != 0;
-}
-
 std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 		NapiNPConnection &sender, const ChatUplink &uplink, uint32_t now_ms,
 		world::World &world) {
@@ -256,7 +244,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	sender.reply.chat_last_ms = now_ms;
 
 	const int8_t channel = static_cast<int8_t>(uplink.channel);
-	const bool sender_only = chat_text_is_int_triplet(uplink.text);  // @0x51383A
+	// A line the chat filter scores goes back to its sender alone; with no filter.txt nothing does
+	// [orig: ChatFilter_IsTextFiltered @0x4FD650 called @0x51382E, its result @0x51383A].
+	const bool sender_only = ctx.chat_filter != nullptr && ctx.chat_filter->is_text_filtered(uplink.text);
 	const std::string stripped = chat_strip_angle_tags(uplink.text);
 	// Channels outside the set send nothing at all [orig: @0x5138E1].
 	if (channel != 12 && channel != 13 && channel != 1 && channel != 5 &&
@@ -316,7 +306,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 					carrier_vehicle(world, *recipient_entity) == sender_carrier;
 			break;
 		case 12: // the same squad key (0 on a LAN host matches 0), then case 2's team
-			// test, and never under the triplet filter, the sender included
+			// test, and never for a line the chat filter scores, the sender included
 			// [orig: @0x513EAE..0x513EE5 - slot+0x188DC, entity+0x162, +0x178E1,
 			//  +0x188D7, the filter word]
 			admit = !sender_only && recipient.squad_key == sender.squad_key &&

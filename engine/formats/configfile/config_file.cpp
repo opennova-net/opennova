@@ -272,7 +272,7 @@ bool read_current_config_value(ConfigSection &s, const char *key, int index, std
 }
 
 // [orig: ConfigFile_ReadBinaryEntry @ 0x75f060]
-bool read_binary_entry(ConfigSection &s, const char *key, int32_t *integer) {
+bool read_binary_entry(ConfigSection &s, const char *key, int32_t *integer, std::string *text, size_t max_len) {
 	if (integer != nullptr) *integer = 0; // [orig: @ 0x75f09b]
 	size_t at = s.next != SIZE_MAX ? s.next : s.current; // [orig: @ 0x75f0b1..0x75f0c7]
 	const size_t count = config_entry_count(s);
@@ -305,9 +305,11 @@ bool read_binary_entry(ConfigSection &s, const char *key, int32_t *integer) {
 		value = &entry.values.front();
 	} else if (entry.value_pointer_set) {
 		// Past the last value the pointer meets heap bytes the parse never wrote (the allocation's slack, or the
-		// next block's header): no value here.
-		if (entry.pointed_entry == SIZE_MAX) return false;
-		value = &s.block->entries[entry.pointed_entry].values.front();
+		// next block's header): no value for the integer leg; the text leg reads none of an entry of none.
+		if (entry.pointed_entry != SIZE_MAX)
+			value = &s.block->entries[entry.pointed_entry].values.front();
+		else if (integer != nullptr)
+			return false;
 	}
 	if (integer != nullptr && value != nullptr) {
 		if (value->type == 1)
@@ -317,6 +319,27 @@ bool read_binary_entry(ConfigSection &s, const char *key, int32_t *integer) {
 			*integer = io::retail_ftol_sse2(static_cast<double>(value->real));
 		else
 			*integer = 0; // [orig: @ 0x75f12a]
+	}
+	if (text != nullptr) {
+		// The entry's own count of values from its pointer, each printed by its type and joined with ", "
+		// [orig: the count +12 @ 0x75f113; memset @ 0x75f180; ", " @ 0x75f1ac..0x75f1bc; "%d" @ 0x75f1f5,
+		//  "%f" @ 0x75f1e2, "%s" @ 0x75f1cf; the append @ 0x75f219..0x75f245]
+		std::string joined;
+		for (size_t i = 0; i < entry.values.size(); ++i) {
+			const ConfigValue &v = entry.values[i];
+			if (v.type != 1 && v.type != 2 && v.text_faults) {
+				s.fault = true;
+				return false;
+			}
+			if (i != 0) joined += ", ";
+			joined += printed(v, config_value_text(s, v));
+		}
+		// String_CopyN into max_len bytes, then the trailing spaces cut back to the second character
+		// [orig: @ 0x75f266 -> String_CopyN @ 0x75eca0; @ 0x75f26c -> String_TrimTrailingSpaces @ 0x75d930]
+		const size_t keep = max_len > 0 ? std::min(joined.size(), max_len - 1) : 0;
+		std::string copied = joined.substr(0, keep);
+		while (copied.size() > 1 && copied.back() == ' ') copied.pop_back();
+		*text = std::move(copied);
 	}
 	return true;
 }

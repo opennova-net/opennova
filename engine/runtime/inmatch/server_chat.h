@@ -23,8 +23,8 @@ namespace opennova::inmatch {
 // {1, 2, 4, 5, 11, 12, 13} are prefixed "name[:[location]]: " and fanned by
 // the channel's recipient predicate (2 team / 4 side B / 5 side A / 11 same
 // carrier / 12 same squad / 13 within 100 units per axis / 1 everyone); any
-// other channel is dropped. A text that parses as three integers (any
-// nonzero) reaches only the sender. Recipients other than the sender are
+// other channel is dropped. A line the boot's filter.txt chat filter scores
+// (ChatFilter) reaches only the sender. Recipients other than the sender are
 // staged on their transports; the sender's own copy is returned as the reply
 // so the dispatcher frames it with the request. Squads are not modeled on
 // this host, so the squad name suffix and channel 12 fan are empty.
@@ -96,10 +96,6 @@ world::EntityHandle carrier_vehicle(const world::World &world, const world::Enti
 // The tag strip [orig: @0x513852..0x5138B6]: a '<' closes the copy, a '>'
 // reopens it; a stray '>' while open is kept.
 std::string chat_strip_angle_tags(const std::string &text);
-
-// [orig: ChatFilter_IsTextFiltered @0x4FD650 -> the three-int text parse]: true when the text
-// scans as three integers with any of them nonzero.
-bool chat_text_is_int_triplet(const std::string &text);
 
 // The relayed line's squad-tag text after the sender's name: the tag as it is, or, for a title
 // that wraps it (TitleInMatch::chat_squad_tag_wrapped, DFX2-14), between <ch> and <co>.

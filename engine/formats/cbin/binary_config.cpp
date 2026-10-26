@@ -275,4 +275,15 @@ bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::
 	return true;
 }
 
+bool config_file_sections(const uint8_t *data, size_t size, std::vector<configfile::ConfigSection> &out) {
+	out.clear();
+	if (data != nullptr && size >= 4 && std::memcmp(data, "CBIN", 4) == 0) { // [orig: @ 0x760aa3]
+		BinaryConfig config;
+		std::string error;
+		return decode_binary_config(data, size, config, error) && binary_config_sections(config, out);
+	}
+	out = configfile::parse_config_text(data, size);
+	return true;
+}
+
 } // namespace opennova::cbin

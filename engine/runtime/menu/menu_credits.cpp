@@ -63,15 +63,7 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 	// ConfigFile_ParseBinary, any other ConfigFile_ParseText [orig:
 	// ConfigFile_LoadFromFile @ 0x760aa3]. Both build the sections the accessors read.
 	std::vector<ConfigSection> sections;
-	if (size >= 4 && std::memcmp(data, "CBIN", 4) == 0) {
-		cbin::BinaryConfig config;
-		std::string error;
-		if (!cbin::decode_binary_config(data, size, config, error) ||
-				!cbin::binary_config_sections(config, sections))
-			return false;
-	} else {
-		sections = configfile::parse_config_text(data, size);
-	}
+	if (!cbin::config_file_sections(data, size, sections)) return false;
 	// A read the game faults on (configfile::config_faulted) ends the game there; here the load fails, the
 	// credits left as they were.
 	const MarqueeCredits before = io;

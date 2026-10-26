@@ -7,8 +7,9 @@
 //   - the 1 Hz S2C 0x46 quality resend, eight per second with a persisting
 //     cursor [orig: Server_TickUpdate @0x51DE79..0x51DF4A];
 //   - the host CNetQuality send window behind S2C 0x79 [orig: CNetQuality_UpdateMetrics @0x4C52C0];
-//   - C2S 0x0D chat: strip, throttle, the int-triplet sender-only rule and the
-//     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760];
+//   - C2S 0x0D chat: strip, throttle, the filter.txt sender-only rule and the
+//     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760]; the chat
+//     filter's load and scoring [orig: TTS_LoadDictionaryFile @0x68A890, TTS_ProcessText @0x68A5F0];
 //   - C2S 0x3D stamps the frame clock [orig: NapiNPServerMsg_0x03D @0x500EC0];
 //   - C2S 0x42 -> S2C 0x70 from the limit table [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0];
 //   - C2S 0x51 permanent-death spectator convert + S2C 0x32 [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840];
@@ -20,6 +21,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_admin_command.h>
 #include <runtime/inmatch/server_ban_lists.h> // Server_BanPlayerSlot
+#include <runtime/inmatch/chat_filter.h>
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -56,6 +58,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -409,12 +412,70 @@ bool check_chat_helpers() {
 	if (!expect(inmatch::chat_strip_angle_tags("a<b>c</b>d>e") == "acd>e",
 			"tags strip; a stray '>' while open is kept"))
 		return false;
-	if (!expect(inmatch::chat_text_is_int_triplet("1 2 3") &&
-					!inmatch::chat_text_is_int_triplet("0 0 0") &&
-					!inmatch::chat_text_is_int_triplet("hello 1 2"),
-			"the int-triplet rule"))
-		return false;
 	return true;
+}
+
+// An authored filter.txt (CR LF lines, as the ConfigFile text form ends them).
+const std::string kFilterTxt = "[WORDS]\r\nITEM=darn,O\r\nITEM=heck,RS\r\nITEM=gosh\r\n"
+		"ITEM=bad word,S\r\n[EXCLUSIONS]\r\nITEM=darnell\r\n";
+
+std::shared_ptr<inmatch::ChatFilter> loaded_filter() {
+	auto filter = std::make_shared<inmatch::ChatFilter>();
+	filter->load(reinterpret_cast<const uint8_t *>(kFilterTxt.data()), kFilterTxt.size());
+	return filter;
+}
+
+// The four token slots of rule `index` in a table, "" past the last.
+std::vector<std::string> rule_slots(const std::vector<uint8_t> &table, size_t index) {
+	std::vector<std::string> out;
+	const size_t record = index * inmatch::ChatFilter::kRuleBytes;
+	for (size_t slot = record; slot < record + 64 && table[slot] != 0; slot += 4)
+		out.emplace_back(reinterpret_cast<const char *>(&table[slot]));
+	return out;
+}
+
+// The chat filter over filter.txt: the rows tokenized into rules, an alternate's passes, the
+// exclusions, and the counts a line scores.
+// [orig: TTS_LoadDictionaryFile @0x68A890; TTS_TokenizeText @0x689C50; TTS_ProcessText @0x68A5F0;
+//  ChatFilter_IsTextFiltered @0x4FD650]
+bool check_chat_filter() {
+	inmatch::ChatFilter none;
+	if (!expect(!none.is_text_filtered("1 2 3") && !none.is_text_filtered("darn it"),
+			"with no filter.txt nothing is filtered"))
+		return false;
+	const std::shared_ptr<inmatch::ChatFilter> filter = loaded_filter();
+	const std::vector<uint8_t> &words = filter->words();
+	using Slots = std::vector<std::string>;
+	// darn; heck's two passes over its e alternate (E, then e; its h a silent alternate a load skips);
+	// gosh with no flags token adds nothing; "bad word,S" reads "bad, word, S" through the text leg, so
+	// the flags token is " word": O and R, not S.
+	if (!expect(rule_slots(words, 0) == Slots{"d", "a", "r", "n"} && words[64] == 1 &&
+					rule_slots(words, 1) == Slots{"h", "E", "k"} && words[76 + 64] == 6 &&
+					rule_slots(words, 2) == Slots{"h", "e", "k"} && words[2 * 76 + 64] == 6 &&
+					rule_slots(words, 3) == Slots{"b", "a", "d"} && words[3 * 76 + 64] == 3 &&
+					words[4 * 76] == 0,
+			"the word rules: one per alternation pass, the flags at +64"))
+		return false;
+	if (!expect(words[68] == 0x00 && words[69] == 0x00 && words[70] == 0x80 && words[71] == 0x3F,
+			"a word rule's weight is 1.0f"))
+		return false;
+	const std::vector<uint8_t> &exclusions = filter->exclusions();
+	if (!expect(rule_slots(exclusions, 0) == Slots{"d", "a", "r", "n", "E", "l"} &&
+					rule_slots(exclusions, 1) == Slots{"d", "a", "r", "n", "e", "l"} &&
+					exclusions[2 * 76] == 0,
+			"the exclusions' rules"))
+		return false;
+	const inmatch::ChatFilterCounts darn = filter->score("DARN it");
+	const inmatch::ChatFilterCounts heck = filter->score("heck");
+	const inmatch::ChatFilterCounts bad = filter->score("bad");
+	if (!expect(darn.o == 1 && darn.r == 0 && darn.s == 0, "a word matches without case") ||
+			!expect(heck.o == 0 && heck.r == 2 && heck.s == 2,
+					"heck's chat passes (silent h, E; h, E; e; h, e) match each rule once") ||
+			!expect(bad.o == 1 && bad.r == 1 && bad.s == 0, "bad counts the flags its row read"))
+		return false;
+	return expect(filter->is_text_filtered("darn it") && !filter->is_text_filtered("darnell") &&
+					!filter->is_text_filtered("gosh") && !filter->is_text_filtered("1 2 3"),
+			"an excluded run, a row without flags and a number line pass");
 }
 
 std::vector<uint8_t> chat_uplink(uint8_t channel, const std::string &text) {
@@ -461,12 +522,22 @@ bool check_chat_routing() {
 			"channel 5 fans to side A with the wire channel 2"))
 		return false;
 	(void)drain(f.transports[2]);
-	// An int triplet reaches only the sender.
+	// A line of numbers is no filtered word: everyone gets it.
 	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "1 2 3"), 100 + 140);
-	if (!expect(replies.size() == 1 && drain(f.transports[0]).empty() &&
-					drain(f.transports[1]).empty(),
-			"a coordinate triplet is echoed to the sender alone"))
+	if (!expect(replies.size() == 1 && count_tag(drain(f.transports[0]), s2c::CHAT_BROADCAST) == 1 &&
+					count_tag(drain(f.transports[1]), s2c::CHAT_BROADCAST) == 1,
+			"a line of numbers reaches everyone"))
 		return false;
+	(void)drain(f.transports[3]);
+	// A line the chat filter scores goes back to its sender alone.
+	// [orig: NapiNPServer_HandleChatMessage - ChatFilter_IsTextFiltered @0x51382E, `!dy || v == sender`]
+	f.ctx.chat_filter = loaded_filter();
+	replies = f.dispatch(2, c2s::CHAT_MESSAGE, chat_uplink(1, "darn it"), 100 + 210);
+	if (!expect(replies.size() == 1 && drain(f.transports[0]).empty() &&
+					drain(f.transports[1]).empty() && drain(f.transports[3]).empty(),
+			"a filtered line is echoed to the sender alone"))
+		return false;
+	f.ctx.chat_filter = nullptr;
 	// An unknown channel sends nothing.
 	replies = f.dispatch(3, c2s::CHAT_MESSAGE, chat_uplink(7, "x"), 100 + 210);
 	if (!expect(replies.empty() && drain(f.transports[0]).empty(), "channel 7 is dropped"))
@@ -2222,6 +2293,7 @@ int main() {
 	ok = check_mission_start_resets_the_quality_sample() && ok;
 	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
+	ok = check_chat_filter() && ok;
 	ok = check_chat_routing() && ok;
 	ok = check_punted_sender_chat_is_not_handled() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;

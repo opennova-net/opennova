@@ -106,4 +106,12 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 // empty) for a label past the table alone, a stray pointer the parse itself lowercases through.
 bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::ConfigSection> &out);
 
+// A ConfigFile's bytes into the sections the accessors read, through the reader of its form: "CBIN"
+// (0x4E494243) the binary parse (binary_config_sections over decode_binary_config), any other the text parse
+// (configfile::parse_config_text). False (out empty) for a CBIN file that does not frame. Every loader of a
+// ConfigFile takes it (charattr.def, the marquee credits, filter.txt).
+// [orig: ConfigFile_LoadFromFile @ 0x760a10 - the magic test @ 0x760aa3 -> ConfigFile_ParseBinary @ 0x75e8a0,
+//  else ConfigFile_ParseText @ 0x7608a0]
+bool config_file_sections(const uint8_t *data, size_t size, std::vector<configfile::ConfigSection> &out);
+
 } // namespace opennova::cbin

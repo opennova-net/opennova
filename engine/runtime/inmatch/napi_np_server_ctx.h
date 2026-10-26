@@ -48,6 +48,7 @@ struct File;
 
 namespace opennova::inmatch {
 
+class ChatFilter;
 class ClientRuntime;
 struct HostRotation;
 
@@ -852,6 +853,12 @@ struct NapiNPServerCtx {
 	// (server_console.h) [orig: byte_B3FE3C, 40 x 128].
 	ChatDisplayBuffer console_chat_display;
 	ChatDisplayWrap console_chat_wrap;
+	// The process's chat filter, filter.txt's rules (chat_filter.h), which the chat relay tests each
+	// line against; null (no filter.txt) filters nothing, as an empty dictionary does. The host boot
+	// loads it once and installs it on every session's context.
+	// [orig: g_ChatFilterTTSContext @0x3347EE0 and its tables byte_32A6A10 / byte_32F2A10, loaded by
+	//  Game_InitSubsystems @0x4A6DEC]
+	std::shared_ptr<const ChatFilter> chat_filter;
 	// A Serve Only host's own slot 0 (HostSlotRow); inactive on a listen host,
 	// whose loopback connection holds slot 0.
 	HostSlotRow host_slot;

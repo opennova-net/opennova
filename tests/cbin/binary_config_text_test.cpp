@@ -436,6 +436,26 @@ int test_binary_entry_read() {
 	return 0;
 }
 
+// The text leg: the entry's values printed by type and joined with ", ", copied into max_len bytes (at most
+// max_len - 1 characters), the trailing spaces cut but never the first character; successive reads walk the
+// key's entries. [orig: ConfigFile_ReadBinaryEntry @ 0x75f060 - @ 0x75f16b..0x75f26c; String_CopyN
+//  @ 0x75eca0; String_TrimTrailingSpaces @ 0x75d930]
+int test_binary_entry_text() {
+	const std::string ini = "[WORDS]\r\nITEM=bad word,S\r\nITEM=1.5,7\r\nOTHER=x\r\nITEM=abcdefgh\r\n";
+	std::vector<configfile::ConfigSection> sections =
+			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(ini.data()), ini.size());
+	configfile::ConfigSection *words = configfile::find_config_section(sections, "WORDS");
+	TEST_EXPECT(words != nullptr);
+	if (words == nullptr) return 1;
+	std::string text;
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128) && text == "bad, word, S");
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128) && text == "1.500000, 7");
+	TEST_EXPECT(configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 4) && text == "abc");
+	TEST_EXPECT(!configfile::read_binary_entry(*words, "ITEM", nullptr, &text, 128));
+	std::printf("binary entry text: the values joined with \", \", bounded, the key's entries in turn\n");
+	return 0;
+}
+
 // The sections hold their names and string values as indices into the block's one string table, as the reader
 // holds pointers into its table [orig: ConfigFile_ParseBinary @ 0x75e8a0 -- the label @ 0x75e9d2, the name
 // @ 0x75ea8e, the string @ 0x75eb5a]: one 64 KiB string that 2000 labels, 2000 entries and 2000 string values
@@ -493,6 +513,7 @@ int main() {
 	failures += test_sections_walk();
 	failures += test_sections_storage_is_linear();
 	failures += test_binary_entry_read();
+	failures += test_binary_entry_text();
 	failures += test_sections_strings_are_shared();
 	if (failures == 0) std::printf("cbin_binary_config_text: all passed\n");
 	return failures == 0 ? 0 : 1;
