@@ -3,12 +3,12 @@
 
 #include <formats/playersav/weapon_sav.h>
 
-#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/crt_ftol.h> // retail_atol
 
 namespace opennova::playersav {
 namespace {
@@ -25,19 +25,14 @@ constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 constexpr size_t kSideUnwitnessedTailBytes =
     kSideBytes - kFirstKitPageOffset - kKitPagesPerSide * kKitPageBytes;  // 22528
 
-// A kit page value token is decimal text consumed by atol in the original. An
-// empty or non-numeric token yields -1, the "unset" value every shipped page
-// authors.
+// A kit page value token is decimal text the loadout submit reads with the CRT's atol: an
+// empty or non-numeric token reads 0, a value past the int32 range saturates. Every shipped
+// page authors "-1", which reads -1.
+// [orig: NetPacket_SendLoadoutSubmit @0x42CDC0 - j__atol on the three value strings @0x42cf7c /
+//  @0x42cfbc / @0x42cff7]
 int32_t parse_value(const std::string &text)
 {
-    if (text.empty())
-        return -1;
-    const char *begin = text.c_str();
-    char *end = nullptr;
-    const long v = std::strtol(begin, &end, 10);
-    if (end == begin)
-        return -1;
-    return static_cast<int32_t>(v);
+    return io::retail_atol(text.c_str());
 }
 
 std::string format_value(int32_t v)
@@ -203,21 +198,19 @@ KitPage decode_kit_page(const uint8_t *page, size_t size)
         tokens.push_back(std::move(token));
     }
 
-    // Groups of four: name, then three decimal-text values. A trailing PARTIAL
-    // group still yields an entry (that is exactly what the single-literal
-    // PlayerProfile_InitDefaults page looks like); the missing values default
-    // to -1.
+    // Groups of four: name, then three decimal-text values. A trailing partial group still
+    // yields an entry, a missing value read as the submit's atol reads the blob's end: 0 (the
+    // terminator, then the page's zero tail past the double NUL). No shipped page has one: the
+    // defaults carry "-1" for each value.
+    // [orig: the defaults blob @0x833BF8 ("WPN_M4AUTO\0-1\0-1\0-1\0...")]
     for (size_t k = 0; k < tokens.size(); k += 4) {
         if (tokens[k].empty())
             continue;
         KitEntry entry;
         entry.name = tokens[k];
-        if (k + 1 < tokens.size())
-            entry.ammo_primary = parse_value(tokens[k + 1]);
-        if (k + 2 < tokens.size())
-            entry.ammo_secondary = parse_value(tokens[k + 2]);
-        if (k + 3 < tokens.size())
-            entry.flags = parse_value(tokens[k + 3]);
+        entry.ammo_primary = k + 1 < tokens.size() ? parse_value(tokens[k + 1]) : 0;
+        entry.ammo_secondary = k + 2 < tokens.size() ? parse_value(tokens[k + 2]) : 0;
+        entry.flags = k + 3 < tokens.size() ? parse_value(tokens[k + 3]) : 0;
         out.entries.push_back(std::move(entry));
     }
     return out;

@@ -62,12 +62,12 @@ std::string weapon_sav_relpath(const std::string &expansion_name);
 // as 0xFF [orig: NetPacket_SendLoadoutSubmit @0x42CDC0 @0x42cf7c/@0x42cfbc/
 // @0x42cff7].
 //
-// Modeling note: a page that stores only a bare weapon name and a page that
-// stores an explicit "<name> -1 -1 -1" group decode to the SAME KitEntry,
-// because a missing value defaults to -1. The writer re-emits the explicit
-// form. Every page the original writes carries the explicit values (its
-// defaults are whole "<name> -1 -1 -1" pages, below), so write() reproduces
-// retail-written files byte for byte.
+// The values read as the submit's atol reads them: a non-numeric token 0, a value past the
+// int32 range saturated, and a bare weapon name's missing values 0 (the submit reads the blob's
+// end). The writer emits the explicit "<name> v v v" form. Every page the original writes
+// carries the explicit values (its defaults are whole "<name> -1 -1 -1" pages, below), so
+// write() reproduces retail-written files byte for byte; the KitEntry defaults are those
+// pages' -1.
 struct KitEntry {
     std::string name;
     int32_t ammo_primary = -1;
