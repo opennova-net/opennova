@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
@@ -262,7 +263,12 @@ private:
 	// a name it serves).
 	std::unique_ptr<OriginalFiles> originals_;
 	bool originals_needed_ = false;
-	// The install's names (ProjectView::retail_files) as want_originals last read them, and normalized.
+	// A stock expansion's game as it ships (SessionCore::original_install, where it is not the install the project
+	// imports from), the view last listed and its names.
+	InstallSpec original_listed_;
+	std::vector<std::string> original_names_;
+	// The install's names (ProjectView::retail_files, else original_names_) as want_originals last read them, and
+	// normalized.
 	std::vector<std::string> served_listing_;
 	std::unordered_set<std::string> served_;
 	// The plan's refusals the rows were last marked against (mark_rows), which a reported finding's mark reads.

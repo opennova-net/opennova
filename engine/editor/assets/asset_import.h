@@ -14,6 +14,8 @@
 
 namespace opennova::editor {
 
+struct InstallSpec;
+
 struct ImportResult {
 	std::vector<std::string> imported; // project-relative paths, as published
 	// After a failure while publishing: the files it did not reach (project-relative), the
@@ -58,6 +60,9 @@ std::vector<ImportChoice> list_installed_expansion_choices(const std::string &in
                                                           const std::string &expansion,
                                                           std::vector<Diagnostic> &diagnostics,
                                                           std::vector<ImportChoiceFacts> *facts = nullptr);
+// The names `spec`'s view of an install gives (assets/install_view.h), sorted by their normalized form; none
+// when it does not open.
+std::vector<std::string> list_install_file_names(const InstallSpec &spec);
 // The names the project gets of a game install's files (the same view), sorted by their normalized
 // form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);

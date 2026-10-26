@@ -1518,6 +1518,19 @@ std::string SessionCore::base_game() const {
 	return dir;
 }
 
+InstallSpec SessionCore::original_install() const {
+	if (!view_.project.open) return InstallSpec();
+	const ProjectDocument &doc = *view_.project.document;
+	// The stock expansion's own files are the installed expansion's, which the base game's export never holds:
+	// judged against the base's, a stock Escalation's items.def and ammo.def read as the modder's.
+	if (doc.expansion.on_base_project())
+		for (const ProjectView::InstallExpansion &installed : view_.project.game_install_expansions)
+			if (strutil::iequals(installed.name, doc.expansion.name))
+				return installed_expansion_spec(game_install(), doc, installed.name);
+	const std::string base = base_game();
+	return base.empty() ? InstallSpec() : install_spec(base, doc);
+}
+
 bool SessionCore::check_base_export() {
 	return check_base_export(BuildAfterBase());
 }
@@ -1836,7 +1849,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 			asked.push_back(d.asset);
 	std::sort(asked.begin(), asked.end());
 	asked.erase(std::unique(asked.begin(), asked.end()), asked.end());
-	shipped.original = original_bytes_.identical(base_game(), *view_.project.document, paths_.root, asked);
+	shipped.original = original_bytes_.identical(original_install(), paths_.root, asked);
 	return shipped;
 }
 

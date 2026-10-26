@@ -558,7 +558,7 @@ static int test_build_gate_shipped() {
 	// The game's own bytes (session/original_bytes.h): the file is what the install serves, byte for byte.
 	OriginalBytes bytes;
 	const std::set<std::string> original =
-			bytes.identical(install, *session.view().project.document, dir.file("project"), { relative });
+			bytes.identical(install_spec(install, *session.view().project.document), dir.file("project"), { relative });
 	TEST_EXPECT(invalid_rows() == 1 && original.count(relative) == 1 && bytes.reads() == 1);
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
 	// Changed by a byte: the modder's file, the row listed there too; the build lands.

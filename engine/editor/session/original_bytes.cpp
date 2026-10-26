@@ -13,16 +13,16 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-std::set<std::string> OriginalBytes::identical(const std::string &install, const ProjectDocument &document,
-                                               const std::string &root, const std::vector<std::string> &files) {
+std::set<std::string> OriginalBytes::identical(const InstallSpec &install, const std::string &root,
+                                               const std::vector<std::string> &files) {
 	std::set<std::string> out;
-	const std::string key = root + '\x1f' + install + '\x1f' + document.target_game + '\x1f' + document.expansion.name +
-	                        '\x1f' + document.expansion.builds_on;
+	const std::string key = root + '\x1f' + install.root + '\x1f' + install.game + '\x1f' + install.expansion + '\x1f' +
+	                        install.project_expansion;
 	if (key != key_) {
 		known_.clear();
 		key_ = key;
 	}
-	if (install.empty() || files.empty()) return out;
+	if (install.root.empty() || files.empty()) return out;
 	std::unique_ptr<InstallView> view;
 	bool opened = false;
 	const int64_t asked_at = io::file_clock_now_ticks();
@@ -41,7 +41,7 @@ std::set<std::string> OriginalBytes::identical(const std::string &install, const
 			opened = true;
 			view = std::make_unique<InstallView>();
 			std::string why;
-			if (!view->open(install_spec(install, document), why)) view.reset();
+			if (!view->open(install, why)) view.reset();
 		}
 		if (!view) continue; // an install that does not open: nothing known, asked again next time
 		bool same = false;

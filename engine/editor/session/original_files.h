@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/install_view.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 
@@ -51,10 +52,11 @@ struct OriginalData {
 // make of a name the install's files make too. So an edit never makes the original's findings of a
 // file the modder's, and the modder's own effects on files they never touched are theirs.
 //
-// The install is listed as the project imports it (assets/install_view.h: its archives' files and the
-// loose files the game reads beside them, with `/exp` for a project that builds on an installed
-// expansion and under the project's names for one that builds as an expansion, ADR 0046 S16), each file
-// by its logical name and read through the view (ProjectPaths::files), then validated as the session
+// The install is listed through the view the caller names (assets/install_view.h: its archives' files and
+// the loose files the game reads beside them, with `/exp` for a project that builds on an installed
+// expansion and under the project's names for one that builds as an expansion, ADR 0046 S16; for a stock
+// expansion on its base game's project, the game install with that expansion mounted:
+// SessionCore::original_install), each file by its logical name and read through the view (ProjectPaths::files), then validated as the session
 // validates the project (ProjectValidation, then the document types' project checks over the install's
 // files: a menu's screens compiled as the game draws them), every step within a budget of bytes, its own
 // graph, cache and checks (nothing of the session's is copied or read). It validates only the files of
@@ -66,8 +68,8 @@ struct OriginalData {
 // over the same graph and cache, and a finding of a name not yet covered is the modder's until it is
 // (OriginalData::covered). It never depends on the project's files: an edit, a save, an import or a build
 // validates nothing again but the name a row is about for the first time. A Refresh (a new scan) looks at the
-// install's folder again, and an install that moved there (a patch) is validated again; another install or
-// game forgets it, as does another expansion of the project's (the view moves with it).
+// install's folder again, and an install that moved there (a patch) is validated again; another view (another
+// install, game or expansion) forgets it.
 class OriginalFiles {
 public:
 	OriginalFiles();
@@ -75,12 +77,12 @@ public:
 	OriginalFiles(const OriginalFiles &) = delete;
 	OriginalFiles &operator=(const OriginalFiles &) = delete;
 
-	// The install to judge against (`install`, "" for none) for the project's game (`document`);
-	// `scan` the session's scan, a new one of which (a Refresh, a save) looks at the install's folder
-	// again; `names` the files the project's rows are about (normalized logical names the install serves),
-	// each validated once (those already wanted kept). Another install, game or folder state forgets what
-	// was found and starts over.
-	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document, const void *scan,
+	// The install to judge against, by the view of it (`install`, an empty root for none: SessionCore::
+	// original_install), for the project (`document`, what the install is validated as); `scan` the session's
+	// scan, a new one of which (a Refresh, a save) looks at the install's folder again; `names` the files the
+	// project's rows are about (normalized logical names the view serves), each validated once (those already
+	// wanted kept). Another view or folder state forgets what was found and starts over.
+	void want(const InstallSpec &install, const std::shared_ptr<const ProjectDocument> &document, const void *scan,
 	          const std::vector<std::string> &names);
 	// Goes on within `bytes` (what it reads, each file at least kValidationFileCost: at least one
 	// step); true when nothing is left to do.
@@ -116,10 +118,8 @@ private:
 	// scope (a terrain's, an environment's, every one's for overcast.def).
 	void add_scope_missions();
 
-	std::string install_;
+	InstallSpec install_;
 	std::shared_ptr<const ProjectDocument> document_;
-	std::string game_;
-	ProjectExpansion expansion_; // the project's, which the install's view follows (install_spec)
 	std::string folder_; // the install folder's state when it was validated (folder_state)
 	const void *scan_ = nullptr;
 	Phase phase_ = Phase::Idle;
