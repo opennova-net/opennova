@@ -395,6 +395,8 @@ public:
 		if (!runtime || !runtime->begin_mission_reload()) return false;
 		local_spawned_ = false;
 		post_start_identity_pending_ = false;
+		local_flags_spawn_seen_ = 0;
+		local_flags_revision_seen_ = 0;
 		weather_revision_seen_ = 0;
 		weapon_availability_revision_seen_ = 0;
 		mounted_ammo_revision_seen_ = 0;
@@ -549,7 +551,8 @@ private:
 	// final wait's first pass, inside the push) folds them too, so the next net frame copies
 	// them over (the copy is the state's, so a re-baselined count only copies it again).
 	uint32_t objective_updates_seen_ = 0;
-	// The self row's compact revision whose Flags byte L has folded.
+	// The self row's lifetime and compact revision whose Flags byte L has folded (fold_local_record).
+	uint32_t local_flags_spawn_seen_ = 0;
 	uint32_t local_flags_revision_seen_ = 0;
 	// The self row's 0x18 generation L was last built from (rebuild_local_from_full_spawn).
 	uint32_t self_full_spawn_revision_seen_ = 0;

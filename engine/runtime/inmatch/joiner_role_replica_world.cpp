@@ -580,14 +580,24 @@ void JoinerRole::fold_local_record() {
 	// The respawn arm this receive's record took, if any: a record the fold drops (no L, no
 	// def) takes its arm with it.
 	ClientRuntime::LocalRespawnArm arm;
-	const bool respawn_arm = rt.take_local_respawn_arm(arm);
-	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) return;
+	if (!local_spawned_ || !world.cached.local_player.valid() || !rt.has_self_handle()) {
+		rt.take_local_respawn_arm(arm);
+		return;
+	}
+	// A record L has not folded: the self row's compact revision counts from 0 again whenever the
+	// row is built anew (a 0x0C or 0x18, a mission reload's fresh state), so the row's lifetime
+	// (its spawn revision, which runs on per handle) keys the gate with it. No record since the
+	// last fold leaves the arm alone (only a record that moves the revision arms one).
 	const replication::ClientEntityState *self = rt.state().find(rt.self_handle());
-	if (self == nullptr || !self->state_flags_known ||
+	if (self != nullptr && self->state_flags_known &&
+			self->spawn_revision == local_flags_spawn_seen_ &&
 			self->compact_revision == local_flags_revision_seen_)
 		return;
+	const bool respawn_arm = rt.take_local_respawn_arm(arm);
+	if (self == nullptr || !self->state_flags_known) return;
 	world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
+	local_flags_spawn_seen_ = self->spawn_revision;
 	local_flags_revision_seen_ = self->compact_revision;
 	// A body with no def drops the record whole (its own ewep update destroyed it, until a 0x18
 	// rebuilds it). [orig: NetPacket_SerializePlayerState @0x4C09C0 - the def test @0x4C0F92]

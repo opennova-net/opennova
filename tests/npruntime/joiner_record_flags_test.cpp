@@ -454,6 +454,37 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 
 } // namespace
 
+// B-100: a self row built anew (a 0x0C's memset, a 0x18 rebuild, a reload's fresh state) counts
+// its compact revision from 0 again, so its first record carries the revision the old row's first
+// record did: the fold keys on the row's lifetime too, and the record's Flags land on L.
+bool run_a_rebuilt_self_row_folds_its_first_record() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, kSelf, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "rebuilt row: L spawned")) return false;
+	auto &self_row = h.role.runtime->state().upsert(kSelf);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	h.frame(0x00);
+	const replication::ClientEntityState *before = h.role.runtime->state().find(kSelf);
+	if (!expect(before != nullptr && before->compact_revision == 1,
+			"rebuilt row: the old row's first record folds at revision 1"))
+		return false;
+	const uint32_t lifetime = before->spawn_revision;
+	replication::ClientEntityState &rebuilt = h.role.runtime->state().upsert(kSelf);
+	rebuilt = replication::ClientEntityState{};
+	rebuilt.handle = kSelf;
+	rebuilt.cls = EntityClass::Player;
+	rebuilt.type_id = w::kPlayerInfantryTypeId;
+	rebuilt.spawn_revision = lifetime + 1;
+	h.frame(0x01); // the new row's first record: revision 1 again
+	const w::Entity *local = h.kernel->local.player();
+	return expect(local != nullptr && (local->flags & 0x01u) != 0,
+			"rebuilt row: its first record's Flags land on L");
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_the_edge_frame_ships_its_first_uplink();
@@ -461,6 +492,7 @@ int main() {
 	ok &= run_the_self_record_mount_edge_snaps_l();
 	ok &= run_the_self_record_echo_chases_l();
 	ok &= run_the_self_record_floor_holds_l_ground_link();
+	ok &= run_a_rebuilt_self_row_folds_its_first_record();
 	if (ok) std::printf("joiner_record_flags: ok\n");
 	return ok ? 0 : 1;
 }
