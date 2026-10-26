@@ -1399,6 +1399,8 @@ private:
 	ConnectLog *connect_log_ = nullptr; // set_connect_log
 	// One "<time> : <text>" line while the process's connect log is on.
 	void connect_log_line(const std::string &text) const;
+	// The connect log is on: a per-datagram line's text is built only then.
+	bool connect_logging() const;
 	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;

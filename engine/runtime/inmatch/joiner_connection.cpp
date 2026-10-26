@@ -528,22 +528,23 @@ constexpr uint8_t kServerProbeOpcode = 0x87;
 JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *raw, std::size_t len) {
 	ManagerPass out;
 	if (raw == nullptr || len == 0 || session_lost() || phase_ == Phase::Error) return out;
-	connect_log_line(napi_got_raw_text(static_cast<int32_t>(len), host_address_));
+	if (connect_logging()) connect_log_line(napi_got_raw_text(static_cast<int32_t>(len), host_address_));
 	if (napi_punkbuster_datagram(raw, len)) return out;
 	std::vector<uint8_t> unpacked;
 	if (!nw_unpack_inbound(raw, len, unpacked)) {
-		connect_log_line(napi_tossed_text(static_cast<int32_t>(len), host_address_,
-				NapiTossReason::Unpack));
+		if (connect_logging())
+			connect_log_line(napi_tossed_text(static_cast<int32_t>(len), host_address_,
+					NapiTossReason::Unpack));
 		return out; // bad envelope: dropped, the session goes on
 	}
 	const int32_t unpacked_len = static_cast<int32_t>(unpacked.size());
-	connect_log_line(napi_got_cooked_text(unpacked_len, host_address_));
+	if (connect_logging()) connect_log_line(napi_got_cooked_text(unpacked_len, host_address_));
 	// The magic packet goes to its reflection, which answers only for a protocol whose
 	// reflection the session create armed: a host's, never a joiner's. No dispatch line follows.
 	// [orig: NapiNPManager_HandlePacket @0x622F10 - @0x622F53, the call @0x622F62;
 	//  NapiNP_HandleMagicPacket @0x622E70 - the reflection test @0x622EA6]
 	if (napi_baffle_packet(unpacked)) {
-		connect_log_line(napi_got_baffle_text(unpacked_len, host_address_));
+		if (connect_logging()) connect_log_line(napi_got_baffle_text(unpacked_len, host_address_));
 		return out;
 	}
 	// The socket legs. The type-2 connection to the host exists from the join's start; it is
@@ -599,10 +600,11 @@ JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *r
 	//  @0x61EDD0 - NapiLog_OnSend (the call @0x61F00D); CNapiNPConnection_SendPing @0x61F080 -
 	//  @0x61F241; NapiNPManager_HandlePacket @0x622FCD after DispatchOpcode returned].
 	for (const std::vector<uint8_t> &sent : out.immediate_outbound) connect_log_send(sent);
-	connect_log_line(taken
-			? napi_got_protocol_text(unpacked_len, host_address_,
-					title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
-			: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
+	if (connect_logging())
+		connect_log_line(taken
+				? napi_got_protocol_text(unpacked_len, host_address_,
+						title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
+				: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
 	return out;
 }
 
@@ -655,8 +657,9 @@ bool JoinerConnection::pump_client_queue(PollResult &out) {
 	// packet of this pump may have changed it).
 	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266A0 - pre_handler_callback2 (proto +0x26C,
 	//  NapiLog_OnRecv @0x4C46B0) @0x6268AA, the handler with its last argument 1 @0x6268D0]
-	connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1), host_address_,
-			packet.opcode));
+	if (connect_logging())
+		connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1), host_address_,
+				packet.opcode));
 	if (phase_ == Phase::Error) return true;
 	switch (packet.opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
@@ -691,8 +694,9 @@ bool JoinerConnection::pump_client_queue(PollResult &out) {
 void JoinerConnection::drain_client_queue_after_teardown() {
 	while (!client_queue_.empty()) {
 		const QueuedPacket &packet = client_queue_.front();
-		connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1),
-				host_address_, packet.opcode));
+		if (connect_logging())
+			connect_log_line(net_got_text(static_cast<int32_t>(packet.body.size() + 1),
+					host_address_, packet.opcode));
 		client_queue_.pop_front();
 	}
 }
@@ -813,8 +817,12 @@ uint32_t g_client_net_frame_counter = 0;
 
 uint32_t JoinerConnection::client_net_frame_counter() { return g_client_net_frame_counter; }
 
+bool JoinerConnection::connect_logging() const {
+	return connect_log_ != nullptr && connect_log_->enabled();
+}
+
 void JoinerConnection::connect_log_line(const std::string &text) const {
-	if (connect_log_ != nullptr && connect_log_->enabled()) connect_log_->line(text);
+	if (connect_logging()) connect_log_->line(text);
 }
 
 void JoinerConnection::connect_log_send(const std::vector<uint8_t> &datagram) const {
@@ -1024,9 +1032,10 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 	// length plus its opcode byte.
 	// [orig: CNapiNPConnection_ParseMessages @0x625BC0 - NapiLog_OnProcess (proto+0x274,
 	//  len + 1) @0x625D3E; NapiLog_OnProcess @0x4C67D0]
-	for (const SessionDeframeAdmission::Packet &packet : admission.packets)
-		connect_log_line(net_processing_text(
-				static_cast<int32_t>(packet.body_bytes + 1), host_address_));
+	if (connect_logging())
+		for (const SessionDeframeAdmission::Packet &packet : admission.packets)
+			connect_log_line(net_processing_text(
+					static_cast<int32_t>(packet.body_bytes + 1), host_address_));
 	if (admission.admitted) {
 		acknowledge_session_packets(conn_.seq, admission.max_ack_count);
 		// The reap clock: stamped by ParseMessages, which only an in-order packet (or the
