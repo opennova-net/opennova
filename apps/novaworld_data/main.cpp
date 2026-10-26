@@ -1,7 +1,7 @@
 // opennova-novaworld-data: the data program (program/program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) over the hosted data sets'
-// jobs alone (data_sets/data_set_jobs.h: tree.finalize, release.validate,
-// release.apply, tree.prune; data_sets/release_build.h: release.build, which runs
+// jobs alone (data_sets/data_set_jobs.h: release.validate, release.apply,
+// tree.prune; data_sets/release_build.h: release.build, which runs
 // opennova-project and opennova-update-tool from beside this program) on the
 // object store, and the scheduler of its one
 // periodic kind (data_set_schedule: tree.prune, while there is a store), in
@@ -10,7 +10,7 @@
 // credentials (the task role's data_store) and the disk a tree or a package
 // passes through, and nothing of the fleet, billing or mail (it reads no
 // hosting policy, the store alone: program/server_config.h object_store_of):
-// an admin's upload can occupy it, never a machine launch. With no object
+// a release's build or tree can occupy it, never a machine launch. With no object
 // store (ONNET_OBJECT_STORE_URL) it has no kind to run and idles. Its watchdog
 // watches the pool's claim loop and the scheduler's ticks.
 

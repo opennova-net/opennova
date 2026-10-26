@@ -1,15 +1,16 @@
 #pragma once
 
-// The hosted data sets' rows (backend/migrations/0011_data_sets.sql and 0013_releases.sql,
-// ADR 0064): the data sets an admin created (one product each: a base game, or one expansion
-// of a base), standalone updater products (kind update, no game tree; 0013's data_sets_update_check),
-// their trees (each an immutable version of the data set's files in the object
-// store, core/object_store.h), the update releases (1SFS packages) and the sections each carries,
-// and the trees each hosted server is pinned to. The routes, the supervisor, the worker's
-// jobs and the update listener share it; every write that spans statements is one
-// db::Transaction, and each state move a compare-and-set, so two writers never both win.
-// Crow-free. Each function throws db::Error on a database failure. Service policy, not a
-// port.
+// The games' rows (backend/migrations/0011_data_sets.sql, 0013_releases.sql and 0025_content.sql,
+// ADR 0064): the data sets an admin created (one game each: a base game, or one expansion of a
+// base; a game with a project carries its key, visibility and head, content_repository.h),
+// standalone updater products (kind update, no game tree and no project; 0013's
+// data_sets_update_check), their trees (each an immutable version of the data set's files in the
+// object store, core/object_store.h, built from its published release), the update releases (1SFS
+// packages) and the sections each carries, and the trees each hosted server is pinned to. The
+// routes, the supervisor, the worker's jobs and the update listener share it; every write that
+// spans statements is one db::Transaction, and each state move a compare-and-set, so two writers
+// never both win. Crow-free. Each function throws db::Error on a database failure. Service
+// policy, not a port.
 
 #include <net/novaworld/db/database.h>
 
@@ -37,24 +38,29 @@ struct DataSetRow {
 	std::string game; // a base's games slug (its lobby)
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
-	bool retail_updater = false;
+	// A retail game (NovaLogic's install): its updater's SERVER.LST names ftp.novaworld.com, and
+	// its project's revision 1 is the stock install.
+	bool retail = false;
+	// Its project (content_repository.h): the key ("" for a game with none, the runtime), who may
+	// read it ("public", "private"; "" with none) and its newest revision (0 before the first
+	// push).
+	std::string key;
+	std::string visibility;
+	int64_t head = 0;
 	// The updater product as its packages name it (the command file's PRODUCT) and the executable
 	// its DONE runs ("" for an expansion): what a release build packs (release_build.h).
 	std::string product_name;
 	std::string product_exe;
 	std::optional<int64_t> current_tree_id;
-	std::optional<int64_t> baseline_tree_id;
 	std::optional<int64_t> published_release_id;
 	std::string created_by;
 	std::string created_at;
 	std::string updated_at;
 };
 
-enum class TreeState : uint8_t { Uploading, Finalizing, Building, Ready, Failed, Pruned };
+enum class TreeState : uint8_t { Building, Ready, Failed, Pruned };
 const char *tree_state_name(TreeState state);
 std::optional<TreeState> tree_state_from_name(std::string_view name);
-enum class TreeSource : uint8_t { Baseline, Release };
-const char *tree_source_name(TreeSource source);
 
 // One file of a tree, as its manifest lists it: what hostd checks a fetch by.
 struct TreeFile {
@@ -70,10 +76,8 @@ struct TreeMission {
 struct DataSetTree {
 	int64_t id = 0;
 	int64_t data_set_id = 0;
-	TreeState state = TreeState::Uploading;
-	TreeSource source = TreeSource::Baseline;
-	std::optional<int64_t> release_id;
-	std::optional<int64_t> baseline_tree_id;
+	TreeState state = TreeState::Building;
+	std::optional<int64_t> release_id; // the release it was built from, while that is there
 	std::string version_text;
 	std::vector<TreeFile> files;
 	std::vector<TreeMission> missions;
@@ -85,8 +89,8 @@ struct DataSetTree {
 	std::string pruned_at;
 };
 
-// Building: a release the data program builds from a content project's revision (release_build.h)
-// before it validates it as an uploaded one.
+// Building: a release the data program builds from a revision of its game's project
+// (release_build.h) before it validates it as an uploaded one.
 enum class ReleaseStatus : uint8_t { Uploading, Validating, Invalid, Draft, Published, Retired, Building };
 const char *release_status_name(ReleaseStatus status);
 std::optional<ReleaseStatus> release_status_from_name(std::string_view name);
@@ -103,9 +107,12 @@ struct ReleaseRow {
 	std::string created_at;
 	std::string published_at;
 	std::string retired_at;
-	// A built release's source (ADR 0069 d7): its content project, the revision built and, for an
-	// expansion's, its base's; the version its package carries; what the build's tools said.
-	std::optional<int64_t> content_project_id;
+	// The game it is a release of: a built one's from the start, an upload's once its validation
+	// mapped its base section.
+	std::optional<int64_t> data_set_id;
+	// A built release's source (ADR 0069 d7): the revision of its game's project built (0 for an
+	// upload) and, for an expansion's, its base game's; the version its package carries; what the
+	// build's tools said.
 	int64_t content_revision = 0;
 	int64_t base_revision = 0;
 	std::string version;
@@ -134,7 +141,10 @@ struct NewDataSet {
 	std::string game;
 	std::string updater_login;
 	std::string command_file;
-	bool retail_updater = false;
+	bool retail = false;
+	// Its project's key and visibility, both or neither ("" for a game with no project).
+	std::string key;
+	std::string visibility;
 	std::string created_by;
 };
 
@@ -143,13 +153,15 @@ enum class DataSetOutcome : uint8_t {
 	Ok,
 	NotFound,
 	DuplicateLogin, // another data set holds the updater login (without case)
+	DuplicateKey, // another game's project has the key
 	DuplicateExpansion, // the parent has an expansion of that code
 	NoSuchParent, // the parent is not a base data set
-	InUse, // a live server runs it, or an expansion has it as parent
+	InUse, // a live server runs it
+	HasExpansion, // an expansion has it as parent
 };
 
-// A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login) are the
-// routes' to check: here only the database's own rules answer.
+// A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
+// the routes' to check: here only the database's own rules answer.
 DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int64_t &id);
 
 // What an admin may change afterwards.
@@ -158,11 +170,16 @@ struct DataSetPatch {
 	std::optional<std::string> game; // a base's
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
-	std::optional<bool> retail_updater;
+	std::optional<bool> retail;
+	// Its project's key (a rename: the objects under content/<key>/ are the caller's to move) and
+	// visibility; after the patch both are set or neither is.
+	std::optional<std::string> key;
+	std::optional<std::string> visibility;
 };
 DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch &patch);
-// The row deleted (its trees' rows cascade: their objects are the caller's to remove first,
-// tree.prune); InUse while a live server names it or an expansion has it as parent.
+// The row deleted (its trees' rows and its project's revisions and files cascade: their objects
+// are the caller's to remove first, the trees' prefixes and content/<key>/); InUse while a live
+// server names it, HasExpansion while an expansion has it as parent.
 DataSetOutcome delete_data_set(db::Database &db, int64_t id);
 
 std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id);
@@ -210,10 +227,9 @@ inline const OfferedExpansion *find_offered_expansion(const OfferedDataSet &data
 
 // --- trees ---
 
-// A new tree row in `state` (uploading for a baseline the browser uploads, building for a
-// release the worker applies); its id.
-int64_t create_tree(db::Database &db, int64_t data_set_id, TreeSource source, TreeState state,
-		std::optional<int64_t> release_id, std::optional<int64_t> baseline_tree_id,
+// A new tree row, building (the worker applies the release `release_id` to an empty tree); its
+// id.
+int64_t create_tree(db::Database &db, int64_t data_set_id, std::optional<int64_t> release_id,
 		const std::string &created_by);
 std::optional<DataSetTree> find_tree(db::Database &db, int64_t id);
 // The data set's trees, newest first.
@@ -229,38 +245,30 @@ struct TreeReady {
 	std::string version_text;
 	int64_t bytes = 0;
 };
-// `from` -> ready with `ready`, and in the same transaction the data set's current tree
-// becomes this one; a baseline also becomes its baseline tree and retires the data set's
-// published release (its sections no longer describe the baseline: published_release_id
-// cleared, the release retired once no data set names it). False when the row left `from`.
-bool finish_tree(db::Database &db, int64_t id, TreeState from, const TreeReady &ready);
-// The trees whose objects may go: ready or failed ones older than `min_age_s` that are no
-// data set's current or baseline tree and no live server's pin, every pruned one whose
-// objects are still there (pruned_at NULL), and uploading ones older than
-// `abandoned_upload_s`. Each is marked pruned by the caller once its objects are removed.
-std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s, int64_t abandoned_upload_s);
+// building -> ready with `ready`, and in the same transaction the data set's current tree
+// becomes this one. False when the row left building.
+bool finish_tree(db::Database &db, int64_t id, const TreeReady &ready);
+// The trees whose objects may go: ready or failed ones older than `min_age_s` that are no data
+// set's current tree and no live server's pin, and every pruned one whose objects are still there
+// (pruned_at NULL). Each is marked pruned by the caller once its objects are removed.
+std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s);
 // Marks `id` pruned: its state, and pruned_at now (its objects are gone).
 void mark_tree_pruned(db::Database &db, int64_t id);
-// Marks `id` pruned with its objects still there (pruned_at NULL): the admin's delete of a
-// ready or failed tree, whose objects the tree.prune job removes (prunable_trees lists it).
-void request_tree_prune(db::Database &db, int64_t id);
-// Why a ready tree cannot be deleted now: "current", "baseline", "pinned" (with how many live
-// servers), or "" when it can.
-std::string tree_hold(db::Database &db, int64_t id, int &pinned_by);
 // How many live servers pin tree `id` (as base or expansion).
 int count_tree_pins(db::Database &db, int64_t id);
 
 // --- releases ---
 
+// An uploaded release (uploading), of the game `data_set_id` when the upload names one.
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
-		const std::string &created_by);
-// A release the data program builds (building), from `revision` of the content project
-// `content_project_id` (an expansion's on `base_revision` of its base's), its package's version
+		const std::string &created_by, std::optional<int64_t> data_set_id = std::nullopt);
+// A release the data program builds (building), from `revision` of the project of the game
+// `data_set_id` (an expansion's on `base_revision` of its base game's), its package's version
 // `version`, named `name`. The caller enqueues its release.build in the same transaction.
 struct NewBuiltRelease {
 	std::string name;
 	std::string created_by;
-	int64_t content_project_id = 0;
+	int64_t data_set_id = 0;
 	int64_t content_revision = 0;
 	int64_t base_revision = 0; // 0 for a base game's
 	std::string version;
@@ -288,8 +296,9 @@ struct NewReleaseSection {
 	int64_t row_count = 0;
 	int64_t blob_bytes = 0;
 };
-// validating -> draft with the package's sha, size and product and its sections, in one
-// transaction; false when the row left validating.
+// validating -> draft with the package's sha, size and product and its sections (an upload that
+// named no game becomes its first section's, the base one), in one transaction; false when the
+// row left validating.
 bool set_release_validated(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes,
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
 // draft -> published: each section's data set's published_release_id becomes `id`, and a
@@ -313,7 +322,7 @@ struct PublishedSection {
 	std::string command_file;
 	std::string expansion;
 	std::string sha256;
-	bool retail_updater = false;
+	bool retail = false;
 };
 // Every data set with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);

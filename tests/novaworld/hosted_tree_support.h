@@ -6,8 +6,8 @@
 // text), an expansion tree (<code>.pff with a mission, <code>L.pff, version.txt),
 // each written into a LocalObjectStore's trees/<id>/ and its row made ready
 // (data_set_repository.h finish_tree) with the files' names and sizes and the
-// missions listed from the archives the way the worker's finalize lists them
-// (mission_catalog::archive_rows over the pair, the multiplayer rows). What
+// missions listed from the archives (mission_catalog::archive_rows over the
+// pair, the multiplayer rows, as release.apply lists an expansion's). What
 // hosted_local_e2e_test and nw_programs_e2e_test start real opennova-serve
 // children over.
 
@@ -97,8 +97,8 @@ inline std::vector<hosted::TreeFile> manifest_of(const fs::path &dir, hosted::Da
 	return out;
 }
 
-// The tree's multiplayer missions as the worker's finalize lists them: the pair's archive
-// rows (mission_catalog::archive_rows), the rows with a game mode.
+// The tree's multiplayer missions: the pair's archive rows (mission_catalog::archive_rows),
+// the rows with a game mode.
 inline std::vector<hosted::TreeMission> missions_of(const fs::path &dir, hosted::DataSetKind kind,
 		const std::string &code) {
 	std::vector<hosted::TreeMission> out;
@@ -126,13 +126,13 @@ inline std::string version_of(const fs::path &dir) {
 	return end == std::string::npos ? text : text.substr(0, end);
 }
 
-// A ready tree of data set `data_set_id` in `store`: its row made (uploading), the files
-// written from `source` into trees/<id>/ (the row's id names the directory), the row
-// finalized with the manifest, the version and the missions read from the archives. The
-// tree's id, 0 on a failure.
+// A ready tree of data set `data_set_id` in `store`, as release.apply leaves one: its row made
+// (building), the files written from `source` into trees/<id>/ (the row's id names the
+// directory), the row made ready with the manifest, the version and the missions read from
+// the archives. The tree's id, 0 on a failure.
 inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_server::LocalObjectStore &store,
 		int64_t data_set_id, hosted::DataSetKind kind, const std::string &code, const fs::path &source) {
-	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeSource::Baseline, hosted::TreeState::Uploading, std::nullopt, std::nullopt, "test");
+	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "test");
 	if (id == 0) return 0;
 	std::error_code ec;
 	for (const fs::directory_entry &entry : fs::directory_iterator(source, ec)) {
@@ -152,8 +152,7 @@ inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_s
 	ready.missions = missions_of(dir, kind, code);
 	ready.version_text = version_of(dir);
 	for (const hosted::TreeFile &f : ready.files) ready.bytes += static_cast<int64_t>(f.size);
-	if (!hosted::set_tree_state(db, id, hosted::TreeState::Uploading, hosted::TreeState::Finalizing) ||
-			!hosted::finish_tree(db, id, hosted::TreeState::Finalizing, ready))
+	if (!hosted::finish_tree(db, id, ready))
 		return 0;
 	return id;
 }

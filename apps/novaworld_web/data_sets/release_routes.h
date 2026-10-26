@@ -1,17 +1,17 @@
 #pragma once
 
-// The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md
-// "Game data"): the 1SFS packages an
-// admin uploads into the object store (one multipart upload each, every part PUT through
-// this program as the trees' are, data_set_routes.h), validated by the data program
-// (release.validate), published to the updater (the update listener serves them,
-// updater/release_catalog.h) and applied to their data sets (one release.apply job per
-// section), retired and deleted. Each behind WebAccess::require_admin (and
-// ONNET_API_PROXY_ONLY like every /api route), its state change logged with its actor and
-// status (AccessMiddleware):
+// The update releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Games"):
+// the 1SFS packages of every game, built from a game's project (the content routes' release
+// route, data_sets/release_build.h) or, for a game with no project (OpenNova's runtime, from the
+// Publish workflow), uploaded into the object store (one multipart upload each, every part PUT
+// through this program; a game with a project answers 409 built_from_project), validated by the
+// data program (release.validate), published to the updater (the update listener serves them,
+// updater/release_catalog.h) and built into their data sets' trees (one release.apply job per
+// section), retired and deleted. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY
+// like every /api route), its state change logged with its actor and status (AccessMiddleware):
 //
 //   GET    /api/admin/releases                 every release with its sections, newest first
-//   POST   /api/admin/releases                 {name?, size}: a release uploading
+//   POST   /api/admin/releases                 {name?, size, data_set_id?}: a release uploading
 //   PUT    /api/admin/releases/<id>/parts/<n>?upload_id=<u>   one part's bytes, {etag} back
 //   POST   /api/admin/releases/<id>/complete   the upload completed: validating + release.validate
 //   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section
@@ -42,15 +42,20 @@ namespace hosted {
 struct ReleaseRow; // data_sets/data_set_repository.h
 
 // A release as the admin's JSON: {id, status, name, sha256, bytes, package_product, error,
-// sections ([{data_set_id, display_name, expansion, command_file, version, tree ({id,
-// state} or null)}]), created_by, created_at, published_at, retired_at ("" until set), source
-// (a built release's {project, revision, base_revision (or null)}, null for an upload), version,
+// data_set_id (its game; null for an upload that named none until its validation maps it),
+// sections ([{data_set_id, display_name, expansion, command_file, version, tree ({id, state} or
+// null)}]), created_by, created_at, published_at, retired_at ("" until set), source (a built
+// release's {project, revision, base_revision (or null)}, null for an upload), version,
 // build_log}.
 crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
 
 class ReleaseRoutes {
 public:
 	static constexpr size_t kNameMax = 64;
+	// One part of a package's multipart upload (S3's parts: inside Cloudflare's request body
+	// limit), and the most parts a package may take (S3's own limit).
+	static constexpr int64_t kPartSize = 32 * 1024 * 1024;
+	static constexpr int kMaxParts = 10000;
 
 	ReleaseRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 

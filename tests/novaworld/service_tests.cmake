@@ -555,16 +555,16 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(cost_routes REDIS COMMAND cost_routes_test)
     set_tests_properties(cost_routes PROPERTIES TIMEOUT 120)
 
-    # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
+    # The games' and releases' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's
-    # shapes over the seeded rows, a base and an expansion created (every shape and database
-    # refusal), patched and deleted; a tree upload begun with the kind's files (a missing
-    # and an unexpected name refused), each part PUT through the route (the ETag back; one
-    # over the cap, out of range or of a name the kind lacks refused), each file completed
-    # (a wrong ETag refused), the tree finalized with its tree.finalize job, ready and
-    # current (its delete refused), an upload abandoned, a superseded tree pruned with a
-    # tree.prune job, a pinned one refused.
+    # shapes over the seeded rows (the runtime among them, each game's project key,
+    # visibility and head), a base and an expansion created with their projects (every shape
+    # and database refusal, a duplicate key), patched (a project renamed and made public) and
+    # deleted (has_expansion, in_use); a game's trees as release.apply leaves them, no tree
+    # upload route left; a release uploaded in parts and completed (an upload of a game with
+    # a project refused built_from_project), validated, published, retired and deleted; the
+    # runtime's release published into no tree.
     add_executable(data_set_routes_test novaworld/data_set_routes_test.cpp)
     target_link_libraries(data_set_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
@@ -578,7 +578,8 @@ if(BUILD_NOVAWORLD_HTTP)
     # player, no session without the CSRF header), a push from nothing (the missing files, each
     # upload checked by its SHA-256, a stale push told the head, the head's files, a missing file
     # and a manifest out of its form refused), the history, manifest and files read back, a file
-    # the store got directly held once a push names it, and the admin's projects.
+    # the store got directly held once a push names it, a game's project made, renamed (its
+    # files moving under the new key) and deleted through the games' routes, and a release built.
     add_executable(content_routes_test novaworld/content_routes_test.cpp)
     target_link_libraries(content_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
@@ -1129,9 +1130,10 @@ target_link_libraries(hosted_agent_protocol_test PRIVATE opennova_novaworld_host
 target_include_directories(hosted_agent_protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 
-# The hosted data sets' rows (data_sets/data_set_repository.h, migration 0011, ADR 0064): the
-# seeded data sets, trees, the servers' pins (hosted/model/hosted_repository.h), the holds'
-# live rule against the hosted servers' own, and the migration's mapping of the old columns.
+# The games' rows (data_sets/data_set_repository.h, migrations 0011, 0013 and 0025, ADR 0064):
+# the seeded games and their projects' keys, a game's writes and refusals, trees, releases naming
+# their games, the servers' pins (hosted/model/hosted_repository.h), the holds' live rule against
+# the hosted servers' own, and the migration's mapping of the old columns.
 add_executable(data_set_repository_test novaworld/data_set_repository_test.cpp)
 target_link_libraries(data_set_repository_test PRIVATE
     opennova_novaworld_data_sets opennova_novaworld_hosting_model opennova_novaworld_service
@@ -1142,8 +1144,9 @@ opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
 set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 
 # The content store's rows (data_sets/content_repository.h, migration 0025, ADR 0069): the seeded
-# projects and who lists them, a project's writes and refusals, the files a store holds, pushes
-# moving the head one at a time (the loser told the winner) and the history paged.
+# games' projects and who lists them, a project made, renamed and gone with its game, the files a
+# store holds, pushes moving the head one at a time (the loser told the winner) and the history
+# paged.
 add_executable(content_repository_test novaworld/content_repository_test.cpp)
 target_link_libraries(content_repository_test PRIVATE
     opennova_novaworld_data_sets opennova_novaworld_service Threads::Threads)
@@ -1152,9 +1155,11 @@ target_compile_definitions(content_repository_test PRIVATE OPENNOVA_SOURCE_DIR="
 opennova_add_pg_test(content_repository COMMAND content_repository_test)
 
 # The data sets' jobs (data_sets/data_set_jobs.h, ADR 0064) on a migrated database and a local
-# object store in a scratch directory, each run as the workers run it: a packed synthetic
-# tree finalized (its manifest, missions, version; the refusals; an expansion's pair) and
-# the prune, over opennova-update-tool's builder.
+# object store in a scratch directory, each run as the workers run it, over
+# opennova-update-tool's builder: a package validated (the refusals: no data set's command file,
+# the same bytes, an upload of a game with a project), a whole retail-shaped release built into
+# each game's tree from nothing (every archive back entry for entry, the missions and version),
+# one lacking a required archive failing its tree, and the prune.
 add_executable(data_set_jobs_test novaworld/data_set_jobs_test.cpp)
 target_link_libraries(data_set_jobs_test PRIVATE
     opennova_novaworld_data_sets opennova_novaworld_service opennova_update_tool_core
@@ -1164,11 +1169,12 @@ target_compile_definitions(data_set_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMA
 opennova_add_pg_test(data_set_jobs COMMAND data_set_jobs_test)
 set_tests_properties(data_set_jobs PROPERTIES TIMEOUT 300)
 
-# A release built from a content project's revision (data_sets/release_build.h, ADR 0069 d7),
-# its jobs run with the real tools as child processes: a retail game's edit packed against its
-# stock revision into a draft of one section, our own game's revision packed whole with its
-# UPDATE.WIZ, and the refusals (no data set; a revision that is no project, the export's words
-# kept as the build's log).
+# A release built from a revision of its game's project (data_sets/release_build.h, ADR 0069 d7),
+# its jobs run with the real tools as child processes: a retail game's edit of a minted install
+# packed whole against its stock revision into a draft of one section, published and built into
+# the game's tree from nothing (its archives equal to the revision's export), our own game's
+# revision packed whole with its UPDATE.WIZ, and the refusals (no updater product; a revision that
+# is no project, the export's words kept as the build's log).
 add_executable(release_build_test novaworld/release_build_test.cpp)
 target_link_libraries(release_build_test PRIVATE
     opennova_novaworld_data_sets opennova_novaworld_service opennova_project_cli opennova_editor

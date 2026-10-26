@@ -123,7 +123,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 	// their last retail patch left them. OpenNova's own products are never stood in for, so
 	// an unpublished one stays refused and a first install fails rather than finding nothing.
 	for (const hosted::DataSetRow &row : data_sets) {
-		if (!row.retail_updater || row.updater_login.empty() || row.command_file.empty() ||
+		if (!row.retail || row.updater_login.empty() || row.command_file.empty() ||
 				next.count(strutil::to_upper(row.updater_login)))
 			continue;
 		hosted::PublishedSection section;
@@ -184,7 +184,7 @@ bool ReleaseCatalog::current_section(
 	section.updater_login = row.updater_login;
 	section.command_file = row.command_file;
 	section.sha256 = io::sha256_hex(bytes.data(), bytes.size());
-	section.retail_updater = true;
+	section.retail = true;
 	const std::string path = io::utf8_join(cache_dir_, section.sha256 + ".sfs");
 	std::error_code ec;
 	return fs::is_regular_file(io::os_path(path), ec) ||
@@ -307,7 +307,7 @@ bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSec
 	product.login = section.updater_login;
 	product.command_file = section.command_file;
 	product.sha256 = section.sha256;
-	product.retail_updater = section.retail_updater;
+	product.retail_updater = section.retail;
 	return list_section_files(dir, product.files, why);
 }
 

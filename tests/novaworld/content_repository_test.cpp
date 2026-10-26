@@ -1,16 +1,17 @@
 // The content store's rows (apps/novaworld_common/data_sets/content_repository.h, migration 0025,
-// ADR 0069) on a migrated database of the test's own: the five seeded projects on their data sets
-// (the retail ones private, each expansion on its base game's project) and who may list them; a
-// project created, changed and refused (a duplicate key, a data set another project updates, no
-// such data set or base), and one an expansion builds on kept from deletion; the files a store
-// holds, each once and at its size; pushes moving the head one at a time, the push that lost told
-// the head that won; the history newest first, a page of it, and an author's name kept past their
-// account.
+// ADR 0069) on a migrated database of the test's own: the five seeded games' projects (the retail
+// ones private, each expansion on its base game) and who may list them, the runtime none; a
+// game's project made, renamed and refused through the games' rows (data_set_repository.h: a
+// duplicate key) and gone with its game; the files a store holds, each once and at its size;
+// pushes moving the head one at a time, the push that lost told the head that won, a game with
+// no project taking none; the history newest first, a page of it, and an author's name kept past
+// their account.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include "data_sets/content_repository.h"
+#include "data_sets/data_set_repository.h"
 
 #include <cstdio>
 #include <string>
@@ -18,6 +19,7 @@
 
 using namespace opennova;
 using namespace opennova::novaworld_server::content;
+namespace hosted = opennova::novaworld_server::hosted;
 using opennova::db::BindValue;
 using opennova::db::Database;
 using test_db::TestDatabase;
@@ -44,13 +46,12 @@ SeededDataSet seeded(Database &db, const std::string &where, const std::vector<B
 }
 // A retail game's, by the command file its stock install ships.
 SeededDataSet retail(Database &db, const char *command_file) {
-	return seeded(db, "command_file = $1 AND retail_updater", { BindValue(command_file) });
+	return seeded(db, "command_file = $1 AND retail", { BindValue(command_file) });
 }
 // Our own game's ("base") or its expansion's: the one of the kind the update service serves that
 // is no retail game's.
 SeededDataSet own(Database &db, const char *kind) {
-	return seeded(
-			db, "kind = $1 AND updater_login <> '' AND NOT retail_updater", { BindValue(kind) });
+	return seeded(db, "kind = $1 AND updater_login <> '' AND NOT retail", { BindValue(kind) });
 }
 
 NewRevision revision(const std::string &message, std::optional<int64_t> author = std::nullopt) {
@@ -90,65 +91,85 @@ static int test_seeded_projects() {
 			   own_expansion = find_project(db, expansion.login);
 	TEST_EXPECT(own_game && own_expansion);
 	TEST_EXPECT(own_game->title == game.name && own_game->visibility == Visibility::Public &&
-			!own_game->retail && !own_game->base_project_id && own_game->data_set_id == game.id);
+			!own_game->retail && !own_game->parent_id && own_game->id == game.id);
 	TEST_EXPECT(own_expansion->title == expansion.name &&
 			own_expansion->visibility == Visibility::Public && !own_expansion->retail &&
-			own_expansion->base_project_id == own_game->id &&
-			own_expansion->data_set_id == expansion.id);
+			own_expansion->parent_id == own_game->id && own_expansion->id == expansion.id);
 	// The retail games', private.
 	const auto jo = find_project(db, "JO"), jox01 = find_project(db, "JOX01"),
 			   dfx2 = find_project(db, "DFX2");
 	TEST_EXPECT(jo && jox01 && dfx2);
 	TEST_EXPECT(jo->title == "Joint Operations" && jo->visibility == Visibility::Private &&
-			jo->retail && !jo->base_project_id && jo->data_set_id == jo_set.id);
+			jo->retail && !jo->parent_id && jo->id == jo_set.id);
 	TEST_EXPECT(jox01->visibility == Visibility::Private && jox01->retail &&
-			jox01->base_project_id == jo->id && jox01->data_set_id == jox_set.id);
-	TEST_EXPECT(dfx2->visibility == Visibility::Private && dfx2->retail &&
-			dfx2->data_set_id == dfx2_set.id);
+			jox01->parent_id == jo->id && jox01->id == jox_set.id);
+	TEST_EXPECT(dfx2->visibility == Visibility::Private && dfx2->retail && dfx2->id == dfx2_set.id);
 	TEST_EXPECT(find_project_by_id(db, jo->id)->key == "JO" && !find_project(db, "NOPE"));
+	// The runtime, a game with no project.
+	const auto runtime = db.query("SELECT id FROM data_sets WHERE kind = 'update';");
+	TEST_EXPECT(runtime.size() == 1 &&
+			!find_project_by_id(db, runtime.front().as_int(0).value_or(0)));
+	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
+			!valid_key("SEVENTEEN_LETTERS") && !valid_key("A-B"));
 	std::printf(
-			"seeded: our two public, the three retail private, each on its data set and base\n");
+			"seeded: our two public, the three retail private, each on its game and base, the "
+			"runtime none\n");
 	return 0;
 }
 
+// A game's project is its row's: made with it, renamed and made public by its patch, a duplicate
+// key refused, gone with it (its revisions and files too).
 static int test_project_writes() {
 	TestDatabase tdb;
 	Database db = tdb.open();
-	NewProject mod;
+	hosted::NewDataSet mod;
+	mod.display_name = "A mod";
+	mod.kind = hosted::DataSetKind::Expansion;
+	mod.parent_id = find_project(db, "JO")->id;
+	mod.expansion_code = "mod";
 	mod.key = "MOD";
-	mod.title = "A mod";
-	mod.visibility = Visibility::Public;
+	mod.visibility = "private";
 	mod.created_by = "admin taylor";
 	int64_t id = 0;
-	TEST_EXPECT(create_project(db, mod, id) == ProjectOutcome::Ok && id != 0);
-	TEST_EXPECT(create_project(db, mod, id) == ProjectOutcome::DuplicateKey);
-	NewProject other = mod;
-	other.key = "OTHER";
-	other.data_set_id = find_project(db, "JO")->data_set_id;
-	TEST_EXPECT(create_project(db, other, id) == ProjectOutcome::DataSetTaken);
-	other.data_set_id = 999999;
-	TEST_EXPECT(create_project(db, other, id) == ProjectOutcome::NoSuchDataSet);
-	other.data_set_id.reset();
-	other.base_project_id = 999999;
-	TEST_EXPECT(create_project(db, other, id) == ProjectOutcome::NoSuchBase);
+	TEST_EXPECT(hosted::create_data_set(db, mod, id) == hosted::DataSetOutcome::Ok && id != 0);
+	const auto made = find_project(db, "MOD");
+	TEST_EXPECT(made && made->id == id && made->title == "A mod" &&
+			made->visibility == Visibility::Private && made->parent_id == find_project(db, "JO")->id &&
+			made->head == 0 && made->created_by == "admin taylor");
+	hosted::NewDataSet again = mod;
+	again.expansion_code = "mod2";
+	int64_t ignored = 0;
+	TEST_EXPECT(hosted::create_data_set(db, again, ignored) == hosted::DataSetOutcome::DuplicateKey);
 
-	const int64_t mod_id = find_project(db, "MOD")->id;
-	ProjectPatch patch;
-	patch.visibility = Visibility::Private;
-	TEST_EXPECT(update_project(db, mod_id, patch) == ProjectOutcome::Ok);
-	const auto changed = find_project(db, "MOD");
-	TEST_EXPECT(changed->visibility == Visibility::Private && changed->title == "A mod");
+	hosted::DataSetPatch patch;
+	patch.visibility = "public";
+	patch.key = "MODDED";
+	patch.display_name = "Renamed";
+	TEST_EXPECT(hosted::update_data_set(db, id, patch) == hosted::DataSetOutcome::Ok);
+	const auto changed = find_project(db, "MODDED");
+	TEST_EXPECT(!find_project(db, "MOD") && changed && changed->id == id &&
+			changed->visibility == Visibility::Public && changed->title == "Renamed");
 	patch = {};
-	patch.title = "Renamed";
-	TEST_EXPECT(update_project(db, mod_id, patch) == ProjectOutcome::Ok &&
-			find_project(db, "MOD")->title == "Renamed");
-	TEST_EXPECT(update_project(db, 999999, patch) == ProjectOutcome::NotFound);
+	patch.key = "JO";
+	TEST_EXPECT(hosted::update_data_set(db, id, patch) == hosted::DataSetOutcome::DuplicateKey);
 
-	// Joint Operations' project is Escalation's base; the mod's is no one's.
-	TEST_EXPECT(delete_project(db, find_project(db, "JO")->id) == ProjectOutcome::InUse);
-	TEST_EXPECT(delete_project(db, mod_id) == ProjectOutcome::Ok && !find_project(db, "MOD"));
-	TEST_EXPECT(delete_project(db, mod_id) == ProjectOutcome::NotFound);
-	std::printf("projects: created, changed, refused, and a base game's kept from deletion\n");
+	// Its history and files go with it; Joint Operations, which Escalation builds on, stays.
+	int64_t head = 0;
+	NewRevision revision;
+	revision.created_by = "admin taylor";
+	revision.message = "First";
+	revision.manifest_sha256 = kShaC;
+	TEST_EXPECT(commit_revision(db, id, 0, revision, head) == CommitOutcome::Ok && head == 1);
+	record_blobs(db, id, { { kShaA, 10 } });
+	TEST_EXPECT(hosted::delete_data_set(db, find_project(db, "JO")->id) ==
+			hosted::DataSetOutcome::HasExpansion);
+	TEST_EXPECT(hosted::delete_data_set(db, id) == hosted::DataSetOutcome::Ok &&
+			!find_project(db, "MODDED"));
+	TEST_EXPECT(db.query("SELECT 1 FROM content_revisions WHERE data_set_id = $1 UNION ALL "
+						 "SELECT 1 FROM content_blobs WHERE data_set_id = $1;",
+						  { BindValue(id) })
+						.empty());
+	std::printf("projects: made with their games, renamed, refused, gone with them\n");
 	return 0;
 }
 
@@ -209,6 +230,11 @@ static int test_pushes() {
 			head == 3);
 	TEST_EXPECT(
 			commit_revision(db, 999999, 0, revision("Nowhere"), head) == CommitOutcome::NotFound);
+	// A game with no project takes no revision.
+	const int64_t runtime =
+			db.query("SELECT id FROM data_sets WHERE kind = 'update';").front().as_int(0).value_or(0);
+	TEST_EXPECT(
+			commit_revision(db, runtime, 0, revision("Runtime"), head) == CommitOutcome::NotFound);
 	TEST_EXPECT(find_project(db, "JOX01")->head == 3 && find_project(db, "JO")->head == 0);
 
 	const std::vector<ContentRevision> history = list_revisions(db, jox01, 0, 10);

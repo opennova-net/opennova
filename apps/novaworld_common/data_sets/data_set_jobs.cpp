@@ -18,7 +18,6 @@
 #include <formats/update/update_crc.h>
 #include <runtime/mission/mission_catalog.h>
 
-#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -32,18 +31,12 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// The games slug of OpenNova's own base data set (backend/migrations/0011_data_sets.sql), whose
-// releases and its expansions' are complete installs (ADR 0067 d7).
-constexpr const char *kAcidGambitGame = "acidgambit_0_consumer";
-
 namespace fs = std::filesystem;
 
 constexpr const char *kTag = "[data]";
-constexpr int kCapFinalize = 2;
 constexpr int kCapValidate = 1;
 constexpr int kCapApply = 1;
 constexpr int kCapPrune = 1;
-constexpr int kAttemptsFinalize = 3;
 constexpr int kAttemptsValidate = 2;
 constexpr int kAttemptsApply = 3;
 constexpr int kAttemptsPrune = 3;
@@ -128,29 +121,6 @@ bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, s
 	return true;
 }
 
-// The first line of version.txt, trimmed; "" when the file is absent.
-std::string version_text_of(const std::string &path) {
-	std::string text, ignored;
-	if (!io::read_file_text(path, text, ignored))
-		return std::string();
-	return strutil::trim(text.substr(0, text.find_first_of("\r\n")));
-}
-
-// Whether every .pff among `files` opens as an archive (its directory read), else why not.
-bool archives_open(const std::map<std::string, std::string> &files, std::string &why) {
-	for (const auto &[name, path] : files) {
-		if (!strutil::ends_with_icase(name, ".pff"))
-			continue;
-		pff::PffArchive archive{};
-		if (pff::pff_open(&archive, path.c_str()) != 0) {
-			why = name + " is not a PFF archive";
-			return false;
-		}
-		pff::pff_close(&archive);
-	}
-	return true;
-}
-
 // The multiplayer missions of a tree's files at `dir` (`files`: the canonical name of each
 // tree file to the path it lies at): a base tree mounted as opennova-serve mounts an install
 // (the retail boot table, mission_catalog::build), an expansion tree its pair alone
@@ -227,11 +197,6 @@ bool put_manifest(ObjectStore &store, const ScratchDir &scratch, int64_t tree_id
 	return store.put_file(tree_prefix(tree_id) + kTreeManifestName, path, error);
 }
 
-void sort_files(std::vector<TreeFile> &files) {
-	std::sort(files.begin(), files.end(),
-			[](const TreeFile &a, const TreeFile &b) { return a.name < b.name; });
-}
-
 int64_t total_bytes(const std::vector<TreeFile> &files) {
 	int64_t bytes = 0;
 	for (const TreeFile &f : files)
@@ -239,18 +204,18 @@ int64_t total_bytes(const std::vector<TreeFile> &files) {
 	return bytes;
 }
 
-// The tree's row settled from what its job came to, with `from` its state while the job ran:
-// ready (and a prune queued for whatever that frees), failed with the reason, or the job run
-// again for a store failure, the tree failed once no attempt is left.
-jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, TreeState from, Outcome outcome,
+// The building tree's row settled from what its job came to: ready (and a prune queued for
+// whatever that frees), failed with the reason, or the job run again for a store failure, the
+// tree failed once no attempt is left.
+jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, Outcome outcome,
 		const TreeReady &ready, const std::string &why) {
 	auto lease = ctx.pool.acquire();
 	db::Database &db = *lease;
 	switch (outcome) {
 		case Outcome::Ok:
-			if (!finish_tree(db, tree_id, from, ready)) {
-				std::printf("%s tree %s left %s meanwhile; nothing written\n", kTag,
-						id_text(tree_id).c_str(), tree_state_name(from));
+			if (!finish_tree(db, tree_id, ready)) {
+				std::printf("%s tree %s left building meanwhile; nothing written\n", kTag,
+						id_text(tree_id).c_str());
 				return jobs::JobResult::done();
 			}
 			std::printf("%s tree %s ready: %zu file%s, %s, %zu mission%s, version \"%s\"\n", kTag,
@@ -262,7 +227,7 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, TreeState fr
 			enqueue_tree_prune(db);
 			return jobs::JobResult::done();
 		case Outcome::Refused:
-			set_tree_state(db, tree_id, from, TreeState::Failed, why);
+			set_tree_state(db, tree_id, TreeState::Building, TreeState::Failed, why);
 			std::fprintf(stderr, "%s tree %s failed: %s\n", kTag, id_text(tree_id).c_str(),
 					loggable(why, 200).c_str());
 			return jobs::JobResult::done();
@@ -270,7 +235,7 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, TreeState fr
 			break;
 	}
 	if (ctx.job.attempts >= ctx.job.max_attempts) {
-		set_tree_state(db, tree_id, from, TreeState::Failed, "the store: " + why);
+		set_tree_state(db, tree_id, TreeState::Building, TreeState::Failed, "the store: " + why);
 		std::fprintf(stderr, "%s tree %s failed after %d attempts: %s\n", kTag,
 				id_text(tree_id).c_str(), ctx.job.attempts, loggable(why, 200).c_str());
 		return jobs::JobResult::fail(why);
@@ -278,93 +243,6 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, TreeState fr
 	std::fprintf(stderr, "%s WARN tree %s: %s; the job runs again\n", kTag,
 			id_text(tree_id).c_str(), loggable(why, 200).c_str());
 	return jobs::JobResult::retry(why);
-}
-
-// --- tree.finalize ---
-
-// The tree's objects under its prefix checked against the kind's files, downloaded, measured,
-// read for the version and the missions, and its manifest written.
-Outcome finalize_tree(ObjectStore &store, const std::string &scratch_root, int64_t tree_id,
-		const DataSetRow &data_set, TreeReady &ready, std::string &why) {
-	const std::string prefix = tree_prefix(tree_id);
-	std::vector<StoredObject> objects;
-	if (!store.list(prefix, objects, why))
-		return Outcome::Transient;
-	std::vector<std::string> names;
-	for (const StoredObject &object : objects) {
-		const std::string name = object.key.substr(prefix.size());
-		if (name == kTreeManifestName)
-			continue; // this job's own, from a run cut short
-		const std::string canonical =
-				canonical_tree_file(data_set.kind, data_set.expansion_code, name);
-		if (name.find('/') != std::string::npos || canonical.empty()) {
-			why = "the tree holds " + name + ", which a " +
-					std::string(data_set_kind_name(data_set.kind)) + " data set's tree does not";
-			return Outcome::Refused;
-		}
-		if (canonical != name) {
-			why = "the file " + name + " is stored under its own spelling, not " + canonical;
-			return Outcome::Refused;
-		}
-		names.push_back(name);
-	}
-	const std::vector<std::string> missing =
-			missing_tree_files(data_set.kind, data_set.expansion_code, names);
-	if (!missing.empty()) {
-		why = "the tree lacks " + join(missing);
-		return Outcome::Refused;
-	}
-	ScratchDir scratch(io::utf8_join(scratch_root, "tree-" + id_text(tree_id)));
-	if (!scratch.make(why))
-		return Outcome::Transient;
-	const std::string dir = scratch.file("tree");
-	if (!io::ensure_directory(dir, why))
-		return Outcome::Transient;
-	std::map<std::string, std::string> files; // canonical name -> its path
-	ready = TreeReady{};
-	for (const std::string &name : names) {
-		const std::string path = io::utf8_join(dir, name);
-		if (!store.get_file(prefix + name, path, why))
-			return Outcome::Transient;
-		TreeFile file;
-		file.name = name;
-		if (!measure_file(path, file.size, why))
-			return Outcome::Transient;
-		ready.files.push_back(std::move(file));
-		files[name] = path;
-	}
-	sort_files(ready.files);
-	ready.bytes = total_bytes(ready.files);
-	if (!archives_open(files, why))
-		return Outcome::Refused;
-	ready.version_text = version_text_of(io::utf8_join(dir, "version.txt"));
-	if (!scan_missions(data_set, dir, files, ready.missions, why))
-		return Outcome::Refused;
-	if (!put_manifest(store, scratch, tree_id, ready, why))
-		return Outcome::Transient;
-	return Outcome::Ok;
-}
-
-jobs::JobResult finalize(
-		jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
-	const int64_t tree_id = member_int(ctx.job.payload, "tree_id");
-	std::optional<DataSetTree> tree;
-	std::optional<DataSetRow> data_set;
-	{
-		auto lease = ctx.pool.acquire();
-		tree = find_tree(*lease, tree_id);
-		if (tree)
-			data_set = find_data_set(*lease, tree->data_set_id);
-	}
-	// Deleted, or finished by another run: nothing to do.
-	if (!tree || tree->state != TreeState::Finalizing || !data_set)
-		return jobs::JobResult::done();
-	std::printf("%s tree %s (%s, baseline): finalizing\n", kTag, id_text(tree_id).c_str(),
-			loggable(data_set->display_name).c_str());
-	TreeReady ready;
-	std::string why;
-	const Outcome outcome = finalize_tree(store, scratch_root, tree_id, *data_set, ready, why);
-	return settle_tree(ctx, tree_id, TreeState::Finalizing, outcome, ready, why);
 }
 
 // --- release.validate ---
@@ -592,11 +470,13 @@ jobs::JobResult validate(
 		jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
 	const int64_t release_id = member_int(ctx.job.payload, "release_id");
 	std::vector<DataSetRow> data_sets;
+	bool built = false;
 	{
 		auto lease = ctx.pool.acquire();
 		const std::optional<ReleaseRow> release = find_release(*lease, release_id);
 		if (!release || release->status != ReleaseStatus::Validating)
 			return jobs::JobResult::done();
+		built = release->content_revision > 0;
 		data_sets = list_data_sets(*lease);
 	}
 	std::printf("%s release %s: validating\n", kTag, id_text(release_id).c_str());
@@ -625,6 +505,14 @@ jobs::JobResult validate(
 	std::vector<NewReleaseSection> sections;
 	if (!map_sections(package, data_sets, sections, why))
 		return invalid_release(ctx, release_id, why);
+	// A game with a project has every release built from its revisions (release_build.h): an
+	// uploaded package of one is refused.
+	if (!built)
+		for (const NewReleaseSection &s : sections)
+			for (const DataSetRow &ds : data_sets)
+				if (ds.id == s.data_set_id && !ds.key.empty())
+					return invalid_release(ctx, release_id,
+							ds.display_name + "'s releases are built from its project, never uploaded");
 	// The package under its own digest first, then the row: a run cut short between them
 	// finds the upload still there and copies again; the upload goes once the row is draft.
 	if (!store.copy(upload_key, release_package_key(sha256), why))
@@ -651,16 +539,16 @@ jobs::JobResult validate(
 
 // --- release.apply ---
 
-// The section's rows applied to a copy of the baseline: the tree's objects under its own prefix
-// (copied server-side, a run again's leftovers removed first), the package and the baseline
-// files the rows touch brought to the scratch directory under the rows' own spellings (the
-// apply library opens each file by its row's name), the section applied, what changed sized
-// and uploaded and what went removed, and the manifest redone from the baseline's.
+// The section's rows applied to an empty tree: the tree's objects under its own prefix (a run
+// again's leftovers removed first), the package brought to the scratch directory, the section
+// applied there with formats/update/apply.h (every release is whole, so its rows make every
+// archive from nothing, ADR 0008), the files the tree takes (data_set_files.h) checked, read for
+// the missions, sized and uploaded, and the manifest written.
 Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 		const DataSetRow &data_set, const ReleaseSection &section, const std::string &sha256,
-		const DataSetTree &baseline, int64_t tree_id, TreeReady &ready, std::string &why) {
-	const std::string from = tree_prefix(baseline.id), to = tree_prefix(tree_id);
-	if (!store.remove_prefix(to, why) || (baseline.id != 0 && !store.copy_prefix(from, to, why)))
+		int64_t tree_id, TreeReady &ready, std::string &why) {
+	const std::string to = tree_prefix(tree_id);
+	if (!store.remove_prefix(to, why))
 		return Outcome::Transient;
 	ScratchDir scratch(io::utf8_join(scratch_root, "apply-" + id_text(tree_id)));
 	if (!scratch.make(why))
@@ -694,116 +582,56 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	std::vector<uint8_t> command_bytes;
 	if (!package.read(*command, command_bytes, why))
 		return Outcome::Transient;
-	const std::optional<update::CommandFile> cmd =
-			update::read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
-	if (!cmd) {
-		why = "the command file " + section.command_file + " does not read";
-		return Outcome::Refused;
-	}
-
-	// The baseline files the rows touch, each under the spelling its row opens it by: the
-	// loose files written or removed at the root, the archives targeted, and the mission pair
-	// the rescan reads. A row's name the tree does not hold (Jointops.exe) brings nothing.
-	std::map<std::string, std::string> spelling; // canonical name -> the name on disk
-	const auto want = [&](const std::string &name) {
-		const std::string canonical =
-				canonical_tree_file(data_set.kind, data_set.expansion_code, name);
-		if (!canonical.empty())
-			spelling.emplace(canonical, name);
-	};
-	std::string target = ".";
-	for (const update::CommandRow &row : cmd->rows) {
-		switch (row.type) {
-			case update::CommandType::Target:
-				target = row.name;
-				if (strutil::ends_with_icase(target, ".pff"))
-					want(target);
-				break;
-			case update::CommandType::Loose:
-			case update::CommandType::Remove:
-				if (target == ".")
-					want(row.name);
-				break;
-			case update::CommandType::Copy:
-				break;
-		}
-	}
-	const MissionPair pair = mission_pair_of(data_set.kind, data_set.expansion_code);
-	want(pair.missions);
-	want(pair.texts);
-	std::map<std::string, TreeFile> files; // the new manifest, from the baseline's
-	for (const TreeFile &f : baseline.files)
-		files[f.name] = f;
-	std::map<std::string, std::string> local; // canonical name -> its path, of what is here
-	for (const auto &[canonical, name] : spelling) {
-		if (files.count(canonical) == 0)
-			continue;
-		const std::string path = io::utf8_join(dir, name);
-		if (!store.get_file(from + canonical, path, why))
-			return Outcome::Transient;
-		local[canonical] = path;
-	}
-
 	update::ApplyReport report;
 	if (!update::apply_commands(command_bytes, section.command_file, package.blobs(*packed),
 				io::os_path(dir), report, why))
 		return Outcome::Refused;
 
-	// What changed, under its canonical name; what the tree does not hold is left here.
-	std::vector<std::string> changed = report.files_written;
-	changed.insert(
-			changed.end(), report.archives_rewritten.begin(), report.archives_rewritten.end());
-	for (const std::string &name : changed) {
+	// What the rows left that the tree takes, under its canonical name; the rest (a loose file no
+	// server reads, Jointops.exe) stays here, and a name a later row removed is gone.
+	std::vector<std::string> written = report.files_written;
+	written.insert(
+			written.end(), report.archives_rewritten.begin(), report.archives_rewritten.end());
+	std::map<std::string, std::string> local; // canonical name -> its path
+	size_t left_out = 0;
+	for (const std::string &name : written) {
 		const std::string canonical =
 				canonical_tree_file(data_set.kind, data_set.expansion_code, name);
-		if (canonical.empty()) {
-			std::printf("%s tree %s: the release writes %s, which the tree does not hold\n", kTag,
-					id_text(tree_id).c_str(), loggable(name).c_str());
-			continue;
-		}
 		const std::string path = io::utf8_join(dir, name);
-		TreeFile file;
-		file.name = canonical;
-		if (!measure_file(path, file.size, why))
-			return Outcome::Transient;
-		if (!store.put_file(to + canonical, path, why))
-			return Outcome::Transient;
-		files[canonical] = file;
-		local[canonical] = path;
-	}
-	for (const std::string &name : report.files_deleted) {
-		const std::string canonical =
-				canonical_tree_file(data_set.kind, data_set.expansion_code, name);
+		std::error_code ec;
 		if (canonical.empty())
-			continue;
-		if (!store.remove(to + canonical, why))
-			return Outcome::Transient;
-		files.erase(canonical);
-		local.erase(canonical);
+			++left_out;
+		else if (fs::is_regular_file(io::os_path(path), ec))
+			local[canonical] = path;
 	}
-	ready = TreeReady{};
 	std::vector<std::string> names;
-	for (const auto &[name, file] : files) {
-		ready.files.push_back(file);
+	for (const auto &[name, path] : local)
 		names.push_back(name);
-	}
 	const std::vector<std::string> missing =
 			missing_tree_files(data_set.kind, data_set.expansion_code, names);
 	if (!missing.empty()) {
 		why = "the release leaves the tree without " + join(missing);
 		return Outcome::Refused;
 	}
-	ready.bytes = total_bytes(ready.files);
+	ready = TreeReady{};
 	// The release's version, its command file's VERSION (ADR 0067: no version file is read for a
-	// release; a stock baseline's version.txt names only what the stock install is).
+	// release).
 	ready.version_text = section.version;
 	if (!scan_missions(data_set, dir, local, ready.missions, why))
 		return Outcome::Refused;
+	for (const auto &[name, path] : local) {
+		TreeFile file;
+		file.name = name;
+		if (!measure_file(path, file.size, why) || !store.put_file(to + name, path, why))
+			return Outcome::Transient;
+		ready.files.push_back(std::move(file));
+	}
+	ready.bytes = total_bytes(ready.files);
 	if (!put_manifest(store, scratch, tree_id, ready, why))
 		return Outcome::Transient;
-	std::printf("%s tree %s: %zu row%s applied, %zu file%s written, %zu removed\n", kTag,
+	std::printf("%s tree %s: %zu row%s applied, %zu file%s of the tree, %zu left out\n", kTag,
 			id_text(tree_id).c_str(), report.rows_applied, report.rows_applied == 1 ? "" : "s",
-			changed.size(), changed.size() == 1 ? "" : "s", report.files_deleted.size());
+			ready.files.size(), ready.files.size() == 1 ? "" : "s", left_out);
 	return Outcome::Ok;
 }
 
@@ -813,13 +641,12 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	std::optional<ReleaseSection> section;
 	std::optional<DataSetRow> data_set;
 	std::optional<DataSetTree> building; // a run again's tree
-	bool full_content = false;
 	std::string sha256;
 	{
 		auto lease = ctx.pool.acquire();
 		db::Database &db = *lease;
 		const std::optional<ReleaseRow> release = find_release(db, release_id);
-		// Retired, or superseded by a newer baseline or release meanwhile: nothing to build.
+		// Retired, or superseded by a newer release meanwhile: nothing to build.
 		if (!release || release->status != ReleaseStatus::Published)
 			return jobs::JobResult::done();
 		sha256 = release->sha256;
@@ -827,12 +654,6 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		if (!data_set || data_set->kind == DataSetKind::Update ||
 				data_set->published_release_id != release_id)
 			return jobs::JobResult::done();
-		// OpenNova's own content packages are complete installs, including first launch:
-		// built from empty on every release. A retail release is whole too, but carries its
-		// removals since the stock install (release_build.cpp), so it applies over the
-		// stock baseline, which holds what the project never did (a stock install's own).
-		const auto base = data_set->parent_id ? find_data_set(db, *data_set->parent_id) : data_set;
-		full_content = base && base->game == kAcidGambitGame;
 		for (const ReleaseSection &s : list_sections(db, release_id))
 			if (s.data_set_id == data_set_id)
 				section = s;
@@ -847,41 +668,22 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	}
 	std::printf("%s release %s -> %s: applying%s\n", kTag, id_text(release_id).c_str(),
 			loggable(data_set->display_name).c_str(), building ? " again" : "");
-	std::optional<DataSetTree> baseline;
 	int64_t tree_id = 0;
-	{
+	if (building) {
+		tree_id = building->id;
+	} else {
+		// The section's tree, made with its row in one transaction.
 		auto lease = ctx.pool.acquire();
-		db::Database &db = *lease;
-		if (!full_content && data_set->baseline_tree_id)
-			baseline = find_tree(db, *data_set->baseline_tree_id);
-		if (baseline && baseline->state != TreeState::Ready)
-			baseline.reset();
-		if (building) {
-			tree_id = building->id;
-		} else {
-			// The section's tree, made with its row in one transaction.
-			db::Transaction tx(db);
-			tree_id = create_tree(db, data_set_id, TreeSource::Release, TreeState::Building,
-					release_id, baseline ? std::optional<int64_t>(baseline->id) : std::nullopt,
-					"worker");
-			set_section_tree(db, release_id, data_set_id, tree_id);
-			tx.commit();
-		}
-		if (!baseline && full_content)
-			baseline.emplace(); // id 0: no baseline objects to copy or read
-		if (!baseline) {
-			set_tree_state(
-					db, tree_id, TreeState::Building, TreeState::Failed, "no baseline uploaded");
-			std::fprintf(stderr, "%s tree %s failed: %s has no baseline uploaded\n", kTag,
-					id_text(tree_id).c_str(), loggable(data_set->display_name).c_str());
-			return jobs::JobResult::done();
-		}
+		db::Transaction tx(*lease);
+		tree_id = create_tree(*lease, data_set_id, release_id, "worker");
+		set_section_tree(*lease, release_id, data_set_id, tree_id);
+		tx.commit();
 	}
 	TreeReady ready;
 	std::string why;
 	const Outcome outcome = build_release_tree(
-			store, scratch_root, *data_set, *section, sha256, *baseline, tree_id, ready, why);
-	return settle_tree(ctx, tree_id, TreeState::Building, outcome, ready, why);
+			store, scratch_root, *data_set, *section, sha256, tree_id, ready, why);
+	return settle_tree(ctx, tree_id, outcome, ready, why);
 }
 
 // --- tree.prune ---
@@ -890,7 +692,7 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 	std::vector<int64_t> ids;
 	{
 		auto lease = ctx.pool.acquire();
-		ids = prunable_trees(*lease, kPruneMinAgeS, kPruneAbandonedUploadS);
+		ids = prunable_trees(*lease, kPruneMinAgeS);
 	}
 	if (ids.empty())
 		return jobs::JobResult::done();
@@ -900,7 +702,7 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 	for (const int64_t id : ids) {
 		const std::string prefix = tree_prefix(id);
 		std::string error;
-		if (!store.remove_prefix(prefix, error) || !store.abort_uploads_under(prefix, error)) {
+		if (!store.remove_prefix(prefix, error)) {
 			std::fprintf(stderr, "%s WARN tree %s: not pruned: %s\n", kTag, id_text(id).c_str(),
 					loggable(error, 200).c_str());
 			if (first_error.empty())
@@ -929,15 +731,6 @@ std::string release_package_key(const std::string &sha256) {
 
 std::string release_upload_key(int64_t release_id) {
 	return "updates/upload-" + id_text(release_id) + ".sfs";
-}
-
-int64_t enqueue_tree_finalize(db::Database &db, int64_t tree_id) {
-	jobs::NewJob job;
-	job.kind = kJobTreeFinalize;
-	job.payload.set("tree_id", io::json_number(static_cast<double>(tree_id)));
-	job.dedupe_key = std::string(kJobTreeFinalize) + ":" + id_text(tree_id);
-	job.max_attempts = kAttemptsFinalize;
-	return jobs::enqueue(db, job);
 }
 
 int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {
@@ -973,12 +766,6 @@ int64_t enqueue_tree_prune(db::Database &db) {
 
 void register_data_set_jobs(
 		jobs::JobRegistry &registry, ObjectStore &store, std::string scratch_dir) {
-	jobs::JobKind finalize_kind{ kJobTreeFinalize,
-		[&store, scratch_dir](jobs::JobContext &ctx) { return finalize(ctx, store, scratch_dir); },
-		kCapFinalize };
-	finalize_kind.retry_base_ms = 5 * 1000;
-	finalize_kind.retry_max_ms = 60 * 1000;
-	registry.add(std::move(finalize_kind));
 	jobs::JobKind validate_kind{ kJobReleaseValidate,
 		[&store, scratch_dir](jobs::JobContext &ctx) { return validate(ctx, store, scratch_dir); },
 		kCapValidate };
