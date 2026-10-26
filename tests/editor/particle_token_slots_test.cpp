@@ -154,6 +154,24 @@ int test_source() {
 	for (const Diagnostic &d : validate_project(input, graph, cache))
 		if (d.code() == "particle.unfilled_token_slot") faults += d.asset == "effects.ptl" && d.line == 4 ? 1 : 100;
 	TEST_EXPECT(faults == 1);
+	// Another source of the same names at the same sizes (the install mounted again over a patched archive, whose
+	// members the scan lists by their sizes alone): its files are read, not the first source's findings kept. Its flags
+	// end on an attached ';', the same length, and fault nowhere.
+	auto patched = std::make_shared<Served>();
+	patched->files = served->files;
+	std::string guarded = kFlags;
+	const size_t apart = guarded.find(" ;");
+	TEST_EXPECT(apart != std::string::npos);
+	guarded.replace(apart, 2, "; ");
+	patched->files["effects.ptl"] = guarded;
+	TEST_EXPECT(guarded.size() == kFlags.size());
+	ProjectPaths patched_paths = paths;
+	patched_paths.files = patched;
+	const ValidationInput patched_input{patched_paths, document, scan, open};
+	AssetGraph patched_graph;
+	ValidationCache patched_cache;
+	for (const Diagnostic &d : validate_project(patched_input, patched_graph, patched_cache))
+		TEST_EXPECT(d.code() != "particle.unfilled_token_slot");
 	return 0;
 }
 

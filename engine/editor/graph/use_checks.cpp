@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -326,8 +327,14 @@ std::string fault_place(const std::string &file, const ParticleSlotFault &fault)
 // The token slots' findings by what they were read from: the project's folder (or its paths' source), the SCR policy,
 // the gore sets, and each particle file in the walk's order with its stamp (an open document's instance, load and
 // revision; else the file's size and last write as the scan lists it; a base entry's archive stamp and size, under
-// the base source read, InstallFileSource::serial, an export stamping every entry alike).
-UseCheckMemo<std::string, std::vector<Diagnostic>> g_slots; // g_slots_mutex held
+// the base source read, InstallFileSource::serial, an export stamping every entry alike), and the paths' source itself:
+// another source's files are no read of these (the game install mounted again lists a patched archive's members at
+// their sizes alone), as texture_checks keeps its reads.
+struct KeptSlots {
+	std::weak_ptr<const FileSource> source;
+	std::vector<Diagnostic> found;
+};
+UseCheckMemo<std::string, KeptSlots> g_slots; // g_slots_mutex held
 
 void check_particle_token_slots(const AssetGraph &, const ValidationCache &, const ValidationInput &input,
 		std::vector<Diagnostic> &out) {
@@ -406,8 +413,8 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		for (const VfsArchiveEntry &base : alone_walk) key += "\x1e" "alone:" + base_stamp(base);
 	}
 	const std::lock_guard<std::mutex> lock(g_slots_mutex);
-	if (const std::vector<Diagnostic> *kept = g_slots.find(key)) {
-		out.insert(out.end(), kept->begin(), kept->end());
+	if (const KeptSlots *kept = g_slots.find(key); kept && kept->source.lock() == input.paths.files) {
+		out.insert(out.end(), kept->found.begin(), kept->found.end());
 		return;
 	}
 	std::vector<ParticleLoadFile> files;
@@ -462,7 +469,7 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		found.push_back(std::move(d));
 	}
 	out.insert(out.end(), found.begin(), found.end());
-	g_slots.keep(key, std::move(found));
+	g_slots.keep(key, {input.paths.files, std::move(found)});
 }
 
 // A file's text as this validation reads it, the file a build packs: an open document with changes, its save
