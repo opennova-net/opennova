@@ -1311,7 +1311,8 @@ public:
     uint16_t next_prng16_b() noexcept;
 	// PRESENTATION-ONLY stream: every consumer (rotor-wash particles, wreck
 	// fire crackle, the occlusion focal-wind sampler) draws behind listener,
-	// camera-distance or render gates, so its value diverges per machine and
+	// camera-distance or render gates, or for the death pieces' probability roll,
+	// a pool each peer spawns for itself, so its value diverges per machine and
 	// no authoritative system may read it or compare it across peers. It is
 	// snapshotted only so an editor play/stop cycle restores the mission-start
 	// state. Seeded at every mission start like streams A and B: Game_StartMission

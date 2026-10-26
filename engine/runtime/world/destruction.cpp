@@ -65,12 +65,11 @@ int32_t world_water_q16(const World &world) {
     return world.env.water_z;
 }
 
-// The witnessed rol-xor PRNG stream the death paths roll [orig: the inline
-// dword_31BFBB8 form — v = rol4(state + rol11(state)); state = v ^ 1; the
-// low 16 bits are the draw. PRNG_Next16/_B/_C @ 0x6130a0/0x6130f0/0x6131b0 are
-// per-module instances of the same generator; this one stream stands in for
-// them for the death pieces (D-ITEM-4). The wreck-fire crackle draws World's
-// stream C instead (World::next_prng16_c).]
+// The inline dword_31BFBB8 stream the blast's cause roll and the piece physics
+// draw [orig: v = rol4(state + rol11(state)); state = v ^ 1, the low 16 bits the
+// draw; the cause roll @0x4E6A6F..0x4E6A8E; DeathPiece_PhysicsUpdate
+// @0x48F5B1..0x48F5F0]. The piece spawn draws World's three PRNG_Next16 streams
+// instead (spawn_death_pieces), the wreck-fire crackle stream C.
 uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 
 // The BAM32/tick spin rate the aircraft death initializer stores directly, in
@@ -84,7 +83,7 @@ uint16_t death_rand16(World &world) { return world.destruction_rng.next16(); }
 //  @0x57b980..0x57b984, cmp/jge floor @0x57b989..0x57b98d]
 int32_t death_random_spin_rate_bam(World &world, float min_deg, float max_deg) {
     const int32_t floor_bam = static_cast<int32_t>(static_cast<double>(min_deg) * 11930464.0);
-    const int32_t roll = death_rand16(world) % 100;
+    const int32_t roll = world.next_prng16() % 100; // stream A [orig: PRNG_Next16 @0x57B952]
     const int32_t max_bam = static_cast<int32_t>(static_cast<double>(max_deg) * 11930464.0);
     const int32_t v = static_cast<int32_t>(
             (static_cast<int64_t>(roll) * 10737418 * static_cast<int64_t>(max_bam)) >> 30);
@@ -1375,9 +1374,19 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // Every section spawns; only the TYPE lookup clamps at slot 16.
         const int type_idx = death_piece_type_index(traits->husk_sub_part_types, s);
         const DeathPieceType &tp = death_piece_type(type_idx);
-        if (tp.probability < 1.0f) {
-            // [orig: the probability roll @ 0x49365f — rand16 vs prob*65536]
-            if (death_rand16(world) >= static_cast<uint16_t>(tp.probability * io::kFp16One))
+        // Each draw takes retail's stream, in retail's order: the probability roll
+        // C, the spread and the vertical B, the two spins and the bounce budget A;
+        // the slide kick past the loop B.
+        // [orig: PRNG_Next16_C @0x49365A; PRNG_Next16_B @0x49370E / @0x49372E /
+        //  @0x493784 / @0x49396B; Death_RandomSpinRateBam @0x4937AB / @0x4937C0;
+        //  PRNG_Next16 @0x49384F]
+        // The roll runs unless the probability is exactly 1.0, and skips the piece only
+        // when prob * 65536 falls below the draw, so a draw equal to it spawns
+        // [orig: `fld1; fcomp; test ah,44h; jnp` @0x493649..0x493658; `fild; fld;
+        //  fmul flt_7C32BC; fcompp; test ah,5; jnp` @0x493663..0x493677].
+        if (tp.probability != 1.0f) {
+            const uint16_t draw = world.next_prng16_c();
+            if (static_cast<double>(tp.probability) * 65536.0 < static_cast<double>(draw))
                 continue;
         }
         DeathPiece &p = world.death_pieces.alloc();
@@ -1415,8 +1424,8 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         // again; the vertical is an INDEPENDENT rand [0,1) with the 1.25 lift
         // [orig: flt 1.25 @ 0x7C6F18] — so the horizontal launch speed is always
         // exactly vel_scale, only the direction varies.
-        float hx = base_x + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
-        float hy = base_y + (static_cast<int32_t>(death_rand16(world)) - 0x8000) / io::kFp16One;
+        float hx = base_x + (static_cast<int32_t>(world.next_prng16_b()) - 0x8000) / io::kFp16One;
+        float hy = base_y + (static_cast<int32_t>(world.next_prng16_b()) - 0x8000) / io::kFp16One;
         float hlen = std::sqrt(hx * hx + hy * hy);
         if (hlen > 1.0e-6f) {
             hx /= hlen;
@@ -1429,7 +1438,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             hx /= hlen;
             hy /= hlen;
         }
-        const float vz = static_cast<int32_t>(death_rand16(world)) / io::kFp16One;
+        const float vz = static_cast<int32_t>(world.next_prng16_b()) / io::kFp16One;
         // Spin rates: the BAM32 words per tick, max * (rand % 100) / 100 floored
         // at min [orig: the pair @0x4937AB / @0x4937C0 -> Death_RandomSpinRateBam
         // @0x57B940, stored @0x4937B0 / @0x4937C5], drawn after the vertical's
@@ -1447,7 +1456,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         p.vel[2] = io::retail_ftol_sse2(scale * 1.25 * static_cast<double>(vz) * io::kFp16OneD);
         // Bounce budget: rand % lifetime + 1, floored at lifetime/8
         // [orig: @ 0x49385b-0x493885].
-        int bounces = tp.lifetime > 0 ? (death_rand16(world) % tp.lifetime) + 1 : 1;
+        int bounces = tp.lifetime > 0 ? (world.next_prng16() % tp.lifetime) + 1 : 1;
         const int floor_b = tp.lifetime >> 3;
         if (bounces < floor_b) bounces = floor_b;
         if (bounces < 1) bounces = 1;
@@ -1470,7 +1479,7 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     if (traits->is_decoration)
         target.veh.slide_z -= 16182;
     else
-        target.veh.slide_z += (death_rand16(world) >> 4) + 4096;
+        target.veh.slide_z += (world.next_prng16_b() >> 4) + 4096;
     // Successful entry installs the generic callback and applies the kick.
     // The unitType dispatch may replace it with a falling/static callback:
     // helicopters drop (-0.247), others pop (+0.0625 + rand/16)

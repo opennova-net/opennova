@@ -1532,6 +1532,60 @@ void test_death_piece_rng_is_world_local() {
     }
 }
 
+// The piece spawn draws retail's three PRNG_Next16 streams in retail's order: a
+// probability roll (a WHEEL's 0.5) from C, the spread and vertical from B, the two
+// spins and the bounce budget from A, the slide kick from B; the inline
+// dword_31BFBB8 stream is left. [orig: Entity_SpawnDeathPieces @0x493400 -
+//  PRNG_Next16_C @0x49365A, PRNG_Next16_B @0x49370E / @0x49372E / @0x493784 /
+//  @0x49396B, Death_RandomSpinRateBam @0x4937AB / @0x4937C0 (PRNG_Next16 @0x57B952),
+//  PRNG_Next16 @0x49384F]
+void test_death_piece_draws_take_retails_streams() {
+    auto w = std::make_unique<World>();
+    seed_ammo(*w);
+    w->registry.configure_pool(1, 4);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 700;
+    seed.health = 0;
+    seed.position = Vec3{0.0f, 0.0f, 10.0f};
+    seed.bound_radius = 2.0f;
+    const EntityHandle h = w->registry.spawn(1, seed);
+    ItemDeathTraits t = barrel_traits();
+    t.husk_sub_part_types[3] = 1; // WHEEL, probability 0.5
+    w->tables.item_death_traits.set(700, t);
+    auto ref = std::make_unique<World>();
+    const uint32_t blast_stream = w->destruction_rng.state;
+    // The expected draws: sections 1 and 2 (CHUNK_M) always, 3 (WHEEL) on its roll.
+    const bool wheel = ref->next_prng16_c() <= 0x8000u;
+    const int pieces = wheel ? 3 : 2;
+    for (int i = 0; i < 3 * pieces + 1; ++i) ref->next_prng16_b();
+    for (int i = 0; i < 3 * pieces; ++i) ref->next_prng16();
+    spawn_death_pieces(*w, *w->registry.get(h));
+    int live = 0;
+    for (const DeathPiece &p : w->death_pieces.pieces)
+        if (p.active) ++live;
+    CHECK(live == pieces);
+    CHECK(w->prng16_c_state == ref->prng16_c_state);
+    CHECK(w->prng16_b_state == ref->prng16_b_state);
+    CHECK(w->prng16_state == ref->prng16_state);
+    CHECK(w->destruction_rng.state == blast_stream);
+
+    // A draw equal to prob * 65536 spawns the piece: the roll skips only below it
+    // [orig: `fcompp; test ah,5; jnp` @0x493663..0x493677]. State 0x10200F7F's next
+    // draw is 0x8000.
+    auto edge = std::make_unique<World>();
+    seed_ammo(*edge);
+    edge->registry.configure_pool(1, 4);
+    const EntityHandle edge_h = edge->registry.spawn(1, seed);
+    edge->tables.item_death_traits.set(700, t);
+    edge->prng16_c_state = 0x10200F7Fu;
+    spawn_death_pieces(*edge, *edge->registry.get(edge_h));
+    int edge_live = 0;
+    for (const DeathPiece &p : edge->death_pieces.pieces)
+        if (p.active) ++edge_live;
+    CHECK(edge_live == 3);
+}
+
 // Retail transforms each section's COBJ centre (the 108-B runtime row's
 // +0x38..+0x40) through the wreck's orientation matrix [orig: @0x4938b2..
 // 0x493900]. As above, the three +90 degree rotations make (x,y,z) ->
@@ -3369,7 +3423,8 @@ static void test_aircraft_death_lifecycle() {
 
 // The aircraft death spin rates in retail's evaluation order
 // [orig: Entity_InitDeathState @0x48F98A/@0x48F9A4 -> Death_RandomSpinRateBam
-//  @0x57B940]. Hand-derived from the rol-xor stream seeded 0x200: the first draw
+//  @0x57B940, whose draw is stream A, PRNG_Next16 @0x57B952]. Hand-derived from
+// stream A seeded 0x200 (the inline blast stream is left): the first draw
 // is state rol4(0x200 + rol11(0x200)) ^ 1 = 0x01002001 -> low16 0x2001 = 8193,
 // r = 93; floor = ftol(0.45f * 11930464.0f) = ftol(0.449999988 * 11930464) =
 // 5368708; max = ftol(0.65f * 11930464.0f) = ftol(0.649999976 * 11930464) =
@@ -3392,11 +3447,13 @@ static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 	seed.position = { 10, 20, 30 };
 	const auto h = w.registry.spawn(1, seed);
 	Entity &e = *w.registry.get(h);
-	w.destruction_rng.state = 0x200u;
+	w.prng16_state = 0x200u;
+	const uint32_t blast_stream = w.destruction_rng.state;
 	entity_init_aircraft_death(w, e, false);
 	CHECK(e.veh.air_roll_rate == 7211964);
 	CHECK(e.veh.air_pitch_rate == -1789569);
-	CHECK(w.destruction_rng.state == 0x20028091u);
+	CHECK(w.prng16_state == 0x20028091u);
+	CHECK(w.destruction_rng.state == blast_stream);
 }
 
 // The spawn-marker pass is one of the server tick's every-32 legs: it runs
@@ -5445,6 +5502,7 @@ int main() {
     test_death_pieces_water_word_edge();
     test_ai_wreck_pieces_follow_its_travel();
     test_death_piece_rng_is_world_local();
+    test_death_piece_draws_take_retails_streams();
     test_death_piece_section_center();
     test_death_piece_render_contract();
     test_death_piece_water();
