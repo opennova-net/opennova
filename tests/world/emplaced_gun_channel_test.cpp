@@ -9,6 +9,9 @@
 #include <base/io/bam.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/inmatch/client_replica_emplaced.h>
+#include <runtime/mission/promote.h> // mission::ItemSeatSpec
+#include <runtime/replication/client_state.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
@@ -1270,9 +1273,8 @@ void test_dfx2_counter_rotation_gate() {
 // DFX2-25 in the channel: the child posed ahead of its gunner's channel slews against its frame
 // before the pose (savedLivePose), publishes the slewed words to its carrier's brain, then turns
 // by the pose's turn and takes its window. A gunner on the old aim leaves the words 0 by the slew;
-// the GROUND brain takes that 0, and the 1/256 turn adds 0x100 to the stored word. Ours' Jointops
-// path (unchanged) slews against the posed frame, spending its rate on the turn, and publishes
-// that.
+// the GROUND brain takes that 0, and the 1/256 turn adds 0x100 to the stored word. Jointops.exe's
+// slews against the same frame and keeps its words 0: it has no counter-rotation.
 // [orig: Entity_UpdateChildAttachment @0x4407A0 then Entity_UpdateTransformAndTurret @0x440B20
 //  (dfx2.exe) - the slew's +0x10 @0x44084E, the publication @0x440E01, the counter-rotation
 //  @0x440FF1 / @0x440FFE, the window @0x4410EA]
@@ -1299,10 +1301,127 @@ void test_dfx2_channel_publishes_then_counter_rotates() {
             CHECK(r.gun().emplaced_gun_yaw_word == 0x100);
             CHECK(brain_yaw == 0); // the slewed word, ahead of the counter-rotation
         } else {
-            CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
-            CHECK(brain_yaw == emplaced_word_bam(static_cast<int16_t>(0x93)));
+            CHECK(r.gun().emplaced_gun_yaw_word == 0);
+            CHECK(brain_yaw == 0);
         }
         CHECK(r.gun().emplaced_gun_pitch_word == 0);
+    }
+}
+
+// The slew reads the frame ahead of this tick's compose, both titles: the gun's ai-fn runs in its
+// pool-1 visit ahead of its class update. A child anchored on a carrier userpoint, its gunner
+// holding the gun's aim while the carrier turns 1/256 of a turn: the IsTurret words stay 0 on the
+// turning tick (the frame before the turn), and take one rate step (0x93) the tick after. A slew
+// against the composed frame took the step a tick early (0x93, then 0x100).
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - @0x4B8E3C ahead of @0x4B8E53;
+//  Entity_UpdateChildAttachment @0x4409A0 - @0x440A51 / @0x440A58]
+void test_slew_reads_the_frame_before_the_compose() {
+    Rig r(/*local=*/true, /*player_bit=*/true, opennova::def::DEF_ITEM_ATTRIB2_ISTURRET);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.health = 100;
+    carrier.heading = kGunHeading;
+    const EntityHandle parent = r.w.registry.spawn(1, carrier);
+    r.gun().emplacement_parent = parent;
+    r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+    r.gun().emplacement_pose_metadata_resolved = true;
+    r.gun().emplacement_bone = 1;
+    r.look(kGunHeading, 0);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    const int32_t turned = bam_add(kGunHeading, 0x01000000);
+    r.w.registry.get(parent)->heading = turned;
+    r.w.run_logic_tick(true);
+    CHECK(emplaced_gun_frame_heading(r.gun()) == turned); // composed on the turned carrier
+    CHECK(r.gun().saved_live_yaw == kGunHeading);
+    CHECK(r.gun().emplaced_gun_yaw_word == 0);
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().emplaced_gun_yaw_word == static_cast<int16_t>(0x93));
+    CHECK(r.body->heading == kGunHeading);
+
+    // The immediate path reads the same frame: (frame - look) >> 16 on each axis.
+    Rig i(/*local=*/false, /*player_bit=*/true);
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.health = 100;
+    const EntityHandle hull_h = i.w.registry.spawn(1, hull);
+    Entity &gun = i.gun();
+    gun.emplacement_parent = hull_h;
+    gun.emplacement_bone = 1;
+    gun.emplacement_pose_metadata_resolved = true;
+    gun.saved_live_yaw = kGunHeading;
+    gun.saved_live_pitch = 0x00400000;
+    gun.saved_live_valid = true;
+    gun.heading = bam_add(kGunHeading, 0x01000000);
+    gun.pitch_bam = 0;
+    i.look(bam_sub(kGunHeading, 0x01000000), 0);
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0100);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0x0040);
+    // A child no compose stamped (here unresolved) reads the frame it stands in.
+    i.gun().emplacement_pose_metadata_resolved = false;
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0);
+}
+
+// The joiner's remote-gunner leg over a gun its world composes: the slew reads the row's frame
+// (its world row's before this tick's compose, which the pool-1 walk mirrored), the window and
+// its occupant write-back the world row's composed frame. An immediate gun 1/32 of a turn behind
+// its composed frame, a +-45 degree window: the gunner held past it is pinned at 45 degrees off
+// the composed frame; a row the world does not compose keeps its own frame for both.
+// [orig: Entity_UpdateChildAttachment @0x4409A0 - the immediate path @0x440B39..0x440B58;
+//  Entity_UpdateTransformAndTurret @0x440CA0 - Math_FixedPointMatrixToEulerAngles @0x4410DD
+//  ahead of the window leg @0x4411D1..0x4412B3]
+void test_replica_gun_window_reads_the_composed_frame() {
+    using opennova::replication::ClientEntityState;
+    for (const bool composed : {false, true}) {
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(1, 4);
+        Entity twin_seed;
+        twin_seed.kind = EntityKind::Item;
+        twin_seed.item_id = 123;
+        const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
+        const int32_t row_frame = kGunHeading;
+        const int32_t composed_frame = bam_add(kGunHeading, 0x08000000);
+        Entity &twin = *w.registry.get(twin_h);
+        twin.veh.yaw_seeded = true;
+        twin.veh.yaw_bam = composed_frame;
+        std::vector<opennova::mission::ItemSeatSpec> specs(1);
+        specs[0].type_id = 123;
+        Seat seat;
+        seat.type = SeatType::Gunner;
+        seat.bone_index = 1;
+        specs[0].seats.push_back(seat);
+        specs[0].turret_limits_valid = true;
+        specs[0].turret_yaw_range_bam = 0x20000000;
+        specs[0].turret_pitch_max_bam = 0x40000000;
+        specs[0].turret_pitch_min_bam = 0x40000000;
+        opennova::replication::ClientState state;
+        ClientEntityState &mount = state.upsert(twin_h.packed);
+        mount.type_id = 123;
+        mount.cls = opennova::EntityClass::NoNetworkCallback;
+        mount.heading_bam = row_frame;
+        if (composed) mount.world_class_update = ClientEntityState::WorldClassUpdate::Ewep;
+        ClientEntityState &gunner = state.upsert(2);
+        gunner.cls = opennova::EntityClass::Player;
+        gunner.carrier_handle = twin_h.packed;
+        gunner.mount_bone = 1;
+        // Within the window: the word is the row's frame less the look.
+        gunner.heading_bam = bam_sub(row_frame, 0x01000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr, false,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        CHECK(state.find(twin_h.packed)->emplaced_gun_yaw_word == 0x0100);
+        CHECK(state.find(2)->heading_bam == bam_sub(row_frame, 0x01000000));
+        // Past it: pinned, and the look written back off the frame the window read.
+        state.find(2)->heading_bam = bam_sub(row_frame, 0x30000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr, false,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        const int16_t pinned = state.find(twin_h.packed)->emplaced_gun_yaw_word;
+        CHECK(pinned == 0x2000);
+        CHECK(state.find(2)->heading_bam ==
+                bam_sub(composed ? composed_frame : row_frame, emplaced_word_bam(pinned)));
     }
 }
 
@@ -1314,6 +1433,8 @@ int main() {
     test_dfx2_counter_rotation();
     test_dfx2_counter_rotation_gate();
     test_dfx2_channel_publishes_then_counter_rotates();
+    test_slew_reads_the_frame_before_the_compose();
+    test_replica_gun_window_reads_the_composed_frame();
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();

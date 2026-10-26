@@ -405,19 +405,35 @@ inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mou
 	return kEmplacedTurretSlewPerTick;
 }
 
-inline bool emplaced_counter_rotates(const World &world, const Entity &child);
+// The frame the gun's slew reads: its Yaw / Pitch words ahead of this tick's class update. The
+// gun's ai-fn (the slew, both paths) runs in its pool-1 visit ahead of its class update, which
+// composes an attached child on its carrier after it, so the slew reads the frame the last compose
+// left. Ours composes an attached child ahead of its gunner's channel (pose_emplacement_attachments),
+// and a compose on a carrier userpoint stamps savedLivePose from the words it replaces first, as
+// the class update copies +4..+0x18 to +0x80..+0x94 ahead of its euler: such a child's slew reads
+// that stamp. Any other gun's frame is the one it stands in: an unanchored child keeps its words
+// under a carrier whose matrix is built, or copies the root pose of a carrier no mover moved.
+// Both titles; dfx2.exe's counter-rotation then turns the slewed words to the composed frame.
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C ahead of the +0x1C4 call
+//  @0x4B8E53; Entity_UpdateChildAttachment @0x4409A0 - gun.Pitch @0x440A51, gun.Yaw @0x440A58,
+//  the immediate path's @0x440B39 / @0x440B3F; Entity_UpdateTransformAndTurret @0x440CA0 -
+//  savedLivePose @0x4410A2..0x4410D7 ahead of Math_FixedPointMatrixToEulerAngles @0x4410DD;
+//  dfx2.exe's Entity_UpdatePool1Slot @0x4B8EB0 - @0x4B8F1C ahead of @0x4B8F33, its
+//  Entity_UpdateChildAttachment @0x4407A0 - @0x44084E / @0x44085D, @0x4409B6 / @0x4409BC]
+inline bool emplaced_slew_reads_saved_frame(const World &world, const Entity &mount) {
+	return mount.saved_live_valid && mount.emplacement_pose_metadata_resolved &&
+			mount.emplacement_bone != 0 && world.registry.get(mount.emplacement_parent) != nullptr;
+}
 
 inline void tick_emplaced_gun_words(const World &world, Entity &mount, const Entity &occupant,
 		AiEntity &gunner) {
  EmplacedGunChannel channel{mount.emplaced_gun_yaw_word, mount.emplaced_gun_pitch_word};
  EmplacedGunnerLook look{gunner.heading, gunner.pitch, gunner.inf.recoil_pitch,
   gunner.inf.is_local_player, ((occupant.flags | occupant.engine_flags) & kEntityFlagPlayer) != 0};
- // dfx2.exe's counter-rotating child slews against its frame before this tick's pose (DFX2-25;
- // its counter-rotation follows the publication, tick_emplaced_weapon_channel).
- const bool counter = mount.saved_live_valid && emplaced_counter_rotates(world, mount);
+ const bool saved = emplaced_slew_reads_saved_frame(world, mount);
  advance_emplaced_gun_channel(channel, look,
-  counter ? mount.saved_live_yaw : emplaced_gun_frame_heading(mount),
-  counter ? mount.saved_live_pitch : emplaced_gun_frame_pitch(mount),
+  saved ? mount.saved_live_yaw : emplaced_gun_frame_heading(mount),
+  saved ? mount.saved_live_pitch : emplaced_gun_frame_pitch(mount),
   (mount.item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) != 0,
   emplaced_turret_planar_rate(world, mount, gunner.inf.is_local_player));
  mount.emplaced_gun_yaw_word = channel.yaw;

@@ -215,14 +215,21 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				world::EmplacedGunnerLook look{ occupant.heading_bam, occupant.pitch_bam,
 					occupant.recoil_pitch, occupant.handle == self_handle,
 					occupant.cls == EntityClass::Player };
-				// dfx2.exe's: the planar rate (DFX2-26; the slower one is the local gunner's on a
+				// The slew reads the row's frame: a gun the joiner's world composes (its ewep
+				// update, D-NET-690) left it the frame its world row held before this tick's
+				// compose, which the pool-1 walk mirrored (world::emplaced_slew_reads_saved_frame
+				// carries the witness). The window and its occupant write-back read the composed
+				// frame, the world row's, as the class update clamps after its compose; dfx2.exe's
+				// counter-rotating gun (DFX2-25) first turns its words from the one frame to the
+				// other. dfx2.exe's planar rate (DFX2-26; the slower one is the local gunner's on a
 				// carrier of one occupied seat, which this leg reads through the gun's world row
-				// when it has one), and a counter-rotating gun (DFX2-25) slews against the row's
-				// frame (the frame its world row held before this tick's pose, which the pool-1
-				// walk mirrored), turns from it to the world row's posed frame, and takes its
-				// window over the posed frame.
+				// when it has one).
 				const bool counter = local_mount != nullptr &&
 						world::emplaced_counter_rotates_frame(world, *local_mount);
+				const bool composed = counter ||
+						(local_mount != nullptr &&
+								mount.world_class_update ==
+										replication::ClientEntityState::WorldClassUpdate::Ewep);
 				const int32_t planar_rate = world.rules.title != gameprofile::GAME_DFX2 ? 0
 						: local_mount != nullptr
 						? world::emplaced_turret_planar_rate(world, *local_mount, look.is_local_player)
@@ -235,9 +242,9 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				const int32_t frame_before[3] = {mount.heading_bam, mount.pitch_bam,
 						mount.roll_bam};
 				const int32_t frame_posed[3] = {
-						counter ? world::emplaced_gun_frame_heading(*local_mount) : mount.heading_bam,
-						counter ? world::emplaced_gun_frame_pitch(*local_mount) : mount.pitch_bam,
-						counter ? world::emplaced_gun_frame_roll(*local_mount) : mount.roll_bam};
+						composed ? world::emplaced_gun_frame_heading(*local_mount) : mount.heading_bam,
+						composed ? world::emplaced_gun_frame_pitch(*local_mount) : mount.pitch_bam,
+						composed ? world::emplaced_gun_frame_roll(*local_mount) : mount.roll_bam};
 				if (counter) world::counter_rotate_emplaced_gun_channel(channel, frame_before, frame_posed);
 				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
 				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
