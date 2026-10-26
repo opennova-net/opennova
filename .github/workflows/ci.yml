@@ -856,7 +856,8 @@ jobs:
         shell: bash
         run: |
           install="${RUNNER_TEMP}/minted-install"
-          build/tests/mint_install.exe "$install" | tee "${RUNNER_TEMP}/minted-missions.txt"
+          # The console's CRLF lines read as the mission names they print.
+          build/tests/mint_install.exe "$install" | tr -d '\r' | tee "${RUNNER_TEMP}/minted-missions.txt"
           echo "install=$install" >> "$GITHUB_OUTPUT"
           if grep -qx "mission ${E2E_MISSION}" "${RUNNER_TEMP}/minted-missions.txt"; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
