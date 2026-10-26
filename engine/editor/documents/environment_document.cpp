@@ -880,6 +880,14 @@ NodeAddress EnvironmentDocument::terrain_key_address(size_t index) const {
 
 void EnvironmentDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
+	// A keyword the file does not write names nothing of its own: the game keeps the value the mission's earlier files
+	// gave it (the .trn's, overcast.def's: one set of globals under the three passes) [orig:
+	// Environment_LoadTimeOfDayConfig @ 0x57DB30]. Its name is a reference once the file writes the keyword, or an edit
+	// sets it (which a save writes: EnvironmentRow::written).
+	if (address.kind == kEnvironment && use.reference != ReferenceKind::None && use.schema)
+		if (const EnvironmentRow *row = environment_row(); row && !row->written.count(use.schema->id) &&
+		                                                    !env::env_keys_differing(row->config, row->read).count(use.schema->id))
+			use.reference = ReferenceKind::None;
 	// The cloud layers through ARCHIVE, each name made .pcx as the parser stores it (kTextureArgPcx): the
 	// engine's renderer::env_key_texture_role [orig: Terrain_InitRenderingResources @ 0x578A97;
 	// TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B].

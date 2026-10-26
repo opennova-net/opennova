@@ -233,8 +233,9 @@ constexpr FileKindFacts kRows[] = {
 	        .row,
 	// Read by its name on every mission's time-of-day load, after the terrain's .trn, through the environment's
 	// keyword parser [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, the name @ 0x57dbfd, the parse @ 0x57dc3b ->
-	// File_ParseASCIIFile]; packed where every other .def is.
-	Kind(FileKind::OvercastDefs, ArchiveSlot::Localres).file("overcast.def").lines(LineReader::AsciiWalk).row,
+	// File_ParseASCIIFile]; packed with the terrains in resource.pff, as retail packs it (JO:CA's boot archives),
+	// not in localres with the other .def files. The name finds it in any archive.
+	Kind(FileKind::OvercastDefs, ArchiveSlot::Resource).file("overcast.def").lines(LineReader::AsciiWalk).row,
 	Kind(FileKind::OtherDefs, ArchiveSlot::Localres).extensions(kOtherDefs).row,
 	// Opened with fopen by its bare name, from the install's folder whatever the expansion [orig:
 	// CookieJar_OpenAndLoadFile @ 0x63a500, from @ 0x55262b].

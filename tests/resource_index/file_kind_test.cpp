@@ -299,8 +299,8 @@ static int test_master_copies() {
 // Retail's boot archives against the table: each entry sits in the archive its kind's slot names, but
 // where retail splits a kind over two archives by what a file is for, which no name says
 // (kRetailSplits, each with why). The retired file_kind_retail row held every entry of JO:CA's three
-// boot archives to this rule and found these eight splits and no other; a split no entry needs fails
-// too, so the list stays retail's. The rule runs here over an install minted from the table itself
+// boot archives to this rule and found eight splits and no other, overcast.def's resource.pff among
+// them, which its own kind's slot now names (F-11); a split no entry needs fails too, so the list stays retail's. The rule runs here over an install minted from the table itself
 // (one packed file of every packed kind on its slot, one file per split in the archive retail puts it
 // in, the archives laid out as the retail packer lays them out, tests/pff/pff_packer_archive.h), and
 // the check's two refusals over the same install with one file astray and one split's file left out.
@@ -317,7 +317,6 @@ constexpr RetailSplit kRetailSplits[] = {
 	{ ArchiveSlot::Language, FileKind::Texture, nullptr, "the missions' map images (<mission>.pcx), localized" },
 	{ ArchiveSlot::Localres, FileKind::Texture, nullptr, "the menus', the HUD's and the weapons' art" },
 	{ ArchiveSlot::Resource, FileKind::Strings, "medmssn.bin", "a mission name table packed with the art" },
-	{ ArchiveSlot::Resource, FileKind::OtherDefs, "overcast.def", "a weather .def packed with the terrains" },
 	{ ArchiveSlot::Localres, FileKind::Notes, "mislist.txt", "a list the game never reads (no kind packs it)" },
 };
 constexpr size_t kRetailSplitCount = sizeof(kRetailSplits) / sizeof(kRetailSplits[0]);
@@ -458,7 +457,7 @@ static int test_boot_archives() {
 		failures += found != 1;
 	}
 	{
-		// overcast.def's split with no overcast.def in resource.pff: one failure, the split unused.
+		// mislist.txt's split with no mislist.txt in localres.pff: one failure, the split unused.
 		test_temp::TempDir dir("file_kind_unused_split");
 		TEST_EXPECT(write_minted_install(dir.root(), 6, false) == 0);
 		std::printf("file_kind: (expected) ");

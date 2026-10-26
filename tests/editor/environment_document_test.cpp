@@ -759,8 +759,8 @@ int test_session() {
 		const std::string shipped = built_text("dusk.env");
 		TEST_EXPECT(shipped.find("polytrn_detaildensity 96\r\n") != std::string::npos &&
 		            shipped.find("sky_height 175\r\n") != std::string::npos);
-		// overcast.def is a text the editor keeps whole (the text type): a terrain key there is kept, no Problem, and
-		// shipped; the environment's key now sets over overcast.def's.
+		// overcast.def opens as the environment document (F-11): a terrain key there is kept, no error (none of the
+		// keywords it does not write names a file), and shipped; the environment's key now sets over overcast.def's.
 		const AssetEntry *overcast_entry = view.project.scan->find("overcast.def");
 		const std::string overcast = overcast_entry ? overcast_entry->relative_path : std::string("overcast.def");
 		TEST_EXPECT(test_io::write_text(root + "/" + overcast, "tod_begin 1200\r\nsun_rgb 1,2,3\r\ntod_end\r\n"
@@ -968,6 +968,21 @@ int test_overcast() {
 	opennova::env::load_mission_env({&trn, &saved, nullptr}, as_saved);
 	TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
 	            config_difference(as_read.overcast, as_saved.overcast).empty() && as_saved.config.fog_type == 3);
+	// A keyword it does not write names nothing (the game keeps the .trn's): no reference, so no missing default
+	// texture or model on a stock overcast.def; one an edit sets does.
+	{
+		const FieldSchema *sky = nullptr, *sun = nullptr;
+		for (const FieldSchema &field : document->fields(kEnvironment)) {
+			if (field.id == "sky_map1") sky = &field;
+			if (field.id == "sun_3di") sun = &field;
+		}
+		auto named = std::make_unique<EnvironmentDocument>();
+		TEST_EXPECT(named->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+		TEST_EXPECT(sky && sun && named->field_on(row_address(*named), *sky).reference == ReferenceKind::None &&
+		            named->field_on(row_address(*named), *sun).reference == ReferenceKind::None);
+		TEST_EXPECT(sky && set(*named, row_address(*named), "sky_map1", std::string("near.pcx")) &&
+		            named->field_on(row_address(*named), *sky).reference == ReferenceKind::Texture);
+	}
 	// An edit's keyword joins them, and no other.
 	TEST_EXPECT(set(*document, row_address(*document), "sky_speed", int64_t(5)));
 	const std::string edited = document->serialize().text;

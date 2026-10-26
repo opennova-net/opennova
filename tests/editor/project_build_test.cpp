@@ -141,7 +141,7 @@ const Route kRoutes[] = {
 	{AssetKind::SoundProfileDefs, ArchiveSlot::Localres},
 	{AssetKind::CharAttrDefs, ArchiveSlot::Localres},
 	{AssetKind::PowerupDefs, ArchiveSlot::Localres},
-	{AssetKind::OvercastDefs, ArchiveSlot::Localres},
+	{AssetKind::OvercastDefs, ArchiveSlot::Resource},
 	{AssetKind::OtherDefs, ArchiveSlot::Localres},
 	{AssetKind::StringTableCoo, ArchiveSlot::Loose},
 	// .mnx, no kind (and left out) before S13 A8; loose until S16, which the front door reads only under
