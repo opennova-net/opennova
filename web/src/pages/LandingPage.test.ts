@@ -162,24 +162,23 @@ describe('LandingPage', () => {
     expect(hrefs(wrapper)).not.toContain('https://github.com/opennova-net/opennova/releases/latest');
   });
 
-  it('sends the buttons to the GitHub releases with no downloads host, and still names every build', async () => {
+  it('offers no download with no downloads host, and still names every build', async () => {
     const wrapper = await mountPage();
     expect(manifest).not.toHaveBeenCalled();
     expect(wrapper.find('[data-test="downloads-version"]').exists()).toBe(false);
     const text = wrapper.text();
     for (const file of BUILDS) expect(text).toContain(file);
-    const buttons = wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'));
-    expect(buttons).toHaveLength(BUILDS.length);
-    expect(buttons.every((a) => a.attributes('href') === 'https://github.com/opennova-net/opennova/releases/latest')).toBe(true);
+    expect(wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'))).toHaveLength(0);
+    expect(wrapper.findAll('[aria-disabled="true"]').filter((s) => s.text() === 'Not published yet')).toHaveLength(BUILDS.length);
+    expect(hrefs(wrapper).some((href) => href?.includes('/releases'))).toBe(false);
   });
 
-  it("keeps the buttons on the GitHub releases until the host's manifest lists the build", async () => {
+  it("offers no download until the host's manifest lists the build", async () => {
     host.mockReturnValue('https://downloads.example.com');
     manifest.mockResolvedValue(null);
     const wrapper = await mountPage();
-    const buttons = wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'));
-    expect(buttons).toHaveLength(BUILDS.length);
-    expect(buttons.every((a) => a.attributes('href') === 'https://github.com/opennova-net/opennova/releases/latest')).toBe(true);
+    expect(wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'))).toHaveLength(0);
+    expect(wrapper.findAll('[aria-disabled="true"]').filter((s) => s.text() === 'Not published yet')).toHaveLength(BUILDS.length);
   });
 
   it('offers the account and lobby steps', async () => {

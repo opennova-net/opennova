@@ -1091,8 +1091,9 @@ The host holds the current set alone, each build under its stable name
 `opennova-apps-windows.zip`, `opennova-switcher-windows.zip`) beside `manifest.json` (the
 version, when it was published, where the builds came from, and each file's size and
 SHA-256; `scripts/stage_downloads.py`). The site reads the manifest for the version and
-the sizes; its buttons work without it. Older releases and the Switcher's checksum stay on
-the GitHub releases, which the site's footer links.
+the sizes, and shows a build's button once the manifest lists it ("Not published yet"
+before; never a GitHub link). Older releases and the Switcher's checksum stay on the GitHub
+releases.
 
 **Publishing** is `.github/workflows/downloads.yml`, run from the Actions tab in the
 deployment's environment, with its GitHub deploy role (which may list, write and remove
@@ -1108,11 +1109,27 @@ The builds go up first, a build the set no longer has removed, then the manifest
 a short `Cache-Control` (five minutes, the manifest one), so the new set is what the host
 serves within minutes, with no invalidation.
 
+An operator publishes the same way from the toolbox (the deploy user may write the
+downloads bucket's objects), for instance a pull request's build to staging before the
+workflow is on master. In `.scratch/` (git ignores it; the toolbox sees the checkout as
+`/workspace`):
+
+```bash
+gh run download <run id> --pattern '*-windows*' --dir .scratch/dl   # a pull request's CI run
+python scripts/stage_downloads.py --from .scratch/dl --to .scratch/stage \
+    --version 'PR #<n> (<sha>)' --source https://github.com/<repo>/actions/runs/<run id>
+B=$(./deploy/run.sh --deployment staging infra output -raw downloads_bucket)
+./deploy/run.sh --deployment staging aws s3 sync .scratch/stage "s3://$B/" --exclude manifest.json \
+    --delete --content-type application/zip --cache-control 'public, max-age=300'
+./deploy/run.sh --deployment staging aws s3 cp .scratch/stage/manifest.json "s3://$B/manifest.json" \
+    --content-type application/json --cache-control 'public, max-age=60'
+```
+
 **Bringing it up**, once per deployment, staging first:
 
 1. `./deploy/run.sh org apply` (type `org`): the deploy user's `opennova-deploy-downloads`
-   policy (CloudFront, the us-east-1 certificate, the bucket's policy) and each GitHub
-   deploy role's grant on its downloads bucket.
+   policy (CloudFront, the us-east-1 certificate, the bucket's policy and objects) and each
+   GitHub deploy role's grant on its downloads bucket.
 2. `./deploy/run.sh --deployment staging infra apply`: the bucket, the certificate and its
    validation record, the distribution and the CNAME (`infra output downloads_host`,
    `downloads_bucket`). The apply waits for ACM to validate (minutes) and not for

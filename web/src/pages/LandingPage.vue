@@ -242,7 +242,8 @@
             <p class="text-lg font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-2 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
             <div class="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <a :href="downloadUrl(item.file)" class="btn-primary" :aria-label="`Download ${item.name}`">Download</a>
+              <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="`Download ${item.name}`">Download</a>
+              <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">Not published yet</span>
               <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
             </div>
           </li>
@@ -254,7 +255,8 @@
             <p class="font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-1 flex-1 text-sm text-ink-muted">{{ item.body }}</p>
             <div class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <a :href="downloadUrl(item.file)" class="btn-secondary px-4 py-2" :aria-label="`Download ${item.name}`">Download</a>
+              <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-secondary px-4 py-2" :aria-label="`Download ${item.name}`">Download</a>
+              <span v-else class="btn-secondary cursor-not-allowed px-4 py-2 opacity-50" aria-disabled="true">Not published yet</span>
               <span class="font-mono text-xs text-ink-muted">{{ fileLine(item.file) }}</span>
             </div>
           </li>
@@ -273,7 +275,7 @@ import RunItYourself from '../components/RunItYourself.vue';
 import type { TiersResponse } from '../types/billing';
 import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
 import { formatBytes, formatDate, formatMoney } from '../utils/format';
-import { ISSUES_URL, RELEASES_URL } from '../utils/links';
+import { ISSUES_URL } from '../utils/links';
 import { editorShots, hero, retailShots, timelapse } from '../utils/media';
 
 const editorFeatures = [
@@ -333,10 +335,10 @@ const tools = [
 const downloadsHost = downloadsBase(window.location.hostname);
 const manifest = ref<DownloadsManifest | null>(null);
 
-// GitHub's releases until the host's manifest lists the file (a deployment before its first
-// publish, or a manifest that failed to load).
-function downloadUrl(file: string): string {
-  return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : RELEASES_URL;
+// The build on this deployment's downloads host once its manifest lists it; none before (a
+// deployment before its first publish, a manifest that failed to load), and never elsewhere.
+function downloadUrl(file: string): string | undefined {
+  return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : undefined;
 }
 
 function fileLine(file: string): string {
