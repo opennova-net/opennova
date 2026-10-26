@@ -5479,7 +5479,62 @@ static void test_bearing_due_minus_x_is_the_ftol_word() {
     CHECK(bearing_to(5, 0) == 0);
 }
 
+// The prone-in-foliage concealment both NPC aim blocks add to their accuracy words: 40 for a
+// person target on a prone animation (flag 2) where the foliage map grows something, else 0.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BC5A6..0x4BC5D8, @0x4BC98A..0x4BC9BC;
+//  PlayerSlot_IsEntityInGame @0x434220 (the def type 3 test); Foliage_SampleFoliageMapMask
+//  @0x606620]
+static void test_prone_in_foliage_concealment() {
+    World world;
+    std::array<int, 256> grid{};
+    grid.fill(1);
+    std::array<uint8_t, 16> grown{};
+    grown.fill(1);
+    opennova::terrain::FoliageMaskMap map;
+    map.data = grown.data();
+    map.width = 4;
+    map.height = 4;
+    map.sector_grid = grid.data();
+    map.origin_x = -4;
+    map.origin_y = -4;
+    world.tables.foliage_map = map;
+    Entity target;
+    target.has_item_def = true;
+    target.item_type = 3;
+    target.net_anim_state = 48; // idle prone, flag 2
+    target.position.set_q16(FixedVec3{300 << 16, -(200 << 16), 0});
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    target.net_anim_state = 19; // a prone walk
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    target.net_anim_state = 44; // idle standing: no flag 2
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.net_anim_state = 48;
+    target.item_type = 1; // a vehicle is no person
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.item_type = 3;
+    target.has_item_def = false;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    target.has_item_def = true;
+    grown.fill(0); // nothing grows there
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    grown.fill(1);
+    // A body with a motor reads the motor's word: a hit's death state (flag 2) stands
+    // before the body's own update mirrors it.
+    target.handle = EntityHandle::make(0, 3);
+    AiEntity *motor = world.ai.at(world.ai.attach(target.handle));
+    motor->inf.anim_state = anim_state::kDeathFire;
+    target.net_anim_state = 44;
+    CHECK(prone_foliage_concealment(world, target) == 40);
+    motor->inf.anim_state = 44;
+    target.net_anim_state = 48;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+    world.tables.foliage_map = opennova::terrain::FoliageMaskMap{}; // no foliage map
+    motor->inf.anim_state = 48;
+    CHECK(prone_foliage_concealment(world, target) == 0);
+}
+
 int main() {
+    test_prone_in_foliage_concealment();
     test_parachute_deployment_and_descent();
     test_slope_probes_include_candidate_models();
     test_downwash_query_and_body_selection();

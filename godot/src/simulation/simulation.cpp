@@ -221,11 +221,15 @@ void Simulation::reset_world() {
 	// surface extras back on.
 	if (assets_.terrain_data.is_valid() && assets_.terrain_data->is_loaded()) {
 		const std::vector<uint8_t> &charmap = assets_.terrain_data->get_charmap_indices();
+		const std::vector<uint8_t> &foliage = assets_.terrain_data->get_foliagemap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
 				assets_.terrain_data->get_cpt(), assets_.terrain_data->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
 				assets_.terrain_data->get_charmap_width(),
-				assets_.terrain_data->get_charmap_height());
+				assets_.terrain_data->get_charmap_height(),
+				foliage.empty() ? nullptr : foliage.data(),
+				assets_.terrain_data->get_foliagemap_width(),
+				assets_.terrain_data->get_foliagemap_height());
 	}
 	apply_terrain_to_ai();
 	// The fresh world's collision/mounted-pose providers wire immediately (the
@@ -494,10 +498,13 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 	kernel_->terrain_store.clear();
 	if (p_terrain.is_valid() && p_terrain->is_loaded()) {
 		const std::vector<uint8_t> &charmap = p_terrain->get_charmap_indices();
+		const std::vector<uint8_t> &foliage = p_terrain->get_foliagemap_indices();
 		opennova::terrain::terrain_field_store_build(kernel_->terrain_store,
 				p_terrain->get_cpt(), p_terrain->get_trn(),
 				charmap.empty() ? nullptr : charmap.data(),
-				p_terrain->get_charmap_width(), p_terrain->get_charmap_height());
+				p_terrain->get_charmap_width(), p_terrain->get_charmap_height(),
+				foliage.empty() ? nullptr : foliage.data(),
+				p_terrain->get_foliagemap_width(), p_terrain->get_foliagemap_height());
 	}
 	apply_terrain_to_ai();
 }

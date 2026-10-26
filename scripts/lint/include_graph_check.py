@@ -135,6 +135,9 @@ TERRAIN_QUERY_HEADERS = {
     "runtime/terrain_query/coords.h",
     "runtime/terrain_query/height_field.h",
     "runtime/terrain_query/surface_type_map.h",
+    # The foliage map's sampler (format-free, the char map's routing): the NPC
+    # aim's prone-in-foliage concealment reads it (Foliage_SampleFoliageMapMask).
+    "runtime/terrain_query/foliage_mask_map.h",
     # The ONE owning cpt/trn(+charmap) field builder (ADR 0042 d4; format-free
     # store header only — terrain_field_build.h, the format-typed entry over
     # the parsed documents, stays off the seam).

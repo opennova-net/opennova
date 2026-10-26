@@ -23,6 +23,7 @@
 #include <runtime/audio/sound_profile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/tick_rate.h> // host_milliseconds_for_logic_tick (authority_tick_count_ms's seam)
+#include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
@@ -626,6 +627,10 @@ struct MissionTables {
     // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
     // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
     terrain::SurfaceTypeMap surface_map;
+    // Host-wired foliage map sampler (the terrain store's remapped masks), which the NPC aim's
+    // prone-in-foliage concealment reads. Empty = nothing grows, the sampler's no-map 0.
+    // [orig: Foliage_SampleFoliageMapMask @ 0x606620]
+    terrain::FoliageMaskMap foliage_map;
     // The seed a World without items rows spawns its players from (a native
     // harness), and the stock class-8 desert row (105305) the joiner-side
     // readers with no body row read.

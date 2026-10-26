@@ -58,6 +58,7 @@ void MissionWorld::load(const std::shared_ptr<MissionFiles> &read, const bms::Fi
 	terrain = ground.height_field();
 	water_height = ground.water() ? float(ground.water_height()) : 0.0f;
 	world.tables.surface_map = ground.surface_sampler();
+	world.tables.foliage_map = ground.foliage_sampler(false);
 	world.env.water_z = ground.water() ? int32_t(std::lround(ground.water_height() * io::kFp16OneD)) : 0;
 	pose.set_assets(files->store.get());
 	collision.terrain = terrain;

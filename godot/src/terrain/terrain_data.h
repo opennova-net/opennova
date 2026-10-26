@@ -384,6 +384,9 @@ public:
 	const std::vector<uint8_t> &get_charmap_indices() const { return charmap_indices; }
 	int get_charmap_width() const { return charmap_width; }
 	int get_charmap_height() const { return charmap_height; }
+	const std::vector<uint8_t> &get_foliagemap_indices() const { return foliagemap_indices; }
+	int get_foliagemap_width() const { return foliagemap_width; }
+	int get_foliagemap_height() const { return foliagemap_height; }
 };
 
 } // namespace godot

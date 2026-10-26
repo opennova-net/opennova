@@ -341,6 +341,8 @@ void MissionKernel::wire_terrain() {
 	// tiles; the shell's apply_terrain_to_ai calls this and then re-layers its
 	// sound profiles.
 	world.tables.surface_map = terrain_store.surface_map();
+	// The foliage map the NPC aim's concealment samples, the store's remapped masks.
+	world.tables.foliage_map = terrain_store.foliage_mask_map();
 }
 
 bool MissionKernel::load_terrain_field() {
