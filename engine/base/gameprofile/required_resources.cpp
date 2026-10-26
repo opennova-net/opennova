@@ -74,9 +74,16 @@ const RequiredResource k_required_resources[] = {
     { "SndProf.def", BOOT_PHASE_BOOT, RES_REQUIRED, 0,
       "missing -> the boot goes on, but the 128-slot profile table it allocated is never cleared and every item definition binds its first slot (the \"default\" lookup's miss): a mission's items then take their sound sets from that uncleared memory, and the game can hang or crash once one is registered or played (a genx or envs item's loop, the player's footsteps)",
       "[orig: Game_InitSubsystems @ 0x4a7141 -> SoundProfile_LoadAll @ 0x527490 (the table AudioMem_AllocWithLabel @ 0x5274ce -> FastMem_Alloc @ 0x7697b0, no clear; the miss File_ParseASCIIFile @ 0x53d823); ItemDef_AllocateWithDefaults @ 0x49e3ea -> SoundProfile_FindSlotByName @ 0x526e30 (no profile: the table @ 0x526e6a); ItemDef_ResolveAllResources @ 0x49e62d..0x49e687; genx Entity_UpdateParentTransform @ 0x4a8d4f -> Entity_UpdateEnvSoundEmitter @ 0x4a81de -> SoundEmitter_RegisterSetLayers @ 0x528340]", "sndprof_def" },
-    { "gt.ssc", BOOT_PHASE_BOOT, RES_OPTIONAL, RES_F_PLAYER_FILE,
+    // The gate-tag override is a game's own data, never a player's file: the game only reads it,
+    // once at boot, by name through the archive layer with loose files first (the expansion's
+    // folder, the install's, then the archives), and nothing writes one: the image's one "gt.ssc"
+    // string is pushed by the loader's three reads alone, and the updater's tools hold no .ssc
+    // name. A game that ships one (ADR 0055 d5) lists in its own lobby.
+    { "gt.ssc", BOOT_PHASE_BOOT, RES_OPTIONAL, 0,
       "silent skip (gate-tag override, key \"jop:2:oyez\")",
-      "[orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]", "gt_ssc" },
+      "[orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0 - "
+      "FileSystem_SetSearchLooseFirst(1) @0x4cdcf4, FileSystem_FileExists(\"gt.ssc\") @0x4cdcfe, the read @0x4cdd32; "
+      "the name @0x7cbb50, pushed only @0x4cdcf9, @0x4cdd0b, @0x4cdd2d]", "gt_ssc" },
     { "items.def", BOOT_PHASE_BOOT, RES_REQUIRED, 0,
       "missing -> the boot goes on with no item definitions: the loader returns 1 whatever its parse did, so the \"Unable to load items.def\" fatal wired at the callsite is never reached",
       "[orig: Game_InitSubsystems @ 0x4a71a3 -> ItemDefs_LoadAndValidate @ 0x4a1da0 (File_ParseASCIIFile's result unread @ 0x4a1e12, returns 1 @ 0x4a20a2); the unreachable fatal @ 0x4a71af -> Game_FatalErrorWithMessageBox @ 0x4a5160]", "items_def" },

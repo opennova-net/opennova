@@ -77,13 +77,17 @@ describe('DownloadsPage', () => {
     expect(commitLink.attributes('title')).toBe(commit);
     expect(line.get('time').attributes('datetime')).toBe('2026-10-26T01:56:58.000Z');
 
-    // Each card: the file's name, then its version, size and short SHA-256 (the full one on hover).
+    // Each card: the file's name, then its version, the set's commit and the deployment a debug build
+    // talks to (as the runtime's main menu names its build), size and short SHA-256 (the full one on hover).
     const game = wrapper.get('[data-test="build-jointops-game-windows.zip"]');
-    expect(game.findAll('p').map((p) => p.text())).toEqual(['jointops-game-windows.zip', 'v0.0.20, 53 MB, SHA-256 e36a8dab2612']);
+    expect(game.findAll('p').map((p) => p.text())).toEqual([
+      'jointops-game-windows.zip',
+      'v0.0.20 (2d23f67, staging), 53 MB, SHA-256 e36a8dab2612',
+    ]);
     expect(game.get('span').attributes('title')).toBe(sha);
-    // The tools' zips but the editor carry no version.
-    expect(buildLine(wrapper, 'opennova-apps-windows.zip')).toBe('53 MB, SHA-256 e36a8dab2612');
-    expect(buildLine(wrapper, 'opennova-editor-windows.zip')).toBe('v0.0.20, 53 MB, SHA-256 e36a8dab2612');
+    // The tools' zips but the editor carry no version: the commit and the deployment alone.
+    expect(buildLine(wrapper, 'opennova-apps-windows.zip')).toBe('2d23f67, staging, 53 MB, SHA-256 e36a8dab2612');
+    expect(buildLine(wrapper, 'opennova-editor-windows.zip')).toBe('v0.0.20 (2d23f67, staging), 53 MB, SHA-256 e36a8dab2612');
     // GitHub sits in the footer now, not in the downloads.
     expect(hrefs(wrapper)).not.toContain('https://github.com/opennova-net/opennova/releases/latest');
   });
@@ -99,9 +103,12 @@ describe('DownloadsPage', () => {
       talks_to: 'prod',
       files: Object.fromEntries(BUILDS.map((file) => [file, { size: 1_096_841, sha256: 'ab'.repeat(32), version: '0.0.21' }])),
     });
-    const line = (await mountPage()).get('[data-test="downloads-version"]');
+    const wrapper = await mountPage();
+    const line = wrapper.get('[data-test="downloads-version"]');
     expect(line.text()).toBe('Version v0.0.21, a release build from commit 1a2b3c4, published 2026-10-26 12:00 UTC.');
     expect(line.get('a').attributes('href')).toBe('https://github.com/opennova-net/opennova/releases/tag/v0.0.21');
+    // A release's cards name its commit and no deployment.
+    expect(buildLine(wrapper, 'jointops-game-windows.zip')).toBe('v0.0.21 (1a2b3c4), 1.1 MB, SHA-256 abababababab');
   });
 
   it('shows what a manifest from before the build fields has', async () => {

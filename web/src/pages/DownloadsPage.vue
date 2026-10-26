@@ -135,13 +135,20 @@ const sourceUrl = computed(() => {
   return source && /^https:\/\//i.test(source) ? source : undefined;
 });
 
-// A build's line under its file name: its version when its name carried one ("v0.0.20, 53 MB")
-// and its SHA-256; none before the manifest lists it.
+// A build's line under its file name: its version when its name carried one, the set's commit and,
+// for a build that is no release, the deployment it talks to, as the runtime's main menu names its
+// build ("v0.0.20 (705c774, staging), 53 MB"), then its size and SHA-256; none before the manifest
+// lists it.
 function buildInfo(file: string): { details: string; sha256: string } | undefined {
-  const entry = manifest.value?.files[file];
-  if (!entry) return undefined;
-  const details = entry.version ? `v${entry.version}, ${formatBytes(entry.size)}` : formatBytes(entry.size);
-  return { details, sha256: entry.sha256 };
+  const m = manifest.value;
+  const entry = m?.files[file];
+  if (!m || !entry) return undefined;
+  const notes = [shortCommit.value, m.build && m.build !== 'release' ? m.talks_to || m.build : '']
+    .filter(Boolean)
+    .join(', ');
+  const name = entry.version ? `v${entry.version}` : '';
+  const which = name && notes ? `${name} (${notes})` : name || notes;
+  return { details: which ? `${which}, ${formatBytes(entry.size)}` : formatBytes(entry.size), sha256: entry.sha256 };
 }
 
 const gameCards = computed(() => games.map((item) => ({ ...item, build: buildInfo(item.file) })));

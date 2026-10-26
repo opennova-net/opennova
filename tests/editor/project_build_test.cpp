@@ -25,7 +25,9 @@
 #include <sys/stat.h>
 #endif
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -43,6 +45,8 @@
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
+#include <net/novacrypto/pubcrypto.h>
+#include <net/title/title_identity.h>
 #include <runtime/renderer/material_texture.h>
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
@@ -559,6 +563,11 @@ static std::vector<uint8_t> bytes_of(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
+// gt.ssc as the game decodes it: `tag` under Joint Operations' key chain (net/title/title_identity.h).
+static std::string gate_tag_file(const std::string &tag) {
+	return opennova::encode_key_chain(bytes_of(tag), opennova::title_identity(opennova::gameprofile::GAME_JO)->gate_tag_keys);
+}
+
 // The project file of the name, wherever the project keeps it ("" for none).
 static std::string find_file(const std::string &root, const std::string &name) {
 	std::error_code ec;
@@ -630,6 +639,7 @@ static int test_expansion_layout() {
 	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", "1.0"));
 	TEST_EXPECT(test_io::write_text(p.root + "/cc.bin", "us"));
 	TEST_EXPECT(test_io::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
+	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", gate_tag_file("jxm:1")));
 	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
 	TEST_EXPECT(install.written);
 	const BaseNames base = install.base();
@@ -666,6 +676,10 @@ static int test_expansion_layout() {
 	TEST_EXPECT(!in(plan.loose, "nw_error.mnx"));
 	TEST_EXPECT(loose_at("expansion/jxm/jxm.bin") && loose_at("expansion/jxm/header.bik"));
 	TEST_EXPECT(loose_at("expansion/jxm/Mjxm.sbf") && loose_at("expansion/jxm/version.txt"));
+	// The gate-tag override in the expansion's folder, which the boot reads first under /exp [orig:
+	// Mission_LoadEncryptedConfig @0x4cdcd0], never in an archive of the pair.
+	TEST_EXPECT(loose_at("expansion/jxm/gt.ssc") && !in(plan.archives[0].entries, "gt.ssc") &&
+	            !in(plan.archives[1].entries, "gt.ssc"));
 	TEST_EXPECT(!in(plan.loose, "cc.bin") && !in(plan.archives[0].entries, "cc.bin") && in(plan.root_only, "cc.bin"));
 	for (const BuildEntry &entry : plan.loose) TEST_EXPECT(entry.build_path.rfind("expansion/jxm/", 0) == 0);
 
@@ -681,6 +695,7 @@ static int test_expansion_layout() {
 	const std::string dir = report.build_dir;
 	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/jxmL.pff")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.pff")));
 	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/version.txt")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.bin")));
+	TEST_EXPECT(test_io::read_file_text(dir + "/expansion/jxm/gt.ssc") == gate_tag_file("jxm:1"));
 	TEST_EXPECT(!fs::exists(system_path(dir + "/language.pff")) && !fs::exists(system_path(dir + "/header.bik")) && !fs::exists(system_path(dir + "/cc.bin")));
 	// S26 C10: the build's list names each loose file where it landed, with its size (they read 0 B).
 	for (const BuiltFile &file : report.built)
@@ -1309,6 +1324,109 @@ static int test_export() {
 	            !fs::exists(system_path(over.export_dir + "/language.pff")) && fs::is_regular_file(system_path(over.export_dir + "/notes.txt")));
 	TEST_EXPECT(std::find(shipped.removed.begin(), shipped.removed.end(), "language.pff") != shipped.removed.end() &&
 	            shipped.kept == std::vector<std::string>{"notes.txt"});
+	return 0;
+}
+
+// The base game's version text (a standalone project's version.txt, its install's root one as a game you own
+// imports it): the game never reads it and the updater reads it alone, loose in the game's folder, its CRC at
+// its start and at its end, then "No Update Needed!" or "Current Version:" and its text [orig:
+// Cupdate2Dlg_OnInitDialog @ 0x4090e0 (UPDATE.EXE); Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]. The
+// build copies it loose beside the archives, never into one; the export carries it there with its bytes,
+// where a release packs it as a loose row of the base's command file. A build of the same project as an
+// expansion puts it in the expansion's folder instead, its own version text.
+static int test_base_version_text_ships_loose_at_the_root() {
+	Project p("opennova_editor_build_base_version_test");
+	TEST_EXPECT(p.create() && p.fill());
+	const std::string version = "Synthetic Game: Base, V1.0.0.1; English";
+	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", version));
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok);
+	size_t loose = 0;
+	for (const BuildEntry &entry : plan.loose)
+		if (entry.logical_name == "version.txt") {
+			++loose;
+			TEST_EXPECT(entry.build_path == "version.txt" && entry.kind == AssetKind::Text);
+		}
+	TEST_EXPECT(loose == 1);
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "version.txt");
+	const AssetEntry asset = entry_of("version.txt", AssetKind::Text);
+	const BuildPlaceWords standalone = build_place_words(asset), expansion = build_place_words(asset, "jxm");
+	TEST_EXPECT(standalone.packed && standalone.words.find("beside the archives") != std::string::npos);
+	TEST_EXPECT(expansion.packed && expansion.words.find("expansion/jxm/version.txt") != std::string::npos);
+
+	const BuildReport build = run_build(plan, p.output_root());
+	for (const Diagnostic &d : build.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(build.ok && test_io::read_file_text(build.build_dir + "/version.txt") == version);
+	TEST_EXPECT(std::find(build.loose_written.begin(), build.loose_written.end(), "version.txt") != build.loose_written.end());
+	ExportRequest request;
+	request.build_dir = build.build_dir;
+	request.build_id = build.build_id;
+	request.export_dir = p.dir.file("shipped/Game");
+	request.project_id = p.doc.project_id;
+	const ExportReport shipped = export_build(request);
+	for (const Diagnostic &d : shipped.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(shipped.ok && std::find(shipped.files.begin(), shipped.files.end(), "version.txt") != shipped.files.end());
+	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/version.txt") == version);
+	// No archive of the export holds it: the game's own mount, archives alone over the boot table, has no such name.
+	{
+		opennova::Vfs vfs;
+		TEST_EXPECT(vfs.mount_game(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
+		                           opennova::VfsArchiveDiscovery::RetailTable));
+		TEST_EXPECT(vfs.has_mounted_archive() && vfs.has_file("main.mnu") && !vfs.has_file("version.txt"));
+	}
+	return 0;
+}
+
+// A game's gate-tag override, gt.ssc (ADR 0055 d5: a game that lists in its own lobby ships one), is its own
+// data, never a player's file: the game only reads it, once at boot, loose first, then from the archives, and
+// nothing writes one [orig: Game_InitSubsystems @0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0]. The build
+// copies it loose beside the archives, the export carries it there with its bytes, and the export mounted as the
+// game mounts it gives the session its tag (title_gate_tag).
+static int test_gate_tag_ships_loose_at_the_root() {
+	Project p("opennova_editor_build_gate_tag_test");
+	TEST_EXPECT(p.create() && p.fill());
+	const std::string stored = gate_tag_file("acidgambit:0");
+	TEST_EXPECT(test_io::write_text(p.root + "/gt.ssc", stored));
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok && count_code(plan.diagnostics, "build.player_file") == 0);
+	size_t loose = 0;
+	for (const BuildEntry &entry : plan.loose)
+		if (entry.logical_name == "gt.ssc") {
+			++loose;
+			TEST_EXPECT(entry.build_path == "gt.ssc" && entry.kind == AssetKind::Config);
+		}
+	TEST_EXPECT(loose == 1);
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "gt.ssc");
+	const AssetEntry asset = entry_of("gt.ssc", AssetKind::Config);
+	const BuildPlaceWords standalone = build_place_words(asset), expansion = build_place_words(asset, "jxm");
+	TEST_EXPECT(standalone.packed && standalone.words.find("beside the archives") != std::string::npos);
+	TEST_EXPECT(expansion.packed && expansion.words.find("expansion/jxm/gt.ssc") != std::string::npos);
+
+	const BuildReport build = run_build(plan, p.output_root());
+	for (const Diagnostic &d : build.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(build.ok && test_io::read_file_text(build.build_dir + "/gt.ssc") == stored);
+	ExportRequest request;
+	request.build_dir = build.build_dir;
+	request.build_id = build.build_id;
+	request.export_dir = p.dir.file("shipped/Game");
+	request.project_id = p.doc.project_id;
+	const ExportReport shipped = export_build(request);
+	for (const Diagnostic &d : shipped.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(shipped.ok && std::find(shipped.files.begin(), shipped.files.end(), "gt.ssc") != shipped.files.end());
+	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/gt.ssc") == stored);
+	// The export as the game mounts it (its archives over the boot table, its folder's loose files first): the
+	// session's tag is the file's, over Joint Operations' own.
+	const opennova::TitleIdentity &jo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+	opennova::ResourceIndex index;
+	TEST_EXPECT(index.scan(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
+	                       opennova::VfsArchiveDiscovery::RetailTable));
+	TEST_EXPECT(opennova::title_gate_tag(jo, nullptr) == "jop:cus2" && opennova::title_gate_tag(jo, &index) == "acidgambit:0");
 	return 0;
 }
 
@@ -2092,6 +2210,8 @@ int main() {
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();
+	failures += test_base_version_text_ships_loose_at_the_root();
+	failures += test_gate_tag_ships_loose_at_the_root();
 	failures += test_lean_packing();
 	failures += test_base_gate();
 	failures += test_expansion_table_texts();

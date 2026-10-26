@@ -86,6 +86,7 @@ InstallCheck check_install(const std::string &root, const std::string &game) {
 	InstallSpec spec;
 	spec.root = out.root;
 	spec.game = out.game;
+	spec.standalone_project = true; // its version text too
 	InstallView view;
 	if (!view.open(spec, out.why)) {
 		// Archives there that do not open (one held by another program, an update stopped half way).

@@ -1354,9 +1354,9 @@ server's data, one immutable version of the files `opennova-serve` reads, never 
 | File | Kind | Why |
 |---|---|---|
 | `resource.pff`, `localres.pff`, `language.pff` | base (required) | the retail boot table it mounts |
-| `version.txt`, `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the version joiners compare; the scoring table; the session timeout override; the game types |
+| `version.txt`, `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the version joiners compare; the scoring table; the session timeout override; the gate-tag override, the lobby its servers list in |
 | `<code>.pff`, `<code>L.pff`, `version.txt` | expansion (required) | the expansion's archives and the checksum joiners compare |
-| `gt.ssc` | expansion (when present) | its game types |
+| `gt.ssc` | expansion (when present) | its gate-tag override |
 
 A game's **current tree** is what new servers start on; a running server is pinned to the
 trees it started on until its owner presses **Update** on its page (the page says an update
