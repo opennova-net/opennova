@@ -84,6 +84,9 @@ bool ExpansionFields::draw(ExpansionChoice &choice, const std::vector<ProjectVie
 		ui_kit::refusal_text(problem);
 		return false;
 	}
+	// An expansion of a project's base game is weighed against that game's export, as New project and
+	// Apply weigh it, not the game install: Escalation's own project is jox01 on its base game's.
+	if (!choice.base_project.empty()) return true;
 	for (const ProjectView::InstallExpansion &installed : expansions)
 		if (strutil::iequals(installed.name, choice.name)) {
 			ui_kit::refusal_text("The game install has an expansion named " + installed.name + " already.");

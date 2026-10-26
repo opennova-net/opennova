@@ -79,6 +79,7 @@ JsonValue project_section(const SessionView &view) {
 		return expansions;
 	};
 	out.set("install_expansions", listed(view.project.install_expansions));
+	out.set("game_install_expansions", listed(view.project.game_install_expansions));
 	// The install a new project opens with (the editor's last chosen): what New project offers.
 	out.set("new_project_expansions", listed(view.project.new_project_expansions));
 	// The last install checked (the UX round's project lane): what it holds, in a line.
@@ -544,7 +545,9 @@ constexpr ViewSectionRow kSections[] = {
 			"runs), file_history {undo, redo, undo_steps, redo_steps} (DI-25: what undo_file and redo_file would take "
 			"back or do again, in words, \"\" none), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
-			"description), new_project_expansions, the same of the install a new project opens with "
+			"description), game_install_expansions, the same of the game install itself (T5: an expansion "
+			"of a project's base game, whose install_expansions are that game's export's, imports from it), "
+			"new_project_expansions, the same of the install a new project opens with "
 			"(the one last chosen), install_check, the last install checked (check_install, new_project's): its "
 			"root, game, exists, ok (the boot table's three archives there and mounting, and no build of a "
 			"project's), files, executable, expansions [{name, title}], missing_archives, build and words; "

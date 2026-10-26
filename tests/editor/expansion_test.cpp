@@ -699,6 +699,8 @@ static int test_session_on_base_project() {
 	};
 	TEST_EXPECT(has("baseonly.txt") && has("shared.txt") && !has("x1only.txt") && !has("01TR.bms"));
 	TEST_EXPECT(view.project.install_expansions.empty());
+	// The game install's own still listed apart: the installed expansion x1 Import offers the project.
+	TEST_EXPECT(view.project.game_install_expansions.size() == 1 && view.project.game_install_expansions[0].name == "x1");
 	// Settings: the base game's project and an installed expansion together refused, nothing written.
 	ProjectSettingsChange both;
 	both.builds_on = std::string("x1");

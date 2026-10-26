@@ -644,7 +644,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		// An expansion project imports an installed expansion's own files (list_installed_expansion_choices):
 		// one item for each expansion the game install has.
 		if (view.project.document && !view.project.document->expansion.standalone()) {
-			for (const ProjectView::InstallExpansion &installed : view.project.install_expansions) {
+			for (const ProjectView::InstallExpansion &installed : view.project.game_install_expansions) {
 				const std::string label = "The installed expansion " + installed.name + "...";
 				ImGui::BeginDisabled(!game_data);
 				if (ImGui::Selectable(label.c_str()) && game_data)
