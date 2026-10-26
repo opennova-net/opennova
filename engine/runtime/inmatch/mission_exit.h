@@ -32,6 +32,10 @@ inline constexpr int32_t kMissionExitRoundOver = 4;
 inline constexpr int32_t kMissionExitCdTrouble = 5;  // [orig: Input_HandleActionBinding case 36 @0x49b780]
 inline constexpr int32_t kMissionExitSystem = 6;
 inline constexpr int32_t kMissionExitPirate = 7;
+// A Mission box's: the main frame's Game Loop starts the mission the box names (World::
+// mission_exit_map) [orig: Entity_UpdateInfantryPlayerBody @0x4B611E; Game_ProcessMainFrame
+// @0x526806 -> UI_NavHistoryPush(&g_GameModeGameLoop) @0x526808].
+inline constexpr int32_t kMissionExitMissionBox = 8;
 inline constexpr int32_t kMissionExitDisconnectFirst = 9;
 // The NovaWorld session's end: the main frame's check, a ServerStopPlaying and the service's
 // punt all store it [orig: Game_ProcessMainFrame @0x52657c,
@@ -127,7 +131,7 @@ enum class MainFrameExit : uint8_t {
 //  reason @0x526860 -> the Post Menu @0x526867. The dword_B4C4CC nav-pop arm ahead of the Post
 //  Menu push (@0x526849) is not modeled; its writers are unwalked.]
 inline MainFrameExit main_frame_exit(int32_t reason, bool in_session, bool authority) {
-	if (reason == 8) return MainFrameExit::GameLoop;
+	if (reason == kMissionExitMissionBox) return MainFrameExit::GameLoop;
 	if (reason == kMissionExitRoundOver) {
 		if (!in_session) return MainFrameExit::RestartRoundSP;
 		if (!authority) return MainFrameExit::GameLoop;

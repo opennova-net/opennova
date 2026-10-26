@@ -202,6 +202,8 @@ inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 //  session) / @0x526860 (any other reason -> the "Post Menu" scene)]
 inline constexpr int32_t kWorldMissionExitQuit = 1;
 inline constexpr int32_t kWorldMissionExitRestart = 4;
+// A Mission box's (World::mission_exit_map) [orig: Entity_UpdateInfantryPlayerBody @0x4B611E].
+inline constexpr int32_t kWorldMissionExitMissionBox = 8;
 
 // The ARGB a live node draws in. An ImageFade's image quad carries the
 // MODULATE2X neutral under the node's alpha, drawn here as the unmodulated

@@ -7,7 +7,12 @@
 #include <base/io/bam.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/entity_commands.h> // hit_record_class_event (the death leg's class event)
+#include <runtime/world/entity_spawn.h>    // max_health_with_difficulty
 #include <runtime/world/infantry_internal.h>
+#include <runtime/world/local_player.h>    // the local pools (g_LocalAmmoPools)
+#include <runtime/world/player_view.h>     // player_on_damage_received
+#include <runtime/world/radar_contacts.h>  // radar_entity_source
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -65,6 +70,8 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
         // The org2 twin of the org1 ride link, right after the hold-state commit.
         // [orig: Entity_UpdateInfantryPlayerBody @0x4B5EA9..0x4B5F2C]
         if (Entity *body = world.registry.get(e.handle)) infantry_ride_link(world, *body);
+        // Then the health-adjust block. [orig: @0x4B5F2C..0x4B622D]
+        infantry_health_adjust(e, world);
         // The local player's live body scans for the nearest threat at the current fog
         // distance (Entity_FindNearestThreat over the player: on the authority the hit's
         // sees and targeted group quads with the player as self, its single rows failing the
@@ -82,6 +89,114 @@ void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic
                                          world.weather.fog_current_q16());
     }
 
+}
+
+// The player body's health-adjust block, on the slow pass, while its Health is above 0. The
+// rates start at the header's two words; each POWER1..POWER8 pool (ammo classes 3..10) that holds
+// a count steps down one, POWER1 adding 10 to the health rate and POWER2 10 to the mana rate; a
+// type 1 / type 2 box strictly holding the body replaces the rate by its value's low word, the
+// last such box in the list winning, and a type 3 box sends the local player to the mission its
+// two words name (exit reason 8). On the authority the health rate then moves Health, a gain
+// below the difficulty's ceiling and capped there, a drain while above 0, the drain crediting the
+// body itself. On every machine a Health at 0 or below on a body not yet dead stages the generic
+// death, clears the last attacker, raises the class event 1 and, for the local player, the self
+// blip; then the mana rate moves the mana word, a gain below the def's mana (no cap), a drain
+// while above 0. A pool reads its validated player's tables on the authority (the listen host's
+// own player and any player with no session slot: the local pools), the local pools elsewhere.
+// The rates and words are 16-bit as the block holds them.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the Health gate @0x4B5F2C..0x4B5F33, the
+//  header words @0x4B5F39 / @0x4B5F40, the pool loop @0x4B5F55..0x4B5F9C
+//  (Server_GetEntitySlotValue @0x5454A0, WeaponSlot_DecrementTimer @0x5454F0), the box walk
+//  @0x4B6022..0x4B614F (the strict bounds @0x4B6040..0x4B6078, the type switch @0x4B608D; the
+//  Mission box @0x4B60AA..0x4B611E), the authority's Health legs @0x4B6157..0x4B61A6
+//  (Entity_GetMaxHealthWithDifficulty @0x4B6160, the self credit @0x4B61A0), the death leg
+//  @0x4B61AD..0x4B61FA (Entity_ComputeAnimSlotIndex(.., 4) @0x4B61C1, the +0x178 clear @0x4B61D7,
+//  the class event @0x4B61E3, Player_OnDamageReceived @0x4B61F5), the mana legs
+//  @0x4B61FD..0x4B622D]
+void AiSystem::infantry_health_adjust(AiEntity &e, World &world) {
+    Entity *self = world.registry.get(e.handle);
+    if (self == nullptr || retail_signed_i16(e.health) <= 0) return;
+    const bool local_body = e.handle == world.cached.local_player;
+    LocalPlayer *local = world.local_player_state;
+    // The slot's pool: on the authority the validated player's tables (the local pools for the
+    // listen host's own player and a body no slot holds), elsewhere the local pools.
+    const auto local_pool = [&](int32_t ammo_class) -> int32_t * {
+        if (local == nullptr || ammo_class < 0 ||
+                static_cast<size_t>(ammo_class) >= local->inventory.pools.size())
+            return nullptr;
+        return &local->inventory.pools[static_cast<size_t>(ammo_class)];
+    };
+    const auto pool_holds = [&](int32_t ammo_class) -> bool {
+        if (is_authority && !local_body && world.remote_weapon_tables != nullptr) {
+            int32_t pool = 0, loaded = 0;
+            if (world.remote_weapon_tables->remote_ammo(world, e.handle, ammo_class, 0, pool,
+                        loaded))
+                return pool != 0;
+        }
+        const int32_t *pool = local_pool(ammo_class);
+        return pool != nullptr && *pool != 0;
+    };
+    const auto pool_step_down = [&](int32_t ammo_class) {
+        if (is_authority && !local_body && world.remote_weapon_tables != nullptr &&
+                world.remote_weapon_tables->remote_pool_step_down(e.handle, ammo_class, 1))
+            return;
+        if (int32_t *pool = local_pool(ammo_class)) *pool = *pool - 1 < 0 ? 0 : *pool - 1;
+    };
+    int32_t health_rate = world.body_zones.header_health;
+    int32_t mana_rate = world.body_zones.header_mana;
+    for (int32_t i = 0; i < 8; ++i) {
+        const int32_t ammo_class = i + 3; // CLASS_POWER1..CLASS_POWER8
+        if (!pool_holds(ammo_class)) continue;
+        pool_step_down(ammo_class);
+        if (i == 0) health_rate += 10;
+        else if (i == 1) mana_rate += 10;
+    }
+    const int32_t at[3] = {self->position.x.q16, self->position.y.q16, self->position.z.q16};
+    for (const BodyZoneBox &box : world.body_zones.boxes) {
+        bool inside = true;
+        for (int axis = 0; axis < 3; ++axis)
+            inside = inside && at[axis] > box.min[axis] && at[axis] < box.max[axis];
+        if (!inside) continue;
+        if (box.type == 1) {
+            health_rate = static_cast<int32_t>(box.value & 0xFFFFu);
+        } else if (box.type == 2) {
+            mana_rate = static_cast<int32_t>(box.value & 0xFFFFu);
+        } else if (box.type == 3 && local_body) {
+            // The value word and the next as eight characters, ".bms" after the first NUL.
+            char name[9] = {};
+            for (int c = 0; c < 4; ++c) {
+                name[c] = static_cast<char>((box.value >> (8 * c)) & 0xFFu);
+                name[4 + c] = static_cast<char>((box.value_next >> (8 * c)) & 0xFFu);
+            }
+            world.mission_exit_map = std::string(name) + ".bms";
+            world.mission_exit_reason = kWorldMissionExitMissionBox;
+        }
+    }
+    const int16_t health_step = static_cast<int16_t>(health_rate);
+    if (is_authority) {
+        const int32_t max = max_health_with_difficulty(world, *self);
+        const int16_t health = static_cast<int16_t>(e.health);
+        if (health_step > 0 && health < max) {
+            const int16_t raised = static_cast<int16_t>(static_cast<uint16_t>(health) + health_rate);
+            e.health = raised > max ? static_cast<int16_t>(max) : raised;
+        } else if (health_step < 0 && health > 0) {
+            e.health = static_cast<int16_t>(static_cast<uint16_t>(health) + health_rate);
+            self->last_attacker = e.handle;
+        }
+    }
+    if (retail_signed_i16(e.health) <= 0 &&
+            ((self->flags | self->engine_flags) & kEntityFlagDead) == 0) {
+        self->death_anim_state = compute_death_anim_state(0, 0, death_cause::kGeneric);
+        self->last_attacker = EntityHandle{};
+        // The class event reads the motor's Health as its own word.
+        self->health = e.health;
+        hit_record_class_event(world, *self, 1, 0);
+        if (local_body)
+            player_on_damage_received(world, radar_entity_source(world, e.handle), at);
+    }
+    const int16_t mana_step = static_cast<int16_t>(mana_rate);
+    if ((mana_step > 0 && self->mana < self->mana_max) || (mana_step < 0 && self->mana > 0))
+        self->mana = static_cast<int16_t>(static_cast<uint16_t>(self->mana) + mana_rate);
 }
 
 void advance_weapon_channel(InfantryState &inf, IRootMotionSource *root_motion,

@@ -1125,6 +1125,8 @@ void GameWorld::_bind_methods() {
 			opennova::inmatch::kMissionExitMapCycle);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_ROUND_OVER",
 			opennova::inmatch::kMissionExitRoundOver);
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_MISSION_BOX",
+			opennova::inmatch::kMissionExitMissionBox);
 	ClassDB::bind_method(D_METHOD("main_frame_exit", "reason"), &GameWorld::main_frame_exit);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAIN_FRAME_EXIT_NONE",
 			static_cast<int>(opennova::inmatch::MainFrameExit::None));

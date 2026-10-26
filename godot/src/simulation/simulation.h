@@ -1035,6 +1035,8 @@ public:
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record,
 	// else the world's (the SP end screens' timeout, the round-over keys, the in-game RESTART).
 	int get_mission_exit_reason() const;
+	// The mission a Mission box's exit names (engine World::mission_exit_map); empty for none.
+	String get_mission_exit_map() const;
 	// The map rotation (D-NET-331, inmatch/map_change.h; simulation_rotation.cpp): the host's
 	// map change (the next map's file; empty when the rotation ended) and the joiner's reload.
 	String begin_host_map_change();

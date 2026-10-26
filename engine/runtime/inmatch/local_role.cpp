@@ -68,6 +68,7 @@ void LocalRole::run_tick(const TickInput &) {
 // The world's two exit values are the session layer's [orig: g_MissionExitReason].
 static_assert(world::kWorldMissionExitQuit == kMissionExitQuit, "the quit reason");
 static_assert(world::kWorldMissionExitRestart == kMissionExitRoundOver, "the SP restart reason");
+static_assert(world::kWorldMissionExitMissionBox == kMissionExitMissionBox, "the Mission box's");
 
 bool LocalRole::session_lost(SessionError &error) const {
 	if (kernel_ == nullptr || kernel_->world.mission_exit_reason == 0) return false;

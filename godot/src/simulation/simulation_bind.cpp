@@ -124,6 +124,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
+	ClassDB::bind_method(D_METHOD("get_mission_exit_map"), &Simulation::get_mission_exit_map);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &Simulation::begin_joiner_reload);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);

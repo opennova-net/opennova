@@ -1046,6 +1046,7 @@ World::Snapshot World::snapshot() const {
     s.kill_stats = kill_stats;
     s.epilog = epilog;
     s.mission_exit_reason = mission_exit_reason;
+    s.mission_exit_map = mission_exit_map;
     s.subgoals = script.subgoals;
     s.spawn_waves = zones.spawn_waves;
     s.zone_capture_state = zones.capture;
@@ -1078,6 +1079,7 @@ void World::restore(const Snapshot &s) {
     epilog = s.epilog;
     epilog.frame_drawn = cine_frame_drawn;
     mission_exit_reason = s.mission_exit_reason;
+    mission_exit_map = s.mission_exit_map;
     zones.spawn_waves = s.spawn_waves;
     zones.capture = s.zone_capture_state;
     zones.spawn_cycle_counter = s.spawn_cycle_counter;

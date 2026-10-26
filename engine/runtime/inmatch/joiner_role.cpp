@@ -1383,6 +1383,11 @@ void JoinerRole::pump() {
 	//  ahead of the WeaponAction_ProcessAllEntities call @0x526786]
 	sync_wire_collision_proxies_live();
 	lap.mark(devtools::Slot::SIM_CLIENT_ATTACH);
+	// A Mission box's exit (world::AiSystem::infantry_health_adjust) is the client's one exit
+	// word: the joiner's main frame answers it with the Game Loop, which reloads the host's
+	// mission (inmatch/mission_exit.h kMissionExitMissionBox).
+	if (world.mission_exit_reason == kMissionExitMissionBox && rt.mission_exit_reason() == 0)
+		rt.set_mission_exit_reason(kMissionExitMissionBox);
 	mirror_mission_entities();
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 	// The local mounted body was seat-posed earlier in the entity update's

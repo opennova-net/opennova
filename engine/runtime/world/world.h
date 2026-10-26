@@ -57,6 +57,7 @@
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
 #include <runtime/world/reverb.h>
+#include <runtime/world/body_zones.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/spectator_motor.h>
 #include <runtime/world/item_sections.h>
@@ -1213,6 +1214,11 @@ public:
     //  @0x5407B3); WeaponSlot_GetSharedLoadedRounds @0x5405F0 (its buckets @0x540657)]
     virtual bool remote_ammo(const World &world, EntityHandle player, int32_t ammo_class,
                              int32_t bucket, int32_t &pool, int32_t &loaded) const = 0;
+    // `player`'s pool of `ammo_class` stepped down by `amount`, floored at 0; false when no
+    // session slot holds it. [orig: WeaponSlot_DecrementTimer @0x5454F0 - the validated
+    //  player's pools @0x54550F..0x545520]
+    virtual bool remote_pool_step_down(EntityHandle player, int32_t ammo_class,
+                                       int32_t amount) = 0;
 };
 
 // Server_TickUpdate's every-32 legs, inside the one script admission, between
@@ -1242,6 +1248,7 @@ public:
 
     EntityRegistry registry;
     ReverbState reverb;
+    BodyZones body_zones;
     EnvState env;
     // The retail weather globals, ONE home (weather_state.h): the WAC weather
     // handlers write it through EntityCommands, the weather tick advances it
@@ -1400,6 +1407,12 @@ public:
     // server context and the client runtime, the values of
     // inmatch/mission_exit.h. [orig: g_MissionExitReason @0x24C1918]
     int32_t mission_exit_reason = 0;
+    // The mission a Mission box (type 3) sends the local player to, with the exit reason 8:
+    // the box's eight characters and ".bms", which the Game Loop's start loads (loose when the
+    // file stands in the game folder) [orig: g_MapFileName, written
+    // Entity_UpdateInfantryPlayerBody @0x4B60BE..0x4B60F3; g_MissionSourceIsLoose
+    // @0x4B60FE..0x4B6114].
+    std::string mission_exit_map;
 
 
 
@@ -1737,6 +1750,7 @@ public:
         // process-lifetime EpilogCine::frame_drawn).
         EpilogCine epilog;
         int32_t mission_exit_reason = 0;
+        std::string mission_exit_map;
         SubgoalState subgoals;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;

@@ -38,6 +38,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/player_input.h>
 
 #include "channel_clip_source.h"
@@ -954,6 +955,92 @@ void test_prone_roll_waits_out_the_slide() {
     ai.player_body_select(*e, w, 0, 8);
     CHECK(e->inf.anim_state == anim_state::kRollLeft ||
           e->inf.anim_pending == anim_state::kRollLeft);
+}
+
+// The player body's health-adjust block (D-INF-28, D-INF-29): the header's rates, a type 1 box
+// replacing the health rate by its value's low word (a drain crediting the body), the ceiling, the
+// mana word, the POWER1 pool's step and +10, the death leg's staged generic death, and the Mission
+// box's exit. Its own function: main's frame unions many scoped World locals.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5F2C..0x4B622D]
+void test_player_body_health_adjust() {
+    World w;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.has_item_def = true;
+    seed.health = 50;
+    seed.health_max = 100;
+    seed.mana = 5;
+    seed.mana_max = 20;
+    seed.flags |= kEntityFlagPlayer;
+    seed.position = Vec3{10.0f, 10.0f, 0.0f};
+    const EntityHandle h = w.registry.spawn(0, seed);
+    AiSystem ai;
+    ai.bind_registry(&w.registry);
+    ai.is_authority = true;
+    AiEntity *e = ai.at(ai.attach(h));
+    Entity *body = w.registry.get(h);
+    CHECK(e != nullptr && body != nullptr);
+    if (e == nullptr || body == nullptr) return;
+    e->health = 50;
+    // The header's rates: +3 health, +2 mana.
+    w.body_zones.header_health = 3;
+    w.body_zones.header_mana = 2;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 53 && body->mana == 7);
+    // A drain box (value -2, its low word 0xFFFE) holding the body replaces the health rate;
+    // the drain credits the body itself.
+    BodyZoneBox drain;
+    drain.min[0] = drain.min[1] = drain.min[2] = -(100 << 16);
+    drain.max[0] = drain.max[1] = drain.max[2] = 100 << 16;
+    drain.type = 1;
+    drain.value = 0xFFFFFFFEu;
+    w.body_zones.boxes.push_back(drain);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 51 && body->last_attacker == h);
+    // A gain stops at the ceiling; the mana gain stops once at the def's mana, uncapped.
+    w.body_zones.boxes.clear();
+    e->health = 99;
+    body->mana = 19;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 100 && body->mana == 21);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 100 && body->mana == 21);
+    // The POWER1 pool (ammo class 3) of the local player steps down one and adds 10.
+    LocalPlayer local(w);
+    local.inventory.pools.assign(11, 0);
+    local.inventory.pools[3] = 2;
+    w.local_player_state = &local;
+    w.cached.local_player = h;
+    e->health = 60;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 73 && local.inventory.pools[3] == 1);
+    // A Mission box sends the local player to the mission its words name.
+    BodyZoneBox mission = drain;
+    mission.type = 3;
+    mission.value = 0x3153494Du;      // "MIS1"
+    mission.value_next = 0x00004241u; // "AB"
+    w.body_zones.boxes.push_back(mission);
+    ai.infantry_health_adjust(*e, w);
+    CHECK(w.mission_exit_reason == 8 && w.mission_exit_map == "MIS1AB.bms");
+    // The death leg: a drain to 0 stages the generic death and clears the last attacker.
+    w.body_zones.boxes.assign(1, drain);
+    w.body_zones.header_health = 0;
+    local.inventory.pools[3] = 0;
+    e->health = 1;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == -1);
+    CHECK(body->death_anim_state == compute_death_anim_state(0, 0, death_cause::kGeneric));
+    CHECK(!body->last_attacker.valid());
+    // Off the authority the Health stands; the mana still moves.
+    ai.is_authority = false;
+    w.body_zones.boxes.clear();
+    w.body_zones.header_health = 3;
+    e->health = 40;
+    body->mana = 3;
+    ai.infantry_health_adjust(*e, w);
+    CHECK(e->health == 40 && body->mana == 5);
+    w.local_player_state = nullptr;
 }
 
 // D-NET-159 — AUTHORITY body-anim selection for a net-snapped REMOTE player. Runs in
@@ -6814,6 +6901,7 @@ int main() {
     // change landed alongside it.
     test_remote_player_body_anim();
     test_prone_roll_waits_out_the_slide();
+    test_player_body_health_adjust();
     test_remote_player_same_tick_prone_jump_is_rejected();
     test_remote_player_airborne_jump_press_and_repress_are_rejected();
     test_remote_player_jump_respects_world_state_flag_gates();

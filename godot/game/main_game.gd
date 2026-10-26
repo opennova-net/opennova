@@ -1506,6 +1506,11 @@ func _on_session_lost(reason: String) -> void:
 	if _world.main_frame_exit(exit_reason) == GameWorld.MAIN_FRAME_EXIT_RESTART_ROUND_SP:
 		_restart_mission()
 		return
+	# A Mission box's exit out of a session: the Game Loop starts the mission the box names
+	# (engine inmatch/mission_exit.h kMissionExitMissionBox).
+	if exit_reason == GameWorld.MISSION_EXIT_MISSION_BOX and sim != null \
+			and not sim.is_mp_session() and _start_mission_box_mission(sim.get_mission_exit_map()):
+		return
 	if sim != null and not sim.is_mp_session():
 		# A single-player mission's own exit (the end screens' ESC and timeout):
 		# the ordinary way out, not an abort.
@@ -2131,6 +2136,23 @@ func _record_round_end() -> void:
 	var in_session := sim.is_host_listening() or sim.is_joiner()
 	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(), -1, -1, false):
 		PlayerProfile.save()
+
+
+## The Mission box's Game Loop out of a session: the mission comes down and the mission the
+## box names starts from its own load entry, loose when its file stands in the game folder
+## (retail's g_MissionSourceIsLoose test, File_CheckExists). False with no name.
+func _start_mission_box_mission(bms_name: String) -> bool:
+	if bms_name.is_empty() or _world == null:
+		return false
+	var root := _world.get_resource_root()
+	var loose := root != null and FileAccess.file_exists(
+			String(root.get_root_dir()).path_join(bms_name))
+	_teardown_world(false)
+	_state = State.WORLD
+	start_world_load(LoadingScreenInfo.for_mission(bms_name),
+			_world.load_loose_mission.bind(bms_name) if loose
+			else _world.load_mission.bind(bms_name))
+	return true
 
 
 ## The SP restart: the main frame routed exit reason 4 out of a session (engine

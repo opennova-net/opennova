@@ -1483,6 +1483,9 @@ public:
     // promotion and the playhead advance. Runs the selection half below only on the
     // witnessed 16-tick slow-pass phase.
     void infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick);
+    // The player body's health-adjust block on the slow pass (infantry_weapon_channel.cpp
+    // carries the witness).
+    void infantry_health_adjust(AiEntity &e, World &world);
     // The selection + commit half [orig: @0x4b5dad..0x4b5ea3]. Split out because the
     // original gates it to `(current_tick & 0xF) == 0` while the advance around it runs
     // every tick from AnimMap_UpdateDualChannels @0x40b8c0.

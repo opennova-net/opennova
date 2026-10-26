@@ -1202,6 +1202,10 @@ bool Simulation::is_session_lost() const {
 	return is_joiner() && runtime_ && runtime_->session_lost();
 }
 
+String Simulation::get_mission_exit_map() const {
+	return kernel_ != nullptr ? opennova::to_gd(kernel_->world.mission_exit_map) : String();
+}
+
 int Simulation::get_mission_exit_reason() const {
 	if (is_joiner()) {
 		return runtime_ ? runtime_->mission_exit_reason() : 0;

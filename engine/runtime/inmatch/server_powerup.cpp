@@ -92,6 +92,17 @@ bool ServerRemoteWeaponTables::remote_ammo(const world::World &world, world::Ent
 	return true;
 }
 
+bool ServerRemoteWeaponTables::remote_pool_step_down(world::EntityHandle player,
+		int32_t ammo_class, int32_t amount) {
+	NapiNPConnection *conn = owning_connection(roster_, player);
+	if (conn == nullptr) return false; // Entity_ValidatePtr finds no slot
+	auto &pools = conn->reply.ammo_pools;
+	if (ammo_class < 0 || static_cast<size_t>(ammo_class) >= pools.size()) return true;
+	int32_t &pool = pools[static_cast<size_t>(ammo_class)];
+	pool = pool - amount < 0 ? 0 : pool - amount;
+	return true;
+}
+
 // A remote player's powerup pickup: the per-class adds and the `allammo`
 // re-seed land on the owning connection's pools and the player's slot rows, the way retail's
 // authority arms write the validated entity's per-connection tables (the listen

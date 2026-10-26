@@ -40,6 +40,8 @@ public:
 			world::WeaponInventory &out) const override;
 	bool remote_ammo(const world::World &world, world::EntityHandle player,
 			int32_t ammo_class, int32_t bucket, int32_t &pool, int32_t &loaded) const override;
+	bool remote_pool_step_down(world::EntityHandle player, int32_t ammo_class,
+			int32_t amount) override;
 
 private:
 	std::vector<NapiNPConnection> &roster_;
