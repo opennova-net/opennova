@@ -74,10 +74,10 @@ static int test_by_code_and_policy(void) {
     CHECK(gameprofile_by_code(NULL) == NULL, "NULL code -> NULL");
     CHECK(gameprofile_by_code("nope") == NULL, "unknown code -> NULL");
 
-    CHECK(gameprofile_scr_policy_for_code("jodemo") == SCR_POLICY_FORCE_DEFAULT, "jodemo forces DEFAULT");
-    CHECK(gameprofile_scr_policy_for_code("jo") == SCR_POLICY_VERSION_DETECT, "jo version-detect");
-    CHECK(gameprofile_scr_policy_for_code(NULL) == SCR_POLICY_VERSION_DETECT, "NULL -> version-detect (JO default)");
-    CHECK(gameprofile_scr_policy_for_code("nope") == SCR_POLICY_VERSION_DETECT, "unknown -> version-detect");
+    CHECK(gameprofile_scr_policy_for_code("jodemo") == opennova::VFS_SCR_FORCE_DEFAULT, "jodemo forces DEFAULT");
+    CHECK(gameprofile_scr_policy_for_code("jo") == opennova::VFS_SCR_VERSION_DETECT, "jo version-detect");
+    CHECK(gameprofile_scr_policy_for_code(NULL) == opennova::VFS_SCR_VERSION_DETECT, "NULL -> version-detect (JO default)");
+    CHECK(gameprofile_scr_policy_for_code("nope") == opennova::VFS_SCR_VERSION_DETECT, "unknown -> version-detect");
     return 1;
 }
 
@@ -87,11 +87,11 @@ static int test_by_code_and_policy(void) {
 static int test_scr_policy_per_game(void) {
     const GameProfile *demo = gameprofile_by_id(GAME_JO_DEMO);
     CHECK(demo != NULL, "demo profile exists");
-    CHECK(demo->scr_policy == SCR_POLICY_FORCE_DEFAULT, "JO Demo forces the DEFAULT key");
-    CHECK(gameprofile_by_id(GAME_JO)->scr_policy == SCR_POLICY_VERSION_DETECT, "retail JO version-detect");
-    CHECK(gameprofile_by_id(GAME_DFX)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX version-detect");
-    CHECK(gameprofile_by_id(GAME_DFX2)->scr_policy == SCR_POLICY_VERSION_DETECT, "DFX2 version-detect");
-    CHECK(gameprofile_by_id(GAME_BHD)->scr_policy == SCR_POLICY_VERSION_DETECT, "BHD version-detect");
+    CHECK(demo->scr_policy == opennova::VFS_SCR_FORCE_DEFAULT, "JO Demo forces the DEFAULT key");
+    CHECK(gameprofile_by_id(GAME_JO)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "retail JO version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "DFX version-detect");
+    CHECK(gameprofile_by_id(GAME_DFX2)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "DFX2 version-detect");
+    CHECK(gameprofile_by_id(GAME_BHD)->scr_policy == opennova::VFS_SCR_VERSION_DETECT, "BHD version-detect");
     return 1;
 }
 

@@ -21,7 +21,7 @@ uint32_t scr_key_for_version(uint8_t version) {
 
 uint32_t scr_key_for_policy(int scr_policy, uint8_t version) {
     // FORCE_* fixes the key regardless of the version byte; VERSION_DETECT (and any unknown
-    // value) falls back to keying off the version byte. Values mirror VfsScrPolicy / ScrPolicy.
+    // value) falls back to keying off the version byte. Values are VfsScrPolicy's.
     switch (scr_policy) {
         case VFS_SCR_FORCE_DEFAULT: return SCR_KEY_DEFAULT;
         case VFS_SCR_FORCE_JO_DFX2: return SCR_KEY_JO_DFX2;

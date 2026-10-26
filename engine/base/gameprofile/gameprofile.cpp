@@ -35,11 +35,11 @@ namespace {
      the dword 0x01070507 @ 0x4a7db6].
    - BHD: no binary read; no version. */
 const GameProfile k_profiles[] = {
-    { GAME_JO,      "jo",     "Joint Operations",             SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      SCR_POLICY_FORCE_DEFAULT,  "V1.0.0.9" },
-    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          SCR_POLICY_VERSION_DETECT, "V1.7.1.9" },
-    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", SCR_POLICY_VERSION_DETECT, nullptr },
+    { GAME_JO,      "jo",     "Joint Operations",             VFS_SCR_VERSION_DETECT, "V1.7.5.7" },
+    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      VFS_SCR_FORCE_DEFAULT,     "V1.0.0.9" },
+    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          VFS_SCR_VERSION_DETECT, "V1.7.1.9" },
+    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        VFS_SCR_VERSION_DETECT, "V1.7.5.7" },
+    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", VFS_SCR_VERSION_DETECT, nullptr },
 };
 
 } // namespace
@@ -78,7 +78,7 @@ const GameProfile *gameprofile_by_code(const char *code) {
 
 int gameprofile_scr_policy_for_code(const char *code) {
     const GameProfile *p = gameprofile_by_code(code);
-    return p ? p->scr_policy : SCR_POLICY_VERSION_DETECT;
+    return p ? p->scr_policy : VFS_SCR_VERSION_DETECT;
 }
 
 const char *gameprofile_version_text_for_code(const char *code) {

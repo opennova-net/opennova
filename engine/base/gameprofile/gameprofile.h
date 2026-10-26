@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include <base/vfs/vfs_decode.h> // VfsScrPolicy, a profile's SCR policy
+
 
 namespace opennova::gameprofile {
 
@@ -26,21 +28,11 @@ typedef enum GameId {
     GAME_COUNT
 } GameId;
 
-/* How SCR-wrapped payloads are keyed. Every shipping game decodes by the SCR version byte
-   (engine/formats/scr + opennova::vfs_decode_payload); the FORCE_* values are headroom for a title that
-   ever needs a fixed key. */
-typedef enum ScrPolicy {
-    SCR_POLICY_VERSION_DETECT = 0,
-    SCR_POLICY_FORCE_DEFAULT,
-    SCR_POLICY_FORCE_JO_DFX2,
-    SCR_POLICY_FORCE_SHADERS
-} ScrPolicy;
-
 typedef struct GameProfile {
     int         id;             /* GameId                                                    */
     const char *code;           /* short launch-flag token, lowercase (e.g. "jo", "jodemo") */
     const char *display_name;   /* artist-facing label                                           */
-    int         scr_policy;     /* ScrPolicy                                                     */
+    int         scr_policy;     /* VfsScrPolicy (base/vfs/vfs_decode.h): how SCR payloads key    */
     const char *version_text;   /* the version text the profile's binary prints at startup, its
                                    build's four numbers through sprintf("V%i.%i.%i.%i") (the
                                    STARTUP screen's VERSION label, the joiner's VERSIONSTRING);
@@ -59,7 +51,7 @@ const GameProfile *gameprofile_by_id(int game_id);
 /* Profile whose `code` matches (case-insensitive); NULL for NULL/unknown code. */
 const GameProfile *gameprofile_by_code(const char *code);
 
-/* The SCR policy (ScrPolicy) for a game `code`. Returns SCR_POLICY_VERSION_DETECT for a
+/* The SCR policy (VfsScrPolicy) for a game `code`. Returns VFS_SCR_VERSION_DETECT for a
    NULL/unknown code, so a missing or bad `/game` value safely behaves like the JO default.
    This is the engine's single game-to-policy seam. */
 int gameprofile_scr_policy_for_code(const char *code);
