@@ -2,13 +2,21 @@ extends GutTest
 
 
 func test_highest_quality_capture_constants_and_face_axes_match_retail() -> void:
-	assert_eq(EnvironmentCubeCapture.CAPTURE_SIZE, 256)
 	assert_eq(EnvironmentCubeCapture.REFRESH_FRAMES, 128)
 	assert_eq(EnvironmentCubeCapture.SKY_DIM_BYTE, 0x60)
 	assert_eq(EnvironmentCubeCapture.FACE_COUNT, 6)
 
 	var capture := EnvironmentCubeCapture.new()
 	add_child_autofree(capture)
+	# The side by the mission's cube quality word, 256 before any mission
+	# (renderer::environment_cube_face_size).
+	assert_eq(capture.get_capture_size(), 256)
+	capture.set_cube_quality_word(0)
+	assert_eq(capture.get_capture_size(), 64)
+	capture.set_cube_quality_word(1)
+	assert_eq(capture.get_capture_size(), 128)
+	capture.set_cube_quality_word(2)
+	assert_eq(capture.get_capture_size(), 256)
 	var directions := capture.get_face_directions()
 	var ups := capture.get_face_up_vectors()
 	# Capture viewport order is LEFT/RIGHT/BOTTOM/TOP/FRONT/BACK. Retail's

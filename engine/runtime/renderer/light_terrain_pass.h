@@ -250,12 +250,14 @@ std::array<float, 3> terrain_light_cube_vector(const std::array<float, 3> &point
 // 0xC00). Those are the D3D cube face orientations, so the faces load as-is
 // in the +X, -X, +Y, -Y, +Z, -Z layer order. The alpha byte is left from the
 // stack and never read (dp3 takes rgb only); it is written opaque here.
-// The side follows the object texture detail through dword_8409E4
-// [orig: Game_StartMission @0x52466d..0x524719]: 64 / 128 / 256
-// [orig: Render_InitTextures @0x58f794..0x58f814]; the served top setting is
-// 256.
+// The side follows the object texture detail through the cube quality word
+// (renderer/environment_cube.h cube_quality_word) [orig: Game_StartMission
+// @0x52466d..0x524719]: 64 at 0, 128 at 1, 256 at any other
+// [orig: Render_InitTextures @0x58f789..0x58f814, the 64 arm @0x58f794].
 inline constexpr int kCubeNormalizeFaces = 6;
-inline constexpr int kCubeNormalizeSize = 256;
+constexpr int cube_normalize_size(int word) noexcept {
+	return word == 0 ? 64 : word == 1 ? 128 : 256;
+}
 
 uint32_t cube_normalize_texel_argb(int face, int col, int row, int size);
 

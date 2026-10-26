@@ -11,14 +11,16 @@ extends GutTest
 func test_the_cube_faces_carry_the_generated_normals() -> void:
 	# Face centres are the six axes packed trunc(n * 127.5 + 128), in the
 	# +X, -X, +Y, -Y, +Z, -Z layer order (renderer::cube_normalize_texel_argb).
-	var size: int = LightScene.terrain_light_cube_size()
+	var size: int = LightScene.terrain_light_cube_size(2)
 	assert_eq(size, 256)
+	assert_eq(LightScene.terrain_light_cube_size(0), 64, "the lowest object texture detail's side")
+	assert_eq(LightScene.terrain_light_cube_size(1), 128)
 	var centre := (128 * size + 128) * 4
 	var expected := [[255, 128, 128], [0, 128, 128], [128, 255, 128],
 			[128, 0, 128], [128, 128, 255], [128, 128, 0]]
 	for face in 6:
-		var bytes: PackedByteArray = LightScene.terrain_light_cube_face_rgba8(face)
+		var bytes: PackedByteArray = LightScene.terrain_light_cube_face_rgba8(face, size)
 		assert_eq(bytes.size(), size * size * 4)
 		assert_eq([bytes[centre], bytes[centre + 1], bytes[centre + 2]], expected[face],
 				"face %d centre" % face)
-	assert_eq(LightScene.terrain_light_cube_face_rgba8(6).size(), 0, "no seventh face")
+	assert_eq(LightScene.terrain_light_cube_face_rgba8(6, size).size(), 0, "no seventh face")

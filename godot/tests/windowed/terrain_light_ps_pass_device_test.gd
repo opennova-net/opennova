@@ -31,11 +31,11 @@ func _rgba8_texture(width: int, height: int, bytes: PackedByteArray) -> ImageTex
 
 
 func _cube_texture() -> Cubemap:
-	var size: int = LightScene.terrain_light_cube_size()
+	var size: int = LightScene.terrain_light_cube_size(2)
 	var faces: Array[Image] = []
 	for face in 6:
 		faces.append(Image.create_from_data(size, size, false, Image.FORMAT_RGBA8,
-				LightScene.terrain_light_cube_face_rgba8(face)))
+				LightScene.terrain_light_cube_face_rgba8(face, size)))
 	var cube := Cubemap.new()
 	assert_eq(cube.create_from_images(faces), OK, "the six cube faces load")
 	return cube

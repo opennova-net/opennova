@@ -117,9 +117,10 @@ void test_cube_vector() {
 // face edge (rt, ct = 1 at row, col 0), and the faces carry the D3D
 // orientation (+X: column 0 is +Z, row 0 is +Y).
 void test_cube_normalize_texels() {
-	CHECK(kCubeNormalizeSize == 256 && kCubeNormalizeFaces == 6,
-			"the top object-detail setting builds 256-square faces");
-	const int s = kCubeNormalizeSize;
+	CHECK(cube_normalize_size(0) == 64 && cube_normalize_size(1) == 128 && cube_normalize_size(2) == 256 &&
+			cube_normalize_size(3) == 256 && kCubeNormalizeFaces == 6,
+			"the cube quality word picks 64, 128 or 256-square faces [orig: Render_InitTextures @0x58f789..0x58f814]");
+	const int s = cube_normalize_size(2);
 	CHECK(cube_normalize_texel_argb(0, 128, 128, s) == 0xFFFF8080u, "+X centre");
 	CHECK(cube_normalize_texel_argb(1, 128, 128, s) == 0xFF008080u,
 			"-X centre (-1 * 127.5 + 128 truncates to 0)");

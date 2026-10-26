@@ -1216,16 +1216,16 @@ PackedByteArray LightScene::terrain_light_disc_rgba8() {
 			&opennova::renderer::falloff_texture_light2d_argb);
 }
 
-int LightScene::terrain_light_cube_size() {
-	return opennova::renderer::kCubeNormalizeSize;
+int LightScene::terrain_light_cube_size(int p_word) {
+	return opennova::renderer::cube_normalize_size(p_word);
 }
 
-PackedByteArray LightScene::terrain_light_cube_face_rgba8(int p_face) {
+PackedByteArray LightScene::terrain_light_cube_face_rgba8(int p_face, int p_size) {
 	PackedByteArray bytes;
-	if (p_face < 0 || p_face >= opennova::renderer::kCubeNormalizeFaces) {
+	if (p_face < 0 || p_face >= opennova::renderer::kCubeNormalizeFaces || p_size <= 0) {
 		return bytes;
 	}
-	const int size = opennova::renderer::kCubeNormalizeSize;
+	const int size = p_size;
 	bytes.resize(static_cast<int64_t>(size) * size * 4);
 	uint8_t *out = bytes.ptrw();
 	for (int row = 0; row < size; ++row) {
@@ -1344,10 +1344,10 @@ void LightScene::_bind_methods() {
 			D_METHOD("terrain_light_disc_rgba8"),
 			&LightScene::terrain_light_disc_rgba8);
 	ClassDB::bind_static_method("LightScene",
-			D_METHOD("terrain_light_cube_size"),
+			D_METHOD("terrain_light_cube_size", "word"),
 			&LightScene::terrain_light_cube_size);
 	ClassDB::bind_static_method("LightScene",
-			D_METHOD("terrain_light_cube_face_rgba8", "face"),
+			D_METHOD("terrain_light_cube_face_rgba8", "face", "size"),
 			&LightScene::terrain_light_cube_face_rgba8);
 	ClassDB::bind_method(D_METHOD("get_report"), &LightScene::get_report);
 	ClassDB::bind_method(D_METHOD("get_static_light_rows_image"),

@@ -35,7 +35,6 @@ class EnvironmentCubeBlit {
 public:
 	static constexpr int kFaceCount =
 			opennova::renderer::kEnvironmentCubeFaceCount;
-	static constexpr int kFaceSize = opennova::renderer::kEnvironmentCubeFaceSize;
 
 	// How a rendered face lands in its cube layer. A capture camera looks
 	// outward from the cube center; the cubemap layer convention addresses a
@@ -59,7 +58,8 @@ public:
 	// Indexed by cube layer: +X, -X, +Y, -Y, +Z, -Z.
 	using Request = std::array<FaceSource, kFaceCount>;
 
-	EnvironmentCubeBlit() = default;
+	// The cube's side (renderer::environment_cube_face_size of the mission's cube quality word).
+	explicit EnvironmentCubeBlit(int p_face_size) : face_size_(p_face_size) {}
 	EnvironmentCubeBlit(const EnvironmentCubeBlit &) = delete;
 	EnvironmentCubeBlit &operator=(const EnvironmentCubeBlit &) = delete;
 
@@ -109,6 +109,7 @@ private:
 	void set_failure(const std::string &reason);
 	void finish(bool ok);
 
+	const int face_size_;
 	Request request_{};
 	RenderingDevice *rd_ = nullptr;
 	RID shader_;

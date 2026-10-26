@@ -321,9 +321,14 @@ void GameWorld::publish_session_render_settings() {
 	// The model texture loaders' halvings for the mission start's detail (engine
 	// renderer/device_texture.h object_texdetail_flags carries the witness).
 	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
+	// Both cubes' side: the cube quality word the mission start sets from the same detail (engine
+	// renderer/environment_cube.h cube_quality_word carries the witness).
+	const int cube_word = opennova::renderer::cube_quality_word(session_object_texdetail_);
+	if (environment_cube_ != nullptr) environment_cube_->set_cube_quality_word(cube_word);
 	if (terrain_ != nullptr) {
 		terrain_->set_texcompression_level(session_texcompression_level_);
 		terrain_->set_terrain_texdetail(session_terrain_texdetail_);
+		terrain_->set_cube_quality_word(cube_word);
 	}
 	if (EffectWorld *effects = get_effect_world()) {
 		effects->set_session_render_settings(session_texcompression_level_, session_particle_density_);

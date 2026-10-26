@@ -1,6 +1,6 @@
 #pragma once
 
-// The witnessed CubeEnvironment facts: the highest-quality face size,
+// The witnessed CubeEnvironment facts: the face size by the quality word,
 // the six-face refresh cadence, the capture eye placement, the per-face
 // 90-degree square view, and the byte multiply the face callback applies to
 // every completed face. A device presenter (the Godot capture node) reads
@@ -18,9 +18,24 @@
 namespace opennova::renderer {
 
 inline constexpr int kEnvironmentCubeFaceCount = 6;
-// Highest quality; the 64 and 128 selections of the lower settings are not
-// presented.
-inline constexpr int kEnvironmentCubeFaceSize = 256;
+
+// The cube quality word both cubes take their side from (dword_8409E4, 2 in
+// the image): each mission start sets it from the session's object texture
+// detail, 0 at detail 0, 1 at detail 1, else 2, ahead of the render
+// subsystems' init that makes the cubes [orig: Game_StartMission @0x524360 -
+// @0x52466D..0x524719 into sub_589A40 @0x589A40, ahead of
+// Render_InitRenderingSubsystems (the call @0x5259D1) -> Render_InitTextures
+// @0x58F6E0].
+inline constexpr int kCubeQualityWordInitial = 2;
+constexpr int cube_quality_word(int object_texdetail) noexcept {
+	return object_texdetail == 0 ? 0 : object_texdetail == 1 ? 1 : 2;
+}
+
+// The CubeEnvironment's side by that word: 64 at 0, 256 at 2, 128 at any
+// other [orig: Render_InitTextures @0x58F6E0..0x58F74A].
+constexpr int environment_cube_face_size(int word) noexcept {
+	return word == 0 ? 64 : word == 2 ? 256 : 128;
+}
 inline constexpr std::int64_t kEnvironmentCubeRefreshFrames = 128;
 inline constexpr float kEnvironmentCubeEyeRaise = 1.0f;
 inline constexpr float kEnvironmentCubeTerrainClearance = 10.0f;

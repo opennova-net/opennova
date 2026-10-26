@@ -39,8 +39,8 @@ func test_device_copy_publishes_a_texture_cubemap_rd_without_readback() -> void:
 	assert_true(cube is TextureCubemapRD)
 	assert_true(cube.texture_rd_rid.is_valid())
 	assert_eq(cube.get_layers(), EnvironmentCubeCapture.FACE_COUNT)
-	assert_eq(cube.get_width(), EnvironmentCubeCapture.CAPTURE_SIZE)
-	assert_eq(cube.get_height(), EnvironmentCubeCapture.CAPTURE_SIZE)
+	assert_eq(cube.get_width(), capture.get_capture_size())
+	assert_eq(cube.get_height(), capture.get_capture_size())
 	assert_eq(cube.get_format(), Image.FORMAT_RGBA8)
 	# The RD cubemap itself: six RGBA8 UNORM layers, sampled by the object
 	# shaders and drawn into by the blit; no Image or Cubemap resource exists.

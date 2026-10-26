@@ -22,6 +22,8 @@
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_static_shadow_rasterizer.h"
 #include "terrain/terrain_tile_cache_device.h"
+#include <runtime/renderer/environment_cube.h>
+#include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain_query/terrain_atlas_rects.h>
 
@@ -211,6 +213,8 @@ private:
 	// teardown after Godot's servers are gone.
 	Ref<ImageTexture> light_disc_texture;
 	Ref<Cubemap> light_cube_texture;
+	int light_cube_size = opennova::renderer::cube_normalize_size(
+			opennova::renderer::kCubeQualityWordInitial);
 
 	void _bind_light_textures();
 	void _ensure_light_rows(LightRows &r_rows);
@@ -355,6 +359,9 @@ public:
 	// texcompression_level is.
 	void set_terrain_texdetail(int p_level);
 	int get_terrain_texdetail() const;
+	// The mission start's cube quality word (renderer::cube_quality_word): the light pass's normalize cube
+	// side (renderer::cube_normalize_size); a new side makes the cube again at the next light bind.
+	void set_cube_quality_word(int p_word);
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;
