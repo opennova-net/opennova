@@ -365,68 +365,8 @@ bool Simulation::native_environment_snapshot(
 		opennova::devtools::EnvironmentSnapshot &out) const {
 	out = opennova::devtools::EnvironmentSnapshot{};
 	if (!world_installed_ || kernel_ == nullptr) return false;
-	const opennova::world::WeatherState &w = kernel_->world.weather;
-	const opennova::env::WeatherCore &core = w.core;
 	// (engine: runtime/devtools/environment_snapshot.h — the rows' sources)
-	out.valid = true;
-	out.logic_tick = kernel_->world.logic_tick;
-	out.env_name = kernel_->mission.get_environment();
-	out.trn_name = kernel_->mission.get_terrain();
-	out.blink_flags = kernel_->collision.local_player_blink_flags;
-	out.fog_type = w.fog_type;
-	out.fog_dist_metres = w.fog_current_q16() >> 16;
-	out.fog_target_metres = w.fog_target_q16() >> 16;
-	out.color_fade_seconds = (w.color_fade_ticks + 31) / 62;
-	out.sun_fade_pct = w.sun_dim_pct_q16() >> 16;
-	out.sun_fade_target_pct = core.scalar_channels.sun_dim_target_fp >> 16;
-	out.night = w.is_night_phase();
-	const auto rgb = [](uint32_t packed) { return packed & 0x00FFFFFFu; };
-	out.fog_rgb = rgb(core.fog_block.render_color);
-	out.skyfog_rgb = rgb(core.sky_color_blocks.skyfog.render_color);
-	out.cloud_rgb = rgb(core.sky_color_blocks.cloud.render_color);
-	out.sun_rgb = rgb(core.sun_block.render_color);
-	out.lightning_rgb = rgb(w.lightning_color);
-	out.sky_rgb = rgb(core.sky_block.render_color);
-	out.ground_rgb = rgb(core.fill_block.render_color);
-	out.ceiling_rgb = rgb(core.sky_color_blocks.ceiling.render_color);
-	out.floor_rgb = rgb(core.sky_color_blocks.floor.render_color);
-	// g_EnvTerrainLightCombined = light x 0xB5/256 + sky; g_EnvCeilingFloorBlend
-	// = ceiling x 0xB5/256 + floor x 0xB5/256 (retail @ 0x57f0b3..0x57f110).
-	const auto combine = [](uint32_t a, uint32_t a_scale, uint32_t b, uint32_t b_scale) {
-		uint32_t out_rgb = 0;
-		for (int shift = 0; shift < 24; shift += 8) {
-			const uint32_t ca = ((a >> shift) & 0xFFu) * a_scale >> 8;
-			const uint32_t cb = ((b >> shift) & 0xFFu) * b_scale >> 8;
-			const uint32_t sum = ca + cb;
-			out_rgb |= (sum > 0xFFu ? 0xFFu : sum) << shift;
-		}
-		return out_rgb;
-	};
-	out.outdoor_rgb = combine(out.sun_rgb, 0xB5u, out.sky_rgb, 256u);
-	out.indoor_rgb = combine(out.ceiling_rgb, 0xB5u, out.floor_rgb, 0xB5u);
-	out.gain_rgb = rgb(core.modulator_chain.modulator.render_color);
-	out.iris_rgb = rgb(core.modulator_chain.modulator2.render_color);
-	out.fov_degrees = core.scalar_channels.camera_fov_fp >> 16;
-	out.sky_height_metres = w.sky_height_q16() >> 16;
-	out.sky_speed = w.cloud_scroll_rate() >> 10;
-	out.sky_speed_target = w.cloud_scroll_rate_target >> 10;
-	out.rain_pct = static_cast<int32_t>((100u * w.rain_pct_current_q16()) >> 16);
-	out.rain_target_pct = static_cast<int32_t>((100u * w.rain_pct_target_q16()) >> 16);
-	out.overcast_pct = static_cast<int32_t>((100u * w.overcast_blend_q16()) >> 16);
-	out.overcast_target_pct = static_cast<int32_t>((100u * w.overcast_target_q16()) >> 16);
-	out.complexity = kernel_->world.cached.local_player.valid()
-			? kernel_->collision.candidate_count(kernel_->world.cached.local_player)
-			: 0;
-	out.minute_of_day = static_cast<int32_t>(
-			opennova::env::EnvironmentState::hhmm_to_minute_of_day(w.tod_hhmm()));
-	out.quake_ticks = static_cast<int32_t>(w.quake_ticks);
-	out.precipitation_kind = static_cast<int32_t>(w.precipitation_kind);
-	out.wind_scale = w.wind_scale();
-	out.lightning_timer_a = core.lightning.timer_a;
-	out.lightning_timer_b = core.lightning.timer_b;
-	out.lightning_level = core.lightning.level;
-	out.authority = !is_joiner();
-	out.tod_keyframed = kernel_->weather_render == nullptr || kernel_->weather_render->tod_keyframed();
+	out = opennova::devtools::environment_snapshot(*kernel_, !is_joiner());
 	return true;
 }
 

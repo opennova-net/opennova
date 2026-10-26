@@ -233,6 +233,16 @@ int main() {
 		if (!expect(byte_of(mid.r) == 171, "(100*181 + 100*257) >> 8 = 171, not 170")) return 1;
 		const Rgb full = combine_terrain_light({1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 1.0f});
 		if (!expect(byte_of(full.r) == 255, "the word sum saturates at 0xFFFF")) return 1;
+		// The packed forms the F3 page reads: light 100 + sky 100 is 171 (the old snapshot's
+		// own formula read 170), and the indoor blend weighs both bytes 0xB5 before one >> 8:
+		// (100*181 + 50*181) >> 8 = 106. Both saturate as words.
+		// [orig: Environment_UpdateWeatherTick @ 0x57f0b3..0x57f110]
+		if (!expect(combine_terrain_light_packed(0x646464u, 0x646464u) == 0xABABABu,
+				"the packed terrain light: 171 per byte")) return 1;
+		if (!expect(combine_ceiling_floor_packed(0x640000u, 0x320000u) == 0x6A0000u,
+				"the indoor blend: (100*181 + 50*181) >> 8 = 106")) return 1;
+		if (!expect(combine_ceiling_floor_packed(0xFFFFFFu, 0xFFFFFFu) == 0xFFFFFFu,
+				"the indoor word sum saturates")) return 1;
 		const Rgb low_mid = combine_terrain_light_low({100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f},
 		                                              {100.0f / 255.0f, 100.0f / 255.0f, 100.0f / 255.0f});
 		if (!expect(byte_of(low_mid.r) == 135, "(100*90 + 100*257) >> 8 = 135")) return 1;

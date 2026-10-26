@@ -511,6 +511,13 @@ inline constexpr double kCloudUvScaleLayer2 = 1.0 / 536870912.0; // 2^-29
 Rgb combine_terrain_light(const Rgb &light, const Rgb &sky);
 // Secondary variant with 0x5A (0.352) light weight.
 Rgb combine_terrain_light_low(const Rgb &light, const Rgb &sky);
+// The tick's two blends over packed 0x00RRGGBB words, as it stores them: the terrain light
+// (g_EnvTerrainLightCombined, the light byte x 0xB5 plus the sky byte x 257) and the indoor
+// ambient (g_EnvCeilingFloorBlend, the ceiling and floor bytes each x 0xB5), each word sum
+// saturating at 0xFFFF, >> 8.
+// [orig: Environment_UpdateWeatherTick - @0x57f0b3..0x57f0d5, @0x57f0dc..0x57f110]
+uint32_t combine_terrain_light_packed(uint32_t light, uint32_t sky);
+uint32_t combine_ceiling_floor_packed(uint32_t ceiling, uint32_t floor);
 // Lit water color = water * combined_light * 2 (saturating) [>> 7 on bytes].
 Rgb lit_water_color(const Rgb &water, const Rgb &combined_light);
 // Fog and skyfog render colors are doubled with saturation — .env fog colors
