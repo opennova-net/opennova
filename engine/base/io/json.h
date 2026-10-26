@@ -3,12 +3,14 @@
 // import sidecars and build records (ADR 0046 d6). Portable on purpose: apps, ctests
 // and headless embedders read a project without Godot.
 //
-// Reading is strict (RFC 8259): UTF-8 text, no comments, no trailing commas, no
-// NaN/Infinity, the seven escapes plus \uXXXX (surrogate pairs decode to UTF-8), no
-// raw control characters inside strings, nesting capped at kJsonMaxDepth. Writing is
-// deterministic so a saved file diffs cleanly: object keys sorted, two-space indent,
-// "\n" line ends, integral numbers without a fraction, other numbers in the shortest
-// form that round-trips, a trailing newline.
+// Reading is strict (RFC 8259): UTF-8 text (io::is_valid_utf8's set: no overlong form, no
+// surrogate, nothing past U+10FFFF), no comments, no trailing commas, no NaN/Infinity, the
+// seven escapes plus \uXXXX (surrogate pairs decode to UTF-8), no raw control characters
+// inside strings, nesting capped at kJsonMaxDepth. Writing is deterministic so a saved file
+// diffs cleanly: object keys sorted, two-space indent, "\n" line ends, integral numbers
+// without a fraction, other numbers in the shortest form that round-trips, a trailing
+// newline; a string's byte that starts no well-formed UTF-8 sequence is written as U+FFFD,
+// so a written file always reads back.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -417,6 +419,9 @@ private:
 			const unsigned char cont = static_cast<unsigned char>(text_[pos_ + i]);
 			if ((cont & 0xC0) != 0x80) return fail("invalid UTF-8 continuation byte");
 		}
+		// The strict set (io::is_valid_utf8): no overlong form, no surrogate, nothing past U+10FFFF.
+		if (!is_valid_utf8(std::string_view(text_.data() + pos_, static_cast<size_t>(extra) + 1)))
+			return fail("invalid UTF-8 sequence");
 		out.append(text_.data() + pos_, static_cast<size_t>(extra) + 1);
 		for (int i = 0; i <= extra; ++i) advance();
 		return true;
@@ -502,8 +507,21 @@ private:
 
 inline void write_escaped(const std::string &s, std::string &out) {
 	out.push_back('"');
-	for (const char c : s) {
+	for (size_t i = 0; i < s.size(); ++i) {
+		const char c = s[i];
 		const unsigned char u = static_cast<unsigned char>(c);
+		if (u >= 0x80) {
+			// A well-formed sequence is copied whole; a byte that starts none is written as
+			// U+FFFD, so whatever is written reads back.
+			const size_t length = u >= 0xF0 ? 4 : u >= 0xE0 ? 3 : u >= 0xC0 ? 2 : 1;
+			if (length > 1 && i + length <= s.size() && is_valid_utf8(std::string_view(s).substr(i, length))) {
+				out.append(s, i, length);
+				i += length - 1;
+			} else {
+				out += "\xEF\xBF\xBD";
+			}
+			continue;
+		}
 		switch (c) {
 		case '"': out += "\\\""; break;
 		case '\\': out += "\\\\"; break;
