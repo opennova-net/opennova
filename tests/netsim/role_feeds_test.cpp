@@ -599,7 +599,7 @@ int main() {
 		cs.breathtime = 25;
 		cs.spawn_success_gate = true; // the folded round-over latch
 		const BreathBarFacts j = breath_bar_facts(joiner);
-		CHECK(j.samples == 40 && j.breath_time == 25 && j.spawn_success_gate);
+		CHECK(j.samples == 40 && j.breath_time == 25 && j.round_over);
 		ClientRuntime host_runtime("host-breath");
 		host_runtime.state().breath_samples = 12;
 		mission::MissionKernel kernel;
@@ -608,9 +608,9 @@ int main() {
 		host.runtime = &host_runtime;
 		host.kernel = &kernel;
 		const BreathBarFacts h = breath_bar_facts(host);
-		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
+		CHECK(h.samples == 12 && h.breath_time == 30 && !h.round_over);
 		const BreathBarFacts none = breath_bar_facts(RoleView{});
-		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+		CHECK(none.samples == 0 && none.breath_time == 20 && !none.round_over);
 		// A Serve Only host (a host context, no client runtime): g_RoundOver is the
 		// authority's own round-end latch, which its status page's end-round leg tests
 		// [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5168E4); Server_DrawStatusScreen
@@ -619,11 +619,11 @@ int main() {
 		RoleView serve_only;
 		serve_only.host = &serve_only_ctx;
 		serve_only.kernel = &kernel;
-		CHECK(!breath_bar_facts(serve_only).spawn_success_gate);
+		CHECK(!breath_bar_facts(serve_only).round_over);
 		kernel.world.match.latch_round_over();
-		CHECK(breath_bar_facts(serve_only).spawn_success_gate);
+		CHECK(breath_bar_facts(serve_only).round_over);
 		// A listen host keeps its own client's folded latch.
-		CHECK(!breath_bar_facts(host).spawn_success_gate);
+		CHECK(!breath_bar_facts(host).round_over);
 	}
 
 	// The HUD's role facts: the session lines' globals off the replica (a

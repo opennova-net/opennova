@@ -177,11 +177,11 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	mark_order_break();
 	element_player_score_list(page, w, h); // [orig: @0x50b27f..0x50b281]
 	mark_order_break();
-	// The end-round transition under the spawn gate, but not in Co-op
+	// The end-round transition under the round-over latch, but not in Co-op
 	// [orig: @0x50b28d..0x50b2a3 — `(g_GameType & 0xFFFDFFFF) != 0x10020`,
 	//  UI_ProcessEndRoundScreenTransition @0x5b8600, whose overlay is
 	//  HudFrameState::end_round].
-	if (state.spawn_success_gate && (page.game_type & 0xFFFDFFFFu) != 0x10020u)
+	if (state.round_over && (page.game_type & 0xFFFDFFFFu) != 0x10020u)
 		element_end_round_overlay(state, w, h);
 	// The connection indicators at their reset corners, whatever hudpos
 	// authors [orig: CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af].

@@ -1666,7 +1666,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.paused_text = opennova::to_std(overlay_text(p_gametext, "STROVER7", ""));
 	state_.breath_samples = facts.breath.samples;
 	state_.breath_time = facts.breath.breath_time;
-	state_.spawn_success_gate = facts.breath.spawn_success_gate;
+	state_.round_over = facts.breath.round_over;
 	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;

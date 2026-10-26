@@ -1218,7 +1218,7 @@ struct HudFrameState {
 	// (Overlays/STROVER91).
 	int breath_samples = 0;
 	int breath_time = 20;
-	bool spawn_success_gate = false;
+	bool round_over = false;
 	std::string breath_label;
 	// The scene frame calls the gameplay overlay pass at all: the embedder's frame verdict
 	// (inmatch::FrameOutcome::hud_pass_called), false where the call site's gates skip
@@ -1472,7 +1472,7 @@ public:
 	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
 	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
 	// bit 0 the overlay pass runs past its hud_detail-3 early-out (the
-	// spawn-success early-out the session reads live), bit 1 the corner
+	// round-over early-out the session reads live), bit 1 the corner
 	// spinmap also draws with mask bits 9, 6 and 10, so its own update site
 	// runs [orig: HUD_RenderAllOverlays @0x5a80c4; the spinmap gates
 	// @0x5a8635 / @0x5a86e8; HUD_DrawMapOverlay @0x5a78ff..0x5a790f].

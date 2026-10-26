@@ -365,7 +365,7 @@ void test_escape_chain() {
 	CHECK(!s.map_legend_open && !s.end_round_stats_open);
 	CHECK(s.scoreboard_open); // SP: the init keeps the player list
 	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
-	in.spawn_gate = true;
+	in.round_over = true;
 	s.help_open = true;
 	CHECK(hud_toggles_escape(s, in) == 0);
 	CHECK(s.help_open);
@@ -589,7 +589,7 @@ void test_escape_pause_and_voice_menus() {
 	CHECK(!s.message_log_open);
 	// The SP spawn gate holds ahead of the pause word too.
 	s.paused = true;
-	in.spawn_gate = true;
+	in.round_over = true;
 	CHECK(hud_toggles_escape(s, in) == 0);
 	CHECK(s.paused);
 }

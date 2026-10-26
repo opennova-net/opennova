@@ -394,8 +394,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 
 uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	using namespace hud_toggle_event;
-	// [orig: @0x49b23b..0x49b249 -- out of a session the spawn gate returns]
-	if (!in.in_session && in.spawn_gate) return 0;
+	// [orig: @0x49b23b..0x49b249 -- out of a session the round-over latch returns]
+	if (!in.in_session && in.round_over) return 0;
 	// The pause word (with g_EpilogScreenActive, which never reaches here —
 	// hud_toggles.h) clears first [orig: @0x49b24f..0x49b261 ->
 	// @0x49b3cd..0x49b3d3].

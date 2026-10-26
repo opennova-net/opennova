@@ -89,7 +89,7 @@ void test_dispatch_gates() {
 	// Dead without the round-over latch: closed; the latch reopens it.
 	f.death_screen = true;
 	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == 0);
-	f.spawn_gate = true;
+	f.round_over = true;
 	CHECK(c.dispatch(kChatDispatchLocal, f, kText) == kOpened);
 	CHECK(c.capturing() && c.prompt() == "<STRMISC_TALKLOCAL>" &&
 			c.open_dispatch() == kChatDispatchLocal);

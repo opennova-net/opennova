@@ -201,7 +201,7 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame);
 
 // The breath bar's facts for THIS client (hud::HudFrameState breath_samples /
-// breath_time / spawn_success_gate; the label is the embedder's gametext).
+// breath_time / round_over; the label is the embedder's gametext).
 // The samples ride every role's replica (the listen host's loopback included);
 // the breath seconds are the authority's own WAC named value on a host and the
 // 0x0A sub-block-1 copy on a joiner; the round-over latch is the folded 0x1D
@@ -212,7 +212,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 struct BreathBarFacts {
 	int samples = 0;
 	int breath_time = 20;
-	bool spawn_success_gate = false;
+	bool round_over = false;
 };
 BreathBarFacts breath_bar_facts(const RoleView &view);
 

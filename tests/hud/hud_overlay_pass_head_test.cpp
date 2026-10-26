@@ -50,11 +50,11 @@ void test_the_head_returns_before_the_pass() {
 	CHECK(drew(open, HudElement::EndRoundOverlay));
 
 	// The round-over latch: no pass, the end-of-round overlay still up.
-	state->spawn_success_gate = true;
+	state->round_over = true;
 	const HudDrawList &latched = compiler->compile(*state, 1024.0f, 768.0f);
 	CHECK(!drew(latched, HudElement::Health));
 	CHECK(drew(latched, HudElement::EndRoundOverlay));
-	state->spawn_success_gate = false;
+	state->round_over = false;
 
 	// The white hit flash, alike.
 	state->combat.white_flash = true;
@@ -65,7 +65,7 @@ void test_the_head_returns_before_the_pass() {
 
 	CHECK(drew(compiler->compile(*state, 1024.0f, 768.0f), HudElement::Health));
 	CHECK(HudFrameCompiler::overlay_pass_runs(*state));
-	state->spawn_success_gate = true;
+	state->round_over = true;
 	CHECK(!HudFrameCompiler::overlay_pass_runs(*state));
 }
 
@@ -88,7 +88,7 @@ void test_the_item_flash_ticks_behind_the_head() {
 	// Each gate in turn: frames up to tick 150 never tick, a timer armed at 160 inside the
 	// stretch keeps its value, and the first pass after it, at 170, takes all 70 ticks.
 	for (int gate = 0; gate < 3; ++gate) {
-		state->spawn_success_gate = gate == 0;
+		state->round_over = gate == 0;
 		state->combat.white_flash = gate == 1;
 		state->hud_detail_level = gate == 2 ? 3 : 0;
 		for (int t = 110; t <= 150; t += 10) {
@@ -99,7 +99,7 @@ void test_the_item_flash_ticks_behind_the_head() {
 		state->ticks = 160 + 1000 * gate;
 		compiler->compile(*state, 1024.0f, 768.0f);
 		CHECK(compiler->item_flash().timer(3) == 0x80);
-		state->spawn_success_gate = false;
+		state->round_over = false;
 		state->combat.white_flash = false;
 		state->hud_detail_level = 0;
 		state->ticks = 170 + 1000 * gate;
@@ -163,9 +163,9 @@ void test_the_big_map_reads_the_last_record_and_altitude_colour() {
 	state->waypoint.world_z = 3 << 16; // above the player at z 0
 
 	// No record before the first pass that gets past the head: no pointer.
-	state->spawn_success_gate = true;
+	state->round_over = true;
 	CHECK(pointer_band(compiler->compile(*state, 1024.0f, 768.0f).big_map) == -1);
-	state->spawn_success_gate = false;
+	state->round_over = false;
 	CHECK(pointer_band(compiler->compile(*state, 1024.0f, 768.0f).big_map) == 0);
 
 	// Level 3: the record is built, the colour is not: the player climbs past the waypoint
@@ -179,9 +179,9 @@ void test_the_big_map_reads_the_last_record_and_altitude_colour() {
 	// The round-over latch and the white flash build no record: a waypoint cleared under
 	// either still points on the big map until the next pass.
 	state->waypoint.present = false;
-	state->spawn_success_gate = true;
+	state->round_over = true;
 	CHECK(pointer_band(compiler->compile(*state, 1024.0f, 768.0f).big_map) == 1);
-	state->spawn_success_gate = false;
+	state->round_over = false;
 	state->combat.white_flash = true;
 	CHECK(pointer_band(compiler->compile(*state, 1024.0f, 768.0f).big_map) == 1);
 	state->combat.white_flash = false;

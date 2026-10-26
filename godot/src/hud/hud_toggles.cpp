@@ -38,10 +38,10 @@ int64_t HudToggles::dispatch(int p_rows_fired, bool p_active,
 					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
 }
 
-int HudToggles::escape(bool p_in_session, bool p_spawn_gate, bool p_authority) {
+int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
 	opennova::hud::HudEscapeInput input;
 	input.in_session = p_in_session;
-	input.spawn_gate = p_spawn_gate;
+	input.round_over = p_round_over;
 	input.authority = p_authority;
 	return static_cast<int>(opennova::hud::hud_toggles_escape(state_, input));
 }
@@ -154,7 +154,7 @@ void HudToggles::_bind_methods() {
 								 "mp_session_peer", "mouse_scale_negative", "head_drops"),
 			&HudToggles::dispatch, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
 			DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate", "authority"),
+	ClassDB::bind_method(D_METHOD("escape", "in_session", "round_over", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),
 			&HudToggles::session_init);

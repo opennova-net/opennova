@@ -288,14 +288,14 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.samples = cs.breath_samples;             // word_A85B7C
-		out.spawn_success_gate = cs.spawn_success_gate;
+		out.round_over = cs.spawn_success_gate;
 		if (view.joiner) out.breath_time = cs.breathtime;
 	} else if (view.host != nullptr && view.kernel != nullptr) {
 		// A Serve Only host has no client to fold a 0x1D: its g_RoundOver is the authority's
 		// own round-end latch, which its status page's end-round leg tests
 		// [orig: Server_ProcessRoundEnd @0x5164F0 (`mov g_RoundOver, ebp` @0x5168E4);
 		//  Server_DrawStatusScreen @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
-		out.spawn_success_gate = view.kernel->world.match.outcome().ended;
+		out.round_over = view.kernel->world.match.outcome().ended;
 	}
 	// The authority's frame carries no sub-block 1 to its own loopback, and
 	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].
@@ -1523,7 +1523,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 	f.death_screen = local_death_screen_active(view); // [orig: g_DeathScreenActive]
 	if (view.runtime != nullptr) {
 		const replication::ClientState &state = view.runtime->state();
-		f.spawn_gate = state.spawn_success_gate;  // [orig: g_RoundOver]
+		f.round_over = state.spawn_success_gate;  // [orig: g_RoundOver]
 		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
 		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
 	}

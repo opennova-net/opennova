@@ -3403,7 +3403,7 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 		return out.quads.size() == idle.quads.size() && bold_glyphs(out).empty();
 	};
 	HudFrameState gated = state;
-	gated.spawn_success_gate = true;
+	gated.round_over = true;
 	// The latch also returns the overlay pass at its head (hud_overlay_pass_head_test), so
 	// its frame is measured against a latched idle frame.
 	HudFrameState gated_idle = gated;

@@ -119,7 +119,7 @@ public:
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false, int p_head_drops = 0);
 	// The escape action's HUD-window close chain; returns the Event bits.
-	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
+	int escape(bool p_in_session, bool p_round_over, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine
 	// hud_toggles_session_init).
 	void session_init(bool p_in_session, bool p_mp_session_peer);

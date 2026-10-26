@@ -883,11 +883,11 @@ bool HudFrameCompiler::overlay_pass_runs(const HudFrameState &state) {
 }
 
 bool HudFrameCompiler::overlay_pass_head_runs(const HudFrameState &state) {
-	return !state.spawn_success_gate && !state.combat.white_flash;
+	return !state.round_over && !state.combat.white_flash;
 }
 
 uint32_t HudFrameCompiler::radar_frame_gates(const HudFrameState &state) const {
-	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the spawn-success early-out
+	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the round-over early-out
 	//  @0x5a8084 is the session's own read (inmatch/session.h)]
 	if (state.hud_detail_level >= 3) return 0u;
 	// The corner map's own update site needs mask bits 9, 6 and 10; its head and gates are
@@ -1771,7 +1771,7 @@ void HudFrameCompiler::element_breath_bar(const HudFrameState &state, float w, f
 	// [orig: HUD_DrawBreathBar @0x59D6F0..0x59D9C9, whose only caller is
 	//  HUD_DrawGameplayOverlays @0x5BDED3, behind g_RoundOver == 0
 	//  @0x5BDECA..0x5BDED1]
-	if (state.spawn_success_gate) {
+	if (state.round_over) {
 		return;
 	}
 	// The BREATHTIME declutter slot, then a positive breathtime
