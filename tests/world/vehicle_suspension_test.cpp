@@ -945,7 +945,7 @@ void test_mounted_action_recoil() {
 	person.mount_type = SeatType::Gunner;
 	person.mount_target = gh;
 	w.logic_tick = 120;
-	w.vehicles.weapon_recoil(person, 20, fired, 6, 1);
+	w.vehicles.weapon_recoil(person, 20, fired, 6, 1, nullptr);
 	CHECK(points.point == 9 && points.asked_direction,
 			"the flash point of the barrel the spent clip selects, with its direction");
 	CHECK(v.veh.chassis_active && v.veh.chassis_contact_active, "tank rocks on fire");
@@ -955,10 +955,10 @@ void test_mounted_action_recoil() {
 			"recoil opposes the gun point's authored direction");
 	const int32_t pitch = v.veh.chassis_matrix[8];
 	CHECK(pitch != 0, "the recoil pair tilts the chassis");
-	w.vehicles.weapon_recoil(person, 0, fired, 6, 1);
+	w.vehicles.weapon_recoil(person, 0, fired, 6, 1, nullptr);
 	CHECK(v.veh.chassis_matrix[8] == pitch, "zero action value preserves the previous recoil");
 	points.direction[0] = -65536;
-	w.vehicles.weapon_recoil(person, 20, fired, 6, 1);
+	w.vehicles.weapon_recoil(person, 20, fired, 6, 1, nullptr);
 	CHECK(int64_t(pitch) * v.veh.chassis_matrix[8] < 0,
 			"a point facing the other way reverses recoil pitch");
 	for (const auto &f : v.veh.chassis_forces)
@@ -970,14 +970,24 @@ void test_mounted_action_recoil() {
 	// 65536 / |v| truncates to -65535 on Y [orig: Math_BuildFixedPointMatrixFromEulerAngles
 	// `fld dbl_7C3608` @0x613F5D, the raw leg's build @0x545E4C].
 	points.point = 0;
-	w.vehicles.weapon_recoil(person, 20, nullptr, 6, 1);
+	w.vehicles.weapon_recoil(person, 20, nullptr, 6, 1, nullptr);
 	CHECK(points.point == 0, "a slot without a def poses no point");
 	CHECK(v.veh.chassis_impulse_direction[0] == 4 &&
 	              v.veh.chassis_impulse_direction[1] == -65535,
-	      "the raw gun forward stands in");
+	      "a replayed shot: the raw gun forward stands in");
+	// The fire's own call: the slot holds the fire position, so the hull rocks along minus
+	// the fire origin's world position, normalized (D-VEH-6).
+	// [orig: WeaponAction_Fire @0x542B10 - @0x542B95..0x542BAB, the call @0x542BF7,
+	//  negated @0x542D60..0x542D7D]
+	const int32_t fire_origin[3] = {3 * 65536, 0, -4 * 65536};
+	w.vehicles.weapon_recoil(person, 20, nullptr, 6, 1, fire_origin);
+	CHECK(v.veh.chassis_impulse_direction[0] == -39321 &&
+	              v.veh.chassis_impulse_direction[1] == 0 &&
+	              v.veh.chassis_impulse_direction[2] == 52428,
+	      "minus the fire origin's position stands for the unresolved point");
 	w.pose_provider = nullptr;
 	person.mount_type = SeatType::Driver;
-	w.vehicles.weapon_recoil(person, 55, fired, 6, 1);
+	w.vehicles.weapon_recoil(person, 55, fired, 6, 1, nullptr);
 	CHECK(v.veh.chassis_impulse_amplitude == 20, "ordinary seats do not rock their vehicle");
 
 	v.has_item_def = true;

@@ -176,7 +176,8 @@ void VehicleSystem::projectile_impact(
 //  @0x542D45..0x542D5B, negated @0x542D60..0x542D7D); ActionSlot_ExecuteAction
 //  @0x4020A0, tail @0x402196..0x402233 (the point @0x4021D1..0x4021ED)]
 void VehicleSystem::weapon_recoil(const Entity &shooter, int32_t amplitude,
-		const WeaponTableEntry *fired, int32_t slot_clip, int column) {
+		const WeaponTableEntry *fired, int32_t slot_clip, int column,
+		const int32_t *fire_origin) {
 	if (amplitude == 0 || !shooter.mounted || shooter.mount_type != SeatType::Gunner)
 		return;
 	const Entity *gun = world_.registry.get(shooter.mount_target);
@@ -191,18 +192,28 @@ void VehicleSystem::weapon_recoil(const Entity &shooter, int32_t amplitude,
 	int32_t pose[6];
 	int32_t point_direction[3];
 	if (!carrier_weapon_world_pose(world_, *gun, fired, slot_clip, column, pose, point_direction)) {
-		// D-VEH-6 (OPEN): retail's slot is not left as it stands. WeaponAction_Fire
-		// zeroes it [orig: WeaponAction_Fire @0x542B10, @0x542B95..0x542BAB],
-		// Entity_CalcWeaponFirePosition writes the fire position into it (the call
-		// @0x542BF7), the raw leg never overwrites it [orig:
-		// Entity_ComputeUserpointWorldTransform @0x545C60, @0x545E1F], and the hull
-		// rocks along minus the fire origin's world position (negated
-		// @0x542D60..0x542D7D, passed @0x542D9C). The gun's raw forward stands in
-		// here until the row is ported.
-		const auto frame = detail::vehicle_euler_basis(pose[3], pose[4], 0).q22;
-		point_direction[0] = frame.m[0] >> 6;
-		point_direction[1] = frame.m[4] >> 6;
-		point_direction[2] = frame.m[8] >> 6;
+		// The fire's direction slot is not left as it stands: WeaponAction_Fire zeroes it,
+		// Entity_CalcWeaponFirePosition writes the fire position into it, the point's raw leg
+		// never overwrites it, and the hull rocks along minus the fire origin's world position
+		// (D-VEH-6).
+		// [orig: WeaponAction_Fire @0x542B10 - the slot zeroed @0x542B95..0x542BAB,
+		//  Entity_CalcWeaponFirePosition @0x4DC750 (the call @0x542BF7), negated
+		//  @0x542D60..0x542D7D, passed @0x542D9C; Entity_ComputeUserpointWorldTransform
+		//  @0x545C60 - the raw leg @0x545E1F]
+		if (fire_origin != nullptr) {
+			point_direction[0] = fire_origin[0];
+			point_direction[1] = fire_origin[1];
+			point_direction[2] = fire_origin[2];
+		} else {
+			// A replayed shot's slot is the replay's uninitialized stack (no store reaches it
+			// on the raw leg), which no port can read; the gun's raw forward stands in.
+			// [orig: ActionSlot_ExecuteAction @0x4020A0 - forceVecX unwritten
+			//  @0x4021ED..0x40220F]
+			const auto frame = detail::vehicle_euler_basis(pose[3], pose[4], 0).q22;
+			point_direction[0] = frame.m[0] >> 6;
+			point_direction[1] = frame.m[4] >> 6;
+			point_direction[2] = frame.m[8] >> 6;
+		}
 	}
 	const int32_t direction[3] = { io::bam_sub(0, point_direction[0]),
 		io::bam_sub(0, point_direction[1]), io::bam_sub(0, point_direction[2]) };

@@ -464,10 +464,13 @@ public:
 	void slew_turret(Entity &veh, int32_t step);
 	// ActionDef+52 rocks the tank carrying an occupied emplacement, against
 	// the direction of the gun's point for the fired slot (`fired` def, its
-	// clip as the fire tail leaves it, `column` from its action pair).
+	// clip as the fire tail leaves it, `column` from its action pair). When the
+	// point does not resolve, the fire's own call rocks along minus the fire
+	// origin's world position (`fire_origin`, the fire position the shot was
+	// computed at); a replayed shot passes none (see the definition).
 	// [orig: WeaponAction_Fire @0x542B10; ActionSlot_ExecuteAction @0x4020A0]
 	void weapon_recoil(const Entity &shooter, int32_t amplitude, const WeaponTableEntry *fired,
-			int32_t slot_clip, int column);
+			int32_t slot_clip, int column, const int32_t *fire_origin);
 	void projectile_impact(
 			Entity &target, int32_t weight, const int32_t normal[3], const int32_t hit[3]);
 

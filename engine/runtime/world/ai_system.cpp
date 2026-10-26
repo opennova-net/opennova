@@ -1363,7 +1363,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		// already spent. [orig: WeaponAction_Fire tail @0x542D1F..0x542D5B]
 		world.vehicles.weapon_recoil(owner,
 				weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
-				mount->primary_weapon_slot.clip, 1);
+				mount->primary_weapon_slot.clip, 1, fire);
 		// The slot's fire action leaves through the adm-indexed arm with its mode
 		// byte from the barrel before the spend [orig: WeaponAction_Fire @0x542C11,
 		//  @0x542C1C..0x542C2F].

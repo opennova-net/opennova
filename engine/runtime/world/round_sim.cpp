@@ -617,7 +617,7 @@ void record_round_fire(World &world, RoundSim &sim,
 					gun != nullptr ? world.vehicles.resolve_mounted_ammo_slot(*gun) : nullptr;
 			world.vehicles.weapon_recoil(*shooter,
 					weapon->action_fsm.actions[weapon_action::kFire].action_value, weapon,
-					slot != nullptr ? slot->clip : 0, 1);
+					slot != nullptr ? slot->clip : 0, 1, nullptr);
 		}
 	}
 	// The sound legs run on the same logic-tick moment (world/fire_sound.h).

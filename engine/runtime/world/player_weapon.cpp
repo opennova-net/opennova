@@ -1602,7 +1602,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				//  send's call @0x542C5E]
 				world.vehicles.weapon_recoil(*shooter,
 						w.def.actions[weapon_action::kFire].action_value, adm,
-						active_local_weapon_slot(world, w)->clip, 1);
+						active_local_weapon_slot(world, w)->clip, 1, pose);
 				// The send refuses every shot under a cease fire at its head: no
 				// round, no ring record, no C2S 0x06. Past it, the authority arm
 				// passes its own-slot gate, then the round validation.
