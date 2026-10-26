@@ -1,6 +1,6 @@
 // AudioStream wrapper for a single entry inside a SbfBank.
-// Witnessed engine equivalent: jointops!Sbf_StartEntry @ 0x004ED910 sets up
-// per-entry streaming state (block_size / total_size / data_offset), which the
+// The engine port (formats/sbf, which carries the per-entry stream init's witness) sets
+// up per-entry streaming state (block_size / total_size / data_offset), which the
 // entry's decode (sbf::sbf_decode_entry) reads via raw_entry_at().
 
 #include "audio/sbf_audio_stream.h"

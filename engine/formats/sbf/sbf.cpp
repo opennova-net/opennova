@@ -1,11 +1,11 @@
 /* SBF audio bank reader implementation.
 
    [orig: Sbf_OpenFile_Gamemus @ 0x4ED6C0, AudioVM_OpenContextFile @ 0x672160, Sbf_StartEntry @ 0x4ED910, Audio_StreamNextChunk @ 0x4ED7D0]
-   Header parser: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0
-                  jointops!AudioVM_OpenContextFile @ 0x00672160
-   Per-entry stream init: jointops!Sbf_StartEntry @ 0x004ED910
-   Chunk decode: jointops!Audio_StreamNextChunk @ 0x004ED7D0 +
-                 jointops!AudioChannel_ComputeMixCoefficients @ 0x007BD4B0 */
+   Header parser: [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0]
+                  [orig: AudioVM_OpenContextFile @ 0x00672160]
+   Per-entry stream init: [orig: Sbf_StartEntry @ 0x004ED910]
+   Chunk decode: [orig: Audio_StreamNextChunk @ 0x004ED7D0] +
+                 [orig: AudioChannel_ComputeMixCoefficients @ 0x007BD4B0] */
 
 #include <formats/sbf/sbf.h>
 
@@ -21,7 +21,7 @@
 
 namespace opennova::sbf {
 
-/* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (magic + flags check).
+/* Witnessed: [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0] (magic + flags check).
    The whole entry index must lie inside the bytes: a header's entry count past
    them is refused, whatever the size (a 24-byte bank holds an empty index). */
 int sbf_validate(const uint8_t *data, size_t size) {
@@ -37,7 +37,7 @@ int sbf_validate(const uint8_t *data, size_t size) {
     return 0;
 }
 
-/* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (header + entry-loop reads).
+/* Witnessed: [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0] (header + entry-loop reads).
    Ingests header + index from a caller-provided buffer. */
 int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
     if (!arc || !data) return -1;
@@ -90,7 +90,7 @@ const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t index) {
     return &arc->entries[index];
 }
 
-/* Witnessed: jointops!Audio_SubmitStereoSampleSplit inner loop @ 0x007BD252.
+/* Witnessed: [orig: Audio_SubmitStereoSampleSplit, its inner loop @ 0x007BD252].
    Bytes are byte-paired stereo: even byte (i&1==0) is the LEFT channel sample
    shifted by scale_a; odd byte is RIGHT shifted by scale_b. valid_samples is
    the count of audio BYTES to consume (and matches the int16 output count). */

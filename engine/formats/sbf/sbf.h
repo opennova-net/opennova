@@ -2,8 +2,8 @@
 
 /* SBF (Sound Buffer File) audio bank format reader.
 
-   Header parser witnessed at jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0
-   (legacy gamemus path) and jointops!AudioVM_OpenContextFile @ 0x00672160
+   Header parser witnessed at [orig: Sbf_OpenFile_Gamemus @ 0x004ED6C0]
+   (legacy gamemus path) and [orig: AudioVM_OpenContextFile @ 0x00672160]
    (live AudioVM path); both implement identical reads. */
 
 #include <stddef.h>

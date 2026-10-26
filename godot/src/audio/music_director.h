@@ -4,9 +4,8 @@
 // signals. Owns a small AudioStreamPlayer pool for marker playback driven
 // by the play / playw opcodes.
 //
-// Witnessed wire-level paths (engine/formats/mus): Jointops.exe!AudioVM_LoadScriptFile @
-// 0x00672D20 (script load), Jointops.exe!AudioVM_Op_Play @ 0x672CB0 + AudioVM_Op_PlayWait @
-// 0x672C90 (sound triggers), Jointops.exe!Intrinsic_GSV / GSDV (volume).
+// The engine port (engine/formats/mus mus_vm.cpp, which carries the witnesses) loads the
+// script, fires the play / playw opcodes' sound triggers and the GSV / GSDV intrinsics' volume.
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/node.hpp>

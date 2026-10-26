@@ -236,7 +236,7 @@ struct EffectScene::Impl {
 	std::shared_ptr<const std::vector<ParticleDef>> definitions =
 			std::make_shared<std::vector<ParticleDef>>();
 	// Per definition, the resolved `child_id` definition (kInvalidIndex when
-	// absent or unresolved) [orig: CEffectDef_ResolveAllReferences @ 0x5e9d90].
+	// absent or unresolved) [orig: CEffectDef_ResolveAllReferences @ 0x5e9d70 - the child_id lookup @ 0x5e9d90].
 	std::vector<std::size_t> child_definition_index;
 	std::vector<CatalogEffect> effects;
 	std::unordered_map<std::string, std::size_t> effect_by_name;

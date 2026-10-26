@@ -1,8 +1,8 @@
 /* MUS container parser implementation.
 
    [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @ 0x672470; docs/audio/mus-sbf-re.md]
-   SCR0 file header parser at Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
-   MU01 chunk pointer fixup at Jointops.exe!AudioVM_FixupPointers @ 0x00672470. */
+   SCR0 file header parser at [orig: AudioVM_LoadScriptFile @ 0x00672D20].
+   MU01 chunk pointer fixup at [orig: AudioVM_FixupPointers @ 0x00672470]. */
 
 #include <formats/mus/mus.h>
 
@@ -18,7 +18,7 @@
 
 namespace opennova::mus {
 
-/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic compare vs 'SCR0' 0x30524353).
+/* Witnessed: [orig: AudioVM_LoadScriptFile @ 0x00672D20] (magic compare vs 'SCR0' 0x30524353).
    Engine itself only validates the SCR0 magic; we additionally bound the chunk
    count to a sane limit so a corrupt file does not provoke a runaway alloc. The
    name count needs no bound of ours: its resolve table must lie in the file
@@ -162,7 +162,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     }
 }
 
-/* Witnessed: Jointops.exe!AudioVM_FixupPointers @ 0x00672470, driven by the chunk-pointer
+/* Witnessed: [orig: AudioVM_FixupPointers @ 0x00672470], driven by the chunk-pointer
    relocation loop in AudioVM_LoadScriptFile @ 0x00672D20. Reads one MU01 chunk into the
    parsed MusScript form. `chunk_off` is the file offset of the MU01 header. */
 static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
@@ -274,7 +274,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
     return 0;
 }
 
-/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
+/* Witnessed: [orig: AudioVM_LoadScriptFile @ 0x00672D20].
    Memory-mode parser. Walks SCR0 header, reads chunk pointer table, parses
    each MU01 chunk into a MusScript, and copies the file-level intrinsic name
    table out of its Pascal-style strings blob. */
@@ -349,7 +349,7 @@ int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
     return 0;
 }
 
-/* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (CreateFile + ReadFile
+/* Witnessed: [orig: AudioVM_LoadScriptFile @ 0x00672D20] (CreateFile + ReadFile
    slurp at the head of the function). The engine reads the whole file into RAM
    before relocation; we mirror that by slurp + delegate. */
 int mus_open(MusFile *out, const char *path) {

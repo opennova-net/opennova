@@ -1,5 +1,5 @@
 // MUS interactive-music script wrapper. The underlying parser is engine/formats/mus
-// (mus_open_memory). Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
+// (mus_open_memory, whose reader carries the script load's witness).
 
 #include "audio/music_script.h"
 

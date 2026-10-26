@@ -3,9 +3,9 @@
 /* MUS (interactive-music script) container reader.
 
    SCR0 file header parser witnessed at
-       Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20
+       [orig: AudioVM_LoadScriptFile @ 0x00672D20]
    MU01 chunk pointer fixup at
-       Jointops.exe!AudioVM_FixupPointers @ 0x00672470 */
+       [orig: AudioVM_FixupPointers @ 0x00672470] */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -52,7 +52,7 @@ inline constexpr int MUS_DEFAULT_LOCALS_BASE = 0x20;
 
 /* --- On-disk structs --- */
 
-/* SCR0 file-level header. Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.
+/* SCR0 file-level header. Witnessed: [orig: AudioVM_LoadScriptFile @ 0x00672D20].
    Field offsets confirmed against the load+relocation loop in that function: magic
    compare vs 'SCR0' 0x30524353, chunk-table ptr relocate at +0x0C, name string-blob
    and resolve-table relocate at +0x14/+0x18 (each resolved via AudioVM_FindContextByName). */
@@ -67,8 +67,8 @@ typedef struct MusFileHeader {
     uint32_t reserved[4];                 /* 16 bytes; never read by engine */
 } MusFileHeader;
 
-/* MU01 chunk header. Witnessed: Jointops.exe!AudioVM_FixupPointers @ 0x00672470
-   plus Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20. */
+/* MU01 chunk header. Witnessed: [orig: AudioVM_FixupPointers @ 0x00672470]
+   plus [orig: AudioVM_LoadScriptFile @ 0x00672D20]. */
 typedef struct MusChunkHeader {
     uint32_t tag;                         /* 'MU01'; never validated at runtime */
     uint32_t version;                     /* 0x00000100; not read */
@@ -374,8 +374,8 @@ void mus_free(void *p);
 
 /* --- VM (interpreter) ---
 
-   Witnessed: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720 (32-instruction budget,
-   65-entry dispatch table at Jointops.exe!0x0084F220, two stacks: data EBP-tracked
+   Witnessed: [orig: AudioVM_DispatchLoop @ 0x00672720] (32-instruction budget,
+   65-entry dispatch table at [orig: g_AudioVMOpcodeDispatchTable @ 0x0084F220], two stacks: data EBP-tracked
    and call EDI-tracked). `method N` calls the handler the loader resolved for
    the script's N-th method name, by name, against the game's registered table @
    0x84F0C8 (36-byte records: GEcho, GGRnd, GSV, GSDV, GFB, FSet, FClear, FIsSet,
@@ -411,12 +411,12 @@ typedef enum MusVMState {
    side-effects (Phase A revisions, see spec §"engine/formats/mus C API"). */
 typedef struct MusVMHooks {
     void *user;
-    /* Witnessed: Jointops.exe!AudioVM_Op_Play @ 0x672CB0 (0x3E, 1B index)
-       and       Jointops.exe!AudioVM_Op_PlayWait @ 0x672C90 (0x3D, 2B index).
+    /* Witnessed: [orig: AudioVM_Op_Play @ 0x672CB0] (0x3E, 1B index)
+       and       [orig: AudioVM_Op_PlayWait @ 0x672C90] (0x3D, 2B index).
        wait=1 for playw (0x3D), 0 for play (0x3E). */
     void (*on_play_sound)     (void *user, uint32_t sbf_entry_index, int wait);
     /* Fired when execution enters a section (via setstate or
-       mus_vm_jump_to_section). Witnessed: Jointops.exe!AudioVM_Op_SetState @ 0x672C70. */
+       mus_vm_jump_to_section). Witnessed: [orig: AudioVM_Op_SetState @ 0x672C70]. */
     void (*on_section_entered)(void *user, const char *section_name);
     /* Fired by pop_g (0x08), GSV, GSDV intrinsics whenever a global var slot
        is written. var_index is the byte offset / 4 (Var00..Var15 fit indices
@@ -424,10 +424,10 @@ typedef struct MusVMHooks {
     void (*on_var_changed)    (void *user, uint8_t var_index, int32_t new_value);
     /* GEcho intrinsic: reads the data stack's top word (popping none, as every
        method), fires this hook with the int32 value.
-       Witnessed: Jointops.exe!Intrinsic_GEcho @ 0x6720C0. */
+       Witnessed: [orig: AudioVM_Intrinsic_GEcho @ 0x6720C0]. */
     void (*on_echo)           (void *user, int32_t arg);
     /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
-       Witnessed: Jointops.exe!Intrinsic_GSV @ 0x6720E0, GSDV @ 0x672120. */
+       Witnessed: [orig: AudioVM_Intrinsic_GSV @ 0x6720E0], [orig: AudioVM_Intrinsic_GSDV @ 0x672120]. */
     void (*on_volume_changed) (void *user, int32_t left_16_16, int32_t right_16_16);
 } MusVMHooks;
 
