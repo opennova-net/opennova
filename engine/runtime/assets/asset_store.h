@@ -60,7 +60,9 @@ private:
 std::string asset_file_name(const std::string &name, const char *extension, bool replace = false);
 
 // Standalone documents use native ownership without creating a mount.
-// Mounted consumers always use AssetStore::model.
+// Mounted consumers always use AssetStore::model, which also refuses what the game's
+// load refuses (a version word below 0x103, a mesh type other than 1 or 2); these two
+// read any file the format reader reads.
 Model read_model_file(const std::string &path);
 // A model's, a table's or a clip's bytes read (the editor's documents hold one as their
 // base, its preview reads the project's); null when they do not read.

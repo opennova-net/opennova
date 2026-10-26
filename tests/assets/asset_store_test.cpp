@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <iterator>
 #include <string>
 #include <stdexcept>
 #include <utility>
@@ -38,6 +39,50 @@ struct TestRoot {
 		}
 	}
 };
+
+// The mounted load refuses what the game's model load refuses: a chunk file whose version
+// word is below 0x103, and a GHDR mesh type other than 1 or 2; the standalone parse still
+// reads both. [orig: ThreediGp_LoadFromFile @0x5B5780 - @0x5B5819..0x5B5823,
+//  @0x5B5911..0x5B5922]
+static void the_mount_refuses_what_the_game_load_refuses(const fs::path &models) {
+	std::vector<uint8_t> bytes;
+	{
+		std::ifstream in(models / "crate.3di", std::ios::binary);
+		bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+	}
+	TEST_EXPECT(bytes.size() > 8);
+	if (bytes.size() <= 8) return;
+	size_t ghdr = std::string(bytes.begin(), bytes.end()).find("GHDR");
+	TEST_EXPECT(ghdr != std::string::npos && ghdr + 8 + 20 <= bytes.size());
+	if (ghdr == std::string::npos || ghdr + 8 + 20 > bytes.size()) return;
+	const size_t mesh_type = ghdr + 8 + 16; // the GHDR data's mesh-type dword
+	struct Case { const char *name; uint32_t version; int32_t mesh; bool loads; };
+	const Case cases[] = {
+		{"stock", 0x103, -1, true},
+		{"old", 0x102, -1, false},
+		{"newer", 0x104, -1, true},
+		{"wide", 0x00010102, -1, false}, // the compare is the low word's
+		{"mesh3", 0x103, 3, false},
+		{"mesh0", 0x103, 0, false},
+	};
+	TestRoot root;
+	for (const Case &c : cases) {
+		std::vector<uint8_t> patched = bytes;
+		for (int i = 0; i < 4; ++i) patched[4 + i] = uint8_t(c.version >> (8 * i));
+		if (c.mesh >= 0)
+			for (int i = 0; i < 4; ++i) patched[mesh_type + i] = uint8_t(uint32_t(c.mesh) >> (8 * i));
+		std::ofstream out(root.path / (std::string(c.name) + ".3di"), std::ios::binary);
+		out.write(reinterpret_cast<const char *>(patched.data()), std::streamsize(patched.size()));
+		out.close();
+		const assets::Model standalone = assets::parse_model(patched.data(), patched.size());
+		TEST_EXPECT(standalone != nullptr);
+		if (standalone && c.mesh >= 0) TEST_EXPECT(int32_t(standalone->header.mesh_type) == c.mesh);
+	}
+	ResourceIndex index;
+	TEST_EXPECT(index.scan(root.path.string(), {}, VfsMountMode::LooseOnly));
+	assets::AssetStore store{&index};
+	for (const Case &c : cases) TEST_EXPECT((store.model(c.name) != nullptr) == c.loads);
+}
 
 int main() {
 	const fs::path repo = test_paths_repo_root(__FILE__);
@@ -172,6 +217,8 @@ int main() {
 	std::vector<anim::PoseBone> pose;
 	retained_rig->eval_pose("anim_idle", 0.1, 0, pose);
 	TEST_EXPECT(pose.size() == retained_rig->bone_count());
+
+	the_mount_refuses_what_the_game_load_refuses(models);
 
 	assets::AssetStore empty;
 	TEST_EXPECT(!empty.model("thing"));
