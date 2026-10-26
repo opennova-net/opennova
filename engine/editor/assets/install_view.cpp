@@ -1,6 +1,7 @@
 #include <editor/assets/install_view.h>
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <set>
 #include <system_error>
@@ -198,6 +199,11 @@ bool InstallFileSource::read(const std::string &name, std::vector<uint8_t> &out)
 }
 
 uint64_t InstallFileSource::stamp(const std::string &name) const { return find_(name) ? 1 : 0; }
+
+uint64_t InstallFileSource::next_serial() {
+	static std::atomic<uint64_t> made{0};
+	return ++made;
+}
 
 uint64_t InstallFileSource::size_of(const std::string &name) const {
 	const std::lock_guard<std::mutex> lock(reading_);

@@ -43,17 +43,19 @@ DocumentState state_of(const DocumentBase &document) {
 // findings moved.
 struct ProblemsService::Pass {
 	Pass(const ProjectPaths &p, std::shared_ptr<const ProjectDocument> d, std::shared_ptr<const AssetScan> s,
-			std::vector<std::shared_ptr<const DocumentBase>> o, AssetGraph &graph, ValidationCache &cache,
-			GraphReadings &readings) :
-			paths(p), project(std::move(d)), scan(std::move(s)), open(std::move(o)), validation(graph, cache, readings) {
+			std::vector<std::shared_ptr<const DocumentBase>> o, std::shared_ptr<const InstallFileSource> b,
+			AssetGraph &graph, ValidationCache &cache, GraphReadings &readings) :
+			paths(p), project(std::move(d)), scan(std::move(s)), open(std::move(o)), base(std::move(b)),
+			validation(graph, cache, readings) {
 		for (const auto &document : open) states.push_back(document ? state_of(*document) : DocumentState());
 	}
-	ValidationInput input() const { return {paths, *project, *scan, open}; }
+	ValidationInput input() const { return {paths, *project, *scan, open, nullptr, base.get()}; }
 
 	ProjectPaths paths;
 	std::shared_ptr<const ProjectDocument> project;
 	std::shared_ptr<const AssetScan> scan;
 	std::vector<std::shared_ptr<const DocumentBase>> open;
+	std::shared_ptr<const InstallFileSource> base; // the base game's files as the pass began (ValidationInput::base)
 	std::vector<DocumentState> states;
 	ProjectValidation validation;
 	size_t checks_run = 0;    // the project checks' slots brought up (ProjectChecks::slot_count)
@@ -161,6 +163,7 @@ void ProblemsService::compose_held() {
 }
 
 void ProblemsService::release_base_files() {
+	base_files_.reset();
 	assets_->set_base(nullptr);
 	originals_->clear();
 	originals_needed_ = false;
@@ -188,7 +191,7 @@ bool ProblemsService::step_pass(uint64_t bytes) {
 		if (pass_) moved_since_composed_ = true;
 		validation_due_ = false;
 		pass_ = std::make_unique<Pass>(core_.paths(), view_.project.document, view_.project.scan, view_.documents.open,
-				*graph_, validation_cache_, readings_);
+				base_files_, *graph_, validation_cache_, readings_);
 	}
 	Pass &pass = *pass_;
 	if (!pass.validation.done()) {
@@ -508,6 +511,7 @@ void ProblemsService::set_base_layer(std::shared_ptr<const GraphLayer> layer) {
 void ProblemsService::clear() {
 	graph_->clear();
 	assets_->clear();
+	base_files_.reset();
 	checks_->clear();
 	validation_cache_ = ValidationCache();
 	composed_ = Composed();

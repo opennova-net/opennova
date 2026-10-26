@@ -137,7 +137,10 @@ public:
 	}
 	// An expansion's base game under the project's files (ProjectAssetSource::set_base; null for none): what the
 	// previews, the terrain tools' reads and the project checks read of a name the project lacks, as the game does.
-	void set_base_files(std::shared_ptr<const FileSource> files) { assets_->set_base(std::move(files)); }
+	void set_base_files(std::shared_ptr<const InstallFileSource> files) {
+		base_files_ = files;
+		assets_->set_base(std::move(files));
+	}
 	// The last build's own findings, Problems rows until the next build starts or the project closes.
 	void set_build_findings(std::vector<Diagnostic> findings) { build_findings_ = std::move(findings); }
 	void clear_build_findings() { build_findings_.clear(); }
@@ -225,6 +228,9 @@ private:
 	std::shared_ptr<const AssetScan> graph_scan_;
 	std::shared_ptr<AssetGraph> graph_ = std::make_shared<AssetGraph>();
 	std::shared_ptr<ProjectAssetSource> assets_ = std::make_shared<ProjectAssetSource>();
+	// The base game's files set_base_files gave the assets, kept typed for a validation's walk of them (the
+	// particle token slots' over the base's archives, graph/use_checks.cpp).
+	std::shared_ptr<const InstallFileSource> base_files_;
 	// The document types' project checks, one per type that has one (S13 V9): what each keeps
 	// between validations, made when the session is.
 	std::shared_ptr<ProjectChecks> checks_;

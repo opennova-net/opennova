@@ -1161,6 +1161,66 @@ static int test_base_detail_map() {
 	return 0;
 }
 
+// The particle token slots over an expansion (graph/use_checks.cpp check_particle_token_slots): the game parses the
+// expansion's archive before its base game's [orig: CEffectSystem_Init @ 0x5F6070, the slots ascending;
+// PFF_OpenAllArchives @ 0x4a4310], so an expansion's flags list read past its line faults the game though the base's
+// table (aaa.ptl, its name sorting first) would fill the slot: the build gate's error on the expansion's file, where
+// the check had skipped every expansion. The expansion's own table first, none. The base's bbb.ptl, the same flags
+// list after aaa.ptl's table, faults nowhere for the base alone; once the expansion has its own aaa.ptl of no table
+// (and no other file), the walk reaches the base's aaa.ptl entry and parses the expansion's copy in its place, by name
+// through the front door [orig: File_ParseASCIIFile by name @ 0x5f6545], so bbb.ptl faults only under the expansion:
+// the project's error, said of the project, naming the base's file and line and the copy.
+static int test_base_particle_walk() {
+	test_temp::TempDir dir("opennova_editor_expansion_particles");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	std::string table = "[tabledef]\r\n{\r\n\tid = grow;\r\n";
+	for (int row = 1; row <= 32; ++row) table += "\ttl" + std::to_string(row) + " = 1, 2, 3, 4, 5, 6, 7, 8;\r\n";
+	table += "}\r\n";
+	const std::string flags = "[particledef]\r\n{\r\n\tid = Dot;\r\n\tflags\t=  EMITVECTOR AMBIENTCOLOR ;\r\n}\r\n";
+	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "aaa.ptl", table }, { "bbb.ptl", flags } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	TEST_EXPECT(test_io::write_text(root + "/particles/effects.ptl", flags));
+	editor_test::handle_to_end(session, request::open_project(root));
+	const auto faults = [&]() {
+		std::vector<Diagnostic> out;
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "particle.unfilled_token_slot") out.push_back(d);
+		return out;
+	};
+	const std::vector<Diagnostic> found = faults();
+	TEST_EXPECT(found.size() == 1 && found[0].asset == "particles/effects.ptl" && found[0].line == 4 &&
+	            found[0].row() && found[0].row()->gates_build);
+	TEST_EXPECT(test_io::write_text(root + "/particles/atable.ptl", table));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	TEST_EXPECT(faults().empty());
+	std::error_code gone;
+	std::filesystem::remove(opennova::io::os_path(root + "/particles/atable.ptl"), gone);
+	std::filesystem::remove(opennova::io::os_path(root + "/particles/effects.ptl"), gone);
+	TEST_EXPECT(test_io::write_text(root + "/particles/aaa.ptl", "[particledef]\r\n{\r\n\tid = Other;\r\n}\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const std::vector<Diagnostic> copied = faults();
+	TEST_EXPECT(copied.size() == 1 && copied[0].asset.empty() && copied[0].row() && copied[0].row()->gates_build &&
+	            copied[0].message.find("The base game's bbb.ptl, line 4:") == 0 &&
+	            copied[0].message.find("the expansion's own aaa.ptl parsing in the base's files' places") !=
+	                    std::string::npos);
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -1313,6 +1373,7 @@ int main() {
 	failures += test_base_files_under_the_project();
 	failures += test_base_string_tables();
 	failures += test_base_detail_map();
+	failures += test_base_particle_walk();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();
