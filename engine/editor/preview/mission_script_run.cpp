@@ -3,15 +3,19 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 
 #include <base/io/fixed.h>
 #include <base/io/hash.h>
 #include <base/io/tick_rate.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_scene.h>
 #include <formats/env/env.h>
 #include <runtime/environment/weather_seed.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/audio/sound_profile.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_kernel.h>
@@ -23,6 +27,15 @@
 namespace opennova::editor {
 
 namespace {
+
+// A file source of two calls (the boot's reads, each noted with its stamp then).
+class CalledFiles final : public FileSource {
+public:
+	std::function<bool(const std::string &, std::vector<uint8_t> &)> reads;
+	std::function<uint64_t(const std::string &)> stamps;
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return reads(name, out); }
+	uint64_t stamp(const std::string &name) const override { return stamps(name); }
+};
 
 // The header's fields the start reads (its environment and its overrides, its clock), and the mission's name.
 std::string key_of(const MissionSceneHeader &header, const std::string &basename) {
@@ -125,6 +138,8 @@ uint64_t mission_start_records(const MissionScene &scene) {
 
 void MissionScriptRun::close() {
 	kernel_.reset();
+	models_.reset();
+	index_.reset();
 	reads_.reset();
 	key_.clear();
 	error_.clear();
@@ -161,6 +176,8 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 		const MissionSceneHeader &header, const std::string &basename) {
 	const auto start = std::chrono::steady_clock::now();
 	kernel_.reset();
+	models_.reset();
+	index_.reset();
 	sounds_.clear();
 	start_sounds_.clear();
 	start_seats_.clear();
@@ -205,7 +222,20 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 			env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
 					header.fog_color, header.water_color, header.water_murk),
 			mission_env);
+	// The models the start reads (the seat table's, each item's graphic model: whether a carrier offers a seat) through
+	// the same noted reads [orig: Game_ReloadEntityModelsAndCallbacks @0x522830, the model loads].
+	auto read_models = std::make_shared<CalledFiles>();
+	read_models->reads = source.read_file;
+	read_models->stamps = [files, reads](const std::string &name) {
+		const uint64_t stamp = files->stamp(name);
+		reads->push_back({ name, stamp });
+		return stamp;
+	};
+	auto index = std::make_unique<ResourceIndex>();
+	index->mount_source(read_models);
+	auto models = std::make_unique<assets::AssetStore>(index.get());
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	kernel->set_assets(models.get());
 	kernel->open_document(std::move(composed), basename, source);
 	// The start as a headless host boots it, beside the picture's own choices: no player of its own (the listener
 	// stands in for one's ears), no collision or terrain tables (nothing moves), the seat table (a start's script may
@@ -249,6 +279,8 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	emitters_.clear();
 	let_go(kernel->world.out);
 	scripted_ = kernel->wac_loaded;
+	index_ = std::move(index);
+	models_ = std::move(models);
 	kernel_ = std::move(kernel);
 	boot_us_ = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();
 }

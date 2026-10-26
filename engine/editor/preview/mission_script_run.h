@@ -10,6 +10,12 @@
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/weather_state.h>
 
+namespace opennova {
+class ResourceIndex;
+}
+namespace opennova::assets {
+class AssetStore;
+}
 namespace opennova::mission {
 class MissionKernel;
 }
@@ -165,6 +171,11 @@ private:
 	// A seat's pose and clip over `carrier` (its point, angles and state into `out`).
 	static void pose_seat_(world::World &w, const SeatBodies &bodies, const world::Entity &carrier, MissionStartSeat &out);
 
+	// The project's files as the start's models read them (the seat table's, the items' graphic models): an index over
+	// the boot's reads and the kernel's asset store over it (MissionKernel::set_assets), which the kernel's own store,
+	// over a mount the start never opens, does not serve. Declared ahead of the kernel, which points at them.
+	std::unique_ptr<ResourceIndex> index_;
+	std::unique_ptr<assets::AssetStore> models_;
 	std::unique_ptr<mission::MissionKernel> kernel_;
 	std::shared_ptr<std::vector<Read>> reads_; // the files the boot read, each with its stamp then
 	std::string key_; // the header's fields the boot read, and the mission's name
