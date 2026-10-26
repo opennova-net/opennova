@@ -12,7 +12,7 @@ extends GutTest
 # ends the round on its first execution.
 func _ending_sim(script: String) -> Simulation:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1),
 			"the local player is the human that keeps the world running")
 	assert_true(sim.compile_and_set_wac(PackedStringArray([script])))
@@ -42,7 +42,7 @@ func test_flow_arms_once_out_of_a_session_and_mounts_one_screen() -> void:
 	flow.begin(null)
 	assert_false(flow.is_round_ended(), "no world, no flow")
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	flow.begin(sim)
 	assert_true(flow.is_round_ended(), "a single-player round end arms the flow")
 	var mount := Node.new()

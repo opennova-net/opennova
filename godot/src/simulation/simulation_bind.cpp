@@ -52,7 +52,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("command_sky_speed", "rate"), &Simulation::command_sky_speed);
 	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Simulation::command_quake);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
-	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);

@@ -711,8 +711,6 @@ public:
 	// ended the process (session_create_ended_process).
 	int64_t create_host_session(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
-	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
-	void build_demo_mission();
 	bool is_loaded() const;
 
 	// Transport.

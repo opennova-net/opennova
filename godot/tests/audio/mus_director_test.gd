@@ -149,7 +149,7 @@ func test_wac_binds_live_music_globals_and_keeps_its_compile_time_context() -> v
 	director.set_var(7, 99)
 	var sim := Simulation.new()
 	sim.set_music_director(director)
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	# A bare Simulation has no host roster to publish humans. This authored
 	# clock write keeps its script admitted for each repeated 62-tick pass.
 	assert_true(sim.compile_and_set_wac(PackedStringArray([

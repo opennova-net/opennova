@@ -59,72 +59,6 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 		options.team_count = joined->state().scoreboard.team_count;
 }
 
-// Build the same synthetic patrol mission the C++ promote_test uses: 3 markers forming a
-// path, one looping waypoint record (channel 1), 2 organics on that route, 1 building.
-opennova::bms::File make_demo_mission() {
-	opennova::bms::File m{};
-
-	auto marker = [](int32_t x, int32_t y, int32_t z) {
-		opennova::bms::Entity e{};
-		e.type = opennova::bms::ItemType::Marker;
-		e.x = x; e.y = y; e.z = z;
-		// No advance trigger (the record's 0xFFFF), so the route advances by proximity:
-		// a trigger of 0 holds the marker (D-HUD-60).
-		e.wp_adv_trigger = -1;
-		return e;
-	};
-	auto organic = [](int32_t x, int32_t y, int32_t z, uint8_t team, uint8_t wp_id) {
-		opennova::bms::Entity e{};
-		e.type = opennova::bms::ItemType::Organic;
-		e.x = x; e.y = y; e.z = z;
-		e.yaw = 90;
-		e.team = team;
-		e.waypoint_id = wp_id;
-		e.wp_number = 0;
-		e.min_engagement_distance = 50 << 16;
-		e.max_engagement_distance = 500 << 16;
-		return e;
-	};
-
-	m.markers.push_back(marker(100 << 16, 0, 0));
-	m.markers.push_back(marker(200 << 16, 0, 0));
-	m.markers.push_back(marker(300 << 16, 0, 0));
-
-	// The waypoint table is POSITIONAL — slot index == authored list id, slot 0
-	// = the reserved no-route id. The looping patrol the organics author as
-	// wp_id 1 sits at slot 1; the BLUE-flagged HUD route at slot 2.
-	m.waypoint_records.resize(3);
-	m.waypoint_records[1].flags = opennova::bms::WaypointFlags::None; // loops
-	m.waypoint_records[1].marker_count = 3;
-	m.waypoint_records[1].waypoint_numbers = {0, 1, 2};
-
-	// A BLUE-flagged player route over the same markers: promotion builds the
-	// HUD waypoint track from the first such record (marker 0 authors a wide
-	// radius + a name id so the view surfaces meaningful fields).
-	m.markers[0].wp_distance = 25;
-	m.markers[0].ttool_index = 1;
-	m.waypoint_records[2].flags = opennova::bms::WaypointFlags::PlayerRoute;
-	m.waypoint_records[2].marker_count = 3;
-	m.waypoint_records[2].waypoint_numbers = {0, 1, 2};
-
-	m.organics.push_back(organic(0, 0, 0, /*team=*/1, /*wp_id=*/1));
-	m.organics.push_back(organic(50 << 16, 0, 0, /*team=*/2, /*wp_id=*/1));
-
-	opennova::bms::Entity bldg{};
-	bldg.type = opennova::bms::ItemType::Building;
-	bldg.x = 999 << 16;
-	m.buildings.push_back(bldg);
-
-	// Authored SSNs (promotion copies record ids verbatim, like the original).
-	m.organics[0].id = 1;
-	m.organics[1].id = 2;
-	m.buildings[0].id = 3;
-	m.markers[0].id = 10;
-	m.markers[1].id = 11;
-	m.markers[2].id = 12;
-	return m;
-}
-
 // The bring-up's session create refused on the mpreset word
 // (inmatch::HostRole::session_create): the in-memory loads fail as the file
 // boot's phase A does (inmatch::HostBoot::session_create), and
@@ -785,30 +719,6 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;
-}
-
-void Simulation::build_demo_mission() {
-	if (!begin_session_load()) return;
-	reset_world();
-	net_.host_session_config.mission_file = "demo.bms";
-	kernel_->open_document(make_demo_mission(), std::string(),
-			opennova::mission::BootFileSource{});
-	opennova::mission::KernelBootOptions options;
-	options.music_globals = wac_music_globals();
-	options.playable = false;
-	options.joiner = is_joiner();
-	options.mp_session = is_host_listening() || is_joiner();
-	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	stamp_admission_limits(options, net_, is_host_listening(),
-			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
-	options.bringup_net_session = role_bringup_hook();
-	std::string boot_error;
-	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
-		fail_session_load(boot_error.c_str());
-		return;
-	}
-	finish_kernel_boot();
-	complete_session_load();
 }
 
 // The Godot legs after the role's baseline restore (reset_session): the

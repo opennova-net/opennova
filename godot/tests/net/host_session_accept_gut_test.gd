@@ -121,7 +121,7 @@ func test_admit_remote_peer_spawns_a_world_entity() -> void:
 
 func test_host_listen_off_by_default() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_false(sim.is_host_listening(), "host listening off by default")
 	assert_eq(sim.get_host_listen_port(), 0, "no bound port when not listening")
 	assert_false(sim.admit_test_remote_peer(Vector3.ZERO, 0.0, 1),

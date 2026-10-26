@@ -275,6 +275,11 @@ slide, the other 48 stay), the person's head sphere.
   pools, one item id each, zero-valued optional fields, the minted terrain and
   environment in its header), which `mission_mis_idempotency` round-trips through `.mis`
   and `mission_corpus` rewrites.
+- `bms/synth_patrol.bms` — `tests/fixtures/minimal_bms_gen.cpp`: the small patrol mission
+  the GUT world tests load (`WorldFixture.load_patrol_mission`): three markers on one looping
+  waypoint record and a BLUE-flagged player route over them, two organics on teams 1 and 2
+  walking the loop, one building, no terrain or environment named; raw records through
+  `bms::write`.
 - `bms/synth_logic.bms`, `bms/synth_logic.bin` — `tests/fixtures/mission_set_gen.cpp`: the
   small mission the mission document and its picture read (every row kind on the minted
   terrain inside mission x, y of -512..512, items whose graphics are `threedi/synth` models,

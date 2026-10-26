@@ -2689,7 +2689,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 
 func test_joiner_off_by_default() -> void:
 	var sim := Simulation.new()
-	sim.build_demo_mission()
+	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_false(sim.is_joiner(), "joiner off by default")
 	assert_eq(sim.get_joiner_phase(), -1, "no joiner phase when not joining")
 	assert_false(sim.is_joined_in_match(), "not in a match")
