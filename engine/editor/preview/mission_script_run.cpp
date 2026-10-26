@@ -132,6 +132,10 @@ uint64_t mission_start_records(const MissionScene &scene) {
 		key = io::fnv1a64_value(key, uint8_t(mark.pool));
 		key = io::fnv1a64_value(key, mark.item);
 		key = io::fnv1a64_value(key, int32_t(mark.ssn));
+		// Whether the spawn takes the record: its attributes' session flags and its team [orig:
+		// Entity_SpawnFromBMSRecord @ 0x40ea94..0x40eac2, the team @ 0x40eb1c].
+		key = io::fnv1a64_value(key, mark.attributes);
+		key = io::fnv1a64_value(key, int32_t(mark.team));
 	}
 	return key;
 }

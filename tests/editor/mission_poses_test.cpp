@@ -744,6 +744,7 @@ static int test_start_seat() {
 	TEST_EXPECT(carrier_mark != nullptr);
 	if (!carrier_mark) return 1;
 	const NodeKind carrier_mark_kind = carrier_mark->kind;
+	const int carrier_team = carrier_mark->team;
 	// Posed again over the carrier where a move stands it: 5 m east, the seat with it; turned a quarter, the seat's
 	// point as far from the carrier, its yaw a quarter on.
 	{
@@ -801,6 +802,18 @@ static int test_start_seat() {
 	while (rig.session.view().activity.validation.running) rig.session.poll();
 	rig.pump();
 	TEST_EXPECT(rig.viewport()->start().start_seats().size() == 1);
+	// The carrier on team 3 of a mission of two teams, which the spawn refuses [orig: Entity_SpawnFromBMSRecord
+	// @ 0x40eb1c]: the start boots again over it and seats no one; on its team again, it seats the rifleman.
+	{
+		const uint64_t before = rig.viewport()->start().boots();
+		rig.session.handle(request::edit_record(mission_path, set_edit({ carrier, carrier_mark_kind, 0 }, "team", int64_t(3))));
+		rig.pump();
+		TEST_EXPECT(rig.viewport()->start().boots() == before + 1 && rig.viewport()->start().start_seats().empty());
+		rig.session.handle(
+				request::edit_record(mission_path, set_edit({ carrier, carrier_mark_kind, 0 }, "team", int64_t(carrier_team))));
+		rig.pump();
+		TEST_EXPECT(rig.viewport()->start().boots() == before + 2 && rig.viewport()->start().start_seats().size() == 1);
+	}
 	{
 		const uint64_t before = rig.viewport()->start().boots();
 		Edit removal;

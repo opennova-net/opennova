@@ -197,8 +197,9 @@ private:
 	std::vector<MissionScriptSound> start_sounds_;
 };
 
-// The shape of a mission's entities its start reads (S27): each record's pool, item and SSN, in the scene's order (an
-// added or removed record, another item or SSN, boots the start again; a move does not).
+// The shape of a mission's entities its start reads (S27): each record's pool, item and SSN, and what decides whether
+// the spawn takes it (its attributes, its team), in the scene's order (an added or removed record, another item, SSN,
+// attribute or team, boots the start again; a move does not).
 uint64_t mission_start_records(const MissionScene &scene);
 
 // How many game ticks one run takes at most (a minute of the game's): a longer run (a jump of the clock) goes on at
