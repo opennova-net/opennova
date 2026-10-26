@@ -1,4 +1,4 @@
-/* Smoke tests for engine/base/gameprofile: table size, lookups, and the universal container key. */
+/* Smoke tests for engine/base/gameprofile: table size, lookups and labels. */
 #include <stdio.h>
 #include <string.h>
 
@@ -45,12 +45,11 @@ static int test_at_bounds(void) {
     return 1;
 }
 
-static int test_universal_key_and_labels(void) {
+static int test_labels(void) {
     int i;
     for (i = 0; i < gameprofile_count(); ++i) {
         const GameProfile *p = gameprofile_at(i);
         CHECK(p != NULL, "profile not null");
-        CHECK(p->container_key == 0x0312A4CEu, "container key is the universal 0x0312A4CE");
         CHECK(p->display_name != NULL && p->display_name[0] != '\0', "display name non-empty");
         CHECK(p->code != NULL && p->code[0] != '\0', "code non-empty");
     }
@@ -100,7 +99,7 @@ int main(void) {
     RUN_TEST(test_count);
     RUN_TEST(test_by_id);
     RUN_TEST(test_at_bounds);
-    RUN_TEST(test_universal_key_and_labels);
+    RUN_TEST(test_labels);
     RUN_TEST(test_scr_policy_per_game);
     RUN_TEST(test_by_code_and_policy);
 

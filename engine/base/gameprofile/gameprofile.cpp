@@ -9,18 +9,12 @@ namespace opennova::gameprofile {
 
 static_assert(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == pff::PFF_FORMAT_PFF3, "a new archive is PFF3 (ADR 0008)");
 
-/* The PFF container key is universal across every NovaLogic title we have reversed (the ROL7
-   keystream seeded 0x0312A4CE, verified vs Jointops.exe PFF_LoadFileToMemory @ 0x768920). The
-   per-game row still carries the key so a future un-reversed game only needs a new table entry,
-   not a code change.
-
-   SCR keying is per-game. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key, which the SCR
+/* SCR keying is per-game. Retail JO/DFX2 version-1 payloads use the JO_DFX2 key, which the SCR
    version byte selects, so those rows use VERSION_DETECT. The JO Demo stamps the SAME version byte
    (1) on every SCR file but keys them with the DEFAULT key (0xABEEFACE) — verified by decrypting
    demores.pff: all 214 version-1 payloads (.def/.adm/.aip/.ptg/.ptl/.ptu/.txt) decode cleanly under
    DEFAULT and to garbage under JO_DFX2, and the demo ships no version-2 files. So the demo forces
    the DEFAULT key. */
-#define PFF_CONTAINER_KEY_DEFAULT GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT
 
 namespace {
 
@@ -41,11 +35,11 @@ namespace {
      the dword 0x01070507 @ 0x4a7db6].
    - BHD: no binary read; no version. */
 const GameProfile k_profiles[] = {
-    { GAME_JO,      "jo",     "Joint Operations",             PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_FORCE_DEFAULT,  "V1.0.0.9" },
-    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.1.9" },
-    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", PFF_CONTAINER_KEY_DEFAULT, SCR_POLICY_VERSION_DETECT, nullptr },
+    { GAME_JO,      "jo",     "Joint Operations",             SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
+    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      SCR_POLICY_FORCE_DEFAULT,  "V1.0.0.9" },
+    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          SCR_POLICY_VERSION_DETECT, "V1.7.1.9" },
+    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        SCR_POLICY_VERSION_DETECT, "V1.7.5.7" },
+    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", SCR_POLICY_VERSION_DETECT, nullptr },
 };
 
 } // namespace

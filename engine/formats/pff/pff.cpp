@@ -88,8 +88,8 @@ static int pff_bsearch_cmp(const void *key, const void *elem)
 /* In-place payload XOR for entries flagged PFF_FLAG_ENCRYPTED. Stateful rotating keystream: the
    32-bit key is rotated left 7 before each byte. Symmetric (XOR is its own inverse), so the same
    routine encrypts and decrypts. Verified against PFF_LoadFileToMemory @ 0x768920 (the retail
-   read path hardcodes seed 0x0312A4CE; the seed is a parameter here so the game-profile container
-   key can be threaded through, and so the public pff_container_xor can re-use it). */
+   read path hardcodes seed 0x0312A4CE, as pff_extract does; the seed is a parameter here so the
+   public pff_container_xor can re-use it). */
 static void pff_xor_buffer(uint8_t *buf, size_t size, uint32_t key)
 {
     size_t i;
