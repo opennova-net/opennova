@@ -374,17 +374,9 @@ public:
 protected:
 public:
 	// The retail Options policy tables (engine/runtime/menu/options_policy.h),
-	// re-exported for the shell's appliers: [{control, minimum, maximum, page}],
-	// the object-detail, texture-filter, particle-density, texture-compression,
-	// terrain-texture-detail and object-texture-detail rows' names, and the not-yet-serviced control
-	// names.
+	// re-exported for the shell's appliers: [{control, minimum, maximum, page}]
+	// and the not-yet-serviced control names.
 	static Array options_scroll_ranges();
-	static PackedStringArray object_detail_controls();
-	static PackedStringArray texture_filter_controls();
-	static PackedStringArray particle_density_controls();
-	static PackedStringArray texture_compression_controls();
-	static PackedStringArray terrain_texture_detail_controls();
-	static PackedStringArray object_texture_detail_controls();
 	static PackedStringArray options_unsupported_controls();
 
 protected:

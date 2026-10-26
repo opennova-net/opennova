@@ -3,6 +3,9 @@
 #include <base/io/strutil.h>
 #include <runtime/profile/profile_controls.h>
 
+#include <cstdlib>
+#include <string>
+
 namespace opennova::menu {
 
 namespace {
@@ -53,6 +56,69 @@ void seed_mouse_and_joystick(MenuRuntime &menu, const playersav::ProfileRecord &
 }
 
 } // namespace
+
+namespace {
+
+// Whether a control's kind can show its word's form.
+bool shows_form(int kind, OptionsWordForm form) {
+	switch (form) {
+	case OptionsWordForm::Scroll: return kind == kScroll;
+	case OptionsWordForm::RowValue:
+		return kind == static_cast<int>(mnu::WindowType::SpinList) ||
+				kind == static_cast<int>(mnu::WindowType::Combo) ||
+				kind == static_cast<int>(mnu::WindowType::List);
+	case OptionsWordForm::Checked: return kind >= 0;
+	}
+	return false;
+}
+
+} // namespace
+
+void OptionsScreen::seed_words(MenuRuntime &menu, const Words &words) const {
+	for (const OptionsWordControl &row : kOptionsWordControls) {
+		const int id = menu.widget_id(row.control);
+		if (id < 0 || !shows_form(menu.widget_kind_of(id), row.form)) continue;
+		const int32_t word = words[static_cast<size_t>(row.word)];
+		switch (row.form) {
+		case OptionsWordForm::Scroll: {
+			MenuScrollRangeState range;
+			if (menu.get_widget_scroll_range(id, range))
+				menu.set_widget_scroll_range(id, range.minimum, range.maximum, range.page, word);
+			break;
+		}
+		case OptionsWordForm::RowValue:
+			menu.select_row_by_value(id, std::to_string(word), false);
+			break;
+		case OptionsWordForm::Checked: menu.set_widget_checked(id, word != 0); break;
+		}
+	}
+}
+
+bool OptionsScreen::edit_word(const MenuRuntime &menu, int id, int value, Words &words) const {
+	if (id < 0) return false;
+	const std::string name = menu.widget_name_of(id);
+	for (const OptionsWordControl &row : kOptionsWordControls) {
+		if (!strutil::iequals(name, row.control)) continue;
+		if (!shows_form(menu.widget_kind_of(id), row.form)) return false;
+		int32_t &word = words[static_cast<size_t>(row.word)];
+		switch (row.form) {
+		case OptionsWordForm::Scroll:
+			if (value < 0) return false;
+			word = value;
+			return true;
+		case OptionsWordForm::RowValue: {
+			if (value < 0) return false;
+			const std::string text = menu.item_value(id, value);
+			word = static_cast<int32_t>(std::strtol(text.c_str(), nullptr, 10));
+			return true;
+		}
+		case OptionsWordForm::Checked:
+			word = menu.is_widget_checked(id) ? 1 : 0;
+			return true;
+		}
+	}
+	return false;
+}
 
 int OptionsScreen::control_table(const MenuRuntime &menu) const {
 	const int id = menu.widget_id("CONTROL_MAPPING");

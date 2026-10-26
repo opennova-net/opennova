@@ -713,6 +713,30 @@ void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p
 	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows, p_local_slot);
 }
 
+namespace {
+
+opennova::menu::OptionsScreen::Words options_words_of(const PackedInt32Array &p_words) {
+	opennova::menu::OptionsScreen::Words words{};
+	for (size_t i = 0; i < words.size() && static_cast<int64_t>(i) < p_words.size(); ++i)
+		words[i] = p_words[static_cast<int64_t>(i)];
+	return words;
+}
+
+} // namespace
+
+void MenuDriver::seed_options_words(const PackedInt32Array &p_words) {
+	options_.seed_words(runtime_, options_words_of(p_words));
+}
+
+PackedInt32Array MenuDriver::options_word_edit(int p_id, int p_value,
+		const PackedInt32Array &p_words) const {
+	opennova::menu::OptionsScreen::Words words = options_words_of(p_words);
+	PackedInt32Array out;
+	if (!options_.edit_word(runtime_, p_id, p_value, words)) return out;
+	for (const int32_t word : words) out.push_back(word);
+	return out;
+}
+
 void MenuDriver::filter_stat_results(int p_id, int p_tab) {
 	opennova::inmatch::stat_screen_filter_rows(runtime_, p_id, p_tab);
 }
@@ -1149,6 +1173,25 @@ void MenuDriver::_bind_methods() {
 	BIND_ENUM_CONSTANT(OPTIONS_APPLY_CONTROLS);
 	BIND_ENUM_CONSTANT(OPTIONS_DISCARD_EDITS);
 	BIND_ENUM_CONSTANT(OPTIONS_RELOAD_CROSSHAIR_ALPHA);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_SOUND_FX_VOLUME);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_DIALOG_VOLUME);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_MUSIC_VOLUME);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_CROSSHAIR_STYLE);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_CROSSHAIR_COLOR);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_CROSSHAIR_SPREAD);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_KEYBOARD_TIPS);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_GAMEPLAY_TIPS);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_ASPECT_MODE);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_OBJECT_POLYDETAIL);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_TEXFILTER_LEVEL);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_PARTICLE_DENSITY);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_TEXCOMPRESSION_LEVEL);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_TERRAIN_TEXDETAIL);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_OBJECT_TEXDETAIL);
+	BIND_ENUM_CONSTANT(OPTIONS_WORD_COUNT);
+	ClassDB::bind_method(D_METHOD("seed_options_words", "words"), &MenuDriver::seed_options_words);
+	ClassDB::bind_method(D_METHOD("options_word_edit", "id", "value", "words"),
+			&MenuDriver::options_word_edit);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);

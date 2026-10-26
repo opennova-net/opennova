@@ -2005,6 +2005,75 @@ void test_options_profile() {
 		OptionsScreen::RestorePreview);
 }
 
+// The player options' words through their controls (E-143): each control seeds its word by
+// its form (a slider's value, a row by its item value, a check box) and
+// reads it back after the player's edit; a control the table does not list, or of another
+// kind than its form takes, shows none.
+// [orig: UI_SyncRenderSettingsToWidgets @0x55a140; UI_OptionsScreenInit @0x554800;
+//  Options_HandleAcceptOrBack @0x55ab5f..0x55ace5]
+void test_options_words() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "OPTIONS";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	auto style = widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList);
+	style.items.present = true;
+	// The crosshair style by its value too: the row's value, not its place.
+	style.items.items = {item("A", ""), item("B", "2"), item("C", "1")};
+	auto color = widget("XHAIR_COLOR", mnu::WindowType::SpinList);
+	color.items.present = true;
+	color.items.items = {item("Red", "16711680"), item("Green", "65280")};
+	auto filter = widget("TEXFILTER", mnu::WindowType::SpinList);
+	filter.items.present = true;
+	filter.items.items = {item("Low", "0"), item("High", "2")};
+	root.children = {widget("SOUNDFXVOLUME", mnu::WindowType::Scroll), style, color,
+		widget("XHAIR_SPREAD", mnu::WindowType::CheckBox), filter,
+		widget("16x9DISPLAY", mnu::WindowType::Button), widget("OTHER", mnu::WindowType::Button)};
+	screen.roots.push_back(root);
+	doc.screens.push_back(screen);
+	MenuRuntime menu;
+	menu.open_document(&doc, "options.mnu", "");
+	const int volume = menu.widget_id("SOUNDFXVOLUME");
+	menu.set_widget_scroll_range(volume, 0, 255, 10, 0);
+	OptionsScreen options;
+	OptionsScreen::Words words{};
+	const auto at = [](OptionsWord w) { return static_cast<size_t>(w); };
+	words[at(OptionsWord::SoundFxVolume)] = 120;
+	words[at(OptionsWord::CrosshairStyle)] = 2;
+	words[at(OptionsWord::CrosshairColor)] = 65280;
+	words[at(OptionsWord::CrosshairSpread)] = 1;
+	words[at(OptionsWord::TexFilterLevel)] = 2;
+	words[at(OptionsWord::AspectMode)] = 1;
+	options.seed_words(menu, words);
+	MenuScrollRangeState range;
+	CHECK(menu.get_widget_scroll_range(volume, range) && range.value == 120);
+	CHECK(menu.selected_row(menu.widget_id("XHAIR_APPEARANCE")) == 1);
+	CHECK(menu.selected_row(menu.widget_id("XHAIR_COLOR")) == 1);
+	CHECK(menu.is_widget_checked(menu.widget_id("XHAIR_SPREAD")));
+	CHECK(menu.selected_row(menu.widget_id("TEXFILTER")) == 1);
+	// The edits: a row's item value (an empty one reads 0) and the slider's value, each the
+	// edit's own, and the box's state read from it.
+	OptionsScreen::Words back = words;
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_COLOR"), 0, back) &&
+			back[at(OptionsWord::CrosshairColor)] == 16711680);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_APPEARANCE"), 2, back) &&
+			back[at(OptionsWord::CrosshairStyle)] == 1);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_APPEARANCE"), 0, back) &&
+			back[at(OptionsWord::CrosshairStyle)] == 0);
+	CHECK(options.edit_word(menu, volume, 30, back) &&
+			back[at(OptionsWord::SoundFxVolume)] == 30);
+	menu.set_widget_checked(menu.widget_id("XHAIR_SPREAD"), false);
+	CHECK(options.edit_word(menu, menu.widget_id("XHAIR_SPREAD"), -1, back) &&
+			back[at(OptionsWord::CrosshairSpread)] == 0);
+	// A click carries no row or value; a control the table lacks, and one of the wrong kind
+	// (a button named 16x9DISPLAY), show none.
+	CHECK(!options.edit_word(menu, menu.widget_id("XHAIR_COLOR"), -1, back));
+	CHECK(!options.edit_word(menu, menu.widget_id("OTHER"), 0, back));
+	CHECK(!options.edit_word(menu, menu.widget_id("16x9DISPLAY"), 0, back));
+	CHECK(back[at(OptionsWord::AspectMode)] == 1 &&
+			back[at(OptionsWord::CrosshairColor)] == 16711680);
+}
+
 // The front-end BACK keeps no widget edit: the OPTIONS screen's own BACK writes
 // no record word and asks the shell to drop the screen's live edits. The gate is
 // the activated control's own screen: an in-document OPTIONS still reverts after
@@ -2433,6 +2502,7 @@ int main() {
 	test_multiple_roots();
 	test_options_screen();
 	test_options_profile();
+	test_options_words();
 	test_options_front_back();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

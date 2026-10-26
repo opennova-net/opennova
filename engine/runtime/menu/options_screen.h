@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
+
 #include "menu_runtime.h"
+#include "options_policy.h"
 #include <formats/playersav/player_sav.h>
 #include <runtime/controls/binding_set.h>
 
@@ -75,6 +78,16 @@ public:
 	// UI_PopulateRenderAndAudioSettings @0x55d2b0..0x55d3c2]. Nothing off the surface or
 	// without a record.
 	void seed_profile(MenuRuntime &menu, const playersav::ProfileRecord *record) const;
+	// The player options' words (OptionsWord order) into their controls, each by its form
+	// (options_policy.h kOptionsWordControls carries the witness); a control the screen
+	// lacks, or of another kind than its form takes, is passed over.
+	using Words = std::array<int32_t, static_cast<size_t>(OptionsWord::kCount)>;
+	void seed_words(MenuRuntime &menu, const Words &words) const;
+	// The word the control `id` shows, written into `words` from the player's edit: `value`
+	// the edit's own (a slider's new value, a list row's index; -1 for a click), a
+	// check box's state read from the control. True when `id` is one of the table's controls
+	// of its form's kind and the edit carries its word.
+	bool edit_word(const MenuRuntime &menu, int id, int value, Words &words) const;
 	// The activated control, by its runtime id: its name picks the arm, its own
 	// screen gates the front BACK.
 	int activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id);

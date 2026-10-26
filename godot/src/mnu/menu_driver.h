@@ -125,6 +125,34 @@ public:
 		OPTIONS_DISCARD_EDITS = opennova::menu::OptionsScreen::DiscardEdits,
 		OPTIONS_RELOAD_CROSSHAIR_ALPHA = opennova::menu::OptionsScreen::ReloadCrosshairAlpha,
 	};
+	// The player options' word indices (engine options_policy.h OptionsWord).
+	enum OptionsWordIndex {
+		OPTIONS_WORD_SOUND_FX_VOLUME = static_cast<int>(opennova::menu::OptionsWord::SoundFxVolume),
+		OPTIONS_WORD_DIALOG_VOLUME = static_cast<int>(opennova::menu::OptionsWord::DialogVolume),
+		OPTIONS_WORD_MUSIC_VOLUME = static_cast<int>(opennova::menu::OptionsWord::MusicVolume),
+		OPTIONS_WORD_CROSSHAIR_STYLE =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairStyle),
+		OPTIONS_WORD_CROSSHAIR_COLOR =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairColor),
+		OPTIONS_WORD_CROSSHAIR_SPREAD =
+				static_cast<int>(opennova::menu::OptionsWord::CrosshairSpread),
+		OPTIONS_WORD_KEYBOARD_TIPS = static_cast<int>(opennova::menu::OptionsWord::KeyboardTips),
+		OPTIONS_WORD_GAMEPLAY_TIPS = static_cast<int>(opennova::menu::OptionsWord::GameplayTips),
+		OPTIONS_WORD_ASPECT_MODE = static_cast<int>(opennova::menu::OptionsWord::AspectMode),
+		OPTIONS_WORD_OBJECT_POLYDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::ObjectPolyDetail),
+		OPTIONS_WORD_TEXFILTER_LEVEL =
+				static_cast<int>(opennova::menu::OptionsWord::TexFilterLevel),
+		OPTIONS_WORD_PARTICLE_DENSITY =
+				static_cast<int>(opennova::menu::OptionsWord::ParticleDensity),
+		OPTIONS_WORD_TEXCOMPRESSION_LEVEL =
+				static_cast<int>(opennova::menu::OptionsWord::TexCompressionLevel),
+		OPTIONS_WORD_TERRAIN_TEXDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::TerrainTexDetail),
+		OPTIONS_WORD_OBJECT_TEXDETAIL =
+				static_cast<int>(opennova::menu::OptionsWord::ObjectTexDetail),
+		OPTIONS_WORD_COUNT = static_cast<int>(opennova::menu::OptionsWord::kCount),
+	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
 	void clear_mission_rows() { flow_.clear_rows(); }
@@ -180,6 +208,13 @@ public:
 	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
 	// A single press on the controls table's row (engine OptionsScreen::press).
 	void press_options_row(int p_id, int p_row) { options_.press(runtime_, p_id, p_row); }
+	// The player options' words (OPTIONS_WORD_* order) into their controls, and one edited
+	// control's word from its edit's `p_value` (-1 for a click): the words with it written,
+	// empty when `p_id` shows none (engine OptionsScreen::seed_words / edit_word,
+	// options_policy.h kOptionsWordControls).
+	void seed_options_words(const PackedInt32Array &p_words);
+	PackedInt32Array options_word_edit(int p_id, int p_value,
+			const PackedInt32Array &p_words) const;
 	int consume_options_input(const Ref<InputEvent> &p_event);
 	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }
 	// The Options screen's own binding records' Control-column text (tests and
@@ -377,4 +412,5 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
+VARIANT_ENUM_CAST(godot::MenuDriver::OptionsWordIndex);
 VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);
