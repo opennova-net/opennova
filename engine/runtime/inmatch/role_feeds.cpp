@@ -519,7 +519,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	return out;
 }
 
-std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
+std::vector<StatScreenRow> end_round_rows(const RoleView &view) {
 	// The PLAYER SLOT table retail walks is the roster every role's view folds
 	// from 0x46 (name / clan / team). Retail joins the board by the row's
 	// stored slot id; the local row is the fill's, by the local player entity's
@@ -540,12 +540,8 @@ std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab) {
 		p.squad = slot.clan;
 		players.push_back(p);
 	}
-	for (const StatScreenRow &r : stat_screen_rows(cs.end_round.board, players, false)) {
-		// The tab filter (stat_screen_row_visible carries the witness): the rows
-		// it admits, which the presenter's refill puts in, where the game hides
-		// the filled rows (D-MNU-53).
-		if (stat_screen_row_visible(tab, r.team)) out.push_back(r);
-	}
+	// Every row: the tab filter hides filled rows (stat_screen_filter_rows, D-MNU-53).
+	out = stat_screen_rows(cs.end_round.board, players, false);
 	return out;
 }
 

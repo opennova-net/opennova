@@ -408,7 +408,7 @@ int main() {
 		CHECK(!local_death_screen_active(bare) && !local_player_dead(bare));
 		const EndRoundSessionState s = end_round_session_state(bare);
 		CHECK(!s.header_known && !s.board_known && !s.session_open);
-		CHECK(end_round_rows(bare, 0).empty());
+		CHECK(end_round_rows(bare).empty());
 		std::vector<world::FriendlyTagSource> tags;
 		CHECK(!collect_friendly_tags(bare, tags) && tags.empty());
 		const world::DeployScreenStatus status =
@@ -517,7 +517,7 @@ int main() {
 		v.joiner = true;
 		CHECK(end_round_session_state(v).local_slot == 3);
 		CHECK(end_round_session_state(RoleView{}).local_slot == -1);
-		const std::vector<StatScreenRow> rows = end_round_rows(v, 0);
+		const std::vector<StatScreenRow> rows = end_round_rows(v);
 		CHECK(rows.size() == 2 && rows[0].slot == 3 && rows[1].slot == 5);
 	}
 	// The joiner's local team is the S2C 0x04 latch; a listen host never

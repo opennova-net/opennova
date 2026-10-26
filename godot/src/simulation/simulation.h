@@ -1165,9 +1165,8 @@ public:
 	// gametext Overlays table (null gametext = the "!..." fallbacks).
 	TypedArray<EndRoundColumn> get_end_round_columns(int p_table_width,
 			const Ref<RtxtStringFile> &p_gametext) const;
-	// The rows, filtered by stat.mnu's tab (0 all, 1 team 2, 2 team 1 — the
-	// engine's stat_screen_row_visible).
-	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
+	// Every RESULTLIST row (the tabs hide filled rows: MenuDriver.filter_stat_results).
+	TypedArray<EndRoundRow> get_end_round_rows() const;
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
 	// The SP score block's Show Score rows (null: no host world); the SP end-of-round

@@ -306,6 +306,9 @@ public:
 	// EndRoundState.get_local_slot) selected (inmatch stat_screen_feed.h).
 	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
 			const TypedArray<EndRoundRow> &p_rows, int p_local_slot);
+	// A stat tab's filter over the filled table: the rows shown or hidden by their team
+	// (inmatch stat_screen_feed.h stat_screen_filter_rows carries the witness).
+	void filter_stat_results(int p_id, int p_tab);
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);

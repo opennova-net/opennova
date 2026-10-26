@@ -662,6 +662,10 @@ void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p
 	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows, p_local_slot);
 }
 
+void MenuDriver::filter_stat_results(int p_id, int p_tab) {
+	opennova::inmatch::stat_screen_filter_rows(runtime_, p_id, p_tab);
+}
+
 // The death screen's SPAWNPOINTS_LIST from the compiled rows: the engine's items
 // (world deploy_screen_feed.h deploy_list_items: the tags stripped, each row in
 // the code page's bytes, an occupant's roster name as the roster holds it).
@@ -1163,6 +1167,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
 	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows", "local_slot"),
 			&MenuDriver::fill_stat_results);
+	ClassDB::bind_method(D_METHOD("filter_stat_results", "id", "tab"),
+			&MenuDriver::filter_stat_results);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),

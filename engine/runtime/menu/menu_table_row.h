@@ -109,4 +109,10 @@ bool table_click_select(std::vector<MenuTableRow> &rows, int row, bool multisele
 // [orig: CTableWnd_SetRowColor @0x640110]
 void table_set_row_color(std::vector<MenuTableRow> &rows, int row, bool enable, uint32_t color);
 
+// CTableWnd_SetRowVisible: `visible` clears the row's flag bit 1, false sets it; true when
+// the bit changed (the game lays the table out again then). A row out of range does nothing.
+// [orig: CTableWnd_SetRowVisible @0x6401c0 - the bound @0x6401c4..0x6401ce, the compare
+//  @0x6401ef, the clear @0x640202, the set @0x64020d, CTableWnd_RecalcLayout @0x640205]
+bool table_set_row_visible(std::vector<MenuTableRow> &rows, int row, bool visible);
+
 } // namespace opennova::menu

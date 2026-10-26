@@ -88,12 +88,12 @@ struct StatScreenPlayer {
 std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 		const std::vector<StatScreenPlayer> &players, bool show_disabled);
 
-// The tab filter [orig: StatScreen_StatFilterTabHandler @0x562140]: tab 0 shows every
-// row, tab 1 only team 2, tab 2 only team 1. The game shows or hides each filled
-// row by its column-0 value (the team) through CTableWnd_SetRowVisible @0x6401c0,
-// keeping the rows, their order and their states; ours's tab change refills the
-// table with the rows this admits (D-MNU-53).
-bool stat_screen_row_visible(int tab_index, uint8_t team);
+// The tab filter over the filled table [orig: StatScreen_StatFilterTabHandler @0x562140 -
+// tab 0 shows every row @0x5621ea..0x5621f5, tab 1 the rows whose column-0 value (the team)
+// is 2 @0x5621c3..0x5621d6, tab 2 those whose value is 1 @0x562195..0x5621a8, through
+// CTableWnd_SetRowVisible @0x6401c0; another index does nothing]: the rows, their order,
+// their states and the sort stay, as the fill left them (D-MNU-53).
+void stat_screen_filter_rows(menu::MenuRuntime &menu, int table, int tab_index);
 
 // The fill over the menu's table: the column count and one init per column
 // (the header, the width, the justification, the compare: NAME and Squad as

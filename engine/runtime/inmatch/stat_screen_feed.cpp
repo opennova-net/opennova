@@ -112,11 +112,17 @@ std::vector<StatScreenRow> stat_screen_rows(const EndRoundStats &board,
 	return out;
 }
 
-bool stat_screen_row_visible(int tab_index, uint8_t team) {
-	// [orig: StatScreen_StatFilterTabHandler @0x562140]
-	if (tab_index == 1) return team == 2;
-	if (tab_index == 2) return team == 1;
-	return true;
+void stat_screen_filter_rows(menu::MenuRuntime &menu, int table, int tab_index) {
+	// [orig: StatScreen_StatFilterTabHandler @0x562140 - CTableWnd_GetRowCount, then per row
+	//  CTableWnd_GetRowValue @0x562195 / @0x5621c3 and CTableWnd_SetRowVisible @0x5621a8 /
+	//  @0x5621d6 / @0x5621f5]
+	if (tab_index < 0 || tab_index > 2) return;
+	const int count = menu.table_row_count(table);
+	for (int r = 0; r < count; ++r) {
+		const int32_t team = menu.table_row_value(table, r);
+		const bool visible = tab_index == 0 || (tab_index == 1 ? team == 2 : team == 1);
+		menu.table_set_row_visible(table, r, visible);
+	}
 }
 
 void fill_stat_results(menu::MenuRuntime &menu, int table,

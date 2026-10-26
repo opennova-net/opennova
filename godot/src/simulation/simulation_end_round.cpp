@@ -115,12 +115,12 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	return out;
 }
 
-TypedArray<EndRoundRow> Simulation::get_end_round_rows(int p_tab) const {
-	// The roster joined to the frozen board, the tab filter applied
-	// (inmatch/role_feeds.h end_round_rows carries the witnesses).
+TypedArray<EndRoundRow> Simulation::get_end_round_rows() const {
+	// The roster joined to the frozen board (inmatch/role_feeds.h end_round_rows carries
+	// the witnesses).
 	TypedArray<EndRoundRow> out;
 	for (const opennova::inmatch::StatScreenRow &r :
-			opennova::inmatch::end_round_rows(role_view(), p_tab)) {
+			opennova::inmatch::end_round_rows(role_view())) {
 		Ref<EndRoundRow> row;
 		row.instantiate();
 		row->assign(r);

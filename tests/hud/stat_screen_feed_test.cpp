@@ -72,10 +72,6 @@ void test_rows() {
 	// With the disabled field listed, field 19 always prints "%i" (even -1).
 	const std::vector<StatScreenRow> all = stat_screen_rows(make_board(), players, true);
 	CHECK(all[0].cells.size() == 5 && all[0].cells[2] == "-1");
-	// The tab filter.
-	CHECK(stat_screen_row_visible(0, 1) && stat_screen_row_visible(0, 2));
-	CHECK(!stat_screen_row_visible(1, 1) && stat_screen_row_visible(1, 2));
-	CHECK(stat_screen_row_visible(2, 1) && !stat_screen_row_visible(2, 2));
 }
 
 // stat.mnu's STAT screen with its RESULTLIST (no COLUMN, no MULTISELECT).
@@ -159,6 +155,34 @@ void test_fill_selects_the_local_slot_after_the_sort() {
 	CHECK(rt.table_selected_rows(id).empty());
 }
 
+// The tab filter shows or hides the filled rows by their column-0 value (the team),
+// keeping the rows, their order and the selection (D-MNU-53): tab 1 the team-2 rows,
+// tab 2 the team-1 rows, tab 0 every row, another index nothing.
+// [orig: StatScreen_StatFilterTabHandler @0x562140; CTableWnd_SetRowVisible @0x6401c0]
+void test_tab_filter_hides_filled_rows() {
+	const mnu::Document doc = stat_document();
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "stat.mnu", "");
+	const int id = rt.widget_id("RESULTLIST");
+	const std::vector<StatScreenColumn> columns = stat_screen_columns(make_board(), false, 750);
+	const std::vector<StatScreenPlayer> players = { { 5, 2, "Bee", "" }, { 3, 1, "Ace", "ALPHA" } };
+	fill_stat_results(rt, id, columns, stat_screen_rows(make_board(), players, false), 5);
+	CHECK(rt.table_row_count(id) == 2);
+	CHECK(rt.table_row_value(id, 0) == 1 && rt.table_row_value(id, 1) == 2);
+	CHECK(rt.table_row_visible(id, 0) && rt.table_row_visible(id, 1));
+	stat_screen_filter_rows(rt, id, 1);
+	CHECK(!rt.table_row_visible(id, 0) && rt.table_row_visible(id, 1));
+	CHECK(rt.table_row_count(id) == 2 && rt.table_cell_text(id, 0, 0) == "Ace");
+	CHECK(rt.table_selected_rows(id) == std::vector<int>{ 1 });
+	stat_screen_filter_rows(rt, id, 2);
+	CHECK(rt.table_row_visible(id, 0) && !rt.table_row_visible(id, 1));
+	stat_screen_filter_rows(rt, id, 7);
+	CHECK(rt.table_row_visible(id, 0) && !rt.table_row_visible(id, 1));
+	stat_screen_filter_rows(rt, id, 0);
+	CHECK(rt.table_row_visible(id, 0) && rt.table_row_visible(id, 1));
+	CHECK(rt.table_selected_rows(id) == std::vector<int>{ 1 });
+}
+
 } // namespace
 
 int main() {
@@ -166,6 +190,7 @@ int main() {
 	test_rows();
 	test_fill_puts_the_roster_bytes_in_the_cells();
 	test_fill_selects_the_local_slot_after_the_sort();
+	test_tab_filter_hides_filled_rows();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

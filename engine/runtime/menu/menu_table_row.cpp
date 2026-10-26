@@ -137,4 +137,15 @@ void table_set_row_color(std::vector<MenuTableRow> &rows, int row, bool enable, 
 	if (row_in_range(rows, row)) apply(rows[static_cast<size_t>(row)]);
 }
 
+bool table_set_row_visible(std::vector<MenuTableRow> &rows, int row, bool visible) {
+	if (!row_in_range(rows, row)) return false;
+	uint32_t &flags = rows[static_cast<size_t>(row)].flags;
+	if (((flags & 2u) == 0) == visible) return false;
+	if (visible)
+		flags &= ~2u;
+	else
+		flags |= 2u;
+	return true;
+}
+
 } // namespace opennova::menu

@@ -531,6 +531,11 @@ public:
 	// A row's colour override; `enable` false drops it, row -1 is every row
 	// [orig: CTableWnd_SetRowColor — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
+	// A row shown or hidden (menu_table_row.h table_set_row_visible carries the witness);
+	// the frame lays the table out again when the row's bit changed.
+	void table_set_row_visible(int id, int row, bool visible);
+	// Whether the row draws: no hidden bit (kTableRowHiddenMask) set. False out of range.
+	bool table_row_visible(int id, int row) const;
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
 	// Select `row` alone (every other non-locked row cleared), or toggle it

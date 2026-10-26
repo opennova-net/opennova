@@ -270,12 +270,12 @@ inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
 inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
 HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
 
-// The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
-// 1): the roster joined to the frozen board; the fill selects the local row by
+// Every stat.mnu RESULTLIST row (the tabs hide filled rows: stat_screen_filter_rows):
+// the roster joined to the frozen board; the fill selects the local row by
 // end_round_session_state's local_slot [orig: StatScreen_PopulateStatResultsList
 // @0x562240 — row slot store @0x562576, board join @0x5624F3, selection compare
 // @0x56272E].
-std::vector<StatScreenRow> end_round_rows(const RoleView &view, int tab);
+std::vector<StatScreenRow> end_round_rows(const RoleView &view);
 
 // The friendly-tags gather (D-HUD-20): the world walk with the role's pass
 // facts, plus a joiner's roster walk. False when there is no local player
