@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <thread>
 
 using namespace opennova;
@@ -23,7 +24,28 @@ struct Server {
 	explicit Server(std::vector<std::string> hosts = {"127.0.0.1"}) : catalog(std::move(hosts)) {}
 	update_tool::PackageCatalog catalog;
 	update::UpdateServer server{catalog};
-	net::UpdateTcpServer listener{server};
+	std::mutex lines_mutex;
+	std::vector<std::string> lines; // each request's first line, as the listener logs it
+	net::UpdateTcpServer listener{server, [this](const std::string &line) {
+		std::lock_guard<std::mutex> lock(lines_mutex);
+		lines.push_back(line);
+	}};
+	// How many logged lines end with `request`, once at least `want` do or 2 s have passed.
+	size_t requests(const std::string &request, size_t want) {
+		const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		for (;;) {
+			size_t n = 0;
+			{
+				std::lock_guard<std::mutex> lock(lines_mutex);
+				for (const std::string &line : lines) {
+					const size_t at = line.size() >= request.size() ? line.size() - request.size() : 0;
+					if (line.size() >= request.size() && line.compare(at, request.size(), request) == 0) ++n;
+				}
+			}
+			if (n >= want || std::chrono::steady_clock::now() >= until) return n;
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		}
+	}
 	std::atomic_bool stop{false};
 	std::thread thread;
 	bool start(const update::SfsPackage &package, std::string &error, const std::string &login = "TEST",
@@ -76,9 +98,14 @@ int test_first_install(const test_temp::TempDir &temp) {
 	TEST_EXPECT(updater::run(options, products, result, error));
 	TEST_EXPECT(result.available && !result.applied && result.files == 2);
 	TEST_EXPECT(!fs::exists(options.resource_dir)); // --check never creates the empty install.
+	// Each connection ends with the protocol's CLOSE, the gateway's once its list is read and the
+	// update server's once its requests are done [orig: NLUpdateProtocol_Close @ 0x401660
+	// (UPDATE.EXE), from Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE) @0x4085b1 and @0x4089c6].
+	TEST_EXPECT(server.requests(" < CLOSE", 2) == 2);
 	options.check = false;
 	TEST_EXPECT(updater::run(options, products, result, error));
 	TEST_EXPECT(result.available && result.applied && fs::exists(options.resource_dir / "resource.pff"));
+	TEST_EXPECT(server.requests(" < CLOSE", 4) == 4);
 	std::string installed;
 	TEST_EXPECT(io::read_file_text(io::utf8_path(options.resource_dir / "version.txt"), installed, error));
 	TEST_EXPECT(installed == "First complete content release");
@@ -188,6 +215,25 @@ int test_check_goes_past_a_failing_product(const test_temp::TempDir &temp) {
 			!result.expansion_failures[0].error.empty());
 	options.check = true;
 	TEST_EXPECT(!updater::run(options, products, result, error) && !result.available && !error.empty());
+	return 0;
+}
+
+// A gateway that refuses the login is closed with the protocol's CLOSE too, as retail's
+// OPEN_GATEWAY closes it before the next try [orig: Cupdate2Dlg_StateTick @ 0x408170
+// (UPDATE.EXE) @0x40838e; NLUpdateProtocol_Close @ 0x401660 (UPDATE.EXE)].
+int test_refused_gateway_closes(const test_temp::TempDir &temp) {
+	Server server;
+	std::string error;
+	TEST_EXPECT(server.start(package("Refused at the gateway"), error));
+	updater::Options options;
+	options.runtime_dir = temp.path;
+	options.resource_dir = io::os_path(temp.file("refused gateway"));
+	options.server = "127.0.0.1";
+	options.port = server.listener.ports()[0];
+	const std::vector<updater::Product> products{{options.resource_dir, "MISSING", "MISSING.CMD", {}, true}};
+	updater::Result result;
+	TEST_EXPECT(!updater::run(options, products, result, error));
+	TEST_EXPECT(server.requests(" < CLOSE", 1) == 1);
 	return 0;
 }
 
@@ -399,6 +445,7 @@ int main() {
 	if (int rc = test_retail_first_install(temp)) return rc;
 	if (int rc = test_retail_server_list(temp)) return rc;
 	if (int rc = test_check_goes_past_a_failing_product(temp)) return rc;
+	if (int rc = test_refused_gateway_closes(temp)) return rc;
 	if (int rc = test_failures(temp)) return rc;
 	if (int rc = test_revision(temp)) return rc;
 	if (int rc = test_revision_handoff(temp)) return rc;

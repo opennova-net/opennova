@@ -97,6 +97,26 @@ std::string dialed_server(const std::string &listed, const std::string &gateway)
 	return novaworld ? gateway : listed;
 }
 
+// The protocol's close: CLOSE sent, then the socket closed; nothing when it is closed already.
+// Retail ends every connection so: the gateway's once its server list has come (before the
+// list is read) and when its login or its list fails, the update server's once its fetches
+// are done and on a failure.
+// [orig: NLUpdateProtocol_Close @ 0x401660 (UPDATE.EXE); Cupdate2Dlg_StateTick @ 0x408170
+//  (UPDATE.EXE): OPEN_GATEWAY @0x40838e (after a refused login), LOADBALANCE @0x4085b1,
+//  PACK @0x4089c6, ERROR @0x408b56]
+void close_protocol(net::ScopedSocket &socket) {
+	if (!socket.is_valid()) return;
+	const std::string close = update::encode_close();
+	(void)net::tcp_send_all(socket.get(), reinterpret_cast<const uint8_t *>(close.data()), close.size());
+	socket = net::ScopedSocket();
+}
+
+// A connection closed as retail's protocol closes it, however its step ends.
+struct ProtocolClose {
+	net::ScopedSocket &socket;
+	~ProtocolClose() { close_protocol(socket); }
+};
+
 struct Worker {
 	const Options &options;
 	const ProgressSink &sink;
@@ -233,21 +253,22 @@ struct Worker {
 			if (interrupted()) return false;
 			status("Locating Gateway Server...", host);
 			net::ScopedSocket gateway;
+			const ProtocolClose gateway_closing{gateway};
 			if (!connect(host, port, gateway) || !login(gateway.get(), product, update::kIdGatewayLogin)) continue;
 			update::Reply list;
 			if (!exchange(gateway.get(), update::encode_get({"SERVER.LST"}, update::kIdServerList),
 						update::Verb::Get, update::kIdServerList, 65536, list, "SERVER.LST")) continue;
+			close_protocol(gateway);
 			const std::vector<std::string> servers = update::read_server_list(
 					std::string(list.payload.begin(), list.payload.end()));
 			if (servers.empty() || servers.size() > 64) { error = "Unable to locate an update server."; continue; }
-			const std::string close = update::encode_close();
-			(void)net::tcp_send_all(gateway.get(), reinterpret_cast<const uint8_t *>(close.data()), close.size());
 			// Every advertised server is a failover candidate. A single-server gateway, the
 			// deployed service's form, needs no LOADTEST round trip (updater-re section 5).
 			for (const std::string &listed : servers) {
 				const std::string server = dialed_server(listed, host);
 				status("Opening update server...", server);
 				if (connect(server, port, out) && login(out.get(), product, update::kIdServerLogin)) return true;
+				close_protocol(out); // a refused login, as retail's ERROR closes it
 			}
 		}
 		return false;
@@ -336,6 +357,7 @@ struct DownloadDir {
 bool update_product(Worker &worker, const Product &product, Result &result) {
 	if (!update::is_safe_row_name(product.command)) { worker.error = "Unsafe command file name."; return false; }
 	net::ScopedSocket socket;
+	const ProtocolClose closing{socket};
 	if (!worker.open_product(product, socket)) return false;
 	worker.status("Checking for update...", product.login);
 	update::Reply remote;
@@ -410,6 +432,9 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 		selected.rows.push_back(row);
 	}
 	++result.products;
+	// The fetches are done: the server's connection ends ahead of the install, as retail's PACK
+	// ends it.
+	close_protocol(socket);
 	if (worker.options.check) return true;
 	if (worker.interrupted()) return false;
 	precheck.close(); // Windows must release the source archive before replacement.
