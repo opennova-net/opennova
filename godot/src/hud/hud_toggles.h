@@ -69,14 +69,6 @@ public:
 		SPECIAL_KEY_QUIT_CONFIRMED = opennova::hud::hud_special_key::kQuitConfirmed,
 		SPECIAL_KEY_RESTART_QUEUED = opennova::hud::hud_special_key::kRestartQueued,
 	};
-	// The round-over leg's result bits (engine hud_round_over; the leg runs
-	// through Simulation.round_over_key, which applies the world's halves).
-	enum RoundOverKey {
-		ROUND_OVER_CONSUMED = opennova::hud::hud_round_over::kConsumed,
-		ROUND_OVER_RESTART = opennova::hud::hud_round_over::kRestart,
-		ROUND_OVER_EXIT = opennova::hud::hud_round_over::kExit,
-		ROUND_OVER_ARM = opennova::hud::hud_round_over::kArm,
-	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {
 		ROW_HUD_DETAIL = opennova::hud::kRowHudDetail,
@@ -177,9 +169,6 @@ public:
 	bool is_mp_verbose() const;
 	bool is_emotes_menu_open() const;
 	bool is_radio_menu_open() const;
-	// A menu pick's close (engine hud_toggles_close_voice_menu): the player
-	// input router applies it with the pick it sends.
-	void close_voice_menu(bool p_radio);
 	// The single-player pause word (engine HudToggleState::paused): the shell's
 	// in-game menu sets it on open and clears it on resume out of a session.
 	bool is_paused() const;
@@ -201,6 +190,9 @@ public:
 	bool is_tip_showing() const;
 
 	const opennova::hud::HudToggleState &state() const { return state_; }
+	// The special-key chain's stores (the quit dialog's close, a menu pick's close): the
+	// input router's chain call (PlayerInputRouter::special_key).
+	opennova::hud::HudToggleState &mutable_state() { return state_; }
 
 protected:
 	static void _bind_methods();
@@ -214,4 +206,3 @@ private:
 VARIANT_ENUM_CAST(godot::HudToggles::Event);
 VARIANT_ENUM_CAST(godot::HudToggles::Row);
 VARIANT_ENUM_CAST(godot::HudToggles::SpecialKey);
-VARIANT_ENUM_CAST(godot::HudToggles::RoundOverKey);

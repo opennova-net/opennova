@@ -239,21 +239,6 @@ func handle_key(key: InputEventKey) -> bool:
 	return not is_open()
 
 
-## The special-key chain's deploy leg: the deploy keys (X, SPACE, a team zone's
-## letter) queue the pick (input event 12) while the player is dead in a
-## session or the overlay is up, the engine's rule picking the event's
-## parameter (Simulation.deploy_key_pick). The rule is the leg's only gate, not
-## this screen: under stat.mnu's STAT (the round end's teardown closed DEATH) a
-## dead player's deploy key still picks (engine hud_toggles.h HudDeployKeyInput
-## carries the witness). The parameter, or -1 when the key is not the leg's.
-func deploy_key_param(key: InputEventKey) -> int:
-	var sim: Simulation = _view.sim() if _view != null else null
-	if key == null or sim == null:
-		return -1
-	# The handler compares Windows VK codes, which follow the key's label.
-	return int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
-
-
 ## The queued pick's dispatch (case 12), the screen open or not: like a list
 ## select, the initial overlay closes on the send and a death re-pick keeps the
 ## screen until the host releases the hold.

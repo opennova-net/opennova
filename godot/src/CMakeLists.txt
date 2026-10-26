@@ -312,6 +312,7 @@ add_library(opennova_bindings OBJECT
     player/key_event_queue.cpp
     player/key_lock_device.cpp
     player/player_input_router.cpp
+    player/special_key_outcome.cpp
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
     player/player_info_character_state.cpp

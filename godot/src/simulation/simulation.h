@@ -50,6 +50,7 @@
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
+#include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
@@ -1044,10 +1045,10 @@ public:
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	void open_host_load_window();
 	void pump_host_load_stage();
-	// The round-over leg of the special-key chain (inmatch::round_over_key): the
-	// hud_round_over bits for a Windows VK and the RESTART key (kArm once the
-	// round-over gate holds; a co-op session's RESTART / ESC store the role's exit).
-	int round_over_key(int p_vk, int p_restart_vk);
+	// One key-down through the special-key chain over this session (inmatch::special_key_chain:
+	// the player input router's call, which runs the outcome's digit pick); none with no kernel.
+	opennova::inmatch::SpecialKeyOutcome special_key_chain(opennova::hud::HudToggleState &p_toggles,
+			opennova::controls::PlayerActions &p_actions, const opennova::inmatch::SpecialKeyInput &p_input);
 	// The in-game menu's RESTART (World::ingame_restart_command): false in a session.
 	bool ingame_restart();
 	// True once the joiner has name-matched its organic-spawn record and received the

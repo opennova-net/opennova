@@ -132,7 +132,7 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
 		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
 		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
-		// Sent over the session; the router closes the menu beside it (chain_digit_key).
+		// Sent over the session; the special-key chain closed the menu (special_key).
 		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
 		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
 		// The shell opens the screen (PlayerInputRouter::take_armory_request /
@@ -776,24 +776,25 @@ void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
 }
 
-bool PlayerInputRouter::chain_digit_key(int p_vk) {
-	// The chain's arms read the HUD's menu words as the key meets them, so a pick that closed
-	// a menu hands the frame's next digit to the next arm (engine
-	// controls::PlayerActions::chain_digit_key carries the witness).
-	const bool emotes = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
-	const bool radio = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
-	const opennova::controls::ChainDigitTake take = actions_.chain_digit_key(p_vk, emotes, radio);
-	if (!take.taken || !take.pick) return take.taken;
-	// The arm runs at once, past no head: the seat pick, or the menu's send and then its close,
-	// which closes the menu whether or not a session carries the pick (engine
-	// hud_toggles_close_voice_menu carries the witness).
-	const Ref<Simulation> pick_sim = sim();
-	if (pick_sim.is_valid()) apply_player_action(*pick_sim.ptr(), *take.pick);
-	const bool radio_pick = take.pick->action == opennova::controls::PlayerAction::RadioPick;
-	if ((radio_pick || take.pick->action == opennova::controls::PlayerAction::EmotePick) &&
-			hud_toggles_.is_valid())
-		hud_toggles_->close_voice_menu(radio_pick);
-	return true;
+Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(int p_vk, int p_deploy_vk, int p_yes_vk,
+		int p_no_vk, int p_restart_vk) {
+	const Ref<Simulation> chain_sim = sim();
+	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
+	opennova::inmatch::SpecialKeyInput input;
+	input.vk = p_vk;
+	input.deploy_vk = p_deploy_vk;
+	input.yes_vk = p_yes_vk;
+	input.no_vk = p_no_vk;
+	input.restart_vk = p_restart_vk;
+	// The chain's arms read the HUD's words as the key meets them, so a pick that closed a
+	// menu hands the frame's next digit to the next arm.
+	opennova::hud::HudToggleState no_hud;
+	opennova::hud::HudToggleState &toggles =
+			hud_toggles_.is_valid() ? hud_toggles_->mutable_state() : no_hud;
+	const opennova::inmatch::SpecialKeyOutcome outcome =
+			chain_sim->special_key_chain(toggles, actions_, input);
+	if (outcome.digit_pick) apply_player_action(*chain_sim.ptr(), *outcome.digit_pick);
+	return SpecialKeyOutcome::make(outcome);
 }
 
 

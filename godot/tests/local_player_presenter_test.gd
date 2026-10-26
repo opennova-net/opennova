@@ -51,8 +51,8 @@ var _models := {}
 
 
 # The keyboard pass's legs over a bare presenter (the shell's MainGame legs,
-# trimmed): no chat line, of the special-key chain only its digit arms (the
-# presenter's chain_digit_key, which the HUD presenter's chain runs), the binding
+# trimmed): no chat line, the special-key chain through the presenter's input
+# router (its special_key, which the HUD presenter's chain runs), the binding
 # scan over the presenter's own binding model, every row's event into the
 # presenter's input router, and the release pass first (KeyboardPass carries the
 # order).
@@ -72,7 +72,10 @@ class PresenterKeyLegs:
 		return false
 
 	func ring_special_key(key: InputEventKey) -> bool:
-		return presenter.chain_digit_key(ControlsModel.vk_from_godot_key(key.physical_keycode))
+		var outcome: SpecialKeyOutcome = presenter.special_key(
+				ControlsModel.vk_from_godot_key(key.physical_keycode),
+				ControlsModel.vk_from_godot_key(key.keycode), KEY_Y, KEY_N, KEY_R)
+		return outcome.is_taken()
 
 	func ring_binding_code(scan_code: int) -> int:
 		return model.event_code(scan_code)
@@ -925,17 +928,17 @@ func test_the_use_hold_passes_a_key_past_the_round_over_leg() -> void:
 	assert_true(_frame_until(world, presenter, camera,
 			func() -> bool: return sim.is_round_over(), 600), "the WAC Lose ends the round")
 	assert_true(presenter.is_use_held(), "the round's last input frame latched the hold")
-	assert_false(hud.handle_special_key(_key_event(KEY_Q)),
+	assert_false(hud.handle_special_key(_key_event(KEY_Q)).is_taken(),
 			"under the hold the key passes the round-over leg and nothing takes it")
 	_frame(world, presenter, camera, 1)
 	assert_false(presenter.is_use_held(), "the round-over gate drops the held USE row")
-	assert_true(hud.handle_special_key(_key_event(KEY_Q)),
+	assert_true(hud.handle_special_key(_key_event(KEY_Q)).is_taken(),
 			"with no hold the round-over leg takes every key out of a session")
 	_hold(KEY_SHIFT, false)
 	_frame(world, presenter, camera, 1)
 
 
-# The special-key chain's menu arms (the presenter's chain_digit_key, per key
+# The special-key chain's menu arms (the presenter's special_key, per key
 # event): while the HUD's F9 Emotes menu is open a digit's key-down is its pick,
 # closing the menu and reaching no row (radarout rebound to 0 stays put); once
 # the menu is closed the same 0 fires the row again.

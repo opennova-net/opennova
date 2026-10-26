@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -29,10 +30,12 @@ public:
 	// The next unread key-down, null when the read index meets the write index (a reader
 	// outside the input frame's keyboard pass: the start-mission splash's exit test).
 	Ref<InputEventKey> pop_key();
-	// The keyboard pass's dequeue: pop_key, and the key-press latch set for the event's
-	// key, for every event the pass takes (engine controls::KeyPressLatch carries the
-	// witness).
-	Ref<InputEventKey> pop_pass_key();
+	// One input frame's keyboard pass over the queue (engine controls::run_keyboard_pass
+	// carries the order and the witness), each leg the legs object's method:
+	// ring_release_pass(), ring_chat_key(key) -> bool, ring_special_key(key) -> bool,
+	// ring_binding_code(scan_code) -> int (-1 none), ring_row_event(key, code, scan_code);
+	// each taken event's key-press latch is set (engine controls::KeyPressLatch).
+	void drain(Object *p_legs);
 	// The latch the pass sets and the input router's release pass reads; the queue's reset
 	// leaves it, the whole input reset clears it.
 	opennova::controls::KeyPressLatch &press_latch() { return latch_; }

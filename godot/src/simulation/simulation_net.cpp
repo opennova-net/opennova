@@ -1210,10 +1210,12 @@ int Simulation::get_mission_exit_reason() const {
 	return kernel_ != nullptr ? kernel_->world.mission_exit_reason : 0;
 }
 
-int Simulation::round_over_key(int p_vk, int p_restart_vk) {
-	if (!kernel_) return 0;
-	return static_cast<int>(
-			opennova::inmatch::round_over_key(role_view(), active_role(), p_vk, p_restart_vk));
+opennova::inmatch::SpecialKeyOutcome Simulation::special_key_chain(
+		opennova::hud::HudToggleState &p_toggles, opennova::controls::PlayerActions &p_actions,
+		const opennova::inmatch::SpecialKeyInput &p_input) {
+	if (!kernel_) return {};
+	return opennova::inmatch::special_key_chain(role_view(), active_role(), p_toggles, p_actions,
+			deploy_zone_registry(), p_input);
 }
 
 bool Simulation::ingame_restart() {

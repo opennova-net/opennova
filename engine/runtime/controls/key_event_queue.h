@@ -141,4 +141,44 @@ private:
 	std::array<bool, kKeyCount> set_{};
 };
 
+// The keyboard pass's legs, the embedder's: the release pass, the open text line's take, the
+// special-key chain (inmatch::special_key_chain), the binding scan's row for a key, and the
+// row's event. dequeued hands over each event the pass takes, with its ring slot, ahead of
+// the event's legs, for an embedder that keeps its device's record of each message beside
+// the slot (KeyEventQueue::read_index).
+class KeyboardPassLegs {
+public:
+	virtual ~KeyboardPassLegs() = default;
+	virtual void release_pass() = 0;
+	virtual void dequeued(const KeyEvent &event, int slot) = 0;
+	virtual bool chat_key(const KeyEvent &event) = 0;
+	virtual bool special_key(const KeyEvent &event) = 0;
+	// The dispatch code of the row the scan fires for the key, -1 for none.
+	virtual int binding_code(int scan_code) = 0;
+	virtual void row_event(const KeyEvent &event, int code, int scan_code) = 0;
+};
+
+// One input frame's keyboard pass: the release pass first, then every queued event in order:
+// its key-press latch set, then an open text line takes it, else the special-key chain, else
+// the binding scan fires the row it matches (keypad Enter scanning as 269).
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d22f..0x49d2cc, the
+//  dequeue loop @0x49d2d2..0x49d4a0: the latch @0x49d2ed, the capture word's test per event
+//  @0x49d2e3 (Chat_HandleInputChar @0x49d498), Input_HandleSpecialKeys @0x49d2fb and a take's
+//  skip @0x49d305, Input_IsExtendedEnterKey @0x49d310, the press scan's Input_QueueEvent
+//  @0x49d42f / @0x49d488]
+inline void run_keyboard_pass(KeyEventQueue &queue, KeyPressLatch &latch, KeyboardPassLegs &legs) {
+	legs.release_pass();
+	for (;;) {
+		const int slot = queue.read_index();
+		KeyEvent event;
+		if (!queue.pop(event)) return;
+		latch.set(event);
+		legs.dequeued(event, slot);
+		if (legs.chat_key(event) || legs.special_key(event)) continue;
+		const int scan_code = key_event_scan_code(event);
+		const int code = legs.binding_code(scan_code);
+		if (code >= 0) legs.row_event(event, code, scan_code);
+	}
+}
+
 } // namespace opennova::controls

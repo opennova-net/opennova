@@ -57,8 +57,9 @@ class DeployRingLegs:
 	func ring_chat_key(_key: InputEventKey) -> bool:
 		return false
 
+	# The chain's deploy leg alone (engine inmatch::deploy_key_pick), over the label's VK.
 	func ring_special_key(key: InputEventKey) -> bool:
-		var param: int = presenter.deploy_key_param(key)
+		var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
 		if param < 0:
 			return false
 		records.append([12, param])
@@ -594,24 +595,24 @@ func test_the_round_over_board_arm_passes_a_dead_players_x_to_the_deploy_leg() -
 	assert_true(sim.is_round_over(), "the WAC Lose ends the session's round")
 	var hud := GameHudPresenter.new()
 	add_child_autofree(hud)
-	hud.setup(world, null, null)
-	# The shell's deploy leg: the key's event-12 parameter by the engine's rule.
-	var asked: Array[int] = []
-	var deploy_param := func(key: InputEventKey) -> int:
-		asked.append(key.keycode)
-		return int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
-	var picks: Array[int] = []
-	var queue_pick := func(param: int) -> void: picks.append(param)
-	assert_true(hud.handle_special_key(_key_event(KEY_PAGEDOWN), deploy_param, queue_pick),
-			"PgDn is the end-of-round board's scroll")
-	assert_eq(asked.size(), 0, "a key the board arm takes never reaches the deploy leg")
-	assert_true(hud.handle_special_key(_key_event(KEY_X), deploy_param, queue_pick),
+	# The chain runs through the player presenter's input router.
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var player := LocalPlayerPresenter.new()
+	add_child_autofree(player)
+	player.setup(world, camera, null, ControlsModel.new())
+	hud.setup(world, player, null)
+	var scroll: SpecialKeyOutcome = hud.handle_special_key(_key_event(KEY_PAGEDOWN))
+	assert_true(scroll != null and scroll.is_taken(), "PgDn is the end-of-round board's scroll")
+	assert_eq(scroll.get_pick() if scroll != null else 0, -1,
+			"a key the board arm takes never reaches the deploy leg")
+	var deploy: SpecialKeyOutcome = hud.handle_special_key(_key_event(KEY_X))
+	assert_true(deploy != null and deploy.is_taken(),
 			"the dead player's X goes on to the deploy leg, which takes it")
-	assert_eq(picks.size(), 1, "the X queued one pick")
-	assert_eq(picks[0] if not picks.is_empty() else -1, 0, "the Default Spawn's")
-	assert_false(hud.handle_special_key(_key_event(KEY_Q), deploy_param, queue_pick),
-			"a key no leg takes is not consumed")
-	assert_eq(asked.size(), 2, "the X and the Q both reached the deploy leg")
+	assert_eq(deploy.get_pick() if deploy != null else -1, 0, "the Default Spawn's pick")
+	var other: SpecialKeyOutcome = hud.handle_special_key(_key_event(KEY_Q))
+	assert_true(other != null and not other.is_taken(), "a key no leg takes is not consumed")
+	assert_eq(other.get_pick() if other != null else 0, -1, "and queues no pick")
 	world.unload()
 	_assert_no_key_held()
 

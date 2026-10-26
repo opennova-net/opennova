@@ -125,7 +125,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &Simulation::begin_joiner_reload);
-	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);
 	ClassDB::bind_method(D_METHOD("take_input_reset"), &Simulation::take_input_reset);

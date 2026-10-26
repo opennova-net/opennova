@@ -1735,35 +1735,26 @@ func ring_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## The special-key chain over the queue's key, its event-12 picks (the deploy
-## keys', a co-op round-over RESTART's) queued in key order with the rows' events
-## (LocalPlayerPresenter.queue_pick_event): the quit
-## dialog's keys, a session's round-over keys, the page keys (the Tab board, the
-## status page, help, the briefing), the status page's Enter and the deploy keys.
-## The deploy keys' test is the engine's (dead, or the deploy overlay up), not the
-## deploy screen's: under stat.mnu's STAT, or over live play with no screen up (the
-## round end's teardown closed DEATH before STAT opens), a dead player's deploy key
-## queues its pick as under DEATH (engine hud_toggles.h HudDeployKeyInput and
-## hud_round_over_key carry the witness). Once the SP round is over the chain's
-## round-over leg takes every key an earlier arm (the USE hold, an open Emotes /
-## Radio menu) does not hold: RESTART runs the splash re-run (over a custom loading
-## background) and the restart, ESC the quit; both reach the shell as the
-## session's mission exit (_on_session_lost). A key such an arm passes (a non-digit
-## under the USE hold) goes on to the chain's tail, the deploy test and the help and
-## briefing page keys, as over live play (GameHudPresenter.handle_special_key skips
-## the held legs). An open quit dialog leads them all: its keys run ahead of the
-## round-over leg, and a key it leaves goes to the tail.
+## The special-key chain over the queue's key (GameHudPresenter.handle_special_key;
+## engine inmatch::special_key_chain carries the chain): the shell's half of its
+## outcome. The round-over RESTART out of a session re-runs the splash (over a
+## custom loading background), and its restart, like ESC's quit, reaches the shell
+## as the session's mission exit (_on_session_lost); an input event 12 the chain
+## queued (a deploy key's pick, the quit dialog's or the round-over RESTART's) waits
+## in key order with the rows' events (LocalPlayerPresenter.queue_pick_event). The
+## deploy keys' test is the engine's (dead, or the deploy overlay up), not the deploy
+## screen's: under stat.mnu's STAT a dead player's deploy key picks as under DEATH.
 func ring_special_key(key: InputEventKey) -> bool:
 	if _hud_presenter == null:
 		return false
-	if _state == State.WORLD and _end_flow.is_round_ended() \
-			and not _hud_presenter.toggles().is_quit_dialog_open():
-		var bits := _hud_presenter.handle_round_over_key(key)
-		if bits & HudToggles.ROUND_OVER_RESTART:
-			_begin_restart_splash()
-		if bits & HudToggles.ROUND_OVER_CONSUMED:
-			return true
-	return _hud_presenter.handle_special_key(key, _deploy_key_param, _queue_pick)
+	var outcome := _hud_presenter.handle_special_key(key)
+	if outcome == null:
+		return false
+	if outcome.is_restart_splash():
+		_begin_restart_splash()
+	if outcome.get_pick() >= 0:
+		_queue_pick(outcome.get_pick())
+	return outcome.is_taken()
 
 
 ## The binding scan over a key the chain left: the dispatch code of the row it
@@ -1792,11 +1783,6 @@ func ring_release_pass() -> void:
 		_player_presenter.run_key_release_pass()
 
 
-## A key's deploy pick parameter by the engine's rule, -1 when not taken.
-func _deploy_key_param(key: InputEventKey) -> int:
-	return _deploy_presenter.deploy_key_param(key) if _deploy_presenter != null else -1
-
-
 ## The special-key chain's pick (input event 12), queued in key order with the
 ## rows' events for the update's drain.
 func _queue_pick(param: int) -> void:
@@ -1809,7 +1795,7 @@ func _queue_pick(param: int) -> void:
 ## action: over live play, with no HUD window to close, the in-game menu opens;
 ## under a pass-through screen never (a menu screen is open), nor once the round
 ## is over; the cheat row 117's weapon-screen toggle (case 40); or input event 12,
-## the pick (the deploy keys', a co-op round-over RESTART's), with or without the
+## the pick (the deploy keys', the RESTART keys'), with or without the
 ## deploy screen open. A console line's record reaches these arms as a key's does.
 ## A case that reset the input (its Input_ResetAllState: the role's memset of the
 ## event queue ends the drain there) owes the devices' reset, which runs at once.

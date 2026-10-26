@@ -1197,81 +1197,39 @@ func handle_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
-## One key-down through the special-key chain (engine hud_toggles.h), over
-## live play and in a pass-through screen's input frame: the quit dialog's keys
-## first; unless the dialog took the chain, the digit arms (the held-USE seat
-## pick, the open Emotes / Radio menu's pick: the player presenter's
-## chain_digit_key); unless the dialog took the chain or an earlier arm holds it
-## (the USE hold, an open Emotes / Radio menu: _chain_arm_holds), the round-over leg once
-## the round-over gate holds (Simulation.round_over_key: a session's end-of-round board takes
-## PgUp / PgDn, a co-op session or single player every key, its RESTART
-## queueing input event 12), else the Tab board's page keys and then the
-## status page's Enter / PgUp / PgDn; then the deploy keys: `deploy_param`
-## gives a key's event-12 parameter (the engine's rule: in a session, the
-## local player dead or the deploy overlay up; -1 when not taken) and
-## `queue_pick` queues the pick, with or without the deploy screen open; then
-## the help and briefing pages. A key a leg takes never reaches the action
-## rows (ControlsModel.consume_key_press); true = consumed. The legs' order is
-## the engine's witness (hud_toggles.h hud_round_over_key, HudDeployKeyInput;
-## world::pass_through_close_axis).
-func handle_special_key(key: InputEventKey, deploy_param := Callable(),
-		queue_pick := Callable()) -> bool:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null:
-		return false
-	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
-	var in_session := sim.is_mp_session()
-	var restart_vk := _key_press_vk("STRKEYPRESS_RESTART", "R")
-	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
-			_key_press_vk("STRKEYPRESS_NO", "N"), restart_vk)
-	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
+## One key-down through the special-key chain (engine inmatch::special_key_chain
+## carries the chain, its order and its witness), over live play and in a
+## pass-through screen's input frame, through the player presenter's input router,
+## which runs a digit arm's pick at once. The device half of its outcome runs here:
+## the quit dialog's Exit Mission (quit_confirmed), the page a PgUp / PgDn steps
+## (the Tab board's, the F1 help's, the briefing's), and a taken key's consumption
+## (ControlsModel.consume_key_press: it never reaches the action rows); the shell
+## runs the rest (the restart's splash re-run, the event-12 pick). Null with no
+## player presenter. The chain reads the key's VK (the physical key, else the label,
+## as the key queue does) and the deploy keys the label's.
+func handle_special_key(key: InputEventKey) -> SpecialKeyOutcome:
+	if _player_presenter == null:
+		return null
+	var vk := ControlsModel.vk_from_godot_key(
+			key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode)
+	var outcome: SpecialKeyOutcome = _player_presenter.special_key(vk,
+			ControlsModel.vk_from_godot_key(key.keycode), _key_press_vk("STRKEYPRESS_YES", "Y"),
+			_key_press_vk("STRKEYPRESS_NO", "N"), _key_press_vk("STRKEYPRESS_RESTART", "R"))
+	if outcome.is_quit_confirmed():
 		quit_confirmed.emit()
-	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
+	var forward := outcome.is_page_forward()
+	var page := outcome.get_page()
+	if page == SpecialKeyOutcome.PAGE_SCOREBOARD and _game_hud != null:
+		# The chain's gate held (a session, the board up).
+		_game_hud.scoreboard_page_key(forward, true, true)
+	elif page == SpecialKeyOutcome.PAGE_HELP:
+		ControlsBindings.model().cycle_help_page(forward)
+	elif page == SpecialKeyOutcome.PAGE_BRIEFING and _game_hud != null:
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		_game_hud.cycle_briefing_page(1 if forward else -1, sim != null and sim.is_mp_session())
+	if outcome.is_taken():
 		ControlsBindings.model().consume_key_press(vk)
-		return true
-	# A digit the held-USE arm or an open menu takes runs its pick at once and
-	# reaches no row (engine controls::PlayerActions::chain_digit_key).
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and _player_presenter != null 			and _player_presenter.chain_digit_key(vk):
-		return true
-	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
-	var taken := false
-	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0 and not _chain_arm_holds():
-		var round_over := int(sim.round_over_key(vk, restart_vk))
-		if round_over & HudToggles.ROUND_OVER_ARM:
-			# The RESTART arm queues event 12 (a session's pick); the restart's
-			# exit and ESC's are the role's, stored by the engine.
-			if (round_over & HudToggles.ROUND_OVER_RESTART) and queue_pick.is_valid():
-				queue_pick.call(0)
-			if round_over & HudToggles.ROUND_OVER_CONSUMED:
-				ControlsBindings.model().consume_key_press(vk)
-				return true
-		elif page_key and _game_hud != null and _game_hud.scoreboard_page_key(
-				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
-			taken = true
-		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
-				_mp_session_peer(sim)):
-			taken = true
-	if not taken and deploy_param.is_valid() and queue_pick.is_valid():
-		var param := int(deploy_param.call(key))
-		if param >= 0:
-			queue_pick.call(param)
-			taken = true
-	if not taken and page_key:
-		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
-	if taken:
-		ControlsBindings.model().consume_key_press(vk)
-	return taken
-
-
-## Whether an arm ahead of the round-over leg holds the special-key chain: the
-## held-USE seat arm (the USE hold the next input frame reads), then the Emotes
-## and Radio menus. Each takes a digit (chain_digit_key's seat pick and menu
-## picks) and passes every other key to the chain's tail, so the round-over,
-## Tab board and status page legs never run for it (engine
-## controls::PlayerActions::use_held carries the witness).
-func _chain_arm_holds() -> bool:
-	return (_player_presenter != null and _player_presenter.is_use_held()) \
-			or _toggles.is_emotes_menu_open() or _toggles.is_radio_menu_open()
+	return outcome
 
 
 ## The KeyPress gametext key's code: its first character as written, the
@@ -1316,27 +1274,6 @@ static func _mp_session_peer(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_DEDICATED_HOST
 
 
-## PgUp / PgDn over live play: the Tab board takes them first (in a session
-## with the board up — the engine's gate), else the open help screen turns its
-## page, else an open briefing panel turns its page; false = not consumed.
-## `with_board` false skips the board (the special-key chain already ran it).
-func handle_page_key(forward: bool, with_board := true) -> bool:
-	if _game_hud == null:
-		return false
-	var board_sim: Simulation = _world.get_sim() if _world != null else null
-	if with_board and _game_hud.scoreboard_page_key(forward,
-			board_sim != null and board_sim.is_mp_session(), _toggles.is_scoreboard_open()):
-		return true
-	if _toggles.is_help_open():
-		ControlsBindings.model().cycle_help_page(forward)
-		return true
-	if (_toggles.get_briefing_mode() & 2) != 0:
-		var sim: Simulation = _world.get_sim() if _world != null else null
-		_game_hud.cycle_briefing_page(1 if forward else -1, sim != null and sim.is_mp_session())
-		return true
-	return false
-
-
 ## The escape key over live play: the engine's HUD-window close chain closes
 ## the first open window (true = consumed); with none open it runs the
 ## respawn init and the shell opens the in-game menu (false).
@@ -1361,21 +1298,6 @@ func begin_end_of_round_cine() -> void:
 	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
 		sim.request_hud_map_close()
 	_apply_toggle_events(events)
-
-
-## One key-down once the round is over: the special-key chain's round-over
-## leg (engine inmatch round_over_key; the world takes the RESTART and ESC
-## halves), unless an earlier arm holds the chain (_chain_arm_holds). Returns
-## the HudToggles.ROUND_OVER_* bits (0 = not taken).
-func handle_round_over_key(key: InputEventKey) -> int:
-	var sim: Simulation = _world.get_sim() if _world != null else null
-	if sim == null or _chain_arm_holds():
-		return 0
-	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
-	var bits := int(sim.round_over_key(vk, _key_press_vk("STRKEYPRESS_RESTART", "R")))
-	if bits & HudToggles.ROUND_OVER_CONSUMED:
-		ControlsBindings.model().consume_key_press(vk)
-	return bits
 
 
 # A Misc gametext toast through the message feed.

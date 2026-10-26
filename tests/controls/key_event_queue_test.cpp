@@ -8,6 +8,8 @@
 #include <initializer_list>
 #include <iostream>
 #include <set>
+#include <string>
+#include <vector>
 
 using namespace opennova::controls;
 namespace flag = opennova::controls::key_event_flag;
@@ -175,13 +177,75 @@ bool test_release_pass_follows_the_press_latch() {
 	return true;
 }
 
+// The keyboard pass: the release pass first (once, with no key waiting too), then each event
+// in order with its key-press latch set: an open text line takes it, else the special-key
+// chain, else the binding scan fires the row it matches, keypad Enter scanning as 269. Each
+// event's ring slot reaches the embedder ahead of its legs.
+// [orig: Input_ProcessKeyboardEvents @0x49d1f0 - the release pass @0x49d22f..0x49d2cc, the
+//  latch @0x49d2ed, the capture test @0x49d2e3, Input_HandleSpecialKeys @0x49d2fb and its
+//  skip @0x49d305, Input_IsExtendedEnterKey @0x49d310, the scan @0x49d42f / @0x49d488]
+bool test_keyboard_pass_order() {
+	struct Legs final : KeyboardPassLegs {
+		std::vector<std::string> calls;
+		bool chat_open = false;
+		void release_pass() override { calls.push_back("release"); }
+		void dequeued(const KeyEvent &event, int slot) override {
+			calls.push_back("slot " + std::to_string(slot) + " " + std::to_string(event.vk));
+		}
+		bool chat_key(const KeyEvent &event) override {
+			if (!chat_open) return false;
+			calls.push_back("chat " + std::to_string(event.vk));
+			if (event.vk == 0x1B) chat_open = false;
+			return true;
+		}
+		bool special_key(const KeyEvent &event) override {
+			if (event.vk != 'X') return false;
+			calls.push_back("special");
+			return true;
+		}
+		int binding_code(int scan_code) override { return scan_code == 0x1B ? 18 : scan_code == 269 ? 7 : -1; }
+		void row_event(const KeyEvent &, int code, int scan_code) override {
+			calls.push_back("row " + std::to_string(code) + " " + std::to_string(scan_code));
+		}
+	};
+	KeyEventQueue queue;
+	KeyPressLatch latch;
+	Legs idle;
+	run_keyboard_pass(queue, latch, idle);
+	CHECK(idle.calls == std::vector<std::string>{"release"});
+	queue.push(0x1B, 0);
+	queue.push('X', 0);
+	queue.push('Q', 0);
+	queue.push(0x0D, flag::kExtended);
+	Legs legs;
+	run_keyboard_pass(queue, latch, legs);
+	const std::vector<std::string> expected{"release", "slot 0 27", "row 18 27", "slot 1 88", "special",
+			"slot 2 81", "slot 3 13", "row 7 269"};
+	CHECK(legs.calls == expected);
+	CHECK(queue.empty());
+	CHECK(latch.is_set(0x1B) && latch.is_set('X') && latch.is_set('Q') && latch.is_set(0x0D));
+	// An open text line takes every key until its Escape closes it; the keys behind meet the
+	// chain again.
+	queue.push('X', 0);
+	queue.push(0x1B, 0);
+	queue.push('X', 0);
+	Legs chat;
+	chat.chat_open = true;
+	run_keyboard_pass(queue, latch, chat);
+	const std::vector<std::string> typed{"release", "slot 4 88", "chat 88", "slot 5 27", "chat 27",
+			"slot 6 88", "special"};
+	CHECK(chat.calls == typed);
+	return true;
+}
+
 } // namespace
 
 int main() {
 	int failed = 0;
 	for (const auto test : {test_queue_keeps_each_press_in_order,
 				 test_queue_wraps_without_a_full_test, test_keypad_enter_scans_as_269,
-				 test_each_event_fires_its_row, test_release_pass_follows_the_press_latch})
+				 test_each_event_fires_its_row, test_release_pass_follows_the_press_latch,
+				 test_keyboard_pass_order})
 		if (!test()) ++failed;
 	std::cout << "controls_key_event_queue: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

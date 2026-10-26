@@ -42,10 +42,36 @@ Ref<InputEventKey> KeyEventQueue::pop_key() {
 	return key;
 }
 
-Ref<InputEventKey> KeyEventQueue::pop_pass_key() {
-	Ref<InputEventKey> key = pop_key();
-	if (key.is_valid()) latch_.set(last_);
-	return key;
+void KeyEventQueue::drain(Object *p_legs) {
+	if (p_legs == nullptr) return;
+	// The engine's pass over the shell's legs: each dequeued event hands its slot's key over
+	// (and frees the slot) ahead of the event's legs.
+	struct Legs final : opennova::controls::KeyboardPassLegs {
+		KeyEventQueue &queue;
+		Object &legs;
+		Ref<InputEventKey> key;
+		Legs(KeyEventQueue &p_queue, Object &p_legs) : queue(p_queue), legs(p_legs) {}
+		void release_pass() override { legs.call("ring_release_pass"); }
+		void dequeued(const opennova::controls::KeyEvent &p_event, int p_slot) override {
+			queue.last_ = p_event;
+			key = queue.events_[static_cast<size_t>(p_slot)];
+			queue.events_[static_cast<size_t>(p_slot)].unref();
+		}
+		bool chat_key(const opennova::controls::KeyEvent &) override {
+			return static_cast<bool>(legs.call("ring_chat_key", key));
+		}
+		bool special_key(const opennova::controls::KeyEvent &) override {
+			return static_cast<bool>(legs.call("ring_special_key", key));
+		}
+		int binding_code(int p_scan_code) override {
+			return static_cast<int>(static_cast<int64_t>(legs.call("ring_binding_code", p_scan_code)));
+		}
+		void row_event(const opennova::controls::KeyEvent &, int p_code, int p_scan_code) override {
+			legs.call("ring_row_event", key, p_code, p_scan_code);
+		}
+	};
+	Legs legs(*this, *p_legs);
+	opennova::controls::run_keyboard_pass(queue_, latch_, legs);
 }
 
 void KeyEventQueue::reset() {
@@ -58,7 +84,7 @@ void KeyEventQueue::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("push_key", "event", "ctrl_down", "shift_down"),
 			&KeyEventQueue::push_key);
 	ClassDB::bind_method(D_METHOD("pop_key"), &KeyEventQueue::pop_key);
-	ClassDB::bind_method(D_METHOD("pop_pass_key"), &KeyEventQueue::pop_pass_key);
+	ClassDB::bind_method(D_METHOD("drain", "legs"), &KeyEventQueue::drain);
 	ClassDB::bind_method(D_METHOD("last_scan_code"), &KeyEventQueue::last_scan_code);
 	ClassDB::bind_method(D_METHOD("reset"), &KeyEventQueue::reset);
 	ClassDB::bind_method(D_METHOD("is_empty"), &KeyEventQueue::is_empty);

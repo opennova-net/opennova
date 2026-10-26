@@ -198,6 +198,7 @@
 #include "player/game_config_block.h"
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
+#include "player/special_key_outcome.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
@@ -485,6 +486,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LocalPlayerVisuals);
 	// The device's key queue the input router owns (D-CTRL-6).
 	GDREGISTER_CLASS(KeyEventQueue);
+	// One key-down's walk through the special-key chain (inmatch::special_key_chain).
+	GDREGISTER_CLASS(SpecialKeyOutcome);
 	GDREGISTER_CLASS(LocalPlayerPresenter);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(HostSessionOptions);

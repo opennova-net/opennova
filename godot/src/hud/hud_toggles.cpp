@@ -120,9 +120,6 @@ int HudToggles::get_briefing_mode() const { return state_.briefing_mode; }
 bool HudToggles::is_mp_verbose() const { return state_.mp_verbose; }
 bool HudToggles::is_emotes_menu_open() const { return state_.emotes_menu_open; }
 bool HudToggles::is_radio_menu_open() const { return state_.radio_menu_open; }
-void HudToggles::close_voice_menu(bool p_radio) {
-	opennova::hud::hud_toggles_close_voice_menu(state_, p_radio);
-}
 bool HudToggles::is_paused() const { return state_.paused; }
 bool HudToggles::is_server_status_view() const { return state_.server_status_view; }
 bool HudToggles::is_server_status_score_list_open() const {
@@ -202,7 +199,6 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_mp_verbose"), &HudToggles::is_mp_verbose);
 	ClassDB::bind_method(D_METHOD("is_emotes_menu_open"), &HudToggles::is_emotes_menu_open);
 	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);
-	ClassDB::bind_method(D_METHOD("close_voice_menu", "radio"), &HudToggles::close_voice_menu);
 	ClassDB::bind_method(D_METHOD("is_paused"), &HudToggles::is_paused);
 	ClassDB::bind_method(D_METHOD("set_paused", "paused"), &HudToggles::set_paused);
 	ClassDB::bind_method(D_METHOD("apply_tip_events", "events"), &HudToggles::apply_tip_events);
@@ -250,10 +246,6 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
 	BIND_ENUM_CONSTANT(SPECIAL_KEY_RESTART_QUEUED);
-	BIND_ENUM_CONSTANT(ROUND_OVER_CONSUMED);
-	BIND_ENUM_CONSTANT(ROUND_OVER_RESTART);
-	BIND_ENUM_CONSTANT(ROUND_OVER_EXIT);
-	BIND_ENUM_CONSTANT(ROUND_OVER_ARM);
 	BIND_ENUM_CONSTANT(ROW_HUD_DETAIL);
 	BIND_ENUM_CONSTANT(ROW_HUD_COLOR);
 	BIND_ENUM_CONSTANT(ROW_SHOWHUD);

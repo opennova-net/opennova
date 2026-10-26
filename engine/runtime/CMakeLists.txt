@@ -526,6 +526,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---

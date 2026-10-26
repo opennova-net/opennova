@@ -21,6 +21,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/session.h>
+#include <runtime/inmatch/special_key_chain.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/epilog_cine.h>
 #include <runtime/world/local_player.h>
@@ -612,6 +613,98 @@ int main() {
 		CHECK(im::main_frame_exit(4, true, false) == im::MainFrameExit::GameLoop);
 		CHECK(im::main_frame_exit(4, true, true) == im::MainFrameExit::PostMenu);
 		CHECK(im::main_frame_exit(12, true, false) == im::MainFrameExit::PostMenu);
+	}
+
+	// --- the special-key chain: one key's walk over the role -------------------
+	{
+		// One else-if chain (inmatch::special_key_chain): the open quit dialog leads (its YES
+		// runs Exit Mission, its RESTART out of a session queues event 12 for the default
+		// spawn, a key it leaves goes to the tail); an open menu takes a digit, closing the
+		// menu, and sends any other key past the round-over arm to the tail; once the round is
+		// over every key is the round-over arm's out of a session, RESTART re-running the
+		// splash and queueing event 12; in a session the Tab board takes the page keys and the
+		// status page its keys; the tail's deploy keys queue their picks and the help and
+		// briefing pages take PgUp / PgDn.
+		// [orig: Input_HandleSpecialKeys @0x49c5c0 - the dialog @0x49c5e6..0x49c6d1
+		//  (Input_QueueEvent(12, 0) @0x49c658), the Emotes arm @0x49c737..0x49c77c, the
+		//  round-over arm @0x49c7cf (Input_QueueEvent(12, 0) @0x49c8a3), the board
+		//  @0x49c910..0x49c95f, the status page @0x49c960..0x49c9c7, the deploy tail
+		//  @0x49c9c9..0x49ca97, the help and briefing pages @0x49ca9e..0x49cb53]
+		const w::SpawnZoneRegistry zones{};
+		controls::PlayerActions actions;
+		hud::HudToggleState toggles;
+		const auto key = [&](SpMission &mission, int vk) {
+			im::SpecialKeyInput in;
+			in.vk = vk;
+			in.deploy_vk = vk;
+			return im::special_key_chain(mission.view(), *mission.role, toggles, actions, zones, in);
+		};
+		SpMission m;
+		CHECK(m.boot(files, false));
+		// Nothing open, the round live: no leg takes a letter or a page key.
+		im::SpecialKeyOutcome out = key(m, 'Q');
+		CHECK(!out.taken && out.pick < 0 && !out.digit_pick && !out.quit_confirmed);
+		CHECK(!key(m, 0x22).taken);
+		// The quit dialog's YES, then its RESTART out of a session.
+		toggles.quit_dialog_open = true;
+		out = key(m, 'Y');
+		CHECK(out.taken && out.quit_confirmed && out.pick < 0);
+		out = key(m, 'R');
+		CHECK(out.taken && out.pick == 0 && !out.quit_confirmed && !out.restart_splash);
+		// A key the open dialog leaves reaches the tail: the open help's PgDn.
+		toggles.help_open = true;
+		out = key(m, 0x22);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Help && out.page_forward);
+		toggles.help_open = false;
+		toggles.briefing_mode = hud::kBriefingModeOpen;
+		out = key(m, 0x21);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Briefing && !out.page_forward);
+		toggles.briefing_mode = 0;
+		// The dialog's NO closes it.
+		CHECK(key(m, 'N').taken && !toggles.quit_dialog_open);
+		// The Emotes menu's digit is its pick (key 0 picks 10) and closes it.
+		toggles.emotes_menu_open = true;
+		out = key(m, '0');
+		CHECK(out.taken && out.digit_pick && out.digit_pick->action == controls::PlayerAction::EmotePick &&
+				out.digit_pick->value == 10);
+		CHECK(!toggles.emotes_menu_open);
+		// Once the round is over the open menu still sends a non-digit past the round-over
+		// arm: ESC under it stores no exit.
+		m.world().process_round_end(2);
+		toggles.emotes_menu_open = true;
+		out = key(m, 27);
+		CHECK(!out.taken && m.world().mission_exit_reason == 0);
+		toggles.emotes_menu_open = false;
+		// With the menu shut the round-over arm takes every key out of a session; RESTART
+		// re-runs the splash, queues event 12 and stores the restart's exit.
+		out = key(m, 'Q');
+		CHECK(out.taken && out.pick < 0 && !out.restart_splash);
+		out = key(m, 'R');
+		CHECK(out.taken && out.pick == 0 && out.restart_splash);
+		CHECK(m.world().mission_exit_reason == 4);
+
+		// In a session: the Tab board's page keys, then the status page's on the authority's
+		// status view, then the tail's deploy keys for a dead player.
+		SpMission c;
+		CHECK(c.boot(files, false));
+		c.world().rules.mp_session = true;
+		toggles.scoreboard_open = true;
+		out = key(c, 0x21);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::Scoreboard && !out.page_forward);
+		toggles.scoreboard_open = false;
+		CHECK(!key(c, 0x0D).taken);
+		toggles.server_status_view = true;
+		out = key(c, 0x0D);
+		CHECK(out.taken && out.page == im::SpecialKeyPage::None && out.pick < 0);
+		toggles.server_status_view = false;
+		w::Entity *local = c.world().registry.get(c.world().cached.local_player);
+		CHECK(local != nullptr);
+		if (local != nullptr) local->flags |= w::kEntityFlagDead;
+		out = key(c, 'X');
+		CHECK(out.taken && out.pick == 0);
+		out = key(c, ' ');
+		CHECK(out.taken && out.pick == hud::kHudDeployKeyAutoTeam);
+		CHECK(!key(c, 'Q').taken);
 	}
 
 	// --- the in-game RESTART command ------------------------------------------
