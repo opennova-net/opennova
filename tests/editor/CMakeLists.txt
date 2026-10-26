@@ -959,6 +959,13 @@ opennova_add_editor_test(mission_map_terrain_view)
 # A mission entity's Height lock (S25): the field, the .mis companion's height_lock, the DI-28 words.
 opennova_add_editor_test(mission_height_lock)
 
+# mint_install <dir>: minted_install.h's synthetic install written to disk, its missions listed, for the
+# editor's end-to-end scripts over an install no repository holds (ci.yml editor-e2e, master pushes); its
+# row writes one under the build tree.
+opennova_add_editor_executable(mint_install SOURCES mint_install_main.cpp LIBS opennova_editor)
+add_test(NAME editor_mint_install COMMAND mint_install ${OPENNOVA_TESTS_BINARY_DIR}/editor_mint_install
+         WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+
 # Every row above carries the `editor` label: CI's ctest leg runs as two shards, `editor` (these
 # rows) and `rest` (the rows without it), each on its own runner (scripts/ci/test_suites.py
 # SHARDS). APPEND keeps a row's other labels. Keep this at the end of the file so it sees every row.

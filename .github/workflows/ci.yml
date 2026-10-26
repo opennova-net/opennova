@@ -295,6 +295,16 @@ jobs:
           if-no-files-found: error
           path: build/apps/project/opennova-project.exe
 
+      # The minted install's writer (tests/editor/mint_install_main.cpp) for editor-e2e, a
+      # master push's only.
+      - name: Upload mint_install
+        if: matrix.shard == 'editor' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mint-install-windows
+          if-no-files-found: error
+          path: build/tests/mint_install.exe
+
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
         if: always()
@@ -753,6 +763,113 @@ jobs:
           name: godot-windowed-reports
           if-no-files-found: warn
           path: build/Testing/
+
+  # The OpenNova Editor end to end (scripts/mcp/editor_mission_e2e.py and editor_terrain_e2e.py: a
+  # project made on an install, a mission imported, edited, built and played through the editor's and
+  # the game's MCP endpoints) over the synthetic install tests/editor/minted_install.h mints, since no
+  # repository holds a game (ADR 0067). Master pushes only (the maintainer's decision, lane G Q11),
+  # not a required check. The mission it plays is E2E_MISSION; until the minted install holds it the
+  # job says so and runs nothing, as a warning.
+  editor-e2e:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    needs: [build-gdextension-windows, test-core]
+    timeout-minutes: 90
+    env:
+      GODOT_VERSION: 4.6.1-stable
+      E2E_MISSION: onjo_e2e.bms
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # scoped below: the minted install reads fixtures/ only
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Godot binary
+        uses: actions/cache@v4
+        with:
+          path: .godot-bin
+          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
+
+      - name: Install Godot (Windows)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${env:GODOT_VERSION}"
+          $bin = ".godot-bin/Godot_v${version}_win64_console.exe"
+          if (-not (Test-Path $bin)) {
+            New-Item -ItemType Directory -Force -Path .godot-bin | Out-Null
+            $url = "https://github.com/godotengine/godot/releases/download/${version}/Godot_v${version}_win64.exe.zip"
+            Invoke-WebRequest -Uri $url -OutFile .godot-bin/godot.zip
+            Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
+          }
+
+      # The editor binary loads the editor-enabled template_debug variant (oneditord.dll), and its
+      # Play the runtime one, both from this artifact.
+      - name: Download GDExtensions (Windows)
+        uses: actions/download-artifact@v4
+        with:
+          name: gdext_windows_template_debug
+          path: godot/bin
+
+      - name: Download mint_install
+        uses: actions/download-artifact@v4
+        with:
+          name: mint-install-windows
+          path: build/tests
+
+      - name: Prime Godot import cache
+        shell: bash
+        run: |
+          GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+          bash scripts/bootstrap_godot.sh
+          ok=0
+          for attempt in 1 2 3; do
+            if "$GODOT_BIN" --headless --path godot --import; then ok=1; break; fi
+            echo "::warning::Godot import attempt ${attempt} failed; retrying"
+          done
+          if [[ "$ok" != "1" ]]; then
+            echo "::error::Godot import did not complete after 3 attempts"
+            exit 1
+          fi
+
+      # From the repository: the writer reads fixtures/ there.
+      - name: Mint the install
+        id: mint
+        shell: bash
+        run: |
+          install="${RUNNER_TEMP}/minted-install"
+          build/tests/mint_install.exe "$install" | tee "${RUNNER_TEMP}/minted-missions.txt"
+          echo "install=$install" >> "$GITHUB_OUTPUT"
+          if grep -qx "mission ${E2E_MISSION}" "${RUNNER_TEMP}/minted-missions.txt"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::editor-e2e skipped: the minted install holds no ${E2E_MISSION} yet (tests/editor/minted_install.h; its missions are listed above)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: The mission editor end to end
+        if: steps.mint.outputs.ready == 'true'
+        shell: bash
+        run: >-
+          python -B scripts/mcp/editor_mission_e2e.py --install "${{ steps.mint.outputs.install }}"
+          --mission "$E2E_MISSION" --godot "${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
+
+      - name: The terrain editor end to end
+        if: steps.mint.outputs.ready == 'true'
+        shell: bash
+        run: >-
+          python -B scripts/mcp/editor_terrain_e2e.py --install "${{ steps.mint.outputs.install }}"
+          --mission "$E2E_MISSION" --godot "${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
 
   # Type-check + build the NovaWorld web portal (web/), after its unit tests
   # (vitest, `npm test`). The built dist is an artifact only; production images
