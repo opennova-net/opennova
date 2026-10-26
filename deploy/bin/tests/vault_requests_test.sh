@@ -89,7 +89,8 @@ make_vault() {
   mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging database_password=SECRETVALUEdbstaging \
     redis_password=SECRETVALUEredisstaging edge_auth_secret=SECRETVALUEedgestaging \
     edge_auth_secret_previous=SECRETVALUEedgepreviousstaging
-  mkitem app-prod SERVER edge_auth_secret=SECRETVALUEedgeprod redis_password=SECRETVALUEredisprod
+  mkitem app-prod SERVER admin_api_token=SECRETVALUEadminapiprod edge_auth_secret=SECRETVALUEedgeprod \
+    redis_password=SECRETVALUEredisprod
   mkitem rds-prod SECURE_NOTE master_password=SECRETVALUEmasterprod
   mkitem rds-staging SECURE_NOTE master_password=SECRETVALUEmasterstaging
   mkitem cloudflare API_CREDENTIAL api_token=SECRETVALUEcloudflare zone_id=0123456789abcdef0123456789abcdef \
@@ -479,11 +480,14 @@ expect_requests "zone plan" 5 zone plan
 expect_tf_var TF_VAR_edge_auth_secret_prod app-prod edge_auth_secret
 expect_tf_var TF_VAR_edge_auth_secret_staging app-staging edge_auth_secret
 expect_tf_var AWS_ACCESS_KEY_ID aws-prod access_key_id
-expect_requests "github plan" 4 github plan
+expect_requests "github plan" 7 github plan
 expect_tf_var GITHUB_TOKEN github-terraform token
 expect_tf_var TF_VAR_members github-terraform members
 expect_tf_var TF_VAR_stripe_test_secret_key stripe-test restricted_key
 expect_tf_var TF_VAR_aws_region_staging aws-staging region
+expect_tf_var TF_VAR_domain cloudflare domain
+expect_tf_var TF_VAR_admin_api_token_prod app-prod admin_api_token
+expect_tf_var TF_VAR_admin_api_token_staging app-staging admin_api_token
 expect_requests "ci plan" 5 ci plan
 for v in region:aws-ci:region aws_account_id_ci:aws-ci:account_id license_key:Runs-On:key alert_email:alerts:email; do
   IFS=: read -r name item field <<<"$v"

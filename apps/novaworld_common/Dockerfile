@@ -16,11 +16,11 @@
 # that base: web hiredis (the one program that links it) and the retail pages
 # (templates, static); the worker the machine script (its machine driver alone
 # renders it); the lobby (its own public address, from
-# EC2), web (the game data's store: the admin page's uploads, the update
+# EC2), web (the games' store: the projects' files, the update
 # service's packages), the worker (the fleet's machines, the outbound mail) and
 # data (the store: the trees it builds, the packages it reads) the AWS CLI v2. No image keeps state: the database is
 # PostgreSQL (DATABASE_URL, DATABASE_PASSWORD), web's state Redis
-# (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the game data the store (S3 on a
+# (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the games' files the store (S3 on a
 # deployment; the compose stack's directory volume mounts under
 # /var/lib/opennova/store). The web portal is a separate nginx image
 # (web/Dockerfile), a second container in web's task.
@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# Configure the whole tree (cheap) but compile only the six programs and
-# their lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
+# Configure the whole tree (cheap) but compile only the six programs, the two
+# tools the data program's release build runs (opennova-project's export,
+# opennova-update-tool's package builder; data_sets/release_build.h) and their
+# lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
 # FetchContent (web, the fleet, the worker and data build with it).
 # GDExtension is never touched (godot/src is its own project). Mirrors the
@@ -48,7 +50,7 @@ RUN cmake -S . -B build -G Ninja \
         -DBUILD_NOVAWORLD_HTTP=ON \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \
         opennova_novaworld_web opennova_novaworld_fleet opennova_novaworld_worker \
-        opennova_novaworld_data
+        opennova_novaworld_data opennova_project opennova_update_tool
 
 # ---- AWS CLI stage ---------------------------------------------------------
 # The hosted servers' ec2 machine driver (hosted/cloud/ec2_machine_driver.h), the
@@ -223,8 +225,9 @@ ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 # ---- web -------------------------------------------------------------------
 # Web alone links hiredis (its Redis pool, in web's core alone:
 # scripts/lint/link_graph_check.py), so its image alone carries it. It
-# runs the AWS CLI for the game data's store (the admin page's uploads, which
-# it puts there part by part, and the update service's packages) and serves
+# runs the AWS CLI for the games' store (the editor's pushes, the runtime's
+# uploaded packages, which it puts there part by part, and the update service's
+# packages) and serves
 # retail UPDATE.EXE on the updater's ports (ONNET_UPDATE_PORTS, with
 # ONNET_UPDATE_HOST set).
 FROM runtime-aws AS web
@@ -269,12 +272,16 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
 ENTRYPOINT ["/app/opennova-novaworld-worker"]
 
 # ---- data ------------------------------------------------------------------
-# The data sets' jobs over the game data's store (S3 through the AWS CLI in a
-# deployment; the compose stack's directory volume at /var/lib/opennova/store):
-# a tree's files and a release's package pass through its disk.
+# The games' jobs over their store (S3 through the AWS CLI in a deployment; the
+# compose stack's directory volume at /var/lib/opennova/store): a tree's files
+# and a release's package pass through its disk, and a release built from a
+# revision of a game's project runs the two tools beside the program
+# (release_build.h).
 FROM runtime-aws AS data
 COPY --from=build /src/build/apps/novaworld_data/opennova-novaworld-data /app/
-RUN ! ldd /app/opennova-novaworld-data | grep -q 'not found'
+COPY --from=build /src/build/apps/project/opennova-project /app/
+COPY --from=build /src/build/apps/update_tool/opennova-update-tool /app/
+RUN ! ldd /app/opennova-novaworld-data /app/opennova-project /app/opennova-update-tool | grep -q 'not found'
 ENV ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
 EXPOSE 8081/tcp
@@ -285,8 +292,8 @@ ENTRYPOINT ["/app/opennova-novaworld-data"]
 # ---- the local stack's smoke test ------------------------------------------
 # No program and never published: the smoke test scripts/dev_stack.sh runs
 # against a running local stack from the stack's own network
-# (tests/novaworld/stack_smoke.cpp), and the synthetic data set (a loose
-# deathmatch map and its game text) the stack's machines serve when no licensed
+# (tests/novaworld/stack_smoke.cpp), and the synthetic game's files (a loose
+# deathmatch map and its game text) the stack seeds a game from when no licensed
 # data is given, written here at build time.
 FROM build AS smoke-build
 RUN cmake --build build --target opennova_novaworld_stack_smoke

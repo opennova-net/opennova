@@ -80,7 +80,7 @@ BuildResult build_result(const BuildReport &report, bool in_project) {
 	if (!in_project)
 		out.players = "To play it, copy these files into a copy of the game's folder, over the files of these names. "
 		              "The game then reads only what this build packs, so the project must hold everything the "
-		              "game needs (File > Import the whole game install).";
+		              "game needs (File > Import..., the whole game install).";
 	// A folder several projects build into: theirs are never pruned, replaced or taken.
 	if (!report.others.empty())
 		out.others = "The folder holds " + counted(report.others.size(), "build") + " of other projects, left as " +

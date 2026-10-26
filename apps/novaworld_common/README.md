@@ -47,7 +47,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
 | worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver; the scheduler of its periodic kinds | more workers, more threads each |
-| data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the trees' finalize and prune, the releases' validate and apply) and the scheduler of their prune | one task (the data jobs' caps are global) |
+| data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the releases' build, validate and apply, each game's tree built from its published release, and the trees' prune: a build runs `opennova-project` and `opennova-update-tool` from beside the program, naming `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) and the scheduler of their prune | one task (the data jobs' caps are global) |
 
 Each program's own code lives in its directory, a static library its tests drive in
 process (`opennova_novaworld_<program>_core`; the worker and the data program have their
@@ -123,7 +123,7 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   web's task, TCP 8080, the update ports) behind one network load balancer at the gate's
   address, the fleet registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
   `scripts/dev_stack.sh`; DEVELOPING.md) runs the six, each its own container, plus
-  PostgreSQL, Valkey, the portal in web's network as in web's task, and with a data set
+  PostgreSQL, Valkey, the portal in web's network as in web's task, and with a game seeded
   the hosted servers' machines as containers of their own (the docker machine driver,
   [`hosted/README.md`](hosted/README.md)).
 
@@ -320,10 +320,10 @@ policy, not a port.
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
-| `tree.finalize` | an uploaded data set tree checked, sized and made ready (`data_sets/data_set_jobs.h`) | the admin's finalize | data | 2 |
-| `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | data | 1 |
-| `release.apply` | one section of a published release applied to its data set's baseline (an OP: Acid Gambit or `nifty` section built from empty), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
-| `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each job above, the delete routes | data | 1 |
+| `release.build` | a release built from a revision of its game's project: exported and packed whole (`data_sets/release_build.h`), then validated as an upload is | the admin's release of a revision | data | 1 |
+| `release.validate` | a built or uploaded update package read, mapped to its data sets (an upload of a game with a project refused), made a draft or invalid (`data_sets/data_set_jobs.h`) | a build's end, the runtime's upload completion | data | 1 |
+| `release.apply` | one section of a published release built into its data set's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
+| `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
@@ -938,7 +938,7 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
 The site's admin pages fall in four areas, the admin menu's (`web/src/utils/adminNav.ts`),
 under the **Overview** (what needs an admin, then each area at a glance): **NovaWorld**
 (Status and sessions, `/admin/novaworld`: the sign-in and maintenance mode, and the
-sessions; CD keys), **Hosting** (Fleet, Server usage, Static addresses, Game data),
+sessions; CD keys), **Hosting** (Fleet, Server usage, Static addresses, Games),
 **People and money** (Users; Subscriptions, `/admin/billing`; AWS costs, `/admin/costs`)
 and **Operations** (Infrastructure, Background jobs). The paths stay flat, and the old
 `/admin/service` and `/admin/sessions` lead to `/admin/novaworld`.

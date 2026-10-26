@@ -14,8 +14,9 @@ namespace opennova::editor {
 
 // The base layer under an expansion project's graph (ADR 0046 d10, S13 D3; wired since T5's follow-up): the
 // base game's files as the game serves them under the project (base_install_spec over SessionCore::
-// base_game(): the install's base game, or the base game's project's export), each name the graph reads
-// read through its extractor (GraphLayerBuilder), so a reference to a name the base game defines (a
+// base_game(): the install's base game, or the base game's project's export), each typed as the project
+// scan types a file (a `.bin` by its content: the base's menutxt.bin a string table) and each name the graph
+// reads read through its extractor (GraphLayerBuilder), so a reference to a name the base game defines (a
 // weapon of its weapon.def, a sound profile of its SndProf.def, a texture or model it ships, a model's
 // user point) resolves as the game resolves it, through the archives below the expansion's pair [orig:
 // PFF_OpenAllArchives @ 0x4a4310, slots 2..4]. Stepped by bytes, so an Open builds it within its polls'

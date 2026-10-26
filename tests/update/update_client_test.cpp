@@ -305,7 +305,7 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	// full native rows and recognize its registered expansion without an archive.
 	// The runtime's OPENNOVA.WIZ is a debug zip's, naming staging's service
 	// (package_godot_windows.ps1 -ExportMode debug), and the content's and the
-	// expansion's own wizards name prod's (package_release.py writes that): every
+	// expansion's own wizards name prod's (a release prod's data program built): every
 	// product updates from staging alone.
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/OPENNOVA.WIZ"),
 			"[HEADER]\r\nCMD=ONRUNTIME.CMD\r\nURL=update.staging.opennova.net\r\n"

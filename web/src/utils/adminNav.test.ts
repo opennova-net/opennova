@@ -7,7 +7,7 @@ describe('the admin map', () => {
   it('groups every page in four areas, the way the service is run', () => {
     expect(ADMIN_AREAS.map((a) => [a.label, a.sections.map((s) => s.label)])).toEqual([
       ['NovaWorld', ['Status and sessions', 'CD keys']],
-      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Game data']],
+      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Games']],
       ['People and money', ['Users', 'Subscriptions', 'AWS costs']],
       ['Operations', ['Infrastructure', 'Background jobs']],
     ]);

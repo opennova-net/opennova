@@ -387,6 +387,9 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_eq(String(state.get("status", {}).get("status", "")), "No project open.")
 	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
 			"the pickers need a person")
+	# ADR 0069: a NovaWorld sign-in is a person's, its password never on the wire.
+	assert_true((await _call("editor_request", {"kind": "content_sign_in", "username": "a", "password": "b"}))
+			.get("_error", "").contains("person"), "a sign-in needs a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
 	assert_true(str((await _call("editor_request", {"kind": "build"})).get("outcome", {})).contains("project.none"))
 	assert_true(str((await _call("editor_request", {"kind": "play"})).get("outcome", {})).contains("project.none"))
@@ -418,8 +421,10 @@ func test_request_table_on_the_wire() -> void:
 	var edit: Dictionary = {}
 	var workspace: Dictionary = {}
 	var viewport: Dictionary = {}
+	var request_properties: Dictionary = {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
 		if String(tool["name"]) == "editor_request":
+			request_properties = tool["inputSchema"]["properties"]
 			kinds = tool["inputSchema"]["properties"]["kind"].get("enum", [])
 			edit = tool["inputSchema"]["properties"]["edits"].get("items", {})
 			workspace = tool["inputSchema"]["properties"].get("workspace", {})
@@ -433,6 +438,9 @@ func test_request_table_on_the_wire() -> void:
 		if String((row as Dictionary).get("served_by", "")) != "person":
 			served.append(String((row as Dictionary).get("kind", "")))
 	assert_eq(kinds, served, "the kind enum is the tokens the request table serves, from the catalog")
+	assert_false(request_properties.has("password"), "no field only a person's kind takes is a property")
+	assert_true(request_properties.has("project_key") and request_properties.has("message"),
+			"the NovaWorld project fields the wire serves are")
 	var named: Array = []
 	for row: Variant in catalog.get("queries", []):
 		named.append(String((row as Dictionary).get("name", "")))

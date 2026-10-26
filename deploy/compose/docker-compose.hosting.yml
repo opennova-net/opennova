@@ -22,9 +22,10 @@
 #                 game server's) reaches it. The local stack's alone, never a
 #                 deployment's.
 #   machine-data  the local object store (the base file's `store` volume: the
-#                 data sets' trees the site's Game data page uploads, which
-#                 scripts/dev_stack.sh up --data or --synthetic-data seeds
-#                 through the admin API) at /var/lib/opennova/store, the path
+#                 trees release.apply makes of each game's published release,
+#                 which scripts/dev_stack.sh up --data or --synthetic-data
+#                 seeds by pushing a project and publishing a release built
+#                 from it) at /var/lib/opennova/store, the path
 #                 web and the data program see it at, read-only; the machines
 #                 take every mount of this container in its mode
 #                 (ONNET_HOSTED_DOCKER_DATA_FROM), so a machine's hostd copies

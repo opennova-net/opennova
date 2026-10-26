@@ -29,6 +29,7 @@ public:
 	bool copy_prefix(
 			std::string_view from_prefix, std::string_view to_prefix, std::string &error) override;
 	bool list(std::string_view prefix, std::vector<StoredObject> &out, std::string &error) override;
+	bool sync_down(std::string_view prefix, const std::string &dir, std::string &error) override;
 	bool head(std::string_view key, bool &exists, uint64_t &size, std::string &error) override;
 	bool remove(std::string_view key, std::string &error) override;
 	bool remove_prefix(std::string_view prefix, std::string &error) override;

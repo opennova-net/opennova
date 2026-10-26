@@ -13,8 +13,8 @@
 namespace opennova::editor {
 
 // File > Project settings... (ADR 0046 S11d): the project's name, features (missions,
-// multiplayer) and expansion (S16: what it builds on, whether and as what it builds as an
-// expansion, ExpansionFields), then this computer's settings: the game install folder, the OpenNova
+// multiplayer) and expansion (S16: the game it changes, whether and as what it ships as a mod,
+// ExpansionFields), then this computer's settings: the game install folder, the OpenNova
 // runtime Play runs (read-only on a source run, where Play drives the checkout) and whether
 // Play runs the game install instead. Whether it is open and what its fields hold until Apply are the
 // workspace's (settings, the MCP gaps lane): opening it fills them with the settings in effect, each field

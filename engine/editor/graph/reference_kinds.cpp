@@ -483,15 +483,24 @@ std::string animation_map_missing(const AssetGraph &graph, const GraphEdge &edge
 // without it, each model's load taking a null [orig: EntityDef_LoadModelsAndCallbacks @ 0x439F50: ThreediGp_LoadModel
 // @ 0x439fdc (graphic), @ 0x43a0b6 (husk), @ 0x43a1c8 / @ 0x43a26e (huskfinal), @ 0x43a2fc (graphic_enemy),
 // @ 0x43a38a, @ 0x43a412; ThreediGp_LoadModel's null @ 0x5B624E], the game logging "Missing 3di(s) from" the item for
-// its graphic and its husk (@ 0x43A08E, @ 0x43A13B, @ 0x43A65A..0x43A664). Another model's reference (a weapon's,
-// a HUD effect's) is not witnessed so: an error.
+// its graphic and its husk (@ 0x43A08E, @ 0x43A13B, @ 0x43A65A..0x43A664). A terrain's foliage definition whose
+// graphic does not load keeps a null model, no file being no refusal [orig: ThreediGp_LoadFromFile's -1 @ 0x5B57C8],
+// and every foliage pass skips a definition with none, so it grows nothing [orig: Foliage_LoadDefAssets @
+// 0x6012CB, the null kept @ 0x601A0A, its buffers skipped @ 0x601A66; Foliage_UpdateDetailCellSlotsForDef @
+// 0x601D68; Foliage_SetupDetailSlotDraw @ 0x6007D0; Foliage_UpdateModelTiles @ 0x601F69]: JO:CA's own terrains name
+// four graphics no archive holds (mveg_3, mveg3_b, mveg_d, mveg4d; foliage-re.md). Another model's reference (a
+// weapon's, a HUD effect's) is not witnessed so: an error.
 bool item_model(const GraphEdge &edge) { return strutil::iequals(basename_of(edge.source), "items.def"); }
+// A terrain's only model reference is a foliage definition's graphic (terrain_document's foliage_fields).
+bool foliage_model(const GraphEdge &edge) { return strutil::ends_with_icase(edge.source, ".trn"); }
 std::string model_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	return project_lacks(graph, edge) +
-	       (item_model(edge) ? " The game loads the item without it." : std::string());
+	       (item_model(edge)      ? " The game loads the item without it."
+	        : foliage_model(edge) ? " The game grows nothing for the definition."
+	                              : std::string());
 }
 DiagnosticSeverity model_severity(const GraphEdge &edge) {
-	return item_model(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+	return item_model(edge) || foliage_model(edge) ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
 }
 
 // An AI profile's weapon naming no ammo: the profile stores the lookup's 0, as a key it never read, so that weapon

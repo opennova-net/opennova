@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/assets/import_choice.h>
+#include <editor/content_store/content_plan.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
@@ -123,6 +124,22 @@ enum class EditorRequestKind {
 	MusicStreamAudio,
 	// A line of a file's source corrected on disk (Problems' Correct the line...), the file read again
 	CorrectLine,
+	// The content store (ADR 0069, session/content_controller.h): the account signed in (a person's
+	// password) and out; the projects listed and the open project's standing checked; a project got into
+	// a new folder and opened; the open project bound to a content project; its head pulled, a conflict of
+	// the pull settled, its files pushed as a revision; the content job in hand given up on.
+	ContentSignIn,
+	ContentSignOut,
+	ContentCheck,
+	ContentGet,
+	ContentBind,
+	ContentPull,
+	ContentResolve,
+	ContentPush,
+	ContentRelease,
+	ContentRestore,
+	ContentHistory,
+	ContentCancel,
 	kCount,
 };
 
@@ -137,8 +154,10 @@ enum class PickPurpose {
 	GameInstall,
 	ImportFiles,
 	NewProjectInstall, // the New project form's game install
+	NewProjectBase, // the New project form's base game's project
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
-	MusicStreamWave // a music bank stream's audio from a wave...: the wave it is made from
+	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
+	ContentFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
@@ -445,6 +464,19 @@ struct EditorRequest {
 	// An edit_record of the Tiles tools (S25 B2, session/terrain_tiles.h): the view (a mission or a terrain) whose
 	// tile placement its edits go to; "" an ordinary edit_record.
 	std::string terrain_view;
+	// The content store (ADR 0069, session/content_controller.h): the service and the account a sign-in
+	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
+	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
+	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`
+	// back as (0: the folder's base, Discard changes).
+	std::string server;
+	std::string username;
+	std::string password;
+	std::string project_key;
+	std::string message;
+	std::optional<Resolution> resolution;
+	std::string version;
+	int64_t revision = 0;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -471,7 +503,10 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.define == b.define && a.preview_background == b.preview_background &&
 			a.keep_selection == b.keep_selection && a.create == b.create && a.event == b.event &&
 			a.variable == b.variable && a.value == b.value && a.stroke == b.stroke && a.gesture == b.gesture &&
-			a.cancel == b.cancel && a.terrain_view == b.terrain_view;
+			a.cancel == b.cancel && a.terrain_view == b.terrain_view && a.server == b.server &&
+			a.username == b.username && a.password == b.password && a.project_key == b.project_key &&
+			a.message == b.message && a.resolution == b.resolution && a.version == b.version &&
+			a.revision == b.revision;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

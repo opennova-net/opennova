@@ -31,7 +31,7 @@
       </RouterLink>
     </p>
 
-    <!-- The data set: the game the server runs, with the version of its data. -->
+    <!-- The game the server runs, with the version of its data. -->
     <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('data_set_id')">
       <legend :id="fieldId('data_set_id')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
         {{ FIELD_LABELS.data_set_id }}
@@ -325,8 +325,8 @@
 // account's free static addresses (the one `preferredAddressId` names first)
 // while any is. While the service offers it, a box lists the server on
 // NovaLogic's NovaWorld too; else the start sends it off.
-// The game (a base data set the service offers, by id) comes first and drives
-// the rest: the expansions it offers (expansion data sets with data), the
+// The game (a base game the service offers, by its data set id) comes first and drives
+// the rest: the expansions it offers (expansion games with data), the
 // whole-number ranges and the rotation's missions, which are the game's data's
 // own (and the picked expansion's), all of them unless the owner takes some
 // out. Every field is checked against the backend's rule

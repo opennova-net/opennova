@@ -9,9 +9,11 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/install_view.h>
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/terrain_brush.h>
+#include <editor/project/base_project.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
@@ -28,9 +30,11 @@
 
 namespace opennova::editor {
 
+class BaseExportOperation;
 class DiskWatch;
 class DocumentSet;
 class EditorPreferences;
+class ContentController;
 class ImportController;
 class NavigationController;
 class OpenOperation;
@@ -39,6 +43,7 @@ class ProblemsService;
 class ProjectRefresh;
 struct PlayIntent;
 struct ExportIntent;
+struct BuildAfterBase;
 class RenameController;
 class FileChores;
 class TerrainSculpt;
@@ -81,6 +86,7 @@ public:
 		NavigationController *navigation = nullptr;
 		FileChores *chores = nullptr;
 		TerrainSculpt *sculpt = nullptr; // S25: the heights' baker
+		ContentController *content = nullptr; // ADR 0069: the content store
 	};
 	void bind(const Parts &parts) { parts_ = parts; }
 	DocumentSet &documents() const { return *parts_.documents; }
@@ -93,6 +99,7 @@ public:
 	NavigationController &navigation() const { return *parts_.navigation; }
 	FileChores &chores() const { return *parts_.chores; }
 	TerrainSculpt &sculpt() const { return *parts_.sculpt; }
+	ContentController &content() const { return *parts_.content; }
 
 	// Once, when the session starts: the preferences read (a store that cannot be read is a finding,
 	// the defaults in effect) and shown, no project open.
@@ -194,10 +201,14 @@ public:
 	// opened as open_project opens it, with its import pass unless `import_pass` is false. `game_install`
 	// (the UX round's project lane), when given, is checked first (refused, project.install.invalid, for a
 	// folder that holds no install) and is the editor's install from then on, which the project's
-	// local.json takes as it opens.
+	// local.json takes as it opens. `stock` (a game you own, new_project's all): the project of the game install's
+	// own game (the editor's install when none is named), the base game standalone or, as `expansion`, one of the
+	// install's expansions on the base game's project; no placeholder of an expansion's own files made, and once it
+	// opens every file of its game imported (ImportController::import_stock, the operation that follows the Open, or
+	// the base game's export the Open starts first: start_stock_import).
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
 	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion(),
-	                 const std::string &game_install = std::string());
+	                 const std::string &game_install = std::string(), bool stock = false);
 	// CheckInstall: the folder `path` ("" the editor's last chosen) read as an install of the open
 	// project's game (check_install), the view's install_check.
 	void check_install(const std::string &path);
@@ -298,6 +309,23 @@ public:
 	// every read of the base game reads: the import's listing, the base's names, lean packing, the build's
 	// gate and the Play run's base; the game install stays the program Play in the game install starts.
 	std::string base_game() const;
+	// The install the game's own data is judged against (ADR 0046 S15, session/original_files.h): a stock
+	// expansion (one on a base game's project whose game install has an installed expansion of the project's own
+	// name: Escalation, jox01, on the Joint Operations project) against the game as it ships, the game install
+	// with that expansion mounted, its files under the project's names (installed_expansion_spec); every other
+	// project against the install it imports from (install_spec over base_game()). An empty root for none.
+	InstallSpec original_install() const;
+	// An expansion of a project's base game (ADR 0046 T5): its base project's export weighed (base_export_of)
+	// and, where it is missing or older than the project and may be replaced, exported again as an operation
+	// (BaseExportOperation), which starts `after` (the Build, Play or Export that found it so) once the base is
+	// in. True when the export runs. The open project's Open, a Rescan, a change of its base game and every
+	// Build, Play and Export ask it; an unchanged base costs the walk of its folder's listings.
+	bool check_base_export();
+	bool check_base_export(const BuildAfterBase &after);
+	// A base export's finish: the base game read again (the new export, or the one before it where it failed,
+	// its failure then the base's one finding), the requirements and Problems over it, and what waited on it
+	// started.
+	OperationOutcome absorb_base_export(BaseExportOperation &exported);
 	// The requirement row of `role`, or null.
 	const RequirementRow *requirement_row(const std::string &role) const;
 	// The project file `file` names, its case aside: the one at that project-relative path in any
@@ -315,9 +343,11 @@ public:
 	// again, the build cache set aside (BuildPlan::rehash).
 	// With the Export that waits on it (`exported`, ADR 0046 S16: the folder it lands in, refused
 	// before anything is built when it lies inside the project but its export folder). `panel`: its result's
-	// panel opens as it ends (a build asked with report false leaves the person's work as it is).
+	// panel opens as it ends (a build asked with report false leaves the person's work as it is). An expansion
+	// of a project's base game whose base export is missing or older than its project exports the base first,
+	// which starts the build once it is in (check_base_export; `base_checked` its own call, the base weighed).
 	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported,
-	                 bool panel = true);
+	                 bool panel = true, bool base_checked = false);
 	// A Build joined onto the running build that asks its panel: it opens as the build ends.
 	void report_build() { build_reports_ = true; }
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
@@ -366,6 +396,10 @@ private:
 	// Why the last New project or Open was refused, for the welcome page, which stands in for Output and
 	// Problems while no project is open (ProjectView::refused); cleared as either starts.
 	void refuse_project(const Diagnostic &why, const std::string &what);
+	// A game you own's import (stock_import_, ImportController::import_stock) started once its project is open and
+	// the slot is free: as its Open finishes, else as the base game's export the Open started ends (finished,
+	// failed or cancelled by the person), so it follows the work its New project began.
+	void start_stock_import();
 	// The editor's install and the one in effect shown (ProjectView::editor_install, retail_directory).
 	void show_installs();
 	// The refresh run to its end now and the project validated (the build's, before it plans).
@@ -381,10 +415,22 @@ private:
 	// The requirements of `doc` over `scan`, with the game install's expansions weighed
 	// (evaluate_requirements: the project's expansion against them, listed).
 	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
+	// What check_base_export does with the base weighed (`base`, base_export_of's: an Open weighs it in its
+	// steps): the export started where it is not current and may be replaced, the folder of the person's
+	// said where it may not, then the requirements and the Problems' hold following (hold_for_base).
+	bool weigh_base_export(const BaseExport &base, const BuildAfterBase &after);
+	// Whether the open project's base game is unread: an expansion of a project's base game whose export is
+	// being made, or whose export folder holds no base game to read.
+	bool base_unread() const;
+	// The requirements evaluated again over the base as it stands, and the Problems' validation held while
+	// the base is unread (ProblemsService::hold_validation), let go once it is read.
+	void hold_for_base();
 	// What an Export that waited on the build `built` copies (BuildOperation's ExportResolver): its folder
-	// (export_folder), the runtime beside a standalone game when the project asks for it; false with
-	// `refused` holding what refuses it.
-	bool export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request, ExportReport &refused);
+	// (export_folder), the runtime beside a standalone game when the project asks for it, the stamp of the
+	// files the build was planned on (`sources`, which its record keeps); false with `refused` holding what
+	// refuses it.
+	bool export_request(const ExportIntent &intent, const BuildReport &built, const std::string &sources,
+	                    ExportRequest &request, ExportReport &refused);
 	// What absorb_changed says of the files that came back from outside the editor (`before` and `after` the
 	// scan, `imported` the sources the pass took and their records): an Output line each, or one line with
 	// each under it.
@@ -431,6 +477,9 @@ private:
 	// The install the open project was opened with for this session alone (open_project's `game_install`),
 	// in effect over local.json's and written nowhere; "" for none.
 	std::string run_install_;
+	// The project a game you own's New project made, whose Open goes on to import every file of its game
+	// (new_project's stock; its root as the Open's paths name it), "" for none: any other Open forgets it.
+	std::string stock_import_;
 	bool workspace_kept_ = true; // set_workspace_kept
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
@@ -443,6 +492,11 @@ private:
 	std::map<std::string, WireDrag> wire_drags_;
 	OriginalBytes original_bytes_; // which files are the install's bytes (shipped_files)
 	std::vector<std::string> install_expansion_names_; // the game install's expansions, by folder name
+	// The one finding about an expansion's base game's project while it stands, which the requirements
+	// carry: its last export failed, or its export folder holds files of the person's (an empty code: none).
+	Diagnostic base_finding_;
+	// A base export another operation kept from starting, weighed again once that one ends.
+	bool base_check_due_ = false;
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 	std::string refusal_status_; // the status line the last refused request left, until a request is served

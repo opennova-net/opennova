@@ -96,6 +96,25 @@ mock_provider "aws" {
   }
 }
 
+# The same account in us-east-1 (versions.tf): the downloads host's certificate,
+# its one validation record known at plan.
+mock_provider "aws" {
+  alias           = "us_east_1"
+  override_during = plan
+
+  mock_resource "aws_acm_certificate" {
+    defaults = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef"
+      domain_validation_options = [{
+        domain_name           = "downloads.example.com"
+        resource_record_name  = "_0123456789abcdef.downloads.example.com."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_fedcba9876543210.acm-validations.aws."
+      }]
+    }
+  }
+}
+
 mock_provider "cloudflare" {
   override_during = plan
 
@@ -307,11 +326,11 @@ run "bucket" {
     condition = (
       toset([for r in aws_s3_bucket_lifecycle_configuration.ops.rule : r.id]) == toset([
         "expire-old-backups", "release-old-versions", "data-abandoned-uploads",
-        "data-trees-old-versions", "data-updates-old-versions",
+        "data-trees-old-versions", "data-updates-old-versions", "data-content-old-versions",
       ]) &&
       alltrue([for r in aws_s3_bucket_lifecycle_configuration.ops.rule : r.status == "Enabled"])
     )
-    error_message = "the dumps' and the releases' rules as before, and the game data's: the abandoned uploads, the trees and the packages"
+    error_message = "the dumps' and the releases' rules as before, and the game data's: the abandoned uploads, the trees, the packages and the content store"
   }
   assert {
     condition = alltrue([
@@ -325,8 +344,9 @@ run "bucket" {
     condition = alltrue(concat(
       [for r in aws_s3_bucket_lifecycle_configuration.ops.rule : one(r.filter).prefix == "data/trees/" && one(r.noncurrent_version_expiration).noncurrent_days == 7 && length(r.expiration) == 0 if r.id == "data-trees-old-versions"],
       [for r in aws_s3_bucket_lifecycle_configuration.ops.rule : one(r.filter).prefix == "data/updates/" && one(r.noncurrent_version_expiration).noncurrent_days == 30 && length(r.expiration) == 0 if r.id == "data-updates-old-versions"],
+      [for r in aws_s3_bucket_lifecycle_configuration.ops.rule : one(r.filter).prefix == "data/content/" && one(r.noncurrent_version_expiration).noncurrent_days == 30 && length(r.expiration) == 0 if r.id == "data-content-old-versions"],
     ))
-    error_message = "the trees' old versions go after 7 days, the packages' after 30; neither rule expires a current object"
+    error_message = "the trees' old versions go after 7 days, the packages' and the content store's after 30; no such rule expires a current object"
   }
   assert {
     condition = alltrue([
@@ -350,8 +370,8 @@ run "staging" {
   assert {
     condition = (
       aws_s3_bucket.ops.bucket == "opennova-staging-ops-123456789012" &&
-      length(aws_s3_bucket_lifecycle_configuration.ops.rule) == 5
+      length(aws_s3_bucket_lifecycle_configuration.ops.rule) == 6
     )
-    error_message = "staging's own bucket, the same five rules"
+    error_message = "staging's own bucket, the same six rules"
   }
 }

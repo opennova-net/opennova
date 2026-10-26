@@ -45,6 +45,10 @@ add_library(opennova_novaworld_web_core STATIC
     # (ADR 0064), and the jobs they enqueue for the data program.
     data_sets/data_set_routes.cpp
     data_sets/release_routes.cpp
+    # The content store's routes (ADR 0069): the editor's reads and pushes, the admin's projects.
+    content/content_routes.cpp
+    content/content_urls.cpp
+    content/s3_presign.cpp
     # The update listener (ADR 0061 d3): UPDATE.EXE's gateway and update server over the
     # published releases, its catalog cached on disk, on apps/common's TCP listener.
     updater/release_catalog.cpp

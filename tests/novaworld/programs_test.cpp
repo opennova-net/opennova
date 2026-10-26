@@ -528,7 +528,7 @@ int exercise_worker(const Binaries &bin, const test_temp::TempDir &temp,
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("worker")));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) worker-"));
-	TEST_EXPECT(has(log, "jobs.prune") && !has(log, "tree.finalize") && !has(log, "tree.prune"));
+	TEST_EXPECT(has(log, "jobs.prune") && !has(log, "release.apply") && !has(log, "tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]"));
 	if (livez_ok(process, log_path) != 0)
@@ -562,7 +562,7 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(has(log, boot_line("data")));
 	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
-			has(log, "for release.apply, release.validate, tree.finalize, tree.prune"));
+			has(log, "for release.apply, release.build, release.validate, tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]") && !has(log, "jobs.prune"));
 	if (livez_ok(process, log_path) != 0)

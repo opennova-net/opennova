@@ -268,16 +268,23 @@ func _validation_end(ctx: McpToolContext, deadline: int) -> bool:
 
 ## Frames until the operation `id` ends, the main thread never held: what it came to (the
 ## operation query's last_operation: id, kind, end, findings), or {} when the call is cancelled,
-## `deadline` (ticks, 0 for none) passed, or another operation's outcome stands in its place.
+## `deadline` (ticks, 0 for none) passed, or another operation's outcome stands in its place. One
+## whose finish started another to go on with its work (its `then`: a game you own's new project
+## goes on from its open to its import) is followed to that one's end, what that one came to the answer.
 func _operation_end(id: int, ctx: McpToolContext, deadline := 0) -> Dictionary:
+	var waited := id
 	while not ctx.cancelled and (deadline == 0 or Time.get_ticks_msec() < deadline):
 		var state := _query("operation")
 		if not state.is_empty():
 			var running: Dictionary = state.get("operation", {})
-			if id == 0 or not bool(running.get("running", false)) or int(running.get("id", 0)) != id:
+			if waited == 0 or not bool(running.get("running", false)) or int(running.get("id", 0)) != waited:
 				var last: Variant = state.get("last_operation")
-				if last is Dictionary and int((last as Dictionary).get("id", 0)) == id:
-					return last
+				if last is Dictionary and int((last as Dictionary).get("id", 0)) == waited:
+					var next_id := int((last as Dictionary).get("then", 0))
+					if next_id == 0:
+						return last
+					waited = next_id
+					continue
 				return {}
 		await ctx.frames(1)
 	return {}

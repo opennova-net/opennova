@@ -31,6 +31,28 @@ variable "stripe_test_secret_key" {
   sensitive   = true
 }
 
+variable "domain" {
+  description = "The domain the deployments' sites serve (environments.tf: each environment's NOVAWORLD_URL, https://<domain> for prod and https://staging.<domain> for staging, which the Publish workflow publishes the runtime release to): a vault input (the vault item cloudflare, field domain)."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+(\\.[a-z0-9-]+)+$", var.domain))
+    error_message = "domain is a host name (opennova.net)."
+  }
+}
+
+variable "admin_api_token_prod" {
+  description = "prod's admin API token (environments.tf: the prod environment's ADMIN_API_TOKEN secret, with which the Publish workflow publishes the runtime release): a vault input (the vault item app-prod, field admin_api_token)."
+  type        = string
+  sensitive   = true
+}
+
+variable "admin_api_token_staging" {
+  description = "staging's admin API token (the staging environment's ADMIN_API_TOKEN secret): a vault input (the vault item app-staging, field admin_api_token)."
+  type        = string
+  sensitive   = true
+}
+
 variable "aws_account_id_prod" {
   description = "prod's AWS account (environments.tf: the prod environment's AWS_ACCOUNT_ID and its deploy role's ARN): a vault input (the vault item aws-prod, field account_id)."
   type        = string

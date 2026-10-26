@@ -192,6 +192,66 @@ static int test_slot_cancels_between_steps() {
 	return 0;
 }
 
+// A finish that starts the next operation (a game you own's open going on to its import, a base export between
+// them): the slot is free as it runs, so the next starts; each finished one's outcome names the next (then), and
+// each that goes on names the work's first operation (follows), a cancelled one's too; one that hands on its id (a
+// base export's Build) goes on under it, naming none as then; an operation started outside a finish follows
+// nothing.
+struct ChainOperation : FakeOperation {
+	OperationSlot &slot;
+	std::unique_ptr<SessionOperation> next;
+	bool hands_on = false;
+	ChainOperation(Tally &t, OperationSlot &s, std::unique_ptr<SessionOperation> n) : FakeOperation(t, 10), slot(s), next(std::move(n)) {}
+	bool hands_on_id() const override { return hands_on; }
+	OperationOutcome finish(SessionCore &core) override {
+		OperationOutcome outcome = FakeOperation::finish(core);
+		slot.start(std::move(next));
+		return outcome;
+	}
+};
+
+static int test_slot_follows_a_finish() {
+	FakePlatform platform;
+	MemoryPreferencesStore store;
+	EditorPreferences preferences(store);
+	SessionCore core(platform, preferences);
+	OperationSlot slot;
+	Tally first, second;
+	const uint64_t id = slot.start(std::make_unique<ChainOperation>(first, slot, std::make_unique<FakeOperation>(second, 10)));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && first.finishes == 1);
+	TEST_EXPECT(slot.running() && slot.status().id == id + 1);
+	TEST_EXPECT(slot.last().id == id && slot.last().then == id + 1 && slot.last().follows == 0);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && second.finishes == 1 && !slot.running());
+	TEST_EXPECT(slot.last().id == id + 1 && slot.last().follows == id && slot.last().then == 0);
+	// One cancelled says what it followed.
+	Tally third, fourth;
+	const uint64_t chained = slot.start(std::make_unique<ChainOperation>(third, slot, std::make_unique<FakeOperation>(fourth, 1000)));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.running());
+	TEST_EXPECT(slot.cancel() && slot.last().id == chained + 1 && slot.last().end == OperationEnd::Cancelled &&
+	            slot.last().follows == chained);
+	Tally alone;
+	TEST_EXPECT(slot.start(std::make_unique<FakeOperation>(alone, 10)) && slot.run_to_end() && slot.finish(core) &&
+	            slot.last().follows == 0 && slot.last().then == 0);
+	// Three: each that goes on follows the first.
+	Tally opening, base_export, importing;
+	const uint64_t work = slot.start(std::make_unique<ChainOperation>(
+	        opening, slot, std::make_unique<ChainOperation>(base_export, slot, std::make_unique<FakeOperation>(importing, 10))));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work && slot.last().then == work + 1);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work + 1 && slot.last().follows == work &&
+	            slot.last().then == work + 2);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work + 2 && slot.last().follows == work &&
+	            slot.last().then == 0 && !slot.running());
+	// One that hands on its id: the next goes on under it, no then.
+	Tally exporting, building;
+	auto handing = std::make_unique<ChainOperation>(exporting, slot, std::make_unique<FakeOperation>(building, 10));
+	handing->hands_on = true;
+	const uint64_t asked = slot.start(std::move(handing));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == asked && slot.last().then == 0 &&
+	            slot.status().id == asked);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == asked && building.finishes == 1);
+	return 0;
+}
+
 // The tables: every request kind has its row, in the enum's order (static_asserted); a project
 // switch and Quit write everything and cancel the running operation as they commit; Build and
 // Play join a build; a new import plan (and the import dialog's Cancel) supersedes a running one;
@@ -874,6 +934,7 @@ int main() {
 	int failures = 0;
 	failures += test_slot_steps_and_finishes();
 	failures += test_slot_cancels_between_steps();
+	failures += test_slot_follows_a_finish();
 	failures += test_request_table();
 	failures += test_gate_is_what_busy_refuses_says();
 	failures += test_busy_gate();

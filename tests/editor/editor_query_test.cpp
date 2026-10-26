@@ -558,7 +558,7 @@ static int test_build_gate_shipped() {
 	// The game's own bytes (session/original_bytes.h): the file is what the install serves, byte for byte.
 	OriginalBytes bytes;
 	const std::set<std::string> original =
-			bytes.identical(install, *session.view().project.document, dir.file("project"), { relative });
+			bytes.identical(install_spec(install, *session.view().project.document), dir.file("project"), { relative });
 	TEST_EXPECT(invalid_rows() == 1 && original.count(relative) == 1 && bytes.reads() == 1);
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
 	// Changed by a byte: the modder's file, the row listed there too; the build lands.
@@ -935,7 +935,8 @@ static int test_catalog() {
 		}
 		const std::string served = entry.get_string("served_by", "");
 		TEST_EXPECT((row.served_by == ServedBy::Session) == (served == "session"));
-		TEST_EXPECT((row.served_by == ServedBy::ShellNeedsPerson) == (served == "person"));
+		TEST_EXPECT((row.served_by == ServedBy::ShellNeedsPerson || row.served_by == ServedBy::SessionNeedsPerson) ==
+				(served == "person"));
 	}
 	const JsonValue *fields = catalog.get("fields");
 	TEST_EXPECT(fields && fields->array.size() == kRequestFieldCount);

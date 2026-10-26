@@ -49,13 +49,16 @@ override_resource {
 }
 
 variables {
-  billing_email          = "billing@example.com"
-  members                = { mock-admin = "admin", mock-member = "member" }
-  stripe_test_secret_key = "rk_test_mock"
-  aws_account_id_prod    = "111111111111"
-  aws_account_id_staging = "222222222222"
-  aws_region_prod        = "us-east-1"
-  aws_region_staging     = "us-east-2"
+  billing_email           = "billing@example.com"
+  members                 = { mock-admin = "admin", mock-member = "member" }
+  stripe_test_secret_key  = "rk_test_mock"
+  aws_account_id_prod     = "111111111111"
+  aws_account_id_staging  = "222222222222"
+  aws_region_prod         = "us-east-1"
+  aws_region_staging      = "us-east-2"
+  domain                  = "example.net"
+  admin_api_token_prod    = "token-prod"
+  admin_api_token_staging = "token-staging"
 }
 
 run "prod_waits_for_an_admin" {
@@ -109,8 +112,8 @@ run "each_environment_its_own_account" {
   command = plan
 
   assert {
-    condition     = length(github_actions_environment_variable.deploy) == 6
-    error_message = "each environment holds its role, its region and its account"
+    condition     = length(github_actions_environment_variable.deploy) == 8
+    error_message = "each environment holds its role, its region, its account and its site"
   }
   assert {
     condition = (
@@ -134,5 +137,25 @@ run "each_environment_its_own_account" {
       github_actions_environment_variable.deploy["staging/AWS_ACCOUNT_ID"].value == "222222222222"
     )
     error_message = "each environment names its deployment's region and account"
+  }
+}
+
+run "publish_reaches_each_deployment" {
+  command = plan
+
+  assert {
+    condition = (
+      github_actions_environment_variable.deploy["prod/NOVAWORLD_URL"].value == "https://example.net" &&
+      github_actions_environment_variable.deploy["staging/NOVAWORLD_URL"].value == "https://staging.example.net"
+    )
+    error_message = "each environment's NOVAWORLD_URL is its deployment's site, which Publish publishes the runtime release to"
+  }
+  assert {
+    condition = (
+      github_actions_environment_secret.admin_api_token["prod"].environment == "prod" &&
+      github_actions_environment_secret.admin_api_token["staging"].environment == "staging" &&
+      github_actions_environment_secret.admin_api_token["staging"].secret_name == "ADMIN_API_TOKEN"
+    )
+    error_message = "each environment holds its own deployment's admin API token as ADMIN_API_TOKEN"
   }
 }

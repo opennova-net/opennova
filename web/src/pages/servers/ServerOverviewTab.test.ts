@@ -39,7 +39,7 @@ describe('ServerOverviewTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listed.mockResolvedValue({ ok: true, value: [] });
-    // The data set holds a newer version than the server runs.
+    // The game holds a newer version than the server runs.
     mine.mockResolvedValue({ ok: true, value: serversResponse([], { data_sets: [{ ...JO, version: '1.7.5.9' }] }) });
     adminSets.mockResolvedValue({
       ok: true,
@@ -112,7 +112,7 @@ describe('ServerOverviewTab', () => {
     expect(page.emitted('gone')).toHaveLength(1);
   });
 
-  it("reads the admin's data sets for the version, and offers the admin no update here", async () => {
+  it("reads the admin's games for the version, and offers the admin no update here", async () => {
     const page = await mountTab(hostedServer(1, { update_available: true }), 'admin');
     expect(mine).not.toHaveBeenCalled();
     expect(adminSets).toHaveBeenCalledTimes(1);

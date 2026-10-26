@@ -116,7 +116,7 @@ int test_config() {
 
 int test_local(const test_temp::TempDir &dir) {
 	LocalObjectStore store(dir.file("store"));
-	std::string error;
+	std::string error, text_before;
 	TEST_EXPECT(std::string(store.kind()) == "local");
 	TEST_EXPECT(store.url_of("trees/1/a.txt").rfind("file:///", 0) == 0);
 	TEST_EXPECT(store.url_of("trees/1/a.txt").find("/store/trees/1/a.txt") != std::string::npos);
@@ -141,6 +141,17 @@ int test_local(const test_temp::TempDir &dir) {
 	TEST_EXPECT(store.copy_prefix("trees/1/", "trees/5/", error));
 	TEST_EXPECT(store.list("trees/5/", objects, error) && objects.size() == 3);
 	TEST_EXPECT(store.head("trees/5/c.txt", exists, size, error) && exists && size == 5);
+	// A prefix downloaded into a directory: what is there at its size stays as it is.
+	const std::string synced = dir.file("synced");
+	TEST_EXPECT(store.sync_down("trees/5/", synced, error));
+	TEST_EXPECT(io::read_file_text(synced + "/c.txt", text_before, error) && text_before == "hello");
+	TEST_EXPECT(io::write_file_atomic(synced + "/a.txt", std::string("HELLO"), error));
+	TEST_EXPECT(io::write_file_atomic(synced + "/b.txt", std::string("short"), error));
+	TEST_EXPECT(io::write_file_atomic(local, std::string("hello, longer"), error));
+	TEST_EXPECT(store.put_file("trees/5/b.txt", local, error));
+	TEST_EXPECT(store.sync_down("trees/5/", synced, error));
+	TEST_EXPECT(io::read_file_text(synced + "/a.txt", text_before, error) && text_before == "HELLO");
+	TEST_EXPECT(io::read_file_text(synced + "/b.txt", text_before, error) && text_before == "hello, longer");
 	TEST_EXPECT(store.remove_prefix("trees/5/", error) && store.remove("trees/1/c.txt", error));
 	TEST_EXPECT(store.list("trees/", objects, error) && objects.size() == 4);
 	const std::string back = dir.file("back.txt");
@@ -239,6 +250,12 @@ int test_s3(const test_temp::TempDir &dir) {
 	TEST_EXPECT(sync[2] == "sync" && sync[3] == "s3://opennova-backups/data/prod/trees/7/" &&
 			sync[4] == "s3://opennova-backups/data/prod/trees/8/");
 	TEST_EXPECT(runner.calls.back().timeout_ms == 20 * 60000);
+	// A prefix downloaded into a directory: an s3 sync from the prefix to the directory.
+	runner.replies.push_back(StubRunner::ok());
+	TEST_EXPECT(store.sync_down("content/MOD/blobs", "/tmp/blobs", error));
+	const std::vector<std::string> &down = runner.calls.back().argv;
+	TEST_EXPECT(down[2] == "sync" && down[3] == "s3://opennova-backups/data/prod/content/MOD/blobs/" &&
+			down[4] == "/tmp/blobs");
 
 	// A multipart upload: begin (no checksum asked for), a part's bytes through a scratch
 	// file `upload-part` reads (gone after, the ETag back without its quotes), complete with

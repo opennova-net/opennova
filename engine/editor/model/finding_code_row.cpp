@@ -425,6 +425,12 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// A correct_line the file cannot take: a file the project lacks, a line it has not, one another program changed
 	// since, a text holding a line end, a document of it with unsaved edits.
 	{ C::SourceLine, code("document.source_line", G::Documents) },
+	// The content store (ADR 0069): a request it cannot serve now (no network, signed out, not an admin, no
+	// project bound, a conflict it has not), a job that failed (the service's or the folder's reason), and a pull
+	// that stopped on files both sides changed, each the author's to settle.
+	{ C::ContentRefused, code("content.refused", G::Content) },
+	{ C::ContentFailed, code("content.failed", G::Content) },
+	{ C::ContentConflicts, code("content.conflicts", G::Content) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

@@ -3,14 +3,15 @@
 // open, its strings' keys and text long; a menu with a deep tree of long names; a
 // stylesheet with long names and comments; a model; a clip and an animation table),
 // findings with long messages, each document's inspector form with every section open, the
-// tools' popups (Files' Import and New lists, the File menu, the reference picker), and
-// then the import dialog (also narrowed to 360 pixels) and the project settings open: at
+// tools' popups (Files' New list, the File menu, the reference picker), and then File > Import...'s
+// first step, the import dialog (also narrowed to 360 pixels) and the project settings open: at
 // 1280x720, again with Files narrowed to 240 pixels, and again with the font a quarter
 // larger, every window, child window and popup keeps its content within its width unless it
 // scrolls sideways, and every cell of a table keeps within its column (a table that scrolls
 // sideways still clips a cell to its column); the failure lists the offenders by name. In
-// the narrow layout the mouse reaches the last button of a toolbar that wrapped (Files'
-// Refresh, the menu view's Outdent, and the mission view's Play mission in a viewport column
+// the narrow layout the mouse reaches Files' Refresh (its toolbar, New, Refresh and Undo, fits
+// in 240 pixels since an import is File > Import...'s alone), the last button of a toolbar that
+// wrapped (the menu view's Outdent, and the mission view's Play mission in a viewport column
 // narrower than 320 pixels, S14) and the last of thirty tabs through the tab list, each
 // raising its request. The mission's view is among the documents swept.
 #include <algorithm>
@@ -226,11 +227,11 @@ struct Sweep {
 	}
 };
 
-// The tools' popups, each checked while it shows: Files' Import and New lists, the File menu.
+// The tools' popups, each checked while it shows: Files' New list, the File menu.
 void sweep_popups(Sweep &sweep, const std::string &where) {
 	Ui &ui = sweep.ui;
 	const ImGuiID files = Ui::window_id("Files");
-	for (const char *list : {"##import", "##new"}) {
+	for (const char *list : {"##new"}) {
 		ui.activate(item_id(files, {list}));
 		ui.frames(2);
 		CHECK(ImGui::FindWindowByName("##Combo_00") && ImGui::FindWindowByName("##Combo_00")->Active,
@@ -278,6 +279,17 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 	}
 	CHECK(picked, (layout + ": a reference picker opened").c_str());
 	sweep_popups(sweep, layout);
+	// File > Import...'s first step: the workspace's, served as the session serves it.
+	choose(sweep.ui, "File", {"Import..."});
+	CHECK(sweep.view.workspace.import.sources, (layout + ": File > Import... asks its first step").c_str());
+	sweep.ui.frames(3);
+	CHECK(ImGui::FindWindowByName("Import") && ImGui::FindWindowByName("Import")->Active,
+	      (layout + ": File > Import...'s sources open").c_str());
+	sweep.check(layout + ", File > Import...'s sources");
+	sweep.ui.activate(item_id(ImHashStr("Import"), {"Cancel"}));
+	sweep.ui.frames(2);
+	CHECK(!sweep.view.workspace.import.sources, (layout + ": its Cancel closes it").c_str());
+	sweep.ui.drain();
 	// The import dialog: a plan whose names, places and notes run long, with an archive's members
 	// to choose from (one of them named long), and changed since it was shown.
 	sweep.follow();
@@ -333,8 +345,8 @@ bool hover_item(Ui &ui, ImGuiID id, const ImGuiWindow *window, float top, float 
 	return false;
 }
 
-// The last button of a toolbar that wrapped, pressed with the mouse: Files' Refresh, and
-// the menu view's Outdent (a nested window selected).
+// Files' Refresh pressed with the mouse in the narrow layout, and the last button of a toolbar
+// that wrapped, the menu view's Outdent (a nested window selected).
 void reach_wrapped_toolbars(Sweep &sweep) {
 	Ui &ui = sweep.ui;
 	const ImGuiWindow *files = ImGui::FindWindowByName("Files");
@@ -342,9 +354,6 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	CHECK(files && hover_item(ui, item_id(Ui::window_id("Files"), {"Refresh"}), files, files->Pos.y,
 	                          files->Pos.y + ImGui::GetFrameHeightWithSpacing() * 4.0f, at),
 	      "Files' Refresh reached");
-	const float first_line = files ? files->Pos.y + files->TitleBarHeight + ImGui::GetStyle().WindowPadding.y +
-	                                         ImGui::GetFrameHeight() : 0.0f;
-	CHECK(at.y > first_line, "Refresh wrapped under Import and New");
 	ui.button(true);
 	ui.button(false);
 	std::vector<EditorRequest> requests = ui.drain();

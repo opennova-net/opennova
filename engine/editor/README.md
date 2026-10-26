@@ -12,6 +12,16 @@ own load paths. The rules that bind it (what may include or link it, the library
   Required resources checklist.
 - `blank`: the from-scratch factories of new files.
 - `project_build`: the steppable build.
+- `content_store`: a project folder as a working copy of its game's project in NovaWorld
+  (ADR 0069, ADR 0071). Its state under `.opennova/content/` (the binding, the base revision's
+  manifest, the hash cache, a pull's downloads); its files hashed as the store keeps them, a
+  few at a time (`content_scan`, by the project walk's rule, `assets/project_walk`); its changes
+  since its base and a pull planned path by path over the base, the folder and the revision,
+  each conflict the author's to settle (`content_plan`); and the plan applied, the files it
+  replaces trashed first and the new base written last (`content_apply`). The client: the
+  account it signs in as (`content_account`), the service's project routes (`/api/content/...`)
+  as it speaks them (`content_api`), and the pull and push as stepped jobs (`content_jobs`), over the transport
+  seam the host fills (`content_transport`: the Shell's Godot HTTPClient, a test's fake).
 - `run`: the Play session over the process seam.
 - `model`: the neutral editing core (ADR 0046 d9); it names no format type.
   - `DocumentBase` (every document's lifecycle); `Document` (the record document over it, its

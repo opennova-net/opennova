@@ -76,12 +76,15 @@ jobs:
       # parity fixtures and nw_self_capture_test the committed
       # opennova-produced self-capture pcap (fixtures/** in .gitattributes:
       # the binaries LFS-tracked, the text fixtures plain blobs). The rest of the net
-      # stack consumes no LFS assets, so pull only this subtree to keep checkout
-      # fast.
+      # stack consumes no LFS assets but the release build's minted install, so pull
+      # only these subtrees to keep checkout fast.
       - name: Materialize net parity fixtures (LFS)
         run: |
           git lfs install --local
           git lfs pull --include="fixtures/novaworld/**"
+          # The release build's test (release_build_test.cpp, ADR 0069) imports a minted
+          # install (tests/editor/minted_install.h), which reads these.
+          git lfs pull --include="fixtures/game/**,fixtures/terrain/tmap/**"
 
       - name: Restore the compiler cache
         uses: ./.github/actions/compiler-cache

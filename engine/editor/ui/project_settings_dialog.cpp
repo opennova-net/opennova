@@ -120,7 +120,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	bool mission = held.mission;
 	if (ImGui::Checkbox("Missions", &mission)) set("mission", io::JsonValue::make_bool(mission));
 	ui_kit::tooltip("The game then needs the files a mission reads, Problems listing the missing ones. A mission is most "
-	                "of the game: File > Import the whole game install... brings them in.");
+	                "of the game: File > Import..., the whole game install, brings them in.");
 	bool multiplayer = held.multiplayer;
 	if (ImGui::Checkbox("Multiplayer", &multiplayer)) set("multiplayer", io::JsonValue::make_bool(multiplayer));
 	// What it does, in the game's terms: the files the game reads for multiplayer alone join the checklist

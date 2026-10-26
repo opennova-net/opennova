@@ -1,12 +1,13 @@
-// The hosted data sets' rows (apps/novaworld_common/data_sets/data_set_repository.h, migrations
-// 0011 and 0013) on a migrated database of the test's own: the seeded four, a data set
-// created, changed and refused (a duplicate login, a duplicate expansion, no base parent, in
-// use); trees from uploading to ready (the data set's current and baseline trees follow, a
-// new baseline retires the published release), what a start may pick, what may be pruned and
-// what holds a tree; releases validated, published (the previous one retired), retired; the
-// servers' pins, the owner's update and the admin's update-all; the data sets' holds on the
-// servers' rows reading a server as live exactly when the hosted servers' own rule does; and
-// the migration's mapping of the old game and expansion columns onto the seeded rows.
+// The games' rows (apps/novaworld_common/data_sets/data_set_repository.h, migrations 0011, 0013
+// and 0025) on a migrated database of the test's own: the seeded games with their projects' keys,
+// a game created, changed and refused (a duplicate login, a duplicate key, a duplicate
+// expansion, no base parent, an expansion building on it, in use); trees from building to ready
+// (the data set's current tree follows), what a start may pick and what may be pruned; releases
+// of their games validated (an upload naming none takes its base section's), published (the
+// previous one retired), retired, and a built one naming its game; the servers' pins, the
+// owner's update and the admin's update-all; the data sets' holds on the servers' rows reading
+// a server as live exactly when the hosted servers' own rule does; and the migration's mapping
+// of the old game and expansion columns onto the seeded rows.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -67,27 +68,30 @@ int test_data_sets() {
 	const auto jo_row = find_data_set(db, jo);
 	TEST_EXPECT(jo_row && jo_row->kind == DataSetKind::Base && jo_row->title == "jo" &&
 			jo_row->game == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
-			jo_row->command_file == "JOPTR.CMD" && jo_row->retail_updater && !jo_row->current_tree_id);
+			jo_row->command_file == "JOPTR.CMD" && jo_row->retail && !jo_row->current_tree_id &&
+			jo_row->key == "JO" && jo_row->visibility == "private" && jo_row->head == 0);
 	const auto jox_row = find_data_set(db, jox);
 	TEST_EXPECT(jox_row && jox_row->kind == DataSetKind::Expansion && jox_row->parent_id == jo &&
-			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus");
+			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus" &&
+			jox_row->key == "JOX01" && jox_row->retail);
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
 	TEST_EXPECT(all[0].kind == DataSetKind::Base && all[3].kind == DataSetKind::Expansion);
 	const auto runtime = find_data_set(db, seeded(db, "OpenNova runtime"));
 	TEST_EXPECT(runtime && runtime->kind == DataSetKind::Update && runtime->game.empty() &&
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
-			!runtime->retail_updater);
+			!runtime->retail && runtime->key.empty() && runtime->visibility.empty());
 	const auto native = find_data_set(db, seeded(db, "OP: Acid Gambit"));
 	TEST_EXPECT(native && native->updater_login == "ACIDGAMBIT" &&
-			native->command_file == "ACIDGAMBIT.CMD" && !native->retail_updater);
+			native->command_file == "ACIDGAMBIT.CMD" && !native->retail &&
+			native->key == "ACIDGAMBIT" && native->visibility == "public");
 	const auto dfx2 = find_data_set(db, seeded(db, "Delta Force Xtreme 2"));
 	TEST_EXPECT(dfx2 && dfx2->updater_login == "DFX2" && dfx2->command_file == "DFX2.CMD" &&
-			dfx2->retail_updater);
+			dfx2->retail && dfx2->key == "DFX2");
 	const auto native_expansions = list_expansions_of(db, native->id);
 	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "nifty" &&
 			native_expansions[0].updater_login == "NIFTY" &&
-			native_expansions[0].command_file == "NIFTY.CMD");
+			native_expansions[0].command_file == "NIFTY.CMD" && native_expansions[0].key == "NIFTY");
 	TEST_EXPECT(tree_file_rules(DataSetKind::Update, "").empty());
 
 	// A new base, a new expansion of it, and the refusals.
@@ -98,13 +102,19 @@ int test_data_sets() {
 	bhd.game = "bhd_consumer";
 	bhd.updater_login = "BHDus";
 	bhd.command_file = "BHDPTR.CMD";
+	bhd.key = "BHD";
+	bhd.visibility = "private";
 	bhd.created_by = "admin";
 	int64_t bhd_id = 0;
 	TEST_EXPECT(create_data_set(db, bhd, bhd_id) == DataSetOutcome::Ok && bhd_id != 0);
+	TEST_EXPECT(find_data_set(db, bhd_id)->key == "BHD" &&
+			find_data_set(db, bhd_id)->visibility == "private" && find_data_set(db, bhd_id)->head == 0);
 	NewDataSet dup = bhd;
 	dup.updater_login = "bhdus"; // the login is unique without case
 	int64_t ignored = 0;
 	TEST_EXPECT(create_data_set(db, dup, ignored) == DataSetOutcome::DuplicateLogin);
+	dup.updater_login = "BHD2us";
+	TEST_EXPECT(create_data_set(db, dup, ignored) == DataSetOutcome::DuplicateKey);
 	NewDataSet ts;
 	ts.display_name = "Team Sabre";
 	ts.kind = DataSetKind::Expansion;
@@ -122,12 +132,22 @@ int test_data_sets() {
 
 	DataSetPatch patch;
 	patch.display_name = "BHD";
-	patch.retail_updater = true;
+	patch.retail = true;
 	TEST_EXPECT(update_data_set(db, bhd_id, patch) == DataSetOutcome::Ok);
-	TEST_EXPECT(find_data_set(db, bhd_id)->display_name == "BHD" && find_data_set(db, bhd_id)->retail_updater);
+	TEST_EXPECT(find_data_set(db, bhd_id)->display_name == "BHD" && find_data_set(db, bhd_id)->retail);
 	DataSetPatch steal;
 	steal.updater_login = "JOTRUS";
 	TEST_EXPECT(update_data_set(db, bhd_id, steal) == DataSetOutcome::DuplicateLogin);
+	// Its project renamed and made public; a key another game's project has refused.
+	DataSetPatch project;
+	project.key = "BHAWK";
+	project.visibility = "public";
+	TEST_EXPECT(update_data_set(db, bhd_id, project) == DataSetOutcome::Ok);
+	TEST_EXPECT(find_data_set(db, bhd_id)->key == "BHAWK" &&
+			find_data_set(db, bhd_id)->visibility == "public");
+	project = {};
+	project.key = "JO";
+	TEST_EXPECT(update_data_set(db, bhd_id, project) == DataSetOutcome::DuplicateKey);
 	DataSetPatch lobby;
 	lobby.game = "acidgambit_0_consumer";
 	TEST_EXPECT(update_data_set(db, bhd_id, lobby) == DataSetOutcome::Ok);
@@ -138,7 +158,7 @@ int test_data_sets() {
 	TEST_EXPECT(update_data_set(db, 99999, patch) == DataSetOutcome::NotFound);
 
 	// A base with an expansion cannot go; the expansion can; then the base.
-	TEST_EXPECT(delete_data_set(db, bhd_id) == DataSetOutcome::InUse);
+	TEST_EXPECT(delete_data_set(db, bhd_id) == DataSetOutcome::HasExpansion);
 	TEST_EXPECT(delete_data_set(db, ts_id) == DataSetOutcome::Ok);
 	TEST_EXPECT(delete_data_set(db, bhd_id) == DataSetOutcome::Ok);
 	TEST_EXPECT(delete_data_set(db, bhd_id) == DataSetOutcome::NotFound);
@@ -156,33 +176,32 @@ int test_trees_and_offered() {
 	const int64_t dfx2 = seeded(db, "Delta Force Xtreme 2");
 	TEST_EXPECT(offered_data_sets(db).empty());
 
-	// A baseline upload: uploading -> finalizing -> ready; the data set's current and
-	// baseline trees are then this one, and the base is offered with its missions.
-	const int64_t t1 = create_tree(db, jo, TreeSource::Baseline, TreeState::Uploading, std::nullopt, std::nullopt, "admin");
+	// A release's tree: building -> ready; the data set's current tree is then this one, and the
+	// base is offered with its missions.
+	const int64_t t1 = create_tree(db, jo, std::nullopt, "worker");
 	TEST_EXPECT(t1 != 0);
 	const auto fresh = find_tree(db, t1);
-	TEST_EXPECT(fresh && fresh->state == TreeState::Uploading && fresh->source == TreeSource::Baseline &&
-			fresh->files.empty() && fresh->missions.empty() && fresh->created_by == "admin");
-	TEST_EXPECT(!finish_tree(db, t1, TreeState::Finalizing, ready_with("JO V1.7.5.3", {})));
-	TEST_EXPECT(set_tree_state(db, t1, TreeState::Uploading, TreeState::Finalizing));
-	TEST_EXPECT(!set_tree_state(db, t1, TreeState::Uploading, TreeState::Finalizing));
-	TEST_EXPECT(finish_tree(db, t1, TreeState::Finalizing,
+	TEST_EXPECT(fresh && fresh->state == TreeState::Building && !fresh->release_id &&
+			fresh->files.empty() && fresh->missions.empty() && fresh->created_by == "worker");
+	TEST_EXPECT(offered_data_sets(db).empty() && !find_data_set(db, jo)->current_tree_id);
+	TEST_EXPECT(finish_tree(db, t1,
 			ready_with("JO V1.7.5.3", { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } })));
+	TEST_EXPECT(!finish_tree(db, t1, ready_with("again", {}))); // ready, no longer building
 	const auto ready = find_tree(db, t1);
 	TEST_EXPECT(ready && ready->state == TreeState::Ready && ready->files.size() == 2 &&
 			ready->files[0].name == "resource.pff" && ready->files[0].size == 1000 &&
 			ready->missions.size() == 2 && ready->missions[1].title == "Bravo" &&
 			ready->version_text == "JO V1.7.5.3" && ready->bytes == 1010 && !ready->ready_at.empty());
 	const auto jo_row = find_data_set(db, jo);
-	TEST_EXPECT(jo_row && jo_row->current_tree_id == t1 && jo_row->baseline_tree_id == t1);
+	TEST_EXPECT(jo_row && jo_row->current_tree_id == t1);
 	std::vector<OfferedDataSet> offered = offered_data_sets(db);
 	TEST_EXPECT(offered.size() == 1 && offered[0].id == jo && offered[0].tree_id == t1 &&
 			offered[0].title == "jo" && offered[0].missions.size() == 2 && offered[0].expansions.empty());
 	TEST_EXPECT(find_offered(offered, jo) != nullptr && find_offered(offered, dfx2) == nullptr);
 
 	// The expansion's tree: offered under its base once ready.
-	const int64_t tx = create_tree(db, jox, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(finish_tree(db, tx, TreeState::Finalizing, ready_with("JOX V1.0", { { "x.bms", "Xray" } })));
+	const int64_t tx = create_tree(db, jox, std::nullopt, "worker");
+	TEST_EXPECT(finish_tree(db, tx, ready_with("JOX V1.0", { { "x.bms", "Xray" } })));
 	offered = offered_data_sets(db);
 	TEST_EXPECT(offered.size() == 1 && offered[0].expansions.size() == 1 &&
 			offered[0].expansions[0].id == jox && offered[0].expansions[0].code == "jox01" &&
@@ -192,35 +211,33 @@ int test_trees_and_offered() {
 	// readiness alone would not list Joint Operations.
 	TEST_EXPECT(list_trees(db, jo).size() == 1 && list_trees(db, jox).size() == 1);
 
-	// A failed tree keeps its reason; a tree's holds.
-	const int64_t t2 = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(set_tree_state(db, t2, TreeState::Finalizing, TreeState::Failed, "resource.pff is missing"));
+	// A failed tree keeps its reason.
+	const int64_t t2 = create_tree(db, jo, std::nullopt, "worker");
+	TEST_EXPECT(set_tree_state(db, t2, TreeState::Building, TreeState::Failed, "resource.pff is missing"));
+	TEST_EXPECT(!set_tree_state(db, t2, TreeState::Building, TreeState::Failed, "again"));
 	TEST_EXPECT(find_tree(db, t2)->error == "resource.pff is missing");
-	int pinned = 0;
-	TEST_EXPECT(tree_hold(db, t1, pinned) == "current");
-	TEST_EXPECT(tree_hold(db, t2, pinned) == "");
 	// Prunable: the failed one once old enough (not yet: created now), never the current.
-	TEST_EXPECT(prunable_trees(db, 3600, 7 * 86400).empty());
-	TEST_EXPECT(prunable_trees(db, -1, 7 * 86400) == std::vector<int64_t>{ t2 });
+	TEST_EXPECT(prunable_trees(db, 3600).empty());
+	TEST_EXPECT(prunable_trees(db, -1) == std::vector<int64_t>{ t2 });
 	mark_tree_pruned(db, t2);
 	TEST_EXPECT(find_tree(db, t2)->state == TreeState::Pruned && !find_tree(db, t2)->pruned_at.empty());
-	TEST_EXPECT(prunable_trees(db, -1, 7 * 86400).empty());
-	// A newer baseline becomes current and baseline; the older one, unpinned, is prunable.
-	const int64_t t3 = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(finish_tree(db, t3, TreeState::Finalizing, ready_with("JO V1.7.5.4", {})));
-	TEST_EXPECT(find_data_set(db, jo)->current_tree_id == t3 && find_data_set(db, jo)->baseline_tree_id == t3);
-	TEST_EXPECT(prunable_trees(db, -1, 7 * 86400) == std::vector<int64_t>{ t1 });
+	TEST_EXPECT(prunable_trees(db, -1).empty());
+	// A newer tree becomes current; the older one, unpinned, is prunable.
+	const int64_t t3 = create_tree(db, jo, std::nullopt, "worker");
+	TEST_EXPECT(finish_tree(db, t3, ready_with("JO V1.7.5.4", {})));
+	TEST_EXPECT(find_data_set(db, jo)->current_tree_id == t3);
+	TEST_EXPECT(prunable_trees(db, -1) == std::vector<int64_t>{ t1 });
 	// Pinned by a live server, it stays.
 	const int64_t server = insert_server(db, jo, std::nullopt);
 	set_tree_pins(db, server, t1, std::nullopt);
-	TEST_EXPECT(prunable_trees(db, -1, 7 * 86400).empty());
-	TEST_EXPECT(tree_hold(db, t1, pinned) == "pinned" && pinned == 1);
-	// An abandoned upload is prunable past the window.
-	const int64_t t4 = create_tree(db, jo, TreeSource::Baseline, TreeState::Uploading, std::nullopt, std::nullopt, "admin");
-	TEST_EXPECT(prunable_trees(db, -1, -1) == std::vector<int64_t>{ t4 });
-	// A pruned tree whose objects are still there (pruned_at NULL) is prunable.
+	TEST_EXPECT(prunable_trees(db, -1).empty());
+	TEST_EXPECT(count_tree_pins(db, t1) == 1);
+	// A building tree is never prunable; a pruned one whose objects are still there (pruned_at
+	// NULL) is.
+	const int64_t t4 = create_tree(db, jo, std::nullopt, "worker");
+	TEST_EXPECT(prunable_trees(db, -1).empty());
 	db.exec("UPDATE data_set_trees SET state = 'pruned', pruned_at = NULL WHERE id = $1;", { BindValue(t4) });
-	TEST_EXPECT(prunable_trees(db, 3600, 7 * 86400) == std::vector<int64_t>{ t4 });
+	TEST_EXPECT(prunable_trees(db, 3600) == std::vector<int64_t>{ t4 });
 	return 0;
 }
 
@@ -228,16 +245,18 @@ int test_releases() {
 	TestDatabase tdb;
 	Database db = tdb.open();
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
-	const int64_t base = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, base, TreeState::Finalizing, ready_with("JO V1.7.5.3", {})));
+	const int64_t runtime = seeded(db, "OpenNova runtime");
 
+	// An upload that names no game takes its base section's once validated.
 	const int64_t r1 = create_release(db, "1.7.5.4", 1234, "admin");
-	TEST_EXPECT(r1 != 0 && find_release(db, r1)->status == ReleaseStatus::Uploading);
+	TEST_EXPECT(r1 != 0 && find_release(db, r1)->status == ReleaseStatus::Uploading &&
+			!find_release(db, r1)->data_set_id);
 	TEST_EXPECT(set_release_status(db, r1, ReleaseStatus::Uploading, ReleaseStatus::Validating));
 	TEST_EXPECT(set_release_validated(db, r1, "abc123", 1234, "Joint Operations",
 			{ { jo, "", "JOPTR.CMD", "1.7.5.4", 3, 999 }, { jox, "jox01", "JOEPTR.CMD", "1.0.0.1", 1, 10 } }));
 	TEST_EXPECT(!set_release_validated(db, r1, "abc123", 1234, "x", {}));
-	TEST_EXPECT(find_release(db, r1)->status == ReleaseStatus::Draft && find_release(db, r1)->sha256 == "abc123");
+	TEST_EXPECT(find_release(db, r1)->status == ReleaseStatus::Draft && find_release(db, r1)->sha256 == "abc123" &&
+			find_release(db, r1)->data_set_id == jo && find_release(db, r1)->content_revision == 0);
 	TEST_EXPECT(find_release_by_sha(db, "abc123") == r1 && !find_release_by_sha(db, "nope"));
 	const std::vector<ReleaseSection> sections = list_sections(db, r1);
 	TEST_EXPECT(sections.size() == 2 && sections[0].data_set_id == jo && sections[0].expansion.empty() &&
@@ -250,16 +269,15 @@ int test_releases() {
 	std::vector<PublishedSection> published = published_sections(db);
 	TEST_EXPECT(published.size() == 2 && published[0].updater_login == "JOEus" &&
 			published[0].command_file == "JOEPTR.CMD" && published[0].expansion == "jox01" &&
-			published[1].updater_login == "JOTRus" && published[1].sha256 == "abc123" && published[1].retail_updater);
+			published[1].updater_login == "JOTRus" && published[1].sha256 == "abc123" && published[1].retail);
 
 	// The release's tree for the base section.
-	const int64_t built = create_tree(db, jo, TreeSource::Release, TreeState::Building, r1, base, "worker");
+	const int64_t built = create_tree(db, jo, r1, "worker");
 	set_section_tree(db, r1, jo, built);
-	TEST_EXPECT(finish_tree(db, built, TreeState::Building, ready_with("JO V1.7.5.4", {})));
+	TEST_EXPECT(find_tree(db, built)->release_id == r1);
+	TEST_EXPECT(finish_tree(db, built, ready_with("JO V1.7.5.4", {})));
 	TEST_EXPECT(list_sections(db, r1)[0].tree_id == built);
-	TEST_EXPECT(find_data_set(db, jo)->current_tree_id == built && find_data_set(db, jo)->baseline_tree_id == base);
-	int pinned = 0;
-	TEST_EXPECT(tree_hold(db, base, pinned) == "baseline");
+	TEST_EXPECT(find_data_set(db, jo)->current_tree_id == built);
 
 	// A second release published retires the first (no data set names it any more).
 	const int64_t r2 = create_release(db, "1.7.5.5", 100, "admin");
@@ -271,16 +289,29 @@ int test_releases() {
 	TEST_EXPECT(find_data_set(db, jo)->published_release_id == r2);
 	TEST_EXPECT(list_releases(db).size() == 2 && list_releases(db)[0].id == r2);
 
-	// Retiring clears the data sets; a new baseline would too.
+	// Retiring clears the data sets.
 	TEST_EXPECT(retire_release(db, r2) && !retire_release(db, r2));
 	TEST_EXPECT(!find_data_set(db, jo)->published_release_id && published_sections(db).empty());
-	const int64_t r3 = create_release(db, "1.7.5.6", 100, "admin");
+	// An upload that names its game keeps it (the runtime's, from the Publish workflow).
+	const int64_t r3 = create_release(db, "v0.0.21", 100, "token", runtime);
+	TEST_EXPECT(find_release(db, r3)->data_set_id == runtime);
 	TEST_EXPECT(set_release_status(db, r3, ReleaseStatus::Uploading, ReleaseStatus::Validating));
-	TEST_EXPECT(set_release_validated(db, r3, "ghi789", 100, "Joint Operations", { { jo, "", "JOPTR.CMD", "1.7.5.6", 1, 1 } }));
-	TEST_EXPECT(publish_release(db, r3) && find_data_set(db, jo)->published_release_id == r3);
-	const int64_t base2 = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, base2, TreeState::Finalizing, ready_with("JO V1.7.5.6 full", {})));
-	TEST_EXPECT(!find_data_set(db, jo)->published_release_id && find_release(db, r3)->status == ReleaseStatus::Retired);
+	TEST_EXPECT(set_release_validated(db, r3, "ghi789", 100, "OpenNova runtime",
+			{ { runtime, "", "ONRUNTIME.CMD", "0.0.21", 1, 1 } }));
+	TEST_EXPECT(publish_release(db, r3) && find_data_set(db, runtime)->published_release_id == r3 &&
+			find_release(db, r3)->data_set_id == runtime);
+	// A release built from a revision of its game's project names the game from the start.
+	NewBuiltRelease made;
+	made.name = "JOX01 1.0.0.3";
+	made.created_by = "admin taylor";
+	made.data_set_id = jox;
+	made.content_revision = 2;
+	made.base_revision = 1;
+	made.version = "1.0.0.3";
+	const int64_t r5 = create_built_release(db, made);
+	const auto building = find_release(db, r5);
+	TEST_EXPECT(building && building->status == ReleaseStatus::Building && building->data_set_id == jox &&
+			building->content_revision == 2 && building->base_revision == 1 && building->version == "1.0.0.3");
 	// An invalid upload keeps its reason; a deleted release leaves its tree's row.
 	const int64_t r4 = create_release(db, "bad", 5, "admin");
 	TEST_EXPECT(set_release_status(db, r4, ReleaseStatus::Uploading, ReleaseStatus::Validating));
@@ -297,13 +328,13 @@ int test_pins() {
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	const int64_t dfx2 = seeded(db, "Delta Force Xtreme 2");
 	TEST_EXPECT(!current_trees_of(db, jo, std::nullopt));
-	const int64_t t_jo = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, t_jo, TreeState::Finalizing, ready_with("1", {})));
+	const int64_t t_jo = create_tree(db, jo, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, t_jo, ready_with("1", {})));
 	TEST_EXPECT(current_trees_of(db, jo, std::nullopt) && current_trees_of(db, jo, std::nullopt)->base_tree_id == t_jo);
 	TEST_EXPECT(!current_trees_of(db, jo, jox)); // the expansion has no data yet
 	TEST_EXPECT(!current_trees_of(db, jox, std::nullopt)); // an expansion is no base
-	const int64_t t_jox = create_tree(db, jox, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, t_jox, TreeState::Finalizing, ready_with("x", {})));
+	const int64_t t_jox = create_tree(db, jox, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, t_jox, ready_with("x", {})));
 	const auto both = current_trees_of(db, jo, jox);
 	TEST_EXPECT(both && both->base_tree_id == t_jo && both->expansion_tree_id == t_jox);
 	TEST_EXPECT(!current_trees_of(db, dfx2, jox)); // not its expansion
@@ -321,8 +352,8 @@ int test_pins() {
 	TEST_EXPECT(request_update(db, s3) == UpdateOutcome::NotLive);
 	TEST_EXPECT(request_update(db, 99999) == UpdateOutcome::NotFound);
 	// A new expansion tree: s1 is behind, s2 (no expansion) is not.
-	const int64_t t_jox2 = create_tree(db, jox, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, t_jox2, TreeState::Finalizing, ready_with("x2", {})));
+	const int64_t t_jox2 = create_tree(db, jox, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, t_jox2, ready_with("x2", {})));
 	TEST_EXPECT(server_outdated(db, s1) && !server_outdated(db, s2));
 	TEST_EXPECT(request_update(db, s2) == UpdateOutcome::UpToDate);
 	TEST_EXPECT(request_update(db, s1) == UpdateOutcome::Requested);
@@ -333,8 +364,8 @@ int test_pins() {
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE id = $1 AND update_requested;", { BindValue(s1) }).empty());
 	TEST_EXPECT(!server_outdated(db, s1));
 	// A new base tree: both are behind; update-all of the data set marks both, the stopped one never.
-	const int64_t t_jo2 = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, t_jo2, TreeState::Finalizing, ready_with("2", {})));
+	const int64_t t_jo2 = create_tree(db, jo, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, t_jo2, ready_with("2", {})));
 	TEST_EXPECT(request_update_all(db, dfx2) == 0);
 	TEST_EXPECT(request_update_all(db, jo) == 2);
 	TEST_EXPECT(request_update_all(db, std::nullopt) == 0);
@@ -352,19 +383,17 @@ int test_live_rule() {
 	TestDatabase tdb;
 	Database db = tdb.open();
 	const int64_t jo = seeded(db, "Joint Operations");
-	// A tree that is neither current nor the baseline (a newer one is both), so only its
-	// pins hold it.
-	const int64_t pinned_tree = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, pinned_tree, TreeState::Finalizing, ready_with("1", {})));
-	const int64_t newer = create_tree(db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "a");
-	TEST_EXPECT(finish_tree(db, newer, TreeState::Finalizing, ready_with("2", {})));
+	// A tree that is not current (a newer one is), so only its pins hold it.
+	const int64_t pinned_tree = create_tree(db, jo, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, pinned_tree, ready_with("1", {})));
+	const int64_t newer = create_tree(db, jo, std::nullopt, "a");
+	TEST_EXPECT(finish_tree(db, newer, ready_with("2", {})));
 	for (int i = 0; i <= static_cast<int>(State::Failed); ++i) {
 		const State state = static_cast<State>(i);
 		const int64_t server = insert_server(db, jo, std::nullopt, state_name(state));
 		set_tree_pins(db, server, pinned_tree, std::nullopt);
-		int pinned = 0;
-		const std::string hold = tree_hold(db, pinned_tree, pinned);
-		TEST_EXPECT((pinned == 1) == is_live(state) && (hold == "pinned") == is_live(state));
+		const std::vector<int64_t> prunable = prunable_trees(db, -1);
+		TEST_EXPECT(prunable.empty() == is_live(state));
 		TEST_EXPECT((count_tree_pins(db, pinned_tree) == 1) == is_live(state));
 		TEST_EXPECT((count_live_servers_of(db, jo) == 1) == is_live(state));
 		db.exec("DELETE FROM hosted_servers WHERE id = $1;", { BindValue(server) });
@@ -382,9 +411,10 @@ int test_migration_mapping() {
 	const fs::path staged = fs::temp_directory_path() / test_paths_unique("opennova_ds_migrations");
 	fs::remove_all(staged);
 	fs::create_directories(staged);
+	// 0025 (the content store) seeds its projects from the data sets, so it waits for them too.
 	for (const auto &entry : fs::directory_iterator(all)) {
 		const std::string name = entry.path().filename().string();
-		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0)
+		if (name.rfind("0011", 0) != 0 && name.rfind("0013", 0) != 0 && name.rfind("0025", 0) != 0)
 			fs::copy_file(entry.path(), staged / name);
 	}
 	db::run_migrations(db, staged);
@@ -396,6 +426,7 @@ int test_migration_mapping() {
 			"VALUES ('stopped', 'old2', 32, 30, 50, 5, 5, 0, 'a.bms', 'dfx2_consumer', '');");
 	fs::copy_file(all / "0011_data_sets.sql", staged / "0011_data_sets.sql");
 	fs::copy_file(all / "0013_releases.sql", staged / "0013_releases.sql");
+	fs::copy_file(all / "0025_content.sql", staged / "0025_content.sql");
 	db::run_migrations(db, staged);
 	fs::remove_all(staged);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");

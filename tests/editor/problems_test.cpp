@@ -1647,7 +1647,7 @@ static int test_original_scope_whole() {
 	TEST_EXPECT(whole.ready && !whole.findings.empty());
 	const int scan = 0; // the session's scan stands in: the same one throughout
 	const auto settle = [&](OriginalFiles &fold, const std::vector<std::string> &names) {
-		fold.want(install, shared, &scan, names);
+		fold.want(install_spec(install, document), shared, &scan, names);
 		while (!fold.step(1 << 20)) {
 		}
 		return *fold.data();
@@ -1727,7 +1727,7 @@ static int test_original_scope_whole() {
 	};
 	TEST_EXPECT(unused_of(styled_whole, sheet) > 0);
 	OriginalFiles styled_fold;
-	styled_fold.want(styled, shared, &scan, {sheet});
+	styled_fold.want(install_spec(styled, document), shared, &scan, {sheet});
 	while (!styled_fold.step(1 << 20)) {
 	}
 	const OriginalData &styled_scope = *styled_fold.data();
@@ -1736,6 +1736,72 @@ static int test_original_scope_whole() {
 	            mine->second == theirs->second && unused_of(styled_scope, sheet) == unused_of(styled_whole, sheet));
 	std::printf("original scope: the stylesheet's findings over every menu's uses, %zu unused\n",
 	            unused_of(styled_scope, sheet));
+	return 0;
+}
+
+// A stock expansion on its base game's project (Escalation, jox01, on the Joint Operations project; here the minted
+// install's nifty) is judged against the game as it ships (SessionCore::original_install, 2026-10-26): the game
+// install with the installed expansion of the project's own name mounted, whose own files the base project's export
+// never holds. Its menu the installed expansion ships, naming a texture neither has, is the game's own; a menu of the
+// project's own is the modder's. An expansion of another name on the same base project, which no installed expansion
+// shares, is judged against the base project's export as before: the same menu is the modder's there, the export
+// serving no such menu.
+static int test_original_stock_expansion() {
+	test_temp::TempDir dir("opennova_editor_problems_original_stock");
+	const auto menu = [](const char *name) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name + "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+		       "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+		       "\t\t<APPEARANCE type=\"image\" state=\"default\">nologo.tga</APPEARANCE>\r\n\t</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	const std::string shipped = menu("SHIPPED");
+	const std::string install = dir.file("install");
+	std::string error;
+	TEST_EXPECT(minted_install::mint_with(
+	        install, {{"shipped.mnu", minted_install::share(std::vector<uint8_t>(shipped.begin(), shipped.end()))}}, error));
+	// The base game's project and its export: the install's base game, laid out as the game reads it.
+	std::vector<minted_install::File> base;
+	TEST_EXPECT(minted_install::base_game(base, error) &&
+	            minted_install::write_install(dir.file("game/assets/build/export"), base, "", {}, error));
+	ProjectDocument base_document;
+	Diagnostic created;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base_document, created));
+	Preferences chosen;
+	chosen.game_install = install;
+	NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	// The project of the expansion made on the base project with both menus, its rows judged: whether each menu's
+	// missing texture is the game's own; 1 where it could not be made so.
+	const auto judged = [&](const std::string &expansion, bool &shipped_theirs, bool &mine_theirs) -> int {
+		const std::string root = dir.file(("game/expansions/" + expansion).c_str());
+		const ActionOutcome outcome = editor_test::handle_to_end(
+		        session, request::new_expansion_project(root, expansion, expansion, "", true, "../../assets"));
+		TEST_EXPECT(!outcome.refused && v.project.open && v.project.document->expansion.on_base_project());
+		TEST_EXPECT(test_io::write_text(root + "/menus/shipped.mnu", shipped) &&
+		            test_io::write_text(root + "/menus/mine.mnu", menu("MINE")));
+		editor_test::set_game_install(session, install);
+		editor_test::handle_to_end(session, request::rescan());
+		const auto logo_in = [&v](const char *path) {
+			for (size_t i = 0; i < v.findings.diagnostics.size(); ++i) {
+				const Diagnostic &d = v.findings.diagnostics[i];
+				if (d.code() == "reference.missing" && d.asset == path && subject_target(d) == "nologo.tga") return i;
+			}
+			return SIZE_MAX;
+		};
+		const size_t theirs = logo_in("menus/shipped.mnu"), mine = logo_in("menus/mine.mnu");
+		TEST_EXPECT(theirs != SIZE_MAX && mine != SIZE_MAX);
+		shipped_theirs = theirs != SIZE_MAX && in_original_data(theirs, v);
+		mine_theirs = mine != SIZE_MAX && in_original_data(mine, v);
+		editor_test::handle_to_end(session, request::close_project());
+		return 0;
+	};
+	bool shipped_theirs = false, mine_theirs = true;
+	TEST_EXPECT(judged(minted_install::kExpansion, shipped_theirs, mine_theirs) == 0);
+	TEST_EXPECT(shipped_theirs && !mine_theirs);
+	TEST_EXPECT(judged("night", shipped_theirs, mine_theirs) == 0);
+	TEST_EXPECT(!shipped_theirs && !mine_theirs);
+	std::printf("original stock expansion: judged against the installed expansion of its name\n");
 	return 0;
 }
 
@@ -2237,6 +2303,7 @@ int main() {
 	failures += test_original_textures();
 	failures += test_original_scope();
 	failures += test_original_scope_whole();
+	failures += test_original_stock_expansion();
 	if (failures == 0) std::printf("editor_problems: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -52,7 +52,13 @@ bool HeldPopup::begin(const char *id, bool held, bool modal, int flags, bool clo
 	if (!held) closing_ = false;
 	// A dialog opened again since its close was asked (a client's open served after it): it shows again.
 	if (closing_ && opened != closed_at_) closing_ = false;
-	if (held && !closing_ && !shown_ && !ImGui::IsPopupOpen(id)) ImGui::OpenPopup(id);
+	// Opened only from a window that drew the frame before as well: one that comes back (reopened, its tab
+	// selected again) is focused by its dock node a frame after it first draws, and a focus closes every popup
+	// over the window, which would take the dialog away as it showed.
+	const int frame = ImGui::GetFrameCount();
+	const bool drew_before = drawn_frame_ == frame - 1 || drawn_frame_ == frame;
+	drawn_frame_ = frame;
+	if (held && !closing_ && !shown_ && !ImGui::IsPopupOpen(id) && drew_before) ImGui::OpenPopup(id);
 	bool open = true;
 	const bool drawing = modal ? ImGui::BeginPopupModal(id, closable ? &open : nullptr, flags) : ImGui::BeginPopup(id, flags);
 	if (!drawing) {

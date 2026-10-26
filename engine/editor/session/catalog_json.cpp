@@ -27,6 +27,7 @@ const char *served_token(ServedBy by) {
 		case ServedBy::Shell:
 			return "shell";
 		case ServedBy::ShellNeedsPerson:
+		case ServedBy::SessionNeedsPerson:
 			return "person";
 	}
 	return "session";

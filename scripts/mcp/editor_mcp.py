@@ -20,6 +20,8 @@ as usual.
     python scripts/mcp/editor_mcp.py query references --path main.mnu
     python scripts/mcp/editor_mcp.py query output --cursor 0 --limit 50
     python scripts/mcp/editor_mcp.py request new_project --dir "C:/mods/My Game" --title "My Game" --wait
+    python scripts/mcp/editor_mcp.py request new_project --dir "C:/games/JO" --game-install "C:/Games/JO" --all true \
+        --wait                        # a game you own: every file imported as it opens (the wait follows it)
     python scripts/mcp/editor_mcp.py request create_missing --roles main_menu,gametext
     python scripts/mcp/editor_mcp.py request open_document --path main.mnu
     python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
@@ -29,8 +31,8 @@ as usual.
     python scripts/mcp/editor_mcp.py request set_viewport --path models/tank.3di --viewport '{"kind": "model",
         "camera": {"yaw": 1.2}}'                     # that model's viewport (left out: the active document's)
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"card": {"path": ""}}'   # the card closed
-    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"new_project": {"title": "Nightfall",
-        "builds_on": "jox01", "expansion": "nightfall"}}'   # the form filled, nothing made
+    python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"new_project": {"making": "mod",
+        "title": "Nightfall", "installed": "jox01", "expansion": "nightfall"}}'   # the form filled, nothing made
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"problems": {"severities": ["error"],
         "group": "file"}, "focus": "problems"}'           # Problems' filters, the window brought forward
     python scripts/mcp/editor_mcp.py request set_workspace --workspace '{"document": {"filter": "gun",
@@ -552,19 +554,23 @@ def wait_stopped(client: GameMcp, seconds: float) -> dict:
 def follow_operation(client: GameMcp, answer: dict, deadline: float) -> dict:
     """An editor_request answer whose wait ran out at the tool's own (timed_out), followed through the operation
     query to the operation's end and the validation after it, until `deadline` (time.monotonic()): the answer as
-    a wait to the end gives it (operation: what it came to), or still timed_out. Where another operation's outcome
-    stands in its place (one started after it ended), what it came to is not known: its end reads "unknown",
-    never done."""
+    a wait to the end gives it (operation: what it came to), or still timed_out. An operation whose finish started
+    another to go on with its work (its `then`: a game you own's new project goes on from its open to its import)
+    is followed to that one's end. Where another operation's outcome stands in its place (one started after it
+    ended), what it came to is not known: its end reads "unknown", never done."""
     operation = int((answer.get("outcome") or {}).get("operation", 0) or 0)
     while time.monotonic() < deadline:
         state = client.structured("editor_query", {"query": "operation"})
         running = state.get("operation") or {}
+        last = state.get("last_operation") or {}
         settled = not (state.get("validation") or {}).get("running", False)
+        if operation and int(last.get("id", 0)) == operation and int(last.get("then", 0) or 0):
+            operation = int(last["then"])
+            continue
         if operation and running.get("running") and int(running.get("id", 0)) == operation:
             settled = False
         if settled:
             if operation:
-                last = state.get("last_operation") or {}
                 answer["operation"] = last if int(last.get("id", 0)) == operation else {"id": operation, "end": "unknown"}
             answer.pop("timed_out", None)
             answer.pop("validation", None)
@@ -792,7 +798,8 @@ def build_parser() -> argparse.ArgumentParser:
                               "(from --dir when relative; needs --expansion, no --builds-on)")
     request.add_argument("--game-install", dest="game_install", default=None,
                          help="open_project: a game install for the session alone, in place of the one the "
-                              "project's .opennova/local.json names (which stays as it is)")
+                              "project's .opennova/local.json names (which stays as it is); new_project: the game "
+                              "install it is made on, checked first")
     request.add_argument("--path", default=None, help="a file: a project file or open document ('' the active one)")
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
@@ -882,7 +889,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--rehash", choices=switch, default=None,
                          help="build: read every file again, the build cache set aside")
     request.add_argument("--all", choices=switch, default=None,
-                         help="preview_install_import: every file of the game install chosen at once, with no walk")
+                         help="preview_install_import: every file of the game install chosen at once, with no walk; "
+                              "new_project: a game you own, the game install's own game (the base game, or with "
+                              "--expansion that installed expansion on --base-project), every file imported as it "
+                              "opens")
     request.add_argument("--planned", choices=switch, default=None,
                          help="import_files: the open preview's checked rows as the dialog's Import takes them, in "
                               "place of --imports (with --plan)")

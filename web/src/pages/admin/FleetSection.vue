@@ -91,8 +91,8 @@
           </button>
         </div>
         <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
-          Restarts every live server on older data than its
-          <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">data set's</RouterLink> current,
+          Restarts every live server on an older release on its
+          <RouterLink to="/admin/games" class="text-accent hover:text-ink-bright">game's</RouterLink> newest,
           dropping its players.
         </p>
         <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
@@ -475,11 +475,11 @@ async function onMachine(m: FleetMachine, action: 'drain' | 'end') {
   await poll.readAgain();
 }
 
-// Every live server on older data restarts on its data set's current data.
+// Every live server on an older release restarts on its game's newest.
 async function updateOutdated() {
   if (busy.value) return;
   const n = outdatedCount.value;
-  if (!window.confirm(`Update ${n} outdated server${n === 1 ? '' : 's'}? Each restarts on its data set's current data, and its players drop while it does.`)) {
+  if (!window.confirm(`Update ${n} outdated server${n === 1 ? '' : 's'}? Each restarts on its game's newest release, and its players drop while it does.`)) {
     return;
   }
   busy.value = true;
@@ -490,7 +490,7 @@ async function updateOutdated() {
     return;
   }
   const asked = result.value;
-  flash(asked === 0 ? 'No server runs older data, so none was updated.' : `${asked} server${asked === 1 ? ' is' : 's are'} updating.`);
+  flash(asked === 0 ? 'No server runs an older release, so none was updated.' : `${asked} server${asked === 1 ? ' is' : 's are'} updating.`);
   await poll.readAgain();
 }
 

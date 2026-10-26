@@ -14,9 +14,10 @@ namespace opennova::editor {
 // Reimport, whose import pass imports again, even unchanged, the sources `only` names when `force`
 // says so (every one when it is empty). ProjectRefresh stepped by bytes within the poll's budget:
 // the import pass, the scan, the requirements. Nothing reaches the view before finish(), which
-// takes the refresh into it (SessionCore::absorb_refresh) and leaves the validation due; a
-// Reimport's outcome carries the pass's findings on the sources it asked for, and the status says
-// how many it imported.
+// takes the refresh into it (SessionCore::absorb_refresh) and leaves the validation due (a Rescan
+// weighs an expansion's base game's export again, SessionCore::check_base_export); a Reimport's
+// outcome carries the pass's findings on the sources it asked for, and the status says how many it
+// imported.
 class RefreshOperation : public SessionOperation {
 public:
 	RefreshOperation(const ProjectPaths &paths, const ProjectDocument &document, bool reimport, bool force,

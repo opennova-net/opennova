@@ -76,6 +76,14 @@ enum class RequestFieldId : uint8_t {
 	Gesture,
 	Cancel,
 	TerrainView,
+	Server,
+	Username,
+	Password,
+	ProjectKey,
+	Message,
+	Resolution,
+	Version,
+	Revision,
 	kCount,
 };
 

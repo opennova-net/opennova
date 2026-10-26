@@ -173,12 +173,12 @@ _Avoid_: emulator, lobby server
 One of the service's binaries, each its own image and ECS service: the **gate**, the
 **lobby**, **web** (the retail HTTP routes and the website's API), the **fleet program** (the
 hosted servers' supervisor, one elected leader), the **worker** (its **jobs** and their
-schedules) and **data** (the data sets' jobs over the game data's store). Each scales on its
+schedules) and **data** (the **games**' jobs over the object store). Each scales on its
 own and shares nothing with the others but PostgreSQL (and web's Redis); what more than one
 uses is the service's libraries (`apps/novaworld_common`). Each runs only its own job kinds and
 schedules only those. There is no all-in-one binary. Beside them, **opennova-hostd** is a
 program of the fleet cluster (`opennova-<deployment>-fleet`): an ECS daemon service, one task
-per **machine**, rolled by the same releases, before the fleet program.
+per **machine**, rolled by the same deploys, before the fleet program.
 _Avoid_: role, service (for one program), tier, microservice, pod
 
 **Gate**:
@@ -245,15 +245,21 @@ sync and the mail.
 _Avoid_: consumer, executor
 
 **Data program**:
-The program (`apps/novaworld_data`) that runs the data sets' jobs (a tree's finalize, a
-release's validate and apply, the trees' prune) over the game data's store, and schedules
-their prune; one task, its own disk for the files a job passes through. An admin's upload
-never queues a machine launch behind it.
+The program (`apps/novaworld_data`) that runs the **games**' jobs over the object store (a
+**release**'s build, validate and apply, the **trees**' prune) and schedules their prune; one
+task, its own disk for the files a job passes through. A release build never queues a machine
+launch behind it.
 _Avoid_: data worker, uploader
+
+**Working copy**:
+A folder on a disk that holds a game's **project** at a revision (its base), bound to it by
+`.opennova/content/`: what it changed since its base is its push, what others pushed since its
+pull. Every OpenNova Editor project folder of a game is one.
+_Avoid_: checkout, clone, mirror
 
 **Job**:
 One piece of background work in the `jobs` table (a machine launch, describe or terminate,
-a billing sync, a mail, a prune, a data set's tree), enqueued in the same transaction as the
+a billing sync, a mail, a prune, a release's build or apply), enqueued in the same transaction as the
 change that causes it, claimed with `SKIP LOCKED` under a lease by the one program that runs
 its kind, retried with backoff, idempotent.
 _Avoid_: task, message, event
@@ -521,15 +527,15 @@ panels Dear ImGui windows (ADR 0039). "The editor" in prose means this product; 
 Godot editor is always "the Godot editor".
 _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
-**OpenNova content**:
-OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
-repository and released as update packages: the
+**OpenNova's own games**:
+The **games** OpenNova authors from scratch, each an OpenNova Editor **project** kept in
+NovaWorld (never in a repository), public, and released as update packages: the
 "OP: Acid Gambit" game (single player and Co-op over LAN) and its "OP: Nifty Package"
 expansion. The minimal runtime downloads it on first launch. `/game acidgambit`,
 `/game jo` or `/game dfx2` selects the game; without `/game` the folder's `UPDATE.WIZ`
 names it (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit;
-ADR 0067). `--resource-dir` selects content separately from the runtime directory.
-_Avoid_: fixtures (test-only data), retail data
+ADR 0067). `--resource-dir` selects the data root separately from the runtime directory.
+_Avoid_: OpenNova content, fixtures (test-only data), retail data
 
 **Serve mode**:
 Hosting a match without being a player: retail's Serve Only server type (`SERVERTYPE`
@@ -564,7 +570,7 @@ _Avoid_: server config, server.cfg, dedicated.cfg
 
 **Hosted server**:
 An `opennova-serve` that an account starts from the NovaWorld site (ADR 0053), as many live at once
-as its **hosting entitlement** allows, each in a **slot** of a **machine**, over the **data set** its
+as its **hosting entitlement** allows, each in a **slot** of a **machine**, over the **game** its
 owner picks. It lists on our NovaWorld under a service account of its own, its owner administers it
 from the site through the service only, and it stays up until stopped; a move to another machine
 costs it no restart.
@@ -650,33 +656,45 @@ configuration. Titles are in scope as data (ADR 0055): a title is a `gameprofile
 `dfx2`) whose wire and NovaWorld identity is one `TitleIdentity` row in `engine/net/title`. No code
 outside that table hardcodes a title's identity, and an unwitnessed field is refused where it is
 needed, never filled with JO's value.
-_Avoid_: game (when you mean the identity, not the running program)
+_Avoid_: game (when you mean the identity: a **game** is the catalog's product, which speaks a
+title)
 
-**Data set**:
-One product a **hosted server** runs on (ADR 0064): a base game (Joint Operations, Delta
-Force Xtreme 2, OpenNova's own data), which speaks a title and lists in a lobby, or one
-expansion of a base (Escalation, `jox01`), holding only its own files
-(`data_sets/data_set_files.h`). An admin creates one as a row on the Game data page and uploads
-its files; the site offers only data sets with a ready **tree**.
-_Avoid_: game (for the data), install (a retail install is where a data set's files come
-from), snapshot (gone: the data lives in the object store), slug (a data set has an id and a
-display name; its lobby has the slug)
+**Game**:
+The one name a user meets for a product the NovaWorld service keeps, updates and hosts (ADR
+0071): OP: Acid Gambit, OP: Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2
+and the OpenNova runtime. A base game speaks a **title** and lists in a lobby; an expansion
+builds on its base game (Escalation on Joint Operations, OP: Nifty Package on OP: Acid
+Gambit); the runtime has no **project** and no **hosted server**. A game has a **project**
+(keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is
+what players update to and what its hosted servers run. Admins manage games in the admin's
+Games area. In code a game is a `data_sets` row (the editor's routes name it
+`/api/content/projects/<key>`); a `games` row is a lobby, not a game.
+_Avoid_: data set, game data, content (as words a user meets; the code keeps `data_sets` and
+`content_*`), lobby (a `games` row), title (the identity a base game speaks), product (the
+updater's word: a game's login and command file), install (where a retail game's project
+began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
 **Tree**:
-One immutable version of a **data set**'s files in the object store (`trees/<id>/` with a
-manifest of every file's name and size, and its missions): a baseline an admin uploaded, or a
-published **release** applied to that baseline. A hosted server is pinned to the trees it
-started on until its owner asks for the update; a **machine** fetches the trees its servers
-need and checks them against the manifest.
-_Avoid_: version (a tree has a version line; the tree is the thing), snapshot, volume
+The internal form of a **hosted server**'s data: one immutable version of a **game**'s files in
+the object store (`trees/<id>/` with a manifest of every file's name and size, and its
+missions), built by the data program from empty out of the game's published **release** (an
+expansion's beside its base game's published tree), never uploaded. A hosted server is pinned
+to the trees it started on until its owner asks for the update; a **machine** fetches the trees
+its servers need and checks them against the manifest.
+_Avoid_: version (a tree has a version line; the tree is the thing), snapshot, volume, baseline
+(gone: every tree is built from a release)
 
 **Release**:
-An uploaded `1SFS` packed update (ADR 0061; ADR 0064 decision 5): one package, one section
-per product it carries, each mapped to a **data set** by its command file. Validated, then a
-draft; published, it is what the update listener serves that data set's updater login, and
-the data program applies it once to the data set's baseline **tree**, making a new current one;
-retired, or replaced by the next publish or a new baseline upload.
-_Avoid_: update (the mechanism), patch, package (the file; a release is the row)
+One packed build of a **game** (a `1SFS` update package, ADR 0061, ADR 0071): built by the
+data program from a revision of the game's **project**, always whole (every file a row, the
+removals since the last release carried), or, for the runtime, which has no project, a CI
+build the Publish workflow uploads. Validated, then a draft; published, it is what the update
+service serves the game's updater and what its hosted servers run (the data program builds
+the game's **tree** from it); retired, or replaced by the next publish. Not a deployment's
+release (`app deploy`'s: the programs' task definitions, DEPLOY.md section 5) nor a GitHub
+release (a tag's assets): beside a game's release, say *deploy* and *tag* for those.
+_Avoid_: update (the mechanism), patch, package (the file; a release is the row), upload (only
+the runtime's arrive that way, and only from Publish)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
@@ -696,12 +714,19 @@ _Avoid_: promote (for anything but the mission→world spawn)
 The vocabulary of ADR 0046's project model.
 
 **Project**:
-A directory the editor owns: `project.opennova` (versioned JSON: title, target game,
-feature toggles, export settings), the loose source files anywhere beneath it, and a
-disposable `.opennova/` cache. The project IS the source tree; nothing lives in a
-database.
-_Avoid_: workspace (the editor's windows, not the data), mod (an expansion-type project is a
-project kind), game directory (the runtime's mounted root)
+A **game**'s source as the editor and NovaWorld keep it: one project in two places (ADR 0046,
+ADR 0069, ADR 0071). On a disk, a directory the editor owns: `project.opennova` (versioned
+JSON: title, target game, feature toggles, export settings), the loose source files anywhere
+beneath it, and a disposable `.opennova/` cache; the folder IS the source tree, and the editor
+keeps none of it in a database. In NovaWorld, the game's line of revisions, each a manifest of
+the project's files by path, SHA-256 and size (every file stored once by its SHA-256), which
+every folder of it is a **working copy** of. A public project (OP: Acid Gambit's, OP: Nifty
+Package's) is anyone's to get, a private one (the retail games') an admin's; admins push, and
+a push is not a **release**. The editor's NovaWorld window is its client, the admin's Games
+area its management.
+_Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
+New project's choice), game directory (the runtime's mounted root), content project, content store
+(the code's `content_*` names), repository, git, depot, asset server
 
 **Game install**:
 The folder of an installed NovaLogic game (Joint Operations) that a project imports from and
@@ -724,8 +749,18 @@ _Avoid_: install validation (nothing is validated: the folder is read)
 **Welcome page**:
 The editor with no project open: the Document window across the whole workspace, with the
 recent projects (each by its title, its game and its expansion), Open, and the New project
-form with its game install.
+form, which asks what is made, then its game install.
 _Avoid_: start screen, home, launcher
+
+**A game you own**:
+New project's first choice: the project of the game install's own game, Joint Operations or one
+of its installed expansions (made as that expansion on the base game's project), every file of it
+imported as it opens (`new_project`'s `all`), the install's files winning over anything the project
+held, the features its files need on. Beside it, **a mod** (a change to a game: an expansion project
+of the install's base game, an installed expansion, or a project of the author's own) and **a new
+game** (a standalone project).
+_Avoid_: stock import (the import is part of making the project), the raw expansion fields (Builds
+on, Expansion name: Project settings keep them for an existing project)
 
 **File card**:
 Files' page for one project file: what a file of its kind is to the game, where a build puts it, where
@@ -739,8 +774,9 @@ name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, 
 expansion it **builds on** (none: the base game). A project with no expansion name is standalone.
 The files the game reads by an expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, ...) are
 its **expansion files**.
-_Avoid_: mod (a project builds as an expansion; "mod" is the Mods list's word for one), base (for
-the expansion a project builds on: the base game is the install with none)
+_Avoid_: mod for the expansion itself (A mod is New project's choice that makes a project building
+as one; "mod" is the Mods list's word for an installed one), base (for the expansion a project
+builds on: the base game is the install with none)
 
 **Logical name**:
 The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
@@ -781,7 +817,8 @@ its import context), and the outputs are regenerated into `.opennova/imported/` 
 native assets. It runs again when the source or an input changes; the machine-local **import
 cache** keeps hashes so an untouched file is not read. A file is an **import source** only while
 its record is there, and an **import input** while a record lists it; the build packs neither,
-only the outputs. The files the import dialog offers are **import choices**.
+only the outputs. The files the import dialog offers are **import choices**; File > Import... is
+the one way in, its first step the sources that fit the project.
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source
 

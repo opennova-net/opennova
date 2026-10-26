@@ -211,13 +211,15 @@ JsonValue ask(Cli &cli, Q kind, const JsonValue &args, std::string &error) {
 
 // What the operation a request's `outcome` names came to once the operations ran (the operation
 // query's last_operation: id, kind, end, findings, and an import's write's imported and
-// not_imported); null when the request started or joined none.
-JsonValue ended_operation(Cli &cli, const JsonValue &outcome) {
+// not_imported), or with `chain` the last of those that went on with its work after it (each
+// `follows` the one named: a game you own's new project goes on from its open to its import, its
+// base game's export between them where one runs); null when the request started or joined none.
+JsonValue ended_operation(Cli &cli, const JsonValue &outcome, bool chain = false) {
 	const double id = outcome.get_number("operation", 0.0);
 	if (id == 0.0) return JsonValue();
 	std::string error;
 	const JsonValue ended = at(ask(cli, Q::Operation, JsonValue(), error), "last_operation");
-	return ended.get_number("id", -1.0) == id ? ended : JsonValue();
+	return ended.get_number("id", -1.0) == id || (chain && ended.get_number("follows", -1.0) == id) ? ended : JsonValue();
 }
 
 // A request's outcome with what the operation it started came to folded in (S13 A3: opening a
@@ -243,12 +245,12 @@ JsonValue settled(const JsonValue &outcome, const JsonValue &ended) {
 // A request handled and the operation it starts run to its end (an Open, a refresh, an import, a
 // rename, a build): what it came to (action_outcome_to_json's: done, the operation, the findings),
 // what the operation came to folded in (settled).
-JsonValue handled(Cli &cli, const EditorRequest &request) {
+JsonValue handled(Cli &cli, const EditorRequest &request, bool chain = false) {
 	assert(names_request(cli.row, request.kind) && "a verb sends only the requests its row names");
 	cli.session.handle(request);
 	const JsonValue outcome = editor::action_outcome_to_json(cli.session.outcome());
 	cli.session.run_operations();
-	return settled(outcome, ended_operation(cli, outcome));
+	return settled(outcome, ended_operation(cli, outcome, chain));
 }
 
 // A request the verb sends: handled, its findings printed on the error stream.
@@ -351,20 +353,27 @@ void print_setup_failure(Cli &cli, const JsonValue &outcome) {
 // and a reimport's, whose own pass is the one) or the verb makes a dry run; then --install's game
 // install: a dry run opens the project on it for the run alone, writing nothing, and any other run
 // sets it as the editor's project settings set it (the project's .opennova/local.json, replacing the
-// install it names). False, said why, when the project does not open or the install is not set
+// install it names). new --all (a game you own) is made on --install's install, which the project
+// then names, every file of its game imported as it opens (new_project's all, the operation that
+// follows its open, after its base game's export where one runs first). False, said why, when the project
+// does not open or the install is not set
 // (exit 2).
 bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string &dir = args.positional.front();
 	const bool dry_run = args.has("--dry-run");
 	const std::string install = args.value("--install");
 	EditorRequest first = editor::request::open_project(dir, row.import_pass && !dry_run, dry_run ? install : std::string());
+	const bool stock = row.requests[0] == K::NewProject && args.has("--all");
 	if (row.requests[0] == K::NewProject) {
 		first = editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass);
 		first.expansion = args.value("--expansion");
 		first.builds_on = args.value("--builds-on");
 		first.base_project = args.value("--base-project");
+		first.all = stock;
+		if (stock) first.game_install = install;
 	}
-	const JsonValue opened = handled(cli, first);
+	// A game you own's: what its import came to, the last of the work its new project began.
+	const JsonValue opened = handled(cli, first, stock);
 	if (!done(opened) || !project_open(cli)) {
 		print_setup_failure(cli, opened);
 		if (!has_error(items(opened, "findings")))
@@ -372,7 +381,7 @@ bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		return false;
 	}
 	print_findings(cli.err, opened);
-	if (install.empty() || dry_run) return true;
+	if (install.empty() || dry_run || stock) return true;
 	editor::ProjectSettingsChange change;
 	change.game_install = install;
 	const JsonValue applied = handled(cli, editor::request::apply_project_settings(change));
@@ -397,7 +406,7 @@ std::string base_words(const JsonValue &expansion) {
 
 // --- the verbs ----------------------------------------------------------------------------------
 
-int run_new(Cli &cli, const CliVerbRow &row, const CliArgs &) {
+int run_new(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	JsonValue answer;
 	if (!answer_of(cli, row, answer)) return 2;
 	if (cli.json) {
@@ -410,6 +419,12 @@ int run_new(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	const JsonValue &expansion = at(project, "expansion");
 	if (const std::string name = expansion.get_string("name", ""); !name.empty())
 		std::fprintf(cli.out, "  as the expansion %s, on %s\n", name.c_str(), base_words(expansion).c_str());
+	// A game you own: what its import wrote (the operation that followed the open, the last to run).
+	if (args.has("--all")) {
+		std::string error;
+		const JsonValue ended = at(ask(cli, Q::Operation, JsonValue(), error), "last_operation");
+		std::fprintf(cli.out, "  every file of its game imported: %s\n", words(items(ended, "imported").size(), "file").c_str());
+	}
 	return 0;
 }
 
@@ -1068,6 +1083,23 @@ bool check_query(const CliArgs &args, std::string &why) {
 	return true;
 }
 
+// A game you own (new --all) is the base game, or with --expansion the installed expansion of that name on its
+// base game's project (--base-project): never on another installed expansion.
+bool check_new(const CliArgs &args, std::string &why) {
+	if (!args.has("--all")) return true;
+	if (args.has("--builds-on")) {
+		why = "--all makes a game you own: its expansion (--expansion) is made on the base game's project "
+		      "(--base-project), never --builds-on another expansion";
+		return false;
+	}
+	if (args.has("--expansion") && args.value("--base-project").empty()) {
+		why = "--all --expansion <name> is made on the base game's project: make that project first, then name its "
+		      "folder with --base-project";
+		return false;
+	}
+	return true;
+}
+
 // An import names what it takes: a source file, or the game install's files by --entry, or every
 // file of the game install (--all, which names nothing else); an archive's members are chosen by
 // --entry too.
@@ -1186,7 +1218,8 @@ constexpr CliOption kNewOptions[] = { { "--title", "a text" },
 	                                  { "--game", "a code" },
 	                                  { "--expansion", "a name" },
 	                                  { "--builds-on", "an expansion" },
-	                                  { "--base-project", "a project directory" } };
+	                                  { "--base-project", "a project directory" },
+	                                  { "--all" } };
 constexpr CliOption kCreateMissingOptions[] = { { "--role", "a token" } };
 constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
@@ -1208,15 +1241,20 @@ using V = CliVerb;
 constexpr VerbRow kRows[] = {
 	Verb(V::New, "new",
 	     "<dir> [--title <text>] [--game <code>] [--expansion <name>] [--builds-on <expansion>]\n"
-	     "                [--base-project <dir>]",
+	     "                [--base-project <dir>] [--all]",
 	     kNewRequests, kDir, run_new,
 	     "create an empty project (project.opennova + .opennova/) in <dir> and open it, no\n"
 	     "source the folder holds imported; --title names it (else the folder's name), --game\n"
 	     "is its game's code (else jo); --expansion builds it as that expansion (played with\n"
 	     "/exp <name>), --builds-on on the game install's expansion of that name (else the base game),\n"
 	     "--base-project on the base game's project in that folder (from <dir> when relative), whose\n"
-	     "export is then the base game it builds and plays over")
+	     "export is then the base game it builds and plays over; --all makes a game you own: the\n"
+	     "project of the game install's own game (--install's, else the editor's), every file of it\n"
+	     "imported as it opens, the install's files as the game ships them (no placeholder kept);\n"
+	     "with --expansion <name> --base-project <dir>, that installed expansion's own files, on\n"
+	     "the base game's project (make it first, new --all alone)")
 	        .takes(kNewOptions)
+	        .checked_by(check_new)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"project\"]}")
 	        .row,
@@ -1304,8 +1342,9 @@ constexpr VerbRow kRows[] = {
 	     "build the project, then copy the build into its export folder as what ships (default:\n"
 	     "project.opennova's export.output; --out from where the command runs, replaced only when\n"
 	     "missing, empty or an export of this project): a standalone game's archives and loose\n"
-	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project\n"
-	     "(--json: the state query's import and operation)")
+	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project;\n"
+	     "an expansion of a base game's project exports that project first, as it opens, when its\n"
+	     "export is missing or older than it (--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

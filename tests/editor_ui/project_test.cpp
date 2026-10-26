@@ -293,8 +293,10 @@ void test_files_kind_and_card() {
 
 // The welcome page's install: the editor's last chosen in the field, checked (a CheckInstall raised once,
 // not again while the answer stands), what it holds said under it; a folder picked for it checked in its
-// turn; one that holds no game holds Create back; Create carries the install. A new project with few files
-// offers the game's files: the main menu with what it needs.
+// turn; one that holds no game holds Create back; Create carries the install, a game you own's every file
+// imported (all), titled as its game; an installed expansion of it waits for the base game's project, a
+// folder its Browse... picks. A new project with few files says where the game's files come from (File >
+// Import...).
 void test_welcome_install_and_first_steps() {
 	SessionView v;
 	// The editor's own install fills the form, never the one in effect (an open project's own, or a
@@ -380,32 +382,57 @@ void test_welcome_install_and_first_steps() {
 	v.revisions.touch(ViewConcern::Workspace);
 	v.project.install_check.root = absolute_install_path("C:/Games/JO");
 	v.project.install_check.mounts = true;
+	v.project.install_check.expansions = {{"jox01", "Joint Operations: Escalation"}};
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
 	ui.activate(item_id(welcome, {"Create project"}));
 	const std::vector<EditorRequest> creating = ui.drain();
 	const EditorRequest *made = only(creating, EditorRequestKind::NewProject);
-	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO", "Create: with the install");
-	// A project open with nothing in it, few files: the game's files offered.
+	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && made->all &&
+	              made->title == "Joint Operations" && made->expansion.empty(),
+	      "Create: a game you own, with the install, every file imported");
+	// Its expansion: made on the base game's project, which Create waits for (its Browse... picks a folder, the
+	// workspace's); named, Create raises it.
+	v.workspace.new_project.installed = "jox01";
+	v.revisions.touch(ViewConcern::Workspace);
+	ui.frames(2);
+	CHECK(logged_frame(ui).find("Make Joint Operations first") != std::string::npos, "no base game's project: said plainly");
+	ui.activate(item_id(welcome, {"Create project"}));
+	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
+	ui.activate(item_id(welcome, {"Browse...##base"}));
+	raised = ui.drain();
+	const EditorRequest *base_pick = only(raised, EditorRequestKind::PickDirectory);
+	CHECK(base_pick && base_pick->purpose == PickPurpose::NewProjectBase, "its Browse... asks the shell for a folder");
+	ui.windows.deliver_pick(PickPurpose::NewProjectBase, "C:/mods/JO");
+	CHECK(workspace_sets(ui.drain(), "new_project", "base_project").size() == 1, "the pick fills the form");
+	v.workspace.new_project.base_project = "../JO";
+	v.revisions.touch(ViewConcern::Workspace);
+	ui.frames(2);
+	ui.activate(item_id(welcome, {"Create project"}));
+	made = nullptr;
+	const std::vector<EditorRequest> expanding = ui.drain();
+	made = only(expanding, EditorRequestKind::NewProject);
+	CHECK(made && made->all && made->expansion == "jox01" && made->base_project == "../JO" && made->builds_on.empty() &&
+	              made->title == "Joint Operations: Escalation",
+	      "Create: the installed expansion on the base game's project");
+	v.workspace.new_project.installed.clear();
+	v.workspace.new_project.base_project.clear();
+	v.revisions.touch(ViewConcern::Workspace);
+	// A project open with nothing in it, few files: where the game's files come from.
 	v.project.open = true;
 	v.project.root = "C:/mods/New";
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
 	ui.frames(3);
 	ui.drain();
 	text = logged_frame(ui);
-	CHECK(text.find("Bring in the game's files") != std::string::npos, "the first steps");
+	CHECK(text.find("The project holds few files yet.") != std::string::npos, "the first steps");
 	// The windows back from standing aside take no keyboard.
 	const ImGuiWindow *focused = GImGui->NavWindow ? GImGui->NavWindow->RootWindow : nullptr;
 	const std::string focused_name = focused ? focused->Name : "";
 	CHECK(focused_name.rfind("Files", 0) != 0 && focused_name.rfind("Inspector", 0) != 0 &&
 	              focused_name.rfind("Problems", 0) != 0 && focused_name.rfind("Output", 0) != 0,
 	      "a project open over the welcome page: the windows coming back take no keyboard");
-	ui.activate(item_id(Ui::window_id("Document"), {"The main menu and what it needs..."}));
-	const std::vector<EditorRequest> planning = ui.drain();
-	const EditorRequest *menu = only(planning, EditorRequestKind::PreviewInstallImport);
-	CHECK(menu && menu->names == std::vector<std::string>({"main.mnu"}) && menu->with_dependencies,
-	      "the main menu with what it needs, planned");
 }
 
 } // namespace
@@ -479,7 +506,8 @@ void test_modals_one_at_a_time() {
 	choose(ui, "File", {"New project..."});
 	run.settle();
 	CHECK(v.workspace.new_project.open && shows("New project"), "File > New project...: the form's modal");
-	session.handle(request::set_workspace("{\"new_project\": {\"dir\": \"" + dir.file("other") + "\", \"title\": \"Other\"}}"));
+	session.handle(request::set_workspace("{\"new_project\": {\"making\": \"game\", \"dir\": \"" + dir.file("other") +
+	                                      "\", \"title\": \"Other\"}}"));
 	run.settle();
 	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
 	run.settle();

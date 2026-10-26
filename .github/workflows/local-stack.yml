@@ -7,7 +7,10 @@ name: Local stack
 # compiled here with the compiler cache the Linux jobs share, then laid into
 # the Dockerfiles' build stages: `dev_stack.sh up --prebuilt`, which leaves
 # every runtime stage as it is); the stack comes up with hosted game servers on
-# the synthetic data set (no licensed data); and the smoke test runs against it
+# the synthetic install (no licensed data) as JO's data: the project
+# opennova-project makes of it pushed through the editor's routes, a release
+# built from that revision, validated and published, its tree applied by the
+# data program, nothing uploaded by hand; and the smoke test runs against it
 # (scripts/dev_stack.sh smoke: every program's liveness, an account through the
 # site's API, the gate's answer and a lobby session, the jobs admin API, and a
 # hosted server started through the site on a machine the worker launches,
@@ -24,6 +27,7 @@ on:
       - 'engine/formats/**'
       - 'engine/net/**'
       - 'engine/runtime/**'
+      - 'engine/editor/**'
       - 'CMakeLists.txt'
       - 'backend/**'
       - 'deploy/compose/**'
@@ -42,6 +46,7 @@ on:
       - 'engine/formats/**'
       - 'engine/net/**'
       - 'engine/runtime/**'
+      - 'engine/editor/**'
       - 'CMakeLists.txt'
       - 'backend/**'
       - 'deploy/compose/**'
@@ -76,7 +81,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          lfs: false   # the stack's images and its synthetic data set need no LFS object
+          lfs: false   # the stack's images and its synthetic install need no LFS object
 
       # The stack's script, as infra.yml checks the deploy toolbox's (which also
       # parses the compose files).
@@ -110,9 +115,9 @@ jobs:
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
           opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet
           opennova_novaworld_worker opennova_novaworld_data opennova_serve opennova_hostd
-          opennova_novaworld_stack_smoke
+          opennova_novaworld_stack_smoke opennova_project opennova_update_tool
 
-      - name: Bring the stack up (hosted servers on the synthetic data set)
+      - name: Bring the stack up (hosted servers on a release of the synthetic install's project)
         run: scripts/dev_stack.sh up --synthetic-data --prebuilt build
 
       - name: The smoke test

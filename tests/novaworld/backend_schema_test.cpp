@@ -84,7 +84,8 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
 		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants", "data_set_trees", "data_sets",
+		"cd_key_activations", "cd_keys", "comp_grants", "content_blobs",
+		"content_revisions", "data_set_trees", "data_sets",
 		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
 		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
 		"fleet_machines", "fleet_slot_reports",
@@ -115,7 +116,7 @@ int test_migrations_create_expected_tables() {
 		"billing_customers.livemode", "billing_events.livemode",
 		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
-		"data_sets.retail_updater", "fleet_machines.launch_refused", "fleet_machines.was_draining",
+		"data_sets.retail", "fleet_machines.launch_refused", "fleet_machines.was_draining",
 		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
@@ -685,6 +686,43 @@ int test_hosted_server_game() {
 	return 0;
 }
 
+// A game's project on its data_sets row (0025_content.sql): every seeded game keyed (our own
+// public, the retail ones private) but the runtime; a key and its visibility come together, a key
+// is unique and of its shape, and the runtime takes none. The project tables and the releases
+// name the game by its row.
+int test_game_projects() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	const auto keyed = db.query("SELECT display_name, key, visibility, head FROM data_sets "
+	                            "WHERE key IS NOT NULL ORDER BY key;");
+	const std::vector<std::pair<std::string, std::string>> expected = { { "ACIDGAMBIT", "public" },
+		{ "DFX2", "private" }, { "JO", "private" }, { "JOX01", "private" }, { "NIFTY", "public" } };
+	TEST_EXPECT(keyed.size() == expected.size());
+	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
+		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
+		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
+	TEST_EXPECT(db.query("SELECT 1 FROM data_sets WHERE kind = 'update' AND key IS NULL "
+	                     "AND visibility IS NULL;").size() == 1);
+	TEST_EXPECT(!has_column(db, "data_sets", "retail_updater") && has_column(db, "data_sets", "retail") &&
+	            !has_column(db, "data_sets", "baseline_tree_id") &&
+	            !has_column(db, "data_set_trees", "baseline_tree_id") &&
+	            !has_column(db, "data_set_trees", "source") && has_column(db, "releases", "data_set_id") &&
+	            !has_column(db, "releases", "content_project_id") &&
+	            has_column(db, "content_revisions", "data_set_id") &&
+	            has_column(db, "content_blobs", "data_set_id"));
+	TEST_EXPECT(refused(db, "UPDATE data_sets SET visibility = NULL WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'JO' WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'dfx2' WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'RUNTIME', visibility = 'private' "
+	                        "WHERE kind = 'update';"));
+	TEST_EXPECT(refused(db, "UPDATE data_sets SET visibility = 'secret' WHERE key = 'DFX2';"));
+	db.exec("UPDATE data_sets SET key = 'DFX2X' WHERE key = 'DFX2';");
+	TEST_EXPECT(db.query("SELECT 1 FROM data_sets WHERE key = 'DFX2X';").size() == 1);
+	TEST_EXPECT(refused(db, "INSERT INTO data_set_trees (data_set_id, state) SELECT id, 'uploading' "
+	                        "FROM data_sets WHERE key = 'JO';"));
+	return 0;
+}
+
 // The billing tables (0002_billing.sql) and the comp grants beside them
 // (0017_capacity_addresses.sql): a grant's range and items, an account's delete
 // taking its grants, a subscription's item and tier rules, the indexes, an
@@ -1075,6 +1113,7 @@ int main(int argc, char **argv) {
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
 	if (test_hosted_server_game() != 0) return 1;
+	if (test_game_projects() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;

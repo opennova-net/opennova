@@ -70,9 +70,9 @@ std::string original_finding_key(const Diagnostic &d) {
 // and project checks (nothing of the session's), its steps' time.
 struct OriginalFiles::Run {
 	std::shared_ptr<const ProjectDocument> document;
-	// The game install's files as the project imports them (assets/install_view.h: as the game is served them, with
-	// `/exp` for a project that builds on an installed expansion and under the project's names for one that builds as
-	// an expansion), by logical name.
+	// The install's files through the view want named (assets/install_view.h: as the game is served them, with `/exp`
+	// for a project that builds on an installed expansion and under the project's names for one that builds as an
+	// expansion), by logical name.
 	std::shared_ptr<InstallFileSource> files;
 	ProjectPaths paths;
 	std::vector<std::string> names; // the install's files as the game serves them
@@ -100,21 +100,17 @@ OriginalFiles::OriginalFiles() : data_(std::make_shared<const OriginalData>()) {
 
 OriginalFiles::~OriginalFiles() = default;
 
-void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
+void OriginalFiles::want(const InstallSpec &install, const std::shared_ptr<const ProjectDocument> &document,
                          const void *scan, const std::vector<std::string> &names) {
-	const std::string game = document ? document->target_game : std::string();
-	// The install as the project imports it moves with the project's expansion (install_spec): another one
+	// The view moves with the project's game and expansion (install_spec, installed_expansion_spec): another one
 	// is another install to judge against (ADR 0046 S16).
-	const ProjectExpansion expansion = document ? document->expansion : ProjectExpansion();
-	if (install != install_ || game != game_ || expansion != expansion_ || !document_ || !document) {
+	if (install != install_ || !document_ || !document) {
 		clear();
 		install_ = install;
-		game_ = game;
-		expansion_ = expansion;
 		document_ = document;
 		scan_ = scan;
 		wanted_.insert(names.begin(), names.end());
-		if (!install_.empty() && document_) start();
+		if (!install_.root.empty() && document_) start();
 		return;
 	}
 	document_ = document;
@@ -192,7 +188,7 @@ void OriginalFiles::add_scope_missions() {
 std::string OriginalFiles::folder_state() const {
 	std::vector<std::string> entries;
 	std::error_code ec;
-	fs::directory_iterator it(system_path(install_), ec);
+	fs::directory_iterator it(system_path(install_.root), ec);
 	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
 		std::error_code status;
 		if (!it->is_regular_file(status)) continue;
@@ -224,7 +220,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 		run_->document = document_;
 		auto game = std::make_unique<InstallView>();
 		std::string why;
-		if (!game->open(install_spec(install_, *document_), why)) {
+		if (!game->open(install_, why)) {
 			// An install that does not mount: none of the project's findings is the original's.
 			run_.reset();
 			pending_.clear();
@@ -236,7 +232,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 		}
 		mounted_ = true;
 		run_->files = std::make_shared<InstallFileSource>(std::move(game));
-		run_->paths = ProjectPaths::for_root(install_);
+		run_->paths = ProjectPaths::for_root(install_.root);
 		run_->paths.files = run_->files;
 		for (const InstallFile &file : run_->files->view().files()) run_->names.push_back(file.name);
 		std::sort(run_->names.begin(), run_->names.end(), [](const std::string &a, const std::string &b) {
@@ -345,7 +341,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 			}
 			auto game = std::make_unique<InstallView>();
 			std::string why;
-			if (!game->open(install_spec(install_, *document_), why)) {
+			if (!game->open(install_, why)) {
 				start(); // the next step finds it does not mount
 				return false;
 			}
@@ -369,9 +365,7 @@ void OriginalFiles::publish(OriginalData data) {
 }
 
 void OriginalFiles::clear() {
-	install_.clear();
-	game_.clear();
-	expansion_ = ProjectExpansion();
+	install_ = InstallSpec();
 	document_.reset();
 	folder_.clear();
 	scan_ = nullptr;

@@ -35,6 +35,22 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::CancelImport}, "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
+	// A check and a push read the files (a save waits), a bind reads which project is open (its binding goes into
+	// the project's .opennova/content/, so a close waits or cancels it), and a pull writes the files and the
+	// documents read again, as an import's write; each gives way to content_cancel.
+	{OperationKind::ContentCheck, "content_check", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Checking",
+	 "the NovaWorld check"},
+	{OperationKind::ContentBind, "content_bind", HoldsProject, HoldsSlot, {}, {K::ContentCancel}, "Binding",
+	 "the binding"},
+	{OperationKind::ContentPull, "content_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
+	 {K::ContentCancel}, "Pulling", "the pull"},
+	{OperationKind::ContentPush, "content_push", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Pushing",
+	 "the push"},
+	// A base export reads the open project's setting of its base game (a settings change waits, a close cancels
+	// it) and none of its files (an edit and a save go on); a Build, a Play and an Export join it, the build
+	// starting once the base is in (session/base_export.h).
+	{OperationKind::BaseExport, "base_export", HoldsProject, HoldsSlot, {K::Build, K::Play, K::Export}, {},
+	 "Exporting the base game", "the base game's export"},
 };
 
 constexpr bool every_operation_writes_the_slot() {
@@ -85,6 +101,7 @@ uint64_t OperationSlot::start(std::unique_ptr<SessionOperation> operation) {
 	if (operation_ || !operation) return 0;
 	operation_ = std::move(operation);
 	id_ = next_id_++;
+	follows_ = finishing_; // started by a finish to go on with its work, or 0
 	done_ = false;
 	return id_;
 }
@@ -106,13 +123,26 @@ bool OperationSlot::run_to_end() {
 bool OperationSlot::finish(SessionCore &core) {
 	if (!done()) return false;
 	std::unique_ptr<SessionOperation> operation = std::move(operation_);
-	const uint64_t id = id_;
+	const uint64_t id = id_, follows = follows_;
 	id_ = 0;
+	follows_ = 0;
 	done_ = false;
+	finishing_ = follows ? follows : id; // what its finish starts goes on with the work this one went on with
 	OperationOutcome outcome = operation->finish(core);
+	finishing_ = 0;
 	outcome.id = id;
 	outcome.kind = operation->kind();
+	outcome.follows = follows;
+	// The operation its finish started goes on under its id (a base export's Build): the id it took is
+	// never handed out again, as no id is, and a wait on this one waits on it. Any other is the one that
+	// follows (then), which runs now.
+	const bool hands_on = operation_ && operation->hands_on_id();
+	outcome.then = operation_ && !hands_on ? id_ : 0;
 	last_ = std::move(outcome);
+	if (hands_on) {
+		id_ = id;
+		follows_ = follows;
+	}
 	return true;
 }
 
@@ -124,8 +154,10 @@ bool OperationSlot::cancel() {
 		return true;
 	}
 	last_ = OperationOutcome{id_, operation_->kind(), OperationEnd::Cancelled, {}};
+	last_.follows = follows_;
 	operation_.reset();
 	id_ = 0;
+	follows_ = 0;
 	done_ = false;
 	return true;
 }

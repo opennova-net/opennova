@@ -13,6 +13,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/clip_sounds.h>
+#include <editor/session/content_controller.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
@@ -59,8 +60,10 @@ struct ProjectSession::Impl {
 			disk(core),
 			navigation(core),
 			chores(core),
-			sculpt(core) {
-		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation, &chores, &sculpt});
+			sculpt(core),
+			content(core) {
+		core.bind({&documents, &problems, &play, &imports, &renames, &guard, &disk, &navigation, &chores, &sculpt,
+		           &content});
 	}
 
 	EditorPreferences preferences;
@@ -75,6 +78,7 @@ struct ProjectSession::Impl {
 	NavigationController navigation;
 	FileChores chores;
 	TerrainSculpt sculpt;
+	ContentController content;
 	uint64_t handle_entries = 0;
 };
 
@@ -98,6 +102,14 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 void ProjectSession::set_file_link(FileLink link) {
 	impl_->play.set_file_link(std::move(link));
+}
+
+void ProjectSession::set_content_transport(ContentTransport *transport) {
+	impl_->content.set_transport(transport);
+}
+
+void ProjectSession::set_content_accounts(ContentAccountStore *accounts) {
+	impl_->content.set_accounts(accounts);
 }
 
 bool ProjectSession::handle(const EditorRequest &request) {
@@ -127,6 +139,13 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"dir of new_project or open_project, the game install or the runtime as "
 				"settings.game_install or settings.runtime_executable of apply_project_settings, "
 				"files to import as the paths of preview_import.";
+	}
+	// A kind the session serves for a person alone (content_sign_in: a password) is refused alike.
+	if (token && token->is_string() && request_kind_from_token(token->string, kind) &&
+			request_kind_row(kind).served_by == ServedBy::SessionNeedsPerson) {
+		ok = false;
+		error = std::string(request_kind_row(kind).token) +
+				" needs a person: a password is typed into the NovaWorld window, never sent over the wire.";
 	}
 	// Whether a request's edits are a text document's spans (S13 D9): the document open at the path
 	// (the active one for none), else the file the project's scan lists there, by the kind the scan
@@ -261,6 +280,7 @@ void ProjectSession::poll() {
 	session.core.step_operation(rest);
 	times.add(FramePhase::Operation, steady_clock_us() - validation_end);
 	session.play.poll();
+	session.content.poll(); // a sign-in's and a project list's calls, outside the slot
 	// S25: a bake that finished lands in its stroke's step; a stroke that ended starts its file's bake.
 	session.sculpt.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
@@ -292,7 +312,7 @@ bool ProjectSession::busy() const {
 	return session.problems.validating() || view.activity.validation.running || view.activity.operation.running() ||
 	       view.project.outside_waiting > 0 || view.project.outside_sweeping || !view.documents.baking.empty() ||
 	       (view.project.open && view.documents.thumbnails && view.documents.thumbnails->pending()) ||
-	       view.workspace.sound.state == WorkspaceView::SoundState::Starting;
+	       view.workspace.sound.state == WorkspaceView::SoundState::Starting || session.content.busy();
 }
 
 void ProjectSession::set_workspace_kept(bool kept) {
@@ -300,7 +320,7 @@ void ProjectSession::set_workspace_kept(bool kept) {
 }
 
 void ProjectSession::run_operations() {
-	while (impl_->core.operations().running()) {
+	while (impl_->core.operations().running() || impl_->content.busy()) {
 		impl_->core.operations().run_to_end();
 		poll();
 	}

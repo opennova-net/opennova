@@ -10,7 +10,6 @@
         <RouterLink v-for="link in siteLinks" :key="link.to" :to="link.to" class="transition hover:text-ink-bright" active-class="text-ink">
           {{ link.label }}
         </RouterLink>
-        <a :href="GITHUB_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">GitHub</a>
         <RouterLink v-if="isAdmin" to="/admin" class="transition hover:text-ink-bright" active-class="text-ink">Admin</RouterLink>
       </nav>
 
@@ -64,7 +63,6 @@
           <RouterLink v-for="link in siteLinks" :key="link.to" :to="link.to" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">
             {{ link.label }}
           </RouterLink>
-          <a :href="GITHUB_URL" target="_blank" rel="noopener" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">GitHub</a>
           <RouterLink v-if="isAdmin" to="/admin" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">Admin</RouterLink>
           <template v-if="ready">
             <template v-if="user">
@@ -92,7 +90,6 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useSession } from '../composables/useSession';
-import { GITHUB_URL } from '../utils/links';
 
 const siteLinks = [
   { to: '/lobby', label: 'Lobbies' },

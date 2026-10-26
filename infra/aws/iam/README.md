@@ -10,7 +10,7 @@ with the account's id and region from the vault.
 | Document | Who carries it | Applied by |
 | --- | --- | --- |
 | `opennova-org.json` | the IAM user `opennova-org` in the management account | the management account's administrator, by hand (below) |
-| `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
+| `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability`, `-downloads` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
 | `opennova-role-boundary.json` | every role `infra/aws` makes in a member account but the machines' two (permissions boundary), and the GitHub deploy role; org appends the exact CI billing reader ARN to prod's boundary alone | the org stack |
 | `opennova-machine-boundary.json` | the machines' instance role and hostd's task role (permissions boundary) | the org stack |
 
@@ -65,6 +65,7 @@ hand.
 | `opennova-deploy-iam` | the stack's roles (under either boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
 | `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its versioning, lifecycle and encryption; its releases read and written, its dumps read and written, never deleted; the game data, `data/*`, is the tasks' roles' alone, never the deploy user's), SSM parameters, its own sessions (ECS Exec), CloudWatch Logs |
 | `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check, the private zone Cloud Map keeps for the fleet program and the static addresses' public zone (`play.<domain>`, `infra/aws/edge.tf`), budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
+| `opennova-deploy-downloads` | the downloads host (`infra/aws/downloads.tf`): its bucket's policy (the bucket itself is `-data`'s `opennova-*` buckets) and its objects (an operator's publish through the toolbox's `aws s3 sync`), its CloudFront distribution (tagged with the deployment) and origin access control, and its certificate in us-east-1 (ACM, tagged) |
 
 Beside them the org stack gives the user two inline policies: its Terraform states (in its
 account's state bucket, `infra/aws/*`; prod's also `infra/zone/*` and `infra/github/*`, the shared
@@ -155,11 +156,11 @@ AccessDenied naming the action):
   under `ecs:container-name` `web`, the session plugin's `ssmmessages:OpenDataChannel`; no
   `ssm:StartSession`, which ECS makes itself): the deploy's log says "every ready machine's
   agent reports ..." rather than naming a refused call;
-- the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
-  the first upload on the Game data page, web's `s3:PutObject` of the parts the browser
-  sends it (as its task role, under the role boundary); at the first tree deleted on the page or
-  pruned by the data program, `s3:ListBucketMultipartUploads` (no prefix condition: the action's
-  context carries none) and `s3:DeleteObject`; at the first server, hostd's task role's
+- the first `infra apply` with `hosted_enabled`: the store's lifecycle rules; then, at
+  the first runtime release Publish uploads, web's `s3:PutObject` of the parts it sends (as
+  its task role, under the role boundary); at the first release deleted or tree pruned by the
+  data program, `s3:ListBucketMultipartUploads` (no prefix condition: the action's context
+  carries none) and `s3:DeleteObject`; at the first server, hostd's task role's
   `aws s3 sync` of a tree (`s3:ListBucket` with `s3:prefix` `data/trees/*`, `s3:GetObject`);
 - a worker's first machine launch under the role boundary (the pinned image, by `ec2:ImageID`),
   that machine's ECS agent registering in the fleet cluster and polling (the instance role's ECS

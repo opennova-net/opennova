@@ -10,7 +10,7 @@
       <nav aria-label="Project" class="space-y-2">
         <p class="font-semibold text-ink">Project</p>
         <ul class="space-y-1.5 text-ink-muted">
-          <li><a :href="RELEASES_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">Downloads</a></li>
+          <li><RouterLink :to="{ path: '/', hash: '#downloads' }" class="transition hover:text-ink-bright">Downloads</RouterLink></li>
           <li><a :href="GITHUB_URL" target="_blank" rel="noopener" class="transition hover:text-ink-bright">GitHub</a></li>
         </ul>
       </nav>
@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
-import { GITHUB_URL, RELEASES_URL } from '../utils/links';
+import { GITHUB_URL } from '../utils/links';
 
 // The admin pages are wide; the footer lines up with them.
 const route = useRoute();

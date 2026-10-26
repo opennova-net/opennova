@@ -4,8 +4,9 @@
 #include "core/object_store.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
-#include "data_sets/data_set_routes.h"
+#include "data_sets/release_build.h"
 #include "http_json.h"
+#include "jobs/job_queue.h"
 
 #include <base/io/strutil.h>
 
@@ -53,6 +54,17 @@ crow::response no_such_release() {
 	return json_error(404, "not_found", "no release has this id");
 }
 
+crow::response built_from_project() {
+	return json_error(409, "built_from_project",
+			"this game's releases are built from its project, never uploaded");
+}
+
+// Whether the game `data_set_id` names has a project, whose releases are built (release_build.h).
+bool has_project(db::Database &db, std::optional<int64_t> data_set_id) {
+	const std::optional<DataSetRow> game = data_set_id ? find_data_set(db, *data_set_id) : std::nullopt;
+	return game && !game->key.empty();
+}
+
 bool printable_ascii(std::string_view s) {
 	return std::all_of(s.begin(), s.end(), [](char c) { return c >= 0x21 && c <= 0x7E; });
 }
@@ -87,6 +99,13 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	out["bytes"] = r.bytes;
 	out["package_product"] = r.package_product;
 	out["error"] = r.error;
+	std::optional<DataSetRow> game;
+	if (r.data_set_id) {
+		out["data_set_id"] = *r.data_set_id;
+		game = find_data_set(db, *r.data_set_id);
+	} else {
+		out["data_set_id"] = nullptr;
+	}
 	std::vector<crow::json::wvalue> sections;
 	for (const ReleaseSection &s : list_sections(db, r.id)) {
 		crow::json::wvalue section;
@@ -112,6 +131,20 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	out["created_at"] = r.created_at;
 	out["published_at"] = r.published_at; // "" until published, and again once retired
 	out["retired_at"] = r.retired_at; // "" until retired
+	// A built release's source (ADR 0069 d7): its game's project key, the revisions built, the
+	// version, and what the build's tools said; null for an uploaded package.
+	if (r.content_revision > 0 && game) {
+		out["source"]["project"] = game->key;
+		out["source"]["revision"] = r.content_revision;
+		if (r.base_revision > 0)
+			out["source"]["base_revision"] = r.base_revision;
+		else
+			out["source"]["base_revision"] = nullptr;
+	} else {
+		out["source"] = nullptr;
+	}
+	out["version"] = r.version;
+	out["build_log"] = r.build_log;
 	return out;
 }
 
@@ -159,10 +192,14 @@ crow::response ReleaseRoutes::list(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/releases — {"name"?, "size"}: a release uploading and its package's
-// multipart upload (key updates/upload-<id>.sfs), 201 {"release", "upload": {"key",
-// "upload_id", "part_size"}}; 400 invalid_json, missing_field, invalid_field; 503
-// store_unavailable (no store, or one that took no upload).
+// POST /api/admin/releases — {"name"?, "size", "data_set_id"?}: an uploaded release of a game
+// with no project (the runtime's, from the Publish workflow; one that names no game becomes its
+// package's base section's once validated) and its package's multipart upload (key
+// updates/upload-<id>.sfs), 201 {"release", "upload": {"key", "upload_id", "part_size"}}; 400
+// invalid_json, missing_field, invalid_field (data_set_id: no game has the id); 409
+// built_from_project (the game named has a project: its releases are built, and release.validate
+// refuses an upload of one whatever it names); 503 store_unavailable (no store, or one that took
+// no upload).
 crow::response ReleaseRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -172,11 +209,12 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return json_error(400, "invalid_json");
 	const auto name = body->text("name");
 	const auto size = body->integer("size");
+	const auto data_set_id = body->null("data_set_id") ? std::nullopt : body->integer("data_set_id");
 	if (body->wrong_type())
 		return json_error(400, "invalid_field");
 	if (!size)
 		return field_error(400, "missing_field", "size", "size (the package's bytes) is required");
-	if (*size <= 0 || *size > DataSetRoutes::kPartSize * DataSetRoutes::kMaxParts)
+	if (*size <= 0 || *size > kPartSize * kMaxParts)
 		return field_error(400, "invalid_field", "size",
 				"size is the package's bytes, at most 32 MiB x 10000");
 	if (name &&
@@ -188,7 +226,14 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		const int64_t id = create_release(*db_conn, name.value_or(""), *size, creator_of(caller));
+		if (data_set_id) {
+			if (!find_data_set(*db_conn, *data_set_id))
+				return field_error(400, "invalid_field", "data_set_id", "no game has this id");
+			if (has_project(*db_conn, data_set_id))
+				return built_from_project();
+		}
+		const int64_t id =
+				create_release(*db_conn, name.value_or(""), *size, creator_of(caller), data_set_id);
 		const std::string key = release_upload_key(id);
 		std::string upload_id, error;
 		if (!store_->multipart_begin(key, upload_id, error)) {
@@ -205,7 +250,7 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		out["release"] = release_json(*db_conn, *find_release(*db_conn, id));
 		out["upload"]["key"] = key;
 		out["upload"]["upload_id"] = upload_id;
-		out["upload"]["part_size"] = DataSetRoutes::kPartSize;
+		out["upload"]["part_size"] = kPartSize;
 		return json_reply(201, out);
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/releases", e);
@@ -213,22 +258,22 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 }
 
 // PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u> — the body (application/octet-stream,
-// at most DataSetRoutes::kPartSize) handed to the store as part n (1 to 10000) of the
-// package's upload, as the trees' part route does: 200 {"etag"} (what the completion reports
-// for it); 400 invalid_field (part_number, upload_id); 404 not_found; 409 not_uploading; 413
-// too_large; 502 store_error; 503 store_unavailable. Crow caps no request body, so this check
-// is the one after nginx's.
+// at most kPartSize) handed to the store as part n (1 to 10000) of the package's upload: 200
+// {"etag"} (what the completion reports for it); 400 invalid_field (part_number, upload_id); 404
+// not_found; 409 not_uploading, built_from_project (its game has a project); 413 too_large; 502
+// store_error; 503 store_unavailable. Crow caps no request body, so this check is the one after
+// nginx's.
 crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64_t part) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
-	if (part < 1 || part > static_cast<uint64_t>(DataSetRoutes::kMaxParts))
+	if (part < 1 || part > static_cast<uint64_t>(kMaxParts))
 		return field_error(400, "invalid_field", "part_number", "the part number is 1 to 10000");
 	const char *upload_id = req.url_params.get("upload_id");
 	if (upload_id == nullptr || !valid_upload_id(upload_id))
 		return field_error(
 				400, "invalid_field", "upload_id", "upload_id is the one the upload began with");
-	if (req.body.size() > static_cast<size_t>(DataSetRoutes::kPartSize))
+	if (req.body.size() > static_cast<size_t>(kPartSize))
 		return json_error(413, "too_large", "a part is at most 32 MiB");
 	try {
 		auto db_conn = pool_.acquire();
@@ -237,6 +282,8 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
 			return json_error(409, "not_uploading", "this release is not uploading");
+		if (has_project(*db_conn, release->data_set_id))
+			return built_from_project();
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string etag, error;
@@ -254,7 +301,7 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 // POST /api/admin/releases/<id>/complete — {"upload_id", "parts": [{"part_number", "etag"}]}:
 // the package's upload completed in the store, then the release validating with its
 // release.validate job in one transaction, 202 {"release"}; 400 invalid_json, invalid_field;
-// 404 not_found; 409 not_uploading; 502 store_error; 503 store_unavailable.
+// 404 not_found; 409 not_uploading, built_from_project; 502 store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -274,7 +321,7 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 		int64_t number = 0;
 		if (item.t() != crow::json::type::Object || !member_whole(item, "part_number", number) ||
 				!member_string(item, "etag", part.etag) || number < 1 ||
-				number > DataSetRoutes::kMaxParts || part.etag.empty() || part.etag.size() > 256 ||
+				number > kMaxParts || part.etag.empty() || part.etag.size() > 256 ||
 				!printable_ascii(part.etag))
 			return field_error(
 					400, "invalid_field", "parts", "parts is a list of {part_number, etag}");
@@ -290,6 +337,8 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 			return no_such_release();
 		if (release->status != ReleaseStatus::Uploading)
 			return json_error(409, "not_uploading", "this release is not uploading");
+		if (has_project(*db_conn, release->data_set_id))
+			return built_from_project();
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;
@@ -375,7 +424,8 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 // release: its package objects removed (the upload key, which an invalid one keeps, with
 // the upload in flight aborted, and the validated key once it has a sha; a missing object
 // is no failure), the row gone, 204; 404 not_found; 409 published (retire it first),
-// validating (the data program is on it); 502 store_error; 503 store_unavailable.
+// validating or building (the data program is on it; a building one whose job ended may go); 502
+// store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -390,6 +440,12 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		if (release->status == ReleaseStatus::Validating)
 			return json_error(
 					409, "validating", "the data program is validating this release; wait for it");
+		// A build whose job ended without settling its row (its attempts spent on a data task
+		// replaced mid-build) leaves it building with no one on it: that one may go.
+		if (release->status == ReleaseStatus::Building &&
+				jobs::job_pending(*db_conn, release_build_key(release->id)))
+			return json_error(
+					409, "building", "the data program is building this release; wait for it");
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;

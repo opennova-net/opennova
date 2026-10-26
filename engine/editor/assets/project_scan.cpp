@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/project_walk.h>
 #include <editor/import/import_context.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
@@ -32,30 +33,9 @@ fs::path under(const fs::path &root, const std::string &relative) {
 	return root / path_of(relative).make_preferred();
 }
 
-bool same_path(const fs::path &a, const fs::path &b) {
-	std::error_code ec;
-	const fs::path ca = fs::weakly_canonical(a, ec);
-	if (ec) return false;
-	const fs::path cb = fs::weakly_canonical(b, ec);
-	if (ec) return false;
-	return ca == cb;
-}
-
-// The export folder, or the staging or set-aside folder an export keeps beside it (ADR 0046 S16): no
-// file of the project's, whatever an export cut short or a removal refused left in it.
-bool export_folder(const fs::path &dir, const fs::path &export_dir) {
-	if (same_path(dir, export_dir)) return true;
-	const fs::path name = export_dir.filename();
-	for (const char *suffix : {kExportStagingSuffix, kExportPreviousSuffix}) {
-		fs::path beside = export_dir;
-		beside.replace_filename(fs::path(name).concat(suffix));
-		if (same_path(dir, beside)) return true;
-	}
-	return false;
-}
-
-// Whether the walk from `root` reaches the file at `path`: it descends into no dot-directory and
-// not into the export output directory, and passes the project file by.
+// Whether the walk from `root` reaches the file at `path`: it descends into no folder the walk
+// passes over (walk_skips_folder: a dot-directory, the export output directory), and passes the
+// project file by.
 bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::path &path) {
 	if (path.parent_path() == root && path.filename() == kProjectFileName) return false;
 	std::error_code ec;
@@ -66,7 +46,7 @@ bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::pa
 		if (std::next(it) == relative.end()) break; // the file itself
 		if (*it == "..") return false;
 		dir /= *it;
-		if (is_dot_directory(dir) || export_folder(dir, export_dir)) return false;
+		if (walk_skips_folder(dir, export_dir)) return false;
 	}
 	return true;
 }
@@ -83,7 +63,7 @@ bool folder_reached(const fs::path &root, const fs::path &export_dir, const fs::
 	for (const fs::path &part : relative) {
 		if (part == "..") return false;
 		at /= part;
-		if (is_dot_directory(at) || export_folder(at, export_dir)) return false;
+		if (walk_skips_folder(at, export_dir)) return false;
 	}
 	return true;
 }
@@ -273,7 +253,7 @@ bool list_project_folder(const ProjectPaths &paths, const ProjectDocument &doc, 
 		const fs::path path = it->path();
 		std::error_code kind;
 		if (it->is_directory(kind)) {
-			if (!is_dot_directory(path) && !export_folder(path, export_dir)) folders.push_back(listed_key(root, path));
+			if (!walk_skips_folder(path, export_dir)) folders.push_back(listed_key(root, path));
 		} else if (it->is_regular_file(kind) && !(dir == root && path.filename() == kProjectFileName)) {
 			files.push_back(listed_key(root, path));
 		}
@@ -322,7 +302,7 @@ bool ProjectScan::step(uint64_t budget) {
 			const fs::directory_entry &entry = *walk_;
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
-				if (is_dot_directory(path) || export_folder(path, export_dir_)) walk_.disable_recursion_pending();
+				if (walk_skips_folder(path, export_dir_)) walk_.disable_recursion_pending();
 				else folders_[listed_key(root_, path)] = io::file_modified_ticks(path); // before the walk lists it
 			} else if (entry.is_regular_file(ec) &&
 					!(path.parent_path() == root_ && path.filename() == kProjectFileName)) {

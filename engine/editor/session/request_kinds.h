@@ -36,6 +36,10 @@ enum class ServedBy : uint8_t {
 	Shell, // the shell alone: an OS's file manager (RevealPath)
 	ShellNeedsPerson, // the shell, with a person to answer its native dialog (the pickers): never
 					  // through the editor MCP, whose requests pass the path instead
+	// The session, by its row's handler, for a person alone: never through the editor MCP or the command
+	// line, whose requests are refused by kind before their fields are read (content_sign_in, whose
+	// password a person types into the Content window).
+	SessionNeedsPerson,
 };
 
 // What serves a session row: a function over the session's core, which reaches every part of the

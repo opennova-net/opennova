@@ -9,6 +9,7 @@
 
 #include "accounts/auth.h"
 #include "accounts/mail_stack.h"
+#include "content/content_urls.h"
 #include "billing/billing_stack.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
@@ -125,8 +126,8 @@ int run(const program::Boot &boot) {
 	// Whether the routes queue the welcome and reset mails (mail.send jobs, a
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
-	// The object store the data set routes upload into and read (the admin's
-	// data sets page). Declared before the listener, which it outlives.
+	// The object store the games' routes read and write (the admin's Games
+	// page, the editor's pushes). Declared before the listener, which it outlives.
 	ObjectStoreStack store;
 	if (hosting.store_ok) {
 		std::string error;
@@ -192,6 +193,22 @@ int run(const program::Boot &boot) {
 	// alone); GET /livez and /healthz read the main loop's last check.
 	Watchdog watchdog;
 
+	// The content store's files (content/content_urls.h, ADR 0069): straight between the editor and
+	// S3 through URLs presigned with web's task role; a directory's store has none, and the content
+	// routes carry the bytes. Declared before the listener, which it outlives.
+	std::optional<content::S3ContentUrls> content_urls;
+	if (store.store && hosting.store.kind == ObjectStoreConfig::Kind::S3) {
+		infra::AwsApiConfig aws = infra::infra_config_from_env(infra_stack.scratch.path().u8string()).aws;
+		const std::string why = infra::AwsApi::check_config(aws);
+		if (why.empty()) {
+			content_urls.emplace(*infra_stack.runner, std::move(aws), hosting.store);
+			std::printf("[boot] content store: files move through S3's presigned URLs\n");
+		} else {
+			std::fprintf(stderr, "[boot] WARN content store: no presigned URLs (%s); files move through web\n",
+					why.c_str());
+		}
+	}
+
 	HttpListener http(boot.pool, redis_pool);
 	http.set_unknown_tracker(&unknown_tracker);
 	http.set_mail_enabled(mail.on);
@@ -221,11 +238,12 @@ int run(const program::Boot &boot) {
 		for (jobs::PeriodicJob &p : hosted::data_set_schedule())
 			schedules.push_back(std::move(p));
 	http.set_job_schedules(std::move(schedules));
-	// The game data routes (data_sets/) work on the deployment's object store
+	// The games' routes (data_sets/, content/) work on the deployment's object store
 	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
 	// routes answer 503 store_unavailable.
 	ObjectStore *object_store = store.store.get();
 	http.set_object_store(object_store);
+	http.set_content_urls(content_urls ? &*content_urls : nullptr);
 	if (!http.start(config))
 		return program::fatal("HTTP listener start failed");
 

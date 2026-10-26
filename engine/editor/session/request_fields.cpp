@@ -216,7 +216,8 @@ constexpr RequestField kFields[] = {
 	{ F::All, "all", J::Boolean,
 			"Every file of the game install chosen (its archives' and the loose files the game ships "
 			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
-			"of everything is everything; a refresh_changed_sources looks at every file of the project "
+			"of everything is everything; a new_project is a game you own, every file of its game imported "
+			"as it opens; a refresh_changed_sources looks at every file of the project "
 			"(DI-01: the editor gaining the focus); a delete_folder takes the folder with what it holds (DI-25)." },
 	{ F::Planned, "planned", J::Boolean,
 			"An import takes the open import preview's checked rows as the dialog's Import takes them (the "
@@ -328,6 +329,27 @@ constexpr RequestField kFields[] = {
 			"files and then the game install's: the mission's own .til, else the terrain's own; a terrain's own under no "
 			"mission), opened quietly; path, when given, must name that file. The batch is a step of the view's undo, save "
 			"and close scope; an empty batch opens the file alone, and makes nothing where it is not made yet." },
+	{ F::Server, "server", J::String,
+			"content_sign_in's service (ADR 0069): its address, https:// before a bare host (\"opennova.net\")." },
+	{ F::Username, "username", J::String, "content_sign_in's account name on the service." },
+	{ F::Password, "password", J::String,
+			"content_sign_in's password: a person's alone, typed into the NovaWorld window; content_sign_in is never "
+			"served over the wire." },
+	{ F::ProjectKey, "project_key", J::String,
+			"content_get's and content_bind's project, by its key (\"JO\", \"JOX01\"): what the "
+			"content section's projects list." },
+	{ F::Message, "message", J::String,
+			"content_push's message: what the revision changes, 1 to 2000 bytes, line breaks kept." },
+	{ F::Resolution, "resolution", J::String,
+			"content_resolve's settling of the pull's conflict at path: keep_mine (the folder's file stays, a change "
+			"to push over the revision's) or take_theirs (the revision's file put in its place, or the folder's "
+			"removed where the revision has none)." },
+	{ F::Version, "version", J::String,
+			"content_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
+			"\"1.7.5.8\")." },
+	{ F::Revision, "revision", J::Integer,
+			"content_restore's revision of the project, whose file at path is put back (left out, 0: "
+			"the folder's base, which discards its changes to the file)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

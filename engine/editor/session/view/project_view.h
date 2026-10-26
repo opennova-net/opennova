@@ -60,6 +60,10 @@ struct ProjectView {
 		std::string description;
 	};
 	std::vector<InstallExpansion> install_expansions;
+	// The same of the game install itself, which differs for an expansion of a project's base game (T5:
+	// install_expansions are that game's export's): the installed expansions Import offers an expansion
+	// project, whose files it imports from the game install (list_installed_expansion_choices).
+	std::vector<InstallExpansion> game_install_expansions;
 	// The records the game's Mods list lists in that same folder (vfs_expansion_records: every folder
 	// under expansion/ in the game's order, its first 16, each by its folder's name with its name and
 	// description), which a menu tried in Try mode lists after the base game's row (D-MNU-31).

@@ -42,7 +42,7 @@ function refusal(status: number, data: unknown, headers: Record<string, string> 
 describe('fetchMyServers', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('reads the entitlement, the data sets and the servers', async () => {
+  it('reads the entitlement, the games and the servers', async () => {
     // One server on a shared machine and a dedicated machine free.
     const body = serversResponse([hostedServer(1), hostedServer(2, { state: 'stopped' })], {
       entitlement: { max_servers: 2, shared_servers: 1, own_machines: 1 },
@@ -88,7 +88,7 @@ describe('fetchMyServers', () => {
     if (!result.ok) expect(result.error.code).toBe('unknown');
   });
 
-  it('drops a malformed data set but keeps the rest', async () => {
+  it('drops a malformed game but keeps the rest', async () => {
     const good = serversResponse([]);
     get.mockResolvedValue(reply({ ...good, data_sets: [good.data_sets[0], { id: 'x' }, { ...good.data_sets[1], limits: { max_players: { min: 5, max: 2 } } }] }));
     const result = await fetchMyServers();

@@ -9,9 +9,10 @@
 
 namespace opennova::editor {
 
-// What a project's expansion fields hold (ADR 0046 S16): what it builds on (an installed expansion's
-// folder name, "" the base game), whether it builds as an expansion, and that expansion's name. The
-// workspace holds it for the new-project form and the project settings (the MCP gaps lane).
+// What a project's expansion fields hold (ADR 0046 S16): the game it changes (an installed expansion's
+// folder name, "" the base game), whether it ships as a mod (an expansion of its own), and that mod's short
+// name. The workspace holds it for the project settings (the MCP gaps lane); the new-project form asks what is
+// being made instead (welcome_view.h).
 struct ExpansionChoice {
 	std::string builds_on;
 	bool as_expansion = false;
@@ -23,13 +24,13 @@ struct ExpansionChoice {
 	}
 };
 
-// The fields a project's expansion is set with (ADR 0046 S16), drawn by the new-project form and the
-// project settings dialog alike over what the workspace holds of them: "Builds on" (the base game, or one of
-// the game install's expansions by its folder's name and the Mods list's name) and "Build as an expansion"
-// with its name, checked as the name is typed (expansion_name_problem: the game's own rule), the problem
+// The fields an existing project's expansion is changed with (ADR 0046 S16), drawn by the project settings
+// dialog over what the workspace holds of them, in the new-project form's words: "Changes" (the base game, or
+// one of the game install's expansions by its folder's name and the Mods list's name) and "Ships as a mod"
+// with its "Short name", checked as the name is typed (expansion_name_problem: the game's own rule), the problem
 // shown under it, and "Base game's project" (T5: a standalone project's folder, whose export is the base game
-// in place of the install's; it builds on the base game, so Builds on then offers nothing else). The text
-// fields are their own; what they hold is the caller's.
+// in place of the install's; it changes the base game, so Changes then offers nothing else). The text fields
+// are their own; what they hold is the caller's.
 class ExpansionFields {
 public:
 	// Draws them over `choice` (what the caller holds) and the install's expansions `installed` (the open

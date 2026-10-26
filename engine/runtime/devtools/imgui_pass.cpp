@@ -385,6 +385,14 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 		if (!window.is_closeable()) {
 			window.open = true;
 		}
+		if (open_before_.size() <= static_cast<size_t>(i)) {
+			open_before_.resize(static_cast<size_t>(i) + 1, 1);
+		}
+		if (window.open && !open_before_[static_cast<size_t>(i)] && !window.focus_requested() &&
+				std::find(layout_focus_.begin(), layout_focus_.end(), window.title()) == layout_focus_.end()) {
+			layout_focus_.push_back(window.title());
+		}
+		open_before_[static_cast<size_t>(i)] = window.open ? 1 : 0;
 		if (!window.open) {
 			// A closed window never carries a focus request forward: the pick
 			// that raised it was declined when the window was closed again.

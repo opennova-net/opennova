@@ -7,7 +7,7 @@
 # per deployment account, through its own provider: the state bucket
 # named after the account, versioned, encrypted, private, TLS only and reached
 # by its deploy user, its administrator role and its root alone; the deploy
-# user with the six policies (each under IAM's 6,144 characters, naming its own
+# user with the seven policies (each under IAM's 6,144 characters, naming its own
 # account alone), its key, its state access (prod's the shared stacks' too,
 # nobody's the org stack's) and its guard; the two boundaries (the role
 # boundary, the machine boundary), each under 6,144 characters, which the deploy
@@ -258,8 +258,8 @@ run "deploy_users" {
     error_message = "each deploy user's key reaches the toolbox through the sensitive output deploy_keys"
   }
   assert {
-    condition     = toset(keys(module.prod.documents.deploy)) == toset(["network", "compute", "ecs", "iam", "data", "observability"])
-    error_message = "the deploy user carries the six opennova-deploy-* policies"
+    condition     = toset(keys(module.prod.documents.deploy)) == toset(["network", "compute", "ecs", "iam", "data", "observability", "downloads"])
+    error_message = "the deploy user carries the seven opennova-deploy-* policies"
   }
   assert {
     condition = alltrue(flatten([for m in [module.prod.documents, module.staging.documents] :
@@ -486,6 +486,14 @@ run "github_deploy_roles" {
       one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "WriteReleases"]) == "arn:aws:s3:::opennova-prod-ops-111111111111/releases/*"
     )
     error_message = "prod's GitHub deploy role hands ECS prod's task roles alone (hostd's among them), points prod's services and its fleet cluster's hostd and writes prod's releases"
+  }
+  assert {
+    condition = (
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "ListDownloads"]) == "arn:aws:s3:::opennova-prod-downloads-111111111111" &&
+      one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "PublishDownloads"]) == "arn:aws:s3:::opennova-prod-downloads-111111111111/*" &&
+      one([for s in jsondecode(module.staging.documents.github).Statement : s.Resource if s.Sid == "PublishDownloads"]) == "arn:aws:s3:::opennova-staging-downloads-222222222222/*"
+    )
+    error_message = "each deployment's GitHub deploy role publishes its own downloads host's files alone"
   }
   assert {
     condition = toset(one([for s in jsondecode(module.prod.documents.github).Statement : s.Resource if s.Sid == "ReadInfraEnv"])) == toset([

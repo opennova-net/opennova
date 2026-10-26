@@ -29,7 +29,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 
 Runtime asset loading is native and the supported object input is 3DI. The
 repository holds no game data: OpenNova's own game downloads through the updater
-on first launch, built from OpenNova Editor projects outside the repository. The
+on first launch, a release NovaWorld builds from the game's OpenNova Editor project,
+which NovaWorld keeps outside the repository. The
 experimental [Blender add-on](tools/blender/opennova_3di/README.md) imports and
 exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for
@@ -117,6 +118,12 @@ sets it automatically. Source checkouts use content exported from an OpenNova
 Editor project or an existing retail install.
 
 ## Downloads
+
+The latest release is on [opennova.net](https://opennova.net/#downloads), whose download
+buttons fetch it from `downloads.opennova.net`; staging's site
+(`staging.opennova.net`) serves a pull request's debug builds from
+`downloads.staging.opennova.net` the same way (DEPLOY.md, "The downloads host"). Every
+release stays on the [GitHub releases](https://github.com/opennova-net/opennova/releases).
 
 CI and tagged releases publish one game zip per game, each the same runtime set up
 for its game: `opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty

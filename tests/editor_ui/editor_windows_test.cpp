@@ -144,7 +144,9 @@ void test_frame_bracket_follows_the_table() {
 	                              K::SplitTexture, K::Quit, K::MoveAsset,
 	                              // DI-25: Files' chores act on the files as saved.
 	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::DeleteFolder, K::UndoFile,
-	                              K::RedoFile};
+	                              K::RedoFile,
+	                              // ADR 0069: a content get, a pull, a push and a restore act on the files as saved.
+	                              K::ContentGet, K::ContentPull, K::ContentPush, K::ContentRestore};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
@@ -2859,6 +2861,7 @@ constexpr Group kGroups[] = {
 	{"board", run_board_tests},           {"space", run_space_tests},
 	{"live", run_live_tests},
 	{"terrain", run_terrain_tests},
+	{"content", run_content_tests},
 };
 
 } // namespace

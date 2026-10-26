@@ -166,8 +166,8 @@ Rows plant(Database &db) {
 	r.launching = hosted::create_machine(db, machine).id;
 
 	// A tree the service holds (its manifest: 1,250 bytes), one it does not.
-	r.tree = db.query("INSERT INTO data_set_trees (data_set_id, state, source, manifest) VALUES (1, "
-					  "'ready', 'baseline', "
+	r.tree = db.query("INSERT INTO data_set_trees (data_set_id, state, manifest) VALUES (1, "
+					  "'ready', "
 					  "'{\"files\":[{\"name\":\"resource.pff\",\"size\":1000},"
 					  "{\"name\":\"localres.pff\",\"size\":250}]}'::jsonb) RETURNING id;")
 					 .front()

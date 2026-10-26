@@ -1,0 +1,148 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DownloadsBucketPolicy",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutBucketPolicy",
+        "s3:DeleteBucketPolicy"
+      ],
+      "Resource": "arn:aws:s3:::opennova-*-downloads-*"
+    },
+    {
+      "Sid": "DownloadsPublishList",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::opennova-*-downloads-*"
+    },
+    {
+      "Sid": "DownloadsPublishObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::opennova-*-downloads-*/*"
+    },
+    {
+      "Sid": "DistributionCreateTagged",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateDistribution",
+        "cloudfront:CreateDistributionWithTags",
+        "cloudfront:TagResource"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*",
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "DistributionManageTagged",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource",
+        "cloudfront:CreateInvalidation"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "DistributionRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:GetInvalidation",
+        "cloudfront:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:distribution/*"
+    },
+    {
+      "Sid": "ResponseHeadersPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateResponseHeadersPolicy",
+        "cloudfront:GetResponseHeadersPolicy",
+        "cloudfront:UpdateResponseHeadersPolicy",
+        "cloudfront:DeleteResponseHeadersPolicy"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:response-headers-policy/*"
+    },
+    {
+      "Sid": "OriginAccessControls",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:UpdateOriginAccessControl",
+        "cloudfront:DeleteOriginAccessControl"
+      ],
+      "Resource": "arn:aws:cloudfront::${account_id}:origin-access-control/*"
+    },
+    {
+      "Sid": "CloudFrontReadHasNoResourceScope",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetCachePolicy",
+        "cloudfront:GetResponseHeadersPolicy",
+        "cloudfront:ListCachePolicies",
+        "cloudfront:ListResponseHeadersPolicies",
+        "cloudfront:ListDistributions",
+        "cloudfront:ListOriginAccessControls",
+        "acm:ListCertificates"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CertificateRequestTagged",
+      "Effect": "Allow",
+      "Action": [
+        "acm:RequestCertificate",
+        "acm:AddTagsToCertificate"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "CertificateManageTagged",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DeleteCertificate",
+        "acm:AddTagsToCertificate",
+        "acm:RemoveTagsFromCertificate"
+      ],
+      "Resource": "arn:aws:acm:us-east-1:${account_id}:certificate/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "CertificateRead",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DescribeCertificate",
+        "acm:GetCertificate",
+        "acm:ListTagsForCertificate"
+      ],
+      "Resource": "arn:aws:acm:us-east-1:${account_id}:certificate/*"
+    }
+  ]
+}

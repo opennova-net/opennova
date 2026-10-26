@@ -95,7 +95,7 @@ private:
 	void prune(const SessionView &view);
 	void draw_tabs(const SessionView &view);
 	// A project open with nothing open in it: how to open a file, and for a project of fewer than kFewFiles
-	// files (a new one) the ways to bring in the game's.
+	// files (a new one) where the game's files come from (File > Import...).
 	void draw_first_steps(const SessionView &view);
 	static constexpr size_t kFewFiles = 40;
 	void draw_find(const Document &document);

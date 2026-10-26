@@ -15,6 +15,8 @@
 
 namespace opennova::editor {
 
+class ContentAccountStore;
+class ContentTransport;
 class Document;
 class DocumentBase;
 class OriginalFiles;
@@ -63,6 +65,11 @@ public:
 	// How Play's staging gives a file a second name (io::link_file; a test's: one refusing what another volume's
 	// link would).
 	void set_file_link(FileLink link);
+	// The content store's seams (ADR 0069, session/content_controller.h): how the session reaches a service (the
+	// Shell's HTTP, a test's fake; null, the default: every content request refused) and where the account is
+	// kept (null, the default: in memory, for the session alone). Each must outlive the session.
+	void set_content_transport(ContentTransport *transport);
+	void set_content_accounts(ContentAccountStore *accounts);
 
 	// True when the request was served here; false for the shell-only kinds. The view is
 	// validated when it returns, unless a pump holds validation.

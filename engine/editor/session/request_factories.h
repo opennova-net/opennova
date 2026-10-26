@@ -44,6 +44,18 @@ inline EditorRequest new_expansion_project(std::string dir, std::string title, s
 	request.base_project = std::move(base_project);
 	return request;
 }
+// A game you own (new_project's all): the project of the game install `game_install`'s own game ("" the
+// editor's install), made in `dir` and titled `title`, every file of it imported as it opens: the base game, or
+// with `expansion` that installed expansion on the base game's project `base_project`.
+inline EditorRequest new_stock_project(std::string dir, std::string title, std::string game_install,
+		std::string expansion = std::string(), std::string base_project = std::string(), bool import_pass = true) {
+	EditorRequest request = new_project(std::move(dir), std::move(title), std::string(), import_pass);
+	request.game_install = std::move(game_install);
+	request.expansion = std::move(expansion);
+	request.base_project = std::move(base_project);
+	request.all = true;
+	return request;
+}
 // The project in `dir` opened, its import pass first unless `import_pass` is false (its files as
 // they are, no source imported), on `game_install` for the session alone when given.
 inline EditorRequest open_project(
@@ -818,6 +830,65 @@ inline EditorRequest empty_trash(bool force) {
 	EditorRequest request = of(EditorRequestKind::EmptyTrash);
 	request.force = force;
 	return request;
+}
+
+// --- the content store (ADR 0069, session/content_controller.h) -------------------------------------
+
+// A person's sign-in: never over the wire.
+inline EditorRequest content_sign_in(std::string server, std::string username, std::string password) {
+	EditorRequest request = of(EditorRequestKind::ContentSignIn);
+	request.server = std::move(server);
+	request.username = std::move(username);
+	request.password = std::move(password);
+	return request;
+}
+inline EditorRequest content_sign_out() {
+	return of(EditorRequestKind::ContentSignOut);
+}
+inline EditorRequest content_check() {
+	return of(EditorRequestKind::ContentCheck);
+}
+inline EditorRequest content_get(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::ContentGet);
+	request.project_key = std::move(project_key);
+	request.dir = std::move(dir);
+	return request;
+}
+inline EditorRequest content_bind(std::string project_key) {
+	EditorRequest request = of(EditorRequestKind::ContentBind);
+	request.project_key = std::move(project_key);
+	return request;
+}
+inline EditorRequest content_pull() {
+	return of(EditorRequestKind::ContentPull);
+}
+inline EditorRequest content_resolve(std::string path, Resolution resolution) {
+	EditorRequest request = of(EditorRequestKind::ContentResolve);
+	request.path = std::move(path);
+	request.resolution = resolution;
+	return request;
+}
+inline EditorRequest content_push(std::string message) {
+	EditorRequest request = of(EditorRequestKind::ContentPush);
+	request.message = std::move(message);
+	return request;
+}
+inline EditorRequest content_restore(std::string path, int64_t revision = 0) {
+	EditorRequest request = of(EditorRequestKind::ContentRestore);
+	request.path = std::move(path);
+	request.revision = revision;
+	return request;
+}
+inline EditorRequest content_history() {
+	return of(EditorRequestKind::ContentHistory);
+}
+inline EditorRequest content_release(std::string version) {
+	EditorRequest request = of(EditorRequestKind::ContentRelease);
+	request.version = std::move(version);
+	return request;
+}
+inline EditorRequest content_cancel() {
+	return of(EditorRequestKind::ContentCancel);
 }
 
 // --- the shell's -------------------------------------------------------------------------------

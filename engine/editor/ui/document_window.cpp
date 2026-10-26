@@ -6,7 +6,6 @@
 #include <map>
 #include <memory>
 
-#include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document_base.h>
@@ -110,33 +109,20 @@ void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	draw_tabs(view);
 }
 
-// Nothing open: how to open a file, and for a project that holds few files yet (a new one) the ways to
-// bring in the game's (the UX round's project lane): the main menu with what it needs, the game data to
-// choose from, or every file of the install; with no install, where to name one.
+// Nothing open: how to open a file, and for a project that holds few files yet (a new one) where its game's
+// files come from, File > Import... (the one way in to an import, the editor import round); with no install,
+// where to name one.
 void DocumentWindow::draw_first_steps(const SessionView &view) {
 	ui_kit::empty_state("No file open.", "Double-click a file in Files to open it, or make one with New.");
 	if (view.project.scan->entries.size() >= kFewFiles) return;
 	ImGui::Spacing();
-	ImGui::SeparatorText("Bring in the game's files");
-	ui_kit::tooltip("A project holds its own copies of the game's files: what you change, and what those need.");
-	if (view.project.retail_directory.empty()) {
+	if (view.project.retail_directory.empty())
 		ui_kit::empty_state("No game install chosen.",
-		                    "Choose it in File > Project settings... to import the game's files; files from the disk "
-		                    "come in with Files > Import > Files....");
-		return;
-	}
-	const bool imports = view.allows(EditorRequestKind::PreviewInstallImport);
-	ImGui::BeginDisabled(!imports);
-	const gameprofile::RequiredResource *menu = gameprofile::gameprofile_required_resource_by_role("main_menu");
-	if (menu && ImGui::Button("The main menu and what it needs...") && imports)
-		workspace_.request(request::preview_install_import({menu->name}, true));
-	ui_kit::tooltip("The menus, their textures, fonts, sounds and texts: what a menu mod changes.");
-	if (ImGui::Button("Choose from the game data...") && imports)
-		workspace_.request(request::preview_install_import({}, view.project.import_dependencies));
-	ui_kit::tooltip("Every file of the game install listed to choose from, with what the chosen ones need.");
-	if (ImGui::Button("Every file of the game install...") && imports) workspace_.request(request::import_whole_install());
-	ui_kit::tooltip("All of it: what a mission mod needs to play, build and resolve every name.");
-	ImGui::EndDisabled();
+		                    "Choose it in File > Project settings... to import the game's files; File > Import... brings in "
+		                    "files from the disk.");
+	else
+		ui_kit::empty_state("The project holds few files yet.",
+		                    "File > Import... brings in the game's files: all of them, or those you choose with what they need.");
 }
 
 void DocumentWindow::draw_tabs(const SessionView &view) {

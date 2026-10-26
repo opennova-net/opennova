@@ -7,6 +7,7 @@
 #include "billing/billing_routes.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
+#include "content/content_routes.h"
 #include "core/health.h"
 #include "core/object_store.h"
 #include "data_sets/data_set_routes.h"
@@ -342,7 +343,8 @@ struct HttpListener::Impl {
 			attention(access, pool, redis),
 			costs(access, redis),
 			data_sets(access, pool),
-			releases(access, pool) {}
+			releases(access, pool),
+			content_routes(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -393,10 +395,10 @@ struct HttpListener::Impl {
 	infra::AttentionRoutes attention;
 	// The month's AWS costs (infra/cost_routes.h).
 	infra::CostRoutes costs;
-	// The hosted data sets' and the update releases' routes over the object store
-	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
+	// The data sets', the releases' and the content store's routes (data_sets/, content/).
 	hosted::DataSetRoutes data_sets;
 	hosted::ReleaseRoutes releases;
+	content::ContentRoutes content_routes;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -504,11 +506,14 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->data_sets.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);
 	impl_->releases.register_routes(impl_->app);
+	impl_->content_routes.set_store(object_store_);
+	impl_->content_routes.set_urls(content_urls_);
+	impl_->content_routes.register_routes(impl_->app);
 	if (object_store_ != nullptr)
-		std::printf("[http] game data routes over the %s object store\n", object_store_->kind());
+		std::printf("[http] games routes over the %s object store\n", object_store_->kind());
 	else
 		std::printf(
-				"[http] game data routes with no object store (hosting off): uploads refused\n");
+				"[http] games routes with no object store (hosting off): store routes refused\n");
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a

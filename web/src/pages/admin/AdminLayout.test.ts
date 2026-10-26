@@ -60,7 +60,7 @@ describe('AdminLayout', () => {
     const areas = page.findAll('.admin-nav-area').map((area) => [area.get('p').text(), area.findAll('a').map((a) => a.text())]);
     expect(areas).toEqual([
       ['NovaWorld', ['Status and sessions', 'CD keys']],
-      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Game data']],
+      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Games']],
       ['People and money', ['Users', 'Subscriptions', 'AWS costs']],
       ['Operations', ['Infrastructure', 'Background jobs']],
     ]);

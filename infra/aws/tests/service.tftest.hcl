@@ -100,6 +100,25 @@ mock_provider "aws" {
   }
 }
 
+# The same account in us-east-1 (versions.tf): the downloads host's certificate,
+# its one validation record known at plan.
+mock_provider "aws" {
+  alias           = "us_east_1"
+  override_during = plan
+
+  mock_resource "aws_acm_certificate" {
+    defaults = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef"
+      domain_validation_options = [{
+        domain_name           = "downloads.example.com"
+        resource_record_name  = "_0123456789abcdef.downloads.example.com."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_fedcba9876543210.acm-validations.aws."
+      }]
+    }
+  }
+}
+
 mock_provider "cloudflare" {
   override_during = plan
 

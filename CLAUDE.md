@@ -36,9 +36,13 @@ easier to relay than to rediscover.
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
-- No repository holds game data (ADR 0067). Every product's OpenNova Editor project (our own
-  game and its expansion, the retail games' imports) is kept by the maintainer outside git;
-  its release is `scripts/package_release.py`'s package, uploaded in the admin's Game data.
+- No repository holds game data (ADR 0067). Every game (our own and its expansion, the retail
+  games' imports) has its OpenNova Editor project in NovaWorld (ADR 0069, ADR 0071): the
+  editor's NovaWorld window gets, pulls and pushes it (admins push); its releases are built on
+  the server from a revision (Build > Release..., or its page in the admin's Games area) and
+  published there, which is what players update to and hosted servers run. The runtime is the
+  game with no project: Publish (`.github/workflows/publish.yml`) ships a CI build to a
+  deployment's downloads host and update service at once.
   CI ships only the runtime: `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies
   and bootstrap configuration. First standalone launch downloads content. `/game` selects
   `acidgambit`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game

@@ -123,6 +123,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
       noncurrent_days = 30
     }
   }
+
+  # The content store (ADR 0069): each file and manifest named by its SHA-256, so an object is
+  # only ever written again with its own bytes (an upload retried) or deleted with its project;
+  # what either leaves is kept 30 days, a deleted project recoverable as long.
+  rule {
+    id     = "data-content-old-versions"
+    status = "Enabled"
+
+    filter {
+      prefix = "data/content/"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "ops" {

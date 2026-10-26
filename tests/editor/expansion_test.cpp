@@ -4,6 +4,7 @@
 // such a project (install_view.h) over a synthetic install written with the PFF writer, and a session's
 // expansion project over it: made, checked against the install, renamed with its files.
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -30,6 +31,7 @@
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_document.h>
+#include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/original_files.h>
 #include <editor/session/preferences_store.h>
@@ -198,6 +200,13 @@ static int test_project_expansion() {
 // builds as an expansion itself, or where it is another game's.
 static int test_base_project_dir() {
 	test_temp::TempDir dir("opennova_editor_base_project_dir");
+	// A folder named whole is kept from the project's folder; one named from it already stays as it is.
+	TEST_EXPECT(base_project_from(dir.file("game/expansions/onx"), dir.file("game/assets")) == "../../assets");
+	TEST_EXPECT(base_project_from(dir.file("game/expansions/onx"), "../../assets") == "../../assets");
+	// The features a game's files need: Missions for a mission, Multiplayer for the multiplayer screens.
+	TEST_EXPECT(features_files_need({ "main.mnu", "01TR.bms" }).mission && !features_files_need({ "01TR.bms" }).multiplayer);
+	TEST_EXPECT(features_files_need({ "MP.MNU" }).multiplayer && features_files_need({ "pre.mnu" }).multiplayer &&
+	            !features_files_need({ "main.mnu", "gametext.bin" }).mission);
 	const std::string mod = dir.file("game/expansions/onx");
 	ProjectDocument made;
 	Diagnostic error;
@@ -220,6 +229,52 @@ static int test_base_project_dir() {
 	TEST_EXPECT(create_project(dir.file("game/dfx"), "Dfx", "dfx", made, error));
 	TEST_EXPECT(!base_project_game_dir(mod, ProjectExpansion{ "onx", "", "../../dfx" }, "jo", out, error) &&
 	            error.code() == "project.base_project" && error.message.find("\"dfx\"") != std::string::npos);
+	return 0;
+}
+
+// An expansion's base project's export as the expansion weighs it (base_project.h's base_export_of): none
+// there (not current, may be made); one whose record keeps the stamp of the base's files as they stand
+// (export_build.h's project_files_stamp: current), which a changed file or a new one makes older than the
+// project, the base's own `.opennova/` and its export folder never moving it; another project's export (never
+// replaced) and a record keeping no stamp, neither current; a base that does not open, refused.
+static int test_base_export_weighed() {
+	test_temp::TempDir dir("opennova_editor_base_export_weighed");
+	const std::string mod = dir.file("game/expansions/onx"), root = dir.file("game/assets");
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Base", "jo", base, error));
+	TEST_EXPECT(test_io::write_text(root + "/menus/main.mnu", "<SCREEN>\r\n</SCREEN>\r\n"));
+	const ProjectExpansion on_base{ "onx", "", "../../assets" };
+	BaseExport weighed = base_export_of(mod, on_base, "jo");
+	TEST_EXPECT(weighed.resolved() && weighed.root == root && weighed.export_dir == root + "/build/export" &&
+	            !weighed.current && weighed.replaceable);
+	const std::string exported = weighed.export_dir;
+	const auto record = [&exported](const std::string &project_id, const std::string &sources) {
+		return test_io::write_text(exported + "/export.json", "{\"schema_version\": 2, \"project_id\": \"" + project_id +
+		                                                          "\", \"sources\": \"" + sources + "\", \"files\": []}");
+	};
+	TEST_EXPECT(record(base.project_id, project_files_stamp(root, exported)));
+	weighed = base_export_of(mod, on_base, "jo");
+	TEST_EXPECT(weighed.current && weighed.replaceable);
+	// The machine's own folder, the export folder and its staging folder hold no file of the base's.
+	TEST_EXPECT(test_io::write_text(root + "/.opennova/local.json", "{}") && test_io::write_text(exported + "/resource.pff", "x") &&
+	            test_io::write_text(exported + ".tmp/resource.pff", "x"));
+	TEST_EXPECT(base_export_of(mod, on_base, "jo").current);
+	// A file changed, a file added: the export is older than the project.
+	TEST_EXPECT(test_io::write_text(root + "/menus/main.mnu", "<SCREEN>\r\n<NAME>STARTUP</NAME>\r\n</SCREEN>\r\n"));
+	TEST_EXPECT(!base_export_of(mod, on_base, "jo").current);
+	TEST_EXPECT(record(base.project_id, project_files_stamp(root, exported)) && base_export_of(mod, on_base, "jo").current);
+	TEST_EXPECT(test_io::write_text(root + "/notes.md", "a note"));
+	TEST_EXPECT(!base_export_of(mod, on_base, "jo").current);
+	// Another project's export: not current, never replaced; a record keeping no stamp: not current.
+	TEST_EXPECT(record("another", project_files_stamp(root, exported)));
+	weighed = base_export_of(mod, on_base, "jo");
+	TEST_EXPECT(!weighed.current && !weighed.replaceable);
+	TEST_EXPECT(record(base.project_id, ""));
+	weighed = base_export_of(mod, on_base, "jo");
+	TEST_EXPECT(!weighed.current && weighed.replaceable);
+	weighed = base_export_of(mod, ProjectExpansion{ "onx", "", "../../nowhere" }, "jo");
+	TEST_EXPECT(!weighed.resolved() && weighed.refusal.code() == "project.base_project" && !weighed.current);
 	return 0;
 }
 
@@ -408,7 +463,7 @@ static int test_fold_follows_the_view() {
 	OriginalFiles fold;
 	const int scan = 0; // the session's scan stands in: the same one throughout
 	const auto settle = [&](const std::shared_ptr<const ProjectDocument> &document) {
-		fold.want(install, document, &scan, {normalized_logical_name("jxm.bin")});
+		fold.want(install_spec(install, *document), document, &scan, {normalized_logical_name("jxm.bin")});
 		while (!fold.step(1 << 20)) {
 		}
 		const OriginalData &data = *fold.data();
@@ -645,10 +700,67 @@ static int test_session() {
 	return 0;
 }
 
+// A game you own (new_project's all) in a session, over a game install with an expansion: refused with no install
+// to make it from; the base game's project made standalone on the install, every file of it imported as it opens
+// (the operation that follows the open: the import's outcome follows it), the features its files need on (a
+// mission: Missions), no placeholder made; its expansion refused with no base game's project named (nothing made)
+// and for an expansion the install lacks, then made on the base game's project, whose export the session makes
+// first (the base has none: session/base_export.h), the import never refused for it but following it, the
+// installed expansion's own files imported (its version text the install's, never a placeholder's).
+static int test_session_stock() {
+	test_temp::TempDir dir("opennova_editor_expansion_stock");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install) && write_archive(install + "/localres.pff", { { "local.txt", "localres" } }) &&
+	            write_archive(install + "/language.pff", { { "words.txt", "language" } }));
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string base = dir.file("work/JO"), expansion = dir.file("work/JOX01");
+	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_stock_project(base, "Joint Operations", ""));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.install.invalid") == 1 && !view.project.open &&
+	            !std::filesystem::exists(opennova::io::os_path(base)));
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(base, "Joint Operations", install));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.project.document->expansion.standalone());
+	const OperationOutcome &imported = view.activity.last_operation;
+	TEST_EXPECT(imported.kind == OperationKind::ImportApply && imported.end == OperationEnd::Done && imported.follows != 0 &&
+	            imported.follows == outcome.operation && imported.id == outcome.operation + 1 && !imported.imported.empty());
+	TEST_EXPECT(view.project.scan->find("01TR.bms") && view.project.scan->find("baseonly.txt") &&
+	            view.project.scan->find("local.txt") && view.project.scan->find("words.txt") && view.project.scan->find("MENUMUS.SBF"));
+	TEST_EXPECT(view.project.document->features.mission && !view.project.document->features.multiplayer);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.mission.feature_off") == 0);
+	// Its expansion: on the base game's project, which must be named.
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x1"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.base_project", "make Joint Operations first") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(expansion)));
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x2", "../JO"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.field.invalid", "no expansion named x2") == 1);
+	outcome = editor_test::handle_to_end(session, request::new_stock_project(expansion, "Escalation", install, "x1", "../JO"));
+	TEST_EXPECT(!outcome.refused && view.project.open &&
+	            view.project.document->expansion == (ProjectExpansion{ "x1", "", "../JO" }));
+	// The base game's project has no export: the session exports it first, then the import goes on (the operation
+	// between them the export), never refused for the slot the export held.
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end == OperationEnd::Done &&
+	            view.activity.last_operation.follows == outcome.operation &&
+	            view.activity.last_operation.id == outcome.operation + 2 && count_code(view.findings.diagnostics, "operation.busy") == 0);
+	std::string text, message;
+	const auto text_in = [&](const char *name) {
+		const AssetEntry *entry = view.project.scan->find(name);
+		return entry && opennova::io::read_file_text(view.project.root + "/" + entry->relative_path, text, message) ? text : "<none>";
+	};
+	TEST_EXPECT(text_in("version.txt") == "x1 version" && text_in("x1.bin") == "x1 table" && text_in("x1only.txt") == "x1 only");
+	return 0;
+}
+
 // An expansion of a project's base game (T5) in a session, over a game install that has an expansion of its
-// own: new_project makes it on the base project's folder (refused, nothing made, where no project is there);
-// while the base has no export the expansion says so and its build is refused, saying to export it; once it
-// has one, the base game it reads is that export (its names, its expansions: none), never the install's.
+// own: new_project makes it on the base project's folder (refused, nothing made, where no project is there).
+// The session exports the base project itself where its export is missing or older than the project
+// (session/base_export.h): a base that does not build is the one finding, nothing validated over a base not
+// read and no required file said missing or offered to create, and a Build exports it again first; a base that
+// builds is exported before the Build it waited for, which goes on under the same operation, and the base game
+// the expansion reads is that export (its names, its expansions: none), never the install's. Opened again with
+// the base unchanged, nothing is exported; with a file of the base changed, the base is exported again first.
 static int test_session_on_base_project() {
 	test_temp::TempDir dir("opennova_editor_expansion_base_project");
 	const std::string install = dir.file("install");
@@ -679,26 +791,80 @@ static int test_session_on_base_project() {
 		const opennova::io::JsonValue *expansion = project.get("expansion");
 		TEST_EXPECT(expansion && expansion->get_string("base_project", "") == "../../assets");
 	}
-	// No export yet: said, and the build refused with what to do.
-	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project", "has no export") == 1);
-	TEST_EXPECT(view.project.base_files.empty() && view.project.install_expansions.empty());
-	editor_test::handle_to_end(session, request::build());
-	TEST_EXPECT(count_code(view.findings.diagnostics, "build.expansion.base_missing", "export the base game's project") == 1);
-	// Its export: the base game the expansion reads, the install's expansion x1 none of it.
+	// The base project holds none of the game's required files, so its export is refused: said once, nothing
+	// validated over a base not read, nothing said of what the expansion lacks (no required file missing, none
+	// to create).
 	const std::string exported = dir.file("game/assets/build/export");
-	std::error_code made_dir;
-	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
-	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "baseonly.txt", "base" }, { "shared.txt", "base" } }) &&
-	            write_archive(exported + "/language.pff", {}) && test_io::write_text(exported + "/export.json", "{}"));
-	outcome = editor_test::handle_to_end(session, request::open_project(mod));
-	TEST_EXPECT(!outcome.refused && view.project.open);
-	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project") == 0);
+	const auto no_false_errors = [&view]() {
+		size_t errors = 0;
+		for (const Diagnostic &d : view.findings.diagnostics) errors += d.severity == DiagnosticSeverity::Error ? 1 : 0;
+		return errors == 0 && count_code(view.project.requirements->diagnostics, "requirement.missing") == 0 &&
+		       unmet_required_roles(*view.project.requirements).empty() && !view.activity.validation.read;
+	};
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::BaseExport &&
+	            view.activity.last_operation.end == OperationEnd::Failed);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project", "could not be exported") == 1 &&
+	            count_code(view.findings.diagnostics, "project.base_project") == 1);
+	TEST_EXPECT(no_false_errors());
+	TEST_EXPECT(view.project.base_files.empty() && view.project.install_expansions.empty() &&
+	            !opennova::vfs_has_boot_archive(exported));
+	// A Build exports the base again first, refused again: no build.
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::BaseExport && !view.activity.has_build &&
+	            count_code(view.findings.diagnostics, "build.expansion.base_missing") == 0 && no_false_errors());
+	// The base made whole (its required files created, as Create all makes them): the next Build exports it,
+	// then builds the expansion over it under the operation the Build named.
+	{
+		MemoryPreferencesStore base_preferences(chosen);
+		ProjectSession base_session(platform, base_preferences);
+		editor_test::handle_to_end(base_session, request::open_project(dir.file("game/assets")));
+		TEST_EXPECT(base_session.view().project.open);
+		editor_test::handle_to_end(base_session,
+		                           request::create_missing(unmet_required_roles(*base_session.view().project.requirements)));
+		TEST_EXPECT(unmet_required_roles(*base_session.view().project.requirements).empty());
+	}
+	session.handle(request::build());
+	const uint64_t asked = session.outcome().operation;
+	TEST_EXPECT(asked != 0 && view.activity.operation.running() && view.activity.operation.kind == OperationKind::BaseExport);
+	session.run_operations();
+	TEST_EXPECT(view.activity.last_operation.id == asked && view.activity.last_operation.kind == OperationKind::Build &&
+	            view.activity.has_build && view.activity.last_build->ok);
+	if (!view.activity.last_build->ok)
+		for (const Diagnostic &d : view.findings.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(opennova::vfs_has_boot_archive(exported) &&
+	            test_io::read_file_text(exported + "/export.json").find("\"sources\"") != std::string::npos);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.base_project") == 0 &&
+	            view.activity.validation.read);
 	const auto has = [&view](const char *name) {
 		return std::any_of(view.project.base_files.begin(), view.project.base_files.end(),
 		                   [name](const std::string &held) { return opennova::strutil::iequals(held, name); });
 	};
-	TEST_EXPECT(has("baseonly.txt") && has("shared.txt") && !has("x1only.txt") && !has("01TR.bms"));
+	TEST_EXPECT(has("main.mnu") && !has("x1only.txt") && !has("01TR.bms"));
 	TEST_EXPECT(view.project.install_expansions.empty());
+	// The game install's own still listed apart: the installed expansion x1 Import offers the project.
+	TEST_EXPECT(view.project.game_install_expansions.size() == 1 && view.project.game_install_expansions[0].name == "x1");
+	// Opened again over the base as it was exported: nothing exported.
+	const std::string record = test_io::read_file_text(exported + "/export.json");
+	outcome = editor_test::handle_to_end(session, request::open_project(mod));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.activity.last_operation.kind == OperationKind::Open &&
+	            test_io::read_file_text(exported + "/export.json") == record && has("main.mnu"));
+	// A file of the base changed since (its last write moved on): exported again as the expansion opens.
+	{
+		MemoryPreferencesStore base_preferences(chosen);
+		ProjectSession base_session(platform, base_preferences);
+		editor_test::handle_to_end(base_session, request::open_project(dir.file("game/assets")));
+		const AssetEntry *menu = base_session.view().project.scan->find("main.mnu");
+		TEST_EXPECT(menu != nullptr);
+		if (!menu) return 1;
+		const std::filesystem::path path = opennova::io::os_path(dir.file("game/assets") + "/" + menu->relative_path);
+		std::error_code ec;
+		const std::filesystem::file_time_type written = std::filesystem::last_write_time(path, ec);
+		std::filesystem::last_write_time(path, written + std::chrono::seconds(2), ec);
+		TEST_EXPECT(!ec);
+	}
+	outcome = editor_test::handle_to_end(session, request::open_project(mod));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.activity.last_operation.kind == OperationKind::BaseExport &&
+	            view.activity.last_operation.end == OperationEnd::Done && has("main.mnu") && view.activity.validation.read);
 	// Settings: the base game's project and an installed expansion together refused, nothing written.
 	ProjectSettingsChange both;
 	both.builds_on = std::string("x1");
@@ -889,6 +1055,112 @@ static int test_base_files_under_the_project() {
 	return 0;
 }
 
+// The base game's string tables under an expansion's graph (base_layer_build.h): a `.bin` of the base typed by its
+// content as the project scan types the project's own, so the base's menutxt.bin (RTXT) is a string table and its
+// fgn2.bin (no magic) a raw table. An expansion's menu naming menutxt.BIN as its TEXT_RSRC then reads the base's
+// table, as the game does through the archives below the expansion's pair [orig: CUIStringTable_LookupString @
+// 0x6527c0; PFF_OpenAllArchives @ 0x4a4310, slots 2..4]: no reference.wrong_kind (Escalation's menus over the JO
+// project's export read "the project's menutxt.bin is Binary table", 2026-10-26), a string id the base's Menu
+// section defines resolved, one it does not still missing.
+static int test_base_string_tables() {
+	test_temp::TempDir dir("opennova_editor_expansion_base_strings");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	const std::vector<uint8_t> menutxt = table_bytes({ { "Menu", { "MM_HELLO" } } });
+	TEST_EXPECT(!menutxt.empty() &&
+	            write_archive(exported + "/language.pff", { { "menutxt.bin", std::string(menutxt.begin(), menutxt.end()) },
+	                                                        { "fgn2.bin", "a marker" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	ProjectDocument mod;
+	mod.target_game = "jo";
+	mod.expansion = ProjectExpansion{ "onx", "", "../../assets" };
+	// Typed by content in the layer, stepped or in one call alike.
+	const std::shared_ptr<const GraphLayer> whole = build_base_layer(exported, mod);
+	BaseLayerBuild stepped(exported, mod);
+	while (!stepped.step(4)) {
+	}
+	const std::shared_ptr<const GraphLayer> layer = stepped.take();
+	for (const std::shared_ptr<const GraphLayer> &built : { whole, layer }) {
+		const GraphSlot *table = built ? built->file_named("menutxt.bin") : nullptr;
+		const GraphSlot *marker = built ? built->file_named("fgn2.bin") : nullptr;
+		TEST_EXPECT(table && table->kind == AssetKind::Strings && table->read && table->ok && !table->symbols.empty());
+		TEST_EXPECT(marker && marker->kind == AssetKind::RawBin);
+	}
+	TEST_EXPECT(whole && layer && whole->symbol_count() == layer->symbol_count());
+
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	const std::string position = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/menus/night.mnu",
+	                                    "<SCREEN>\r\n<NAME>NIGHT</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"MAIN\">\r\n" + position +
+	                                            "<TEXT_RSRC>menutxt.BIN</TEXT_RSRC>\r\n"
+	                                            "<WINDOW TYPE=\"STATIC\" NAME=\"HELLO\">\r\n" + position +
+	                                            "<STRING type=\"id\">MM_HELLO</STRING>\r\n</WINDOW>\r\n"
+	                                            "<WINDOW TYPE=\"STATIC\" NAME=\"GONE\">\r\n" + position +
+	                                            "<STRING type=\"id\">MM_GONE</STRING>\r\n</WINDOW>\r\n"
+	                                            "</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(view.project.open && view.project.scan->find("night.mnu") && view.findings.graph);
+	if (!view.findings.graph) return 1;
+	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextTable, "menutxt.BIN") == ReferenceStatus::Present);
+	TEST_EXPECT(count_code(rows, "reference.wrong_kind") == 0 && count_code(rows, "reference.missing", "menutxt.BIN") == 0);
+	TEST_EXPECT(count_code(rows, "reference.missing", "MM_HELLO") == 0 && count_code(rows, "reference.missing", "MM_GONE") == 1);
+	return 0;
+}
+
+// An expansion's terrain naming a detail map its base game serves: the game makes the detail coefficient of the
+// base's file by its name, read through the archives below the expansion's pair [orig: PFF_OpenAllArchives @
+// 0x4a4310, slots 2..4], so no texture.wrong_reader says "the project lacks it" (Escalation's G11.trn, g14.trn and
+// I7.trn over the JO project's Det_d1.tga and Det_m2.tga, 2026-10-26); a name neither has, whose .dds alone the
+// project holds, still does.
+static int test_base_detail_map() {
+	test_temp::TempDir dir("opennova_editor_expansion_base_detail");
+	const std::string exported = dir.file("game/assets/build/export");
+	std::error_code made_dir;
+	std::filesystem::create_directories(opennova::io::os_path(exported), made_dir);
+	TEST_EXPECT(write_archive(exported + "/resource.pff", { { "det_base.tga", "the base's detail map" } }));
+	ProjectDocument base;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("game/assets"), "Base", "jo", base, error));
+	Preferences chosen;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("game/expansions/onx");
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_expansion_project(root, "Night", "onx", "", true, "../../assets"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	const auto terrain = [](const char *detail) {
+		return std::string("polytrn_detailmap ") + detail +
+		       "\npolytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\npolytrn_colormap colour.tga\n";
+	};
+	TEST_EXPECT(test_io::write_text(root + "/terrain/served.trn", terrain("det_base.tga")) &&
+	            test_io::write_text(root + "/terrain/lacking.trn", terrain("det_own.tga")) &&
+	            test_io::write_text(root + "/textures/det_own.dds", "the near texture alone"));
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(view.project.open && view.project.scan->find("served.trn") && view.project.scan->find("lacking.trn"));
+	size_t served = 0, lacking = 0;
+	for (const Diagnostic &d : view.findings.diagnostics) {
+		if (d.code() != "texture.wrong_reader") continue;
+		if (d.asset == "terrain/served.trn") ++served;
+		if (d.asset == "terrain/lacking.trn" && d.message.find("the project lacks it") != std::string::npos) ++lacking;
+	}
+	TEST_EXPECT(served == 0 && lacking == 1);
+	return 0;
+}
+
 // The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
 // text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
 // 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
@@ -1034,9 +1306,13 @@ int main() {
 	failures += test_name_rule();
 	failures += test_project_expansion();
 	failures += test_base_project_dir();
+	failures += test_base_export_weighed();
 	failures += test_session_on_base_project();
+	failures += test_session_stock();
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
+	failures += test_base_string_tables();
+	failures += test_base_detail_map();
 	failures += test_install_findings();
 	failures += test_files_table();
 	failures += test_name_forms_no_game_file();

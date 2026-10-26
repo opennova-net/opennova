@@ -23,6 +23,7 @@
 #include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/preview/viewport_kinds.h>
+#include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
@@ -68,19 +69,25 @@ constexpr WorkspaceMember kNewProject[] = {
 	{ "open", J::Boolean,
 			"File > New project...'s modal is open (the welcome page shows the form whenever no project is "
 			"open). A new_project closes it as the session takes it." },
-	{ "title", J::String, "The form's Name.", kTextLongest },
+	{ "making", J::String,
+			"What it makes: stock (a game you own: the game install's base game, or one of its expansions on the base "
+			"game's project, every file of it imported as it opens: new_project's all), mod (a change to a game, an "
+			"expansion of it played with /exp <expansion>) or game (a new game, a standalone project)." },
+	{ "title", J::String, "The form's Name (a mod's and a new game's; a game you own takes its game's name).", kTextLongest },
 	{ "dir", J::String, "The form's Folder: where the project is made.", kPathLongest },
 	{ "game_install", J::String,
 			"The form's Game install, named (left unnamed, the form shows the editor's own); the window checks it "
 			"as typing stops (check_install), its words under the field.", kPathLongest },
-	{ "builds_on", J::String,
-			"The installed expansion it builds on, by its folder's name (\"\" the base game); building on one "
-			"builds as an expansion." },
-	{ "as_expansion", J::Boolean, "Build as an expansion: the project builds as expansion\\<expansion>\\." },
-	{ "expansion", J::String, "The expansion's name, which the form checks as the game's rule takes it.", kExpansionLongest },
+	{ "installed", J::String,
+			"The install's game it is (stock) or changes (mod): \"\" the base game, else an installed expansion by its "
+			"folder's name." },
+	{ "on_project", J::Boolean, "A mod changes a project of the author's own, its base_project (T5), not the install's game." },
 	{ "base_project", J::String,
-			"The base game's project the expansion builds on (T5; \"\" the game install's base game): a standalone "
-			"project's folder, from the new project's when relative, whose export is the base game.", kPathLongest },
+			"The base game's project (T5): a game you own's expansion is made on it, a mod on_project changes it; a "
+			"standalone project's folder, from the new project's when relative, whose export is the base game. Left "
+			"empty, the form is offered the first folder beside its own that holds one.", kPathLongest },
+	{ "expansion", J::String, "A mod's name: the expansion it builds as, which the form checks as the game's rule takes it.",
+			kExpansionLongest },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -190,6 +197,11 @@ constexpr WorkspaceMember kFiles[] = {
 			"texture_budget query's textures)." },
 };
 constexpr WorkspaceMember kImport[] = {
+	{ "sources", J::Boolean,
+			"File > Import...'s first step shows, a project open: the sources that fit it (the whole game install, an "
+			"expansion project's installed expansion, the game data to choose from, files from the disk, every source "
+			"again), each raising its request (preview_install_import, preview_import, reimport). A preview opening "
+			"closes it." },
 	{ "filter", J::String,
 			"The import dialog's filter of the files to choose from (a name, a folder, or a kind's word), with an "
 			"import preview open.", kTextLongest },
@@ -274,7 +286,8 @@ constexpr WorkspacePartRow kParts[] = {
 	{ "project_find", kProjectFind, std::size(kProjectFind),
 	  "The project's finder: Find in project, Go to file, Go to name, Find usages." },
 	{ "files", kFiles, std::size(kFiles), "Files' filter, kind and order." },
-	{ "import", kImport, std::size(kImport), "The import dialog's filters, Replace existing files and its checks." },
+	{ "import", kImport, std::size(kImport),
+	  "File > Import...'s first step (the sources), then the import dialog's filters, Replace existing files and its checks." },
 	{ "problems", kProblems, std::size(kProblems), "Problems' filters and its confirmation." },
 	{ "document", kDocument, std::size(kDocument), "What a document's views show of it: filters, kinds, order, a menu's and a texture's fields." },
 	{ "terrain_brush", kTerrainBrushMembers, std::size(kTerrainBrushMembers),
@@ -289,6 +302,7 @@ struct FocusRow {
 constexpr FocusRow kWindows[] = {
 	{ "files", "Files" },     { "document", "Document" }, { "preview", "Preview" },
 	{ "inspector", "Inspector" }, { "problems", "Problems" }, { "output", "Output" },
+	{ "content", "NovaWorld" },
 };
 
 const WorkspacePartRow *part_of(const std::string &token) {
@@ -457,26 +471,34 @@ bool set_build_result(Change &change, const JsonValue &part) {
 }
 
 bool set_new_project(Change &change, const JsonValue &part) {
+	using Making = WorkspaceView::Making;
 	WorkspaceView::NewProject form = change.workspace().new_project;
 	if (const JsonValue *open = part.get("open")) form.open = open->boolean;
+	if (const JsonValue *making = part.get("making")) {
+		if (!new_project_making_named(making->string, form.making))
+			return change.refuse("A new project is stock (a game you own), mod or game, not \"" + making->string + "\".");
+	}
 	if (const JsonValue *title = part.get("title")) form.title = title->string;
 	if (const JsonValue *dir = part.get("dir")) form.dir = dir->string;
 	if (const JsonValue *install = part.get("game_install")) {
 		form.game_install = install->string;
 		form.install_named = true;
 	}
-	if (const JsonValue *builds_on = part.get("builds_on")) form.builds_on = builds_on->string;
-	if (const JsonValue *as_expansion = part.get("as_expansion")) form.as_expansion = as_expansion->boolean;
-	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
+	if (const JsonValue *installed = part.get("installed")) form.installed = installed->string;
+	if (const JsonValue *on_project = part.get("on_project")) form.on_project = on_project->boolean;
 	if (const JsonValue *base = part.get("base_project")) form.base_project = base->string;
-	// The game reads an expansion's own files only under /exp: a project on an installed expansion builds as one,
-	// and so does one on a base game's project (T5).
-	if (!form.builds_on.empty() || !form.base_project.empty()) form.as_expansion = true;
+	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
+	// An expansion on a project's base game (a game you own's expansion, a mod of a project of the author's) is
+	// offered the folder beside its own that holds a standalone project of the game, until one is named.
+	const bool on_base = (form.making == Making::Stock && !form.installed.empty()) || (form.making == Making::Mod && form.on_project);
+	if (on_base && form.base_project.empty() && !form.dir.empty() && !part.get("base_project"))
+		form.base_project = sibling_base_project(form.dir, kDefaultTargetGame);
 	WorkspaceView::NewProject &held = change.workspace().new_project;
-	const bool moved = form.open != held.open || form.title != held.title || form.dir != held.dir ||
-	                   form.game_install != held.game_install || form.install_named != held.install_named ||
-	                   form.builds_on != held.builds_on || form.as_expansion != held.as_expansion ||
-	                   form.expansion != held.expansion || form.base_project != held.base_project;
+	const bool moved = form.open != held.open || form.making != held.making || form.title != held.title ||
+	                   form.dir != held.dir || form.game_install != held.game_install ||
+	                   form.install_named != held.install_named || form.installed != held.installed ||
+	                   form.on_project != held.on_project || form.base_project != held.base_project ||
+	                   form.expansion != held.expansion;
 	held = std::move(form);
 	return moved;
 }
@@ -796,6 +818,13 @@ bool set_files(Change &change, const JsonValue &part) {
 // they name (the one shown, else refused), a converter's outputs coming together.
 bool set_import(Change &change, const JsonValue &part) {
 	const DialogsView::ImportPreview &preview = change.view.dialogs.import_preview;
+	// File > Import...'s first step, a project's: shown or closed with or without a preview (one opening closes it).
+	if (const JsonValue *sources = part.get("sources")) {
+		if (sources->boolean && !change.view.project.open) return change.refuse("No project is open: an import is a project's.");
+		const bool moved = change.workspace().import.sources != sources->boolean;
+		change.workspace().import.sources = sources->boolean;
+		if (part.object.size() == 1) return moved;
+	}
 	if (!preview.open || !preview.plan) return change.closed("The import dialog", "preview an import first");
 	WorkspaceView::Import import = change.workspace().import;
 	if (const JsonValue *filter = part.get("filter")) import.filter = filter->string;
@@ -1243,6 +1272,24 @@ const char *workspace_json_token(WorkspaceJson json) {
 	return "string";
 }
 
+const char *new_project_making_token(WorkspaceView::Making making) {
+	switch (making) {
+		case WorkspaceView::Making::Stock: return "stock";
+		case WorkspaceView::Making::Mod: return "mod";
+		case WorkspaceView::Making::Game: return "game";
+	}
+	return "stock";
+}
+
+bool new_project_making_named(const std::string &token, WorkspaceView::Making &out) {
+	for (const WorkspaceView::Making making : { WorkspaceView::Making::Stock, WorkspaceView::Making::Mod, WorkspaceView::Making::Game })
+		if (token == new_project_making_token(making)) {
+			out = making;
+			return true;
+		}
+	return false;
+}
+
 const WorkspacePartRow *workspace_parts(size_t &count) {
 	count = std::size(kParts);
 	return kParts;
@@ -1569,7 +1616,7 @@ ShownModal shown_modal(const SessionView &view) {
 	const bool project = view.project.open;
 	using M = HeldModal;
 	if (view.dialogs.unsaved_prompt.open) return { M::Unsaved, {} };
-	if (view.dialogs.import_preview.open) return { M::Import, {} };
+	if (view.dialogs.import_preview.open || (w.import.sources && project)) return { M::Import, {} };
 	if (view.dialogs.texture_source.open && project) return { M::TextureSource, {} };
 	if (w.settings.open && project) return { M::Settings, {} };
 	if (w.new_project.open) return { M::NewProject, {} };
@@ -1638,10 +1685,11 @@ JsonValue workspace_to_json(const SessionView &view) {
 	// As the form shows it: the one named, else the editor's own.
 	made.set("game_install", text(form.install_named ? form.game_install : view.project.editor_install));
 	made.set("install_named", flag(form.install_named));
-	made.set("builds_on", text(form.builds_on));
-	made.set("as_expansion", flag(form.as_expansion));
-	made.set("expansion", text(form.expansion));
+	made.set("making", text(new_project_making_token(form.making)));
+	made.set("installed", text(form.installed));
+	made.set("on_project", flag(form.on_project));
 	made.set("base_project", text(form.base_project));
+	made.set("expansion", text(form.expansion));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();
@@ -1728,6 +1776,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	// index.
 	const WorkspaceView::Import &import = workspace.import;
 	JsonValue dialog_import = JsonValue::make_object();
+	dialog_import.set("sources", flag(import.sources));
 	dialog_import.set("filter", text(import.filter));
 	dialog_import.set("choice_kind", kind_json(import.choice_kind));
 	dialog_import.set("rows_filter", text(import.rows_filter));

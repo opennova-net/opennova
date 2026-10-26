@@ -40,6 +40,7 @@ class NovaLogicLobbies;
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 namespace infra { class AlarmStore; class CostStore; class InfraStatus; class LogStore; class MetricsStore; }
+namespace content { class ContentUrls; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -80,10 +81,13 @@ namespace infra { class AlarmStore; class CostStore; class InfraStatus; class Lo
 //                         (infra/usage_routes.h): what everything uses and
 //                         the programs' tasks; CostRoutes
 //                         (infra/cost_routes.h): the month's AWS bill
-//   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
-//                         hosted data sets, their tree uploads into the object
-//                         store and the update releases, each part through
-//                         this program (ADR 0064)
+//   games               — DataSetRoutes and ReleaseRoutes (data_sets/): the
+//                         games (each a data set, its project with it) and
+//                         their releases, a project-less game's package
+//                         uploaded through this program part by part (ADR 0064)
+//   content store       — ContentRoutes (content/): the games' projects'
+//                         revisions, manifests and files, the editor's
+//                         pushes, and a release built from a revision (ADR 0069)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -163,14 +167,18 @@ public:
 	// start(); it must outlive the listener. Null: the view says none is read.
 	void set_cost_store(infra::CostStore *store) { cost_store_ = store; }
 
-	// The object store the hosted data sets' trees and the update packages
-	// live in (core/object_store.h; core/object_store_stack.h
-	// make_object_store), which the admin's data set and release routes upload
-	// into and read. Set before start(); it
+	// The object store the hosted data sets' trees, the projects' files and the
+	// update packages live in (core/object_store.h; core/object_store_stack.h
+	// make_object_store), which the games', release and content routes read and
+	// write. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
+	// The object store's own signed URLs (content/content_urls.h: S3's), which the content routes
+	// hand the editor in place of carrying a file's bytes. Set before start(); it must outlive the
+	// listener. Null: the routes carry the bytes (a directory's store).
+	void set_content_urls(content::ContentUrls *urls) { content_urls_ = urls; }
 
 	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -357,6 +365,8 @@ private:
 	infra::CostStore *cost_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
+	// The store's signed URLs (set_content_urls); null: none.
+	content::ContentUrls *content_urls_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;

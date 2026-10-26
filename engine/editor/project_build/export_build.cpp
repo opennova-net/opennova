@@ -8,6 +8,9 @@
 #include <base/io/file_time.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/sha256.h>
+#include <editor/assets/project_walk.h>
+#include <editor/content_store/content_scan.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
@@ -55,6 +58,7 @@ io::JsonValue export_record(const ExportRequest &request, const std::vector<std:
 	json.set("project_id", io::JsonValue::make_string(request.project_id));
 	json.set("build_id", io::JsonValue::make_string(request.build_id));
 	json.set("expansion", io::JsonValue::make_string(request.expansion));
+	json.set("sources", io::JsonValue::make_string(request.sources));
 	io::JsonValue names = io::JsonValue::make_array();
 	for (const std::string &name : files) names.push(io::JsonValue::make_string(name));
 	json.set("files", std::move(names));
@@ -99,6 +103,55 @@ std::string some_of(const std::vector<std::string> &names) {
 }
 
 } // namespace
+
+std::string project_files_stamp(const std::string &root, const std::string &export_dir) {
+	struct Stamped {
+		std::string path; // relative, '/'-separated
+		uint64_t size = 0;
+		int64_t written = 0;
+	};
+	std::vector<Stamped> files;
+	const fs::path top = system_path(root);
+	const fs::path exported = system_path(export_dir);
+	std::error_code ec;
+	for (auto it = fs::recursive_directory_iterator(top, ec); !ec && it != fs::recursive_directory_iterator();
+	     it.increment(ec)) {
+		std::error_code kind;
+		if (it->is_directory(kind)) {
+			if (walk_skips_folder(it->path(), exported)) it.disable_recursion_pending();
+			continue;
+		}
+		if (!it->is_regular_file(kind) || content_skips_file(utf8_of(it->path().filename()))) continue;
+		// The size and last write the listing read (directory_entry's), so no file is opened.
+		Stamped file;
+		file.path = utf8_of(it->path().lexically_relative(top));
+		std::replace(file.path.begin(), file.path.end(), '\\', '/');
+		file.size = uint64_t(it->file_size(kind));
+		file.written = int64_t(it->last_write_time(kind).time_since_epoch().count());
+		files.push_back(std::move(file));
+	}
+	std::sort(files.begin(), files.end(), [](const Stamped &a, const Stamped &b) { return a.path < b.path; });
+	io::Sha256 hash;
+	for (const Stamped &file : files) {
+		const std::string line = file.path + '\n' + std::to_string(file.size) + '\n' + std::to_string(file.written) + '\n';
+		hash.update(line);
+	}
+	// A walk cut short stamps as no finished one does: the next weighs it changed.
+	if (ec) hash.update("incomplete\n");
+	return io::sha256_hex(hash.finish());
+}
+
+bool export_sources_of(const std::string &dir, const std::string &project_id, std::string &sources) {
+	sources.clear();
+	io::JsonValue record;
+	if (!export_record_of(system_path(dir), project_id, record)) return false;
+	sources = record.get_string("sources", "");
+	return true;
+}
+
+bool export_replaces(const std::string &dir, const std::string &project_id) {
+	return replaceable(system_path(dir), project_id);
+}
 
 struct ExportRun::Streams {
 	std::ifstream in;

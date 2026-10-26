@@ -47,13 +47,16 @@ override_resource {
 }
 
 variables {
-  billing_email          = "billing@example.com"
-  members                = { mock-admin = "admin", mock-member = "member" }
-  stripe_test_secret_key = "rk_test_mock"
-  aws_account_id_prod    = "111111111111"
-  aws_account_id_staging = "222222222222"
-  aws_region_prod        = "us-east-1"
-  aws_region_staging     = "us-east-2"
+  billing_email           = "billing@example.com"
+  members                 = { mock-admin = "admin", mock-member = "member" }
+  stripe_test_secret_key  = "rk_test_mock"
+  aws_account_id_prod     = "111111111111"
+  aws_account_id_staging  = "222222222222"
+  aws_region_prod         = "us-east-1"
+  aws_region_staging      = "us-east-2"
+  domain                  = "example.net"
+  admin_api_token_prod    = "token-prod"
+  admin_api_token_staging = "token-staging"
 }
 
 run "stripe_test_secret_key" {

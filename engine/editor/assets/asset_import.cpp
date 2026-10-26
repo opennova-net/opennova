@@ -162,11 +162,7 @@ std::vector<ImportChoice> list_installed_expansion_choices(const std::string &in
 	return sources;
 }
 
-namespace {
-
-// The names `spec`'s view of the install gives, sorted by their normalized form; none when it does
-// not open.
-std::vector<std::string> view_names(const InstallSpec &spec) {
+std::vector<std::string> list_install_file_names(const InstallSpec &spec) {
 	std::vector<std::string> names;
 	InstallView view;
 	std::string error;
@@ -179,15 +175,13 @@ std::vector<std::string> view_names(const InstallSpec &spec) {
 	return names;
 }
 
-} // namespace
-
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document) {
-	return view_names(install_spec(retail_root, document));
+	return list_install_file_names(install_spec(retail_root, document));
 }
 
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document) {
 	if (document.expansion.standalone()) return std::vector<std::string>();
-	return view_names(base_install_spec(retail_root, document));
+	return list_install_file_names(base_install_spec(retail_root, document));
 }
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {

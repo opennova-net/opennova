@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LandingPage from './LandingPage.vue';
 import { fetchStats } from '../api/stats';
 import { fetchTiers } from '../api/billing';
+import { downloadsBase, fetchDownloadsManifest } from '../api/downloads';
 import { tiersResponse } from '../test/billingFixtures';
 import { testRouter } from '../test/router';
 
 vi.mock('../api/stats', () => ({ fetchStats: vi.fn() }));
+vi.mock('../api/downloads', () => ({ downloadsBase: vi.fn(), fetchDownloadsManifest: vi.fn() }));
 vi.mock('../api/billing', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/billing')>()),
   fetchTiers: vi.fn(),
@@ -14,6 +16,18 @@ vi.mock('../api/billing', async (importOriginal) => ({
 
 const stats = vi.mocked(fetchStats);
 const tiers = vi.mocked(fetchTiers);
+const host = vi.mocked(downloadsBase);
+const manifest = vi.mocked(fetchDownloadsManifest);
+
+const BUILDS = [
+  'opennova-game-windows.zip',
+  'jointops-game-windows.zip',
+  'dfx2-game-windows.zip',
+  'opennova-editor-windows.zip',
+  'opennova-blender-addon-windows.zip',
+  'opennova-apps-windows.zip',
+  'opennova-switcher-windows.zip',
+];
 
 async function mountPage() {
   const router = await testRouter('/');
@@ -26,11 +40,18 @@ function hrefs(wrapper: Awaited<ReturnType<typeof mountPage>>) {
   return wrapper.findAll('a').map((a) => a.attributes('href'));
 }
 
+// The line under a build's file name on its card: its version, size and SHA-256.
+function buildLine(wrapper: Awaited<ReturnType<typeof mountPage>>, file: string) {
+  return wrapper.get(`[data-test="build-${file}"]`).findAll('p')[1]?.text();
+}
+
 describe('LandingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stats.mockResolvedValue({ games: 3, lobbies: 2, players: 9, updatedAtMs: 0 });
     tiers.mockResolvedValue({ ok: true, value: tiersResponse() });
+    host.mockReturnValue(null);
+    manifest.mockResolvedValue(null);
   });
 
   it('leads with our own game, and still plays the Joint Operations you own', async () => {
@@ -127,22 +148,103 @@ describe('LandingPage', () => {
     expect(wrapper.text()).not.toContain('Dedicated machine:');
   });
 
-  it('offers every release download and the account and lobby steps', async () => {
+  it("downloads every build from the deployment's downloads host, and says what each build is", async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    const commit = '2d23f67' + 'a'.repeat(33);
+    const sha = 'e36a8dab2612dab5e7deb7dfcd5388993336c442abead86589c4a82a751856f6';
+    // A staging set: a pull request's debug builds, the game zips and the editor versioned.
+    manifest.mockResolvedValue({
+      version: 'PR #1260 (2d23f67)',
+      published: '2026-10-26T01:56:58Z',
+      source: 'https://github.com/opennova-net/opennova/actions/runs/40255180333',
+      commit,
+      build: 'debug',
+      talks_to: 'staging',
+      files: Object.fromEntries(
+        BUILDS.map((file) => [
+          file,
+          { size: 53_178_900, sha256: sha, ...(/game|editor/.test(file) ? { version: '0.0.20' } : {}) },
+        ]),
+      ),
+    });
     const wrapper = await mountPage();
+    expect(manifest).toHaveBeenCalledWith('https://downloads.example.com');
+    const buttons = wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'));
+    expect(buttons.map((a) => a.attributes('href'))).toEqual(BUILDS.map((file) => `https://downloads.example.com/${file}`));
+    expect(buttons[1].attributes('aria-label')).toBe('Download OpenNova for Joint Operations');
+
+    const line = wrapper.get('[data-test="downloads-version"]');
+    expect(line.text()).toBe(
+      'Version PR #1260 (2d23f67), a debug build for staging from commit 2d23f67, published 2026-10-26 01:56 UTC.',
+    );
+    const commitLink = line.get('a');
+    expect(commitLink.attributes('href')).toBe('https://github.com/opennova-net/opennova/actions/runs/40255180333');
+    expect(commitLink.attributes('title')).toBe(commit);
+    expect(line.get('time').attributes('datetime')).toBe('2026-10-26T01:56:58.000Z');
+
+    // Each card: the file's name, then its version, size and short SHA-256 (the full one on hover).
+    const game = wrapper.get('[data-test="build-jointops-game-windows.zip"]');
+    expect(game.findAll('p').map((p) => p.text())).toEqual(['jointops-game-windows.zip', 'v0.0.20, 53 MB, SHA-256 e36a8dab2612']);
+    expect(game.get('span').attributes('title')).toBe(sha);
+    // The tools' zips but the editor carry no version.
+    expect(buildLine(wrapper, 'opennova-apps-windows.zip')).toBe('53 MB, SHA-256 e36a8dab2612');
+    expect(buildLine(wrapper, 'opennova-editor-windows.zip')).toBe('v0.0.20, 53 MB, SHA-256 e36a8dab2612');
+    // GitHub sits in the footer now, not in the downloads.
+    expect(hrefs(wrapper)).not.toContain('https://github.com/opennova-net/opennova/releases/latest');
+  });
+
+  it('calls a tagged set a release build', async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    manifest.mockResolvedValue({
+      version: 'v0.0.21',
+      published: '2026-10-26T12:00:00Z',
+      source: 'https://github.com/opennova-net/opennova/releases/tag/v0.0.21',
+      commit: '1a2b3c4' + 'b'.repeat(33),
+      build: 'release',
+      talks_to: 'prod',
+      files: Object.fromEntries(BUILDS.map((file) => [file, { size: 1_096_841, sha256: 'ab'.repeat(32), version: '0.0.21' }])),
+    });
+    const line = (await mountPage()).get('[data-test="downloads-version"]');
+    expect(line.text()).toBe('Version v0.0.21, a release build from commit 1a2b3c4, published 2026-10-26 12:00 UTC.');
+    expect(line.get('a').attributes('href')).toBe('https://github.com/opennova-net/opennova/releases/tag/v0.0.21');
+  });
+
+  it('shows what a manifest from before the build fields has', async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    manifest.mockResolvedValue({
+      version: 'PR #1260 (2d23f67)',
+      published: '2026-10-26T01:56:58Z',
+      source: 'https://github.com/opennova-net/opennova/actions/runs/40255180333',
+      files: Object.fromEntries(BUILDS.map((file) => [file, { size: 53_185_054, sha256: 'ab'.repeat(32) }])),
+    });
+    const wrapper = await mountPage();
+    const line = wrapper.get('[data-test="downloads-version"]');
+    expect(line.text()).toBe('Version PR #1260 (2d23f67), published 2026-10-26 01:56 UTC.');
+    expect(line.find('a').exists()).toBe(false);
+    expect(buildLine(wrapper, 'opennova-game-windows.zip')).toBe('53 MB, SHA-256 abababababab');
+  });
+
+  it('offers no download with no downloads host, and still names every build', async () => {
+    const wrapper = await mountPage();
+    expect(manifest).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-test="downloads-version"]').exists()).toBe(false);
     const text = wrapper.text();
-    for (const file of [
-      'opennova-game-windows',
-      'jointops-game-windows',
-      'dfx2-game-windows',
-      'opennova-editor-windows',
-      'opennova-switcher-windows',
-      'opennova-blender-addon-windows',
-      'opennova-apps-windows',
-    ]) {
-      expect(text).toContain(file);
-    }
-    const links = hrefs(wrapper);
-    expect(links).toContain('https://github.com/opennova-net/opennova/releases/latest');
+    for (const file of BUILDS) expect(text).toContain(file);
+    expect(wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'))).toHaveLength(0);
+    expect(wrapper.findAll('[aria-disabled="true"]').filter((s) => s.text() === 'Not published yet')).toHaveLength(BUILDS.length);
+    expect(hrefs(wrapper).some((href) => href?.includes('/releases'))).toBe(false);
+  });
+
+  it("offers no download until the host's manifest lists the build", async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    manifest.mockResolvedValue(null);
+    const wrapper = await mountPage();
+    expect(wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'))).toHaveLength(0);
+    expect(wrapper.findAll('[aria-disabled="true"]').filter((s) => s.text() === 'Not published yet')).toHaveLength(BUILDS.length);
+  });
+
+  it('offers the account and lobby steps', async () => {
+    const links = hrefs(await mountPage());
     expect(links).toContain('/register');
     expect(links).toContain('/lobby');
     expect(links).toContain('#downloads');

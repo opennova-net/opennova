@@ -13,7 +13,7 @@ checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/READ
 image is the `web` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 
 - `http_listener.*` and the route files (`*_routes.*`, `hosted/`, `billing/`, `jobs/`,
-  `data_sets/`: the Game data and releases admin routes over the object store, and
+  `data_sets/`: the games' and releases' admin routes over the object store, and
   `infra/`: the admin's infrastructure view and its AWS reads, and every log on the site
   from the store `ONNET_LOG_STORE` names), the update listener and its catalog of the
   published releases (`updater/`), the

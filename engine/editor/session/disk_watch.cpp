@@ -32,6 +32,25 @@ std::set<std::string> import_inputs(const SessionView &view) {
 
 } // namespace
 
+void add_changed_files(const ProjectPaths &paths, const std::vector<std::string> &changed, ExternalChanges &changes) {
+	std::set<std::string> sources(changes.sources.begin(), changes.sources.end());
+	std::set<std::string> files(changes.files.begin(), changes.files.end());
+	const std::string record_suffix = kImportSidecarSuffix;
+	for (const std::string &file : changed) {
+		files.insert(file);
+		// An import record that changed, or a source that came with its record: the source imported (again).
+		if (strutil::ends_with_icase(file, record_suffix)) {
+			const std::string source = file.substr(0, file.size() - record_suffix.size());
+			if (disk_stamp(paths, source).present) sources.insert(source);
+		} else if (importer_for(basename_of(file)) && disk_stamp(paths, file).present &&
+		           disk_stamp(paths, file + record_suffix).present) {
+			sources.insert(file);
+		}
+	}
+	changes.sources.assign(sources.begin(), sources.end());
+	changes.files.assign(files.begin(), files.end());
+}
+
 DiskWatch::DiskWatch(SessionCore &core) : core_(core) {}
 
 bool DiskWatch::follow_project() {
@@ -121,22 +140,7 @@ void DiskWatch::check(bool all) {
 	if (!view.documents.gestures.empty()) return publish(unsettled);
 	const std::vector<std::string> ready = changes_.take_ready();
 	if (ready.empty() && changes.empty()) return publish(unsettled);
-	std::set<std::string> sources(changes.sources.begin(), changes.sources.end());
-	std::set<std::string> files(changes.files.begin(), changes.files.end());
-	const std::string record_suffix = kImportSidecarSuffix;
-	for (const std::string &file : ready) {
-		files.insert(file);
-		// An import record that changed, or a source that came with its record: the source imported (again).
-		if (strutil::ends_with_icase(file, record_suffix)) {
-			const std::string source = file.substr(0, file.size() - record_suffix.size());
-			if (disk_stamp(paths, source).present) sources.insert(source);
-		} else if (importer_for(basename_of(file)) && disk_stamp(paths, file).present &&
-		           disk_stamp(paths, file + record_suffix).present) {
-			sources.insert(file);
-		}
-	}
-	changes.sources.assign(sources.begin(), sources.end());
-	changes.files.assign(files.begin(), files.end());
+	add_changed_files(paths, ready, changes);
 	if (core_.start_changed_refresh(std::move(changes))) {
 		view.activity.status = "Reading what changed outside the editor...";
 		core_.touch(ViewConcern::Output);

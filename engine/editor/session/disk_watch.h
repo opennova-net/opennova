@@ -9,7 +9,15 @@
 namespace opennova::editor {
 
 class SessionCore;
+struct ExternalChanges;
 struct PollBudget;
+struct ProjectPaths;
+
+// The project files `changed` (project-relative) that something other than the editor's own saves wrote
+// (another program, a content store pull: session/content_controller.h) taken into `changes`: each a file
+// read again, and an import source among them, or one whose import record changed, imported again (its
+// record and its source both there).
+void add_changed_files(const ProjectPaths &paths, const std::vector<std::string> &changed, ExternalChanges &changes);
 
 // How often the Shell sends its check (ADR 0046 DI-01), with or without the focus (an editor an MCP
 // client launched never has it); while a file waits to hold still, or the sweep runs, the next comes

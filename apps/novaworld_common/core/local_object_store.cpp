@@ -77,6 +77,22 @@ bool LocalObjectStore::copy_prefix(
 	return true;
 }
 
+bool LocalObjectStore::sync_down(
+		std::string_view prefix, const std::string &dir, std::string &error) {
+	std::vector<StoredObject> objects;
+	if (!list(prefix, objects, error))
+		return false;
+	for (const StoredObject &object : objects) {
+		const fs::path to = io::os_path(io::utf8_join(dir, object.key.substr(prefix.size())));
+		std::error_code ec;
+		if (fs::is_regular_file(to, ec) && fs::file_size(to, ec) == object.size && !ec)
+			continue;
+		if (!copy_file_to(io::os_path(path_of(object.key)), to, error))
+			return false;
+	}
+	return true;
+}
+
 bool LocalObjectStore::list(
 		std::string_view prefix, std::vector<StoredObject> &out, std::string &error) {
 	out.clear();

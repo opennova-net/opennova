@@ -3,7 +3,9 @@
 #include <string>
 
 #include <editor/assets/install_check.h>
-#include <editor/ui/expansion_fields.h>
+#include <editor/session/editor_request.h>
+#include <editor/session/view/workspace_view.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -36,13 +38,26 @@ private:
 // waits ("" for "Checking the folder...").
 void draw_install_line(const std::string &words, bool ok, bool named);
 
-// The new-project form: a name, a folder (Browse... asks the shell for one), the game install the project
-// imports from and plays in (the UX round's project lane: prefilled with the one the editor last chose,
-// Browse..., and checked as it is named, CheckInstall, what it holds said under it), what it builds on and
-// whether it builds as an expansion (ADR 0046 S16: ExpansionFields, over the expansions of the install
-// named), and Create, which raises NewProject with the install. What it holds is the workspace's
-// (new_project, the MCP gaps lane): each field draws it and a person's change is a set_workspace, so the
-// editor MCP fills it as a person does; the welcome page and File > New project... draw the one form.
+// What Create raises of the new-project form `form` (`install`: the game install it names, else the editor's;
+// `stock_title`: a game you own's name, its game's): a game you own's project (new_project's all, every file of
+// its game imported as it opens) of the base game, or of an installed expansion on the base game's project; a
+// mod, an expansion of the game it changes (the install's base game, an installed expansion, or a project of the
+// author's own as its base game); a new game, a standalone project.
+EditorRequest new_project_request(const WorkspaceView::NewProject &form, const std::string &install,
+                                  const std::string &stock_title);
+
+// The new-project form, which asks what is being made (the editor import round: three choices, the raw
+// expansion fields no longer the author's to fill in). The game install the project imports from and plays in
+// (the UX round's project lane: prefilled with the one the editor last chose, Browse..., and checked as it is
+// named, CheckInstall, what it holds said under it) comes first. A game you own: which of the install's games
+// (its base game, or one of its expansions, which is made on the base game's project: a folder, Browse...,
+// offered the one beside it that holds one, refused plainly where none is named) and the folder; its name is its
+// game's. A mod: the game it changes (the install's base game, an installed expansion, or a project of the
+// author's own, its folder), its name and short name (the expansion it builds as, checked as the game's rule
+// takes it), the folder. A new game: its name and the folder. Create raises new_project_request. What it holds
+// is the workspace's (new_project, the MCP gaps lane): each field draws it and a person's change is a
+// set_workspace, so the editor MCP fills it as a person does; the welcome page and File > New project... draw
+// the one form.
 class NewProjectForm {
 public:
 	// True when Create raised the request.
@@ -52,8 +67,9 @@ private:
 	ui_kit::HeldText<kWorkspaceText> title_;
 	ui_kit::HeldText<kWorkspacePath> folder_;
 	ui_kit::HeldText<kWorkspacePath> install_;
+	ui_kit::HeldText<kWorkspacePath> base_;
+	ui_kit::HeldText<kWorkspaceExpansion> name_;
 	InstallFieldCheck check_;
-	ExpansionFields expansion_;
 };
 
 // The Document window with no project open, which then has the whole workspace (the other windows stand

@@ -68,6 +68,16 @@ output "update_host" {
   description = "The update service's hostname, an unproxied record at the load balancer (web's ONNET_UPDATE_HOST; retail UPDATE.EXE reaches it on the update ports); null without a zone"
 }
 
+output "downloads_host" {
+  value       = local.downloads_host != "" ? local.downloads_host : null
+  description = "The downloads host, an unproxied record at its CloudFront distribution (the site's download buttons); null without a zone"
+}
+
+output "downloads_bucket" {
+  value       = length(aws_s3_bucket.downloads) > 0 ? aws_s3_bucket.downloads[0].bucket : null
+  description = "The downloads host's bucket, which .github/workflows/publish.yml publishes to; null without a zone"
+}
+
 output "novaworld_host" {
   value       = local.novaworld_host != "" ? local.novaworld_host : null
   description = "The gate's hostname, an unproxied A record at the gate's address (OpenNova's client's OpenNova NovaWorld; opennova-serve's --master-host); null without a zone"

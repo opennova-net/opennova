@@ -1,49 +1,42 @@
--- The update releases (ADR 0064 d5, d9; apps/novaworld_common/hosted/data_set_repository.h):
--- 1SFS packages an admin uploads, each section applied to the baseline of the data set
--- whose command file it carries, and served to retail UPDATE.EXE by the web program's
--- update listener. Over 0011_data_sets.sql's rows. Service policy, not a port.
+-- The update releases (ADR 0064 d5, d9; apps/novaworld_common/data_sets/data_set_repository.h):
+-- 1SFS packages, each section a whole build of the data set whose command file it carries,
+-- served to retail UPDATE.EXE by the web program's update listener and built into that data
+-- set's tree from nothing (release.apply). A game with a project builds its releases from its
+-- revisions (0025); one with none (OpenNova's runtime) has its packages uploaded. Over
+-- 0011_data_sets.sql's rows. Service policy, not a port.
 
 -- A data set's updater product: updater_login and command_file (JOTRus, JOPTR.CMD; '' for a
--- data set the update service does not serve), retail_updater whether SERVER.LST names
--- ftp.novaworld.com (a retail install through the Switcher) or the deployment's update host.
--- baseline_tree_id is the newest ready baseline (what a release applies to; current_tree_id
--- stays the tree new starts take: a baseline upload, or a published release applied),
--- published_release_id the release the update listener serves.
+-- data set the update service does not serve); retail whether it is a retail game (NovaLogic's
+-- install: its SERVER.LST names ftp.novaworld.com, reached through the Switcher, where our own
+-- game's names the deployment's update host; its project's revision 1 the stock install, 0025).
+-- published_release_id is the release the update listener serves and its tree is built from
+-- (current_tree_id the tree new starts take).
 ALTER TABLE data_sets
     ADD COLUMN updater_login        text NOT NULL DEFAULT '',
     ADD COLUMN command_file         text NOT NULL DEFAULT '',
-    ADD COLUMN retail_updater       boolean NOT NULL DEFAULT false,
-    ADD COLUMN baseline_tree_id     bigint,
+    ADD COLUMN retail               boolean NOT NULL DEFAULT false,
     ADD COLUMN published_release_id bigint,
     ADD CONSTRAINT data_sets_updater_check CHECK ((updater_login = '') = (command_file = '')),
     -- A standalone updater product: a login and its command file, and nothing a game has.
     ADD CONSTRAINT data_sets_update_check CHECK (kind <> 'update' OR (
         parent_id IS NULL AND expansion_code = '' AND title = '' AND game = '' AND
-        updater_login <> '' AND current_tree_id IS NULL AND baseline_tree_id IS NULL));
+        updater_login <> '' AND current_tree_id IS NULL));
 CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE updater_login <> '';
 
--- A tree is a baseline the admin uploaded (source 'baseline'), or a published release
--- applied to the baseline it was copied from (source 'release', release_id,
--- baseline_tree_id): building (the worker applies a release) -> ready, or failed with
--- `error`. Every tree so far is a baseline.
-ALTER TABLE data_set_trees
-    DROP CONSTRAINT data_set_trees_state_check,
-    ADD CONSTRAINT data_set_trees_state_check
-        CHECK (state IN ('uploading', 'finalizing', 'building', 'ready', 'failed', 'pruned')),
-    ADD COLUMN source           text NOT NULL DEFAULT 'baseline' CHECK (source IN ('baseline', 'release')),
-    ADD COLUMN release_id       bigint,
-    ADD COLUMN baseline_tree_id bigint REFERENCES data_set_trees(id) ON DELETE SET NULL;
-ALTER TABLE data_set_trees ALTER COLUMN source DROP DEFAULT;
+-- The release a tree was built from (NULL once that release is deleted).
+ALTER TABLE data_set_trees ADD COLUMN release_id bigint;
 
--- An uploaded 1SFS package (updates/<sha256>.sfs once validated; updates/upload-<id>.sfs
--- while uploading): uploading -> validating (the worker parses it and maps each section to a
--- data set by its command file) -> draft | invalid -> published (its sections' data sets
--- serve it to the updater and get a tree built from it) -> retired. package_product is the
--- 1SFS trailer's; name the admin's label.
+-- A 1SFS package (updates/<sha256>.sfs once validated; updates/upload-<id>.sfs before):
+-- uploading -> validating (the worker parses it and maps each section to a data set by its
+-- command file) -> draft | invalid -> published (its sections' data sets serve it to the
+-- updater and get a tree built from it) -> retired. data_set_id is the game it is a release of
+-- (a built one's from the start, an upload's once its validation maps its base section);
+-- package_product the 1SFS trailer's; name the release's label.
 CREATE TABLE releases (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     status          text NOT NULL DEFAULT 'uploading'
         CHECK (status IN ('uploading', 'validating', 'invalid', 'draft', 'published', 'retired')),
+    data_set_id     bigint REFERENCES data_sets(id) ON DELETE SET NULL,
     sha256          text NOT NULL DEFAULT '',
     bytes           bigint NOT NULL DEFAULT 0,
     package_product text NOT NULL DEFAULT '',
@@ -72,29 +65,23 @@ CREATE TABLE release_sections (
 );
 
 ALTER TABLE data_sets
-    ADD CONSTRAINT data_sets_baseline_tree_fkey
-        FOREIGN KEY (baseline_tree_id) REFERENCES data_set_trees(id) ON DELETE SET NULL,
     ADD CONSTRAINT data_sets_published_release_fkey
         FOREIGN KEY (published_release_id) REFERENCES releases(id) ON DELETE SET NULL;
 ALTER TABLE data_set_trees
     ADD CONSTRAINT data_set_trees_release_fkey
         FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE SET NULL;
 
--- A data set's current tree so far is a baseline upload: it is the baseline a release
--- applies to.
-UPDATE data_sets SET baseline_tree_id = current_tree_id WHERE current_tree_id IS NOT NULL;
-
 -- The seeded retail products the update service serves (the Switcher sends their updater to
 -- it): Joint Operations and its Escalation expansion.
-UPDATE data_sets SET updater_login = 'JOTRus', command_file = 'JOPTR.CMD', retail_updater = true
+UPDATE data_sets SET updater_login = 'JOTRus', command_file = 'JOPTR.CMD', retail = true
 WHERE kind = 'base' AND game = 'jop_2_consumer';
-UPDATE data_sets d SET updater_login = 'JOEus', command_file = 'JOEPTR.CMD', retail_updater = true
+UPDATE data_sets d SET updater_login = 'JOEus', command_file = 'JOEPTR.CMD', retail = true
 FROM data_sets b
 WHERE d.kind = 'expansion' AND d.expansion_code = 'jox01' AND d.parent_id = b.id
   AND b.kind = 'base' AND b.game = 'jop_2_consumer';
 -- Delta Force Xtreme 2's, as the Steam DFX2's UPDATE.WIZ names it (CMD=DFX2.CMD,
 -- PRODUCT_LOGIN=DFX2).
-UPDATE data_sets SET updater_login = 'DFX2', command_file = 'DFX2.CMD', retail_updater = true
+UPDATE data_sets SET updater_login = 'DFX2', command_file = 'DFX2.CMD', retail = true
 WHERE kind = 'base' AND game = 'dfx2_consumer';
 
 -- OpenNova's own products (ADR 0067): its runtime, a standalone updater product; its game's

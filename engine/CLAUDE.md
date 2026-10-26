@@ -91,9 +91,11 @@
   reports a failed query or migration by throwing.
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
-  partition acyclic), `opennova_base` (vfs, resource_index, gameprofile, pcapio, os_random,
-  proc), `opennova_net` (novacrypto, napi, npwire, admin, title, update and the novaworld
-  session/gate: the wire), `opennova_runtime` (the rest of runtime/, `inmatch` and `replication` included),
+  partition acyclic), `opennova_base` (content, vfs, resource_index, gameprofile, pcapio,
+  os_random, proc; `content` is a project revision's manifest, shared by the service and the
+  editor, ADR 0069), `opennova_net` (novacrypto, napi, npwire, admin, title, update and the
+  novaworld session/gate: the wire), `opennova_runtime` (the rest of runtime/, `inmatch` and
+  `replication` included),
   `opennova_novaworld_service` (the service alone, only with the root option
   `OPENNOVA_NOVAWORLD_SERVICE`, the ONLY target linking `opennova_pq`, the INTERFACE target
   over the system libpq) and `opennova_editor` (linked only by the editor-enabled

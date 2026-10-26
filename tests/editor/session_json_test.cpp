@@ -136,7 +136,7 @@ static int test_tokens() {
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
 		            back == operation);
 	}
-	for (int i = 0; i <= static_cast<int>(PickPurpose::MusicStreamWave); ++i) {
+	for (int i = 0; i <= static_cast<int>(PickPurpose::ContentFolder); ++i) {
 		const auto purpose = static_cast<PickPurpose>(i);
 		PickPurpose back = PickPurpose::None;
 		TEST_EXPECT(*pick_purpose_token(purpose) && pick_purpose_from_token(pick_purpose_token(purpose), back) &&
@@ -152,6 +152,11 @@ static int test_tokens() {
 		UnsavedChoice back = UnsavedChoice::Cancel;
 		TEST_EXPECT(*unsaved_choice_token(choice) && unsaved_choice_from_token(unsaved_choice_token(choice), back) &&
 		            back == choice);
+	}
+	for (const Resolution resolution : { Resolution::KeepMine, Resolution::TakeTheirs }) {
+		Resolution back = Resolution::KeepMine;
+		TEST_EXPECT(*content_resolution_token(resolution) &&
+		            content_resolution_from_token(content_resolution_token(resolution), back) && back == resolution);
 	}
 	for (int i = 0; i <= static_cast<int>(DiagnosticSeverity::Error); ++i) {
 		const auto severity = static_cast<DiagnosticSeverity>(i);
@@ -567,7 +572,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, expansion, builds_on, base_project, game_install, import_pass, all).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
 			"Unknown request member \"flagg\" (build takes out_dir, rehash, report).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash, report).");
@@ -865,6 +870,14 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Gesture: out.gesture = 6; break;
 		case F::Cancel: out.cancel = true; break;
 		case F::TerrainView: out.terrain_view = "missions/m01.mis"; break;
+		case F::Server: out.server = "https://opennova.example"; break;
+		case F::Username: out.username = "taylor"; break;
+		case F::Password: out.password = "pw"; break;
+		case F::ProjectKey: out.project_key = "JO"; break;
+		case F::Message: out.message = "A change"; break;
+		case F::Resolution: out.resolution = Resolution::TakeTheirs; break;
+		case F::Version: out.version = "0.2.0"; break;
+		case F::Revision: out.revision = 4; break;
 		case F::kCount: break;
 		}
 	}

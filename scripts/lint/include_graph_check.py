@@ -258,6 +258,11 @@ def local_roots(rel: Path) -> list[Path]:
         roots.append(REPO / "godot" / "src")
     elif rel.parts[0] == "tests":
         roots.append(REPO / "tests")
+        if len(rel.parts) > 2 and rel.parts[1] == "novaworld":
+            # The service's tests include its programs' headers by their own roots
+            # (apps/novaworld_web/content/ shares its name with base/content).
+            roots.append(REPO / "apps" / "novaworld_web")
+            roots.append(REPO / "apps" / "novaworld_common")
     elif rel.parts[0] == "apps" and len(rel.parts) > 2:
         roots.append(REPO / "apps" / rel.parts[1])
         roots.append(REPO / "apps" / "common")

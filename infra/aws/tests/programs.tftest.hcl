@@ -110,6 +110,25 @@ mock_provider "aws" {
   }
 }
 
+# The same account in us-east-1 (versions.tf): the downloads host's certificate,
+# its one validation record known at plan.
+mock_provider "aws" {
+  alias           = "us_east_1"
+  override_during = plan
+
+  mock_resource "aws_acm_certificate" {
+    defaults = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/01234567-89ab-cdef-0123-456789abcdef"
+      domain_validation_options = [{
+        domain_name           = "downloads.example.com"
+        resource_record_name  = "_0123456789abcdef.downloads.example.com."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_fedcba9876543210.acm-validations.aws."
+      }]
+    }
+  }
+}
+
 mock_provider "cloudflare" {
   override_during = plan
 
@@ -377,9 +396,9 @@ run "task_definitions" {
       aws_ecs_task_definition.program["fleet"].cpu == "256" && aws_ecs_task_definition.program["fleet"].memory == "512" &&
       aws_ecs_task_definition.program["web"].cpu == "512" && aws_ecs_task_definition.program["web"].memory == "1024" &&
       aws_ecs_task_definition.program["worker"].cpu == "512" && aws_ecs_task_definition.program["worker"].memory == "1024" &&
-      aws_ecs_task_definition.program["data"].cpu == "256" && aws_ecs_task_definition.program["data"].memory == "1024"
+      aws_ecs_task_definition.program["data"].cpu == "256" && aws_ecs_task_definition.program["data"].memory == "2048"
     )
-    error_message = "small tasks: gate, lobby and the fleet 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB, data 0.25 vCPU and 1 GiB"
+    error_message = "small tasks: gate, lobby and the fleet 0.25 vCPU and 0.5 GiB, web (server and nginx) and the worker 0.5 vCPU and 1 GiB, data 0.25 vCPU and 2 GiB (a whole game's release build)"
   }
   assert {
     condition = alltrue([
@@ -548,9 +567,11 @@ run "environments" {
     condition = (
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_PORTS"] == "20044,20556,21068,21580" &&
-      alltrue([for p in ["gate", "lobby", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")])
+      alltrue([for p in ["gate", "lobby", "fleet", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")]) &&
+      { for e in jsondecode(aws_ecs_task_definition.program["data"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
+      !strcontains(aws_ecs_task_definition.program["data"].container_definitions, "ONNET_UPDATE_PORTS")
     )
-    error_message = "web alone serves the update service: at the update record's name, on the updater's four ports"
+    error_message = "web alone serves the update service: at the update record's name, on the updater's four ports; data's release build names the host in our own game's UPDATE.WIZ"
   }
   assert {
     condition = (

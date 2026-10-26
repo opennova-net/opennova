@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <utility>
 
+#include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
@@ -112,9 +113,58 @@ void ProblemsService::validate_pending_now() {
 }
 
 void ProblemsService::compose(bool keep_reported) {
+	if (held_) return compose_held();
 	while (!step_pass(UINT64_MAX)) {
 	}
 	compose_rows(keep_reported);
+}
+
+void ProblemsService::hold_validation(bool held) {
+	if (held == held_) return;
+	held_ = held;
+	if (!held) {
+		// The rows are made again whatever the counts say: the held ones were made of none of it.
+		moved_since_composed_ = true;
+		validate_later();
+		return;
+	}
+	pass_.reset();
+	compose_held();
+}
+
+// The scan's and the requirements' findings, as every composition leads with them (show_requirements
+// keeps them as files land), then every finding reported since the last validation; the gate empty
+// (gate_findings), the marks made again.
+void ProblemsService::compose_held() {
+	if (!view_.project.scan || !view_.project.requirements) return;
+	std::vector<Diagnostic> rows = view_.project.scan->diagnostics;
+	const std::vector<Diagnostic> &requirements = view_.project.requirements->diagnostics;
+	rows.insert(rows.end(), requirements.begin(), requirements.end());
+	const size_t composed = rows.size();
+	for (const Reported &reported : reported_) rows.push_back(reported.finding);
+	gate_size_ = 0;
+	gate_tail_ = composed;
+	trailing_ = rows.size() - composed;
+	composed_ = Composed();
+	composed_.made = true;
+	composed_.rows = rows.size();
+	composed_.scan = view_.project.scan->diagnostics;
+	composed_.requirements = requirements;
+	lead_scan_ = composed_.scan;
+	lead_requirements_ = composed_.requirements;
+	if (rows != view_.findings.diagnostics) {
+		view_.findings.diagnostics = std::move(rows);
+		core_.touch(ViewConcern::Findings);
+	}
+	mark_rows();
+	show_validation();
+}
+
+void ProblemsService::release_base_files() {
+	assets_->set_base(nullptr);
+	originals_->clear();
+	originals_needed_ = false;
+	show_originals();
 }
 
 bool ProblemsService::pass_current() const {
@@ -199,10 +249,21 @@ void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
 	// The install is validated for the files a row may be the game's own in (problem_query.h's
 	// original_candidate): a finding on a file of a name the install serves, each name validated once (the
-	// install's files of those names and what their findings read, session/original_files.h).
-	// The install's names normalized once while its listing stands (a composition asks every row's).
-	if (served_listing_ != view_.project.retail_files) {
-		served_listing_ = view_.project.retail_files;
+	// install's files of those names and what their findings read, session/original_files.h). The install is
+	// SessionCore::original_install's: the one the project imports from, whose names the session lists
+	// (retail_files), or for a stock expansion the game as it ships, its names listed here once while that view
+	// stands. Its names normalized once while its listing stands (a composition asks every row's).
+	const InstallSpec install = core_.original_install();
+	// A view mounting an expansion the project does not build on is a stock expansion's (it builds on a base
+	// project, mounting none); any other is the one the project imports from.
+	const bool imported_from = install.root.empty() || install.expansion == view_.project.document->expansion.builds_on;
+	if (!imported_from && install != original_listed_) {
+		original_listed_ = install;
+		original_names_ = list_install_file_names(install);
+	}
+	const std::vector<std::string> &listing = imported_from ? view_.project.retail_files : original_names_;
+	if (served_listing_ != listing) {
+		served_listing_ = listing;
 		served_.clear();
 		for (const std::string &name : served_listing_) served_.insert(pff::normalized_logical_name(name));
 	}
@@ -215,7 +276,7 @@ void ProblemsService::want_originals() {
 	originals_needed_ = !names.empty();
 	// Another install or game forgets what was found (the view says so at once); a new scan looks at the
 	// install's folder again.
-	originals_->want(core_.base_game(), view_.project.document, view_.project.scan.get(), names);
+	originals_->want(install, view_.project.document, view_.project.scan.get(), names);
 	show_originals();
 }
 
@@ -455,6 +516,7 @@ void ProblemsService::clear() {
 	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;
+	held_ = false;
 	read_once_ = false;
 	graph_scan_.reset();
 	pass_.reset();
@@ -462,6 +524,8 @@ void ProblemsService::clear() {
 	readings_.clear();
 	originals_->clear();
 	originals_needed_ = false;
+	original_listed_ = InstallSpec();
+	original_names_.clear();
 	blockers_.clear();
 	*blocker_memo_ = BlockerMemo();
 	view_.findings.marks.reset();

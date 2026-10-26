@@ -63,6 +63,7 @@ private:
 	bool dismissed_ = false;
 	uint64_t opened_ = 0;    // the workspace's opened serial at the last begin
 	uint64_t closed_at_ = 0; // ... when the close was made
+	int drawn_frame_ = -2;   // the frame of the last begin: its window drew then
 };
 
 // The colours of a finding's severity (Problems' marks, Output's lines).
