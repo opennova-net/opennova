@@ -110,6 +110,24 @@ func test_oversize_body_rejected_413() -> void:
 	assert_eq(parser.error_status(), 413)
 
 
+func test_bytes_pushed_past_one_largest_request_rejected_413() -> void:
+	# A client that streams while the connection is busy (next_request() not polled)
+	# is refused at push(): the buffer never holds more than one largest request.
+	var parser := McpHttpParser.new()
+	var chunk := PackedByteArray()
+	chunk.resize(64 * 1024)
+	chunk.fill(97)
+	var pushed := 0
+	while pushed + chunk.size() <= McpHttpParser.MAX_BUFFERED_BYTES:
+		parser.push(chunk)
+		pushed += chunk.size()
+	assert_false(parser.has_error(), "up to one largest request is buffered")
+	parser.push(chunk)
+	assert_true(parser.has_error())
+	assert_eq(parser.error_status(), 413)
+	assert_true(parser.next_request().is_empty())
+
+
 func test_malformed_request_line_rejected_400() -> void:
 	var parser := McpHttpParser.new()
 	parser.push("GARBAGE\r\n\r\n".to_ascii_buffer())

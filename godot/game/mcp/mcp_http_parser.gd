@@ -16,6 +16,10 @@ const LF := 10
 
 const MAX_HEAD_BYTES := 16384
 const MAX_BODY_BYTES := 4 * 1024 * 1024
+## The most the buffer holds: one largest request, its head, terminator and body. push()
+## enforces it as the bytes arrive, so a client streaming while the connection is busy
+## (next_request() not called) cannot grow the buffer past it either.
+const MAX_BUFFERED_BYTES := MAX_HEAD_BYTES + 4 + MAX_BODY_BYTES
 
 var _buffer := PackedByteArray()
 var _scan_from := 0
@@ -23,9 +27,15 @@ var _error_status := 0
 
 
 ## Append raw socket bytes. No-op once the parser is in an error state (the
-## connection is about to be closed anyway).
+## connection is about to be closed anyway). Bytes that would take the buffer past
+## MAX_BUFFERED_BYTES are refused with 413 and the buffer dropped.
 func push(bytes: PackedByteArray) -> void:
 	if _error_status != 0:
+		return
+	if _buffer.size() + bytes.size() > MAX_BUFFERED_BYTES:
+		_error_status = 413
+		_buffer = PackedByteArray()
+		_scan_from = 0
 		return
 	_buffer.append_array(bytes)
 
