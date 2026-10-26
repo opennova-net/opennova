@@ -3,8 +3,9 @@
 // test's own and a local object store, the data program's jobs run on this thread with the real
 // tools (opennova-project's export, opennova-update-tool's builder, as child processes). A retail
 // game's stock import pushed as revision 1 and an edit as revision 2: the build exports both and
-// packs what changed, a package release.validate makes a draft of, its one section the game's data
-// set's. Our own game's first revision: a full package whose tree holds the UPDATE.WIZ naming its
+// packs the revision whole (every file a row, the stock install's removals counted from revision
+// 1, the runtime's own files left out), a package release.validate makes a draft of, its one
+// section the game's data set's. Our own game's first revision: a full package whose tree holds the UPDATE.WIZ naming its
 // product. And the refusals: a project that updates no data set, and a revision that is no project
 // (its export fails, what the tool said kept as the build's log).
 
@@ -206,8 +207,10 @@ const update::SfsEntry *entry_named(const update::SfsSection &section, const cha
 
 } // namespace
 
-// A retail game's stock import as revision 1 and an edit as revision 2: what changed, packed.
-static int test_retail_patch() {
+// A retail game's stock import as revision 1 and an edit as revision 2: the revision packed whole,
+// so the jointops zip installs the game into an empty folder from it (ADR 0067 d6 as amended
+// 2026-10-25).
+static int test_retail_whole() {
 	Rig rig("opennova_release_build_retail");
 	const std::string install = rig.temp.file("install"), project = rig.temp.file("JO");
 	std::string minted;
@@ -245,11 +248,31 @@ static int test_retail_patch() {
 	TEST_EXPECT(sections.size() == 1 && set && sections[0].data_set_id == *set->data_set_id &&
 			sections[0].command_file == "JOPTR.CMD" && sections[0].version == "1.0.1");
 	TEST_EXPECT(!sections.empty() && sections[0].row_count >= 1);
-	// Only what changed: far fewer rows than the stock import's files.
 	update::SfsPackage package;
-	TEST_EXPECT(rig.package(*release, package) && package.product == "Joint Operations");
-	std::printf("retail patch: JO r2 against its stock r1, %lld row(s), a draft\n",
-			sections.empty() ? 0LL : static_cast<long long>(sections[0].row_count));
+	TEST_EXPECT(rig.package(*release, package) && package.product == "Joint Operations" &&
+			package.sections.size() == 1);
+	const update::SfsEntry *command =
+			package.sections.empty() ? nullptr : entry_named(package.sections[0], "JOPTR.CMD");
+	TEST_EXPECT(command != nullptr);
+	if (!command)
+		return 1;
+	const auto cmd =
+			update::read_command_file(std::string(command->data.begin(), command->data.end()));
+	TEST_EXPECT(cmd.has_value());
+	// Whole: the edited weapon.def a row beside the files the edit left as they were, and none
+	// of the runtime's own files in a game's folder.
+	size_t copies = 0;
+	bool edited = false, runtime_file = false;
+	for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{}) {
+		if (row.type == update::CommandType::Copy || row.type == update::CommandType::Loose)
+			++copies;
+		edited = edited || strutil::iequals(row.name, "weapon.def");
+		runtime_file = runtime_file || strutil::iequals(row.name, "update.exe") ||
+				strutil::iequals(row.name, "revupdat.exe") || strutil::iequals(row.name, "README.txt");
+	}
+	TEST_EXPECT(edited && copies > 1 && !runtime_file);
+	std::printf("retail whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft\n",
+			copies);
 	return 0;
 }
 
@@ -327,7 +350,7 @@ static int test_refusals() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
-	failures += test_retail_patch();
+	failures += test_retail_whole();
 	failures += test_own_full();
 	failures += test_refusals();
 	if (failures == 0)

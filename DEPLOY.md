@@ -2114,7 +2114,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 
 ### Cost
 
-About $160 a month for each deployment's service tier before the machines (approximate:
+About $163 a month for each deployment's service tier before the machines (approximate:
 us-east-1 on-demand list prices, rounded: Fargate Linux x86 $0.04048 a vCPU-hour and
 $0.004445 a GB-hour, a public IPv4 address $0.005 an hour, a network load balancer
 $0.0225 an hour and its LCUs, `db.t4g.micro` single-AZ $0.016 an hour, RDS gp3 $0.115 a
@@ -2127,7 +2127,7 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 | web, a 0.5 vCPU / 1 GiB task (the server and nginx) and its public IPv4 | $22 |
 | the fleet program, a 0.25 vCPU / 0.5 GiB task and its public IPv4 | $13 |
 | the worker, a 0.5 vCPU / 1 GiB task and its public IPv4 | $22 |
-| the data program, a 0.25 vCPU / 1 GiB task, 20 GiB of task storage past Fargate's 20 and its public IPv4 | $16 |
+| the data program, a 0.25 vCPU / 2 GiB task (a whole game's release build holds its packed files), 20 GiB of task storage past Fargate's 20 and its public IPv4 | $19 |
 | the load balancer, its LCUs at this traffic and its two Elastic IPs | $25 |
 | the database, `db.t4g.micro` in one zone, 20 GiB gp3, backups | $14 |
 | the cache, one `cache.t4g.micro` Valkey node | $9 |
@@ -2137,7 +2137,7 @@ GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 
 Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
 doubles the database's $14, and each further cache node adds $9. Staging has prod's shape
-(about $160) and costs about $70 while `app down` (the database, the cache, the load
+(about $163) and costs about $70 while `app down` (the database, the cache, the load
 balancer and its addresses stay). A deployment's extra tasks (every
 program's new tasks start beside the old) run for minutes. The database adds its surplus CPU credits, if any (unlimited mode: about $0.075 a
 vCPU-hour past its baseline over a day), none while it stays under its baseline. The

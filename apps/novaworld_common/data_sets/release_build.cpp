@@ -32,6 +32,10 @@ namespace fs = std::filesystem;
 constexpr const char *kTag = "[data]";
 constexpr int kCapBuild = 1;
 constexpr int kAttemptsBuild = 3;
+// The files the runtime's own package installs in a game's folder that a game's export may hold
+// too (a stock install's UPDATE.EXE, REVUPDAT.EXE and Readme.txt): a release never carries them,
+// or the runtime's update and the game's would replace each other's on every pass.
+const char *const kRuntimeFiles[] = { "update.exe", "revupdat.exe", "README.txt" };
 // What a build's log keeps of what its tools said: the tail past this.
 constexpr size_t kLogMax = 256 * 1024;
 // The system's own variables a tool runs with (a name ending in '*' a prefix): nothing of the
@@ -58,8 +62,8 @@ struct Source {
 };
 
 // What a build makes, read in one lease: the release, the data set its package updates, the
-// revision it exports (an expansion's base's beside it), a retail game's stock revisions, and our
-// own game's last published package.
+// revision it exports (an expansion's base's beside it), a retail game's stock revisions, and the
+// data set's last published package.
 struct BuildPlan {
 	ReleaseRow release;
 	DataSetRow data_set;
@@ -68,7 +72,7 @@ struct BuildPlan {
 	std::optional<Source> base;
 	std::optional<Source> stock;
 	std::optional<Source> base_stock;
-	std::string previous_key; // our own game's published package, "" for none
+	std::string previous_key; // the data set's published package, "" for none
 };
 
 // The revision `number` of `project` as a Source; false with `why` when it has none.
@@ -144,7 +148,8 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 				return false;
 			plan.base_stock = base_stock;
 		}
-	} else if (data_set->published_release_id) {
+	}
+	if (data_set->published_release_id) {
 		const std::optional<ReleaseRow> published =
 				find_release(db, *data_set->published_release_id);
 		if (published && !published->sha256.empty())
@@ -367,14 +372,19 @@ bool Build::write_wizard(const std::string &tree, std::string &why) const {
 }
 
 // opennova-update-tool's build of the package from `from` to `to`, as the data set names its
-// product: an expansion's section under its code, a base's with its executable; our own game's
-// full, with the removals since `previous` ("" for none).
+// product: an expansion's section under its code, a base's with its executable. Every release is
+// whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install their game into an
+// empty folder from it), with the removals since `previous` ("" for none) and, for a retail game,
+// since its stock install (`from`, revision 1's export). The runtime's own files in a game's
+// folder are left out (kRuntimeFiles).
 std::vector<std::string> Build::pack_command(
 		const std::string &from, const std::string &to, const std::string &previous) const {
 	const DataSetRow &ds = plan_.data_set;
 	std::vector<std::string> argv = { tools_.update_tool, "build", "--from", from, "--to", to,
 		"--out", package(), "--product-name", ds.product_name, "--product", ds.product_name,
-		"--version", plan_.release.version, "--exclude", "export.json" };
+		"--version", plan_.release.version, "--exclude", "export.json", "--full" };
+	for (const char *name : kRuntimeFiles)
+		argv.insert(argv.end(), { "--exclude", name });
 	if (!ds.expansion_code.empty()) {
 		argv.insert(argv.end(), { "--expansion", ds.expansion_code + "=" + ds.command_file });
 	} else {
@@ -382,11 +392,8 @@ std::vector<std::string> Build::pack_command(
 		if (!ds.product_exe.empty())
 			argv.insert(argv.end(), { "--exe", ds.product_exe });
 	}
-	if (!plan_.retail) {
-		argv.push_back("--full");
-		if (!previous.empty())
-			argv.insert(argv.end(), { "--previous", previous });
-	}
+	if (!previous.empty())
+		argv.insert(argv.end(), { "--previous", previous });
 	return argv;
 }
 
@@ -403,8 +410,9 @@ Step Build::run(std::string &why) {
 	const std::string edited_export = io::utf8_join(work_, "export");
 	if (!export_to(edited, edited_export, what, why))
 		return Step::Refused;
-	// What the package is the difference from: a retail game's stock revision exported as the
-	// edited one is (the stock install's files in our own writer's form), else nothing.
+	// What the package's removals count from: a retail game's stock revision exported as the
+	// edited one is (the stock install's files in our own writer's form), else nothing. Every
+	// file of the edited export is a row either way (pack_command's --full).
 	std::string from = io::utf8_join(work_, "empty");
 	std::string previous;
 	if (plan_.retail) {
@@ -416,14 +424,13 @@ Step Build::run(std::string &why) {
 		from = io::utf8_join(work_, "stock-export");
 		if (!export_to(stock, from, plan_.stock->label(), why))
 			return Step::Refused;
-	} else {
-		if (!io::ensure_directory(from, why) || !write_wizard(edited_export, why))
+	} else if (!io::ensure_directory(from, why) || !write_wizard(edited_export, why)) {
+		return Step::Transient;
+	}
+	if (!plan_.previous_key.empty()) {
+		previous = io::utf8_join(work_, "previous.sfs");
+		if (!store_.get_file(plan_.previous_key, previous, why))
 			return Step::Transient;
-		if (!plan_.previous_key.empty()) {
-			previous = io::utf8_join(work_, "previous.sfs");
-			if (!store_.get_file(plan_.previous_key, previous, why))
-				return Step::Transient;
-		}
 	}
 	if (!tool(pack_command(from, edited_export, previous), "the package of " + what, why))
 		return Step::Refused;

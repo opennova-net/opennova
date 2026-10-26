@@ -147,7 +147,12 @@ deferred. A stale DLL shows up as GDScript "class not found" errors for classes 
 
 The engine repository and its CI hold and ship no game data. The Windows runtime
 package contains the engine, its native dependencies, `update.exe`, and
-`revupdat.exe`; a standalone installation downloads OpenNova content on first run.
+`revupdat.exe`, in one game zip per game (`scripts/package_godot_windows.ps1`):
+`opennova-game-windows` (OP: Acid Gambit, a folder with no wizard),
+`jointops-game-windows` (JO's `UPDATE.WIZ` and Escalation's `expansion/jox01/UPDATE.WIZ`)
+and `dfx2-game-windows` (DFX2's `UPDATE.WIZ`). Unzipped into an empty folder, a zip's
+first run downloads its whole game. One runtime update package serves all three, each
+zip carrying its command file.
 
 A package talks to its export mode's deployment (DEPLOY.md "Deployments: dev, staging and
 prod"). A release package (`scripts/package_godot_windows.ps1`'s default: tagged releases
@@ -166,15 +171,17 @@ their stock installs (each one's revision 1 the stock import), are private. The 
 Content window gets, pulls and pushes a project; admins alone push, and a push is not a
 release. A release is built on the server from a revision: the editor's
 **Build > Release...** or the admin's Content page starts it, the data program exports
-and packs it, and the admin's Game data (Releases) publishes it. Our own game's is a full
-package carrying the last published one's removals; a retail game's is a patch of only
-what changed since its stock revision.
+and packs it, and the admin's Game data (Releases) publishes it. Every release is a
+whole package, carrying the last published one's removals, so the jointops and dfx2 zips
+install their game into an empty folder from it.
 
 The version goes into the package's command file; no version file is read or written.
-A retail patch diffs two exports by our own writer (the revision's and the stock
-revision's), so only changed files get rows, each into the archive the stock install
-holds it in. Its hosted tree is built on publish from the data set's stock baseline,
-uploaded once with "Upload data".
+A retail release also carries the removals since the stock install: it is packed from the
+stock revision's export by our own writer to the revision's, every file a row, each into
+the archive the stock install holds it in (a stock install's first update fetches its
+archives once, since our export stamps every entry anew). The runtime's own files in a
+game's folder (`update.exe`, `revupdat.exe`, `README.txt`) are left out. Its hosted tree is
+built on publish over the data set's stock baseline, uploaded once with "Upload data".
 
 The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
@@ -183,8 +190,9 @@ another game is refused (ADR 0067). OpenNova's product uses the JO engine profil
 updater refuses a product the folder's wizard does not name, and installs OpenNova
 content only into OpenNova's own folder or an empty one. The selected product
 and its installed expansions update independently of the OpenNova runtime. A retail
-selection requires existing game data; it does not download OpenNova's game into a
-retail installation. `--resource-dir` selects the content directory; otherwise an
+selection's folder holds that game, or gets the whole game on its first run (the
+jointops and dfx2 zips; every expansion folder holding a wizard is a product, as
+retail's); OpenNova's game never downloads into a retail folder. `--resource-dir` selects the content directory; otherwise an
 exported runtime uses its executable's directory.
 
 Startup checks do not block an installed game. An available update reveals the main
