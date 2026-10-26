@@ -24,7 +24,7 @@
         <RelativeTime :value="state.loadedAt.value!" :now="now" />.
       </p>
       <p v-else-if="needing === 0" class="attention-empty rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-        Nothing needs you: every machine reports and every server is running or starting on time.
+        No actionable findings in the checks available here.
       </p>
 
       <ul v-if="attention.findings.length" class="space-y-2">
@@ -62,6 +62,7 @@
               <span class="break-all font-mono text-xs text-ink">{{ a.name }}</span>
             </p>
             <p v-if="a.description" class="break-words text-ink">{{ a.description }}</p>
+            <RouterLink :to="alarmDestination(a.name).to" class="inline-block text-accent hover:text-ink-bright">{{ alarmDestination(a.name).label }}</RouterLink>
             <p v-if="a.state_since && sinceText(a.state_since)" class="text-xs text-ink-muted">Firing for {{ sinceText(a.state_since) }}</p>
           </li>
         </ul>
@@ -90,6 +91,7 @@ import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
 import { attentionCount } from '../api/attention';
 import { useAttention } from '../composables/useAttention';
+import { alarmDestination } from '../utils/alarmLinks';
 import type { FindingLevel } from '../types/attention';
 import { formatDuration, timeMs } from '../utils/format';
 import { toneBadgeClass, type Tone } from '../utils/infraView';

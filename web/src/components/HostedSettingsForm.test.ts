@@ -7,6 +7,9 @@ import { DFX2, JO, hostedServer, settings } from '../test/hostedFixtures';
 import type { Address } from '../types/addresses';
 import type { HostedDataSet, HostedSettings } from '../types/hostedServer';
 import { FIELD_RULES, MISSIONS_MAX } from '../utils/hostedSettings';
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
+
+vi.mock('../composables/useUnsavedChanges', () => ({ useUnsavedChanges: vi.fn() }));
 
 vi.mock('../api/hostedServer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/hostedServer')>()),
@@ -49,6 +52,32 @@ function rotation(wrapper: VueWrapper): string[] {
 describe('HostedSettingsForm', () => {
   beforeEach(() => {
     start.mockReset();
+  });
+
+  it('opens advanced settings before focusing an invalid advanced field', async () => {
+    const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), dataSets: [JO] }, attachTo: document.body });
+    const advanced = wrapper.get('[data-advanced-settings]').element as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    await wrapper.get('#hosted-settings-time_limit').setValue(999);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(advanced.open).toBe(true);
+    expect(document.activeElement?.id).toBe('hosted-settings-time_limit');
+    expect(start).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('protects edited setup until a server start succeeds', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([JO], settings());
+    const isDirty = vi.mocked(useUnsavedChanges).mock.calls.at(-1)![0];
+    expect(isDirty()).toBe(false);
+    await wrapper.get('#hosted-settings-game_name').setValue('Friday Night');
+    expect(isDirty()).toBe(true);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(isDirty()).toBe(false);
+    wrapper.unmount();
   });
 
   it('offers each game first with its version, and the picked game drives the rest of the form', async () => {

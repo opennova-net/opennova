@@ -1,20 +1,5 @@
-// The admin's map: the Overview, then four areas the way an operator thinks of
-// the service, each with its pages. The admin menu (pages/admin/AdminLayout.vue),
-// every page's breadcrumb (components/AdminCrumbs.vue) and the Overview's links
-// into each area read it, so a page has one place in all three.
-//
-//   NovaWorld         the service retail players use: whether they can sign in,
-//                     who is signed in, the CD keys DFX2 activates
-//   Hosting           the hosted servers: the fleet's machines and servers, what
-//                     they use, their static addresses, and the games: each
-//                     one's editor project and the releases built from it
-//   People and money  the accounts, their subscriptions, and what AWS charges
-//   Operations        the deployment as it runs: its programs and AWS resources,
-//                     and the background jobs
-//
-// Paths stay flat (/admin/fleet, /admin/users/<id>): the attention list's links
-// (apps/novaworld_common/hosted/model/fleet_health.cpp), the toolbox's output and
-// the docs name them.
+// One navigation map for the sidebar, breadcrumbs and Overview. Flat paths
+// remain shared with backend findings and operator tools.
 
 import type { RouteLocationRaw } from 'vue-router';
 
@@ -26,7 +11,7 @@ export interface AdminSection {
 }
 
 export interface AdminArea {
-  id: 'novaworld' | 'hosting' | 'people' | 'operations';
+  id: 'service' | 'accounts' | 'operations';
   label: string;
   description: string;
   sections: AdminSection[];
@@ -40,33 +25,24 @@ export const OVERVIEW: AdminSection = {
 
 export const ADMIN_AREAS: readonly AdminArea[] = [
   {
-    id: 'novaworld',
-    label: 'NovaWorld',
-    description: 'The service retail players sign in to',
+    id: 'service',
+    label: 'Service',
+    description: 'NovaWorld, game servers and their releases',
     sections: [
-      { to: '/admin/novaworld', label: 'Status and sessions', description: 'Whether players can sign in, and who is signed in now' },
-      { to: '/admin/cd-keys', label: 'CD keys', description: 'The Delta Force Xtreme 2 keys a copy activates' },
-    ],
-  },
-  {
-    id: 'hosting',
-    label: 'Hosting',
-    description: 'The hosted game servers and the machines they run on',
-    sections: [
+      { to: '/admin/novaworld', label: 'NovaWorld', description: 'Sign-in, live sessions and lobby instances' },
       { to: '/admin/fleet', label: 'Fleet', description: 'Machines and servers, their moves, the roll' },
-      { to: '/admin/usage', label: 'Server usage', description: 'What every live server uses of its slot' },
-      { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
       { to: '/admin/games', label: 'Games', description: "Each game's project, its releases and the servers running it" },
+      { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
     ],
   },
   {
-    id: 'people',
-    label: 'People and money',
-    description: 'Accounts, what they pay, and what AWS charges',
+    id: 'accounts',
+    label: 'Accounts',
+    description: 'Players, subscriptions and access',
     sections: [
       { to: '/admin/users', label: 'Users', description: 'Accounts, their roles, tiers and servers' },
       { to: '/admin/billing', label: 'Subscriptions', description: 'Support tiers, dedicated machines and addresses, as Stripe has them' },
-      { to: '/admin/costs', label: 'AWS costs', description: "The month's AWS bill and account budgets" },
+      { to: '/admin/cd-keys', label: 'CD keys', description: 'The Delta Force Xtreme 2 keys a copy activates' },
     ],
   },
   {
@@ -75,6 +51,8 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
     description: 'The deployment as it runs',
     sections: [
       { to: '/admin/infrastructure', label: 'Infrastructure', description: 'Programs, tasks, the balancer, the database and cache' },
+      { to: '/admin/usage', label: 'Server usage', description: 'What every live server uses of its slot' },
+      { to: '/admin/costs', label: 'AWS costs', description: "The month's AWS bill and account budgets" },
       { to: '/admin/jobs', label: 'Background jobs', description: 'The queue, its failures and its schedules' },
     ],
   },

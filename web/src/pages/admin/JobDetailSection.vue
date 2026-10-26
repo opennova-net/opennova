@@ -89,6 +89,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/jobs/<id>: one background job (GET /api/admin/jobs/<id>): its kind,
 // state, attempts, its times (when it may run, was made, last taken, ended),
 // its worker and lease while it runs, its keys, whether it carries a secret
@@ -190,7 +191,7 @@ async function retry() {
   const j = job.value;
   if (!j || busy.value) return;
   const next = j.attempts + 1;
-  if (!window.confirm(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
+  if (!await confirmAction(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
   busy.value = true;
   const result = await retryJob(j.id);
   busy.value = false;
@@ -208,7 +209,7 @@ async function retry() {
 async function cancel() {
   const j = job.value;
   if (!j || busy.value) return;
-  if (!window.confirm(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
+  if (!await confirmAction(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
   busy.value = true;
   const result = await cancelJob(j.id);
   busy.value = false;

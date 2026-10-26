@@ -1,3 +1,4 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Router } from 'vue-router';
@@ -29,7 +30,7 @@ const prune = vi.mocked(pruneJobs);
 describe('JobsSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
   let router: Router;
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountSection(path = '/admin/jobs') {
     router = await testRouter(path);
@@ -46,7 +47,7 @@ describe('JobsSection', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     readOverview.mockResolvedValue({ ok: true, value: overview() });
     readJobs.mockResolvedValue({ ok: true, value: jobPage() });
     retry.mockResolvedValue({ ok: true, value: job(89, { state: 'queued' }) });
@@ -121,7 +122,7 @@ describe('JobsSection', () => {
     expect(rows[0].text()).not.toContain('Retry all');
     // None can run again, so it can only be dismissed (deleted), asked first.
     dismissGroup.mockResolvedValue({ ok: true, value: 14 });
-    confirm.mockReturnValueOnce(true);
+    confirm.mockResolvedValueOnce(true);
     await rows[0].get('button').trigger('click');
     await flushPromises();
     expect(dismissGroup).toHaveBeenCalledWith('machine.launch', expect.any(String));
@@ -130,7 +131,7 @@ describe('JobsSection', () => {
     expect(rows[1].text()).toContain('SES refused the address <id>');
     expect(rows[1].text()).toContain('2 jobs');
     expect(rows[1].text()).not.toContain('can run again');
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await rows[1].get('button').trigger('click');
     expect(retryGroup).not.toHaveBeenCalled();
     await rows[1].get('button').trigger('click');
@@ -304,7 +305,7 @@ describe('JobsSection', () => {
     const page = await mountSection('/admin/jobs?tab=jobs');
     const form = page.get('section[aria-labelledby="jobs-prune"] form');
     await form.get('select').setValue('7');
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await form.trigger('submit');
     expect(prune).not.toHaveBeenCalled();
     await form.trigger('submit');

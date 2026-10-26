@@ -137,6 +137,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // The background jobs page's Jobs tab (JobsSection.vue): a page of jobs (GET
 // /api/admin/jobs) by state, kind, creation time, key and failure, newest
 // first, each to its own page (/admin/jobs/<id>), with a retry or a cancel;
@@ -363,13 +364,13 @@ async function act(run: () => Promise<AdminResult<unknown>>, done: string) {
 async function retry(j: Job) {
   if (busy.value) return;
   const next = j.attempts + 1;
-  if (!window.confirm(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
+  if (!await confirmAction(`Retry "${jobKindLabel(j.kind)}" (job ${j.id}) now? It gets one more attempt, ${next} of ${next}.`)) return;
   await act(() => retryJob(j.id), `Job ${j.id} is queued again to run now.`);
 }
 
 async function cancel(j: Job) {
   if (busy.value) return;
-  if (!window.confirm(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
+  if (!await confirmAction(`Cancel "${jobKindLabel(j.kind)}" (job ${j.id})? It will not run, and it is marked failed as cancelled by you.`)) return;
   await act(() => cancelJob(j.id), `Job ${j.id} is cancelled.`);
 }
 
@@ -377,7 +378,7 @@ async function prune() {
   if (busy.value) return;
   const days = keepDays.value;
   const plural = days === 1 ? '' : 's';
-  if (!window.confirm(`Delete every job that finished more than ${days} day${plural} ago? Their history goes for good.`)) return;
+  if (!await confirmAction(`Delete every job that finished more than ${days} day${plural} ago? Their history goes for good.`)) return;
   busy.value = true;
   const result = await pruneJobs(days);
   busy.value = false;

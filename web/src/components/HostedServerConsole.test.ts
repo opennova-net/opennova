@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import HostedServerConsole from './HostedServerConsole.vue';
 import {
+  consolePlayerAction,
   fetchConsoleChat,
   fetchConsoleLog,
   fetchConsoleMissions,
@@ -10,6 +11,8 @@ import {
   fetchConsoleRotation,
 } from '../api/hostedServer';
 import { provideConsoleQueue } from '../composables/useConsoleQueue';
+import { confirmAction } from '../composables/useConfirm';
+import { CONSOLE_TICK_MS } from '../composables/useHostedConsole';
 import type { ConsolePlayer } from '../types/hostedServer';
 
 vi.mock('../api/hostedServer', async (importOriginal) => ({
@@ -19,7 +22,9 @@ vi.mock('../api/hostedServer', async (importOriginal) => ({
   fetchConsoleMissions: vi.fn(),
   fetchConsoleChat: vi.fn(),
   fetchConsoleLog: vi.fn(),
+  consolePlayerAction: vi.fn(),
 }));
+vi.mock('../composables/useConfirm', () => ({ confirmAction: vi.fn() }));
 
 const players = vi.mocked(fetchConsolePlayers);
 
@@ -54,11 +59,14 @@ describe('HostedServerConsole', () => {
     vi.mocked(fetchConsoleMissions).mockResolvedValue({ ok: true, value: [] });
     vi.mocked(fetchConsoleChat).mockResolvedValue({ ok: true, value: [] });
     vi.mocked(fetchConsoleLog).mockResolvedValue({ ok: true, value: { server_id: 1, link: null, lines: [] } });
+    vi.mocked(confirmAction).mockResolvedValue(true);
+    vi.mocked(consolePlayerAction).mockResolvedValue({ ok: true, value: { slot: 1, result: 'sent' } });
   });
 
   afterEach(() => {
     wrapper?.unmount();
     wrapper = null;
+    vi.useRealTimers();
   });
 
   async function rows() {
@@ -80,5 +88,42 @@ describe('HostedServerConsole', () => {
     const listed = await rows();
     expect(listed).toHaveLength(2);
     expect(wrapper.find('.player-novalogic').exists()).toBe(false);
+  });
+
+  it.each(['Ban', 'Kill'])('does not %s a slot whose player changed while confirmation was open', async (label) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let approve!: (accepted: boolean) => void;
+    vi.mocked(confirmAction).mockImplementationOnce(() => new Promise((resolve) => { approve = resolve; }));
+    wrapper = mountConsole();
+    const [first] = await rows();
+    await first.findAll('button').find((button) => button.text().startsWith(label))!.trigger('click');
+    expect(consolePlayerAction).not.toHaveBeenCalled();
+
+    players.mockResolvedValue({ ok: true, value: [player(1, 'New arrival')] });
+    await vi.advanceTimersByTimeAsync(CONSOLE_TICK_MS);
+    await rows();
+    expect(wrapper.text()).toContain('New arrival');
+    approve(true);
+    await flushPromises();
+
+    expect(consolePlayerAction).not.toHaveBeenCalled();
+    expect(wrapper.get('[role="alert"]').text()).toContain('The player list changed');
+    expect(wrapper.findAll('p').some((paragraph) => paragraph.attributes('aria-hidden') === 'true' && paragraph.text().includes('The player list changed'))).toBe(true);
+  });
+
+  it('allows a confirmed player action when a refresh only changes their scores', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let approve!: (accepted: boolean) => void;
+    vi.mocked(confirmAction).mockImplementationOnce(() => new Promise((resolve) => { approve = resolve; }));
+    wrapper = mountConsole();
+    const [first] = await rows();
+    await first.findAll('button').find((button) => button.text().startsWith('Ban'))!.trigger('click');
+    players.mockResolvedValue({ ok: true, value: [{ ...player(1, 'Ours'), kills: 5 }] });
+    await vi.advanceTimersByTimeAsync(CONSOLE_TICK_MS);
+    await rows();
+    approve(true);
+    await flushPromises();
+
+    expect(consolePlayerAction).toHaveBeenCalledWith({ kind: 'owner', id: 1 }, 1, 'ban');
   });
 });

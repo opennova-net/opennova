@@ -1,3 +1,4 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import JobDetailSection from './JobDetailSection.vue';
@@ -13,7 +14,7 @@ const cancel = vi.mocked(cancelJob);
 
 describe('JobDetailSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountSection(id = 77) {
     const router = await testRouter(`/admin/jobs/${id}`, ['/admin/jobs/:id']);
@@ -32,7 +33,7 @@ describe('JobDetailSection', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -86,7 +87,7 @@ describe('JobDetailSection', () => {
     const page = await mountSection();
     const button = page.get('section[aria-label="Actions"] button');
     expect(button.text()).toContain('Retry now: attempt 3 of 3');
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await button.trigger('click');
     expect(retry).not.toHaveBeenCalled();
     read.mockResolvedValue({ ok: true, value: job(77, { state: 'queued', attempts: 2, max_attempts: 3, finished_at: null }) });

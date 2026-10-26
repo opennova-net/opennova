@@ -1,7 +1,8 @@
 <template>
   <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-md rounded-panel border border-border bg-panel p-8">
-      <h1 class="text-3xl font-semibold text-ink">Log in</h1>
+    <div class="mx-auto max-w-lg rounded-panel border border-border bg-panel p-6 sm:p-8">
+      <p class="eyebrow">Welcome back</p>
+      <h1 class="page-heading mt-3">Log in</h1>
 
       <p v-if="view === 'checking'" role="status" class="mt-2 text-sm text-ink-muted">
         Checking your session…
@@ -38,7 +39,7 @@
 
       <template v-else>
         <p class="mt-2 text-sm text-ink-muted">
-          Use your NovaWorld account: the handle and password you log in with in-game.
+          Use the same username and password you use in-game.
         </p>
         <form class="mt-8 grid gap-6" @submit.prevent="handleSubmit">
           <label class="grid gap-2 text-sm text-ink">

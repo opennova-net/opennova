@@ -153,6 +153,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // The background jobs page's Overview tab (JobsSection.vue): the failures to
 // look at, alike ones together (each group to its jobs on the Jobs tab, and a
 // retry of every one of them that can run again: POST
@@ -202,7 +203,7 @@ function jobsOf(g: JobFailureGroup) {
 
 async function dismiss(g: JobFailureGroup) {
   if (busy.value) return;
-  if (!window.confirm(`Dismiss ${g.count === 1 ? 'this failed job' : `these ${g.count} failed jobs`}? They are deleted.`)) return;
+  if (!await confirmAction(`Dismiss ${g.count === 1 ? 'this failed job' : `these ${g.count} failed jobs`}? They are deleted.`)) return;
   busy.value = true;
   const result = await dismissJobGroup(g.kind, g.key);
   busy.value = false;
@@ -217,7 +218,7 @@ async function retryAll(g: JobFailureGroup) {
     n === 1
       ? `Retry the failed "${jobKindLabel(g.kind)}" job now? It gets one more attempt.`
       : `Retry the ${n} failed "${jobKindLabel(g.kind)}" jobs that failed this way now? Each gets one more attempt.`;
-  if (!window.confirm(question)) return;
+  if (!await confirmAction(question)) return;
   busy.value = true;
   const result = await retryJobGroup(g.kind, g.key);
   busy.value = false;

@@ -94,6 +94,10 @@ export interface NovaLogicLobbies {
 // inline markup.
 export interface ServerRow {
   key: string;
+  // Display metadata for the unified directory, not additional API fields.
+  game?: string;
+  gameName?: string;
+  source?: 'opennova' | 'novalogic';
   // Its page.
   to: RouteLocationRaw;
   serverName: string;

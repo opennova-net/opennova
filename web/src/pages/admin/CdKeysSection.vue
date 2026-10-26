@@ -274,13 +274,15 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/cd-keys: the CD keys (GET /api/admin/cd-keys) with their filters, the
 // generate form (POST /api/admin/cd-keys), assign (by account name) and revoke
 // per key, a key's machines and a manual activation (/api/admin/cd-keys/<id>/
 // activations), and an account's keys and machines (/api/admin/users/<id>/cd-keys,
 // the account found by name in the users list).
 import AdminPageHeader from '../../components/AdminPageHeader.vue';
-import { defineComponent, h, onMounted, ref, computed, type PropType } from 'vue';
+import { defineComponent, h, onMounted, ref, computed, watch, type PropType } from 'vue';
+import { useRoute } from 'vue-router';
 import {
   activateCdKey,
   assignCdKey,
@@ -461,7 +463,7 @@ async function assign(k: CdKey) {
 async function revoke(k: CdKey) {
   if (busy.value) return;
   const who = k.account ? ` It is on ${k.account.username}'s account.` : '';
-  if (!window.confirm(`Revoke key ${k.serial}?${who} It will activate no machine again.`)) return;
+  if (!await confirmAction(`Revoke key ${k.serial}?${who} It will activate no machine again.`)) return;
   busy.value = true;
   const result = await revokeCdKey(k.id);
   busy.value = false;
@@ -535,7 +537,9 @@ async function lookUpAccount() {
   }
 }
 
-onMounted(() => {
-  void load();
-});
+const route = useRoute();
+watch(() => route?.query.account, (account) => {
+  if (typeof account === 'string' && /^\d+$/.test(account) && Number(account) > 0) void openAccount(Number(account));
+}, { immediate: true });
+onMounted(() => { void load(); });
 </script>

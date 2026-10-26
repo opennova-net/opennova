@@ -59,10 +59,9 @@ describe('AdminLayout', () => {
     const page = await mountLayout();
     const areas = page.findAll('.admin-nav-area').map((area) => [area.get('p').text(), area.findAll('a').map((a) => a.text())]);
     expect(areas).toEqual([
-      ['NovaWorld', ['Status and sessions', 'CD keys']],
-      ['Hosting', ['Fleet', 'Server usage', 'Static addresses', 'Games']],
-      ['People and money', ['Users', 'Subscriptions', 'AWS costs']],
-      ['Operations', ['Infrastructure', 'Background jobs']],
+      ['Service', ['NovaWorld', 'Fleet', 'Games', 'Static addresses']],
+      ['Accounts', ['Users', 'Subscriptions', 'CD keys']],
+      ['Operations', ['Infrastructure', 'Server usage', 'AWS costs', 'Background jobs']],
     ]);
     // Each area is a group its name labels, for a screen reader.
     const hosting = page.findAll('.admin-nav-area')[1];
@@ -77,6 +76,23 @@ describe('AdminLayout', () => {
     wrapper = mount(AdminLayout, { global: { plugins: [router] } });
     await flushPromises();
     expect(wrapper.findAll('nav a[aria-current="page"]').map((a) => a.text())).toEqual(['Fleet']);
+  });
+
+  it('opens a modal mobile drawer and restores page scrolling when closed', async () => {
+    const page = await mountLayout();
+    const dialog = page.get('dialog').element as HTMLDialogElement;
+    dialog.showModal = vi.fn(() => { dialog.setAttribute('open', ''); });
+    dialog.close = vi.fn(() => { dialog.removeAttribute('open'); dialog.dispatchEvent(new Event('close')); });
+    await page.get('button[aria-controls="admin-drawer"]').trigger('click');
+    await flushPromises();
+    expect(dialog.showModal).toHaveBeenCalledOnce();
+    expect(page.get('button[aria-controls="admin-drawer"]').attributes('aria-expanded')).toBe('true');
+    expect(page.get('dialog nav').findAll('.admin-nav-area')).toHaveLength(3);
+    expect(document.body.style.overflow).toBe('hidden');
+    await page.get('dialog button').trigger('click');
+    await flushPromises();
+    expect(page.get('button[aria-controls="admin-drawer"]').attributes('aria-expanded')).toBe('false');
+    expect(document.body.style.overflow).toBe('');
   });
 
   it('shows no count when nothing needs anyone', async () => {

@@ -13,7 +13,7 @@
         {{
           retry
             ? 'That server failed. Check its settings and try again.'
-            : 'It stays listed until you stop it.'
+            : 'Choose a game, name your server and pick the missions. You can adjust the defaults below.'
         }}
       </p>
     </div>
@@ -115,7 +115,7 @@
       </div>
 
       <!-- MaxPlayers, Time_Limit, KillLimit, MaxScore, Respawn, Delay -->
-      <div v-for="spec in NUMBER_FIELDS" :key="spec.field" class="min-w-0 space-y-1">
+      <div v-for="spec in NUMBER_FIELDS.slice(0, 1)" :key="spec.field" class="min-w-0 space-y-1">
         <label :for="fieldId(spec.field)" :class="labelClass">{{ FIELD_LABELS[spec.field] }}</label>
         <div class="flex items-center gap-2">
           <input
@@ -137,22 +137,6 @@
           {{ numberHint(spec) }}
         </p>
         <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
-      </div>
-
-      <!-- TeamFF -->
-      <div class="min-w-0 space-y-1 sm:col-span-2">
-        <label class="flex items-center gap-3 text-sm text-ink">
-          <input
-            :id="fieldId('team_ff')"
-            v-model="form.team_ff"
-            type="checkbox"
-            :disabled="busy"
-            :aria-describedby="hintId('team_ff')"
-            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-          />
-          {{ FIELD_LABELS.team_ff }}
-        </label>
-        <p :id="hintId('team_ff')" class="text-xs text-ink-muted">Teammates can hurt each other.</p>
       </div>
 
       <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
@@ -300,6 +284,53 @@
       On a shared machine: your dedicated machines are all in use.
     </p>
 
+    <details class="rounded-panel border border-border bg-surface p-4" data-advanced-settings>
+      <summary class="cursor-pointer font-medium text-ink">Advanced game settings <span class="ml-1 text-xs font-normal text-ink-muted">Round limits, respawn & friendly fire</span></summary>
+      <div class="mt-5 grid gap-6 sm:grid-cols-2">
+      <!-- MaxPlayers, Time_Limit, KillLimit, MaxScore, Respawn, Delay -->
+      <div v-for="spec in NUMBER_FIELDS.slice(1)" :key="spec.field" class="min-w-0 space-y-1">
+        <label :for="fieldId(spec.field)" :class="labelClass">{{ FIELD_LABELS[spec.field] }}</label>
+        <div class="flex items-center gap-2">
+          <input
+            :id="fieldId(spec.field)"
+            v-model.number="form[spec.field]"
+            type="number"
+            inputmode="numeric"
+            step="1"
+            :min="limitOf(spec.field)?.min"
+            :max="limitOf(spec.field)?.max"
+            :disabled="busy"
+            :aria-invalid="errors[spec.field] ? 'true' : undefined"
+            :aria-describedby="describedBy(spec.field)"
+            :class="[inputBase, 'w-28']"
+          />
+          <span v-if="spec.unit" class="text-sm text-ink-muted">{{ spec.unit }}</span>
+        </div>
+        <p :id="hintId(spec.field)" class="text-xs text-ink-muted">
+          {{ numberHint(spec) }}
+        </p>
+        <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
+      </div>
+
+      <!-- TeamFF -->
+      <div class="min-w-0 space-y-1 sm:col-span-2">
+        <label class="flex items-center gap-3 text-sm text-ink">
+          <input
+            :id="fieldId('team_ff')"
+            v-model="form.team_ff"
+            type="checkbox"
+            :disabled="busy"
+            :aria-describedby="hintId('team_ff')"
+            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+          />
+          {{ FIELD_LABELS.team_ff }}
+        </label>
+        <p :id="hintId('team_ff')" class="text-xs text-ink-muted">Teammates can hurt each other.</p>
+      </div>
+
+      </div>
+    </details>
+
     <div class="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
       <p class="text-xs text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
       <button
@@ -346,6 +377,7 @@ import type {
   SettingRange,
 } from '../types/hostedServer';
 import { cp1252Length } from '../utils/cp1252';
+import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 import {
   allowsExpansion,
   availableMissions,
@@ -456,15 +488,15 @@ const FIELD_ORDER: SettingsField[] = [
   'game_name',
   'game_password',
   'max_players',
+  'list_on_novalogic',
+  'expansion_id',
+  'missions',
   'time_limit',
   'kill_limit',
   'max_score',
   'respawn',
   'start_delay',
   'team_ff',
-  'list_on_novalogic',
-  'expansion_id',
-  'missions',
 ];
 
 // The game a fresh form picks (the last server's while still offered), and
@@ -481,6 +513,10 @@ function rotationFor(dataSetId: number, expansionId: number | null) {
 const firstForm = formFrom(props.previous, findDataSet(props.dataSets, firstDataSet), []);
 firstForm.missions = rotationFor(firstDataSet, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
+const submitted = ref(false);
+const settingsSnapshot = () => JSON.stringify({ settings: form, ownMachine: ownMachine.value, addressId: addressId.value });
+const initialSettings = settingsSnapshot();
+useUnsavedChanges(() => !submitted.value && settingsSnapshot() !== initialSettings);
 const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
 // The NovaLogic box: the service offers it and the picked game takes it (Joint Operations alone).
 const showNovaLogic = computed(() => offersNovaLogicListing(dataSet.value, props.novalogicListing));
@@ -587,7 +623,10 @@ async function focusFirstError(errs: SettingsErrors) {
     rotation.value?.focus();
     return;
   }
-  document.getElementById(fieldId(first))?.focus();
+  const field = document.getElementById(fieldId(first));
+  const advanced = field?.closest('details');
+  if (advanced) advanced.open = true;
+  field?.focus();
 }
 
 async function submit() {
@@ -609,6 +648,7 @@ async function submit() {
   const reply = await startHostedServer(result.settings, own, own && props.addresses.length > 0 ? addressId.value : null);
   busy.value = false;
   if (reply.ok) {
+    submitted.value = true;
     emit('started', reply.value);
     return;
   }

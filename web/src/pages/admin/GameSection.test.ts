@@ -1,6 +1,7 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
-import type { Router } from 'vue-router';
+import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router';
 import GameSection from './GameSection.vue';
 import {
   buildRelease,
@@ -53,7 +54,7 @@ function buttonNamed(page: VueWrapper, scope: string, text: string) {
 describe('GameSection', () => {
   let wrapper: VueWrapper | null = null;
   let router: Router;
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountGame(ref = 'JO') {
     router = await testRouter(`/admin/games/${ref}`, ['/admin/games/:ref']);
@@ -64,7 +65,7 @@ describe('GameSection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     sets.mockResolvedValue({ ok: true, value: dataSetsResponse() });
     list.mockResolvedValue({
       ok: true,
@@ -105,6 +106,7 @@ describe('GameSection', () => {
     expect(rows[2].findAll('button').map((b) => b.text())).toEqual(['Publish release 1.7.5.8', 'Delete release 1.7.5.8']);
     expect(rows[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 1.7.5.7']);
 
+    expect(page.findAll('a').find((a) => a.text() === 'View these servers in the fleet')?.attributes('href')).toBe('/admin/fleet?game=1');
     expect(page.get('#game-servers-line').text()).toBe('3 live servers. New servers start on 1.7.5.9.');
     expect(page.get('#game-update-servers').text()).toBe('Move it to 1.7.5.9');
     expect(page.text()).not.toContain('—');
@@ -202,7 +204,7 @@ describe('GameSection', () => {
     expect(retire).toHaveBeenCalledWith(9);
     expect(page.get('[role="alert"]').text()).toBe('That release is not published. Refresh the list.');
 
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await rows()[3].findAll('button').find((b) => b.text().startsWith('Delete'))!.trigger('click');
     await flushPromises();
     expect(removeRelease).not.toHaveBeenCalled();
@@ -256,6 +258,35 @@ describe('GameSection', () => {
     expect(rows[0].text()).toContain('Published');
     expect(rows[1].text()).toContain('Uploading');
     expect(buttonNamed(page, 'tbody', 'Retire').exists()).toBe(true);
+  });
+
+  it.each(['rename', 'build'] as const)('leaves a deleted game without warning about its %s draft', async (draft) => {
+    router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/admin/games/:ref', component: GameSection },
+        { path: '/:rest(.*)*', component: { render: () => null } },
+      ],
+    });
+    await router.push('/admin/games/JO');
+    wrapper = mount(RouterView, { global: { plugins: [router] } });
+    await flushPromises();
+    await wrapper.get(`#game-${draft}-toggle`).trigger('click');
+    await wrapper.get(draft === 'rename' ? '#game-rename-key' : '#game-build-version').setValue(draft === 'rename' ? 'JOP' : '1.7.6');
+    confirm.mockResolvedValue(false);
+    await router.push('/admin/games');
+    expect(router.currentRoute.value.path).toBe('/admin/games/JO');
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('unsaved changes'), 'Unsaved changes');
+
+    confirm.mockClear();
+    remove.mockResolvedValueOnce({ ok: true, value: true });
+    await wrapper.get('#game-delete-toggle').trigger('click');
+    await wrapper.get('#game-delete-confirm').setValue('JO');
+    submitForm(wrapper, '#game-delete-confirm');
+    await flushPromises();
+    expect(remove).toHaveBeenCalledWith(1);
+    expect(router.currentRoute.value.path).toBe('/admin/games');
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it('says when no game has the address', async () => {

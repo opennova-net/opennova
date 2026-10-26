@@ -1,3 +1,4 @@
+import * as actionReview from '../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import NovaWorldSessions from './NovaWorldSessions.vue';
@@ -64,7 +65,7 @@ function response(list: AdminConnection[]): ConnectionsResponse {
 
 describe('NovaWorldSessions', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountSection(list: AdminConnection[]) {
     connections.mockResolvedValue({ ok: true, value: response(list) });
@@ -81,7 +82,7 @@ describe('NovaWorldSessions', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     end.mockResolvedValue({ ok: true, value: undefined });
     stop.mockResolvedValue({ ok: true, value: undefined });
   });
@@ -288,7 +289,7 @@ describe('NovaWorldSessions', () => {
 
   it('ends a client’s session once confirmed, by its row id', async () => {
     const page = await mountSection([session(11, { account: { id: 9, username: 'gunner', via: 'login' } })]);
-    confirm.mockReturnValueOnce(false);
+    confirm.mockResolvedValueOnce(false);
     await page.get('.sessions-clients tr.session-row button').trigger('click');
     expect(end).not.toHaveBeenCalled();
     await page.get('.sessions-clients tr.session-row button').trigger('click');

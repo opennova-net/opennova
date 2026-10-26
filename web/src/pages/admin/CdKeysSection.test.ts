@@ -1,3 +1,4 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CdKeysSection from './CdKeysSection.vue';
@@ -11,6 +12,7 @@ import {
   revokeCdKey,
 } from '../../api/cdKeys';
 import { listUsers } from '../../api/users';
+import { testRouter } from '../../test/router';
 import type { CdKey, CdKeyListResponse } from '../../types/cdKeys';
 
 vi.mock('../../api/cdKeys', () => ({
@@ -65,6 +67,17 @@ describe('CdKeysSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fetchKeys.mockResolvedValue({ ok: true, value: listOf([ASSIGNED, key(1)]) });
+  });
+
+  it('opens the account named by a support link without downloading every user', async () => {
+    account.mockResolvedValue({ ok: true, value: { account: { id: 7, username: 'pilot' }, keys: [ASSIGNED], activations: [] } });
+    const router = await testRouter('/admin/cd-keys?account=7');
+    const wrapper = mount(CdKeysSection, { global: { plugins: [router] } });
+    await flushPromises();
+    expect(account).toHaveBeenCalledWith(7);
+    expect(users).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain('pilot');
+    wrapper.unmount();
   });
 
   it('lists the keys with their state, account and machines', async () => {
@@ -135,7 +148,7 @@ describe('CdKeysSection', () => {
   });
 
   it('revokes a key after a confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     revoke.mockResolvedValue({ ok: true, value: { ...ASSIGNED, state: 'revoked', revoked_at: '2026-10-14 13:00:00' } });
     const wrapper = mount(CdKeysSection);
     await flushPromises();

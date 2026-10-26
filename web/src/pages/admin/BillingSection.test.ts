@@ -1,3 +1,4 @@
+import * as actionReview from '../../composables/useConfirm';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import BillingSection from './BillingSection.vue';
@@ -26,7 +27,7 @@ const tiers = vi.mocked(fetchTiers);
 const users = vi.mocked(listUsers);
 
 describe('BillingSection', () => {
-  let confirm: MockInstance<typeof window.confirm>;
+  let confirm: MockInstance<typeof actionReview.confirmAction>;
 
   async function mountSection() {
     const router = await testRouter('/admin/billing');
@@ -37,7 +38,7 @@ describe('BillingSection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     billing.mockResolvedValue({ ok: true, value: adminBilling() });
     tiers.mockResolvedValue({ ok: true, value: tiersResponse() });
   });

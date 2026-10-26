@@ -21,7 +21,11 @@
     </div>
 
     <template v-else>
-      <header class="space-y-3">
+      <header class="space-y-4 rounded-panel border border-border bg-panel p-5 sm:p-6">
+        <div class="flex items-center justify-between gap-3">
+          <p class="eyebrow">Hosted server <span class="ml-1 font-mono">#{{ server.id }}</span></p>
+          <button type="button" class="btn-secondary" :disabled="poll.loading.value" @click="poll.refresh">{{ poll.loading.value ? 'Refreshing…' : 'Refresh' }}</button>
+        </div>
         <p v-if="scope === 'admin'" class="text-sm text-ink-muted">
           Hosted server {{ server.id }},
           <template v-if="owner">
@@ -35,7 +39,7 @@
           :id="`hosted-server-${server.id}-heading`"
           ref="heading"
           tabindex="-1"
-          class="break-words text-3xl font-semibold text-ink focus:outline-none"
+          class="page-heading break-words focus:outline-none"
         >
           {{ server.settings.game_name || 'Unnamed server' }}
         </h1>
@@ -52,6 +56,10 @@
             at <span class="font-mono text-xs text-ink">{{ serverAddressEndpoint(server.address) }}</span>
           </template>
         </p>
+        <div v-if="server.listing" class="flex flex-wrap gap-x-8 gap-y-2 border-t border-border pt-4 text-sm">
+          <p class="text-ink-muted"><span class="font-semibold text-ink">{{ server.listing.players }} / {{ server.listing.max_players }}</span> players</p>
+          <p v-if="server.listing.mission_name" class="min-w-0 break-words text-ink-muted">Playing <span class="font-medium text-ink">{{ server.listing.mission_name }}</span></p>
+        </div>
         <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
       </header>
 
@@ -60,7 +68,7 @@
           <li v-for="tab in tabs" :key="tab.path">
             <RouterLink
               :to="tab.path"
-              class="block whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition"
+              class="tab-link"
               :class="isActive(tab) ? 'border-accent text-ink' : 'border-transparent text-ink-muted hover:text-ink'"
               :aria-current="isActive(tab) ? 'page' : undefined"
             >

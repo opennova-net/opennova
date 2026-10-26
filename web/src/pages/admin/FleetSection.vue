@@ -83,7 +83,7 @@
           <button
             type="button"
             :class="secondaryButton"
-            :disabled="busy || outdatedCount === 0"
+            :disabled="busy || outdatedCount === 0 || !!query.owner || query.state === 'ended'"
             aria-describedby="fleet-update-all-hint"
             @click="updateOutdated"
           >
@@ -91,9 +91,14 @@
           </button>
         </div>
         <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
-          Restarts every live server on an older release on its
+          <span v-if="query.owner || query.state === 'ended'">Clear the owner and ended-only filters to update servers. </span>
+          Restarts every live server <template v-if="gameFilter">of this game </template>on an older release on its
           <RouterLink to="/admin/games" class="text-accent hover:text-ink-bright">game's</RouterLink> newest,
           dropping its players.
+        </p>
+        <p v-if="gameFilter" class="flex flex-wrap items-center gap-3 rounded-control border border-border bg-raised p-3 text-sm text-ink">
+          Showing servers for game {{ gameFilter }}.
+          <RouterLink :to="{ path: '/admin/fleet', query: { ...route.query, game: undefined } }" class="text-accent">Show all games</RouterLink>
         </p>
         <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
           <label class="space-y-1">
@@ -141,7 +146,7 @@
               <tr v-if="fleet === null">
                 <td colspan="8" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
               </tr>
-              <tr v-else-if="fleet.servers.length === 0">
+              <tr v-else-if="serversShown.length === 0">
                 <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No hosted server matches.</td>
               </tr>
               <tr v-for="s in serversShown" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
@@ -155,7 +160,7 @@
                 </th>
                 <td class="whitespace-nowrap px-4 py-3">
                   <template v-if="s.owner">
-                    {{ s.owner.username }}
+                    <RouterLink :to="`/admin/users/${s.owner.id}`" class="text-accent hover:text-ink-bright">{{ s.owner.username }}</RouterLink>
                     <span class="block text-xs text-ink-muted">{{ ownerHostingLabel(s.owner) }}</span>
                   </template>
                   <span v-else class="text-ink-muted">Deleted account</span>
@@ -171,7 +176,7 @@
                 </td>
                 <td class="px-4 py-3 text-xs">
                   <template v-if="s.machine_ref">
-                    <span class="block whitespace-nowrap font-mono">{{ s.machine_ref }}</span>
+                    <RouterLink :to="`/admin/fleet/machines/${s.machine_ref}`" class="block whitespace-nowrap font-mono text-accent hover:text-ink-bright">{{ s.machine_ref }}</RouterLink>
                     <span class="block text-ink-muted">
                       Slot {{ s.slot ?? 'none' }}<template v-if="s.game_port">, game port {{ s.game_port }}</template>
                     </span>
@@ -180,7 +185,8 @@
                 </td>
                 <td class="fleet-server-data px-4 py-3 text-xs">
                   <template v-if="s.base_tree_id !== null">
-                    <span class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
+                    <RouterLink v-if="s.data_set" :to="`/admin/games/${s.data_set.id}`" class="block whitespace-nowrap text-accent hover:text-ink-bright">{{ pinnedText(s.data.base) }}</RouterLink>
+                    <span v-else class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
                     <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
                       {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion) }}
                     </span>
@@ -262,6 +268,7 @@
 </template>
 
 <script setup lang="ts">
+import { confirmAction } from '../../composables/useConfirm';
 // /admin/fleet: what needs an admin (AttentionList), then the fleet (GET
 // /api/admin/hosted?owner=&state=): its machines as cards (MachineCard: state,
 // last report, what is wrong in words, what each uses now, its slots, its
@@ -308,6 +315,7 @@ const secondaryButton =
 
 const route = useRoute();
 const tab = computed(() => (route.query.tab === 'roll' ? 'roll' : 'main'));
+const gameFilter = computed(() => typeof route.query.game === 'string' && /^\d+$/.test(route.query.game) ? Number(route.query.game) : null);
 
 const fleet = ref<FleetResponse | null>(null);
 const busy = ref(false);
@@ -327,7 +335,7 @@ const query = ref<FleetQuery>({});
 let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
-const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
+const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested && (!gameFilter.value || s.data_set?.id === gameFilter.value || s.expansion?.id === gameFilter.value)).length ?? 0);
 const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
 // The ended rows a later start or launch replaced (utils/history.ts), shown
@@ -342,7 +350,7 @@ const replacedServerIds = computed(() =>
   query.value.state === 'ended' ? new Set<number>() : replacedServers(fleet.value?.servers ?? [], (s) => s.owner?.id ?? null),
 );
 const serversShown = computed(() =>
-  (fleet.value?.servers ?? []).filter((s) => showServerHistory.value || !replacedServerIds.value.has(s.id)),
+  (fleet.value?.servers ?? []).filter((s) => (!gameFilter.value || s.data_set?.id === gameFilter.value || s.expansion?.id === gameFilter.value) && (showServerHistory.value || !replacedServerIds.value.has(s.id))),
 );
 
 // A pinned tree's version; data that ships no version.txt has none.
@@ -450,7 +458,7 @@ async function stopOne(s: FleetServer) {
   if (busy.value) return;
   const who = s.owner ? `${s.owner.username}'s` : 'the';
   const players = s.players ? ` The match ends for the ${s.players} player${s.players === 1 ? '' : 's'} on it.` : '';
-  if (!window.confirm(`Stop ${who} hosted server ${s.id} (${s.settings.game_name})?${players}`)) return;
+  if (!await confirmAction(`Stop ${who} hosted server ${s.id} (${s.settings.game_name})?${players}`)) return;
   busy.value = true;
   const result = await stopFleetServer(s.id);
   busy.value = false;
@@ -466,7 +474,7 @@ async function onMachine(m: FleetMachine, action: 'drain' | 'end') {
     action === 'drain'
       ? `Drain machine ${m.id}? It takes no new server, and its ${servers} server${servers === 1 ? '' : 's'} move to other machines one at a time; each server is down while it moves.`
       : `End machine ${m.id} now? ${servers === 0 ? 'No server runs on it.' : `Its ${servers} server${servers === 1 ? '' : 's'} move to other machines at once, and their matches end for everyone on them.`}`;
-  if (!window.confirm(prompt)) return;
+  if (!await confirmAction(prompt)) return;
   busy.value = true;
   const result = await machineAction(m.id, action);
   busy.value = false;
@@ -477,13 +485,14 @@ async function onMachine(m: FleetMachine, action: 'drain' | 'end') {
 
 // Every live server on an older release restarts on its game's newest.
 async function updateOutdated() {
-  if (busy.value) return;
+  if (busy.value || query.value.owner || query.value.state === 'ended') return;
   const n = outdatedCount.value;
-  if (!window.confirm(`Update ${n} outdated server${n === 1 ? '' : 's'}? Each restarts on its game's newest release, and its players drop while it does.`)) {
+  const gameId = gameFilter.value;
+  if (!await confirmAction(`Update ${n} outdated server${n === 1 ? '' : 's'}? Each restarts on its game's newest release, and its players drop while it does.`)) {
     return;
   }
   busy.value = true;
-  const result = await updateAllServers();
+  const result = gameId ? await updateAllServers(gameId) : await updateAllServers();
   busy.value = false;
   if (!result.ok) {
     fail(result.error.message);

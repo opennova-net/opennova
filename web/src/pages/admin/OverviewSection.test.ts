@@ -161,21 +161,19 @@ describe('OverviewSection', () => {
     const html = page.html();
     expect(html.indexOf('Needs you')).toBeGreaterThan(-1);
     expect(html.indexOf('Needs you')).toBeLessThan(html.indexOf('At a glance'));
-    expect(page.findAll('.overview-area h3').map((h) => h.text())).toEqual(['NovaWorld', 'Hosting', 'People and money', 'Operations']);
+    expect(page.findAll('.overview-area h3').map((h) => h.text())).toEqual(['Service', 'Accounts', 'Operations']);
   });
 
   it("states each area in words beside the colour: the worst of what it holds, what needs you among it", async () => {
     const page = await mountOverview();
     const badge = (label: string) => area(page, label).get('.overview-area-status');
-    expect(badge('NovaWorld').text()).toBe('Open');
-    expect(badge('NovaWorld').classes()).toContain('text-online');
     // Two of the findings link to the fleet's machines, one of them danger.
-    expect(badge('Hosting').text()).toBe('2 need you');
-    expect(badge('Hosting').classes()).toContain('text-danger');
-    expect(area(page, 'Hosting').classes()).toContain('border-danger/60');
+    expect(badge('Service').text()).toBe('2 need you');
+    expect(badge('Service').classes()).toContain('text-danger');
+    expect(area(page, 'Service').classes()).toContain('border-danger/60');
     // A payment past due, the budget well within.
-    expect(badge('People and money').text()).toBe('1 payment past due');
-    expect(badge('People and money').classes()).toContain('text-warn');
+    expect(badge('Accounts').text()).toBe('1 payment past due');
+    expect(badge('Accounts').classes()).toContain('text-warn');
     // The firing alarm.
     expect(badge('Operations').text()).toBe('1 needs you');
     expect(badge('Operations').classes()).toContain('text-danger');
@@ -183,19 +181,19 @@ describe('OverviewSection', () => {
 
   it('shows the key numbers of each area', async () => {
     const page = await mountOverview();
-    expect(figure(page, 'NovaWorld', 'Sign-in')).toContain('Open');
-    expect(figure(page, 'NovaWorld', 'Signed in now')).toBe('Signed in now21 hosts a server');
-    expect(figure(page, 'Hosting', 'Live servers')).toContain('1 of 24 shared');
-    expect(figure(page, 'Hosting', 'Live servers')).toContain('0 of 2 dedicated');
-    expect(figure(page, 'Hosting', 'Machines')).toContain('1 shared, 1 dedicated');
-    expect(figure(page, 'Hosting', 'Players on hosted servers')).toContain('5');
-    expect(area(page, 'Hosting').get('svg').attributes('aria-label')).toContain('Players on hosted servers, last 24 hours');
-    expect(figure(page, 'People and money', 'Subscribers')).toContain('Tier 1: 1, Tier 2: 2, Tier 3: 1');
-    expect(figure(page, 'People and money', 'Payments past due')).toContain('Their servers keep running while Stripe retries');
+    expect(figure(page, 'Service', 'Sign-in')).toContain('Open');
+    expect(figure(page, 'Service', 'Signed in now')).toBe('Signed in now21 hosts a server');
+    expect(figure(page, 'Service', 'Live servers')).toContain('1 of 24 shared');
+    expect(figure(page, 'Service', 'Live servers')).toContain('0 of 2 dedicated');
+    expect(figure(page, 'Service', 'Machines')).toContain('1 shared, 1 dedicated');
+    expect(figure(page, 'Service', 'Players on hosted servers')).toContain('5');
+    expect(area(page, 'Service').get('svg').attributes('aria-label')).toContain('Players on hosted servers, last 24 hours');
+    expect(figure(page, 'Accounts', 'Subscribers')).toContain('Tier 1: 1, Tier 2: 2, Tier 3: 1');
+    expect(figure(page, 'Accounts', 'Payments past due')).toContain('Their servers keep running while Stripe retries');
     // Four tiers and two dedicated machines at today's prices.
-    expect(figure(page, 'People and money', 'Subscriptions a month')).toContain('about $130');
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('$41.25 so far');
-    expect(figure(page, 'People and money', 'AWS this month')).toContain("About $117 by the month's end, 47% of the $250 budget.");
+    expect(figure(page, 'Accounts', 'Subscriptions a month')).toContain('about $130');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('$41.25 so far');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain("About $117 by the month's end, 47% of the $250 budget.");
     expect(figure(page, 'Operations', 'Alarms firing')).toContain('opennova-prod-machines-lost');
     expect(figure(page, 'Operations', 'Background jobs')).toContain('3 queued, 2 running');
     expect(figure(page, 'Operations', 'Background jobs')).toContain('16 failed in the last day');
@@ -207,18 +205,20 @@ describe('OverviewSection', () => {
       const links = area(page, a.label).findAll('ul a').map((l) => [l.text(), l.attributes('href')]);
       expect(links).toEqual(a.sections.map((s) => [s.label, s.to]));
     }
-    expect(area(page, 'People and money').text()).toContain("The month's AWS bill and account budgets");
+    expect(area(page, 'Operations').text()).toContain("The month's AWS bill and account budgets");
   });
 
   it('marks maintenance, and an AWS bill near the budget', async () => {
+    needs.mockResolvedValue({ ok: true, value: attention({ findings: [], alarms: [] }) });
+    jobs.mockResolvedValue({ ok: true, value: overview({ attention_total: 0 }) });
     status.mockResolvedValue({ ok: true, value: { maintenance_enabled: true, message: 'Back soon' } });
     billing.mockResolvedValue({ ok: true, value: adminBilling({ subscriptions: [] }) });
     aws.mockResolvedValue({ ok: true, value: costs({ forecast_cents: 26000 }) });
     const page = await mountOverview();
-    expect(area(page, 'NovaWorld').get('.overview-area-status').text()).toBe('In maintenance');
-    expect(figure(page, 'NovaWorld', 'Sign-in')).toContain('Game clients cannot sign in');
-    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Near the AWS budget');
-    expect(figure(page, 'People and money', 'AWS this month')).toContain("About $260 by the month's end, 104% of the $250 budget.");
+    expect(area(page, 'Service').get('.overview-area-status').text()).toBe('In maintenance');
+    expect(figure(page, 'Service', 'Sign-in')).toContain('Game clients cannot sign in');
+    expect(area(page, 'Operations').get('.overview-area-status').text()).toBe('Near the AWS budget');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain("About $260 by the month's end, 104% of the $250 budget.");
   });
 
   it('shows the combined AWS figure and names the account with the worst budget warning', async () => {
@@ -228,16 +228,16 @@ describe('OverviewSection', () => {
     value.month_to_date_cents = value.accounts[0].month_to_date_cents + 11000;
     aws.mockResolvedValue({ ok: true, value });
     const page = await mountOverview();
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('$151 so far');
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('Production + CI. CI:');
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('110% of the $100 budget');
-    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('CI over its AWS budget');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('$151 so far');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('Production + CI. CI:');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('110% of the $100 budget');
+    expect(area(page, 'Operations').get('.overview-area-status').text()).toBe('CI over its AWS budget');
   });
 
   it('shows the combined forecast without comparing it to one account budget', async () => {
     aws.mockResolvedValue({ ok: true, value: combinedCosts() });
     const page = await mountOverview();
-    const text = figure(page, 'People and money', 'AWS this month');
+    const text = figure(page, 'Operations', 'AWS this month');
     expect(text).toContain('$66.25 so far');
     expect(text).toContain("Production + CI. About $192 by the month's end");
     expect(text).not.toContain('of the');
@@ -249,11 +249,11 @@ describe('OverviewSection', () => {
     value.accounts[0].month_to_date_cents = 30000;
     aws.mockResolvedValue({ ok: true, value });
     const page = await mountOverview();
-    const text = figure(page, 'People and money', 'AWS this month');
+    const text = figure(page, 'Operations', 'AWS this month');
     expect(text).toContain('Unknown');
     expect(text).toContain('Combined total unavailable: CI: AccessDeniedException');
     expect(text).not.toContain('$66.25');
-    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Production over its AWS budget');
+    expect(area(page, 'Operations').get('.overview-area-status').text()).toBe('Production over its AWS budget');
   });
 
   it('names a read that failed, and leaves the rest', async () => {
@@ -263,10 +263,10 @@ describe('OverviewSection', () => {
     expect(page.get('.overview-problems').text()).toBe(
       'Not read: the background jobs (The server hit a database error.); AWS costs (Could not reach the server.).',
     );
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('Unknown');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('Unknown');
     expect(area(page, 'Operations').get('.overview-area-status').text()).toBe('1 needs you');
     expect(figure(page, 'Operations', 'Background jobs')).toContain('Not read');
-    expect(figure(page, 'Hosting', 'Live servers')).toContain('1 of 24 shared');
+    expect(figure(page, 'Service', 'Live servers')).toContain('1 of 24 shared');
   });
 
   it('says the local stack reads no AWS bill, and when billing is off', async () => {
@@ -274,11 +274,11 @@ describe('OverviewSection', () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling({ enabled: false }) });
     needs.mockResolvedValue({ ok: true, value: attention({ findings: [], alarms: [], alarms_read: false }) });
     const page = await mountOverview();
-    expect(figure(page, 'People and money', 'AWS this month')).toContain('Not read here');
-    expect(figure(page, 'People and money', 'Subscribers')).toContain('Billing off');
-    expect(area(page, 'People and money').find('.overview-figure dt').exists()).toBe(true);
-    expect(area(page, 'People and money').text()).not.toContain('Subscriptions a month');
-    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Billing off');
+    expect(figure(page, 'Operations', 'AWS this month')).toContain('Not read here');
+    expect(figure(page, 'Accounts', 'Subscribers')).toContain('Billing off');
+    expect(area(page, 'Accounts').find('.overview-figure dt').exists()).toBe(true);
+    expect(area(page, 'Accounts').text()).not.toContain('Subscriptions a month');
+    expect(area(page, 'Accounts').get('.overview-area-status').text()).toBe('Billing off');
     expect(figure(page, 'Operations', 'Alarms firing')).toContain('Not read on the local stack');
   });
 
@@ -292,7 +292,7 @@ describe('OverviewSection', () => {
     expect(hold.text()).toContain('Hosted server limits are on hold');
     expect(hold.text()).toContain('A pass would stop or move 11 servers of 9 owners');
     expect(hold.get('a').attributes('href')).toBe('/admin/billing');
-    expect(area(page, 'People and money').get('.overview-area-status').text()).toBe('Server limits on hold');
+    expect(area(page, 'Accounts').get('.overview-area-status').text()).toBe('Server limits on hold');
   });
 
   it('reads everything again on Refresh, what needs you with it', async () => {

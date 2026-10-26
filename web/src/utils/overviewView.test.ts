@@ -4,26 +4,26 @@ import { attention, finding } from '../test/usageFixtures';
 
 describe("the Overview's areas", () => {
   it('places a finding by the page it links to', () => {
-    expect(areaOfLink('/admin/fleet/machines/3')).toBe('hosting');
-    expect(areaOfLink('/admin/fleet?tab=roll')).toBe('hosting');
-    expect(areaOfLink('/admin/addresses')).toBe('hosting');
-    expect(areaOfLink('/admin/billing')).toBe('people');
+    expect(areaOfLink('/admin/fleet/machines/3')).toBe('service');
+    expect(areaOfLink('/admin/fleet?tab=roll')).toBe('service');
+    expect(areaOfLink('/admin/addresses')).toBe('service');
+    expect(areaOfLink('/admin/billing')).toBe('accounts');
     expect(areaOfLink('/admin/infrastructure/programs/lobby')).toBe('operations');
-    expect(areaOfLink('/admin/novaworld#sessions')).toBe('novaworld');
+    expect(areaOfLink('/admin/novaworld#sessions')).toBe('service');
     expect(areaOfLink(null)).toBeNull();
     expect(areaOfLink('https://example.com/')).toBeNull();
   });
 
   it("counts what needs you in an area, danger or a firing alarm the worse, never an info", () => {
-    expect(areaAttention(attention(), 'hosting')).toEqual({ tone: 'bad', label: '2 need you' });
+    expect(areaAttention(attention(), 'service')).toEqual({ tone: 'bad', label: '2 need you' });
     expect(areaAttention(attention(), 'operations')).toEqual({ tone: 'bad', label: '1 needs you' });
-    expect(areaAttention(attention(), 'novaworld')).toBeNull();
-    expect(areaAttention(attention({ findings: [finding('warn', 'oversold', { link: '/admin/billing' })], alarms: [] }), 'people')).toEqual({
+    expect(areaAttention(attention(), 'accounts')).toBeNull();
+    expect(areaAttention(attention({ findings: [finding('warn', 'oversold', { link: '/admin/billing' })], alarms: [] }), 'accounts')).toEqual({
       tone: 'warn',
       label: '1 needs you',
     });
-    expect(areaAttention(attention({ findings: [finding('info', 'held', { link: '/admin/fleet' })], alarms: [] }), 'hosting')).toBeNull();
-    expect(areaAttention(null, 'hosting')).toBeNull();
+    expect(areaAttention(attention({ findings: [finding('info', 'held', { link: '/admin/fleet' })], alarms: [] }), 'service')).toBeNull();
+    expect(areaAttention(null, 'service')).toBeNull();
   });
 
   it('takes the worst state, the first of the worst', () => {
