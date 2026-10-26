@@ -457,6 +457,10 @@ private:
 	// The first symbol `name_key` names that `scope` matches and a lookup finds, the project's before
 	// the base's (resolve_symbol's search).
 	const GraphSymbol *scoped_symbol(const std::string &name_key, const std::string &scope) const;
+	// An effect (Particle), a particle (ParticleDefinition) or a curve's table (ParticleTable) as the effect system
+	// finds one, among the particle files it loads in its walk's order; a table by the curve's transform `mask`
+	// (GraphEdge::loader_arg).
+	const GraphSymbol *particle_symbol(ReferenceKind kind, const std::string &name_key, uint32_t mask) const;
 	// A sound set by name as the game finds one (an unscoped Sound lookup): the definition in the
 	// chain's first bank holding the name, the project's before the base layer's; null for none.
 	const GraphSymbol *sound_binding(const std::string &name) const;

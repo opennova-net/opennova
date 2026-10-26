@@ -43,7 +43,8 @@ struct GraphEdge {
 	// What the reference's loader picks the one file the name loads by, as its kind's row reads
 	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type, another
 	// texture's role, documents/texture_roles.h texture_role_arg, or the game's loader of it alone,
-	// texture_loader_arg); -1 for none.
+	// texture_loader_arg); a particle's curve: its transform (inverse 1, reverse 2), which picks among the tables of
+	// its name (AssetGraph's particle lookup); -1 for none.
 	int32_t loader_arg = -1;
 	// What the record says of the use beyond that (FieldUse::use_context: a model texture row's slot,
 	// flags and its material's alpha test, texture_roles.h); 0 for none.

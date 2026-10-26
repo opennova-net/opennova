@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/display_names.h>
@@ -138,11 +139,13 @@ bool same_texture_uses(const std::vector<GraphEdge> &a, const std::vector<GraphE
 
 // An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
 // whether its menu file is one), and one whose scope a file decides (its table there or not, its
-// owner there or not), or whose reading at all does (GraphEdge::needs).
+// owner there or not), or whose reading at all does (GraphEdge::needs); an effect's, a particle's or a
+// table's, whose files the content marker's presence picks (AssetGraph::particle_symbol).
 bool reads_file_set(const GraphEdge &edge) {
 	return reference_row(edge.kind).resolution == ReferenceResolution::File ||
 			edge.kind == ReferenceKind::MenuScreen || !edge.scope_alternate.empty() || !edge.scope_owner.empty() ||
-			!edge.needs.empty();
+			!edge.needs.empty() || edge.kind == ReferenceKind::Particle ||
+			edge.kind == ReferenceKind::ParticleDefinition || edge.kind == ReferenceKind::ParticleTable;
 }
 
 } // namespace
@@ -1032,7 +1035,12 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 			const GraphSlot *file = file_named(key(scope));
 			if (!file || file->kind != AssetKind::Menu) return ReferenceStatus::Unverified;
 		}
-		if (const GraphSymbol *symbol = resolve_symbol(kind, name, scope)) {
+		const GraphSymbol *symbol =
+		        kind == ReferenceKind::ParticleTable
+		                ? particle_symbol(kind, GraphIndex::key_of(kind, symbol_name(kind, name), std::string()),
+		                                  loader_arg > 0 ? uint32_t(loader_arg) : 0)
+		                : resolve_symbol(kind, name, scope);
+		if (symbol) {
 			if (file_out) *file_out = symbol->file;
 			return ReferenceStatus::Present;
 		}
@@ -1082,7 +1090,58 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 	if (kind == ReferenceKind::ItemName) return item_named(name);
 	if (kind == ReferenceKind::TextId)
 		if (const GraphSymbol *over = override_symbol(name, scope)) return over;
+	if (kind == ReferenceKind::Particle || kind == ReferenceKind::ParticleDefinition ||
+	    kind == ReferenceKind::ParticleTable)
+		return particle_symbol(kind, GraphIndex::key_of(kind, symbol_name(kind, name), std::string()), 0);
 	return scoped_symbol(GraphIndex::key_of(kind, symbol_name(kind, name), scope), scope);
+}
+
+const GraphSymbol *AssetGraph::particle_symbol(ReferenceKind kind, const std::string &name_key, uint32_t mask) const {
+	// The files the effect system parses: every .ptl and the gore set the mount's content marker picks, the
+	// project's archive before its base game's, by the upper-cased name (the base layer's files as one table: a stock
+	// base keeps its particle files in one archive, localres)
+	// [orig: CEffectSystem_Init @ 0x5F6070, the slots ascending @ 0x5f6485, the extension test @
+	// 0x5f64cd..0x5f64f3, the gore set @ 0x5f608b..0x5f6095; opennova::effect_file_order]. A base file the project
+	// has its own copy of parses at its place as the copy (by name through the front door, @ 0x5f6545), so the
+	// base's own never parses; the copy's second registration answers no lookup, each taking the first. An effect
+	// or a particle is the first registered of its name [orig: CEffectWorld_InternEffectHandle @ 0x5F7310;
+	// CEffectWorld_FindParticleDefByName @ 0x5E41D0; D-PTL-24].
+	const std::string gore = gore_particle_extension(has_file(kGoreContentMarker));
+	const auto loaded = [&](const GraphSlot &slot) {
+		return strutil::ends_with_icase(slot.logical_name, ".ptl") || strutil::ends_with_icase(slot.logical_name, gore);
+	};
+	std::vector<const GraphSymbol *> found;
+	// A layer's definitions of the name in its archive's walk (the upper-cased name), a file's own in its order.
+	const auto walk = [&](const GraphIndex &index, bool base) {
+		std::vector<Ref> refs;
+		for (const Ref ref : index.symbols_named(name_key)) {
+			const GraphSlot &slot = index.slot(ref.slot);
+			if (!index.symbol(ref).inert && loaded(slot) && (!base || base_file_shows(slot))) refs.push_back(ref);
+		}
+		std::stable_sort(refs.begin(), refs.end(), [&](Ref a, Ref b) {
+			return strutil::to_upper(index.slot(a.slot).logical_name) < strutil::to_upper(index.slot(b.slot).logical_name);
+		});
+		for (const Ref ref : refs) found.push_back(&index.symbol(ref));
+	};
+	walk(index_, false);
+	if (base_) walk(base_->index(), true);
+	if (kind != ReferenceKind::ParticleTable) return found.empty() ? nullptr : found.front();
+	// A curve reads the first base (flags 0) of its name, modified or not: the lookup answers a modified one with
+	// a transformed clone of the last base, and each later resolve pass transforms every table of nonzero flags
+	// again from the first base, a mission's start running two [orig: CParticleManager_FindTableDefByName @
+	// 0x5e95b8..0x5e960b, the clone CParticleTableDef_ConstructClone @ 0x5e80f0; CParticleManager_ResolveAllReferences
+	// @ 0x5ec856..0x5ec8a4; Game_StartMission @ 0x52499e, @ 0x525a6e; formats/particle bake_one_curve]. With no base, a
+	// modified curve the first table of its own mask (its flags, a 33rd row's bytes after an id run into them), as
+	// it is; an unmodified one none.
+	const GraphSymbol *first_of_mask = nullptr;
+	for (const GraphSymbol *table : found) {
+		// The whole dword: a row's fourth byte past the LUT is its top byte (formats/particle parser.cpp write_row_byte).
+		const std::optional<unsigned long> flags = strutil::parse_ulong(table->value);
+		const uint32_t held = flags ? static_cast<uint32_t>(*flags) : 0;
+		if (held == 0) return table;
+		if (held == mask && !first_of_mask) first_of_mask = table;
+	}
+	return first_of_mask;
 }
 
 const GraphSymbol *AssetGraph::item_named(const std::string &name) const {
@@ -1117,6 +1176,10 @@ bool AssetGraph::first_item(const GraphSymbol &symbol) const {
 }
 
 const GraphSymbol *AssetGraph::value_symbol(const GraphEdge &edge, const std::string &scope) const {
+	// A curve's table by its transform (GraphEdge::loader_arg).
+	if (edge.kind == ReferenceKind::ParticleTable)
+		return particle_symbol(edge.kind, GraphIndex::key_of(edge.kind, symbol_name(edge.kind, edge.value), std::string()),
+		                       edge.loader_arg > 0 ? uint32_t(edge.loader_arg) : 0);
 	const GraphSymbol *found = resolve_symbol(edge.kind, edge.value, scope);
 	// A tracer takes the item its type id finds only where the lookup's index is not 0 [orig: AmmoDef_ParseProperty
 	// @ 0x40A5DA..0x40A5FE / @ 0x40A646..0x40A668, `if (index || ...)` over ItemList_FindIndexByTypeId].
