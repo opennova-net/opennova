@@ -250,9 +250,12 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 // @0x454d11..0x454daf; MissionDocument_RebuildAreasFromMarkers @0x44d240, the range @0x44d2a9; sub_40F360 @0x40f360; MIS_ExportBmsFile
 // @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its zone id, in id order,
 // and the .bms holds no color. An area whose id is outside 1..99, or a second area of an id, has no
-// slot in the original's .mis: the write is refused, naming it, rather than leaving it out. The
-// original also writes slot i when path i has a description, testing the path table where it means
-// the area's (@0x454d20..0x454d3f); this writer writes the areas there are (D-MIS-15).
+// slot in the original's .mis: the write is refused, naming it, rather than leaving it out. A zone of
+// markers the export makes no area of has its slot too (its id word set by the rebuild whatever the
+// markers' extra_valmode): its section is written, its flags MisUnexportedArea's, where no area of its id
+// stands and its markers are written (D-MIS-18). The original also writes slot i when path i has a
+// description, testing the path table where it means the area's (@0x454d20..0x454d3f); this writer
+// writes the areas there are (D-MIS-15).
 bool write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names, std::string &error) {
 	std::array<const bms::AreaTrigger *, kMisAreaSlots> slots{};
 	std::array<size_t, kMisAreaSlots> first{};
@@ -272,13 +275,21 @@ bool write_mis_area_triggers(const bms::File &file, std::string &out, const MisN
 		slots[id] = &area;
 		first[id] = i;
 	}
+	std::array<const bms::MisUnexportedArea *, kMisAreaSlots> passed{};
+	for (const bms::MisUnexportedArea &zone : file.mis_unexported_areas) {
+		if (zone.zone < 1 || zone.zone >= static_cast<int32_t>(kMisAreaSlots) || slots[size_t(zone.zone)] != nullptr)
+			continue;
+		for (const bms::MisAreaMarker &marker : file.mis_area_markers)
+			if (marker.zone == zone.zone) passed[size_t(zone.zone)] = &zone;
+	}
 	for (size_t id = 1; id < kMisAreaSlots; ++id) {
 		const bms::AreaTrigger *area = slots[id];
-		if (area == nullptr) continue;
+		if (area == nullptr && passed[id] == nullptr) continue;
+		const uint32_t flags = area != nullptr ? area->flags : passed[id]->flags;
 		append_kv(out, "begin areatrig ", id);
 		append_kv(out, "  description \"", names != nullptr ? mis_name(names->areas[id], kMisDescriptionChars) : std::string(),
 		          "\"");
-		if (area->flags != 0) append_kv(out, "  attrib ", area->flags);
+		if (flags != 0) append_kv(out, "  attrib ", flags);
 		append_line(out, "end areatrig");
 		append_line(out);
 	}
@@ -682,23 +693,31 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain) {
 // [orig: JOTACmed.exe MissionDocument_RebuildAreasFromMarkers @ 0x44d240: every slot's id cleared @ 0x44d250, each 6013 item of
 // a wpnumber of 1..99 @ 0x44d296..0x44d2a9 setting its slot's box on the first @ 0x44d2d8 and
 // widening it after, the least x's item kept @ 0x44d3a8; MIS_ExportBmsFile @ 0x450a16..0x450ab3, the slots
-// in order, written where the least-x item's extra_valmode is 0 @ 0x450a3a]
+// in order, written where the least-x item's extra_valmode is 0 @ 0x450a3a]. A zone of markers the export passes by
+// keeps its slot's flags (MisUnexportedArea, D-MIS-18), as the original's slot does.
 void rebuild_mis_areas(bms::File &file) {
 	std::array<uint32_t, kMisAreaSlots> flags{};
+	const auto in_slot = [](int32_t zone) { return zone >= 1 && zone < static_cast<int32_t>(kMisAreaSlots); };
+	for (const bms::MisUnexportedArea &zone : file.mis_unexported_areas)
+		if (in_slot(zone.zone)) flags[static_cast<size_t>(zone.zone)] = zone.flags;
 	for (const bms::AreaTrigger &area : file.area_triggers)
-		if (area.id >= 1 && area.id < static_cast<int32_t>(kMisAreaSlots))
-			flags[static_cast<size_t>(area.id)] = area.flags;
+		if (in_slot(area.id)) flags[static_cast<size_t>(area.id)] = area.flags;
 	std::vector<bms::AreaTrigger> areas;
+	std::vector<bms::MisUnexportedArea> unexported;
 	for (int32_t zone = 1; zone < static_cast<int32_t>(kMisAreaSlots); ++zone) {
 		bms::AreaTrigger area = {};
 		const bms::MisAreaMarker *least = detail::zone_box(file.mis_area_markers, zone, area);
-		if (least == nullptr || least->extra_valmode != 0)
+		if (least == nullptr) continue;
+		if (least->extra_valmode != 0) {
+			unexported.push_back({ zone, flags[static_cast<size_t>(zone)] });
 			continue;
+		}
 		area.id = zone;
 		area.flags = flags[static_cast<size_t>(zone)];
 		areas.push_back(area);
 	}
 	file.area_triggers = std::move(areas);
+	file.mis_unexported_areas = std::move(unexported);
 }
 
 MisWeaponTable mis_weapon_table(const def::DefWeaponsFile &weapons) {

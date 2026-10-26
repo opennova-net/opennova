@@ -272,7 +272,8 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 // id order, and leaves the 6013 items out of the markers [orig: JOTACmed.exe MIS_ExportBmsFile
 // @ 0x450785]. rebuild_mis_areas
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
-// before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so
+// before (an `areatrig` section's); an area of no marker goes; a zone of markers the export makes no
+// area of is listed in mis_unexported_areas with its flags, its section the writer's (D-MIS-18). parse_mis_text reads a 6013 item so
 // (none of the pools) and makes the areas in the file's frame; mis_items_to_bms_frame makes them
 // again once the markers stand in the .bms's, keeping the markers of a zone it makes no area of.
 // The writer writes a zone's markers as read where they still make its area (or, a zone of no area,

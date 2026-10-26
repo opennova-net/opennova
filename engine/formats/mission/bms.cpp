@@ -1356,6 +1356,11 @@ bool equal(const File& a, const File& b) {
 			return false;
 		}
 	}
+	if (a.mis_unexported_areas.size() != b.mis_unexported_areas.size()) return false;
+	for (size_t i = 0; i < a.mis_unexported_areas.size(); ++i)
+		if (a.mis_unexported_areas[i].zone != b.mis_unexported_areas[i].zone ||
+				a.mis_unexported_areas[i].flags != b.mis_unexported_areas[i].flags)
+			return false;
 	// Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
 	// count fields. The body comparisons below are over the actual vectors, so they detect a
 	// change even when a header count is momentarily out of sync with its vector (sync_counts runs

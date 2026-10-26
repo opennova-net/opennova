@@ -972,6 +972,17 @@ struct MisAreaMarker {
 	int32_t extra_bheight; // as read
 };
 
+// A .mis zone of area markers the export makes no area of (its least-x marker's extra_valmode not 0), and the flags
+// (`attrib`) its `areatrig` section gives it: the original editor's rebuild sets the slot's id word for every zone of
+// markers whatever their extra_valmode, and its writer writes every slot so set, the section's description and
+// attrib with it [orig: JOTACmed.exe MissionDocument_RebuildAreasFromMarkers @ 0x44d240; MIS_SaveDocument @
+// 0x454d11..0x454daf], the extra_valmode test being its .bms export's alone [orig: JOTACmed.exe MIS_ExportBmsFile @
+// 0x450a3a] (D-MIS-18). Transient: no .bms byte holds one.
+struct MisUnexportedArea {
+	int32_t zone;
+	uint32_t flags;
+};
+
 // The frame a File's entity heights are in (mission_mis.h's frames, D-MIS-4). Transient: no .bms
 // byte holds it; write_mis_text reads it.
 enum class MisFrame : uint8_t {
@@ -1022,6 +1033,10 @@ struct File {
 	// writes a zone's back where they still make its area (or, such a zone, none). None in a parsed
 	// .bms.
 	std::vector<MisAreaMarker> mis_area_markers;
+	// The zones of those markers the export makes no area of, each with its areatrig section's flags
+	// (MisUnexportedArea), in zone id order: rebuild_mis_areas makes them beside the areas; write_mis_text writes
+	// each one's section where no area of its id stands. None in a parsed .bms.
+	std::vector<MisUnexportedArea> mis_unexported_areas;
 
     // Get mission name as string
     std::string get_mission_name() const;
@@ -1105,7 +1120,7 @@ std::string first_differing_section(const File& file, const std::vector<uint8_t>
 // preserve all bytes, padding included. WaypointRecord (inner vectors) compares
 // field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
 // The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
-// mis_height_lock), and the File's mis_frame and mis_area_markers are compared too: they never
+// mis_height_lock), and the File's mis_frame, mis_area_markers and mis_unexported_areas are compared too: they never
 // reach .bms bytes, but they do change write_mis_text output, so a difference between them is a
 // real document change for undo/dirty purposes.
 bool equal(const File& a, const File& b);
