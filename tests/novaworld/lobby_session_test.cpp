@@ -373,7 +373,7 @@ int test_observed_source_is_game_endpoint() {
 
 int test_two_hosts_with_colliding_app_ids_get_distinct_rids() {
 	// Retail AppId is a per-session random in [1000, 9999]
-	// [orig: CNapiNetwork_RandomizeTimeout @0x4c4d9a]: 1000 and 5096 share
+	// [orig: CNapiNetwork_MintAppId @0x4c4d9a]: 1000 and 5096 share
 	// their low twelve bits, so the RID must not be derived from it.
 	LobbySession sess;
 	LobbyState a, b;

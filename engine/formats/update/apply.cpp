@@ -32,20 +32,18 @@ const SfsEntry *find_entry(const SfsSection &section, std::string_view name) {
 }
 
 // A row's installed bytes: its blob inflated, checked against the row's size and crc.
-bool row_content(const SfsSection &section, const CommandRow &row, std::vector<uint8_t> &out,
+bool row_content(const SectionBlobs &blobs, const CommandRow &row, std::vector<uint8_t> &out,
 		std::string &error) {
-	const SfsEntry *entry = find_entry(section, row.name);
-	if (entry == nullptr) {
-		error = "the package has no file for the row " + row.name;
+	std::vector<uint8_t> packed;
+	if (!blobs(row.name, packed, error))
 		return false;
-	}
 	NlzHeader header;
-	if (nlz_read_header(entry->data.data(), entry->data.size(), header) &&
+	if (nlz_read_header(packed.data(), packed.size(), header) &&
 			(row.size < 0 || header.raw_size != static_cast<uint32_t>(row.size))) {
 		error = "the file for the row " + row.name + " has the wrong inflated size";
 		return false;
 	}
-	if (nlz_decode(entry->data.data(), entry->data.size(), out) == NlzDecode::Corrupt) {
+	if (nlz_decode(packed.data(), packed.size(), out) == NlzDecode::Corrupt) {
 		error = "the file for the row " + row.name + " does not inflate";
 		return false;
 	}
@@ -141,23 +139,37 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 		error = "the package has no command file " + std::string(command_file);
 		return false;
 	}
-	const std::optional<CommandFile> cmd = read_command_file(
-			std::string(cmd_entry->data.begin(), cmd_entry->data.end()));
+	const SectionBlobs blobs = [&section](std::string_view name, std::vector<uint8_t> &packed,
+									   std::string &why) {
+		const SfsEntry *entry = find_entry(section, name);
+		if (entry == nullptr) {
+			why = "the package has no file for the row " + std::string(name);
+			return false;
+		}
+		packed = entry->data;
+		return true;
+	};
+	return apply_commands(cmd_entry->data, command_file, blobs, dir, report, error);
+}
+
+bool apply_commands(const std::vector<uint8_t> &command_bytes, std::string_view command_file,
+		const SectionBlobs &blobs, const fs::path &dir, ApplyReport &report, std::string &error) {
+	report = ApplyReport{};
+	const std::optional<CommandFile> cmd =
+			read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
 	if (!cmd) {
 		error = "the command file " + std::string(command_file) + " does not read";
 		return false;
 	}
 	if (!validate_commands(*cmd, error)) return false;
 
-	// Every row checked before any is applied.
-	std::map<size_t, std::vector<uint8_t>> contents; // by row index
-	for (size_t i = 0; i < cmd->rows.size(); ++i) {
-		const CommandRow &row = cmd->rows[i];
+	// Every row checked before any is applied, each blob let go once checked: a whole game's
+	// release is never inflated in memory at once.
+	for (const CommandRow &row : cmd->rows) {
 		if (row.type == CommandType::Loose || row.type == CommandType::Copy) {
 			std::vector<uint8_t> content;
-			if (!row_content(section, row, content, error))
+			if (!row_content(blobs, row, content, error))
 				return false;
-			contents[i] = std::move(content);
 		}
 	}
 
@@ -186,8 +198,9 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 				fs::create_directories(parent, ec);
 				if (ec) { error = "cannot create target directory: " + ec.message(); return false; }
 				const fs::path path = parent / io::os_path(row.name);
-				const std::vector<uint8_t> &content = contents[i];
-				if (!io::write_file_atomic(io::utf8_path(path), content.data(), content.size(), error))
+				std::vector<uint8_t> content;
+				if (!row_content(blobs, row, content, error) ||
+						!io::write_file_atomic(io::utf8_path(path), content.data(), content.size(), error))
 					return false;
 				fs::last_write_time(path, file_time_from_unix(row.time), ec);
 				if (ec) { error = "cannot stamp " + row.name + ": " + ec.message(); return false; }
@@ -195,14 +208,17 @@ bool apply_section(const SfsSection &section, std::string_view command_file,
 						target == "." ? row.name : target + "/" + row.name);
 				break;
 			}
-			case CommandType::Copy:
+			case CommandType::Copy: {
 				if (!archive_target) {
 					error = "the COPY row " + row.name + " has no archive target";
 					return false;
 				}
-				edits.adds.push_back({ row.name, std::move(contents[i]),
-						static_cast<uint32_t>(row.time) });
+				std::vector<uint8_t> content;
+				if (!row_content(blobs, row, content, error))
+					return false;
+				edits.adds.push_back({ row.name, std::move(content), static_cast<uint32_t>(row.time) });
 				break;
+			}
 			case CommandType::Remove:
 				if (archive_target) {
 					edits.removes.push_back(row.name);

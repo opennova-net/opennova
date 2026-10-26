@@ -16,6 +16,7 @@
 
 #include <base/io/crc32_mpeg2.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -86,7 +87,7 @@ int test_wizard() {
 	// content's; any other (BHD's, an expansion's) none.
 	TEST_EXPECT(wizard_product(wizard.cmd) == "jo");
 	TEST_EXPECT(wizard_product(" dfx2.cmd ") == "dfx2");
-	TEST_EXPECT(wizard_product("OPENNOVA.CMD") == "opennova");
+	TEST_EXPECT(wizard_product("ACIDGAMBIT.CMD") == "acidgambit");
 	TEST_EXPECT(wizard_product("DFBHD.CMD").empty() && wizard_product("JOEPTR.CMD").empty() &&
 			wizard_product("").empty());
 
@@ -264,6 +265,29 @@ int test_sfs() {
 	overrun[16] = 0xFF; // the first entry's size
 	overrun[17] = 0xFF;
 	TEST_EXPECT(!sfs_read(overrun.data(), overrun.size(), back, error));
+	// Located in a file, never read whole (a whole game's package): the sections and entries
+	// sfs_read finds, each entry's bytes at its span, the executable before them included.
+	std::FILE *file = std::tmpfile();
+	TEST_EXPECT(file != nullptr && std::fwrite(exe.data(), 1, exe.size(), file) == exe.size());
+	SfsLayout layout;
+	TEST_EXPECT(sfs_locate(file, layout, error));
+	TEST_EXPECT(layout.product == package.product && layout.sections.size() == 2 &&
+			layout.sections[0].entries.size() == 2 && layout.sections[1].expansion == "jox01" &&
+			layout.sections[1].entries.size() == 1);
+	for (size_t s = 0; s < layout.sections.size(); ++s)
+		for (size_t e = 0; e < layout.sections[s].entries.size(); ++e) {
+			const SfsEntrySpan &span = layout.sections[s].entries[e];
+			const SfsEntry &entry = from_exe.sections[s].entries[e];
+			TEST_EXPECT(span.name == entry.name && span.size == entry.data.size() &&
+					span.offset + span.size <= exe.size() &&
+					std::equal(entry.data.begin(), entry.data.end(),
+							exe.begin() + static_cast<std::ptrdiff_t>(span.offset)));
+		}
+	std::fclose(file);
+	file = std::tmpfile();
+	TEST_EXPECT(file != nullptr && std::fwrite(overrun.data(), 1, overrun.size(), file) == overrun.size());
+	TEST_EXPECT(!sfs_locate(file, layout, error));
+	std::fclose(file);
 	return 0;
 }
 

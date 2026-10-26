@@ -36,7 +36,8 @@ class AdminApi:
         self.timeout = timeout
 
     def request(self, method: str, path: str = "", body=None):
-        headers = {"Authorization": "Bearer " + self.token}
+        # Cloudflare in front of the portal refuses urllib's default agent (error 1010).
+        headers = {"Authorization": "Bearer " + self.token, "User-Agent": "opennova-publish-update/1"}
         if isinstance(body, bytes):
             data = body
             headers["Content-Type"] = "application/octet-stream"

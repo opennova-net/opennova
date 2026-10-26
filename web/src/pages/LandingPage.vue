@@ -45,12 +45,12 @@
     <!-- Our own game: what a download plays with no retail install. -->
     <section id="game" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="game-title">
       <p class="eyebrow">Our game</p>
-      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">Indigo Shore, and more to come</h2>
+      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">OP: Acid Gambit, and more to come</h2>
       <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
         <p>
-          OpenNova comes with a small game of its own, made in the OpenNova Editor with no file from the original
-          games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN, then play it
-          again at night in a storm with the Indigo Storm expansion.
+          OpenNova comes with a small game of its own, OP: Acid Gambit, made in the OpenNova Editor with no file from
+          the original games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN,
+          then play it again at night in a storm with the OP: Nifty Package expansion.
         </p>
         <p>
           A carbine, a pistol, a knife, grenades and binoculars; rebels who patrol, stand guard and raise the alarm.
@@ -130,36 +130,46 @@
       </div>
     </section>
 
-    <!-- Online: OpenNova needs nothing; an original exe needs the Switcher. -->
+    <!-- Online: OpenNova reaches either NovaWorld, the original Jointops.exe finds our hosted servers on
+         NovaLogic's, and only the original dfx2.exe needs the Switcher. -->
     <section id="online" class="scroll-mt-20 border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="online-title">
       <div class="page">
         <p class="eyebrow">NovaWorld</p>
         <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          NovaWorld is the online service these games log in to. We run our own, with accounts, lobbies and the
-          in-game server browser. First <RouterLink to="/register" class="link">make a NovaWorld account</RouterLink>:
-          the handle and password you log in with in-game. Then pick your way in.
+          NovaWorld is the online service these games log in to. We run our own for Joint Operations and Delta Force
+          Xtreme 2, with accounts, lobbies and the in-game server browser, and NovaLogic still runs theirs for Joint
+          Operations. To play on ours, first <RouterLink to="/register" class="link">make a NovaWorld account</RouterLink>:
+          the handle and password you log in with in-game.
         </p>
-        <div class="mt-10 grid gap-4 lg:grid-cols-2">
+        <div class="mt-10 grid gap-4 lg:grid-cols-3">
           <article class="card p-6">
             <h3 class="text-lg font-semibold text-ink-bright">With OpenNova</h3>
             <p class="mt-2 text-ink-muted">
-              Open NovaWorld from Joint Operations' multiplayer menu in OpenNova and choose OpenNova. Nothing else to
+              Open NovaWorld from Joint Operations' multiplayer menu in OpenNova and choose OpenNova, or Original
+              NovaWorld for NovaLogic's. Nothing else to install.
+            </p>
+          </article>
+          <article class="card p-6">
+            <h3 class="text-lg font-semibold text-ink-bright">With the original Jointops.exe</h3>
+            <p class="mt-2 text-ink-muted">
+              Joint Operations servers we host can also list on NovaLogic's NovaWorld, so the original game finds them
+              as it is: log in to NovaLogic's NovaWorld as always and pick one from its server browser. Nothing to
               install.
             </p>
           </article>
           <article class="card p-6">
-            <h3 class="text-lg font-semibold text-ink-bright">With the original Jointops.exe or dfx2.exe</h3>
+            <h3 class="text-lg font-semibold text-ink-bright">With the original dfx2.exe</h3>
             <p class="mt-2 text-ink-muted">
-              The OpenNova Switcher points the original game at our NovaWorld. It manages one block in the Windows
-              hosts file, for gs.novaworld.net, so it asks for administrator rights. Your game files stay as they are,
-              and it switches back to NovaLogic's NovaWorld whenever you like.
+              NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, so the OpenNova Switcher points the original
+              game at ours. It manages one block in the Windows hosts file, for gs.novaworld.net, so it asks for
+              administrator rights. Your game files stay as they are.
             </p>
             <a href="#downloads" class="link mt-3 inline-block text-sm">Get the Switcher</a>
           </article>
         </div>
         <p class="mt-6 text-ink-muted">
-          Both ways meet in the same lobbies. <RouterLink to="/lobby" class="link">See who is playing</RouterLink>.
+          <RouterLink to="/lobby" class="link">See who is playing</RouterLink> on our NovaWorld and on NovaLogic's.
         </p>
       </div>
     </section>
@@ -172,8 +182,9 @@
           <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Hosted servers</h2>
           <p class="mt-4 text-ink">
             A monthly support tier funds OpenNova and runs your own servers on NovaWorld. We start them on our machines,
-            list them in the game's server browser and keep them running until you stop them. Pick the map rotation
-            and game settings, watch the stats and use the server console, all from this site.
+            list them in the game's server browser and keep them running until you stop them. A Joint Operations server
+            can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install. Pick
+            the map rotation and game settings, watch the stats and use the server console, all from this site.
           </p>
           <p class="mt-3 text-ink-muted">
             Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
@@ -218,8 +229,9 @@
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. The game comes with OpenNova's own game; playing Joint Operations
-          needs your own purchased copy. Each release on GitHub carries these files:
+          Windows x64. Pre-1.0 and experimental. There is a zip for each game, and its first launch downloads that
+          game: OP: Acid Gambit, Joint Operations or Delta Force Xtreme 2. Playing Joint Operations needs your own
+          purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <li v-for="item in downloads" :key="item.file" class="card p-5">
@@ -262,8 +274,18 @@ const editorFeatures = [
 const downloads = [
   {
     name: 'OpenNova',
-    body: 'The game: our own game, and a drop-in for Jointops.exe that plays the Joint Operations you own.',
+    body: 'The game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
     file: 'opennova-game-windows',
+  },
+  {
+    name: 'OpenNova for Joint Operations',
+    body: 'The same game, set up for Joint Operations: unzip it into an empty folder and its first launch downloads Joint Operations and its Escalation expansion.',
+    file: 'jointops-game-windows',
+  },
+  {
+    name: 'OpenNova for Delta Force Xtreme 2',
+    body: 'The same game, set up for Delta Force Xtreme 2: unzip it into an empty folder and its first launch downloads Delta Force Xtreme 2.',
+    file: 'dfx2-game-windows',
   },
   {
     name: 'OpenNova Editor',
@@ -282,7 +304,7 @@ const downloads = [
   },
   {
     name: 'OpenNova Switcher',
-    body: "Only for the original Jointops.exe or dfx2.exe: a tray app that points them at our NovaWorld, NovaLogic's, or an address of your own. OpenNova itself doesn't need it.",
+    body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address of your own. OpenNova and the original Jointops.exe don't need it.",
     file: 'opennova-switcher-windows',
   },
 ];

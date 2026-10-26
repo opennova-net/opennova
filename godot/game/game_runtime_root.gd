@@ -52,8 +52,11 @@ func _ready() -> void:
 		run_args.append_array(user_args)
 	RuntimeUpdates.configure(LaunchFlags.product(), runtime_dir, resource_dir,
 			run_args, not LaunchFlags.no_update() and OS.get_name() == "Windows")
-	if LaunchFlags.product() == "opennova" and not has_content(resource_dir,
-			LaunchFlags.loose_override_enabled(), LaunchFlags.loose_root_allowed()):
+	# Every product's zip downloads its game on the first launch (ADR 0067 d3): a
+	# folder without its game, OpenNova's own or Joint Operations or DFX2, offers
+	# the download instead of failing its boot.
+	if not has_content(resource_dir, LaunchFlags.loose_override_enabled(),
+			LaunchFlags.loose_root_allowed(), LaunchFlags.game()):
 		_show_bootstrap()
 		return
 	RuntimeUpdates.begin_check()
@@ -63,11 +66,23 @@ func _ready() -> void:
 		_start_direct_game.call_deferred()
 
 
-static func has_content(directory: String, loose_override := false, allow_loose_root := false) -> bool:
+## The game's name on the download screen, by product.
+static func product_title(product: String) -> String:
+	match product:
+		"jo":
+			return "Joint Operations"
+		"dfx2":
+			return "Delta Force Xtreme 2"
+	return "OP: Acid Gambit"
+
+
+## `game` is the engine profile the product mounts with (LaunchFlags.game()).
+static func has_content(directory: String, loose_override := false, allow_loose_root := false,
+		game := "jo") -> bool:
 	# Content is packed by the project exporter. A missing or interrupted first
 	# install must reach the updater without constructing data-dependent menus.
 	var root := ResourceRoot.new()
-	var err := root.mount_runtime(directory, "", loose_override, "jo")
+	var err := root.mount_runtime(directory, "", loose_override, game)
 	if err != OK:
 		if err != ERR_FILE_NOT_FOUND or not allow_loose_root or root.set_root_dir(directory) != OK:
 			return false
@@ -78,11 +93,12 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 
 func _show_bootstrap() -> void:
 	print_verbose("OpenNova: content installation required")
+	var title := product_title(LaunchFlags.product())
 	if is_headless():
-		push_error("OpenNova content is missing. Run update.exe to install it.")
+		push_error("%s is not installed here. Run update.exe to install it." % title)
 		get_tree().quit(1)
 		return
-	var column := _message_column("Install OpenNova's game content to start playing.")
+	var column := _message_column("Download %s to start playing." % title)
 	var install := Button.new()
 	install.text = "Download and play"
 	install.disabled = not RuntimeUpdates.is_enabled()
@@ -94,8 +110,8 @@ func _show_bootstrap() -> void:
 	elif LaunchFlags.after_update():
 		# The updater finished but the content still does not boot: offer the
 		# download again rather than looping updater and game into each other.
-		_bootstrap_status.text = ("The download finished, but OpenNova's game content is still "
-				+ "incomplete. Try the download again.")
+		_bootstrap_status.text = ("The download finished, but %s is still incomplete. "
+				+ "Try the download again.") % title
 	else:
 		_install_content.call_deferred()
 

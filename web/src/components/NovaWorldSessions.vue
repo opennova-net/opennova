@@ -137,6 +137,9 @@
                   <template v-if="c.host && c.host.listed">
                     {{ c.host.players }} of {{ c.host.max_players }}
                     <span v-if="clientsOn(c.host.rid) > 0" class="block text-xs text-ink-muted">{{ countLabel(clientsOn(c.host.rid), 'client') }} above</span>
+                    <span v-if="c.host.novalogic_players" class="session-novalogic block text-xs text-ink-muted">
+                      {{ countLabel(c.host.novalogic_players, 'player') }} through NovaLogic's NovaWorld (no session here)
+                    </span>
                   </template>
                   <span v-else class="text-ink-muted">None listed</span>
                 </td>
@@ -276,13 +279,18 @@ function clientsOn(rid: number): number {
   return clients.value.filter((c) => c.playing?.rid === rid && c.playing.listed).length;
 }
 
-// "3 signed in: 2 clients and 1 server; a session closes after 4 minutes without a keepalive."
+// "3 signed in: 2 clients and 1 server; a session closes after 4 minutes without a keepalive.",
+// then the players NovaLogic's NovaWorld sent the hosted servers, who hold no session here.
 const summary = computed(() => {
   const d = data.value;
   if (!d) return '';
   const signedIn = `${d.count} signed in: ${countLabel(clients.value.length, 'client')} and ${countLabel(servers.value.length, 'server')}`;
-  if (!d.heartbeat_timeout_ms) return `${signedIn}.`;
-  return `${signedIn}; a session closes after ${formatDuration(d.heartbeat_timeout_ms)} without a keepalive.`;
+  const sessions = d.heartbeat_timeout_ms
+    ? `${signedIn}; a session closes after ${formatDuration(d.heartbeat_timeout_ms)} without a keepalive.`
+    : `${signedIn}.`;
+  const novalogic = servers.value.reduce((n, c) => n + (c.host?.novalogic_players ?? 0), 0);
+  if (novalogic === 0) return sessions;
+  return `${sessions} ${countLabel(novalogic, 'player')} on hosted servers came through NovaLogic's NovaWorld and hold no session here.`;
 });
 
 // A header's sort (both tables follow it): a new column starts as its natural

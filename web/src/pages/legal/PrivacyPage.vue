@@ -32,6 +32,7 @@
         'Stripe: payments and the billing portal.',
         'Amazon Web Services: the servers and the database NovaWorld runs on, and where they are.',
         'Cloudflare: the site\'s network edge, which sees every visit to it.',
+        'NovaLogic\'s NovaWorld: a hosted server its owner also lists there sends it the names and addresses of the players on that server, as every game server listed there does.',
         'Any transfer of data outside the visitor\'s country, and the safeguards for it.',
       ]"
     />

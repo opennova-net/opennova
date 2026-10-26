@@ -5,6 +5,7 @@ import AddressesSection from '../pages/admin/AddressesSection.vue';
 import CostsSection from '../pages/admin/CostsSection.vue';
 import NovaWorldSection from '../pages/admin/NovaWorldSection.vue';
 import LobbyServerPage from '../pages/LobbyServerPage.vue';
+import NovaLogicServerPage from '../pages/NovaLogicServerPage.vue';
 import MachineDetailSection from '../pages/admin/MachineDetailSection.vue';
 import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
 import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
@@ -17,6 +18,7 @@ import ServerUsageTab from '../pages/servers/ServerUsageTab.vue';
 describe('router', () => {
   it.each([
     ['/lobby/167772175', LobbyServerPage],
+    ['/lobby/novalogic/167782351', NovaLogicServerPage],
     // The billing portal's cancel flow for an address returns here.
     ['/me/addresses', AddressesPage],
     ['/admin/addresses', AddressesSection],
@@ -68,6 +70,7 @@ describe('router', () => {
 
   it('sends a lobby id that is no number to the not-found page', () => {
     expect(router.resolve('/lobby/abc').matched.at(-1)?.components?.default).toBe(NotFoundPage);
+    expect(router.resolve('/lobby/novalogic/abc').matched.at(-1)?.components?.default).toBe(NotFoundPage);
   });
 
   it('sends an AWS resource the view reads none of to the not-found page', () => {

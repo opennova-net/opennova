@@ -30,6 +30,7 @@ import type {
   HostedServersResponse,
   HostedSettings,
   HostingEntitlement,
+  NovaLogicListing,
   PinnedTree,
   ServerPhase,
   StopLimit,
@@ -318,6 +319,25 @@ function parseStoppedBecause(value: unknown): StoppedBecause | null {
   };
 }
 
+// The listing on NovaLogic's NovaWorld, or null when it is missing or has no
+// state; a malformed member reads as absent, a malformed slot is left out.
+function parseNovaLogic(value: unknown): NovaLogicListing | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.state !== 'string') return null;
+  const listing: NovaLogicListing = {
+    state: v.state,
+    player_slots: Array.isArray(v.player_slots) ? v.player_slots.filter(isCount) : [],
+  };
+  if (isCount(v.try) && isCount(v.tries)) {
+    listing.try = v.try;
+    listing.tries = v.tries;
+  }
+  if (typeof v.next_try_at === 'string' && v.next_try_at !== '') listing.next_try_at = v.next_try_at;
+  if (typeof v.reason === 'string' && v.reason !== '') listing.reason = v.reason;
+  if (typeof v.tag === 'string' && v.tag !== '') listing.tag = v.tag;
+  return listing;
+}
+
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
@@ -331,6 +351,7 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     data: parseServerData(v.data),
     update_available: v.update_available === true,
     update_requested: v.update_requested === true,
+    novalogic: parseNovaLogic(v.novalogic),
     phase: parsePhase(v.phase),
     stopped_because: parseStoppedBecause(v.stopped_because),
   };
@@ -415,6 +436,7 @@ function parseDataSet(value: unknown): HostedDataSet | null {
     missions: parseMissions(v.missions),
     limits,
     expansions: expansions as HostedExpansionOption[],
+    novalogic_listing: v.novalogic_listing === true,
   };
 }
 
@@ -440,7 +462,14 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
       : [];
     return {
       ok: true,
-      value: { enabled: data.enabled, full: data.full, entitlement, data_sets: dataSets, servers: servers as HostedServer[] },
+      value: {
+        enabled: data.enabled,
+        full: data.full,
+        entitlement,
+        data_sets: dataSets,
+        novalogic_listing: data.novalogic_listing === true,
+        servers: servers as HostedServer[],
+      },
     };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };

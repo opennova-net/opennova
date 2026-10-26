@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <system_error>
@@ -33,7 +34,7 @@ namespace {
 
 // The games slug of OpenNova's own base data set (backend/migrations/0011_data_sets.sql), whose
 // releases and its expansions' are complete installs (ADR 0067 d7).
-constexpr const char *kOpenNovaGame = "opennova_0_consumer";
+constexpr const char *kAcidGambitGame = "acidgambit_0_consumer";
 
 namespace fs = std::filesystem;
 
@@ -370,24 +371,83 @@ jobs::JobResult finalize(
 
 // The section's entry named `name`, as the apply library finds it (without case: the blobs land
 // in one flat update directory).
-const update::SfsEntry *find_entry(const update::SfsSection &section, std::string_view name) {
-	for (const update::SfsEntry &entry : section.entries)
+const update::SfsEntrySpan *find_entry(
+		const update::SfsSectionSpans &section, std::string_view name) {
+	for (const update::SfsEntrySpan &entry : section.entries)
 		if (strutil::iequals(entry.name, name))
 			return &entry;
 	return nullptr;
 }
 
+// A package on disk, its entries located (formats/update/sfs.h sfs_locate) and each read only
+// when asked: a whole game's release, hundreds of megabytes, is never held in memory.
+class PackageFile {
+public:
+	PackageFile() = default;
+	PackageFile(const PackageFile &) = delete;
+	PackageFile &operator=(const PackageFile &) = delete;
+	~PackageFile() {
+		if (file_ != nullptr)
+			std::fclose(file_);
+	}
+
+	// False with `why` when the file does not open or holds no package.
+	bool open(const std::string &path, std::string &why) {
+		file_ = io::fopen_utf8(path.c_str(), "rb");
+		if (file_ == nullptr) {
+			why = "cannot open " + path;
+			return false;
+		}
+		return update::sfs_locate(file_, layout_, why);
+	}
+	const update::SfsLayout &layout() const { return layout_; }
+
+	bool read(const update::SfsEntrySpan &entry, std::vector<uint8_t> &out, std::string &why) {
+		out.resize(entry.size);
+		if (io::fseek64(file_, static_cast<int64_t>(entry.offset), SEEK_SET) != 0 ||
+				(entry.size != 0 && std::fread(out.data(), 1, entry.size, file_) != entry.size)) {
+			why = "cannot read " + entry.name + " from the package";
+			return false;
+		}
+		return true;
+	}
+
+	// The section's blobs by name, without case, as the apply library reads them.
+	update::SectionBlobs blobs(const update::SfsSectionSpans &section) {
+		auto by_name = std::make_shared<std::map<std::string, const update::SfsEntrySpan *>>();
+		for (const update::SfsEntrySpan &entry : section.entries)
+			by_name->emplace(strutil::to_lower(entry.name), &entry);
+		return [this, by_name](std::string_view name, std::vector<uint8_t> &packed,
+					   std::string &why) {
+			const auto it = by_name->find(strutil::to_lower(std::string(name)));
+			if (it == by_name->end()) {
+				why = "the package has no file for the row " + std::string(name);
+				return false;
+			}
+			return read(*it->second, packed, why);
+		};
+	}
+
+private:
+	std::FILE *file_ = nullptr;
+	update::SfsLayout layout_;
+};
+
 // The section's command file read and every row checked as the apply library will check it,
 // so a package that would fail to apply is refused at its upload: `out` gets the version, the
-// row count and the blobs' bytes.
-bool check_section(const update::SfsSection &section, const update::SfsEntry &command,
-		NewReleaseSection &out, std::string &why) {
-	const std::optional<update::CommandFile> cmd =
-			update::read_command_file(std::string(command.data.begin(), command.data.end()));
+// row count and the blobs' bytes. Each blob is read and inflated alone.
+bool check_section(PackageFile &package, const update::SfsSectionSpans &section,
+		const update::SfsEntrySpan &command, NewReleaseSection &out, std::string &why) {
+	std::vector<uint8_t> command_bytes;
+	if (!package.read(command, command_bytes, why))
+		return false;
+	const std::optional<update::CommandFile> cmd = update::read_command_file(
+			std::string(command_bytes.begin(), command_bytes.end()));
 	if (!cmd) {
 		why = "the command file " + command.name + " does not read";
 		return false;
 	}
+	const update::SectionBlobs blobs = package.blobs(section);
 	out.version = cmd->version;
 	out.row_count = 0;
 	for (const update::CommandRow &row : cmd->rows) {
@@ -410,13 +470,10 @@ bool check_section(const update::SfsSection &section, const update::SfsEntry &co
 					why = "the row " + row.name + " is longer than a packed update's 15 characters";
 					return false;
 				}
-				const update::SfsEntry *entry = find_entry(section, row.name);
-				if (entry == nullptr) {
-					why = "the package has no file for the row " + row.name;
+				std::vector<uint8_t> packed, content;
+				if (!blobs(row.name, packed, why))
 					return false;
-				}
-				std::vector<uint8_t> content;
-				if (update::nlz_decode(entry->data.data(), entry->data.size(), content) ==
+				if (update::nlz_decode(packed.data(), packed.size(), content) ==
 						update::NlzDecode::Corrupt) {
 					why = "the file for the row " + row.name + " does not inflate";
 					return false;
@@ -440,9 +497,9 @@ bool check_section(const update::SfsSection &section, const update::SfsEntry &co
 		++out.row_count;
 	}
 	out.blob_bytes = 0;
-	for (const update::SfsEntry &entry : section.entries)
+	for (const update::SfsEntrySpan &entry : section.entries)
 		if (&entry != &command)
-			out.blob_bytes += static_cast<int64_t>(entry.data.size());
+			out.blob_bytes += static_cast<int64_t>(entry.size);
 	return true;
 }
 
@@ -450,17 +507,17 @@ bool check_section(const update::SfsSection &section, const update::SfsEntry &co
 // section (no PACKAGEBREAK) to a base data set or standalone updater, an expansion section
 // to an expansion of its code and, when the package carries a base section, of that base.
 // None or two refuse.
-bool map_sections(const update::SfsPackage &package, const std::vector<DataSetRow> &data_sets,
+bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets,
 		std::vector<NewReleaseSection> &out, std::string &why) {
 	out.clear();
 	std::optional<int64_t> base_id;
 	std::set<int64_t> taken;
-	for (const update::SfsSection &section : package.sections) {
+	for (const update::SfsSectionSpans &section : package.layout().sections) {
 		const bool expansion = !section.expansion.empty();
 		const std::string label =
 				expansion ? "the section " + section.expansion : std::string("the base section");
 		const DataSetRow *match = nullptr;
-		const update::SfsEntry *command = nullptr;
+		const update::SfsEntrySpan *command = nullptr;
 		for (const DataSetRow &ds : data_sets) {
 			if (ds.command_file.empty() || (ds.kind == DataSetKind::Expansion) != expansion)
 				continue;
@@ -468,7 +525,7 @@ bool map_sections(const update::SfsPackage &package, const std::vector<DataSetRo
 				continue;
 			if (expansion && base_id && ds.parent_id != base_id)
 				continue;
-			const update::SfsEntry *entry = find_entry(section, ds.command_file);
+			const update::SfsEntrySpan *entry = find_entry(section, ds.command_file);
 			if (entry == nullptr)
 				continue;
 			if (match != nullptr) {
@@ -493,7 +550,7 @@ bool map_sections(const update::SfsPackage &package, const std::vector<DataSetRo
 		s.data_set_id = match->id;
 		s.expansion = section.expansion;
 		s.command_file = match->command_file;
-		if (!check_section(section, *command, s, why)) {
+		if (!check_section(package, section, *command, s, why)) {
 			why = label + ": " + why;
 			return false;
 		}
@@ -562,11 +619,8 @@ jobs::JobResult validate(
 	}
 	if (other && *other != release_id)
 		return invalid_release(ctx, release_id, "already uploaded as release " + id_text(*other));
-	std::vector<uint8_t> bytes;
-	if (!io::read_file_bytes(path, bytes, why))
-		return release_transient(ctx, release_id, why);
-	update::SfsPackage package;
-	if (!update::sfs_read(bytes.data(), bytes.size(), package, why))
+	PackageFile package;
+	if (!package.open(path, why))
 		return invalid_release(ctx, release_id, "not a 1SFS package: " + why);
 	std::vector<NewReleaseSection> sections;
 	if (!map_sections(package, data_sets, sections, why))
@@ -578,7 +632,7 @@ jobs::JobResult validate(
 	{
 		auto lease = ctx.pool.acquire();
 		if (!set_release_validated(*lease, release_id, sha256, static_cast<int64_t>(size),
-					package.product, sections)) {
+					package.layout().product, sections)) {
 			std::printf(
 					"%s release %s left validating meanwhile\n", kTag, id_text(release_id).c_str());
 			return jobs::JobResult::done();
@@ -589,7 +643,7 @@ jobs::JobResult validate(
 		std::fprintf(stderr, "%s WARN release %s: the upload %s stays: %s\n", kTag,
 				id_text(release_id).c_str(), upload_key.c_str(), loggable(ignored, 200).c_str());
 	std::printf("%s release %s draft: \"%s\" %s, %zu section%s\n", kTag,
-			id_text(release_id).c_str(), loggable(package.product).c_str(),
+			id_text(release_id).c_str(), loggable(package.layout().product).c_str(),
 			strutil::byte_size_text(size).c_str(), sections.size(),
 			sections.size() == 1 ? "" : "s");
 	return jobs::JobResult::done();
@@ -615,35 +669,33 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	if (!io::ensure_directory(dir, why))
 		return Outcome::Transient;
 
-	// The package and its section for this data set.
+	// The package and its section for this data set, its entries read as the rows need them.
 	const std::string package_path = scratch.file("package.sfs");
 	if (!store.get_file(release_package_key(sha256), package_path, why))
 		return Outcome::Transient;
-	std::vector<uint8_t> bytes;
-	if (!io::read_file_bytes(package_path, bytes, why))
-		return Outcome::Transient;
-	update::SfsPackage package;
-	if (!update::sfs_read(bytes.data(), bytes.size(), package, why)) {
+	PackageFile package;
+	if (!package.open(package_path, why)) {
 		why = "the package does not read: " + why;
 		return Outcome::Refused;
 	}
-	bytes.clear();
-	bytes.shrink_to_fit();
-	const update::SfsSection *packed = nullptr;
-	for (const update::SfsSection &s : package.sections)
+	const update::SfsSectionSpans *packed = nullptr;
+	for (const update::SfsSectionSpans &s : package.layout().sections)
 		if (strutil::iequals(s.expansion, section.expansion))
 			packed = &s;
 	if (packed == nullptr) {
 		why = "the package has no section for " + data_set.display_name;
 		return Outcome::Refused;
 	}
-	const update::SfsEntry *command = find_entry(*packed, section.command_file);
+	const update::SfsEntrySpan *command = find_entry(*packed, section.command_file);
 	if (command == nullptr) {
 		why = "the package has no command file " + section.command_file;
 		return Outcome::Refused;
 	}
+	std::vector<uint8_t> command_bytes;
+	if (!package.read(*command, command_bytes, why))
+		return Outcome::Transient;
 	const std::optional<update::CommandFile> cmd =
-			update::read_command_file(std::string(command->data.begin(), command->data.end()));
+			update::read_command_file(std::string(command_bytes.begin(), command_bytes.end()));
 	if (!cmd) {
 		why = "the command file " + section.command_file + " does not read";
 		return Outcome::Refused;
@@ -693,7 +745,8 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	}
 
 	update::ApplyReport report;
-	if (!update::apply_section(*packed, section.command_file, io::os_path(dir), report, why))
+	if (!update::apply_commands(command_bytes, section.command_file, package.blobs(*packed),
+				io::os_path(dir), report, why))
 		return Outcome::Refused;
 
 	// What changed, under its canonical name; what the tree does not hold is left here.
@@ -777,7 +830,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		// OpenNova's own content packages are complete installs, including first launch.
 		// Build those from empty on every release; retail packages still patch a baseline.
 		const auto base = data_set->parent_id ? find_data_set(db, *data_set->parent_id) : data_set;
-		full_content = base && base->game == kOpenNovaGame;
+		full_content = base && base->game == kAcidGambitGame;
 		for (const ReleaseSection &s : list_sections(db, release_id))
 			if (s.data_set_id == data_set_id)
 				section = s;

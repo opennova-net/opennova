@@ -2,8 +2,9 @@
 
 These authored menu documents and string tables exercise the engine's menu parser,
 navigation, options, player and armory bindings. They are deliberately independent
-of the downloadable OpenNova content repository. Change them when a menu contract
-test needs a new shape; they are not a content release snapshot to synchronize.
+of OpenNova's downloadable content, an OpenNova Editor project no repository holds.
+Change them when a menu contract test needs a new shape; they are not a content
+release snapshot to synchronize.
 
 Godot tests stage them over generated runtime fixtures, with synthetic font and
 image data. No mission binary, terrain, model, music or production texture belongs here.

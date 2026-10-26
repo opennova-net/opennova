@@ -738,7 +738,7 @@ MigrationResult run_migrations(Database &db, const std::filesystem::path &migrat
 				throw Error(describe("",
 						"migration " + filename + " changed since it was applied (recorded sha256 " +
 								it->second + ", the file's " + hash +
-								"); migrations are append-only, a fix is a new file",
+								"); until 1.0 migrations are edited in place: reset this database",
 						"run_migrations"));
 			}
 			result.skipped.push_back(filename);

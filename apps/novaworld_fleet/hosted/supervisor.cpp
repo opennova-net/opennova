@@ -109,6 +109,10 @@ void Supervisor::start() {
 			profile_.provider.c_str(), config_.placement.shared_slots, config_.placement.max_shared,
 			config_.placement.max_own, config_.cap, config_.master_host.c_str(),
 			static_cast<unsigned>(config_.master_gate_port));
+	if (config_.novalogic.offered())
+		std::printf("[hosted] supervisor: a server whose owner asks also lists on NovaLogic's "
+					"NovaWorld (%s:%u)\n",
+				config_.novalogic.gate_host.c_str(), static_cast<unsigned>(config_.novalogic.gate_port));
 	last_good_pass_ms_.store(config_.clock_ms(), std::memory_order_relaxed);
 	try {
 		reconcile(config_.clock_ms());
@@ -833,6 +837,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	inputs.admin_password = admin_password;
 	inputs.master_host = config_.master_host;
 	inputs.master_gate_port = config_.master_gate_port;
+	inputs.novalogic = config_.novalogic;
 	const LaunchSpec spec = render_launch(s.settings, data->title, data->expansion_code, inputs);
 
 	Start start;
@@ -1662,7 +1667,7 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		c.expansion_tree = server->expansion_tree_id;
 		c.expansion_code = data->expansion_code;
 		c.args = render_serve_args(server->settings, data->title, data->expansion_code, config_.master_host,
-				config_.master_gate_port);
+				config_.master_gate_port, config_.novalogic);
 		c.cpus = config_.slot_cpus;
 		c.memory_mb = config_.slot_memory_mb;
 		c.pids = config_.slot_pids;

@@ -3,10 +3,12 @@
 OpenNova is an open-source C++ and Godot reimplementation of the Joint
 Operations generation of NovaLogic games. The repository contains the game
 runtime, native format readers, NovaWorld-compatible services, and the project
-web portal. The minimal runtime downloads OpenNova's own game on first run:
-"Indigo Shore", a mission for single player and Co-op over LAN, and its
-"Indigo Storm" expansion. The same `opennova.exe` can run against an existing
-Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder and run it.
+web portal. The minimal runtime downloads its game on first run: OpenNova's own,
+"OP: Acid Gambit", a mission for single player and Co-op over LAN, and its
+"OP: Nifty Package" expansion, or, from the zips set up for them, Joint Operations
+(with Escalation) or Delta Force Xtreme 2. The same `opennova.exe` can run against an
+existing Joint Operations or Delta Force Xtreme 2 install: put it in that game's folder
+and run it.
 
 This is a pre-1.0 project. Implemented systems and known differences from the
 retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
@@ -18,7 +20,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications. |
-| `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). Only the original exes need it: `opennova.exe` reaches OpenNova's NovaWorld itself. |
+| `switcher/` | OpenNova Switcher: a Windows tray app for the original Delta Force Xtreme 2, whose NovaLogic NovaWorld is down: it points a stock install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). It works for Joint Operations too, but the original `Jointops.exe` needs no Switcher to find OpenNova's hosted servers, which can also list on NovaLogic's NovaWorld; `opennova.exe` reaches OpenNova's NovaWorld itself. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |
@@ -92,8 +94,8 @@ $GODOT_BIN --headless --path godot --import   # once; retry it if a cold cache c
 $GODOT_BIN --path godot -- /game jo --resource-dir "C:/Games/Joint Operations" --no-update
 ```
 
-In its own folder the packaged runtime plays OpenNova's game, and its first launch
-downloads OpenNova's content through the adjacent `update.exe`. Existing content
+In its own folder the packaged runtime plays the game its zip is set up for, and its
+first launch downloads that game through the adjacent `update.exe`. Existing content
 starts normally while an update check runs in the background; **UPDATE** appears
 in the main menu when a newer package is available. Installed content works offline.
 
@@ -108,24 +110,31 @@ opennova.exe -- /game dfx2 --resource-dir "C:/Games/Delta Force Xtreme 2"
 ```
 
 For loose data without boot archives, add `--loose-root /d`. `/game <code>`
-selects `opennova`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
+selects `acidgambit`, `jo`, or `dfx2`; `/exp <name>` selects an expansion. A
 `--resource-dir` directory is never saved. An empty `--resource-dir` prints
 usage and exits with code 2. Use `--no-update` for development runs; Editor Play
-sets it automatically. Source checkouts use exported content from the assets
-repository or an existing retail install.
+sets it automatically. Source checkouts use content exported from an OpenNova
+Editor project or an existing retail install.
 
 ## Downloads
 
-CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
-contains `opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`,
-and the small bootstrap configuration. Game content is downloaded on first run.
-Retail game data is supplied separately. Debug builds include
-the game's dev tools (Insert).
+CI and tagged releases publish one game zip per game, each the same runtime set up
+for its game: `opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty
+Package), `jointops-game-windows-v<version>.zip` (Joint Operations and Escalation) and
+`dfx2-game-windows-v<version>.zip` (Delta Force Xtreme 2). Each contains
+`opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`, and the small
+bootstrap configuration: the Joint Operations and DFX2 zips add the `UPDATE.WIZ`
+naming their game (and Escalation's `expansion/jox01/UPDATE.WIZ`). Unzipped into an
+empty folder, a zip's first run downloads its game from OpenNova's update service.
+Debug builds include the game's dev tools (Insert). Tagged releases also attach
+`opennova-runtime-windows-v<version>.sfs`, the same runtime packed as the update
+`update.exe` installs.
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
 OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
 with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
-Joint Operations projects today; what it edits is listed above.
+OpenNova, Joint Operations (Escalation included) and Delta Force Xtreme 2 projects
+today; what it edits is listed above.
 
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include
@@ -145,11 +154,14 @@ service runs on Linux only; on Windows, run the local stack (`scripts/dev_stack.
 
 The OpenNova Switcher ships as `opennova-switcher-windows.zip` (on a PR's build
 comment) and `opennova-switcher-windows-v<version>.zip` (on tagged releases):
-`opennova-switcher.exe` and its README. It is a tray app that switches a stock
-Joint Operations install between OpenNova's NovaWorld, NovaLogic's NovaWorld and
-an address you enter, by managing one block in the Windows hosts file; the game's
-files stay stock. Only the original exes need it: `opennova.exe`'s NovaWorld screen
-reaches OpenNova's NovaWorld (`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
+`opennova-switcher.exe` and its README. It is a tray app for the original `dfx2.exe`:
+NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, and the Switcher points a stock
+install at OpenNova's NovaWorld (or NovaLogic's, or an address you enter) by managing one
+block in the Windows hosts file; the game's files stay stock. It works for a stock Joint
+Operations install too, but the original `Jointops.exe` does not need it: a hosted Joint
+Operations server can also list on NovaLogic's NovaWorld, where the game finds it as it
+is. Nor does `opennova.exe`, whose NovaWorld screen reaches OpenNova's NovaWorld
+(`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
 exe is unsigned, so releases also carry the zip's SHA-256
 (`opennova-switcher-windows-v<version>.zip.sha256`) to check before running it.
 See [switcher/README.md](switcher/README.md).

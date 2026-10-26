@@ -5,7 +5,7 @@ NovaWorld service launches runs one `opennova-hostd`, the fleet cluster's ECS da
 the game data trees the service's replies name (ADR 0064), starts the `opennova-serve`
 containers the service places on the machine's slots, stops the ones the service no
 longer wants, and reports every container's state, CPU, memory, its slot's network and its
-server's tick health back, with the machine's own image, use and trees. It never decides
+server's tick health and NovaLogic listing back, with the machine's own image, use and trees. It never decides
 anything on its own: the service places
 servers, pins their trees, counts restarts and ends machines; the agent does what the
 last reply said and keeps doing it while the service cannot be reached.
@@ -133,7 +133,9 @@ POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
   "trees": {"<tree id>": {"state", "bytes", "tries", ["reason"]}},
   "containers": [{"name", "slot", "state", "waiting", "exit_code", "oom", "started_at",
   ["reason",] "cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes",
-  ["tick": {"p50_ms", "p99_ms", "max_ms", "late"}]}],
+  ["tick": {"p50_ms", "p99_ms", "max_ms", "late"}],
+  ["second_listing": {"state", ["try", "tries",] ["next_try_at",] ["reason", ["tag"],]
+                      ["slots"]}]}],
   ["listing_failed": true]}
 -> 200 {"protocol": 3, "drain", "desired": [{"name", "slot", "image", "uid", "base_tree",
   "expansion_tree", "expansion_code", "args", "files", "env", "cpus", "memory_mb", "pids",
@@ -158,8 +160,16 @@ fetch's error: the service counts no restart for it, and shows the line to an ad
 machine booted, what its user sent to the internet and what reached its ports (a lower
 count than the last is a counter that started over); `tick` a running server's last minute
 of ticks (its `--stats-file`, `tick-stats.json` in the slot's directory, read at most every
-5 s and only while it is less than 3 minutes old). The agent, root, reads both files as
-files the slot's user controls: opened from the slot's directory with `O_NOFOLLOW` and
+5 s and only while it is less than 3 minutes old); `second_listing` a running server's
+listing on a second service, a hosted server's on NovaLogic's NovaWorld for an owner who
+asked (its `--second-listing-file`, `second-listing.json`, read with the ticks and of any
+age, since the server rewrites it only when the state changes; the member is the file's own
+JSON, read by the protocol's strict decoder, so a file of another shape says nothing). The
+member rides only a server whose start the service rendered it for, with the serve image
+the same release's service pins, so a hostd that rolls ahead of the fleet program sends it
+to no service that cannot read it; the protocol stays 3, and a report without it reads as
+no state (`apps/novaworld_common/hosted/protocol/agent_protocol.h`). The agent, root, reads
+each of these files as a file the slot's user controls: opened from the slot's directory with `O_NOFOLLOW` and
 `O_NONBLOCK`, a regular file of at most 4 KiB alone, its age its open file's own; a link, a
 FIFO, a directory or a larger file reads as nothing written. Each desired container names
 its log stream (`log`, "Logs" below). `files` (each file's bytes in base64) is sent until
@@ -308,8 +318,9 @@ the instance role (the task has no execution role). On the machine, `docker logs
 agent's ECS container reads them too.
 
 Reading them needs no shell on the machine: `./deploy/run.sh --deployment <deployment> fleet
-logs <machine id> [<slot>|hostd] [--since 1h] [--follow]`, and `app logs hostd` for every
-agent's (DEPLOY.md, "Hosted game servers").
+logs server <server id> [--start N]` (a start's output) or `fleet logs machine <machine id>`
+(its hostd's), each `[--since 1h] [--follow]`, and `app logs hostd` for every agent's
+(DEPLOY.md, "Hosted game servers").
 
 ## The process runtime
 
@@ -378,11 +389,11 @@ cluster, the instance attributes `machine-id` and `kind`, task IAM roles in host
 and no privileged task (never the ECS agent's cleanup of images it did not pull: it would
 delete the servers' images); ports 32768-32831 reserved out of the ephemeral range. The
 fleet cluster's daemon service brings the rest: the agent's image (the docker CLI, the AWS
-CLI v2, nft), its task role (`s3:GetObject` on `data/<deployment>/trees/*`,
-`s3:ListBucket` on that prefix, ECS Exec's channels) and its paths. The trees root
-`/opt/game` and the slots' root are made by the agent on the root volume. Never drain the
-fleet cluster through ECS: a drain stops the agent, not the servers (the service drains a
-machine itself).
+CLI v2, nft), its task role (`s3:GetObject` on `data/trees/*` of the deployment's
+operations bucket, `s3:ListBucket` on that prefix, ECS Exec's channels) and its paths. The
+trees root `/opt/game` and the slots' root are made by the agent on the root volume. Never
+drain the fleet cluster through ECS: a drain stops the agent, not the servers (the service
+drains a machine itself).
 
 ## Development and tests
 
@@ -408,9 +419,9 @@ tree store on a fake fetcher and a hand-stepped clock, then the real fetcher's `
 and its `aws s3 sync` run by stand-in programs) and `opennova_hostd_agent` (the bootstrap,
 its saved file read again across a protocol bump, and the sync passes against an in-process
 fake of the service's routes, the envelope, the files sent again to a replaced agent, the
-images pruned, the machine's use from fixture `/proc` files, the servers' tick and exit
-files (a FIFO, a link, a directory and a sparse oversize file among them, none of which
-blocks or reads), never logging the secret, the token or a file's bytes).
+images pruned, the machine's use from fixture `/proc` files, the servers' tick, second
+listing and exit files (a FIFO, a link, a directory and a sparse oversize file among them,
+none of which blocks or reads), never logging the secret, the token or a file's bytes).
 
 The protocol itself is `hosted_agent_protocol` (`tests/novaworld`). The real binary runs
 end to end, with the process runtime, in `hosted_agent_route_agent_end_to_end` (against the service's agent

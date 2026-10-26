@@ -17,12 +17,13 @@ The hosted servers (the fleet, its supervisor, the data sets, the console) are
 | `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
+| `UpdateListener` (`apps/novaworld_web/updater/`) | TCP 20044, 20556, 21068, 21580 (`ONNET_UPDATE_PORTS`) | UPDATE.EXE's gateway and update server over the published releases, with `ONNET_UPDATE_HOST` set and an object store ([`hosted/README.md`](hosted/README.md) "The update listener") |
 | `InternalListener` (`hosted/internal_listener.*`) | TCP 8070 | the machines' agent routes alone (`hosted/agent_route.*`), on a private address |
 | `HealthListener` (`core/health_listener.*`) | TCP 8081 | `GET /livez` alone, from the program's stall watchdog ("Health" below) |
 
 The gate listener is the gate's (`apps/novaworld_gate`), the NW UDP listener the lobby's
-(`apps/novaworld_lobby`), the HTTP listener web's (`apps/novaworld_web`), the internal
-listener the fleet's while it leads (`apps/novaworld_fleet`), and a health
+(`apps/novaworld_lobby`), the HTTP and update listeners web's (`apps/novaworld_web`), the
+internal listener the fleet's while it leads (`apps/novaworld_fleet`), and a health
 listener each program's but web's, whose `/livez` is on its HTTP port.
 
 ## Programs
@@ -43,7 +44,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 | --- | --- | --- |
 | gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
-| web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
+| web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
 | worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver; the scheduler of its periodic kinds | more workers, more threads each |
 | data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the trees' finalize and prune, the releases' validate and apply) and the scheduler of their prune | one task (the data jobs' caps are global) |
@@ -119,8 +120,8 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   lobby address ("Lobby instances" below).
 - **Deployment**: one ECS Fargate service per program (`infra/aws/programs.tf`), the
   gate (UDP 7597), the lobby (UDP 64206) and web (TCP 443 through the portal's nginx in
-  web's task, TCP 8080) behind one network load balancer at the gate's address, the
-  fleet registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
+  web's task, TCP 8080, the update ports) behind one network load balancer at the gate's
+  address, the fleet registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
   `scripts/dev_stack.sh`; DEVELOPING.md) runs the six, each its own container, plus
   PostgreSQL, Valkey, the portal in web's network as in web's task, and with a data set
   the hosted servers' machines as containers of their own (the docker machine driver,
@@ -201,8 +202,8 @@ Service policy (`core/health.*`), what the container runtime and the uptime chec
   and the lobby's receive loops (each wakes at least every 250 ms), the fleet's
   supervisor (the election's turns standing in while it is a standby, or with hosting
   off), the worker's and the data program's job pool (only a pool whose every thread
-  stands still stalls: each slow call has its own timeout) and scheduler, and every
-  program's main loop. A thread of its own samples
+  stands still stalls: each slow call has its own timeout) and scheduler, web's update
+  listener while it runs, and every program's main loop. A thread of its own samples
   the loops' turn counters every second; a loop that has not moved for 30 s logs
   `[watchdog] FATAL the <loop> made no progress for 30 s; exiting 70` and the process
   exits 70 at once (nothing can unstick a thread; an orderly shutdown could hang on it),
@@ -309,6 +310,9 @@ policy, not a port.
 | `machine.describe` | the cloud's word on a live machine, onto its row | the supervisor's boot and lost checks, deduped per machine | worker | 4 |
 | `machine.terminate` | a cloud machine ended | the supervisor's ends | worker | 4 |
 | `fleet.sweep` | the driver's machines against the rows | every 5 min (the worker's schedule), and at the supervisor's reconciliation | worker | 1 |
+| `address.allocate` | a static address allocated (or found by its tag) and its A record written (`hosted/model/address_jobs.*`) | the address routes (an owner's naming, an admin's rename, retry or comp address), the supervisor (an allocation whose job is gone, a refusal due again) and a release undone, deduped per address | worker | 1 |
+| `address.associate` | a ready address associated with the machine launched to carry it | the supervisor, deduped per machine | worker | 4 |
+| `address.release` | a releasing address's record deleted and drained, then the address released | the supervisor (a lapsed address its machines left), deduped per address | worker | 2 |
 | `billing.reconcile` | the full reconcile with Stripe | at a release's start, every `ONNET_BILLING_RECONCILE_MINUTES`, an admin | worker | 1 |
 | `billing.sync` | the price check while the prices are not checked under the worker's lists, then the customers with an event to sync | each fresh webhook event; every minute while one waits or the prices are not checked | worker | 1 |
 | `mail.send` | one mail, at most once | the welcome and reset routes | worker | 4 |
@@ -318,7 +322,7 @@ policy, not a port.
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
 | `tree.finalize` | an uploaded data set tree checked, sized and made ready (`data_sets/data_set_jobs.h`) | the admin's finalize | data | 2 |
 | `release.validate` | an uploaded update package read, mapped to its data sets, made a draft or invalid | the admin's upload completion | data | 1 |
-| `release.apply` | one section of a published release applied to its data set's baseline, a new tree | the admin's publish, one per section | data | 1 |
+| `release.apply` | one section of a published release applied to its data set's baseline (an OP: Acid Gambit or `nifty` section built from empty), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each job above, the delete routes | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
@@ -337,6 +341,7 @@ a worker holds, and each is logged with its actor and the job.
 | `GET /api/admin/jobs/<id>` | admin | `{"job"}` with its `payload`; 404 |
 | `POST /api/admin/jobs/<id>/retry` | admin | a failed job queued again with one more attempt: 200; 404; 409 `not_failed`, `secret_dropped`, `already_pending` |
 | `POST /api/admin/jobs/retry-group` | admin | `{"kind", "key"}`, each job of that failure group retried: 200 with each outcome's count; 400 |
+| `POST /api/admin/jobs/dismiss-group` | admin | `{"kind", "key"}`, the failed jobs of that failure group (as the overview groups them) deleted: 200 `{"dismissed"}`; 400 |
 | `POST /api/admin/jobs/<id>/cancel` | admin | a queued job failed for good, its secret dropped: 200; 404; 409 `not_queued` |
 | `POST /api/admin/jobs/run` | admin | `{"kind"}`, a periodic kind enqueued now (`<kind>@manual-<ms>`): 202; 400; 404; 409 `already_pending` |
 | `POST /api/admin/jobs/prune` | admin | `{"keep_days": 1..14}`, a `jobs.prune` now: 202; 400; 409 `already_pending` |
@@ -397,13 +402,13 @@ boot); `title` is the engine's game profile code the row's clients speak
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
-| `opennova:0` | `opennova_0_consumer` | `opennova_0_consumer` | `jo` | `jop_2_start.htm` | `/opennova_0.gsb` | 28 | 1 |
+| `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `jop_2_start.htm` | `/acidgambit_0.gsb` | 28 | 1 |
 
 The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
 (3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
 LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
-Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2 and ON have no
-expansion.
+Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
+bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set migration 0013 seeds, has no bit here).
 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
@@ -432,6 +437,33 @@ expansion.
   prefix of the page it names (`dfx2_0_`); else JO's. JO and ON share pfid 28 and JO's
   pages, so only the tag tells them apart. The HTTP listener also reads the table once in
   `start()`, where it registers the `.gsb` routes.
+
+### NovaLogic's servers on the Lobbies page
+
+`GET /api/lobbies/novalogic` (public, read-only) answers the Joint Operations servers listed
+on NovaLogic's own NovaWorld, as a stock client's browser lists them:
+`{"enabled", "servers": [{"id", "serverName", "mission", "gameType", "players",
+"maxPlayers", "locked", "password", "message", "country", "region", "timeLeft", "timeOfDay",
+"expansion", "punkBuster", "dedicated", "tracers", "roster"}], "fetchedAt", "ageSeconds",
+"failing"}`: the text UTF-8 with the game's inline markup left in (the page draws it as the
+game does), the roster the players' names the game's browser shows, and no host's address
+([`novalogic_lobbies.h`](../novaworld_web/novalogic_lobbies.h)). The site's Lobbies page lists
+them in its server table and each on a page of its own (`/lobby/novalogic/<id>`).
+Web reads them the way the stock client does, with no login and no cookie: one GET of JO's
+GSB feed on NovaLogic's web host, `http://207.178.209.204/jop_2.gsb?a=1` (the lobby
+SessionInit's web domain and the list load the record's live capture shows,
+`docs/net/novaworld-net-re.md` §7 Wave 4), parsed with `gsb_parse_response`. DFX2's feed
+there is unwitnessed, so only JO's is read. The list is a cache in each web process: a
+request answers what it holds and never waits on NovaLogic; a request that finds it older
+than 5 minutes (or none) starts one fetch in the background, so a process fetches at most
+once every 5 minutes however many visitors look, and not at all while nobody does. A fetch
+that fails (no answer within 5 s a step, a status other than 200, bytes that are no server
+list) keeps the last good list and its time (`failing` true), and the next waits its 5
+minutes too. `ONNET_NOVALOGIC_LOBBIES=1` turns it on (web's, read at boot); unset or `0`
+(the default, so no test, dev stack or CI run contacts NovaLogic), the route answers
+`enabled` false and nothing is fetched. A deployment sets it from `novalogic_lobbies`
+(`infra/aws`, on by default). The route harness's `novalogic_lobbies_route` case and the
+`novalogic_lobbies` ctest pin it over a feed minted by `gsb_build_response`.
 
 ## Connection lifecycle
 
@@ -566,7 +598,7 @@ the lobby program's usage of that instance's task, and the lobby instances below
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
+| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed, and `novalogic_players`: a hosted server listed on NovaLogic's NovaWorld too, the players that service sent it, who hold no session here though its `players` counts them; null for any other server and while its agent reports none) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
 | `POST /api/admin/connections/<session id>/end` | admin | 202, an `end_session` command for the instance holding it: the client gets its `ServerGoodBye` burst and the connection drops (`Logout`), as the NAPI server role ends a connection it asked to disconnect; 404 for a session that ended; 409 `hosting` (with its `rid`: stop the listing instead, since ending its session only parks it for the re-host) |
 
 ## Pushing statements to a listed server
@@ -954,7 +986,7 @@ task role holds these reads alone, scoped to the deployment's resources
 | --- | --- | --- |
 | `ONNET_INFRA_CLUSTER` | none | Web: the deployment's ECS cluster, whose services (the programs) and tasks the view reads. Unset (the local stack), AWS is not read. |
 | `ONNET_INFRA_REGION` | none | Web: the region of every AWS call the view makes. |
-| `ONNET_INFRA_TARGET_GROUPS` | none | Web: the load balancer's target groups, a JSON object of listener to target group ARN (`{"gate": "arn:...", "lobby": ..., "http": ..., "https": ...}`). |
+| `ONNET_INFRA_TARGET_GROUPS` | none | Web: the load balancer's target groups, a JSON object of listener to target group ARN (`{"gate": "arn:...", "lobby": ..., "http": ..., "update": ..., "https": ...}`). |
 | `ONNET_INFRA_DATABASE` | none | Web: the RDS instance's identifier. |
 | `ONNET_INFRA_CACHE` | none | Web: the ElastiCache replication group's id. |
 | `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
@@ -1104,6 +1136,9 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 `ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`. The listing policy:
 `ONNET_REQUIRE_HOST_KEY=1` lists no host whose HostKey names no account (default off:
 listed with no owner; "Listed servers and owners" above).
+`ONNET_NOVALOGIC_LOBBIES=1` has web list the servers on NovaLogic's NovaWorld on the
+Lobbies page (default off: nothing is fetched from NovaLogic; "NovaLogic's servers on the
+Lobbies page" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
 `ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on a UDP
@@ -1142,7 +1177,7 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://novaworld@127.0.0.1:5432/novaworld` | A libpq connection URI: host, port, role, database and options. Against RDS it carries `sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem`, the CA bundle every image pins ([`Dockerfile`](Dockerfile)). Not a secret: the boot log prints it, a password in it masked. |
 | `DATABASE_PASSWORD` | none | The role's password, kept apart from the URI because it is a secret (the vault's). Unset, libpq's own sources apply (a password in the URI, `~/.pgpass`). |
-| `DATABASE_POOL_MAX` | `16` | The most connections the server opens. A thread that needs one past them waits up to 30 s for a lease to come back, then its request fails `db_error`. A deployment's infra.env sets it (`db_pool_max`, 7: `infra/aws/database.tf` sizes the database's `max_connections` for it). |
+| `DATABASE_POOL_MAX` | `16` | The most connections the server opens. A thread that needs one past them waits up to 30 s for a lease to come back, then its request fails `db_error`. A deployment's task definitions set it (`db_pool_max`, 7: `infra/aws/database.tf` sizes the database's `max_connections` for it). |
 
 - **The database itself** is made with the SQL_ASCII encoding and the C locale
   (`CREATE DATABASE ... TEMPLATE template0 ENCODING 'SQL_ASCII' LC_COLLATE 'C'
@@ -1187,11 +1222,13 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
 - **Migrations.** Each boot applies the `backend/migrations` files (`MIGRATIONS_DIR`)
   that `_schema_migrations` does not name yet, each in its own transaction, recording
   its SHA-256, then the seeds (`SEED_DIR`), all under a second advisory lock, so two
-  servers booting at once apply each file once. Migrations are append-only: a recorded
-  file whose SHA-256 has changed stops the boot, so a fix is a new file
-  ([`backend/README.md`](../../backend/README.md)). A development database is recreated
-  with `scripts/dev_postgres.sh reset`; a deployment's, with DEPLOY.md's "Resetting the
-  service database".
+  servers booting at once apply each file once. Until 1.0 the database is disposable: a
+  migration is edited in place, and a database that applied the old file is reset when it
+  takes the change. A recorded file whose SHA-256 has changed stops the boot, which is how
+  that shows; a recorded file the server does not have is ignored
+  ([`backend/README.md`](../../backend/README.md), "Migrations until 1.0"). A development
+  database is recreated with `scripts/dev_postgres.sh reset`; a deployment's, with
+  DEPLOY.md's "Resetting the service database".
 
 ## Redis
 
@@ -1389,8 +1426,8 @@ email the service kept.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_MAIL_FROM` | none | The sender's address, in lower case (`support@<domain>`; infra.env names it). Unset, mail is off: each mail is logged as not sent. |
-| `ONNET_MAIL_REGION` | none | Amazon SES's region (infra.env's). |
+| `ONNET_MAIL_FROM` | none | The sender's address, in lower case (`support@<domain>`; web's and the worker's task definitions set it, `infra/aws/mail.tf`). Unset, mail is off: each mail is logged as not sent. |
+| `ONNET_MAIL_REGION` | none | Amazon SES's region (the same task definitions'). |
 | `ONNET_SITE_URL` | none | The site's origin the mails link to (billing reads it too). Mail is on only with all three; a sender without a site URL or a region boots with mail off and a warning naming why. |
 
 ## Build layout and tests

@@ -26,8 +26,9 @@ struct Server {
 	net::UpdateTcpServer listener{server};
 	std::atomic_bool stop{false};
 	std::thread thread;
-	bool start(const update::SfsPackage &package, std::string &error) {
-		if (!catalog.bind("TEST", "TEST.CMD", {package}, error) || !listener.listen({0}, true)) return false;
+	bool start(const update::SfsPackage &package, std::string &error, const std::string &login = "TEST",
+			const std::string &command = "TEST.CMD") {
+		if (!catalog.bind(login, command, {package}, error) || !listener.listen({0}, true)) return false;
 		thread = std::thread([this]() {
 			while (!stop.load()) {
 				if (!listener.pump()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -38,7 +39,8 @@ struct Server {
 	~Server() { stop.store(true); if (thread.joinable()) thread.join(); }
 };
 
-update::SfsPackage package(const std::string &text, bool corrupt = false, bool self = false) {
+update::SfsPackage package(const std::string &text, bool corrupt = false, bool self = false,
+		const std::string &command_file = "TEST.CMD") {
 	update::CommandFile command;
 	command.product = "Synthetic updater client";
 	command.version = "1";
@@ -52,7 +54,7 @@ update::SfsPackage package(const std::string &text, bool corrupt = false, bool s
 			update::crc_as_signed(update::file_crc(content.data(), content.size()))});
 	const std::string cmd = update::write_command_file(command);
 	update::SfsSection section;
-	section.entries.push_back({"TEST.CMD", synthetic_trees::bytes(cmd)});
+	section.entries.push_back({command_file, synthetic_trees::bytes(cmd)});
 	section.entries.push_back({self ? "update.exe" : "version.txt", update::nlz_encode(bytes.data(), bytes.size())});
 	section.entries.push_back({"menu.txt", update::nlz_encode(content.data(), content.size())});
 	if (corrupt) section.entries.back().data.back() ^= 0xff;
@@ -94,6 +96,36 @@ int test_first_install(const test_temp::TempDir &temp) {
 	TEST_EXPECT(updater::run(options, products, result, error) && result.available);
 	options.check = false;
 	TEST_EXPECT(updater::run(options, products, result, error) && result.applied);
+	return 0;
+}
+
+// The jointops zip unzipped: an empty folder holding only JO's wizard. Its product is the retail
+// one the wizard names (JOTRus after the territory), not native, so every row is prechecked, and
+// in an empty folder every row is missing: a whole release installs the whole game, then checks
+// current.
+int test_retail_first_install(const test_temp::TempDir &temp) {
+	Server server;
+	std::string error;
+	TEST_EXPECT(server.start(package("A whole retail release", false, false, "JOPTR.CMD"), error, "JOTRus",
+			"JOPTR.CMD"));
+	updater::Options options;
+	TEST_EXPECT(updater::parse_options({"/game", "jo", "--resource-dir", temp.file("jointops zip"),
+			"--no-runtime", "--server", "127.0.0.1", "--port", std::to_string(server.listener.ports()[0])},
+			temp.path / "update.exe", options, error));
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("jointops zip/UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=JOPTR.CMD\r\nURL=update.opennova.net\r\nPRODUCT_LOGIN=JOTRqq\r\n"));
+	std::vector<updater::Product> products;
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 1);
+	TEST_EXPECT(products[0].login == "JOTRus" && products[0].command == "JOPTR.CMD" && !products[0].native);
+	updater::Result result;
+	TEST_EXPECT(updater::run(options, products, result, error));
+	TEST_EXPECT(result.applied && result.files == 2 && fs::exists(options.resource_dir / "resource.pff") &&
+			fs::exists(options.resource_dir / "JOPTR.CMD"));
+	std::string installed;
+	TEST_EXPECT(io::read_file_text(io::utf8_path(options.resource_dir / "version.txt"), installed, error) &&
+			installed == "A whole retail release");
+	options.check = true;
+	TEST_EXPECT(updater::run(options, products, result, error) && !result.available && result.files == 0);
 	return 0;
 }
 
@@ -226,14 +258,19 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	TEST_EXPECT(products.size() == 1 && products[0].login == "JOTRus" && !products[0].native);
 	// Never the wizard's own URL: OpenNova's service, the runtime's OPENNOVA.WIZ naming it.
 	TEST_EXPECT(products[0].gateways == std::vector<std::string>({"update.opennova.net"}));
-	// Retail expansions still need their installed archive, so copying a wizard alone
-	// cannot install a retail expansion.
+	// Every expansion\<n>\ holding a wizard is a product, as retail's, its archive installed or
+	// not: a whole release installs it (the jointops zip ships Escalation's wizard alone).
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("retail/expansion/testexp/UPDATE.WIZ"),
 			"[HEADER]\r\nCMD=EXP.CMD\r\nPRODUCT_LOGIN=EXP\r\nURL=127.0.0.1\r\n"));
-	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 1);
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
+	TEST_EXPECT(products[1].login == "EXP" && products[1].command == "EXP.CMD" && products[1].expansion &&
+			!products[1].native && products[1].dir.filename() == "testexp");
+	std::error_code removed;
+	fs::remove_all(temp.path / "retail" / "expansion", removed);
+	TEST_EXPECT(!removed);
 	// OpenNova content never lands in a folder whose wizard names another game, even when
 	// /game asks for it; nor does another product the wizard does not name.
-	TEST_EXPECT(updater::parse_options({"/game", "opennova", "--resource-dir", temp.file("retail")},
+	TEST_EXPECT(updater::parse_options({"/game", "acidgambit", "--resource-dir", temp.file("retail")},
 			temp.path / "update.exe", options, error));
 	TEST_EXPECT(!updater::discover_products(options, products, error) && error.find("UPDATE.WIZ") != std::string::npos);
 	TEST_EXPECT(updater::parse_options({"/game", "dfx2", "--resource-dir", temp.file("retail")},
@@ -257,23 +294,33 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	// A folder with no wizard takes OpenNova content only while it holds no game archive (a
 	// DFX install ships no wizard); an empty one is the first install.
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("wizardless/resource.pff"), "archive"));
-	TEST_EXPECT(updater::parse_options({"/game", "opennova"}, temp.path / "wizardless/update.exe", options, error));
+	TEST_EXPECT(updater::parse_options({"/game", "acidgambit"}, temp.path / "wizardless/update.exe", options, error));
 	TEST_EXPECT(!updater::discover_products(options, products, error));
 	std::error_code made;
 	fs::create_directories(temp.path / "fresh", made);
 	TEST_EXPECT(updater::parse_options({}, temp.path / "fresh/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
-	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "OPENNOVA" && products[1].native);
+	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "ACIDGAMBIT" && products[1].native);
 	// A completed native install also has UPDATE.WIZ. Bare launch must retain
 	// full native rows and recognize its registered expansion without an archive.
+	// The runtime's OPENNOVA.WIZ is a debug zip's, naming staging's service
+	// (package_godot_windows.ps1 -ExportMode debug), and the content's and the
+	// expansion's own wizards name prod's (package_release.py writes that): every
+	// product updates from staging alone.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/OPENNOVA.WIZ"),
+			"[HEADER]\r\nCMD=ONRUNTIME.CMD\r\nURL=update.staging.opennova.net\r\n"
+			"PRODUCT_LOGIN=ONRUNTIME\r\n"));
 	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/UPDATE.WIZ"),
-			"[HEADER]\r\nCMD=OPENNOVA.CMD\r\nPRODUCT_LOGIN=OPENNOVA\r\n"));
-	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/expansion/onjo1/UPDATE.WIZ"),
-			"[HEADER]\r\nCMD=ONJO1.CMD\r\nPRODUCT_LOGIN=ONJO1\r\n"));
+			"[HEADER]\r\nCMD=ACIDGAMBIT.CMD\r\nURL=update.opennova.net\r\n"
+			"PRODUCT_LOGIN=ACIDGAMBIT\r\n"));
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("native/expansion/nifty/UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=NIFTY.CMD\r\nURL=update.opennova.net\r\nPRODUCT_LOGIN=NIFTY\r\n"));
 	TEST_EXPECT(updater::parse_options({}, temp.path / "native/update.exe", options, error));
 	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 3);
-	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "OPENNOVA" && products[1].native &&
-			products[2].login == "ONJO1" && products[2].native);
+	TEST_EXPECT(products[0].login == "ONRUNTIME" && products[1].login == "ACIDGAMBIT" && products[1].native &&
+			products[2].login == "NIFTY" && products[2].native);
+	for (const updater::Product &product : products)
+		TEST_EXPECT(product.gateways == std::vector<std::string>({"update.staging.opennova.net"}));
 	return 0;
 }
 
@@ -282,6 +329,7 @@ int main() {
 	TEST_EXPECT(net::startup() == 0);
 	test_temp::TempDir temp("update_client");
 	if (int rc = test_first_install(temp)) return rc;
+	if (int rc = test_retail_first_install(temp)) return rc;
 	if (int rc = test_retail_server_list(temp)) return rc;
 	if (int rc = test_check_goes_past_a_failing_product(temp)) return rc;
 	if (int rc = test_failures(temp)) return rc;

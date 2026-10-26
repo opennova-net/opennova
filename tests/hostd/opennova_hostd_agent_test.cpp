@@ -6,14 +6,13 @@
 // never strands it), the sync (its envelope, the agent's own image among it; every
 // container reported with its stats and its slot's counts; the machine's image, the
 // agent's log stream, its use from fixture /proc files once read twice, every tree it
-// holds; a running server's tick health from its fresh --stats-file, an exited one's
-// --exit-file line, what a starting one waits for; the desired ones started on their
-// slots with
-// their files written 0600 and their environment in a file that lives for the start
-// alone; the ones left out stopped, killed past the stop timeout, removed and their
-// directories wiped; a slot's next container started only once its previous one is
-// gone), a start that fails (reported exited 125, never retried, forgotten once dropped),
-// an image pulled in the background while its containers wait (reported starting, their
+// holds; a running server's tick health from its fresh --stats-file and its second
+// listing from its --second-listing-file, an exited one's --exit-file line, what a starting one
+// waits for; the desired ones started on their slots with their files written 0600 and their
+// environment in a file that lives for the start alone; the ones left out stopped, killed past the
+// stop timeout, removed and their directories wiped; a slot's next container started only once its
+// previous one is gone), a start that fails (reported exited 125, never retried, forgotten once
+// dropped), an image pulled in the background while its containers wait (reported starting, their
 // files kept; a pull that fails or overruns its bound failing them), the trees a reply
 // names fetched through a fake fetcher while their containers wait the same way (a
 // container started with its base and expansion trees' binds once both are present; a
@@ -1387,7 +1386,8 @@ int test_trees() {
 
 // What the reports say of the machine and of each server beyond the runtime's view: the
 // machine's use once read twice (the CPU busy between the readings), a running server's
-// tick health while its --stats-file is fresh, an exited one's --exit-file line.
+// tick health while its --stats-file is fresh and its second listing from its
+// --second-listing-file, an exited one's --exit-file line.
 int test_machine_report() {
 	Rig rig("hostd_agent_machine");
 	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1) };
@@ -1444,6 +1444,36 @@ int test_machine_report() {
 			hostd::parse_tick_stats("{\"p50_ms\":1,\"p99_ms\":2,\"max_ms\":3}") == std::nullopt);
 	TEST_EXPECT(hostd::parse_tick_stats("{\"p50_ms\":-1,\"p99_ms\":2,\"max_ms\":3,\"late\":0}") ==
 			std::nullopt);
+
+	// The servers' second listings (their --second-listing-file): a line that reads rides its
+	// running container's report whatever its age (the server rewrites it only when the state
+	// changes), one that does not read gives none, and it is read with the ticks.
+	const std::string listing_0 = rig.slots_root + "/slot-0/second-listing.json";
+	const std::string listing_1 = rig.slots_root + "/slot-1/second-listing.json";
+	std::ofstream(listing_0) << "{\"state\":\"not_listed\",\"reason\":\"the service did not accept "
+								"the server name\",\"tag\":\"NWEC57\",\"slots\":[3]}\n";
+	std::ofstream(listing_1) << "{\"state\":\"listed\",\"extra\":1}\n";
+	fs::last_write_time(listing_0, fs::file_time_type::clock::now() - std::chrono::hours(2));
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	a = rig.service.reported("srv-1-g1");
+	b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && a->second_listing &&
+			a->second_listing->state == hosted::SecondListingState::NotListed &&
+			a->second_listing->reason == "the service did not accept the server name" &&
+			a->second_listing->tag == "NWEC57" &&
+			a->second_listing->slots == std::vector<int>{ 3 });
+	TEST_EXPECT(b && !b->second_listing);
+	fs::remove(listing_0);
+	rig.clock_ms += 1000;
+	rig.step();
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->second_listing.has_value());
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(!rig.service.reported("srv-1-g1")->second_listing);
+	fs::remove(listing_1);
+	TEST_EXPECT(hostd::parse_second_listing("{\"state\":\"trying\",\"try\":1,\"tries\":5}\n") &&
+			!hostd::parse_second_listing("{\"state\":\"trying\"}"));
 
 	// An exit: its --exit-file line rides the report; one that exited 0 wrote none,
 	// and a link in the file's place (to a file root may read) gives no line.

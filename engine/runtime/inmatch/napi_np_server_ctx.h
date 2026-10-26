@@ -685,7 +685,7 @@ struct NapiNPServerCtx {
 	// value, net/napi/session.h make_session_app_id), installed by the
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
 	// authority's status page shows it on its NovaWorld server line.
-	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
+	// [orig: ctx+0x1194 — CNapiNetwork_MintAppId @0x4c4da3, read back
 	//  by CNapiNPCtx_GetAppId @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
 	uint32_t novaworld_app_id = 0;
 	// The host's own CD-key ids, the wire forms its registry key decodes to: a DFX2 LAN host
@@ -741,6 +741,13 @@ struct NapiNPServerCtx {
 	//  @0x4C8B88 / @0x4C8CA9, SendPlayEnterRequest @0x4C8BC1, SetGameState(4)
 	//  @0x4C8BCA]
 	bool novaworld_join_tickets_armed = false;
+	// A second NovaWorld listing of the same match (opennova-serve's --also-master-host; D-NET-1385,
+	// none of retail's, whose host lists on one service): its registration's own AppId (0: none)
+	// and its ServerHostResult's ticket arm. A joiner whose APPID is this AppId is that listing's
+	// (NapiNPConnection::novaworld_listing 1): the code-9 leg admits it, its ticket gate and
+	// watchdog read this arm, and its ClientPlayerEnterRequest goes to that listing's service.
+	uint32_t novaworld_second_app_id = 0;
+	bool novaworld_second_join_tickets_armed = false;
 	// The host's own address string on a NovaWorld transport: it prefixes every
 	// key the host looks up in a joiner's CD identity cookie (PUBPCID,
 	// PUBSQUADINFO, PUBJOINTICKET). get_local_address() below hands it out.
@@ -778,6 +785,9 @@ struct NapiNPServerCtx {
 		uint32_t connection_id = 0;
 		PeerAddr peer{};
 		std::string join_ticket;
+		// The listing whose service sent the joiner (NapiNPConnection::novaworld_listing): its
+		// session is the one the request goes to.
+		uint8_t listing = 0;
 	};
 	std::function<void(const PlayerEnterRequest &)> on_player_enter_request;
 
@@ -914,13 +924,19 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 // code-28 leg reads the same three words (D-NET-702). Ours carries retail's
 // two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
 // +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
+// A joiner a second listing's service sent (novaworld_listing 1, D-NET-1385) reads
+// that listing's arm instead (join_tickets_armed_for).
 // [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
 //  transport @0x512F90, g_HostRequiresJoinTicketMaybe @0x512F99, state 3 @0x512FA2..0x512FA6,
 //  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
 //  @0x5128E2..0x5128F8]
-inline bool join_tickets_required(const NapiNPServerCtx &ctx) {
+inline bool join_tickets_armed_for(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
+	return conn.novaworld_listing == 1 ? ctx.novaworld_second_join_tickets_armed
+	                                   : ctx.novaworld_join_tickets_armed;
+}
+inline bool join_tickets_required(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
-			ctx.novaworld_join_tickets_armed;
+			join_tickets_armed_for(ctx, conn);
 }
 
 // The host's local address: "PUB" while it is in a session on the NovaWorld

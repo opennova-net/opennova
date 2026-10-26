@@ -36,6 +36,7 @@
 
 #include <crow/json.h>
 
+#include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -271,8 +272,8 @@ int test_list(Harness &h) {
 	TEST_EXPECT(str(json["store"]["kind"]) == "local");
 	TEST_EXPECT(json["titles"].size() == 2 && str(json["titles"][0]) == "jo" &&
 			str(json["titles"][1]) == "dfx2");
-	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][1]["slug"]) == "jop_2_consumer" &&
-			!str(json["games"][1]["display_name"]).empty());
+	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
+			!str(json["games"][2]["display_name"]).empty());
 	TEST_EXPECT(json["data_sets"].size() == 5);
 	TEST_EXPECT(str(json["data_sets"][0]["kind"]) == "base" &&
 			str(json["data_sets"][3]["kind"]) == "expansion");
@@ -401,9 +402,9 @@ int test_create_patch_delete(Harness &h) {
 			"PATCH", "/api/admin/data-sets/" + std::to_string(ts), R"({"game":"dfx2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "game");
 	json = json_of(h.admin("PATCH", "/api/admin/data-sets/" + std::to_string(bhd),
-						   R"({"game":"opennova_0_consumer"})"),
+						   R"({"game":"acidgambit_0_consumer"})"),
 			200);
-	TEST_EXPECT(json && str(json["data_set"]["game"]) == "opennova_0_consumer");
+	TEST_EXPECT(json && str(json["data_set"]["game"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/data-sets/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
 
@@ -889,6 +890,33 @@ int test_runtime_release(Harness &h) {
 	return 0;
 }
 
+// A reset database numbers its trees again over a bucket an earlier database filled (DEPLOY.md
+// "Resetting the service database"): a baseline upload begun at an id whose prefix still holds
+// objects empties it first, so the finalize, which takes every object under the prefix, sees
+// only this upload's files.
+int test_tree_upload_after_reset(Harness &h) {
+	const int64_t reused = 900000;
+	{
+		auto db = h.pool.acquire();
+		db->exec("ALTER TABLE data_set_trees ALTER COLUMN id RESTART WITH " +
+				std::to_string(reused) + ";");
+	}
+	const std::string prefix = "trees/" + std::to_string(reused) + "/";
+	const std::vector<uint8_t> earlier = { 'o', 'l', 'd' };
+	for (const char *name : { "resource.pff", "stale.pff" })
+		TEST_EXPECT(test_io::write_file(h.store.path_of(prefix + name), earlier));
+	const auto begun = begin_tree(h, h.jo, { "resource.pff", "localres.pff", "language.pff" });
+	TEST_EXPECT(begun && begun->id == reused);
+	std::vector<nws::StoredObject> left;
+	std::string error;
+	TEST_EXPECT(h.store.list(prefix, left, error) && left.empty());
+	// The data set as it was: the upload abandoned.
+	const net::HttpReply reply = h.admin("DELETE",
+			"/api/admin/data-sets/" + std::to_string(h.jo) + "/trees/" + std::to_string(reused));
+	TEST_EXPECT(reply.transport_ok && reply.code == 204);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -937,6 +965,7 @@ int main(int argc, char **argv) {
 			{ "tree_upload", test_tree_upload },
 			{ "releases", test_releases },
 			{ "runtime_release", test_runtime_release },
+			{ "tree_upload_after_reset", test_tree_upload_after_reset },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

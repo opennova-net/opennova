@@ -531,7 +531,7 @@ void ImGuiPass::draw_menu_bar() {
 		if (ImGui::MenuItem("Reset layout")) {
 			layout_reset_pending_ = true;
 		}
-		if (closeable_ && ImGui::MenuItem("Close dev tools", "F3")) {
+		if (closeable_ && ImGui::MenuItem("Close dev tools", "Insert")) {
 			close_requested_ = true;
 		}
 		ImGui::EndMenu();

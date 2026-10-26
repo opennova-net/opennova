@@ -170,6 +170,43 @@ int main() {
 		CHECK(socket.sent.size() == 2);
 	}
 
+	// --- Two session lanes (opennova-serve's second listing, none of retail's): each datagram to
+	// the first lane whose claim takes it, in lane order, then the game; each lane's view reads its
+	// own queue, and an unclaimed lane takes nothing.
+	{
+		const PeerAddr second{0x0300007Fu, 7000}; // 127.0.0.3:7000
+		MemorySocket socket;
+		DatagramDemux demux(socket, 2);
+		CHECK(demux.session_lanes() == 2);
+		demux.set_session_claim([&](const PeerAddr &from, const uint8_t *, std::size_t) { return from == server; });
+		socket.inbound.push_back({second, {0x01}});
+		socket.inbound.push_back({server, {0x02}});
+		// Lane 1 has no claim yet: the second service's datagram is the game's.
+		std::vector<PeerAddr> game_from;
+		CHECK(drain(demux.game(), &game_from) == 1);
+		CHECK(game_from.size() == 1 && game_from[0] == second);
+		CHECK(drain(demux.session(0)) == 1);
+		demux.set_session_claim([&](const PeerAddr &from, const uint8_t *, std::size_t) { return from == second; }, 1);
+		socket.inbound.push_back({server, {0x03}});
+		socket.inbound.push_back({second, {0x04}});
+		socket.inbound.push_back({joiner, {0x05}});
+		socket.inbound.push_back({second, {0x06}});
+		std::vector<PeerAddr> second_from;
+		CHECK(drain(demux.session(1), &second_from) == 2);
+		CHECK(second_from.size() == 2 && second_from[0] == second && second_from[1] == second);
+		CHECK(drain(demux.session(0)) == 1);
+		CHECK(drain(demux.game()) == 1);
+		// Lane order: a datagram both claims take goes to lane 0.
+		demux.set_session_claim([](const PeerAddr &, const uint8_t *, std::size_t) { return true; }, 1);
+		socket.inbound.push_back({server, {0x07}});
+		CHECK(drain(demux.session(1)) == 0);
+		CHECK(drain(demux.session(0)) == 1);
+		// Lane 1's view sends from the one socket too.
+		const uint8_t byte = 0x7F;
+		demux.session(1).send_to(second, &byte, 1);
+		CHECK(socket.sent.size() == 1 && socket.sent[0].first == second);
+	}
+
 	// --- The lobby protocol's claim: a server-direction opcode from its server.
 	{
 		MemorySocket gate;

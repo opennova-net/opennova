@@ -53,6 +53,7 @@
         base-id="new-server"
         :previous="from?.settings ?? null"
         :data-sets="data.data_sets"
+        :novalogic-listing="data.novalogic_listing"
         :retry="from?.state === 'failed'"
         :shared-free="sharedFree(data.entitlement)"
         :own-machines-free="ownMachinesFree(data.entitlement)"

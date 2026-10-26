@@ -728,6 +728,12 @@ struct NapiNPConnection {
 	bool player_enter_requested = false;
 	bool player_enter_admitted = false;
 	bool player_enter_pending() const { return player_enter_requested && !player_enter_admitted; }
+	// Which of the match's NovaWorld listings sent this joiner: 0 the listing whose AppId its
+	// APPID carried was the match's own (retail's one), 1 a second listing's on a match listed on
+	// two services (NapiNPServerCtx::novaworld_second_app_id; D-NET-1385, none of retail's). The
+	// code-9 leg sets it (validate_novaworld_app_id); its ticket rules and its enter request
+	// follow that listing's.
+	uint8_t novaworld_listing = 0;
 	// The last outer-namespace 0x45 ping round trip this host measured
 	// (session_keys.rtt_ms; stored when the peer answers our MS without WR).
 	// [orig: Nwu_HandlePing @0x623C9B]

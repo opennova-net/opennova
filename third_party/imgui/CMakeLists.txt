@@ -14,7 +14,8 @@
 # For offline/air-gapped builds, point
 # -DFETCHCONTENT_SOURCE_DIR_IMGUI_DOCKING=<dir> at a pre-extracted copy.
 #
-# Built only with OPENNOVA_DEVTOOLS for the game's F3 windows.
+# Built when either product wants it (the root CMakeLists.txt's OPENNOVA_IMGUI: the game's
+# dev-tool windows, OPENNOVA_DEVTOOLS, or the OpenNova Editor's, OPENNOVA_EDITOR).
 
 include(FetchContent)
 

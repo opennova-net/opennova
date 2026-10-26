@@ -36,6 +36,9 @@ describe('SupportPage', () => {
     expect(wrapper.text()).toContain('$45 a month for each');
     expect(wrapper.text()).toContain('No support tier needed');
     expect(wrapper.text()).toContain('not the sale of any game');
+    expect(wrapper.text()).toContain(
+      "A Joint Operations server can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install.",
+    );
     expect(wrapper.text()).not.toContain('—');
     // The terms and the refund policy beside Subscribe.
     const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));

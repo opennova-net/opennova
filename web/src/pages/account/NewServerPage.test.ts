@@ -187,4 +187,19 @@ describe('NewServerPage', () => {
     await flushPromises();
     expect(start).toHaveBeenCalledWith(expect.anything(), false, null);
   });
+
+  it("offers the listing on NovaLogic's NovaWorld only while the service does", async () => {
+    addresses.mockResolvedValue({ ok: true, value: addressesResponse([]) });
+    servers.mockResolvedValue({ ok: true, value: serversResponse([]) });
+    const off = mount(NewServerPage, { global: { plugins: [await testRouter('/me/servers/new')] } });
+    await flushPromises();
+    expect(off.find('#new-server-game_name').exists()).toBe(true);
+    expect(off.find('#new-server-list_on_novalogic').exists()).toBe(false);
+    off.unmount();
+
+    servers.mockResolvedValue({ ok: true, value: serversResponse([], { novalogic_listing: true }) });
+    wrapper = mount(NewServerPage, { global: { plugins: [await testRouter('/me/servers/new')] } });
+    await flushPromises();
+    expect(wrapper.find('#new-server-list_on_novalogic').exists()).toBe(true);
+  });
 });

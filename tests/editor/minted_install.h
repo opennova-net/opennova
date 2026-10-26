@@ -53,7 +53,7 @@ struct File {
 };
 
 // The synthetic expansion the install carries.
-inline constexpr const char *kExpansion = "onjo1";
+inline constexpr const char *kExpansion = "nifty";
 
 inline std::string repo() {
 	return std::string(test_paths_repo_root(__FILE__));

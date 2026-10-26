@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { bytesOf, phaseSlow, phaseText, stoppedBecauseText } from './hostedState';
-import type { StoppedBecause } from '../types/hostedServer';
+import { bytesOf, novalogicListingText, novalogicListingTone, phaseSlow, phaseText, stoppedBecauseText } from './hostedState';
+import type { NovaLogicListing, StoppedBecause } from '../types/hostedServer';
 
 describe('the phase in its owner words', () => {
   it('reads the data downloaded so far of its total in one unit', () => {
@@ -103,5 +103,46 @@ describe('the phase in its owner words', () => {
     expect(stoppedBecauseText({ ...limits('shared_servers', 1), limit: null }, 'admin')).toBe(
       "Its owner's hosting limit no longer covers it (their support tier, dedicated machine or admin grant ended or changed), so it was stopped.",
     );
+  });
+});
+
+describe("the listing on NovaLogic's NovaWorld in its owner's words", () => {
+  const NOW = Date.parse('2026-10-25T13:00:00Z');
+  const listing = (over: Partial<NovaLogicListing>): NovaLogicListing => ({ state: 'listed', player_slots: [], ...over });
+
+  it('says whether it is listed, and why not, naming NovaLogic for the service', () => {
+    expect(novalogicListingText(listing({}), NOW)).toBe("Listed. Players find it in NovaLogic's server browser too.");
+    expect(novalogicListingText(listing({ state: 'trying', try: 1, tries: 5 }), NOW)).toBe('Signing in and listing (try 1 of 5).');
+    expect(
+      novalogicListingText(listing({ state: 'not_listed', reason: 'the service did not accept the server name', tag: 'NWEC57' }), NOW),
+    ).toBe('Not listed for this run: NovaLogic did not accept the server name. The next start of the server tries again.');
+    expect(novalogicListingText(listing({ state: 'not_listed', reason: 'the service counts too many servers running' }), NOW)).toContain(
+      'NovaLogic counts too many servers running',
+    );
+    // A reason that names no service stays the server's own; the tag never shows.
+    expect(novalogicListingText(listing({ state: 'not_listed', reason: 'it did not host in 5 tries; the last: the gate did not answer' }), NOW)).toBe(
+      'Not listed for this run: it did not host in 5 tries; the last: the gate did not answer. The next start of the server tries again.',
+    );
+    expect(novalogicListingText(listing({ state: 'off' }), NOW)).toBe(
+      'Not listed: the service does not offer it right now. The next start of the server tries again.',
+    );
+    expect(novalogicListingText(listing({ state: 'paused' }), NOW)).toBe('');
+  });
+
+  it("counts a retry's wait down to its next try", () => {
+    const retrying = listing({ state: 'retrying', try: 2, tries: 5, reason: 'the gate did not answer', next_try_at: '2026-10-25T13:02:00Z' });
+    expect(novalogicListingText(retrying, NOW)).toBe('Not listed yet: the gate did not answer. It tries again in 2 minutes (try 2 of 5).');
+    expect(novalogicListingText(retrying, Date.parse('2026-10-25T13:03:00Z'))).toBe(
+      'Not listed yet: the gate did not answer. It tries again shortly (try 2 of 5).',
+    );
+    expect(novalogicListingText({ ...retrying, next_try_at: undefined }, NOW)).toContain('It tries again shortly');
+  });
+
+  it('reads as up, failed for the run, or on its way', () => {
+    expect(novalogicListingTone(listing({}))).toBe('good');
+    expect(novalogicListingTone(listing({ state: 'not_listed' }))).toBe('bad');
+    expect(novalogicListingTone(listing({ state: 'off' }))).toBe('bad');
+    expect(novalogicListingTone(listing({ state: 'retrying' }))).toBe('pending');
+    expect(novalogicListingTone(listing({ state: 'trying' }))).toBe('pending');
   });
 });

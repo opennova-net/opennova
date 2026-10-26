@@ -101,7 +101,9 @@ current understanding of the original engine:
   `docs/<domain>/<system>-re.md` record and/or `docs/correspondence.md`
   rows. Originals with no reimpl can land as confirm-only rows; open
   threads land as the record's explicit unknown/follow-up entries.
-- Spawned implementation work → a TODO.md entry naming the addresses.
+- Spawned implementation work (witnessed behavior not yet ported) → an open
+  `D-<DOMAIN>-n` row naming the addresses, in the record's catalog and
+  `docs/divergence-ledger.md` (via `re-doc`); TODO.md holds non-parity work only.
 
 Raw decompilation never lands in any file — quote it in the conversation
 only (docs/README.md rule).
@@ -111,4 +113,4 @@ only (docs/README.md rule).
 The question is answered with addresses — or explicitly unresolved, with
 what was ruled out landed as the record's follow-up entries — durable
 findings are landed via `re-doc`, any IDB writes are logged and saved, and
-the routing (inline cite / record / TODO) is stated.
+the routing (inline cite / record / ledger) is stated.

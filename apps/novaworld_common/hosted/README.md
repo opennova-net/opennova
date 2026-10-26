@@ -33,10 +33,12 @@ this directory's.
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
-  `backend/migrations/0011_data_sets.sql`). A data set is a row an admin makes: a **base**
+  `backend/migrations/0011_data_sets.sql`). A data set is a row (migrations 0011 and 0013
+  seed the catalog's, and an admin may make more): a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
   `dfx2`, and its `game`, the `games` row whose lobby it lists in) or an **expansion** of a
-  base (its `expansion_code`, `/exp jox01`). Its data lives in the object store
+  base (its `expansion_code`, `/exp jox01`); a third kind, `update`, is an updater product
+  with no tree ("Game data" below). Its data lives in the object store
   (`ONNET_OBJECT_STORE_URL`) as **trees**, each one immutable version of the data set's
   files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
   applying a published update release, with the multiplayer missions its archives list. A
@@ -177,8 +179,9 @@ this directory's.
   `launch_failures`.
 - **No lobby live.** While no lobby instance takes clients (`lobbydb::live_lobbies`: a
   lobby outage, or a deployment's first release, whose fleet program rolls before any
-  lobby), a gate hands a starting `opennova-serve` no lobby and it exits past its 30 s
-  probe (retail's). So the supervisor starts nothing then: a server due to be placed waits
+  lobby), a gate hands a starting `opennova-serve` no lobby and it gives up 20 s into its
+  gate wait and exits (retail's dedicated host's; the probe itself stops at 10 s). So the
+  supervisor starts nothing then: a server due to be placed waits
   in `provisioning` (`[hosted] server <id> waits for a live lobby`), an exit places the
   server again with no restart counted, and the listing's clocks wait. Once a lobby is
   live the waiting servers start, and an exit counts again.
@@ -322,7 +325,11 @@ this directory's.
   exit.txt /game <title>` and `/exp <code>` with an expansion: no status page (it would
   stream the players' names and chat into the server's log every 200 ms), and the two
   files the machine's agent reads in the slot's directory, the server's tick health and the
-  error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). The
+  error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). A server whose
+  owner asked to be listed on NovaLogic's NovaWorld (`list_on_novalogic`) also gets
+  `--second-listing-file second-listing.json`, the listing's state, which the agent forwards
+  and its page shows (off when the service offers no listing at that start), and, while the
+  service offers it, the second listing itself (`--also-master-host` and the rest, ADR 0068). The
   settings' rules (`check_settings`): an offered data set, a name of 1..31 cp1252 bytes
   with no control character or double quote, a password of up to 16 printable ASCII
   characters with no space or quote, the numbers within the title's limits, an expansion
@@ -543,7 +550,7 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end, and for a limits stop before `0021_stop_causes.sql`), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `data_sets` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, pins, `update_available`, restarts, times, `listing`, its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it, 0024_second_listing_reports.sql) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end, and for a limits stop before `0021_stop_causes.sql`), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
 | `POST /api/me/servers` | a website session | the settings (`game_name` required; `data_set_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
@@ -587,11 +594,11 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every data set with its trees |
+| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every data set but the `update` rows, with its trees |
 | `POST /api/admin/data-sets` | a base (a title, a `games` slug) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, and `retail_updater` (names `ftp.novaworld.com` in the updater's SERVER.LST instead of `ONNET_UPDATE_HOST`): 201; 400; 409 `duplicate_login`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/data-sets/<id>` | the name, a base's lobby, the updater's fields: 200; 400; 404; 409 `duplicate_login` |
 | `DELETE /api/admin/data-sets/<id>` | the data set and its trees' objects: 204; 404; 409 `in_use`; 503 |
-| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`; 503 |
+| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree, its prefix emptied first (a reset database reuses tree ids), and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`, `update_only` (an `update` row); 503 |
 | `PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`; 413; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete` | `{"upload_id", "parts"}`: the file's upload completed: 200; 400; 404; 409; 502; 503 |
 | `POST /api/admin/data-sets/<id>/trees/<t>/finalize` | the tree `finalizing` and its `tree.finalize` job: 202; 404; 409 `not_uploading` |
@@ -605,7 +612,7 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`; 502; 503 |
 
 The seeded updater products include `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
-`OPENNOVA` / `OPENNOVA.CMD` (its content), `ONJO1` / `ONJO1.CMD` (its `onjo1` expansion),
+`ACIDGAMBIT` / `ACIDGAMBIT.CMD` (its content), `NIFTY` / `NIFTY.CMD` (its `nifty` expansion),
 and `DFX2` / `DFX2.CMD`, alongside the existing `JOTRus` and `JOEus` products. The runtime
 uses a standalone `update` row: it appears in Releases but has no hosted game tree and
 does not appear among Game data or hosted-server choices. OpenNova content releases are
@@ -638,8 +645,11 @@ release that carries its command file, the package fetched into the cache and th
 unpacked beside it, streamed from disk (a connection's next replies are made only while
 less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a data
 set marked `retail_updater` (a retail install reaches it through the Switcher's hosts
-block), else `ONNET_UPDATE_HOST`. A login no published release serves is refused. Logged
-under `[update]`.
+block), else `ONNET_UPDATE_HOST`. A login no published release serves is refused when it
+is OpenNova's own (`retail_updater` off), so a first install fails rather than finding
+nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
+a package of its command file alone that the catalog writes into its cache. Logged under
+`[update]`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

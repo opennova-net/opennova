@@ -1,16 +1,19 @@
 # OpenNova Switcher
 
-A small Windows tray app that switches a stock Joint Operations install between
-OpenNova's NovaWorld and NovaLogic's own, by managing one block in the Windows hosts
-file. Your game files stay stock: no patched executable, no injected DLL, no config
-edit in the game folder. It is pre-1.0 and experimental.
+A small Windows tray app that points a stock Delta Force Xtreme 2 install at OpenNova's
+NovaWorld, by managing one block in the Windows hosts file. NovaLogic's NovaWorld for
+Delta Force Xtreme 2 is down, so the switcher is how the original `dfx2.exe` reaches
+OpenNova's lobbies. Your game files stay stock: no patched executable, no injected DLL,
+no config edit in the game folder. It is pre-1.0 and experimental.
 
-It is for the original executables alone: `opennova.exe` reaches OpenNova's NovaWorld by
-itself (its NovaWorld screen's OpenNova target dials `nw.opennova.net`), so it needs no
-Switcher.
+It works for a stock Joint Operations install too, but the original `Jointops.exe` does
+not need it to find OpenNova's hosted servers: a hosted Joint Operations server can also
+list on NovaLogic's NovaWorld, where the game finds it as it is. Nor does `opennova.exe`,
+which reaches OpenNova's NovaWorld by itself (its NovaWorld screen's OpenNova target dials
+`nw.opennova.net`).
 
-It covers JO and newer titles: retail Joint Operations (Combined Arms included) looks
-up NovaWorld by the gate name below, and Delta Force Xtreme 2's client names the same
+It covers JO and newer titles: Delta Force Xtreme 2's client looks up NovaWorld by the
+gate name below, and retail Joint Operations (Combined Arms included) names the same
 one; their updater, `UPDATE.EXE`, looks up the three gateway names beside it, so a
 switched install updates from OpenNova too.
 
@@ -27,8 +30,8 @@ switched install updates from OpenNova too.
      NovaLogic's real NovaWorld.
    - **Custom address...**: an IPv4 address you type, such as `127.0.0.1` for a
      NovaWorld service on this computer or a LAN address for one on another.
-4. Start `Jointops.exe` as usual. The choice applies the next time the game connects
-   to NovaWorld.
+4. Start the game (`dfx2.exe`, or `Jointops.exe`) as usual. The choice applies the next
+   time the game connects to NovaWorld.
 
 The choice stays in the hosts file after you exit the switcher and across restarts.
 To put the hosts file back to stock, pick **NovaLogic NovaWorld** before you delete the
@@ -39,11 +42,11 @@ switcher.
 `opennova-switcher.exe` carries no code signature. The first run may show SmartScreen's
 "Windows protected your PC" (**More info**, then **Run anyway**), and the UAC prompt
 names an unknown publisher. Since it runs as administrator, check the download first: a
-tagged release lists `opennova-switcher-windows-<version>.zip.sha256` beside the zip, and
+tagged release lists `opennova-switcher-windows-v<version>.zip.sha256` beside the zip, and
 in PowerShell
 
 ```powershell
-Get-FileHash .\opennova-switcher-windows-<version>.zip -Algorithm SHA256
+Get-FileHash .\opennova-switcher-windows-v<version>.zip -Algorithm SHA256
 ```
 
 must print the same hash. A PR build's hashes are in its CI log (the package step).
@@ -123,7 +126,7 @@ on OpenNova, it asks again and rewrites the block if the address moved.
 
 **OpenNova service URL...** points the switcher at another OpenNova service. It takes an
 https URL, or http only to this computer or a private network address, for example
-`http://127.0.0.1:8080` for a local stack (the switcher adds `/api/server-info`); never a
+`http://localhost:8000` for a local stack (the switcher adds `/api/server-info`); never a
 user name or password. A service other than the default shows in the menu. Only a
 service on this computer or a private network may answer a loopback, private or
 link-local address: from any other, the switcher refuses one.

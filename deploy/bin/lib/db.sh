@@ -165,7 +165,7 @@ db_reset() {
   granting="$(sed -n 's/^granting=\([0-9][0-9]*\)$/\1/p' <<<"$out" | tail -n 1)"
   [ -n "$granting" ] || die "the check printed no count; nothing was changed"
   if [ "$granting" -gt 0 ] && [ "$orphan" -eq 0 ]; then
-    die "$granting subscription(s) (active, trialing or past_due) grant hosting: once billing is live the database is durable. Refusing. (--orphan-subscriptions resets anyway: their customers keep paying with no account linked here, so cancel them in Stripe first)"
+    die "$granting subscription(s) (active, trialing or past_due) grant hosting: a reset orphans them. Refusing. (--orphan-subscriptions resets anyway: their customers keep paying with no account linked here, so cancel them in Stripe first)"
   fi
   log "db reset-db on $DEP will:"
   if [ "$backup" -eq 1 ]; then

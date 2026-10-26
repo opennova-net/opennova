@@ -15,7 +15,7 @@ struct Options {
 	bool legacy = false;
 	bool help = false;
 	bool game_explicit = false;
-	std::string game = "opennova";
+	std::string game = "acidgambit";
 	std::filesystem::path runtime_dir;
 	std::filesystem::path resource_dir;
 	std::string server;

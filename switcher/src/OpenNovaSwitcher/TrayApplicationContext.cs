@@ -261,7 +261,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ShowError(
                 $"'{url}' is not a service URL the switcher uses: an https URL such as {ServerInfo.DefaultServiceUrl}, " +
-                "or http to this computer or a private network address (http://127.0.0.1:8080), with no user name or password.");
+                "or http to this computer or a private network address (http://localhost:8000), with no user name or password.");
             return;
         }
 
@@ -336,7 +336,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             ShowBalloon(
                 "Switched to " + ShortName(_state),
-                "Retail Joint Operations uses it the next time it connects to NovaWorld.");
+                "The original game uses it the next time it connects to NovaWorld.");
         }
 
         return true;

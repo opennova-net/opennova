@@ -22,15 +22,18 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
   `available: false`); `--windowed` otherwise (never rely on the project's
   fullscreen default under automation).
 - `--resource-dir` names the built game data or a retail install on this machine
-  (a machine-local path: never guess or commit one); select retail with `/game jo`
-  or `/game dfx2`. Source/probe launches use `--no-update`. `GODOT_BIN` names
-  the binary (else the main checkout's `.godot-bin/`).
+  (a machine-local path: never guess or commit one); select retail with `--game jo`
+  or `--game dfx2` (the game's `/game`). `launch` appends `--no-update` itself and
+  takes no such flag. `GODOT_BIN` names the binary (else the main checkout's
+  `.godot-bin/`).
 - A `--mission` launch parks under the start splash with the world un-ticked:
   every mission probe begins with `wait_for_local_player`.
-- The console wrapper stalls from a shell without a console: launch from a
-  terminal, or point `GODOT_BIN` at the plain runtime executable.
-- Ports: 8975 single game (the tracked `.mcp.json`), 8975/8976 for a LAN pair, 8977 the editor (`scripts/mcp/editor_mcp.py`; docs/mcp.md "The editor MCP")
-  (`scripts/net/run_lan_pair.ps1`). Claude Code sees a game started after the
+- `launch` runs the plain executable in place of a console wrapper beside it
+  (Godot's `_console.exe`), so the pid it records is the game's and the
+  wrapper's no-console stall (docs/mcp.md) does not arise.
+- Ports: 8975 single game (the tracked `.mcp.json`), 8975/8976 for a LAN pair
+  (`scripts/net/run_lan_pair.ps1`), 8977 the editor (`scripts/mcp/editor_mcp.py`;
+  docs/mcp.md "The editor MCP"). Claude Code sees a game started after the
   session began through `/mcp` reconnect, or through this script.
 
 ## 2. Drive
@@ -44,7 +47,7 @@ python scripts/mcp/game_mcp.py entities --watch --interval 1 --out build/entitie
 python scripts/mcp/game_mcp.py logs
 ```
 
-`game_debug` drives the typed `DebugControlTable` (the C++ table F3 shares;
+`game_debug` drives the typed `DebugControlTable` (the C++ table the Insert dev tools share;
 engine rows end in `Simulation`/`EntityCommands`, device rows in the shell;
 ADR 0043 d12); `op=invoke`/`set` name the row by `id`, and host-only or
 confirmation-gated rows (teleport, the entity edits) need `"confirm_authority":true`; entity

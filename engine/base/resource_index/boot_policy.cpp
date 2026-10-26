@@ -259,9 +259,9 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 }
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
-    if (!flags.game.empty()) return flags.game == "opennova" ? "jo" : flags.game;
+    if (!flags.game.empty()) return flags.game == "acidgambit" ? "jo" : flags.game;
     const std::string fb = strutil::to_lower(strutil::trim(fallback));
-    return fb.empty() || fb == "opennova" ? std::string("jo") : fb;
+    return fb.empty() || fb == "acidgambit" ? std::string("jo") : fb;
 }
 
 std::string folder_product(const std::string &dir) {
@@ -273,13 +273,13 @@ std::string folder_product(const std::string &dir) {
 
 std::string launch_product(const LaunchFlags &flags, const std::string &folder) {
     if (flags.game_given) return flags.game;
-    if (folder.empty()) return "opennova";
+    if (folder.empty()) return "acidgambit";
     return folder == kForeignFolder ? std::string() : folder;
 }
 
 bool launch_product_supported(const LaunchFlags &flags, const std::string &folder) {
     const std::string product = launch_product(flags, folder);
-    return product == "opennova" || product == "jo" || product == "dfx2";
+    return product == "acidgambit" || product == "jo" || product == "dfx2";
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {

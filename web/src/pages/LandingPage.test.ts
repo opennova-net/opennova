@@ -38,7 +38,8 @@ describe('LandingPage', () => {
     const text = wrapper.text();
     expect(wrapper.get('h1').text()).toBe('OpenNova');
     expect(text).toContain("A game on NovaLogic's engine, rebuilt in the open.");
-    expect(text).toContain('Indigo Shore');
+    expect(text).toContain('OP: Acid Gambit');
+    expect(text).toContain('OP: Nifty Package');
     expect(text).toContain('Online play in our own game is coming.');
     expect(text).toContain('OpenNova runs in place of Jointops.exe.');
     expect(text).toContain('It ships no retail files.');
@@ -59,19 +60,27 @@ describe('LandingPage', () => {
     expect(hrefs(wrapper)).toContain('https://github.com/opennova-net/opennova/issues');
   });
 
-  it('keeps the Switcher to the original exes: OpenNova reaches NovaWorld as it is', async () => {
+  it("keeps the Switcher to the original dfx2.exe: Jointops.exe finds our servers on NovaLogic's NovaWorld", async () => {
     const text = (await mountPage()).text();
     expect(text).toContain('With OpenNova');
-    expect(text).toContain('Nothing else to install.');
-    expect(text).toContain('With the original Jointops.exe or dfx2.exe');
+    expect(text).toContain("choose OpenNova, or Original NovaWorld for NovaLogic's. Nothing else to install.");
+    expect(text).toContain('With the original Jointops.exe');
+    expect(text).toContain("Joint Operations servers we host can also list on NovaLogic's NovaWorld");
+    expect(text).toContain('With the original dfx2.exe');
+    expect(text).toContain("NovaLogic's NovaWorld for Delta Force Xtreme 2 is down, so the OpenNova Switcher points");
     expect(text).toContain('gs.novaworld.net');
-    expect(text).toContain("OpenNova itself doesn't need it.");
+    expect(text).toContain("OpenNova and the original Jointops.exe don't need it.");
+    // The Switcher is pitched for dfx2.exe alone, never for Jointops.exe.
+    expect(text).not.toContain('Jointops.exe or dfx2.exe');
   });
 
   it('says hosted servers run our engine, and how to run one yourself for free', async () => {
     const wrapper = await mountPage();
     const text = wrapper.text();
     expect(text).toContain("Hosted servers run OpenNova's own server, opennova-serve, not the original game.");
+    expect(text).toContain(
+      "A Joint Operations server can also list on NovaLogic's NovaWorld, reaching players on the original game with nothing to install.",
+    );
     expect(text).toContain("we can't guarantee that yet");
     expect(text).toContain('not the sale of any game');
     expect(text).toContain('Rather not pay? Run it yourself.');
@@ -123,6 +132,8 @@ describe('LandingPage', () => {
     const text = wrapper.text();
     for (const file of [
       'opennova-game-windows',
+      'jointops-game-windows',
+      'dfx2-game-windows',
       'opennova-editor-windows',
       'opennova-switcher-windows',
       'opennova-blender-addon-windows',

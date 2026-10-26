@@ -20,12 +20,18 @@ easier to relay than to rediscover.
   excluded from every export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
-  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"). `common/` is the shared
-  socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap I/O lives in
-  `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working directory.
+  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
+  `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
+  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
+  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
+  directory.
 - `switcher/` — the OpenNova Switcher (ADR 0054): a .NET 8 tray app, `opennova-switcher.exe`,
-  that switches retail's `gs.novaworld.net` between OpenNova's NovaWorld, NovaLogic's and a
-  custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
+  that switches retail's `gs.novaworld.net` and the updater's `ftp.novaworld.com`,
+  `ftp2.novaworld.com` and `ftp4.novaworld.com` between OpenNova's NovaWorld, NovaLogic's and
+  a custom address through one hosts-file block; outside CMake (`package-switcher-windows.yml`).
+  Pitched for the original `dfx2.exe` alone (NovaLogic's DFX2 NovaWorld is down): the original
+  `Jointops.exe` finds our hosted JO servers on NovaLogic's NovaWorld (ADR 0068), though the
+  Switcher still works for it.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -35,8 +41,8 @@ easier to relay than to rediscover.
   its release is `scripts/package_release.py`'s package, uploaded in the admin's Game data.
   CI ships only the runtime: `opennova.exe`, `update.exe`, `revupdat.exe`, native dependencies
   and bootstrap configuration. First standalone launch downloads content. `/game` selects
-  `opennova`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
-  (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `OPENNOVA.CMD` or no wizard OpenNova; ADR 0067 d2).
+  `acidgambit`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
+  (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit; ADR 0067 d2).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;

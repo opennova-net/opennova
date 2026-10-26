@@ -651,7 +651,7 @@ std::vector<ProtocolMessage> dispatch_admission(const GameConfig &config,
 				//  and the return @0x512F87..0x512FA6; state 6 @0x512FB3,
 				//  CNetPlayer_SendFileTransferChunk(0) called @0x512FBC]
 				conn.join_ticket_validation =
-						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
+						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx, conn);
 				if (conn.join_ticket_validation) {
 					// State 3's entry stamps the net player's +0xA4 with GetTickCount, the
 					// validation watchdog's deadline base (D-NET-NEW-L8-34).

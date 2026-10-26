@@ -27,6 +27,10 @@ namespace fs = std::filesystem;
 namespace {
 using Clock = std::chrono::steady_clock;
 
+// Prod's update service, dialed only when no OPENNOVA.WIZ names a gateway. The game zip
+// always carries that wizard, naming its export mode's deployment (prod's in a release
+// package, staging's in a debug one: scripts/package_godot_windows.ps1), so one updater
+// build serves both flavours.
 constexpr const char *kServiceHost = "update.opennova.net";
 
 fs::path named_file(const fs::path &dir, const std::string &name) {
@@ -60,7 +64,7 @@ bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 	product.command = wizard.cmd;
 	product.login = wizard.product_login;
 	product.native = product.native || strutil::iequals(product.login, "ONRUNTIME") ||
-			strutil::iequals(product.login, "OPENNOVA");
+			strutil::iequals(product.login, "ACIDGAMBIT");
 	return true;
 }
 
@@ -375,9 +379,9 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 			error = "This folder's UPDATE.WIZ names a game OpenNova does not update.";
 			return false;
 		}
-		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("opennova") : folder);
-		if (product == "opennova") {
-			if (!folder.empty() && folder != "opennova") {
+		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("acidgambit") : folder);
+		if (product == "acidgambit") {
+			if (!folder.empty() && folder != "acidgambit") {
 				error = "This folder holds another game (its UPDATE.WIZ). OpenNova content installs only into its own folder.";
 				return false;
 			}
@@ -396,7 +400,7 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 	}
 	if (native_content) {
-		out.push_back({o.resource_dir, "OPENNOVA", "OPENNOVA.CMD", {}, true});
+		out.push_back({o.resource_dir, "ACIDGAMBIT", "ACIDGAMBIT.CMD", {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;
@@ -409,11 +413,11 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		if (it->is_directory(ec)) dirs.push_back(it->path());
 	std::sort(dirs.begin(), dirs.end());
 	for (const fs::path &dir : dirs) {
+		// Every expansion\<n>\ holding an UPDATE.WIZ is a product, its archive installed or not:
+		// a release is a whole install, so the wizard alone installs the expansion (the jointops
+		// zip ships Escalation's). [orig: Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
 		const fs::path wizard = named_file(dir, "UPDATE.WIZ");
 		if (!fs::is_regular_file(wizard, ec)) continue;
-		// A retail game's expansion needs its archive installed, where retail needs only the wizard
-		// (D-UPD-9); a native content's registers by its wizard alone.
-		if (!native_content && !fs::is_regular_file(named_file(dir, io::utf8_path(dir.filename()) + ".pff"), ec)) continue;
 		Product registered;
 		if (!wizard_product(dir, wizard, registered, error)) return false;
 		registered.native = registered.native || native_content;

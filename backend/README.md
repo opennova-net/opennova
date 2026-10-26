@@ -37,18 +37,22 @@ runs as, and keys a listing's joiners (`host_players`) by their account, so its
 roster is who plays on it now ("Listed servers and owners"). `0022_lobby_goodbyes.sql`
 adds the goodbyes a lobby's clean stop leaves for the sessions it held
 (`lobby_goodbyes`), which the lobby their next packets reach sends in its place
-("Lobby instances").
+("Lobby instances"). `0024_second_listing_reports.sql` adds a slot report's
+second listing: a hosted server's listing on NovaLogic's NovaWorld as its agent
+last read it, its state, tries, reason and the players that service sent
+(apps/novaworld_common/hosted/README.md "Routes", the server's `novalogic`).
 
-## Migrations are append-only
+## Migrations until 1.0
 
-A migration that a database has applied never changes: the server refuses to
-boot when a recorded file's SHA-256 no longer matches the file on disk. A new
-table, a new column or a fix to an existing one is a new file with the next
-number. (The disposable-database practice of the SQLite era, an edited
-migration plus a reset, ended with the move to PostgreSQL; the one exception is
-the change that brought PostgreSQL in, whose files no deployment had applied
-before its cutover, so a database made from an earlier revision of it is
-recreated: `scripts/dev_postgres.sh reset`.)
+Until 1.0 the NovaWorld service database is disposable: a migration is edited in
+place (as #1253's 5149d70c2c did to 0011 and 0013), and a deployment whose
+database applied the old file is reset when it takes the change (DEPLOY.md,
+"Resetting the service database"). Each file still runs once, in its own
+transaction, and `_schema_migrations` records its name and SHA-256: the server
+refuses to boot while a recorded file's SHA-256 no longer matches the file on
+disk, which is how a database that needs the reset shows. A recorded file the
+server does not have (a newer release's) is ignored. A local database is
+recreated with `scripts/dev_postgres.sh reset`.
 
 ## The database the server needs
 

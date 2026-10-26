@@ -1,5 +1,6 @@
 #include "server.h"
 
+#include "destination_policy.h" // resolve_destination (the second listing's gate lookup)
 #include "lister.h"
 #include "profile_name.h"
 #include "serve_listing.h"
@@ -32,8 +33,10 @@
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <ctime> // the second listing's next try, in the supervisor's clock
 #include <iterator>
 #include <thread>
 #include <utility>
@@ -45,12 +48,18 @@ namespace {
 const char kUsage[] =
 		"usage: opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>]\n"
 		"                      [/exp <name>] [/d]\n"
-		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]\n"
+		"                      [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] "
+		"[--log-debug]\n"
 		"                      [--master-host <gate>] [--master-gate-port <n>]\n"
 		"                      [--credentials <file>] [--allow-public]\n"
+		"                      [--also-master-host <gate>] [--also-master-gate-port <n>]\n"
+		"                      [--also-credentials <file>]\n"
 		"                      [--status-page on|off] [--stats-file <file>] [--exit-file <file>]\n"
-		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes it)\n"
-		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per line\n"
+		"                      [--second-listing-file <file>]\n"
+		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes "
+		"it)\n"
+		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per "
+		"line\n"
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
@@ -60,7 +69,8 @@ const char kUsage[] =
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
 		"                   listing advertises LAN only\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
-		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
+		"  --lan-port       the first port of the bind scan (default: game.cfg "
+		"mplanserverportmin,\n"
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
 		"                   listing on NovaWorld); 0 binds a port the OS picks\n"
 		"  --log-debug      print the engine's debug log lines\n"
@@ -75,12 +85,19 @@ const char kUsage[] =
 		"  --allow-public   allow NovaLogic's NovaWorld (novaworld.net and its hosts), a live\n"
 		"                   shared service: use it sparingly. Loopback and any other host are\n"
 		"                   allowed without it\n"
+		"  --also-master-host, --also-master-gate-port, --also-credentials\n"
+		"                   a second NovaWorld gate to list the same server on, its port and\n"
+		"                   its account (needs --master-host); it lists once the first map is\n"
+		"                   up, is tried again when it does not host, and never stops the server\n"
 		"  --status-page    on (the default) prints the status page on stdout and takes stdin\n"
 		"                   as its chat input; off does neither (a supervised server's)\n"
 		"  --stats-file     rewrite this file once a minute with the last minute's tick health\n"
 		"                   (frame time p50, p99 and longest, late frames), one JSON line\n"
 		"  --exit-file      at a non-zero exit, write the error that ended the server there,\n"
 		"                   one line\n"
+		"  --second-listing-file\n"
+		"                   rewrite this file whenever the second listing's state changes (off,\n"
+		"                   trying, listed, retrying or not_listed, with why), one JSON line\n"
 		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
 		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
@@ -152,6 +169,26 @@ HardwareIdentity sample_device_identity(const gamecfg::GameCfg &cfg, const Serve
 	return hw;
 }
 
+// Whether `from` is `lobby`'s server: the 0x81 sender it took, or one of its probe targets.
+bool from_lobby_server(const NwuLobbySession &lobby, const PeerAddr &from) {
+	if (from == lobby.nw_peer()) return true;
+	for (const NwuLobbySession::Target &target : lobby.targets())
+		if (target.ip == from.ip && static_cast<uint16_t>(target.port) == from.port) return true;
+	return false;
+}
+
+// A session lane's claim (DatagramDemux::Claim): its lister's session's (NwuLobbySession::
+// claims), and while the socket carries a second listing (D-NET-1385), less a datagram from the
+// other listing's server that is not its own's too. Both connections have CI 1, so a 0x81 either
+// would take by its CI from any sender (retail's rule for its one session) could be the other's
+// server answering the other's probe. A lane whose lister is gone takes nothing.
+bool lane_claims(const Lister *own, const Lister *other, const PeerAddr &from, const uint8_t *data,
+		std::size_t len) {
+	if (own == nullptr || !own->lobby().claims(from, data, len)) return false;
+	return other == nullptr || !from_lobby_server(other->lobby(), from) ||
+			from_lobby_server(own->lobby(), from);
+}
+
 } // namespace
 
 const char *serve_usage() { return kUsage; }
@@ -219,6 +256,17 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			}
 		} else if (a == "--credentials") {
 			if (!value(out.credentials_path)) return 1;
+		} else if (a == "--also-master-host") {
+			if (!value(out.also_master_host)) return 1;
+		} else if (a == "--also-master-gate-port") {
+			std::string text;
+			if (!value(text)) return 1;
+			if (!parse_port(text, out.also_master_gate_port)) {
+				error = "--also-master-gate-port must be 1..65535";
+				return 1;
+			}
+		} else if (a == "--also-credentials") {
+			if (!value(out.also_credentials_path)) return 1;
 		} else if (a == "--allow-public") {
 			out.allow_public = true;
 		} else if (a == "--status-page") {
@@ -233,6 +281,9 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(out.stats_file)) return 1;
 		} else if (a == "--exit-file") {
 			if (!value(out.exit_file)) return 1;
+		} else if (a == "--second-listing-file") {
+			if (!value(out.second_listing_file))
+				return 1;
 		} else {
 			error = "unknown option '" + a + "'";
 			return 1;
@@ -244,6 +295,16 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 	}
 	if (out.host_file.empty()) {
 		error = "/HOST <host file> is required";
+		return 1;
+	}
+	if (!out.also_master_host.empty() && out.master_host.empty()) {
+		error = "--also-master-host needs --master-host: the second listing lists beside the first";
+		return 1;
+	}
+	// Two sessions with one service would share its session server's datagrams on the one socket.
+	if (!out.also_master_host.empty() && strutil::iequals(out.also_master_host, out.master_host) &&
+			out.also_master_gate_port == out.master_gate_port) {
+		error = "--also-master-host names the --master-host gate: the second listing lists on another service";
 		return 1;
 	}
 	return 0;
@@ -327,6 +388,8 @@ bool Server::start_session(std::string &error) {
 	}
 	if (listing_ != nullptr) bind_listing();
 	running_ = true;
+	// The second listing's first try starts beside the bound match, pumped by the frames.
+	if (second_listing_wanted()) begin_second_try();
 	return true;
 }
 
@@ -373,6 +436,11 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 	listing_->set_base(std::move(r));
 	lister_->publish_server_info(rotation_.round_count);
 	(void)lister_->tick(wall_ms());
+	// A hosting second listing publishes the same mission start on its own session.
+	if (second_lister_ != nullptr && second_published_ && second_lister_->hosting()) {
+		second_lister_->publish_server_info(rotation_.round_count);
+		(void)second_lister_->tick(wall_ms());
+	}
 }
 
 // The listing meets the mission that just started: the live source reads the new kernel and the
@@ -403,11 +471,16 @@ bool Server::resolve_title(std::string &error) {
 		error = "/game " + code + ": " + error;
 		return false;
 	}
-	// The listing's login and HOSTKEY fetch request the title's web pages by name.
-	if (!options_.master_host.empty() && options_.credentials.present()) {
+	// The listing's login and HOSTKEY fetch request the title's web pages by name, the second
+	// listing's as the first's.
+	const bool first_logs_in = !options_.master_host.empty() && options_.credentials.present();
+	const bool second_logs_in =
+			!options_.also_master_host.empty() && options_.also_credentials.present();
+	if (first_logs_in || second_logs_in) {
 		const std::string refusal = title_identity_refusal(*title_, TitleIdentityPart::WebFlow);
 		if (!refusal.empty()) {
-			error = "/game " + code + " with --credentials: " + refusal;
+			error = "/game " + code + " with " +
+					(first_logs_in ? "--credentials" : "--also-credentials") + ": " + refusal;
 			title_ = nullptr;
 			return false;
 		}
@@ -821,7 +894,9 @@ bool Server::open_socket(std::string &error) {
 		return false;
 	}
 	datagrams_ = std::make_unique<net::NetDatagramSocket>(socket_);
-	demux_ = std::make_unique<DatagramDemux>(*datagrams_);
+	// A second listing's session rides the same socket on a lane of its own, so its service too
+	// learns the game socket's address from its datagrams (D-NET-346).
+	demux_ = std::make_unique<DatagramDemux>(*datagrams_, second_listing_wanted() ? 2 : 1);
 	return true;
 }
 
@@ -885,45 +960,27 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 		return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
 	};
 	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
-	ListerOptions lister_options;
-	lister_options.title = title_;
-	lister_options.gate_tag = gate_tag_;
+	ListerOptions lister_options = base_lister_options();
 	lister_options.master_host = options_.master_host;
 	lister_options.master_gate_port = options_.master_gate_port;
-	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
-	lister_options.allow_public = options_.allow_public;
 	lister_options.credentials = options_.credentials;
 	lister_options.connect_log = &log_devices_.connect();
 	server_logs_ = log_devices_.logs();
 	lister_options.server_logs = &server_logs_;
-	lister_options.gate_ports = inmatch::gate_bind_ports(config_.cfg());
-	lister_options.extended_metrics = config_.cfg().mp_extract_extended_metric_information != 0;
-	// NWHWI at the connect: the boot's device facts and game.cfg's display mode, formatted
-	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F].
-	HardwareIdentity hw = device_identity_;
-	gamecfg::display_size(config_.cfg(), hw.desktop_width, hw.desktop_height, hw.display_width,
-			hw.display_height);
-	lister_options.hardware_identity = make_nwhwi(hw);
 	last_lister_exit_ = -1;
 	lister_ = std::make_unique<Lister>(lister_options, *listing_, &demux_->session());
-	const NwuLobbySession &lobby = lister_->lobby();
-	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
-		return lobby.claims(from, data, len);
+	demux_->set_session_claim([this](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lane_claims(lister_.get(), second_lister_.get(), from, data, len);
 	});
 	// Each player's teardown sends its ClientHostPlayerRemoved on the hosting session itself
-	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29) [orig:
-	//  Server_HandlePlayerDisconnect @0x51B5C0 - CNapiGameSession_SendPlayerRemovedIfHosting called
-	//  @0x51B5F3].
+	// (inmatch::NapiNPServerCtx::nwu_player_removed, D-NET-NEW-L9-29), and on the second
+	// listing's beside it (D-NET-1385, none of retail's) [orig: Server_HandlePlayerDisconnect @0x51B5C0 -
+	//  CNapiGameSession_SendPlayerRemovedIfHosting called @0x51B5F3].
 	client_process_.nwu_player_removed = [this](int player_number) {
 		if (lister_ != nullptr) lister_->host_role().clear_player_slot(player_number);
+		if (second_lister_ != nullptr) second_lister_->host_role().clear_player_slot(player_number);
 	};
-	// The Host list's tokens are the mounted gametext's NovaWorld and TimeOfDay strings.
-	lister_->host_role().set_lobby_text(make_host_lobby_text(
-			[this](const char *section, const char *key, std::string &out) {
-				if (!have_gametext_) return false;
-				out = gametext_.get_in_section(section, key);
-				return !out.empty();
-			}));
+	set_lobby_text(*lister_);
 	if (!lister_->start()) {
 		error = listing_failure(lister_->exit_code(), config_.cfg().networkconnecttype,
 				options_.master_host);
@@ -946,6 +1003,318 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	return true;
 }
 
+ListerOptions Server::base_lister_options() const {
+	ListerOptions options;
+	options.title = title_;
+	options.gate_tag = gate_tag_;
+	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
+	options.allow_public = options_.allow_public;
+	options.gate_ports = inmatch::gate_bind_ports(config_.cfg());
+	options.extended_metrics = config_.cfg().mp_extract_extended_metric_information != 0;
+	// NWHWI at the connect: the boot's device facts and game.cfg's display mode, formatted
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1570 - sprintf called @0x4D178F].
+	HardwareIdentity hw = device_identity_;
+	gamecfg::display_size(config_.cfg(), hw.desktop_width, hw.desktop_height, hw.display_width,
+			hw.display_height);
+	options.hardware_identity = make_nwhwi(hw);
+	return options;
+}
+
+// The Host list's tokens are the mounted gametext's NovaWorld and TimeOfDay strings.
+void Server::set_lobby_text(Lister &lister) {
+	lister.host_role().set_lobby_text(make_host_lobby_text(
+			[this](const char *section, const char *key, std::string &out) {
+				if (!have_gametext_) return false;
+				out = gametext_.get_in_section(section, key);
+				return !out.empty();
+			}));
+}
+
+// The socket's second session lane. OpenNova's own composition, none of retail's: a stock host
+// lists on the one service its gate names (D-NET-1385, ADR 0068). Everything below is the
+// second listing's policy:
+// - it waits for the starting map (the first listing's hosting holds the boot, retail's order;
+//   the second never does), and nothing of it blocks the frame thread: its gate's DNS lookup
+//   runs on a worker, and a torn-down try's web exchange is left to land on its own;
+// - it publishes its first full lists the moment it hosts, as a mission start would;
+// - its service's decision (ServerStopHosting, its punt, a ServerCommand's stop, a refused
+//   login, host request or re-host) ends it there alone for the rest of the run, as a stock
+//   host's listing that does not host ends: no retry against that service;
+// - a fault on the way (a gate that does not answer or resolve, a request that never reached
+//   the service, no hosting by kSecondListingHostDeadlineMs) is tried again after
+//   kSecondListingRetryFirstMs, doubling up to kSecondListingRetryMaxMs, at most
+//   kSecondListingTriesMax tries.
+constexpr std::size_t kSecondListingLane = 1;
+
+bool Server::second_listing_wanted() const {
+	return novaworld_ && !options_.also_master_host.empty();
+}
+
+void Server::begin_second_try() {
+	if (second_resolve_.valid() || second_lister_ != nullptr || second_stopped_) return;
+	// The destination rule is the run's own, the same at every try: a gate it refuses is final.
+	if (!destination_permitted(options_.also_master_host, options_.allow_public)) {
+		io::logf(io::LogLevel::kWarn,
+				"opennova-serve: the second listing's gate %s needs --allow-public; it is not tried "
+				"this run",
+				options_.also_master_host.c_str());
+		second_stopped_ = true;
+		second_reason_ = "its gate needs --allow-public";
+		second_tag_.clear();
+		return;
+	}
+	// The destination rule by name, as the listing's own lookups apply it (destination_policy.h);
+	// the try then probes the dotted address, which the rule passes.
+	second_resolve_ = std::async(std::launch::async,
+			[host = options_.also_master_host,
+					allow_public = options_.allow_public]() -> std::optional<std::string> {
+				net::Endpoint gate{};
+				if (!resolve_destination(host, gate, allow_public, "the second listing's gate"))
+					return std::nullopt;
+				return std::to_string(gate.ip[0]) + "." + std::to_string(gate.ip[1]) + "." +
+						std::to_string(gate.ip[2]) + "." + std::to_string(gate.ip[3]);
+			});
+}
+
+void Server::start_second_listing(const std::string &gate_address, uint32_t now_ms) {
+	if (listing_ == nullptr || lister_ == nullptr || demux_ == nullptr || second_lister_ != nullptr ||
+			second_stopped_)
+		return;
+	if (second_source_ == nullptr) second_source_ = std::make_unique<SecondListing>(*listing_);
+	ListerOptions options = base_lister_options();
+	options.master_host = gate_address;
+	options.master_gate_port = options_.also_master_gate_port;
+	options.credentials = options_.also_credentials;
+	// Its own AppId, apart from the first registration's: each service's .joi hands its joiners
+	// its own registration's, so the match's join check knows which listing sent each (code 9,
+	// NapiNPConnection::novaworld_listing) and routes its ticket to that listing's service.
+	options.taken_app_id = static_cast<uint32_t>(lister_->host_role().app_id());
+	// The process's _connectlog.txt and _inout.txt are retail's lines of its one listing: the
+	// second listing writes neither, only its console lines, which its label marks.
+	options.label = "(second listing)";
+	second_lister_ = std::make_unique<Lister>(options, *second_source_,
+			&demux_->session(kSecondListingLane));
+	second_source_->set_lister(second_lister_.get());
+	second_published_ = false;
+	second_started_ms_ = now_ms;
+	// Each lane's claim reads the listers as they stand when a datagram lands, so neither holds a
+	// lister that went.
+	demux_->set_session_claim([this](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+		return lane_claims(second_lister_.get(), lister_.get(), from, data, len);
+	}, kSecondListingLane);
+	set_lobby_text(*second_lister_);
+	listing_->set_second(second_lister_.get());
+	if (!second_lister_->start()) {
+		end_second_listing(/*stop_hosting=*/false);
+		schedule_second_retry(now_ms, "its sockets did not open");
+	}
+}
+
+void Server::schedule_second_retry(
+		uint32_t now_ms, const std::string &why, const std::string &tag) {
+	second_tag_ = tag;
+	if (++second_faults_ >= kSecondListingTriesMax) {
+		second_stopped_ = true;
+		second_reason_ =
+				"it did not host in " + std::to_string(second_faults_) + " tries; the last: " + why;
+		io::logf(io::LogLevel::kWarn,
+				"opennova-serve: the second listing (%s) did not host (%s); %d tries, not tried "
+				"again this run",
+				options_.also_master_host.c_str(), why.c_str(), second_faults_);
+		return;
+	}
+	second_reason_ = why;
+	second_backoff_ms_ = second_backoff_ms_ == 0
+			? kSecondListingRetryFirstMs
+			: std::min(second_backoff_ms_ * 2u, kSecondListingRetryMaxMs);
+	second_retry_at_ms_ = now_ms + second_backoff_ms_;
+	// The supervisor's copy of when it comes (second_listing_report), in its own clock.
+	second_retry_at_unix_ = static_cast<int64_t>(std::time(nullptr)) + second_backoff_ms_ / 1000u;
+	io::logf(io::LogLevel::kWarn,
+			"opennova-serve: the second listing (%s) did not host (%s); trying again in %u s",
+			options_.also_master_host.c_str(), why.c_str(), second_backoff_ms_ / 1000u);
+}
+
+SecondListingReport Server::second_listing_report() const {
+	SecondListingReport report;
+	if (!second_listing_wanted())
+		return report;
+	// The players its service sent, whatever its state: they stay when the listing ends.
+	if (role_ != nullptr) {
+		for (const inmatch::NapiNPConnection &conn :
+				role_->state.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == inmatch::NapiNPConnection::kTypeServerSide &&
+					inmatch::player_slot_active(conn) && conn.novaworld_listing == 1)
+				report.slots.push_back(static_cast<int>(conn.reply.player_slot));
+		std::sort(report.slots.begin(), report.slots.end());
+	}
+	if (second_stopped_) {
+		report.state = SecondListingState::NotListed;
+		report.reason = second_reason_;
+		report.tag = second_tag_;
+		return report;
+	}
+	if (second_lister_ != nullptr && second_lister_->hosting()) {
+		report.state = SecondListingState::Listed;
+		return report;
+	}
+	report.attempt = second_faults_ + 1;
+	report.attempts = kSecondListingTriesMax;
+	// A try under way (its gate's lookup or its lister), or the first not yet begun.
+	if (second_lister_ != nullptr || second_resolve_.valid() || second_faults_ == 0) {
+		report.state = SecondListingState::Trying;
+		return report;
+	}
+	report.state = SecondListingState::Retrying;
+	report.next_try_at = second_retry_at_unix_;
+	report.reason = second_reason_;
+	report.tag = second_tag_;
+	return report;
+}
+
+void Server::tick_second_listing() {
+	if (!second_listing_wanted() || listing_ == nullptr) return;
+	// The torn-down tries' web exchanges that landed go.
+	second_http_left_.erase(std::remove_if(second_http_left_.begin(), second_http_left_.end(),
+			[](const std::future<net::HttpReply> &left) {
+				return left.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+			}), second_http_left_.end());
+	if (second_stopped_) return;
+	const uint32_t now = wall_ms();
+	if (second_lister_ == nullptr) {
+		if (second_resolve_.valid()) {
+			if (second_resolve_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+			const std::optional<std::string> address = second_resolve_.get();
+			if (address)
+				start_second_listing(*address, now);
+			else
+				schedule_second_retry(now, "its gate did not resolve or was refused");
+		} else if (static_cast<int32_t>(now - second_retry_at_ms_) >= 0) {
+			begin_second_try();
+		}
+		return;
+	}
+	if (!second_lister_->finished()) (void)second_lister_->tick(now);
+	if (second_lister_->hosting()) {
+		if (second_published_) return;
+		second_published_ = true;
+		second_backoff_ms_ = 0;
+		second_faults_ = 0;
+		second_reason_.clear();
+		second_tag_.clear();
+		// Its first full Host list and PlayerList, its HostKey among them, as the mission start's
+		// update sends a fresh host's (its host result published nothing, D-NET-465).
+		second_lister_->publish_server_info(rotation_.round_count);
+		io::logf(io::LogLevel::kInfo, "opennova-serve: also listed on NovaWorld (%s)%s",
+				options_.also_master_host.c_str(),
+				second_lister_->host_role().requires_join_ticket()
+						? "; its joiners' tickets go to it"
+						: "");
+		return;
+	}
+	// Not hosting. Its service's decision, final for the run as a stock host's listing that does
+	// not host ends: ServerStopHosting (the session left up, as a stock host's is until its
+	// match's NovaWorld exit), its punt (ServerLeaveNovaWorld, the session ended), a
+	// ServerCommand's stop (the hosting left with ClientStopHosting), a re-host refused after its
+	// session's reconnect (the hosting left with none of those: NwuHostRole's
+	// handle_host_result), or a refusal that ended the try (a login, a HOSTKEY page or a host
+	// request refused: Lister::refused).
+	const bool finished = second_lister_->finished();
+	const bool punted = finished && second_lister_->exit_code() == kExitStoppedByService;
+	const bool rehost_refused = second_published_ && !finished;
+	const bool command_stopped = second_source_ != nullptr && second_source_->command_stopped();
+	if (second_lister_->stopped_by_service() || punted || command_stopped || rehost_refused ||
+			(finished && second_lister_->refused())) {
+		// Why, for the supervisor: the stop the service sent, or the refusal the lister ended on
+		// (a punt's among them).
+		second_tag_.clear();
+		if (second_lister_->stopped_by_service()) {
+			second_reason_ = "the service stopped the hosting";
+		} else if (command_stopped) {
+			second_reason_ = "a command from the service stopped it";
+		} else if (rehost_refused) {
+			second_reason_ = "the service refused the hosting again after its session reconnected";
+		} else {
+			second_reason_ = second_lister_->failure().empty()
+					? std::string("the service refused it")
+					: second_lister_->failure();
+			second_tag_ = second_lister_->failure_tag();
+		}
+		io::logf(io::LogLevel::kWarn,
+				"opennova-serve: the second listing's service (%s) stopped or refused it (%s); it "
+				"is "
+				"not tried again this run",
+				options_.also_master_host.c_str(), second_reason_.c_str());
+		second_stopped_ = true;
+		end_second_listing(/*stop_hosting=*/false);
+		return;
+	}
+	if (!finished) {
+		// Still on its way (the gate, the session, the login and the HOSTKEY, the host request),
+		// within the deadline.
+		if (now - second_started_ms_ <= kSecondListingHostDeadlineMs) return;
+		end_second_listing(/*stop_hosting=*/false);
+		schedule_second_retry(now,
+				"it was not listed within " +
+						std::to_string(kSecondListingHostDeadlineMs / 60000u) + " minutes");
+		return;
+	}
+	// A fault on the way: a gate or a session that did not answer, a request that never reached
+	// the service; the lister's own account of it when it has one.
+	const std::string why = second_lister_->failure().empty()
+			? std::string("its gate or its session did not answer")
+			: second_lister_->failure();
+	const std::string tag = second_lister_->failure_tag();
+	end_second_listing(/*stop_hosting=*/false);
+	schedule_second_retry(now, why, tag);
+}
+
+void Server::announce_joins() {
+	if (role_ == nullptr)
+		return;
+	// The service a listing's gate names, as the console calls it: NovaLogic's NovaWorld under
+	// novaworld.net, OpenNova's on any other (destination_policy.h), the gate beside it.
+	const auto service = [](const std::string &gate, uint16_t port) {
+		return std::string(is_novaworld_domain_host(gate) ? "NovaLogic's NovaWorld ("
+														  : "OpenNova's NovaWorld (") +
+				gate + ":" + std::to_string(port) + ")";
+	};
+	std::set<uint32_t> present;
+	for (const inmatch::NapiNPConnection &conn :
+			role_->state.host_owner.ctx.np_protocol.connection_list) {
+		if (conn.type != inmatch::NapiNPConnection::kTypeServerSide ||
+				!inmatch::player_slot_active(conn))
+			continue;
+		present.insert(conn.connection_id);
+		if (!announced_joins_.insert(conn.connection_id).second)
+			continue;
+		const std::string via = !novaworld_ ? std::string("on the LAN")
+				: conn.novaworld_listing == 1
+				? "via " + service(options_.also_master_host, options_.also_master_gate_port)
+				: "via " + service(options_.master_host, options_.master_gate_port);
+		io::logf(io::LogLevel::kInfo, "opennova-serve: [join] \"%s\" %s", conn.player_name.c_str(),
+				via.c_str());
+	}
+	for (auto it = announced_joins_.begin(); it != announced_joins_.end();)
+		it = present.count(*it) != 0 ? std::next(it) : announced_joins_.erase(it);
+}
+
+void Server::end_second_listing(bool stop_hosting) {
+	if (second_lister_ == nullptr) return;
+	if (listing_ != nullptr) listing_->set_second(nullptr);
+	if (second_source_ != nullptr) second_source_->set_lister(nullptr);
+	if (stop_hosting)
+		second_lister_->stop();
+	else
+		second_lister_->disconnect();
+	if (demux_ != nullptr) demux_->set_session_claim(nullptr, kSecondListingLane);
+	// A web exchange still out lands on its own: the lister goes without waiting on it.
+	std::future<net::HttpReply> left = second_lister_->release_http();
+	if (left.valid()) second_http_left_.push_back(std::move(left));
+	second_lister_.reset();
+	second_published_ = false;
+}
+
 bool Server::frame(double delta_seconds) {
 	if (!running_) return false;
 	// The per-main-frame counter [orig: Game_ProcessMainFrame @0x5265D5 ->
@@ -959,6 +1328,7 @@ bool Server::frame(double delta_seconds) {
 		if (!lister_->finished()) (void)lister_->tick(wall_ms());
 		listing_->sync_session();
 	}
+	tick_second_listing();
 	inmatch::FrameInput input;
 	input.delta_seconds = delta_seconds;
 	input.loaded_model_list_count = loaded_model_list_count_;
@@ -967,6 +1337,7 @@ bool Server::frame(double delta_seconds) {
 	// queues: the fire ring among them, which grew by every round fired until the next map.
 	kernel_->world.out.discard_presentation();
 	world::discard_entity_presentation(kernel_->world);
+	announce_joins();
 	if (!outcome.terminal()) {
 		// The admin pump ends a game frame; a frame whose mission exit pushes the
 		// Post Menu returns before it [orig: Game_ProcessMainFrame @0x526872..0x526878
@@ -1019,8 +1390,12 @@ void Server::stop() {
 	//  CNapiNetwork_TearDownSocket called @0x4C877B]
 	const inmatch::PostMissionRoute exit_route = inmatch::route_mission_exit(
 			role_ ? role_->state.host_owner.ctx.mission_exit_reason : 0, /*novaworld=*/true);
-	if (lister_ && role_ && exit_route.error != inmatch::PostMissionError::None)
+	if (lister_ && role_ && exit_route.error != inmatch::PostMissionError::None) {
+		// The first listing's service ended its hosting (the NovaWorld exit), so its burst goes
+		// alone; the second's still hosts, so it deregisters as a stock host does, first.
+		end_second_listing(/*stop_hosting=*/true);
 		lister_->disconnect();
+	}
 	// The game socket's teardown line, once, while the _connectlog.txt log is still on (no
 	// connection ever came): the session's FullDestroy on the rotation's end or the quit, else
 	// the shutdown's (D-NET-NEW-L8-8) [orig: CNapiNetwork_TearDownSocket @0x4C4C90 (the line
@@ -1064,6 +1439,12 @@ void Server::stop() {
 	//  CNapiNPConnection_Destroy -> SendDisconnectPacket @0x61F2A0 -> sendto;
 	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
 	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
+	// The second listing goes the same way as the first, ahead of it. A try's gate lookup and the
+	// torn-down tries' web exchanges still out are waited out after the first listing's own
+	// deregistration (each holds copies alone, no lister or lane), so a hung exchange never holds
+	// it back past a container's stop grace.
+	end_second_listing(/*stop_hosting=*/!reset_exit_);
+	second_source_.reset();
 	if (lister_) {
 		if (reset_exit_)
 			lister_->disconnect();
@@ -1072,6 +1453,8 @@ void Server::stop() {
 		last_lister_exit_ = lister_->exit_code();
 		lister_.reset();
 	}
+	second_resolve_ = {};
+	second_http_left_.clear();
 	listing_.reset();
 	demux_.reset();
 	datagrams_.reset();

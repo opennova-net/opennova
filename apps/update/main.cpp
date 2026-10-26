@@ -44,7 +44,7 @@ VersionMark version_mark(const std::filesystem::path &dir) {
 	std::string wizard;
 	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
 	                                    ? update::read_update_wizard(wizard).cmd
-	                                    : std::string(update::kOpenNovaCommandFile);
+	                                    : std::string(update::kAcidGambitCommandFile);
 	std::vector<uint8_t> bytes;
 	std::string ignored;
 	if (command.empty() || !update::is_safe_row_name(command) ||

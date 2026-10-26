@@ -97,12 +97,13 @@ WHERE d.kind = 'expansion' AND d.expansion_code = 'jox01' AND d.parent_id = b.id
 UPDATE data_sets SET updater_login = 'DFX2', command_file = 'DFX2.CMD', retail_updater = true
 WHERE kind = 'base' AND game = 'dfx2_consumer';
 
--- OpenNova's own products (ADR 0067): its runtime, a standalone updater product; its content
--- and its onjo1 expansion's, complete packages served at the deployment's update host.
+-- OpenNova's own products (ADR 0067): its runtime, a standalone updater product; its game's
+-- (OP: Acid Gambit) and its nifty expansion's (OP: Nifty Package), complete packages served at
+-- the deployment's update host.
 INSERT INTO data_sets (display_name, kind, updater_login, command_file)
 VALUES ('OpenNova runtime', 'update', 'ONRUNTIME', 'ONRUNTIME.CMD');
-UPDATE data_sets SET updater_login = 'OPENNOVA', command_file = 'OPENNOVA.CMD'
-WHERE kind = 'base' AND game = 'opennova_0_consumer';
+UPDATE data_sets SET updater_login = 'ACIDGAMBIT', command_file = 'ACIDGAMBIT.CMD'
+WHERE kind = 'base' AND game = 'acidgambit_0_consumer';
 INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file)
-SELECT 'OpenNova Joint Operations', 'expansion', id, 'onjo1', 'ONJO1', 'ONJO1.CMD'
-FROM data_sets WHERE kind = 'base' AND game = 'opennova_0_consumer';
+SELECT 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD'
+FROM data_sets WHERE kind = 'base' AND game = 'acidgambit_0_consumer';

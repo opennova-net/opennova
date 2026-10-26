@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DFX2, JO, settings } from '../test/hostedFixtures';
+import type { HostedSettings } from '../types/hostedServer';
 import {
   availableMissions,
   checkSettings,
@@ -11,6 +12,8 @@ import {
   initialRotation,
   MISSIONS_MAX,
   missionLabel,
+  NOVA_NAME_RULE,
+  offersNovaLogicListing,
   type SettingsForm,
 } from './hostedSettings';
 
@@ -84,6 +87,42 @@ describe('checkSettings', () => {
     expect(checkSettings(form({ game_name: ' ' }), BOTH).errors.game_name).toBeDefined();
     expect(checkSettings(form({ game_password: 'has space' }), BOTH).errors.game_password).toBeDefined();
   });
+
+  it("sends the listing on NovaLogic's NovaWorld only while the service offers it", () => {
+    expect(checkSettings(form({ list_on_novalogic: true }), BOTH, true).settings?.list_on_novalogic).toBe(true);
+    expect(checkSettings(form({ list_on_novalogic: false }), BOTH, true).settings?.list_on_novalogic).toBe(false);
+    // Not offered: it goes off, whatever the form holds, and is no error.
+    const unoffered = checkSettings(form({ list_on_novalogic: true }), BOTH, false);
+    expect(unoffered.errors).toEqual({});
+    expect(unoffered.settings?.list_on_novalogic).toBe(false);
+    expect(checkSettings(form({ list_on_novalogic: true }), BOTH).settings?.list_on_novalogic).toBe(false);
+  });
+
+  it("refuses a name holding Nova while the listing on NovaLogic's NovaWorld is ticked", () => {
+    const ticked = checkSettings(form({ list_on_novalogic: true, game_name: '[OPENNOVA.NET] Joint Ops' }), BOTH, true);
+    expect(ticked.errors.game_name).toBe(NOVA_NAME_RULE);
+    expect(ticked.settings).toBeNull();
+    expect(checkSettings(form({ list_on_novalogic: true, game_name: 'my nova server' }), BOTH, true).errors.game_name)
+      .toBe(NOVA_NAME_RULE);
+    // Unticked, or not offered: the name is fine.
+    expect(checkSettings(form({ list_on_novalogic: false, game_name: 'OpenNova Test' }), BOTH, true).errors).toEqual({});
+    expect(checkSettings(form({ list_on_novalogic: true, game_name: 'OpenNova Test' }), BOTH, false).errors).toEqual({});
+  });
+
+  it("sends the listing on NovaLogic's NovaWorld only for a game it lists", () => {
+    // Delta Force Xtreme 2 takes none: it goes off, whatever the form holds.
+    const dfx2 = checkSettings(
+      form({ data_set_id: DFX2.id, missions: ['dfx_one.bms'], expansion_id: null, list_on_novalogic: true }),
+      BOTH,
+      true,
+    );
+    expect(dfx2.errors).toEqual({});
+    expect(dfx2.settings?.list_on_novalogic).toBe(false);
+    expect(offersNovaLogicListing(JO, true)).toBe(true);
+    expect(offersNovaLogicListing(DFX2, true)).toBe(false);
+    expect(offersNovaLogicListing(JO, false)).toBe(false);
+    expect(offersNovaLogicListing(null, true)).toBe(false);
+  });
 });
 
 describe('fieldRule', () => {
@@ -94,6 +133,7 @@ describe('fieldRule', () => {
     expect(fieldRule('expansion_id', DFX2)).toBe('The expansion is the base game.');
     expect(fieldRule('max_players', null)).toBe(FIELD_RULES.max_players);
     expect(fieldRule('data_set_id', JO)).toBe(FIELD_RULES.data_set_id);
+    expect(fieldRule('list_on_novalogic', JO)).toBe(FIELD_RULES.list_on_novalogic);
   });
 });
 
@@ -126,6 +166,15 @@ describe('the form a start begins with', () => {
     expect(formFrom(settings({ expansion_id: ESCALATION }), JO, []).expansion_id).toBe(ESCALATION);
     expect(formFrom(settings({ expansion_id: ESCALATION }), DFX2, []).expansion_id).toBeNull();
     expect(formFrom(settings({ max_players: 12 }), JO, []).max_players).toBe(12);
+  });
+
+  it("starts the listing on NovaLogic's NovaWorld off, or as the last server had it", () => {
+    expect(DEFAULT_SETTINGS.list_on_novalogic).toBe(false);
+    expect(formFrom(null, JO, []).list_on_novalogic).toBe(false);
+    expect(formFrom(settings({ list_on_novalogic: true }), JO, []).list_on_novalogic).toBe(true);
+    // A server's settings that leave it out read as off.
+    const { list_on_novalogic: _listing, ...older } = settings();
+    expect(formFrom(older as HostedSettings, JO, []).list_on_novalogic).toBe(false);
   });
 
   it("plays every mission of the data by default, or the last server's for its own game", () => {

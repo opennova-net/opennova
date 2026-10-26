@@ -22,6 +22,7 @@
 
 #include "data_sets/data_set_repository.h"
 
+#include <formats/update/sfs.h>
 #include <net/novaworld/db/database.h>
 #include <net/update/update_server.h>
 
@@ -98,10 +99,10 @@ private:
 	// there while it is live), and the section that names it. False with `why`.
 	bool current_section(const hosted::DataSetRow &row, hosted::PublishedSection &section,
 			std::string &why);
-	// The package's section keys, from the memo or the package read once; `read` whether
-	// the package's bytes were read into `bytes` (left empty otherwise).
-	bool section_keys(const std::string &sha256, std::vector<SectionKey> &keys,
-			std::vector<uint8_t> &bytes, bool &read, std::string &why);
+	// The package's section keys, from the memo or the package's entries located once.
+	bool section_keys(const std::string &sha256, std::vector<SectionKey> &keys, std::string &why);
+	// The cached package's entries located (formats/update/sfs.h sfs_locate), never read.
+	bool locate_package(const std::string &sha256, update::SfsLayout &layout, std::string &why) const;
 	// Every cached package or directory whose sha is not in `live` removed.
 	void sweep(const std::set<std::string> &live);
 

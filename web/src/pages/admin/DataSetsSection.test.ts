@@ -223,10 +223,10 @@ describe('DataSetsSection', () => {
     // A base sends its title and lobby, and no updater when none is named.
     await page.get('#ds-new-toggle').trigger('click');
     await page.get('#ds-new-display_name').setValue('OpenNova');
-    await page.get('#ds-new-game').setValue('opennova_0_consumer');
+    await page.get('#ds-new-game').setValue('acidgambit_0_consumer');
     submitForm(page, '#ds-new-display_name');
     await flushPromises();
-    expect(create).toHaveBeenLastCalledWith({ display_name: 'OpenNova', kind: 'base', retail_updater: false, title: 'jo', game: 'opennova_0_consumer' });
+    expect(create).toHaveBeenLastCalledWith({ display_name: 'OpenNova', kind: 'base', retail_updater: false, title: 'jo', game: 'acidgambit_0_consumer' });
   });
 
   it("edits a data set's name, lobby and updater", async () => {
@@ -234,11 +234,11 @@ describe('DataSetsSection', () => {
     const page = await mountSection();
     await page.findAll('tr.ds-row')[0].findAll('button').find((b) => b.text().startsWith('Edit'))!.trigger('click');
     await page.get('#ds-edit-display_name-1').setValue('JO');
-    await page.get('#ds-edit-game-1').setValue('opennova_0_consumer');
+    await page.get('#ds-edit-game-1').setValue('acidgambit_0_consumer');
     await page.get('#ds-edit-retail_updater-1').setValue(false);
     submitForm(page, '#ds-edit-display_name-1');
     await flushPromises();
-    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', game: 'opennova_0_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail_updater: false });
+    expect(update).toHaveBeenCalledWith(1, { display_name: 'JO', game: 'acidgambit_0_consumer', updater_login: 'JOTRus', command_file: 'JOPTR.CMD', retail_updater: false });
     expect(page.get('[role="status"]').text()).toBe('JO is saved.');
 
     // An expansion has no lobby of its own; a command file without its login

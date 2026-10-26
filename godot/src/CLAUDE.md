@@ -22,7 +22,7 @@ subdirectory here may be named `base`, `formats`, `runtime` or `net`
 Citations (ADR 0042 d7, ADR 0043): a witness citation is `[orig: Name @ 0xADDR]`
 everywhere — there is no second marker form. `godot_orig_cites` is ONE
 non-increasing count over the whole Godot side (`godot/src` plus the
-`godot/game` and `godot/probes` GDScript): a cite moves freely
+`godot/game`, `godot/editor` and `godot/probes` GDScript): a cite moves freely
 between GDScript and binding C++; the count shrinks only when witnessed code
 moves to its engine home (or dies as verified dead code) and may never grow.
 Genuinely witnessed engine behavior still belongs in `engine/` (ADR 0042's
@@ -39,8 +39,8 @@ absolute zero floor.
 The game-level GDScript runtime (world, debug, ui, avatar, probe,
 mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
 there that is really engine behavior is the C++ rewrite queue. The debug-control
-table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the F3
-windows' `ControlRequest`s and MCP's `game_debug` drive the one instance.
+table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the Insert
+dev tools' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 
 Placement rule: no GDScript here, ever. Game scripts go to `godot/game/`.
 
@@ -50,7 +50,7 @@ return/error contract reports context via `push_warning` (negative-path tests
 drive those legs; GUT counts engine errors as failures); `push_error` is for
 invariant violations nothing recovers from. Load/lifecycle narration uses
 `print_verbose` (visible under `--verbose`), live inspection goes through the
-dev tools (F3: engine-owned ImGui windows; `devtools/` here is the
+dev tools (Insert: engine-owned ImGui windows; `devtools/` here is the
 `DevTools` node and the `FrameStats` board binding, ADR 0039), and `engine/` diagnostics ride the
 `io/log.h` sink.
 Never raw `print`/`printerr`/`print_line`/`WARN_PRINT`/`ERR_PRINT` in shipping
@@ -61,13 +61,17 @@ Gotchas:
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot
   editor — GDExtension registration does not hot-reload, and GDScript referencing an
   unregistered class fails to parse (GUT then silently drops those test scripts).
-- Two GDExtension variants come out of one build (ADR 0046 d2): `libopennova.*`
-  (runtime-only: the game and the editor's Play child) and `libopennova_editor.*`
-  (the same bindings plus `authoring/` and the editor core: what the OpenNova
-  Editor ships). A source run (the Godot editor, GUT, export scanning) loads
-  `godot/bin/libopennova_editor.*.template_debug.*`, the superset, through the
-  plain rows of `bin/opennova.gdextension`; the `opennova_runtime` /
-  `opennova_editor` feature tags of the export presets pick the shipped one. A
+- Two GDExtension variants come out of one build (ADR 0046 d2): the runtime-only one
+  (the game and the editor's Play child; on Windows `opennovad.dll` debug and
+  `opennova.dll` release, elsewhere `libopennova.*`) and the editor-enabled one (the
+  same bindings plus `authoring/` and the editor core: what the OpenNova Editor
+  ships; `oneditord.dll` debug and `oneditor.dll` release, elsewhere
+  `libopennova_editor.*`). The Windows names stay short for the retail updater's
+  15-byte 1SFS name field. A source run (the Godot editor, GUT, export scanning)
+  loads the editor-enabled debug library, the superset (`godot/bin/oneditord.dll`
+  on Windows), through the plain debug rows of `bin/opennova.gdextension`; the
+  `opennova_runtime` / `opennova_editor` feature tags of the export presets pick the
+  shipped one. A
   stale editor means a stale `godot/bin` DLL — rebuild via `scripts/build_godot.sh`
   and fully restart. `authoring/` is the editor's Godot seam (the `EditorApp`
   root node over the shared `ImGuiPassNode`, the OS process seam under Play):

@@ -64,6 +64,17 @@ describe('LobbyServerPage', () => {
     expect(page.findAll('li').map((li) => li.text())).toEqual(['biggy', 'Ann']);
   });
 
+  it("draws the name, message and mission in the game's markup", async () => {
+    read.mockResolvedValue(
+      listed({ serverName: '<c00FF00>Green</c> Ops', message: '<b>Hi<-b> all', mission: 'AS - <cFF0000>Red</c>', gameType: '<c00FF00>COOP/AAS</c>' }),
+    );
+    const page = await open();
+    expect(page.get('h1').text()).toBe('Green Ops');
+    expect(page.get<HTMLElement>('h1 span span').element.style.color).toBe('rgb(0, 255, 0)');
+    expect(page.text()).toContain('Hi all');
+    expect(page.get('dl').text()).toContain('AS - Red (COOP/AAS)');
+  });
+
   it('shows a hosted server its scoreboard, most kills first', async () => {
     read.mockResolvedValue(
       listed({

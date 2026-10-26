@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -49,10 +50,40 @@ bool sfs_has_trailer(const uint8_t *data, size_t size);
 // trailer is absent or an entry runs past the trailer.
 bool sfs_read(const uint8_t *data, size_t size, SfsPackage &out, std::string &error);
 
+// Where an entry's bytes lie in a package file, for a reader that never holds the package: a
+// whole game's release is hundreds of megabytes.
+struct SfsEntrySpan {
+	std::string name;
+	uint64_t offset = 0; // from the start of the file
+	uint32_t size = 0;
+};
+
+struct SfsSectionSpans {
+	std::string expansion;
+	std::vector<SfsEntrySpan> entries;
+};
+
+struct SfsLayout {
+	std::string product;
+	std::vector<SfsSectionSpans> sections;
+};
+
+// The package the open file ends with, walked as sfs_read walks it, each entry located and its
+// bytes left in the file. False with `error` set as sfs_read's.
+bool sfs_locate(std::FILE *file, SfsLayout &out, std::string &error);
+
 // The package's bytes, to append to an updater executable (or to stand alone, which the service
 // accepts). The first section is written without a PACKAGEBREAK when its expansion is empty.
-// Empty when a name does not fit its field, an entry is named PACKAGEBREAK, or a later section
-// has no expansion.
+// Empty when it is not sfs_writable.
 std::vector<uint8_t> sfs_write(const SfsPackage &package);
+
+// Whether sfs_write writes the package: every name fits its field, no entry is named
+// PACKAGEBREAK, only the first section has no expansion, and the whole package fits the
+// trailer's 32-bit offset (2 GiB). `bytes`, when given, gets the package's size.
+bool sfs_writable(const SfsPackage &package, uint64_t *bytes = nullptr);
+
+// sfs_write's bytes written to the open file at its position, a piece at a time, never all in
+// memory; false when the package is not sfs_writable or a write fails.
+bool sfs_write_file(const SfsPackage &package, std::FILE *file);
 
 } // namespace opennova::update

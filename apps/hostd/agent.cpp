@@ -135,6 +135,14 @@ std::optional<hosted::TickHealth> parse_tick_stats(std::string_view text) {
 	return out;
 }
 
+std::optional<hosted::SecondListingStatus> parse_second_listing(std::string_view text) {
+	hosted::SecondListingStatus out;
+	std::string error;
+	if (!hosted::decode_second_listing(text, out, error))
+		return std::nullopt;
+	return out;
+}
+
 // --- the link ------------------------------------------------------------------
 
 HttpServiceLink::HttpServiceLink(std::string base_url, int timeout_ms, Resolver resolve) :
@@ -343,8 +351,10 @@ void Agent::refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t
 		return;
 	machine_read_ = true;
 	machine_at_ = now;
-	// Each running server's last minute of ticks, while its file is fresh.
+	// Each running server's last minute of ticks, while its file is fresh, and
+	// its second listing's state, which it writes only when that changes.
 	ticks_.clear();
+	listings_.clear();
 	const auto fresh_before =
 			std::chrono::system_clock::now() - std::chrono::milliseconds(kTickStaleMs);
 	for (const ContainerInfo &c : observed) {
@@ -352,6 +362,10 @@ void Agent::refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t
 			continue;
 		std::string text;
 		std::chrono::system_clock::time_point written;
+		if (slots_.read_written(c.slot, hosted::kSecondListingFileName, text, written)) {
+			if (auto listing = parse_second_listing(text))
+				listings_[c.name] = std::move(*listing);
+		}
 		if (!slots_.read_written(c.slot, hosted::kTickStatsFileName, text, written) ||
 				written < fresh_before)
 			continue;
@@ -465,6 +479,9 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 			const auto tick = ticks_.find(c.name);
 			if (tick != ticks_.end())
 				r.tick = tick->second;
+			const auto listing = listings_.find(c.name);
+			if (listing != listings_.end())
+				r.second_listing = listing->second;
 		}
 		// Why it ended: the line it wrote at a non-zero exit, in its slot's
 		// directory until the container is removed.

@@ -7,13 +7,13 @@ Glossary of the project's domain language. Definitions only: what a term *is*, n
 The vocabulary for the codebase's own layering (ADR 0028/0034; the boundary rule is
 ADR 0042's). Dependencies point one way: the Godot layer (godot/src bindings +
 godot/game game runtime) → engine. Shells are the front-end composition inside the
-Godot layer's game runtime, not a third dependency tier.
+Godot layer, not a third dependency tier.
 
 **Engine**:
 The portable, Godot-free C++ core under `engine/` (`base/`, `formats/`, `runtime/`,
-`net/`) — the reimplemented NovaLogic engine: format codecs, the world simulation, the
-net stack. "The original engine" always means NovaLogic's binary; our engine contrasted
-with retail is *the reimpl*. Godot is never "the engine".
+`net/`, and the editor's `editor/`) — the reimplemented NovaLogic engine: format codecs,
+the world simulation, the net stack. "The original engine" always means NovaLogic's
+binary; our engine contrasted with retail is *the reimpl*. Godot is never "the engine".
 _Avoid_: libs, core, framework
 
 **The Godot layer (first-class, ADR 0034)**:
@@ -24,9 +24,10 @@ _Avoid_: godot/engine, engine layer (that word is the engine's), glue, bindings 
 half of it)
 
 **Shell**:
-An application front-end composed inside the Godot layer's game runtime: the game
-shell (in `godot/game/`). Shells own UI and application
-flow, never engine behavior.
+An application front-end composed inside the Godot layer: the game shell (in
+`godot/game/`, inside its game runtime) and the editor's (`EditorApp` in
+`godot/src/authoring/`, ADR 0046 d11), which the Authoring terms call the Shell. Shells own
+UI and application flow, never engine behavior.
 _Avoid_: frontend, app (in project prose), host (reserved for the game host)
 
 **Simulation**:
@@ -489,8 +490,9 @@ _Avoid_: animation file, clip file (a `.bad` is one clip)
 
 **`opennova-3di`**:
 The command-line tool (`apps/3di`) over the engine's one `.3di` reader and writer: the
-`.o3d` and `.o3a` texts' `build` and `scene`, `info`, `compare` and `catalog`, and `weapon
-timing` (`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
+`.o3d` and `.o3a` texts' `build` and `scene`, `info` and `compare` (of a model or a clip
+set), `migrate` and `gp` (a BHD-era GP model to 3DI3 and back), `texture`, `catalog`, and
+`weapon timing` (`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
 _Avoid_: the exporter (the add-on is the front end; the CLI mints the files)
 
 **Blender add-on**:
@@ -522,10 +524,11 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 **OpenNova content**:
 OpenNova's own game data, authored from scratch as OpenNova Editor projects kept outside the
 repository and released as update packages: the
-"Indigo Shore" mission (single player and Co-op over LAN) and its "Indigo Storm"
-expansion. The minimal runtime downloads it on first launch. `/game opennova`
-is the default; `/game jo` or `/game dfx2` selects an existing retail installation
-(ADR 0067). `--resource-dir` selects content separately from the runtime directory.
+"OP: Acid Gambit" game (single player and Co-op over LAN) and its "OP: Nifty Package"
+expansion. The minimal runtime downloads it on first launch. `/game acidgambit`,
+`/game jo` or `/game dfx2` selects the game; without `/game` the folder's `UPDATE.WIZ`
+names it (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit;
+ADR 0067). `--resource-dir` selects content separately from the runtime directory.
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
@@ -545,8 +548,10 @@ _Avoid_: dedicated server (for the binary), server exe, opennova-server
 **OpenNova Switcher**:
 The Windows tray app (`switcher/`, `opennova-switcher.exe`, ADR 0054) that points a stock
 retail install's NovaWorld at OpenNova's service, NovaLogic's, or an address the user
-enters, by managing one block in the Windows hosts file for `gs.novaworld.net`. It does
-nothing else: it starts no game and installs nothing. Not a Godot product.
+enters, by managing one block in the Windows hosts file that maps `gs.novaworld.net` and
+the updater's three gateways (`ftp.novaworld.com`, `ftp2.novaworld.com`,
+`ftp4.novaworld.com`). It does nothing else: it starts no game and installs nothing. Not a
+Godot product.
 _Avoid_: launcher (it launches nothing), host file for the Windows hosts file it edits
 (the host file is retail's dedicated-server config, below)
 
@@ -669,7 +674,7 @@ _Avoid_: version (a tree has a version line; the tree is the thing), snapshot, v
 An uploaded `1SFS` packed update (ADR 0061; ADR 0064 decision 5): one package, one section
 per product it carries, each mapped to a **data set** by its command file. Validated, then a
 draft; published, it is what the update listener serves that data set's updater login, and
-the worker applies it once to the data set's baseline **tree**, making a new current one;
+the data program applies it once to the data set's baseline **tree**, making a new current one;
 retired, or replaced by the next publish or a new baseline upload.
 _Avoid_: update (the mechanism), patch, package (the file; a release is the row)
 
@@ -1417,8 +1422,9 @@ a file at a time too but is no operation.
 _Avoid_: task, job, background work (nothing runs on another thread)
 
 **Play**:
-Build, then launch the game runtime (`opennova.exe -- --resource-dir <build> --mcp-port <n>
-[--mission <name.bms>]`) as the editor's one managed child, in a run directory; Stop ends it. Play
+Build, then launch the game runtime (`opennova.exe --log-file <log> -- --no-update
+--resource-dir <build> [/exp <name>] /game <code> --mcp-port <n> [--mission <name.bms>]`) as
+the editor's one managed child, in a run directory; Stop ends it. Play
 starts the game at its menu; **Play mission** (Ctrl+F5) in the active document's mission. It runs in
 the project's **Play mode** and saves unsaved files first (`save_before_play`, on by default).
 _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
@@ -1473,13 +1479,13 @@ or control window added later. Debug builds only; the Godot side is one
 `DevTools` node plus the imgui-godot addon.
 _Avoid_: debug overlay, F3 overlay (the retired GDScript surface), editor
 
-**F3 control board**:
-The read side of the one debug-control table F3 and MCP share
+**Dev tools control board**:
+The read side of the one debug-control table the dev tools (Insert) and MCP share
 (`engine/runtime/devtools/control_board.h`, ADR 0043 d12): each row's definition
 (label, tooltip, kind, range, enum choices) pushed once, and the live state (value,
 writable, the refusal reason) of the rows the visible windows declare, pushed on a
 short cadence. A window draws a row through `draw_control` and writes it through a
-`ControlRequest`, so F3 shows exactly what MCP's `game_debug op=list` reports.
+`ControlRequest`, so the dev tools show exactly what MCP's `game_debug op=list` reports.
 _Avoid_: a window-local copy of a row's range, choices or refusal text
 
 **FrameFX**:

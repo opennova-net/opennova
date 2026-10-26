@@ -4,12 +4,15 @@
 #include "hosted_settings.h"
 
 #include <base/io/sha256.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace opennova::novaworld_server::hosted {
 
@@ -51,6 +54,27 @@ BindValue count_value(uint64_t count) {
 
 BindValue optional_int(const std::optional<int64_t> &value) {
 	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+
+// A second listing's PlayerList slots as their column holds them, "3,7" ("" for none), and back
+// (a part that is no slot left out).
+std::string join_slots(const std::vector<int> &slots) {
+	std::string out;
+	for (const int slot : slots)
+		out += (out.empty() ? "" : ",") + std::to_string(slot);
+	return out;
+}
+std::vector<int> split_slots(const std::string &column) {
+	std::vector<int> out;
+	size_t at = 0;
+	while (at < column.size()) {
+		const size_t comma = std::min(column.find(',', at), column.size());
+		if (const auto slot = strutil::parse_int(column.substr(at, comma - at));
+				slot && *slot >= 0 && *slot <= kMaxSecondListingSlot)
+			out.push_back(*slot);
+		at = comma + 1;
+	}
+	return out;
 }
 
 double as_double(const db::Row &row, size_t i) {
@@ -692,11 +716,21 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const auto tick = [&c](double TickHealth::*field) {
 			return c->tick ? BindValue((*c->tick).*field) : BindValue(std::monostate{});
 		};
+		// Its second listing, null without one; a count the state carries none of, null too.
+		const std::optional<SecondListingStatus> &listing = c->second_listing;
+		const auto listing_count = [&listing](int value) {
+			return listing && value > 0 ? BindValue(static_cast<int64_t>(value))
+										: BindValue(std::monostate{});
+		};
 		db.exec("INSERT INTO fleet_slot_reports (machine_id, slot, container, state, waiting, "
 				"exit_code, oom, started_at, reason, cpu_percent, memory_bytes, egress_bytes, "
-				"net_in_bytes, tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks) "
+				"net_in_bytes, tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks, "
+				"second_listing_state, second_listing_try, second_listing_tries, "
+				"second_listing_next_try_at, second_listing_reason, second_listing_tag, "
+				"second_listing_slots) "
 				"VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8::double precision), $9, $10, "
-				"$11, $12, $13, $14, $15, $16, $17);",
+				"$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, "
+				"to_timestamp($21::double precision), $22, $23, $24);",
 				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
 						BindValue(std::string(container_state_text(c->state))),
 						BindValue(std::string(container_wait_text(c->waiting))),
@@ -706,7 +740,15 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 						count_value(c->egress_bytes), count_value(c->net_in_bytes),
 						tick(&TickHealth::p50_ms), tick(&TickHealth::p99_ms),
 						tick(&TickHealth::max_ms),
-						c->tick ? count_value(c->tick->late) : BindValue(std::monostate{}) });
+						c->tick ? count_value(c->tick->late) : BindValue(std::monostate{}),
+						listing ? BindValue(std::string(second_listing_state_text(listing->state)))
+								: BindValue(std::monostate{}),
+						listing_count(listing ? listing->attempt : 0),
+						listing_count(listing ? listing->attempts : 0),
+						listing ? optional_int(listing->next_try_at) : BindValue(std::monostate{}),
+						BindValue(listing ? listing->reason : std::string()),
+						BindValue(listing ? listing->tag : std::string()),
+						BindValue(listing ? join_slots(listing->slots) : std::string()) });
 	}
 	auto row = find_machine(db, id);
 	tx.commit();
@@ -839,7 +881,10 @@ std::vector<SlotReport> query_slot_reports(
 			db.query("SELECT r.slot, r.container, r.state, r.exit_code, r.oom, "
 					 "CAST(extract(epoch FROM r.started_at) AS bigint), r.reason, r.cpu_percent, "
 					 "r.memory_bytes, r.egress_bytes, r.reported_at, r.waiting, r.net_in_bytes, "
-					 "r.tick_p50_ms, r.tick_p99_ms, r.tick_max_ms, r.late_ticks "
+					 "r.tick_p50_ms, r.tick_p99_ms, r.tick_max_ms, r.late_ticks, "
+					 "r.second_listing_state, r.second_listing_try, r.second_listing_tries, "
+					 "CAST(extract(epoch FROM r.second_listing_next_try_at) AS bigint), "
+					 "r.second_listing_reason, r.second_listing_tag, r.second_listing_slots "
 					 "FROM fleet_slot_reports r " +
 							tail,
 					binds)) {
@@ -864,6 +909,17 @@ std::vector<SlotReport> query_slot_reports(
 			t.max_ms = as_double(r, 15);
 			t.late = as_count(r, 16);
 			s.tick = t;
+		}
+		if (const auto state = parse_second_listing_state(r.as_text(17).value_or(""))) {
+			SecondListingStatus listing;
+			listing.state = *state;
+			listing.attempt = static_cast<int>(r.as_int(18).value_or(0));
+			listing.attempts = static_cast<int>(r.as_int(19).value_or(0));
+			listing.next_try_at = r.as_int(20);
+			listing.reason = r.as_text(21).value_or("");
+			listing.tag = r.as_text(22).value_or("");
+			listing.slots = split_slots(r.as_text(23).value_or(""));
+			s.second_listing = std::move(listing);
 		}
 		out.push_back(std::move(s));
 	}

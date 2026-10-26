@@ -7,28 +7,37 @@ Godot, configured by a host file, retail's own dedicated-server format, over the
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
 answers LAN browsers and admits joiners, and takes retail's remote admin when `game.cfg`
-names its port. A stock retail client has joined it as DFX2 (`/game dfx2`: a retail `dfx2.exe`
-on LAN and through OpenNova's NovaWorld, 2026-10-14, `docs/titles/dfx2-vs-jo-re.md` §7.13); a stock
-`Jointops.exe` join is not yet recorded. Pre-1.0 and experimental.
+names its port. Stock retail clients have joined it: a stock JO:CA 1.7.5.7 `Jointops.exe`
+through NovaLogic's live NovaWorld, with the server listed there (2026-10-24, the net parity
+program's S3 leg, `docs/net/lan-parity-verdict.md` "NovaWorld live legs"), retail joiners on LAN
+(that verdict's `01tr-coop-serve` and `ash-i5a-aas-serve` cells), and a retail `dfx2.exe` as
+DFX2 (`/game dfx2`, on LAN and through OpenNova's NovaWorld, 2026-10-14,
+`docs/titles/dfx2-vs-jo-re.md` §7.13). Pre-1.0 and experimental.
 
 ## Usage
 
 ```text
-opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
-               [/game <code>] [--loose-root] [--lan-port <n>] [--log-debug]
+opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/exp <name>]
+               [/d] [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
+               [--also-master-host <gate>] [--also-master-gate-port <n>]
+               [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
-               [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG]
+               [--second-listing-file <file>]
+               [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
+               [/CONNECTLOG | /NOCONNECTLOG]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
-| `/exp <name>` | Mount that expansion (for example `revx02`). |
+| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
+| `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server speaks (below). Default `jo`. |
+| `/LAN` | Every `game.cfg` read sets `mpnovaworldhostlanonly` to 1, as retail's switch does: a NovaWorld listing advertises LAN only. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
@@ -36,9 +45,13 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
 | `--allow-public` | Allow NovaLogic's NovaWorld (`novaworld.net` and every host under it), a live shared service. Loopback and any other host, an OpenNova service among them, need no flag. |
+| `--also-master-host <gate>` | A second NovaWorld gate to list the same server on, beside `--master-host`'s ("Two listings" below). Needs `--master-host`. |
+| `--also-master-gate-port <n>` | The second gate's UDP port (default 7597). |
+| `--also-credentials <file>` | The second listing's account, in the `--credentials` file's form. |
 | `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
 | `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
 | `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
+| `--second-listing-file <file>` | Rewrite the file whenever the second listing's state changes ("Supervised runs" below). |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
 | `/CHEATLOG` | Start `_CHEAT.TXT` (below). |
@@ -104,6 +117,56 @@ is deployed, can be listed on without a flag. A host that is `novaworld.net` or 
 (`gs.novaworld.net`, NovaLogic's live master) is refused, unresolved, unless `--allow-public`
 is given; a live master is a shared service, so use it sparingly. Account names, passwords and
 session tags are masked in the log.
+
+### Two listings
+
+`--also-master-host` lists the same server on a second NovaWorld service as well, for
+example NovaLogic's `gs.novaworld.net` beside OpenNova's (with `--allow-public`, and
+`--also-credentials` naming a NovaLogic account, since NovaLogic's service hands out a
+HOSTKEY only after a login). Retail has no such thing: a stock host lists on one service.
+The second listing:
+
+- **Starts once the starting map is up.** The first listing still hosts before the boot and
+  still stops the start when it does not host; the second never holds up or stops the
+  server.
+- **Rides the game socket.** Its NovaWorld session shares the one socket with the first's
+  and with the game, so its service lists the server at the address joiners reach.
+- **Lists the same match.** It carries the same columns and players and the same cookie-key
+  ring. It publishes its first full Host list the moment it hosts, and every mission
+  start's after that.
+- **Registers under an AppId of its own,** as every retail host request mints one. Each
+  service hands its joiners its own registration's AppId, so the match knows which service
+  sent each joiner: it admits either AppId, holds a joiner to its own service's join-ticket
+  rule, and sends that joiner's `ClientPlayerEnterRequest` to that service. NovaLogic's
+  service asks for join tickets (the S3 leg's hosts sent it enter requests); OpenNova's
+  does not.
+- **Runs its service's commands on the match,** as a stock host listed there does: a rename
+  or message change from either service renames the server on both. A `PuntPlayer` at the
+  server's own slot from the second service ends only the second listing.
+- **Takes its service's decisions as final.** That service's `ServerStopHosting`, its
+  punt, a refused login, a refused host request (too many servers, the name not accepted,
+  ...) or a refused re-host delists the server there and nowhere else: the match and the
+  first listing go on, and the second listing is not tried again until the server
+  restarts, as a stock host's listing that does not host ends. Its console line says why,
+  and so does `--second-listing-file` ("Supervised runs").
+- **Retries only faults.** A gate that does not answer or resolve, a request that never
+  reached the service, a web page its host failed (5xx) or moved (3xx), a session that
+  dropped before the service answered, or a listing still not hosting 3 minutes after its
+  start is tried again after a minute, then after twice as long each time up to 15 minutes,
+  at most 5 tries in a run. A gate the destination rule refuses (NovaLogic's without
+  `--allow-public`) is not tried at all, and `--also-master-host` may not name the
+  `--master-host` gate (two sessions with one service would share its datagrams).
+- **Deregisters as a stock host does.** Whatever stops the server, a second listing still
+  hosting sends `ClientStopHosting` and then the goodbye (the goodbye alone at the reset
+  exit, as the first's).
+- **Never holds up the match.** Its gate's name is looked up on a worker thread, and a try
+  that ends with a web request still out leaves it to finish on its own.
+
+What stays the first listing's: the match's GSID (the LAN reply's `SUS1`), its METPROTOCOL
+gate reports after the first mission's `ID` report, and the `_connectlog.txt` and
+`_inout.txt` lines. The second listing's console lines start with `(second listing)`. Both
+services see every player in the PlayerList, with the PCID that player's own service gave
+it.
 
 ## The host file
 
@@ -203,6 +266,8 @@ empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
 | `game.cfg` | at the start (twice, as the game) | at the start, at every map change, at the exit, and by every admin `SET` |
 | `activesrvr.txt` | never | at the start; deleted at a clean exit |
 | `admin.cfg` | at the start | never |
+| `player.sav` | at every mission boot (the start and each map change), when present: the server's own slot runs under its current record (`game.cfg`'s `player_index`), whose name joiners see (D-NET-352) | never |
+| `weapon.sav` (`expansion/<code>/weapon.sav` with `/exp`) | at every mission boot, when present: that record's sides, its class and characters | never |
 | `admin_log.txt` | never | emptied at every launch, then one line per admin event |
 | `banned.txt` | when the session starts | at the exit, when an in-game ban added an entry |
 | `banlist.txt` | when a NovaWorld session starts (a missing one is created) | by every ban or unban on a NovaWorld session (`PLAYER BAN`, `CMD BAN`, `CMD UNBAN`) |
@@ -262,7 +327,12 @@ install's `gametext.bin`. `--status-page off` prints no page and reads no standa
 
 The console also prints the session's lines retail writes under its `/INOUT` switch: `HOST
 STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED` and
-`SERVER PLAYER REMOVED` per connection.
+`SERVER PLAYER REMOVED` per connection. None of them names the way a player came, so the
+server adds a line of its own per player it adds: `opennova-serve: [join] "<name>" via
+NovaLogic's NovaWorld (<gate>:<port>)` for a gate under `novaworld.net`, `via OpenNova's
+NovaWorld (<gate>:<port>)` for any other, the gate the listing whose AppId the joiner carried
+lists on ("Two listings"), or `on the LAN`. Retail's lines, `_inout.txt` and
+`_connectlog.txt` stay as retail writes them.
 
 These logs go to the working directory, in retail's names and formats:
 
@@ -271,11 +341,14 @@ These logs go to the working directory, in retail's names and formats:
 | `<path>.sph` | `/PROFILE <path>` | The server log: per map of the rotation, a file of its own holding the map, the players, every eighth tick each player's position and heading, each deploy and disconnect. The extension replaces everything after the path's first dot; an existing file is not overwritten, the name counts up instead (`host.sph`, `host1.sph`, ... `host10.sph`, then `host1.sph` again). `opennova-wire` decodes it. |
 | `_PUNT.TXT` | `/PUNTLOG` or `/PUNT.TXT` | A `START` line, then one line per punted player (the weapon and ammo table checks, more than nine suicides). The switch starts the file anew. |
 | `_CHEAT.TXT` | `/CHEATLOG` | A `START` line (retail writes nothing else to it). |
+| `_NETLOG.TXT` | `/NETLOG`, or a `_DONETLOG.TXT` in the working directory | The protocol manager's net log; the remote admin's `CMD NETLOG` toggles it. |
+| `_inout.txt` | `/INOUT` | The protocol's log from the socket's open: the host and player lines the console prints (above), and each `ServerStopHosting` the NovaWorld session reads. |
+| `_connectlog.txt` | `/CONNECTLOG` (`/NOCONNECTLOG` turns it back off) | The connection debug log: a header (the exe, version, title and version pair), then its lines until the server's first new connection, which writes its disabling line and turns it off for the process. |
 
 ## Supervised runs
 
-Whatever runs the server for others (a hosted server's machine agent, ADR 0053) reads two
-files of its own, neither retail's, and turns the status page off (`--status-page off`):
+Whatever runs the server for others (a hosted server's machine agent, ADR 0053) reads
+files of its own, none of them retail's, and turns the status page off (`--status-page off`):
 the page reprints whenever a slot or a chat line changes, which a log pipeline would carry
 line by line.
 
@@ -290,6 +363,18 @@ line by line.
   logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
   host: ...`), so its supervisor can say why without reading its log. A clean exit (0)
   writes nothing.
+- **`--second-listing-file <file>`**: the second listing's state ("Two listings" above), so
+  its supervisor can show whether and why the server is listed there without reading its
+  log. The server rewrites the file (a new file renamed over the old) whenever the state
+  changes, one JSON line: `{"state"}`, one of `off` (the run has no second listing),
+  `trying`, `listed`, `retrying` and `not_listed` (over for the run), with `"try"` and
+  `"tries"` (the try under way or the next, of the 5) while trying or retrying,
+  `"next_try_at"` (Unix seconds) while retrying, `"reason"` while retrying or not listed
+  (in plain words: `the service did not accept the server name`, `the gate did not answer`,
+  `it did not host in 5 tries; the last: ...`) with `"tag"`, the NWEC tag behind it, when
+  there is one, and `"slots"`, the PlayerList slots (the remote admin's `PLAYER LIST`
+  numbers) of the players in the match the second listing's service sent, while there are
+  any. No account name or password is in it.
 
 ## Exit codes
 
@@ -297,7 +382,7 @@ line by line.
 |---|---|
 | 0 | `--help`, stopped by Ctrl+C or SIGTERM (one that arrives during the start stops the server once the mission has booted, except on a listed server before its listing hosted: 1), `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), the mission did not boot, or, on a listed server, a Ctrl+C or SIGTERM arrived before the NovaWorld listing hosted. |
-| 2 | A usage error, or the `--credentials` file did not open. |
+| 2 | A usage error, or the `--credentials` or `--also-credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting (its `ServerStopHosting`, an admin's or owner's stop from the site among them). |
 
 So a code alone does not tell a stop someone asked for from a fault: a stop through the
@@ -326,7 +411,7 @@ install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
 |---|---|---|
 | `/opt/game` | The game folder, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads). The entrypoint names it. | read-only (`:ro`) |
 | `/opt/game/expansion/<code>` | An expansion's folder (`<code>.pff`, `<code>L.pff`, `version.txt`) for `/exp <code>`: part of the game folder when you mount an install, a second read-only bind on a hosted machine (the expansion's own tree). | read-only (`:ro`) |
-| `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, and by convention the host file and the `--credentials` file. | a writable volume |
+| `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, `player.sav` and `weapon.sav` when you put them there, and by convention the host file and the `--credentials` file. | a writable volume |
 
 ```bash
 docker build -f apps/serve/Dockerfile -t opennova-serve .     # from the repo root

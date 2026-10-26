@@ -24,7 +24,8 @@ constexpr const char *kServerColumns =
 		"provider, machine_id, machine_address, admin_port, restarts, "
 		"failure_reason, created_at, updated_at, running_at, ended_at, own_machine, "
 		"machine_ref, slot, game_port, generation, serve_image, "
-		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id";
+		"data_set_id, expansion_id, base_tree_id, expansion_tree_id, update_requested, address_id, "
+		"list_on_novalogic";
 
 // The servers whose pins are behind their data sets' current trees, as a WHERE over
 // hosted_servers s (live ones).
@@ -79,6 +80,7 @@ HostedServer row_to_server(const db::Row &r) {
 	s.expansion_tree_id = r.as_int(33);
 	s.update_requested = r.as_int(34).value_or(0) != 0;
 	s.address_id = r.as_int(35);
+	st.list_on_novalogic = r.as_int(36).value_or(0) != 0;
 	return s;
 }
 
@@ -193,9 +195,9 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 	const auto inserted = db.query(
 			"INSERT INTO hosted_servers (owner_user_id, state, data_set_id, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion_id, missions, own_machine, address_id) "
-			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) "
-			"RETURNING id;",
+			"expansion_id, missions, own_machine, address_id, list_on_novalogic) "
+			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, "
+			"$16) RETURNING id;",
 			{ BindValue(owner_user_id), BindValue(settings.data_set_id), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
 					BindValue(settings.game_password),
@@ -206,7 +208,7 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 					BindValue(static_cast<int64_t>(settings.start_delay)),
 					BindValue(db::Bool{ settings.team_ff }), optional_id(settings.expansion_id),
 					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }),
-					optional_id(address_id) });
+					optional_id(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();

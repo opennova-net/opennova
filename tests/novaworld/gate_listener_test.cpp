@@ -264,14 +264,14 @@ int main(int argc, char **argv) {
 	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "", true };
 	const Lobby jo_demo{ "jop_2_consumer", kJoQuery, "", "", "" };
 	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000", true };
-	const Lobby on{ "opennova_0_consumer", kJoQuery, "", "", "", true };
+	const Lobby on{ "acidgambit_0_consumer", kJoQuery, "", "", "", true };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
 		return 1;
 	if (expect_lobby(port, kJoDemo.gate_tag, jo_demo) != 0)
 		return 1;
 	if (expect_lobby(port, "dfx2:0:cus:buffy", dfx2) != 0)
 		return 1;
-	if (expect_lobby(port, "opennova:0", on) != 0)
+	if (expect_lobby(port, "acidgambit:0", on) != 0)
 		return 1;
 	{
 		const auto got = probe_text(port, "dfx2:0:cus:buffy");
@@ -318,7 +318,7 @@ int main(int argc, char **argv) {
 
 	// A tag no row answers to is refused: no reply at all.
 	TEST_EXPECT(!probe_text(port, "jop:cus3", 400).has_value());
-	TEST_EXPECT(!probe_text(port, "opennova_0_consumer", 400).has_value());
+	TEST_EXPECT(!probe_text(port, "acidgambit_0_consumer", 400).has_value());
 
 	// No lobby instance takes clients and no fallback: no reply, each probe
 	// counted in the heartbeat's probes_unanswered (taken once), lobbies_live 0;

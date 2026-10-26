@@ -19,7 +19,7 @@ public static class ServerInfo
     /// The route's URL under <paramref name="serviceUrl"/>, or null when that is not a
     /// service URL the switcher asks: an absolute https URL, or http only to this computer
     /// or a private network (<see cref="IsLocalService"/>: a local stack such as
-    /// http://127.0.0.1:8080); never with a user name, password, query or fragment.
+    /// http://localhost:8000); never with a user name, password, query or fragment.
     /// </summary>
     public static Uri? EndpointFor(string? serviceUrl)
     {

@@ -78,7 +78,7 @@ ALTER TABLE fleet_slot_reports ADD COLUMN reason text NOT NULL DEFAULT '';
 INSERT INTO data_sets (display_name, kind, title, game)
 VALUES ('Joint Operations', 'base', 'jo', 'jop_2_consumer'),
        ('Delta Force Xtreme 2', 'base', 'dfx2', 'dfx2_consumer'),
-       ('OpenNova', 'base', 'jo', 'opennova_0_consumer');
+       ('OP: Acid Gambit', 'base', 'jo', 'acidgambit_0_consumer');
 INSERT INTO data_sets (display_name, kind, parent_id, expansion_code)
 SELECT 'Escalation', 'expansion', id, 'jox01'
 FROM data_sets WHERE kind = 'base' AND game = 'jop_2_consumer';

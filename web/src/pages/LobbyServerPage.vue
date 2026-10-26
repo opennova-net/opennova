@@ -14,8 +14,8 @@
       <header class="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0">
           <p class="eyebrow">{{ server.game.displayName || 'NovaWorld' }}</p>
-          <h1 class="mt-2 break-words text-3xl font-semibold text-ink-bright">{{ server.serverName || 'Unnamed server' }}</h1>
-          <p v-if="message" class="mt-2 break-words text-sm text-ink-muted">{{ message }}</p>
+          <h1 class="mt-2 break-words text-3xl font-semibold text-ink-bright"><GameText :text="name" /></h1>
+          <p v-if="message" class="mt-2 whitespace-pre-line break-words text-sm text-ink-muted"><GameText :text="message" /></p>
         </div>
         <span class="shrink-0 rounded-control bg-hover px-3 py-1 text-sm font-semibold text-accent">
           {{ server.players }} / {{ server.maxPlayers || 0 }}
@@ -25,7 +25,9 @@
       <dl class="mt-6 grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
         <template v-if="server.mission">
           <dt class="text-ink-muted">Mission</dt>
-          <dd class="text-ink">{{ server.mission }}<span v-if="server.gameType" class="text-ink-muted"> ({{ server.gameType }})</span></dd>
+          <dd class="text-ink">
+            <GameText :text="server.mission" /><span v-if="server.gameType" class="text-ink-muted"> (<GameText :text="server.gameType" />)</span>
+          </dd>
         </template>
         <template v-if="server.timeLeft !== null">
           <dt class="text-ink-muted">Time left</dt>
@@ -85,22 +87,30 @@
 // players, with their scores on a server NovaWorld hosts. Read every 15 s.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import GameText from '../components/GameText.vue';
 import { fetchLobbyServer, LobbyGone } from '../api/lobbies';
 import { usePolling } from '../composables/usePolling';
+import { stripGameText } from '../utils/gameText';
 import type { LobbyServer } from '../types/lobby';
 
 const POLL_MS = 15_000;
-// The retail host screen's message until its host writes one.
-const DEFAULT_MESSAGE = '!Put your message here';
+// The host screen's message until its host writes one: the menu's ("!Put your message here")
+// or game.cfg's default ("Put your message here."), which a host file or a dedicated server
+// leaves in.
+const DEFAULT_MESSAGES = ['!Put your message here', 'Put your message here.'];
 
 const route = useRoute();
 const server = ref<LobbyServer | null>(null);
 const gone = ref(false);
 const error = ref('');
 
+const name = computed(() => {
+  const text = server.value?.serverName ?? '';
+  return stripGameText(text).trim() ? text : 'Unnamed server';
+});
 const message = computed(() => {
   const text = server.value?.message?.trim() ?? '';
-  return text === DEFAULT_MESSAGE ? '' : text;
+  return DEFAULT_MESSAGES.includes(text) ? '' : text;
 });
 const timeOfDay = computed(() => {
   const text = server.value?.timeOfDay ?? '';
