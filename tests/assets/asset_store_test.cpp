@@ -9,11 +9,15 @@
 #include "common/test_paths.h"
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace opennova;
@@ -45,6 +49,17 @@ int main() {
 	fs::copy_file(models / "house.3di", second.path / "thing.3di");
 	for (const char *name : {"idle.bad", "walk.bad", "soldier.adm"})
 		fs::copy_file(animations / name, first.path / name);
+	// The minted idle padded with zeros to the game's clip limit and one byte past it: the
+	// load takes a file of exactly bad::kBadLoadMaxBytes and refuses a bigger one
+	// [orig: BoneFile_Load @0x40FFF0 - `cmp edi, 7A120h; jbe` @0x41005A..0x410060].
+	for (const auto &[name, size] : {std::pair<const char *, size_t>{"edge.bad", bad::kBadLoadMaxBytes},
+				 std::pair<const char *, size_t>{"huge.bad", bad::kBadLoadMaxBytes + 1}}) {
+		std::ifstream in(animations / "idle.bad", std::ios::binary);
+		std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+		bytes.resize(size, 0);
+		std::ofstream out(first.path / name, std::ios::binary);
+		out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+	}
 	{
 		std::ofstream map(first.path / "variants.adm", std::ios::binary);
 		map << "anim_reset \"idle\"\r\n"
@@ -68,6 +83,10 @@ int main() {
 		TEST_EXPECT(clip && store.bone_animation("IDLE.BAD") == clip);
 		// A .bad load opens the name's stem plus .bad (anim::bad_file_name).
 		TEST_EXPECT(store.bone_animation("idle.txt") == clip && store.bone_animation("clips/Idle.anim") == clip);
+		// The game's clip limit: a file of the limit loads, one byte more loads nothing.
+		const auto edge = store.bone_animation("edge");
+		TEST_EXPECT(edge && edge->frame_count == clip->frame_count);
+		TEST_EXPECT(!store.bone_animation("huge"));
 		const auto rig = store.skeletal_rig("soldier");
 		TEST_EXPECT(rig && rig->bone_count() > 0);
 		TEST_EXPECT(store.skeletal_rig("SOLDIER.ADM") == rig);

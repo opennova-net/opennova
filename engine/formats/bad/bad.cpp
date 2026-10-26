@@ -46,18 +46,6 @@ static float read_f32(const uint8_t *buf, size_t off) {
 }
 
 // --------------------------------------------------------------------------
-// On-disk channel layout (12 bytes)
-// --------------------------------------------------------------------------
-
-typedef struct {
-    uint32_t num_frames;
-    uint32_t frame_len_off;
-    uint32_t rotation_off;
-} ChannelDisk;
-
-#define CHANNEL_DISK_SIZE 12
-
-// --------------------------------------------------------------------------
 // API
 // --------------------------------------------------------------------------
 
@@ -86,15 +74,14 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
         uint32_t bones_offset    = read_u32(data, 0x18);
         uint32_t channels_offset = read_u32(data, 0x1C);
 
-        bone_stride  = read_u32(data, 0x2C);
-        if (bone_stride == 0) bone_stride = 100;
-        rot_stride   = read_u32(data, 0x34);
-        if (rot_stride == 0) rot_stride = 16;
-        trans_stride = read_u32(data, 0x30);
-        if (trans_stride == 0) trans_stride = 12;
+        // The rows' sizes are the game's, whatever the header words +0x2C / +0x30 / +0x34
+        // hold: a smaller word there must not let a row's read run past the file (bad.h).
+        bone_stride  = kBadBoneRowBytes;
+        rot_stride   = kBadRotationKeyBytes;
+        trans_stride = kBadTranslationRowBytes;
 
         // Bounds check channel and bone tables
-        if (!in_range(channels_offset, (size_t)out->bone_count * CHANNEL_DISK_SIZE, data_size)) {
+        if (!in_range(channels_offset, (size_t)out->bone_count * kBadChannelRowBytes, data_size)) {
             return -1;
         }
         if (!in_range(bones_offset, (size_t)out->bone_count * bone_stride, data_size)) {
@@ -108,8 +95,10 @@ int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out) {
             if (!out->channels) { bad_free(out); return -1; }
 
             for (i = 0; i < out->bone_count; ++i) {
-                size_t off = channels_offset + (size_t)i * CHANNEL_DISK_SIZE;
-                uint32_t num_frames   = read_u32(data, off);
+                size_t off = channels_offset + (size_t)i * kBadChannelRowBytes;
+                // The key count is the row's first 16-bit word [orig: BoneAnim_FindKeyframeAtTime
+                //  @0x410220 - `movzx ebx, word ptr [edi]` @0x41024F].
+                uint32_t num_frames   = read_u16(data, off);
                 uint32_t frame_len_off = read_u32(data, off + 4);
                 uint32_t rotation_off  = read_u32(data, off + 8);
 

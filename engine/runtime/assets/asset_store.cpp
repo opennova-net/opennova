@@ -107,7 +107,9 @@ BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 	if (found != impl_->animations.end()) return found->second;
 	BoneAnimation result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_bone_animation(bytes.data(), bytes.size());
+	// A clip file over the game's size limit does not load (bad::kBadLoadMaxBytes).
+	if (impl_->index->read_file(key, bytes) && !bytes.empty() && bytes.size() <= bad::kBadLoadMaxBytes)
+		result = parse_bone_animation(bytes.data(), bytes.size());
 	impl_->animations.emplace(key, result);
 	return result;
 }

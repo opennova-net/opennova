@@ -36,6 +36,8 @@ public:
 	void invalidate() const;
 	Model model(const std::string &graphic) const;
 	AnimationMap animation_map(const std::string &name) const override;
+	// The clip the game loads by `name`: null for a file over bad::kBadLoadMaxBytes, as the
+	// game's load refuses one (its token then plays failsafe.bad, anim::adm_token_clip).
 	BoneAnimation bone_animation(const std::string &name) const override;
 	SkeletalRig skeletal_rig(const std::string &adm_name,
 			const std::vector<anim::Vec3> &origins = {},

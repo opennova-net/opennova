@@ -16,10 +16,6 @@ namespace opennova::bad {
 namespace {
 
 constexpr uint32_t kHeaderBytes = 80;
-constexpr uint32_t kChannelRowBytes = 12;
-constexpr uint32_t kBoneStride = 100;
-constexpr uint32_t kTranslationStride = 12;
-constexpr uint32_t kRotationStride = 16;
 // The header words the reader never names, at the values the retail corpus
 // ships (rAKM_RST, DT1RST, DT1runF, BINOC: every clip inspected).
 constexpr uint32_t kHeaderWord8 = 0;
@@ -71,7 +67,7 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     std::vector<uint8_t> buf;
     buf.resize(kHeaderBytes, 0);
     const uint32_t channels_offset = static_cast<uint32_t>(buf.size());
-    buf.resize(buf.size() + static_cast<size_t>(bone_count) * kChannelRowBytes, 0);
+    buf.resize(buf.size() + static_cast<size_t>(bone_count) * kBadChannelRowBytes, 0);
 
     // Per-channel key data: the u16 duration table, padded to 4, then the quaternions.
     std::vector<uint32_t> frame_lengths_offset(bone_count, 0);
@@ -133,17 +129,17 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
         put_s32(buf, num_children);
         // A leaf's child address is 0, as retail's rows carry it (BINOC.bad bone 18).
         put_s32(buf, first_child >= 0
-                         ? static_cast<int32_t>(bones_offset + static_cast<uint32_t>(first_child) * kBoneStride)
+                         ? static_cast<int32_t>(bones_offset + static_cast<uint32_t>(first_child) * kBadBoneRowBytes)
                          : 0);
         const bool root = i == 0 || b.parent_index < 0 || static_cast<uint32_t>(b.parent_index) >= bone_count;
         put_s32(buf, root ? 0
-                          : static_cast<int32_t>(bones_offset + static_cast<uint32_t>(b.parent_index) * kBoneStride));
+                          : static_cast<int32_t>(bones_offset + static_cast<uint32_t>(b.parent_index) * kBadBoneRowBytes));
         put_f32(buf, b.length);
         put_f32(buf, b.position[0]);
         put_f32(buf, b.position[1]);
         put_f32(buf, b.position[2]);
         for (int r = 0; r < 9; ++r) put_f32(buf, b.rotation[r]);
-        buf.resize(start + kBoneStride, 0);
+        buf.resize(start + kBadBoneRowBytes, 0);
     }
 
     // Translations follow the bone table (where the reader looks), frame-major:
@@ -164,7 +160,7 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     }
 
     for (uint32_t i = 0; i < bone_count; ++i) {
-        const size_t row = static_cast<size_t>(channels_offset) + static_cast<size_t>(i) * kChannelRowBytes;
+        const size_t row = static_cast<size_t>(channels_offset) + static_cast<size_t>(i) * kBadChannelRowBytes;
         set_u32(buf, row + 0, bf->channels[i].frame_count);
         set_u32(buf, row + 4, frame_lengths_offset[i]);
         set_u32(buf, row + 8, rotations_offset[i]);
@@ -181,9 +177,9 @@ int bad_write_buffer(const BadFile *bf, std::vector<uint8_t> &out) {
     set_u32(buf, 0x20, kHeaderWord8);
     set_u32(buf, 0x24, kHeaderWord9);
     set_u32(buf, 0x28, kHeaderWord10);
-    set_u32(buf, 0x2C, kBoneStride);
-    set_u32(buf, 0x30, kTranslationStride);
-    set_u32(buf, 0x34, kRotationStride);
+    set_u32(buf, 0x2C, kBadBoneRowBytes);
+    set_u32(buf, 0x30, kBadTranslationRowBytes);
+    set_u32(buf, 0x34, kBadRotationKeyBytes);
     set_u32(buf, 0x38, kHeaderWord14);
     set_u32(buf, 0x3C, event_count);
     set_u32(buf, 0x40, events_offset);
