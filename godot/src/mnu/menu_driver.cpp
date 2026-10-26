@@ -1132,6 +1132,7 @@ void MenuDriver::_bind_methods() {
 	BIND_ENUM_CONSTANT(OPTIONS_RESTORE_PREVIEW);
 	BIND_ENUM_CONSTANT(OPTIONS_APPLY_CONTROLS);
 	BIND_ENUM_CONSTANT(OPTIONS_DISCARD_EDITS);
+	BIND_ENUM_CONSTANT(OPTIONS_RELOAD_CROSSHAIR_ALPHA);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);

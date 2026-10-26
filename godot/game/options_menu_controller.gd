@@ -14,6 +14,9 @@ const CROSSHAIR_STYLE_CONTROL := "XHAIR_APPEARANCE"
 ## owner applies the record onto the live bindings and the running session's
 ## live words, then saves the profile (engine OptionsScreen::ApplyControls).
 signal controls_accepted
+## The in-game options' Accept asks the HUD to reload its crosshair art in alpha
+## mode (MenuDriver.OPTIONS_RELOAD_CROSSHAIR_ALPHA).
+signal crosshair_reload_requested
 
 var _driver: MenuDriver
 var _options: PlayerOptions
@@ -210,6 +213,8 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 	var effects := _driver.activate_options(PlayerProfile.store(), id)
 	if effects & MenuDriver.OPTIONS_APPLY_CONTROLS:
 		controls_accepted.emit()
+	if effects & MenuDriver.OPTIONS_RELOAD_CROSSHAIR_ALPHA:
+		crosshair_reload_requested.emit()
 	if effects & MenuDriver.OPTIONS_COMMIT_PREVIEW:
 		if _options != null:
 			_entry_state = _options.current()

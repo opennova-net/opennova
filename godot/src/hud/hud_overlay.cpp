@@ -146,6 +146,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_additive_material"), &HudOverlay::get_additive_material);
 	ClassDB::bind_method(D_METHOD("set_crosshair_style", "style"), &HudOverlay::set_crosshair_style);
 	ClassDB::bind_method(D_METHOD("get_crosshair_style"), &HudOverlay::get_crosshair_style);
+	ClassDB::bind_method(D_METHOD("reload_crosshair_alpha"), &HudOverlay::reload_crosshair_alpha);
 	ClassDB::bind_method(D_METHOD("set_crosshair_color", "rgb"), &HudOverlay::set_crosshair_color);
 	ClassDB::bind_method(D_METHOD("get_crosshair_color"), &HudOverlay::get_crosshair_color);
 	ClassDB::bind_method(D_METHOD("set_crosshair_spread_enabled", "enabled"),
@@ -528,10 +529,12 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 
 void HudOverlay::load_crosshair_texture_() {
 	// The style's texture by the engine's name (hud_texture_names.h carries the witness),
-	// colour mode at HUD init (hud-re.md).
+	// colour mode at HUD init (hud-re.md), alpha mode once the in-game options' Accept
+	// reloaded it (crosshair_alpha_mode_).
 	const Ref<Texture2D> tex = load_hud_texture_(
 			String(opennova::hud::hud_crosshair_texture_name(crosshair_style_).c_str()),
-			ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
+			crosshair_alpha_mode_ ? ResourceRoot::TEXTURE_LOADER_HUD_ALPHA
+								  : ResourceRoot::TEXTURE_LOADER_HUD_COLOR);
 	textures_[opennova::hud::kHudTexCrosshair] = tex;
 	layout_.crosshair_texture_valid = tex.is_valid();
 	layout_.crosshair_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -542,6 +545,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		bool p_full_arm) {
 	root_ = p_root;
 	layout_ = HudLayout{};
+	crosshair_alpha_mode_ = false; // the HUD init loads the crosshair in colour mode
 	textures_ = {};
 	// The colour map a terrain picture gives back goes with the slots, so a
 	// picture set null before the next set_minimap_terrain restores nothing.
@@ -815,6 +819,16 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 
 bool HudOverlay::is_configured() const {
 	return configured_;
+}
+
+void HudOverlay::reload_crosshair_alpha() {
+	if (!configured_) {
+		return;
+	}
+	crosshair_alpha_mode_ = true;
+	load_crosshair_texture_();
+	compiler_.update_layout(layout_);
+	queue_redraw();
 }
 
 void HudOverlay::set_crosshair_style(int p_style) {

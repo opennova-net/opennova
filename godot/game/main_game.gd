@@ -848,6 +848,7 @@ func _wire_shell() -> void:
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_menu_shell.game_reloaded.connect(_on_game_reloaded)
 	_menu_shell.ingame_controls_accepted.connect(_on_ingame_controls_accepted)
+	_menu_shell.ingame_crosshair_reload_requested.connect(_on_ingame_crosshair_reload_requested)
 	_menu_shell.screen_activated.connect(_on_menu_screen_activated)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
@@ -910,6 +911,13 @@ func _on_ingame_controls_accepted() -> void:
 		sim.apply_ingame_options(PlayerProfile.store())
 	PlayerProfile.save()
 	GameCfgStore.save()
+
+
+# The in-game options Accept reloads the crosshair art in alpha mode (engine
+# menu::OptionsScreen::ReloadCrosshairAlpha carries the witness, D-HUD-48).
+func _on_ingame_crosshair_reload_requested() -> void:
+	if _hud_presenter != null:
+		_hud_presenter.reload_crosshair_alpha()
 
 
 # PLAYER_INFO's ACCEPT: the companion has saved the dialog into the current

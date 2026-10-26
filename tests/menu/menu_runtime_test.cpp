@@ -1942,6 +1942,18 @@ void test_options_profile() {
 	CHECK(options.activate(menu, &record, menu.widget_id("OPT_CANCEL")) ==
 		OptionsScreen::RestorePreview);
 	CHECK(menu.is_widget_checked(menu.widget_id("INVERT_MOUSE")) && record.invert_mouse == 1);
+
+	// A dialog holding XHAIR_APPEARANCE: its Accept also reloads the crosshair art in
+	// alpha mode [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the gate
+	// @0x5551ca, sub_59EEF0 @0x555201] (D-HUD-48); its Cancel does not.
+	root.children.push_back(widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList));
+	menu.open_document(&doc, "game.mnu", "");
+	options.prepare(menu, &record);
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_ACCEPT")) ==
+		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls |
+				OptionsScreen::ReloadCrosshairAlpha));
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_CANCEL")) ==
+		OptionsScreen::RestorePreview);
 }
 
 // The front-end BACK keeps no widget edit: the OPTIONS screen's own BACK writes

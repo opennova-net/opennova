@@ -122,6 +122,7 @@ public:
 		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
 		OPTIONS_APPLY_CONTROLS = opennova::menu::OptionsScreen::ApplyControls,
 		OPTIONS_DISCARD_EDITS = opennova::menu::OptionsScreen::DiscardEdits,
+		OPTIONS_RELOAD_CROSSHAIR_ALPHA = opennova::menu::OptionsScreen::ReloadCrosshairAlpha,
 	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);

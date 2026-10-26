@@ -121,6 +121,10 @@ signal game_reloaded()
 # to the live bindings and the running session, then saves the profile
 # (docs/playerinfo/player-sav-re.md "The controls words").
 signal ingame_controls_accepted()
+# The in-game options dialog's Accept, on a dialog holding XHAIR_APPEARANCE,
+# reloads the crosshair art in the HUD loader's alpha mode (engine
+# menu::OptionsScreen::ReloadCrosshairAlpha carries the witness, D-HUD-48).
+signal ingame_crosshair_reload_requested()
 # A screen the driver shows (its activation): main_game runs the main menu's
 # (STARTUP's) transport reset off it.
 signal screen_activated(screen_name: String)
@@ -366,6 +370,7 @@ func _assemble_assets() -> void:
 	_options_controller = OptionsMenuController.new()
 	_options_controller.setup(_driver, _player_options)
 	_options_controller.controls_accepted.connect(ingame_controls_accepted.emit)
+	_options_controller.crosshair_reload_requested.connect(ingame_crosshair_reload_requested.emit)
 	set_process(true)
 
 

@@ -47,6 +47,16 @@ public:
 		// word
 		// [orig: Options_HandleAcceptOrBack @0x55adcf..0x55ae01].
 		DiscardEdits = 32,
+		// The in-game Accept on a dialog holding XHAIR_APPEARANCE reloads the
+		// crosshair art, in the HUD loader's ALPHA mode (where the mission's HUD
+		// init loads it in colour mode), so it then draws under the alpha
+		// material 0xA51 (twice the vertex colour, the texture's alpha) until
+		// the next mission's HUD init
+		// [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the find
+		//  @0x5551c3, the gate @0x5551ca, the old art released (sub_59EF10)
+		//  @0x5551d8, "cross%02d.tga" @0x5551f4, sub_59EEF0 @0x555201 ->
+		//  HUD_LoadTextureWithInfo(name, 1, ...) @0x59eefc] (D-HUD-48).
+		ReloadCrosshairAlpha = 64,
 	};
 	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record);
 	bool is_surface() const { return is_surface_; }

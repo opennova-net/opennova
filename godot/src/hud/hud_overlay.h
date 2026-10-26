@@ -108,6 +108,11 @@ public:
 	// runtime state (messages, fades) survives the layout refresh.
 	void set_crosshair_style(int p_style);
 	int get_crosshair_style() const;
+	// The in-game options' Accept: the crosshair art again, in the HUD
+	// loader's alpha mode (engine OptionsScreen::ReloadCrosshairAlpha carries
+	// the witness, D-HUD-48), which every later style change keeps until the
+	// next configure (the mission's HUD init) loads it in colour mode again.
+	void reload_crosshair_alpha();
 
 	// The user crosshair colour (0xRRGGBB, forced opaque) and the spread
 	// enable — the other two retail crosshair options; defaults and witness
@@ -603,6 +608,9 @@ private:
 	std::string hudpos_font_hi_;
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
+	// The crosshair art's HUD loader mode since the last configure: alpha after an
+	// in-game options Accept (reload_crosshair_alpha), else colour.
+	bool crosshair_alpha_mode_ = false;
 	uint32_t crosshair_color_ = opennova::hud::HudLayout::kCrosshairColorDefault;
 	bool crosshair_spread_enabled_ = true;
 	bool draw_timing_enabled_ = false;

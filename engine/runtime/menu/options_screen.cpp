@@ -210,7 +210,8 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 			profile::store_bindings(bindings_, *record);  // [orig: @0x554e74]
 			accept_words(menu, *record, true);
 		}
-		return CommitPreview | ApplyControls;
+		const int crosshair = menu.widget_id("XHAIR_APPEARANCE") >= 0 ? ReloadCrosshairAlpha : None;
+		return CommitPreview | ApplyControls | crosshair;
 	}
 	if (upper == "OPT_CANCEL") {
 		// Cancel re-runs the screen's init over the record, which the dialog

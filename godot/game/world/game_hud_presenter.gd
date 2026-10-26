@@ -332,6 +332,13 @@ func set_crosshair_style(style: int) -> void:
 		_game_hud.set_crosshair_style(_crosshair_style)
 
 
+# The in-game options' Accept: the crosshair art again in alpha mode
+# (HudOverlay.reload_crosshair_alpha, D-HUD-48).
+func reload_crosshair_alpha() -> void:
+	if _game_hud != null:
+		_game_hud.reload_crosshair_alpha()
+
+
 func crosshair_style() -> int:
 	return _crosshair_style
 

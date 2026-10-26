@@ -659,6 +659,36 @@ func test_colour_mode_crosshair_draws_under_modulate2x() -> void:
 	assert_eq(vertices, 14 * 3, "the run holds all fourteen triangles")
 
 
+# The in-game options' Accept reloads the crosshair in the HUD loader's alpha
+# mode, which the mission's HUD init loaded in colour mode: it then draws under
+# 0xA51, the vertex colour doubled into the submitted colour, with no
+# MODULATE2X flag (engine OptionsScreen::ReloadCrosshairAlpha, D-HUD-48).
+func test_the_options_accept_reloads_the_crosshair_in_alpha_mode() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"ALPHAFADE 30 50 3",
+	]), PackedStringArray(["cross01.tga"]), {
+		"cross01.tga": Vector2i(8, 8),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, fixture.root)
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0x651,
+			"the HUD init loads the crosshair in colour mode")
+	hud.reload_crosshair_alpha()
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0xA51,
+			"the Accept reloads it in alpha mode")
+	hud.set_crosshair_style(hud.get_crosshair_style())
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0xA51,
+			"a later style change keeps the alpha mode")
+	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
+	var rows := _flat_rows(hud, Vector2i(8, 8))
+	assert_eq(rows.size(), 1, "the crosshair's triangles submit as one run")
+	for row: Dictionary in rows:
+		assert_false(_flat_doubled(row), "the alpha material carries no MODULATE2X flag")
+	hud.configure(fixture.layout, fixture.root)
+	assert_eq(hud.get_texture_material_word("cross01.tga"), 0x651,
+			"the next HUD init loads it in colour mode again")
+
+
 # The quad class: the hudpos STATICFRAME background (colour mode), submitted as
 # a flagged triangle pair at the raw white diffuse.
 func test_colour_mode_static_frame_draws_under_modulate2x() -> void:
