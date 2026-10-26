@@ -25,8 +25,13 @@
 #include <editor/documents/document_types.h>
 #include <editor/project_build/archive_routing.h>
 #include <formats/dds/dds.h>
+#include <formats/def/def.h>
+#include <formats/def/def_write.h>
 #include <formats/lwf/lwf.h>
 #include <formats/lwf/wav_pcm.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/pff/pff.h>
 #include <formats/tga/tga.h>
 #include <formats/trn/trn_io.h>
@@ -54,6 +59,10 @@ struct File {
 
 // The synthetic expansion the install carries.
 inline constexpr const char *kExpansion = "nifty";
+// The mission the editor's end-to-end scripts run on (scripts/mcp/editor_mission_e2e.py, editor_terrain_e2e.py; their
+// CI job passes --mission onjo_e2e.bms), and the item its one entity is (items.def's row, drawn by test.3di).
+inline constexpr const char *kE2eMission = "onjo_e2e";
+inline constexpr int kE2eItem = 106001;
 
 inline std::string repo() {
 	return std::string(test_paths_repo_root(__FILE__));
@@ -149,6 +158,57 @@ inline bool mission(std::vector<File> &out, const std::string &stem, std::string
 	       blank(out, stem + ".bin", error, opennova::editor::kBlankMissionTextRole) &&
 	       blank(out, stem + ".til", error) && blank(out, stem + ".pcx", error);
 }
+// The base game's item table: the blank's Null marker, then the e2e mission's crate (an object test.3di draws), each
+// through the engine's own writer.
+inline bool item_table(std::vector<File> &out, std::string &error) {
+	opennova::def::DefItemDef rows[2] = {};
+	opennova::def::def_init_item(rows[0]);
+	std::snprintf(rows[0].display_name, sizeof rows[0].display_name, "%s", "Null");
+	rows[0].id = 100000;
+	rows[0].type = opennova::def::DEF_ITEM_TYPE_MARKER;
+	opennova::def::def_init_item(rows[1]);
+	std::snprintf(rows[1].display_name, sizeof rows[1].display_name, "%s", "E2E Crate");
+	std::snprintf(rows[1].graphic, sizeof rows[1].graphic, "%s", "test");
+	rows[1].id = kE2eItem;
+	rows[1].type = opennova::def::DEF_ITEM_TYPE_OBJECT;
+	rows[1].hp = 100;
+	opennova::def::DefItemsFile file{};
+	file.entries = rows;
+	file.count = 2;
+	const opennova::def::DefWriteResult written = opennova::def::def_write_items(file);
+	if (!written.ok()) {
+		error = "items.def: " + written.diagnostics.front().message;
+		return false;
+	}
+	text_file(out, "items.def", written.text);
+	return true;
+}
+// The e2e scripts' mission: onjo_m1's blank (Tmap, testday) with one entity, the crate, the first record with a
+// position: the mission run moves it 64 m east and Play must stand it where it was put; the terrain run raises the
+// ground under it (a 20 m brush), paints beside it and stamps cell 3 of the tile set east of it. Tmap's ground is its
+// four sectors about the origin (the .trn's ids 1..4 at rows and columns 3 and 4 from its -4 origin, 512 m each:
+// -512..512 m both ways), so the crate stands west of the middle and every step's point stays on the ground.
+inline bool e2e_mission(std::vector<File> &out, std::string &error) {
+	if (!mission(out, kE2eMission, error)) return false;
+	const std::string name = std::string(kE2eMission) + ".bms";
+	const File *blank_bms = nullptr;
+	for (const File &file : out)
+		if (file.name == name) blank_bms = &file;
+	opennova::bms::File bms;
+	if (!blank_bms || !opennova::bms::parse(blank_bms->bytes->data(), blank_bms->bytes->size(), bms, error)) {
+		error = name + ": " + (error.empty() ? std::string("the blank was not made") : error);
+		return false;
+	}
+	opennova::mission::EntityTransform at;
+	at.x = -300.0f;
+	at.y = -100.0f;
+	at.z = 30.0f;
+	opennova::mission::add_entity(bms, opennova::mission::EntityKind::Item, kE2eItem, at);
+	std::vector<uint8_t> bytes;
+	if (!opennova::bms::write(bms, bytes, error)) return false;
+	put(out, name, std::move(bytes));
+	return true;
+}
 inline bool base_game(std::vector<File> &out, std::string &error) {
 	out.clear();
 	if (!manifest(out, false, error)) return false;
@@ -179,9 +239,14 @@ inline bool base_game(std::vector<File> &out, std::string &error) {
 	for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255;
 	if (!opennova::tga::tga_write_rgb24(pixels.data(), 1024, 1024, color, error)) return false;
 	put(out, "mnml_c.tga", std::move(color));
+	// The tile set four 64-texel cells in a row (the terrain run stamps cell 3).
+	std::vector<uint8_t> strip, cells(256 * 64 * 4, 96);
+	for (size_t i = 3; i < cells.size(); i += 4) cells[i] = 255;
+	if (!opennova::tga::tga_write_rgb24(cells.data(), 256, 64, strip, error)) return false;
+	put(out, "mnml_t.tga", std::move(strip));
 	text_file(out, "weapon.def", "weapon \"TEST_WEAPON\"\nround_type AT_NULL\nend\n");
-	if (!sound_bank(out, "menu.lwf", error) || !sound_bank(out, "game.lwf", error) ||
-	    !mission(out, "onjo_m1", error)) return false;
+	if (!item_table(out, error) || !sound_bank(out, "menu.lwf", error) || !sound_bank(out, "game.lwf", error) ||
+	    !mission(out, "onjo_m1", error) || !e2e_mission(out, error)) return false;
 	return true;
 }
 inline bool expansion_game(std::vector<File> &out, std::string &error) {
