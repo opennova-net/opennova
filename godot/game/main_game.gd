@@ -2212,11 +2212,11 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 	return text if not text.is_empty() else key
 
 
-func _on_exit_to_desktop() -> void:
-	# The main menu's EXIT saves the player profile and game.cfg before the
-	# game quits (engine: runtime/profile/player_profiles.h, the save
-	# points; docs/gamecfg/game-cfg-re.md).
-	push_warning("MainGame: the main menu's EXIT ends the process")
+func _on_exit_to_desktop(reason: String) -> void:
+	# The main menu's EXIT (or a started updater) saves the player profile and
+	# game.cfg before the game quits (engine: runtime/profile/player_profiles.h,
+	# the save points; docs/gamecfg/game-cfg-re.md).
+	push_warning("MainGame: %s; the process ends" % reason)
 	PlayerProfile.save()
 	GameCfgStore.save()
 	request_quit()

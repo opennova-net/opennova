@@ -104,7 +104,8 @@ extends Control
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
 signal start_requested(bms_name: String)
-signal exit_to_desktop_requested()
+# `reason` names what ends the process, for the exit's log line.
+signal exit_to_desktop_requested(reason: String)
 signal return_to_menu_requested()
 signal restart_requested()
 signal resume_requested()
@@ -617,7 +618,7 @@ func _on_app_command_requested(command: String) -> void:
 # menu as it was (engine menu_commands.h app_message_command).
 func _launch_update() -> void:
 	if RuntimeUpdates.launch_update():
-		exit_to_desktop_requested.emit()
+		exit_to_desktop_requested.emit("the updater started")
 	else:
 		push_warning("MenuShell: the updater did not start: %s" % RuntimeUpdates.last_error)
 
@@ -783,7 +784,7 @@ func _on_quit_requested() -> void:
 	elif _in_game:
 		resume_requested.emit()
 	else:
-		exit_to_desktop_requested.emit()
+		exit_to_desktop_requested.emit("the main menu's BACK with no screen behind it")
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
@@ -824,7 +825,7 @@ func _on_start_control() -> void:
 
 
 func _on_exit_control() -> void:
-	exit_to_desktop_requested.emit()
+	exit_to_desktop_requested.emit("the main menu's EXIT")
 
 
 func _on_return_control() -> void:

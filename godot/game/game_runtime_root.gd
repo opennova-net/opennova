@@ -171,12 +171,15 @@ func _message_column(text: String) -> VBoxContainer:
 func _exit_button() -> Button:
 	var quit := Button.new()
 	quit.text = "Exit"
-	quit.pressed.connect(func() -> void: get_tree().quit())
+	quit.pressed.connect(func() -> void:
+		push_warning("GameRuntimeRoot: the start screen's Exit ends the process")
+		get_tree().quit())
 	return quit
 
 
 func _install_content() -> void:
 	if RuntimeUpdates.launch_update(true):
+		push_warning("GameRuntimeRoot: the updater started for the download; the process ends for it")
 		get_tree().quit()
 	else:
 		_bootstrap_status.text = RuntimeUpdates.last_error
