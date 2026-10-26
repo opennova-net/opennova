@@ -13,6 +13,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::sbf {
+struct SbfHeader;
+}
+
 namespace opennova::mus {
 
 /* --- Format constants --- */
@@ -465,6 +469,20 @@ void mus_vm_stop  (MusVM *vm);
 /* Drop the borrowed script pointer (the owner is about to free it); the VM
    parks STOPPED with no program until the next mus_vm_load_script. */
 void mus_vm_unload_script(MusVM *vm);
+
+/* The music context open over the pair the embedder read: the running context
+   torn down first (the script unloaded), then no context when the bank's file
+   did not open (`bank` NULL: the game opens it ahead of the script, so the
+   script's load never runs), the script did not load (`script` NULL) or the
+   bank's header is not SBF0; a bank of no entry opens. A pass binds the script
+   (mus_vm_load_script) and runs it. Returns 0 on a pass, negative on a bail
+   (-1 no VM or no bank, -2 no script, -3 not SBF0, -4 the bind refused).
+   [orig: AudioVM_OpenContextFile @ 0x672160 - the teardown @ 0x672168..0x6721a3,
+    no audio system @ 0x6721b4, CreateFileA @ 0x6721da, AudioVM_LoadScriptFile
+    @ 0x6721f7, the SBF0 test @ 0x67222b, a zero count past the table @ 0x672253;
+    AudioVM_OpenMusicContext @ 0x6722a0 - ScriptInstance_Init @ 0x6722ce,
+    g_AudioVMContextActive @ 0x6722db] */
+int mus_vm_open_context(MusVM *vm, const sbf::SbfHeader *bank, const MusScript *script);
 void mus_vm_pause (MusVM *vm);
 void mus_vm_resume(MusVM *vm);
 

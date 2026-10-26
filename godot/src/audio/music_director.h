@@ -73,6 +73,10 @@ public:
 	bool get_auto_start() const;
 
 	// Methods
+	// The music context open over the pair the shell read (engine mus_vm_open_context
+	// carries the gate and its witness): false, no context and neither half kept, at
+	// its bails; a pass keeps the pair and runs the script.
+	bool open_context(const Ref<SbfBank> &p_bank, const Ref<MusicScript> &p_script);
 	void start();
 	void stop();
 	// stop() requests the mixer's fade-out. This stays true until all started
@@ -111,6 +115,9 @@ private:
 	static void _on_play_sound(void *user, uint32_t sbf_entry_index, int wait);
 	static void _on_section_entered(void *user, const char *name);
 	static void _on_echo(void *user, int32_t arg);
+	// The script start() and open_context() bind: the named one, else the file's default.
+	const opennova::mus::MusScript *_raw_script(const Ref<MusicScript> &p_script) const;
+	void _install_hooks();
 
 	Ref<MusicScript> _script;
 	Ref<SbfBank> _bank;

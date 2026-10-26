@@ -13,6 +13,7 @@
    handlers and inspected by the dispatch loop. */
 
 #include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h> // the context open's SBF0 test
 
 #include <base/io/bits.h>
 
@@ -354,6 +355,20 @@ void mus_vm_unload_script(MusVM *vm) {
     set_instance_word(vm, kInstLocals, 0);
     set_instance_word(vm, kInstIp, 0);
     set_instance_word(vm, kInstSection, 0);
+}
+
+/* The checks read nothing the others change, so the bank's header is tested
+   ahead of the bind, where the game tests it after the script file's load: the
+   verdict is the same (mus.h carries the witness). */
+int mus_vm_open_context(MusVM *vm, const sbf::SbfHeader *bank, const MusScript *script) {
+    if (!vm) return -1;
+    mus_vm_unload_script(vm);
+    if (!bank) return -1;
+    if (!script) return -2;
+    if (bank->magic != sbf::SBF_MAGIC) return -3;
+    if (mus_vm_load_script(vm, script) != 0) return -4;
+    mus_vm_start(vm);
+    return 0;
 }
 
 void mus_vm_pause(MusVM *vm) {
