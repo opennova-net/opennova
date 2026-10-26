@@ -6,8 +6,9 @@
 // second told its base is stale, then pulling (the first's change taken, its own kept) and pushing
 // both; a conflict settled by keeping one's own, pushed, and pulled by the other; a folder at its
 // base with nothing to push; a player refused; a renewed session kept by the account; an ended
-// one signing it out; and a store reset since the folder's revision, a pull and a push each told to
-// bind again. The routes themselves answer the same client over HTTP in
+// one signing it out; a store reset since the folder's revision, a pull and a push each told to
+// bind again; and a folder the scan could not read whole, refused by a push and a pull, its check
+// counting no deletion. The routes themselves answer the same client over HTTP in
 // tests/novaworld/content_client_routes_test.cpp.
 
 #include <cstdio>
@@ -28,6 +29,7 @@
 #include <editor/content_store/content_jobs.h>
 #include <editor/content_store/content_state.h>
 #include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 
 #include "common/test_expect.h"
 #include "editor/content_fake_service.h"
@@ -328,6 +330,91 @@ static int test_bind_and_check() {
 	return 0;
 }
 
+// A push sends every file, so it refuses a folder it could not read whole, NovaWorld's head unmoved:
+// one its walk could not list (the folder gone, as a drive taken away; a folder the walk may list
+// but not look into) and one holding a file it could not read (two paths one file on Windows and
+// macOS, where the file system holds both) (F-2). Over the folder not listed whole, a pull refuses
+// too and a check counts no file the list lacks as deleted (C-11). The cases a system cannot make
+// (case-insensitive names; no search permission enforced, as for root or on Windows) say so.
+static int test_incomplete_folder() {
+	test_temp::TempDir dir("opennova_content_client_incomplete");
+	const std::string root = dir.file("Project");
+	FakeService service;
+	TEST_EXPECT(put(root + "/project.opennova", "{}") && put(root + "/defs/a.def", "a1") &&
+			put(root + "/locked/c.def", "c1"));
+	TEST_EXPECT(push(service, root, "r1") == editor::PushOutcome::Pushed && service.head == 1);
+	const editor::ContentBinding bound = binding_of(root);
+	TEST_EXPECT(bound.revision == 1);
+	std::string error;
+
+	{
+		editor::ContentPush gone(service, account(kAdminCookie),
+				editor::ProjectPaths::for_root(dir.file("Gone")), "", bound, "gone");
+		TEST_EXPECT(run(gone) == editor::ContentJobState::Failed &&
+				gone.error().find("could not all be listed") != std::string::npos);
+		TEST_EXPECT(service.head == 1);
+	}
+
+	TEST_EXPECT(put(root + "/defs/A.def", "other"));
+	size_t named = 0;
+	std::error_code ec;
+	for (const auto &entry :
+			std::filesystem::directory_iterator(editor::system_path(root + "/defs"), ec)) {
+		(void)entry;
+		++named;
+	}
+	if (named == 2) {
+		push(service, root, "folded", kAdminCookie, &error);
+		TEST_EXPECT(error.find("could not be read; a push sends every file") != std::string::npos &&
+				service.head == 1);
+		std::printf("incomplete: a file the scan could not read refuses the push\n");
+	} else {
+		std::printf("incomplete: names fold here: the unread case not run\n");
+	}
+	std::filesystem::remove(editor::system_path(root + "/defs/A.def"), ec);
+	if (named != 2)
+		TEST_EXPECT(put(root + "/defs/a.def", "a1"));
+
+#ifndef _WIN32
+	const std::filesystem::path locked = editor::system_path(root + "/locked");
+	std::filesystem::permissions(locked,
+			std::filesystem::perms::owner_read | std::filesystem::perms::group_read |
+					std::filesystem::perms::others_read,
+			std::filesystem::perm_options::replace, ec);
+	TEST_EXPECT(!ec);
+	std::error_code probe;
+	std::filesystem::file_size(locked / "c.def", probe);
+	if (probe) {
+		TEST_EXPECT(put(root + "/defs/a.def", "a2"));
+		error.clear();
+		push(service, root, "locked", kAdminCookie, &error);
+		TEST_EXPECT(error.find("could not all be listed") != std::string::npos && service.head == 1);
+		{
+			editor::ContentCheck check(
+					service, account(""), editor::ProjectPaths::for_root(root), "", bound);
+			TEST_EXPECT(run(check) == editor::ContentJobState::Done && !check.problems().empty());
+			TEST_EXPECT(check.changes().size() == 1 && check.changes()[0].path == "defs/a.def" &&
+					check.changes()[0].change == editor::ContentChange::Modified);
+		}
+		{
+			// A pull from before the head, over the same folder.
+			editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(root), "",
+					{ kServer, "MOD", 0 });
+			TEST_EXPECT(run(pull) == editor::ContentJobState::Failed &&
+					pull.error().find("a pull compares every file") != std::string::npos);
+		}
+		std::printf("incomplete: a folder listed but not looked into refuses the push and the "
+					"pull, its check counts no deletion\n");
+	} else {
+		std::printf("incomplete: the system enforces no search permission here: the case not run\n");
+	}
+	std::filesystem::permissions(
+			locked, std::filesystem::perms::owner_all, std::filesystem::perm_options::add, ec);
+#endif
+	std::printf("incomplete: a folder gone refuses the push\n");
+	return 0;
+}
+
 static int test_api_shapes() {
 	// The server as the client keeps it, and the session cookie a login reply signs in.
 	TEST_EXPECT(editor::content_server(" opennova.net/ ") == "https://opennova.net");
@@ -377,6 +464,7 @@ int main() {
 	failures += test_restore();
 	failures += test_accounts();
 	failures += test_bind_and_check();
+	failures += test_incomplete_folder();
 	failures += test_api_shapes();
 	if (failures == 0)
 		std::printf("content_client: all tests passed\n");
