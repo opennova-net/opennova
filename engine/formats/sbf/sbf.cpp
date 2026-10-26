@@ -9,8 +9,6 @@
 
 #include <formats/sbf/sbf.h>
 
-#include <base/io/os_path.h>
-
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,9 +22,8 @@
 namespace opennova::sbf {
 
 /* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (magic + flags check).
-   The bounds-vs-size check only fires when caller gave us more than just the
-   header; passing exactly SBF_HEADER_SIZE bytes does header-only validation
-   (used by sbf_open before it has read the index off disk). */
+   The whole entry index must lie inside the bytes: a header's entry count past
+   them is refused, whatever the size (a 24-byte bank holds an empty index). */
 int sbf_validate(const uint8_t *data, size_t size) {
     if (!data || size < SBF_HEADER_SIZE) return -1;
     SbfHeader h;
@@ -34,46 +31,14 @@ int sbf_validate(const uint8_t *data, size_t size) {
     if (h.magic != SBF_MAGIC) return -2;
     if (h.flags > 2) return -5;
     if (h.index_offset != SBF_HEADER_SIZE) return -3;
-    if (size > SBF_HEADER_SIZE
-        && (uint64_t)h.entry_count * SBF_ENTRY_SIZE > size - SBF_HEADER_SIZE) {
+    if ((uint64_t)h.entry_count * SBF_ENTRY_SIZE > size - SBF_HEADER_SIZE) {
         return -4;
     }
     return 0;
 }
 
-/* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0.
-   Mirrors the engine's CreateFile+ReadFile pair: 24-byte header, then N×32-byte
-   entries from index_offset. */
-int sbf_open(SbfArchive *arc, const char *path) {
-    if (!arc || !path) return -1;
-    memset(arc, 0, sizeof(*arc));
-
-    FILE *f = opennova::io::fopen_utf8(path, "rb");
-    if (!f) return -10;
-
-    uint8_t header[SBF_HEADER_SIZE];
-    if (fread(header, 1, SBF_HEADER_SIZE, f) != SBF_HEADER_SIZE) {
-        fclose(f); return -11;
-    }
-    int v = sbf_validate(header, SBF_HEADER_SIZE);
-    if (v != 0) { fclose(f); return v; }
-    memcpy(&arc->header, header, SBF_HEADER_SIZE);
-    snprintf(arc->_path, sizeof(arc->_path), "%s", path);
-
-    uint32_t n = arc->header.entry_count;
-    if (n > 0) {
-        arc->entries = (SbfRawEntry *)malloc((size_t)n * SBF_ENTRY_SIZE);
-        if (!arc->entries) { fclose(f); return -5; }
-        if (fread(arc->entries, SBF_ENTRY_SIZE, n, f) != n) {
-            free(arc->entries); arc->entries = NULL; fclose(f); return -12;
-        }
-    }
-    arc->_file = f;
-    return 0;
-}
-
 /* Witnessed: jointops!Sbf_OpenFile_Gamemus @ 0x004ED6C0 (header + entry-loop reads).
-   Memory-mode counterpart: ingests header + index from a caller-provided buffer. */
+   Ingests header + index from a caller-provided buffer. */
 int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
     if (!arc || !data) return -1;
     memset(arc, 0, sizeof(*arc));
@@ -88,7 +53,6 @@ int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size) {
         if (!arc->entries) return -5;
         memcpy(arc->entries, data + SBF_HEADER_SIZE, (size_t)n * SBF_ENTRY_SIZE);
     }
-    arc->_file = NULL;
     return 0;
 }
 
@@ -96,10 +60,6 @@ void sbf_close(SbfArchive *arc) {
     if (!arc) return;
     free(arc->entries);
     arc->entries = NULL;
-    if (arc->_file) {
-        fclose((FILE *)arc->_file);
-        arc->_file = NULL;
-    }
 }
 
 /* Case-insensitive null-padded compare across SBF_NAME_SIZE. */
@@ -128,20 +88,6 @@ const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t index) {
     if (!arc || !arc->entries) return NULL;
     if (index >= arc->header.entry_count) return NULL;
     return &arc->entries[index];
-}
-
-/* Witnessed: jointops!Sbf_StartEntry @ 0x004ED910 (SetFilePointer to data_offset)
-   + jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile).
-   This function reads the entry's full audio range in one shot. */
-int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
-                             uint8_t *out_buf, size_t buf_size) {
-    if (!arc || !entry || !out_buf) return -1;
-    if (buf_size < entry->total_size) return -2;
-    if (!arc->_file) return -3;
-    FILE *f = (FILE *)arc->_file;
-    if (opennova::io::fseek64(f, (int64_t)entry->data_offset, SEEK_SET) != 0) return -4;
-    if (fread(out_buf, 1, entry->total_size, f) != entry->total_size) return -5;
-    return (int)entry->total_size;
 }
 
 /* Witnessed: jointops!Audio_SubmitStereoSampleSplit inner loop @ 0x007BD252.
@@ -215,24 +161,6 @@ std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
     }
     out.resize(produced);
     return out;
-}
-
-/* Witnessed: jointops!Audio_StreamNextChunk @ 0x004ED7D0 (per-chunk ReadFile of
-   block_size bytes). */
-int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
-                               uint32_t chunk_index, uint8_t *out_buf,
-                               size_t buf_size) {
-    if (!arc || !entry || !out_buf) return -1;
-    if (buf_size < entry->block_size) return -2;
-    if (!arc->_file) return -3;
-    uint64_t chunk_off = (uint64_t)chunk_index * entry->block_size;
-    if (chunk_off >= entry->total_size) return -4;
-    uint64_t off = (uint64_t)entry->data_offset + chunk_off;
-    FILE *f = (FILE *)arc->_file;
-    if (opennova::io::fseek64(f, (int64_t)off, SEEK_SET) != 0) return -5;
-    size_t got = fread(out_buf, 1, entry->block_size, f);
-    if (got != entry->block_size) return -6;
-    return (int)entry->block_size;
 }
 
 /* --- Encoder ---

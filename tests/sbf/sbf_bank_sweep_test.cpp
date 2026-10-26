@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 #include "common/test_paths.h"
+#include "sbf/sbf_bank_file.h"
 #include "sbf/sbf_streaming_reference.h"
 
 using namespace opennova::sbf;
@@ -121,14 +122,14 @@ std::vector<uint8_t> round_trip(const std::string &path, const char *label) {
 }
 
 std::vector<uint8_t> sweep(const std::string &path, const char *label) {
-	SbfArchive arc;
-	CHECK(sbf_open(&arc, path.c_str()) == 0, "%s opens\n", label);
+	SbfBankFile bank;
+	const SbfArchive &arc = bank.arc;
+	CHECK(bank.open(path) == 0, "%s opens\n", label);
 	if (g_failures != 0) return {};
 	CHECK(arc.header.magic == SBF_MAGIC, "%s magic\n", label);
 	CHECK(arc.header.flags <= 2, "%s flags %u within the engine's accepted range\n", label, arc.header.flags);
 	CHECK(arc.header.index_offset == SBF_HEADER_SIZE, "%s index at 0x18\n", label);
 	CHECK(arc.header.entry_count > 0, "%s has entries\n", label);
-	std::vector<uint8_t> chunk(SBF_CHUNK_TOTAL);
 	std::vector<int16_t> decoded(SBF_CHUNK_AUDIO);
 	uint32_t chunks = 0;
 	for (uint32_t i = 0; i < arc.header.entry_count; ++i) {
@@ -138,16 +139,15 @@ std::vector<uint8_t> sweep(const std::string &path, const char *label) {
 		const uint32_t count = e.total_size / e.block_size;
 		CHECK(count * e.block_size == e.total_size, "%s entry %u total_size is whole chunks\n", label, i);
 		for (uint32_t c = 0; c < count; ++c) {
-			const int got = sbf_read_chunk(&arc, &e, c, chunk.data(), chunk.size());
-			CHECK(got == static_cast<int>(e.block_size), "%s entry %u chunk %u reads\n", label, i, c);
-			if (got != static_cast<int>(e.block_size)) break;
-			CHECK(sbf_decode_chunk(chunk.data(), chunk.size(), decoded.data(), decoded.size()) >= 0,
+			const uint8_t *chunk = bank.chunk(&e, c);
+			CHECK(chunk != nullptr, "%s entry %u chunk %u lies in the bank\n", label, i, c);
+			if (chunk == nullptr) break;
+			CHECK(sbf_decode_chunk(chunk, e.block_size, decoded.data(), decoded.size()) >= 0,
 			      "%s entry %u chunk %u decodes\n", label, i, c);
 			++chunks;
 		}
 	}
 	std::printf("%s: %u entries, %u chunks decode\n", label, arc.header.entry_count, chunks);
-	sbf_close(&arc);
 	return round_trip(path, label);
 }
 
@@ -223,21 +223,22 @@ int main(int argc, char **argv) {
 	}
 
 	// The JO gamemus facts the synthetic bank mirrors (gamemus.sbf's NULLS: entry 0, one chunk, 0x08A8 valid).
-	SbfArchive arc;
-	if (sbf_open(&arc, (dir + "synth_gamemus.sbf").c_str()) == 0) {
+	SbfBankFile gamemus;
+	if (gamemus.open(dir + "synth_gamemus.sbf") == 0) {
+		const SbfArchive &arc = gamemus.arc;
 		CHECK(arc.header.entry_count == 13, "the gamemus shape has 13 entries\n");
 		CHECK(std::strncmp(arc.entries[0].name, "SILENCE", 7) == 0, "its entry 0 is the silence\n");
 		const SbfRawEntry *nulls = sbf_find_by_name(&arc, "SILENCE");
 		CHECK(nulls != nullptr && nulls->total_size == 0x1008, "the silence is one chunk\n");
 		if (nulls != nullptr) {
-			uint8_t chunk[SBF_CHUNK_TOTAL];
-			if (sbf_read_chunk(&arc, nulls, 0, chunk, sizeof(chunk)) == SBF_CHUNK_TOTAL) {
+			const uint8_t *chunk = gamemus.chunk(nulls, 0);
+			CHECK(chunk != nullptr, "the silence's chunk lies in the bank\n");
+			if (chunk != nullptr) {
 				uint32_t valid = 0;
 				std::memcpy(&valid, chunk, sizeof(valid));
 				CHECK(valid == 0x08A8, "the silence carries 0x08A8 valid samples\n");
 			}
 		}
-		sbf_close(&arc);
 	} else {
 		CHECK(false, "synth_gamemus.sbf opens\n");
 	}

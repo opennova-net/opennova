@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "sbf/sbf_bank_file.h"
 #include "sbf/sbf_streaming_reference.h"
 
 using namespace opennova::sbf;
@@ -78,16 +79,16 @@ static int test_decode_chunk_takes_any_shift(void) {
 }
 
 static int test_decode_chunk_tone01(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
-    uint8_t chunk[0x1008];
-    CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
-          "read chunk");
+    const uint8_t *chunk = bank.chunk(e, 0);
+    CHECK(chunk != NULL && e->block_size == 0x1008, "the first chunk lies in the entry");
 
     int16_t decoded[SBF_CHUNK_AUDIO];
-    int n = sbf_decode_chunk(chunk, sizeof(chunk), decoded, SBF_CHUNK_AUDIO);
+    int n = sbf_decode_chunk(chunk, e->block_size, decoded, SBF_CHUNK_AUDIO);
     CHECK(n == 0x1000, "full chunk decoded to 4096 int16 samples");
 
     /* Hand-verify the first audio byte using sbf_decode_sample with scale_a. */
@@ -106,16 +107,16 @@ static int test_decode_chunk_tone01(void) {
 }
 
 static int test_decode_chunk_silence_partial(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
-    uint8_t chunk[0x1008];
-    CHECK(sbf_read_chunk(&arc, e, 0, chunk, sizeof(chunk)) == (int)e->block_size,
-          "read chunk");
+    const uint8_t *chunk = bank.chunk(e, 0);
+    CHECK(chunk != NULL && e->block_size == 0x1008, "the chunk lies in the entry");
 
     int16_t decoded[SBF_CHUNK_AUDIO];
-    int n = sbf_decode_chunk(chunk, sizeof(chunk), decoded, SBF_CHUNK_AUDIO);
+    int n = sbf_decode_chunk(chunk, e->block_size, decoded, SBF_CHUNK_AUDIO);
     CHECK(n == 0x08A8, "partial chunk: 2216 int16 samples");
     for (int i = 0; i < n; ++i) CHECK(decoded[i] == 0, "silence decodes to zero");
 
@@ -124,32 +125,32 @@ static int test_decode_chunk_silence_partial(void) {
 }
 
 static int test_decode_all_silence(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
-    uint8_t *raw = (uint8_t *)malloc(e->total_size);
-    CHECK(raw != NULL, "raw alloc");
-    CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
+    const uint8_t *raw = bank.entry_bytes(e);
+    CHECK(raw != NULL, "the entry's bytes lie in the bank");
 
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
     int n = sbf_decode_all(raw, e->total_size, out, e->total_size);
     CHECK(n == 0x08A8, "SILENCE decodes to 2216 samples (single partial chunk)");
 
-    free(out); free(raw);
+    free(out);
     sbf_close(&arc);
     return 1;
 }
 
 static int test_decode_all_tone01_multichunk(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
-    uint8_t *raw = (uint8_t *)malloc(e->total_size);
-    CHECK(raw != NULL, "raw alloc");
-    CHECK(sbf_read_raw(&arc, e, raw, e->total_size) == (int)e->total_size, "read raw");
+    const uint8_t *raw = bank.entry_bytes(e);
+    CHECK(raw != NULL, "the entry's bytes lie in the bank");
 
     int16_t *out = (int16_t *)malloc(e->total_size * sizeof(int16_t));
     CHECK(out != NULL, "out alloc");
@@ -163,7 +164,7 @@ static int test_decode_all_tone01_multichunk(void) {
           "decoded count is bounded by chunk count");
     CHECK(n == 4096 + 4096 + 1000, "TONE01 decodes to its 9192 authored samples");
 
-    free(out); free(raw);
+    free(out);
     sbf_close(&arc);
     return 1;
 }

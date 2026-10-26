@@ -67,28 +67,25 @@ typedef struct SbfChunkHeader {
     uint8_t  reserved_b;            /* never read: 0x00 or 0x01, one value a bank */
 } SbfChunkHeader;
 
-/* --- Open archive (lifetime-owning state) --- */
+/* --- Open bank index (the header and entry table of a bank held in memory) --- */
 
 typedef struct SbfArchive {
     SbfHeader     header;
     SbfRawEntry  *entries;            /* malloc'd, length = header.entry_count */
-    void         *_file;              /* opaque FILE* (NULL when memory mode) */
-    char          _path[260];
 } SbfArchive;
 
 /* --- API --- */
 
-/* Validate raw bytes look like an SBF header. 0 = OK, negative = error. */
+/* Validate a bank's bytes: the header and the whole entry index inside `size`.
+   0 = OK, negative = error. */
 int sbf_validate(const uint8_t *data, size_t size);
 
-/* Open by file path. Streams chunk reads off the open handle in sbf_read_*. */
-int sbf_open(SbfArchive *arc, const char *path);
-
 /* Open from a contiguous buffer (caller retains ownership of `data`).
-   Copies header + entry table into the archive struct. */
+   Copies header + entry table into the archive struct; an entry's audio is the
+   buffer's bytes at its data_offset. */
 int sbf_open_memory(SbfArchive *arc, const uint8_t *data, size_t size);
 
-/* Free entry table and close any open file handle. Idempotent. */
+/* Free the entry table. Idempotent. */
 void sbf_close(SbfArchive *arc);
 
 /* Lookup by entry name (case-insensitive, null-padded). NULL on miss. */
@@ -96,15 +93,6 @@ const SbfRawEntry *sbf_find_by_name (const SbfArchive *arc, const char *name);
 
 /* Lookup by index. NULL on out-of-range. */
 const SbfRawEntry *sbf_find_by_index(const SbfArchive *arc, uint32_t index);
-
-/* Read entry's full audio bytes (entry->total_size) into out_buf.
-   Returns bytes read on success, negative on error. File-mode only. */
-int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
-                 uint8_t *out_buf, size_t buf_size);
-
-/* Streaming hot path: read a single block_size-sized chunk into out_buf. */
-int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
-                   uint32_t chunk_index, uint8_t *out_buf, size_t buf_size);
 
 /* Decode one offset-binary u8 sample to int16 PCM at its channel's shift, as
    the music stream mixes it. The stream pump hands each chunk to the stereo
@@ -132,8 +120,8 @@ static inline int16_t sbf_decode_sample(uint8_t byte, uint8_t scale) {
 int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
                      int16_t *out_samples, size_t out_capacity);
 
-/* Decode every chunk in a contiguous raw_bytes buffer (typically a full entry
-   read via sbf_read_raw). Returns total samples produced. */
+/* Decode every chunk in a contiguous raw_bytes buffer (typically an entry's
+   bytes in the bank, at its data_offset). Returns total samples produced. */
 int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
                    int16_t *out_samples, size_t out_capacity);
 

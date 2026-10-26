@@ -8,6 +8,8 @@
 #include <string.h>
 #include <formats/sbf/sbf.h>
 
+#include "sbf/sbf_bank_file.h"
+
 using namespace opennova::sbf;
 
 static int passed = 0, failed = 0;
@@ -50,19 +52,10 @@ static int test_open_memory(void) {
     return 1;
 }
 
-static int test_open_file(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open file");
-    CHECK(arc.header.magic       == SBF_MAGIC, "magic");
-    CHECK(arc.header.entry_count == 13,        "synth bank has 13 entries");
-    CHECK(strncmp(arc.entries[0].name, "SILENCE", 7) == 0, "first SILENCE");
-    sbf_close(&arc);
-    return 1;
-}
-
 static int test_find_by_name(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
     CHECK(strncmp(e->name, "SILENCE", 7) == 0, "name match");
@@ -77,8 +70,9 @@ static int test_find_by_name(void) {
 }
 
 static int test_find_by_index(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
+    SbfBankFile bank;
+    SbfArchive &arc = bank.arc;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
     const SbfRawEntry *e = sbf_find_by_index(&arc, 0);
     CHECK(e != NULL, "index 0");
     CHECK(strncmp(e->name, "SILENCE", 7) == 0, "first is SILENCE");
@@ -90,62 +84,70 @@ static int test_find_by_index(void) {
     return 1;
 }
 
-static int test_read_raw(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "SILENCE");
+static int test_entry_bytes(void) {
+    SbfBankFile bank;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&bank.arc, "SILENCE");
     CHECK(e != NULL, "SILENCE found");
     CHECK(e->total_size == 0x1008, "SILENCE total_size = 4104 (one chunk)");
-    uint8_t buf[0x1008];
-    int got = sbf_read_raw(&arc, e, buf, sizeof(buf));
-    CHECK(got == 0x1008, "read full entry");
+    const uint8_t *buf = bank.entry_bytes(e);
+    CHECK(buf != NULL, "the entry's bytes lie in the bank");
     /* First 4 bytes are the chunk header's valid_samples: 0x08A8, the retail NULLS shape. */
     uint32_t valid_samples;
     memcpy(&valid_samples, buf, 4);
     CHECK(valid_samples == 0x08A8, "valid_samples in the SILENCE chunk");
-    sbf_close(&arc);
     return 1;
 }
 
-static int test_read_chunk(void) {
-    SbfArchive arc;
-    CHECK(sbf_open(&arc, SYNTH_BANK) == 0, "open");
-    const SbfRawEntry *e = sbf_find_by_name(&arc, "TONE01");
+static int test_entry_chunks(void) {
+    SbfBankFile bank;
+    CHECK(bank.open(SYNTH_BANK) == 0, "open");
+    const SbfRawEntry *e = sbf_find_by_name(&bank.arc, "TONE01");
     CHECK(e != NULL, "TONE01 found");
     CHECK(e->total_size == 3 * 0x1008, "TONE01 spans three chunks");
-    uint8_t buf[0x1008];
-    int got = sbf_read_chunk(&arc, e, 0, buf, sizeof(buf));
-    CHECK(got == (int)e->block_size, "chunk size matches block_size");
+    const uint8_t *buf = bank.chunk(e, 0);
+    CHECK(buf != NULL, "the first chunk lies in the entry");
     uint32_t valid_samples;
     memcpy(&valid_samples, buf, 4);
     CHECK(valid_samples == 0x1000, "TONE01 first chunk full");
-    CHECK(sbf_read_chunk(&arc, e, 2, buf, sizeof(buf)) == (int)e->block_size, "last chunk reads");
+    buf = bank.chunk(e, 2);
+    CHECK(buf != NULL, "the last chunk lies in the entry");
     memcpy(&valid_samples, buf, 4);
     CHECK(valid_samples == 1000, "TONE01 last chunk carries the 1000-sample tail");
-    sbf_close(&arc);
+    CHECK(bank.chunk(e, 3) == NULL, "no chunk past the entry");
     return 1;
 }
 
-static int test_open_bad_magic_safe_close(void) {
+/* A header whose entry count runs past the bytes is refused whatever the size, a header-only 24-byte
+   bank too (the index would be read past the buffer), and a failed open leaves the index closable. */
+static int test_open_bad_bytes_safe_close(void) {
+    uint8_t buf[24] = {
+        0x53,0x42,0x46,0x30,  /* SBF0 */
+        0x00,0x01,0x00,0x00,  /* version */
+        0x01,0x00,0x00,0x00,  /* flags */
+        0x00,0x00,0x00,0x00,  /* reserved */
+        0x18,0x00,0x00,0x00,  /* index_offset = 24 */
+        0xE8,0x03,0x00,0x00,  /* entry_count = 1000, no index behind it */
+    };
     SbfArchive arc;
     /* Garbage in struct memory before open */
     memset(&arc, 0xCD, sizeof(arc));
-    /* Open a non-existent file */
-    int rc = sbf_open(&arc, "fixtures/sbf/__definitely_not_an_sbf__.sbf");
-    CHECK(rc != 0, "open should fail on missing file");
+    CHECK(sbf_open_memory(&arc, buf, sizeof(buf)) == -4, "an index past the bytes is refused");
     /* sbf_close should be safe even after failed open */
+    sbf_close(&arc);
+    buf[0] = 'X';
+    CHECK(sbf_open_memory(&arc, buf, sizeof(buf)) != 0, "bad magic is refused");
     sbf_close(&arc);
     return 1;
 }
 
 int main(void) {
     RUN_TEST(test_open_memory);
-    RUN_TEST(test_open_file);
     RUN_TEST(test_find_by_name);
     RUN_TEST(test_find_by_index);
-    RUN_TEST(test_read_raw);
-    RUN_TEST(test_read_chunk);
-    RUN_TEST(test_open_bad_magic_safe_close);
+    RUN_TEST(test_entry_bytes);
+    RUN_TEST(test_entry_chunks);
+    RUN_TEST(test_open_bad_bytes_safe_close);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }
