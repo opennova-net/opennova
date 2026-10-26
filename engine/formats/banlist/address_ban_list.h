@@ -46,11 +46,8 @@ struct AddressBanList {
 	std::vector<AddressBan> entries;
 };
 
-// One line's tokens onto the list [orig: BanList_ParseIPEntry @0x4FD520]. `count` is the
-// line's token count (a game.cfg-walk line has at least one).
-void parse_entry(AddressBanList &list, int count, const char *token0, const char *token1);
-
-// The file's lines through the game.cfg walk.
+// The file's lines through the game.cfg walk, each line's tokens onto the list as
+// BanList_ParseIPEntry @0x4FD520 puts them.
 AddressBanList parse_address_list(const char *text, size_t size);
 // parse_address_list() over the file at `path`; false (an empty list) when it does not open.
 bool load_address_list(const std::string &path, AddressBanList &out);
