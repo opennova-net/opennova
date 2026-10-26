@@ -41,10 +41,13 @@ struct EffectClosure {
 	std::string effect;
 	std::string source;
 	std::size_t shadowed = 0;
-	// Its pdefs as written, and the first that no definition registers (members.size() when every one
-	// resolves): an effect with one unresolved member spawns nothing at all.
+	// Its pdefs as written, and the first that no definition registers or whose definition fails its
+	// own resolve (members.size() when every one resolves): an effect with one unresolved member
+	// spawns nothing at all. `member_fails_resolve`: that member is registered, and its child_id or a
+	// curve it names finds nothing.
 	std::vector<std::string> members;
 	std::size_t unresolved_member = 0;
+	bool member_fails_resolve = false;
 	// The definitions it instantiates, in the order the spawn makes their emitters (each member,
 	// then its child chain, up to EffectScene's depth of 4), each once.
 	std::vector<EffectClosureDefinition> definitions;

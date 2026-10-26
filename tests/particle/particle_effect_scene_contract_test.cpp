@@ -1,6 +1,8 @@
 #include <runtime/particle/effect_scene.h>
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <string>
@@ -182,6 +184,75 @@ bool effect_resolve_is_all_or_nothing_contract() {
 	const auto intact_receipt = scene.spawn(spawn_request(intact));
 	return check(intact_receipt.spawned(),
 			"a sibling effect with resolvable pdefs is unaffected");
+}
+
+p::TableDef ramp_table(std::string id) {
+	p::TableDef table;
+	table.id = std::move(id);
+	for (int r = 0; r < 32; ++r) {
+		std::array<std::uint8_t, 8> row{};
+		for (int c = 0; c < 8; ++c) row[static_cast<std::size_t>(c)] = static_cast<std::uint8_t>(r * 8 + c);
+		table.rows.push_back(row);
+	}
+	return table;
+}
+
+p::CurveRef curve(std::string table) {
+	p::CurveRef value;
+	value.name = std::move(table);
+	value.present = true;
+	return value;
+}
+
+bool member_resolve_fails_on_a_child_or_curve_miss_contract() {
+	// A found member still runs its own resolve, and a 0 return clears the
+	// effect as a missing member does [orig: CEffectBank_ResolveAllEntries
+	// @ 0x5e4966..0x5e496e -> ClearAll @ 0x5e49be]: the member's child_id
+	// must find a particle [orig: CEffectDef_ResolveAllReferences
+	// @ 0x5e9d90..0x5e9da2] and each curve it names a table (@ 0x5e9dc1..
+	// 0x5e9f65); it returns both @ 0x5e9ff6. A child's own failed resolve
+	// does not fail its parent: the parent finds the child by name alone.
+	p::ParticleDef smoke = particle("smoke");
+	smoke.alpha_func = curve("fade");
+	p::ParticleDef orphan = particle("orphan");
+	orphan.child_id = "nobody";
+	p::ParticleDef uncurved = particle("uncurved");
+	uncurved.red_func = curve("no such table");
+	p::ParticleDef layered = particle("layered");
+	layered.graphics[0].green_func = curve("no such table");
+	p::ParticleDef parent = particle("parent");
+	parent.child_id = "kid";
+	p::ParticleDef kid = particle("kid");
+	kid.alpha_func = curve("no such table");
+	p::EffectSceneConfig config;
+	config.documents.push_back(document("resolve.ptl",
+			{smoke, orphan, uncurved, layered, parent, kid},
+			{{"bad child", {"smoke", "orphan"}},
+			 {"bad curve", {"uncurved", "smoke"}},
+			 {"bad graphic", {"layered"}},
+			 {"parented", {"parent"}},
+			 {"good", {"smoke"}}}));
+	config.documents[0].file.tables.push_back(ramp_table("fade"));
+	p::EffectScene scene;
+	const auto report = scene.open(config);
+	if (!check(report.unresolved_particle_reference_count == 3,
+			"each effect a failed member empties counts once")) return false;
+	for (const char *name : {"bad child", "bad curve", "bad graphic"}) {
+		const auto handle = scene.intern(name);
+		const auto receipt = scene.spawn(spawn_request(handle));
+		if (!check(bool(handle) && !receipt.spawned() &&
+				receipt.status == p::EffectSpawnStatus::EmptyEffect,
+				"an effect whose member's child or curve misses spawns nothing")) return false;
+	}
+	const auto good = scene.spawn(spawn_request(scene.intern("good")));
+	if (!check(good.spawned(), "a member whose every name resolves spawns")) return false;
+	const auto parented = scene.spawn(spawn_request(scene.intern("parented")));
+	if (!check(parented.spawned(), "a child failing its own resolve leaves its parent's effect")) return false;
+	const auto debug = scene.inspect();
+	const auto *group = debug_group(debug, parented.group);
+	return check(group && group->emitters.size() == 2 &&
+			group->emitters[1].definition_name == "kid",
+			"and the parent still spawns that child");
 }
 
 bool slot_owner_and_admission_contract() {
@@ -974,6 +1045,7 @@ int main() {
 	if (!catalog_and_stock_alias_contract()) return 1;
 	if (!pdef_reference_resolution_is_case_insensitive_contract()) return 1;
 	if (!effect_resolve_is_all_or_nothing_contract()) return 1;
+	if (!member_resolve_fails_on_a_child_or_curve_miss_contract()) return 1;
 	if (!slot_owner_and_admission_contract()) return 1;
 	if (!child_reaping_and_group_suppression_lifetime_contract()) return 1;
 	if (!replace_detach_and_validation_contract()) return 1;

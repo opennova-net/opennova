@@ -11,7 +11,10 @@
 //                            colour overrides and curves, and a one-layer one
 //   synth_minimal_effect.ptl the Buildup effect over the "Buildup_dots"
 //                            particle (a gravitating top-aligned burst) that
-//                            the authored gorehit.ptu also references
+//                            the authored gorehit.ptu also references, and
+//                            the four tables its curves name (a curve that
+//                            finds no table fails the particle's resolve, so
+//                            every effect naming it spawns nothing)
 //
 // Each model is one the game's reader gives back as it is: every name one word
 // (the tokenizer ends a word at a blank), each layer holding the particle's
@@ -273,6 +276,10 @@ ParticleFile make_minimal_effect() {
 	g1.green_func = curve("synth_green");
 	g1.blue_func = curve("synth_blue");
 	f.particles.push_back(dots);
+	f.tables.push_back(rise_table("synth_grow"));
+	f.tables.push_back(ramp_table("synth_red"));
+	f.tables.push_back(ramp_table("synth_green"));
+	f.tables.push_back(ramp_table("synth_blue"));
 	return f;
 }
 

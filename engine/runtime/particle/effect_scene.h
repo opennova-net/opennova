@@ -148,9 +148,10 @@ struct EffectLoadReport {
 	std::size_t table_definition_count = 0;
 	std::size_t duplicate_effect_count = 0;
 	std::size_t duplicate_particle_count = 0;
-	// Counted once per failed effect, at its first missing pdefs member —
-	// the resolve is all-or-nothing and stops there, matching the single
-	// retail log line [orig: CEffectBank_ResolveAllEntries @ 0x5e4920].
+	// Counted once per failed effect, at its first pdefs member missing or
+	// failing its own resolve (its child or a curve not found) — the resolve
+	// is all-or-nothing and stops there [orig: CEffectBank_ResolveAllEntries
+	// @ 0x5e4920].
 	std::size_t unresolved_particle_reference_count = 0;
 };
 

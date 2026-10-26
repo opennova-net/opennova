@@ -565,6 +565,11 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 
 	auto mutable_definitions = std::make_shared<std::vector<ParticleDef>>();
 	std::unordered_map<std::string, std::size_t> definition_by_name;
+	// Per definition, whether its own resolve succeeds: its child found and every curve it names
+	// found [orig: CEffectDef_ResolveAllReferences @ 0x5e9d70 returns +4948 && +4952 @ 0x5e9ff6].
+	// The game resolves every definition at load, a member or not [orig:
+	// CParticleManager_ResolveAllReferences @ 0x5ec8dc..0x5ec90b, vtable+8 of each particle].
+	std::vector<bool> definition_resolved;
 	// Particle-def identity and the pdefs member resolve below are
 	// case-insensitive like every by-name walk in the effect system
 	// [orig: CEffectWorld_FindParticleDefByName @ 0x5e41d0 → _stricmp
@@ -580,7 +585,8 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 			const std::size_t index = mutable_definitions->size();
 			definition_by_name.emplace(definition_key, index);
 			mutable_definitions->push_back(source_definition);
-			bake_particle_def_curves(mutable_definitions->back(), tables);
+			definition_resolved.push_back(
+					bake_particle_def_curves(mutable_definitions->back(), tables));
 		}
 	}
 	next->load_report.particle_definition_count = mutable_definitions->size();
@@ -591,9 +597,15 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 		if (child_name.empty()) {
 			continue;
 		}
+		// A child_id line sets the child flag (+140) with its name (+76) [orig:
+		// CParticleDef_ParseProperties @ 0x5ea46e..0x5ea481]; the resolve finds it among the
+		// particles by name, and a miss fails the definition's resolve [orig:
+		// CEffectDef_ResolveAllReferences @ 0x5e9d90..0x5e9da2, +4948 = found].
 		const auto found = definition_by_name.find(fold_ascii(child_name));
 		if (found != definition_by_name.end()) {
 			next->child_definition_index[index] = found->second;
+		} else {
+			definition_resolved[index] = false;
 		}
 	}
 
@@ -609,14 +621,16 @@ EffectLoadReport EffectScene::open(const EffectSceneConfig &config) {
 			effect.source = document.source;
 			effect.definition_indices.reserve(source_effect.pdefs.size());
 			// The pdefs resolve is all-or-nothing: retail stops at the FIRST
-			// missing member, logs it, and CLEARS the effect's whole resolved
-			// list — an effect with any missing PARDEF stays registered by
-			// name but spawns nothing, never a partial subset
+			// member it misses or whose own resolve fails (its child or a
+			// curve not found), and CLEARS the effect's whole resolved list —
+			// such an effect stays registered by name but spawns nothing,
+			// never a partial subset
 			// [orig: CEffectBank_ResolveAllEntries @ 0x5e4920 — miss breaks
-			// @ 0x5e495d, ClearAll @ 0x5e49be, resolved flag stays 0].
+			// @ 0x5e495d, the member's vtable+8 resolve @ 0x5e4966 failing
+			// @ 0x5e496e, ClearAll @ 0x5e49be, resolved flag stays 0].
 			for (const std::string &particle_name : source_effect.pdefs) {
 				const auto found = definition_by_name.find(fold_ascii(particle_name));
-				if (found == definition_by_name.end()) {
+				if (found == definition_by_name.end() || !definition_resolved[found->second]) {
 					++next->load_report.unresolved_particle_reference_count;
 					effect.definition_indices.clear();
 					break;

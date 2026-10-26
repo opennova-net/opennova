@@ -424,15 +424,15 @@ struct ParticleFile {
 void bake_curve_lut(const TableDef &table, bool reverse, bool inverse,
 		std::array<std::uint8_t, 256> &out) noexcept;
 
-// Walks every `*_func` CurveRef on `def` (5 particle-level + 5 per graphic),
-// looks up each `CurveRef::name` in `tables`, and bakes the LUT into
-// `CurveRef::baked_lut` (sets `baked = true` on success). Curves with
-// `present == false` are skipped. Curves whose name does not resolve leave
-// `baked = false` and the LUT untouched. Also bakes per-frame UV rects via
-// `bake_graphic_uv_rects` for every present graphic layer. Mirrors the
-// engine's resolve-after-parse pass
-// (CEffectDef_ResolveAllReferences @ 0x5e9d70).
-void bake_particle_def_curves(ParticleDef &def,
+// The curves of the game's resolve-after-load pass [orig: CEffectDef_ResolveAllReferences @
+// 0x5e9d70]: the particle's six `*_func` curves, then each present graphic's five, in the game's
+// order, each `CurveRef::name` looked up in `tables` and its LUT baked into `CurveRef::baked_lut`
+// (`baked = true`). A curve of no name (or `present == false`) resolves as found. The first curve
+// whose name finds no table ends the walk: it and every curve after it stay `baked = false`, and
+// the call returns false (the game's resolve fails, which fails an effect naming the particle as a
+// member, runtime/particle/effect_scene.cpp). Also bakes per-frame UV rects via
+// `bake_graphic_uv_rects` for every graphic layer.
+bool bake_particle_def_curves(ParticleDef &def,
 		const std::vector<TableDef> &tables) noexcept;
 
 // Fill `layer.baked_uv_rects` with per-frame UV rectangles. Default fill is

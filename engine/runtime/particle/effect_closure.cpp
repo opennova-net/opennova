@@ -3,6 +3,7 @@
 #include <cctype>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace opennova::particle {
 
@@ -56,13 +57,30 @@ EffectClosure effect_closure(const std::vector<EffectCatalogDocument> &documents
 	if (const auto shadows = again.find(found->first); shadows != again.end()) out.shadowed = shadows->second;
 	out.members = effect.pdefs;
 	out.unresolved_member = out.members.size();
+	// Every table in the documents' order: a curve finds the first base of its name, a modified one
+	// the last (CParticleManager_FindTableDefByName @ 0x5E9540), as over the whole catalog.
+	std::vector<TableDef> tables;
+	for (const EffectCatalogDocument &document : documents)
+		tables.insert(tables.end(), document.file.tables.begin(), document.file.tables.end());
 	// The members, all or nothing [orig: CEffectBank_ResolveAllEntries @ 0x5E4920: the first miss
-	// clears the effect's resolved list].
-	for (std::size_t member = 0; member < out.members.size(); ++member)
-		if (!definitions.count(fold(out.members[member]))) {
+	// clears the effect's resolved list]; a member found still runs its own resolve, its child among
+	// the particles and each curve it names among the tables, and a failed one clears it the same
+	// way [orig: @ 0x5E4966..0x5E496E; CEffectDef_ResolveAllReferences @ 0x5E9D70] (EffectScene::open's rule).
+	for (std::size_t member = 0; member < out.members.size(); ++member) {
+		const auto at = definitions.find(fold(out.members[member]));
+		if (at == definitions.end()) {
 			out.unresolved_member = member;
 			break;
 		}
+		const ParticleDef &definition = *at->second.definition;
+		ParticleDef baked = definition;
+		if ((!definition.child_id.empty() && !definitions.count(fold(definition.child_id))) ||
+				!bake_particle_def_curves(baked, tables)) {
+			out.unresolved_member = member;
+			out.member_fails_resolve = true;
+			break;
+		}
+	}
 	EffectCatalogDocument closure;
 	closure.source = out.source;
 	closure.file.effects.push_back(effect);
@@ -82,10 +100,7 @@ EffectClosure effect_closure(const std::vector<EffectCatalogDocument> &documents
 			}
 		}
 	}
-	// Every table in the documents' order: a curve finds the first base of its name, a modified one
-	// the last (CParticleManager_FindTableDefByName @ 0x5E9540), as over the whole catalog.
-	for (const EffectCatalogDocument &document : documents)
-		closure.file.tables.insert(closure.file.tables.end(), document.file.tables.begin(), document.file.tables.end());
+	closure.file.tables = std::move(tables);
 	out.config.simulation_tick_seconds = limits.simulation_tick_seconds;
 	out.config.max_live_groups = limits.max_live_groups;
 	out.config.max_live_emitters = limits.max_live_emitters;
