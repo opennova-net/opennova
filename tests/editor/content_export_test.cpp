@@ -87,9 +87,26 @@ bool store_copy(const std::string &from, const std::string &to) {
 	return !ec;
 }
 
-// Two exports' digests the same; the difference said when not.
+// A digest without its export record's line: the record's `sources` stamps the project's files on
+// this disk (their sizes and times, which a copy does not share), and a release leaves the record out
+// (release_build's --exclude export.json).
+std::string without_record(const std::string &digest) {
+	std::string out;
+	size_t at = 0;
+	while (at < digest.size()) {
+		size_t end = digest.find('
+', at);
+		end = end == std::string::npos ? digest.size() : end + 1;
+		if (digest.compare(at, 12, "export.json ") != 0)
+			out.append(digest, at, end - at);
+		at = end;
+	}
+	return out;
+}
+
+// Two exports' digests the same but for their records; the difference said when not.
 bool same_export(const std::string &original, const std::string &copied) {
-	if (original == copied)
+	if (without_record(original) == without_record(copied))
 		return true;
 	std::fprintf(stderr, "the project exported:\n%.6000s\nits copy exported:\n%.6000s\n",
 			original.c_str(), copied.c_str());
