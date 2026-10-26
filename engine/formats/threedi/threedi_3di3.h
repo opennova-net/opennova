@@ -725,13 +725,6 @@ typedef struct ThreediCtrl {
     ThreediControlRegister *registers;
 } ThreediCtrl;
 
-typedef struct ThreediRawTable {
-    uint32_t count;
-    uint32_t record_size;
-    uint8_t *data;
-    size_t data_len;
-} ThreediRawTable;
-
 typedef struct ThreediVec3 {
     float x, y, z;
 } ThreediVec3;
@@ -893,7 +886,6 @@ typedef struct Threedi3di3 {
 
     // Misc chunks
     ThreediCtrl ctrl;
-    ThreediRawTable ovrt;
     ThreediMatrixTable mtrx;
 
     // Occlusion (OCCL children)

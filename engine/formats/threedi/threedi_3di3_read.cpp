@@ -132,7 +132,6 @@ static void free_model_arrays(Threedi3di3 *model)
         free(model->collision->translations);
         free(model->collision);
     }
-    free(model->ovrt.data);
     free(model->mtrx.matrices);
     free(model->occlusion_vertices);
     free(model->occlusion_faces);
@@ -154,7 +153,6 @@ static void free_model_arrays(Threedi3di3 *model)
     model->user_point_count = 0;
     model->collision = NULL;
     memset(&model->ctrl, 0, sizeof(model->ctrl));
-    memset(&model->ovrt, 0, sizeof(model->ovrt));
     memset(&model->mtrx, 0, sizeof(model->mtrx));
     model->occlusion_vertices = NULL;
     model->occlusion_faces = NULL;
