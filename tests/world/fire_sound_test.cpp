@@ -231,6 +231,48 @@ void test_full_pending_pool_drops() {
     CHECK(r.drain().size() == FireSoundQueue::kSlotCount);
 }
 
+// The set's cull range gates the play before the slot pool: a shot past it plays
+// nothing and takes no slot, so a pool's worth of far shots leaves room for an
+// in-range one; at the range exactly it plays (an unsigned `ja`); the near leg
+// is gated too. [orig: Sound_PlayWithDistanceAttenuation @0x528E40 - the
+// compare @0x528EC3..0x528EC6 ahead of the allocation @0x528EF2]
+void test_cull_range_gates_before_the_slot_pool() {
+    opennova::lwf::File bank;
+    bank.multis.resize(3);
+    bank.multis[0].name = "GS_SHORT";
+    bank.multis[0].target_id = 200;
+    bank.multis[1].name = "GS_LONG";
+    bank.multis[1].target_id = 1000;
+    bank.multis[2].name = "GS_TINY";
+    bank.multis[2].target_id = 10;
+    opennova::audio::SoundSetIndex sets;
+    sets.add_bank(0, bank);
+    FireSoundQueue q;
+    q.set_sound_sets(&sets);
+    q.set_listener({0.0f, 0.0f, 0.0f});
+    for (int i = 0; i < FireSoundQueue::kSlotCount + 5; ++i)
+        q.play_with_distance_delay("GS_SHORT", {330.0f, 0.0f, 0.0f}, 0);
+    CHECK(q.pending_count() == 0);
+    q.play_with_distance_delay("gs_long", {330.0f, 0.0f, 0.0f}, 0);
+    CHECK(q.pending_count() == 1);
+    q.play_with_distance_delay("GS_SHORT", {200.0f, 0.0f, 0.0f}, 0); // at the range
+    CHECK(q.pending_count() == 2);
+    q.play_with_distance_delay("GS_TINY", {20.0f, 0.0f, 0.0f}, 0);   // near, past 10
+    q.play_with_distance_delay("GS_TINY", {10.0f, 0.0f, 0.0f}, 0);   // near, at 10
+    CHECK(q.drain().size() == 1);
+    // A name no bank holds is the null set: nothing, no slot.
+    q.play_with_distance_delay("GS_UNKNOWN", {330.0f, 0.0f, 0.0f}, 0);
+    q.play_with_distance_delay("GS_UNKNOWN", {10.0f, 0.0f, 0.0f}, 0);
+    CHECK(q.pending_count() == 2 && q.drain().empty());
+    // The distance caps at 32767 units: a set ranged that far hears 40000 units out.
+    bank.multis[0].target_id = 32767;
+    opennova::audio::SoundSetIndex far_sets;
+    far_sets.add_bank(0, bank);
+    q.set_sound_sets(&far_sets);
+    q.play_with_distance_delay("GS_SHORT", {40000.0f, 0.0f, 0.0f}, 0);
+    CHECK(q.pending_count() == 3);
+}
+
 // run_logic_tick advances the countdown once per tick from the World seam.
 void test_world_tick_advances_the_countdown() {
     Rig r;
@@ -606,6 +648,7 @@ int main() {
     test_alt_fire_bit_selects_the_ammo_arm();
     test_entityless_adm_arm_uses_the_supplied_shooter_pos();
     test_full_pending_pool_drops();
+    test_cull_range_gates_before_the_slot_pool();
     test_world_tick_advances_the_countdown();
     if (failures == 0) std::printf("fire_sound_test: all passed\n");
     return failures == 0 ? 0 : 1;

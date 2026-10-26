@@ -17,6 +17,10 @@
 
 #include <runtime/world/geom.h>
 
+namespace opennova::audio {
+class SoundSetIndex;
+}
+
 namespace opennova::world {
 
 class World;
@@ -56,8 +60,9 @@ struct PendingFireSound {
 };
 
 // One ready-to-play positional fire one-shot, drained by the presenting host.
-// The set's max-range cull runs at PLAY time in our audio bank vs fire time
-// in retail (soundDef+72 @ 0x528ec6) — the tracked D-AI-8 delta.
+// The set's cull range gates twice, as in retail: at fire time
+// (play_with_distance_delay, soundDef+72 @ 0x528ec6) and again where the
+// shell's audio bank plays it (Sound_Play3DPositional @ 0x527cd1).
 struct ReadyFireSound {
     bool interface_set = false;
     std::string set_name;
@@ -96,10 +101,15 @@ public:
     }
     bool listener_valid() const { return listener_valid_; }
     const Vec3 &listener() const { return listener_; }
+    // The loaded banks' sets (World::tables.sound_sets), whose cull range the
+    // distance-gated play tests first; null tests nothing.
+    void set_sound_sets(const audio::SoundSetIndex *sets) { sound_sets_ = sets; }
 
     // The distance-gated play [orig: Sound_PlayWithDistanceAttenuation
-    // @ 0x528e40 minus the set-range gate — D-AI-8]: truncate the listener
-    // distance to integer units; >= 30 units queues a free pending slot with
+    // @ 0x528e40]: truncate the listener distance to integer units (capped at
+    // 32767); a set no loaded bank holds, or one past its cull range (its +72
+    // word), plays nothing and takes no slot;
+    // >= 30 units queues a free pending slot with
     // countdown (62 * dist / 330) >> 2 (integer division; a full pool drops
     // the sound [orig: @ 0x527c47]; a zero countdown seeds 1 [orig:
     // @ 0x527c94]); nearer plays this present.
@@ -158,6 +168,7 @@ private:
     std::vector<ReadyFireSound> ready_;
     Vec3 listener_{};
     bool listener_valid_ = false;
+    const audio::SoundSetIndex *sound_sets_ = nullptr;
 };
 
 // Flag/objective events carry both immediate cues and delayed interface voice.

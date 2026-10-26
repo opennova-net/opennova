@@ -354,8 +354,8 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 
 // The ready fire-sound drain: immediate near shots, the adm-arm action-row
 // sets, and expired propagation-delayed slots, in play order on the logic
-// clock. The shell plays each row positionally; the set's max-range cull
-// stays at play time in the audio bank (D-AI-8).
+// clock. The shell plays each row positionally; the audio bank's play-time
+// range test is retail's second one (the sim ran the first at fire time).
 // (engine: runtime/world/fire_sound.h)
 void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds) {
 	r_sounds.clear();

@@ -783,6 +783,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("script_catalogs");
 		wac::load_script_sound_sets(files_, script_sound_catalog);
 		world.tables.sound_sets = &script_sound_catalog;
+		world.out.fire_sounds.set_sound_sets(&script_sound_catalog);
 		// The mission's dialog bank when it exists, <mission>.dbf or the one the
 		// header's slot names, and with it the bank's sounds, <bank>.lwf else
 		// <bank>.pwf. [orig: DialogSystem_Init @0x52760c..0x527659 ->
