@@ -142,8 +142,9 @@ func test_sub_pixel_world_models_are_not_drawn_at_any_level_count() -> void:
 	# @0x5c42d8..0x5c42de), whatever the model's level count: the two-level
 	# pump and the one-level crate both drop, and come back when near.
 	var placer := _placer()
-	placer.register_occlusion_verdict(106401, true)
-	placer.register_occlusion_verdict(106403, true)
+	# The crate's graphic as a variant with one occlusion record, which takes it
+	# out of the static batches; the pump's live PANM does that for it.
+	assert_true(placer.register_object_data("crate", _data("crate_occl_open")))
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 106401, Vector3.ZERO, Vector3.ZERO))
@@ -347,7 +348,7 @@ func _present_husk(placer: MissionObjectPlacer, placed: Dictionary,
 
 func test_individual_husk_retains_primary_sphere_with_nonunit_scale() -> void:
 	var placer := _placer()
-	placer.register_occlusion_verdict(106403, true)
+	assert_true(placer.register_object_data("crate", _data("crate_occl_open")))
 	var placed := _place(placer, 106403)
 	assert_eq(placed.stats.animated, 1)
 	_present_husk(placer, placed, true)

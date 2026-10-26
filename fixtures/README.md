@@ -171,6 +171,7 @@ control register 0, values 0..4, no speed):
 | `person_flipbook_register` | person | material 0 a flipbook on the register clock (CTRL `TEX_CAMO1`): four diffuse and four detail frames, flagged and framed, and a `.mdt` normal map (ArmGlove's) | `threedi_rewrite`; the editor's model rows |
 | `crate_bvol_types` | crate | volumes of types 0, 5, 9, 10, 12, 13 and 16 beside the crate's own (farp_lnd's 13, FAH6a's 16) | `threedi_rewrite`; the editor's model rows |
 | `crate_usrp_no_part` | crate | user point 0 on part -1 (Bed01's) | `threedi_rewrite`; the editor's model rows |
+| `crate_occl_open` | crate | one occlusion record, an open box over the crate | `mission_object_placer_test.gd`, `object_projection_lod_test.gd`: an individual model by its occlusion records alone |
 | `shed_mtrl1_ab_lum_uv` | shed | material 1 (the bulb) as `FF_ST_AB_LUM#UV`, emissive full, U scrolling (style 16, rate 1.0) | `threedi_rewrite` |
 | `crate_alphagen24` | crate | material 0 a two-sided `FF_ST_OP` with a constant AlphaGen (style 24, register -1, start 128), no alpha test (SCrate1's) | `threedi_material_facts`; `terrain_static_shadow_runtime_test.gd` projected-shadow witness |
 

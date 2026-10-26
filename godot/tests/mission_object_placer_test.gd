@@ -684,34 +684,33 @@ func test_godot_to_bms_position_axis_remap() -> void:
 
 const ARMRY_3DI := "res://../fixtures/threedi/synth/armory.3di"
 const PMPJK_3DI := "res://../fixtures/threedi/synth/pump.3di"
+# An inert PANM row on the one-part shed, with no occlusion record.
+const INERT_3DI := "res://../fixtures/threedi/synth/panm_inert_05_rot_scalex.3di"
 
 
-func _panm_data(live: bool) -> ObjectData:
+func _panm_data(path: String) -> ObjectData:
 	var data := ObjectData.new()
-	var path := PMPJK_3DI if live else ARMRY_3DI
 	if data.open_file(_abs(path)) != OK:
 		return null
 	return data
 
 
-# The classification seams replace the old script-subclass harness (native
+# The classification seam replaces the old script-subclass harness (native
 # methods cannot be overridden from GDScript): the authored fixture data is
-# cache-injected for the graphic and the occlusion verdict is pre-filled so
-# the PANM rule is isolated from the fixture's independent portal payload.
-func _panm_placer(live: bool) -> MissionObjectPlacer:
+# cache-injected for the graphic, its PANM and occlusion records its own.
+func _panm_placer(path: String) -> MissionObjectPlacer:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
 	# item 105004: type object, no anim_def
-	placer.register_object_data("StaticCrate1", _panm_data(live))
-	placer.register_occlusion_verdict(105004, false)
+	placer.register_object_data("StaticCrate1", _panm_data(path))
 	return placer
 
 
 func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
-	var placer := _panm_placer(true)
+	var placer := _panm_placer(PMPJK_3DI)
 	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data authored with one live PANM track")
 	if placer.object_data_for("StaticCrate1") == null:
 		return
@@ -740,10 +739,9 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 
 
 func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
-	# armory as shipped has idle PANM plus an independent OOBJ portal payload.
-	# The harness suppresses that second classifier here so this test isolates
-	# the rule that inert PANM alone does not defeat static batching.
-	var placer := _panm_placer(false)
+	# An inert PANM row and no occlusion record: inert PANM alone does not
+	# defeat static batching.
+	var placer := _panm_placer(INERT_3DI)
 	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data loads")
 	if placer.object_data_for("StaticCrate1") == null:
 		return
@@ -769,13 +767,12 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 
 
 func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
-	var placer := _panm_placer(false)
+	var placer := _panm_placer(ARMRY_3DI)
 	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data loads")
 	if placer.object_data_for("StaticCrate1") == null:
 		return
 	assert_true(placer.object_data_for("StaticCrate1").has_occlusion(),
 		"fixture carries the portal payload that requires per-section visibility")
-	placer.register_occlusion_verdict(105004, true)
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_not_null(mission.add_entity(
@@ -792,7 +789,7 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 
 
 func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
-	var data := _panm_data(false)
+	var data := _panm_data(ARMRY_3DI)
 	assert_not_null(data, "inert PANM fixture loads")
 	if data == null:
 		return
@@ -825,7 +822,7 @@ func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
 
 
 func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
-	var data := _panm_data(true)
+	var data := _panm_data(PMPJK_3DI)
 	assert_not_null(data, "live PANM fixture loads")
 	if data == null:
 		return
@@ -1045,11 +1042,9 @@ func test_multi_lod_static_selects_its_rlod_per_instance_inside_the_bin() -> voi
 
 
 func test_multi_lod_document_harvests_every_level_into_the_bins() -> void:
-	# The real harvest: an inert-PANM document with more than one authored
-	# RLOD (the occlusion verdict is pre-filled so only the RLOD rule is under
-	# test) emits one population per level and stays out of the individual
-	# count.
-	var placer := _panm_placer(false)
+	# The real harvest: an inert-PANM document with no occlusion record emits
+	# one population per authored RLOD and stays out of the individual count.
+	var placer := _panm_placer(INERT_3DI)
 	var data := placer.object_data_for("StaticCrate1")
 	assert_not_null(data, "fixture data loads")
 	if data == null:
@@ -1388,9 +1383,11 @@ func test_static_and_live_placement_share_initialized_entity_light_radius() -> v
 		director.render_frame(camera, GameWorld.current_frame_clock_ms())
 		assert_almost_eq(static_scene.get_static_light_rows_image().get_pixel(0, 0).r,
 				1.0, 0.001, "static selection uses the authored scale and entity pad")
+		# The crate with one occlusion record, its sphere the crate's: an individual model.
+		var live_data := ObjectData.new()
+		assert_eq(live_data.open_from_resource_root(root, "crate_occl_open.3di"), OK)
 		var live_placer := MissionObjectPlacer.create(root, db)
-		live_placer.register_object_data(definition[1], data)
-		live_placer.register_occlusion_verdict(definition[0], true)
+		live_placer.register_object_data(definition[1], live_data)
 		var live_branch := Node3D.new()
 		parent.add_child(live_branch)
 		var live_stats := live_placer.place(mission, live_branch)
@@ -1621,8 +1618,10 @@ func _crossing_placer(root: ResourceRoot, item_db: ItemDatabase, data: ObjectDat
 	assert_true(placer.register_resolved_static_graphic("StaticCrate1", data, [{
 		"mesh": BoxMesh.new(), "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
-	placer.register_object_data("pump", data)
-	placer.register_occlusion_verdict(106103, true)
+	# The crate with one occlusion record: an individual model per row.
+	var occluding := ObjectData.new()
+	assert_eq(occluding.open_from_resource_root(root, "crate_occl_open.3di"), OK)
+	placer.register_object_data("pump", occluding)
 	return placer
 
 

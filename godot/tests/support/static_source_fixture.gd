@@ -30,7 +30,6 @@ static func place(test: GutTest, parent: Node, models: Array[ObjectData],
 				"offset": Transform3D(Basis.IDENTITY, offsets[row] if row < offsets.size() else Vector3.ZERO),
 				"submesh": row, "robj_index": sections[row]})
 		test.assert_true(placer.register_resolved_static_graphic("Source%d" % i, models[i], batches))
-		placer.register_occlusion_verdict(105001 + i, false)
 		test.assert_not_null(mission.add_entity(MissionData.KIND_BUILDING, 105001 + i,
 				MissionObjectPlacer.godot_to_bms_position(positions[i]), Vector3(0, 180, 0)))
 	var branch := Node3D.new()

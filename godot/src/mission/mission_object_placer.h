@@ -403,9 +403,6 @@ public:
 	// classification seam: live-PANM routing reads the injected data).
 	bool register_object_data(const String &p_graphic,
 			const Ref<ObjectData> &p_data);
-	// Pre-fill the per-item occlusion verdict (isolates the PANM routing
-	// rule from a fixture's independent portal payload).
-	void register_occlusion_verdict(int p_item_id, bool p_has_occlusion);
 
 protected:
 	static void _bind_methods();
@@ -650,7 +647,6 @@ private:
 	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces
 	HashMap<String, StaticLodProfile> static_lod_profile_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
-	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
 	// The placement run begun last (begin_place_rows): a run of an older generation is cancelled.
 	uint64_t placement_generation_ = 0;

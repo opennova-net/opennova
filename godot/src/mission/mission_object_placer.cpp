@@ -201,9 +201,6 @@ void MissionObjectPlacer::_bind_methods() {
 			DEFVAL(Dictionary()));
 	ClassDB::bind_method(D_METHOD("register_object_data", "graphic", "data"),
 			&MissionObjectPlacer::register_object_data);
-	ClassDB::bind_method(
-			D_METHOD("register_occlusion_verdict", "item_id", "has_occlusion"),
-			&MissionObjectPlacer::register_occlusion_verdict);
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_LOD",
 			RENDER_LOD);
@@ -274,7 +271,6 @@ void MissionObjectPlacer::_check_epoch() {
 	static_face_cache_.clear();
 	static_lod_profile_cache_.clear();
 	graphic_panm_cache_.clear();
-	occlusion_cache_.clear();
 	static_sources_.invalidate_shadow_assets();
 	// Effect snapshots retain their resources across a root epoch, like the
 	// old placed rows; the shadow-only references are released here.
@@ -798,21 +794,15 @@ bool MissionObjectPlacer::_graphic_needs_live_panm(const String &p_graphic) {
 	return result;
 }
 
+// The item's graphic's own occlusion records: a field of the object data the
+// placer's cache holds (a miss cached as none).
 bool MissionObjectPlacer::_has_occlusion_records(int p_item_id) {
-	const bool *cached = occlusion_cache_.getptr(p_item_id);
-	if (cached != nullptr) {
-		return *cached;
-	}
-	bool has_occ = false;
 	const String graphic = _graphic_for(p_item_id);
-	if (!graphic.is_empty()) {
-		const Ref<ObjectData> data = _load_object_data(graphic);
-		if (data.is_valid()) {
-			has_occ = data->has_occlusion();
-		}
+	if (graphic.is_empty()) {
+		return false;
 	}
-	occlusion_cache_[p_item_id] = has_occ;
-	return has_occ;
+	const Ref<ObjectData> data = _load_object_data(graphic);
+	return data.is_valid() && data->has_occlusion();
 }
 
 int32_t MissionObjectPlacer::_item_entity_bound_radius_q16(int p_item_id,

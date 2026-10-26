@@ -1082,6 +1082,11 @@ const std::vector<Recipe> &recipes() {
 		// A user point on part -1 (Bed01).
 		{"crate_usrp_no_part", make_crate, nullptr, "threedi/synth",
 				[](Threedi3di3 &t) { t.user_points[0].subobject_index = -1; }},
+		// One occlusion record, an open box over the crate: a model the placement
+		// takes out of the static batches for its occlusion records alone.
+		{"crate_occl_open", make_crate, [](Model &m) {
+			m.add_occ_box(1, 0, 0, box(-0.5, -0.5, 0.0, 0.5, 0.5, 1.0));
+		}},
 		// The bulb self-lit on its UV twin: an emissive material named _LUM#UV, its U
 		// scrolling (the shipped _LUM#UV rows the reader accepts as emissive).
 		{"shed_mtrl1_ab_lum_uv", make_shed, [](Model &m) {
@@ -1199,6 +1204,9 @@ bool check_quirk(const std::string &name, const Parsed &p) {
 		expect(all, name + ": volume types");
 	} else if (name == "crate_usrp_no_part") {
 		expect(t.user_points[0].subobject_index == -1, name + ": a user point on part -1");
+	} else if (name == "crate_occl_open") {
+		expect(t.occlusion_object_count == 1 && p.parts() == 1 && p.bvols() == 1,
+				name + ": one occlusion record over the crate");
 	} else {
 		return false;
 	}
