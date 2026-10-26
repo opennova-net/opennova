@@ -16,6 +16,7 @@
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>
+#include <base/proc/child_process.h>
 #include <net/novaworld/lobby_identity.h> // read_primary_screen_size
 #include <runtime/world/tick_accumulator.h>
 #include <runtime/world/tick_count_clock.h>
@@ -169,7 +170,7 @@ int main(int argc, char **argv) {
 	std::vector<std::string> args(argv + 1, argv + argc);
 	serve::ServeOptions options;
 	std::string error;
-	const int parsed = serve::parse_serve_options(args, options, error);
+	const int parsed = serve::parse_serve_options(args, options, error, proc::own_command_line());
 	if (parsed < 0) {
 		std::fputs(serve::serve_usage(), stdout);
 		return 0;

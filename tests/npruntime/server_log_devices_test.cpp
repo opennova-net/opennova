@@ -52,12 +52,12 @@ void run_the_launch_walk_reads_the_switches() {
 	expect(f.log_switches.profile_path == "/NETLOG" && f.log_switches.net_log,
 	       "a /PROFILE's value token is its path, and the walk's later tests read it too");
 	const opennova::LaunchFlags none = opennova::parse_launch_flags({"--lan-host", "x.bms"});
-	expect(none.log_switches.profile_path.empty() && !none.log_switches.punt_log &&
+	expect(!none.log_switches.profile_path && !none.log_switches.punt_log &&
 	               !none.log_switches.net_log && !none.log_switches.inout,
 	       "no switch arms nothing");
 	const opennova::LaunchFlags tail = opennova::parse_launch_flags({"/NETLOG", "/PROFILE"});
-	expect(tail.log_switches.net_log && tail.log_switches.profile_path.empty(),
-	       "a /PROFILE with no value takes none");
+	expect(tail.log_switches.net_log && tail.log_switches.profile_path == std::string(),
+	       "a /PROFILE with no value records to the path \"\" (retail's flag set, its path empty)");
 }
 
 void run_the_devices_write_in_the_working_directory() {

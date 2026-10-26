@@ -1,6 +1,7 @@
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
 #include <base/gameprofile/player_files.h>
+#include <base/proc/child_process.h>
 #include <formats/tga/tga.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -53,6 +54,7 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::screen_shot_tga_file);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_reload"), &LaunchFlags::no_reload);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan"), &LaunchFlags::lan);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("nopunt"), &LaunchFlags::nopunt);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("working_dir"), &LaunchFlags::working_dir);
@@ -83,20 +85,34 @@ void LaunchFlags::_bind_methods() {
 
 // Every token the game was launched with (engine + user args): Godot commands
 // put custom options behind Godot's `--` separator, and scanning both arrays
-// lets packaged and source launches share the engine's one parser. Tests
-// substitute the token list through set_args_override.
+// lets packaged and source launches share the engine's one parser. The retail
+// switches are walked over the game's own line, as the game's config tokenizer
+// splits it. A packaged game's is the process's line where the OS keeps one
+// (Windows: `opennova.exe /exp jox01`, and the updater's relaunch of it,
+// `... /exp jox01 -- --after-update`), else its arguments spelled as one. A source
+// run (the editor binary, no "template" feature) puts Godot's own arguments ahead of
+// `--` (its --path, and the scene's res:// path, whose "//" would end the line), so
+// its line is the arguments after `--`, spelled as one. OpenNova's own options there
+// are tokens the walk passes over as retail passes an unknown one. Tests substitute
+// the token list through set_args_override, which is walked as a line spelling it.
 opennova::LaunchFlags LaunchFlags::parse() {
 	if (args_override_set_) return opennova::parse_launch_flags(args_override_);
 	std::vector<std::string> args;
+	std::vector<std::string> user;
+	bool source_run = false;
 	OS *os = OS::get_singleton();
 	if (os != nullptr) {
+		source_run = !os->has_feature("template");
 		const PackedStringArray engine_args = os->get_cmdline_args();
 		const PackedStringArray user_args = os->get_cmdline_user_args();
 		args.reserve(static_cast<size_t>(engine_args.size() + user_args.size()));
 		for (int64_t i = 0; i < engine_args.size(); ++i) args.push_back(to_std(engine_args[i]));
-		for (int64_t i = 0; i < user_args.size(); ++i) args.push_back(to_std(user_args[i]));
+		for (int64_t i = 0; i < user_args.size(); ++i) user.push_back(to_std(user_args[i]));
+		args.insert(args.end(), user.begin(), user.end());
 	}
-	return opennova::parse_launch_flags(args);
+	std::string line = source_run ? opennova::retail_command_line(user) : opennova::proc::own_command_line();
+	if (line.empty()) line = opennova::retail_command_line(args);
+	return opennova::parse_launch_flags(args, line);
 }
 
 bool LaunchFlags::loose_override_enabled() {
@@ -256,6 +272,10 @@ bool LaunchFlags::no_reload() {
 
 bool LaunchFlags::lan() {
 	return parse().lan;
+}
+
+bool LaunchFlags::nopunt() {
+	return parse().nopunt;
 }
 
 void LaunchFlags::set_args_override(const PackedStringArray &args) {

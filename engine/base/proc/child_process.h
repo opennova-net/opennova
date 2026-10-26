@@ -111,6 +111,14 @@ std::vector<std::string> current_environment();
 // matches every name it begins (LC_* is every locale variable).
 std::vector<std::string> filter_environment(const std::vector<std::string> &names);
 
+// This process's command line as the OS holds it, the program's own token first
+// (GetCommandLineW, as UTF-8): the line the game's retail switches are read from
+// (base/resource_index/boot_policy.h walk_retail_switches). "" where the OS holds
+// none, only an argument array (POSIX). Retail reads GetCommandLineA, in the ANSI code
+// page; past ASCII the walk's 1000-character clamp and its 31- and 32-byte value cuts
+// count UTF-8 bytes here, and a cut can split a character.
+std::string own_command_line();
+
 class ChildProcess {
 public:
 	ChildProcess();

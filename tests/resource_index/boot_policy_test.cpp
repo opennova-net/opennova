@@ -152,6 +152,66 @@ void test_mod_is_exp_and_the_name_keeps_32_bytes() {
     CHECK(kExpansionNameMax == 31 && kExpansionNameMax + 1 == kExpansionNameBytes);
 }
 
+// The game's one walk over its command line [orig: Game_ParseCommandLineAndInit @0x4a7310]: the
+// line split by its config tokenizer (30 tokens with the program's, [orig: Config_TokenizeLine
+// @0x53CB60]), each token tested against every switch in the walk's order, a value-taking switch
+// stepping onto its value for the switches after it, an unknown token passed over (D-GAMECFG-7).
+void test_the_retail_walk() {
+    // /NOPUNT, the whole token in any case [orig: @0x4A7473 -> dword_B4C698 @0x4A747F].
+    CHECK(parse_launch_flags({"/nopunt"}).nopunt);
+    CHECK(!parse_launch_flags({"/NOPUNTX"}).nopunt && !parse_launch_flags({}).nopunt);
+    // /HOST steps onto its value: `/HOST /LAN` names the host file /LAN and sets no /LAN, since
+    // the /LAN test, ahead of /HOST in the walk, never sees that token.
+    const LaunchFlags host = parse_launch_flags({"/HOST", "/LAN"});
+    CHECK(host.host_file == std::optional<std::string>("/LAN") && !host.lan);
+    // `/exp /HOST /LAN`: /exp takes /HOST as its value, then the /HOST test, after /exp's in the
+    // walk, reads that same token and steps onto /LAN as the host file.
+    const LaunchFlags exp_host = parse_launch_flags({"/exp", "/HOST", "/LAN"});
+    CHECK(exp_host.expansion == "/HOST" && exp_host.host_file == std::optional<std::string>("/LAN") &&
+          !exp_host.lan);
+    // `/mod /UDPNOVAWORLD x`: the /UDPNOVAWORLD test, ahead of /mod's, has passed, /mod takes it
+    // as its value, and the walk goes on to x, which is no switch: no entry kept.
+    const LaunchFlags mod_udp = parse_launch_flags({"/mod", "/UDPNOVAWORLD", "x"});
+    CHECK(mod_udp.expansion == "/UDPNOVAWORLD" && mod_udp.udp_novaworld.empty());
+    // /maxplayers, /HOST and /PROFILE read their next token with no bound: past the last, "".
+    const LaunchFlags tail = parse_launch_flags({"/maxplayers", "12", "/HOST"});
+    CHECK(tail.max_players == 12 && tail.host_file == std::optional<std::string>(""));
+    CHECK(!parse_launch_flags({}).host_file.has_value() && parse_launch_flags({}).max_players == 0);
+    // The startup page's switches and /AA step onto their value: a switch spelled there is read
+    // as the value, not the switch [orig: @0x4A7B71, @0x4A7BA5].
+    CHECK(!parse_launch_flags({"/URL", "/LAN"}).lan && !parse_launch_flags({"/AA", "/NOPUNT"}).nopunt);
+    CHECK(parse_launch_flags({"/URL=x", "/LAN"}).lan);
+    // Tokens the game does not know pass, the switches after them still read.
+    const LaunchFlags passed = parse_launch_flags({"/STATLOG", "stray", "/w", "/NOHUD"});
+    CHECK(passed.no_hud && !passed.lan);
+
+    // The split is the game's tokenizer over the process's own line where it is given: a comma
+    // or a tab ends a token, a ';' or "//" ends the line, a quoted run is one token.
+    CHECK(parse_launch_flags({"/w,/LAN"}, "game.exe /w,/LAN").lan);
+    CHECK(!parse_launch_flags({"/w", ";", "/LAN"}, "game.exe /w ; /LAN").lan);
+    CHECK(!parse_launch_flags({}, "game.exe //LAN").lan);
+    CHECK(parse_launch_flags({}, "game.exe \"/LAN\"").lan);
+    CHECK(retail_command_line_tokens("\"C:\\Program Files\\x\\game.exe\" /exp jox01") ==
+          std::vector<std::string>({"C:\\Program Files\\x\\game.exe", "/exp", "jox01"}));
+    // The program's own token is never walked.
+    CHECK(!parse_launch_flags({}, "/LAN").lan);
+    // At most 30 tokens with the program's [orig: the 30 cap @0x53CC8C..0x53CC93]: the 30th
+    // runs to the end of the line, so a /LAN past it is that token's text.
+    std::string long_line = "game.exe";
+    for (int i = 0; i < 28; ++i) long_line += " x";
+    CHECK(parse_launch_flags({}, long_line + " /LAN").lan);        // the 30th token itself
+    CHECK(!parse_launch_flags({}, long_line + " y /LAN").lan);     // the 30th is "y /LAN"
+    // An argument list with no line of its own is spelled as the OS holds one: an argument with
+    // a space or a tab quoted, the rest as they are, so the tokenizer splits and cuts it as it
+    // does the game's own line.
+    CHECK(retail_command_line({"a b", "c,d", "", "e\tf"}) == "opennova \"a b\" c,d \"\" \"e\tf\"");
+    CHECK(retail_command_line_tokens(retail_command_line({"a b", "c,d", "/LAN"})) ==
+          std::vector<std::string>({"opennova", "a b", "c", "d", "/LAN"}));
+    CHECK(parse_launch_flags({"/w,/LAN"}).lan);
+    CHECK(!parse_launch_flags({"e;f", "/LAN"}).lan && !parse_launch_flags({"res://x.tscn", "/LAN"}).lan);
+    CHECK(parse_launch_flags({"C:\\Program Files\\x", "/LAN"}).lan);
+}
+
 // What ends an /exp token on the command line [orig: Config_TokenizeLine @ 0x53cb60]: a
 // space, tab or comma, a quote, a semicolon; nothing else a name holds.
 void test_launch_token_breaks() {
@@ -393,6 +453,7 @@ void test_mount_install() {
 int main() {
     test_flags_parse_case_insensitively_with_values();
     test_mod_is_exp_and_the_name_keeps_32_bytes();
+    test_the_retail_walk();
     test_launch_token_breaks();
     test_runtime_launch_flags_parse();
     test_lan_fallbacks_and_join_endpoint();

@@ -94,6 +94,7 @@ struct ServeOptions {
 	std::string host_file;    // /HOST <file>
 	int32_t max_player_arg = 0; // /maxplayers N: the host file's MaxPlayers yields to it (0: none)
 	bool lan_switch = false;  // /LAN: every game.cfg read forces mpnovaworldhostlanonly
+	bool nopunt = false;      // /NOPUNT, retail's no-punt switch, as parsed (boot_policy.h nopunt)
 	// The first port of the bind scan (--lan-port; 0 binds the OS's pick; unset, the cfg
 	// range's head: game.cfg mplanserverportmin, or mpnovaworldportmin on the NovaWorld
 	// network type).
@@ -138,9 +139,14 @@ struct ServeOptions {
 	int32_t desktop_height = kHeadlessDesktopHeight;
 };
 
-// Parses the command line (argv[1..]). Returns 0 when the options parsed, 1 on
-// a usage error (`error` says why), -1 when help was asked for.
-int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error);
+// Parses the command line (argv[1..]): the server's own options from `args`, the retail
+// switches walked over `command_line` (the process's own, proc::own_command_line), or over
+// `args` spelled as one when it is empty (walk_retail_switches; a token the walk does not
+// know is passed over, as the game passes it). Returns 0 when the options parsed, 1 on a
+// usage error (`error` says why: an unknown `--` option among them), -1 when help was asked
+// for.
+int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
+		const std::string &command_line = "");
 const char *serve_usage();
 
 class ServeListing;

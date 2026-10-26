@@ -7,7 +7,6 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
-#include <base/io/crt_ftol.h> // retail_atol (/maxplayers)
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
@@ -67,7 +66,8 @@ const char kUsage[] =
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default jo)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
-		"                   listing advertises LAN only\n"
+		"                   listing advertises LAN only (the game's other switches are\n"
+		"                   accepted, and those the server has no use for do nothing)\n"
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: game.cfg "
 		"mplanserverportmin,\n"
@@ -193,7 +193,22 @@ bool lane_claims(const Lister *own, const Lister *other, const PeerAddr &from, c
 
 const char *serve_usage() { return kUsage; }
 
-int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error) {
+int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
+		const std::string &command_line) {
+	// The retail switches, read as the game reads its own command line: one walk over the line's
+	// tokens, a value-taking switch stepping onto its value, any token it does not know passed over
+	// (walk_retail_switches) [orig: Game_ParseCommandLineAndInit @0x4a7310].
+	const RetailSwitches retail = walk_retail_switches(
+			retail_command_line_tokens(command_line.empty() ? retail_command_line(args) : command_line));
+	out.loose_override = retail.loose_override;
+	out.expansion = retail.expansion;
+	out.host_file = retail.host_file.value_or(std::string());
+	out.max_player_arg = retail.max_players;
+	out.lan_switch = retail.lan;
+	out.nopunt = retail.nopunt;
+	out.log_switches = retail.log_switches;
+	// The server's own options; every other token is the walk's (a switch, a switch's value, or
+	// a token the game passes over).
 	for (size_t i = 0; i < args.size(); ++i) {
 		const std::string &a = args[i];
 		const auto value = [&](std::string &dest) {
@@ -205,37 +220,14 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			return true;
 		};
 		if (a == "--help" || a == "-h" || a == "/?") return -1;
-		if (strutil::iequals(a, "/d")) {
-			out.loose_override = true;
-		} else if (a == "--loose-root") {
+		if (a == "--loose-root") {
 			out.loose_root = true;
 		} else if (a == "--log-debug") {
 			out.log_debug = true;
 		} else if (a == "--resource-dir") {
 			if (!value(out.resource_dir)) return 1;
-		} else if (strutil::iequals(a, "/HOST")) {
-			if (!value(out.host_file)) return 1;
-		} else if (strutil::iequals(a, "/maxplayers")) {
-			// The next token's CRT atol [orig: Game_ParseCommandLineAndInit
-			//  @0x4A76EF..0x4A7710 -> g_MaxPlayerCommandLineArg @0xB4C4F8].
-			std::string n;
-			if (!value(n)) return 1;
-			out.max_player_arg = io::retail_atol(n.c_str());
-		} else if (strutil::iequals(a, "/exp") || strutil::iequals(a, "/mod")) {
-			// The game's one `/mod`/`/exp` arm: the last one wins, its first 32
-			// bytes kept [orig: Game_ParseCommandLineAndInit @ 0x4a76ac].
-			std::string name;
-			if (!value(name)) return 1;
-			out.expansion = launch_expansion_name(name);
-		} else if (strutil::iequals(a, "/game")) {
+		} else if (strutil::iequals(a, kLaunchFlagGame)) {
 			if (!value(out.game)) return 1;
-		} else if (strutil::iequals(a, kLaunchFlagLan)) {
-			// [orig: Game_ParseCommandLineAndInit `_stricmp(token, "/LAN")`
-			//  @0x4A74D9..0x4A74E9 -> g_LanSwitch = 1 @0x4A74EB]
-			out.lan_switch = true;
-		} else if (const int log = parse_log_switch(args, i, out.log_switches, error); log != 0) {
-			if (log < 0) return 1;
-			i += static_cast<size_t>(log - 1);
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
@@ -284,7 +276,7 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--second-listing-file") {
 			if (!value(out.second_listing_file))
 				return 1;
-		} else {
+		} else if (a.rfind("--", 0) == 0) {
 			error = "unknown option '" + a + "'";
 			return 1;
 		}

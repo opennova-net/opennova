@@ -47,9 +47,41 @@ void run_the_maxplayers_switch() {
 			       options, error) == 0 &&
 	               options.max_player_arg == 12,
 	       "/maxplayers in any case takes its next token");
+	// The walk reads /maxplayers' next token with no bound: none after it reads "", atol 0, no
+	// override (retail's slot there is NULL past the third token, which its atol does not survive).
 	serve::ServeOptions missing;
-	expect(serve::parse_serve_options({"--resource-dir", "x", "/maxplayers"}, missing, error) == 1,
-	       "a /maxplayers with no value is refused");
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "h.host", "/maxplayers"}, missing,
+			       error) == 0 &&
+	               missing.max_player_arg == 0,
+	       "a /maxplayers with no value overrides nothing");
+
+	// Retail's switches the server keeps nothing of, and any token the game would pass over,
+	// pass here too; /NOPUNT is kept; only an unknown option of the server's own is refused.
+	serve::ServeOptions retail;
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "h.host", "/nopunt", "/STATLOG",
+			       "/SHOWNOVAWORLD", "/w", "stray"},
+			       retail, error) == 0 &&
+	               retail.nopunt && retail.host_file == "h.host",
+	       "retail's own switches pass, /NOPUNT in any case is kept");
+	serve::ServeOptions plain;
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "h.host"}, plain, error) == 0 &&
+	               !plain.nopunt,
+	       "no /NOPUNT: the switch unset");
+	serve::ServeOptions refused;
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "h.host", "--no-such-option"},
+			       refused, error) == 1,
+	       "an unknown option of the server's own is refused");
+	// The one walk: /HOST steps onto its value, so `/HOST /LAN` names the host file /LAN and sets
+	// no /LAN; read from the process's own command line where it is given.
+	serve::ServeOptions walked;
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "/LAN"}, walked, error) == 0 &&
+	               walked.host_file == "/LAN" && !walked.lan_switch,
+	       "/HOST /LAN: the host file /LAN, no /LAN switch");
+	serve::ServeOptions line;
+	expect(serve::parse_serve_options({"--resource-dir", "x", "/HOST", "h.host,/LAN"}, line, error,
+			       "opennova-serve.exe --resource-dir x /HOST h.host,/LAN") == 0 &&
+	               line.host_file == "h.host" && line.lan_switch,
+	       "the command line split as the game splits it: a comma ends a token");
 
 	expect(cap_after("MaxPlayers 8\r\n", 0) == 8, "no switch: the file's MaxPlayers");
 	expect(cap_after("MaxPlayers 8\r\n", 12) == 12, "the switch replaces the file's MaxPlayers");
