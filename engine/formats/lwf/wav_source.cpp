@@ -27,8 +27,9 @@ std::string tag_text(const std::vector<uint8_t> &b, size_t at) {
 	return out;
 }
 
-// The bytes as the loader holds them: a BFC1 file decompressed first [orig: AudioFile_DecompressBFC, called
-// @ 0x7664cb]; a BFC1 file that does not decompress is held as stored.
+// The bytes as the loader holds them: a BFC1 file decompressed first, as bfc1_decompress reads one (a
+// damaged stream kept at the header's size) [orig: AudioFile_DecompressBFC @ 0x75B030, called
+// @ 0x7664c6 (its return @0x7664cb), the rule of AudioFile_DecompressBFC_Aligned @ 0x75AFB0].
 std::vector<uint8_t> as_loaded(const std::vector<uint8_t> &bytes) {
 	if (!bfc1::bfc1_is_bfc1(bytes.data(), bytes.size())) return bytes;
 	uint32_t size = 0;

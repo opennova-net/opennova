@@ -42,16 +42,32 @@ int main() {
     out_size = sizeof(out);
     TEST_EXPECT(bfc1_decompress(invalid, sizeof(invalid), out, &out_size) == -1);
 
-    // Unpacked in place; bytes that are no BFC1 left as they are; a BFC1 that does not unpack
-    // refused, its bytes unchanged.
+    // Unpacked in place; bytes that are no BFC1 left as they are.
     std::vector<uint8_t> packed(blob, blob + sizeof(blob));
     TEST_EXPECT(bfc1_unpack(packed) && packed.size() == sizeof(expected) - 1 &&
                 std::memcmp(packed.data(), expected, packed.size()) == 0);
     std::vector<uint8_t> plain(invalid, invalid + sizeof(invalid));
     TEST_EXPECT(bfc1_unpack(plain) && plain == std::vector<uint8_t>(invalid, invalid + sizeof(invalid)));
+
+    // The game's read [orig: AudioFile_DecompressBFC_Aligned @ 0x75AFB0; ZLib_DecompressBuffer
+    // @ 0x63E80E]: the header's size unless the stream reaches its own end. A stream cut short
+    // keeps the header's 27 bytes, what did not inflate zero.
     std::vector<uint8_t> broken(blob, blob + 12);
-    const std::vector<uint8_t> before = broken;
-    TEST_EXPECT(!bfc1_unpack(broken) && broken == before);
+    TEST_EXPECT(bfc1_unpack(broken) && broken.size() == sizeof(expected) - 1 && broken.back() == 0);
+    // A stream whose checksum is damaged inflates whole and keeps the header's size: the text.
+    std::vector<uint8_t> unchecked(blob, blob + sizeof(blob));
+    unchecked.back() ^= 0xFF;
+    TEST_EXPECT(bfc1_unpack(unchecked) && unchecked.size() == sizeof(expected) - 1 &&
+                std::memcmp(unchecked.data(), expected, unchecked.size()) == 0);
+    // A header naming more than the stream holds: the stream reaches its end first and gives its
+    // own length.
+    std::vector<uint8_t> roomy(blob, blob + sizeof(blob));
+    roomy[4] = 40;
+    TEST_EXPECT(bfc1_unpack(roomy) && roomy.size() == sizeof(expected) - 1 &&
+                std::memcmp(roomy.data(), expected, roomy.size()) == 0);
+    // A stream inflate refuses at once (no zlib header) keeps the header's size, all zero.
+    std::vector<uint8_t> refused = {'B', 'F', 'C', '1', 4, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF};
+    TEST_EXPECT(bfc1_unpack(refused) && refused == std::vector<uint8_t>(4, 0));
 
     return 0;
 }

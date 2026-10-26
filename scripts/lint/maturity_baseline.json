@@ -1,6 +1,5 @@
 {
   "citation_allowlist_engine": [
-    "bfc1",
     "devtools",
     "pcapio",
     "base/vfs/vfs_decode.cpp",

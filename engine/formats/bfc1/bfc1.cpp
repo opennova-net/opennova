@@ -38,6 +38,14 @@ int bfc1_decompress(const uint8_t *data, size_t size,
     if (*out_size < uncompressed_size)
         return -2;
 
+    /* The game's read: the header's size is the file's, the stream inflated into a buffer of it
+       (zlib's uncompress, inflate to Z_FINISH) and its result never tested; a stream that reaches
+       its own end gives its length instead. So a truncated or damaged stream, or one inflate
+       refuses outright, keeps the header's size with what inflated at its head; the bytes past
+       that are the allocation's, never written, which here are zero (PERMANENT).
+       [orig: AudioFile_DecompressBFC_Aligned @ 0x75AFB0 - *outSize = header[1] @0x75B00A,
+        ZLib_DecompressBuffer called @0x75B012, its result dropped; ZLib_DecompressBuffer
+        @ 0x63E80E - *destSize = total_out only on Z_STREAM_END @0x63E87D] */
     memset(&stream, 0, sizeof(stream));
     stream.next_in  = data + BFC1_HEADER_SIZE;
     stream.avail_in = (unsigned int)(size - BFC1_HEADER_SIZE);
@@ -45,26 +53,18 @@ int bfc1_decompress(const uint8_t *data, size_t size,
     stream.avail_out = uncompressed_size;
 
     ret = mz_inflateInit(&stream);
-    if (ret != MZ_OK)
-        return -3;
-
-    ret = mz_inflate(&stream, MZ_FINISH);
-    mz_inflateEnd(&stream);
-
-    /* Accept MZ_STREAM_END (complete) and MZ_OK (truncated but valid).
-       Also accept MZ_BUF_ERROR / MZ_DATA_ERROR if we got most of the
-       expected output — some BFC1 files have truncated zlib streams
-       missing the trailing checksum. */
-    if (ret != MZ_STREAM_END && ret != MZ_OK) {
-        int got_enough = stream.total_out >= uncompressed_size - 16;
-        if ((ret == MZ_BUF_ERROR || ret == MZ_DATA_ERROR) && got_enough) {
-            /* Accept — got most/all data, just missing checksum */
-        } else {
-            return -4;
-        }
+    if (ret == MZ_OK) {
+        ret = mz_inflate(&stream, MZ_FINISH);
+        mz_inflateEnd(&stream);
     }
-
-    *out_size = (size_t)stream.total_out;
+    const size_t inflated = (size_t)stream.total_out;
+    if (ret == MZ_STREAM_END) {
+        *out_size = inflated;
+    } else {
+        if (uncompressed_size > inflated)
+            memset(out_buf + inflated, 0, uncompressed_size - inflated);
+        *out_size = uncompressed_size;
+    }
     return 0;
 }
 
