@@ -233,7 +233,8 @@ static int test_generator_param_byte(void) {
 }
 
 // A frame byte selects an MTRX row only when it sign-extends above zero, and
-// only the spinner and Euler rotation types (1 and 2) turn through it.
+// only the Euler rotation type (2) turns through it: a spinner (1) keeps no
+// flag in JO's loader (D-3DI-9).
 static int test_frame_selector(void) {
     int ok = 1;
     static const struct {
@@ -251,7 +252,7 @@ static int test_frame_selector(void) {
             memset(&pa, 0, sizeof(pa));
             pa.flags = threedi_panm_pack_flags(0, rotation, 0, 0);
             pa.matrix_index = row.byte;
-            const int expected = rotation == 1 || rotation == 2 ? row.selector : 0;
+            const int expected = rotation == 2 ? row.selector : 0;
             if (threedi_panm_frame_row(pa) != expected) {
                 fprintf(stderr, "rotation type %u frame byte %u: row %d, expected %d\n", rotation, row.byte,
                         threedi_panm_frame_row(pa), expected);

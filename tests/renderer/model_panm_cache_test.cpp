@@ -10,13 +10,17 @@ using namespace opennova::threedi;
 
 namespace {
 bool near(float a, float b) { return std::fabs(a - b) < 0.0001f; }
-ThreediPartAnimation spinner(uint8_t part) {
+// A row JO's loader keeps (rotation type 2): its rotation_z track the clock's
+// sawtooth (style 4, rate 256, over 0..16384), a quarter turn about Z each
+// 250 ms. A spinner (rotation type 1) stands still in JO (D-3DI-9).
+ThreediPartAnimation turning(uint8_t part) {
     ThreediPartAnimation node{};
-    node.flags = 1u << 8;
+    node.flags = threedi_panm_pack_flags(0, 2, 0, 0);
     node.parent_subobject = 0xff;
     node.subobject_index = part;
-    const float coefficient = 1.0f;
-    std::memcpy(&node.rotation_y.control, &coefficient, sizeof(coefficient));
+    node.rotation_z.control = 0x14;
+    node.rotation_z.rate = 256;
+    node.rotation_z.end = 16384;
     return node;
 }
 }
@@ -28,8 +32,8 @@ int main() {
     parts[2].abs[2] = 3;
     ThreediLod lods[2]{};
     for (auto &lod : lods) { lod.render_objects = parts; lod.render_object_count = 3; }
-    auto model_node = spinner(1);
-    auto lod_node = spinner(2);
+    auto model_node = turning(1);
+    auto lod_node = turning(2);
     lods[1].part_animations = &lod_node;
     lods[1].part_animation_count = 1;
     Threedi3di3 model{};
