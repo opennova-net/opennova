@@ -264,9 +264,16 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
 
     // The action's texttoken, its text resolved at the load (the mission
     // text's entry, else the game text's, else ""), becomes the local
-    // player's kill-announce banner line [orig: ActionSlot_OnTextTokenCallback
-    // @0x4011B0 @0x442A9A; ActionDef_ParseScriptLine @0x4028A8]: JO:CA's rows
-    // author none, JOTAC's PU_* rows do; not emitted here (D-PWR-3).
+    // player's kill-announce banner line, stamped with the tick; a picker that
+    // is not the local player writes nothing. JO:CA's rows author none, JOTAC's
+    // PU_* rows do. [orig: ActionSlot_OnTextTokenCallback @0x4011B0, called
+    //  @0x442A9A - the text and local-player tests @0x4011B4..0x4011C5, the strncpy
+    //  into g_KillAnnounceText @0x4011D2, g_KillAnnounceTick = g_CurrentTick
+    //  @0x4011E0]
+    if (action.text && picker.handle == world.cached.local_player) {
+        world.out.kill_announce_text = *action.text;
+        world.out.kill_announce_tick = world.logic_tick;
+    }
     // The soundset plays at the PICKER [orig: @0x442AA6, entity+4]
     play_action_sound(world, action, picker);
     // So does the action's particle [orig: the handle test @0x442AAE,

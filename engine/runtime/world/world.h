@@ -1053,6 +1053,15 @@ struct WorldOutbox {
     // the 930 ticks every such site passes (Chat_AddMessageChannel1; the ewep tank-command
     // leg, world::emplaced_command_call, carries the witness).
     std::vector<HudChatLine> hud_chat_lines;
+    // The kill-announce banner line a local player's pickup wrote (a powerup.def
+    // action's resolved texttoken), with the logic tick it stamped; unset when none is
+    // owed. The HUD owner records it into the banner the involved S2C 0x1E lines feed
+    // (hud::KillAnnouncement) and clears it; a later write in the frame replaces an
+    // earlier one, as the one banner buffer does. [orig: ActionSlot_OnTextTokenCallback
+    // @0x4011B0 - g_KillAnnounceText @0x4011D2, g_KillAnnounceTick @0x4011E0; the
+    // banner's other writer NetPacket_HandleGameEvent @0x427B86 / @0x427B96]
+    std::optional<std::string> kill_announce_text;
+    uint32_t kill_announce_tick = 0;
     // An audio channel shutdown is owed: every audio channel falls silent and
     // the ambient channel handles drop, so the mix takes its channels anew. The
     // embedder's audio device takes and clears it. Three setters: the pause
@@ -1135,6 +1144,7 @@ struct WorldOutbox {
         script_effects.clear();
         script_sounds.clear();
         hud_chat_lines.clear();
+        kill_announce_text.reset();
         terrain_scorches.clear_pending();
         slot_sounds.clear();
         sound_emitters.clear();

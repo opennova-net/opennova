@@ -25,6 +25,9 @@
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/vehicle_panel_feed.h>
 
+#include <optional>
+#include <string>
+
 using namespace sim_internal;
 using namespace opennova::def;
 
@@ -210,6 +213,14 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 	// sim marks for the SYSTEM ring (a cheat toggle's) goes there.
 	std::vector<opennova::world::HudChatLine> sim_lines;
 	if (kernel_) sim_lines.swap(kernel_->world.out.hud_chat_lines);
+	// A local pickup's banner line (engine WorldOutbox::kill_announce_text carries the
+	// witness), recorded below.
+	std::optional<std::string> pickup_banner;
+	uint32_t pickup_banner_tick = 0;
+	if (kernel_) {
+		pickup_banner.swap(kernel_->world.out.kill_announce_text);
+		pickup_banner_tick = kernel_->world.out.kill_announce_tick;
+	}
 	if (!runtime_) return;
 	for (const opennova::world::HudChatLine &line : sim_lines) {
 		// A keyless line posts its text; a keyed one its key's text, its $A the line's text
@@ -272,6 +283,13 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 				opennova::hud::kGameTextLineColor, std::move(line), false});
 	}
 	opennova::hud::order_feed_posts(r_posts);
+	// The pickup's line goes into the one banner the involved 0x1E lines feed, stamped with its
+	// own tick. A frame receives ahead of its entity update, so the pickup's write lands after
+	// the frame's involved line: its text stands, and no post of this drain announces.
+	if (pickup_banner) {
+		for (opennova::hud::FeedPost &post : r_posts) post.announce = false;
+		runtime_->state().kill_announcement.record(*pickup_banner, pickup_banner_tick);
+	}
 }
 
 } // namespace godot

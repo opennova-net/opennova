@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -185,6 +186,35 @@ int main() {
 		CHECK(text.location_name(1234) == "Four digits");
 		CHECK(text.location_name(-1) == "LOCATION-01");
 		CHECK(mission::MissionText().location_name(0) == "LOCATION000");
+	}
+
+	// A key's text as a load resolves it: the override table first, then the mission's
+	// table, then the game text's, each a whole-key lookup over every section; no
+	// mission table, or a key none holds, answers nothing (the shared "").
+	// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0 - @0x51ECEA, @0x51ECF2,
+	//  @0x51ED18, @0x51ED22; TextResource_FindEntryByKey @0x75D450, @0x75D461]
+	{
+		const rtxt::File mission_table = parsed({
+				{ "Pickups", "PU_PISTOL", "Mission pistol" },
+				{ "Pickups", "PU_RIFLE", "Mission rifle" },
+		});
+		const rtxt::File game_table = parsed({
+				{ "Client", "pu_pistol", "Game pistol" },
+				{ "Client", "PU_KNIFE", "Game knife" },
+		});
+		const rtxt::File override_table = parsed({ { "Pickups", "PU_RIFLE", "Override rifle" } });
+		using mission::text_by_key_or_game_text;
+		CHECK(text_by_key_or_game_text(nullptr, &mission_table, &game_table, "pu_pistol") ==
+				std::optional<std::string>("Mission pistol"));
+		CHECK(text_by_key_or_game_text(nullptr, &mission_table, &game_table, "PU_KNIFE") ==
+				std::optional<std::string>("Game knife"));
+		CHECK(text_by_key_or_game_text(&override_table, &mission_table, &game_table, "PU_RIFLE") ==
+				std::optional<std::string>("Override rifle"));
+		CHECK(!text_by_key_or_game_text(&override_table, &mission_table, &game_table, "PU_NONE"));
+		CHECK(!text_by_key_or_game_text(nullptr, &mission_table, nullptr, "PU_KNIFE"));
+		// No mission table: the game text is not tried.
+		CHECK(!text_by_key_or_game_text(&override_table, nullptr, &game_table, "PU_KNIFE"));
+		CHECK(!text_by_key_or_game_text(&override_table, nullptr, &game_table, "PU_RIFLE"));
 	}
 
 	if (failures != 0) {

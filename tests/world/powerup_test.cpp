@@ -783,6 +783,52 @@ void test_action_particles() {
     CHECK(!rig.get(med)->hidden && effects.empty());
 }
 
+// The pickup's texttoken: the text the load resolved becomes the local player's
+// kill-announce banner line, stamped with the tick; another picker writes nothing,
+// and an action with no texttoken line writes nothing either.
+// [orig: ActionSlot_OnTextTokenCallback @0x4011B0, called @0x442A9A - the tests
+//  @0x4011B4..0x4011C5, g_KillAnnounceText @0x4011D2, g_KillAnnounceTick @0x4011E0]
+void test_pickup_texttoken_banner() {
+    Rig rig;
+    const int32_t pistol = rig.world.tables.powerups.index_of("PU_PISTOL");
+    CHECK(pistol >= 0);
+    if (pistol < 0) return;
+    PowerupDef &def = rig.world.tables.powerups.rows[static_cast<size_t>(pistol)];
+    // The table build keeps the key; the kernel's load resolves its text.
+    CHECK(def.pickup.texttoken == "PU_PISTOL" && !def.pickup.text);
+    CHECK(!def.respawn.text);
+    def.pickup.text = std::string("M1911 picked up");
+    rig.world.logic_tick = 77;
+    const EntityHandle row = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, row, rig.picker, rig.ctx(true));
+    CHECK(rig.world.out.kill_announce_text && *rig.world.out.kill_announce_text == "M1911 picked up");
+    CHECK(rig.world.out.kill_announce_tick == 77);
+    // A resolved "" is written too: it blanks the banner as retail's copy does (the local
+    // copy off the authority, which refuses no held weapon).
+    rig.world.out.kill_announce_text.reset();
+    def.pickup.text = std::string();
+    const EntityHandle second = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, second, rig.picker, rig.ctx(false));
+    CHECK(rig.world.out.kill_announce_text && rig.world.out.kill_announce_text->empty());
+    // Another picker writes nothing.
+    rig.world.out.kill_announce_text.reset();
+    def.pickup.text = std::string("M1911 picked up");
+    const EntityHandle third = rig.spawn_powerup(10);
+    powerup_bind_entities(rig.world, rig.items);
+    const EntityHandle other = rig.spawn_player(false);
+    powerup_pickup(rig.world, third, other, rig.ctx(true));
+    CHECK(!rig.world.out.kill_announce_text);
+    // The med pack's pickup action names no texttoken.
+    const EntityHandle med = rig.spawn_powerup(1);
+    powerup_bind_entities(rig.world, rig.items);
+    rig.get(rig.picker)->health = 10;
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
+    CHECK(rig.get(rig.picker)->health == 100);
+    CHECK(!rig.world.out.kill_announce_text);
+}
+
 // The authority refuses a picker already carrying the weapon full: the whole
 // pickup ends, the row unconsumed and no grant recorded. A joiner's own copy
 // never refuses (the walk returns 0 off the authority) and refills it.
@@ -1028,6 +1074,7 @@ int main() {
     test_weapon_grant_lands_local();
     test_weapon_grant_refused_when_full();
     test_action_particles();
+    test_pickup_texttoken_banner();
     test_weapon_grant_refills_held();
     test_weapon_grant_sameas();
     test_weapon_grant_subvariants();

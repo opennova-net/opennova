@@ -12,8 +12,10 @@
 #include <formats/mission/bms_edit.h> // mission_info (the BMS tile set)
 #include <formats/mission/mission.h>
 #include <runtime/anim/adm_fallback.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/mission/mission_text.h>
 #include <runtime/mission/seat_spec_extract.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h> // the terrain field's file entry (ADR 0043 E9)
@@ -641,6 +643,27 @@ bool MissionKernel::load_powerup_table(const BootFileSource &files,
 	if (def::def_parse_powerup_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	world.tables.powerups = w::build_powerup_table(file, world.tables.weapons);
 	def::def_free_powerup(&file);
+	// Each action's texttoken resolves as its line is parsed, over the mission text
+	// the boot loaded ahead of powerup.def and the game text [orig:
+	// ActionDef_ParseScriptLine @0x402892..0x4028B7 - MissionText_GetStringByKeyOrGameText
+	// called @0x4028A8, the pointer stored at the action's +0x14 @0x4028B7; Game_StartMission
+	// loads the mission text @0x5247CE / @0x524E78 ahead of powerup.def @0x5256D2].
+	rtxt::File game_text;
+	bool has_game_text = false;
+	{
+		std::vector<uint8_t> text_bytes;
+		std::string text_error;
+		has_game_text = files.read_file(hud::kGameTextTable, text_bytes) &&
+				rtxt::parse(text_bytes.data(), text_bytes.size(), game_text, text_error);
+	}
+	for (w::PowerupDef &row : world.tables.powerups.rows) {
+		for (w::PowerupAction *action : {&row.pickup, &row.respawn}) {
+			if (action->texttoken.empty()) continue;
+			action->text = mission::text_by_key_or_game_text(world.tables.text_override,
+					world.tables.mission_text, has_game_text ? &game_text : nullptr,
+					action->texttoken).value_or(std::string());
+		}
+	}
 	return true;
 }
 

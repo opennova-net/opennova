@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,6 +48,13 @@ struct PowerupAction {
     std::string soundsetend;
     std::string particle;
     std::string texttoken;
+    // The texttoken's string as the load resolved it (the mission text's entry, else
+    // the game text's, else ""); unset for an action with no texttoken line. The
+    // mission kernel's powerup.def load fills it.
+    // [orig: ActionDef_ParseScriptLine @0x402892..0x4028B7 - the
+    //  MissionText_GetStringByKeyOrGameText call @0x4028A8, its pointer stored at the
+    //  action's +0x14 @0x4028B7]
+    std::optional<std::string> text;
 };
 
 // One powerup.def row as the runtime reads it (the 576-byte retail row).
