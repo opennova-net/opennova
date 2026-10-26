@@ -27,9 +27,9 @@ const char *drop_reason_name(DropReason r);
 // GetTickCount deltas against cs_dir0.timeout_ms], and the service reaps on
 // the same contract — one value, sourced from the template, never a second
 // literal. (An earlier 120 s reap evicted idle browser clients two
-// keepalives early; that comment cited CNapiNetwork_RandomizeTimeout
-// @0x4c4d80 as its basis, but that routine draws the host's per-session
-// AppId, not a timeout.)
+// keepalives early; that comment cited CNapiNetwork_MintAppId (then named
+// RandomizeTimeout) @0x4c4d80 as its basis, but that routine draws the host's
+// per-session AppId, not a timeout.)
 uint64_t novaworldudp_session_timeout_ms();
 
 // Owns a ConnectionRegistry and delivers lifecycle events to the app

@@ -683,7 +683,7 @@ struct NapiNPServerCtx {
 	};
 	ServerKeyMint server_key_mint;
 
-	// The per-registration NovaWorld AppId (CNapiNetwork_RandomizeTimeout's
+	// The per-registration NovaWorld AppId (CNapiNetwork_MintAppId's
 	// value, net/napi/session.h make_session_app_id), installed by the
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
 	// authority's status page shows it on its NovaWorld server line.
