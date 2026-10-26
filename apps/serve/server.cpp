@@ -783,19 +783,17 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	return true;
 }
 
-// Every mission start reloads the HUD fonts for the display's width: game.cfg's video_res
-// when it parses, else the defaults' desktop width. The bold slot is the chat display's wrap
-// font, and with no hud.def mounted the chat box's width is 4. A font that does not read
-// leaves the slot empty, and no line wraps.
+// Every mission start reloads the HUD fonts for the display's width: the display mode the
+// block holds (the last game.cfg video_res that parsed), else the defaults' desktop width.
+// The bold slot is the chat display's wrap font, and with no hud.def mounted the chat box's
+// width is 4. A font that does not read leaves the slot empty, and no line wraps.
 // [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20 (the bold name by the
 //  width @0x51EE7E..0x51EEE4, HUD_LoadFontIntoSlot @0x51EF3F); Config_ParseSettingsLine
 //  @0x5512F4..0x551303 (video_res into outWidth); Chat_AddMessageChannel1 @0x498673..0x4986AC]
 void Server::select_chat_font() {
-	int32_t width = options_.desktop_width;
-	int32_t parsed_width = 0;
-	int32_t parsed_height = 0;
-	if (gamecfg::parse_resolution_dimensions(config_.cfg().video_res, parsed_width, parsed_height))
-		width = parsed_width;
+	int32_t width = 0;
+	int32_t height = 0;
+	gamecfg::display_size(config_.cfg(), options_.desktop_width, options_.desktop_height, width, height);
 	const std::string name = hud::hud_label_font_choice(width).bold_fnt;
 	if (name != chat_font_name_) {
 		if (chat_font_valid_) fnt::fnt_free(&chat_font_);
