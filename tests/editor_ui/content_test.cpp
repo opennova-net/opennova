@@ -55,7 +55,7 @@ void test_bound_project() {
 	Ui ui;
 	SessionView v = bound_view();
 	ui.windows.set_view(&v);
-	ui.focus("Content");
+	ui.focus("NovaWorld");
 	ui.away();
 	const std::string text = logged_frame(ui);
 	CHECK(text.find("taylor (admin) on content.test") != std::string::npos, "who is signed in, and where");
@@ -150,7 +150,7 @@ void test_bind_and_sign_in() {
 	v.content.checked = false;
 	v.content.changes.clear();
 	ui.windows.set_view(&v);
-	ui.focus("Content");
+	ui.focus("NovaWorld");
 	ui.away();
 	const std::string text = logged_frame(ui);
 	CHECK(text.find("Not on NovaWorld.") != std::string::npos, "an unbound project says so");
@@ -199,7 +199,7 @@ void test_get_a_project() {
 	CHECK(content != nullptr, "the NovaWorld window");
 	if (!content) return;
 	content->show_anyway();
-	ui.focus("Content");
+	ui.focus("NovaWorld");
 	ui.activate(content_item({"content_projects", "MOD", "Get..."}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *pick = one(raised, EditorRequestKind::PickDirectory);
