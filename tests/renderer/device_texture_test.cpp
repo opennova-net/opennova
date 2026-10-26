@@ -193,6 +193,56 @@ void test_level_bytes() {
 	CHECK(full_chain_levels(1, 1) == 1, "a 1 x 1 is one level");
 }
 
+// A one-level 4 x 4 "DXT5" DDS (one block) or an 8 x 8 one with two levels (four blocks, then one): the
+// 128-byte header ("DDS ", the sides at dwords 3 and 4, the pitch at 5, the mip count at 7, the FourCC at
+// 21, the caps at 27), each block's alpha half `alpha` then its colour half the bytes 1..8 plus its index.
+std::vector<uint8_t> dxt5_dds(uint32_t side, bool two_levels, uint8_t alpha) {
+	const size_t blocks = two_levels ? 5 : 1;
+	std::vector<uint8_t> file(128 + blocks * 16, 0);
+	const auto put = [&file](size_t dword, uint32_t v) {
+		for (int b = 0; b < 4; ++b) file[4 * dword + size_t(b)] = uint8_t(v >> (8 * b));
+	};
+	put(0, 0x20534444u); // "DDS "
+	put(1, 124);
+	put(2, two_levels ? 0x20000u : 0u);
+	put(3, side);
+	put(4, side);
+	put(5, side * side);
+	put(7, two_levels ? 2u : 1u);
+	put(21, 0x35545844u); // "DXT5"
+	put(27, two_levels ? 0x400000u : 0u);
+	for (size_t k = 0; k < blocks; ++k) {
+		file[128 + 16 * k] = file[128 + 16 * k + 1] = alpha;
+		for (size_t b = 0; b < 8; ++b) file[128 + 16 * k + 8 + b] = uint8_t(b + 1 + 16 * k);
+	}
+	return file;
+}
+
+void test_dxt5_made_dxt1() {
+	// An all-opaque DXT5 on the reference card: the colour halves packed, the pitch halved, the FourCC "DXT1"
+	// [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0].
+	std::vector<uint8_t> one = dxt5_dds(4, false, 0xFF);
+	CHECK(convert_dxt5_alpha_blocks(one), "an opaque DXT5 is made DXT1");
+	CHECK(one[84] == 'D' && one[85] == 'X' && one[86] == 'T' && one[87] == '1', "its FourCC DXT1");
+	CHECK(one[20] == 8 && one[21] == 0, "its pitch word halved");
+	CHECK(one[128] == 1 && one[135] == 8, "the block's colour half from the blocks' start");
+	// Each level's blocks, the mip count read where the header flags both the count and the mip caps.
+	std::vector<uint8_t> two = dxt5_dds(8, true, 0xFF);
+	CHECK(convert_dxt5_alpha_blocks(two), "a two-level opaque DXT5 is made DXT1");
+	CHECK(two[128 + 8 * 3] == 1 + 16 * 3 && two[128 + 8 * 4] == 1 + 16 * 4, "level 1's block after level 0's four");
+	// One block's alpha below 255, a card that keeps DXT5, or one without DXT1: the file as it is.
+	std::vector<uint8_t> clear = dxt5_dds(4, false, 0xFE);
+	const std::vector<uint8_t> clear_before = clear;
+	CHECK(!convert_dxt5_alpha_blocks(clear) && clear == clear_before, "a translucent DXT5 stays");
+	TextureDxtCaps keep;
+	keep.keep_dxt5 = true;
+	std::vector<uint8_t> kept = dxt5_dds(4, false, 0xFF);
+	CHECK(!convert_dxt5_alpha_blocks(kept, keep), "the kept DXT5");
+	TextureDxtCaps no_dxt1;
+	no_dxt1.dxt1 = false;
+	CHECK(!convert_dxt5_alpha_blocks(kept, no_dxt1), "no DXT1 card");
+}
+
 void test_dxt5_opaque() {
 	// Two blocks of an 8 x 4 level: both alpha endpoints 255 in each.
 	std::vector<uint8_t> blocks(32, 0);
@@ -391,6 +441,7 @@ int main() {
 	test_dds_device_texture();
 	test_level_bytes();
 	test_dxt5_opaque();
+	test_dxt5_made_dxt1();
 	if (failures != 0) {
 		std::fprintf(stderr, "device_texture: %d failure(s)\n", failures);
 		return 1;

@@ -230,4 +230,16 @@ DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int l
 // [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687B28..0x687B6A]. False for bytes too few to hold them.
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height);
 
+// The DXT5 file the game's loader makes DXT1 before D3DX reads it, in place: on a card that takes DXT1 and
+// keeps no DXT5 (`caps`), a "DXT5" file whose first level's blocks are all opaque (dxt5_first_level_opaque)
+// has each level's colour halves packed from its start, max(1, side / 4) blocks a side a level for the
+// header's mip count (one level unless it flags both the count and the mip caps), its pitch word halved
+// and its FourCC made "DXT1". A DXT5 block whose first colour is not above its second then draws its
+// fourth index transparent black, as DXT1's three-colour block does. False, the bytes untouched, for any
+// other file. [orig: GTexture_InitFromMemory @ 0x687E80..0x687EB9 (the "DXT5" compare, the card's DXT1
+// and the kept-DXT5 word); GTexture_ConvertDXTAlphaBlocks @ 0x687AC0 - the FourCC @ 0x687ACF, the mip count
+// @ 0x687AE6..0x687B06, the scan @ 0x687B28..0x687B6A, the copy @ 0x687B76..0x687BE8, the pitch and the
+// FourCC @ 0x687BEE..0x687BF4]
+bool convert_dxt5_alpha_blocks(std::vector<uint8_t> &dds, const TextureDxtCaps &caps = kReferenceTextureDxtCaps);
+
 } // namespace opennova::renderer

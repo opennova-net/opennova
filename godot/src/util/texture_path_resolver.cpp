@@ -521,7 +521,18 @@ godot::Ref<godot::Texture> make_material_texture(const renderer::TextureLoad &lo
     }
     // The file decoded once, on the CPU; the one device texture is made from the pixels the
     // loader keeps (engine renderer/material_texture.h carries the witness, D-NET-NEW-L3-27).
-    const godot::PackedByteArray bytes = read ? read() : godot::PackedByteArray();
+    godot::PackedByteArray bytes = read ? read() : godot::PackedByteArray();
+    // A DDS the row uses as it is goes through the game's DDS creator, which makes an all-opaque
+    // DXT5 DXT1 on the reference card before D3DX reads it (engine renderer/device_texture.h
+    // convert_dxt5_alpha_blocks carries the witness, D-RMAT-20).
+    if (load.reader == TextureReader::Dds && !bytes.is_empty() &&
+            material_texture_transform(type, native_name, true) == MaterialTextureTransform::Unchanged) {
+        std::vector<uint8_t> file(bytes.ptr(), bytes.ptr() + bytes.size());
+        if (convert_dxt5_alpha_blocks(file, kReferenceTextureDxtCaps)) {
+            bytes.resize(static_cast<int64_t>(file.size()));
+            std::memcpy(bytes.ptrw(), file.data(), file.size());
+        }
+    }
     godot::Ref<godot::Image> image = bytes.is_empty() ? godot::Ref<godot::Image>() : decode_texture_load(load, bytes);
     const bool loaded = image.is_valid() && !image->is_empty();
     const auto mode = material_texture_transform(type, native_name, loaded);

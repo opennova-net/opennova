@@ -350,6 +350,43 @@ DeviceTexture model_row_device_texture(TextureLoader loader, uint8_t slot, int l
 // [orig: GTexture_ConvertDXTAlphaBlocks @ 0x687AC0 — the blocks counted @ 0x687B28..0x687B44 (each side over 4, at
 // least 1); the first word of each block from the level's start, 16 bytes apart, while it is 0xFFFF
 // (@ 0x687B56..0x687B6A)]
+bool convert_dxt5_alpha_blocks(std::vector<uint8_t> &dds, const TextureDxtCaps &caps) {
+	constexpr size_t kHeaderBytes = 128; // "DDS " and the 124-byte header: the blocks from here
+	if (!caps.dxt1 || caps.keep_dxt5 || dds.size() < kHeaderBytes) return false;
+	const auto dword = [&dds](size_t i) {
+		return static_cast<uint32_t>(dds[4 * i]) | static_cast<uint32_t>(dds[4 * i + 1]) << 8 |
+				static_cast<uint32_t>(dds[4 * i + 2]) << 16 | static_cast<uint32_t>(dds[4 * i + 3]) << 24;
+	};
+	const auto store = [&dds](size_t i, uint32_t value) {
+		for (int b = 0; b < 4; ++b) dds[4 * i + static_cast<size_t>(b)] = static_cast<uint8_t>(value >> (8 * b));
+	};
+	if (dword(21) != 0x35545844u) return false; // "DXT5"
+	// The header's sides as the routine takes them, signed (+12, then +16), the blocks counted over each / 4.
+	int32_t first = static_cast<int32_t>(dword(3)), second = static_cast<int32_t>(dword(4));
+	int32_t levels = 1;
+	if ((dword(27) & 0x400000u) != 0 && (dword(2) & 0x20000u) != 0) {
+		levels = static_cast<int32_t>(dword(7));
+		if (levels < 1) return false;
+	}
+	const int64_t blocks = static_cast<int64_t>(std::max(1, second / 4)) * std::max(1, first / 4);
+	if (blocks > 0 && !dxt5_first_level_opaque(dds.data() + kHeaderBytes, dds.size() - kHeaderBytes,
+					static_cast<uint32_t>(first), static_cast<uint32_t>(second)))
+		return false;
+	// Each level's colour halves (the block's second 8 bytes) packed from the blocks' start.
+	size_t dst = kHeaderBytes, src = kHeaderBytes + 8;
+	do {
+		const int64_t count = static_cast<int64_t>(std::max(1, second / 4)) * std::max(1, first / 4);
+		for (int64_t k = 0; k < count && src + 8 <= dds.size(); ++k, src += 16, dst += 8)
+			std::copy_n(dds.begin() + static_cast<std::ptrdiff_t>(src), 8, dds.begin() + static_cast<std::ptrdiff_t>(dst));
+		--levels;
+		second >>= 1;
+		first >>= 1;
+	} while ((second >= 1 || first >= 1) && levels > 0);
+	store(5, static_cast<uint32_t>(static_cast<int32_t>(dword(5)) >> 1));
+	store(21, 0x31545844u); // "DXT1"
+	return true;
+}
+
 bool dxt5_first_level_opaque(const uint8_t *blocks, size_t size, uint32_t width, uint32_t height) {
 	const uint64_t count = uint64_t(std::max(1u, height / 4)) * std::max(1u, width / 4);
 	if (blocks == nullptr || count * 16 > size) return false;
