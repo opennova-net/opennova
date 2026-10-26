@@ -1170,7 +1170,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
 			"The operation that runs (running, and while one does its id, kind (open, refresh, "
-			"build, import_plan, import_apply, rename_apply), label, done and total in its unit, "
+			"build, import_plan, import_apply, rename_apply, base_export, the content_ ones), label, "
+			"done and total in its unit, "
 			"cancellable, and what it reads and writes), what the last one came to "
 			"(last_operation: id, kind, end, findings), the validation the polls step "
 			"(validation: running, done and total files) and the last build.")

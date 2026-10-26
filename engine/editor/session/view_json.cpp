@@ -566,8 +566,9 @@ constexpr ViewSectionRow kSections[] = {
 			"The selection in the active document, over any of its rows: its primary record and "
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
-			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply or "
-			"rename_apply; done and total in its unit, what it works on, cancellable, what it reads "
+			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply, "
+			"rename_apply, base_export or a content_ one; done and total in its unit, what it works on, "
+			"cancellable, what it reads "
 			"and writes), what the last one came to, the validation the polls step (running, the "
 			"files done of total: the problems are the last composed until it ends) and the last "
 			"build." },

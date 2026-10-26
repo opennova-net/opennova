@@ -167,7 +167,11 @@ target dials loopback ("Test with our Godot game").
 Every game (ADR 0071) has its OpenNova Editor project in NovaWorld (ADR 0069), never in a
 repository: OP: Acid Gambit's and its expansion OP: Nifty Package's (with their Blender
 sources) are public, and Joint Operations', Escalation's and DFX2's, imported from their
-stock installs (each one's revision 1 the stock import), are private. The editor's
+stock installs (each one's revision 1 the stock import), are private. An expansion's
+project names its base game's project wherever its author keeps it (project.opennova's
+`base_project`, from the expansion's folder): the editor exports that base project itself
+whenever its export is missing or older than the project, before it reads the base game, and
+a release build lays the base out by its key and points the expansion at it. The editor's
 NovaWorld window gets, pulls and pushes a project; admins alone push, and a push is not a
 release. A release is built on the server from a revision: the editor's
 **Build > Release...** or the game's page in the admin's Games area starts it, the data

@@ -23,13 +23,33 @@ namespace opennova::editor {
 std::string base_project_root(const std::string &project_root, const ProjectExpansion &expansion);
 
 // The base game's folder of an expansion on a project's base game: the base project's export folder
-// (ProjectPaths::export_dir of its document). False with `error` (project.base_project) where the
-// folder holds no project, its project does not read, it builds as an expansion itself (an expansion
-// stands over a base game, never over another expansion: the game mounts one), or it is a project of
-// another game; `out` is then the folder the export would be in where the project reads, else "".
-// Whether the export is there is the caller's to weigh (an export not made yet: export the base first).
+// (ProjectPaths::export_dir of its document, which `document` takes when given). False with `error`
+// (project.base_project) where the folder holds no project, its project does not read, it builds as an
+// expansion itself (an expansion stands over a base game, never over another expansion: the game mounts
+// one), or it is a project of another game; `out` is then the folder the export would be in where the
+// project reads, else "". Whether the export is there, and the project as it stands, is base_export_of's.
 bool base_project_game_dir(const std::string &project_root, const ProjectExpansion &expansion,
-                           const std::string &target_game, std::string &out, Diagnostic &error);
+                           const std::string &target_game, std::string &out, Diagnostic &error,
+                           ProjectDocument *document = nullptr);
+
+// The base game's project of an expansion on a project's base game, and its export as the expansion
+// weighs it. The export is current when its record names the base project and keeps the stamp of the
+// project's files as they stand (export_build.h's project_files_stamp, which the export recorded as its
+// build was planned): the expansion plays over it as it is. Otherwise the editor exports the base project
+// again before it reads it (session/base_export.h), as the server's release build exports a base game
+// before its expansion, where the export may replace the folder (export_replaces: none there, an empty
+// one, an export of the base project); a folder of anything else is the person's, never written over.
+// Nothing is read but the base's project file, the export's record and the base's folder listings.
+struct BaseExport {
+	std::string root;         // the base project's folder ("" for an expansion on the game install's base game)
+	std::string export_dir;   // its export folder, where its project reads (base_project_game_dir's `out`)
+	Diagnostic refusal;       // project.base_project where it serves as no base game
+	bool current = false;     // the export is the base project's, made from its files as they stand
+	bool replaceable = false; // an export of the base project may replace the folder
+	bool resolved() const { return refusal.code().empty(); }
+};
+BaseExport base_export_of(const std::string &project_root, const ProjectExpansion &expansion,
+                          const std::string &target_game);
 
 // Whether the folder holds a base game an expansion can play over (the export's three boot archives, an
 // install's) is base/vfs's vfs_has_boot_archive.

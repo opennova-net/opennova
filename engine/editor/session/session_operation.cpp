@@ -46,6 +46,11 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::ContentCancel}, "Pulling", "the pull"},
 	{OperationKind::ContentPush, "content_push", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Pushing",
 	 "the push"},
+	// A base export reads the open project's setting of its base game (a settings change waits, a close cancels
+	// it) and none of its files (an edit and a save go on); a Build, a Play and an Export join it, the build
+	// starting once the base is in (session/base_export.h).
+	{OperationKind::BaseExport, "base_export", HoldsProject, HoldsSlot, {K::Build, K::Play, K::Export}, {},
+	 "Exporting the base game", "the base game's export"},
 };
 
 constexpr bool every_operation_writes_the_slot() {
@@ -124,6 +129,9 @@ bool OperationSlot::finish(SessionCore &core) {
 	outcome.id = id;
 	outcome.kind = operation->kind();
 	last_ = std::move(outcome);
+	// The operation its finish started goes on under its id (a base export's Build): the id it took is
+	// never handed out again, as no id is.
+	if (operation_ && operation->hands_on_id()) id_ = id;
 	return true;
 }
 

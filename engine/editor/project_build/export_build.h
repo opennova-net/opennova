@@ -41,8 +41,13 @@ enum class CoreFinding;
 // ExportRun steps the copy a budget of bytes at a time (S16: progress and cancel, as the build's own
 // phases are stepped); cancelled before its folder is replaced, it removes its staging folder and leaves
 // the folder as it was (export.cancelled).
+//
+// The record also keeps `sources`, the stamp of the project's files its build was planned on
+// (project_files_stamp): an expansion of the project's base game (ADR 0046 T5) weighs it against the
+// project as it stands, and exports the project again where they differ (session/base_export.h).
 inline constexpr const char *kExportRecordFileName = "export.json";
-inline constexpr int kExportRecordSchemaVersion = 1;
+// 2: the record keeps its build's `sources`.
+inline constexpr int kExportRecordSchemaVersion = 2;
 
 struct ExportRequest {
 	std::string build_dir;   // the published build
@@ -51,7 +56,23 @@ struct ExportRequest {
 	std::string export_dir;  // where it lands (a trailing separator is dropped)
 	std::string project_id;  // the project's (project.opennova's project_id)
 	std::string runtime_dir; // the runtime's folder to ship beside a standalone game ("" for none)
+	std::string sources;     // the stamp of the project's files the build was planned on (project_files_stamp)
 };
+
+// The stamp of a project's files as they stand: every file the project walk reaches (assets/project_walk.h:
+// no dot-directory, so never the machine's own `.opennova/`, and no export folder; none a machine makes
+// beside a project, content_skips_file), each by its path, its size and its last write, hashed (SHA-256,
+// 64 hex digits). Nothing is read but the folders' listings, so a stamp of the JO install's 9,300 files
+// takes a walk alone. `export_dir` is the project's export folder (ProjectPaths::export_dir).
+std::string project_files_stamp(const std::string &root, const std::string &export_dir);
+
+// The `sources` of the export in `dir` when it is an export of the project `project_id` (its record
+// names the project; "" where it keeps none); false where the folder holds no export of the project.
+bool export_sources_of(const std::string &dir, const std::string &project_id, std::string &sources);
+
+// Whether an export of the project `project_id` may replace the folder `dir`: there is none, it is empty,
+// or it is an export of the project (ExportRun refuses any other, export.folder).
+bool export_replaces(const std::string &dir, const std::string &project_id);
 
 struct ExportReport {
 	bool ok = false;

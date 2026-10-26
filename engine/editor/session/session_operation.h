@@ -33,6 +33,9 @@ enum class OperationKind : uint8_t {
 	ContentBind,
 	ContentPull,
 	ContentPush,
+	// An expansion's base game's project exported, where its export is missing or older than the project, and
+	// the base read again (ADR 0046 T5, session/base_export.h)
+	BaseExport,
 	kCount,
 };
 
@@ -170,6 +173,9 @@ public:
 	// build already published, whose Play's copies were cancelled: BuildOperation). The session finishes it at
 	// once, as the cancel is asked.
 	virtual bool finishes_on_cancel() const { return false; }
+	// Whether the operation its finish starts goes on under its id (a base export's: the Build, Play or Export it
+	// was asked for, which waited on the base), so what waits on the one asked waits on both (OperationSlot::finish).
+	virtual bool hands_on_id() const { return false; }
 	// Stops between two steps and discards the work (a build's staging directory goes): the
 	// operation never finishes.
 	virtual void cancel() = 0;
@@ -198,7 +204,8 @@ public:
 	// Steps the running operation to its end (a test, a command line); true when one is done.
 	bool run_to_end();
 	// The done operation's finish(core), once: last() is what it came to, and the slot is free
-	// (before its finish runs, so a finish may start the next one). False when none is done.
+	// (before its finish runs, so a finish may start the next one, which takes its id where it hands it
+	// on: SessionOperation::hands_on_id). False when none is done.
 	bool finish(SessionCore &core);
 	// Cancels the running operation between two steps: its work discarded, last() says so, the
 	// slot free. False when none runs or it cannot be cancelled.

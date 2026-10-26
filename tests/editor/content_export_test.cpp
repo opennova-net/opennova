@@ -143,7 +143,9 @@ static int test_import_source() {
 
 // An expansion imported from the install's expansion over its base game's project (base_project
 // "../Base"), as a retail expansion's stock revision is, and the copies of both side by side: one
-// export.
+// export. The copy of the base holds no export, so the expansion's exports its base first, as the
+// expansion opens (the session's base export, session/base_export.h); exported again with the base
+// unchanged, nothing of the base is exported.
 static int test_expansion_over_base_project() {
 	test_temp::TempDir dir("opennova_content_export_expansion");
 	const std::string scratch = dir.root(), install = dir.file("install"),
@@ -166,9 +168,17 @@ static int test_expansion_over_base_project() {
 						.code == 0);
 	TEST_EXPECT(run(scratch, { "export", expansion, "--out", dir.file("export") }).code == 0);
 	TEST_EXPECT(store_copy(base, base_copy) && store_copy(expansion, expansion_copy));
-	TEST_EXPECT(run(scratch, { "export", base_copy }).code == 0);
+	TEST_EXPECT(!fs::exists(opennova::editor::system_path(base_copy + "/build/export/export.json")));
 	TEST_EXPECT(
 			run(scratch, { "export", expansion_copy, "--out", dir.file("copy-export") }).code == 0);
+	const std::string record = base_copy + "/build/export/export.json";
+	std::string recorded, error;
+	TEST_EXPECT(opennova::io::read_file_text(record, recorded, error) &&
+			recorded.find("\"sources\"") != std::string::npos);
+	TEST_EXPECT(
+			run(scratch, { "export", expansion_copy, "--out", dir.file("copy-export") }).code == 0);
+	std::string again;
+	TEST_EXPECT(opennova::io::read_file_text(record, again, error) && again == recorded);
 	const std::string original = editor_test::tree_digest(dir.file("export"));
 	TEST_EXPECT(original.find(std::string("expansion/") + minted_install::kExpansion) !=
 			std::string::npos);
