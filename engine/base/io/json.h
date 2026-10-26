@@ -631,5 +631,13 @@ inline std::string json_write(const JsonValue &value) {
 	return out;
 }
 
+// `text` as a JSON string literal, quoted and escaped as json_write writes a string (no line
+// break after it): what a hand-built JSON text puts between its braces.
+inline std::string json_quote(std::string_view text) {
+	std::string out;
+	json_detail::write_escaped(std::string(text), out);
+	return out;
+}
+
 } // namespace io
 } // namespace opennova

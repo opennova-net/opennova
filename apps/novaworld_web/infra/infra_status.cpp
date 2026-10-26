@@ -31,32 +31,12 @@ bool is_name_char(char c) {
 	return is_alnum(c) || c == '-' || c == '_';
 }
 
-// `text` as a JSON string literal.
-std::string json_text(std::string_view text) {
-	std::string out = "\"";
-	for (const char c : text) {
-		const auto byte = static_cast<unsigned char>(c);
-		if (c == '"' || c == '\\') {
-			out.push_back('\\');
-			out.push_back(c);
-		} else if (byte < 0x20) {
-			char escaped[8];
-			std::snprintf(escaped, sizeof(escaped), "\\u%04x", static_cast<unsigned>(byte));
-			out += escaped;
-		} else {
-			out.push_back(c);
-		}
-	}
-	out.push_back('"');
-	return out;
-}
-
 std::string json_list(const std::vector<std::string> &items) {
 	std::string out = "[";
 	for (size_t i = 0; i < items.size(); ++i) {
 		if (i != 0)
 			out.push_back(',');
-		out += json_text(items[i]);
+		out += io::json_quote(items[i]);
 	}
 	out.push_back(']');
 	return out;
@@ -399,7 +379,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 	if (!api_.credentials(creds, s.error))
 		return s;
 
-	const std::string cluster = json_text(config_.cluster);
+	const std::string cluster = io::json_quote(config_.cluster);
 	// The fleet's machines EC2 is asked about.
 	std::vector<std::string> ids;
 	for (const std::string &id : instance_ids)
@@ -444,7 +424,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 				std::string body = "{\"cluster\":" + cluster + ",\"desiredStatus\":\"" + desired +
 						"\",\"maxResults\":100";
 				if (!token.empty())
-					body += ",\"nextToken\":" + json_text(token);
+					body += ",\"nextToken\":" + io::json_quote(token);
 				body += "}";
 				JsonValue reply;
 				if (!json_reply("ecs",
@@ -568,7 +548,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 			JsonValue reply;
 			if (!json_reply("ssm",
 						api_.json_call(creds, "ssm", "AmazonSSM.GetParameter",
-								"{\"Name\":" + json_text(config_.release_parameter) + "}"),
+								"{\"Name\":" + io::json_quote(config_.release_parameter) + "}"),
 						reply, s.release_error))
 				return;
 			const JsonValue *parameter = member(reply, "Parameter", JsonValue::Type::Object);
@@ -634,7 +614,7 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 	// there (one page of 100; the fleet holds fewer).
 	if (!config_.fleet_cluster.empty()) {
 		run([&] {
-			const std::string fleet = json_text(config_.fleet_cluster);
+			const std::string fleet = io::json_quote(config_.fleet_cluster);
 			JsonValue reply;
 			if (!json_reply("ecs",
 						api_.json_call(creds, "ecs", std::string(kEcsTarget) + "DescribeServices",
