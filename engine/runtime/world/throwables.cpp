@@ -1328,6 +1328,11 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
                                     : (ammo.tracer_item_friendly != 0
                                                ? ammo.tracer_item_friendly
                                                : ammo.tracer_item_enemy);
+    // No BMS placement: the explicit none origin, as every runtime spawn carries it. The
+    // Entity default 0 reads as the authored record (kind 0, index 0), which sent the host's
+    // present pass to defer the device to a placed node that does not exist and kept it out
+    // of the host's lighting walk.
+    seed.spawn_origin = kSpawnOriginNone;
     seed.kind = EntityKind::Item;
     seed.has_item_def = true;
     seed.position = round.pos;

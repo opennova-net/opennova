@@ -2584,6 +2584,8 @@ void test_throwable_round_refreshes_its_indoors_flag() {
         if (device != nullptr) {
             for (int i = 0; i < 4; ++i) CHECK(device->blink_hits[i] == inside.blink_hits[i]);
             CHECK((device->flags & kEntityFlagIndoors) != 0);
+            // A runtime spawn: no BMS placement, the none origin.
+            CHECK(device->spawn_origin == kSpawnOriginNone && device->bms_id == 0);
         }
     }
     r.pos = Vec3{50, 50, 2}; // outside the BB
