@@ -1449,24 +1449,24 @@ constexpr RequestKindRow kRows[] = {
 	// session's; a check, a get, a bind, a pull and a push are operations (their kinds' rows: a pull writes
 	// the files and the documents, a check and a push read the files), each of which content_cancel stops.
 	Request(K::ContentSignIn, "content_sign_in", serve_content_sign_in,
-			"Signed in to the content store at server (a bare host is https://; left out, the account's) as "
+			"Signed in to NovaWorld at server (a bare host is https://; left out, the account's) as "
 			"username with password, the account kept for the editor (its session never in the view), then its "
 			"projects listed (the content section). A person's alone: refused over the wire.")
 			.served_by(ServedBy::SessionNeedsPerson)
 			.takes(request_params({ F::Username, F::Password }, { F::Server }))
 			.row,
 	Request(K::ContentSignOut, "content_sign_out", serve_content_sign_out,
-			"Signed out of the content store: the account's session ended and forgotten, the public projects "
+			"Signed out of NovaWorld: the account's session ended and forgotten, the public projects "
 			"listed.")
 			.row,
 	Request(K::ContentCheck, "content_check", serve_content_check,
-			"The content store's projects listed again and, for an open project that is a working copy of one, its "
+			"NovaWorld's projects listed again and, for an open project that is a working copy of one, its "
 			"standing checked, an operation: the project's head asked of the service, the folder's changes since "
-			"its base read (the content section's standing). Refused where the editor reaches no content store.")
+			"its base read (the content section's standing). Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
 	Request(K::ContentGet, "content_get", serve_content_get,
-			"The content project project_key got into dir (missing, or empty) as a working copy at its head, an "
+			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
 			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
 			"An expansion's project builds on its base game's in the folder beside it: get that one there too.")
 			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
@@ -1477,14 +1477,14 @@ constexpr RequestKindRow kRows[] = {
 			.acts_on_saved()
 			.row,
 	Request(K::ContentBind, "content_bind", serve_content_bind,
-			"The open project made a working copy of the content project project_key as it stands, an operation: "
+			"The open project made a working copy of the project project_key as it stands, an operation: "
 			"its base the project's head, its files untouched, so what differs from the head is its change to "
 			"push (a project with no revision yet: every file is its first push).")
 			.takes(request_params({ F::ProjectKey }, {}))
 			.holds(kNone, kSlot)
 			.row,
 	Request(K::ContentPull, "content_pull", serve_content_pull,
-			"The open project's content project's head pulled into it, an operation: a file only the revision "
+			"The open project's NovaWorld project's head pulled into it, an operation: a file only the revision "
 			"changed taken, one only the folder changed kept, one both changed otherwise a conflict, the pull "
 			"stopping on them (the content section's pull: content_resolve settles each, content_pull again goes "
 			"on). The files it replaces or removes go to the project's trash; the files it wrote are read again. "
@@ -1502,7 +1502,7 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::ContentPush, "content_push", serve_content_push,
 			"The open project's files pushed as the revision after its base, with message, an operation: the "
-			"files the store lacks uploaded, then the revision; refused for a project whose base is behind the "
+			"files NovaWorld lacks uploaded, then the revision; refused for a project whose base is behind the "
 			"head (pull first), and for anyone but an admin. Unsaved edits wait on the prompt first.")
 			.takes(request_params({ F::Message }, {}))
 			.holds(kFiles, kSlot)
@@ -1514,14 +1514,14 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::ContentRelease, "content_release", serve_content_release,
 			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
 			"the service as version, a draft once the service's data program has packed and checked it, published "
-			"in the web admin's Game data; for an expansion's project, on its base game's newest revision. An "
+			"in the web admin's Releases; for an expansion's project, on its base game's newest revision. An "
 			"admin's alone.")
 			.takes(request_params({ F::Version }, {}))
 			.row,
 	// A restore is a pull of one file (an operation of the pull's kind), the base left as it is; the history a
 	// call as a release is.
 	Request(K::ContentRestore, "content_restore", serve_content_restore,
-			"The open project's file at path put back as revision of its content project has it, an operation: "
+			"The open project's file at path put back as revision of its NovaWorld project has it, an operation: "
 			"left out (0), as the folder's base has it, which discards the folder's changes to it (a file the base "
 			"lacks removed); an older revision's file is a change to push. The file it replaces goes to the "
 			"project's trash (kept until Empty the trash); unsaved edits to it wait on the prompt first.")
@@ -1533,13 +1533,13 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::ContentHistory, "content_history", serve_content_history,
-			"The open project's content project's revisions listed, newest first (the content section's "
+			"The open project's NovaWorld project's revisions listed, newest first (the content section's "
 			"history: each one's number, author, message, files and time).")
 			.row,
 	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
 	// its conflicts.
 	Request(K::ContentCancel, "content_cancel", serve_content_cancel,
-			"The content operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
+			"The NovaWorld operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "
 			"its conflicts given up.")
 			.holds(kNone, kNone, OnBusy::Supersede)
 			.row,

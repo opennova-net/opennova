@@ -62,7 +62,7 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::PopID();
 }
 
-// The projects of the content store (ADR 0069): a project got from it opens. Its sign-in is the Content window's,
+// The projects of the content store (ADR 0069): a project got from it opens. Its sign-in is the NovaWorld window's,
 // which the button shows over the welcome page.
 void draw_from_store(Workspace &workspace) {
 	const SessionView &v = workspace.view();

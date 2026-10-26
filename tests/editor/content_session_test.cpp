@@ -1,5 +1,5 @@
 // The content store's part of the editor's session (engine/editor/session/content_controller.h, ADR
-// 0069), driven through the session's requests as the Content window and the editor MCP send them,
+// 0069), driven through the session's requests as the NovaWorld window and the editor MCP send them,
 // over the in-memory service (content_fake_service.h) and accounts kept in memory: every content
 // request refused with no transport; a sign-in (a person's, refused over the wire) keeping the
 // admin's session and listing the projects, a wrong password refused; a new project bound to the

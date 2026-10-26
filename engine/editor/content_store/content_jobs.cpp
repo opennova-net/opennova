@@ -31,7 +31,7 @@ std::string count_text(size_t n, const char *one, const char *many) {
 std::string reset_text(const ContentBinding &binding, int64_t head) {
 	return binding.key + "'s newest revision is " + std::to_string(head) +
 			", before the folder's " + std::to_string(binding.revision) +
-			": the store was reset, so bind the project again (the Content window's Bind again)";
+			": NovaWorld was reset, so bind the project again (the NovaWorld window's Bind again)";
 }
 
 } // namespace
@@ -562,7 +562,7 @@ ContentJobProgress ContentPush::progress() const {
 			return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(),
 				true };
 		case Phase::Missing:
-			return { "Asking which files the store lacks", 0, 0, false };
+			return { "Asking which files NovaWorld lacks", 0, 0, false };
 		case Phase::Upload:
 			return { "Uploading " + count_text(uploads_.size(), "file", "files"), bytes_uploaded_,
 				bytes_to_upload_, true };
@@ -601,7 +601,7 @@ bool ContentPush::step_uploads() {
 		const UploadTarget &target = uploads_[next_upload_++];
 		const auto path = path_of_sha.find(target.file.sha256);
 		if (path == path_of_sha.end()) {
-			fail("the store asked for a file the folder does not hold");
+			fail("NovaWorld asked for a file the folder does not hold");
 			return false;
 		}
 		const std::string file = join_path(paths_.root, path->second);
@@ -691,7 +691,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				std::vector<UploadTarget> lacking;
 				ContentApiError error;
 				if (!content_api::read_missing(call_.reply(), account_, lacking, error))
-					return fail("cannot ask which files the store lacks: " + error.line());
+					return fail("cannot ask which files NovaWorld lacks: " + error.line());
 				call_ = ContentCall();
 				for (UploadTarget &target : lacking) {
 					bytes_to_upload_ += target.file.size;
@@ -734,7 +734,7 @@ ContentJobState ContentPush::step(uint64_t budget) {
 				}
 				if (answer == content_api::PushAnswer::MissingBlobs)
 					return fail(count_text(hashes.size(), "file", "files") +
-							" did not reach the store: push again");
+							" did not reach NovaWorld: push again");
 				if (answer != content_api::PushAnswer::Pushed)
 					return fail("the push was refused: " + error.line());
 				ContentBinding pushed = binding_;

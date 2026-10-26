@@ -387,7 +387,7 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_eq(String(state.get("status", {}).get("status", "")), "No project open.")
 	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
 			"the pickers need a person")
-	# ADR 0069: a content store sign-in is a person's, its password never on the wire.
+	# ADR 0069: a NovaWorld sign-in is a person's, its password never on the wire.
 	assert_true((await _call("editor_request", {"kind": "content_sign_in", "username": "a", "password": "b"}))
 			.get("_error", "").contains("person"), "a sign-in needs a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
@@ -440,7 +440,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(kinds, served, "the kind enum is the tokens the request table serves, from the catalog")
 	assert_false(request_properties.has("password"), "no field only a person's kind takes is a property")
 	assert_true(request_properties.has("project_key") and request_properties.has("message"),
-			"the content store's fields the wire serves are")
+			"the NovaWorld project fields the wire serves are")
 	var named: Array = []
 	for row: Variant in catalog.get("queries", []):
 		named.append(String((row as Dictionary).get("name", "")))

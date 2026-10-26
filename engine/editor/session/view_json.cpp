@@ -639,7 +639,7 @@ constexpr ViewSectionRow kSections[] = {
 			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
 			"record? {row, kind, child} while the document read stands}])." },
 	{ S::Content, "content", concern_set({ C::Content }), content_section,
-			"The content store (ADR 0069): available (the editor reaches a service), the account {server, "
+			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
 			"username, role, signed_in} (never its session), calling (a sign-in or a project list in flight), the "
 			"projects as last listed [{key, title, public, retail, base, head, can_push}] and projects_error, the "
 			"open project's binding {bound, key, revision}, its standing as the last check, pull or push left it "

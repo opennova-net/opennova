@@ -794,14 +794,14 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (menu_item("Export", nullptr, v.project.open && v.allows(EditorRequestKind::Export)))
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
-	// ADR 0069 d7: a release of the project's revision, built on the service; the Content window asks its version.
+	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
 	const ContentView &content = v.content;
 	const bool releases = content.bound && content.signed_in && content.role == "admin" && content.revision > 0;
 	const std::string release = content.revision > 0 ? "Release r" + std::to_string(content.revision) + "..." : "Release...";
 	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::ContentRelease)))
 		window_requests::focus(*this, "content");
-	ui_kit::tooltip(releases ? "Builds a release of the store's revision on the service; the Content window asks its version."
-	                         : "An admin releases a project the content store holds, from a revision pushed to it.");
+	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
+	                         : "An admin releases a project on NovaWorld, from a revision pushed to it.");
 	if (menu_item("Show export folder", nullptr,
 	              v.activity.has_export && v.activity.last_export->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_export->export_dir));
@@ -1115,8 +1115,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		return clicked;
 	};
 	if (first == 0 && !content_text.empty()) {
-		if (clickable("##content", widths[0], "The project in the content store: its revision, your changes and "
-		                                     "what others pushed since. Shows the Content window."))
+		if (clickable("##content", widths[0], "The project on NovaWorld: its revision, your changes and what "
+		                                     "others pushed since. Shows the NovaWorld window."))
 			window_requests::focus(*this, "content");
 		ImGui::TextUnformatted(content_text.c_str());
 	}

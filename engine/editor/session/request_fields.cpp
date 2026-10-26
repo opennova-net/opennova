@@ -332,10 +332,10 @@ constexpr RequestField kFields[] = {
 			"content_sign_in's service (ADR 0069): its address, https:// before a bare host (\"opennova.net\")." },
 	{ F::Username, "username", J::String, "content_sign_in's account name on the service." },
 	{ F::Password, "password", J::String,
-			"content_sign_in's password: a person's alone, typed into the Content window; content_sign_in is never "
+			"content_sign_in's password: a person's alone, typed into the NovaWorld window; content_sign_in is never "
 			"served over the wire." },
 	{ F::ProjectKey, "project_key", J::String,
-			"content_get's and content_bind's content project, by its key (\"JO\", \"JOX01\"): what the "
+			"content_get's and content_bind's project, by its key (\"JO\", \"JOX01\"): what the "
 			"content section's projects list." },
 	{ F::Message, "message", J::String,
 			"content_push's message: what the revision changes, 1 to 2000 bytes, line breaks kept." },
@@ -347,7 +347,7 @@ constexpr RequestField kFields[] = {
 			"content_release's version, the package's: one to four numbers between dots (\"0.2.0\", "
 			"\"1.7.5.8\")." },
 	{ F::Revision, "revision", J::Integer,
-			"content_restore's revision of the content project, whose file at path is put back (left out, 0: "
+			"content_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
 };
 

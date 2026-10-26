@@ -110,7 +110,7 @@ void ContentController::keep_account(const ContentAccountUpdate &update) {
 	account_ = update.account;
 	std::string error;
 	if (!accounts_->save(account_, error))
-		core_.note("The content account was not kept: " + error);
+		core_.note("The NovaWorld account was not kept: " + error);
 	show_account();
 }
 
@@ -120,12 +120,12 @@ void ContentController::refuse(const std::string &why) {
 
 bool ContentController::ready(bool admin, bool project, bool bound) {
 	if (!transport_) {
-		refuse("This editor reaches no content store.");
+		refuse("This editor reaches no NovaWorld service.");
 		return false;
 	}
 	if (admin && !account_.admin()) {
 		refuse(account_.signed_in() ? "Only an admin pushes or binds a project for pushing."
-									: "Sign in to the content store first.");
+									: "Sign in to NovaWorld first.");
 		return false;
 	}
 	if (project && !core_.view().project.open) {
@@ -133,7 +133,7 @@ bool ContentController::ready(bool admin, bool project, bool bound) {
 		return false;
 	}
 	if (bound && !core_.view().content.bound) {
-		refuse("The project is no working copy of a content project yet: bind it first.");
+		refuse("The project is no working copy of a NovaWorld project yet: bind it first.");
 		return false;
 	}
 	// A working copy is of one service's project (a debug build signs in to staging, a release
@@ -162,7 +162,7 @@ void ContentController::start(OperationKind kind, std::unique_ptr<ContentJob> jo
 
 void ContentController::sign_in(const EditorRequest &request) {
 	if (!transport_) {
-		refuse("This editor reaches no content store.");
+		refuse("This editor reaches no NovaWorld service.");
 		return;
 	}
 	const std::string server =
@@ -202,7 +202,7 @@ void ContentController::check() {
 	if (!ready(false, false, false))
 		return;
 	if (account_.server.empty()) {
-		refuse("Sign in to a content store first, or name its server.");
+		refuse("Sign in to NovaWorld first, or name its server.");
 		return;
 	}
 	list_projects();
@@ -220,7 +220,7 @@ void ContentController::get(const EditorRequest &request) {
 	if (!ready(false, false, false))
 		return;
 	if (request.dir.empty() || request.project_key.empty()) {
-		refuse("A get names the content project and the folder it goes into.");
+		refuse("A get names the project and the folder it goes into.");
 		return;
 	}
 	if (!empty_folder(request.dir)) {
@@ -247,7 +247,7 @@ void ContentController::bind(const EditorRequest &request) {
 	if (!ready(false, true, false))
 		return;
 	if (request.project_key.empty()) {
-		refuse("A bind names the content project the open project is a working copy of.");
+		refuse("A bind names the NovaWorld project the open project is a working copy of.");
 		return;
 	}
 	start(OperationKind::ContentBind,
@@ -326,7 +326,7 @@ void ContentController::release(const EditorRequest &request) {
 		return;
 	}
 	if (view.revision <= 0) {
-		refuse("Push the project first: a release is built from a revision of the store's.");
+		refuse("Push the project first: a release is built from a revision on NovaWorld.");
 		return;
 	}
 	if (release_.started()) {
@@ -398,10 +398,10 @@ void ContentController::poll() {
 		if (content_api::read_login(login_.reply(), account, error)) {
 			keep_account({ true, account });
 			view.last = "Signed in to " + account.server + " as " + account.username + ".";
-			core_.note("Content store: " + view.last);
+			core_.note("NovaWorld: " + view.last);
 			list_projects();
 		} else {
-			view.last = "The content store's sign-in failed: " + error.line();
+			view.last = "The NovaWorld sign-in failed: " + error.line();
 			core_.refuse_request(make_finding(
 					CoreFinding::ContentFailed, DiagnosticSeverity::Warning, view.last));
 		}
@@ -426,8 +426,8 @@ void ContentController::poll() {
 		std::string name;
 		if (content_api::read_release(release_.reply(), id, name, error)) {
 			view.last = "Release " + name + " is building on " + release_server_ +
-					": publish it in the web admin's Game data once it is a draft.";
-			core_.note("Content store: " + view.last);
+					": publish it in the web admin's Releases once it is a draft.";
+			core_.note("NovaWorld: " + view.last);
 		} else {
 			view.last = "The release was refused: " + error.line();
 			core_.refuse_request(make_finding(
@@ -521,7 +521,7 @@ void ContentController::finish_pull(ContentPull &pull) {
 				: pull.restored_revision() == view.revision ? "Discarded the changes to " + what + "."
 															: what + " is back as revision " + revision +
 								" has it: a change to push.";
-		core_.note("Content store: " + view.last);
+		core_.note("NovaWorld: " + view.last);
 		view.checked = false; // the changes are counted again by the next check
 		view.changes.clear();
 	} else {
@@ -533,7 +533,7 @@ void ContentController::finish_pull(ContentPull &pull) {
 		view.last = "Pulled revision " + std::to_string(pull.revision()) + ": " +
 				count_text(pull.applied().written, "file written", "files written") + ", " +
 				count_text(pull.applied().removed, "removed", "removed") + ".";
-		core_.note("Content store: " + view.last);
+		core_.note("NovaWorld: " + view.last);
 		view.head = pull.revision();
 		view.head_known = true;
 		view.checked = false; // the changes are counted again by the next check
@@ -592,7 +592,7 @@ void ContentController::finish_push(ContentPush &push) {
 		case PushOutcome::Pushed:
 			view.last = "Pushed revision " + std::to_string(push.revision()) + " (" +
 					count_text(push.changes().size(), "change", "changes") + ").";
-			core_.note("Content store: " + view.last);
+			core_.note("NovaWorld: " + view.last);
 			view.head = push.revision();
 			view.head_known = true;
 			view.checked = true;
@@ -672,7 +672,7 @@ OperationOutcome ContentController::finish_job(
 				view.last = "Bound to " + static_cast<ContentBind &>(*job).binding().key +
 						" at revision " +
 						std::to_string(static_cast<ContentBind &>(*job).binding().revision) + ".";
-				core_.note("Content store: " + view.last);
+				core_.note("NovaWorld: " + view.last);
 				show_binding();
 			} else if (kind == OperationKind::ContentPull) {
 				finish_pull(static_cast<ContentPull &>(*job));
