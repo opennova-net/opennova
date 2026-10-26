@@ -1937,8 +1937,6 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	conn.type = 1;
 	conn.phase = opennova::inmatch::ConnectionPhase::PlayerAdded;
 	conn.admission_stage = opennova::inmatch::GameAdmissionStage::AwaitPaddingEcho;
-	conn.admission_padding_x = 0x11223344u;
-	conn.admission_padding_y = 0x55667788u;
 	conn.link.owned_entity = owned;
 	conn.server_scrk =
 			"SERVERINITIALHOLDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -1947,13 +1945,9 @@ bool check_initial_stream_obeys_connection_holdoff() {
 			conn, config.effective_send_holdoff_ticks());
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	auto &remote = owner.ctx.np_protocol.connection_list.front();
+	// The echo's words are compared with nothing (the 0x02 handler reads two words for its
+	// stats sample alone).
 	std::vector<uint8_t> echo(256, 0);
-	auto write_echo_u32 = [&](size_t offset, uint32_t value) {
-		for (size_t i = 0; i < 4; ++i)
-			echo[offset + i] = static_cast<uint8_t>(value >> (i * 8));
-	};
-	write_echo_u32(0, remote.admission_padding_x);
-	write_echo_u32(4, remote.admission_padding_y);
 	const std::vector<opennova::ProtocolMessage> post_handshake =
 			opennova::inmatch::dispatch_session_replies(
 					config, remote,

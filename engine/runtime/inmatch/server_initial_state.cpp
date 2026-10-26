@@ -677,17 +677,16 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 // The slot's network state reset at its state-6 entry, in session alone: the time-sync round
 // state and both silence counters zeroed, the control quartet's countdown seeded with its
 // 744-tick period (so the first quartet comes 744 gated ticks after the live-age gate opens,
-// not on its first), and the loaded-model reply stamp set to the frame clock. The other words
-// it resets (+0x178F0, +0x178F8 = 62, +0x17CFC, the two 512-byte blocks, +0x17D10, +0x17D14,
-// +0x17D1C) have no reader here. (D-NET-532)
+// not on its first). The other words it resets (+0x178F0, +0x178F8 = 62, +0x17CFC, the two
+// 512-byte blocks, +0x17D10, +0x17D14, +0x17D1C, and the loaded-model reply stamp +97560 the
+// frame clock) have no reader here. (D-NET-532)
 // Retail's is_in_session is 0 in the single player, whose own slot it leaves alone; ours's
 // single-player listen host keeps ctx.is_in_session 1, so the session fact is the world's
 // (world.rules.mp_session, as the join's placement reads it, D-NET-NEW-L1-19).
 // [orig: PlayerSlot_ResetNetworkState @0x4F9FD0 - is_in_session `cmp` @0x4F9FD3, `jz` @0x4F9FD9,
 //  dwords 22486..22493 @0x4F9FF1..0x4FA01B, the countdown +0x15F20 = 744 @0x4FA021, +0x15F24 = 0
 //  @0x4FA02B, +97560 = dword_A87060 @0x4FA073; called from Server_OnPlayerJoin @0x51A72B]
-void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &conn,
-		uint32_t now_tick) {
+void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &conn) {
 	if (!world.rules.mp_session) return;
 	SessionReplyState &st = conn.reply;
 	st.time_sync_host_baseline_ms = 0;
@@ -700,7 +699,6 @@ void PlayerSlot_ResetNetworkState(const world::World &world, NapiNPConnection &c
 	st.time_sync_unanswered_count = 0;
 	st.control_request_countdown = CONTROL_REQUEST_PERIOD_TICKS;
 	st.charattr_unanswered_count = 0;
-	st.loaded_model_reply_frame = now_tick;
 }
 
 } // namespace
@@ -755,7 +753,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 		// [orig: +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
 		st.client_quality = 0;
 		st.client_quality_dirty = false;
-		PlayerSlot_ResetNetworkState(world, conn, now_tick); // [orig: @0x51A72B] (D-NET-532)
+		PlayerSlot_ResetNetworkState(world, conn); // [orig: @0x51A72B] (D-NET-532)
 		conn.link.armory_reuse_seconds = 0;                // +356 [orig: @0x51A752]
 		st.rtt_request_countdown = 0;                      // +89816 [orig: @0x51A758]
 		// The state-6 entry's GetTickCount, the process clock the deploy-idle punt measures

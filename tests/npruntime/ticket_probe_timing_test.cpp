@@ -89,7 +89,6 @@ int main() {
 			d.body == probe_body(5000u + 41u * 16u, 1u));
 	CHECK(!wire.client_recv(d));
 	CHECK(conn.admission_stage == inmatch::GameAdmissionStage::AwaitPaddingEcho);
-	CHECK(conn.admission_padding_x == 5000u + 41u * 16u && conn.admission_padding_y == 1u);
 
 	// Ungated: the 0x01 sends the probe at once.
 	ctx.novaworld_join_tickets_armed = false;

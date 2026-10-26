@@ -938,8 +938,7 @@ bool run_reactive_replies() {
 		const inmatch::NapiNPConnection *c = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) c = &candidate;
-		if (!expect(!saw_5a && c != nullptr && !c->reply.loadout_synced &&
-		                    !c->burst.loadout_received && !c->reply.loadout_buffer_set &&
+		if (!expect(!saw_5a && c != nullptr && !c->reply.loadout_buffer_set &&
 		                    c->reply.last_loadout_reply.empty(),
 		            "a 0x2F from a slot with no entity draws nothing")) return false;
 	}
@@ -3733,8 +3732,7 @@ bool run_loadout_resolve_with_armory() {
 		const inmatch::NapiNPConnection *connection = nullptr;
 		for (const inmatch::NapiNPConnection &candidate : ctx.np_protocol.connection_list)
 			if (candidate.peer == peer) connection = &candidate;
-		return expect(connection != nullptr && !connection->reply.loadout_synced &&
-		                      !connection->burst.loadout_received &&
+		return expect(connection != nullptr &&
 		                      connection->reply.last_loadout_reply.empty(),
 		              "malformed 0x2F leaves the loadout gate and prior grant untouched");
 	};
@@ -4012,8 +4010,7 @@ bool run_loadout_envelope_gates() {
 		            "the re-send carries the slot's class and the player's current (empty) slots"))
 			return false;
 		const inmatch::NapiNPConnection *c = joiner_conn();
-		if (!expect(c != nullptr && !c->reply.loadout_synced && !c->burst.loadout_received &&
-		                    c->reply.last_loadout_reply.empty(),
+		if (!expect(c != nullptr && c->reply.last_loadout_reply.empty(),
 		            "an out-of-range team opens no gate and retains no body")) return false;
 		if (!expect(joiner_entity()->player_class == 6,
 		            "an out-of-range team never stamps entity+660")) return false;
@@ -4029,8 +4026,7 @@ bool run_loadout_envelope_gates() {
 		                    lo.slots[0].type_id == 9,
 		            "a valid envelope grants the submitted kit")) return false;
 		const inmatch::NapiNPConnection *c = joiner_conn();
-		if (!expect(c != nullptr && c->reply.loadout_synced && c->burst.loadout_received &&
-		                    c->reply.last_loadout_reply == granted,
+		if (!expect(c != nullptr && c->reply.last_loadout_reply == granted,
 		            "the accepted grant opens the gates and is retained")) return false;
 		if (!expect(joiner_entity()->player_class == 8,
 		            "the accepted class stamps entity+660")) return false;

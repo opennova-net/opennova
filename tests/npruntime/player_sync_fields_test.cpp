@@ -225,11 +225,9 @@ AdmittedJoin admit_and_sync(inmatch::NetworkType transport) {
 			&world, inputs);
 	(void)inmatch::dispatch_session_replies(ctx.config, joiner,
 			{make_protocol_message(0x01, {0x00})}, 2, roster, &world, inputs);
+	// The echo's words are compared with nothing (the 0x02 handler reads two words for its
+	// stats sample alone).
 	std::vector<uint8_t> echo(256, 0);
-	for (int i = 0; i < 4; ++i) {
-		echo[i] = static_cast<uint8_t>(joiner.admission_padding_x >> (8 * i));
-		echo[4 + i] = static_cast<uint8_t>(joiner.admission_padding_y >> (8 * i));
-	}
 	for (const ProtocolMessage &m : inmatch::dispatch_session_replies(ctx.config, joiner,
 			{make_protocol_message(0x02, echo)}, 3, roster, &world, inputs)) {
 		if (m.tag == s2c::PLAYER_NAME && !m.payload.empty())

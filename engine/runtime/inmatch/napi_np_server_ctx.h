@@ -115,7 +115,6 @@ struct NapiNPProtocol {
 	uint32_t host_key = 0;              // [orig +0x534] HK TLV; NapiNP_GenerateSessionKey @0x61ea70
 	uint32_t host_running = 0;          // [orig +0x538] 1 once StartServer succeeds; Hello rejects 0
 	uint32_t host_start_tick = 0;       // [orig +0x53C] GetTickCount at StartServer (uptime base)
-	uint32_t host_stop_tick = 0;        // [orig +0x540] GetTickCount at StopServer
 	uint32_t host_run_duration_ms = 0;  // [orig +0x544] live elapsed ms; frozen at stop
 	// The host's millisecond clock at this pump's receive (HostOwner::clock_ms, GetTickCount's
 	// stand-in): the stamp an in-order receive or a ping writes on its connection (D-NET-256).
@@ -671,18 +670,6 @@ struct NapiNPServerCtx {
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
-	// Deterministic server-key source (reimpl-only). The original draws the per-connection
-	// server SK and then its SCRK from the manager's PRNG at the 0x42 join
-	// (manager_connection_keys). For golden 0x82 byte-parity these must be reproducible, so the
-	// default leaves `forced` false (drawn, exactly as retail) and a golden test seed-injects
-	// the captured values — mirroring the P1 SessionStartup "pass in, don't sample" approach.
-	struct ServerKeyMint {
-		bool forced = false;       // false => draw from the manager PRNG (retail behavior)
-		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
-		uint32_t server_sk = 0;    // forced ServerAuth.sk
-	};
-	ServerKeyMint server_key_mint;
-
 	// The per-registration NovaWorld AppId (CNapiNetwork_MintAppId's
 	// value, net/napi/session.h make_session_app_id), installed by the
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
@@ -897,13 +884,6 @@ struct NapiNPServerCtx {
 	std::vector<OrphanedPlayerRow> orphaned_player_rows;
 	// The last net-player identity drawn for an orphaned row (NapiNPConnection::net_player_serial).
 	uint32_t last_net_player_serial = 0;
-	// Test seam: per tag, the in-match records dispatch_session_replies' default arm took with
-	// no named handler on this host. The squad legs' tags (Server_HandleSquadMessage) are named;
-	// C2S 0x48's records count here, its server handler being a bare return. No game code
-	// reads it. [orig: NapiNPServerMsg_0x048 @0x510F30 (a lone retn), the server table's 0x48
-	// row @0x82B9B8]
-	std::array<uint32_t, 256> unnamed_records{};
-	uint32_t unnamed_record_count(uint8_t tag) const { return unnamed_records[tag]; }
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

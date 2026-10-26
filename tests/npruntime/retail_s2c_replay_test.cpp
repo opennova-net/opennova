@@ -52,8 +52,7 @@
 //   - every packet deframes in order; no description (disconnect) is queued; the joiner is
 //     never torn down;
 //   - the 0x00 / 0x01 / 0x02 reach the admission walk in its turn; every other record reaches
-//     the in-match switch, and only C2S 0x48's take its default arm with no named handler
-//     (NapiNPServerCtx::unnamed_records; retail's 0x48 handler is a lone retn);
+//     the in-match switch;
 //   - the replies a handler sends in the twin's state, tag for tag per packet (kReplyRules),
 //     each a tag the retail host's own stream carries.
 // The capture keeps no C2S of the joiner's load (its 0x2F, its 0x0B), so the twin's slot waits
@@ -64,7 +63,7 @@
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
 #include <runtime/inmatch/napi_np_protocol.h>   // handle_server_datagram / tick_connections
-#include <runtime/inmatch/napi_np_server_ctx.h> // NapiNPServerCtx::unnamed_record_count
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_spawn.h>       // Server_InitNewRoundState / the spawn pump
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -1179,7 +1178,7 @@ void run_host_twin(const std::string &dir) {
 	const uint64_t k_last = tick_of(c2s_stream.packets.back().ts_us);
 	const uint64_t k_limit = k_last + 10u * static_cast<uint64_t>(io::kTicksPerSecondInt);
 
-	std::map<uint16_t, std::size_t> seen, at_admission, at_switch, unnamed;
+	std::map<uint16_t, std::size_t> seen, at_admission, at_switch;
 	std::map<uint8_t, std::size_t> reply_histogram, producer_histogram;
 	std::set<uint8_t> asserted_replies;
 	std::size_t next = 0;
@@ -1211,7 +1210,6 @@ void run_host_twin(const std::string &dir) {
 			const bool slot_active = player_slot_active(*conn);
 			const uint32_t id_before = conn->connection_id;
 			std::map<uint8_t, std::size_t> want_replies;
-			std::map<uint16_t, std::size_t> want_unnamed;
 			std::vector<uint8_t> record_tags;
 			for (const Logical *r : records[next]) {
 				record_tags.push_back(static_cast<uint8_t>(r->full_tag));
@@ -1229,15 +1227,11 @@ void run_host_twin(const std::string &dir) {
 							"answers it", r->full_tag, where.c_str());
 				} else {
 					++at_switch[r->full_tag];
-					if (r->full_tag == c2s::CLIENT_ACK) ++want_unnamed[r->full_tag];
 				}
 				const int reply = expected_reply(*r, admission, capacity);
 				if (reply >= 0) ++want_replies[static_cast<uint8_t>(reply)];
 				if (admission && r->full_tag == c2s::JOIN_PADDING_ECHO) admission = false;
 			}
-			std::array<uint32_t, 256> unnamed_before{};
-			for (std::size_t t = 0; t < unnamed_before.size(); ++t)
-				unnamed_before[t] = ctx.unnamed_record_count(static_cast<uint8_t>(t));
 
 			std::vector<ProtocolMessage> messages;
 			for (const nwmsg::FixtureMessage &m : c2s_stream.packets[next].physical)
@@ -1268,19 +1262,6 @@ void run_host_twin(const std::string &dir) {
 			if (conn->connection_id != id_before)
 				std::printf("note: host twin: %s moved the joiner's connection id %u -> %u (our C2S 0x48 "
 						"leg; retail's handler reads nothing)\n", where.c_str(), id_before, conn->connection_id);
-
-			// Every record but 0x48's reaches a named case.
-			for (std::size_t t = 0; t < unnamed_before.size(); ++t) {
-				const uint32_t delta =
-						ctx.unnamed_record_count(static_cast<uint8_t>(t)) - unnamed_before[t];
-				if (delta != 0) unnamed[static_cast<uint16_t>(t)] += delta;
-				const auto want = want_unnamed.find(static_cast<uint16_t>(t));
-				const std::size_t expected = want == want_unnamed.end() ? 0 : want->second;
-				if (delta != expected)
-					fail("host twin: C2S 0x%02X at %s: %u record(s) took the in-match switch's default arm with "
-							"no named handler, %zu expected", static_cast<unsigned>(t), where.c_str(), delta,
-							expected);
-			}
 
 			// The replies, tag for tag.
 			const std::vector<uint8_t> replies = host->drain(where);
@@ -1320,12 +1301,12 @@ void run_host_twin(const std::string &dir) {
 				c2s_stream.messages.size(), conn->reply.player_slot, static_cast<unsigned>(conn->slot_state),
 				static_cast<unsigned>(conn->phase));
 	}
-	std::printf("host twin: C2S tag  records  admission  switch  default(unnamed)\n");
+	std::printf("host twin: C2S tag  records  admission  switch\n");
 	for (const auto &kv : seen) {
 		const uint16_t tag = kv.first;
 		const std::size_t handled = at_admission[tag] + at_switch[tag];
-		std::printf("  0x%02X  %7zu  %9zu  %6zu  %7zu%s\n", tag, kv.second, at_admission[tag], at_switch[tag],
-				unnamed[tag], tag == c2s::CLIENT_ACK
+		std::printf("  0x%02X  %7zu  %9zu  %6zu%s\n", tag, kv.second, at_admission[tag], at_switch[tag],
+				tag == c2s::CLIENT_ACK
 						? "  (retail: NapiNPServerMsg_0x048 @0x510F30, a lone retn)"
 						: "");
 		if (handled != kv.second)

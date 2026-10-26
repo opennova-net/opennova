@@ -621,7 +621,6 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	//  @0x5189EF..0x518A3A, the countdown @0x518A42..0x518A5D;
 	//  CNapiNPConnection_QueueMessage's `desc_sent` drop @0x62864D].
 	if (!expect(live.host_disconnect_sent &&
-				live.host_disconnect_mismatch_type == expected_type &&
 				live.reply.control_request_countdown ==
 						inmatch::CONTROL_REQUEST_PERIOD_TICKS,
 			"the counter is checked before the countdown, the cause latches and the "
@@ -630,8 +629,7 @@ bool check_host_control_punt(uint32_t charattr_silence,
 
 	const std::size_t sent_once = socket.sent.size();
 	inmatch::host_session_pump(owner, socket);
-	if (!expect(socket.sent.size() == sent_once &&
-				live.host_disconnect_mismatch_type == expected_type,
+	if (!expect(socket.sent.size() == sent_once,
 			"the first host event wins and later pumps remain silent"))
 		return false;
 
@@ -1405,7 +1403,6 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	}
 	const replication::Datagram *punt = sent.empty() ? nullptr : &sent.back();
 	if (!expect(live.host_disconnect_sent &&
-				live.host_disconnect_mismatch_type == 35 &&
 				punt != nullptr && punt->reliable &&
 				punt->protocol_flags_raw == kDescriptionFlags &&
 				punt->tag == hightag::DESCRIPTION_PACKET &&
@@ -1554,8 +1551,7 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 				datagram.protocol_flags_raw == kDescriptionFlags &&
 				datagram.body == connection_description_to_bytes(expected);
 	}
-	return expect(live.host_disconnect_sent &&
-				live.host_disconnect_mismatch_type == 7 && saw_punt,
+	return expect(live.host_disconnect_sent && saw_punt,
 			"the first non-permanent second over 360 emits exact t7");
 }
 
@@ -1667,7 +1663,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 		expected.dstr = "t6";
 		expected.dpc = 33;
 		expected.ddstr = "LogPuntEvent";
-		if (!expect(live.host_disconnect_sent && live.host_disconnect_mismatch_type == 6 &&
+		if (!expect(live.host_disconnect_sent &&
 					first.size() == 1 && first[0].reliable &&
 					first[0].protocol_flags_raw == kDescriptionFlags &&
 					first[0].body == connection_description_to_bytes(expected),

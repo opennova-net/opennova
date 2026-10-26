@@ -48,7 +48,6 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	p.max_players = ctx.config.max_players; // MP TLV mirror
-	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
 	// The socket the host opened before this start hands the /INOUT switch to the
@@ -393,14 +392,9 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  @0x629D50; NapiNP_GetLocalConnectionId @0x4C6D40; NapiNPServer_HandleNewConnection
 		//  @0x4C8040 - the player's id @0x4C80B9]
 		self.connection_id = next_connection_index();
-		if (ctx.server_key_mint.forced) {
-			self.server_sk = ctx.server_key_mint.server_sk;
-			self.server_scrk = ctx.server_key_mint.server_scrk;
-		} else {
-			const ConnectionKeys node_keys = manager_connection_keys();
-			self.server_sk = node_keys.key;
-			self.server_scrk = node_keys.scrk;
-		}
+		const ConnectionKeys node_keys = manager_connection_keys();
+		self.server_sk = node_keys.key;
+		self.server_scrk = node_keys.scrk;
 		ctx.np_protocol.connection_list.push_back(self);
 		if (ctx.logs.connect != nullptr && ctx.logs.connect->enabled()) {
 			ConnectLog &log = *ctx.logs.connect;

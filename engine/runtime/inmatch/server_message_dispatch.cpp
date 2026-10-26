@@ -935,8 +935,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (!conn.link.preround_loadout_latch)
 					conn.link.armory_reuse_seconds = static_cast<int32_t>(config.armory_reuse_time);
 				conn.link.preround_loadout_latch = false;
-				st.loadout_synced = true;
-				conn.burst.loadout_received = true;
 				// Every accepted loadout re-stamps every player's live kit weight
 				// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f9d ->
 				//  Server_RecalculateAllPlayerScores @0x5014E0].
@@ -1225,10 +1223,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							world::authority_tick_count_ms(world, now_tick), replies); // GetTickCount @0x519A1E (D-NET-NEW-L8-32)
 				break;
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
-				// Authority-gated; the body is never read: the handler stamps the
-				// host frame clock onto the player slot (+97560 = dword_A87060).
-				if (!conn.link.owned_entity.valid()) break;
-				st.loaded_model_reply_frame = now_tick;
+				// Authority-gated; the body is never read. The handler stamps the host frame
+				// clock onto the player slot (+97560 = dword_A87060), a word no code of ours
+				// reads. [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				break;
 			}
 			case c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST: { // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
@@ -1543,13 +1540,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			default:
 				// The command map's squad / waypoint / punt legs (server_squad.h); 0x48
-				// + per-frame client updates: consumed (no reactive reply). A record no
-				// named handler takes counts on the host's test seam
-				// (NapiNPServerCtx::unnamed_records).
-				if (inputs.server_ctx != nullptr && world != nullptr &&
-						Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world))
-					break;
-				if (inputs.server_ctx != nullptr) ++inputs.server_ctx->unnamed_records[msg.tag];
+				// + per-frame client updates: consumed (no reactive reply).
+				if (inputs.server_ctx != nullptr && world != nullptr)
+					(void)Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world);
 				break;
 		}
 	}

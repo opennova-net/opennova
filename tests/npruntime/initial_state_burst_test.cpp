@@ -542,7 +542,7 @@ int main_impl() {
 	}
 
 	// --- Loadout gate pacing: a TYPE-1 (remote joiner) connection PAUSES at phase 7→8 until
-	// loadout_received is set. The golden (f316-318) shows: S 0x1A (end of world-stream) -> C 0x2F
+	// its C2S 0x0B runs the join (D-NET-678). The golden (f316-318) shows: S 0x1A (end of world-stream) -> C 0x2F
 	// (client sends loadout request) -> S 0x5A + game-start. Without the gate, 0x1A and the
 	// game-start would land together and the client couldn't send 0x2F between them. ---
 	{
@@ -658,7 +658,6 @@ int main_impl() {
 		// The stock client's join-time C2S 0x2F pair seeded the armory cooldown, then its
 		// C2S 0x0B runs the join [orig: NapiNPServerMsg_PlayerJoinRequest @0x51AB10 ->
 		// Server_OnPlayerJoin @0x51A680].
-		jconn.burst.loadout_received = true;
 		jconn.link.armory_reuse_seconds = 30;
 		jconn.reply.chat_last_ms = 1234;
 		jconn.reply.rtt_request_countdown = 17;
@@ -796,12 +795,10 @@ int main_impl() {
 			gated = sconn.slot_state == inmatch::PlayerSlotState::AwaitJoin;
 		}
 		if (!expect(gated, "the joiner's world stream ends in slot state 5")) return 1;
-		// An accepted 0x2F alone opens nothing.
-		sconn.burst.loadout_received = true;
+		// The pumps alone open nothing: the join runs on the 0x0B.
 		for (int i = 0; i < 16; ++i)
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, 2);
-		if (!expect(!sconn.burst.spawned, "the join does not run on a 0x2F")) return 1;
-		sconn.burst.loadout_received = false;
+		if (!expect(!sconn.burst.spawned, "the join does not run ahead of the 0x0B")) return 1;
 		// The C2S 0x0B through the receiver.
 		auto send_0b = [&]() {
 			inmatch::ServerDispatchInputs inputs;

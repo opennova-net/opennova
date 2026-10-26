@@ -133,8 +133,6 @@ void reset_slot_for_next_mission(NapiNPConnection &conn) {
 	reply.last_loadout_reply = kept.last_loadout_reply;
 	conn.reply = std::move(reply);
 
-	conn.score = 0;
-	conn.score_wire_mirror = 0;
 	// The tick-seed transaction's words (+0x178C8..+0x178E0: the armed clock,
 	// the disarm stamp, the seed, the fire floor, the keepalive high water, the
 	// mode byte) outlive the mission: no mission-change or mission-start store

@@ -199,11 +199,6 @@ struct InitialStateBurst {
 	uint16_t phase_loop_counter = 0;    // [playerSlot+89884] per-phase record cursor (reserved; paging)
 	uint8_t  game_state = 0;            // [CNetPlayer_SetGameState] 8 player-added / 9 in-game
 	uint32_t entity_batch_count = 0;    // world-stream batches emitted — the F3 readiness signal
-	bool     loadout_received = false;  // a C2S 0x2F accepted (the 0x5A grant sent). The join
-	                                    // runs on the 0x0B, not this (D-NET-678).
-	                                    // Golden: 0x1A (end of world-stream, f316) -> client sends
-	                                    // 0x2F + 0x0B (f317) -> server replies 0x5A + game-start
-	                                    // (f318).
 	bool     spawned = false;           // set by the join (the in-match latch, the PeerSpawned source)
 };
 
@@ -275,10 +270,6 @@ struct SessionReplyState {
 	//  slot memset @0x51CD06, +418 = 0 @0x51CD40, +89860 = 0 @0x51CD46]
 	uint8_t client_quality = 0;
 	bool client_quality_dirty = false;
-	// The host frame clock stamped by the C2S 0x3D loaded-model page reply; the
-	// reply carries no payload the host reads. [orig: NapiNPServerMsg_0x03D
-	//  @0x500EC0 -> player+97560 = dword_A87060]
-	uint32_t loaded_model_reply_frame = 0;
 	// The revive position GameEvent_RevivePlayer saves on the victim (its live
 	// position raised 0x4000) for the deploy that follows a medic revive. The
 	// revive saves the yaw/pitch/roll beside it too, but nothing reads those three
@@ -314,7 +305,6 @@ struct SessionReplyState {
 	//  Server_UpdateAllActivePlayerSlots @0x5189A6]
 	bool frontier_hint_pending = false; // bit 0x04
 	bool capture_nag_held = false;      // bit 0x08
-	bool loadout_synced = false;        // 0x2F WEAPON-LOADOUT request seen (set on the 0x5A reply)
 	// Authority-side per-ammo-class pool table (serverPlayer+88664), written in
 	// full by S2C 0x0F after loadout acceptance. Indices are the weapon table's
 	// retail ammo-class ids; unused classes remain zero.
@@ -474,14 +464,6 @@ struct ClientGameEnvironment {
 };
 
 struct NapiNPConnection {
-	// The slot's SCORE and the cached copy the S2C 0x81 change gate compares against.
-	// Retail keeps both on the per-slot stats object: the score is field id 28
-	// (== 0x1C, what CPlayerStats_GetFieldPlusOne (ex CRenderState_GetFieldByIndex)(playerSlotPtr + 18, 0x1C) reads);
-	// the cached mirror is slot[83] [orig: Server_UpdateCaptureZoneProximity @0x5086A0].
-	// Both start at 0, matching a fresh slot: retail sends nothing until the score
-	// first CHANGES, so an untouched slot is silent rather than sending a zero.
-	int32_t score = 0;
-	int32_t score_wire_mirror = 0;
 	// [orig +0x18] ConnectionId / dcb — the join-order id a player record is matched by [orig:
 	// NapiNP_GetLocalConnectionId @0x4c6d40; Player_FindLocalPlayerEntity @0x4e0090 numeric match].
 	uint32_t connection_id = 0;
@@ -563,7 +545,6 @@ struct NapiNPConnection {
 	// the gameplay predicate immediately while leaving the owner node resident
 	// long enough to frame and flush its reliable H:0x03 record.
 	bool host_disconnect_sent = false;
-	uint32_t host_disconnect_mismatch_type = 0;
 	// Host-to-this-peer send block. Retail owns the countdown on each
 	// NapiNPConnection (+0x648), so peers admitted on different ticks keep
 	// independent boundaries even though the dictated period is session-wide.
@@ -785,8 +766,6 @@ struct NapiNPConnection {
 	                               // (seq.retained_outbound_message_count, server_initial_state.cpp).
 	std::string session_id;        // key into the GameServerRuntime sessions_ (the peer label)
 	GameAdmissionStage admission_stage = GameAdmissionStage::Complete;
-	uint32_t admission_padding_x = 0; // S2C 0x02 challenge prefix the C2S echo must preserve
-	uint32_t admission_padding_y = 0;
 
 	// self_id (the joiner's own ConnectionId / dcb / unk_18) UNIFIES onto connection_id above
 	// (+0x18), the value Player_FindLocalPlayerEntity @0x4e0090 numeric-matches: the create's

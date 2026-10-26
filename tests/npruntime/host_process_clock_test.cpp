@@ -347,7 +347,7 @@ void test_deploy_idle_reads_the_process_clock() {
 	expect(!live.host_disconnect_sent, "exactly six minutes of clock keeps the held joiner");
 	clock += 1u;
 	tick_second();
-	expect(live.host_disconnect_sent && live.host_disconnect_mismatch_type == 35,
+	expect(live.host_disconnect_sent && sent_description(transport, "t35"),
 	       "the next millisecond of clock punts it t35");
 }
 

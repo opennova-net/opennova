@@ -73,9 +73,7 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 	event.dstr = "t" + std::to_string(mismatch_type);
 	event.dpc = 33;
 	event.ddstr = "LogPuntEvent";
-	if (!stage_host_disconnect(conn, event)) return false;
-	conn.host_disconnect_mismatch_type = mismatch_type;
-	return true;
+	return stage_host_disconnect(conn, event);
 }
 
 } // namespace

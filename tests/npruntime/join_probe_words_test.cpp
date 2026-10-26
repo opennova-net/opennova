@@ -80,7 +80,6 @@ void test_probe_words() {
 		padding = padding && probe.payload[i] == static_cast<uint8_t>(expected.next() >> 3);
 	CHECK(padding);
 	CHECK(world->crt_rand.state == expected.state);
-	CHECK(conn->admission_padding_x == 103216u && conn->admission_padding_y == 3u);
 	CHECK(conn->admission_stage == inmatch::GameAdmissionStage::AwaitPaddingEcho);
 	// A worked byte: the seed 0x1234's first draw is (0x1234 * 214013 + 2531011) mod 2^32 =
 	// 0x3B983827, >> 16 & 0x7FFF = 0x3B98, >> 3 = 0x773, whose low byte 0x73 is the padding's first.

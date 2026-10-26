@@ -52,6 +52,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_hello.h> // DisconnectEvent (the punts' descriptions)
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/ai.h>
@@ -1280,8 +1281,7 @@ bool check_armory_reuse_cooldown() {
 	// gets the current (empty) list and no state write.
 	std::vector<ProtocolMessage> replies = dispatch(submit);
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::WEAPON_LOADOUT &&
-			conn.link.armory_reuse_seconds == 0 && entity->player_class != 6 &&
-			!conn.reply.loadout_synced,
+			conn.link.armory_reuse_seconds == 0 && entity->player_class != 6,
 			"an alive player outside an armory zone is answered with its current list"))
 		return false;
 	// A dead player passes the armory-window gate: the grant seeds the cooldown.
@@ -1289,7 +1289,7 @@ bool check_armory_reuse_cooldown() {
 	replies = dispatch(submit);
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::WEAPON_LOADOUT &&
 			conn.link.armory_reuse_seconds == 30 && entity->player_class == 6 &&
-			conn.reply.loadout_synced && !conn.link.preround_loadout_latch,
+			!conn.link.preround_loadout_latch,
 			"a dead player's submit is granted and seeds the 30 s cooldown"))
 		return false;
 	const std::vector<uint8_t> granted = conn.reply.last_loadout_reply;
@@ -1534,14 +1534,29 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 	b.reply.control_request_countdown = 1;
 	b.reply.control_challenge_seed = 0x1234;
 	const uint32_t sequence = b.reply.time_sync_sequence;
-	const auto tags = [](ns::UdpSessionTransport &t) {
+	const auto tags = [](const std::vector<ns::Datagram> &sent) {
 		std::vector<uint8_t> out;
-		for (const ns::Datagram &d : drain(t)) out.push_back(d.tag);
+		for (const ns::Datagram &d : sent) out.push_back(d.tag);
 		return out;
 	};
+	// The punt's description names its cause, Server_LogCRCMismatchPunt's "t<N>".
+	const auto punts_with = [](const std::vector<ns::Datagram> &sent, const char *cause) {
+		DisconnectEvent event;
+		event.ds = 1;
+		event.dc = 2;
+		event.dstr = cause;
+		event.dpc = 33;
+		event.ddstr = "LogPuntEvent";
+		const std::vector<uint8_t> want = connection_description_to_bytes(event);
+		for (const ns::Datagram &d : sent)
+			if (d.tag == hightag::DESCRIPTION_PACKET && d.body == want) return true;
+		return false;
+	};
 	inmatch::Server_TickUpdate(ctx);
-	const std::vector<uint8_t> a_tags = tags(ta);
-	const std::vector<uint8_t> b_tags = tags(tb);
+	const std::vector<ns::Datagram> a_sent = drain(ta);
+	const std::vector<ns::Datagram> b_sent = drain(tb);
+	const std::vector<uint8_t> a_tags = tags(a_sent);
+	const std::vector<uint8_t> b_tags = tags(b_sent);
 	const auto punted = [](const std::vector<uint8_t> &t) {
 		return std::count(t.begin(), t.end(), hightag::DESCRIPTION_PACKET) == 1 &&
 				std::count(t.begin(), t.end(), s2c::CHARATTR_CRC_CHALLENGE) == 0 &&
@@ -1549,11 +1564,11 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 				std::count(t.begin(), t.end(), s2c::TIME_SYNC_PING) == 0 &&
 				std::count(t.begin(), t.end(), s2c::LOADED_MODEL_PAGE_REQUEST) == 0;
 	};
-	if (!expect(a.host_disconnect_sent && a.host_disconnect_mismatch_type == 16 &&
+	if (!expect(a.host_disconnect_sent && punts_with(a_sent, "t16") &&
 	                    punted(a_tags) && a.reply.control_request_countdown == 1,
 	            "the 16 punt's visit runs the countdown on (2 -> 1)"))
 		return false;
-	return expect(b.host_disconnect_sent && b.host_disconnect_mismatch_type == 24 &&
+	return expect(b.host_disconnect_sent && punts_with(b_sent, "t24") &&
 	                      punted(b_tags) &&
 	                      b.reply.control_request_countdown ==
 	                              inmatch::CONTROL_REQUEST_PERIOD_TICKS &&

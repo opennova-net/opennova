@@ -630,8 +630,8 @@ bool check_punted_sender_chat_is_not_handled() {
 
 bool check_loaded_model_reply_stamp() {
 	HostFixture f(1);
-	(void)f.dispatch(0, c2s::LOADED_MODEL_PAGE_REPLY, {}, 777);
-	return expect(f.conn(0).reply.loaded_model_reply_frame == 777, "0x3D stamps the frame clock");
+	return expect(f.dispatch(0, c2s::LOADED_MODEL_PAGE_REPLY, {}, 777).empty(),
+			"0x3D answers nothing");
 }
 
 // The mission start's EntityLimit table: retail's 23 rows, in its order, rebuilt at every

@@ -509,8 +509,6 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 // See header.
 ProtocolMessage admission_padding_probe(NapiNPConnection &conn, NapiNPServerCtx *ctx) {
 	std::vector<uint8_t> challenge = context_tag02_push(ctx);
-	conn.admission_padding_x = io::read_u32_le(challenge.data());
-	conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
 	conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
 	return make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge));
 }

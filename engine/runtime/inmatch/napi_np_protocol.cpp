@@ -775,8 +775,6 @@ bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const Peer
 	conn.connection_id = connection_id;
 	conn.self_id_seen = false;
 	conn.admission_stage = GameAdmissionStage::AwaitJoinRequest;
-	conn.admission_padding_x = 0;
-	conn.admission_padding_y = 0;
 	// The keys the create drew (NapiNP_GenerateSessionKey's SK, GenerateTxKey's SCRK).
 	conn.server_sk = server_keys.key;
 	conn.server_scrk = server_keys.scrk;
@@ -1057,14 +1055,11 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	const uint32_t connection_id = next_connection_index();
 	// The created node's keys come at the create too, ahead of the validate callback, so a
 	// refused 0x42 has drawn them from the manager's PRNG as well. R2: the server SK and then
-	// its SCRK from the manager's PRNG (D-NET-524), unless a deterministic source is forced
-	// (golden byte-parity).
+	// its SCRK from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - NapiNP_GenerateSessionKey @0x62bf5e
 	//  (the SK, stored @0x62bf6b), then CNapiNPConnection_GenerateTxKey @0x62bf99, ahead of the
 	//  validate callback called @0x62C0AA]
-	const ConnectionKeys server_keys = ctx.server_key_mint.forced
-			? ConnectionKeys{ctx.server_key_mint.server_sk, ctx.server_key_mint.server_scrk}
-			: manager_connection_keys();
+	const ConnectionKeys server_keys = manager_connection_keys();
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
 	// is already full. The witnessed gate is ONE count, players and spectators alike: the host's
