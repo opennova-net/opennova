@@ -905,14 +905,22 @@ void apply_item_state_event(World &world, Entity &target, int16_t section, int32
     hit_record_class_event(world, target, 4, flags);
 }
 
+bool runs_brain_class_row(const World &world, const Entity &e) {
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(e.item_id);
+	if (traits == nullptr || traits->death_class == ItemDeathClass::kUnwitnessed)
+		return e.is_ai_capable;
+	return traits->death_class == ItemDeathClass::kBrainMachine;
+}
+
 void destruction_notify_item_damage(World &world, Entity &target, int phase, ItemHitContext hit) {
 	// The entity+0x1C8 event callback, keyed by the def's ai_function class
 	// row and invoked as cb(entity, phase, 0): 1 from the round damage, 2
 	// from the blast damage [orig: @0x4e6f93], 4 from the S2C 0x13 net kill
 	// [orig: @0x42ebf5] and from the 0x26 kill through hit_record_class_event
-	// (apply_item_state_event). Organics run the person callbacks and AI-driven
-	// vehicles die through their state machine (rows 21/23), not here.
-	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
+	// (apply_item_state_event). Organics run the person callbacks and a brain-class
+	// row dies through its state machine (rows 21/23), not here; an AIData item of
+	// any other row takes its row's callback.
+	if (target.kind == EntityKind::Organic || runs_brain_class_row(world, target)) return;
     // A section clone's event callback is the null row whatever its def; a
     // palm fragment runs item 900's own row [orig: Entity_SpawnSectionEntity
     //  @0x440365 -> NullClass_HandleEvent; Palm_SpawnFragment @0x53C35D].
@@ -1128,7 +1136,7 @@ void tick_item_event_pool(World &world, int pool) {
                 else
                     world.minefields.think(world, *entity);
             }
-        } else if (cohort && !entity->is_ai_capable) {
+        } else if (cohort && !runs_brain_class_row(world, *entity)) {
             if (entity->class_think_ticks <= 0) {
                 if (pool == 2 && world.ai.collision != nullptr)
                     world.ai.collision->refresh_blink(world, *entity);

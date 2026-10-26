@@ -244,7 +244,10 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
         person_class_event(world, e, phase, flags);
         return;
     }
-    if (e.is_ai_capable) {
+    // The row's callback is its class row's, not its AIData bit's: an AIData item whose
+    // ai_function row is no brain machine (a gnrc, a flag) takes its item callback.
+    // [orig: g_EntityClassEventCallbackTable @0x813000]
+    if (runs_brain_class_row(world, e)) {
         run_brain_class_event(world, e, phase);
         return;
     }

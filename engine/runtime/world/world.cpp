@@ -319,12 +319,27 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     }
     // The row's class callback and its +0x2AC clock: the brain machine
     // (Entity::spawn_phase), a minefield (its age) or an item damage callback
-    // (Entity::class_think_ticks). A brain row never takes the item callback.
+    // (Entity::class_think_ticks). A brained brain-class row never takes the item callback.
+    // The callback is the class row's: a brained row whose ai_function row is no brain
+    // machine takes the item callback, and a brain-class row with no brain the item
+    // leg's refresh and clock, whose notify runs nothing for it (the machine returns at
+    // a null brain). A row whose class row is unknown (no def resolved one) keeps the
+    // brain's presence and AIData as its class.
+    // [orig: g_EntityClassEventCallbackTable @0x813000; EntityAI_ProcessAirStateMachine
+    //  @0x4581B9..0x4581BE, EntityAI_ProcessGroundStateMachine @0x4583CA..0x4583D1]
     enum class ThinkKind { None, Brain, Minefield, Item };
     ThinkKind kind = ThinkKind::None;
-    if (brain != nullptr) kind = ThinkKind::Brain;
+    const ItemDeathTraits *row_traits = tables.item_death_traits.get(row.item_id);
+    const bool class_known =
+            row_traits != nullptr && row_traits->death_class != ItemDeathClass::kUnwitnessed;
+    const bool brain_row = class_known
+            ? row_traits->death_class == ItemDeathClass::kBrainMachine
+            : brain != nullptr || row.is_ai_capable;
+    if (brain != nullptr && brain_row) kind = ThinkKind::Brain;
     else if (row.minefield.think) kind = row.hidden ? ThinkKind::None : ThinkKind::Minefield;
-    else if (body == nullptr && !row.is_ai_capable) kind = ThinkKind::Item;
+    else if (class_known ? (body == nullptr || brain != nullptr)
+                         : (body == nullptr && !row.is_ai_capable))
+        kind = ThinkKind::Item;
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
     if (brain != nullptr && !row.motor_suspended && row.health > 0) {

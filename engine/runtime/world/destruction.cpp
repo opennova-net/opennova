@@ -327,7 +327,7 @@ EntityHandle resolve_attacker_chain(World &world, EntityHandle owner) {
 // `cmp [edi+1C8h], offset Entity_HandleDestructibleDeathEvent` gate on the
 // +0x80 store @0x4eb53f]. A row without a class runs that same body.
 bool runs_tree_death_body(const World &world, const Entity &target) {
-	if (target.is_ai_capable) return false;
+	if (runs_brain_class_row(world, target)) return false;
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(target.item_id);
 	return traits == nullptr || traits->death_class == ItemDeathClass::kTree ||
 			traits->death_class == ItemDeathClass::kUnwitnessed;

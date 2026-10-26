@@ -860,6 +860,14 @@ struct ItemHitContext {
 void apply_item_state_event(World &world, Entity &target, int16_t section,
         int32_t flags = 0);
 
+// Whether the row's class event callback (entity+0x1C8, bound from its def's ai_function
+// row) is one of the brain machines (CHel, cpln, cveh, cbot, ctrn: ItemDeathClass::
+// kBrainMachine), which run the row's brain; every other row's is an item callback,
+// AIData or not. A row whose class row is unknown (no traits row, or kUnwitnessed: no def
+// resolved one) runs the machine when it carries AIData. [orig:
+// g_EntityClassEventCallbackTable @0x813000, resolved by
+//  EntityDef_InitAllCallbacks @0x4A5AAE]
+bool runs_brain_class_row(const World &world, const Entity &e);
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
 

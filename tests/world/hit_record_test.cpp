@@ -216,6 +216,61 @@ static void test_kill_single_hands_items_the_record() {
     }
 }
 
+// The class event follows the def's ai_function row, not the AIData bit: an AIData
+// item whose row is gnrc takes its item callback from a script kill (its death leg
+// sends the record's section) and runs no machine; an AIData row whose class is a brain
+// machine (CHel) runs its machine.
+// [orig: g_EntityClassEventCallbackTable @0x813000 - gnrc @0x8130C0 -> 0x407020, the
+//  section read @0x407073 for the state send @0x40708E; CHel @0x8132A0 ->
+//  EntityAI_ProcessAirStateMachine @0x4581B0]
+static void test_class_event_follows_the_class_row_not_aidata() {
+    KillRig rig;
+    rig.w->rules.mp_session = true;
+    rig.w->rules.logic_authority = true;
+    ItemDeathTraits gnrc;
+    gnrc.death_class = ItemDeathClass::kGnrc;
+    rig.w->tables.item_death_traits.set(902, gnrc);
+    Entity flag;
+    flag.kind = EntityKind::Item;
+    flag.item_id = 902;
+    flag.has_item_def = true;
+    flag.item_type_index = 8;
+    flag.is_ai_capable = true; // AIData, as the shipped flags 104091/3/5 carry
+    flag.net_id = 72;
+    flag.engine_flags = kEntityFlagDead; // killed earlier, not yet husked
+    const EntityHandle item = rig.w->registry.spawn(1, flag);
+    rig.w->ai.attach(item);
+    rig.record_round(7);
+    CHECK(rig.w->commands.kill_ssn(item));
+    int sections = 0;
+    for (const auto &event : rig.w->out.entity_events)
+        if (const auto *state = std::get_if<ItemStateEvent>(&event))
+            if (state->handle == item.packed && state->section == 7) ++sections;
+    CHECK(sections == 1);
+    CHECK(rig.w->ai.events.count() == 0);
+
+    ItemDeathTraits chel;
+    chel.death_class = ItemDeathClass::kBrainMachine;
+    rig.w->tables.item_death_traits.set(903, chel);
+    VehicleTraits air;
+    air.brain_class = VehicleBrainClass::Air;
+    rig.w->vehicles.traits.set(903, air);
+    Entity heli;
+    heli.kind = EntityKind::Item;
+    heli.item_id = 903;
+    heli.has_item_def = true;
+    heli.item_type_index = 9;
+    heli.is_ai_capable = true;
+    heli.health = 400;
+    heli.alive = true;
+    heli.net_id = 73;
+    const EntityHandle brained = rig.w->registry.spawn(1, heli);
+    rig.w->ai.attach(brained);
+    CHECK(rig.w->commands.kill_ssn(brained));
+    CHECK(rig.w->ai.events.count() == 1);
+    if (rig.w->ai.events.count() == 1) CHECK(rig.w->ai.events.at(0).type() == 1);
+}
+
 // The org callback's event 4 zeroes the health word and, while the record
 // holds a round, restages the death clip from it over whatever was staged;
 // with no round it keeps the staged clip.
@@ -280,6 +335,7 @@ int main() {
     test_wac_kill_ssn_zeroes_the_record();
     test_kill_group_runs_the_round_and_keeps_the_attacker();
     test_kill_single_hands_items_the_record();
+    test_class_event_follows_the_class_row_not_aidata();
     test_class_event_4_restages_the_death_clip();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
