@@ -33,15 +33,17 @@ this directory's.
   sells past the fleet (`model/sold_capacity.*`; [`../README.md`](../README.md) "Billing").
   A start is still refused `at_capacity` when the fleet has no room for it now.
 - **Data sets** (`../data_sets/data_set_repository.*`, `../data_sets/data_set_files.*`,
-  `backend/migrations/0011_data_sets.sql`). A data set is a row (migrations 0011 and 0013
-  seed the catalog's, and an admin may make more): a **base**
+  `backend/migrations/0011_data_sets.sql`). A data set is a row, one **game** (migrations
+  0011, 0013 and 0025 seed the catalog's, and an admin may make more): a **base**
   game (its `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or
   `dfx2`, and its `game`, the `games` row whose lobby it lists in) or an **expansion** of a
   base (its `expansion_code`, `/exp jox01`); a third kind, `update`, is an updater product
-  with no tree ("Game data" below). Its data lives in the object store
+  with no tree and no project, OpenNova's runtime ("Games" below). A game with a `key` has a
+  **project** (its OpenNova Editor project's revisions, `../data_sets/content_repository.h`),
+  and its releases are built from it. Its data lives in the object store
   (`ONNET_OBJECT_STORE_URL`) as **trees**, each one immutable version of the data set's
-  files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, uploaded by an admin or built by
-  applying a published update release, with the multiplayer missions its archives list. A
+  files (`../data_sets/data_set_files.h` names them) at `trees/<id>/`, built from nothing out
+  of its published release (every release is whole), with the multiplayer missions its archives list. A
   base is **offered** while it has a ready current tree, with each of its expansions that
   has one; the host-screen limits are the title's (`model/host_limits.h`). Hosting is on only
   with a store. At its placement a server is **pinned** to its data sets' current trees
@@ -578,60 +580,53 @@ writes need the CSRF header.
 | `POST /api/admin/addresses/<id>/retry` | admin | an address the cloud refused allocated again (its automatic tries counted from 0): 202; 404; 409 `not_retryable` (not failed); 503 `addresses_disabled` |
 | `POST /api/admin/users/<id>/addresses` | admin | `{"name"}`: a comp address for the account, at most its dedicated machines: 201; 400 `invalid_name`; 404; 409 `name_taken`, `address_limit`; 503 `addresses_disabled` |
 
-## Game data
+## Games
 
-**Game data** (`apps/novaworld_web/data_sets/`, ADR 0064): the data sets as rows
-(`../data_sets/data_set_repository.h`, migrations 0011 and 0013), the trees the admin page uploads into
-the object store (web begins each file's multipart upload, takes each part's PUT, 32 MiB
-a part, inside Cloudflare's request limits, and completes it), and the update releases
-(1SFS packages, uploaded the same way) the data program validates and applies and the
-update listener serves. The jobs a route enqueues (`tree.finalize`, `release.validate`,
-`release.apply`, `tree.prune`; the service README's "Background jobs") commit with the
-state move that causes them, and the data program (`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged with
-its actor; without a store the store routes answer 503 `store_unavailable`, and a store
+**Games** (`apps/novaworld_web/data_sets/`, ADR 0064): the data sets as rows
+(`../data_sets/data_set_repository.h`, migrations 0011, 0013 and 0025), each one game with, when
+it has a key, its project (`../data_sets/content_repository.h`; the editor's routes,
+`apps/novaworld_web/content/content_routes.h`, push and pull its revisions by that key), and
+the update releases (1SFS packages) the data program validates and builds into each game's tree
+and the update listener serves. Every release of a game with a project is built from one of its
+revisions (`POST /api/admin/content/projects/<key>/releases`, the `release.build` job,
+`../data_sets/release_build.h`); only a game with none, OpenNova's runtime, has its packages
+uploaded (web begins the package's multipart upload, takes each part's PUT, 32 MiB a part,
+inside Cloudflare's request limits, and completes it). Every release is whole, so
+`release.apply` builds a game's tree from nothing out of its published release alone (an
+expansion's its own, beside its base game's): no tree is ever uploaded. The jobs a route
+enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`; the service
+README's "Background jobs") commit with the state move that causes them, and the data program
+(`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged
+with its actor; without a store the store routes answer 503 `store_unavailable`, and a store
 call that fails mid-way 502 `store_error` (its own text to the log alone). The shapes
 (`DataSet`, `Tree`, `Release`) are `apps/novaworld_web/data_sets/`'s.
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every data set but the `update` rows, with its trees |
-| `POST /api/admin/data-sets` | a base (a title, a `games` slug) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, and `retail_updater` (names `ftp.novaworld.com` in the updater's SERVER.LST instead of `ONNET_UPDATE_HOST`): 201; 400; 409 `duplicate_login`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/data-sets/<id>` | the name, a base's lobby, the updater's fields: 200; 400; 404; 409 `duplicate_login` |
-| `DELETE /api/admin/data-sets/<id>` | the data set and its trees' objects: 204; 404; 409 `in_use`; 503 |
-| `POST /api/admin/data-sets/<id>/trees` | `{"files": [{"name", "size"}]}`: a new uploading tree, its prefix emptied first (a reset database reuses tree ids), and one multipart upload per file (names canonicalised by `../data_sets/data_set_files.h`): 201; 400 `invalid_files` (with `missing` and `unexpected`); 404; 409 `upload_in_flight`, `update_only` (an `update` row); 503 |
-| `PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`; 413; 502; 503 |
-| `POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete` | `{"upload_id", "parts"}`: the file's upload completed: 200; 400; 404; 409; 502; 503 |
-| `POST /api/admin/data-sets/<id>/trees/<t>/finalize` | the tree `finalizing` and its `tree.finalize` job: 202; 404; 409 `not_uploading` |
-| `DELETE /api/admin/data-sets/<id>/trees/<t>` | an uploading tree removed (204), a ready or failed one pruned by a `tree.prune` job (202); 404; 409 `current`, `baseline`, `pinned`, `in_progress`; 502; 503 |
-| `GET /api/admin/releases` | the releases, newest first |
-| `POST /api/admin/releases` | `{"name"?, "size"}`: a release `uploading` and its package's multipart upload: 201; 400; 503 |
-| `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | as a tree's parts |
-| `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `validating` with its `release.validate` job: 202; 400; 404; 409; 502; 503 |
-| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's data set named before retired once none names it) with one `release.apply` job per game-data section: 202; 404; 409 `not_draft` |
+| `GET /api/admin/data-sets` | the store's kind, the titles, the lobbies and every game (bases, expansions, then the runtime), each with its project's `key`, `visibility` (null with no project) and `head` and its trees |
+| `POST /api/admin/data-sets` | a base (a title, a `games` slug) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail_updater` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its project's `key` (1 to 16 of `A-Z0-9_`) and `visibility` (`public`, `private`) both or neither: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/data-sets/<id>` | the name, a base's lobby, the updater's fields, the project's `key` (a rename: its objects move from `content/<old>/` to `content/<new>/` first) and `visibility` (the runtime takes neither): 200; 400; 404; 409 `duplicate_login`, `duplicate_key`; 502 |
+| `DELETE /api/admin/data-sets/<id>` | the game, its trees' objects and its project (its history and its files under `content/<key>/`): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it); 503 |
+| `GET /api/admin/releases` | the releases, newest first, each naming its game (`data_set_id`, null for an upload not yet validated) |
+| `POST /api/admin/releases` | `{"name"?, "size", "data_set_id"?}`: a release `uploading` and its package's multipart upload: 201; 400; 409 `built_from_project` (the game named has a project); 503 |
+| `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
+| `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `validating` with its `release.validate` job (an upload whose package maps a game with a project is made invalid there): 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
+| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's data set named before retired once none names it) with one `release.apply` job per section of a game with a tree: 202; 404; 409 `not_draft` |
 | `POST /api/admin/releases/<id>/retire` | 202; 404; 409 `not_published` |
-| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`; 502; 503 |
+| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
-The seeded updater products include `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
-`ACIDGAMBIT` / `ACIDGAMBIT.CMD` (its content), `NIFTY` / `NIFTY.CMD` (its `nifty` expansion),
-and `DFX2` / `DFX2.CMD`, alongside the existing `JOTRus` and `JOEus` products. The runtime
-uses a standalone `update` row: it appears in Releases but has no hosted game tree and
-does not appear among Game data or hosted-server choices. OpenNova content releases are
-complete packages built with `--full`; their hosted trees are also built
-from empty, so their first publication needs no separate baseline upload. Retail
-releases continue to apply to their uploaded baselines.
-
-CI and operators can use the same multipart upload API without direct object-store
-credentials:
-
-```sh
-python scripts/publish_update.py --url https://opennova.net --token-file admin.token \
-    --package runtime.sfs --name "OpenNova runtime v0.1.0" --publish
-```
-
-The token file contains the existing admin bearer token. The script waits for the data
-worker to validate the package before publishing it. Omit `--publish` to leave a draft
-for review. Runtime and content packages are uploaded independently; each carries its
-own product's command file.
+The seeded games' updater products are `ONRUNTIME` / `ONRUNTIME.CMD` (OpenNova's runtime),
+`ACIDGAMBIT` / `ACIDGAMBIT.CMD` (OP: Acid Gambit), `NIFTY` / `NIFTY.CMD` (its `nifty` expansion),
+`DFX2` / `DFX2.CMD`, `JOTRus` and `JOEus`; every one but the runtime has a project (`ACIDGAMBIT`
+and `NIFTY` public, `JO`, `JOX01` and `DFX2` private: a retail game's revision 1 is its stock
+install imported afresh). The runtime is the standalone `update` row: it appears among the games
+with its releases alone, has no hosted game tree and is no hosted-server choice. Its releases
+arrive from CI: the Publish workflow (`.github/workflows/publish.yml`, its helper
+`scripts/publish_runtime.py`) uploads the build's `opennova-runtime-windows-*.sfs` through the
+routes above with the deployment's admin API token (naming no game: the package's
+`ONRUNTIME.CMD` section makes it the runtime's), waits for it to validate and publishes it. A
+release of the same version as an earlier one is taken like any other; only the same bytes
+again are refused (`release.validate`: "already uploaded").
 
 ## The update listener
 
@@ -643,10 +638,10 @@ by the stall watchdog; a second refreshes its catalog (`release_catalog.*`) from
 every 30 s: each data set with an updater login serves the section of its published
 release that carries its command file, the package fetched into the cache and the section
 unpacked beside it, streamed from disk (a connection's next replies are made only while
-less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a data
-set marked `retail_updater` (a retail install reaches it through the Switcher's hosts
-block), else `ONNET_UPDATE_HOST`. A login no published release serves is refused when it
-is OpenNova's own (`retail_updater` off), so a first install fails rather than finding
+less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a retail
+game's data set (its `retail` column, the admin's `retail_updater`: a retail install reaches it
+through the Switcher's hosts block), else `ONNET_UPDATE_HOST`. A login no published release
+serves is refused when it is OpenNova's own (not retail), so a first install fails rather than finding
 nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
 a package of its command file alone that the catalog writes into its cache. Logged under
 `[update]`.
