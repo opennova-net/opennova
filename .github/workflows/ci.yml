@@ -284,6 +284,17 @@ jobs:
         shell: bash
         run: scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
 
+      # The project tool the Godot shells shard's built-project boot test drives
+      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), from the one
+      # leg that saves the cache; godot-tests-core lays it where the test looks.
+      - name: Upload opennova-project
+        if: matrix.shard == 'editor'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-windows
+          if-no-files-found: error
+          path: build/apps/project/opennova-project.exe
+
       # Right after the build, so the step's numbers are this build's hit rate.
       - name: sccache stats
         if: always()
@@ -461,6 +472,17 @@ jobs:
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
+      # The project tool the Linux GUT run's built-project boot test drives
+      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), whatever the
+      # native tests did; godot-tests-linux lays it where the test looks.
+      - name: Upload opennova-project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-linux
+          if-no-files-found: warn
+          path: build/apps/project/opennova-project
+
       - name: Save the ctest cost data
         if: always()
         uses: ./.github/actions/ctest-costs
@@ -565,7 +587,10 @@ jobs:
 
   godot-tests-linux:
     runs-on: ubuntu-latest
-    needs: [build-gdextension-linux]   # skipped with it on docs-only PRs
+    # Skipped with the extension build on docs-only PRs; test-linux for its
+    # opennova-project build, run whatever the native tests did.
+    needs: [build-gdextension-linux, test-linux]
+    if: ${{ !cancelled() && needs.build-gdextension-linux.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -603,6 +628,21 @@ jobs:
         with:
           name: gdext_linux_template_debug
           path: godot/bin
+
+      # Where built_project_boot_test.gd looks for the project tool (an artifact
+      # keeps no mode bits). A test-linux build that failed uploaded none, and the
+      # test then stays pending.
+      - name: Download opennova-project (Linux)
+        id: project_tool
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: opennova-project-linux
+          path: build/apps/project
+
+      - name: Make opennova-project executable
+        if: steps.project_tool.outcome == 'success'
+        run: chmod +x build/apps/project/opennova-project
 
       - name: Prime Godot import cache
         run: |
@@ -799,7 +839,10 @@ jobs:
       matrix:
         shard: [shells, world]
     runs-on: windows-latest
-    needs: [build-gdextension-windows]
+    # test-core for its opennova-project build: the shards run when the extension
+    # built, whatever the native tests did (their failure is test-core's to report).
+    needs: [build-gdextension-windows, test-core]
+    if: ${{ !cancelled() && needs.build-gdextension-windows.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
     steps:
@@ -843,6 +886,16 @@ jobs:
         with:
           name: gdext_windows_template_debug
           path: godot/bin
+
+      # Where built_project_boot_test.gd looks for the project tool. A test-core
+      # build that failed uploaded none, and the test then stays pending.
+      - name: Download opennova-project (Windows)
+        if: matrix.shard == 'shells'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: opennova-project-windows
+          path: build/apps/project
 
       - name: Prime Godot import cache
         shell: bash
