@@ -3,7 +3,7 @@
 # with the wizards naming its game; update.exe installs that game on the first launch, so this
 # script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-PreviousRuntimePackage <prior.sfs>]
+#        [-PreviousRuntimePackage <prior.sfs>] [-BuildCommit <sha>]
 
 param(
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
@@ -21,7 +21,10 @@ param(
     # always loads template_debug while it scans scripts for the export, so that
     # DLL is required in both modes.
     [ValidateSet("debug", "release")]
-    [string]$ExportMode = "release"
+    [string]$ExportMode = "release",
+    # The commit the build names on the main menu (D-MNU-76): CI passes a pull request's head (the
+    # merge ref it checks out is another commit) or the tag's; a local run takes its checkout's HEAD.
+    [string]$BuildCommit = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -577,9 +580,9 @@ function Assert-StageHoldsOnly {
 
 # The build's commit in the exported project settings (application/config/build_commit), which the
 # STARTUP screen's VERSION label names beside config/version (D-MNU-76, godot/src/mnu/menu_driver.cpp):
-# OPENNOVA_BUILD_COMMIT where CI sets it (a pull request's head, not the merge ref it checks out), else
-# the checkout's HEAD. project.godot is put back as it was once the exports end.
-$BuildCommit = if ($env:OPENNOVA_BUILD_COMMIT) { $env:OPENNOVA_BUILD_COMMIT } else { (& git -C $ROOT rev-parse HEAD).Trim() }
+# -BuildCommit where CI passes it, else the checkout's HEAD. project.godot is put back as it was once the
+# exports end.
+if (-not $BuildCommit) { $BuildCommit = (& git -C $ROOT rev-parse HEAD).Trim() }
 $BuildCommit = $BuildCommit.Substring(0, [Math]::Min(7, $BuildCommit.Length))
 $projectGodotPath = "$ROOT\godot\project.godot"
 $projectGodotText = [System.IO.File]::ReadAllText($projectGodotPath)

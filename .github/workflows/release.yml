@@ -124,8 +124,7 @@ jobs:
         shell: pwsh
         env:
           PREVIOUS_RUNTIME_PACKAGE: ${{ steps.previous.outputs.package }}
-          OPENNOVA_BUILD_COMMIT: ${{ github.sha }}
-        run: scripts/package_godot_windows.ps1 -PreviousRuntimePackage $env:PREVIOUS_RUNTIME_PACKAGE
+        run: scripts/package_godot_windows.ps1 -PreviousRuntimePackage $env:PREVIOUS_RUNTIME_PACKAGE -BuildCommit ${{ github.sha }}
 
       - name: Upload OpenNova Windows game zip
         id: upload_game
