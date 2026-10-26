@@ -14,7 +14,6 @@ using db::BindValue;
 BindValue str(const std::string &s) { return BindValue(s); }
 BindValue i64(int64_t v) { return BindValue(v); }
 BindValue null() { return BindValue(std::monostate{}); }
-BindValue opt_int(std::optional<int64_t> v) { return v ? BindValue(*v) : null(); }
 // A RID column: NULL for none (0).
 BindValue rid_bind(uint32_t rid) { return rid == 0 ? null() : i64(rid); }
 BindValue flag(bool b) { return BindValue(db::Bool{ b }); }
@@ -113,7 +112,7 @@ bool insert_for_session(db::Database &db, CommandKind kind, int64_t session_id, 
 				"SELECT lobby_id, $2::text, id, $3::bigint, $4::bigint, $5::text, $6::bigint, "
 				"$7::bigint, $8::bigint, now() + make_interval(secs => $9) "
 				"FROM lobby_sessions WHERE id = $1;",
-				{ i64(session_id), str(kind_name_of(kind)), rid_bind(rid), opt_int(account), std::move(cmd),
+				{ i64(session_id), str(kind_name_of(kind)), rid_bind(rid), db::int_or_null(account), std::move(cmd),
 						std::move(msg_code), std::move(msg_param1), std::move(msg_param2),
 						i64(kCommandTtlSeconds) });
 	} catch (const db::Error &e) {
@@ -132,7 +131,7 @@ PushResult queue_push(db::Database &db, CommandKind kind, uint32_t rid, std::opt
 	const auto rows = db.query("SELECT id, hosting FROM lobby_sessions WHERE rid = $1 "
 							   "AND ($2::bigint IS NULL OR host_user_id = $2::bigint) "
 							   "ORDER BY hosting DESC, id LIMIT 1;",
-			{ i64(rid), opt_int(owner) });
+			{ i64(rid), db::int_or_null(owner) });
 	if (rows.empty())
 		return PushResult::UnknownRid;
 	if (rows.front().as_int(1).value_or(0) == 0)
@@ -244,8 +243,8 @@ int64_t insert_session(db::Database &db, const SessionRow &row) {
 			"$15, to_timestamp($16::float8 / 1000), to_timestamp($17::float8 / 1000), $18, $19, "
 			"$20, to_timestamp($21::float8 / 1000)) RETURNING id;",
 			{ i64(row.connection_id), str(row.peer_ip), i64(row.peer_port), str(row.state),
-					str(row.pn), str(row.identity), opt_int(row.user_id), rid_bind(row.rid),
-					flag(row.hosting), flag(row.listed), opt_int(row.host_user_id),
+					str(row.pn), str(row.identity), db::int_or_null(row.user_id), rid_bind(row.rid),
+					flag(row.hosting), flag(row.listed), db::int_or_null(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
 					i64(row.max_players), i64(row.connected_ms), i64(row.last_seen_ms),
 					lobby_bind(row.lobby_id), rid_bind(row.playing_rid), str(row.play_addr),
@@ -260,8 +259,8 @@ void update_session(db::Database &db, const SessionRow &row) {
 			"players = $15, max_players = $16, playing_rid = $17, play_addr = $18, "
 			"playing_since = to_timestamp($19::float8 / 1000) WHERE id = $1;",
 			{ i64(row.id), i64(row.connection_id), str(row.peer_ip), i64(row.peer_port),
-					str(row.state), str(row.pn), str(row.identity), opt_int(row.user_id),
-					rid_bind(row.rid), flag(row.hosting), flag(row.listed), opt_int(row.host_user_id),
+					str(row.state), str(row.pn), str(row.identity), db::int_or_null(row.user_id),
+					rid_bind(row.rid), flag(row.hosting), flag(row.listed), db::int_or_null(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
 					i64(row.max_players), rid_bind(row.playing_rid), str(row.play_addr),
 					ms_bind(row.playing_since_ms) });
@@ -272,7 +271,7 @@ void update_session_listing(db::Database &db, int64_t id, uint32_t rid, bool hos
 		const std::string &mission_name, int players, int max_players) {
 	db.exec("UPDATE lobby_sessions SET rid = $2, hosting = $3, listed = $4, host_user_id = $5, "
 			"server_name = $6, mission_name = $7, players = $8, max_players = $9 WHERE id = $1;",
-			{ i64(id), rid_bind(rid), flag(hosting), flag(listed), opt_int(host_user_id),
+			{ i64(id), rid_bind(rid), flag(hosting), flag(listed), db::int_or_null(host_user_id),
 					str(server_name), str(mission_name), i64(players), i64(max_players) });
 }
 

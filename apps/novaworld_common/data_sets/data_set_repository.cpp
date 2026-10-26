@@ -27,19 +27,6 @@ constexpr const char *kReleaseColumns =
 		"published_at, retired_at, data_set_id, content_revision, base_revision, version, "
 		"build_log";
 
-BindValue optional_id(std::optional<int64_t> id) {
-	if (!id)
-		return BindValue(std::monostate{});
-	return BindValue(*id);
-}
-
-// A project's key or visibility as its column takes it: NULL for a game with no project.
-BindValue optional_text(const std::string &text) {
-	if (text.empty())
-		return BindValue(std::monostate{});
-	return BindValue(text);
-}
-
 DataSetRow row_to_data_set(const db::Row &r) {
 	DataSetRow d;
 	d.id = r.as_int(0).value_or(0);
@@ -177,7 +164,7 @@ DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int
 	db::Transaction tx(db);
 	if (data_set.kind == DataSetKind::Expansion) {
 		const auto parent = db.query("SELECT kind FROM data_sets WHERE id = $1 FOR SHARE;",
-				{ optional_id(data_set.parent_id) });
+				{ db::int_or_null(data_set.parent_id) });
 		if (parent.empty() || parent.front().as_text(0).value_or("") != "base")
 			return DataSetOutcome::NoSuchParent;
 	}
@@ -191,7 +178,7 @@ DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int
 		return DataSetOutcome::DuplicateKey;
 	if (data_set.kind == DataSetKind::Expansion &&
 			!db.query("SELECT 1 FROM data_sets WHERE parent_id = $1 AND expansion_code = $2;",
-						{ optional_id(data_set.parent_id), BindValue(data_set.expansion_code) })
+						{ db::int_or_null(data_set.parent_id), BindValue(data_set.expansion_code) })
 					 .empty())
 		return DataSetOutcome::DuplicateExpansion;
 	const bool base = data_set.kind == DataSetKind::Base;
@@ -200,13 +187,13 @@ DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int
 			"updater_login, command_file, retail, key, visibility, created_by) "
 			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;",
 			{ BindValue(data_set.display_name), BindValue(data_set_kind_name(data_set.kind)),
-					base ? BindValue(std::monostate{}) : optional_id(data_set.parent_id),
+					base ? BindValue(std::monostate{}) : db::int_or_null(data_set.parent_id),
 					BindValue(base ? std::string() : data_set.expansion_code),
 					BindValue(base ? data_set.title : std::string()),
 					BindValue(base ? data_set.game : std::string()),
 					BindValue(data_set.updater_login), BindValue(data_set.command_file),
-					BindValue(db::Bool{ data_set.retail }), optional_text(data_set.key),
-					optional_text(data_set.visibility), BindValue(data_set.created_by) });
+					BindValue(db::Bool{ data_set.retail }), db::text_or_null(data_set.key),
+					db::text_or_null(data_set.visibility), BindValue(data_set.created_by) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return DataSetOutcome::Ok;
@@ -247,8 +234,8 @@ DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch 
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(row.display_name), BindValue(row.game),
 					BindValue(row.updater_login), BindValue(row.command_file),
-					BindValue(db::Bool{ row.retail }), optional_text(row.key),
-					optional_text(row.visibility) });
+					BindValue(db::Bool{ row.retail }), db::text_or_null(row.key),
+					db::text_or_null(row.visibility) });
 	tx.commit();
 	return DataSetOutcome::Ok;
 }
@@ -351,7 +338,7 @@ int64_t create_tree(db::Database &db, int64_t data_set_id, std::optional<int64_t
 	const auto rows = db.query(
 			"INSERT INTO data_set_trees (data_set_id, state, release_id, created_by) "
 			"VALUES ($1, 'building', $2, $3) RETURNING id;",
-			{ BindValue(data_set_id), optional_id(release_id), BindValue(created_by) });
+			{ BindValue(data_set_id), db::int_or_null(release_id), BindValue(created_by) });
 	return rows.front().as_int(0).value_or(0);
 }
 
@@ -427,7 +414,7 @@ int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 	const auto rows = db.query(
 			"INSERT INTO releases (name, bytes, created_by, data_set_id) VALUES ($1, $2, $3, $4) "
 			"RETURNING id;",
-			{ BindValue(name), BindValue(bytes), BindValue(created_by), optional_id(data_set_id) });
+			{ BindValue(name), BindValue(bytes), BindValue(created_by), db::int_or_null(data_set_id) });
 	return rows.front().as_int(0).value_or(0);
 }
 

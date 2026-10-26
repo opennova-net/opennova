@@ -13,11 +13,6 @@ namespace opennova::hostdb {
 
 namespace {
 
-opennova::db::BindValue opt_int(std::optional<int64_t> v) {
-	if (!v) return opennova::db::BindValue(std::monostate{});
-	return opennova::db::BindValue(*v);
-}
-
 opennova::db::BindValue str(const std::string &s) {
 	return opennova::db::BindValue(s);
 }
@@ -115,7 +110,7 @@ std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
 		str(h.time_left), str(h.time_of_day), str(h.msg), str(h.mod), str(h.age),
 		str(h.pb_server), str(h.level_range), str(h.bb_mode),
 		str(h.skins), str(h.tracers), str(h.pix),
-		opt_int(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
+		db::int_or_null(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
 		h.lobby_id == 0 ? opennova::db::BindValue(std::monostate{}) : i64(h.lobby_id),
 	};
 }

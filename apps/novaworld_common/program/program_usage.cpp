@@ -22,14 +22,6 @@ namespace {
 
 using db::BindValue;
 
-BindValue double_or_null(const std::optional<double> &value) {
-	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
-BindValue int_or_null(const std::optional<int64_t> &value) {
-	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
 // `text` as a task id: its letters, digits, '.', '_' and '-', at most 64 of
 // them.
 std::string id_chars(std::string_view text) {
@@ -126,9 +118,9 @@ void insert_usage_sample(db::Database &db, const UsageSample &s) {
 			"VALUES ($1, $2, to_timestamp($3::double precision), $4, $5, $6, $7, $8, $9) "
 			"ON CONFLICT (program, task_id, at) DO NOTHING;",
 			{ BindValue(s.program), BindValue(s.task_id), BindValue(s.at),
-					double_or_null(s.cpu_percent), double_or_null(s.cpu_limit),
-					int_or_null(s.memory_used_bytes), int_or_null(s.memory_limit_bytes),
-					int_or_null(s.net_in_bytes), int_or_null(s.net_out_bytes) });
+					db::double_or_null(s.cpu_percent), db::double_or_null(s.cpu_limit),
+					db::int_or_null(s.memory_used_bytes), db::int_or_null(s.memory_limit_bytes),
+					db::int_or_null(s.net_in_bytes), db::int_or_null(s.net_out_bytes) });
 }
 
 void rollup_usage_hours(db::Database &db, int64_t now) {

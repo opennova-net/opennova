@@ -15,11 +15,6 @@ namespace {
 
 using db::BindValue;
 
-BindValue optional_int(std::optional<int64_t> value) {
-	if (!value) return BindValue(std::monostate{});
-	return BindValue(*value);
-}
-
 constexpr const char *kCustomerColumns =
 		"user_id, stripe_customer_id, livemode, open_checkout_session, created_at, synced_at";
 
@@ -162,11 +157,11 @@ void upsert_subscription(db::Database &db, const SubscriptionRow &row) {
 			"status_since = CASE WHEN billing_subscriptions.status = excluded.status "
 			"THEN billing_subscriptions.status_since ELSE now() END, "
 			"updated_at = now();",
-			{ BindValue(row.stripe_subscription_id), BindValue(row.stripe_customer_id), optional_int(row.user_id),
+			{ BindValue(row.stripe_subscription_id), BindValue(row.stripe_customer_id), db::int_or_null(row.user_id),
 					BindValue(db::Bool{ row.livemode }), BindValue(row.status),
 					BindValue(std::string(item_kind_name(row.item))), BindValue(row.price_id),
 					BindValue(static_cast<int64_t>(row.tier)), BindValue(row.quantity),
-					optional_int(row.current_period_end), BindValue(db::Bool{ row.cancel_at_period_end }) });
+					db::int_or_null(row.current_period_end), BindValue(db::Bool{ row.cancel_at_period_end }) });
 }
 
 std::vector<SubscriptionRow> subscriptions_of(db::Database &db, int64_t user_id) {
@@ -223,7 +218,7 @@ bool record_event(db::Database &db, const std::string &event_id, const std::stri
 			"CASE WHEN $4::text = '' THEN now() END, CASE WHEN $4::text = '' THEN 'ignored' ELSE '' END) "
 			"ON CONFLICT (event_id) DO NOTHING;",
 			{ BindValue(event_id), BindValue(type), BindValue(db::Bool{ livemode }), BindValue(customer_id),
-					optional_int(stripe_created) });
+					db::int_or_null(stripe_created) });
 	return db.changes() > 0;
 }
 

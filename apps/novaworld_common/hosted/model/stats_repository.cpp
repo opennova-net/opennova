@@ -26,18 +26,6 @@ std::string counter_delta(const char *cur, const char *prev) {
 			" >= " + prev + " THEN " + cur + " - " + prev + " ELSE " + cur + " END";
 }
 
-BindValue text_or_null(const std::string &text) {
-	return text.empty() ? BindValue(std::monostate{}) : BindValue(text);
-}
-
-BindValue int_or_null(const std::optional<int64_t> &value) {
-	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
-BindValue double_or_null(const std::optional<double> &value) {
-	return value ? BindValue(*value) : BindValue(std::monostate{});
-}
-
 std::optional<double> double_at(const db::Row &row, size_t i) {
 	if (i >= row.values.size()) return std::nullopt;
 	if (const auto *d = std::get_if<double>(&row.values[i])) return *d;
@@ -109,12 +97,12 @@ void insert_sample(db::Database &db, const ServerSample &s) {
 						"VALUES ($1, to_timestamp($2::double precision), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, "
 						"$13, $14, $15, $16, $17, $18) "
 						"ON CONFLICT (server_id, at) DO NOTHING;"),
-			{ BindValue(s.server_id), BindValue(s.at), BindValue(s.state), int_or_null(s.players),
-					int_or_null(s.max_players), text_or_null(s.mission), text_or_null(s.scene),
-					BindValue(db::Bool{ s.link_up }), double_or_null(s.cpu_percent), int_or_null(s.memory_bytes),
+			{ BindValue(s.server_id), BindValue(s.at), BindValue(s.state), db::int_or_null(s.players),
+					db::int_or_null(s.max_players), db::text_or_null(s.mission), db::text_or_null(s.scene),
+					BindValue(db::Bool{ s.link_up }), db::double_or_null(s.cpu_percent), db::int_or_null(s.memory_bytes),
 					BindValue(s.egress_bytes < 0 ? 0 : s.egress_bytes), BindValue(db::Bool{ s.mission_started }),
-					int_or_null(s.net_in_bytes), int_or_null(s.net_out_bytes), double_or_null(s.tick_p50_ms),
-					double_or_null(s.tick_p99_ms), double_or_null(s.tick_max_ms), int_or_null(s.late_ticks) });
+					db::int_or_null(s.net_in_bytes), db::int_or_null(s.net_out_bytes), db::double_or_null(s.tick_p50_ms),
+					db::double_or_null(s.tick_p99_ms), db::double_or_null(s.tick_max_ms), db::int_or_null(s.late_ticks) });
 }
 
 void add_machine_egress(db::Database &db, int64_t machine_id, int64_t at, int64_t bytes) {

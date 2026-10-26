@@ -11,10 +11,6 @@ namespace {
 
 using db::BindValue;
 
-BindValue text_or_null(const std::string &text) {
-	return text.empty() ? BindValue(std::monostate{}) : BindValue(text);
-}
-
 BindValue seconds(int64_t ms) {
 	return BindValue(static_cast<double>(std::max<int64_t>(ms, 0)) / 1000.0);
 }
@@ -119,8 +115,8 @@ int64_t enqueue(db::Database &db, const NewJob &job) {
 					 "VALUES ($1, $2::jsonb, $3, $4, $5, now() + make_interval(secs => $6), $7) "
 					 "ON CONFLICT DO NOTHING RETURNING id;",
 					{ BindValue(job.kind), BindValue(io::json_write(job.payload)),
-							text_or_null(job.secret), text_or_null(job.dedupe_key),
-							text_or_null(job.schedule_key), seconds(job.delay_ms),
+							db::text_or_null(job.secret), db::text_or_null(job.dedupe_key),
+							db::text_or_null(job.schedule_key), seconds(job.delay_ms),
 							BindValue(static_cast<int64_t>(std::max(job.max_attempts, 1))) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }

@@ -16,12 +16,6 @@ constexpr std::array<const char *, 2> kVisibilityNames = { "public", "private" }
 constexpr const char *kRevisionColumns = "data_set_id, number, author_id, created_by, message, "
 										 "manifest_sha256, file_count, bytes, created_at";
 
-BindValue optional_id(std::optional<int64_t> id) {
-	if (!id)
-		return BindValue(std::monostate{});
-	return BindValue(*id);
-}
-
 ContentRevision row_to_revision(const db::Row &r) {
 	ContentRevision v;
 	v.data_set_id = r.as_int(0).value_or(0);
@@ -173,7 +167,7 @@ CommitOutcome commit_revision(db::Database &db, int64_t data_set_id, int64_t par
 	head = moved.front().as_int(0).value_or(0);
 	db.exec("INSERT INTO content_revisions (data_set_id, number, author_id, created_by, message, "
 			"manifest_sha256, file_count, bytes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);",
-			{ BindValue(data_set_id), BindValue(head), optional_id(revision.author_id),
+			{ BindValue(data_set_id), BindValue(head), db::int_or_null(revision.author_id),
 					BindValue(revision.created_by), BindValue(revision.message),
 					BindValue(revision.manifest_sha256), BindValue(revision.file_count),
 					BindValue(revision.bytes) });

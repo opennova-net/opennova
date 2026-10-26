@@ -119,6 +119,18 @@ struct Row {
 // on its argument), the statement casts: `$1::text`.
 using BindValue = std::variant<std::monostate, int64_t, double, std::string, std::vector<uint8_t>, Bool>;
 
+// A bind of `value`, NULL with none (an optional column's).
+inline BindValue int_or_null(const std::optional<int64_t> &value) {
+	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+inline BindValue double_or_null(const std::optional<double> &value) {
+	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+// A bind of `text`, NULL when it is empty.
+inline BindValue text_or_null(const std::string &text) {
+	return text.empty() ? BindValue(std::monostate{}) : BindValue(text);
+}
+
 // How to reach the database. `url` is a libpq connection URI
 // (postgresql://user@host:port/dbname?sslmode=verify-full&sslrootcert=...),
 // `password` the role's password when the URI names none (kept apart: it is a

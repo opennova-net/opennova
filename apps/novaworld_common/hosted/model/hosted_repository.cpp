@@ -35,11 +35,6 @@ constexpr const char *kOutdatedSql =
 		"OR EXISTS (SELECT 1 FROM data_sets e WHERE e.id = s.expansion_id "
 		"        AND e.current_tree_id IS NOT NULL AND e.current_tree_id IS DISTINCT FROM s.expansion_tree_id)";
 
-BindValue optional_id(std::optional<int64_t> id) {
-	if (!id) return BindValue(std::monostate{});
-	return BindValue(*id);
-}
-
 HostedServer row_to_server(const db::Row &r) {
 	HostedServer s;
 	s.id = r.as_int(0).value_or(0);
@@ -206,9 +201,9 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 					BindValue(static_cast<int64_t>(settings.max_score)),
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
-					BindValue(db::Bool{ settings.team_ff }), optional_id(settings.expansion_id),
+					BindValue(db::Bool{ settings.team_ff }), db::int_or_null(settings.expansion_id),
 					BindValue(join_missions(settings.missions)), BindValue(db::Bool{ own_machine }),
-					optional_id(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
+					db::int_or_null(address_id), BindValue(db::Bool{ settings.list_on_novalogic }) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
@@ -529,7 +524,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id) {
 	db.exec("UPDATE hosted_servers SET service_user_id = $1, updated_at = now() "
 			"WHERE id = $2;",
-			{ optional_id(user_id), BindValue(id) });
+			{ db::int_or_null(user_id), BindValue(id) });
 }
 
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
@@ -640,7 +635,7 @@ void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 		std::optional<int64_t> expansion_tree_id) {
 	db.exec("UPDATE hosted_servers SET base_tree_id = $2, expansion_tree_id = $3, "
 			"update_requested = false, updated_at = now() WHERE id = $1;",
-			{ BindValue(server_id), BindValue(base_tree_id), optional_id(expansion_tree_id) });
+			{ BindValue(server_id), BindValue(base_tree_id), db::int_or_null(expansion_tree_id) });
 }
 
 UpdateOutcome request_update(db::Database &db, int64_t server_id) {
