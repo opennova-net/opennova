@@ -141,12 +141,13 @@ int frame_widget_caret(const MenuFrameState &state, int index) {
 
 namespace {
 
-// The field an edit's input works on: its text as the frame holds it, its caret (at the end when
-// none is held), within the text.
+// The field an edit's input works on: its text as the frame holds it, its caret (a byte index, 0
+// when none is held, as the edit's construction leaves it; MenuRuntime::set_focus_ carries the
+// witness, D-MNU-59), within the text.
 EditField edit_field(const MenuFrameCompiler &compiler, const MenuWidgetState &row, int index) {
 	EditField field;
 	field.text = row.has_text ? row.text : compiler.widget_authored_text(index);
-	field.caret = row.caret >= 0 ? row.caret : static_cast<int>(field.text.size());
+	field.caret = row.caret >= 0 ? row.caret : 0;
 	field.caret = std::min(field.caret, static_cast<int>(field.text.size()));
 	return field;
 }

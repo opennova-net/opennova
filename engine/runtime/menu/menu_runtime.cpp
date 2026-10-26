@@ -1938,12 +1938,16 @@ void MenuRuntime::set_focus_(int id) {
 	const int index = frame_index(id);
 	if (index >= 0) {
 		frame_->set_widget_focused(index, true);
-		// An edit's caret rides characters (code points), not bytes. Retail's
-		// starts at 0 and only its keys, its typing, a clear and the sets'
-		// clamps move it; this end-of-text seed is D-MNU-59 [orig:
-		// CEditWnd_Construct @ 0x661422].
+		// An edit's caret is a byte index into its text that starts at 0: only its
+		// keys, its typing, a clear and the sets' clamps move it, so a frame that
+		// holds none takes 0 here and a focused edit holding text takes a typed
+		// character at its start (D-MNU-59) [orig: CEditWnd_Construct - the
+		// +0x2FC store @ 0x661422; its writers CEditWnd_HandleKeyEvent @ 0x6623a0,
+		// CEditWnd_InsertChar @ 0x661ee0, CEditWnd_InsertText @ 0x6620c0,
+		// CEditWnd_ClearText @ 0x6618e8, CEditWnd_SetText @ 0x661933,
+		// CEditWnd_SetIntValueAndUpdateScroll @ 0x6619b9].
 		if (widget_kind_of(id) == kKindEdit && frame_->get_widget_caret(index) < 0)
-			frame_->set_widget_caret(index, static_cast<int>(strutil::utf8_length(get_widget_text(id))));
+			frame_->set_widget_caret(index, 0);
 	}
 }
 

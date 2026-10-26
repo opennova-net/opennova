@@ -199,6 +199,26 @@ void test_edit_sets_clamp_the_caret_and_reset_the_first_line() {
 	CHECK(run.row("DESC")->scroll_row == 0);
 }
 
+// A focused edit's caret starts at 0, a byte index (D-MNU-59): the edit's construction zeroes it and
+// only its keys, its typing, a clear and the sets' clamps move it, so a focused edit holding text
+// takes a typed character at its start, and End puts the caret past the text's last byte, a
+// two-byte character counted twice [orig: CEditWnd_Construct @ 0x661422; CEditWnd_InsertChar
+// @ 0x661ee0; CEditWnd_HandleKeyEvent @ 0x6623a0].
+void test_a_focused_edit_types_at_its_start() {
+	Run run;
+	CHECK(run.open(kEdits, "edits.mnu"));
+	const int name = run.rt.widget_id("NAME");
+	run.rt.set_widget_text(name, "h\xC3\xA9");
+	run.click(150, 120);
+	CHECK(run.rt.focused_widget() == name && run.row("NAME") && run.row("NAME")->caret == 0);
+	run.rt.handle_key(vk('X', 'X'));
+	CHECK(run.rt.get_widget_text(name) == "Xh\xC3\xA9" && run.row("NAME")->caret == 1);
+	run.rt.handle_key(vk(35)); // End
+	CHECK(run.row("NAME")->caret == 4);
+	run.rt.handle_key(vk('Y', 'Y'));
+	CHECK(run.rt.get_widget_text(name) == "Xh\xC3\xA9Y" && run.row("NAME")->caret == 5);
+}
+
 void test_frame_state_writes() {
 	MenuFrameState state;
 	frame_set_scroll_range(state, 3, 10, 5, 2, 7);
@@ -333,6 +353,7 @@ int main() {
 	test_runtime_over_the_state_frame();
 	test_frame_state_writes();
 	test_edit_sets_clamp_the_caret_and_reset_the_first_line();
+	test_a_focused_edit_types_at_its_start();
 	test_commands();
 	test_options_policy();
 	if (failures) {

@@ -1196,8 +1196,8 @@ void test_mouse() {
 	CHECK(rt.selected_row(9) == 1);
 	frame.spin_arrow = 0;
 
-	// Edit focus: a press focuses (read-only refuses); focus parks the caret after
-	// the text (characters, not bytes).
+	// Edit focus: a press focuses (read-only refuses); a frame holding no caret takes
+	// 0, a byte index, whatever the text (D-MNU-59).
 	frame.claim = 9;
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
@@ -1207,7 +1207,7 @@ void test_mouse() {
 	frame.claim = 8;
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
-	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 2"));
+	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 0"));
 	// A moved widget keeps its rect across a screen round trip [orig: CWnd_SetRect
 	// @0x646560], and the typed text survives it (the focus drops into the store).
 	frame.log.clear();
