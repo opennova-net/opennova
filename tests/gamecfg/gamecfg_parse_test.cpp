@@ -348,26 +348,36 @@ int resolution_dimensions() {
 	return 0;
 }
 
-// The block's display mode (+0x60 / +0x64): the defaults' desktop size, replaced by a video_res
-// that parses; one that does not leaves the desktop's (NWHWI's fourth field, D-NET-NEW-L9-54).
+// The block's display mode (+0x60 / +0x64): the defaults' desktop size, replaced by each video_res
+// line that parses; one that does not leaves the mode as it was (NWHWI's fourth field,
+// D-NET-NEW-L9-54).
 // [orig: Config_SetDefaults @0x54D030 - @0x54D0F6 / @0x54D10A; Config_ParseSettingsLine
 //  @0x54F740 - String_ParseResolutionDimensions called @0x551303]
 int display_mode() {
-	GameCfg cfg = defaults();
 	int32_t w = -1;
 	int32_t h = -1;
-	cfg.video_res = "1280x1024";
-	display_size(cfg, 1920, 1080, w, h);
+	display_size(load_text(with_version("video_res = 1280x1024\r\n")).cfg, 1920, 1080, w, h);
 	TEST_EXPECT(w == 1280 && h == 1024);
-	cfg.video_res = " 800 X 600";
-	display_size(cfg, 1920, 1080, w, h);
+	display_size(load_text(with_version("video_res = \" 800 X 600\"\r\n")).cfg, 1920, 1080, w, h);
 	TEST_EXPECT(w == 800 && h == 600);
-	cfg.video_res = "";
-	display_size(cfg, 1920, 1080, w, h);
+	// Unquoted, the line's tokenizer ends the value at its first space: "800", no mode.
+	display_size(load_text(with_version("video_res = 800 X 600\r\n")).cfg, 1920, 1080, w, h);
 	TEST_EXPECT(w == 1920 && h == 1080);
-	cfg.video_res = "1024x0";
-	display_size(cfg, 1707, 960, w, h);
+	display_size(load_text(with_version("video_res = \r\n")).cfg, 1920, 1080, w, h);
+	TEST_EXPECT(w == 1920 && h == 1080);
+	display_size(load_text(with_version("video_res = 1024x0\r\n")).cfg, 1707, 960, w, h);
 	TEST_EXPECT(w == 1707 && h == 960);
+	display_size(defaults(), 1707, 960, w, h);
+	TEST_EXPECT(w == 1707 && h == 960);
+	// Each line is parsed as it is read: one that does not parse keeps the mode the line before
+	// it set, though the text kept is its own [orig: the strncpy and the parse of each line
+	// @0x5512E4..0x551303].
+	const GameCfg kept = load_text(with_version("video_res = 1280x1024\r\nvideo_res = junk\r\n")).cfg;
+	display_size(kept, 1920, 1080, w, h);
+	TEST_EXPECT(w == 1280 && h == 1024 && kept.video_res == "junk");
+	// The parse reads the 16-byte copy: a width cut there is the copy's.
+	display_size(load_text(with_version("video_res = 0000000000000640x480\r\n")).cfg, 1920, 1080, w, h);
+	TEST_EXPECT(w == 1920 && h == 1080);
 	return 0;
 }
 

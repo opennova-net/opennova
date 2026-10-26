@@ -11,11 +11,12 @@
 namespace opennova::inmatch {
 
 void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t desktop_height) {
-	// The display mode takes the sample, video_res its "%ux%u" (32 bytes, Format's maxLen): the
-	// mode the block holds is display_size's, video_res first, so it is the sample from here on.
+	// The display mode takes the sample, video_res its "%ux%u" (32 bytes, Format's maxLen).
 	// [orig: Game_RunVideoTestDialog @0x53EC10 - displayWidth_060 @0x53ED42, displayHeight_064
 	//  @0x53ED48, Format_ResolutionString called @0x53ED9B into displayResolution_068 (video_res),
 	//  ahead of Game_SaveConfig called @0x53EDB6]
+	cfg.display_width = desktop_width;
+	cfg.display_height = desktop_height;
 	cfg.video_res = gamecfg::format_resolution_string(desktop_width, desktop_height, 32);
 	cfg.display_16x9 = renderer::fresh_profile_aspect_mode(desktop_width, desktop_height);
 	cfg.object_polydetail = renderer::kObjectLodDetailFreshProfile;

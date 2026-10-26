@@ -114,6 +114,11 @@ struct GameCfg {
 	// exactly 1 (640x480 0x1 .. 2048x1536 0x2000, the 'h' arm @0x54FFB5..
 	// 0x5502BC; game_cfg.cpp's table); never written
 	uint32_t display_device_flags = 0;
+	// +0x060 / +0x064, the display mode: the last video_res line that parsed, each line parsed
+	// as it is read, or the first launch's video test; 0 x 0 when neither set it (the defaults'
+	// desktop size, display_size). Derived state the file never carries.
+	int32_t display_width = 0;
+	int32_t display_height = 0;
 	std::string video_res;         // +0x068, strncpy 16
 	float gamma = 0.0f;            // +0x09C (the writer prints its applied copy flt_B4C298)
 	int32_t terrain_polydetail = 0;   // +0x10C graphicsQuality +0x00
@@ -459,7 +464,9 @@ bool parse_resolution_dimensions(const std::string &text, int32_t &width, int32_
 std::string format_resolution_string(int32_t width, int32_t height, int max_len);
 
 // The display mode's width and height as the block holds them (+0x60 / +0x64): the defaults'
-// primary desktop size, replaced by a video_res that parses. The boot then opens the renderer at
+// primary desktop size, replaced by each video_res line that parses as the file is read (one
+// that does not leaves the mode the line before it set: GameCfg::display_width / display_height)
+// and by the first launch's video test. The boot then opens the renderer at
 // that mode and writes back the mode it set, the same one when the device opens (no fallback in a
 // port with no Direct3D device).
 // [orig: Config_SetDefaults @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into
