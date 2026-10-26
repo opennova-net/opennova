@@ -229,8 +229,9 @@
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. Its first launch downloads OpenNova's own game, OP: Acid Gambit;
-          playing Joint Operations needs your own purchased copy. Each release on GitHub carries these files:
+          Windows x64. Pre-1.0 and experimental. There is a zip for each game, and its first launch downloads that
+          game: OP: Acid Gambit, Joint Operations or Delta Force Xtreme 2. Playing Joint Operations needs your own
+          purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <li v-for="item in downloads" :key="item.file" class="card p-5">
@@ -275,6 +276,16 @@ const downloads = [
     name: 'OpenNova',
     body: 'The game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
     file: 'opennova-game-windows',
+  },
+  {
+    name: 'OpenNova for Joint Operations',
+    body: 'The same game, set up for Joint Operations: unzip it into an empty folder and its first launch downloads Joint Operations and its Escalation expansion.',
+    file: 'jointops-game-windows',
+  },
+  {
+    name: 'OpenNova for Delta Force Xtreme 2',
+    body: 'The same game, set up for Delta Force Xtreme 2: unzip it into an empty folder and its first launch downloads Delta Force Xtreme 2.',
+    file: 'dfx2-game-windows',
   },
   {
     name: 'OpenNova Editor',

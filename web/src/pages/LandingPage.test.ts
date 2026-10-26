@@ -132,6 +132,8 @@ describe('LandingPage', () => {
     const text = wrapper.text();
     for (const file of [
       'opennova-game-windows',
+      'jointops-game-windows',
+      'dfx2-game-windows',
       'opennova-editor-windows',
       'opennova-switcher-windows',
       'opennova-blender-addon-windows',

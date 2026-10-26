@@ -11,6 +11,7 @@
 #include <formats/update/sfs.h>
 #include <net/update/update_wire.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <system_error>
@@ -31,6 +32,23 @@ bool is_sha256_hex(std::string_view text) {
 		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
 			return false;
 	return true;
+}
+
+// The entry's bytes of the open package `in` written to the new file `to`, a piece at a time.
+bool copy_span(std::FILE *in, const update::SfsEntrySpan &entry, const std::string &to,
+		std::vector<uint8_t> &buffer, std::string &why) {
+	std::FILE *out = io::fopen_utf8(to.c_str(), "wb");
+	bool ok = out != nullptr && io::fseek64(in, static_cast<int64_t>(entry.offset), SEEK_SET) == 0;
+	for (uint64_t left = entry.size; ok && left > 0;) {
+		const size_t n = static_cast<size_t>(std::min<uint64_t>(left, buffer.size()));
+		ok = std::fread(buffer.data(), 1, n, in) == n && std::fwrite(buffer.data(), 1, n, out) == n;
+		left -= n;
+	}
+	if (out != nullptr && std::fclose(out) != 0)
+		ok = false;
+	if (!ok)
+		why = "cannot copy " + entry.name + " out of the package into " + to;
+	return ok;
 }
 
 // The cached files of one unpacked section, by upper-cased name.
@@ -173,30 +191,38 @@ bool ReleaseCatalog::current_section(
 			io::write_file_atomic(path, bytes.data(), bytes.size(), why);
 }
 
-bool ReleaseCatalog::section_keys(const std::string &sha256, std::vector<SectionKey> &keys,
-		std::vector<uint8_t> &bytes, bool &read, std::string &why) {
-	read = false;
+bool ReleaseCatalog::section_keys(
+		const std::string &sha256, std::vector<SectionKey> &keys, std::string &why) {
 	const auto memo = sections_.find(sha256);
 	if (memo != sections_.end()) {
 		keys = memo->second;
 		return true;
 	}
-	const std::string package_path = io::utf8_join(cache_dir_, sha256 + ".sfs");
-	if (!io::read_file_bytes(package_path, bytes, why))
+	update::SfsLayout layout;
+	if (!locate_package(sha256, layout, why))
 		return false;
-	update::SfsPackage package;
-	if (!update::sfs_read(bytes.data(), bytes.size(), package, why)) {
-		why = "the package does not read: " + why;
+	keys.clear();
+	for (size_t i = 0; i < layout.sections.size(); ++i)
+		for (const update::SfsEntrySpan &entry : layout.sections[i].entries)
+			if (strutil::ends_with_icase(entry.name, ".CMD"))
+				keys.push_back({ layout.sections[i].expansion, strutil::to_upper(entry.name), i });
+	sections_[sha256] = keys;
+	return true;
+}
+
+bool ReleaseCatalog::locate_package(
+		const std::string &sha256, update::SfsLayout &layout, std::string &why) const {
+	const std::string package_path = io::utf8_join(cache_dir_, sha256 + ".sfs");
+	std::FILE *file = io::fopen_utf8(package_path.c_str(), "rb");
+	if (file == nullptr) {
+		why = "cannot open " + package_path;
 		return false;
 	}
-	keys.clear();
-	for (size_t i = 0; i < package.sections.size(); ++i)
-		for (const update::SfsEntry &entry : package.sections[i].entries)
-			if (strutil::ends_with_icase(entry.name, ".CMD"))
-				keys.push_back({ package.sections[i].expansion, strutil::to_upper(entry.name), i });
-	sections_[sha256] = keys;
-	read = true;
-	return true;
+	const bool located = update::sfs_locate(file, layout, why);
+	std::fclose(file);
+	if (!located)
+		why = "the package does not read: " + why;
+	return located;
 }
 
 bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSection &section,
@@ -218,9 +244,7 @@ bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSec
 				hosted::release_package_key(section.sha256).c_str(), section.updater_login.c_str());
 	}
 	std::vector<SectionKey> keys;
-	std::vector<uint8_t> bytes;
-	bool read = false;
-	if (!section_keys(section.sha256, keys, bytes, read, why))
+	if (!section_keys(section.sha256, keys, why))
 		return false;
 	const SectionKey *key = nullptr;
 	for (const SectionKey &k : keys)
@@ -235,37 +259,50 @@ bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSec
 	const std::string dir =
 			io::utf8_join(io::utf8_join(cache_dir_, section.sha256), std::to_string(key->index));
 	if (!fs::is_directory(io::os_path(dir), ec)) {
-		// The memo answered without the bytes: the package is read for its entries.
-		if (!read && !io::read_file_bytes(package_path, bytes, why))
+		// Each entry copied from the package to its own file, a piece at a time: a whole game's
+		// package is never held in memory.
+		update::SfsLayout layout;
+		if (!locate_package(section.sha256, layout, why))
 			return false;
-		update::SfsPackage package;
-		if (!update::sfs_read(bytes.data(), bytes.size(), package, why) ||
-				key->index >= package.sections.size()) {
-			why = "the package does not read: " + why;
+		if (key->index >= layout.sections.size()) {
+			why = "the package does not read: it has no section " + std::to_string(key->index);
 			return false;
 		}
 		const std::string partial = dir + kPartialSuffix;
 		fs::remove_all(io::os_path(partial), ec);
 		if (!io::ensure_directory(partial, why))
 			return false;
-		for (const update::SfsEntry &entry : package.sections[key->index].entries) {
+		const std::vector<update::SfsEntrySpan> &entries = layout.sections[key->index].entries;
+		std::FILE *in = io::fopen_utf8(package_path.c_str(), "rb");
+		if (in == nullptr) {
+			why = "cannot open " + package_path;
+			return false;
+		}
+		std::vector<uint8_t> buffer(1024 * 1024);
+		bool copied = true;
+		for (const update::SfsEntrySpan &entry : entries) {
 			if (entry.name.empty() || entry.name.find_first_of("\\/") != std::string::npos ||
 					entry.name == "." || entry.name == "..") {
 				why = "the package carries an entry name no file takes";
-				return false;
+				copied = false;
+				break;
 			}
-			if (!io::write_file_atomic(io::utf8_join(partial, strutil::to_upper(entry.name)),
-						entry.data.data(), entry.data.size(), why))
-				return false;
+			if (!copy_span(in, entry, io::utf8_join(partial, strutil::to_upper(entry.name)), buffer,
+						why)) {
+				copied = false;
+				break;
+			}
 		}
+		std::fclose(in);
+		if (!copied)
+			return false;
 		fs::rename(io::os_path(partial), io::os_path(dir), ec);
 		if (ec) {
 			why = "cannot put the section in place: " + ec.message();
 			return false;
 		}
 		std::printf("[update] unpacked section %zu of %.12s for %s (%zu file(s))\n", key->index,
-				section.sha256.c_str(), section.updater_login.c_str(),
-				package.sections[key->index].entries.size());
+				section.sha256.c_str(), section.updater_login.c_str(), entries.size());
 	}
 	product.login = section.updater_login;
 	product.command_file = section.command_file;

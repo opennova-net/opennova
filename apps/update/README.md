@@ -20,9 +20,16 @@ test server; `--no-runtime` checks/applies only the selected content products.
 The runtime product defaults to `ONRUNTIME` / `ONRUNTIME.CMD`, configured by
 `OPENNOVA.WIZ`. OpenNova content is `ACIDGAMBIT` / `ACIDGAMBIT.CMD`. JO/DFX2 content
 uses the existing `UPDATE.WIZ`, including its territory substitution. OpenNova's
-runtime config never replaces the retail wizard or its `version.txt`. A native
-expansion's `expansion/<name>/UPDATE.WIZ` registers it for first installation;
-retail expansion updates additionally require the installed `<name>.pff`.
+runtime config never replaces the retail wizard or its `version.txt`. Every
+`expansion/<name>/UPDATE.WIZ` registers that expansion, as retail's updater does, its
+archive installed or not: the Joint Operations zip ships Escalation's wizard alone, and
+the first run installs Escalation's whole release beside Joint Operations'.
+
+The Joint Operations and DFX2 zips (`jointops-game-windows`, `dfx2-game-windows`) are the
+runtime with the `UPDATE.WIZ` naming that game's product. Unzipped into an empty folder,
+the game's first launch runs `/game jo` (or `dfx2`) there: the product is the retail one
+the wizard names, every row is prechecked, and in an empty folder every row is missing,
+so a whole release installs the whole game.
 
 Every product updates through the gateways the runtime's `OPENNOVA.WIZ` names (its
 `URL`, `URL2` and `URL3`); a product's own wizard URLs are never dialed. The game zip

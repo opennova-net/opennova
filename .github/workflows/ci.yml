@@ -903,13 +903,16 @@ jobs:
             exit 1
           fi
 
-  # The game archive and the editor archive (the editor plus the runtime it
-  # plays a project with).
+  # The game archives (one per game: OpenNova's own, Joint Operations and
+  # DFX2, the same runtime with its game's wizards) and the editor archive (the
+  # editor plus the runtime it plays a project with).
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
+      jointops_artifact_url: ${{ steps.upload_jointops.outputs.artifact-url }}
+      dfx2_artifact_url: ${{ steps.upload_dfx2.outputs.artifact-url }}
       editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -992,6 +995,22 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: Upload Joint Operations Windows game zip
+        id: upload_jointops
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/jointops-game-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload DFX2 Windows game zip
+        id: upload_dfx2
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/dfx2-game-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
       - name: Upload OpenNova Windows editor zip
         id: upload_editor
         uses: actions/upload-artifact@v7
@@ -1048,6 +1067,8 @@ jobs:
         uses: actions/github-script@v7
         env:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
+          JOINTOPS_URL: ${{ needs.package-godot-windows.outputs.jointops_artifact_url }}
+          DFX2_URL: ${{ needs.package-godot-windows.outputs.dfx2_artifact_url }}
           EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
           APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
@@ -1069,7 +1090,9 @@ jobs:
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Runtime: opennova.exe, update.exe and revupdat.exe; the first launch downloads OpenNova's game, and in a Joint Operations or Delta Force Xtreme 2 folder it plays that install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Game: opennova.exe, update.exe and revupdat.exe; the first launch downloads OpenNova's game, OP: Acid Gambit, and in a Joint Operations or Delta Force Xtreme 2 folder it plays that install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Joint Operations: the same runtime; unzipped into an empty folder, the first launch downloads Joint Operations and Escalation | [jointops-game-windows.zip](${process.env.JOINTOPS_URL}) |`,
+              `| Delta Force Xtreme 2: the same runtime; unzipped into an empty folder, the first launch downloads Delta Force Xtreme 2 | [dfx2-game-windows.zip](${process.env.DFX2_URL}) |`,
               `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
