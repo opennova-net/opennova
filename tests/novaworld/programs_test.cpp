@@ -562,7 +562,7 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 	TEST_EXPECT(has(log, boot_line("data")));
 	TEST_EXPECT(has(log, "[boot] data sets: jobs over the local store"));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
-			has(log, "for release.apply, release.build, release.validate, tree.prune"));
+			has(log, "for game.purge, release.apply, release.build, release.validate, tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]") && !has(log, "jobs.prune"));
 	if (livez_ok(process, log_path) != 0)
