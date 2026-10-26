@@ -1,15 +1,15 @@
 <template>
   <section class="page py-10 sm:py-14" aria-labelledby="downloads-title">
     <header class="max-w-3xl">
-      <p class="eyebrow">Windows x64 / Pre-1.0</p>
+      <p class="eyebrow">Windows x64 · Pre-1.0</p>
       <h1 id="downloads-title" class="mt-3 text-4xl font-semibold tracking-tight text-ink-bright">Download OpenNova</h1>
       <p class="mt-4 leading-relaxed text-ink-muted">
-        Games, the editor and tools. Pre-1.0 and experimental. Unzip a game build into an empty folder and run
-        <code>opennova.exe</code>. Its first launch downloads that game's content. Playing Joint Operations needs
-        your own purchased copy.
+        The games, the editor and the tools, all pre-1.0 and experimental. Unzip a game build into an empty folder
+        and run <code>opennova.exe</code>; its first launch downloads the game. Joint Operations needs your own
+        purchased copy.
       </p>
       <p class="mt-4 text-sm text-ink-muted">
-        Not sure where to start? <RouterLink to="/play" class="link">Find the right setup for your game</RouterLink>.
+        Not sure which one? <RouterLink to="/play" class="link">See how to set up each game</RouterLink>.
       </p>
     </header>
 
@@ -44,7 +44,7 @@
       </li>
     </ul>
 
-    <h2 id="tools" class="mt-12 scroll-mt-24 text-xl font-semibold text-ink-bright">Tools &amp; server software</h2>
+    <h2 id="tools" class="mt-12 scroll-mt-24 text-xl font-semibold text-ink-bright">Tools</h2>
     <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <li v-for="item in toolCards" :key="item.file" class="card flex flex-col p-5">
         <h3 class="font-semibold text-ink-bright">{{ item.name }}</h3>
@@ -71,17 +71,17 @@ import { GITHUB_URL } from '../utils/links';
 const games = [
   {
     name: 'OpenNova',
-    body: 'Our own game: downloads OP: Acid Gambit on its first launch, and plays the Joint Operations you own in place of Jointops.exe.',
+    body: 'OP: Acid Gambit, our own game, downloaded on the first launch. It also runs the Joint Operations you own in place of Jointops.exe.',
     file: 'opennova-game-windows.zip',
   },
   {
     name: 'OpenNova for Joint Operations',
-    body: 'The same game, set up for Joint Operations: unzip it into an empty folder and its first launch downloads Joint Operations and its Escalation expansion.',
+    body: 'Set up for Joint Operations: unzip it into an empty folder and the first launch downloads Joint Operations and its Escalation expansion.',
     file: 'jointops-game-windows.zip',
   },
   {
     name: 'OpenNova for Delta Force Xtreme 2',
-    body: 'The same game, set up for Delta Force Xtreme 2: unzip it into an empty folder and its first launch downloads Delta Force Xtreme 2.',
+    body: 'Set up for Delta Force Xtreme 2: unzip it into an empty folder and the first launch downloads Delta Force Xtreme 2.',
     file: 'dfx2-game-windows.zip',
   },
 ];
@@ -89,7 +89,7 @@ const games = [
 const tools = [
   {
     name: 'OpenNova Editor',
-    body: 'The editor that made our game, ready to run on its own.',
+    body: 'The editor we made OP: Acid Gambit with.',
     file: 'opennova-editor-windows.zip',
   },
   {
@@ -99,12 +99,12 @@ const tools = [
   },
   {
     name: 'Tools and dedicated server',
-    body: 'The command-line tools and opennova-serve, the server our hosted servers run. Retail and OpenNova players both join it.',
+    body: 'The command-line tools and opennova-serve, the dedicated server our hosted servers run. Players on the original game and on OpenNova can join it.',
     file: 'opennova-apps-windows.zip',
   },
   {
     name: 'OpenNova Switcher',
-    body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address of your own. OpenNova and the original Jointops.exe don't need it.",
+    body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address you choose. OpenNova and the original Jointops.exe don't need it.",
     file: 'opennova-switcher-windows.zip',
   },
 ];

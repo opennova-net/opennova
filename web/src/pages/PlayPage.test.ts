@@ -11,7 +11,7 @@ describe('PlayPage', () => {
   it('starts with the own-game setup and its current multiplayer limits', async () => {
     const { page } = await open();
     expect(page.get('#setup-title').text()).toBe('OP: Acid Gambit');
-    expect(page.text()).toContain('Co-op over LAN. Online play in our own game is coming.');
+    expect(page.text()).toContain('in co-op over LAN, or online through our NovaWorld.');
     expect(page.get('a[href="/downloads#opennova"]').text()).toBe('Download OpenNova');
     expect(page.text()).not.toMatch(/production-ready|—/);
   });
@@ -32,8 +32,8 @@ describe('PlayPage', () => {
   });
   it('distinguishes the services and keeps the Switcher specific to original DFX2', async () => {
     const { page } = await open();
-    expect(page.text()).toContain("OpenNova's accounts and NovaLogic's accounts belong to separate services.");
-    expect(page.text()).toContain("OpenNova and the original Jointops.exe don't need the Switcher.");
+    expect(page.text()).toContain('An account on one does not work on the other.');
+    expect(page.text()).toContain("OpenNova itself and the original Jointops.exe don't need the Switcher.");
     expect(page.text()).toContain('choose OpenNova, or Original NovaWorld');
     expect(page.find('a[href="/register"]').exists()).toBe(true);
     expect(page.find('a[href="/lobby"]').exists()).toBe(true);
