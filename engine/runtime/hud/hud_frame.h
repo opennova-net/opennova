@@ -1273,6 +1273,19 @@ struct HudDrawList {
 		size_t glyphs = 0;
 		size_t underlines = 0;
 	} top_begin;
+	// The flat entries from these indices on draw over the view veil, the three fullscreen
+	// damage-feedback quads and the sun veil the device leg lays between them: the scene frame
+	// draws the main HUD (the gameplay overlay pass, its corner map, console messages and
+	// crosshair among it), then the white hit flash, the red damage vignette and the revive
+	// tint, then the veil, then the big map, the tips, the gameplay overlays, the menu, the
+	// overlay panels and the net quality indicators over them (D-NET-1384)
+	// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - HUD_RenderAllOverlays @0x5CAD04 (on
+	//  foot) / @0x5CACE3 (mounted in seat 2 or 5); Render_FullscreenDecalQuad @0x5CABCD /
+	//  @0x5CAC10 / @0x5CAC43; Environment_ApplySunVeilAndExposureStopdown @0x5CAC4B;
+	//  HUD_BuildMapOverlayView @0x5CAD15, CTipSystem_Draw @0x5CAD28, HUD_DrawGameplayOverlays
+	//  @0x5CAE0B, HUD_DrawOverlayPanels @0x5CAE3B, CNetQuality_DrawIndicators @0x5CAE5D].
+	// SIZE_MAX (a list the scene frame did not compile): every entry under the veil.
+	TopBegin veil_begin;
 	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
 	// submits each run between consecutive breaks as its own quads / tris /
 	// lines / glyphs group, so an element that must layer in the walk's
@@ -1684,6 +1697,8 @@ private:
 	void emit_label_box(float x1, float y1, float x2, float y2, const std::string &title,
 			uint32_t title_color, float w, float h);
 	void mark_top_layer();
+	// The view veil's place in the flat lists (HudDrawList::veil_begin).
+	void mark_veil_layer();
 	void compile_overlay_pass(const HudFrameState &state, float w, float h);
 	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);

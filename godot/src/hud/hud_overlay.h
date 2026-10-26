@@ -509,6 +509,31 @@ public:
 	// off the tree.
 	void submit_draw_now();
 
+	// THE VIEW VEIL (D-NET-1384): the three fullscreen damage-feedback quads (the white hit
+	// flash, the red damage vignette, the medic revive tint) and the sun veil, laid over the main
+	// HUD and under everything the scene frame draws after it (engine hud_frame.h
+	// HudDrawList::veil_begin carries the witness). The engine owns every word, decay, cap and
+	// gate (world/player_view.h); this takes its draw values:
+	//   white_alpha     the raw hit-flash word, 0..255, drawn as white at that alpha
+	//   red_alpha       the vignette's draw alpha, already capped at 192 and gated
+	//   revive          the revive word, non-zero = draw
+	//   revive_channel  255 - (revive >> 1): the tint's red / green byte, blue 255
+	void update_damage_feedback(int p_white_alpha, int p_red_alpha, int p_revive,
+			int p_revive_channel);
+	// The red quad's art (vignette.tga, the archive loader's); null draws no red quad.
+	void set_damage_vignette(const Ref<Texture2D> &p_texture);
+	// The sun veil's quad, its alpha the Celestial's pushed global (shaders/sun_veil_overlay):
+	// off where no world pushes it (the editor's HUD preview, which another device's sun must
+	// not veil).
+	void set_sun_veil_enabled(bool p_enabled);
+	bool is_sun_veil_enabled() const { return sun_veil_enabled_; }
+	// The three quads' draw colours in their order (white, red, revive), each transparent where
+	// its quad does not draw (a read seam).
+	PackedColorArray get_damage_feedback_colors() const;
+	// The veil's and the revive tint's materials (a read seam: their programs).
+	Ref<ShaderMaterial> get_sun_veil_material();
+	Ref<ShaderMaterial> get_revive_tint_material();
+
 	void _draw() override;
 
 	// The menu map windows' seam (hud/map_view_window.h, C++ only): compile
@@ -649,6 +674,35 @@ private:
 	// The gameplay-overlay windows' layer above the big map
 	// (HudDrawList::top_begin).
 	RID top_item_;
+	// The child items' order over this control's own commands (the main HUD): the corner map's
+	// sandwich behind them, the additive rows, the view veil (the damage quads, the revive
+	// tint, the sun veil), the flat entries the frame draws after the veil, the big map's
+	// sandwich, then the top layer.
+	enum ChildDrawIndex : int {
+		kDrawCornerMap = 0, // .. 3, behind the parent
+		kDrawAdditive = 4,
+		kDrawDamageQuads = 5,
+		kDrawReviveTint = 6,
+		kDrawSunVeil = 7,
+		kDrawOverVeil = 8,
+		kDrawBigMap = 9, // .. 12
+		kDrawTop = 13,
+	};
+	// The view veil (hud_overlay_veil.cpp; update_damage_feedback).
+	int flash_white_ = 0;
+	int flash_red_ = 0;
+	int flash_revive_ = 0;
+	int flash_revive_channel_ = 255;
+	Ref<Texture2D> damage_vignette_;
+	bool sun_veil_enabled_ = true;
+	Ref<ShaderMaterial> sun_veil_material_;
+	Ref<ShaderMaterial> revive_tint_material_;
+	RID damage_quads_item_; // the white flash and the red vignette, the default blend
+	RID revive_tint_item_;
+	RID sun_veil_item_;
+	// The flat entries over the veil and under the big map (HudDrawList::veil_begin ..
+	// top_begin).
+	RID over_veil_item_;
 	// The status page's own item, drawn above every child of this control
 	// (the SIGHTS card, the view effects): the page stands in for the whole
 	// scene frame.
@@ -731,6 +785,17 @@ private:
 			const FlatRange &p_range);
 	void ensure_top_item_();
 	void ensure_page_item_();
+	void ensure_view_veil_materials_();
+	void ensure_view_veil_();
+	void ensure_over_veil_item_();
+	void render_view_veil_();
+	void clear_view_veil_();
+	void free_view_veil_();
+	// The flat entries between two cursors of the list (clamped to its sizes).
+	static FlatRange flat_span_(const opennova::hud::HudDrawList &p_list,
+			const opennova::hud::HudDrawList::TopBegin &p_from,
+			const opennova::hud::HudDrawList::TopBegin &p_to);
+	static bool flat_empty_(const FlatRange &p_range);
 	// p_big selects the sandwich: the corner map's base rides the control's
 	// own item (under the flat HUD) with its add/top children just above the
 	// flat pass; the big map's whole trio sits above everything flat.

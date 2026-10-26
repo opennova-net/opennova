@@ -558,7 +558,7 @@ void Celestial::advance_frame(double p_delta) {
 	// the occlusion tick and the glint legs: the engine's composition
 	// (engine: runtime/environment/celestial_frame.h sun_veil_frame), at the
 	// sun model's presence, this frame's camera, the occlusion brightness and
-	// the water glint's. The veil alpha global feeds the PlayerViewEffects
+	// the water glint's. The veil alpha global feeds the HudOverlay view veil's
 	// white overlay; the stop-down is read back by the world's veil leg into
 	// Weather.
 	sun_veil_glare_ = 0;

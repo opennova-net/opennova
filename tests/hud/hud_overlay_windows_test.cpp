@@ -6,11 +6,13 @@
 // [orig: HUD_DrawGameplayOverlays @0x5BDE60; HelpScreen_Draw @0x497800;
 // HUD_DrawHelpScreenIcons @0x497480].
 #include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_overlay_windows.h>
 
 #include "common/test_font.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -202,6 +204,66 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 		CHECK(list.glyphs[i].color == 0xFF7F7F7Fu);
 }
 
+// The view veil's place in the lists (D-NET-1384): the main HUD (the gameplay overlay pass, its
+// ammo count among it) lies under veil_begin, where the device leg lays the damage quads and the
+// sun veil; the overlay panels (the pause text) between it and top_begin, over the veil and under
+// the big map; and HUD_DrawGameplayOverlays' head legs (the frame-rate overlay) past top_begin,
+// over the big map. The blank level marks the veil with nothing under it.
+// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - HUD_RenderAllOverlays @0x5CAD04, the veil
+//  @0x5CAC4B, HUD_BuildMapOverlayView @0x5CAD15, HUD_DrawGameplayOverlays @0x5CAE0B,
+//  HUD_DrawOverlayPanels @0x5CAE3B]
+void test_view_veil_layer(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.ticks = 10;
+	state.weapon.active = true;
+	state.weapon.clip = 12;
+	state.weapon.reserve = 90;
+	state.weapon.capacity = 30;
+	state.paused = true;
+	state.paused_text = "PAUSED";
+	state.frame_rate.shown = true;
+	state.frame_rate.average_fps = 58;
+	const auto at_or_before = [](const HudDrawCursor &c, const HudDrawList::TopBegin &mark) {
+		return c.quads <= mark.quads && c.tris <= mark.tris && c.lines <= mark.lines &&
+				c.glyphs <= mark.glyphs && c.underlines <= mark.underlines;
+	};
+	const auto at_or_after = [](const HudDrawCursor &c, const HudDrawList::TopBegin &mark) {
+		return c.quads >= mark.quads && c.tris >= mark.tris && c.lines >= mark.lines &&
+				c.glyphs >= mark.glyphs && c.underlines >= mark.underlines;
+	};
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.veil_begin.glyphs <= list.top_begin.glyphs);
+		bool ammo = false, paused = false, frame_rate = false;
+		for (const HudElementSpan &span : list.element_spans) {
+			if (span.element == HudElement::AmmoCount) {
+				ammo = true;
+				CHECK(at_or_before(span.end, list.veil_begin));
+			} else if (span.element == HudElement::PausedText) {
+				paused = true;
+				CHECK(at_or_after(span.begin, list.veil_begin));
+				CHECK(at_or_before(span.end, list.top_begin));
+			} else if (span.element == HudElement::FrameRateOverlay) {
+				frame_rate = true;
+				CHECK(at_or_after(span.begin, list.top_begin));
+			}
+		}
+		CHECK(ammo && paused && frame_rate);
+	}
+	state.hud_detail_level = 3;
+	state.frame_rate.shown = false;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.veil_begin.quads == 0 && list.veil_begin.glyphs == 0);
+		CHECK(list.glyphs.size() > list.veil_begin.glyphs); // the pause text, over the veil
+	}
+	// A list the scene frame did not compile marks no veil.
+	const HudDrawList &console = compiler.compile_console_messages(state, 1024.0f, 768.0f);
+	CHECK(console.veil_begin.glyphs == SIZE_MAX);
+}
+
 } // namespace
 
 int main() {
@@ -210,6 +272,7 @@ int main() {
 	test_briefing_pages();
 	test_windows_ride_the_top_layer(&font);
 	test_briefing_markup_draws_plain(&font);
+	test_view_veil_layer(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

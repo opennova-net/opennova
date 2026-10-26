@@ -172,7 +172,7 @@ public:
 
 	// The last advanced frame's sun-veil outputs (engine: formats/env/env_celestial.h): the fullscreen
 	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
-	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
+	// HudOverlay view veil's rect via the opennova_sun_veil_alpha shader
 	// global this node pushes) and the modulator-2 exposure stop-down input
 	// (0..40 — the world's veil leg forwards it to
 	// Weather.set_sun_veil_stopdown).

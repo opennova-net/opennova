@@ -110,6 +110,7 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	const float h = surface_h;
 	draw_list_ = HudDrawList{};
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.veil_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
 	// The page clears the whole frame to black first [orig:
 	// CGfxDevice_SetClearColor(0) @0x50a376, CGfxDevice_Clear @0x50a393].
 	emit_rect(0.0f, 0.0f, w, h, 0xFF000000u, true);

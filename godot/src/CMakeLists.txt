@@ -192,6 +192,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
+    hud/hud_overlay_veil.cpp
     hud/hud_overlay_windows.cpp
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp

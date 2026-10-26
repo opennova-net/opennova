@@ -327,6 +327,19 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
 			&HudOverlay::consume_draw_timing_us);
 	ClassDB::bind_method(D_METHOD("submit_draw_now"), &HudOverlay::submit_draw_now);
+	ClassDB::bind_method(D_METHOD("update_damage_feedback", "white_alpha", "red_alpha", "revive",
+								 "revive_channel"),
+			&HudOverlay::update_damage_feedback);
+	ClassDB::bind_method(D_METHOD("set_damage_vignette", "texture"),
+			&HudOverlay::set_damage_vignette);
+	ClassDB::bind_method(D_METHOD("set_sun_veil_enabled", "enabled"),
+			&HudOverlay::set_sun_veil_enabled);
+	ClassDB::bind_method(D_METHOD("is_sun_veil_enabled"), &HudOverlay::is_sun_veil_enabled);
+	ClassDB::bind_method(D_METHOD("get_damage_feedback_colors"),
+			&HudOverlay::get_damage_feedback_colors);
+	ClassDB::bind_method(D_METHOD("get_sun_veil_material"), &HudOverlay::get_sun_veil_material);
+	ClassDB::bind_method(D_METHOD("get_revive_tint_material"),
+			&HudOverlay::get_revive_tint_material);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
 	BIND_CONSTANT(MAX_CROSSHAIR_STYLE);
@@ -350,6 +363,7 @@ HudOverlay::~HudOverlay() {
 	}
 	corner_map_.release();
 	big_map_.release();
+	free_view_veil_();
 	additive_item_ = RID();
 	top_item_ = RID();
 	page_item_ = RID();
@@ -2003,7 +2017,7 @@ void HudOverlay::ensure_additive_item_() {
 	rs->canvas_item_set_transform(additive_item_, d3d9_screen_to_canvas());
 	rs->canvas_item_set_material(additive_item_, additive_material_->get_rid());
 	// Above the four-layer corner-map sandwich like every non-map additive row.
-	rs->canvas_item_set_draw_index(additive_item_, 4);
+	rs->canvas_item_set_draw_index(additive_item_, kDrawAdditive);
 }
 
 void HudOverlay::ensure_minimap_water_material_() {
@@ -2106,6 +2120,10 @@ void HudOverlay::_draw() {
 	if (page_item_.is_valid()) {
 		rs->canvas_item_clear(page_item_);
 	}
+	clear_view_veil_();
+	// The view veil draws whatever the HUD's state, as the scene frame's own legs do; the status
+	// page stands in for the whole scene frame.
+	if (!server_status_shown_) render_view_veil_();
 	if (!configured_) {
 		return;
 	}
@@ -2203,30 +2221,27 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	// corner map — retail draws it as a second pass over the whole overlay
 	// set. Each pass carries its own glyphs.
 	render_map_(p_list.big_map, p_list.big_map_glyphs, true);
-	// The flat HUD below the big map, then the gameplay-overlay windows the
-	// compiler marked (HudDrawList::top_begin) on the child item above it.
+	// The flat HUD in three layers: the main HUD on this control's own item, under the view
+	// veil; what the frame draws after the veil, under the big map, on the item over the veil;
+	// the gameplay-overlay windows above the big map on the top item (HudDrawList::veil_begin,
+	// top_begin). Additive rows ride their one item under the veil whichever layer they are of.
 	const auto &top = p_list.top_begin;
-	FlatRange below;
-	below.quads_end = std::min(top.quads, p_list.quads.size());
-	below.tris_end = std::min(top.tris, p_list.tris.size());
-	below.lines_end = std::min(top.lines, p_list.lines.size());
-	below.glyphs_end = std::min(top.glyphs, p_list.glyphs.size());
-	below.underlines_end = std::min(top.underlines, p_list.underlines.size());
-	render_flat_runs_(get_canvas_item(), p_list, below);
-	FlatRange above;
-	above.quads_begin = below.quads_end;
-	above.quads_end = p_list.quads.size();
-	above.tris_begin = below.tris_end;
-	above.tris_end = p_list.tris.size();
-	above.lines_begin = below.lines_end;
-	above.lines_end = p_list.lines.size();
-	above.glyphs_begin = below.glyphs_end;
-	above.glyphs_end = p_list.glyphs.size();
-	above.underlines_begin = below.underlines_end;
-	above.underlines_end = p_list.underlines.size();
-	if (above.quads_begin == above.quads_end && above.tris_begin == above.tris_end &&
-			above.lines_begin == above.lines_end && above.glyphs_begin == above.glyphs_end &&
-			above.underlines_begin == above.underlines_end) {
+	HudDrawList::TopBegin veil = p_list.veil_begin;
+	veil.quads = std::min(veil.quads, top.quads);
+	veil.tris = std::min(veil.tris, top.tris);
+	veil.lines = std::min(veil.lines, top.lines);
+	veil.glyphs = std::min(veil.glyphs, top.glyphs);
+	veil.underlines = std::min(veil.underlines, top.underlines);
+	const HudDrawList::TopBegin start{};
+	const HudDrawList::TopBegin end{SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	render_flat_runs_(get_canvas_item(), p_list, flat_span_(p_list, start, veil));
+	const FlatRange over = flat_span_(p_list, veil, top);
+	if (!flat_empty_(over)) {
+		ensure_over_veil_item_();
+		render_flat_runs_(over_veil_item_, p_list, over);
+	}
+	const FlatRange above = flat_span_(p_list, top, end);
+	if (flat_empty_(above)) {
 		return;
 	}
 	ensure_top_item_();
@@ -2239,8 +2254,8 @@ void HudOverlay::ensure_top_item_() {
 	top_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
 	rs->canvas_item_set_transform(top_item_, d3d9_screen_to_canvas());
-	// Above the big-map sandwich (draw indices 5..8).
-	rs->canvas_item_set_draw_index(top_item_, 9);
+	// Above the big-map sandwich.
+	rs->canvas_item_set_draw_index(top_item_, kDrawTop);
 	ensure_flat_material_();
 	rs->canvas_item_set_material(top_item_, flat_material_->get_rid());
 }
@@ -2271,7 +2286,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		// chat, and the corner spinmap all disappear under it (only the
 		// objectives-family legs draw later — that residual is ledgered on
 		// D-HUD-21; witness at hud_frame.h HudDrawList::big_map).
-		big_map_.ensure(get_canvas_item(), 5, false, additive, water, modulate2x);
+		big_map_.ensure(get_canvas_item(), kDrawBigMap, false, additive, water, modulate2x);
 		big_map_.render(p_map, p_map_glyphs, map_pass_textures());
 		return;
 	}
@@ -2279,6 +2294,6 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	// retail pushes the map before the friendly-tag and console-message
 	// passes, so those overlays paint OVER the corner map (witness at
 	// hud_frame.cpp element ordering).
-	corner_map_.ensure(get_canvas_item(), 0, true, additive, water, modulate2x);
+	corner_map_.ensure(get_canvas_item(), kDrawCornerMap, true, additive, water, modulate2x);
 	corner_map_.render(p_map, p_map_glyphs, map_pass_textures());
 }

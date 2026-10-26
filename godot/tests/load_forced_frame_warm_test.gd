@@ -175,9 +175,10 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 				"the body and the staged kit's view model drew in the frame: %s" % [names])
 	assert_null(world.get_node_or_null("PersonPipelineWarm"),
 			"the warm's models are freed inside the load")
-	# The frame's draws leave with it: the overlay's item and the veil's are cleared at its end, as
-	# Godot clears an item at a redraw only once it drew the item itself, so a warm draw left there
-	# would stand under the first live one (the veil's static rect blended twice all mission).
+	# The frame's draws leave with it: the overlay's own item is cleared at its end, as Godot clears
+	# an item at a redraw only once it drew the item itself, so a warm draw left there would stand
+	# under the first live one; the overlay's child items, the view veil's among them, are cleared
+	# at its next draw (once, the veil's static rect blended twice all mission).
 	assert_eq(warm_frames, [[true, true, true], [false, false, false]],
 			"the HUD is on the tree, and its warm draws on its items, for the forced frame alone")
 	assert_false(hud.has_warm_draw(), "no draw of the forced frame outlives the load")
@@ -193,7 +194,7 @@ func test_the_forced_frame_draws_the_local_models_and_the_hud_ahead_of_the_birth
 	assert_eq(programs.size(), 6, "the load made the HUD's six canvas programs")
 	var shaders: Array[Shader] = [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
 			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
-			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]
+			GameHudPresenter.SUN_VEIL_SHADER, GameHudPresenter.REVIVE_TINT_SHADER]
 	for i in range(mini(programs.size(), shaders.size())):
 		assert_true(programs[i].is_valid(), "program %d has its RID" % i)
 		assert_eq(programs[i], shaders[i].get_rid(), "program %d is the one its materials bind" % i)

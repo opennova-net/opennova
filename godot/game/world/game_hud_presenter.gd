@@ -28,6 +28,13 @@ signal quit_confirmed
 const QUIT_CONFIRM_SOUNDSET := "PU_EXIT_CONFIRM"
 const HudScopeCircleMaskScript := preload("res://game/world/hud_scope_circle_mask.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
+# The view veil's two programs (HudOverlay's, which loads the same shaders by path): the sun
+# veil's, and the revive tint's multiply, a Shader rather than a CanvasItemMaterial, whose program
+# waits for the first idle frame past a mission load (the reveal); a Shader makes its device
+# program at its first get_rid(), and the load's HUD leg makes both (_make_canvas_programs,
+# D-NET-NEW-LF-28).
+const SUN_VEIL_SHADER := preload("res://shaders/sun_veil_overlay.gdshader")
+const REVIVE_TINT_SHADER := preload("res://shaders/canvas_blend_mul.gdshader")
 
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
@@ -427,9 +434,9 @@ func _on_hud_textures_load(full_arm: bool) -> void:
 ## redraw would reach the frame empty), so its canvas pipelines compile behind the loading
 ## screen, not in the first revealed frame (D-NET-NEW-LF-16). It leaves the tree again, and the
 ## frame's draws leave with it: Godot clears an item at a redraw only once it drew the item itself,
-## so the real mount's first redraw would add to what the frame submitted, and the veil's static
-## rect blended its quad twice all mission. The first frame with a local player mounts it as before
-## (ensure_game_hud).
+## so the real mount's first redraw would add to what the frame submitted (the overlay clears its
+## own child items, the view veil's among them, at each draw). The first frame with a local player
+## mounts it as before (ensure_game_hud).
 func _on_hud_pipeline_warm(drawing: bool) -> void:
 	if drawing:
 		if _game_hud == null or not _game_hud.is_configured() or _game_hud.is_inside_tree():
@@ -440,7 +447,6 @@ func _on_hud_pipeline_warm(drawing: bool) -> void:
 		_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_game_hud.submit_draw_now()
-		_view_effects.submit_draw_now()
 		_hud_warm_drawn = true
 		return
 	if not _hud_warm_mounted:
@@ -448,7 +454,6 @@ func _on_hud_pipeline_warm(drawing: bool) -> void:
 	_hud_warm_mounted = false
 	if _game_hud != null:
 		RenderingServer.canvas_item_clear(_game_hud.get_canvas_item())
-		_view_effects.release_warm_draw()
 		_hud_warm_drawn = false
 		if _game_hud.is_inside_tree():
 			_game_hud.get_parent().remove_child(_game_hud)
@@ -578,6 +583,11 @@ func _load_hud_textures(full_arm: bool) -> void:
 			_world.get_minimap_water_mask() if _world != null else null,
 			_session_texcompression_level())
 	_view_effects.set_resource_root(root)
+	# The red damage vignette's art, through the archive loader; retail loads it once into the
+	# material behind the quad's mode-3 pass (docs/render/render-material-re.md "Texture loaders").
+	_game_hud.set_damage_vignette(root.load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_VIGNETTE),
+			ResourceRoot.TEXTURE_LOADER_ARCHIVE) if root != null else null)
 	_make_canvas_programs()
 
 
@@ -589,7 +599,7 @@ func _make_canvas_programs() -> void:
 	_load_canvas_programs.clear()
 	for shader: Shader in [HudSightsCard.ADD_SHADER, HudSightsCard.BLEND_AT_SHADER,
 			HudSightsCard.ADD_AT_SHADER, HudSightsCard.MULTIPLY_SHADER,
-			PlayerViewEffects.SUN_VEIL_SHADER, PlayerViewEffects.REVIVE_TINT_SHADER]:
+			SUN_VEIL_SHADER, REVIVE_TINT_SHADER]:
 		_load_canvas_programs.append(shader.get_rid())
 
 
@@ -900,8 +910,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _view_effects != null:
 		_view_effects.update_view(info.binoculars_view_active, info.binocular_range,
 				info.nvg_mask, info.nvg_gain)
-		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
-				info.flash_revive, info.flash_revive_channel)
+	# The damage quads ride the overlay's view veil, over the main HUD (HudOverlay).
+	_game_hud.update_damage_feedback(info.flash_white, info.flash_red,
+			info.flash_revive, info.flash_revive_channel)
 	# The white hit flash's return of the gameplay overlay pass is the engine
 	# compiler's (hud_frame.h HudFrameCompiler::overlay_pass_runs): the scene
 	# frame's other legs on this node (the message log, the chat line, the kill

@@ -105,6 +105,10 @@ HudViewportApplier::HudViewportApplier(SubViewport &viewport) {
 	overlay->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	screen->add_child(overlay);
 	overlay_id_ = overlay->get_instance_id();
+	// The view veil's sun quad is the world's (the Celestial pushes its alpha as a process-wide
+	// global): the HUD preview has no world and no sun, so none, whatever another device's
+	// Celestial (an environment view looking at the sun) last pushed.
+	overlay->set_sun_veil_enabled(false);
 	// The view effects behind the overlay's own draw list, a stable layer under it.
 	if (Control *effects = script_control(kViewEffectsPath)) {
 		effects->set_name("PlayerViewEffects");
@@ -171,6 +175,11 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 	const PackedByteArray text = root_->has_file("gametext.bin") ? root_->read_file("gametext.bin") : PackedByteArray();
 	if (text.is_empty() || gametext_->load_from_byte_array(text) != OK) gametext_.unref();
 	if (Control *effects = view_effects()) effects->call("set_resource_root", root_);
+	// The red damage vignette's art, through the archive loader, as the game's HUD presenter
+	// hands it the overlay.
+	hud->set_damage_vignette(root_->load_texture(
+			HudPos::view_effect_texture(HudPos::VIEW_TEXTURE_VIGNETTE),
+			ResourceRoot::TEXTURE_LOADER_ARCHIVE));
 	applied_ = false;
 }
 
@@ -309,10 +318,9 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 	const bool night_vision = options.view == opennova::editor::HudPreviewView::NightVision;
 	const float inf = std::numeric_limits<float>::infinity();
 	hud->set_view_state(binoculars, Vector2(inf, inf));
-	if (Control *effects = view_effects()) {
+	if (Control *effects = view_effects())
 		effects->call("update_view", binoculars, kBinocularRange, night_vision, kNightVisionGain);
-		effects->call("update_damage_feedback", 0, options.damage, 0, 255);
-	}
+	hud->update_damage_feedback(0, options.damage, 0, 255);
 	apply_sights_(hud_model);
 	apply_board_(hud_model);
 	// Where each element of the HUD's walk drew, in the screen's pixels: the boxes of its compile now.
@@ -334,12 +342,6 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 }
 
 void HudViewportApplier::tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
-	// The view effects' sun veil is the world's (the Celestial pushes its alpha as a process-wide global): the HUD
-	// preview has no world and no sun, so none, whatever another device's Celestial (an environment view looking at
-	// the sun) last pushed. The effects make the veil as they enter the tree.
-	if (Control *effects = view_effects())
-		if (CanvasItem *veil = Object::cast_to<CanvasItem>(effects->get_node_or_null(NodePath("SunVeil"))))
-			if (veil->is_visible()) veil->set_visible(false);
 	HudOverlay *hud = overlay();
 	if (!hud || !configured_) return;
 	// The preview clock's ticks are the HUD's every clock (the preview has one: its fades, its

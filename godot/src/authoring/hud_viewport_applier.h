@@ -31,9 +31,11 @@ class Control;
 // shows scaled to the room the canvas gives it, so the HUD and what reads the screen's size off the viewport (the
 // SIGHTS card's rows) are laid out and drawn at that screen exactly (its fonts, its scale, its one-pixel lines)
 // as a screenshot of the game is; the game's own
-// first-person view effects (godot/game/world/player_view_effects.gd, its binocular and goggle masks
-// and the damage vignette, loaded by path as the editor loads its MCP transport) as the overlay's
-// behind-parent child, as the game's HUD presenter mounts them, and after them the game's SIGHTS card and
+// first-person view effects (godot/game/world/player_view_effects.gd, its binocular and
+// goggle masks, loaded by path as the editor loads its MCP transport) as the overlay's
+// behind-parent child, as the game's HUD presenter mounts them (the damage vignette the
+// overlay's own view veil, its sun veil off: the preview has no world), and after them
+// the game's SIGHTS card and
 // scoped-view circle mask (godot/game/world/hud_sights_card.gd, hud_scope_circle_mask.gd), the card first so the
 // mask covers its corners; a backdrop under both where the game has its 3D view. A Rebuild mounts a root over the
 // project's files (the open documents standing in for theirs: the HUD layout as Save would write it) and

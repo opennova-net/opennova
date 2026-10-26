@@ -5,8 +5,9 @@
 // Render_FullscreenDecalQuad called @ 0x5ad954 with quad color
 // (glare << 24) + 0xFFFFFF, alpha-blended]. Celestial pushes the global once
 // per advanced frame (the gate baked into the pushed value: 0 when it skips);
-// PlayerViewEffects owns the rect. A gated frame draws nothing: the quad's
-// fragments discard rather than blend a zero alpha over the whole surface.
+// HudOverlay's view veil owns the rect, over the main HUD (D-NET-1384). A gated
+// frame draws nothing: the quad's fragments discard rather than blend a zero
+// alpha over the whole surface.
 shader_type canvas_item;
 
 global uniform float opennova_sun_veil_alpha;
