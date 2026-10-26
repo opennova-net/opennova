@@ -726,6 +726,56 @@ static int test_vm_intrinsic_ggrnd_in_range(void) {
     return 1;
 }
 
+/* GGRnd's span and sum wrap on 32 bits as the game's registers do [orig: AudioVM_Intrinsic_GGRnd
+   @ 0x672341 sub ecx,ebx; @ 0x672345 inc ecx; @ 0x672346 jz; @ 0x67234F lea eax,[ebx+edx]]:
+   GGRnd(INT_MIN, INT_MAX) spans 2^32, which wraps to 0 and divides nothing, so it answers lo;
+   GGRnd(0x7FFFFFF0, 0x80000010) spans 33, so the result is lo plus a remainder of 0..32, wrapping
+   past INT_MAX. Neither depends on the process-global seed. */
+static int32_t run_ggrnd(uint32_t lo, uint32_t hi) {
+    uint8_t code[] = {
+        0x02, 0, 0, 0, 0,  /* push_imm32 lo */
+        0x02, 0, 0, 0, 0,  /* push_imm32 hi */
+        0x40, 0x01,        /* method GGRnd (idx 1) */
+        0x08, 0x00,        /* pop_g Var00 (byte_off 0) */
+        0x3F,              /* done */
+    };
+    for (int i = 0; i < 4; ++i) {
+        code[1 + i] = (uint8_t)(lo >> (8 * i));
+        code[6 + i] = (uint8_t)(hi >> (8 * i));
+    }
+    MusSection sec;
+    memset(&sec, 0, sizeof(sec));
+    strncpy(sec.name, "Begin", sizeof(sec.name) - 1);
+    sec.code_offset = 0;
+
+    MusScript s;
+    memset(&s, 0, sizeof(s));
+    lan_methods(&s);
+    strncpy(s.name, "t", sizeof(s.name) - 1);
+    s.code = code;
+    s.code_size = sizeof(code);
+    s.sections = &sec;
+    s.section_count = 1;
+    s.entry_section_index = 0;
+    s.globals_size = 68;
+
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &s);
+    mus_vm_start(vm);
+    mus_vm_tick(vm, 16);
+    const int32_t r = mus_vm_get_var(vm, 0);
+    mus_vm_destroy(vm);
+    return r;
+}
+
+static int test_vm_intrinsic_ggrnd_wraps_on_32_bits(void) {
+    CHECK(run_ggrnd(0x80000000u, 0x7FFFFFFFu) == (int32_t)0x80000000u,
+          "GGRnd(INT_MIN, INT_MAX): the span wraps to 0 and the result is lo");
+    const uint32_t r = (uint32_t)run_ggrnd(0x7FFFFFF0u, 0x80000010u);
+    CHECK(r - 0x7FFFFFF0u <= 32u, "GGRnd(0x7FFFFFF0, 0x80000010): lo plus 0..32, wrapping past INT_MAX");
+    return 1;
+}
+
 /* ---- E8: flag intrinsics (FSet, FClear, FIsSet, FIsClear stub) ----------
 
    Witnessed: dfvas!Intrinsic_FSet/FClear/FIsSet/FIsClear @ 0x557970..0x5579D0.
@@ -1984,6 +2034,7 @@ int main(void) {
     RUN_TEST(test_vm_intrinsic_gsv_clamps);
     RUN_TEST(test_vm_intrinsic_gfb);
     RUN_TEST(test_vm_intrinsic_ggrnd_in_range);
+    RUN_TEST(test_vm_intrinsic_ggrnd_wraps_on_32_bits);
     /* E8 */
     RUN_TEST(test_vm_intrinsic_fset);
     RUN_TEST(test_vm_intrinsic_fclear);

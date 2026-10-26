@@ -1047,10 +1047,13 @@ static int32_t intrinsic_ggrnd(MusVM *vm, int top) {
     int32_t lo = stack_word(vm, top - 1);
     static uint32_t s_ggrnd_seed = 0xBABEFACEu;   /* initial value of dword_84F210 */
     s_ggrnd_seed = opennova::io::rotl32(s_ggrnd_seed + opennova::io::rotl32(s_ggrnd_seed, 11), 2);
-    int32_t span = hi - lo + 1;
+    /* The span and the sum on 32-bit registers, wrapping as the game's do [orig:
+       AudioVM_Intrinsic_GGRnd @ 0x672341 sub ecx,ebx; @ 0x672345 inc ecx; @ 0x672346 jz (a span that
+       wraps to 0 divides nothing: edx stays 0); @ 0x67234D idiv ecx; @ 0x67234F lea eax,[ebx+edx]]. */
+    const int32_t span = (int32_t)((uint32_t)hi - (uint32_t)lo + 1u);
     int32_t rnd  = 0;
     if (span != 0) rnd = (int32_t)(s_ggrnd_seed & 0xFFFFu) % span;
-    return lo + rnd;
+    return (int32_t)((uint32_t)lo + (uint32_t)rnd);
 }
 
 /* Helper: decode an address tag value back to (region, byte_offset).
