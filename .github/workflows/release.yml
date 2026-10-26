@@ -263,49 +263,17 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
 
-  # Opt in only after the existing admin API token and portal URL are configured.
-  # The helper uploads, waits for validation, then publishes through the admin API.
-  publish-runtime-update:
+  # The release onto prod through Publish (publish.yml): the runtime's release on
+  # prod's update service and the builds on prod's downloads host, once prod's
+  # reviewers approve. Publish runs from master: prod's environment takes runs
+  # from protected branches alone, never a tag's.
+  publish:
     needs: release
-    if: vars.PUBLISH_RUNTIME_UPDATES == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      actions: write   # starts publish.yml
     steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: false
-      - name: Download and publish the released runtime update
-        shell: bash
+      - name: Start the prod Publish
         env:
           GH_TOKEN: ${{ github.token }}
-          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
-          UPDATE_PUBLISH_URL: ${{ vars.UPDATE_PUBLISH_URL }}
-        run: |
-          set -euo pipefail
-          test -n "$ADMIN_API_TOKEN" || { echo '::error::ADMIN_API_TOKEN is required for update publication'; exit 1; }
-          test -n "$UPDATE_PUBLISH_URL" || { echo '::error::UPDATE_PUBLISH_URL is required for update publication'; exit 1; }
-          gh release download "$GITHUB_REF_NAME" --pattern "opennova-runtime-windows-${GITHUB_REF_NAME}.sfs" --dir dist
-          umask 077
-          token_file="$(mktemp)"
-          trap 'rm -f "$token_file"' EXIT
-          printf '%s' "$ADMIN_API_TOKEN" > "$token_file"
-          unset ADMIN_API_TOKEN
-          python scripts/publish_update.py --url "$UPDATE_PUBLISH_URL" --token-file "$token_file" \
-            --package "dist/opennova-runtime-windows-${GITHUB_REF_NAME}.sfs" \
-            --name "OpenNova runtime ${GITHUB_REF_NAME}" --publish
-
-  # Opt in once the downloads hosts exist (DEPLOY.md, "The downloads host"):
-  # the release's builds onto prod's downloads host, through downloads.yml,
-  # whose prod run waits for the prod environment's reviewers.
-  publish-downloads:
-    needs: release
-    if: vars.PUBLISH_DOWNLOADS == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write   # starts downloads.yml
-    steps:
-      - name: Start the prod downloads publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run downloads.yml --repo "$GITHUB_REPOSITORY" --ref master -f deployment=prod -f release="$GITHUB_REF_NAME"
+        run: gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" --ref master -f deployment=prod -f release="$GITHUB_REF_NAME"

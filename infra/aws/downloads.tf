@@ -11,7 +11,7 @@
 # Nothing without a zone: there is no name to serve it at. The bucket holds the
 # current set alone, each file under its stable name (opennova-game-windows.zip)
 # beside manifest.json (the version, and each file's size and SHA-256), which
-# .github/workflows/downloads.yml writes; the site reads the manifest from any
+# .github/workflows/publish.yml writes; the site reads the manifest from any
 # origin (CloudFront's managed SimpleCORS response headers).
 # ---------------------------------------------------------------------------
 

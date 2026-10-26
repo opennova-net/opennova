@@ -1,21 +1,30 @@
-name: Downloads
-# Publishes a deployment's downloads host (ADR 0070; DEPLOY.md, "The downloads
-# host"; infra/aws/downloads.tf), the builds its site's download buttons fetch:
+name: Publish
+# Ships one build to a deployment everywhere at once (ADR 0070, ADR 0071;
+# DEPLOY.md):
 #
-# - prod (downloads.<domain>): a tagged release's assets, release builds that
-#   talk to prod. In the environment `prod`, whose required reviewers approve
-#   each run; release.yml starts one for every tag where the repository
-#   variable PUBLISH_DOWNLOADS is true.
-# - staging (downloads.staging.<domain>): a pull request's CI build (its run
-#   id), debug builds that talk to staging. In the environment `staging`. A
-#   master run's builds are release builds, which talk to prod, so a staging
-#   publish takes a pull request's run alone.
+# - the OpenNova runtime's release on the deployment's update service: the
+#   build's opennova-runtime-windows-*.sfs uploaded through the deployment's
+#   admin API (the environment's ADMIN_API_TOKEN secret and NOVAWORLD_URL
+#   variable), waited through validation and published
+#   (scripts/publish_runtime.py). The runtime is the game with no project: its
+#   releases arrive from here alone. It goes first, so a package the service
+#   refuses stops the run before the downloads host changes.
+# - the downloads host (downloads.<domain>, infra/aws/downloads.tf), the builds
+#   the site's download buttons fetch: the current set alone, each build under
+#   its stable name (scripts/stage_downloads.py) beside manifest.json, the
+#   builds uploaded first and the manifest last, each with a short Cache-Control
+#   so the CDN serves the new set within minutes. The deployment's GitHub deploy
+#   role writes the bucket's objects alone (infra/org/account/github.tf).
 #
-# The host holds the current set alone: each build under its stable name
-# (scripts/stage_downloads.py) beside manifest.json, the builds uploaded first
-# and the manifest last, each with a short Cache-Control so the CDN serves the
-# new set within minutes. The deployment's GitHub deploy role writes the
-# bucket's objects alone (infra/org/account/github.tf).
+# Two deployments:
+#
+# - prod: a tagged release's assets, release builds that talk to prod. In the
+#   environment `prod`, whose required reviewers approve each run; release.yml
+#   starts one for every tag.
+# - staging: a pull request's CI build (its run id), debug builds that talk to
+#   staging. In the environment `staging`. A master run's builds are release
+#   builds, which talk to prod, so a staging publish takes a pull request's run
+#   alone.
 on:
   workflow_dispatch:
     inputs:
@@ -33,9 +42,9 @@ on:
         required: false
         default: ""
 
-# One publish of a deployment's host at a time.
+# One publish to a deployment at a time.
 concurrency:
-  group: downloads-${{ inputs.deployment }}
+  group: publish-${{ inputs.deployment }}
   cancel-in-progress: false
 
 permissions:
@@ -62,8 +71,13 @@ jobs:
       - name: Check what to publish
         id: source
         shell: bash
+        env:
+          NOVAWORLD_URL: ${{ vars.NOVAWORLD_URL }}
+          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
         run: |
           set -euo pipefail
+          [[ -n "$NOVAWORLD_URL" ]] || { echo "::error::the $DEPLOYMENT environment has no NOVAWORLD_URL variable (its site, https://<host>)"; exit 1; }
+          [[ -n "$ADMIN_API_TOKEN" ]] || { echo "::error::the $DEPLOYMENT environment has no ADMIN_API_TOKEN secret (the deployment's admin API token)"; exit 1; }
           if [[ "$DEPLOYMENT" == prod ]]; then
             [[ -z "$RUN_ID" ]] || { echo "::error::prod publishes a release tag alone (a CI run's builds are not a release)"; exit 1; }
             [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "::error::prod needs a release tag (v0.0.21)"; exit 1; }
@@ -89,10 +103,13 @@ jobs:
       - name: Download the release's assets
         if: inputs.deployment == 'prod'
         shell: bash
-        run: gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir dist --pattern "*-windows-$RELEASE.zip"
+        run: |
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern "*-windows-$RELEASE.zip" --pattern "opennova-runtime-windows-$RELEASE.sfs"
 
       # The package jobs upload with `archive: false`: skip-decompress keeps each
-      # zip the zip it is (release.yml does the same).
+      # zip the zip it is (release.yml does the same). The pattern takes the
+      # runtime package too (opennova-runtime-windows-v*.sfs).
       - name: Download the run's builds
         if: inputs.deployment == 'staging'
         uses: actions/download-artifact@v8
@@ -104,8 +121,28 @@ jobs:
           skip-decompress: true
           path: dist
 
+      # Before anything is published: a set missing a build stops here.
       - name: Lay out the stable names and the manifest
-        run: python scripts/stage_downloads.py --from dist --to stage --version "${{ steps.source.outputs.version }}" --source "${{ steps.source.outputs.url }}"
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE: ${{ steps.source.outputs.url }}
+        run: python scripts/stage_downloads.py --from dist --to stage --version "$VERSION" --source "$SOURCE"
+
+      - name: Publish the runtime release
+        shell: bash
+        env:
+          NOVAWORLD_URL: ${{ vars.NOVAWORLD_URL }}
+          ADMIN_API_TOKEN: ${{ secrets.ADMIN_API_TOKEN }}
+          NAME: OpenNova runtime ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          umask 077
+          token_file="$(mktemp)"
+          trap 'rm -f "$token_file"' EXIT
+          printf '%s' "$ADMIN_API_TOKEN" > "$token_file"
+          unset ADMIN_API_TOKEN
+          python scripts/publish_runtime.py --url "$NOVAWORLD_URL" --token-file "$token_file" \
+            --from dist --name "$NAME"
 
       - name: AWS credentials (OIDC, the deployment's account)
         uses: aws-actions/configure-aws-credentials@v4
@@ -113,10 +150,13 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Publish
+      - name: Publish the downloads host
         shell: bash
         env:
           BUCKET: opennova-${{ inputs.deployment }}-downloads-${{ vars.AWS_ACCOUNT_ID }}
+          NOVAWORLD_URL: ${{ vars.NOVAWORLD_URL }}
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE: ${{ steps.source.outputs.url }}
         run: |
           set -euo pipefail
           # The builds first (a build the set no longer has removed), then the
@@ -125,6 +165,8 @@ jobs:
             --content-type application/zip --cache-control "public, max-age=300"
           aws s3 cp stage/manifest.json "s3://$BUCKET/manifest.json" \
             --content-type application/json --cache-control "public, max-age=60"
-          echo "### Published to the ${DEPLOYMENT} downloads host" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ steps.source.outputs.version }} from ${{ steps.source.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Published ${VERSION} to ${DEPLOYMENT}"
+            echo ""
+            echo "From ${SOURCE}: the runtime release on ${NOVAWORLD_URL}, and the downloads host."
+          } >> "$GITHUB_STEP_SUMMARY"

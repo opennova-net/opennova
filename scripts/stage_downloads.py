@@ -11,7 +11,7 @@ file under a name without its version, so the site's download buttons never chan
 artifacts (opennova-game-windows-v0.0.20.zip, opennova-apps-windows.zip); every build the host
 serves must be there, and anything else (the runtime's update package, a checksum file) is left
 out. --to gets the stable names and manifest.json: the version, when it was staged, the source,
-and each file's size and SHA-256. .github/workflows/downloads.yml uploads --to as it is.
+and each file's size and SHA-256. .github/workflows/publish.yml uploads --to as it is.
 """
 
 from __future__ import annotations

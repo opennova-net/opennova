@@ -75,7 +75,7 @@ output "downloads_host" {
 
 output "downloads_bucket" {
   value       = length(aws_s3_bucket.downloads) > 0 ? aws_s3_bucket.downloads[0].bucket : null
-  description = "The downloads host's bucket, which .github/workflows/downloads.yml publishes to; null without a zone"
+  description = "The downloads host's bucket, which .github/workflows/publish.yml publishes to; null without a zone"
 }
 
 output "novaworld_host" {

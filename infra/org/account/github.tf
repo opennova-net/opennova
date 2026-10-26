@@ -17,7 +17,7 @@
 # deployment's web container alone: `app deploy`'s check after hostd's roll),
 # and point the nightly backup's schedule at the release's backup revision
 # (handing it the schedule's role); and publish the downloads host's files
-# (.github/workflows/downloads.yml: the bucket's objects listed, written and
+# (.github/workflows/publish.yml: the bucket's objects listed, written and
 # removed, nothing of its settings). It names
 # infra/aws's resources by the names infra/aws gives them (opennova-<deployment>-*;
 # a renamed one there is a change here too). It carries the role boundary.
