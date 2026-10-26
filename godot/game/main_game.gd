@@ -216,12 +216,9 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	var load_operation := _world_load.cancel_current()
 	_world_load_pending = false
 	finish_hud_hidden_capture()
-	for presenter in [
-		_player_presenter, _armory_presenter, _deploy_presenter, _command_map_presenter,
-		_hud_presenter,
-	]:
-		if presenter != null:
-			presenter.teardown()
+	_teardown_presenters()
+	if _hud_presenter != null:
+		_hud_presenter.teardown()
 	if _world != null:
 		_world.cancel_join_preload()
 		# The F3 windows' Simulation dies with the runtime unload frees.
@@ -2093,12 +2090,25 @@ func _teardown_world(restart: bool, record_round_end := true) -> void:
 	_join_screen.close()
 	finish_hud_hidden_capture()
 	_end_flow.reset()
+	_teardown_presenters()
+	# The F3 windows' Simulation dies with the runtime unload frees.
+	_dev_tools.set_simulation(null)
+	_world.unload()
+	if _player_presenter != null:
+		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
+	if _hud_presenter != null:
+		_hud_presenter.teardown(restart)
+
+
+# The in-world presenters come down with their world, at a mission teardown and at
+# the runtime's shutdown alike (the HUD presenter's teardown is each caller's own).
+func _teardown_presenters() -> void:
 	if _player_presenter != null:
 		_player_presenter.teardown()
 	if _armory_presenter != null:
 		_armory_presenter.teardown()  # the built menu holds the OLD world's resource root
 	if _vehicle_menu_presenter != null:
-		_vehicle_menu_presenter.teardown()
+		_vehicle_menu_presenter.teardown()  # vehicle.mnu's frame, the same root
 	if _deploy_presenter != null:
 		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
@@ -2108,13 +2118,6 @@ func _teardown_world(restart: bool, record_round_end := true) -> void:
 		_end_round_presenter.teardown()  # same stale-root hazard: the stat.mnu frame and
 		# its MenuAudio hold the OLD world's resource root, and a frame left visible when
 		# the session ends mid-STAT would be re-shown over the next mission
-	# The F3 windows' Simulation dies with the runtime unload frees.
-	_dev_tools.set_simulation(null)
-	_world.unload()
-	if _player_presenter != null:
-		_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
-	if _hud_presenter != null:
-		_hud_presenter.teardown(restart)
 
 
 # The mission teardown's profile step (and the SP restart's): outside a session
