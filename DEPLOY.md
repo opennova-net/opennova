@@ -1251,9 +1251,12 @@ first site admin again (section 4). On prod it asks for `prod` besides
 `--yes-drop-database`. The reset drops the database alone: the next `fleet.sweep`
 terminates every machine no row names (so every hosted server ends) and records the static
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
-in the ops bucket under `data/content/`, so a project pushed again uploads none it already
-had; and the trees' files stay under `data/trees/<id>/` while the new database numbers its
-trees from 1 again. A new tree empties its prefix before it takes files (at its release's
+in the ops bucket under `data/content/<game id>/` (the store names a project's files by its
+game's id, never its key), and the migrations seed the six games in one order, so each seeded
+game keeps its id and a project pushed again uploads none it already had, while a game an admin
+made has its files under an id the new database may give another game: remove those
+(`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
+`data/trees/<id>/` while the new database numbers its trees from 1 again. A new tree empties its prefix before it takes files (at its release's
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
 database does not reach stay until removed by hand.
 
@@ -1268,8 +1271,14 @@ D='--deployment staging'
 
 The deploy finds the programs down and moves them to the release at no task (on the old
 database their boot would refuse the edited file); the reset starts them on the empty one.
-Then make the first site admin again (`ONNET_BOOTSTRAP_ADMIN`: section 4, "The first site
-admin"), push each game's project again from the OpenNova Editor (its NovaWorld window says
+The store's files are never moved for a reset or a release: the database and the store are
+disposable until 1.0. The release that keyed the store by game id (it had named a project's
+files by its key, `data/content/<KEY>/`) moves none either, and goes out with a reset (its
+database's record of the files each project holds names the old prefixes): every project's
+first push after it uploads its files once more, under its id, and the old
+`data/content/<KEY>/` prefixes are no game's, to remove by hand. Then make the first site admin
+again (`ONNET_BOOTSTRAP_ADMIN`: section 4, "The first site admin"), push each game's project
+again from the OpenNova Editor (its NovaWorld window says
 to bind again; a retail game's stock import first, its revision 1), release and publish it
 on the admin's Games page ("The games", section 7), and run Publish for the runtime ("The
 downloads host", section 5): the reset took every game's revisions and releases.

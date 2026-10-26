@@ -46,6 +46,12 @@
 //                     ADR 0069).
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, the
 //                     row marked pruned. Hourly (data_set_schedule) and after each apply.
+//   game.purge        {data_set_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
+//                     its trees' prefixes and its project's files and manifests (content/<id>/,
+//                     content_repository.h), removed whole. The games' admin delete enqueues it
+//                     in the transaction that deletes the row, so the route answers at once
+//                     however many files a retail game's project holds. A store failure runs it
+//                     again.
 //
 // The routes' enqueues below return the job's id, 0 when one of its dedupe key is queued or
 // running already.
@@ -65,6 +71,7 @@ namespace opennova::novaworld_server::hosted {
 inline constexpr const char *kJobReleaseValidate = "release.validate";
 inline constexpr const char *kJobReleaseApply = "release.apply";
 inline constexpr const char *kJobTreePrune = "tree.prune";
+inline constexpr const char *kJobGamePurge = "game.purge";
 
 // The object a tree's manifest is written as, under its prefix.
 inline constexpr const char *kTreeManifestName = "manifest.json";
@@ -83,6 +90,10 @@ int64_t enqueue_release_validate(db::Database &db, int64_t release_id);
 // Standalone updater products have no hosted tree and queue no apply job (returns 0).
 int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data_set_id);
 int64_t enqueue_tree_prune(db::Database &db);
+// The objects of the game `data_set_id` (deleted in the caller's transaction) and of its trees
+// `tree_ids` removed by the data program.
+int64_t enqueue_game_purge(
+		db::Database &db, int64_t data_set_id, const std::vector<int64_t> &tree_ids);
 
 // The handlers over `store`, which must outlive the workers; `scratch_dir` is where a job
 // downloads what it works on (one directory of its own per job, removed when it ends).

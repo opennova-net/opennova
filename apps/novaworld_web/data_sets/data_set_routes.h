@@ -3,8 +3,9 @@
 // The games' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Games"): the data
 // sets an admin creates as rows (data_sets/data_set_repository.h), each one game with, when it has
 // a key, its project (data_sets/content_repository.h: one create makes the whole game, one patch
-// edits it, a key rename moving its objects in the deployment's object store, one delete removes
-// it). A game's hosted trees are built by the data program from its published release
+// edits it, a key rename its row alone since the store names a project's objects by the game's
+// id, one delete removes it, its objects removed after by the data program's game.purge). A
+// game's hosted trees are built by the data program from its published release
 // (data_sets/data_set_jobs.h release.apply), never uploaded. Each behind WebAccess::require_admin
 // (and ONNET_API_PROXY_ONLY like every /api route), its state change logged with its actor and
 // status (AccessMiddleware):
@@ -15,7 +16,8 @@
 //                                        it has a key)
 //   PATCH  /api/admin/data-sets/<id>     its name, lobby, updater product, project key (a
 //                                        rename) and visibility
-//   DELETE /api/admin/data-sets/<id>     its trees, its project and the row gone
+//   DELETE /api/admin/data-sets/<id>     the row gone (its trees' and its project's rows with
+//                                        it), its objects' game.purge queued
 //
 // Every reply is an error code with our own message, never database or store text; a
 // timestamp not yet set is "" (the DB text). The admin's update-all (POST
@@ -58,8 +60,8 @@ public:
 	DataSetRoutes(const DataSetRoutes &) = delete;
 	DataSetRoutes &operator=(const DataSetRoutes &) = delete;
 
-	// The deployment's object store, null while hosting is off (a delete of a game with trees
-	// then answers 503 store_unavailable). It must outlive the listener. Before
+	// The deployment's object store, null while hosting is off (a delete then queues no purge:
+	// with no store there are no objects). It must outlive the listener. Before
 	// register_routes().
 	void set_store(ObjectStore *store) { store_ = store; }
 	void register_routes(WebApp &app);

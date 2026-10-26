@@ -1,11 +1,11 @@
 #pragma once
 
 // The content store's rows (backend/migrations/0025_content.sql, ADR 0069): the games' projects
-// (on their data_sets rows, data_set_repository.h: a game with a key has one, the key the store's
-// and the routes' name for it), each one's linear history of revisions (each a manifest in the
-// object store, base/content/content_manifest.h), and the files its store holds. The content
-// routes and the release build share it; a game, its project with it, is made, changed and
-// deleted through data_set_repository.h. A push moves its project's head in one compare-and-set,
+// (on their data_sets rows, data_set_repository.h: a game with a key has one, the key the routes'
+// name for it, the game's id the store's), each one's linear history of revisions (each a
+// manifest in the object store, base/content/content_manifest.h), and the files its store holds.
+// The content routes and the release build share it; a game, its project with it, is made,
+// changed and deleted through data_set_repository.h. A push moves its project's head in one compare-and-set,
 // so two pushes on one parent never both win; the push that loses is told the head that won.
 // Crow-free. Each function throws db::Error on a database failure. Service policy, not a port.
 
@@ -72,11 +72,15 @@ std::optional<ContentRevision> find_revision(db::Database &db, int64_t data_set_
 
 // --- the files the store holds ---
 
-// The object store's keys for a project's files and manifests: `content/<key>/blobs/<sha256>` and
-// `content/<key>/manifests/<sha256>.json`; `content/<key>/` holds every object of the project.
-std::string blob_key(std::string_view project_key, std::string_view sha256);
-std::string manifest_key(std::string_view project_key, std::string_view sha256);
-std::string project_prefix(std::string_view project_key);
+// The object store's keys for a project's files and manifests, named by its game's id, never by
+// its key: `content/<data_set_id>/blobs/<sha256>` and
+// `content/<data_set_id>/manifests/<sha256>.json`; `content/<data_set_id>/` holds every object of
+// the project. A rename of the key moves no object,
+// so a push begun under the old key lands where its revision's readers look, and a game's delete
+// queues the prefix's removal (data_set_jobs.h game.purge).
+std::string blob_key(int64_t data_set_id, std::string_view sha256);
+std::string manifest_key(int64_t data_set_id, std::string_view sha256);
+std::string project_prefix(int64_t data_set_id);
 
 struct StoredBlob {
 	std::string sha256;

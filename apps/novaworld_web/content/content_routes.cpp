@@ -46,8 +46,12 @@ crow::response store_failure(const char *route, const std::string &error) {
 	return json_error(502, "store_error", "the object store did not take the request");
 }
 
+// A working copy bound to a key renamed since (or a game deleted) reads this: its binding names
+// the old key, so the editor's NovaWorld window binds it again.
 crow::response no_such_project() {
-	return json_error(404, "not_found", "no game's project has this key");
+	return json_error(404, "not_found",
+			"no game's project has this key (a renamed key or a deleted game: bind the project "
+			"again)");
 }
 
 crow::response field_error(
@@ -118,20 +122,20 @@ std::optional<ContentProject> readable(db::Database &db, const std::string &key,
 // `error` when the store fails. A few are asked of the store one by one; more by one listing of
 // the project's files, since each store call is a process of the AWS CLI's (a first push of a
 // retail game names thousands).
-bool sort_by_store(ObjectStore &store, const std::string &key,
+bool sort_by_store(ObjectStore &store, int64_t data_set_id,
 		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
 		std::vector<StoredBlob> &absent, std::string &error) {
 	const bool listing = unrecorded.size() > ContentRoutes::kHeadsAtMost;
 	std::unordered_map<std::string, uint64_t> stored; // key -> size, when listed
 	if (listing) {
 		std::vector<StoredObject> objects;
-		if (!store.list(project_prefix(key) + "blobs/", objects, error))
+		if (!store.list(project_prefix(data_set_id) + "blobs/", objects, error))
 			return false;
 		for (const StoredObject &object : objects)
 			stored.emplace(object.key, object.size);
 	}
 	for (const StoredBlob &blob : unrecorded) {
-		const std::string object = blob_key(key, blob.sha256);
+		const std::string object = blob_key(data_set_id, blob.sha256);
 		bool exists = false;
 		uint64_t size = 0;
 		if (listing) {
@@ -395,7 +399,7 @@ crow::response ContentRoutes::manifest(
 	std::string text;
 	if (scratch.empty() ||
 			!read_object(
-					*store_, manifest_key(p->key, revision->manifest_sha256), scratch, text, error))
+					*store_, manifest_key(p->id, revision->manifest_sha256), scratch, text, error))
 		return store_failure("GET /api/content/projects/<key>/revisions/<n>/manifest", error);
 	crow::response res(200);
 	res.body = std::move(text);
@@ -424,7 +428,7 @@ crow::response ContentRoutes::blob(
 	}
 	if (!p)
 		return no_such_project();
-	const std::string object = blob_key(p->key, sha);
+	const std::string object = blob_key(p->id, sha);
 	if (urls_ != nullptr) {
 		// No file passes through this program when the store signs its own URLs (ADR 0069 d6).
 		SignedTransfer download;
@@ -489,11 +493,13 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		wanted.push_back(std::move(blob));
 	}
 	std::vector<StoredBlob> absent;
+	int64_t data_set_id = 0;
 	try {
 		auto db_conn = pool_.acquire();
 		const auto p = find_project(*db_conn, key);
 		if (!p)
 			return no_such_project();
+		data_set_id = p->id;
 		absent = missing_blobs(*db_conn, p->id, wanted);
 		// A file an earlier push uploaded through the store's own URL but never committed (an
 		// upload past its URL's hour, a push that failed) is held once the store has it, so a push
@@ -501,7 +507,7 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		if (store_ != nullptr && !absent.empty()) {
 			std::vector<StoredBlob> found, still;
 			std::string error;
-			if (!sort_by_store(*store_, p->key, absent, found, still, error))
+			if (!sort_by_store(*store_, p->id, absent, found, still, error))
 				return store_failure("POST /api/content/projects/<key>/missing", error);
 			record_blobs(*db_conn, p->id, found);
 			absent = std::move(still);
@@ -517,7 +523,7 @@ crow::response ContentRoutes::missing(const crow::request &req, const std::strin
 		SignedTransfer upload;
 		std::string error;
 		if (urls_ != nullptr) {
-			if (!urls_->put(blob_key(key, blob.sha256), blob.sha256, upload, error))
+			if (!urls_->put(blob_key(data_set_id, blob.sha256), blob.sha256, upload, error))
 				return store_failure("POST /api/content/projects/<key>/missing", error);
 		} else {
 			upload = { "PUT", "/api/content/projects/" + key + "/blobs/" + blob.sha256,
@@ -552,9 +558,12 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 					400, "invalid_field", "hashes", "each hash is 64 lower-case hex digits");
 		hashes.emplace_back(item.s());
 	}
+	int64_t data_set_id = 0;
 	try {
-		if (!readable(*pool_.acquire(), key, admin))
+		const auto p = readable(*pool_.acquire(), key, admin);
+		if (!p)
 			return no_such_project();
+		data_set_id = p->id;
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/content/projects/<key>/downloads", e);
 	}
@@ -563,7 +572,7 @@ crow::response ContentRoutes::downloads(const crow::request &req, const std::str
 		SignedTransfer download;
 		std::string error;
 		if (urls_ != nullptr) {
-			if (!urls_->get(blob_key(key, sha), download, error))
+			if (!urls_->get(blob_key(data_set_id, sha), download, error))
 				return store_failure("POST /api/content/projects/<key>/downloads", error);
 		} else {
 			download = { "GET", "/api/content/projects/" + key + "/blobs/" + sha, {} };
@@ -604,7 +613,7 @@ crow::response ContentRoutes::upload(
 		std::string error;
 		const std::string scratch = scratch_file("upload", error);
 		if (scratch.empty() ||
-				!write_object(*store_, blob_key(p->key, sha), scratch, req.body, error))
+				!write_object(*store_, blob_key(p->id, sha), scratch, req.body, error))
 			return store_failure("PUT /api/content/projects/<key>/blobs/<sha256>", error);
 		record_blobs(*db_conn, p->id, { { sha, static_cast<int64_t>(req.body.size()) } });
 	} catch (const db::Error &e) {
@@ -676,7 +685,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 			listed.push_back({ file.sha256, static_cast<int64_t>(file.size) });
 		std::vector<StoredBlob> found, absent;
 		std::string held_error;
-		if (!sort_by_store(*store_, p->key, missing_blobs(*db_conn, p->id, listed), found, absent,
+		if (!sort_by_store(*store_, p->id, missing_blobs(*db_conn, p->id, listed), found, absent,
 					held_error))
 			return store_failure(kRoute, held_error);
 		record_blobs(*db_conn, p->id, found);
@@ -693,7 +702,7 @@ crow::response ContentRoutes::push(const crow::request &req, const std::string &
 		std::string error;
 		const std::string scratch = scratch_file("manifest", error);
 		if (scratch.empty() ||
-				!write_object(*store_, manifest_key(p->key, manifest_sha), scratch, *manifest_text,
+				!write_object(*store_, manifest_key(p->id, manifest_sha), scratch, *manifest_text,
 						error))
 			return store_failure(kRoute, error);
 		NewRevision revision;

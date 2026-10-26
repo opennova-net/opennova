@@ -171,15 +171,15 @@ struct DataSetPatch {
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
 	std::optional<bool> retail;
-	// Its project's key (a rename: the objects under content/<key>/ are the caller's to move) and
-	// visibility; after the patch both are set or neither is.
+	// Its project's key (a rename moves no object: the store names a project's files by the
+	// game's id, content_repository.h) and visibility; after the patch both are set or neither is.
 	std::optional<std::string> key;
 	std::optional<std::string> visibility;
 };
 DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch &patch);
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
-// are the caller's to remove first, the trees' prefixes and content/<key>/); InUse while a live
-// server names it, HasExpansion while an expansion has it as parent.
+// are the caller's to remove, the trees' prefixes and content/<id>/, data_set_jobs.h game.purge);
+// InUse while a live server names it, HasExpansion while an expansion has it as parent.
 DataSetOutcome delete_data_set(db::Database &db, int64_t id);
 
 std::optional<DataSetRow> find_data_set(db::Database &db, int64_t id);

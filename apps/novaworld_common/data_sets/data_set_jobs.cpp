@@ -1,5 +1,6 @@
 #include "data_set_jobs.h"
 
+#include "content_repository.h"
 #include "core/loggable.h"
 #include "data_set_files.h"
 #include "data_set_repository.h"
@@ -37,9 +38,11 @@ constexpr const char *kTag = "[data]";
 constexpr int kCapValidate = 1;
 constexpr int kCapApply = 1;
 constexpr int kCapPrune = 1;
+constexpr int kCapPurge = 1;
 constexpr int kAttemptsValidate = 2;
 constexpr int kAttemptsApply = 3;
 constexpr int kAttemptsPrune = 3;
+constexpr int kAttemptsPurge = 10;
 constexpr int64_t kPrunePeriodMs = 60 * 60 * 1000;
 
 int64_t member_int(const io::JsonValue &payload, const char *key) {
@@ -719,6 +722,33 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 	return jobs::JobResult::done();
 }
 
+// --- game.purge ---
+
+// A deleted game's objects: its trees' prefixes and its project's (content/<id>/), each removed
+// whole. Its row went with the delete, its trees' rows with it, so the payload names them; a
+// prefix already gone removes nothing, so a run again after a store failure takes the rest.
+jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
+	const int64_t data_set_id = member_int(ctx.job.payload, "data_set_id");
+	std::vector<std::string> prefixes;
+	if (const io::JsonValue *trees = ctx.job.payload.get("trees"); trees && trees->is_array())
+		for (const io::JsonValue &tree : trees->array)
+			if (tree.is_number() && tree.number > 0)
+				prefixes.push_back(tree_prefix(static_cast<int64_t>(tree.number)));
+	if (data_set_id > 0)
+		prefixes.push_back(content::project_prefix(data_set_id));
+	for (const std::string &prefix : prefixes) {
+		std::string error;
+		if (!store.remove_prefix(prefix, error)) {
+			std::fprintf(stderr, "%s WARN game %s: %s not removed: %s\n", kTag,
+					id_text(data_set_id).c_str(), prefix.c_str(), loggable(error, 200).c_str());
+			return jobs::JobResult::retry(prefix + ": " + error);
+		}
+	}
+	std::printf("%s game %s purged: %zu prefix%s removed\n", kTag, id_text(data_set_id).c_str(),
+			prefixes.size(), prefixes.size() == 1 ? "" : "es");
+	return jobs::JobResult::done();
+}
+
 } // namespace
 
 std::string tree_prefix(int64_t tree_id) {
@@ -756,6 +786,20 @@ int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data
 	return jobs::enqueue(db, job);
 }
 
+int64_t enqueue_game_purge(
+		db::Database &db, int64_t data_set_id, const std::vector<int64_t> &tree_ids) {
+	jobs::NewJob job;
+	job.kind = kJobGamePurge;
+	job.payload.set("data_set_id", io::json_number(static_cast<double>(data_set_id)));
+	io::JsonValue trees = io::JsonValue::make_array();
+	for (const int64_t id : tree_ids)
+		trees.push(io::json_number(static_cast<double>(id)));
+	job.payload.set("trees", std::move(trees));
+	job.dedupe_key = std::string(kJobGamePurge) + ":" + id_text(data_set_id);
+	job.max_attempts = kAttemptsPurge;
+	return jobs::enqueue(db, job);
+}
+
 int64_t enqueue_tree_prune(db::Database &db) {
 	jobs::NewJob job;
 	job.kind = kJobTreePrune;
@@ -780,6 +824,11 @@ void register_data_set_jobs(
 	registry.add(std::move(apply_kind));
 	registry.add({ kJobTreePrune, [&store](jobs::JobContext &ctx) { return prune(ctx, store); },
 			kCapPrune });
+	jobs::JobKind purge_kind{ kJobGamePurge,
+		[&store](jobs::JobContext &ctx) { return purge(ctx, store); }, kCapPurge };
+	purge_kind.retry_base_ms = 10 * 1000;
+	purge_kind.retry_max_ms = 10 * 60 * 1000;
+	registry.add(std::move(purge_kind));
 }
 
 std::vector<jobs::PeriodicJob> data_set_schedule() {

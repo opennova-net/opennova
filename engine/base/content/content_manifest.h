@@ -2,9 +2,9 @@
 
 // The content store's manifest (ADR 0069): one revision of a content project, the project's own
 // files (never the machine's `.opennova/`) each by its path, its SHA-256 and its size, in one
-// canonical text whose own SHA-256 names the revision in the store
-// (`content/<key>/manifests/<sha256>.json`; each file at `content/<key>/blobs/<sha256>`). The
-// service checks a push by it and the editor writes and reads it, so both take the one form here.
+// canonical text whose own SHA-256 names the revision in the store (`content/<game id>/manifests/
+// <sha256>.json`; each file at `content/<game id>/blobs/<sha256>`). The service checks a push by
+// it and the editor writes and reads it, so both take the one form here.
 // A path is one every system the project is downloaded to can hold: '/'-separated and relative,
 // UTF-8, no part a Windows file name refuses, and none two paths share once their ASCII letters are
 // folded (Windows and macOS hold one of the two). OpenNova's own format, not a port.

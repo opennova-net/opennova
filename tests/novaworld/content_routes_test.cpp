@@ -11,9 +11,10 @@
 // the store lacks refused with its hash, a manifest out of its canonical form refused), its
 // history, manifest and files read back; a file the store got through no route of this program (as
 // an upload through the store's own URL puts one) held once a push names it; a game's project
-// made, refused, made public and renamed (its objects moving under the new key) and deleted with
-// its objects through the games' admin routes (data_sets/data_set_routes.h); and a release built
-// from a revision.
+// made, refused, made public and renamed (a row change alone: the store names its objects by the
+// game's id, so a file uploaded under the old key serves a push under the new one) and deleted,
+// the route answering at once with its objects' game.purge queued, through the games' admin routes
+// (data_sets/data_set_routes.h); and a release built from a revision.
 
 #include "core/local_object_store.h"
 #include "data_sets/content_repository.h"
@@ -363,7 +364,7 @@ int test_push(Harness &h) {
 		const std::string path = scratch.file("c.bin");
 		std::string error;
 		TEST_EXPECT(io::write_file_atomic(path, charlie, error));
-		TEST_EXPECT(h.store.put_file(content::blob_key("JO", sha_of(charlie)), path, error));
+		TEST_EXPECT(h.store.put_file(content::blob_key(h.jo, sha_of(charlie)), path, error));
 	}
 	const std::vector<ContentFile> direct = { files[0], file_of("defs/c.def", charlie) };
 	json = json_of(
@@ -390,7 +391,7 @@ int test_push(Harness &h) {
 			const std::string path = scratch.file(("m" + std::to_string(i)).c_str());
 			std::string error;
 			TEST_EXPECT(io::write_file_atomic(path, bytes, error));
-			TEST_EXPECT(h.store.put_file(content::blob_key("JO", sha_of(bytes)), path, error));
+			TEST_EXPECT(h.store.put_file(content::blob_key(h.jo, sha_of(bytes)), path, error));
 			many.push_back(file_of("many/" + std::to_string(i) + ".def", bytes));
 		}
 	}
@@ -419,9 +420,12 @@ int test_push(Harness &h) {
 
 // A game's project through the games' admin routes (data_sets/data_set_routes.h): an expansion
 // of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
-// in its store, then the game made public and its key renamed, the file moving under the new key
-// (still held: the store's rows name the game) and the old key no project's; Joint Operations
-// kept from deletion while an expansion builds on it; the mod deleted with its files.
+// in its store, then the game made public and its key renamed, the file staying where it was (the
+// store names it by the game's id) and still held, the old key no project's (its 404 telling a
+// working copy bound to it to bind again); a push begun under the old key (its file uploaded
+// there) committed under the new one, its manifest read back; Joint Operations kept from deletion
+// while an expansion builds on it; the mod deleted at once, its files left for the data program's
+// game.purge, queued with its id.
 int test_game_projects(Harness &h) {
 	const auto admin = [&](const char *method, const std::string &path,
 							   const std::string &body = {}) {
@@ -448,7 +452,7 @@ int test_game_projects(Harness &h) {
 								"\"visibility\": \"public\"}"),
 			409, "duplicate_key"));
 
-	// A file in its store; made public and renamed, the file moves with it.
+	// A file in its store; made public and renamed, the file stays where it is.
 	TEST_EXPECT(json_of(h.upload("MOD", sha_of("mod file"), "mod file"), 200));
 	const std::string game = "/api/admin/data-sets/" + std::to_string(mod);
 	TEST_EXPECT(refused(admin("PATCH", game, "{\"key\": \"JO\"}"), 409, "duplicate_key"));
@@ -458,14 +462,14 @@ int test_game_projects(Harness &h) {
 			200);
 	TEST_EXPECT(json && std::string(json["data_set"]["key"].s()) == "MODDED" &&
 			std::string(json["data_set"]["visibility"].s()) == "public");
-	bool exists = true;
+	bool exists = false;
 	uint64_t size = 0;
 	std::string error;
-	TEST_EXPECT(h.store.head(content::blob_key("MOD", sha_of("mod file")), exists, size, error) &&
-			!exists);
-	TEST_EXPECT(h.store.head(content::blob_key("MODDED", sha_of("mod file")), exists, size, error) &&
-			exists);
-	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MOD", { h.admin }), 404, "not_found"));
+	const std::string mod_file = content::blob_key(mod, sha_of("mod file"));
+	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
+	const auto old_key = h.send("GET", "/api/content/projects/MOD", { h.admin });
+	TEST_EXPECT(refused(old_key, 404, "not_found") &&
+			body_text(old_key).find("bind the project again") != std::string::npos);
 	json = json_of(h.send("GET", "/api/content/projects/MODDED"), 200);
 	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed");
 	json = json_of(h.as_admin("POST", "/api/content/projects/MODDED/missing",
@@ -473,14 +477,39 @@ int test_game_projects(Harness &h) {
 			200);
 	TEST_EXPECT(json && json["missing"].size() == 0);
 
-	// Joint Operations stays while an expansion builds on it; the mod goes with its files.
+	// A push across a rename: its file uploaded under MODDED, the key renamed MODA, its revision
+	// pushed under MODA with nothing to upload again, its manifest read back.
+	const std::string across = "uploaded before the rename";
+	TEST_EXPECT(json_of(h.upload("MODDED", sha_of(across), across), 200));
+	TEST_EXPECT(json_of(admin("PATCH", game, "{\"key\": \"MODA\"}"), 200));
+	const std::vector<ContentFile> pushed = { file_of("mod.def", "mod file"),
+		file_of("across.def", across) };
+	json = json_of(
+			h.as_admin("POST", "/api/content/projects/MODA/missing", missing_body(pushed)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+	const std::string pushed_manifest = opennova::content::encode_manifest(pushed);
+	json = json_of(h.as_admin("POST", "/api/content/projects/MODA/revisions",
+						   push_body(0, "Across a rename", pushed_manifest)),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 1);
+	const auto read_back =
+			h.send("GET", "/api/content/projects/MODA/revisions/1/manifest", { h.admin });
+	TEST_EXPECT(read_back.code == 200 && body_text(read_back) == pushed_manifest);
+
+	// Joint Operations stays while an expansion builds on it; the mod goes at once, its files
+	// left for the data program's purge.
 	TEST_EXPECT(refused(admin("DELETE", "/api/admin/data-sets/" + std::to_string(h.jo)), 409,
 			"has_expansion"));
 	const auto gone = admin("DELETE", game);
 	TEST_EXPECT(gone.transport_ok && gone.code == 204);
-	TEST_EXPECT(h.store.head(content::blob_key("MODDED", sha_of("mod file")), exists, size, error) &&
-			!exists);
-	TEST_EXPECT(refused(h.send("GET", "/api/content/projects/MODDED", { h.admin }), 404, "not_found"));
+	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
+	const auto purge = h.pool.acquire()->query(
+			"SELECT count(*) FROM jobs WHERE kind = 'game.purge' AND state = 'queued' AND "
+			"(payload->>'data_set_id')::bigint = $1;",
+			{ BindValue(mod) });
+	TEST_EXPECT(!purge.empty() && purge.front().as_int(0).value_or(0) == 1);
+	TEST_EXPECT(
+			refused(h.send("GET", "/api/content/projects/MODA", { h.admin }), 404, "not_found"));
 	return 0;
 }
 

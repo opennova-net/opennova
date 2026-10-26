@@ -52,8 +52,10 @@ std::string id_text(int64_t id) {
 	return std::to_string(static_cast<long long>(id));
 }
 
-// One revision a build lays out: its project's key, its number and its manifest's SHA-256.
+// One revision a build lays out: its game's id (where the store keeps its files), its project's
+// key (the folder it is laid out in), its number and its manifest's SHA-256.
 struct Source {
+	int64_t data_set_id = 0;
 	std::string key;
 	int64_t revision = 0;
 	std::string manifest_sha256;
@@ -84,6 +86,7 @@ bool source_of(db::Database &db, const content::ContentProject &project, int64_t
 		why = project.key + " has no revision " + id_text(number);
 		return false;
 	}
+	out.data_set_id = project.id;
 	out.key = project.key;
 	out.revision = number;
 	out.manifest_sha256 = revision->manifest_sha256;
@@ -238,7 +241,7 @@ private:
 	std::string cache_;
 	proc::ProcessCommandRunner runner_;
 	std::string log_;
-	std::vector<std::string> synced_; // the projects whose files the cache took this build
+	std::vector<int64_t> synced_; // the games whose project's files the cache took this build
 };
 
 // The revision's files laid out in `dir` from the cache, its project's files synced down first.
@@ -246,8 +249,8 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 	const std::string manifest_file =
 			io::utf8_join(work_, "manifest-" + source.key + "-" + id_text(source.revision));
 	std::string text;
-	if (!store_.get_file(
-				content::manifest_key(source.key, source.manifest_sha256), manifest_file, why) ||
+	if (!store_.get_file(content::manifest_key(source.data_set_id, source.manifest_sha256),
+				manifest_file, why) ||
 			!io::read_file_text(manifest_file, text, why))
 		return Step::Transient;
 	std::vector<opennova::content::ContentFile> files;
@@ -256,11 +259,11 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 		why = source.label() + "'s manifest does not read" + (why.empty() ? "" : ": " + why);
 		return Step::Refused;
 	}
-	const std::string blobs = io::utf8_join(cache_, source.key);
-	if (std::find(synced_.begin(), synced_.end(), source.key) == synced_.end()) {
-		if (!store_.sync_down(content::project_prefix(source.key) + "blobs/", blobs, why))
+	const std::string blobs = io::utf8_join(cache_, id_text(source.data_set_id));
+	if (std::find(synced_.begin(), synced_.end(), source.data_set_id) == synced_.end()) {
+		if (!store_.sync_down(content::project_prefix(source.data_set_id) + "blobs/", blobs, why))
 			return Step::Transient;
-		synced_.push_back(source.key);
+		synced_.push_back(source.data_set_id);
 	}
 	for (const opennova::content::ContentFile &file : files) {
 		const fs::path from = io::os_path(io::utf8_join(blobs, file.sha256));

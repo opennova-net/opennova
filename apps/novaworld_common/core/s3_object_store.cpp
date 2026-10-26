@@ -127,13 +127,6 @@ bool S3ObjectStore::copy(std::string_view from_key, std::string_view to_key, std
 			timeouts_.transfer_ms, out, error);
 }
 
-bool S3ObjectStore::copy_prefix(
-		std::string_view from_prefix, std::string_view to_prefix, std::string &error) {
-	std::string out;
-	return run(s3("sync", { s3_url(with_slash(from_prefix)), s3_url(with_slash(to_prefix)) }),
-			timeouts_.transfer_ms, out, error);
-}
-
 bool S3ObjectStore::sync_down(
 		std::string_view prefix, const std::string &dir, std::string &error) {
 	std::string out;

@@ -124,8 +124,8 @@ struct Rig {
 			file.path = relative;
 			file.sha256 = io::sha256_hex(bytes.data(), bytes.size());
 			file.size = bytes.size();
-			if (!store.put_file(
-						content::blob_key(key, file.sha256), io::utf8_path(it->path()), error))
+			if (!store.put_file(content::blob_key(project->id, file.sha256),
+						io::utf8_path(it->path()), error))
 				return 0;
 			files.push_back(file);
 		}
@@ -134,7 +134,7 @@ struct Rig {
 		const std::string staged_path = temp.file(("manifest" + std::to_string(++staged)).c_str());
 		std::string error;
 		if (!io::write_file_atomic(staged_path, text, error) ||
-				!store.put_file(content::manifest_key(key, sha), staged_path, error))
+				!store.put_file(content::manifest_key(project->id, sha), staged_path, error))
 			return 0;
 		content::NewRevision revision;
 		revision.created_by = "admin taylor";

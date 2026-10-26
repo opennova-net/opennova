@@ -13,7 +13,9 @@
 // not hold left out, the removals since the stock install nothing to do, the version and the
 // missions read, trees/<id>/manifest.json beside the files, a run again on a building tree
 // continuing on its row afresh); a release that leaves a tree without a required archive
-// failing it; and the prune removing an orphaned tree's objects, idempotent.
+// failing it; the prune removing an orphaned tree's objects, idempotent; and a deleted game's
+// purge removing its trees' prefixes and its project's files (content/<id>/), another game's left,
+// idempotent.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -21,6 +23,7 @@
 #include "update/synthetic_trees.h"
 
 #include "core/local_object_store.h"
+#include "data_sets/content_repository.h"
 #include "data_sets/data_set_files.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
@@ -757,6 +760,34 @@ int test_prune() {
 	return 0;
 }
 
+// A deleted game's purge (game.purge): the prefixes of the trees it names and its project's files
+// and manifests (content/<id>/) removed whole, another game's project and tree left; one queued
+// for the game already holds its dedupe key; a run again finds nothing to remove and is done.
+int test_purge() {
+	namespace store = opennova::novaworld_server::content;
+	Rig rig("data_set_jobs_purge");
+	const int64_t gone = 9001; // its row deleted already: the purge reads none
+	const int64_t kept = rig.seeded("Joint Operations");
+	TEST_EXPECT(kept != 0);
+	const std::string blob(64, 'a'), manifest(64, 'b');
+	TEST_EXPECT(rig.put(store::blob_key(gone, blob), bytes("blob")) &&
+			rig.put(store::manifest_key(gone, manifest), bytes("manifest")) &&
+			rig.put(tree_prefix(41) + "version.txt", bytes("tree")) &&
+			rig.put(tree_prefix(42) + "resource.pff", bytes("tree")) &&
+			rig.put(store::blob_key(kept, blob), bytes("kept")) &&
+			rig.put(tree_prefix(43) + "version.txt", bytes("kept")));
+	const int64_t job = enqueue_game_purge(rig.db, gone, { 41, 42 });
+	TEST_EXPECT(job > 0 && enqueue_game_purge(rig.db, gone, { 41, 42 }) == 0);
+	TEST_EXPECT(rig.run_jobs() == 1 && rig.job_state(job) == "done");
+	TEST_EXPECT(rig.names_under(store::project_prefix(gone)).empty() &&
+			rig.names_under(tree_prefix(41)).empty() && rig.names_under(tree_prefix(42)).empty());
+	TEST_EXPECT(rig.has(store::blob_key(kept, blob)) && rig.has(tree_prefix(43) + "version.txt"));
+	// Again: nothing left to remove.
+	const int64_t again = enqueue_game_purge(rig.db, gone, { 41, 42 });
+	TEST_EXPECT(again > 0 && rig.run_jobs() == 1 && rig.job_state(again) == "done");
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -772,6 +803,7 @@ int main(int argc, char **argv) {
 		{ "apply", test_apply },
 		{ "apply_incomplete", test_apply_incomplete },
 		{ "prune", test_prune },
+		{ "purge", test_purge },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

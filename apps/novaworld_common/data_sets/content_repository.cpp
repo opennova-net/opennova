@@ -143,16 +143,16 @@ std::optional<ContentRevision> find_revision(db::Database &db, int64_t data_set_
 	return row_to_revision(rows.front());
 }
 
-std::string blob_key(std::string_view project_key, std::string_view sha256) {
-	return project_prefix(project_key) + "blobs/" + std::string(sha256);
+std::string blob_key(int64_t data_set_id, std::string_view sha256) {
+	return project_prefix(data_set_id) + "blobs/" + std::string(sha256);
 }
 
-std::string manifest_key(std::string_view project_key, std::string_view sha256) {
-	return project_prefix(project_key) + "manifests/" + std::string(sha256) + ".json";
+std::string manifest_key(int64_t data_set_id, std::string_view sha256) {
+	return project_prefix(data_set_id) + "manifests/" + std::string(sha256) + ".json";
 }
 
-std::string project_prefix(std::string_view project_key) {
-	return "content/" + std::string(project_key) + "/";
+std::string project_prefix(int64_t data_set_id) {
+	return "content/" + std::to_string(static_cast<long long>(data_set_id)) + "/";
 }
 
 std::vector<StoredBlob> missing_blobs(

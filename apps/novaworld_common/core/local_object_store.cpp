@@ -64,19 +64,6 @@ bool LocalObjectStore::copy(std::string_view from_key, std::string_view to_key, 
 	return copy_file_to(io::os_path(path_of(from_key)), io::os_path(path_of(to_key)), error);
 }
 
-bool LocalObjectStore::copy_prefix(
-		std::string_view from_prefix, std::string_view to_prefix, std::string &error) {
-	std::vector<StoredObject> objects;
-	if (!list(from_prefix, objects, error))
-		return false;
-	for (const StoredObject &object : objects) {
-		const std::string to_key = std::string(to_prefix) + object.key.substr(from_prefix.size());
-		if (!copy(object.key, to_key, error))
-			return false;
-	}
-	return true;
-}
-
 bool LocalObjectStore::sync_down(
 		std::string_view prefix, const std::string &dir, std::string &error) {
 	std::vector<StoredObject> objects;

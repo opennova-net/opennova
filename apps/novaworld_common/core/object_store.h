@@ -65,9 +65,6 @@ public:
 	virtual bool put_file(std::string_view key, const std::string &path, std::string &error) = 0;
 	virtual bool get_file(std::string_view key, const std::string &path, std::string &error) = 0;
 	virtual bool copy(std::string_view from_key, std::string_view to_key, std::string &error) = 0;
-	// Every object under `from_prefix` copied under `to_prefix` (server-side on S3).
-	virtual bool copy_prefix(
-			std::string_view from_prefix, std::string_view to_prefix, std::string &error) = 0;
 	virtual bool list(
 			std::string_view prefix, std::vector<StoredObject> &out, std::string &error) = 0;
 	// Every object under `prefix` downloaded into the directory `dir` at its key below the

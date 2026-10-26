@@ -376,9 +376,11 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 // PATCH /api/admin/data-sets/<id> — any of {display_name, game (a base's), updater_login,
 // command_file, retail_updater, key, visibility}, the shapes as the create's; after it the key
 // and visibility are both set or neither (the runtime takes neither: its releases arrive from
-// CI). A new key renames the project: its objects in the store move from content/<old>/ to
-// content/<new>/ first. 200 {"data_set"}; 400 invalid_json, invalid_field; 404 not_found; 409
-// duplicate_login, duplicate_key; 502 store_error (the objects did not move; nothing changed).
+// CI). A new key renames the project in its row alone: the store names a project's objects by
+// the game's id (content/<id>/, content_repository.h), so none moves and a push begun under the old
+// key lands where the renamed project's readers look; an editor bound to the old key binds again.
+// 200 {"data_set"}; 400 invalid_json, invalid_field; 404 not_found; 409 duplicate_login,
+// duplicate_key.
 crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -446,30 +448,8 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 		if (key.empty() != patch.visibility.value_or(row->visibility).empty())
 			return field_error(400, "invalid_field", key.empty() ? "key" : "visibility",
 					"key and visibility come together: a game with a key has a project");
-		// A rename: the project's objects copied under the new key first, so a refusal leaves the
-		// old ones where its rows name them; the old ones go once the row names the new key.
 		const bool rename = !row->key.empty() && key != row->key;
-		if (rename) {
-			if (content::find_project(*db_conn, key))
-				return duplicate_key();
-			std::string error;
-			if (store_ != nullptr &&
-					!store_->copy_prefix(
-							content::project_prefix(row->key), content::project_prefix(key), error)) {
-				std::fprintf(stderr,
-						"[http] PATCH /api/admin/data-sets/<id>: the object store did not copy "
-						"%s to %s: %s\n",
-						content::project_prefix(row->key).c_str(),
-						content::project_prefix(key).c_str(), error.c_str());
-				return json_error(502, "store_error", "the object store did not move the project");
-			}
-		}
-		const DataSetOutcome outcome = update_data_set(*db_conn, row->id, patch);
-		if (outcome != DataSetOutcome::Ok && rename && store_ != nullptr) {
-			std::string error;
-			store_->remove_prefix(content::project_prefix(key), error);
-		}
-		switch (outcome) {
+		switch (update_data_set(*db_conn, row->id, patch)) {
 			case DataSetOutcome::Ok:
 				break;
 			case DataSetOutcome::NotFound:
@@ -482,17 +462,10 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 			default:
 				return json_error(500, "internal_error");
 		}
-		if (rename) {
-			std::string error;
-			if (store_ != nullptr &&
-					!store_->remove_prefix(content::project_prefix(row->key), error))
-				std::fprintf(stderr,
-						"[http] PATCH /api/admin/data-sets/<id>: %s stays in the store: %s\n",
-						content::project_prefix(row->key).c_str(), error.c_str());
+		if (rename)
 			std::printf("[http] project %s of data set %lld renamed %s by %s\n",
 					loggable(row->key).c_str(), static_cast<long long>(row->id),
 					loggable(key).c_str(), loggable(creator_of(caller)).c_str());
-		}
 		crow::json::wvalue out;
 		out["data_set"] = data_set_json(*db_conn, *find_data_set(*db_conn, row->id));
 		return json_reply(200, out);
@@ -501,13 +474,12 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	}
 }
 
-// DELETE /api/admin/data-sets/<id> — the game: its trees, its project (its history and files)
-// and the row. 404 not_found; 409 in_use while a live server runs it, has_expansion while an
-// expansion builds on it. Each tree's objects go first, here and now (its prefix removed, the row
-// marked pruned as it goes: the row delete cascades the tree rows, so the tree.prune job could
-// never find them), then the row, then the project's objects (content/<key>/; ones the store
-// keeps are logged). 503 store_unavailable with no store or one that failed while a tree has
-// objects (the data set stays, the trees not yet removed still there). 204.
+// DELETE /api/admin/data-sets/<id> — the game: its row, its trees' rows and its project's history
+// (they cascade), and, with a store, its objects removed by the data program's game.purge
+// (data_set_jobs.h), enqueued in the delete's transaction: its trees' prefixes and its project's
+// files (content/<id>/), so the route answers at once however many files a retail game's project
+// holds. 404 not_found; 409 in_use while a live server runs it, has_expansion while an expansion
+// builds on it. 204.
 crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -528,20 +500,12 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 			return in_use();
 		if (!list_expansions_of(*db_conn, row->id).empty())
 			return has_expansion();
-		for (const DataSetTree &t : list_trees(*db_conn, row->id)) {
-			if (t.state == TreeState::Pruned && !t.pruned_at.empty())
-				continue;
-			std::string error;
-			if (store_ == nullptr || !store_->remove_prefix(tree_prefix(t.id), error)) {
-				std::fprintf(stderr,
-						"[http] DELETE /api/admin/data-sets/<id>: the object store kept "
-						"tree %lld's objects: %s\n",
-						static_cast<long long>(t.id), store_ ? error.c_str() : "no store");
-				return json_error(
-						503, "store_unavailable", "the object store did not remove the trees");
-			}
-			mark_tree_pruned(*db_conn, t.id);
-		}
+		db::Transaction tx(*db_conn);
+		// The trees whose objects the store may still hold: every one not pruned yet.
+		std::vector<int64_t> trees;
+		for (const DataSetTree &t : list_trees(*db_conn, row->id))
+			if (!(t.state == TreeState::Pruned && !t.pruned_at.empty()))
+				trees.push_back(t.id);
 		switch (delete_data_set(*db_conn, row->id)) {
 			case DataSetOutcome::Ok:
 				break;
@@ -554,16 +518,16 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 			default:
 				return json_error(500, "internal_error");
 		}
+		// With no store there are no objects: nothing to purge.
+		if (store_ != nullptr)
+			enqueue_game_purge(*db_conn, row->id, trees);
+		tx.commit();
 	} catch (const db::Error &e) {
 		return db_failure("DELETE /api/admin/data-sets/<id>", e);
 	}
-	std::string error;
-	if (!row->key.empty() && store_ != nullptr &&
-			!store_->remove_prefix(content::project_prefix(row->key), error))
-		std::fprintf(stderr, "[http] DELETE /api/admin/data-sets/<id>: %s stays in the store: %s\n",
-				content::project_prefix(row->key).c_str(), error.c_str());
-	std::printf("[http] data set %lld '%s' deleted by %s\n", static_cast<long long>(row->id),
-			loggable(row->display_name).c_str(), loggable(creator_of(caller)).c_str());
+	std::printf("[http] data set %lld '%s' deleted by %s%s\n", static_cast<long long>(row->id),
+			loggable(row->display_name).c_str(), loggable(creator_of(caller)).c_str(),
+			store_ != nullptr ? "; its objects' purge queued" : "");
 	return crow::response(204);
 }
 
