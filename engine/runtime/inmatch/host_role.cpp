@@ -27,6 +27,7 @@
 #include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
 #include <runtime/inmatch/server_spawn.h> // Player_InitPlayerSideWords (the mission start's body leg)
 #include <runtime/inmatch/server_tick.h>
+#include <runtime/inmatch/server_vehicle_spawn.h> // Server_InitEntityLimitTable (the rewind)
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_loadout.h>
@@ -1622,6 +1623,10 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
 		return false;
 	}
+	// The restart's mission start rebuilds the vehicle EntityLimit table, the consumed
+	// per-team slots with it [orig: Game_RestartRoundSP @0x5263DB -> Game_StartMission(1) ->
+	//  EntityLimit_InitTable @0x509A70 (the call @0x526182)].
+	Server_InitEntityLimitTable(state.host_owner.ctx);
 	if (state.client_runtime) {
 		state.host_loop.clear();
 		if (own_connection_at_baseline_)

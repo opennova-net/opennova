@@ -15,6 +15,7 @@
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
+#include <runtime/inmatch/server_vehicle_spawn.h> // Server_InitEntityLimitTable
 #include <runtime/inmatch/session_status.h>
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
 
@@ -561,6 +562,10 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 		const NapiNPServerCtx &ctx = boot.host->state.host_owner.ctx;
 		if (ctx.logs.profile != nullptr) ctx.logs.profile->write_mission_roster(ctx, kernel.world);
 	}
+	// Past the roster the start rebuilds the vehicle EntityLimit table, so a map change or a
+	// restart also restores the consumed per-team slots (the S2C 0x70 rows and the C2S 0x40
+	// gate read it) [orig: Game_StartMission @0x526182 -> EntityLimit_InitTable @0x509A70].
+	if (boot.host != nullptr) Server_InitEntityLimitTable(boot.host->state.host_owner.ctx);
 
 	// The load end: the authority's S2C 0x7B to every slot, then the load's spawn
 	// gate clears (D-NET-116) [orig: Game_StartMission @0x52625F..0x526267, @0x52631B].

@@ -516,50 +516,113 @@ bool check_loaded_model_reply_stamp() {
 	return expect(f.conn(0).reply.loaded_model_reply_frame == 777, "0x3D stamps the frame clock");
 }
 
+// The mission start's EntityLimit table: retail's 23 rows, in its order, rebuilt at every
+// start, behind the S2C 0x70 bytes and the C2S 0x40 gate.
+// [orig: Game_StartMission @0x526182 -> EntityLimit_InitTable @0x509A70 (23
+//  EntityLimit_SetEntry @0x500E50 calls); NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0;
+//  EntityLimit_TryConsume @0x5104C0]
 bool check_vehicle_spawn_availability() {
 	HostFixture f(1);
-	inmatch::NapiNPServerCtx::VehicleSpawnLimitRow row;
-	row.type_id = 7;
-	row.type_cap = 3;
-	row.per_team_flag = 0;
-	row.team_slots[1] = 2;
-	f.ctx.vehicle_spawn_limits.push_back(row);
-	inmatch::NapiNPServerCtx::VehicleSpawnLimitRow open;
-	open.type_id = 9;
-	f.ctx.vehicle_spawn_limits.push_back(open);
-	// One live team-1 deployable of type 7.
+	inmatch::Server_InitEntityLimitTable(f.ctx);
+	struct Row {
+		uint16_t id;
+		int32_t cap;
+		int32_t per_team;
+	};
+	const Row stock[] = {
+			{1292, 3, -1}, {1306, 2, -1}, {1307, 2, -1}, {2010, 2, -1}, {1308, 3, -1},
+			{1215, 3, -1}, {1300, 1, 3},  {1214, 1, 3},  {1291, 4, -1}, {1301, 2, -1},
+			{1302, 3, -1}, {1305, 3, -1}, {1294, 3, -1}, {1295, 2, -1}, {1304, 2, -1},
+			{1213, 2, -1}, {2015, 2, -1}, {1293, 3, -1}, {2003, 3, -1}, {1299, 3, -1},
+			{1200, 3, -1}, {1296, 1, 3},  {1303, 1, 3}};
+	bool rows_ok = f.ctx.vehicle_spawn_limits.size() == 23;
+	for (size_t i = 0; rows_ok && i < 23; ++i) {
+		const inmatch::NapiNPServerCtx::VehicleSpawnLimitRow &row = f.ctx.vehicle_spawn_limits[i];
+		rows_ok = row.type_id == stock[i].id && row.type_cap == stock[i].cap &&
+				row.per_team_flag == stock[i].per_team && row.team_slots[0] == stock[i].per_team &&
+				row.team_slots[69] == stock[i].per_team;
+	}
+	if (!expect(rows_ok, "the init holds retail's 23 rows, every team slot at the row's flag"))
+		return false;
+	// One live team-1 deployable of 1300 (cap 1).
 	w::Entity seed;
-	seed.item_id = 7;
+	seed.item_id = 1300;
 	seed.team = 1;
 	seed.has_item_def = true;
 	seed.flags = 0x1000u;
 	seed.kind = w::EntityKind::Item;
 	(void)f.world.registry.spawn(1, seed);
-	if (!expect(inmatch::Server_CountEntitiesByTypeAndTeam(f.world, 7, 1) == 1,
+	if (!expect(inmatch::Server_CountEntitiesByTypeAndTeam(f.world, 1300, 1) == 1,
 			"the live deployable counts"))
 		return false;
-	// The stock host config's unlimited_vehicles reads every row unlimited.
+	// The stock host config's unlimited_vehicles reads every row FF/FF.
 	// [orig: g_RulesUnlimitedVehicles @0x5105F5..0x5105FF; Config_SetDefaults @0x54D352]
+	std::vector<uint8_t> unlimited = {3};
+	for (const Row &row : stock) {
+		unlimited.push_back(static_cast<uint8_t>(row.id & 0xFFu));
+		unlimited.push_back(static_cast<uint8_t>(row.id >> 8));
+		unlimited.push_back(0xFF);
+		unlimited.push_back(0xFF);
+	}
+	unlimited.push_back(0);
+	unlimited.push_back(0);
 	std::vector<ProtocolMessage> replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
-	const std::vector<uint8_t> unlimited = {3, 7, 0, 0xFF, 0xFF, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
 					replies[0].payload == unlimited,
-			"0x70 carries FF/FF for every row under the stock unlimited_vehicles"))
+			"0x70 carries the 23 rows FF/FF under the stock unlimited_vehicles"))
 		return false;
+	// Limited, for the requester's team 1: (cap - live, FF) for a row with no per-team flag,
+	// (min(cap - live, slots), slots) for a per-team row.
 	f.ctx.config.unlimited_vehicles = false;
+	const uint8_t limited_pairs[23][2] = {
+			{3, 0xFF}, {2, 0xFF}, {2, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {0, 3},
+			{1, 3},    {4, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF}, {2, 0xFF},
+			{2, 0xFF}, {2, 0xFF}, {2, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF}, {3, 0xFF},
+			{1, 3},    {1, 3}};
+	std::vector<uint8_t> want = {3};
+	for (size_t i = 0; i < 23; ++i) {
+		want.push_back(static_cast<uint8_t>(stock[i].id & 0xFFu));
+		want.push_back(static_cast<uint8_t>(stock[i].id >> 8));
+		want.push_back(limited_pairs[i][0]);
+		want.push_back(limited_pairs[i][1]);
+	}
+	want.push_back(0);
+	want.push_back(0);
 	replies = f.dispatch(0, c2s::VEHICLE_SPAWN_AVAILABILITY_REQUEST, {});
-	const std::vector<uint8_t> want = {3, 7, 0, 2, 2, 9, 0, 0xFF, 0xFF, 0, 0};
 	if (!expect(replies.size() == 1 && replies[0].tag == s2c::VEHICLE_SPAWN_AVAILABILITY &&
 					replies[0].payload == want,
-			"0x70 carries min(cap - live, team slots) / team slots, then FF/FF for an open row"))
+			"0x70 carries the counted rows for the requester's team"))
 		return false;
-	// The spawn gate consumes a finite team slot.
-	if (!expect(inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 1, true) &&
-					f.ctx.vehicle_spawn_limits[0].team_slots[1] == 1,
+	// The spawn gate consumes a finite team slot, refuses a type at its cap and a type the
+	// table does not hold.
+	if (!expect(inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 1214, 1, true) &&
+					f.ctx.vehicle_spawn_limits[7].team_slots[1] == 2,
 			"an allowed spawn consumes a team slot"))
 		return false;
-	return expect(!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 2, false),
-			"a team without slots is refused");
+	if (!expect(!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 1300, 1, false) &&
+					!inmatch::Server_VehicleSpawnAllowed(f.ctx, f.world, 7, 1, false),
+			"a type at its cap, and one the table lacks, are refused"))
+		return false;
+	// The next mission start restores the consumed slot.
+	inmatch::Server_InitEntityLimitTable(f.ctx);
+	if (!expect(f.ctx.vehicle_spawn_limits.size() == 23 &&
+					f.ctx.vehicle_spawn_limits[7].team_slots[1] == 3,
+			"the next start rebuilds the table"))
+		return false;
+	// SetEntry updates the row it finds in place, and a full table takes nothing more.
+	// [orig: EntityLimit_SetEntry @0x500E50 - @0x500E72..0x500E7E, the cap @0x500E8B]
+	inmatch::Server_SetEntityLimitEntry(f.ctx, 1292, 5, 2);
+	const inmatch::NapiNPServerCtx::VehicleSpawnLimitRow &first = f.ctx.vehicle_spawn_limits[0];
+	if (!expect(f.ctx.vehicle_spawn_limits.size() == 23 && first.type_cap == 5 &&
+					first.per_team_flag == 2 && first.team_slots[5] == 2,
+			"an existing id is updated in place"))
+		return false;
+	for (uint16_t id = 3000; f.ctx.vehicle_spawn_limits.size() < 128; ++id)
+		inmatch::Server_SetEntityLimitEntry(f.ctx, id, 1, -1);
+	inmatch::Server_SetEntityLimitEntry(f.ctx, 4000, 1, -1);
+	return expect(f.ctx.vehicle_spawn_limits.size() == 128 &&
+					f.ctx.vehicle_spawn_limits.back().type_id != 4000,
+			"the table holds at most 128 rows");
 }
 
 // D-NET-699: the S2C 0x79 boundary kicks a connection the join validator flagged for a

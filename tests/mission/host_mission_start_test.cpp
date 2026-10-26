@@ -543,6 +543,9 @@ void run_single_player_retry_replays_the_own_join() {
 		CHECK(!hidden());
 		inmatch::SessionError reset_error;
 		CHECK(role.reset_to_baseline(reset_error));
+		// The restart is a mission start: it rebuilds the vehicle EntityLimit table, retail's
+		// 23 rows [orig: Game_RestartRoundSP @0x5263DB -> Game_StartMission(1) @0x526182].
+		CHECK(host.host_owner.ctx.vehicle_spawn_limits.size() == 23);
 	}
 }
 

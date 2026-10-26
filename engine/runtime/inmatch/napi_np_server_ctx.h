@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -793,18 +794,22 @@ struct NapiNPServerCtx {
 
 	// The host EntityLimit table behind the vehicle-spawn availability reply
 	// (C2S 0x42 -> S2C 0x70) and the C2S 0x40 spawn gate: one row per spawnable
-	// items.def id. Retail's 73-dword rows carry the id (row[0]), the type cap
-	// (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
-	// cap) and the per-team slot counts (row[3 + team], -1 = unlimited).
-	// Empty = no limit table loaded: the reply carries only its terminator and
-	// every spawn is refused, exactly as an empty g_EntityLimitTable.
+	// items.def id, at most 128. Retail's 73-dword rows carry the id (row[0]), the
+	// type cap (row[1], -1 = unlimited), the per-team flag (row[2], -1 = no per-team
+	// cap) and the 70 per-team slot counts (row[3 + team], -1 = unlimited). Every
+	// mission start rebuilds it from the 23 rows Server_InitEntityLimitTable holds
+	// (server_vehicle_spawn.h); empty, the reply carries only its terminator and
+	// every spawn is refused, as an empty g_EntityLimitTable.
 	// [orig: g_EntityLimitTable @0xC7B480 / g_EntityLimitCount @0xC84680;
-	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; EntityLimit_TryConsume @0x5104C0]
+	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0; EntityLimit_TryConsume @0x5104C0;
+	//  EntityLimit_SetEntry @0x500E50 (128 rows @0x500E8B, 292-byte rows, 0x46 slots @0x500EBC)]
+	static constexpr std::size_t kEntityLimitRows = 128;
+	static constexpr std::size_t kEntityLimitTeamSlots = 70;
 	struct VehicleSpawnLimitRow {
 		uint16_t type_id = 0;
 		int32_t type_cap = -1;                // row[1]
 		int32_t per_team_flag = -1;           // row[2]
-		std::array<int32_t, 8> team_slots{};  // row[3 + team]
+		std::array<int32_t, kEntityLimitTeamSlots> team_slots{}; // row[3 + team]
 	};
 	// The table is bypassed while the host config's unlimited_vehicles is set
 	// (GameConfig::unlimited_vehicles, stock 1): 0xFF/0xFF rows on the wire and

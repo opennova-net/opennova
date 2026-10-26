@@ -257,8 +257,15 @@ int main() {
 		CHECK(kernel.world.rules.mp_session);
 
 		// --- phase B: the mission start, then the load's end -----------------
+		// The vehicle EntityLimit table is the mission start's: empty past the boot, retail's
+		// 23 rows (1292 first, 1303 last) past the start [orig: Game_StartMission @0x526182 ->
+		// EntityLimit_InitTable @0x509A70].
+		CHECK(ctx.vehicle_spawn_limits.empty());
 		CHECK(inmatch::start_host_mission(host.boot, inmatch::HostStartDevice{}, error));
 		CHECK(error.empty());
+		CHECK(ctx.vehicle_spawn_limits.size() == 23);
+		CHECK(!ctx.vehicle_spawn_limits.empty() && ctx.vehicle_spawn_limits.front().type_id == 1292 &&
+				ctx.vehicle_spawn_limits.back().type_id == 1303);
 		CHECK(!kernel.mission_start_pending);
 		CHECK(kernel.have_baseline);
 		CHECK(host.session.state() == inmatch::State::Running);
