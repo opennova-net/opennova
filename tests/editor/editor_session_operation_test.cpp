@@ -192,13 +192,17 @@ static int test_slot_cancels_between_steps() {
 	return 0;
 }
 
-// A finish that starts the next operation (a game you own's open going on to its import): the slot is free as it
-// runs, so the next starts; the first's outcome names the next (then), the next's names the first (follows), a
-// cancelled one's too; an operation started outside a finish follows nothing.
+// A finish that starts the next operation (a game you own's open going on to its import, a base export between
+// them): the slot is free as it runs, so the next starts; each finished one's outcome names the next (then), and
+// each that goes on names the work's first operation (follows), a cancelled one's too; one that hands on its id (a
+// base export's Build) goes on under it, naming none as then; an operation started outside a finish follows
+// nothing.
 struct ChainOperation : FakeOperation {
 	OperationSlot &slot;
 	std::unique_ptr<SessionOperation> next;
+	bool hands_on = false;
 	ChainOperation(Tally &t, OperationSlot &s, std::unique_ptr<SessionOperation> n) : FakeOperation(t, 10), slot(s), next(std::move(n)) {}
+	bool hands_on_id() const override { return hands_on; }
 	OperationOutcome finish(SessionCore &core) override {
 		OperationOutcome outcome = FakeOperation::finish(core);
 		slot.start(std::move(next));
@@ -228,6 +232,23 @@ static int test_slot_follows_a_finish() {
 	Tally alone;
 	TEST_EXPECT(slot.start(std::make_unique<FakeOperation>(alone, 10)) && slot.run_to_end() && slot.finish(core) &&
 	            slot.last().follows == 0 && slot.last().then == 0);
+	// Three: each that goes on follows the first.
+	Tally opening, base_export, importing;
+	const uint64_t work = slot.start(std::make_unique<ChainOperation>(
+	        opening, slot, std::make_unique<ChainOperation>(base_export, slot, std::make_unique<FakeOperation>(importing, 10))));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work && slot.last().then == work + 1);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work + 1 && slot.last().follows == work &&
+	            slot.last().then == work + 2);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == work + 2 && slot.last().follows == work &&
+	            slot.last().then == 0 && !slot.running());
+	// One that hands on its id: the next goes on under it, no then.
+	Tally exporting, building;
+	auto handing = std::make_unique<ChainOperation>(exporting, slot, std::make_unique<FakeOperation>(building, 10));
+	handing->hands_on = true;
+	const uint64_t asked = slot.start(std::move(handing));
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == asked && slot.last().then == 0 &&
+	            slot.status().id == asked);
+	TEST_EXPECT(slot.run_to_end() && slot.finish(core) && slot.last().id == asked && building.finishes == 1);
 	return 0;
 }
 

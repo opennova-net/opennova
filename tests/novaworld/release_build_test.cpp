@@ -8,9 +8,11 @@
 // draft of, its one section the game's; published, release.apply builds the game's tree from
 // nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
 // equal to the edited revision's export. Our own game's first revision: a full package whose
-// tree holds the UPDATE.WIZ naming its product. And the refusals: a game that names no updater
-// product, and a revision that is no project (its export fails, what the tool said kept as the
-// build's log).
+// tree holds the UPDATE.WIZ naming its product. A retail expansion over its base game's revision
+// from folders named neither by the projects' keys nor side by side (the base laid out by its
+// key, the expansion's base_project pointed at it). And the refusals: a game that names no
+// updater product, a revision that is no project (its export fails, what the tool said kept as
+// the build's log), and an expansion whose project names no base game's project.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -165,8 +167,10 @@ struct Rig {
 		return own;
 	}
 
-	// A release built from revision `revision` of `key`, its build queued: its id.
-	int64_t release(const std::string &key, int64_t revision, const char *version) {
+	// A release built from revision `revision` of `key` (an expansion's over its base game's
+	// revision `base_revision`), its build queued: its id.
+	int64_t release(const std::string &key, int64_t revision, const char *version,
+			int64_t base_revision = 0) {
 		const auto project = content::find_project(db, key);
 		if (!project)
 			return 0;
@@ -175,6 +179,7 @@ struct Rig {
 		made.created_by = "admin taylor";
 		made.data_set_id = project->id;
 		made.content_revision = revision;
+		made.base_revision = base_revision;
 		made.version = version;
 		const int64_t id = hosted::create_built_release(db, made);
 		hosted::enqueue_release_build(db, id);
@@ -368,6 +373,56 @@ static int test_own_full() {
 	return 0;
 }
 
+// A retail expansion's release over its base game's revision, its author's folders named neither by
+// the projects' keys nor side by side as the keys would be ("Joint Operations" and "Escalation"): the
+// build lays the base out by its key and points the expansion's base_project at it, the package the
+// expansion's section alone. An expansion whose project names no base game's project is refused.
+static int test_expansion_folders() {
+	Rig rig("opennova_release_build_expansion");
+	const std::string install = rig.temp.file("install"), base = rig.temp.file("Joint Operations"),
+					  expansion = rig.temp.file("mods/Escalation");
+	std::string minted;
+	TEST_EXPECT(minted_install::mint(install, minted));
+	TEST_EXPECT(rig.project({ "new", base, "--title", "Stock", "--game", "jo", "--install", install }) == 0);
+	TEST_EXPECT(rig.project({ "import", base, "--all", "--install", install }) == 0);
+	TEST_EXPECT(rig.push("JO", base, 0, "stock import") == 1);
+	TEST_EXPECT(rig.project({ "new", expansion, "--title", "Escalation", "--game", "jo", "--expansion", "jox01",
+						"--base-project", "../../Joint Operations" }) == 0);
+	TEST_EXPECT(rig.project({ "import", expansion, install, "--all", "--expansion", minted_install::kExpansion,
+						"--replace" }) == 0);
+	TEST_EXPECT(rig.push("JOX01", expansion, 0, "stock import") == 1);
+	const int64_t id = rig.release("JOX01", 1, "1.3.0", 1);
+	TEST_EXPECT(id > 0);
+	rig.run_jobs();
+	const auto release = hosted::find_release(rig.db, id);
+	TEST_EXPECT(release.has_value());
+	if (!release)
+		return 1;
+	if (release->status != hosted::ReleaseStatus::Draft)
+		std::fprintf(stderr, "release %s: %s\n%s\n", hosted::release_status_name(release->status),
+				release->error.c_str(), release->build_log.c_str());
+	TEST_EXPECT(release->status == hosted::ReleaseStatus::Draft &&
+			release->build_log.find("base_project \"../../Joint Operations\" at ../JO") !=
+					std::string::npos);
+	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
+	TEST_EXPECT(sections.size() == 1 && sections[0].command_file == "JOEPTR.CMD");
+
+	// An expansion project on the game install's base game: no base game's project to lay out.
+	const std::string loose = rig.temp.file("Loose");
+	TEST_EXPECT(rig.project({ "new", loose, "--title", "Loose", "--game", "jo", "--expansion", "jox01",
+						"--install", install }) == 0);
+	TEST_EXPECT(rig.push("JOX01", loose, 1, "no base project") == 2);
+	const int64_t refused = rig.release("JOX01", 2, "1.3.1", 1);
+	rig.run_jobs();
+	const auto invalid = hosted::find_release(rig.db, refused);
+	TEST_EXPECT(invalid && invalid->status == hosted::ReleaseStatus::Invalid &&
+			invalid->error.find("names no base game's project") != std::string::npos);
+	if (release->status == hosted::ReleaseStatus::Draft)
+		std::printf("expansion: JOX01 r1 built over JO r1 from folders of other names; one naming "
+					"no base project refused\n");
+	return 0;
+}
+
 // A game that names no updater product, and a revision that is no project: each release invalid
 // with its reason, the second with what the export said.
 static int test_refusals() {
@@ -409,6 +464,7 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	failures += test_retail_whole();
 	failures += test_own_full();
+	failures += test_expansion_folders();
 	failures += test_refusals();
 	if (failures == 0)
 		std::printf("release_build: all tests passed\n");

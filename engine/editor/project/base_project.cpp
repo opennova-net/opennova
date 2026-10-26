@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/export_build.h>
 
 namespace fs = std::filesystem;
 
@@ -31,7 +32,8 @@ std::string base_project_root(const std::string &project_root, const ProjectExpa
 }
 
 bool base_project_game_dir(const std::string &project_root, const ProjectExpansion &expansion,
-                           const std::string &target_game, std::string &out, Diagnostic &error) {
+                           const std::string &target_game, std::string &out, Diagnostic &error,
+                           ProjectDocument *document) {
 	out.clear();
 	const std::string root = base_project_root(project_root, expansion);
 	if (root.empty()) return fail(error, "The project names no base game's project.");
@@ -41,6 +43,7 @@ bool base_project_game_dir(const std::string &project_root, const ProjectExpansi
 		return fail(error, "The base game's project " + expansion.base_project + " (" + root +
 		                           ") does not open: " + why.message);
 	out = ProjectPaths::for_root(root).export_dir(base);
+	if (document) *document = base;
 	if (!base.expansion.standalone())
 		return fail(error, "The base game's project " + expansion.base_project + " builds as the expansion " +
 		                           base.expansion.name +
@@ -81,6 +84,19 @@ std::string sibling_base_project(const std::string &new_root, const std::string 
 			return "../" + name;
 	}
 	return std::string();
+}
+
+BaseExport base_export_of(const std::string &project_root, const ProjectExpansion &expansion,
+                          const std::string &target_game) {
+	BaseExport out;
+	out.root = base_project_root(project_root, expansion);
+	ProjectDocument base;
+	if (!base_project_game_dir(project_root, expansion, target_game, out.export_dir, out.refusal, &base)) return out;
+	out.replaceable = export_replaces(out.export_dir, base.project_id);
+	std::string sources;
+	out.current = export_sources_of(out.export_dir, base.project_id, sources) && !sources.empty() &&
+	              sources == project_files_stamp(out.root, out.export_dir);
+	return out;
 }
 
 } // namespace opennova::editor

@@ -589,7 +589,10 @@ it has a key, its project (`../data_sets/content_repository.h`; the editor's rou
 the update releases (1SFS packages) the data program validates and builds into each game's tree
 and the update listener serves. Every release of a game with a project is built from one of its
 revisions (`POST /api/admin/content/projects/<key>/releases`, the `release.build` job,
-`../data_sets/release_build.h`); only a game with none, OpenNova's runtime, has its packages
+`../data_sets/release_build.h`: each revision laid out in a folder of its project's key, an
+expansion's base game's revision beside it and exported first, the laid-out expansion's
+`base_project` pointed at it, so the folders an author keeps the projects in never matter);
+only a game with none, OpenNova's runtime, has its packages
 uploaded (web begins the package's multipart upload, takes each part's PUT, 32 MiB a part,
 inside Cloudflare's request limits, and completes it). Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an

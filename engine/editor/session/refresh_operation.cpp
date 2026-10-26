@@ -20,7 +20,12 @@ OperationProgress RefreshOperation::progress() const {
 OperationOutcome RefreshOperation::finish(SessionCore &core) {
 	const ImportRunResult imported = core.absorb_refresh(refresh_);
 	OperationOutcome outcome;
-	if (!reimport_) return outcome;
+	// A Rescan reads an expansion's base game again too: its project exported first where its export is
+	// missing or older than it (SessionCore::check_base_export).
+	if (!reimport_) {
+		core.check_base_export();
+		return outcome;
+	}
 	// The pass's findings are Problems rows already (they ride the scan); the ones on the sources
 	// asked for are also what the Reimport came to.
 	std::vector<std::string> asked;

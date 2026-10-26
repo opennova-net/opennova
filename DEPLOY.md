@@ -1337,7 +1337,9 @@ on which release).
 A **release** is built from a revision: **Release r<head>...** on the game's page, or the
 editor's **Build > Release...** (`POST /api/admin/content/projects/<key>/releases`), queues
 the data program's `release.build`, which exports the revision with `opennova-project` (an
-expansion's beside its base game's project), packs it whole with `opennova-update-tool build
+expansion's after its base game's revision, laid out by its key beside it, the expansion's
+`base_project` pointed there whatever folder its author keeps the base game's project in),
+packs it whole with `opennova-update-tool build
 --full` (its removals since the last release carried, and a retail game's since its stock
 revision) and validates it, leaving a draft (or `invalid`, with what the tools said in its
 log). Nothing is uploaded on the page: a game with a project refuses an uploaded package

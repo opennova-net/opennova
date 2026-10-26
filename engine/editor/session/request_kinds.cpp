@@ -451,7 +451,8 @@ constexpr RequestKindRow kRows[] = {
 			"no base game's project is named: make the base game's first); no placeholder made, and once "
 			"it opens every file of its game imported, the base game's whole install or the expansion's own "
 			"files, planned and written over whatever the project holds of their names, the features they "
-			"need set first: the operation that follows the open (its last_operation's then).")
+			"need set first: the operation that follows the open (its last_operation's then), after the base "
+			"game's export where an expansion's base project is exported first.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
 			                                    F::GameInstall, F::All }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
@@ -591,7 +592,9 @@ constexpr RequestKindRow kRows[] = {
 			"outcome names it); a build running already serves it, where it packs. rehash: every "
 			"file read again, the build cache set aside. report false: its result panel does not open as it "
 			"ends (a build asked over the wire, the person's work left as it is). Unsaved edits wait on "
-			"the prompt first.")
+			"the prompt first. An expansion of a base game's project exports that project first where its "
+			"export is missing or older than it (a base_export operation, which a Build, a Play or an Export "
+			"joins; the build then goes on under its id).")
 			.takes(request_params({}, { F::OutDir, F::Rehash, F::Report }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
@@ -626,7 +629,8 @@ constexpr RequestKindRow kRows[] = {
 			"taken from the project's folder when relative; refused inside the project but its export "
 			"folder) as what ships: a standalone game's archives and loose files (the runtime's files "
 			"beside them when project.opennova's export.include_runtime asks), an expansion's "
-			"expansion/<name>/ laid out as in an install, with export.json naming the project. The "
+			"expansion/<name>/ laid out as in an install, with export.json naming the project and the "
+			"stamp of its files the build was planned on (sources). The "
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
 			"lands. rehash: every file read again.")

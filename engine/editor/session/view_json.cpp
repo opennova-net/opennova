@@ -566,8 +566,9 @@ constexpr ViewSectionRow kSections[] = {
 			"The selection in the active document, over any of its rows: its primary record and "
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
-			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply or "
-			"rename_apply; done and total in its unit, what it works on, cancellable, what it reads "
+			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply, "
+			"rename_apply, base_export or a content_ one; done and total in its unit, what it works on, "
+			"cancellable, what it reads "
 			"and writes), what the last one came to, the validation the polls step (running, the "
 			"files done of total: the problems are the last composed until it ends) and the last "
 			"build." },
@@ -815,7 +816,7 @@ JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
 	// An import's write: the files it wrote and those it did not reach, each only when it has any.
 	if (!outcome.imported.empty()) out.set("imported", io::json_string_array(outcome.imported));
 	if (!outcome.not_imported.empty()) out.set("not_imported", io::json_string_array(outcome.not_imported));
-	// The operation its finish started to go on with its work, and the one it goes on from, each only when it has one.
+	// The operation its finish started to go on with its work, and the work's first operation, each only when it has one.
 	if (outcome.then) out.set("then", json_number(double(outcome.then)));
 	if (outcome.follows) out.set("follows", json_number(double(outcome.follows)));
 	return out;

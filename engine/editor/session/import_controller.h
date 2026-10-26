@@ -46,7 +46,8 @@ public:
 	void set_dependencies(bool with_dependencies);
 	void cancel();
 	void import_files(const EditorRequest &request);
-	// A game you own's import (new_project's all, started as its Open finishes): every file of the game install,
+	// A game you own's import (new_project's all, started as its Open finishes, or as the base game's export that
+	// Open started ends: SessionCore::start_stock_import): every file of the game install,
 	// or for an expansion project the own files of the installed expansion of its name, from the project's game
 	// install; the features those files need (with the base game's, features_files_need) set in the project file
 	// first, then planned and imported as one operation (ImportOperation of its own plan, no dialog), the install's

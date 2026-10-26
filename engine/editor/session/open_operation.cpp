@@ -21,18 +21,23 @@ bool OpenOperation::step(const StepBudget &budget) {
 	if (!listed_) {
 		// The game install's names first, the project's own install (its local.json, else the one
 		// the editor last chose): the Import fixes read them. For an expansion of a project's base game
-		// (T5), that project's export in its place (SessionCore::base_game).
+		// (T5), that project's export in its place (SessionCore::base_game), weighed against the project as
+		// it stands: one the session exports again as the Open finishes (SessionCore::check_base_export) is
+		// read once that is in, not here.
 		std::string base = local_.game_install;
+		bool read = true;
 		if (document_.expansion.on_base_project()) {
-			Diagnostic why;
-			base_project_game_dir(paths_.root, document_.expansion, document_.target_game, base, why);
+			base_export_ = base_export_of(paths_.root, document_.expansion, document_.target_game);
+			base = base_export_.export_dir;
+			read = !base_export_.resolved() || base_export_.current || !base_export_.replaceable;
 		}
+		listed_ = true;
+		if (!read) return false;
 		install_files_ = list_retail_file_names(base, document_);
 		// And an expansion's base game's, which its build's gate reads (ADR 0046 S16), and its layer under the
 		// graph, built in the steps that follow.
 		base_files_ = list_base_file_names(base, document_);
 		if (!document_.expansion.standalone()) layer_ = std::make_unique<BaseLayerBuild>(base, document_);
-		listed_ = true;
 		return false;
 	}
 	if (layer_ && !layer_->done()) {

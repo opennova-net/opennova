@@ -211,15 +211,15 @@ JsonValue ask(Cli &cli, Q kind, const JsonValue &args, std::string &error) {
 
 // What the operation a request's `outcome` names came to once the operations ran (the operation
 // query's last_operation: id, kind, end, findings, and an import's write's imported and
-// not_imported), or the one its finish started to go on with its work, which ran after it (it
-// `follows` the one named: a game you own's new project goes on from its open to its import);
-// null when the request started or joined none.
-JsonValue ended_operation(Cli &cli, const JsonValue &outcome) {
+// not_imported), or with `chain` the last of those that went on with its work after it (each
+// `follows` the one named: a game you own's new project goes on from its open to its import, its
+// base game's export between them where one runs); null when the request started or joined none.
+JsonValue ended_operation(Cli &cli, const JsonValue &outcome, bool chain = false) {
 	const double id = outcome.get_number("operation", 0.0);
 	if (id == 0.0) return JsonValue();
 	std::string error;
 	const JsonValue ended = at(ask(cli, Q::Operation, JsonValue(), error), "last_operation");
-	return ended.get_number("id", -1.0) == id || ended.get_number("follows", -1.0) == id ? ended : JsonValue();
+	return ended.get_number("id", -1.0) == id || (chain && ended.get_number("follows", -1.0) == id) ? ended : JsonValue();
 }
 
 // A request's outcome with what the operation it started came to folded in (S13 A3: opening a
@@ -245,12 +245,12 @@ JsonValue settled(const JsonValue &outcome, const JsonValue &ended) {
 // A request handled and the operation it starts run to its end (an Open, a refresh, an import, a
 // rename, a build): what it came to (action_outcome_to_json's: done, the operation, the findings),
 // what the operation came to folded in (settled).
-JsonValue handled(Cli &cli, const EditorRequest &request) {
+JsonValue handled(Cli &cli, const EditorRequest &request, bool chain = false) {
 	assert(names_request(cli.row, request.kind) && "a verb sends only the requests its row names");
 	cli.session.handle(request);
 	const JsonValue outcome = editor::action_outcome_to_json(cli.session.outcome());
 	cli.session.run_operations();
-	return settled(outcome, ended_operation(cli, outcome));
+	return settled(outcome, ended_operation(cli, outcome, chain));
 }
 
 // A request the verb sends: handled, its findings printed on the error stream.
@@ -355,7 +355,8 @@ void print_setup_failure(Cli &cli, const JsonValue &outcome) {
 // sets it as the editor's project settings set it (the project's .opennova/local.json, replacing the
 // install it names). new --all (a game you own) is made on --install's install, which the project
 // then names, every file of its game imported as it opens (new_project's all, the operation that
-// follows its open). False, said why, when the project does not open or the install is not set
+// follows its open, after its base game's export where one runs first). False, said why, when the project
+// does not open or the install is not set
 // (exit 2).
 bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string &dir = args.positional.front();
@@ -371,7 +372,8 @@ bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		first.all = stock;
 		if (stock) first.game_install = install;
 	}
-	const JsonValue opened = handled(cli, first);
+	// A game you own's: what its import came to, the last of the work its new project began.
+	const JsonValue opened = handled(cli, first, stock);
 	if (!done(opened) || !project_open(cli)) {
 		print_setup_failure(cli, opened);
 		if (!has_error(items(opened, "findings")))
@@ -1340,8 +1342,9 @@ constexpr VerbRow kRows[] = {
 	     "build the project, then copy the build into its export folder as what ships (default:\n"
 	     "project.opennova's export.output; --out from where the command runs, replaced only when\n"
 	     "missing, empty or an export of this project): a standalone game's archives and loose\n"
-	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project\n"
-	     "(--json: the state query's import and operation)")
+	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project;\n"
+	     "an expansion of a base game's project exports that project first, as it opens, when its\n"
+	     "export is missing or older than it (--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

@@ -7,9 +7,11 @@
 //
 //   release.build  {release_id}, cap 1. The release must be building. Its project's revision
 //                  is laid out from the store (every file by its SHA-256 from the program's own
-//                  cache of the project's files, synced down once per build: sync_down), an
-//                  expansion's beside its base game's revision where its project.opennova's
-//                  base_project names it, and exported by opennova-project. Every package is
+//                  cache of the project's files, synced down once per build: sync_down), each in
+//                  a folder of its project's key, an expansion's beside its base game's revision
+//                  with the laid-out project.opennova's base_project pointed there (whatever
+//                  folder its author kept the base in; one naming no base game's project is
+//                  refused), and exported by opennova-project, the base first. Every package is
 //                  whole (--full: every file of the export a row, so the jointops and dfx2 zips
 //                  install their game into an empty folder from it), carrying the removals
 //                  since the data set's published release (--previous) and leaving out the

@@ -38,6 +38,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/export_build.h>
 #include <editor/run/play_lease.h>
+#include <editor/session/base_export.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/build_result.h>
 #include <editor/session/clip_sounds.h>
@@ -249,6 +250,7 @@ bool SessionCore::cancel_operation(bool asked) {
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
 	const bool plan = running->kind() == OperationKind::ImportPlan;
+	const bool base = running->kind() == OperationKind::BaseExport;
 	const bool finishes = running->finishes_on_cancel();
 	if (!operations_.cancel()) {
 		if (asked) refuse_now(CoreFinding::OperationNotCancellable, "This cannot be cancelled now: wait for " + noun + " to finish.");
@@ -265,6 +267,14 @@ bool SessionCore::cancel_operation(bool asked) {
 		view_.dialogs.import_preview.planning = false;
 		touch(ViewConcern::Dialogs);
 	}
+	// A base export the person cancelled: the base game read as its folder holds it (the export before, or none
+	// to read). Cancelled by a close or a quit, the project goes with it.
+	if (base && asked) {
+		imports().refresh_install_files();
+		read_install_expansions();
+		hold_for_base();
+		start_stock_import(); // a game you own's import that waited on it goes on
+	}
 	const std::string line = "Cancelled " + noun + ".";
 	if (asked) view_.activity.status = line;
 	note(line);
@@ -274,6 +284,11 @@ bool SessionCore::cancel_operation(bool asked) {
 
 void SessionCore::finish_operation() {
 	operations_.finish(*this);
+	// A base export another operation kept from starting (an import made as the project opened) weighed now.
+	if (base_check_due_ && !operations_.running()) {
+		base_check_due_ = false;
+		check_base_export();
+	}
 	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
 	workspace_tidies(*this); // a refresh, an import or a rename moved the files the workspace names
@@ -505,7 +520,12 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	problems().set_base_layer(open.take_base_layer()); // an expansion's base game under the graph
 	problems().set_base_files(base_game_files(base_game(), *view_.project.document)); // and under its files
 	read_install_expansions(); // the project's install's, before its requirements weigh them
+	base_finding_ = Diagnostic();
+	base_check_due_ = false;
 	absorb_refresh(open.refresh());
+	// An expansion of a project's base game: its base project exported first where the export is missing or
+	// older than the project (weighed in the Open's steps), the base unread meanwhile.
+	if (view_.project.document->expansion.on_base_project()) weigh_base_export(open.base_export(), BuildAfterBase());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
 	navigation().clear(); // its history starts where it reopened, with no place behind it
 	content().project_opened(); // its binding to a content project, ADR 0069
@@ -515,12 +535,16 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	touch(ViewConcern::Project);
 	touch(ViewConcern::Operation); // no build yet
 	touch(ViewConcern::Output);
-	// A game you own's new project goes on to import every file of its game: the operation that follows this one.
-	if (!stock_import_.empty() && stock_import_ == paths_.root) {
-		stock_import_.clear();
-		imports().import_stock();
-	}
+	// A game you own's new project goes on to import every file of its game: the operation that follows this one,
+	// or the one that follows its base game's export where that runs first (absorb_base_export).
+	start_stock_import();
 	return outcome;
+}
+
+void SessionCore::start_stock_import() {
+	if (stock_import_.empty() || stock_import_ != paths_.root || !view_.project.open || operations_.running()) return;
+	stock_import_.clear();
+	imports().import_stock();
 }
 
 bool SessionCore::close_project() {
@@ -883,6 +907,9 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 				// moves (T5: its export's).
 				imports().refresh_install_files();
 				read_install_expansions();
+				// A base game's project to play over: exported first where its export is missing or older
+				// than it (none now: the hold let go).
+				check_base_export();
 			}
 			if (features_changed || expansion_changed) {
 				// The requirements follow the features and the expansion, over the files as the scan
@@ -1484,11 +1511,106 @@ std::string SessionCore::game_install() const {
 std::string SessionCore::base_game() const {
 	if (!view_.project.open || !view_.project.document->expansion.on_base_project()) return game_install();
 	// The base project's export folder, where its project reads (one that does not says so in Problems:
-	// requirements_of); its absence is the build's gate's to say (build.expansion.base_missing).
+	// requirements_of), which the session exports itself (check_base_export).
 	std::string dir;
 	Diagnostic why;
 	base_project_game_dir(paths_.root, view_.project.document->expansion, view_.project.document->target_game, dir, why);
 	return dir;
+}
+
+bool SessionCore::check_base_export() {
+	return check_base_export(BuildAfterBase());
+}
+
+bool SessionCore::check_base_export(const BuildAfterBase &after) {
+	if (!view_.project.open || !view_.project.document->expansion.on_base_project()) {
+		base_finding_ = Diagnostic();
+		problems().hold_validation(false);
+		return false;
+	}
+	const ProjectDocument &doc = *view_.project.document;
+	return weigh_base_export(base_export_of(paths_.root, doc.expansion, doc.target_game), after);
+}
+
+bool SessionCore::weigh_base_export(const BaseExport &base, const BuildAfterBase &after) {
+	const ProjectDocument &doc = *view_.project.document;
+	bool started = false;
+	if (base.resolved() && !base.current && base.replaceable) {
+		// What holds the export's files open lets them go first: the export replaces the folder.
+		problems().release_base_files();
+		started = start_operation(std::make_unique<BaseExportOperation>(base.root, base.export_dir, doc,
+		                                                                preferences_.values(), after)) != 0;
+		if (started) {
+			base_finding_ = Diagnostic();
+			note("Exporting the base game's project " + doc.expansion.base_project + " first: the expansion plays over "
+			     "its export, which is missing or older than the project.");
+			view_.activity.status = "Exporting the base game's project...";
+		} else {
+			// Another operation holds the slot: weighed again once it ends (finish_operation).
+			base_check_due_ = true;
+			problems().set_base_files(base_game_files(base_game(), doc));
+		}
+	} else if (base.resolved() && !base.current) {
+		// A folder of the person's: never written over, the expansion playing over what it holds.
+		base_finding_ = make_finding(
+		        CoreFinding::ProjectBaseProject, DiagnosticSeverity::Warning,
+		        "The base game's export folder " + base.export_dir + " holds files that are no export of its project " +
+		                doc.expansion.base_project + ", so the editor does not export the project there: move them out, "
+		                "then Refresh.");
+	} else {
+		base_finding_ = Diagnostic();
+	}
+	hold_for_base();
+	return started;
+}
+
+bool SessionCore::base_unread() const {
+	if (!view_.project.open || !view_.project.document->expansion.on_base_project()) return false;
+	const SessionOperation *running = operations_.running();
+	return (running && running->kind() == OperationKind::BaseExport) || !vfs_has_boot_archive(base_game());
+}
+
+void SessionCore::hold_for_base() {
+	if (!view_.project.open || !view_.project.scan) return;
+	view_.project.requirements =
+	        std::make_shared<const RequirementReport>(requirements_of(*view_.project.document, *view_.project.scan));
+	touch(ViewConcern::Files);
+	problems().hold_validation(base_unread());
+	problems().show_requirements(); // the rows they lead with, at once
+}
+
+OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) {
+	OperationOutcome outcome;
+	const ProjectDocument &doc = *view_.project.document;
+	const std::string base = doc.expansion.base_project;
+	if (exported.ok()) {
+		base_finding_ = Diagnostic();
+		note("Exported the base game's project " + base + " to " + shown_path(exported.export_dir(), paths_.root) + ".");
+		view_.activity.status = "Exported the base game's project.";
+	} else {
+		// The one finding: why, in the base project's words (opening it shows the rest).
+		std::string why = exported.reason();
+		if (!why.empty() && why.back() != '.') why += '.';
+		base_finding_ = make_finding(CoreFinding::ProjectBaseProject, DiagnosticSeverity::Warning,
+		                             "The base game's project " + base + " could not be exported: " + why +
+		                                     " Open it to see why, then Refresh here.");
+		outcome.findings.push_back(base_finding_);
+		outcome.end = OperationEnd::Failed;
+		note("The base game's project " + base + " could not be exported.");
+		view_.activity.status = "The base game's project could not be exported; see Problems.";
+	}
+	// The base game read again: the new export, or the one before it where this one failed.
+	imports().set_install_files(std::move(exported.install_files()), std::move(exported.base_files()));
+	problems().set_base_layer(exported.take_base_layer());
+	problems().set_base_files(base_game_files(base_game(), doc));
+	read_install_expansions();
+	hold_for_base();
+	const BuildAfterBase &after = exported.after();
+	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true);
+	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
+	// or failed: they come from the game install).
+	start_stock_import();
+	return outcome;
 }
 
 void SessionCore::read_install_expansions() {
@@ -1523,24 +1645,47 @@ RequirementReport SessionCore::requirements_of(const ProjectDocument &doc, const
 		return evaluate_requirements(doc, scan, game_install().empty() ? nullptr : &install_expansion_names_,
 		                             &view_.project.base_files);
 	// An expansion of a project's base game (T5): weighed against the base game's export (its expansions,
-	// its names), and a base project that does not serve as one, or has no export yet, said (listed: the
-	// build's gate refuses the build while the base does not mount, build.expansion.base_missing).
+	// its names), which the session exports itself (check_base_export). While the base is unread (its export
+	// being made, or none to read) what the project lacks is the base's to serve or not: those rows wait for it
+	// and nothing is said of them (no file offered to create over a base not yet read), the one finding the
+	// base's own (a base project that serves as none, its export under way, failed or kept out of the folder).
 	std::string dir;
 	Diagnostic why;
 	const bool resolved = base_project_game_dir(paths_.root, doc.expansion, doc.target_game, dir, why);
-	const bool exported = resolved && vfs_has_boot_archive(dir);
+	const SessionOperation *running = operations_.running();
+	const bool exporting = running && running->kind() == OperationKind::BaseExport;
+	const bool read = !exporting && vfs_has_boot_archive(dir);
 	RequirementReport report =
-	        evaluate_requirements(doc, scan, exported ? &install_expansion_names_ : nullptr, &view_.project.base_files);
+	        evaluate_requirements(doc, scan, read ? &install_expansion_names_ : nullptr, &view_.project.base_files);
+	if (!read) {
+		const auto unread = [](const RequirementRow &row) {
+			return row.state == RequirementState::Missing || row.state == RequirementState::Served;
+		};
+		report.rows.erase(std::remove_if(report.rows.begin(), report.rows.end(), unread), report.rows.end());
+		report.required_total -= report.required_missing + report.required_served;
+		report.required_missing = report.required_served = 0;
+		const auto of_the_base = [](const Diagnostic &d) {
+			return d.row() == &finding_code(CoreFinding::RequirementMissing) ||
+			       d.row() == &finding_code(CoreFinding::RequirementOptionalMissing);
+		};
+		report.diagnostics.erase(std::remove_if(report.diagnostics.begin(), report.diagnostics.end(), of_the_base),
+		                         report.diagnostics.end());
+	}
 	if (!resolved) {
 		why.severity = DiagnosticSeverity::Warning;
 		report.diagnostics.push_back(why);
-	} else if (!exported) {
+	} else if (exporting) {
+		report.diagnostics.push_back(make_finding(
+		        CoreFinding::ProjectBaseProject, DiagnosticSeverity::Info,
+		        "The base game's project " + doc.expansion.base_project + " is being exported to " + dir +
+		                ": the expansion's files are checked over it once it is in."));
+	} else if (!base_finding_.code().empty()) {
+		report.diagnostics.push_back(base_finding_);
+	} else if (!read) {
 		report.diagnostics.push_back(make_finding(
 		        CoreFinding::ProjectBaseProject, DiagnosticSeverity::Warning,
 		        "The base game's project " + doc.expansion.base_project + " has no export at " + dir +
-		                ": the expansion plays over the base game as it ships. Export the base game's project "
-		                "(its File > Export, or opennova-project export " + base_project_root(paths_.root, doc.expansion) +
-		                "), then Refresh."));
+		                " yet: the expansion plays over the base game as it ships. Refresh exports it."));
 	}
 	return report;
 }
@@ -1696,9 +1841,25 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 }
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
-                              const ExportIntent &exported, bool panel) {
+                              const ExportIntent &exported, bool panel, bool base_checked) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
+	// An expansion of a project's base game builds over the base project's export, made first where it is
+	// missing or older than the project: the base export starts this build once it is in, under its id.
+	if (!base_checked) {
+		BuildAfterBase after;
+		after.wanted = true;
+		after.play = intent;
+		after.exported = exported;
+		after.out_dir = out_dir;
+		after.rehash = rehash;
+		after.panel = panel;
+		if (check_base_export(after)) {
+			outcome_.operation = operations_.status().id;
+			build_reports_ = panel;
+			return;
+		}
+	}
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
 	// project the next scan lists, an archive every later build refuses: refused before anything
@@ -1722,6 +1883,9 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	problems().clear_build_findings(); // the last build's rows go: this one reports anew
 	documents().reload_changed();
 	refresh_now();
+	// The stamp of the files the build is planned on, which an export of it records (export.json's
+	// `sources`): an expansion over this project weighs its export by it (check_base_export).
+	const std::string sources = project_files_stamp(paths_.root, paths_.export_dir(*view_.project.document));
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
@@ -1750,9 +1914,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
 	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, platform_.now_ms(), intent, exported,
-	        [this](const ExportIntent &wanted, const BuildReport &built, ExportRequest &request, ExportReport &refused) {
-		        return export_request(wanted, built, request, refused);
-	        },
+	        [this, sources](const ExportIntent &wanted, const BuildReport &built, ExportRequest &request,
+	                        ExportReport &refused) { return export_request(wanted, built, sources, request, refused); },
 	        [this](const PlayIntent &wanted, const BuildReport &built) { return play().copy_fill(wanted, built); }));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
@@ -1764,8 +1927,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	show_operation();
 }
 
-bool SessionCore::export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request,
-                                 ExportReport &refused) {
+bool SessionCore::export_request(const ExportIntent &intent, const BuildReport &built, const std::string &sources,
+                                 ExportRequest &request, ExportReport &refused) {
 	// What ships (ADR 0046 S16): the build copied whole into the export folder, the runtime's folder
 	// beside a standalone game when the project asks for it and a packaged runtime is set.
 	const ProjectDocument &document = *view_.project.document;
@@ -1774,6 +1937,7 @@ bool SessionCore::export_request(const ExportIntent &intent, const BuildReport &
 	request.expansion = built.expansion;
 	request.export_dir = export_folder(intent.to);
 	request.project_id = document.project_id;
+	request.sources = sources;
 	// The runtime ships beside a standalone game alone (an expansion plays in the install's game), and
 	// only a packaged one: a source run's is the checkout.
 	const bool runtime = document.export_settings.include_runtime && built.expansion.empty();

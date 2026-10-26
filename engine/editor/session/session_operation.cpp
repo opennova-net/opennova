@@ -46,6 +46,11 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::ContentCancel}, "Pulling", "the pull"},
 	{OperationKind::ContentPush, "content_push", HoldsFiles, HoldsSlot, {}, {K::ContentCancel}, "Pushing",
 	 "the push"},
+	// A base export reads the open project's setting of its base game (a settings change waits, a close cancels
+	// it) and none of its files (an edit and a save go on); a Build, a Play and an Export join it, the build
+	// starting once the base is in (session/base_export.h).
+	{OperationKind::BaseExport, "base_export", HoldsProject, HoldsSlot, {K::Build, K::Play, K::Export}, {},
+	 "Exporting the base game", "the base game's export"},
 };
 
 constexpr bool every_operation_writes_the_slot() {
@@ -122,14 +127,22 @@ bool OperationSlot::finish(SessionCore &core) {
 	id_ = 0;
 	follows_ = 0;
 	done_ = false;
-	finishing_ = id;
+	finishing_ = follows ? follows : id; // what its finish starts goes on with the work this one went on with
 	OperationOutcome outcome = operation->finish(core);
 	finishing_ = 0;
 	outcome.id = id;
 	outcome.kind = operation->kind();
 	outcome.follows = follows;
-	outcome.then = operation_ ? id_ : 0; // the one its finish started, which runs now
+	// The operation its finish started goes on under its id (a base export's Build): the id it took is
+	// never handed out again, as no id is, and a wait on this one waits on it. Any other is the one that
+	// follows (then), which runs now.
+	const bool hands_on = operation_ && operation->hands_on_id();
+	outcome.then = operation_ && !hands_on ? id_ : 0;
 	last_ = std::move(outcome);
+	if (hands_on) {
+		id_ = id;
+		follows_ = follows;
+	}
 	return true;
 }
 

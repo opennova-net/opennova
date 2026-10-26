@@ -88,8 +88,19 @@ public:
 	// first steps are the validation's remaining ones), its rows composed on the step that ends it;
 	// none while a gesture's edits are open. True when none is due or under way.
 	bool advance(uint64_t bytes);
-	// True while a validation is due or under way: the Problems rows are the last composed.
-	bool validating() const { return validation_due_ || pass_ != nullptr; }
+	// True while a validation is due or under way: the Problems rows are the last composed. None is while
+	// the validation is held (hold_validation).
+	bool validating() const { return !held_ && (validation_due_ || pass_ != nullptr); }
+	// While an expansion's base game is unread (ADR 0046 T5: its project's export being made, or none to
+	// read: SessionCore::hold_for_base), nothing is validated over it, where every name the project's files
+	// take from the base would read as missing: the rows are the scan's and the requirements' alone (the
+	// base's own finding among them), then what was reported, with no gate. Let go, a validation is due.
+	void hold_validation(bool held);
+	bool held() const { return held_; }
+	// What holds the base game's files open lets them go: the base under the project's files and the game's
+	// own data's check over it, which the rows ask again once composed (a base export replaces the folder,
+	// which the system refuses while a file of it is open).
+	void release_base_files();
 	// The view's validation status (ActivityView::validation) as it stands: running while one is
 	// due or under way, the files asked of those it asks (a validation started again showing where
 	// the one before stood until it passes it); Operation moves when it changed.
@@ -189,6 +200,8 @@ private:
 	// The validation under way (started when due or none is, and again when what it reads moved)
 	// run to its end, then the rows.
 	void compose(bool keep_reported);
+	// The rows while the validation is held (hold_validation).
+	void compose_held();
 	// One step of it within `bytes`; true when it is done.
 	bool step_pass(uint64_t bytes);
 	// Whether what the pass under way reads is the view's still.
@@ -234,6 +247,7 @@ private:
 	std::vector<Diagnostic> play_findings_; // the last Play's own (a nonzero exit), that project's too
 	std::vector<Reported> reported_;        // reported since the last validation
 	bool validation_due_ = false;           // an edit since the last validation
+	bool held_ = false;                     // hold_validation: an expansion's base game unread
 	std::unique_ptr<Pass> pass_;            // the validation under way, stepped by the polls
 	// A pass was started again before it ended: what it had brought to the graph, the cache and the
 	// project checks may have moved the rows, which its successor's own counts cannot say (S13 A3).

@@ -1170,11 +1170,13 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
 			"The operation that runs (running, and while one does its id, kind (open, refresh, "
-			"build, import_plan, import_apply, rename_apply), label, done and total in its unit, "
+			"build, import_plan, import_apply, rename_apply, base_export, the content_ ones), label, "
+			"done and total in its unit, "
 			"cancellable, and what it reads and writes), what the last one came to "
 			"(last_operation: id, kind, end, findings; then, the operation its finish started to go on "
-			"with its work, and follows, on that one, the operation it goes on from: a game you own's new "
-			"project goes on from its open to its import), the validation the polls step "
+			"with its work, and follows, on each that goes on, the work's first operation: a game you own's "
+			"new project goes on from its open to its import, its base game's export between them where one "
+			"runs), the validation the polls step "
 			"(validation: running, done and total files) and the last build.")
 			.row,
 	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,
