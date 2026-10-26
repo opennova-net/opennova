@@ -71,12 +71,12 @@ import { GITHUB_URL } from '../utils/links';
 const games = [
   {
     name: 'OpenNova',
-    body: 'OP: Acid Gambit, our own game, downloaded on the first launch. It also runs the Joint Operations you own in place of Jointops.exe.',
+    body: 'OP: Acid Gambit, our own game, downloaded on the first launch.',
     file: 'opennova-game-windows.zip',
   },
   {
     name: 'OpenNova for Joint Operations',
-    body: 'Set up for Joint Operations: unzip it into an empty folder and the first launch downloads Joint Operations and its Escalation expansion.',
+    body: 'Set up for Joint Operations: unzip it into an empty folder and the first launch downloads Joint Operations and its Escalation expansion. Or copy its files into an existing install and run opennova.exe in place of Jointops.exe.',
     file: 'jointops-game-windows.zip',
   },
   {

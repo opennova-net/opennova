@@ -34,7 +34,7 @@
           <ol class="mt-6 list-decimal space-y-3 pl-5 text-sm text-ink">
             <li>You need your own purchased copy of Joint Operations.</li>
             <li>Download the Joint Operations build, unzip it into an empty folder and run <code>opennova.exe</code>. Its first launch downloads Joint Operations and Escalation.</li>
-            <li>Or put OpenNova in your existing Joint Operations folder to use its maps, missions, models and sounds.</li>
+            <li>Already have Joint Operations installed? <code>opennova.exe</code> is a drop-in replacement for <code>Jointops.exe</code>: copy the build's files into your install's folder and run <code>opennova.exe</code> instead. It plays that install's maps, missions, models and sounds.</li>
           </ol>
           <RouterLink to="/downloads#jointops" class="btn-primary mt-7">Get the Joint Operations build</RouterLink>
         </template>
