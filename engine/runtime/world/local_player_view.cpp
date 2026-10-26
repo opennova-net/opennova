@@ -270,15 +270,15 @@ bool local_player_adjust_scope_zoom(World &world, LocalPlayerWeapon &w, const Pl
 
 void local_player_scope_zoom_mount_clamp(const World &world, const ScopeZoomLimits &limits,
                                          int32_t def_flags, int32_t scope_max_mag,
-                                         WeaponSlotState &slot) {
+                                         int32_t &scope_zoom) {
     // [orig: Player_MountWeaponSlot -- Def+8 Flags & 1 @0x4dfacf..0x4dfad1,
     //  Def+0x90 != 0 @0x4dfad3..0x4dfadb, the floor @0x4dfadd..0x4dfb01, the
     //  clamp of MountSlot+0xC @0x4dfb03..0x4dfb13]
     if ((def_flags & static_cast<int32_t>(DEF_WEAPON_FLAG_SCOPED)) == 0 || scope_max_mag == 0)
         return;
     const int32_t floor = local_player_scope_zoom_floor(world, limits, scope_max_mag);
-    if (slot.scope_zoom < floor) slot.scope_zoom = floor;                      // @0x4dfb0a
-    else if (slot.scope_zoom > scope_max_mag) slot.scope_zoom = scope_max_mag; // @0x4dfb13
+    if (scope_zoom < floor) scope_zoom = floor;                      // @0x4dfb0a
+    else if (scope_zoom > scope_max_mag) scope_zoom = scope_max_mag; // @0x4dfb13
 }
 
 bool local_player_weapon_category_admitted(const LocalPlayerWeapon &w, const PlayerViewState &v) {

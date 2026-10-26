@@ -165,6 +165,18 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 	return gates;
 }
 
+// The mounted slot's zoom into its own def's span: the floor its scope_min_mag (the
+// sniper lock's max for a class-6 player on a Primary def), the cap its scope_max_mag
+// [orig: Player_MountWeaponSlot @0x4DFAC4..0x4DFB13].
+void mount_clamp_slot_zoom(const World &world, const WeaponTableEntry *def,
+		int32_t &scope_zoom) {
+	if (def == nullptr) return;
+	ScopeZoomLimits limits;
+	limits.scope_min_mag = def->scope_min_mag;
+	limits.category = def->category;
+	local_player_scope_zoom_mount_clamp(world, limits, def->flags, def->scope_max_mag, scope_zoom);
+}
+
 // Player_MountWeaponSlot's request, for every local mount (a weapon key's, a loadout apply's, a
 // seat detach's switch back, a UseGun attach's or swap's) on `target`, the mounted slot's def
 // (null: none to read). An AbsorbPitch def levels the body's Pitch and takes its elevation span
@@ -201,7 +213,8 @@ WeaponSwitchGates local_weapon_switch_gates(const World &world,
 //  Entity_AttachToVehicleSlot @0x4946D0 (@0x494838), Entity_DetachFromVehicle @0x4355F0
 //  (@0x43565F), NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (@0x4296F4)]
 void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState *view,
-		bool same_category, const WeaponTableEntry *target, bool personal_slot) {
+		bool same_category, const WeaponTableEntry *target, bool personal_slot,
+		int32_t *target_scope_zoom) {
 	WeaponInstallData data;
 	const bool has_data =
 			target != nullptr && install_data_by_name(world, target->name, false, data);
@@ -213,6 +226,7 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 			w.pitch_offset_bam = 0;
 		}
 	}
+	if (target_scope_zoom != nullptr) mount_clamp_slot_zoom(world, target, *target_scope_zoom);
 	if (target != nullptr) {
 		if ((target->flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) {
 			if (view != nullptr) view->scope_settled = true;
@@ -362,13 +376,13 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 			// shared leg's (mount_queue_switch_out) [orig: @0x4dfa4d..0x4dfa74].
 			w.switch_in_flight = true;
 			w.switch_deferred_action = -1;
-			const WeaponInventorySlot *target =
+			WeaponInventorySlot *target =
 					inventory != nullptr ? inventory->slot(out.combo) : nullptr;
 			mount_queue_switch_out(world, w, &view, out.same_category,
 					target != nullptr && target->adm_index >= 0
 							? world.tables.weapons.by_index(static_cast<uint8_t>(target->adm_index))
 							: nullptr,
-					/*personal_slot=*/true);
+					/*personal_slot=*/true, target != nullptr ? &target->scope_zoom : nullptr);
 			break;
 		}
 		default:
