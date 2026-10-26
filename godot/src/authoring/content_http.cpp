@@ -40,6 +40,8 @@ constexpr int64_t kKeepMs = 4000;
 // An upload's sending is given kStalledMs plus a millisecond for each kSlowestBytesPerMs bytes of
 // its body: HTTPClient says nothing of how much of a request has gone.
 constexpr int64_t kSlowestBytesPerMs = 16;
+// How many more tries a request that may go again gets once its connection breaks.
+constexpr int kRetries = 3;
 
 int64_t now_ms() {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -176,7 +178,7 @@ private:
 	// Polled until the reply's head is in: false with `error` when none came, `retry` when the
 	// connection failed before any of it did.
 	bool await_head(int64_t sending_ms, bool &retry, std::string &error);
-	bool read_body(ContentResponse &out);
+	bool read_body(ContentResponse &out, bool &lost);
 
 	Connection &connection_;
 	const ContentHttp::Exchange &exchange_;
@@ -260,7 +262,8 @@ bool Worker::await_head(int64_t sending_ms, bool &retry, std::string &error) {
 	return false;
 }
 
-bool Worker::read_body(ContentResponse &out) {
+bool Worker::read_body(ContentResponse &out, bool &lost) {
+	lost = false;
 	const ContentRequest &request = exchange_.request;
 	const bool to_file = !request.response_file.empty() && out.status >= 200 && out.status < 300;
 	std::FILE *file = nullptr;
@@ -306,7 +309,8 @@ bool Worker::read_body(ContentResponse &out) {
 	}
 	const HTTPClient::Status status = connection_.client->get_status();
 	if (ok && status != HTTPClient::STATUS_CONNECTED && status != HTTPClient::STATUS_DISCONNECTED) {
-		out.error = "the connection failed during the reply";
+		out.error = "the connection failed during the reply (HTTP " + std::to_string(out.status) + ")";
+		lost = true;
 		ok = false;
 	}
 	if (file != nullptr) {
@@ -357,7 +361,11 @@ ContentResponse Worker::run() {
 	if (body.is_empty() && !has_length && method != HTTPClient::METHOD_GET)
 		headers.push_back("Content-Length: 0");
 	const int64_t sending_ms = ContentHttp::kStalledMs + body.size() / kSlowestBytesPerMs;
+	// A connection the far end breaks (a kept one it had closed, or one a store drops mid-reply, as
+	// S3 does now and then over a push's thousands of uploads), or a store's 5xx, costs a request
+	// that may go again another try on a fresh connection, kRetries times; any other request fails.
 	for (int attempt = 0;; ++attempt) {
+		out = ContentResponse();
 		const bool kept = connection_.open_for(address);
 		if (!kept && !open(address, out.error))
 			return out;
@@ -368,29 +376,34 @@ ContentResponse Worker::run() {
 			return out;
 		}
 		bool retry = false;
-		if (await_head(sending_ms, retry, out.error))
-			break;
-		// A kept connection the far end had closed: once more on a fresh one, if the request may
-		// be.
-		if (!(retry && kept && attempt == 0 && idempotent(method)))
+		if (!await_head(sending_ms, retry, out.error)) {
+			if (retry && attempt < kRetries && idempotent(method))
+				continue;
 			return out;
-		out.error.clear();
+		}
+		out.status = connection_.client->get_response_code();
+		const PackedStringArray lines = connection_.client->get_response_headers();
+		for (int64_t i = 0; i < lines.size(); ++i) {
+			const std::string line = opennova::to_std(lines[i]);
+			const size_t colon = line.find(':');
+			if (colon == std::string::npos)
+				continue;
+			size_t start = colon + 1;
+			while (start < line.size() && (line[start] == ' ' || line[start] == '\t'))
+				++start;
+			out.headers.emplace_back(line.substr(0, colon), line.substr(start));
+		}
+		bool lost = false;
+		out.transport_ok = read_body(out, lost);
+		// A store that answers 5xx asks for the request again (S3's 500 and 503 SlowDown), after a
+		// moment.
+		const bool busy = out.transport_ok && out.status >= 500;
+		if ((out.transport_ok && !busy) || (!lost && !busy) || attempt >= kRetries ||
+				!idempotent(method))
+			return out;
+		if (busy)
+			std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
 	}
-	body.clear();
-	out.status = connection_.client->get_response_code();
-	const PackedStringArray lines = connection_.client->get_response_headers();
-	for (int64_t i = 0; i < lines.size(); ++i) {
-		const std::string line = opennova::to_std(lines[i]);
-		const size_t colon = line.find(':');
-		if (colon == std::string::npos)
-			continue;
-		size_t start = colon + 1;
-		while (start < line.size() && (line[start] == ' ' || line[start] == '\t'))
-			++start;
-		out.headers.emplace_back(line.substr(0, colon), line.substr(start));
-	}
-	out.transport_ok = read_body(out);
-	return out;
 }
 
 } // namespace
