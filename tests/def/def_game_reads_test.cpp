@@ -106,6 +106,12 @@ int main() {
 	      [](const void *f) { return weapon_of(f).ammobucket == 9; }, "ammobucket 9");
 	reads("ammobucket 9mmSD", "weapon.def", weapon("ammobucket 9mmSD"), reinterpreted, "reads this as 9.",
 	      [](const void *f) { return weapon_of(f).ammobucket == 9; }, "ammobucket 9");
+	// A negative one is its size, what the record holds and the writer writes, said as such [orig: the cdq/xor/sub
+	// @0x544037].
+	reads("ammobucket -9mm", "weapon.def", weapon("ammobucket -9mm"), reinterpreted, "reads this as 9.",
+	      [](const void *f) { return weapon_of(f).ammobucket == 9; }, "ammobucket 9");
+	reads("ammobucket -4", "weapon.def", weapon("ammobucket -4"), reinterpreted, "reads this as 4.",
+	      [](const void *f) { return weapon_of(f).ammobucket == 4; }, "ammobucket 4");
 	// An item's number past its whole part, atol's [orig: ItemDef_ParseProperty, hp @0x49EB00].
 	reads("hp 1.5", "items.def", item("hp 1.5"), reinterpreted, "reads this as 1.",
 	      [](const void *r) { return static_cast<const DefItemDef *>(r)->hp == 1; }, "hp 1");

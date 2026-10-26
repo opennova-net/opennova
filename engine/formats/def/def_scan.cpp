@@ -342,7 +342,7 @@ namespace {
 // DigitsWhole its integer part alone, an ammo's heat_det_range, >> 16). AtolOrAtof: one or the other as an
 // earlier line decides (an item's husk_swap_at, its percent's atol before a husk_swap_at_sec, its seconds'
 // atof after one [orig: ItemDef_ParseProperty @ 0x49F242..0x49F2C2]).
-enum class NumberRead { Atol, Atof, Digits, DigitsWhole, AtolOrAtof };
+enum class NumberRead { Atol, Atof, Digits, DigitsWhole, AtolOrAtof, AtolAbs };
 
 // The shortest decimal the CRT's atof reads as `value` again.
 std::string atof_words(double value) {
@@ -423,6 +423,20 @@ bool whole_number(NumberRead read, const std::string &token, std::string &reads_
         }
         return false;
     }
+    case NumberRead::AtolAbs: {
+        // atol's number made positive, as the arm's cdq/xor/sub makes it (abs of INT_MIN stays INT_MIN): a
+        // negative one reads as its size, which the record holds and the writer writes [orig:
+        // WeaponDefs_ParseLineCallback, ammobucket @0x544037, ammoclass's count @0x54422E..0x544242,
+        // ammoclass_max_carry's @0x543862..0x543873].
+        std::string as_atol;
+        const bool whole = whole_number(NumberRead::Atol, token, as_atol);
+        const int32_t value = io::retail_atol_n(s, n);
+        const uint32_t bits = static_cast<uint32_t>(value);
+        const int32_t stored = static_cast<int32_t>(value < 0 ? 0u - bits : bits);
+        if (whole && stored == value) return true;
+        reads_as = std::to_string(stored);
+        return false;
+    }
     case NumberRead::AtolOrAtof: {
         std::string as_atol, as_atof;
         const bool whole = whole_number(NumberRead::Atof, token, as_atof);
@@ -464,6 +478,11 @@ NumberRead number_read(opennova::def::DefRecordKind kind, const std::string &key
     }
     // [orig: AmmoDef_ParseProperty @0x40a2d0, heat_det_range: the walker's word >> 16]
     if (kind == DefRecordKind::Ammo && key == "heat_det_range") return NumberRead::DigitsWhole;
+    // The three arms that keep abs(atol) (whole_number's AtolAbs witnesses).
+    if ((kind == DefRecordKind::Weapon && key == "ammobucket") ||
+        (kind == DefRecordKind::Weapon && key == "ammoclass" && column == 1) ||
+        (kind == DefRecordKind::Carry && column == 1))
+        return NumberRead::AtolAbs;
     // A weapon's two plain reals, its view's field and its scope's most zoom, are atol's [orig:
     // WeaponDefs_ParseLineCallback, renderfov @0x544840..0x54484C, scope_max_mag @0x544F1E..0x544F29].
     return field.type == DefFieldType::Real && kind != DefRecordKind::Weapon ? NumberRead::Atof : NumberRead::Atol;
