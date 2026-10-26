@@ -458,17 +458,6 @@ int tcp_send_nonblocking(Socket &s, const uint8_t *data, size_t len) {
 #endif
 }
 
-void shutdown_socket(const Socket &s) {
-	if (!s.is_valid()) {
-		return;
-	}
-#if defined(_WIN32)
-	::shutdown(native_socket(s.fd), SD_BOTH);
-#else
-	::shutdown(native_socket(s.fd), SHUT_RDWR);
-#endif
-}
-
 void close_socket_reset(Socket &s) {
 	if (!s.is_valid()) {
 		return;

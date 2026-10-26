@@ -90,9 +90,6 @@ inline constexpr int TCP_RECV_WOULD_BLOCK = -2;
 inline constexpr int TCP_SEND_WOULD_BLOCK = -2;
 int tcp_send_nonblocking(Socket &s, const uint8_t *data, size_t len);
 int tcp_recv_nonblocking(Socket &s, uint8_t *buf, size_t cap);
-// Shut both directions down, so a recv blocked on `s` in another thread returns; the socket
-// stays open for its owner to close.
-void shutdown_socket(const Socket &s);
 // Close with a reset rather than a FIN (SO_LINGER on with a zero timeout). Sets fd=-1.
 void close_socket_reset(Socket &s);
 
