@@ -14,6 +14,7 @@
 #include "simulation/simulation.h"
 #include "util/axes.h"
 #include "world/game_world.h"
+#include "world/game_world_access.h"
 
 #include <godot_cpp/classes/camera_attributes.hpp>
 #include <godot_cpp/classes/canvas_layer.hpp>
@@ -135,11 +136,7 @@ LocalPlayerPresenter::LocalPlayerPresenter() {
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
 // so a cached reference would go stale (the debug views follow the same rule).
 Ref<Simulation> LocalPlayerPresenter::sim() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(node->call("get_sim"));
+	return world_access::sim(world());
 }
 
 Node *LocalPlayerPresenter::world() const {
@@ -544,7 +541,7 @@ bool LocalPlayerPresenter::has_player() const {
 	if (node == nullptr) {
 		return false;
 	}
-	if (!static_cast<bool>(node->call("is_loaded"))) {
+	if (!world_access::loaded(node)) {
 		return false;
 	}
 	const Ref<Simulation> player_sim = sim();
@@ -891,9 +888,7 @@ void LocalPlayerPresenter::update_model_lighting_context() {
 	const Ref<Simulation> light_sim = sim();
 	const int interior_item_id = light_sim.is_valid() ? light_sim->local_player_interior_item_id() : 0;
 	float transfer = 0.0f;
-	Node *node = world();
-	const Ref<ItemDatabase> item_db = node != nullptr ? Ref<ItemDatabase>(node->call("get_item_db"))
-														: Ref<ItemDatabase>();
+	const Ref<ItemDatabase> item_db = world_access::item_db(world());
 	if (interior_item_id != 0 && item_db.is_valid()) {
 		transfer = item_db->get_light_transfer(interior_item_id);
 	}
@@ -913,17 +908,15 @@ void LocalPlayerPresenter::update_model_lighting_context() {
 	// The third-person body and gun also declare the player's interior light
 	// group for the per-draw point-light select (the FP parts take it from
 	// the director's local-player query).
-	const PackedInt64Array group = light_sim.is_valid() ? light_sim->local_player_interior_group()
-														: PackedInt64Array();
-	const int group_bms = group.size() >= 2 ? static_cast<int>(group[0]) : 0;
-	const int group_section = group.size() >= 2 ? static_cast<int>(group[1]) : 0;
-	if (avatar()) avatar()->set_interior_light_group(group_bms, group_section);
-	if (held_weapon()) held_weapon()->set_interior_light_group(group_bms, group_section);
-	const TypedArray<ObjectModel> parts = vm_parts();
-	for (int64_t i = 0; i < parts.size(); ++i) {
-		set_model_lighting_context(Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i])),
-				context.interior, context.light_transfer, context.fp_effect_scale);
-	}
+	const Simulation::InteriorGroup group = light_sim.is_valid()
+			? light_sim->local_player_interior_group_words()
+			: Simulation::InteriorGroup{};
+	if (avatar()) avatar()->set_interior_light_group(group.bms_id, group.section);
+	if (held_weapon()) held_weapon()->set_interior_light_group(group.bms_id, group.section);
+	viewmodel_rig_->for_each_vm_part([&](ObjectModel *p_part) {
+		set_model_lighting_context(p_part, context.interior, context.light_transfer,
+				context.fp_effect_scale);
+	});
 }
 
 void LocalPlayerPresenter::set_model_lighting_context(ObjectModel *p_model, bool p_interior,
@@ -939,10 +932,7 @@ void LocalPlayerPresenter::set_model_lighting_context(ObjectModel *p_model, bool
 // the frame's one composed view snapshot, so it is the feed; the entity
 // presenter owns the vehicle's nodes and does the drawing.
 void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
-	Node *node = world();
-	MissionRoot *runtime = node != nullptr
-			? Object::cast_to<MissionRoot>(static_cast<Object *>(node->call("get_runtime")))
-			: nullptr;
+	MissionRoot *runtime = world_access::runtime(world());
 	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
 	if (entities == nullptr) {
 		return;
@@ -1372,7 +1362,7 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290 -- every overlay
 	// blends toward bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14
 	// (D-INF-11)]
-	MissionRoot *runtime = Object::cast_to<MissionRoot>(static_cast<Object *>(node->call("get_runtime")));
+	MissionRoot *runtime = world_access::runtime(node);
 	const Ref<PlayerAimOverlay> overlay = runtime != nullptr ? runtime->local_player_aim_overlay()
 															 : Ref<PlayerAimOverlay>();
 	if (overlay.is_valid()) {

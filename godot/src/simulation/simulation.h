@@ -2348,6 +2348,13 @@ public:
 	// bms_id, so the entity lighting feed never emits it; its group is what
 	// scopes interior lights onto the first-person arms and weapon.
 	PackedInt64Array local_player_interior_group() const;
+	// The same as two words for the per-frame native readers (no array built): bms_id 0
+	// outdoors.
+	struct InteriorGroup {
+		int bms_id = 0;
+		int section = 0;
+	};
+	InteriorGroup local_player_interior_group_words() const;
 
 	// Sound-occlusion distance inflation for the audio host (engine: runtime/audio/ambient_mixer.h). Positions in Godot
 	// world space; distance in/out 16.16.

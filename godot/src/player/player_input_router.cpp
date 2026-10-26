@@ -4,6 +4,7 @@
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 #include "world/game_world.h"
+#include "world/game_world_access.h"
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
@@ -238,14 +239,7 @@ void PlayerInputRouter::teardown() {
 // The game's world answers through its own accessor (no script call, no name
 // built per use); only another world node (a test's) goes through the call.
 Ref<Simulation> PlayerInputRouter::sim() const {
-	Object *world = ObjectDB::get_instance(world_id_);
-	if (GameWorld *game_world = Object::cast_to<GameWorld>(world)) {
-		return game_world->get_sim();
-	}
-	if (world == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(world->call("get_sim"));
+	return world_access::sim(ObjectDB::get_instance(world_id_));
 }
 
 LocalPlayerPresenter *PlayerInputRouter::presenter() const {

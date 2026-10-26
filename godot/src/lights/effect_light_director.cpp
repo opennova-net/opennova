@@ -767,16 +767,16 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 	if (sim.is_null()) {
 		return out;
 	}
-	const PackedInt64Array hit = sim->local_player_interior_group();
-	if (hit.size() < 2) {
+	const Simulation::InteriorGroup hit = sim->local_player_interior_group_words();
+	if (hit.bms_id == 0) {
 		return out;
 	}
-	const int64_t owner = _owner_id_for_bms(static_cast<int>(hit[0]));
+	const int64_t owner = _owner_id_for_bms(hit.bms_id);
 	if (owner == 0) {
 		return out;
 	}
 	out.owner = owner;
-	out.section = static_cast<int>(hit[1]);
+	out.section = hit.section;
 	return out;
 }
 

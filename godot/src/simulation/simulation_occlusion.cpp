@@ -421,17 +421,24 @@ PackedInt64Array Simulation::query_blink_owner_at(const Vector3 &p_world) {
 	return out;
 }
 
-PackedInt64Array Simulation::local_player_interior_group() const {
-	PackedInt64Array out;
+Simulation::InteriorGroup Simulation::local_player_interior_group_words() const {
+	InteriorGroup out;
 	if (!kernel_) return out;
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player == nullptr || player->blink_hits[0] == 0) return out;
-	const int owner = blink_hit_owner_bms_id(player->blink_hits[0]);
-	if (owner == 0) return out;
-	out.push_back(owner);
-	out.push_back(
-			opennova::world::BlinkAccum::hit_section(player->blink_hits[0]));
+	out.bms_id = blink_hit_owner_bms_id(player->blink_hits[0]);
+	if (out.bms_id != 0)
+		out.section = opennova::world::BlinkAccum::hit_section(player->blink_hits[0]);
+	return out;
+}
+
+PackedInt64Array Simulation::local_player_interior_group() const {
+	PackedInt64Array out;
+	const InteriorGroup group = local_player_interior_group_words();
+	if (group.bms_id == 0) return out;
+	out.push_back(group.bms_id);
+	out.push_back(group.section);
 	return out;
 }
 

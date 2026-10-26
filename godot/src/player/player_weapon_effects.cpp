@@ -11,6 +11,7 @@
 #include "simulation/simulation.h"
 #include "simulation/entity_presenter.h"
 #include "world/game_world.h"
+#include "world/game_world_access.h"
 #include "world/item_effect_director.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
@@ -59,35 +60,19 @@ Ref<LocalPlayerVisuals> PlayerWeaponEffects::visuals() const {
 // The sim, re-resolved per use: mission reloads free the runtime and its sim,
 // so a cached reference would go stale (the presenter follows the same rule).
 Ref<Simulation> PlayerWeaponEffects::sim() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<Simulation>();
-	}
-	return Ref<Simulation>(node->call("get_sim"));
+	return world_access::sim(world());
 }
 
 EffectWorld *PlayerWeaponEffects::effect_world() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return nullptr;
-	}
-	return Object::cast_to<EffectWorld>(static_cast<Object *>(node->call("get_effect_world")));
+	return world_access::effect_world(world());
 }
 
 MissionAudio *PlayerWeaponEffects::mission_audio() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return nullptr;
-	}
-	return Object::cast_to<MissionAudio>(static_cast<Object *>(node->call("get_mission_audio")));
+	return world_access::mission_audio(world());
 }
 
 Ref<ItemEffectDirector> PlayerWeaponEffects::effect_anchors() const {
-	Node *node = world();
-	if (node == nullptr) {
-		return Ref<ItemEffectDirector>();
-	}
-	return Ref<ItemEffectDirector>(node->call("get_item_effect_director"));
+	return world_access::item_effect_director(world());
 }
 
 void PlayerWeaponEffects::reset() {
