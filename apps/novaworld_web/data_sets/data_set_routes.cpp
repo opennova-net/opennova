@@ -464,6 +464,10 @@ crow::response DataSetRoutes::remove(const crow::request &req, uint64_t id) {
 		if (!list_expansions_of(*db_conn, row->id).empty())
 			return has_expansion();
 		db::Transaction tx(*db_conn);
+		// The game's row held first: a tree a release's apply makes waits on it (its insert's
+		// key share), so the list below names every tree the delete takes.
+		db_conn->query(
+				"SELECT 1 FROM data_sets WHERE id = $1 FOR UPDATE;", { db::BindValue(row->id) });
 		// The trees whose objects the store may still hold: every one not pruned yet.
 		std::vector<int64_t> trees;
 		for (const DataSetTree &t : list_trees(*db_conn, row->id))

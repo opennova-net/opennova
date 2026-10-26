@@ -18,6 +18,8 @@
 // admin routes (data_sets/data_set_routes.h); and a release built from a revision.
 
 #include "content/content_routes.h"
+#include "content/content_urls.h"
+#include "data_sets/data_set_jobs.h"
 #include "core/local_object_store.h"
 #include "data_sets/content_repository.h"
 #include "http_listener.h"
@@ -420,6 +422,10 @@ int test_push(Harness &h) {
 			400, "invalid_field"));
 	return 0;
 }
+
+// A deleted game's purge waits out every presigned transfer handed out before the delete.
+static_assert(opennova::novaworld_server::hosted::kGamePurgeDelaySeconds >
+		opennova::novaworld_server::content::S3ContentUrls::kExpiresS);
 
 // The blob route's cap is the portal's: web/nginx.conf's client_max_body_size in its /api/
 // location (the one proxy in front of web's routes), so the route refuses exactly what the proxy

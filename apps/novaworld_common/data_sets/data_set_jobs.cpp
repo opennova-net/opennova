@@ -794,6 +794,7 @@ int64_t enqueue_game_purge(
 		trees.push(io::json_number(static_cast<double>(id)));
 	job.payload.set("trees", std::move(trees));
 	job.dedupe_key = std::string(kJobGamePurge) + ":" + std::to_string(data_set_id);
+	job.delay_ms = kGamePurgeDelaySeconds * 1000;
 	job.max_attempts = kAttemptsPurge;
 	return jobs::enqueue(db, job);
 }

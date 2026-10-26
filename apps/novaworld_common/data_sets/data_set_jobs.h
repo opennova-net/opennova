@@ -50,8 +50,8 @@
 //                     its trees' prefixes and its project's files and manifests (content/<id>/,
 //                     content_repository.h), removed whole. The games' admin delete enqueues it
 //                     in the transaction that deletes the row, so the route answers at once
-//                     however many files a retail game's project holds. A store failure runs it
-//                     again.
+//                     however many files a retail game's project holds, and it runs
+//                     kGamePurgeDelaySeconds later. A store failure runs it again.
 //
 // The routes' enqueues below return the job's id, 0 when one of its dedupe key is queued or
 // running already.
@@ -90,8 +90,14 @@ int64_t enqueue_release_validate(db::Database &db, int64_t release_id);
 // Standalone updater products have no hosted tree and queue no apply job (returns 0).
 int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data_set_id);
 int64_t enqueue_tree_prune(db::Database &db);
+// A game's purge waits this long after its delete: past every presigned transfer its project's
+// routes handed out before it (an hour, apps/novaworld_web/content/content_urls.h
+// S3ContentUrls::kExpiresS) and the jobs then working on its trees, so none of them writes an
+// object back under its prefixes after the purge removed them.
+inline constexpr int64_t kGamePurgeDelaySeconds = 75 * 60;
+
 // The objects of the game `data_set_id` (deleted in the caller's transaction) and of its trees
-// `tree_ids` removed by the data program.
+// `tree_ids` removed by the data program, kGamePurgeDelaySeconds from now.
 int64_t enqueue_game_purge(
 		db::Database &db, int64_t data_set_id, const std::vector<int64_t> &tree_ids);
 

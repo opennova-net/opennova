@@ -795,12 +795,20 @@ int test_purge() {
 			rig.put(tree_prefix(43) + "version.txt", bytes("kept")));
 	const int64_t job = enqueue_game_purge(rig.db, gone, { 41, 42 });
 	TEST_EXPECT(job > 0 && enqueue_game_purge(rig.db, gone, { 41, 42 }) == 0);
+	// It waits kGamePurgeDelaySeconds (past the presigned transfers' hour), then runs.
+	TEST_EXPECT(rig.db.query("SELECT 1 FROM jobs WHERE id = $1 AND run_at > now() + "
+							 "make_interval(secs => $2);",
+							{ BindValue(job), BindValue(kGamePurgeDelaySeconds - 60) })
+						.size() == 1);
+	TEST_EXPECT(rig.run_jobs() == 0 && rig.job_state(job) == "queued");
+	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(job) });
 	TEST_EXPECT(rig.run_jobs() == 1 && rig.job_state(job) == "done");
 	TEST_EXPECT(rig.names_under(store::project_prefix(gone)).empty() &&
 			rig.names_under(tree_prefix(41)).empty() && rig.names_under(tree_prefix(42)).empty());
 	TEST_EXPECT(rig.has(store::blob_key(kept, blob)) && rig.has(tree_prefix(43) + "version.txt"));
 	// Again: nothing left to remove.
 	const int64_t again = enqueue_game_purge(rig.db, gone, { 41, 42 });
+	rig.db.exec("UPDATE jobs SET run_at = now() WHERE id = $1;", { BindValue(again) });
 	TEST_EXPECT(again > 0 && rig.run_jobs() == 1 && rig.job_state(again) == "done");
 	return 0;
 }
