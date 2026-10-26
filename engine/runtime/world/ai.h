@@ -527,6 +527,12 @@ struct AiEntity {
     // by AiSystem::tick_infantry [orig: Entity_UpdateInfantryAI @0x4b9910] instead of the
     // vehicle state machine; promote routes BMS organics here. See world/infantry.h.
     InfantryState inf;
+    // The kernel registered this brain's animation map (inf.adm_id;
+    // MissionKernel::resolve_new_infantry_adm_ids). attach() clears it with the
+    // rest of the slot, so a body that takes a freed slot registers its own map.
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity
+    //  @0x40BB60 call @0x43C4DF]
+    bool adm_resolved = false;
 
     // Per-entity collision-resolver state (prev-position gating + the idle skip
     // throttle). [orig: entity savedLivePose + pad_370[3]; collision.h]

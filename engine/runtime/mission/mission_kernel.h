@@ -650,7 +650,6 @@ private:
 	int default_infantry_adm_id_ = -1;
 	uint64_t infantry_adm_revision_ = 0;
 	bool infantry_adm_retained_ = false;
-	int infantry_adm_resolved_ai_count_ = 0;
 
 	struct MountedPoseRest {
 		world::MountedPosePartMatrices parts;

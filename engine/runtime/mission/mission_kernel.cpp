@@ -513,28 +513,35 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 
 void MissionKernel::resolve_new_infantry_adm_ids() {
 	if (!infantry_adm_retained_ || items_table() == nullptr) return;
+	// Every brain not registered yet, wherever it sits: attach() reuses the lowest
+	// freed slot, below brains already registered, so the walk keys on the brain's
+	// own bit (which attach clears), never on a count. A body that takes a freed
+	// slot registers its own map at its spawn, as every spawn does [orig:
+	// Entity_SpawnFromAnimSlotProperty @0x43C390 - the AnimMap_RegisterEntity
+	// @0x40BB60 call @0x43C4DF].
 	const int count = world.ai.count();
-	if (infantry_adm_resolved_ai_count_ < 0 || infantry_adm_resolved_ai_count_ > count)
-		infantry_adm_resolved_ai_count_ = 0;
-	for (int i = infantry_adm_resolved_ai_count_; i < count; ++i) {
+	for (int i = 0; i < count; ++i) {
 		w::AiEntity *e = world.ai.at(i);
-		if (e == nullptr) continue;
+		if (e == nullptr || e->adm_resolved) continue;
+		e->adm_resolved = true;
 		e->inf.adm_id = default_infantry_adm_id_;
 		if (!e->inf.active) continue;
 		const w::Entity *ent = world.registry.get(e->handle);
 		if (ent == nullptr) continue;
 		e->inf.adm_id = adm_id_for_runtime_type(ent->item_id);
 	}
-	infantry_adm_resolved_ai_count_ = count;
 	world.ai.root_motion = root_motion.empty() ? nullptr : &root_motion;
 }
 
 void MissionKernel::reset_infantry_adm_ids() {
 	adm_by_runtime_type_.clear();
 	++infantry_adm_revision_;
-	infantry_adm_resolved_ai_count_ = 0;
-	for (int i = 0; i < world.ai.count(); ++i)
-		if (w::AiEntity *e = world.ai.at(i)) e->inf.adm_id = default_infantry_adm_id_;
+	for (int i = 0; i < world.ai.count(); ++i) {
+		if (w::AiEntity *e = world.ai.at(i)) {
+			e->inf.adm_id = default_infantry_adm_id_;
+			e->adm_resolved = false;
+		}
+	}
 	resolve_new_infantry_adm_ids();
 }
 
@@ -1210,7 +1217,7 @@ bool MissionKernel::restore_baseline() {
 	world.hud_frames = w::HudFrameCounters{};
 	if (have_wac_baseline) wac.restore_runtime_state(world, wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
-	// handles across epochs, so the high-water mark cannot be trusted.
+	// handles across epochs, so no restored brain's registration is trusted.
 	reset_infantry_adm_ids();
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the
