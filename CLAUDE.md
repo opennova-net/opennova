@@ -109,8 +109,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   `scripts/ci/test_suites.py --check-layout` fails a test that names a retail root. No
   test reads a machine-local capture (the wire fixtures live in `fixtures/novaworld/`),
   and every env hook but `GODOT_BIN` is gone ([docs/dev-env-vars.md](docs/dev-env-vars.md),
-  `scripts/lint/env_lint.py`): a tool that runs against a retail install takes it as an
-  argument (`--resource-dir`, `--install`).
+  `scripts/lint/env_lint.py`; its allowlist keeps the OS variables such as `TEMP`/`TMP` and
+  `billing_stripe_e2e`'s `ONNET_STRIPE_TEST_SECRET_KEY`): a tool that runs against a retail
+  install takes it as an argument (`--resource-dir`, `--install`).
 - Windows PowerShell 5.1 `Get-Content`/`Set-Content` corrupts BOM-less UTF-8 `.gd` files.
   Do bulk text rewrites with bash sed/perl, not PowerShell.
 

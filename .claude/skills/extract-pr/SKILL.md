@@ -41,7 +41,12 @@ All commands are Git Bash, inside the current worktree only.
         python scripts/lint/$c.py --enforce; done   # the CI lint gates
     python scripts/lint/fixture_lint.py --enforce --require-pulled  # as CI runs it
     python scripts/ci/test_suites.py --check-layout  # no test reads retail data (same CI step)
-    python docs/tools/ledger_check.py --check        # the ledger scoreboard (docs repo)
+    for d in scripts/ci scripts/lint scripts/ida scripts/mcp scripts/net; do
+        python -B -m unittest discover -s $d -p "test_*.py"; done   # the gates job's script tests
+    for t in test_stage_downloads.py test_publish_runtime.py; do
+        python -B -m unittest discover -s scripts -p $t; done       # Publish's helpers
+    dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo  # the Switcher's xunit suite
+    python -B docs/tools/ledger_check.py --check     # the ledger scoreboard (docs repo)
 
 Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
 A slice that moves the `docs/` pointer must name a commit already on docs `master`
