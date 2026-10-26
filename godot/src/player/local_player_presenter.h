@@ -157,8 +157,8 @@ public:
 	// drawn in every camera mode, and/or draw the player's own body in first
 	// person -- the "see our feet" probe (the §14 aim overlay bends the spine
 	// away from the eye, so looking down shows your legs; the head/shoulders
-	// will clip the near plane until a section-hide like the original's bone
-	// zeroing @0x4b1f2a is ported).
+	// clip the near plane: the original draws no first-person body, so nothing
+	// folds those bones here (ObjectModel::set_cut_sections would)).
 	void set_debug_force_viewmodel(bool p_enabled) { debug_force_viewmodel_ = p_enabled; }
 	bool is_debug_force_viewmodel() const { return debug_force_viewmodel_; }
 	void set_debug_body_in_first_person(bool p_enabled) { debug_body_in_first_person_ = p_enabled; }

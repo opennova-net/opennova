@@ -21,24 +21,6 @@ using namespace godot;
 
 namespace {
 
-// The collapsed right-hand bone is the engine's (anim::kCollapsedRightHandBone,
-// skeletal_clips.h, the special row @0x4b1290 cited there); this file writes
-// the collapsed Transform3D.
-constexpr int kRightHandBoneIndex = opennova::anim::kCollapsedRightHandBone;
-
-// Entity_BuildBoneTransformMatrices applies the BN17 special row after every
-// ordinary channel/overlay branch, including the fallback taken when overlay
-// inputs are unavailable. Keep the zero-scale pose in one helper so a future
-// early return cannot leave the baked personal weapon at the wrist. Preserve
-// the sampled local origin: presentation must collapse at the animated joint,
-// not drag partially weighted vertices toward world origin.
-void apply_right_hand_local_collapse(Array &pose, bool collapse) {
-	if (!collapse || pose.size() <= kRightHandBoneIndex) return;
-	const Transform3D hand = pose[kRightHandBoneIndex];
-	pose[kRightHandBoneIndex] =
-			Transform3D(Basis(Vector3(), Vector3(), Vector3()), hand.origin);
-}
-
 // The sampler already produces engine-native (Y-up) transforms -- the same space Godot
 // and the original engine use -- so a bone's parent-local pose maps DIRECTLY to a Godot
 // Transform3D with no change-of-basis. (The mesh carries the (-x,y,z) handedness flip;
@@ -251,14 +233,14 @@ PackedInt32Array SkeletalAnim::get_overlay_classes() const {
 Array SkeletalAnim::eval_pose_overlay_deltas(const String &p_key, double p_playhead_seconds,
 		const PackedInt32Array &p_classes, const Basis *p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant, int p_variant, bool p_person) const {
 	std::vector<opennova::anim::PoseBone> pose;
 	rig().eval_pose(opennova::to_std(p_key), p_playhead_seconds, p_variant, pose);
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant,
 			p_person ? rig().clip_file_bones(opennova::to_std(p_key), p_variant) : kNotPerson);
 }
@@ -268,7 +250,7 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 		const String &p_target_key, double p_target_playhead_seconds,
 		float p_weight, const PackedInt32Array &p_classes,
 		const Basis *p_deltas, const String &p_wpn_key,
-		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
+		double p_wpn_playhead_seconds,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant,
 		int p_source_variant, int p_target_variant, bool p_person) const {
@@ -278,7 +260,7 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 			p_source_variant, p_target_variant);
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant,
 			p_person ? rig().clip_file_bones(opennova::to_std(p_target_key), p_target_variant)
 					 : kNotPerson);
@@ -287,7 +269,7 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> native_pose,
 		const PackedInt32Array &p_classes, const Basis *p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant, size_t p_person_clip_bones) const {
 	std::vector<uint8_t> classes;
@@ -312,16 +294,14 @@ Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> nat
 		rig().pose_person_rows_past_clip(native_pose, p_person_clip_bones, p_deltas ? deltas : nullptr,
 				classes);
 	}
-	Array pose = pose_to_array(native_pose);
-	apply_right_hand_local_collapse(pose, p_collapse_right_hand);
-	return pose;
+	return pose_to_array(native_pose);
 }
 
 void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_key,
 		double p_playhead_seconds, int p_variant,
 		const PackedInt32Array &p_classes, const Basis *p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant, bool p_person) const {
 	// Branch mirror of ObjectModel.advance_body_animation: overlay inputs
@@ -330,7 +310,7 @@ void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_
 	Array pose;
 	if (p_deltas != nullptr && !p_classes.is_empty()) {
 		pose = eval_pose_overlay_deltas(p_key, p_playhead_seconds, p_classes, p_deltas,
-				p_wpn_key, p_wpn_playhead_seconds, p_collapse_right_hand,
+				p_wpn_key, p_wpn_playhead_seconds,
 				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
 				p_wpn_variant, p_wpn_prev_variant, p_variant, p_person);
 	} else if (p_person) {
@@ -340,7 +320,7 @@ void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_
 	} else {
 		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
 	}
-	write_pose_to_skeleton(p_skeleton, pose, p_collapse_right_hand);
+	write_pose_to_skeleton(p_skeleton, pose);
 }
 
 void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
@@ -348,7 +328,7 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 		const String &p_target_key, double p_target_playhead_seconds,
 		float p_weight, const PackedInt32Array &p_classes,
 		const Basis *p_deltas, const String &p_wpn_key,
-		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
+		double p_wpn_playhead_seconds,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant,
 		int p_source_variant, int p_target_variant, bool p_person) const {
@@ -358,7 +338,7 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 				p_source_key, p_source_playhead_seconds,
 				p_target_key, p_target_playhead_seconds, p_weight,
 				p_classes, p_deltas, p_wpn_key,
-				p_wpn_playhead_seconds, p_collapse_right_hand,
+				p_wpn_playhead_seconds,
 				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
 				p_wpn_variant, p_wpn_prev_variant, p_source_variant,
 				p_target_variant, p_person);
@@ -377,7 +357,7 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 				p_target_key, p_target_playhead_seconds, p_weight,
 				p_source_variant, p_target_variant);
 	}
-	write_pose_to_skeleton(p_skeleton, pose, p_collapse_right_hand);
+	write_pose_to_skeleton(p_skeleton, pose);
 }
 
 namespace {
@@ -397,13 +377,13 @@ const Basis *deltas_from_array(const Array &p_deltas, std::array<Basis, 9> &out)
 Array SkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant) const {
 	std::array<Basis, 9> table;
 	return eval_pose_overlay_deltas(p_key, p_playhead_seconds, p_classes,
 			deltas_from_array(p_deltas, table), p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 }
 
@@ -412,14 +392,14 @@ Array SkeletalAnim::eval_pose_blended_overlay(
 		const String &p_target_key, double p_target_playhead_seconds,
 		float p_weight, const PackedInt32Array &p_classes,
 		const Array &p_deltas, const String &p_wpn_key,
-		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
+		double p_wpn_playhead_seconds,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant) const {
 	std::array<Basis, 9> table;
 	return eval_pose_blended_overlay_deltas(p_source_key, p_source_playhead_seconds,
 			p_target_key, p_target_playhead_seconds, p_weight, p_classes,
 			deltas_from_array(p_deltas, table), p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 }
 
@@ -427,13 +407,13 @@ void SkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key,
 		double p_playhead_seconds, int p_variant,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
 		int p_wpn_variant, int p_wpn_prev_variant) const {
 	std::array<Basis, 9> table;
 	pose_skeleton_deltas(p_skeleton, p_key, p_playhead_seconds, p_variant, p_classes,
 			deltas_from_array(p_deltas, table), p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 }
 
@@ -461,7 +441,7 @@ void SkeletalAnim::write_native_pose(Skeleton3D *p_skeleton,
 }
 
 void SkeletalAnim::write_pose_to_skeleton(Skeleton3D *p_skeleton,
-		const Array &p_pose, bool p_collapse_right_hand) const {
+		const Array &p_pose) const {
 	if (p_skeleton == nullptr) {
 		return;
 	}
@@ -469,20 +449,9 @@ void SkeletalAnim::write_pose_to_skeleton(Skeleton3D *p_skeleton,
 			static_cast<int>(p_skeleton->get_bone_count()));
 	for (int i = 0; i < count; ++i) {
 		const Transform3D t = p_pose[i];
-		if (p_collapse_right_hand && i == 16) {
-			// eval_pose_overlay preserves BN17's sampled parent-local joint origin
-			// while clearing its basis. Apply that origin directly and collapse
-			// scale there (zero scale keeps mixed-weight triangles at the actor
-			// instead of spanning to world zero). Also covers the no-overlay
-			// eval_pose fallback.
-			p_skeleton->set_bone_pose_position(i, t.origin);
-			p_skeleton->set_bone_pose_rotation(i, Quaternion());
-			p_skeleton->set_bone_pose_scale(i, Vector3(0, 0, 0));
-		} else {
-			p_skeleton->set_bone_pose_position(i, t.origin);
-			p_skeleton->set_bone_pose_rotation(i, t.basis.get_rotation_quaternion());
-			p_skeleton->set_bone_pose_scale(i, t.basis.get_scale());
-		}
+		p_skeleton->set_bone_pose_position(i, t.origin);
+		p_skeleton->set_bone_pose_rotation(i, t.basis.get_rotation_quaternion());
+		p_skeleton->set_bone_pose_scale(i, t.basis.get_scale());
 	}
 }
 
@@ -508,7 +477,7 @@ void SkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &SkeletalAnim::eval_pose, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("eval_pose_blended", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "source_variant", "target_variant"), &SkeletalAnim::eval_pose_blended, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &SkeletalAnim::get_overlay_classes);
-	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 }

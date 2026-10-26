@@ -452,8 +452,10 @@ struct RoundHitOutcome {
 	int motor_anim_pending = -1;
 	int32_t shake = 0;
 	int32_t health_after = 0;
+	int burn_spawns = 0; // the ammo's hit emitter spawned on the body
 };
-RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, bool local) {
+RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, bool local,
+		const char *secondary_effect = "") {
 	RoundHitOutcome out;
 	Rig r;
 	r.world->ai.is_authority = true;
@@ -487,6 +489,7 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	ammo.velocity = 620;
 	ammo.max_age_ticks = 20;
 	ammo.weight_in_grains = 875;
+	ammo.secondary_effect = secondary_effect;
 	r.world->tables.ammo.entries.push_back(ammo);
 	w::CollisionModel model;
 	model.sections.resize(14);
@@ -515,6 +518,10 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	r.world->collision = nullptr;
 	out.struck = r.world->round_sim.hit_record.target == victim;
 	out.shake = r.local->view.shake.counter;
+	for (const w::DestructionEffectEvent &effect : r.world->out.destruction.effects)
+		if (effect.family == 1 && !effect.release && effect.attach_wire_handle == victim.packed &&
+				effect.effect == "Effect_Burn")
+			++out.burn_spawns;
 	const w::Entity *hit = r.world->registry.get(victim);
 	if (hit == nullptr) return out;
 	out.death_anim_state = hit->death_anim_state;
@@ -559,6 +566,35 @@ void test_a_round_hit_runs_the_callbacks_tails() {
 	const RoundHitOutcome barrel = fire_one_round(kBrrl, dealt, false, /*local=*/true);
 	CHECK(barrel.struck);
 	CHECK(barrel.shake == 0); // the dying arm's bit, read after the callback
+}
+
+// An incendiary round (the ammo's +72 `secondary_effect`) on a player body: the plyr callback
+// spawns the hit emitter and stages the fire death 173 ahead of its health tail, so a lethal hit
+// requests 173 on the primary channel; its dead return spawns nothing on a dead body, where the
+// org callback (no dead return) burns a dead body too; an item row's callback has no such leg.
+// [orig: Entity_HandleDamageAndTriggerZones @0x407720 - the dead return @0x40772F, the emitter
+//  @0x407843..0x4078B2, the override @0x407A7A..0x407A7C, the tail @0x407ACD..0x407B33;
+//  OrganicClass_HandleEvent @0x407310 - the emitter @0x4074DB..0x40754A, the override
+//  @0x4076D3..0x4076D5]
+void test_an_incendiary_round_burns_the_callbacks_bodies() {
+	const RoundHitOutcome alive = fire_one_round(kPlyr, 5000, false, false, "Effect_Burn");
+	CHECK(alive.struck && alive.burn_spawns == 1);
+	CHECK(alive.death_anim_state == w::anim_state::kDeathFire);
+	CHECK(alive.motor_anim_state == 0x777); // no tail on a body the round leaves alive
+	const int32_t dealt = 5000 - alive.health_after;
+	const RoundHitOutcome lethal = fire_one_round(kPlyr, dealt, false, false, "Effect_Burn");
+	CHECK(lethal.struck && lethal.burn_spawns == 1 && lethal.health_after <= 0);
+	CHECK(lethal.death_anim_state == w::anim_state::kDeathFire);
+	CHECK(lethal.motor_anim_state == w::anim_state::kDeathFire && lethal.motor_anim_pending == 0);
+	const RoundHitOutcome plyr_corpse = fire_one_round(kPlyr, 100, /*dead=*/true, false, "Effect_Burn");
+	CHECK(plyr_corpse.struck && plyr_corpse.burn_spawns == 0 && plyr_corpse.death_anim_state == 0x1234);
+	const RoundHitOutcome org_corpse = fire_one_round(kOrg, 100, /*dead=*/true, false, "Effect_Burn");
+	CHECK(org_corpse.struck && org_corpse.burn_spawns == 1);
+	CHECK(org_corpse.death_anim_state == w::anim_state::kDeathFire);
+	const RoundHitOutcome barrel = fire_one_round(kBrrl, dealt, false, false, "Effect_Burn");
+	CHECK(barrel.struck && barrel.burn_spawns == 0);
+	const RoundHitOutcome plain = fire_one_round(kPlyr, 5000, false, false);
+	CHECK(plain.struck && plain.burn_spawns == 0 && plain.death_anim_state != w::anim_state::kDeathFire);
 }
 
 // Script SSN 10000 names the local body only when its row is the plyr row: the plyr class init
@@ -2521,6 +2557,7 @@ int main() {
 	test_a_knife_runs_its_rows_callback();
 	test_a_round_hit_runs_its_rows_callback();
 	test_a_round_hit_runs_the_callbacks_tails();
+	test_an_incendiary_round_burns_the_callbacks_bodies();
 	test_the_player_ssn_follows_the_plyr_class_init();
 	test_the_barrel_rows_dying_flag_reaches_the_uplink_gate();
 	test_the_nade_row_has_no_callback();

@@ -81,6 +81,40 @@ void pose_globals(const std::vector<anim::PoseBone> &pose,
 	}
 }
 
+void collapse_bone_rows(const std::vector<int> &parents,
+		const std::vector<anim::Vec3> &rest_joints, uint32_t collapse_mask,
+		std::vector<SkeletalClips::RestTransform> &deformations) {
+	const size_t count = std::min({deformations.size(), parents.size(), rest_joints.size()});
+	const auto collapsed = [collapse_mask](size_t bone) {
+		return bone < 32 && (collapse_mask & (1u << bone)) != 0;
+	};
+	if (collapse_mask == 0) return;
+	// The rows as the pose built them, which every joint below is measured against.
+	const std::vector<SkeletalClips::RestTransform> posed(deformations.begin(),
+			deformations.begin() + static_cast<std::ptrdiff_t>(count));
+	for (size_t i = 0; i < count; ++i) {
+		const anim::Vec3 &joint = rest_joints[i];
+		// Where the pivot lands: as posed, moved by however far the parent's final
+		// row carries it from where the posed parent did.
+		anim::Vec3 landed = rest_transform_point(posed[i], joint);
+		const int parent = parents[i];
+		if (parent >= 0 && static_cast<size_t>(parent) < i) {
+			const anim::Vec3 now = rest_transform_point(deformations[static_cast<size_t>(parent)], joint);
+			const anim::Vec3 was = rest_transform_point(posed[static_cast<size_t>(parent)], joint);
+			landed = anim::Vec3{landed.x + now.x - was.x, landed.y + now.y - was.y,
+					landed.z + now.z - was.z};
+		}
+		SkeletalClips::RestTransform &row = deformations[i];
+		if (collapsed(i)) {
+			std::memset(row.rows, 0, sizeof(row.rows));
+			row.origin = landed;
+			continue;
+		}
+		const anim::Vec3 turned = rest_transform_direction(row, joint);
+		row.origin = anim::Vec3{landed.x - turned.x, landed.y - turned.y, landed.z - turned.z};
+	}
+}
+
 // Full affine inverse (cofactor basis inverse + rotated-negated origin) — the
 // binding used Transform3D::affine_inverse on the accumulated rest. The rest
 // chain is orthonormal by construction, so the determinant never vanishes;

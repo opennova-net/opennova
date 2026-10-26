@@ -160,3 +160,96 @@ static func connect_layout_source(layout_control: Control, ui_parent: Node,
 	var viewport := ui_parent.get_viewport() if ui_parent != null else null
 	if viewport != null and not viewport.size_changed.is_connected(on_resize):
 		viewport.size_changed.connect(on_resize)
+
+
+# --- MCP menu-driving seams (the game_menu tool) ------------------------------
+# Over any built frame and its driver: the shell's menu and the presenters' surfaces
+# answer game_menu through these alike. Positions are design space (800x600), scaled
+# to the frame as its own input is.
+
+
+static func design_to_local(frame: MenuFrame, design_pos: Vector2) -> Vector2:
+	var size := frame.get_size()
+	return Vector2(design_pos.x * size.x / MenuFrame.DESIGN_WIDTH,
+			design_pos.y * size.y / MenuFrame.DESIGN_HEIGHT)
+
+
+## A surface's game_menu state: `head` (the surface's own fields) with, when asked, every
+## widget's row (widget_rows).
+static func menu_state(driver: MenuDriver, frame: MenuFrame, head: Dictionary,
+		include_widgets: bool) -> Dictionary:
+	if include_widgets:
+		head["widgets"] = widget_rows(driver, frame)
+	return head
+
+
+## Every widget the frame places, in its pre-order: the design rect, kind, text and
+## item count, and a list's rows and selected row (-1 none), read by its NAME (the
+## driver's doc-id space is not the frame's index space).
+static func widget_rows(driver: MenuDriver, frame: MenuFrame) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for i in frame.widget_count():
+		var rect := frame.widget_rect(i)
+		var widget_name := frame.widget_name(i)
+		var item_count := frame.item_count(i)
+		var row := {
+			"index": i,
+			"name": widget_name,
+			"kind": frame.widget_kind(i),
+			"disabled": frame.is_widget_disabled(i),
+			"rect": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
+			"text": frame.get_widget_text(i),
+			"items": item_count,
+		}
+		var id := driver.widget_id(widget_name)
+		if item_count > 0 and id >= 0:
+			var texts := PackedStringArray()
+			for item in driver.item_count(id):
+				texts.append(driver.item_text(id, item))
+			row.merge({"rows": texts, "selected": driver.selected_row(id)})
+		rows.append(row)
+	return rows
+
+
+## Press+release through the real pump at the named, enabled widget's design-rect
+## center, so click activation follows the pump's claim rules; false for none.
+static func press_widget(driver: MenuDriver, frame: MenuFrame, widget_name: String) -> bool:
+	for i in frame.widget_count():
+		if frame.widget_name(i) != widget_name or frame.is_widget_disabled(i):
+			continue
+		var local := design_to_local(frame, frame.widget_rect(i).get_center())
+		driver.process_mouse(local, true)
+		driver.process_mouse(local, false)
+		return true
+	return false
+
+
+## One raw pump sample at design coords with the button held or not, as a motion is
+## (the claim's hover and the window sounds it plays); the hit widget index, -1 for none.
+static func pump_at(driver: MenuDriver, frame: MenuFrame, design_pos: Vector2, down: bool) -> int:
+	var local := design_to_local(frame, design_pos)
+	var hit := frame.hit_test(local)
+	driver.process_mouse(local, down)
+	return hit
+
+
+## A raw pump press+release at design coords (list rows, combo popups, spin arrows);
+## the hit widget index, -1 for none.
+static func press_at(driver: MenuDriver, frame: MenuFrame, design_pos: Vector2) -> int:
+	var hit := pump_at(driver, frame, design_pos, true)
+	pump_at(driver, frame, design_pos, false)
+	return hit
+
+
+## A REAL left click at design coords: press and release fed through Godot's input
+## dispatch at the frame's place on the canvas (mouse filters, companion mounts and GUI
+## focus all apply), unlike the pump-direct ops. The events land on the next frame.
+static func click_at(frame: MenuFrame, design_pos: Vector2) -> void:
+	var window_pos := frame.get_global_transform_with_canvas() * design_to_local(frame, design_pos)
+	for pressed in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = pressed
+		click.position = window_pos
+		click.global_position = window_pos
+		Input.parse_input_event(click)

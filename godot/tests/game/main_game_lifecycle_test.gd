@@ -1281,10 +1281,20 @@ func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
 			"ESC in the armory resumes, so the pause verb requires resume first")
 	assert_eq(adapter.mcp_game_control("open_armory"), OK,
 			"open is idempotent while the armory is up")
+	# game_menu drives the armory while it is up; screen and open stay the shell menu's.
+	var armory_menu: Dictionary = adapter.mcp_game_menu({"op": "state"})
+	assert_eq(armory_menu.get("surface"), "armory", "game_menu reaches the open armory")
+	assert_eq(String(armory_menu.get("file")).to_lower(), "weapon.mnu")
+	assert_false((armory_menu.get("widgets", []) as Array).is_empty(),
+			"the armory's widgets are listed")
+	assert_string_contains(String(adapter.mcp_game_menu({"op": "screen", "name": "MAIN"})
+			.get("error", "")), "armory", "screen stays the shell menu's")
 	assert_eq(adapter.mcp_game_control("resume"), OK)
 	state = adapter.get_mcp_game_state()
 	assert_eq(String(state["shell"]["state"]), "world",
 			"resume closes the armory and hands play back")
+	assert_eq(adapter.mcp_game_menu({"op": "state", "widgets": false}).get("surface"), "shell",
+			"a closed armory leaves game_menu the shell's menu")
 
 	# The debug pause row pauses the session under the WORLD shell state: the same
 	# paused branch runs on its frames.

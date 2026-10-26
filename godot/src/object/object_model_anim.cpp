@@ -715,6 +715,11 @@ bool ObjectModel::has_body_blend() const {
 	return !(body_blend_source_key_.is_empty() && body_blend_weight_ >= 1.0f);
 }
 
+// Both collapse inputs fold their bones in the skin at once, like play_body_clip_at re-poses:
+// a mount edge or a cut must land on the current pose without waiting for the next
+// runtime-frame advance (models no longer self-clock — the frame driver advances the awake
+// set, and a caller may read the skin same-frame); the frame pass keeps them folded as the
+// pose moves (apply_skeletal_binds).
 void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->set_right_hand_collapsed(p_collapsed);
@@ -724,14 +729,32 @@ void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {
 		return;
 	}
 	collapse_right_hand_ = p_collapsed;
+	land_collapsed_bones();
+}
+
+// The fold lands on the current pose: the body re-poses first, as a mount edge always has,
+// so an overlay or clip not yet advanced is current before its bones fold.
+void ObjectModel::land_collapsed_bones() {
 	body_pose_dirty_ = true;
-	// Re-pose immediately, like play_body_clip_at: the collapse is a mount-edge
-	// presentation flag and must land on the current pose without waiting for
-	// the next runtime-frame advance (models no longer self-clock — the frame
-	// driver advances the awake set, and a caller may read the pose same-frame).
 	if (!anim_key_.is_empty()) {
 		advance_body_animation(0.0);
 	}
+	if (apply_skeletal_binds()) {
+		publish_skin_palette();
+	}
+}
+
+void ObjectModel::set_cut_sections(int64_t p_mask) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_cut_sections(p_mask);
+	}
+	wake_runtime_frame();
+	const uint32_t mask = static_cast<uint32_t>(p_mask);
+	if (mask == cut_sections_) {
+		return;
+	}
+	cut_sections_ = mask;
+	land_collapsed_bones();
 }
 
 void ObjectModel::set_body_pose_override(const std::vector<opennova::anim::PoseBone> &p_pose,
@@ -824,7 +847,7 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 				body_blend_source_time_, anim_key_, anim_time_, body_blend_weight_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
 				overlay_deltas,
-				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
+				use_overlay ? wpn_key_ : String(), wpn_time,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_,
 				body_blend_source_variant_, anim_variant_, !viewmodel_rig_);
@@ -832,7 +855,7 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 		skeletal_->pose_skeleton_deltas(skeleton_, anim_key_, anim_time_, anim_variant_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
 				overlay_deltas,
-				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
+				use_overlay ? wpn_key_ : String(), wpn_time,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_, !viewmodel_rig_);
 	}

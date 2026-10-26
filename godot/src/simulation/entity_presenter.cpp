@@ -1015,6 +1015,19 @@ bool EntityPresenter::stamp_right_hand_collapsed(ObjectModel *model,
 	return true;
 }
 
+bool EntityPresenter::stamp_cut_sections(ObjectModel *model, const float *p, int base,
+		int64_t &last_cut) {
+	const int64_t cut = static_cast<int64_t>(
+			static_cast<uint32_t>(field_i(p, base, Simulation::PF_CUT_SECTIONS_LO)) |
+			(static_cast<uint32_t>(field_i(p, base, Simulation::PF_CUT_SECTIONS_HI)) << 16));
+	if (cut == last_cut) {
+		return false;
+	}
+	model->set_cut_sections(cut);
+	last_cut = cut;
+	return true;
+}
+
 bool EntityPresenter::aim_payload_changed(const float *p, int base,
 		std::array<float, kAimPayloadFloats> &cache, bool &cache_valid) {
 	static_assert(kAimPayloadFloats == AIM_PAYLOAD_FLOATS,
@@ -1206,8 +1219,7 @@ void EntityPresenter::note_ragdoll_row(ObjectModel *model, int32_t handle, const
 	row.life = field_i(p, base, Simulation::PF_RESPAWN_REVISION);
 	row.anim_state = anim_state;
 	row.hidden = field_i(p, base, Simulation::PF_HIDDEN) != 0;
-	row.severed = field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0 &&
-			(field_i(p, base, Simulation::PF_SECTION_MASK_LO) & 1) != 0;
+	row.severed = (field_i(p, base, Simulation::PF_CUT_SECTIONS_LO) & 1) != 0;
 	ragdoll_rows_.push_back(row);
 }
 
@@ -1359,6 +1371,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		bool body_dependency_changed = false;
 		if (submitted && stamp_right_hand_collapsed(model, p, base, row.rhc)) {
 			++stat_rhc_dispatches_;
+			body_dependency_changed = true;
+		}
+		if (submitted && stamp_cut_sections(model, p, base, row.cut_sections)) {
 			body_dependency_changed = true;
 		}
 		if (submitted) {

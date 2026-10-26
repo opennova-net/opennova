@@ -8,11 +8,12 @@
 // skeleton's settled pose: one texture row per bone, republished whenever the
 // Skeleton3D settles a pose, and the matrices the render-slot capture skins
 // its silhouettes with. The skin's binds also carry the clip-posed parts'
-// PANM layer (apply_skeletal_panm below).
+// PANM layer and the person bone walk's collapsed bones (apply_skeletal_binds below).
 
 #include "object/object_model.h"
 
 #include <formats/threedi/threedi_panm_pose.h>
+#include <runtime/anim/skeletal_clips.h>
 
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -143,11 +144,24 @@ void ObjectModel::build_skin_palette() {
 	publish_skin_palette();
 }
 
-// The Skeleton3D settled a pose (its deferred update, the moment Godot uploads
-// the skeleton's own skins, which every pose writer ends in): republish the
-// palette, and the palette strips' culling box as the union of their per-bone
-// bind boxes carried through the posed palette (the bounds Godot derives for
-// the strips it skins itself).
+// The Skeleton3D settled a pose (its deferred update, which every pose writer ends in): it
+// emits skeleton_updated, then uploads its skins as each bone's global pose times the bind
+// standing at that moment. The frame pass solved the binds over the pose it saw, so a pose
+// written after it this frame (a presenter's clip-phase stamp) would skin a folded bone with
+// binds solved for the pose before; the binds re-solve over the settled pose first. A bind
+// written mid-update marks the skeleton dirty with no update queued (it is updating), so the
+// next pose write would queue none: the full transform pass clears that flag (mid-update it
+// recomputes the current bones and signals nothing).
+void ObjectModel::settle_skeleton_pose() {
+	if (skeletal_scene_ && skeletal_binds_live() && apply_skeletal_binds() && skeleton_ != nullptr) {
+		skeleton_->force_update_all_bone_transforms();
+	}
+	publish_skin_palette();
+}
+
+// Republish the palette, and the palette strips' culling box as the union of their per-bone
+// bind boxes carried through the posed palette (the bounds Godot derives for the strips it
+// skins itself).
 void ObjectModel::publish_skin_palette() {
 	if (skin_palette_texture_.is_null()) {
 		return;
@@ -216,32 +230,75 @@ void ObjectModel::apply_skin_palette_bounds() {
 	}
 }
 
-// A clip-posed model's part tracks, composed over the bone matrices its clip
-// built exactly as retail's submit composes a static model's over its entity
-// matrix (threedi_panm_pose_parts_over carries the witness: the first-person
-// gun and its arms, rigid and per-vertex skinned alike). Godot skins bone i as
-// its global pose times the skin's bind i, so the composed part matrix lands
-// as that bind, G_i^-1 x out_i: a bind takes any affine matrix (a part scaled
-// to nothing included) where a bone pose keeps only position, rotation and
-// scale, and the bones keep the clip's pose for everything else that reads
-// them. Bone i is part i, as the fake skinning binds a rigid part
-// (renderer::prepare_model_mesh). The skin palette follows the same binds.
-void ObjectModel::apply_skeletal_panm() {
+namespace {
+
+opennova::anim::SkeletalClips::RestTransform rest_of(const Transform3D &p_transform) {
+	opennova::anim::SkeletalClips::RestTransform out;
+	for (int row = 0; row < 3; ++row) {
+		for (int column = 0; column < 3; ++column) {
+			out.rows[row * 3 + column] = static_cast<float>(p_transform.basis.rows[row][column]);
+		}
+	}
+	out.origin = {static_cast<float>(p_transform.origin.x), static_cast<float>(p_transform.origin.y),
+			static_cast<float>(p_transform.origin.z)};
+	return out;
+}
+
+Transform3D transform_of(const opennova::anim::SkeletalClips::RestTransform &p_rest) {
+	const float *r = p_rest.rows;
+	return Transform3D(Basis(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]),
+			Vector3(p_rest.origin.x, p_rest.origin.y, p_rest.origin.z));
+}
+
+} // namespace
+
+uint32_t ObjectModel::collapsed_bones() const {
+	return cut_sections_ |
+			(collapse_right_hand_ ? 1u << opennova::anim::kCollapsedRightHandBone : 0u);
+}
+
+bool ObjectModel::skeletal_binds_live() const {
+	return has_live_panm_ || skin_binds_layered_ || collapsed_bones() != 0 || skin_binds_collapsed_;
+}
+
+Transform3D ObjectModel::get_bone_skin_transform(int p_bone) const {
+	if (skeleton_ == nullptr || skeleton_skin_.is_null() || p_bone < 0 ||
+			p_bone >= skeleton_->get_bone_count() || p_bone >= skeleton_skin_->get_bind_count()) {
+		return Transform3D();
+	}
+	return skeleton_->get_bone_global_pose(p_bone) * skeleton_skin_->get_bind_pose(p_bone);
+}
+
+// The skin's binds over the clip pose. Godot skins bone i as its global pose times the
+// skin's bind i, so a matrix out_i the draw needs for bone i lands as that bind,
+// G_i^-1 x out_i: a bind takes any affine matrix (a part scaled to nothing included) where
+// a bone pose keeps only position, rotation and scale, and the bones keep the clip's pose
+// for everything else that reads them. Bone i is part i, as the fake skinning binds a rigid
+// part (renderer::prepare_model_mesh). The skin palette follows the same binds. Two layers:
+// - a clip-posed model's part tracks, composed over the bone matrices its clip built exactly
+//   as retail's submit composes a static model's over its entity matrix
+//   (threedi_panm_pose_parts_over carries the witness: the first-person gun and its arms,
+//   rigid and per-vertex skinned alike);
+// - then the person bone walk's collapsed bones (collapsed_bones: the mounted right hand,
+//   the cut sections), whose rows fold to their joints while their children keep turning on
+//   the fold points (anim::collapse_bone_rows carries the witness). A bone pose cannot carry
+//   that: a parent scaled to nothing takes its children with it.
+bool ObjectModel::apply_skeletal_binds() {
 	if (!skeletal_scene_ || skeleton_ == nullptr || skeleton_skin_.is_null() ||
 			object_data_.is_null() || !object_data_->has_document()) {
-		return;
+		return false;
 	}
 	const opennova::threedi::Threedi3di3 &model = object_data_->native_model();
 	if (active_lod_ < 0 || static_cast<std::size_t>(active_lod_) >= model.lod_count ||
 			model.lods == nullptr) {
-		return;
+		return false;
 	}
 	const std::size_t part_count = model.lods[active_lod_].render_object_count;
 	const int bone_count = std::min({skeleton_->get_bone_count(),
 			static_cast<int>(skeleton_skin_->get_bind_count()),
 			static_cast<int>(skin_rest_binds_.size())});
 	if (part_count == 0 || bone_count <= 0) {
-		return;
+		return false;
 	}
 	// Each part's posed frame: its bone's global pose times the rest bind (a
 	// part past the rig rides the last bone, like its fake-skinned vertices).
@@ -259,36 +316,55 @@ void ObjectModel::apply_skeletal_panm() {
 	const bool layered = opennova::threedi::threedi_panm_pose_parts_over(model, active_lod_,
 			opennova::threedi::threedi_panm_runtime_time_ms(anim_time_ms_),
 			runtime_ctrl_values().data(), inputs, posed, &driven);
-	if (!layered && !skin_binds_layered_) {
-		return;
+	const uint32_t collapsed = collapsed_bones();
+	if (!layered && !skin_binds_layered_ && collapsed == 0 && !skin_binds_collapsed_) {
+		return false;
 	}
-	bool changed = false;
 	const std::size_t binds = std::min(part_count, static_cast<std::size_t>(bone_count));
+	std::vector<Transform3D> bind_poses(binds);
 	for (std::size_t bone = 0; bone < binds; ++bone) {
-		Transform3D bind = skin_rest_binds_[bone];
-		// A bone posed to nothing (the collapsed right hand) has no inverse;
-		// its part keeps the clip's collapse.
+		bind_poses[bone] = skin_rest_binds_[bone];
 		if (layered && driven[bone] != 0 &&
 				!Math::is_zero_approx(globals[bone].basis.determinant())) {
 			const Transform3D composed =
 					globals[bone].affine_inverse() * ObjectData::panm_transform(posed[bone]);
-			if (!composed.is_equal_approx(bind)) {
-				bind = composed;
+			if (!composed.is_equal_approx(bind_poses[bone])) {
+				bind_poses[bone] = composed;
 			}
 		}
+	}
+	if (collapsed != 0) {
+		std::vector<opennova::anim::SkeletalClips::RestTransform> rows(binds);
+		std::vector<opennova::anim::Vec3> joints(binds);
+		std::vector<int> parents(binds);
+		for (std::size_t bone = 0; bone < binds; ++bone) {
+			rows[bone] = rest_of(globals[bone] * bind_poses[bone]);
+			const Vector3 joint = skin_rest_binds_[bone].affine_inverse().origin;
+			joints[bone] = {static_cast<float>(joint.x), static_cast<float>(joint.y),
+					static_cast<float>(joint.z)};
+			parents[bone] = skeleton_->get_bone_parent(static_cast<int>(bone));
+		}
+		opennova::anim::collapse_bone_rows(parents, joints, collapsed, rows);
+		for (std::size_t bone = 0; bone < binds; ++bone) {
+			if (!Math::is_zero_approx(globals[bone].basis.determinant())) {
+				bind_poses[bone] = globals[bone].affine_inverse() * transform_of(rows[bone]);
+			}
+		}
+	}
+	bool changed = false;
+	for (std::size_t bone = 0; bone < binds; ++bone) {
 		const int index = static_cast<int>(bone);
-		if (skeleton_skin_->get_bind_pose(index) != bind) {
-			skeleton_skin_->set_bind_pose(index, bind);
+		if (skeleton_skin_->get_bind_pose(index) != bind_poses[bone]) {
+			skeleton_skin_->set_bind_pose(index, bind_poses[bone]);
 			changed = true;
 		}
 		if (bone < skin_bind_poses_.size()) {
-			skin_bind_poses_[bone] = bind;
+			skin_bind_poses_[bone] = bind_poses[bone];
 		}
 	}
 	skin_binds_layered_ = layered;
-	if (changed) {
-		publish_skin_palette();
-	}
+	skin_binds_collapsed_ = collapsed != 0;
+	return changed;
 }
 
 Array ObjectModel::get_skin_palette() const {

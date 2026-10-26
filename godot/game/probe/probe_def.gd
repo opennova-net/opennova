@@ -504,12 +504,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 				"The impact-position probe on the loaded mission: equip `weapon` when given, "
 				+ "walk forward, aim down, fire a burst through the real input path, then "
 				+ "dump the camera aim ray against every live effect-world group (name, sim "
-				+ "position, rendered bounds) and capture the frame; fails on no live group.",
+				+ "position, rendered bounds) and capture the frame; fails on no live group. "
+				+ "`aim_entity` (a game_entities ai_index) replaces the walk and look with "
+				+ "the aim lock: the view held on that entity's body plus `aim_height` m "
+				+ "through the burst.",
 				RUNTIME + "fp_impact_probe.gd", {
 					"weapon": { "type": "string", "default": "" },
 					"walk_frames": { "type": "integer", "minimum": 0, "default": 120 },
 					"look_px": { "type": "number", "default": 37.5 },
 					"burst_frames": { "type": "integer", "minimum": 1, "default": 20 },
+					"aim_entity": { "type": "integer", "minimum": -1, "default": -1 },
+					"aim_height": { "type": "number", "default": 0.4 },
 					"output_dir": { "type": "string", "default": "" },
 				}, [], true, true, 300_000),
 		ProbeDef.make("mission_playthrough",
