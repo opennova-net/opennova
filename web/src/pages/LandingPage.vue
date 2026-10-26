@@ -333,8 +333,10 @@ const tools = [
 const downloadsHost = downloadsBase(window.location.hostname);
 const manifest = ref<DownloadsManifest | null>(null);
 
+// GitHub's releases until the host's manifest lists the file (a deployment before its first
+// publish, or a manifest that failed to load).
 function downloadUrl(file: string): string {
-  return downloadsHost ? `${downloadsHost}/${file}` : RELEASES_URL;
+  return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : RELEASES_URL;
 }
 
 function fileLine(file: string): string {

@@ -173,6 +173,15 @@ describe('LandingPage', () => {
     expect(buttons.every((a) => a.attributes('href') === 'https://github.com/opennova-net/opennova/releases/latest')).toBe(true);
   });
 
+  it("keeps the buttons on the GitHub releases until the host's manifest lists the build", async () => {
+    host.mockReturnValue('https://downloads.example.com');
+    manifest.mockResolvedValue(null);
+    const wrapper = await mountPage();
+    const buttons = wrapper.findAll('a').filter((a) => a.text() === 'Download' && a.attributes('aria-label'));
+    expect(buttons).toHaveLength(BUILDS.length);
+    expect(buttons.every((a) => a.attributes('href') === 'https://github.com/opennova-net/opennova/releases/latest')).toBe(true);
+  });
+
   it('offers the account and lobby steps', async () => {
     const links = hrefs(await mountPage());
     expect(links).toContain('/register');
