@@ -1131,6 +1131,16 @@ void MenuRuntime::table_set_row_color(int id, int row, bool enable, uint32_t col
 	push_table_rows_(id);
 }
 
+bool MenuRuntime::table_row_colored(int id, int row, uint32_t *color) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	if (state == nullptr || row < 0 || row >= static_cast<int>(state->table_rows.size()))
+		return false;
+	const MenuTableRow &r = state->table_rows[static_cast<size_t>(row)];
+	if ((r.flags & kTableRowFlagColor) == 0) return false;
+	if (color != nullptr) *color = r.color;
+	return true;
+}
+
 void MenuRuntime::table_set_row_visible(int id, int row, bool visible) {
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (menu::table_set_row_visible(state.table_rows, row, visible)) push_table_rows_(id);

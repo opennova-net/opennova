@@ -164,17 +164,49 @@ void OptionsScreen::accept_words(const MenuRuntime &menu, playersav::ProfileReco
 
 // The table mirrors the screen's class/action/control rows. Capture
 // writes "???" into the armed row's Control cell alone, preserving the
-// action's row identity (D-MNU-48).
+// action's row identity (D-MNU-48). A row whose binding another listed row
+// shares draws yellow on every device page, the others the table's colour
+// (D-CTRL-3).
 // [orig: UI_PopulateControlMappingList @0x55c0c0;
 // UI_UpdateControlMappingDisplay @0x55b700; UI_ControlsRemapArmHandler
 // @0x55d560 - asc_7CA0FC "???" pushed @0x55d5c8, the column-2
-// CTableWnd_SetCellText call @0x55d5d0]
+// CTableWnd_SetCellText call @0x55d5d0; UI_RefreshControlMappingList
+// @0x55b320 - KeyBinding_CheckWeaponSlotConflict per record @0x55b37b, the
+// tint CTableWnd_SetRowColor(row, 1, 0xFFFFFF00) else (row, 0, 0) on the
+// joystick page @0x55b461 / @0x55b468, the mouse page @0x55b651 / @0x55b658
+// and the keyboard page @0x55b6b5 / @0x55b6bc]
 void OptionsScreen::fill(MenuRuntime &menu, int table, int blank) {
 	menu.table_clear_rows(table);
 	int i = 0;
 	for (const auto &row : bindings_.build_rows(device_)) {
-		menu.table_add_row(table, {row.cls, row.action, i++ == blank ? "???" : row.control});
+		menu.table_add_row(table, {row.cls, row.action, i == blank ? "???" : row.control});
+		const bool shared = bindings_.shares_binding(bindings_.action_index_for_row(i));
+		menu.table_set_row_color(table, i, shared, shared ? kSharedBindingTint : 0u);
+		++i;
 	}
+}
+
+// A press on the controls table's row (its row event 0x5000001, raised after
+// the table's own selection write): a running capture ends, its row's control
+// shown again, and the press arms the row only when it leaves no row selected
+// (the selected row compared with the capture's row, which the end reset)
+// (D-CTRL-3). [orig: UI_ControlsRemapArmHandler @0x55d560 - the end
+// @0x55d583..0x55d585, the first selected row (sub_63F550 @0x63f550) and its
+// compare @0x55d58c..0x55d591; UI_UpdateControlMappingDisplay @0x55b700 (the
+// reset @0x55b9ad..0x55b9b3); CTableWnd_HandleNamedEvent @0x642400 - the
+// selection write @0x64259d, the row event @0x64261a]
+void OptionsScreen::press(MenuRuntime &menu, int id, int row) {
+	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING")) return;
+	if (action_ >= 0) {
+		// The armed row's control cell alone shown again, the rows, their
+		// selection and the scroll as they stand [orig: UI_UpdateControlMappingDisplay
+		// @0x55b700 - the keyboard page's CTableWnd_SetCellText @0x55b9a2].
+		const int table = table_, armed = row_, action = action_;
+		table_ = row_ = action_ = -1;
+		if (menu.widget_kind_of(table) == static_cast<int>(mnu::WindowType::Table))
+			menu.table_set_cell_text(table, armed, 2, bindings_.control_text(action, device_));
+	}
+	if (menu.table_selected_rows(id).empty()) arm(menu, id, row);
 }
 
 // [orig: UI_SelectControlsInputDevice @0x55bcd0]

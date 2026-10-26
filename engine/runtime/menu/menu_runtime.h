@@ -541,6 +541,8 @@ public:
 	// A row's colour override; `enable` false drops it, row -1 is every row
 	// [orig: CTableWnd_SetRowColor — the row's +28 bit 4 and +32].
 	void table_set_row_color(int id, int row, bool enable, uint32_t color);
+	// Whether the row draws its own colour (the +28 bit 4), that colour into `color`.
+	bool table_row_colored(int id, int row, uint32_t *color = nullptr) const;
 	// A row shown or hidden (menu_table_row.h table_set_row_visible carries the witness);
 	// the frame lays the table out again when the row's bit changed.
 	void table_set_row_visible(int id, int row, bool visible);

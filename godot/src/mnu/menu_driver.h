@@ -177,6 +177,8 @@ public:
 	static bool is_front_options_screen(const String &p_screen);
 	int activate_options(const Ref<PlayerProfiles> &p_profiles, int p_id);
 	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
+	// A single press on the controls table's row (engine OptionsScreen::press).
+	void press_options_row(int p_id, int p_row) { options_.press(runtime_, p_id, p_row); }
 	int consume_options_input(const Ref<InputEvent> &p_event);
 	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }
 	// The Options screen's own binding records' Control-column text (tests and

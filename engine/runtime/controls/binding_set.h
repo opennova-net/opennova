@@ -159,6 +159,19 @@ class BindingSet {
   // -1 out of range.
   int action_index_for_row(int row) const;
 
+  // Whether the record shares a binding with another record the controls
+  // screens list, which their refresh tints yellow: both eligible (flags
+  // 0x4000800), neither pair of the exclusive flag pairs (0x40 against 1,
+  // 0x20000000 against 0x40000000), a key slot of the other's equal to one
+  // of this record's with the same modifier, or the same mouse mask and
+  // modifier, or the same joystick button and modifier, and the two rows
+  // sharing a mode (alive bit 1, death-screen bit 2).
+  // [orig: KeyBinding_CheckWeaponSlotConflict @0x55ae60 - the gate @0x55ae79,
+  //  the pair test @0x55aebc..0x55af13, the key slots @0x55af1b..0x55af77,
+  //  the mouse @0x55af79..0x55af96, the joystick @0x55afae..0x55afc6;
+  //  sub_55AE10 @0x55ae10 (the modes overlap)]
+  bool shares_binding(int index) const;
+
   // Every VK bound to a catalog action token (primary then secondary; empty
   // when unbound). The gameplay consumer's lookup seam.
   std::vector<int> keys_for_token(const std::string &token) const;

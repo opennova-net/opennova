@@ -79,6 +79,11 @@ public:
 	// screen gates the front BACK.
 	int activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id);
 	void arm(MenuRuntime &menu, int id, int row);
+	// A single press on a row (the table's row event after its selection write):
+	// ends a running capture, then arms only when no row is left selected.
+	void press(MenuRuntime &menu, int id, int row);
+	// The yellow a shared binding's row draws (UI_RefreshControlMappingList).
+	static constexpr uint32_t kSharedBindingTint = 0xFFFFFF00u;
 	int consume(MenuRuntime &menu, const RemapInput &event);
 	void end_remap(MenuRuntime &menu, bool refill);
 	// The screen's own binding records (the remap flow's).

@@ -1135,6 +1135,8 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::is_front_options_screen);
 	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "id"), &MenuDriver::activate_options);
 	ClassDB::bind_method(D_METHOD("arm_options_remap", "id", "row"), &MenuDriver::arm_options_remap);
+	ClassDB::bind_method(D_METHOD("press_options_row", "id", "row"),
+			&MenuDriver::press_options_row);
 	ClassDB::bind_method(D_METHOD("consume_options_input", "event"), &MenuDriver::consume_options_input);
 	ClassDB::bind_method(D_METHOD("end_options_remap", "refill"), &MenuDriver::end_options_remap);
 	ClassDB::bind_method(D_METHOD("options_control_text", "action", "device"),

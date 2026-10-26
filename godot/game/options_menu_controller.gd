@@ -33,6 +33,7 @@ func setup(driver: MenuDriver, options: PlayerOptions) -> void:
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
 	_driver.widget_activated.connect(_on_widget_activated)
 	_driver.list_activated.connect(_on_list_activated)
+	_driver.table_cell_clicked.connect(_on_table_cell_clicked)
 
 
 ## Rebuild every options-owned widget after MenuDriver opens a document, and
@@ -238,6 +239,14 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 		# the BACK's pop_screen leaves the widgets to the next open's seed.
 		if _options != null and _entry_state != null:
 			_options.update(_entry_state.copy())
+
+
+# A single press on a table row: the controls table's ends a running capture
+# and arms only when no row is left selected (engine OptionsScreen::press).
+func _on_table_cell_clicked(id: int, _widget_name: String, row: int, _column: int,
+		_state: int, _cell_value: int, double_click: bool) -> void:
+	if not double_click:
+		_driver.press_options_row(id, row)
 
 
 func _on_list_activated(id: int, row: int) -> void:

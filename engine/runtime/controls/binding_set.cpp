@@ -620,6 +620,46 @@ bool BindingSet::fire_signed(int index, uint16_t held_mouse_mask,
   return pressed_mouse(index, held_mouse_mask, key_down);
 }
 
+bool BindingSet::shares_binding(int index) const {
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  const BindingRecord *self = record(index);
+  if (self == nullptr || static_cast<std::size_t>(index) >= n) return false;
+  constexpr uint32_t kEligible = 0x4000800u;
+  const uint32_t own = cat[index].flags;
+  if ((own & kEligible) == 0) return false;
+  const auto modes_overlap = [&](std::size_t other) {
+    const uint32_t a = cat[index].modes, b = cat[other].modes;
+    return ((a & 1u) != 0 && (b & 1u) != 0) || ((a & 2u) != 0 && (b & 2u) != 0);
+  };
+  for (std::size_t j = 0; j < n && j < records_.size(); ++j) {
+    if (static_cast<int>(j) == index) continue;
+    const uint32_t other = cat[j].flags;
+    if ((other & kEligible) == 0) continue;
+    if ((other & 0x40u) != 0 && (own & 1u) != 0) continue;
+    if ((other & 1u) != 0 && (own & 0x40u) != 0) continue;
+    if ((other & 0x20000000u) != 0 && (own & 0x40000000u) != 0) continue;
+    if ((other & 0x40000000u) != 0 && (own & 0x20000000u) != 0) continue;
+    const BindingRecord &r = records_[j];
+    const uint16_t keys[2] = {r.primary, r.secondary};
+    const uint16_t mods[2] = {r.primary_mod, r.secondary_mod};
+    for (int k = 0; k < 2; ++k) {
+      if (keys[k] != 0 &&
+          ((keys[k] == self->primary && mods[k] == self->primary_mod) ||
+           (keys[k] == self->secondary && mods[k] == self->secondary_mod)) &&
+          modes_overlap(j))
+        return true;
+    }
+    if (r.mouse_mask != 0 && r.mouse_mask == self->mouse_mask &&
+        r.mouse_mod == self->mouse_mod && modes_overlap(j))
+      return true;
+    if (r.joy_button != 0 && r.joy_button == self->joy_button &&
+        r.joy_mod == self->joy_mod && modes_overlap(j))
+      return true;
+  }
+  return false;
+}
+
 const BindingRecord *BindingSet::record(int index) const {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return nullptr;

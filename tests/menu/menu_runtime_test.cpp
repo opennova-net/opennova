@@ -1467,7 +1467,11 @@ mnu::Document flow_document(bool options = false) {
 		item("USA second", "2")};
 	root.children.push_back(country);
 	if (options) {
-		root.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
+		// The controls table authors its three columns (options.mnu's COLUMN count="3").
+		auto controls = widget("CONTROL_MAPPING", mnu::WindowType::Table);
+		controls.table_data.column.has_count = true;
+		controls.table_data.column.count = 3;
+		root.children.push_back(controls);
 		root.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
 		root.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
 		root.children.push_back(widget("JOYSTICK", mnu::WindowType::Radio));
@@ -1813,6 +1817,51 @@ void test_options_screen() {
 	CHECK(menu.table_cell_text(table, 0, 2).empty());
 	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
+	// A binding two listed rows share draws both rows yellow; the others keep the
+	// table's colour (D-CTRL-3). At the defaults Prone and Cycle Spectator Mode share
+	// the middle mouse button (both modes words hold the death-screen bit), on every
+	// device page; Forward taking Crouch's X shares it.
+	// [orig: UI_RefreshControlMappingList @0x55b320 - KeyBinding_CheckWeaponSlotConflict
+	//  @0x55b37b, CTableWnd_SetRowColor(row, 1, 0xFFFFFF00) @0x55b6b5]
+	{
+		const auto row_of = [&](const char *action) {
+			for (int r = 0; r < menu.table_row_count(table); ++r)
+				if (menu.table_cell_text(table, r, 1) == action) return r;
+			return -1;
+		};
+		const int crouch = row_of("Crouch");
+		const int prone = row_of("Prone");
+		const int spectate = row_of("Cycle Spectator Mode");
+		CHECK(crouch > 0 && prone > 0 && spectate > 0);
+		CHECK(menu.table_row_colored(table, prone) && menu.table_row_colored(table, spectate));
+		CHECK(!menu.table_row_colored(table, 0) && !menu.table_row_colored(table, crouch));
+		options.arm(menu, table, 0);
+		RemapInput z;
+		z.kind = RemapInput::Kind::Key;
+		z.pressed = true;
+		z.vk = 'X';
+		CHECK(options.consume(menu, z) == OptionsScreen::Consumed);
+		uint32_t tint = 0;
+		CHECK(menu.table_row_colored(table, 0, &tint) && tint == OptionsScreen::kSharedBindingTint);
+		CHECK(menu.table_row_colored(table, crouch) && !menu.table_row_colored(table, 1));
+		// A single press while armed ends the capture, the armed row's control shown
+		// again; leaving a row selected, it arms nothing [orig: UI_ControlsRemapArmHandler
+		// @0x55d560 - the end @0x55d585, the compare @0x55d58c..0x55d591].
+		options.arm(menu, table, 0);
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		menu.table_select_row(table, 3, false);  // the press's own selection write
+		options.press(menu, table, 3);
+		CHECK(menu.table_cell_text(table, 0, 2) == "X or Up" && menu.table_row_selected(table, 3));
+		CHECK(options.consume(menu, z) == OptionsScreen::None);
+		// A press that leaves no row selected arms the pressed row.
+		menu.table_set_row_selected(table, -1, false);
+		options.press(menu, table, 2);
+		CHECK(menu.table_cell_text(table, 2, 2) == "???");
+		options.end_remap(menu, true);
+		CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
+		CHECK(!menu.table_row_colored(table, 0) && !menu.table_row_colored(table, crouch));
+		CHECK(menu.table_row_colored(table, prone));
+	}
 	options.activate(menu, nullptr, menu.widget_id("MOUSE"));
 	options.arm(menu, table, 0);
 	input = RemapInput();
