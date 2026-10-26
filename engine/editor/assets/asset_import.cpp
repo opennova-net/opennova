@@ -154,7 +154,8 @@ std::vector<ImportChoice> list_installed_expansion_choices(const std::string &in
 		return sources;
 	}
 	for (const InstallFile &file : view.files()) {
-		// The expansion's own, never the player's (its folder's gt.ssc: gameprofile/player_files.h).
+		// The expansion's own (its folder's gt.ssc among them, its gate tag), never the player's
+		// (gameprofile/player_files.h).
 		if (file.layer != InstallFile::Layer::Expansion || gameprofile::is_player_file(file.name)) continue;
 		sources.push_back(install_choice(install, file, expansion));
 		if (facts) facts->push_back({file_kind_for_required_name(file.name, document.expansion.name), view.size(file)});

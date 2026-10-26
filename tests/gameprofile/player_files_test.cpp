@@ -13,7 +13,7 @@ using namespace opennova::gameprofile;
 
 static int test_table() {
 	const std::vector<PlayerFile> &rows = player_files();
-	TEST_EXPECT(rows.size() >= 18);
+	TEST_EXPECT(rows.size() >= 17);
 	int manifest = 0;
 	for (int i = 0; i < gameprofile_required_resource_count(); ++i)
 		manifest += (gameprofile_required_resource_at(i)->flags & RES_F_PLAYER_FILE) != 0;
@@ -38,9 +38,11 @@ static int test_names() {
 	TEST_EXPECT(is_player_file("extra.sav") && player_file_words("extra.sav") == "the player's saved profiles");
 	TEST_EXPECT(is_player_file("SS00001.tga") && player_file_words("ss99999.jpg") == "a screenshot the game took");
 	TEST_EXPECT(!is_player_file("SS1234.tga") && !is_player_file("SS123456.tga") && !is_player_file("SS1234a.tga"));
-	// A resource the game ships is none.
+	// A resource the game ships is none, the gate-tag override among them (a game's own data, which the game
+	// only reads [orig: Mission_LoadEncryptedConfig @0x4cdcd0]).
 	TEST_EXPECT(!is_player_file("items.def") && !is_player_file("cc.bin") && !is_player_file("gametext.bin"));
-	TEST_EXPECT(player_file_words("items.def").empty());
+	TEST_EXPECT(!is_player_file("gt.ssc") && !is_player_file("expansion/x1/GT.SSC"));
+	TEST_EXPECT(player_file_words("items.def").empty() && player_file_words("gt.ssc").empty());
 	return 0;
 }
 
