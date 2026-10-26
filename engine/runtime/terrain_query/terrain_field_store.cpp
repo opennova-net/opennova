@@ -27,6 +27,7 @@ void TerrainFieldStore::clear() {
 	foliage_height_ = 0;
 	field_ = TerrainHeightField{};
 	surface_map_ = SurfaceTypeMap{};
+	trn_water_height_ = 0.0f;
 	tilestrip_.clear();
 	attach_placed_tiles();
 }
@@ -198,7 +199,8 @@ void terrain_field_store_build(TerrainFieldStore &store, const CptFile &cpt,
 			trn.sector_count, trn.sector_rows, trn.wrap_x != 0, trn.wrap_y != 0,
 			coords_locks_from(trn), charmap, charmap_width, charmap_height);
 	if (!store.valid()) return;
-	store.set_trn_facts(trn.tilestrip);
+	store.set_trn_facts(trn.water_height != 0 ? static_cast<float>(trn.water_height) * env::kWaterHeightUnit : 0.0f,
+			trn.tilestrip);
 	// The foliage map's codes, each texel remapped to the definition slots it selects under
 	// the .trn's definitions [orig: Foliage_LoadFoliageMapPCX @ 0x605AD0 - the remap
 	// @ 0x605B73..0x605B8A; Foliage_RemapPixelToDefMask @ 0x5FF4E0].

@@ -93,7 +93,12 @@ void load_environment_and_water(const mission::BootFileSource &files,
 	// The occupant clamp, the vehicle grounding and the footstep water pick
 	// read the plane [orig: g_EnvWaterHeightFixed @0x26C6454]; the rungs and
 	// their witnesses are env::mission_water_rung's.
-	const float water = env::mission_water_rung(overrides, boot.env_config).height;
+	float water = env::mission_water_rung(overrides, boot.env_config).height;
+	// A terrain handed over in documents leaves the load no .trn to read: its own water_height
+	// line is that first pass's, which the header's override and every later pass's line
+	// overwrite (env::load_mission_env; the game's files always hold the .trn).
+	if (!loaded.terrain && !overrides.has_water_height && !boot.env_config.water_height_set)
+		water = kernel.terrain_store.terrain_water_height();
 	boot.water_z_q16 = static_cast<int32_t>(water * io::kFp16One);
 	kernel.world.env.water_z = boot.water_z_q16;
 	kernel.sync_water_plane();

@@ -908,7 +908,10 @@ bool load_mission_env(const MissionEnvTexts &texts, MissionEnv &out) {
 	TodParse parse;
 	// The terrain's pass, then overcast.def's into the same table [orig: Environment_LoadTimeOfDayConfig
 	// @ 0x57dbeb, @ 0x57dc3b], that table the overcast table [orig: @ 0x57dc48].
-	if (texts.terrain != nullptr) parse_tod_pass(*texts.terrain, config, parse);
+	if (texts.terrain != nullptr) {
+		parse_tod_pass(*texts.terrain, config, parse);
+		out.terrain = true;
+	}
 	if (texts.overcast != nullptr) parse_tod_pass(*texts.overcast, config, parse);
 	sort_keyframes(config.keyframes);
 	out.overcast.keyframes = std::move(config.keyframes);
