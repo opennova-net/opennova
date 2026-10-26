@@ -1147,9 +1147,10 @@ sees the checkout as `/workspace`):
 ```bash
 gh run download <run id> --pattern '*-windows*' --dir .scratch/dl   # a pull request's CI run
 python scripts/stage_downloads.py --from .scratch/dl --to .scratch/stage \
-    --version 'PR #<n> (<sha>)' --source https://github.com/<repo>/actions/runs/<run id>
+    --version 'PR #<n> (<sha>)' --source https://github.com/<repo>/actions/runs/<run id> \
+    --commit <the head's full sha> --build debug
 python scripts/publish_runtime.py --url https://staging.<domain> --token-file .scratch/staging.token \
-    --from .scratch/dl
+    --from .scratch/dl --name 'OpenNova runtime PR #<n> (<sha>)'
 B=$(./deploy/run.sh --deployment staging infra output -raw downloads_bucket)
 ./deploy/run.sh --deployment staging aws s3 sync .scratch/stage "s3://$B/" --exclude manifest.json \
     --delete --content-type application/zip --cache-control 'public, max-age=300'
@@ -1557,9 +1558,10 @@ that asks is refused. The listing is opennova-serve's second listing (`--also-ma
 `apps/serve/README.md` "Two listings"). It starts once the server's first map is up and
 never stops the server. Anything NovaLogic refuses or stops stays off until that server's
 next start; only faults on the way (no answer, a request that never arrived) are tried
-again, at most 5 times. Whether one account may hold several listings at once is not yet
-witnessed; a refusal (MsgCode 1008, too many servers) would show as the extra servers' second
-listings ending, in each server's log and on its page (its Overview's NovaLogic's NovaWorld
+again, at most 5 times. Two listings on the one account are witnessed (ADR 0068 open question
+1, 2026-10-25: both listed at once, neither refused or punted); more than two at once, and a
+re-host after another listing's login, are not yet. A refusal (MsgCode 1008, too many servers)
+would show as the extra servers' second listings ending, in each server's log and on its page (its Overview's NovaLogic's NovaWorld
 line: listed, retrying or not listed and why; its console marks the players who came through
 it, and the admin's NovaWorld sessions count them per hosted server).
 
