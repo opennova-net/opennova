@@ -29,5 +29,12 @@ inline constexpr bool is_power_of_two(uint32_t value)
     return value != 0u && (value & (value - 1u)) == 0u;
 }
 
+// A power of two or 0, by the original's `((n - 1) & n) == 0` over a 32-bit word (a negative
+// int's wrap reads as the word it is).
+inline constexpr bool is_power_of_two_or_zero(uint32_t value)
+{
+    return ((value - 1u) & value) == 0u;
+}
+
 } // namespace io
 } // namespace opennova

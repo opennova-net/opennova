@@ -1,6 +1,7 @@
 #include <formats/trn/trn_io.h>
 
 #include <base/io/ascii_config.h>
+#include <base/io/bits.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/env/env.h>
@@ -292,12 +293,11 @@ TrnRefusal trn_refusal(const TrnConfig &config, int sector_rows) {
 	if (config.colormap.empty()) return TrnRefusal::NoColormap;
 	if (config.detailmap.empty()) return TrnRefusal::NoDetailmap;
 	if (config.polydata.empty()) return TrnRefusal::NoPolydata;
-	const auto power_of_two_or_zero = [](int n) {
-		const uint32_t u = static_cast<uint32_t>(n); // the 32-bit wrap of the original's `n - 1`
-		return ((u - 1u) & u) == 0u;
-	};
-	if (sector_rows > kTerrainGridSide || !power_of_two_or_zero(sector_rows)) return TrnRefusal::SectorRows;
-	if (config.sector_count > kTerrainGridSide || !power_of_two_or_zero(config.sector_count))
+	// The 32-bit wrap of the original's `n - 1` (io::is_power_of_two_or_zero over the int's word).
+	if (sector_rows > kTerrainGridSide || !io::is_power_of_two_or_zero(static_cast<uint32_t>(sector_rows)))
+		return TrnRefusal::SectorRows;
+	if (config.sector_count > kTerrainGridSide ||
+			!io::is_power_of_two_or_zero(static_cast<uint32_t>(config.sector_count)))
 		return TrnRefusal::SectorCount;
 	return TrnRefusal::None;
 }

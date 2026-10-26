@@ -1,5 +1,6 @@
 #include <runtime/terrain/foliage_detail_collector.h>
 
+#include <base/io/bits.h>
 #include <formats/foliage/runtime.h>
 #include <runtime/terrain_query/coords.h>
 
@@ -151,7 +152,7 @@ void collect_foliage_detail_patches(
 	// The handoff node's sector-local rect selects the collector's start
 	// depth: 512 = the whole-sector root, 64 = one traversal leaf's subtree.
 	if (node_size < kDetailCellSize || node_size > kSectorSize ||
-			(node_size & (node_size - 1)) != 0) {
+			!io::is_power_of_two(static_cast<uint32_t>(node_size))) {
 		return;
 	}
 	int mip_level = kFirstMipLevel;

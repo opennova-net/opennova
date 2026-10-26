@@ -11,6 +11,7 @@
 #include <sstream>
 #include <utility>
 
+#include <base/io/bits.h>
 #include <base/io/cp1252.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
@@ -64,8 +65,6 @@ bool real_of(const Value &value, double &out, std::string &error) {
 	}
 	return true;
 }
-
-bool power_of_two_or_zero(int64_t n) { return n >= 0 && ((n - 1) & n) == 0; }
 
 // The next power of two at or past `n`, at most 16.
 int next_power_of_two(int n) {
@@ -305,7 +304,8 @@ void terrain_fields(TableKind &kind) {
 		const auto set = field.value.set;
 		field.value.set = [set](const RecordHandle &record, const Value &value, std::string &error) {
 			int64_t whole = 0;
-			if (whole_of(value, whole, error) && !power_of_two_or_zero(whole)) {
+			// The format's own gate (formats/trn trn_refusal's word test; the range is the field's).
+			if (whole_of(value, whole, error) && (whole < 0 || !io::is_power_of_two_or_zero(static_cast<uint32_t>(whole)))) {
 				error = "A power of two (1, 2, 4, 8 or 16): the game refuses a terrain whose width is not one.";
 				return false;
 			}

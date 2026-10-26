@@ -1,5 +1,6 @@
 #include <runtime/environment/weather_seed.h>
 
+#include <base/io/fixed.h>
 #include <formats/env/tod_clock.h>
 
 #include <algorithm>
@@ -10,14 +11,9 @@
 namespace opennova::env {
 namespace {
 
+// A non-finite value holds no word: 0 (an infinity would saturate).
 int32_t fixed_q16(float value) noexcept {
-	if (!std::isfinite(value)) return 0;
-	const double scaled = static_cast<double>(value) * 65536.0;
-	if (scaled <= static_cast<double>(std::numeric_limits<int32_t>::min()))
-		return std::numeric_limits<int32_t>::min();
-	if (scaled >= static_cast<double>(std::numeric_limits<int32_t>::max()))
-		return std::numeric_limits<int32_t>::max();
-	return static_cast<int32_t>(std::llround(scaled));
+	return std::isfinite(value) ? io::float_to_fp16_16_round_sat(value) : 0;
 }
 
 uint32_t nonnegative_scaled(float value, double scale) noexcept {
