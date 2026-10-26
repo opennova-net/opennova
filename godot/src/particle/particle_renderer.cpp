@@ -55,6 +55,7 @@
 #include "particle/particle_far_pass.h"
 #include "particle/particle_first_person_batch.h"
 #include "particle/particle_material_cache.h"
+#include "render/display_decode.h"
 #include "render/frame_fx.h"
 #include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"

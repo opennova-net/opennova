@@ -49,6 +49,7 @@
 #include "particle/effect_world.h"
 #include "particle/particle_compositor.h"
 #include "particle/particle_renderer.h"
+#include "render/display_decode.h"
 #include "render/frame_fx.h"
 #include "render/q3_source_registry.h"
 #include "render/retained_array_mesh.h"

@@ -24,6 +24,7 @@
 #include <runtime/renderer/q3_frame.h>
 
 #include "render/frame_fx_distortion.h"
+#include "render/frame_fx_compositor_effect.h"
 #include "render/nvg_view_device.h"
 
 namespace godot {
@@ -39,87 +40,6 @@ class Texture;
 class Texture2D;
 class Viewport;
 class WorldEnvironment;
-
-// One frame's FrameFX screen-effect plan as the terminal effect consumes it:
-// the planner's rows (runtime/renderer/frame_fx_effects.h), the effects
-// device that draws the type-0 distortion sets, on the NVG lens arm the lens
-// over the surface's overlay rect (runtime/renderer/nvg_scope_lens.h) with
-// the surface size its pixels span, and on the NVG Sighted arm the SIGHTS
-// card's rows in the NVG scene's pixels.
-struct FrameFxScreenFrame {
-	std::uint64_t frame_id = 0;
-	opennova::renderer::FrameFxFramePlan plan;
-	std::shared_ptr<FrameFxDistortionDrawer> distortion;
-	std::shared_ptr<const opennova::renderer::NvgScopeLens> lens;
-	Vector2i screen_size;
-	std::vector<NvgViewDevice::SightsRow> nvg_sights;
-};
-
-// The frame's terminal compositor effect: the post-transparent device leg
-// that runs retail's FrameFX over the finished scene and performs the sole
-// display decode (for a view whose environment carries FrameFx's decode
-// table, Godot's tonemap performs it instead). It executes the planner's DrawPass rows in dispatch order
-// (distortion, death or damage blur, the bloom, thermal and monitor) or, in
-// the first-person NVG view, the NVG scene/glow/composite chain in their
-// place (Render_ProcessMainSceneFrame @0x5ca8f6..0x5caad5 / @0x5ca6ab; the
-// bloom kernel FrameFX_BloomKernel @0x5841d0 over the Q3 source FrameFX_RenderGlowSource
-// @0x582940 draws and FrameFX_CaptureAltBuffer @0x584020 captures; targets
-// FrameFX_CreateRenderTargets @0x583c40).
-// The Q3 source is an effect-owned full-resolution color target sharing the
-// resolved beauty depth; the capture is the power-of-two floor of the frame.
-class FrameFxCompositorEffect : public CompositorEffect {
-	GDCLASS(FrameFxCompositorEffect, CompositorEffect)
-
-private:
-	class Impl;
-	std::unique_ptr<Impl> impl_;
-
-	void create_glow_source_device_on_render_thread();
-	void create_view_effects_device_on_render_thread();
-	void create_frame_fx_device_on_render_thread();
-
-protected:
-	static void _bind_methods();
-
-public:
-	FrameFxCompositorEffect();
-	~FrameFxCompositorEffect() override;
-
-	// The device objects the renderer creates ahead of the first frame, each queued on the
-	// render thread (rd_glsl.h call_device_create); the render callback's own creates then
-	// find them. The Q3 glow source's (the effect set's GLOW passes) at the renderer's start;
-	// the NVG view's (the view effects') and FrameFX's own shaders and samplers (its pixel
-	// shaders') at the mission textures stage.
-	void create_glow_source_device();
-	void create_view_effects_device();
-	void create_frame_fx_device();
-	void compile_q3_frame(Node *p_scope, Viewport *p_viewport,
-			Camera3D *p_camera);
-	void clear_q3_frame();
-	// Main thread: the frame's screen-effect plan, consumed by the next render
-	// (a frame's one-shot parts, the NVG glow clear, run once per frame id).
-	void publish_screen_effects(const std::shared_ptr<const FrameFxScreenFrame> &p_frame);
-	// Main thread: the mission's "ffscan" texels (frame_fx_scanline_texels).
-	void publish_scanline_texels(const std::vector<std::uint8_t> &p_texels);
-	void release_device_resources();
-	// F3-only GPU timing: RD timestamps around the pass carve its span out of
-	// the root viewport's GPU row. capture_timestamp barriers the RD graph, so
-	// this stays off unless the Stats capture is live.
-	void set_gpu_timing_enabled(bool p_enabled);
-	Dictionary get_backend_report() const;
-	// Inspection seam for the GUT pins: the first view's focused Q3 colour
-	// target as drawn by the last completed frame. Call only after
-	// RenderingServer.force_sync(); an empty Ref means no target exists (no
-	// RenderingDevice, no frame yet, or an unmapped attachment format).
-	Ref<Image> capture_q3_target();
-	// Main thread: the environment whose views Godot's tonemap decodes through
-	// FrameFx's display decode table (FrameFx::install_display_table); a view
-	// drawn with it runs no terminal decode here. An invalid RID clears it.
-	void set_display_table_environment(const RID &p_environment);
-
-	void _render_callback(int32_t p_effect_callback_type,
-			RenderData *p_render_data) override;
-};
 
 // World-owned coordinator. The terminal compositor owns the sole focused Q3
 // renderer and its beauty-depth target. Producers register typed scene
@@ -295,44 +215,6 @@ public:
 	// The terminal effect's focused Q3 target (see
 	// FrameFxCompositorEffect::capture_q3_target); empty without one.
 	Ref<Image> get_q3_target_image() const;
-};
-
-// The display decode for a 3D view that has no FrameFx (the menu avatar
-// preview, probes). Every engine shader
-// writes gamma-domain numbers into the scene target and relies on exactly one
-// terminal decode before Godot's sRGB output encode; without it a viewport
-// shows the scene encoded twice. This node installs a decode-only
-// FrameFxCompositorEffect (no Q3 source, so no FrameFX composite) on the
-// nearest WorldEnvironment, or directly on the viewport's World3D when the
-// view has none.
-class DisplayDecode : public Node3D {
-	GDCLASS(DisplayDecode, Node3D)
-
-private:
-	Ref<FrameFxCompositorEffect> effect_;
-	// The owning WorldEnvironment by identity: an embedder may free it before
-	// this node leaves the tree (preview teardown), so never a raw pointer.
-	ObjectID world_environment_id_;
-	Ref<World3D> world_;
-	Ref<Compositor> previous_compositor_;
-	Ref<Compositor> installed_compositor_;
-
-	void install();
-	void uninstall();
-
-protected:
-	static void _bind_methods();
-	void _notification(int p_what);
-
-public:
-	// The compositor a DisplayDecode installed on `p_world`'s scenario (a view
-	// with no WorldEnvironment), else null: what a camera with no compositor of
-	// its own renders with there, as a WorldEnvironment's compositor is where
-	// the view has one. A leg that gives a camera its own compositor composes
-	// it around this one (the particle renderer keeps the decode last behind
-	// its passes), or the view loses its one decode while it draws. Godot binds
-	// no getter for a scenario's compositor.
-	static Ref<Compositor> scenario_compositor(const Ref<World3D> &p_world);
 };
 
 } // namespace godot

@@ -124,7 +124,9 @@ add_library(opennova_bindings OBJECT
     particle/particle_atlas_page_upload.cpp
     render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
+    render/display_decode.cpp
     render/frame_fx.cpp
+    render/frame_fx_compositor_effect.cpp
     render/nvg_view_device.cpp
     render/object_lod_frame.cpp
     render/q3_frame_adapter.cpp
