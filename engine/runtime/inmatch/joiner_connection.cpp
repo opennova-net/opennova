@@ -1400,16 +1400,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 					enter_initial_sync_tail();
 				}
 			}
-		} else if (m.tag == s2c::PLAYER_LIST) {
-			PlayerList player_list;
-			if (decode_player_list(
-					m.payload.data(), m.payload.size(), player_list)) {
-				// The body IS the Tab board's data (D-HUD-24), folded from the
-				// canonical reducer stream by ClientReplicaPipeline::apply_player_list;
-				// it gates nothing in the join (D-NET-526).
-				// [orig: NapiNPClientMsg_PlayerList @0x42FAE0]
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
 		} else if (m.tag == s2c::END_ROUND_HEADER) {
 			EndRoundHeader header;
 			// A joiner is in-session by definition, so the header form is
@@ -1418,7 +1408,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			if (decode_end_round_header(
 					m.payload.data(), m.payload.size(),
 					(game_type_ & 0x10000u) == 0, header)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				// A valid 0x1D immediately starts the requester-driven board stream
 				// at zero. [orig: NapiNPClientMsg_0x01D @0x430840 queues
 				// reliable C2S 0x2B {0}]
@@ -1430,7 +1419,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			EndRoundStatsChunk chunk;
 			if (decode_end_round_stats_chunk(
 					m.payload.data(), m.payload.size(), chunk)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				if (!chunk.complete()) {
 					const uint16_t next = static_cast<uint16_t>(
 							chunk.chunk_offset + chunk.chunk.size());
@@ -1512,7 +1500,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 				apply_self_spawn(rec.slot_id, rec.has_body(), rec.owner_connection_id,
 						rec.minimap_flags, spawn, out);
 			}
-			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::FULL_ENTITY_SPAWN) {
 			// A repair destroys and rebuilds this slot, even for the same type.
 			// Ownership can disappear or move here without another organic page.
@@ -1531,11 +1518,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 				apply_self_spawn(rec.slot_id, rec.item_type != 0, rec.entity_flags,
 						rec.minimap_flags, spawn, out);
 			}
-			out.inbound_world.emplace_back(m.tag, m.payload);
-		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
-			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
-			// pool-3 markers. Surface raw for the caller's ClientReplicaPipeline to upsert.
-			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
 			// retail's g_LocalTeam, the 0x2F loadout-submit header byte 0. A retail host always
@@ -1581,7 +1563,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
 			    static_cast<std::size_t>(assigned.slot()) <
 			            world::retail_pool_capacity(assigned.pool())) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				// Retail's header gates: not the 0xFFFF sentinel, the pool nibble
 				// addressing one of the five entity pools, and a slot inside its
 				// pool's table [orig: @0x431984..0x4319b3].
@@ -1639,7 +1620,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			DestroyEntityList destroy_list;
 			if (decode_destroy_entity_list(
 					m.payload.data(), m.payload.size(), destroy_list)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				for (uint16_t index : destroy_list.pool0_indices) {
 					out.destroyed_pool0_slots.push_back(index);
 					retire_self_handle(index);
@@ -1656,11 +1636,9 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			// [orig: NapiNPClientMsg_PlayerSync @0x431370 @0x431411..0x43144c]
 			PlayerSync sync;
 			if (decode_player_sync(m.payload.data(), m.payload.size(), sync)) {
-				// The roster fold (D-HUD-24) lives in the replica pipeline;
-				// surface the validated body on the canonical reducer stream
-				// beside the connection-level bookkeeping below.
+				// The roster fold (D-HUD-24) lives in the replica pipeline, over the
+				// reducer stream; the connection keeps the bookkeeping below.
 				// [orig: NapiNPClientMsg_PlayerSync @0x431370]
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				// Bit 0x4000 is the ACK-driven roster cursor. Retail advances
 				// through EMPTY rows too and treats the 0x04 capacity byte as an
 				// inclusive final slot: max=4 requests 0,1,2,3,4, then stops.
@@ -1970,19 +1948,6 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			//  NapiNPServerMsg_0x006_ClientFiredRound @0x51358d]
 			decode_tick_seed(m.payload.data(), m.payload.size(), out.tick_seed);
 			out.tick_seed_set = true;
-		} else if (m.tag == s2c::PER_FRAME_UPDATE) {
-			// Per-frame world snapshot — surface for the caller's ClientReplicaPipeline.
-			out.inbound_0a.push_back(m.payload);
-		} else if (m.tag == s2c::CAPTURE_ZONE_STATE) {
-			CaptureZoneOverlayBatch batch;
-			if (decode_capture_zone_overlay(m.payload.data(), m.payload.size(), batch)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::MINIMAP_OVERLAY) {
-			MinimapOverlayBatch batch;
-			if (decode_minimap_overlay_batch(m.payload.data(), m.payload.size(), batch)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 			// Every valid retail 0x5A apply clears g_ClientDeployHold immediately,
@@ -1998,138 +1963,13 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 			    packet_ack >= deployment_pick_sequence_) {
 				release_deployment(/*deployment_complete=*/true);
 			}
-		} else if (m.tag == s2c::DEPLOYED_ITEM) {
-			DeployedItemSpawn spawn;
-			std::size_t consumed = 0;
-			if (decode_deployed_item_spawn(
-					m.payload.data(), m.payload.size(), spawn, consumed) &&
-					consumed == m.payload.size()) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
 		} else if (m.tag == s2c::ENTITY_REMOVE) {
 			EntityRemove removal;
 			std::size_t consumed = 0;
 			if (decode_entity_remove(
 					m.payload.data(), m.payload.size(), removal, consumed) &&
 					consumed == m.payload.size()) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				retire_self_handle(removal.entity_handle);
-			}
-		} else if (m.tag == s2c::OBJECTIVE_ENTITY_STATE) {
-			ObjectiveEntityState state;
-			std::size_t consumed = 0;
-			if (decode_objective_entity_state(
-					m.payload.data(), m.payload.size(), state, consumed) &&
-					consumed == m.payload.size()) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::SPAWN_WAVE_STATUS) {
-			SpawnWaveStatus status;
-			if (decode_spawn_wave_status(
-					m.payload.data(), m.payload.size(), status)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::SCORE_DELTA_SOUND) {
-			ScoreDeltaSound score;
-			if (decode_score_delta_sound(
-					m.payload.data(), m.payload.size(), score)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::WEAPON_RELOAD) {
-			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
-			// Surface it once through the decoded client-view event path.
-			out.inbound_gameplay.emplace_back(m.tag, m.payload);
-		} else if (m.tag == s2c::WEAPON_PICKUP) {
-			// A powerup `weapon` grant: the replica pipeline folds it and the
-			// role lands and mounts the weapon when the picker is its own
-			// player. [orig: NapiNPClientMsg_0x035 @0x4261A0]
-			WeaponPickupNotice notice;
-			std::size_t consumed = 0;
-			if (decode_weapon_pickup(m.payload.data(), m.payload.size(), notice, consumed) &&
-					consumed == m.payload.size())
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-		} else if (m.tag == s2c::ENTITY_DEATH) {
-			// S2C 0x13 ENTITY DEATH — the host's per-death notify for every
-			// non-player victim (the AI/item leg of Entity_CheckAndProcessDeath).
-			// The replica pipeline folds it (Health = 0 + the surfaced death
-			// record) and the embedding sim runs the class death callback on the
-			// world twin — a destructible's husk/explosion chain (reason 4).
-			// Without this surface a joiner never saw a destructible die unless
-			// its own visual round predicted it.
-			// [orig: NapiNPClientMsg_EntityDeath @0x42EB50; sender
-			//  Entity_CheckAndProcessDeath @0x51b550 — msg 19, mask 0x90]
-			EntityDeathRecord death;
-			std::size_t death_consumed = 0;
-			if (decode_entity_death(
-					m.payload.data(), m.payload.size(), death, death_consumed)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::SCRIPT_REMOTE_COMMAND) {
-			// S2C 0x23 — a WAC command the host VM replicated. The replica
-			// pipeline folds it and the role runs the registry row's handler
-			// against its world. [orig: GameMode_DispatchRemoteCommand @0x4F81E0]
-			ScriptRemoteCommand command;
-			std::size_t consumed = 0;
-			if (decode_script_remote_command(
-					m.payload.data(), m.payload.size(), command, consumed)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::DEATH_CAMERA_TARGET) {
-			DeathCameraTarget target;
-			std::size_t consumed = 0;
-			if (decode_death_camera_target(
-					m.payload.data(), m.payload.size(), target, consumed) &&
-					consumed == m.payload.size()) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::PLAYER_DOWNED_STATE) {
-			PlayerDownedState state;
-			std::size_t consumed = 0;
-			if (decode_player_downed_state(
-					m.payload.data(), m.payload.size(), state, consumed) &&
-					consumed == m.payload.size()) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-        } else if (m.tag == s2c::EXPLOSION_EFFECT) {
-            out.inbound_gameplay.emplace_back(m.tag,m.payload);
-		} else if (m.tag == s2c::KILL_SYNC) {
-			// S2C 0x26 KILL SYNC — the second death route (the destructible
-			// deathCallback's own authority resend among its senders); the
-			// client kills the addressed slot through the same class death
-			// callback. Folded beside 0x13 by the replica pipeline.
-			// [orig: NapiNPClientMsg_0x026 @0x42EC30 → Entity_KillBySlotId
-			//  @0x42BCE0; resend Server_SendEntityStatePacket @0x509d70 via
-			//  Entity_HandleDestructibleDeathEvent @0x440210]
-			KillRecord kill;
-			std::size_t kill_consumed = 0;
-			if (decode_kill_record(
-					m.payload.data(), m.payload.size(), kill, kill_consumed)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::GAME_EVENT) {
-			// S2C 0x1E kill/objective/medic feed event. The replica pipeline
-			// folds it into ClientState feed events (D-HUD-23) — before this
-			// branch a joiner silently dropped the lane (the #511 fold only
-			// ever fired on the host's loopback view, which applies every
-			// tag). [orig: NetPacket_HandleGameEvent @0x426270]
-			GameEventRecord game_event;
-			std::size_t game_event_consumed = 0;
-			if (decode_game_event(m.payload.data(), m.payload.size(),
-					game_event, game_event_consumed)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-			}
-		} else if (m.tag == s2c::ENTITY_ROUTED) {
-			// S2C 0x44 entity-routed sub-packet — the guided-missile channel
-			// (D-NET-64). The replica pipeline folds the GUIDED subtype into
-			// the ClientState guided bank; before this branch a joiner
-			// silently dropped the lane (the #508 fold only ever fired on the
-			// host's loopback view, which applies every tag — the same gap as
-			// 0x16/0x46/0x1E before it). [orig: NapiNPClientMsg_0x044
-			// @0x422710 → NetPacket_DispatchToEntityByNetId @0x4D6960]
-			EntityRoutedPacket routed;
-			if (decode_entity_routed_packet(
-					m.payload.data(), m.payload.size(), routed)) {
-				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 			}
 		} else if (m.tag == s2c::DISCONNECT_UNLOCK) {
 			// S2C 0x11 is the terminal pre-world admission marker. It ends the mission start's

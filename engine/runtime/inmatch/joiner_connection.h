@@ -167,22 +167,9 @@ public:
 		// the replies of a datagram keep its messages' wire order beside the fold's own
 		// requests (the 0x16 handler's 0x22, the 0x0A handler's 0x0F).
 		std::vector<std::size_t> queued_send_after;
-		// DIAGNOSTIC VIEW ONLY: raw S2C 0x0A bodies. ClientRuntime applies
-		// nothing from this vector — the reducer stream below is the sole
-		// applied stream; per-family tests assert against these views.
-		std::vector<std::vector<uint8_t>> inbound_0a;
-		// DIAGNOSTIC VIEW ONLY: raw S2C world-stream spawn/static bodies the
-		// host sends during load, as (tag, body): 0x0C organics, 0x0D pool-1,
-		// 0x10 statics, 0x20 markers.
-		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_world;
-		// DIAGNOSTIC VIEW ONLY: validated live S2C gameplay bodies (reload
-		// echoes and entity lifecycle updates). 0x0A tag-2 rounds remain
-		// embedded in inbound_0a.
-		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_gameplay;
-		// The canonical client-reducer stream in original packet order. The
-		// legacy per-family vectors above remain diagnostic views only; applying
-		// them separately reorders 0x0A/world/map/gameplay records that shared a
-		// protocol packet.
+		// The canonical client-reducer stream: every admitted game message, as (tag, body), in
+		// original packet order; the one stream ClientRuntime folds, so the 0x0A / world / map /
+		// gameplay records that shared a protocol packet keep their order.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_reducer;
 		bool reached_in_match = false;                // applicable deployment edge once self H is known
 		// Every successfully decoded S2C 0x5A runs retail's unconditional
@@ -249,10 +236,10 @@ public:
 		//  the side pick @0x431A27].
 		std::vector<uint8_t> local_resubmit_teams;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
-		// corresponding raw inbound_gameplay record.
+		// corresponding inbound_reducer record.
 		std::vector<std::pair<uint16_t, uint8_t>> entity_team_assigns;
 		// Diagnostic summary of S2C 0x5D; entity state is folded only from the
-		// corresponding raw inbound_gameplay record.
+		// corresponding inbound_reducer record.
 		std::vector<uint16_t> destroyed_pool0_slots;
 	};
 

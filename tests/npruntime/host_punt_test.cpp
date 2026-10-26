@@ -499,8 +499,7 @@ bool check_initial_settings_and_close_emit_only_goodbyes() {
 			"the terminal description replaces same-packet admission traffic"))
 		return false;
 	return expect(!result.send_holdoff_set &&
-				result.queued_send_messages.empty() && result.inbound_0a.empty() &&
-				result.inbound_world.empty() && result.inbound_gameplay.empty(),
+				result.queued_send_messages.empty() && result.inbound_reducer.empty(),
 			"the terminal result exposes no same-packet semantic effects");
 }
 

@@ -2161,13 +2161,13 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 
 	joiner_receive::Received initial =
 			joiner_receive::receive(joiner, first.data(), first.size());
-	if (!expect(initial.inbound_gameplay.size() == 1 &&
-	                    initial.inbound_gameplay[0].first == 0x49,
+	if (!expect(initial.inbound_reducer.size() == 1 &&
+	                    initial.inbound_reducer[0].first == 0x49,
 	            "first S2C 0x83 surfaces its one-shot reload event"))
 		return false;
 	joiner_receive::Received duplicate =
 			joiner_receive::receive(joiner, first.data(), first.size());
-	if (!expect(duplicate.inbound_gameplay.empty(),
+	if (!expect(duplicate.inbound_reducer.empty(),
 	            "exact duplicate S2C 0x83 does not replay its one-shot event"))
 		return false;
 
@@ -2180,10 +2180,10 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 		return false;
 	const std::vector<uint8_t> second =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(second_body));
-	if (!expect(joiner_receive::receive(joiner, second.data(), second.size()).inbound_gameplay.size() == 1,
+	if (!expect(joiner_receive::receive(joiner, second.data(), second.size()).inbound_reducer.size() == 1,
 	            "next contiguous S2C 0x83 dispatches"))
 		return false;
-	if (!expect(joiner_receive::receive(joiner, first.data(), first.size()).inbound_gameplay.empty(),
+	if (!expect(joiner_receive::receive(joiner, first.data(), first.size()).inbound_reducer.empty(),
 	            "older replayed S2C 0x83 stays suppressed"))
 		return false;
 	if (!expect(joiner.connection().seq.last_inbound_seq == 2,
@@ -2262,9 +2262,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 				"canonical reducer stream preserves inner packet order"))
 			return false;
 	}
-	return expect(poll.inbound_0a.size() == 1 &&
-				poll.inbound_gameplay.size() == 9,
-			"legacy family vectors remain diagnostic views of the same packet");
+	return true;
 }
 
 using opennova::inmatch::NullDatagramSocket;

@@ -182,9 +182,9 @@ bool run_team_assign_relatches_self_and_resubmits() {
 				poll.entity_team_assigns[0].second == 3,
 			"0x50-self: the decoded-view fold also names the entity"))
 		return false;
-	if (!expect(poll.inbound_gameplay.size() == 1 &&
-				poll.inbound_gameplay[0].first == 0x50 &&
-				poll.inbound_gameplay[0].second == assign_payload,
+	if (!expect(poll.inbound_reducer.size() == 1 &&
+				poll.inbound_reducer[0].first == 0x50 &&
+				poll.inbound_reducer[0].second == assign_payload,
 			"0x50-self: the validated raw record reaches the replica pipeline"))
 		return false;
 
@@ -473,9 +473,9 @@ bool run_empty_slot_sweep_surfaces_raw_gameplay() {
 	if (!expect(poll.destroyed_pool0_slots == sweep.pool0_indices,
 			"0x5D-poll: decoded slot diagnostics remain available"))
 		return false;
-	return expect(poll.inbound_gameplay.size() == 1 &&
-				poll.inbound_gameplay[0].first == 0x5D &&
-				poll.inbound_gameplay[0].second == sweep_payload,
+	return expect(poll.inbound_reducer.size() == 1 &&
+				poll.inbound_reducer[0].first == 0x5D &&
+				poll.inbound_reducer[0].second == sweep_payload,
 			"0x5D-poll: the validated raw record reaches the replica pipeline");
 }
 
@@ -507,12 +507,12 @@ bool run_deployed_item_lifecycle_surfaces_raw_gameplay() {
 	const joiner_receive::Received poll =
 			joiner_receive::receive(joiner, dg.data(), dg.size());
 
-	if (!expect(poll.inbound_gameplay.size() == 2 &&
-			poll.inbound_gameplay[0].first == s2c::DEPLOYED_ITEM &&
-			poll.inbound_gameplay[0].second == spawn_payload &&
-			poll.inbound_gameplay[1].first == s2c::ENTITY_REMOVE &&
-			poll.inbound_gameplay[1].second == removal_payload,
-			"validated 0x59/0x12 lifecycle surfaces on the diagnostic view"))
+	if (!expect(poll.inbound_reducer.size() == 2 &&
+			poll.inbound_reducer[0].first == s2c::DEPLOYED_ITEM &&
+			poll.inbound_reducer[0].second == spawn_payload &&
+			poll.inbound_reducer[1].first == s2c::ENTITY_REMOVE &&
+			poll.inbound_reducer[1].second == removal_payload,
+			"the 0x59/0x12 lifecycle reaches the reducer stream"))
 		return false;
 	// ClientRuntime folds ONLY the reducer stream — a record absent there never
 	// reaches ClientReplicaPipeline (the post-#498 review regression: 0x59/0x12

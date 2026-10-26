@@ -130,8 +130,7 @@ bool check_session_header_key_validation() {
 		return false;
 	const joiner_receive::Received joiner_drop =
 			joiner_receive::receive(joiner, wrong_s2c.data(), wrong_s2c.size());
-	return expect(joiner_drop.inbound_gameplay.empty() &&
-	                      joiner_drop.inbound_0a.empty() &&
+	return expect(joiner_drop.inbound_reducer.empty() &&
 	                      joiner_drop.outbound.empty() &&
 	                      joiner.connection().seq.last_inbound_seq == 0 &&
 	                      joiner.connection().seq.queued_inbound.empty(),
@@ -159,12 +158,12 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 	            "frame reordered same-batch S2C packets"))
 		return false;
 	if (!expect(joiner_receive::receive(joiner,
-			s2c3.data(), s2c3.size()).inbound_gameplay.empty(),
+			s2c3.data(), s2c3.size()).inbound_reducer.empty(),
 	            "joiner queues the future S2C packet"))
 		return false;
 	const joiner_receive::Received joiner_close =
 			joiner_receive::receive(joiner, s2c2.data(), s2c2.size());
-	if (!expect(joiner_close.inbound_gameplay.size() == 2 &&
+	if (!expect(joiner_close.inbound_reducer.size() == 2 &&
 	                    joiner.connection().seq.queued_inbound.empty(),
 	            "later S2C packet in the batch closes and drains the gap"))
 		return false;
@@ -271,7 +270,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 
 	const joiner_receive::Received gap =
 			joiner_receive::receive(joiner, second.data(), second.size());
-	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty() &&
+	if (!expect(gap.inbound_reducer.empty() && gap.outbound.empty() &&
 	                    gap.immediate_outbound.empty(),
 	            "joiner queues S2C sequence two without NACKing before the batch boundary"))
 		return false;
@@ -345,10 +344,10 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 
 	const joiner_receive::Received recovered =
 			joiner_receive::receive(joiner, resend.immediate_outbound[0].data(), resend.immediate_outbound[0].size());
-	if (!expect(recovered.inbound_gameplay.size() == 2 &&
-	                    recovered.inbound_gameplay[0].second ==
+	if (!expect(recovered.inbound_reducer.size() == 2 &&
+	                    recovered.inbound_reducer[0].second ==
 	                            std::vector<uint8_t>({0xC5}) &&
-	                    recovered.inbound_gameplay[1].second ==
+	                    recovered.inbound_reducer[1].second ==
 	                            std::vector<uint8_t>({0xC6}) &&
 	                    joiner.connection().seq.last_inbound_seq == 2,
 	            "recovered S2C sequence one dispatches before queued sequence two"))
