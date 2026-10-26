@@ -242,8 +242,11 @@ enum PresentField : int {
 	// bus beyond DOOR_15 when authored), so only door-bearing rows pay for it.
 	PF_DOOR_COUNT,
     // A retained model pick also covers fragments born with Flags & 4 and
-    // dynamic rows whose model is built after their death event was drained.
-    // [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0)]
+    // dynamic rows whose model is built after their death event was drained:
+    // 0 intact, 1 husked, 2 husked with the swap stage's final husk promoted
+    // into the husk (world::husk_present_value).
+    // [orig: Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0,
+    //  the promotion stores @ 0x5C4241 / @ 0x5C42C7)]
     PF_HUSK,
     // Six Q16 CTRL words evaluated by the native destruction clock.
     PF_OBJECT_DESTROY,

@@ -345,6 +345,12 @@ void VehicleSystem::respawn(Entity &e) {
 	intact.pos = e.position;
 	intact.restore_intact = true;
 	world_.out.destruction.husk_swaps.push_back(intact);
+	// The def's husk pair is copied back, so a promoted final husk is the final husk
+	// again, held for the next death [orig: Entity_RespawnVehicle - the
+	//  EntityDef_LoadModelsAndCallbacks call @0x460025, +0x34 = def+0xF4
+	//  @0x460048..0x46004E, +0x38 = def+0xF8 @0x460053..0x460059].
+	e.husk_promoted = false;
+	e.final_husk_overlay = false;
 	vehicle_suspension_respawn(m);
 	detail::vehicle_clear_chassis(m);
 	// The +0x1B0 destroy timer re-seeds from def+0x1A4 (the same source as

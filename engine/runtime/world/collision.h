@@ -1308,6 +1308,9 @@ public:
     void remove_entity_instance(EntityHandle h);
     // Attach the husk-stage collision model (swapped in while Flags & 4).
     void assign_entity_husk(EntityHandle h, int32_t husk_model_id);
+    // Attach the final husk's model (entity+0x38), which serves as the husk model
+    // once the swap stage promotes it (Entity::husk_promoted).
+    void assign_entity_final_husk(EntityHandle h, int32_t final_husk_model_id);
     // Install the embedder's pose seam that supplies final per-section
     // matrices. Null restores the static shared-entity-matrix fallback.
     void set_pose_provider(IPoseProvider *provider);
@@ -1332,8 +1335,9 @@ public:
     // The attached collision model id for a live entity (-1 = no instance);
     // the userpoint leg of the muzzle-pose provider keys its parsed model by it.
     int32_t entity_model_id(EntityHandle h) const;
-    // The husk-stage model id attached beside it (-1 = none or no instance).
-    int32_t entity_husk_model_id(EntityHandle h) const;
+    // The husk-stage model id the entity holds (-1 = none or no instance): its
+    // final husk's once the swap stage promoted it.
+    int32_t entity_husk_model_id(const Entity &e) const;
     size_t instance_count() const { return instances_.size(); }
 
     // --- the per-tick snapshot ---
@@ -2071,6 +2075,16 @@ private:
         // Physics_RaycastAgainstEntityPool @ 0x538720 and the ray/contact picks
         // @ 0x413086 / @ 0x4ae233; D-AI-7 residual closed §24]
         int32_t husk_model_id = -1;
+        // The final husk's model (entity+0x38), which the swap stage's promotion
+        // makes the husk model; -1 = none. [orig: Render_SectorEntity @0x5C4241 /
+        //  @0x5C42C7]
+        int32_t final_husk_model_id = -1;
+        // The husk model the entity holds (+0x34): the final husk once promoted.
+        // A respawn re-arms the def's pair, so the entity's flag picks, never a
+        // store here. [orig: Entity_RespawnVehicle @0x45FF40 (@0x460048..0x460059)]
+        int32_t held_husk(const Entity &e) const {
+            return e.husk_promoted ? final_husk_model_id : husk_model_id;
+        }
         // Entity::registry_spawn_id at assignment. Zero preserves the legacy
         // handle-only behavior for portable callers/tests that do not stamp it.
         uint64_t registry_spawn_id = 0;

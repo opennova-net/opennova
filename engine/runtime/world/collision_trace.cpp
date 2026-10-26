@@ -35,9 +35,9 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // entity+52 in Entity_RaycastCollisionModel @ 0x413086 and the pool walk
     // @ 0x538720; the contact pick @ 0x4ae233].
     const bool using_husk = husk_swap &&
-            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
+            (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
     int32_t model_id =
-            using_husk ? instance->husk_model_id : instance->model_id;
+            using_husk ? instance->held_husk(*e) : instance->model_id;
     const CollisionModel *m = model(model_id);
     if (m == nullptr || !m->valid()) return nullptr;
 
@@ -366,9 +366,9 @@ bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t po
     const Entity *e = world.registry.get(h);
     if (e == nullptr) return false;
     const bool using_husk =
-            (e->engine_flags & kEntityFlagHusk) != 0 && instance->husk_model_id >= 0;
+            (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
     const CollisionModel *m =
-            model(using_husk ? instance->husk_model_id : instance->model_id);
+            model(using_husk ? instance->held_husk(*e) : instance->model_id);
     if (m == nullptr || !m->valid()) return false;
     if (solid_only && !m->has_solid_volume) return false;
     entity_pos_fixed(*e, pos_out);
@@ -390,8 +390,8 @@ const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
     const Instance *instance = live_instance(world, h);
     int32_t model_id_now = -1;
     if (instance != nullptr) {
-        model_id_now = husk_now && instance->husk_model_id >= 0
-                ? instance->husk_model_id
+        model_id_now = husk_now && instance->held_husk(*e) >= 0
+                ? instance->held_husk(*e)
                 : instance->model_id;
     }
     const auto cached = trace_view_cache_.find(h.packed);

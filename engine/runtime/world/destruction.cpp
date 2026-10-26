@@ -1290,10 +1290,7 @@ void process_destructible_death(World &world, Entity &target) {
     target.health = 0;
     if (target.death_tick == 0) target.death_tick = world.logic_tick; // [orig: @ 0x43fbfd]
     ++ev.items_destroyed;
-    ev.husk_swaps.push_back(HuskSwapEvent{target.net_id, target.handle.packed,
-                                          target.bms_id,
-                                          target.spawn_origin, target.item_id,
-                                          target.spawned_piece_mask, target.position});
+    ev.husk_swaps.push_back(husk_swap_event(target));
     // The item's footprint retires the terrain pages composed under it
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fc12..0x43fc5e].
     // The box is the position words less and plus the bound word (twice on
@@ -1534,9 +1531,9 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 		target.veh.damage_fire_active = false;
 	}
 	if (!was_husked) {
-		world.out.destruction.husk_swaps.push_back(
-				HuskSwapEvent{ target.net_id, target.handle.packed, target.bms_id,
-						target.spawn_origin, target.item_id, mask, target.position });
+		HuskSwapEvent husk = husk_swap_event(target);
+		husk.spawned_piece_mask = mask;
+		world.out.destruction.husk_swaps.push_back(husk);
 		++world.out.destruction.items_destroyed;
 	}
 }
@@ -1648,10 +1645,9 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {
-        world.out.destruction.husk_swaps.push_back(
-                HuskSwapEvent{target.net_id, target.handle.packed, target.bms_id,
-                              target.spawn_origin, target.item_id, mask,
-                              target.position});
+        HuskSwapEvent husk = husk_swap_event(target);
+        husk.spawned_piece_mask = mask;
+        world.out.destruction.husk_swaps.push_back(husk);
         ++world.out.destruction.items_destroyed;
     }
     // The successful spawn applied the death vertical kick [orig: @ 0x493969

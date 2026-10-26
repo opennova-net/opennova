@@ -191,9 +191,7 @@ void mark_class_dead(Entity &target) {
 void land_class_husk(World &world, Entity &target) {
 	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
 	target.engine_flags |= kEntityFlagHusk;
-	world.out.destruction.husk_swaps.push_back(HuskSwapEvent{target.net_id,
-			target.handle.packed, target.bms_id, target.spawn_origin, target.item_id,
-			target.spawned_piece_mask, target.position});
+	world.out.destruction.husk_swaps.push_back(husk_swap_event(target));
 	++world.out.destruction.items_destroyed;
 }
 
@@ -712,8 +710,65 @@ DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ti
 void update_item_destroy_fade(World &world, Entity &entity) {
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
-    if ((entity.engine_flags & kEntityFlagHusk) == 0) return;
+    if ((entity.engine_flags & kEntityFlagHusk) == 0) {
+        // An entity back intact (an emplaced gun's revive; a vehicle respawn clears the
+        // word itself) draws no pending final husk.
+        if (entity.final_husk_overlay) {
+            entity.final_husk_overlay = false;
+            HuskSwapEvent hide = husk_swap_event(entity);
+            hide.final_overlay = HuskSwapEvent::Overlay::kHide;
+            world.out.destruction.husk_swaps.push_back(hide);
+        }
+        return;
+    }
     publish_swap_fade_phases(world, entity);
+    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
+        update_husk_swap_stage(world, entity, *traits);
+}
+
+HuskSwapEvent husk_swap_event(const Entity &entity) {
+    HuskSwapEvent ev{entity.net_id, entity.handle.packed, entity.bms_id, entity.spawn_origin,
+            entity.item_id, entity.spawned_piece_mask, entity.position};
+    ev.husk_final = entity.husk_promoted;
+    return ev;
+}
+
+// [orig: Render_SectorEntity @0x5C4190 - Flags & 4 and +0x38 @0x5C41F5..0x5C41FD; the share
+//  Entity_PublishSwapFadePhases @0x5C4200 (0 while the destroy delay runs); a zero +0x1A0
+//  @0x5C420A..0x5C4218: the share at 1.0 promotes @0x5C4223..0x5C424B, at +0x19C draws the
+//  pending @0x5C4225..0x5C4234; else the ticks past +0x1AC @0x5C428A..0x5C4294: under +0x1A0
+//  nothing @0x5C4298..0x5C42A3, +0x19C past it promotes @0x5C42AB..0x5C42D1, between draws
+//  the pending @0x5C4232; GameLoop_RenderFrame @0x521310 (the session-peer test @0x52134E)]
+void update_husk_swap_stage(World &world, Entity &entity, const ItemDeathTraits &traits) {
+    bool draw_pending = false;
+    bool promote = false;
+    if (world.rules.mp_session_peer && entity.holds_final_husk()) {
+        if (traits.husk_swap_at_sec != 0.0f) {
+            const double elapsed = double(int32_t(world.logic_tick - entity.death_tick));
+            if (elapsed >= double(traits.husk_swap_at_sec)) {
+                promote = elapsed - double(traits.husk_swap_at_sec) >= double(traits.husk_swap_at);
+                draw_pending = !promote;
+            }
+        } else if (entity.destroy_progress >= 1.0) {
+            promote = true;
+        } else {
+            draw_pending = entity.destroy_progress >= double(traits.husk_swap_at);
+        }
+    }
+    if (promote) {
+        // The final husk becomes the husk, for the draw and the collision picks
+        // (CollisionWorld reads the flag).
+        entity.husk_promoted = true;
+        entity.final_husk_overlay = false;
+        world.out.destruction.husk_swaps.push_back(husk_swap_event(entity));
+        return;
+    }
+    if (draw_pending == entity.final_husk_overlay) return;
+    entity.final_husk_overlay = draw_pending;
+    HuskSwapEvent overlay = husk_swap_event(entity);
+    overlay.final_overlay =
+            draw_pending ? HuskSwapEvent::Overlay::kShow : HuskSwapEvent::Overlay::kHide;
+    world.out.destruction.husk_swaps.push_back(overlay);
 }
 
 // [orig: Entity_PublishSwapFadePhases @0x5C3F40 - the six zeroes @0x5C3F48..0x5C3F66, the
@@ -1030,7 +1085,7 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
         emit_item_state(world, entity, 0);
         entity.sub_type |= 0x20;
     }
-    if ((!traits.primary_husk_loaded || progress >= 1.0) &&
+    if ((!husk_model_held(traits, entity) || progress >= 1.0) &&
             world.rules.logic_authority && (entity.sub_type & 0x80) == 0 && entity.item_type == 5) {
         entity.sub_type |= 0x80;
         queue_class_blast(world, entity, kAmmoKzOrganicBlast, traits.kz);

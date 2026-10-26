@@ -316,7 +316,7 @@ bool DefinitionViewport::subject_(const ViewportInput &input, const DefCatalogDo
 		slot_.point = text_of(def.particlefx.userpoint);
 		// The husk the game draws (husk first) and the model the pieces come from (huskfinal first), each the
 		// project's file the game loads by its name: their points place the death's banks and its blasts.
-		const assets::Model &husk = held_(view, world::husk_render_graphic(item_.husk, item_.huskfinal), husk_file_);
+		const assets::Model &husk = held_(view, world::husk_render_graphic(item_.husk), husk_file_);
 		const assets::Model &pieces = held_(view, world::death_piece_graphic(item_.husk, item_.huskfinal), piece_file_);
 		if (husk) {
 			note_damage_husk(*husk, damage_models_);

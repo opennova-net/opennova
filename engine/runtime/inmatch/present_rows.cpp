@@ -19,6 +19,7 @@
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
 #include <runtime/world/collision.h> // entity_live_euler_bam, ResolvedCollisionShape
 #include <runtime/world/item_sections.h> // bldg_section_origin_q16
+#include <runtime/world/present_passes.h> // husk_present_value
 #include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
@@ -438,7 +439,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_ROLL_DEG] = static_cast<float>(pool_present_roll_deg(*ent));
 			r[PF_HIDDEN] = pool_row_hidden(*ent) ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
-			r[PF_HUSK] = (ent->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+			r[PF_HUSK] = husk_present_value(*ent);
 			for (int phase = 0; phase < 6; ++phase)
 				r[PF_OBJECT_DESTROY + phase] = float(ent->destroy_phases_q16[phase]);
 			// The org0 skin callback's DEATH register off the authoritative
@@ -636,7 +637,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// Every read below takes that row: the husk, the destroy phases, the
 			// doors, the motion controls, the gun words and the section draws.
 			if (owned) {
-				r[PF_HUSK] = (owned->engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+				r[PF_HUSK] = husk_present_value(*owned);
 				for (int phase = 0; phase < 6; ++phase)
 					r[PF_OBJECT_DESTROY + phase] = float(owned->destroy_phases_q16[phase]);
 				// The door records advance on every peer (the per-frame entity
@@ -832,7 +833,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_BODY_ANIM_SLOT] = static_cast<float>(e.body_anim_slot);
 	r[PF_HIDDEN] = pool_row_hidden(e) ? 1.0f : 0.0f;
 	r[PF_ALIVE] = e.alive ? 1.0f : 0.0f;
-	r[PF_HUSK] = (e.engine_flags & kEntityFlagHusk) ? 1.0f : 0.0f;
+	r[PF_HUSK] = husk_present_value(e);
 	for (int phase = 0; phase < 6; ++phase)
 		r[PF_OBJECT_DESTROY + phase] = float(e.destroy_phases_q16[phase]);
 	// The org0 skin bone-callback's DEATH register (CTRL ordinal 6): the corpse

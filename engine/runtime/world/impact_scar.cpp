@@ -297,17 +297,23 @@ bool scar_project_decal_onto_entity(World &world, const Entity &entity, const Pr
 	// The model the leg walks: the husk under Flags & 4 when one is loaded, else
 	// the graphic [orig: @0x5CE4EB..0x5CE503].
 	const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+	// A promoted husk is the final husk's model (Entity::husk_promoted).
 	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits != nullptr &&
-			traits->primary_husk_loaded;
+			husk_model_held(*traits, entity);
+	const bool final_husk = husk && entity.husk_promoted;
 	if (!husk && !entity.has_graphic_model) return false;
 	// The model's collision block (+0xB0) [orig: @0x5CE509..0x5CE511].
 	if (traits != nullptr &&
-			(husk ? traits->husk_no_collision_block : traits->graphic_no_collision_block))
+			(final_husk ? traits->final_husk_no_collision_block
+			 : husk     ? traits->husk_no_collision_block
+			            : traits->graphic_no_collision_block))
 		return false;
 	// The model's LOD-0 render model, present and not skinned ((+0x20) non-null, its +0x10
 	// bit 0 clear) [orig: @0x5CE517..0x5CE526].
 	if (traits != nullptr &&
-			(husk ? traits->husk_lod0_refuses_decal : traits->graphic_lod0_refuses_decal))
+			(final_husk ? traits->final_husk_lod0_refuses_decal
+			 : husk     ? traits->husk_lod0_refuses_decal
+			            : traits->graphic_lod0_refuses_decal))
 		return false;
 	// The scar-cache bone callback (+0xAC), which the item load that creates the model binds
 	// (never null there),
@@ -317,7 +323,9 @@ bool scar_project_decal_onto_entity(World &world, const Entity &entity, const Pr
 	// its no-scar flag [orig: @0x5CE578..0x5CE5A2, the gates Scar_AddEntry shares].
 	if (hit.section_index < 0) return false;
 	if (traits != nullptr &&
-			(husk ? traits->husk_scar_bones_null : traits->graphic_scar_bones_null) &&
+			(final_husk ? traits->final_husk_scar_bones_null
+			 : husk     ? traits->husk_scar_bones_null
+			            : traits->graphic_scar_bones_null) &&
 			hit.section_index == 0)
 		return false;
 	if (hit.face_index < 0) return false;
@@ -350,10 +358,14 @@ int surface_effects_at_userpoints(World &world, const char *key, const Entity &e
 	if (traits == nullptr) return 0;
 	// The husk under Flags & 4 when one is loaded, else the graphic
 	// [orig: @0x5CEABC..0x5CEADB].
-	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && traits->primary_husk_loaded;
+	// A promoted husk is the final husk's model (Entity::husk_promoted).
+	const bool husk = (entity.engine_flags & kEntityFlagHusk) != 0u && husk_model_held(*traits, entity);
 	if (!husk && !entity.has_graphic_model) return 0;
-	const std::string &model_name = husk ? traits->husk_name : traits->graphic_name;
-	const std::vector<ModelUserPoint> &points = husk ? traits->husk_userpoints : traits->graphic_userpoints;
+	const bool final_husk = husk && entity.husk_promoted;
+	const std::string &model_name = final_husk ? traits->final_husk_name
+			: husk ? traits->husk_name : traits->graphic_name;
+	const std::vector<ModelUserPoint> &points = final_husk ? traits->final_husk_userpoints
+			: husk ? traits->husk_userpoints : traits->graphic_userpoints;
 	// The row, then the two texture gates, each a draw when its id spans more
 	// than one texture [orig: @0x5CEAF7, @0x5CEB08, @0x5CEB1C].
 	const SurfaceMaterialRow *row = find_surface_material_row(key, model_name);

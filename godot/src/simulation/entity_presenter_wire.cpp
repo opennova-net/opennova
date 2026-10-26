@@ -980,6 +980,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
         husk.spawn_origin = opennova::world::spawn_origin_pack(
                 wfield_i(p, base, Simulation::PF_KIND), wfield_i(p, base, Simulation::PF_INDEX));
         husk.item_id = wfield_i(p, base, Simulation::PF_TYPE_ID);
+        husk.husk_final = wfield_i(p, base, Simulation::PF_HUSK) == 2; // promoted
         destruction_->apply_husk_swap(husk);
     }
 	model->set_parachute_deployed(wfield_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);

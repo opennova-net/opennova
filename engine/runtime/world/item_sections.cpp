@@ -21,8 +21,7 @@ void section_effect(World &world, const std::string &name, const Vec3 &position)
 void tower_husk(World &world, Entity &entity) {
     if ((entity.engine_flags & kEntityFlagHusk) != 0) return;
     entity.engine_flags |= kEntityFlagHusk;
-    world.out.destruction.husk_swaps.push_back({entity.net_id, entity.handle.packed,
-            entity.bms_id, entity.spawn_origin, entity.item_id, entity.spawned_piece_mask, entity.position});
+    world.out.destruction.husk_swaps.push_back(husk_swap_event(entity));
     ++world.out.destruction.items_destroyed;
 }
 void spawn_tower_section(World &world, Entity &entity, const ItemDeathTraits &traits,
@@ -427,8 +426,12 @@ uint32_t item_hidden_sections(const Entity &entity) {
     //  Entity_BuildAndApplyBoneMatrices @0x48F210 (the test @0x48F39D);
     //  Render_DestroyedSections @0x449EF0 (the test @0x44A0CD);
     //  BoneCallback_cpln_World @0x48FE90 (the test @0x48FFFF)]
+    // The gnrc, trcr and ewep rows skip that collapse while the entity holds a final
+    // husk (+0x38, until the swap stage promotes it) [orig: BoneCallback_gnrc_World
+    // @0x4E2958..0x4E295C; Entity_RenderVehicleModel @0x4408C8].
     uint32_t mask = 0;
-    if (entity.engine_flags & kEntityFlagHusk)
+    if ((entity.engine_flags & kEntityFlagHusk) &&
+            !(entity.collapse_waits_on_final_husk && entity.holds_final_husk()))
         mask |= entity.spawned_piece_mask;
     return mask | chel_rotor_hidden_sections(entity);
 }

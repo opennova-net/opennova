@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 
 #include <algorithm>
+#include <initializer_list>
 #include <base/io/fixed.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
@@ -984,18 +985,25 @@ int EntityPresenter::emplaced_apply(Object *node,
 // --- The per-row legs both walks share ---------------------------------------
 
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
+	// The swap stage's pending final husk draws right after the same publication, so
+	// its controlled materials read the same six slots (engine:
+	// world::update_husk_swap_stage).
+	ObjectModel *overlay = destruction_->final_overlay_model(model);
 	model = destruction_->visual_model(model);
 	static const std::string owner("present:destruction");
 	// Preserve publication before later culling and owner-scoped zero releases.
 	// Retail's direct six-slot writer and the retained-bus boundary are
 	// documented in docs/threedi/3di-gp-format-re.md (D-3DI-2).
-	model->begin_ctrl_update();
-	for (int i = 0; i < 6; ++i) {
-		const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
-		if (phase != 0) model->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
-		else model->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
+	for (ObjectModel *target : {model, overlay}) {
+		if (target == nullptr) continue;
+		target->begin_ctrl_update();
+		for (int i = 0; i < 6; ++i) {
+			const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+			if (phase != 0) target->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
+			else target->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
+		}
+		target->end_ctrl_update();
 	}
-	model->end_ctrl_update();
 }
 
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
@@ -1052,6 +1060,9 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
+	// The pending final husk draws through the same world callback, so it takes the
+	// husk's mask (the overlay copies the husk's at its build; each change follows).
+	ObjectModel *overlay = destruction_->final_overlay_model(model);
 	model = destruction_->visual_model(model);
 	// The sim's destroyed sections (entity+0x138), the model's own hidden
 	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
@@ -1064,10 +1075,12 @@ void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 						<< 16));
 		if (hidden_mask != last_mask) {
 			model->set_destroyed_section_mask(hidden_mask);
+			if (overlay != nullptr) overlay->set_destroyed_section_mask(hidden_mask);
 			last_mask = hidden_mask;
 		}
 	} else if (last_mask != -2 && last_mask != 0) {
 		model->set_destroyed_section_mask(0);
+		if (overlay != nullptr) overlay->set_destroyed_section_mask(0);
 		last_mask = 0;
 	}
 }

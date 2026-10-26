@@ -566,7 +566,7 @@ void MissionShots::step_() {
 		}
 		const DamageItem item = damage_item_of(*def, "items.def");
 		DamageModels models;
-		const std::string husk = world::husk_render_graphic(item.husk, item.huskfinal);
+		const std::string husk = world::husk_render_graphic(item.husk);
 		const std::string pieces = world::death_piece_graphic(item.husk, item.huskfinal);
 		if (!husk.empty())
 			if (const assets::Model model = run.files->store->model(husk)) note_damage_husk(*model, models);

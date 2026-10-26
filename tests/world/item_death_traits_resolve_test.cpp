@@ -259,9 +259,9 @@ static void test_first_husk_kz_and_dead_points_feed_death_traits() {
 }
 
 // Retail reads entity+52 huskModel for the KZ walk. A final-only definition
-// may use huskFinal for pieces (and the legacy collision fallback), but it
-// must not mine that model for KZ anchors; the empty bank selects the origin
-// fallback blast.
+// uses huskFinal for pieces (and, once the swap stage promotes it, for the husk),
+// but it must not mine that model for KZ anchors; the empty bank selects the
+// origin fallback blast.
 static void test_final_only_husk_supplies_the_gate_but_no_kz_source() {
     const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
     const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
@@ -287,6 +287,54 @@ static void test_final_only_husk_supplies_the_gate_but_no_kz_source() {
     if (t == nullptr) return;
     CHECK(t->husk_model_loaded); // a successfully opened final-only husk also supplies the retail gate
     CHECK(t->kz_points.empty()); // huskFinal alone does not replace retail's first-stage KZ source
+}
+
+// The final husk (+0x38) is the husk name's "xb" variant when that loads, ahead of
+// huskfinal, else huskfinal; the entity holds it from the sweep, a section clone
+// never (its zeroed template copies the husk alone).
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (@0x43A145..0x43A26E);
+//  Entity_InitFromItemDef @0x49E5AA; Entity_SpawnSectionEntity @0x4402D0 (the memset
+//  @0x440322, +0x34 @0x440331..0x440343)]
+static void test_final_husk_takes_the_xb_variant_and_a_clone_holds_none() {
+    const std::vector<uint8_t> house = test_io::read_file(repo_path("fixtures/threedi/synth/house.3di"));
+    const std::vector<uint8_t> armory = test_io::read_file(repo_path("fixtures/threedi/synth/armory.3di"));
+    const Items items(text_bytes(
+            "begin \"Final husk witness\"\r\n"
+            "  id 105098\r\n"
+            "  type object\r\n"
+            "  graphic Barrel1\r\n"
+            "  husk Barrel1XA\r\n"
+            "  huskfinal Barrel1XF\r\n"
+            "  hp 75\r\n"
+            "end\r\n"));
+    CHECK(!house.empty() && !armory.empty() && items.ok);
+    if (house.empty() || armory.empty() || !items.ok) return;
+    for (const bool xb : {true, false}) {
+        const TempRoot root(xb ? "final_xb" : "final_xf");
+        root.put("Barrel1.3di", house);
+        root.put("Barrel1XA.3di", armory);
+        if (xb) root.put("Barrel1XB.3di", armory);
+        root.put("Barrel1XF.3di", house);
+        Rig rig(root, items, 5098);
+        const ItemDeathTraits *t = rig.traits(5098);
+        CHECK(t != nullptr);
+        if (t == nullptr) continue;
+        CHECK(t->final_husk_loaded);
+        CHECK(t->final_husk_graphic == (xb ? "barrel1xb" : "Barrel1XF"));
+        CHECK(rig.w.registry.get(rig.building)->final_husk_loaded);
+        Entity clone;
+        clone.kind = EntityKind::Building;
+        clone.item_id = 5098;
+        clone.bms_id = 2;
+        clone.health = 20;
+        clone.section_clone = true; // as spawn_tower_section seeds it
+        const EntityHandle clone_h = rig.w.registry.spawn(2, clone);
+        const mission::CollisionResolveDeps deps{rig.collision, rig.occlusion, rig.pose, rig.models};
+        mission::resolve_collision_instances(rig.w, items.file, rig.state, deps);
+        const Entity *resolved = rig.w.registry.get(clone_h);
+        CHECK(resolved != nullptr && !resolved->final_husk_loaded && !resolved->holds_final_husk());
+        CHECK(rig.w.registry.get(rig.building)->final_husk_loaded);
+    }
 }
 
 // Authored names do not stand in for the live retail pointer: a root that
@@ -394,6 +442,7 @@ static void test_class_init_seeds_the_brain_floors() {
 int main() {
     test_first_husk_kz_and_dead_points_feed_death_traits();
     test_final_only_husk_supplies_the_gate_but_no_kz_source();
+    test_final_husk_takes_the_xb_variant_and_a_clone_holds_none();
     test_missing_husk_assets_leave_the_live_model_gate_clear();
     test_class_init_seeds_the_brain_floors();
     if (failures == 0) std::printf("OK: item_death_traits_resolve\n");

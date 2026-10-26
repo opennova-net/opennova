@@ -105,6 +105,10 @@ public:
     // Retained rows can arrive before or after the transient death drain.
     void apply_husk_swap(const opennova::world::HuskSwapEvent &p_husk);
     ObjectModel *visual_model(ObjectModel *p_entity_model) const;
+    // The swap stage's pending final husk drawn beside the entity's husk, or null:
+    // it takes the husk's destroy phases and section mask each frame (the pending
+    // draw follows the phase publication through the same world callback).
+    ObjectModel *final_overlay_model(ObjectModel *p_entity_model) const;
 	// The pure-data presentation leg (the present_snapshot precedent): production
 	// present() drains the typed sim; tests feed the same event/piece rows.
 	void present_drained(const opennova::world::DestructionEvents &p_events,
@@ -172,6 +176,15 @@ private:
 	EffectLightDirector *lights() const;
 	Node3D *resolve_entity_node(int p_bms_id, int64_t p_spawn_origin, int p_wire_handle) const;
 	void restore_intact(const String &p_key);
+	// The canonical identity of an entity's present model ("" for one with no ref).
+	String model_identity_key(ObjectModel *p_entity_model) const;
+	// The husk's candidate graphics for one swap: the def's husk, or the final
+	// husk's (runtime/world/present_passes.h) once the swap stage promoted it.
+	std::vector<String> husk_graphics(int p_def_id, bool p_husk_final) const;
+	// The swap stage's pending final husk drawn beside the husk (a show builds it
+	// beside the graft, or under the entity's node when no husk grafted).
+	void apply_final_overlay(const String &p_key, const opennova::world::HuskSwapEvent &p_husk);
+	void drop_final_overlay(const String &p_key);
 	Variant present_transform_for_identity(int p_bms_id, int64_t p_spawn_origin) const;
 	void sync_static_husks();
 	void apply_effect(const opennova::world::DestructionEffectEvent &p_effect);
@@ -195,6 +208,8 @@ private:
 	ObjectID lights_id_;               // the death-flash light route (or null)
 	HashMap<String, ObjectID> husked_;          // canonical mission identity -> husk node (invalid = null)
 	HashMap<String, HuskRestore> husk_restore_; // canonical mission identity -> original state
+	HashSet<String> final_husked_;              // identities whose applied husk is the final husk
+	HashMap<String, ObjectID> final_overlays_;  // identity -> the pending final husk drawn beside it
 	HashMap<String, int64_t> attached_groups_;
 	HashMap<String, WreckFire> burning_;        // canonical wreck owner key -> WreckFire
 	HashSet<String> wreck_anchor_keys_;         // registered wreck owner keys

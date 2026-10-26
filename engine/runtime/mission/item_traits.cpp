@@ -21,6 +21,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/physics_class_table.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/present_passes.h> // final_husk_graphics
 
 #include <string>
 #include <utility>
@@ -636,6 +637,20 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The world callbacks that skip their section collapse while the entity holds
+        // a final husk (+0x38): the gnrc and trcr rows' and the ewep row's. A tag
+        // naming no row (an empty render_function too: every shipped model's own
+        // RMDL tag misses the table, D-ITEMDEF-18) takes row 0's, the gnrc one.
+        // [orig: g_BoneCallbackTable @0x82CF00 (gnrc @0x82CF00 / @0x82CF30, ewep
+        //  @0x82CFA0 -> Entity_RenderVehicleModel @0x4407D0, trcr @0x82CFB0 ->
+        //  BoneCallback_gnrc_World @0x4E2860); BoneCallback_LookupByTag @0x4E32B0, the
+        //  miss @0x4E32D4; the +0x38 tests @0x4E2958 / @0x4408C8]
+        static constexpr std::string_view kUngatedRows[] = {"bldg", "ewpn", "org0", "pwp0",
+                "door", "tree", "bone", "bfst", "lndm", "chel", "cveh", "tank", "cpln",
+                "cesp", "psec"};
+        e->collapse_waits_on_final_husk = true;
+        for (const std::string_view row : kUngatedRows)
+            if (render == row) e->collapse_waits_on_final_husk = false;
         // The chel row's world callback also hides sections by the rotor speed
         // and the airborne flag, each section named by one byte of the def's
         // +0x890..+0x897 run (the deathtime / door dword and the clipsize dword
@@ -1121,9 +1136,21 @@ void resolve_minefields(world::World &world, const def::DefItemsFile &items,
                 points.push_back({type, {transformed[0], transformed[1], transformed[2]}});
             }
         }
+        // The marked slots draw the entity's two husk models: type 1 the final husk
+        // (+0x38, the first of its candidates that loads), type 3 the husk (+0x34)
+        // [orig: Entity_RenderBoneAttachments @0x441660 - +0x38 @0x4416A5..0x4416AA,
+        //  +0x34 @0x4416C2..0x4416C7; EntityDef_LoadModelsAndCallbacks @0x439F50
+        //  (@0x43A145..0x43A26E)].
+        std::string final_husk;
+        for (const std::string &candidate : world::final_husk_graphics(def.husk, def.huskfinal)) {
+            if (models.model(candidate) != nullptr) {
+                final_husk = candidate;
+                break;
+            }
+        }
         world.minefields.initialize(world, *entity, think, render, model != nullptr,
                 ammo_id(world, def.ammo_closeattack), ammo_id(world, def.ammo_marker3),
-                def.huskfinal, def.husk, points);
+                final_husk, def.husk, points);
     });
 }
 } // namespace opennova::mission

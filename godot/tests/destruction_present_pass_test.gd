@@ -512,6 +512,62 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 	presenter.teardown()
 
 
+const BARREL_ITEM_ID := 5002  # fixture items.def 105002: husk Barrel1X, huskfinal Barrel1XF
+
+
+# The swap stage's presentation (engine: world::update_husk_swap_stage): the
+# husk grafts first, the pending final husk draws beside it on a show and
+# leaves on a hide, and a promotion regrafts the final husk in the husk's place,
+# dropping the pending draw. A death of a promoted entity grafts the final husk
+# at once.
+func test_final_husk_overlay_and_promotion_regraft() -> void:
+	var anchors := ItemEffectDirector.new()
+	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+	var placer := MissionObjectPlacer.new()
+	var husk_data := ObjectData.new()
+	assert_eq(husk_data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	var final_data := ObjectData.new()
+	assert_eq(final_data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
+	placer.register_object_data('Barrel1X', husk_data)
+	placer.register_object_data('Barrel1XF', final_data)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := ObjectModel.new()
+	container.add_child(intact)
+	var index := _index_of([_entry(intact, 41)])
+	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var none := Simulation.SPAWN_ORIGIN_NONE
+	var no_handle := 0xFFFF
+
+	presenter.present_destruction_drained(
+			DestructionDrain.make([HuskSwapEvent.make(41, BARREL_ITEM_ID)]), [])
+	var grafts := _husk_models(self)
+	assert_eq(grafts.size(), 1)
+	if grafts.size() == 1:
+		assert_eq((grafts[0] as ObjectModel).get_object_data(), husk_data, 'the husk grafts first')
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, false, 1)]), [])
+	var overlays := intact.find_children('FinalHuskOverlay*', 'ObjectModel', false, false)
+	assert_eq(overlays.size(), 1, 'the pending final husk draws beside the husk')
+	if overlays.size() == 1:
+		assert_eq((overlays[0] as ObjectModel).get_object_data(), final_data)
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, true)]), [])
+	await get_tree().process_frame
+	grafts = _husk_models(self)
+	assert_eq(grafts.size(), 1)
+	if grafts.size() == 1:
+		assert_eq((grafts[0] as ObjectModel).get_object_data(), final_data,
+				'the promotion regrafts the final husk in the husk place')
+	assert_eq(intact.find_children('FinalHuskOverlay*', 'ObjectModel', false, false).size(), 0,
+			'the promotion ends the pending draw')
+	# A repeated promoted pick keeps the graft.
+	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(
+			41, BARREL_ITEM_ID, none, no_handle, false, true)]), [])
+	assert_eq(_husk_models(self).size(), 1)
+	presenter.teardown()
+
+
 func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void:
 	var anchors := ItemEffectDirector.new()
 	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))

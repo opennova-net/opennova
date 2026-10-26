@@ -74,7 +74,7 @@ public:
 	void assign(const opennova::world::HuskSwapEvent &p_value) { value_ = p_value; }
 	const opennova::world::HuskSwapEvent &value() const { return value_; }
 	static Ref<HuskSwapEvent> make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
-			int p_wire_handle, bool p_restore_intact);
+			int p_wire_handle, bool p_restore_intact, bool p_husk_final, int p_final_overlay);
 
 	bool get_restore_intact() const { return value_.restore_intact; }
 	int get_net_id() const { return static_cast<int>(value_.net_id); }
@@ -84,6 +84,9 @@ public:
 	int get_item_id() const { return value_.item_id; }
 	int64_t get_spawned_piece_mask() const { return static_cast<int64_t>(value_.spawned_piece_mask); }
 	Vector3 get_pos() const;
+	bool get_husk_final() const { return value_.husk_final; }
+	// 0 none, 1 show, 2 hide (opennova::world::HuskSwapEvent::Overlay).
+	int get_final_overlay() const { return static_cast<int>(value_.final_overlay); }
 };
 
 // One drain: every event since the last drain plus the diagnostic counters

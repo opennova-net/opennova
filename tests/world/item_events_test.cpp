@@ -1,6 +1,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/item_sections.h>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -851,6 +852,149 @@ int test_destroy_fade_phases() {
     return 0;
 }
 
+// The husk -> final-husk swap stage. The share arm (husk_swap_at_sec 0): from the share
+// husk_swap_at on the final husk draws beside the husk, at 1.0 it is promoted into the
+// husk, collision model included. The tick arm: from husk_swap_at_sec ticks past the
+// fade's origin it draws, husk_swap_at ticks later it is promoted. A peer that draws no
+// entity runs neither; an entity with no final husk neither; the gnrc / ewep collapse
+// waits on the held final husk; the +0x34 readers take the final husk once promoted.
+// [orig: Render_SectorEntity @0x5C4190 (@0x5C41F5..0x5C42D1); BoneCallback_gnrc_World
+//  @0x4E2958; GameLoop_RenderFrame @0x52134E]
+int test_husk_swap_stage() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(2, 8);
+    CollisionWorld collision;
+    w.collision = &collision;
+    const int32_t intact = collision.add_model(CollisionModel{});
+    const int32_t first = collision.add_model(CollisionModel{});
+    const int32_t last = collision.add_model(CollisionModel{});
+    const EntityHandle h = spawn(w, 2, 71, ItemDeathClass::kGnrl);
+    auto &e = *w.registry.get(h);
+    collision.assign_entity(h, intact);
+    collision.assign_entity_husk(h, first);
+    collision.assign_entity_final_husk(h, last);
+    auto *traits = w.tables.item_death_traits.get_mutable(71);
+    traits->destroy_timing_ticks[1] = 50; // a fade of 50 + 4 x 25 = 150 ticks
+    traits->destroy_timing_ticks[2] = 25;
+    traits->primary_husk_loaded = true;
+    traits->final_husk_loaded = true;
+    e.final_husk_loaded = true;
+    e.collapse_waits_on_final_husk = true;
+    e.spawned_piece_mask = 0x6;
+    e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    e.death_tick = 100;
+    auto &swaps = w.out.destruction.husk_swaps;
+    // The share arm at husk_swap_at 0 (the minefield sections): drawn from the death on.
+    w.logic_tick = 100;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+    CHECK(swaps.back().final_overlay == HuskSwapEvent::Overlay::kShow && !swaps.back().husk_final);
+    CHECK(item_hidden_sections(e) == 0);   // the gnrc collapse waits on the final husk
+    CHECK(husk_model_held(*traits, e));
+    w.logic_tick = 249;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.size() == 1 && !e.husk_promoted);
+    w.logic_tick = 250; // the share reaches 1.0
+    update_item_destroy_fade(w, e);
+    CHECK(e.husk_promoted && !e.final_husk_overlay && !e.holds_final_husk());
+    CHECK(swaps.size() == 2 && swaps.back().husk_final &&
+            swaps.back().final_overlay == HuskSwapEvent::Overlay::kNone);
+    CHECK(collision.entity_husk_model_id(e) == last);
+    CHECK(item_hidden_sections(e) == 0x6); // the collapse runs on the promoted husk
+    traits->final_husk_loaded = false;
+    CHECK(!husk_model_held(*traits, e));   // +0x34 now reads the final husk's facts
+    traits->final_husk_loaded = true;
+    w.logic_tick = 400;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.size() == 2);              // promoted once while it stays husked
+    CHECK(husk_swap_event(e).husk_final);  // a revived gun's next husk is the final husk
+
+    // The share arm at 0.5: nothing until half the fade, then the draw.
+    swaps.clear();
+    e.husk_promoted = false;
+    traits->husk_swap_at = 0.5f;
+    w.logic_tick = 174; // 74 / 150 < 0.5
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.empty() && !e.final_husk_overlay);
+    w.logic_tick = 175;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+
+    // Back intact (a respawn): the pending draw ends.
+    e.engine_flags = 0;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.final_husk_overlay && swaps.size() == 2 &&
+            swaps.back().final_overlay == HuskSwapEvent::Overlay::kHide);
+
+    // The tick arm: 62 ticks past the origin it draws, 31 ticks later it is promoted.
+    swaps.clear();
+    e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    traits->husk_swap_at_sec = 62.0f;
+    traits->husk_swap_at = 31.0f;
+    w.logic_tick = 161;
+    update_item_destroy_fade(w, e);
+    CHECK(swaps.empty());
+    w.logic_tick = 162;
+    update_item_destroy_fade(w, e);
+    CHECK(e.final_husk_overlay && swaps.size() == 1);
+    w.logic_tick = 192;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.size() == 1);
+    w.logic_tick = 193;
+    update_item_destroy_fade(w, e);
+    CHECK(e.husk_promoted && swaps.size() == 2 && swaps.back().husk_final);
+
+    // A dedicated host draws nothing, so its stage never runs.
+    swaps.clear();
+    e.husk_promoted = false;
+    w.rules.mp_session_peer = false;
+    w.logic_tick = 300;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.empty());
+    w.rules.mp_session_peer = true;
+    // No final husk: no stage, and the collapse runs.
+    e.final_husk_loaded = false;
+    update_item_destroy_fade(w, e);
+    CHECK(!e.husk_promoted && swaps.empty());
+    CHECK(item_hidden_sections(e) == 0x6);
+    return 0;
+}
+
+// A vehicle respawn copies the def's husk pair back: a promoted final husk is held
+// again, so the next death draws and collides on the first husk until the stage
+// promotes it anew. [orig: Entity_RespawnVehicle @0x45FF40 - +0x34 = def+0xF4
+//  @0x460048..0x46004E, +0x38 = def+0xF8 @0x460053..0x460059]
+int test_vehicle_respawn_rearms_the_final_husk() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(1, 4);
+    CollisionWorld collision;
+    w.collision = &collision;
+    const int32_t intact = collision.add_model(CollisionModel{});
+    const int32_t first = collision.add_model(CollisionModel{});
+    const int32_t last = collision.add_model(CollisionModel{});
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type = 1;
+    seed.alive = true;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    collision.assign_entity(h, intact);
+    collision.assign_entity_husk(h, first);
+    collision.assign_entity_final_husk(h, last);
+    auto &v = *w.registry.get(h);
+    v.final_husk_loaded = true;
+    v.husk_promoted = true;
+    v.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    CHECK(collision.entity_husk_model_id(v) == last && husk_swap_event(v).husk_final);
+    w.vehicles.respawn(v);
+    CHECK(!v.husk_promoted && !v.final_husk_overlay && v.holds_final_husk());
+    CHECK(collision.entity_husk_model_id(v) == first);
+    CHECK(!husk_swap_event(v).husk_final);
+    return 0;
+}
+
 int test_destroy_phases_and_ambient() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
@@ -1029,6 +1173,8 @@ int test_section_mask_hides_no_person_part() {
 int main() {
     if (test_chel_rotor_hidden_sections() != 0) return 1;
     if (test_section_mask_hides_no_person_part() != 0) return 1;
+    if (test_husk_swap_stage() != 0) return 1;
+    if (test_vehicle_respawn_rearms_the_final_husk() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;

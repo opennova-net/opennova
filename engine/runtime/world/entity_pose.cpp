@@ -342,7 +342,7 @@ bool EntityPoseProvider::resolve_seat_bone(world::World &world,
 	if (world.collision == nullptr) return true; // no model data
 	if (bone_index == 0) return false;
 	int32_t model_id = world.collision->entity_model_id(carrier.handle);
-	const int32_t husk_id = world.collision->entity_husk_model_id(carrier.handle);
+	const int32_t husk_id = world.collision->entity_husk_model_id(carrier);
 	if ((carrier.engine_flags & world::kEntityFlagHusk) != 0 && husk_id >= 0)
 		model_id = husk_id;
 	const auto found = userpoint_models_.find(model_id);

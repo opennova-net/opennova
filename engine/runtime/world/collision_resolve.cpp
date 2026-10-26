@@ -1268,7 +1268,7 @@ std::vector<CollisionWorld::DebugHitboxEntity> CollisionWorld::debug_hitboxes(
         ent.bound_radius = tv->bound_radius;
         if (const Entity *e = world.registry.get(h)) {
             ent.husk = (e->engine_flags & kEntityFlagHusk) != 0 &&
-                       instances_.at(h.packed).husk_model_id >= 0;
+                       instances_.at(h.packed).held_husk(*e) >= 0;
             if (e->bound_radius > 0.0f) ent.bound_radius = e->bound_radius.q16;
         }
 

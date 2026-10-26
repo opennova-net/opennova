@@ -63,9 +63,12 @@ void DestructionEffectEvent::_bind_methods() {
 // --- HuskSwapEvent ----------------------------------------------------------
 
 Ref<HuskSwapEvent> HuskSwapEvent::make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
-		int p_wire_handle, bool p_restore_intact) {
+		int p_wire_handle, bool p_restore_intact, bool p_husk_final, int p_final_overlay) {
 	opennova::world::HuskSwapEvent v;
 	v.restore_intact = p_restore_intact;
+	v.husk_final = p_husk_final;
+	v.final_overlay = static_cast<opennova::world::HuskSwapEvent::Overlay>(
+			p_final_overlay >= 0 && p_final_overlay <= 2 ? p_final_overlay : 0);
 	v.bms_id = p_bms_id;
 	v.item_id = p_item_id;
 	v.spawn_origin = static_cast<uint32_t>(p_spawn_origin);
@@ -80,9 +83,11 @@ Vector3 HuskSwapEvent::get_pos() const { return mission_to_godot(value_.pos); }
 
 void HuskSwapEvent::_bind_methods() {
 	ClassDB::bind_static_method("HuskSwapEvent",
-			D_METHOD("make", "bms_id", "item_id", "spawn_origin", "wire_handle", "restore_intact"),
+			D_METHOD("make", "bms_id", "item_id", "spawn_origin", "wire_handle", "restore_intact",
+					"husk_final", "final_overlay"),
 			&HuskSwapEvent::make, DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)),
-			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)), DEFVAL(false));
+			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)), DEFVAL(false),
+			DEFVAL(false), DEFVAL(0));
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::BOOL, restore_intact)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, net_id)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, wire_handle)
@@ -91,6 +96,8 @@ void HuskSwapEvent::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, item_id)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, spawned_piece_mask)
 	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::VECTOR3, pos)
+	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::BOOL, husk_final)
+	OPENNOVA_RECORD_READ_ONLY(HuskSwapEvent, Variant::INT, final_overlay)
 }
 
 // --- DestructionDrain -------------------------------------------------------

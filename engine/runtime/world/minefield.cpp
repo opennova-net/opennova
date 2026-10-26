@@ -162,7 +162,14 @@ void MinefieldSystem::compile_draws(const World &world, std::vector<MinefieldDra
             if (field.section_mask & (1u << i)) continue;
             const uint8_t type = state.types[i] & 0x7F;
             if (type != 1 && type != 3) continue;
-            const std::string &model = type == 1 ? state.small_marker : state.large_marker;
+            // Type 1 draws +0x38, type 3 +0x34: once the swap stage has promoted the
+            // final husk into +0x34, a type-1 slot draws nothing and a type-3 slot the
+            // final husk [orig: @0x4416A0..0x4416C7; Render_SectorEntity @0x5C4241 /
+            //  @0x5C42C7].
+            static const std::string kNone;
+            const std::string &model = type == 1
+                    ? (field.husk_promoted ? kNone : state.small_marker)
+                    : (field.husk_promoted ? state.small_marker : state.large_marker);
             if (model.empty()) continue;
             MinefieldDraw draw;
             draw.owner = field.handle;

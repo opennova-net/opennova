@@ -1048,6 +1048,27 @@ struct Entity {
     int32_t collapse_step = 0; // bld2/cran currentSpeed (+0x29C), steps 0..64
     std::array<int32_t, 6> destroy_phases_q16{};
     double destroy_progress = 0.0;
+    // The swap stage (world::update_husk_swap_stage): the def's final husk loaded
+    // (entity+0x38 held from the spawn, which collision_resolve stamps; a section
+    // clone's or a palm fragment's zeroed template holds none), promoted into +0x34
+    // once the stage's window ends (+0x38 then empty, until a vehicle respawn copies
+    // the def's pair back; an emplaced gun's revive keeps it), and drawn beside the
+    // husk this tick.
+    // [orig: Entity_InitFromItemDef @0x49E550 (+0x34 @0x49E5A1, +0x38 @0x49E5AA);
+    //  Render_SectorEntity @0x5C4190 (the stores
+    //  @0x5C4241..0x5C4244 / @0x5C42C7..0x5C42CA); Entity_RespawnVehicle @0x45FF40
+    //  (@0x460048..0x460059); Entity_SpawnSectionEntity @0x4402D0 (the template memset
+    //  @0x440322, +0x34 alone copied @0x440331..0x440343); Palm_SpawnFragment @0x53C1C0
+    //  (the memset @0x53C2BC)]
+    bool final_husk_loaded = false;
+    bool husk_promoted = false;
+    bool final_husk_overlay = false;
+    // The world callback skips its section collapse while +0x38 is held: the gnrc
+    // and trcr rows (and row 0's, which a tag naming no row takes) and the ewep row.
+    // [orig: BoneCallback_gnrc_World @0x4E2860 (the test @0x4E2958); Entity_RenderVehicleModel
+    //  @0x4407D0 (the test @0x4408C8)]
+    bool collapse_waits_on_final_husk = false;
+    bool holds_final_husk() const { return final_husk_loaded && !husk_promoted; }
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay

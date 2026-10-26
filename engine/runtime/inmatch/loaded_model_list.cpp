@@ -5,6 +5,7 @@
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/present_passes.h>
 #include <runtime/world/world.h>
 
 #include <base/io/strutil.h>
@@ -57,16 +58,12 @@ public:
 		if (graphic_[i]) return;
 		const def::DefItemDef &d = items_->entries[i];
 		if (d.graphic[0] != '\0') graphic_[i] = list_.load(d.graphic);
-		if (d.husk[0] != '\0') {
-			list_.load(d.husk);
-			std::string variant = d.husk;
-			for (char &c : variant) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-			if (variant.size() >= 2 && variant[variant.size() - 2] == 'x' && variant.back() == 'a') {
-				variant.back() = 'b';
-				husk_final_[i] = list_.load(variant);
-			}
+		if (d.husk[0] != '\0') list_.load(d.husk);
+		// The final husk: the husk's "xb" variant, else huskfinal while none loaded.
+		for (const std::string &candidate : world::final_husk_graphics(d.husk, d.huskfinal)) {
+			husk_final_[i] = list_.load(candidate);
+			if (husk_final_[i]) break;
 		}
-		if (!husk_final_[i] && d.huskfinal[0] != '\0') husk_final_[i] = list_.load(d.huskfinal);
 		if (d.graphic_enemy[0] != '\0') list_.load(d.graphic_enemy);
 		if (d.huskshadow[0] != '\0') list_.load(d.huskshadow);
 		if (d.virtual_display[0] != '\0') list_.load(d.virtual_display);

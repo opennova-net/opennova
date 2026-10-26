@@ -1805,7 +1805,7 @@ int32_t brain_ground_offset(const World &world, const Entity &entity) {
                       entity.health <= 0;
     if (dead) {
         const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
-        if (traits != nullptr && traits->primary_husk_loaded)
+        if (traits != nullptr && husk_model_held(*traits, entity))
             return ai->brain.f[AiBrain::kHuskFloor];
     }
     return ai->brain.f[AiBrain::kModelFloor];

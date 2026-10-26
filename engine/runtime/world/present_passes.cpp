@@ -1,23 +1,38 @@
 #include <runtime/world/present_passes.h>
 
+#include <cctype>
 #include <cmath>
 
 #include <runtime/world/entity.h>
 
 namespace opennova::world {
 
-// The Flags & 4 swap shows the def's `husk`, falling back to `huskfinal`.
-// Retail's render pick takes the husk model (+0x34) or the graphic [orig:
-// Render_SectorEntity @ 0x5C4190 (the Flags & 4 test @ 0x5C41A0)]; the
-// collision picks take the same +0x34 [orig: Entity_RaycastCollisionModel
-// @ 0x413060 (the pick @ 0x41307B..0x413088); Physics_RaycastAgainstEntityPool
-// @ 0x538720 (the pick @ 0x538A15)]. The `huskfinal` fallback has no such
-// witness (present_passes.h).
+float husk_present_value(const Entity &entity) {
+    if ((entity.engine_flags & kEntityFlagHusk) == 0) return 0.0f;
+    return entity.husk_promoted ? 2.0f : 1.0f;
+}
+
+// The Flags & 4 swap shows the def's `husk` (present_passes.h).
 // The death-piece model is the OTHER way round (huskfinal first,
 // destruction.h [orig: @ 0x4934af]); the two picks are kept apart.
-std::string husk_render_graphic(const std::string &husk, const std::string &huskfinal) {
-    if (!husk.empty()) return husk;
-    return huskfinal;
+std::string husk_render_graphic(const std::string &husk) {
+    return husk;
+}
+
+// [orig: EntityDef_LoadModelsAndCallbacks @0x439F50 (@0x43A145..0x43A26E)]
+std::vector<std::string> final_husk_graphics(const std::string &husk,
+                                             const std::string &huskfinal) {
+    std::vector<std::string> out;
+    if (!husk.empty()) {
+        std::string variant = husk;
+        for (char &c : variant) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (variant.size() >= 2 && variant[variant.size() - 2] == 'x' && variant.back() == 'a') {
+            variant.back() = 'b';
+            out.push_back(std::move(variant));
+        }
+    }
+    if (!huskfinal.empty()) out.push_back(huskfinal);
+    return out;
 }
 
 std::string death_piece_graphic(const std::string &husk, const std::string &huskfinal) {

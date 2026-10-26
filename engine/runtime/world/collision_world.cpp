@@ -57,13 +57,15 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
                                    uint64_t registry_spawn_id) {
     if (!h.valid() || model_id < 0 || model_id >= static_cast<int32_t>(models_.size())) return;
     int32_t husk = -1;
+    int32_t final_husk = -1;
     const auto existing = instances_.find(h.packed);
     if (existing != instances_.end() &&
         (registry_spawn_id == 0 ||
          existing->second.registry_spawn_id == registry_spawn_id)) {
         husk = existing->second.husk_model_id;
+        final_husk = existing->second.final_husk_model_id;
     }
-    instances_[h.packed] = Instance{model_id, husk, registry_spawn_id};
+    instances_[h.packed] = Instance{model_id, husk, final_husk, registry_spawn_id};
     invalidate_trace_view(h);
 }
 
@@ -80,6 +82,16 @@ void CollisionWorld::assign_entity_husk(EntityHandle h, int32_t husk_model_id) {
     auto it = instances_.find(h.packed);
     if (it == instances_.end()) return; // husk stages ride an existing instance
     it->second.husk_model_id = husk_model_id;
+    invalidate_trace_view(h);
+}
+
+void CollisionWorld::assign_entity_final_husk(EntityHandle h, int32_t final_husk_model_id) {
+    if (!h.valid() || final_husk_model_id < 0 ||
+        final_husk_model_id >= static_cast<int32_t>(models_.size()))
+        return;
+    auto it = instances_.find(h.packed);
+    if (it == instances_.end()) return;
+    it->second.final_husk_model_id = final_husk_model_id;
     invalidate_trace_view(h);
 }
 
@@ -136,9 +148,9 @@ int32_t CollisionWorld::entity_model_id(EntityHandle h) const {
     return it == instances_.end() ? -1 : it->second.model_id;
 }
 
-int32_t CollisionWorld::entity_husk_model_id(EntityHandle h) const {
-    const auto it = instances_.find(h.packed);
-    return it == instances_.end() ? -1 : it->second.husk_model_id;
+int32_t CollisionWorld::entity_husk_model_id(const Entity &e) const {
+    const auto it = instances_.find(e.handle.packed);
+    return it == instances_.end() ? -1 : it->second.held_husk(e);
 }
 
 int32_t CollisionWorld::candidate_count(EntityHandle h) const {
@@ -197,8 +209,9 @@ const CollisionModel *CollisionWorld::model_for(
 const CollisionModel *CollisionWorld::husk_model_for(
         const World &world, EntityHandle h) const {
     const Instance *instance = live_instance(world, h);
-    if (instance == nullptr || instance->husk_model_id < 0) return nullptr;
-    return model(instance->husk_model_id);
+    const Entity *e = world.registry.get(h);
+    if (instance == nullptr || e == nullptr || instance->held_husk(*e) < 0) return nullptr;
+    return model(instance->held_husk(*e));
 }
 
 bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
