@@ -259,6 +259,7 @@ add_library(opennova_bindings OBJECT
     world/occlusion_frame.cpp
     world/game_world.cpp
     world/game_world_frame.cpp
+    world/post_load_counts.cpp
     world/game_world_load.cpp
     world/game_world_effects.cpp
     world/world_scene.cpp
