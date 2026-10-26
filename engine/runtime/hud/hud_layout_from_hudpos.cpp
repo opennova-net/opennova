@@ -110,7 +110,7 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// and JO:CA ships no hud.def — the rows stay 0 and the width is 4, which
 	// still splits a line that begins with a space, or with a glyph of extent 3
 	// or less followed by a space [orig: HUD_WordWrapText @0x580980].
-	// chat_box_present stays false, so the client does not wrap (D-HUD-58); a
+	// Every chat line wraps at that width (D-HUD-58); a
 	// hud.def-equipped title needs a formats/def reader (the file is SCR-encoded,
 	// key 0x2A5A8EAD).
 	out.sys_text = pos_record2(hud.sys_text[0], hud.sys_text[1]);

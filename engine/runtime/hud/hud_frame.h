@@ -366,11 +366,10 @@ struct HudLayout {
 	// space [orig: HUD_WordWrapText @0x580980]; ordinary lines do not wrap
 	// (the no-space leg @0x5809ea..0x5809fc).
 	// These are NOT the HUDCHATTEXT pair (that is the feed anchor
-	// dword_27237A8/AC): a layout builder must leave them absent unless it
-	// parsed a hud.def, and absent, the client wraps no line (D-HUD-58).
+	// dword_27237A8/AC): a layout builder leaves them 0 unless it parsed a
+	// hud.def, and the wrap runs whatever they hold (D-HUD-58).
 	int chat_box_x1 = 0;
 	int chat_box_x2 = 0;
-	bool chat_box_present = false;
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;

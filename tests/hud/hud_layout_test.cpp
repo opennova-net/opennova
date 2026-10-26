@@ -119,7 +119,7 @@ static void synthetic() {
 	CHECK(layout.wpd_info.present && layout.wpd_info.x == 0);
 	CHECK(layout.chat_text.x == 8 && layout.chat_text.y == 600 && layout.chat_text.present);
 	CHECK(layout.sys_text.y == 640);
-	CHECK(!layout.chat_box_present && layout.chat_box_x1 == 0 && layout.chat_box_x2 == 0);
+	CHECK(layout.chat_box_x1 == 0 && layout.chat_box_x2 == 0);
 	CHECK(layout.lfp_anchor_present && layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
 	CHECK(layout.veh_stance_pos.present && layout.veh_stance_pos.x == 0 &&
 			layout.veh_stance_pos.y == 272);

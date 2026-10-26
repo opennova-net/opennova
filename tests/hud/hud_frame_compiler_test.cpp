@@ -2957,7 +2957,6 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.chat_box_x1 = 4;
 	layout.chat_box_x2 = 44;
-	layout.chat_box_present = true;
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	compiler.push_chat_line("aaaa bbbb cccc", 0xFF00FF00u, 100);
@@ -2971,12 +2970,25 @@ void test_chat_wrap_slots(const fnt_font_t *font) {
 		CHECK(ring[0].color == 0xFF00FF00u && ring[1].color == 0xFF00FF00u,
 				"the colour lands on every slot");
 	}
-	// Without a chat box the line is never wrapped.
+	// Without a hud.def the box's rows are 0 and the width is 4 (D-HUD-58): an
+	// ordinary line overflows ahead of its first space and stays whole, and a
+	// line that begins with a space splits there, its first segment empty
+	// [orig: Chat_AddMessageChannel1 @0x498673..0x4986c5; HUD_WordWrapText
+	//  @0x580980].
+	HudFrameCompiler spaced;
+	spaced.configure(HudLayout{}, font);
+	spaced.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	spaced.push_chat_line(" hi", 0xFFFFFFFFu, 0);
+	CHECK(spaced.chat_lines().size() == 2, "a leading space splits at width 4");
+	if (spaced.chat_lines().size() == 2) {
+		CHECK(spaced.chat_lines()[0].text.empty() && spaced.chat_lines()[1].text == "  hi",
+				"the empty head, then the rest prefixed two spaces");
+	}
 	HudFrameCompiler plain;
 	plain.configure(HudLayout{}, font);
 	plain.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	plain.push_chat_line("aaaa bbbb cccc", 0xFFFFFFFFu, 0);
-	CHECK(plain.chat_lines().size() == 1, "no box, no wrap");
+	CHECK(plain.chat_lines().size() == 1, "an ordinary line stays whole at width 4");
     plain.reset_overlay_buffers();
     CHECK(plain.chat_lines().size() == 1 && plain.chat_lines()[0].text == "aaaa bbbb cccc",
             "respawn overlay reset retains chat history");

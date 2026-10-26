@@ -235,9 +235,11 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	// design units — so the measure here is scale 1, never label_scale_. The
 	// wrapper walks the FULL message (the 119-char cap is per copied segment
 	// @0x498781, and on the raw ring @0x498621).
+	// The wrap runs on every line whatever the box holds: with no hud.def its
+	// rows are 0 and the width is 4 (D-HUD-58).
 	std::string buf = text;
 	int count = 0;
-	if (layout_.chat_box_present && label_font_bold_.font() != nullptr) {
+	if (label_font_bold_.font() != nullptr) {
 		const int width = layout_.chat_box_x2 - (layout_.chat_box_x1 - 4);
 		count = chat_wrap_text(label_font_bold_, 1.0f, buf, width, 0);
 	}
