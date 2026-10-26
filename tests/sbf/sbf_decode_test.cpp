@@ -242,6 +242,48 @@ static int test_play_stream_takes_the_split_rule(void) {
     return 1;
 }
 
+/* A bank of flags 0 or 2 streams stereo IMA ADPCM: 1024-byte blocks, the left header at +0 and the
+   right at +4 (a predictor, then a signed index byte), then 127 pairs of 4-byte words, left then right,
+   eight nibbles a word low first, through the wave loader's step [orig: Audio_PlayStereoSample
+   @ 0x7BCF95; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
+static int test_adpcm_chunk_decodes_both_channels(void) {
+    std::vector<uint8_t> block(4096, 0);
+    const int16_t left = 1000, right = -1000;
+    memcpy(block.data(), &left, 2);
+    memcpy(block.data() + 4, &right, 2);
+    block[8] = 0x07; /* the left's first word: nibble 7, then 0 */
+    std::vector<int16_t> out;
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 3, out);
+    CHECK(out.size() == 6, "three frames, left then right");
+    /* Nibble 7 at index 0: 7 * 0x1E000 >> 16 = 13; then nibble 0 at index 8 (step 16): 16 * 0x2000 >> 16 = 2. */
+    CHECK(out[0] == 1000 && out[2] == 1013 && out[4] == 1015, "the left's predictor, then its nibbles");
+    CHECK(out[1] == -1000 && out[3] == -1000 && out[5] == -1000, "the right's own header and words");
+    out.clear();
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 0, out);
+    sbf_decode_adpcm_chunk(block.data(), block.size(), SBF_ADPCM_FRAMES + 1, out);
+    CHECK(out.empty(), "a count outside 1..4068 plays nothing");
+    /* A chunk's second block: the left's header 1024 bytes on, its 1018th sample. */
+    const int16_t second = 2000;
+    memcpy(block.data() + 1024, &second, 2);
+    sbf_decode_adpcm_chunk(block.data(), block.size(), 1018, out);
+    CHECK(out.size() == 2 * 1018 && out[2 * 1017] == 2000, "a block makes 1017 samples, the next its own header");
+    return 1;
+}
+
+/* Each block_size read plays min(4068, the samples left) frames, the count unsigned against the
+   samples left, which fall 4068 a block [orig: AudioStream_Update @ 0x671CF8..0x671D09, @ 0x671D72]. */
+static int test_adpcm_entry_counts_by_the_samples_left(void) {
+    std::vector<uint8_t> entry(3 * 4096, 0);
+    const std::vector<int16_t> five = sbf_decode_entry(entry.data(), entry.size(), 4096, 0, 5000);
+    /* 4068, 932, then the samples left below 0: a count of 4068 again. */
+    CHECK(five.size() == 2 * (4068 + 932 + 4068), "the third block plays 4068 past the samples");
+    CHECK(sbf_decode_entry(entry.data(), entry.size(), 4096, 2, 0).size() == 2 * (0 + 4068 + 4068),
+            "no samples: the first block plays none, the ones after it 4068 each");
+    CHECK(sbf_decode_entry(entry.data(), entry.size(), 4096, 0, 4068).size() == 2 * (4068 + 0 + 4068),
+            "exactly one block's samples: the next count is 0, the one after 4068 again");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
@@ -253,6 +295,8 @@ int main(void) {
     RUN_TEST(test_decode_entry_matches_streaming);
     RUN_TEST(test_decode_entry_walks_every_chunk);
     RUN_TEST(test_play_stream_takes_the_split_rule);
+    RUN_TEST(test_adpcm_chunk_decodes_both_channels);
+    RUN_TEST(test_adpcm_entry_counts_by_the_samples_left);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

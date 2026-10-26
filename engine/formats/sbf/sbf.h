@@ -138,7 +138,28 @@ int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
    decoder refuses, or one past the bytes, ends the stream. The Godot player
    hands this PCM to the mixer whole (godot/src/audio/sbf_audio_stream.cpp). */
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
-                                      uint32_t block_size);
+                                      uint32_t block_size, uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO,
+                                      uint32_t sample_length = 0);
+
+/* A bank of any flags word but 1 (0 or 2, which the header test takes) streams stereo IMA
+   ADPCM: each block_size read plays min(4068, the entry's samples left) frames, the count
+   unsigned against the samples left (+0x1C of its index entry, less 4068 a block, so a stream
+   past them plays 4068 a block), none under 1 [orig: AudioVM_SelectStream @ 0x671BC0 - the
+   count @ 0x671BF8, 4068 @ 0x671BFE; AudioStream_Update @ 0x671C60 - the flags test
+   @ 0x671CCA, the count @ 0x671CF8..0x671D09, the samples left less 4068 @ 0x671D72;
+   Audio_StreamNextChunk @ 0x4ED7D0 alike]. A chunk of 1024-byte blocks interleaved by
+   channel: each block the left channel's 4-byte header (its predictor a sample, its step
+   index a signed byte) at +0 and the right's at +4, then 127 pairs of 4-byte words, the left's
+   then the right's, each word eight nibbles low first through the wave loader's own step; a
+   block makes 1017 samples. The left decodes (count + 0x1C + 0x3FF) >> 10 blocks, the right
+   always four [orig: Audio_PlayStereoSample @ 0x7BCF95 - the count's bounds @ 0x7BCFB2..
+   0x7BCFC1, the left's blocks @ 0x7BCFEA..0x7BCFF3, the right's four @ 0x7BD095, the blocks
+   @ 0x7BD001..0x7BD07F and @ 0x7BD0A5..0x7BD123, each nibble Audio_AdpcmDecodeNibbleStep
+   @ 0x7BF250], and both play on mixer channels 1 and 2 as the byte-paired form's split
+   does (D-SND-8). `count` frames, left then right, appended to `out`; none for a count
+   outside 1..4068. */
+inline constexpr uint32_t SBF_ADPCM_FRAMES = 4068;
+void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, std::vector<int16_t> &out);
 
 /* --- Encoder ---
 
@@ -226,6 +247,9 @@ inline constexpr uint8_t SBF_CHUNK_RESERVED_A = 0xFA;
 inline constexpr uint8_t SBF_CHUNK_RESERVED_B = 0x00;
 inline constexpr uint8_t SBF_CHUNK_TAIL = 0x80;
 
+/* A chunk of a byte-paired bank (flags 1): its two shifts and the bytes it plays. A chunk of a
+   bank of any other flags (the IMA ADPCM form, sbf_decode_adpcm_chunk) has no header: its
+   `audio` is the block's bytes, at most block_size, and its shifts are 0. */
 struct SbfChunk {
     uint8_t scale_a = 0;           /* the left channel's shift, any byte (15 and up silent) */
     uint8_t scale_b = 0;           /* the right channel's */
@@ -279,12 +303,12 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
 /* A stream's audio as int16 PCM, byte-paired stereo interleaved (left then
    right) at SBF_SAMPLE_RATE: each chunk's bytes decoded at its shifts, in
    order (sbf_decode_sample: a shift of 15 or more decodes to silence). */
-std::vector<int16_t> sbf_decode_stream(const SbfStream &stream);
+std::vector<int16_t> sbf_decode_stream(const SbfStream &stream, uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO);
 
 /* The same stream as the game plays it: each chunk through the stereo split's
    frame rule, as sbf_decode_entry plays an entry's blocks (the editor's
    preview). */
-std::vector<int16_t> sbf_play_stream(const SbfStream &stream);
+std::vector<int16_t> sbf_play_stream(const SbfStream &stream, uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO);
 
 /* A stream of `pcm` (int16, left/right interleaved), encoded chunk by chunk
    as sbf_encode_chunk encodes one: full SBF_CHUNK_AUDIO chunks, the last

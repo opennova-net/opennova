@@ -50,6 +50,9 @@ public:
 	const opennova::sbf::SbfHeader *opened_header() const {
 		return _opened ? &_arc.header : nullptr;
 	}
+	// The header's flags word: 1 the byte-paired form, any other the IMA ADPCM form
+	// (sbf::sbf_decode_entry).
+	uint32_t flags() const { return _arc.header.flags; }
 
 	// The bytes load_from_path read, the streaming reader's (sbf_open_memory keeps
 	// its index pointing into them; playback reads its chunks from them). The

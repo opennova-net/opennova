@@ -66,10 +66,18 @@ RecordTable make_table() {
 	streams.spec.first_number = 0;
 	streams.ops = vector_list<MusicBankRow, MusicBankStream>(
 			kStream, [](MusicBankRow &b) -> std::vector<MusicBankStream> & { return b.streams; },
-			[](const MusicBankRow &, size_t) {
+			[](const MusicBankRow &b, size_t) {
 				MusicBankStream fresh;
 				fresh.name = "NEWSTREAM";
-				fresh.chunks = silence();
+				// A bank of the IMA ADPCM form: one block of zeros, which decodes to silence and, of no
+				// samples, plays none (sbf::sbf_decode_entry).
+				if (b.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+					SbfChunk zero;
+					zero.audio.assign(fresh.block_size, 0);
+					fresh.chunks = std::make_shared<const std::vector<SbfChunk>>(std::vector<SbfChunk>{zero});
+				} else {
+					fresh.chunks = silence();
+				}
 				return fresh;
 			});
 	bank.list(std::move(streams));
@@ -154,7 +162,7 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 		error = "the bank has no stream " + std::to_string(place);
 		return false;
 	}
-	const std::vector<int16_t> samples = sbf_play_stream(bank.streams[size_t(place)]);
+	const std::vector<int16_t> samples = sbf_play_stream(bank.streams[size_t(place)], bank.flags);
 	out = lwf::WavPcm();
 	out.channels = SBF_CHANNELS;
 	out.sample_rate = SBF_SAMPLE_RATE;
@@ -340,6 +348,11 @@ bool MusicBankDocument::apply_payload(Node &row, const NodeAddress &address, con
 		return false;
 	}
 	MusicBankRow &bank = static_cast<MusicBankRow &>(row);
+	if (bank.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+		error = "The bank streams IMA ADPCM (its flags word is " + std::to_string(bank.flags) +
+		        ", not 1), and a wave's audio is made only as the byte-paired form.";
+		return false;
+	}
 	const size_t place = stream_place(bank, address.child);
 	if (place >= bank.streams.size()) {
 		error = "The stream no longer exists.";

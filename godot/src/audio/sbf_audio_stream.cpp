@@ -38,7 +38,8 @@ Ref<AudioStreamWAV> SbfAudioStream::get_wav() const {
 	if (!_bank->read_file_block(e->data_offset, e->total_size, raw)) {
 		return Ref<AudioStreamWAV>();
 	}
-	const std::vector<int16_t> pcm = sbf_decode_entry(raw.ptr(), (size_t)raw.size(), e->block_size);
+	const std::vector<int16_t> pcm = sbf_decode_entry(raw.ptr(), (size_t)raw.size(), e->block_size,
+			_bank->flags(), e->sample_length_hint);
 	PackedByteArray data;
 	data.resize((int64_t)(pcm.size() * sizeof(int16_t)));
 	if (!pcm.empty()) {

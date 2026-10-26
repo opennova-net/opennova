@@ -8,6 +8,7 @@
                  [orig: AudioChannel_ComputeMixCoefficients @ 0x007BD4B0] */
 
 #include <formats/sbf/sbf.h>
+#include <formats/lwf/wav_pcm.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -140,9 +141,52 @@ static size_t sbf_split_kept_samples(size_t samples) {
     return (frames <= 3 || frames > 0x800) ? 0 : frames * 2;
 }
 
+void sbf_decode_adpcm_chunk(const uint8_t *block, size_t size, uint32_t count, std::vector<int16_t> &out) {
+    if (count < 1 || count > SBF_ADPCM_FRAMES) return;
+    /* Past the block's bytes the game's static read buffer holds an earlier read's; ours reads 0. */
+    const auto at = [&](size_t i) -> uint32_t { return i < size && block ? block[i] : 0u; };
+    std::vector<int16_t> channel[2];
+    for (size_t c = 0; c < 2; ++c) {
+        const uint32_t blocks = c == 0 ? (count + 0x1Cu + 0x3FFu) >> 10 : 4u;
+        for (uint32_t b = 0; b < blocks; ++b) {
+            const size_t base = (size_t)b * 1024 + c * 4;
+            int32_t sample = (int16_t)(at(base) | at(base + 1) << 8);
+            int32_t index = (int8_t)at(base + 2);
+            channel[c].push_back((int16_t)sample);
+            for (size_t k = 0; k < 127; ++k) {
+                const size_t w = base + 8 + 8 * k;
+                uint32_t word = at(w) | at(w + 1) << 8 | at(w + 2) << 16 | at(w + 3) << 24;
+                for (int n = 0; n < 8; ++n, word >>= 4) {
+                    lwf::adpcm_nibble_step(word, sample, index);
+                    channel[c].push_back((int16_t)sample);
+                }
+            }
+        }
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        out.push_back(channel[0][i]);
+        out.push_back(channel[1][i]);
+    }
+}
+
+/* The ADPCM form's chunks as the stream pump plays them: each block's count by the samples left. */
+static void sbf_decode_adpcm_blocks(const uint8_t *bytes, size_t size, uint32_t block_size,
+                                    uint32_t sample_length, std::vector<int16_t> &out) {
+    int32_t left = (int32_t)sample_length;
+    for (size_t off = 0; off < size; off += block_size) {
+        const uint32_t count = std::min(SBF_ADPCM_FRAMES, (uint32_t)left);
+        sbf_decode_adpcm_chunk(bytes + off, std::min<size_t>(block_size, size - off), count, out);
+        left = (int32_t)((uint32_t)left - SBF_ADPCM_FRAMES);
+    }
+}
+
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
-                                      uint32_t block_size) {
+                                      uint32_t block_size, uint32_t flags, uint32_t sample_length) {
     std::vector<int16_t> out;
+    if (flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+        if (entry_bytes && block_size > 0) sbf_decode_adpcm_blocks(entry_bytes, size, block_size, sample_length, out);
+        return out;
+    }
     if (!entry_bytes || block_size < (uint32_t)SBF_CHUNK_HEADER) return out;
     out.resize(size);
     size_t produced = 0;
@@ -283,6 +327,14 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
             error = at + "'s audio runs past the end of the file";
             return false;
         }
+        if (header.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+            if (entry.block_size == 0 && entry.total_size != 0) {
+                error = at + "'s block size is 0";
+                return false;
+            }
+            streamed += entry.total_size;
+            continue;
+        }
         if (entry.block_size < (uint32_t)SBF_CHUNK_HEADER) {
             error = at + "'s block size is under a chunk's 8-byte header";
             return false;
@@ -321,6 +373,20 @@ bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &
         stream.block_size = entry.block_size;
         stream.sample_length_hint = entry.sample_length_hint;
         const uint8_t *audio = data + entry.data_offset;
+        if (bank.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+            /* The IMA ADPCM form: each chunk the block's bytes, no header. */
+            for (uint32_t offset = 0; offset < entry.total_size; offset += entry.block_size) {
+                const uint32_t held = std::min(entry.block_size, entry.total_size - offset);
+                SbfChunk chunk;
+                chunk.audio.assign(audio + offset, audio + offset + held);
+                if (held < entry.block_size) ++found.short_chunks;
+                stream.chunks.push_back(std::move(chunk));
+            }
+            if (entry.data_offset != expected) found.packed = false;
+            expected = (size_t)entry.data_offset + entry.total_size;
+            bank.streams.push_back(std::move(stream));
+            continue;
+        }
         const size_t area = entry.block_size - SBF_CHUNK_HEADER;
         for (uint32_t offset = 0; offset < entry.total_size; offset += entry.block_size) {
             const uint32_t left = entry.total_size - offset;
@@ -371,11 +437,12 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
             error = "stream " + std::to_string(i + 1) + "'s name holds a NUL, which ends a name in the index";
             return false;
         }
-        if (stream.block_size < (uint32_t)SBF_CHUNK_HEADER) {
-            error = at + "'s block size is under a chunk's 8-byte header";
+        const bool paired = bank.flags == SBF_FLAGS_BYTE_PAIRED_STEREO;
+        if (paired ? stream.block_size < (uint32_t)SBF_CHUNK_HEADER : stream.block_size == 0) {
+            error = at + (paired ? "'s block size is under a chunk's 8-byte header" : "'s block size is 0");
             return false;
         }
-        const size_t area = stream.block_size - SBF_CHUNK_HEADER;
+        const size_t area = paired ? stream.block_size - SBF_CHUNK_HEADER : stream.block_size;
         for (size_t c = 0; c < stream.chunks.size(); ++c) {
             const size_t held = stream.chunks[c].audio.size();
             if (held > area) {
@@ -415,6 +482,14 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
     /* Every chunk a whole block: its header (the valid count, the shifts, the
        writer's reserved pair), the bytes it plays, then the writer's tail. */
     for (const SbfStream &stream : bank.streams) {
+        if (bank.flags != SBF_FLAGS_BYTE_PAIRED_STEREO) {
+            /* The IMA ADPCM form: each chunk its block's bytes, zeros to a whole block. */
+            for (const SbfChunk &chunk : stream.chunks) {
+                out.insert(out.end(), chunk.audio.begin(), chunk.audio.end());
+                out.insert(out.end(), stream.block_size - chunk.audio.size(), 0);
+            }
+            continue;
+        }
         const size_t area = stream.block_size - SBF_CHUNK_HEADER;
         for (const SbfChunk &chunk : stream.chunks) {
             word((uint32_t)chunk.audio.size());
@@ -429,7 +504,19 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
     return true;
 }
 
-std::vector<int16_t> sbf_decode_stream(const SbfStream &stream) {
+/* An ADPCM stream's chunks as the pump plays them (sbf_decode_entry's ADPCM form). */
+static std::vector<int16_t> sbf_decode_adpcm_stream(const SbfStream &stream) {
+    std::vector<int16_t> out;
+    int32_t left = (int32_t)stream.sample_length_hint;
+    for (const SbfChunk &chunk : stream.chunks) {
+        sbf_decode_adpcm_chunk(chunk.audio.data(), chunk.audio.size(), std::min(SBF_ADPCM_FRAMES, (uint32_t)left), out);
+        left = (int32_t)((uint32_t)left - SBF_ADPCM_FRAMES);
+    }
+    return out;
+}
+
+std::vector<int16_t> sbf_decode_stream(const SbfStream &stream, uint32_t flags) {
+    if (flags != SBF_FLAGS_BYTE_PAIRED_STEREO) return sbf_decode_adpcm_stream(stream);
     std::vector<int16_t> out;
     for (const SbfChunk &chunk : stream.chunks) {
         for (size_t i = 0; i < chunk.audio.size(); ++i)
@@ -438,7 +525,8 @@ std::vector<int16_t> sbf_decode_stream(const SbfStream &stream) {
     return out;
 }
 
-std::vector<int16_t> sbf_play_stream(const SbfStream &stream) {
+std::vector<int16_t> sbf_play_stream(const SbfStream &stream, uint32_t flags) {
+    if (flags != SBF_FLAGS_BYTE_PAIRED_STEREO) return sbf_decode_adpcm_stream(stream);
     std::vector<int16_t> out;
     for (const SbfChunk &chunk : stream.chunks) {
         const size_t kept = sbf_split_kept_samples(chunk.audio.size());
