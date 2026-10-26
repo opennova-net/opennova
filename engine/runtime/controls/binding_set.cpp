@@ -570,6 +570,8 @@ int BindingSet::pressed_key(int index,
     // @0x49d42f and its jump past the fallback @0x49d437; the fallback's
     // queue @0x49d488 and jump @0x49d490].
     const bool modified = row_mod_down(*r);
+    // The fallback takes a row whose modifier words are both zero
+    // [orig: @0x49d3c1..0x49d3d2].
     if (!modified && (r->primary_mod != 0 || r->secondary_mod != 0)) return 0;
     for (const uint16_t key : keys) {
       if (!slot_down(key)) continue;
