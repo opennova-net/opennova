@@ -366,6 +366,13 @@ std::vector<uint16_t> ClientReplicaPipeline::drain_respawn_releases() {
 	return out;
 }
 
+std::vector<ClientReplicaPipeline::ReplicaBodySoundWord>
+ClientReplicaPipeline::drain_body_sound_words() {
+	std::vector<ReplicaBodySoundWord> out;
+	out.swap(body_sound_words_);
+	return out;
+}
+
 std::vector<ClientReplicaPipeline::ReplicaSlotSound>
 ClientReplicaPipeline::drain_slot_sounds() {
 	std::vector<ReplicaSlotSound> out;

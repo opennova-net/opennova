@@ -1491,9 +1491,10 @@ String Simulation::format_feed_camp_line(const String &p_template,
 // world/wire_body_sound.h and docs/audio/lwf-dbf-sound-re.md).
 //
 // Exactly one sound source per drawn body: this consume runs only for rows
-// the wire pass renders (a joiner's remote rows; a listen host's admitted
-// players — authored rows defer to the authority presenter and never enter
-// the wire plan), and the authority tick's sound pass never reaches
+// the wire pass renders on a listen host (its admitted players — authored rows
+// defer to the authority presenter and never enter the wire plan; a joiner's
+// replica bodies play theirs per tick in the engine), and the authority tick's
+// sound pass never reaches
 // net-snapped peers (tick_infantry returns at the net-snap gate before the
 // consume, the gate AiSystem::tick_infantry cites; each machine instead
 // consumes from the body updater of every body it draws; see

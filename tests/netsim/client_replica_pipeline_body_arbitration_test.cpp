@@ -105,6 +105,21 @@ struct EmoteSource final : public opennova::world::IRootMotionSource {
 	bool clip_loops(int, int state, int) const override { return state < 115 || state > 124; }
 };
 
+// A looping clip whose every sampled frame carries the left-foot event word.
+struct StepSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int) const override { return true; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		out.events = 0x1u; // kAnimEventFootLeft
+		return true;
+	}
+	int32_t clip_length_ticks(int, int, int) const override { return 62; }
+	bool clip_loops(int, int, int) const override { return true; }
+};
+
 void arm_row(ns::ClientReplicaPipeline &view) {
 	view.state().find(kPlayerHandle)->rm_adm_id = 0;
 }
@@ -1186,6 +1201,38 @@ void test_dead_row_in_the_air_tumbles() {
 	expect(es->rm_aim_word == a + b, "tick 4: the aim word takes a + b");
 }
 
+// A remote body's sound block runs in its own tick: the player body on the replica clock's
+// even ticks, the event word its channel update sampled, the frame's capsule bottom, the row's
+// position ahead of its integrate; the own row and a starved one play none.
+// [orig: Entity_UpdateInfantryPlayerBody - `test current_tick,1; jnz` @0x4B76E6, the block
+//  @0x4B76F1..0x4B78A8 ahead of the velocity @0x4B78A8; the starved return @0x4B4669..0x4B4670]
+void test_remote_body_sound_block_runs_per_tick() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	StepSource src;
+	view.set_root_motion_source(&src);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(view);
+	(void)view.drain_body_sound_words();
+	for (int i = 0; i < 4; ++i) view.tick_remote_motion(0xFFFF);
+	const auto words = view.drain_body_sound_words();
+	// Four ticks, two of them even: one word on each.
+	expect(words.size() == 2, "a player body's block runs on the clock's even ticks: two of four");
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	if (!words.empty() && es != nullptr) {
+		expect(words[0].handle == kPlayerHandle && words[0].type_id == kPlayerType &&
+						words[0].events == 0x1u && words[0].capsule_bottom == (1 << 16),
+				"the word carries the row, its event word and the capsule bottom");
+		expect(!words[0].on_entity, "a row with no link plays on the ground");
+	}
+	// The own row: its block is the World body's.
+	(void)view.drain_body_sound_words();
+	for (int i = 0; i < 4; ++i) view.tick_remote_motion(kPlayerHandle);
+	expect(view.drain_body_sound_words().empty(), "the own row plays no replica block");
+}
+
 int main() {
 	test_dead_row_in_the_air_tumbles();
 	test_seated_row_eye_reads_its_channel_capsule();
@@ -1206,6 +1253,7 @@ int main() {
 	test_gait_transition_insert();
 	test_dead_park_and_respawn_edges();
 	test_row_weapon_channel_plays_an_emote_then_returns();
+	test_remote_body_sound_block_runs_per_tick();
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

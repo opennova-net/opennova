@@ -366,6 +366,23 @@ public:
 		int32_t pos[3] = {};
 	};
 	std::vector<ReplicaSlotSound> drain_slot_sounds();
+	// One replica body's sound block on its tick half: the anim event word this tick's
+	// channel update sampled, the frame's capsule bottom (the foot dip), the body's
+	// position ahead of this tick's integrate and its link as last tick left it (the
+	// on-entity pick), with the identity the embedder resolves the slots through
+	// (world::wire_body_slot_sounds) [orig: Entity_UpdateInfantryPlayerBody - the parity
+	// @0x4B76E6, the block @0x4B76F1..0x4B78A8; Entity_UpdateInfantryAI - @0x4BF144,
+	// @0x4BF169..0x4BF2B0].
+	struct ReplicaBodySoundWord {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		bool on_entity = false;
+		uint32_t events = 0;
+		int32_t capsule_bottom = 0;
+		int32_t pos[3] = {};
+	};
+	std::vector<ReplicaBodySoundWord> drain_body_sound_words();
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
 	// contact resolve grounded it on an entity follows that carrier's
@@ -889,6 +906,7 @@ private:
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
 	std::vector<uint16_t> respawn_releases_;
 	std::vector<ReplicaSlotSound> slot_sounds_;
+	std::vector<ReplicaBodySoundWord> body_sound_words_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	ReplicaPlayerCammoResolver replica_player_cammo_resolver_;
 	ReplicaHitRecordResolver replica_hit_record_resolver_;

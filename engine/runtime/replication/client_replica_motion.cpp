@@ -15,6 +15,7 @@
 #include <runtime/world/dir_table.h>           // quantized_dir (the slope conform's probe facing)
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
+#include <runtime/world/infantry_sound.h>      // anim_sound_tick (the body sound block's tick half)
 #include <runtime/world/infantry_view.h>       // the org2 deck ride's turn, hold and pitch lag
 #include <runtime/world/vehicle_motor.h>       // vehicle_chase_bucket (the vehicle-family interp bucket)
 #include <net/npwire/wire_handle.h>
@@ -904,7 +905,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
-                          std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
+                          std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds,
+                          std::vector<ClientReplicaPipeline::ReplicaBodySoundWord> &body_sounds) {
 	// The player body rotates its root pair at its update's head, by the body heading its last
 	// pass left: ahead of this pass's view phase and ride (D-NET-NEW-L5-46).
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - +0x8C @0x4B41E4, the rotation's
@@ -1061,6 +1063,25 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// [orig: Entity_UpdateInfantryPlayerBody root+velocity stores
 	// @0x4B7CBF..0x4B7CEF, before resolver call @0x4B7CF4].
 	if (is_self || starved) return;
+	// The body's sound block, on its tick half: the event word this tick's channel update
+	// sampled, ahead of the integrate and the resolve, so at this position, and the
+	// on-entity pick reading last tick's link (the seat link over the ground link, as the
+	// rows publish it); a starved body returned ahead of it, a corpse runs it too
+	// (ClientReplicaPipeline::ReplicaBodySoundWord carries the witness).
+	if (frame.events != 0u && world::anim_sound_tick(tick, es.cls == EntityClass::Player)) {
+		ClientReplicaPipeline::ReplicaBodySoundWord word;
+		word.handle = es.handle;
+		word.type_id = es.type_id;
+		word.character_id = es.cls == EntityClass::Player ? static_cast<uint16_t>(es.net_id) : 0;
+		word.on_entity = es.carrier_handle != wire_handle::kInvalid ||
+				es.resolved_ground != wire_handle::kInvalid;
+		word.events = frame.events;
+		word.capsule_bottom = frame.capsule_bottom;
+		word.pos[0] = es.x;
+		word.pos[1] = es.y;
+		word.pos[2] = es.z;
+		body_sounds.push_back(word);
+	}
 	// The world motor's rotation pair: org2's sine table, org1's trig at
 	// retail's scale [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4206;
 	// Entity_UpdateInfantryAI @0x4BF001..0x4BF02A].
@@ -1762,7 +1783,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			                     &replica_bound_radius_resolver_,
 			                     contact_peer_scratch_.data(),
 			                     static_cast<int32_t>(contact_peer_scratch_.size()),
-			                     rm_key, water_z_, slot_sounds_);
+			                     rm_key, water_z_, slot_sounds_, body_sound_words_);
 	};
 	// The corpse leg's def source (row_corpse_tail), read only for a row
 	// whose dead bit is latched or latches this tick, and the org1 corpses it

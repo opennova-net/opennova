@@ -1220,6 +1220,9 @@ void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 	// most; anything past this is a mid-clip landing.
 	constexpr int32_t kFreshClipTicks = 3;
 	Simulation *s = sim();
+	// A joiner's replica bodies play their sound blocks per tick in the engine (the joiner
+	// role drains ClientReplicaPipeline::drain_body_sound_words): one source per body.
+	if (s != nullptr && s->is_joiner()) return;
 	const int32_t foot_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
 	const int32_t foot_phase =
 			wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);

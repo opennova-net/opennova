@@ -49,6 +49,7 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <runtime/world/weapon_table.h>
+#include <runtime/world/wire_body_sound.h> // the replica bodies' sound blocks
 
 #include <algorithm>
 #include <array>
@@ -1329,6 +1330,13 @@ void JoinerRole::pump() {
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-0 walk @0x4C2426..0x4C2472,
 	//  the +0x1C4 call @0x4C2472]
 	rt.view().tick_remote_motion_after_self();
+	// Every replica body's sound block this tick, in walk order: its event word's foley at the
+	// body, its feet at foot level through the slot pick (one source per body: the wire
+	// presenter plays none on a joiner).
+	for (const replication::ClientReplicaPipeline::ReplicaBodySoundWord &word :
+			rt.view().drain_body_sound_words())
+		world::wire_body_slot_sounds(world, &word.events, 1, word.capsule_bottom, word.type_id,
+				word.character_id, word.handle, word.on_entity, word.pos);
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	// The door callback's C2S 0x1A requests this tick raised, queued in raise
 	// order for the next send boundary (world/doors.cpp carries the witness).
