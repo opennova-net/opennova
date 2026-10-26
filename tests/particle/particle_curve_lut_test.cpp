@@ -326,8 +326,13 @@ bool test_curve_lines_or_their_modifiers_into_the_entry() {
 		return false;
 	}
 
-	// The carried bit reaches the bake: `shrink` resolves to its reversed clone.
+	// The carried bit reaches the bake: `shrink` resolves to its reversed clone. The resolve walks the
+	// particle's curves and then each graphic's, and its first miss ends the walk [orig:
+	// CEffectDef_ResolveAllReferences @ 0x5e9dc1..0x5e9e2f, @ 0x5e9e8b..0x5e9f65], so every table the
+	// curves ahead of graphic 1's scale name is there: the particle's scale, alpha and red and graphic 1's
+	// alpha and red.
 	std::vector<TableDef> tables;
+	for (const char *name : {"grow", "fade2", "tint2", "fade3"}) tables.push_back(ramp_table(name));
 	tables.push_back(ramp_table("shrink"));
 	ParticleDef baked = def;
 	bake_particle_def_curves(baked, tables);
