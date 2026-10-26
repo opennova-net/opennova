@@ -547,7 +547,9 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	std::vector<anim::PoseBone> target;
 	eval_pose(source_key, source_seconds, source_variant, source);
 	eval_pose(target_key, target_seconds, target_variant, target);
-	anim::blend_poses(source, target, w, r_pose);
+	// The rotations cross-fade in model space, each bone's channel row slerped
+	// (anim::blend_poses_model carries the witness).
+	anim::blend_poses_model(source, target, parents_, w, r_pose);
 	// The rotations always cross-fade; the translation scratch is filled by the
 	// two clips' flags & 2: exactly one translated, that clip's rows go in whole
 	// and unweighted, so its translation holds from the fade's first tick. A clip
