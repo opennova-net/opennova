@@ -1409,7 +1409,8 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
 			label.screen_y = screen.y;
-			label.text = opennova::hud::attach_label_text(gametext, l.type, l.attach_text_key);
+			label.text = opennova::hud::attach_label_text(gametext, l.type, l.attach_text_key,
+					l.armory_delay_seconds);
 			label.nearest = l.nearest;
 			state_.attach_labels.push_back(label);
 		}

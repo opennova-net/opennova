@@ -3625,12 +3625,25 @@ void test_attach_label_text_anchor_and_round_divisor() {
 	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "STROVER_MG").empty(),
 			"a named key the table lacks draws empty");
 	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "") == "!UseArmory", "armory");
+	// While the client's armory countdown runs, an armory point's label is the
+	// delay format with its seconds; another label ignores the countdown
+	// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3763..0x5a378e].
+	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "", 12) ==
+					"!ArmoryDelay 12",
+			"the armory delay fallback, formatted");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Passenger, "", 12) == "!sit",
+			"a seat label ignores the countdown");
 	const opennova::hud::GameTextLookup table = [](const char *section, const char *key,
 			const char *fallback) -> std::string {
 		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_MG") == 0) return "Use MG";
 		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_SIT") == 0) return "Sit";
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_USEARMORYD") == 0)
+			return "Armory in %d Seconds";
 		return fallback;
 	};
+	CHECK(opennova::hud::attach_label_text(table, SeatType::ArmoryPoint, "", 3) ==
+					"Armory in 3 Seconds",
+			"the table's delay format");
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Gunner, "STROVER_MG") == "Use MG", "the def key");
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Passenger, "") == "Sit", "the table's sit");
 

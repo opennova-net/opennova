@@ -593,6 +593,11 @@ void LocalPlayer::collect_attach_labels(std::vector<w::AttachLabel> &out, const 
 	// [orig: is_armory_mode = entity Flags & 0x400000 @0x5a32c4]
 	const bool armory_mode = (player->flags & w::kEntityFlagArmoryZone) != 0;
 	world.vehicles.collect_attach_labels(*player, armory_mode, local_player_can_fire(), out, nullptr, source);
+	// An armory point's label reads the client's countdown as it draws [orig:
+	// HUD_DrawVehicleSeatAndArmoryLabels - g_ClientArmoryDelaySeconds @0x5a3763].
+	for (w::AttachLabel &label : out)
+		if (label.type == w::SeatType::ArmoryPoint)
+			label.armory_delay_seconds = view_session_inputs.armory_reuse_seconds;
 }
 
 bool LocalPlayer::local_player_dead() const {

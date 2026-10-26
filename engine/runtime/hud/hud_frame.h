@@ -616,10 +616,14 @@ struct HudAttachLabel {
 //  (dword_2723860) / STROVER_CONTROL "!Control" (g_HUDLabelTextControl, the
 //  ctrlx and drvrx arms @0x5a34db / @0x5a34fb) / STROVER_USEGUN "!UseGun"
 //  (dword_2723868) / STROVER_USEARMORY "!UseArmory" (dword_272386C); the USEGUN
-//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87.
-//  The STROVER_USEARMORYD delay variant rides the MP armory delay, D-HUD-14.]
+//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87].
+// An armory point's label while the client's armory countdown runs is
+// STROVER_USEARMORYD ("!ArmoryDelay %d", g_HUDLabelFmtArmoryDelay @0x2723870)
+// formatted with the seconds, in place of the plain armory text
+// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a3763..0x5a378e - the zero
+//  test @0x5a376d, sprintf @0x5a377f; HUD_InitOverlaySystem @0x5a481e].
 std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
-		const std::string &attach_text_key);
+		const std::string &attach_text_key, int32_t armory_delay_seconds = 0);
 
 // One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
 // via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor

@@ -18,7 +18,7 @@ using namespace opennova::fnt;
 namespace opennova::hud {
 
 std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
-		const std::string &attach_text_key) {
+		const std::string &attach_text_key, int32_t armory_delay_seconds) {
 	using world::SeatType;
 	switch (seat_type) {
 		case SeatType::Passenger:
@@ -31,6 +31,11 @@ std::string attach_label_text(const GameTextLookup &gametext, world::SeatType se
 				return game_text(gametext, kGameTextOverlays, "STROVER_USEGUN", "!UseGun");
 			return game_text(gametext, kGameTextOverlays, attach_text_key.c_str(), "");
 		case SeatType::ArmoryPoint:
+			if (armory_delay_seconds != 0) {
+				const std::string format = game_text(gametext, kGameTextOverlays,
+						"STROVER_USEARMORYD", "!ArmoryDelay %d");
+				return hud_sprintf(format, armory_delay_seconds);
+			}
 			return game_text(gametext, kGameTextOverlays, "STROVER_USEARMORY", "!UseArmory");
 		default:
 			return std::string();
