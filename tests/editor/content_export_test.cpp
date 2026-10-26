@@ -94,8 +94,7 @@ std::string without_record(const std::string &digest) {
 	std::string out;
 	size_t at = 0;
 	while (at < digest.size()) {
-		size_t end = digest.find('
-', at);
+		size_t end = digest.find('\n', at);
 		end = end == std::string::npos ? digest.size() : end + 1;
 		if (digest.compare(at, 12, "export.json ") != 0)
 			out.append(digest, at, end - at);
