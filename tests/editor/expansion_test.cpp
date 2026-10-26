@@ -1216,6 +1216,9 @@ static int test_base_particle_walk() {
 	TEST_EXPECT(!outcome.refused && view.project.open);
 	TEST_EXPECT(test_io::write_text(root + "/particles/effects.ptl", flags));
 	editor_test::handle_to_end(session, request::open_project(root));
+	// Then a Rescan, its validation run, as every later step finds its files: the walk over the base read.
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
 	const auto faults = [&]() {
 		std::vector<Diagnostic> out;
 		for (const Diagnostic &d : view.findings.diagnostics)
@@ -1223,6 +1226,8 @@ static int test_base_particle_walk() {
 		return out;
 	};
 	const std::vector<Diagnostic> found = faults();
+	if (found.size() != 1)
+		for (const Diagnostic &d : found) std::fprintf(stderr, "  found: %s:%zu %s\n", d.asset.c_str(), d.line, d.message.c_str());
 	TEST_EXPECT(found.size() == 1 && found[0].asset == "particles/effects.ptl" && found[0].line == 4 &&
 	            found[0].row() && found[0].row()->gates_build);
 	TEST_EXPECT(test_io::write_text(root + "/particles/atable.ptl", table));
