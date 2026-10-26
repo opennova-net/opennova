@@ -248,27 +248,34 @@ bool bake_one_curve(CurveRef &curve, const std::vector<TableDef> &tables) noexce
 	// `id = table11Alt` — an exact compare leaves green unbaked (constant 255)
 	// while red/alpha fade, tinting aging fire sprites green.
 	// TableDef+0x248 is the transform mask (inverse=1, reverse=2), not an
-	// owner. The walk returns the FIRST name match whose flags equal the
-	// reference's mask, as it is (a base table for an unmodified reference, a
-	// table whose rows ran into its flags for a modified one); else, for a
-	// modified reference, it clones and transforms the LAST match of flags 0
-	// [orig: @ 0x5e95b8..0x5e960b — `table_def[146] == mask` @ 0x5e95c0, the
-	// flags-0 match kept @ 0x5e95c6; transform @ 0x5e2700]. A mask of 0 that
-	// finds no table of flags 0 resolves none.
+	// owner. The lookup returns the FIRST name match whose flags equal the
+	// reference's mask, as it is; else, for a modified reference, it clones the
+	// LAST match of flags 0 and transforms it [orig: @ 0x5e95b8..0x5e960b —
+	// `table_def[146] == mask` @ 0x5e95c0, the flags-0 match kept @ 0x5e95c6;
+	// transform @ 0x5e2700]. A mask of 0 that finds no table of flags 0
+	// resolves none. But each resolve pass first transforms every table of
+	// nonzero flags again from the FIRST flags-0 table of its name [orig:
+	// CParticleManager_ResolveAllReferences @ 0x5ec856..0x5ec8a4 ->
+	// CParticleManager_FindTableDefByName(name, 0), CEffectTableDef_ApplyTransform
+	// @ 0x5e2700], and a mission's start runs two passes [orig: Game_StartMission
+	// @ 0x52499e (CEffectManager_RegisterAllMaterials -> @ 0x5f7a49) and
+	// @ 0x525a6e (Render_InitMissionTextures @ 0x5871e1 -> @ 0x5f6902)]. So from
+	// the second pass on, a modified reference reads the first flags-0 table
+	// transformed by its mask, the clone it answered and a table of its flags
+	// alike; with no flags-0 table of the name, a table of its flags as it is.
 	const std::uint32_t mask = (curve.inverse ? 0x01u : 0u) | (curve.reverse ? 0x02u : 0u);
-	const TableDef *base_match = nullptr;
+	const TableDef *first_base = nullptr;
+	const TableDef *first_of_mask = nullptr;
 	for (const TableDef &table : tables) {
 		if (!strutil::iequals(table.id, curve.name)) continue;
-		if (table.flags == mask) {
-			bake_curve_lut(table, false, false, curve.baked_lut);
-			curve.baked = true;
-			return true;
-		}
-		if (table.flags == 0) base_match = &table;
+		if (table.flags == 0 && first_base == nullptr) first_base = &table;
+		if (table.flags == mask && first_of_mask == nullptr) first_of_mask = &table;
 	}
-	if (base_match != nullptr && mask != 0) {
-		bake_curve_lut(*base_match, curve.reverse, curve.inverse,
-				curve.baked_lut);
+	if (first_base != nullptr) {
+		bake_curve_lut(*first_base, curve.reverse, curve.inverse, curve.baked_lut);
+		curve.baked = true;
+	} else if (first_of_mask != nullptr) {
+		bake_curve_lut(*first_of_mask, false, false, curve.baked_lut);
 		curve.baked = true;
 	}
 	return curve.baked;

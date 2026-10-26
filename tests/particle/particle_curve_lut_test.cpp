@@ -461,8 +461,12 @@ bool test_def_bake_resolves_names_case_insensitively() {
 
 bool test_duplicate_selection_matches_retail_transform_cache() {
 	// CParticleManager_FindTableDefByName @ 0x5e9540 returns the first base
-	// table for flags=0. For inverse/reverse flags it remembers the last base
-	// match, clones that table, and applies the transform @ 0x5e2700.
+	// table for flags=0. For inverse/reverse flags it clones the last base
+	// match and transforms it @ 0x5e2700, but every resolve pass first
+	// transforms each table of nonzero flags again from the FIRST base of its
+	// name (CParticleManager_ResolveAllReferences @ 0x5ec856..0x5ec8a4), and a
+	// mission's start runs two (Game_StartMission @ 0x52499e, @ 0x525a6e): the
+	// clone reads the first base transformed, as a table of the mask does.
 	using namespace opennova::particle;
 	std::vector<TableDef> tables;
 	tables.push_back(constant_table("Duplicate", 17));
@@ -478,15 +482,34 @@ bool test_duplicate_selection_matches_retail_transform_cache() {
 	if (!expect(def.alpha_func.baked_lut[0] == 17 &&
 			def.alpha_func.baked_lut[255] == 17,
 			"unmodified duplicate resolves the first base table")) return false;
-	if (!expect(def.red_func.baked_lut[0] == 255 &&
-			def.red_func.baked_lut[255] == 0,
-			"reverse duplicate transforms the last base table")) return false;
-	if (!expect(def.green_func.baked_lut[0] == 255 &&
-			def.green_func.baked_lut[255] == 0,
-			"inverse duplicate transforms the last base table")) return false;
-	return expect(def.blue_func.baked_lut[0] == 0 &&
-			def.blue_func.baked_lut[255] == 255,
-			"combined modifiers transform the last base table");
+	if (!expect(def.red_func.baked_lut[0] == 17 &&
+			def.red_func.baked_lut[255] == 17,
+			"reverse duplicate reads the first base reversed")) return false;
+	if (!expect(def.green_func.baked_lut[0] == 238 &&
+			def.green_func.baked_lut[255] == 238,
+			"inverse duplicate reads the first base inverted")) return false;
+	if (!expect(def.blue_func.baked_lut[0] == 238 &&
+			def.blue_func.baked_lut[255] == 238,
+			"combined modifiers transform the first base")) return false;
+
+	// A table of the reference's flags (its rows ran into them) is transformed
+	// from the first base of its name too; with no base, it is read as it is.
+	std::vector<TableDef> flagged;
+	flagged.push_back(ramp_table("over"));
+	TableDef over = constant_table("over", 3);
+	over.flags = 0x02u;
+	flagged.push_back(over);
+	ParticleDef ran;
+	ran.scale_func = {"over", true, false, true};
+	bake_particle_def_curves(ran, flagged);
+	if (!expect(ran.scale_func.baked && ran.scale_func.baked_lut[0] == 255 &&
+			ran.scale_func.baked_lut[255] == 0,
+			"a table of the mask with a base reads the base reversed")) return false;
+	flagged.erase(flagged.begin());
+	bake_particle_def_curves(ran, flagged);
+	return expect(ran.scale_func.baked && ran.scale_func.baked_lut[0] == 3 &&
+			ran.scale_func.baked_lut[255] == 3,
+			"a table of the mask with no base is read as it is");
 }
 
 bool test_uv_rect_bake_horizontal_strip_default() {

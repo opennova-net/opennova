@@ -57,8 +57,9 @@ EffectClosure effect_closure(const std::vector<EffectCatalogDocument> &documents
 	if (const auto shadows = again.find(found->first); shadows != again.end()) out.shadowed = shadows->second;
 	out.members = effect.pdefs;
 	out.unresolved_member = out.members.size();
-	// Every table in the documents' order: a curve finds the first base of its name, a modified one
-	// the last (CParticleManager_FindTableDefByName @ 0x5E9540), as over the whole catalog.
+	// Every table in the documents' order: a curve, modified or not, reads the first base of its name,
+	// a modified one with no base a table of its own flags as it is (formats/particle
+	// bake_particle_def_curves), as over the whole catalog.
 	std::vector<TableDef> tables;
 	for (const EffectCatalogDocument &document : documents)
 		tables.insert(tables.end(), document.file.tables.begin(), document.file.tables.end());

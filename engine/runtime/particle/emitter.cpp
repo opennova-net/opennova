@@ -830,9 +830,9 @@ float particle_scale_curve_blend(const CurveRef &curve, int lut_index, float fra
 	// reverse 0x02 [orig: CParticleManager_FindTableDefByName @ 0x5e95da..0x5e95fc
 	// -> CParticleTableDef_ConstructClone @ 0x5e80fc; the bits CEffectTableDef_ApplyTransform
 	// @ 0x5e2730 / @ 0x5e273c tests]. The resolve hands an unmodified reference
-	// only a base table (flags 0) and a modified one only the clone stamped with
-	// its own mask (@ 0x5e95b8..0x5e95c6), so the byte is the reference's mask
-	// (D-PTL-11).
+	// only a base table (flags 0) and a modified one a table of its own mask, the
+	// clone stamped with it or a file's table whose flags are it
+	// (@ 0x5e95b8..0x5e95c6), so the byte is the reference's mask (D-PTL-11).
 	const std::uint8_t table_flags =
 			static_cast<std::uint8_t>((curve.inverse ? 0x01u : 0u) | (curve.reverse ? 0x02u : 0u));
 	const std::uint8_t index_sample = curve.baked_lut[index];
