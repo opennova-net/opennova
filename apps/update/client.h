@@ -32,6 +32,10 @@ using ProgressSink = std::function<void(const Progress &)>;
 // tick @0x4036c4, GetTickCount() - it >= 0x2710 @0x403726..0x403731]
 inline constexpr int kInstallConnectTimeoutMs = 10000;
 
+// The result box's MessageBox type: retail's 0, MB_OK with no icon, a failure's as a success's.
+// [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE), uType 0 pushed @0x4053ce]
+inline constexpr unsigned kResultBoxType = 0;
+
 // The installed command file of a product's folder (its wizard's CMD), as the result box reads it:
 // its CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads
 // the command file the release wrote, whose VERSION is the release's (D-UPD-11).

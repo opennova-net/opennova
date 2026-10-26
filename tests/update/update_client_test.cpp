@@ -87,6 +87,9 @@ update::SfsPackage package(const std::string &text, bool corrupt = false, bool s
 // @ 0x403570 (UPDATE.EXE), 0x2710 @0x40372c].
 int test_install_connect_timeout() {
 	TEST_EXPECT(updater::kInstallConnectTimeoutMs == 10000);
+	// The result box is retail's type 0, no icon [orig: Cupdate2Dlg_ReportResult @ 0x405140
+	// (UPDATE.EXE) @0x4053ce].
+	TEST_EXPECT(updater::kResultBoxType == 0);
 	return 0;
 }
 

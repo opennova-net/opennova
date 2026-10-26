@@ -153,11 +153,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
 			if (!dialog->ok || !dialog->result.revision_pending) {
 				for (const updater::Result::Expansion &expansion : dialog->result.expansions)
 					MessageBoxW(window, updater::wide(expansion_text(expansion)).c_str(), L"OpenNova Update",
-							MB_OK | (expansion.ok ? MB_ICONINFORMATION : MB_ICONERROR));
+							updater::kResultBoxType);
 				const std::string text = result_text(dialog->ok ? kSucceeded : dialog->error, dialog->ok,
 						dialog->options.resource_dir, dialog->start);
-				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update",
-						MB_OK | (dialog->ok ? MB_ICONINFORMATION : MB_ICONERROR));
+				MessageBoxW(window, updater::wide(text).c_str(), L"OpenNova Update", updater::kResultBoxType);
 			}
 			if (dialog->ok && !finish(dialog->options, dialog->args, dialog->result, dialog->error)) {
 				dialog->ok = false;
