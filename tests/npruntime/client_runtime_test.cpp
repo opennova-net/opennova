@@ -8638,6 +8638,8 @@ bool run_voice_menu_picks_round_trip_through_a_host() {
     ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
     ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
             inmatch::kFirstJoinerDcb, 1, &transport, ns::TransportMode::Client, joined, true));
+    // The join's net-player game state 10, which the radio call's per-slot fan reads.
+    ctx.np_protocol.connection_list.back().burst.game_state = 10;
 
     const std::string client_scrk = "CLIENT-VOICE-SCRK";
     const std::string server_scrk = "SERVER-VOICE-SCRK";

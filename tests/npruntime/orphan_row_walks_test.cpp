@@ -15,7 +15,9 @@
 //   - the round end sends the row's 0x61 and 0x1D to its net player, in slot order with the
 //     player's own row's pair, and moves the row to state 7;
 //   - a C2S 0x22 naming the row's slot answers the row's 0x46, its PCID the live net
-//     player's (none past the player's leave), not the removal record.
+//     player's (none past the player's leave), not the removal record;
+//   - a chat line or a ruled radio call the row admits reaches its net player, which takes
+//     one per row.
 // [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19);
 //  Server_AutoBalanceTeams @0x4FCC30 (+4 @0x4FCC74, +5 @0x4FCC7A, the key @0x4FCC82, the walk
 //  @0x4FCCDC..0x4FCDD8); CPairList_ShellSort @0x526C00 (`cmp` @0x526C77, `jl` @0x526C7B);
@@ -36,6 +38,8 @@
 #include <runtime/inmatch/punt_log.h>     // PuntLog (the sweep's _PUNT.TXT lines)
 #include <runtime/inmatch/server_files.h>  // ServerFileSink
 #include <runtime/inmatch/server_entity_state.h> // snapshot_entity_states
+#include <runtime/inmatch/server_chat.h>         // Server_HandleChatMessage
+#include <runtime/inmatch/server_radio_call.h>   // Server_HandleRadioCall
 #include <runtime/inmatch/server_medic.h>        // Server_ResendTeamDownedStates
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the C2S 0x22)
 #include <runtime/inmatch/server_net_quality.h>  // Server_SampleHostNetQuality
@@ -607,6 +611,77 @@ void test_the_player_sync_reply_takes_an_orphaned_row() {
 	CHECK(ask(5, sync) && sync.removal);
 }
 
+// A chat line's walk is the slot table's: an orphaned row the line admits sends it to the row's
+// net player, which so takes a copy for its own row and one for the orphaned row; past the
+// player's leave the row has no net player and sends nothing.
+// [orig: NapiNPServer_HandleChatMessage @0x513760 - the everyone arm's loop over g_PlayerSlots
+//  (the row's +0x1C @0x5140AA, its state @0x5140B7), the send's mask 0x20;
+//  NapiNPServer_SendFiltered @0x4C8A1F]
+void test_a_chat_line_reaches_an_orphaned_rows_net_player() {
+	OrphanRig r;
+	r.net_player().burst.game_state = 10; // the join's
+	ns::UdpSessionTransport sender_transport{ns::UdpSessionTransport::Role::Host};
+	w::PlayerSpawn s;
+	s.position = {30.0f, 10.0f, 2.0f};
+	s.team = 1;
+	inmatch::NapiNPConnection sender = row(4, 1, 0);
+	sender.burst.spawned = true;
+	sender.burst.game_state = 10;
+	sender.slot_state = inmatch::PlayerSlotState::Joined;
+	sender.link.owned_entity = w::spawn_remote_player(*r.world, s);
+	sender.link.transport = &sender_transport;
+	sender.link.mode = ns::TransportMode::Client;
+	sender.reply.player_name = "Sender";
+	r.ctx->np_protocol.connection_list.push_back(sender);
+	ChatUplink line;
+	line.channel = 1;
+	line.text = "hello";
+	const auto chat_count = [&]() {
+		size_t n = 0;
+		ns::Datagram d;
+		while (r.transport.pop_outbound(d)) n += d.tag == s2c::CHAT_BROADCAST ? 1 : 0;
+		return n;
+	};
+	(void)inmatch::Server_HandleChatMessage(*r.ctx, r.ctx->np_protocol.connection_list.back(),
+			line, 5000, *r.world);
+	CHECK(chat_count() == 2); // its own row's copy and the orphaned row's
+	// The player leaves: the orphaned row has no net player, the line reaches no one there.
+	r.ctx->np_protocol.connection_list.erase(r.ctx->np_protocol.connection_list.begin());
+	(void)inmatch::Server_HandleChatMessage(*r.ctx, r.ctx->np_protocol.connection_list.back(),
+			line, 7000, *r.world);
+	CHECK(chat_count() == 0);
+}
+
+// The radio call's per-slot fan walks the slot table too: a ruled call reaches an orphaned row on
+// the sender's slot team through the row's net player, a copy per row.
+// [orig: NapiNPServerMsg_HandleRadioCall - the walk @0x514510..0x5147EC, the row's +0x1C
+//  @0x51452C, NetPlayer +0xA0 == 10 @0x514537]
+void test_a_ruled_radio_call_reaches_an_orphaned_rows_net_player() {
+	OrphanRig r;
+	r.net_player().burst.game_state = 10; // the join's
+	ns::UdpSessionTransport sender_transport{ns::UdpSessionTransport::Role::Host};
+	w::PlayerSpawn s;
+	s.position = {30.0f, 10.0f, 2.0f};
+	s.team = 1;
+	inmatch::NapiNPConnection sender = row(4, 1, 0);
+	sender.burst.spawned = true;
+	sender.burst.game_state = 10;
+	sender.slot_state = inmatch::PlayerSlotState::Joined;
+	sender.link.owned_entity = w::spawn_remote_player(*r.world, s);
+	sender.link.transport = &sender_transport;
+	sender.link.mode = ns::TransportMode::Client;
+	r.ctx->np_protocol.connection_list.push_back(sender);
+	RadioCallRequest request;
+	request.value = 7; // RAD_7: a rule (type -1), so the per-slot fan
+	const std::vector<ProtocolMessage> own = inmatch::Server_HandleRadioCall(r.ctx.get(),
+			r.ctx->np_protocol.connection_list.back(), request, r.ctx->np_protocol.connection_list,
+			*r.world);
+	size_t calls = 0;
+	ns::Datagram d;
+	while (r.transport.pop_outbound(d)) calls += d.tag == s2c::TRACKED_PLAYER_VOICE ? 1 : 0;
+	CHECK(own.size() == 1 && calls == 2); // the sender's own; the net player's row and the orphan's
+}
+
 } // namespace
 
 int main() {
@@ -628,6 +703,8 @@ int main() {
 	test_the_violation_sweep_takes_no_row_after_the_round_end();
 	test_a_punted_row_takes_its_integrity_draw();
 	test_the_player_sync_reply_takes_an_orphaned_row();
+	test_a_chat_line_reaches_an_orphaned_rows_net_player();
+	test_a_ruled_radio_call_reaches_an_orphaned_rows_net_player();
 	if (failures != 0) {
 		std::printf("npruntime_orphan_row_walks: %d failure(s)\n", failures);
 		return 1;

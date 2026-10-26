@@ -130,6 +130,7 @@ struct HostFixture {
 			conn.assigned_team = static_cast<uint8_t>(first_team + (i % 2));
 			conn.assigned_team_valid = true;
 			conn.slot_state = inmatch::PlayerSlotState::Joined; // in game (state 6)
+			conn.burst.game_state = 10; // the join's net-player game state
 			(void)inmatch::Server_RerollPlayerTickSeed(conn, world.out.rounds.frame_clock);
 			ctx.np_protocol.connection_list.push_back(std::move(conn));
 		}
@@ -2180,6 +2181,28 @@ bool check_radio_call_request() {
 // [orig: NapiNPServerMsg_HandleRadioCall: `movzx ecx, [ebx+1A0h]` @0x51449F,
 //  the filter @0x5144B1, mask 0x180 @0x5144BE; the per-slot compare
 //  @0x51451A / @0x514520; NapiNPServer_SendFiltered @0x4C896A..0x4C8977]
+// The per-slot fan takes a net player in game state 10 alone: a teammate resyncing (9) hears no
+// call, and a resyncing sender not even its own copy.
+// [orig: NapiNPServerMsg_HandleRadioCall - `cmp dword [eax+0A0h], 0Ah` @0x514537 ahead of the
+//  sender test @0x514544; NapiNPServerMsg_HandlePlayerSyncRequest @0x51322D]
+bool check_radio_call_takes_game_state_10() {
+	HostFixture f(4); // teams 1, 2, 1, 2
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	RadioCallRequest req;
+	req.value = 7; // RAD_7: a rule, so the per-slot fan (RAD_1's no-rule team send has no such head)
+	f.conn(2).burst.game_state = 9;
+	bool ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).size() == 1 &&
+					count_radio(f.transports[2]) == 0,
+			"a resyncing teammate hears no call");
+	f.conn(2).burst.game_state = 10;
+	f.conn(0).burst.game_state = 9;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).empty() &&
+					count_radio(f.transports[2]) == 1,
+			"a resyncing sender's call reaches its team, not its own copy") && ok;
+	return ok;
+}
+
 bool check_radio_call_split_slots() {
 	HostFixture f(4); // slot and body teams 1, 2, 1, 2
 	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
@@ -2368,6 +2391,7 @@ int main() {
 	ok = check_radio_call_rules() && ok;
 	ok = check_radio_call_request() && ok;
 	ok = check_radio_call_split_slots() && ok;
+	ok = check_radio_call_takes_game_state_10() && ok;
 	ok = check_server_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;

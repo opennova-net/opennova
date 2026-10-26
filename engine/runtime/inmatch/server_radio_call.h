@@ -45,7 +45,8 @@ const RadioCallRule *radio_call_find_rule(const std::string &key);
 // sender's pool-0 index, the nearest 2044 location or -1}. With no rule the
 // body goes to the sender's team (mask 0x180); with one it goes, unicast, to
 // every active same-team slot in NetPlayer state 10 that the rule type admits
-// (the sender always), and a mode-3 rule registers a designation at the
+// (the sender without its rule, in state 10 too; an orphaned row by its own
+// words through its net player), and a mode-3 rule registers a designation at the
 // sender's aim point. The cooldown re-arms to 4 seconds. The sender's own
 // copy is returned as the reply (the dispatcher frames it with the request);
 // every other recipient is staged on its transport, unreliable (msgClass 0).
