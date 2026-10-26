@@ -83,6 +83,13 @@ update::SfsPackage package(const std::string &text, bool corrupt = false, bool s
 	return {"Test", {section}};
 }
 
+// An install's connect waits retail's 10 s before the next server is tried [orig: UpdateSocket_Connect
+// @ 0x403570 (UPDATE.EXE), 0x2710 @0x40372c].
+int test_install_connect_timeout() {
+	TEST_EXPECT(updater::kInstallConnectTimeoutMs == 10000);
+	return 0;
+}
+
 int test_first_install(const test_temp::TempDir &temp) {
 	Server server;
 	std::string error;
@@ -496,6 +503,7 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 int main() {
 	TEST_EXPECT(net::startup() == 0);
 	test_temp::TempDir temp("update_client");
+	if (int rc = test_install_connect_timeout()) return rc;
 	if (int rc = test_first_install(temp)) return rc;
 	if (int rc = test_retail_first_install(temp)) return rc;
 	if (int rc = test_retail_server_list(temp)) return rc;

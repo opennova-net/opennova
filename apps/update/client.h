@@ -26,6 +26,12 @@ struct Progress {
 };
 using ProgressSink = std::function<void(const Progress &)>;
 
+// How long an install's connect to a gateway or an update server may take before the next one is
+// tried: retail's 10 s from the connect's start. A check keeps its own bound (at most 2 s each,
+// within its 10 s in all: D-UPD-7). [orig: UpdateSocket_Connect @ 0x403570 (UPDATE.EXE), the start
+// tick @0x4036c4, GetTickCount() - it >= 0x2710 @0x403726..0x403731]
+inline constexpr int kInstallConnectTimeoutMs = 10000;
+
 // The installed command file of a product's folder (its wizard's CMD), as the result box reads it:
 // its CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads
 // the command file the release wrote, whose VERSION is the release's (D-UPD-11).

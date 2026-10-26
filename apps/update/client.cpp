@@ -133,7 +133,7 @@ struct Worker {
 		if (sink) sink({text, file, n, total});
 	}
 	int connect_timeout() const {
-		if (!options.check) return 3000;
+		if (!options.check) return kInstallConnectTimeoutMs;
 		const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
 		return static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(remaining, 2000)));
 	}
