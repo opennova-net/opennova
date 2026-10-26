@@ -1,17 +1,16 @@
 #pragma once
 
-// Internal to engine/formats/def — not part of def/def.h. Split out of def.cpp (quality
-// campaign W3-3).
+// Internal to engine/formats (def's family parsers and the avatars parser) — not part of
+// def/def.h. Split out of def.cpp (quality campaign W3-3).
 //
 // The shared .def text scanner: the retail line walk and its tokens, key matching and
 // the scalar conversions every family parser beside it uses.
 //
 // These were file-local statics when every parser lived in one file. They now cross
 // a TU boundary, so they need linkage — but names this generic (read_file, tokenize,
-// next_line) must not enter the global namespace: engine/formats/avatars and
-// engine/base/resource_index each have their own static read_file or tokenize, and one
-// of those turning external later would collide. Hence the namespace; the family
-// TUs pull it in wholesale, so no call site changes.
+// next_line) must not enter the global namespace: engine/base/resource_index has its own
+// static read_file and tokenize, and one of those turning external later would collide.
+// Hence the namespace; the family TUs pull it in wholesale, so no call site changes.
 
 #include <formats/def/def.h>
 #include <formats/def/def_schema.h>

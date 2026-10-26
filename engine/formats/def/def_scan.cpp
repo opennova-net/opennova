@@ -1,5 +1,6 @@
 #include "def_scan.h"
 
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <algorithm>
 #include <cmath>
@@ -31,18 +32,15 @@ namespace opennova::defscan {
 /* ========================================================================= */
 
 char *read_file(const char *path, size_t *out_len) {
-    FILE *f = opennova::io::fopen_utf8(path, "rb");
-    if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len < 0) { fclose(f); return NULL; }
-    char *buf = (char *)malloc((size_t)len + 1);
-    if (!buf) { fclose(f); return NULL; }
-    size_t rd = fread(buf, 1, (size_t)len, f);
-    fclose(f);
-    buf[rd] = '\0';
-    *out_len = rd;
+    // The whole file through the io layer's read, handed over as a terminated malloc'd buffer.
+    std::string text;
+    std::string error;
+    if (!opennova::io::read_file_text(path, text, error)) return NULL;
+    char *buf = (char *)malloc(text.size() + 1);
+    if (!buf) return NULL;
+    memcpy(buf, text.data(), text.size());
+    buf[text.size()] = '\0';
+    *out_len = text.size();
     return buf;
 }
 

@@ -16,6 +16,7 @@
 #include <base/io/crt_ftol.h>
 
 #include <base/io/ascii_config.h>
+#include <formats/def/def_scan.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -27,39 +28,9 @@
 
 namespace opennova::avatars {
 
-/* ========================================================================= */
-/* Lexer helpers (copied from engine/formats/def/def_scan.cpp)                     */
-/* ========================================================================= */
-
-static char *read_file(const char *path, size_t *out_len) {
-    FILE *f = opennova::io::fopen_utf8(path, "rb");
-    if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len < 0) { fclose(f); return NULL; }
-    char *buf = (char *)malloc((size_t)len + 1);
-    if (!buf) { fclose(f); return NULL; }
-    size_t rd = fread(buf, 1, (size_t)len, f);
-    fclose(f);
-    buf[rd] = '\0';
-    *out_len = rd;
-    return buf;
-}
-
-static void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len) {
-    if (src_len >= dst_size) src_len = dst_size - 1;
-    memcpy(dst, src, src_len);
-    dst[src_len] = '\0';
-}
-
-#define DA_PUSH(arr, count, cap, elem) do {                                    \
-    if ((count) >= (cap)) {                                                    \
-        (cap) = (cap) ? (cap) * 2 : 8;                                         \
-        (arr) = (decltype(arr))realloc((arr), (cap) * sizeof(*(arr)));         \
-    }                                                                          \
-    (arr)[(count)++] = (elem);                                                 \
-} while (0)
+/* The .def scanner's file read, bounded copy and growing arrays (formats/def/def_scan.h), shared. */
+using opennova::defscan::read_file;
+using opennova::defscan::safe_copy;
 
 /* ========================================================================= */
 /* Avatars-specific helpers                                                  */
