@@ -235,14 +235,12 @@ void ContentController::get(const EditorRequest &request) {
 				" holds files: a project is got into an empty folder.");
 		return;
 	}
+	// The list may be older than the project (a revision pushed since it was asked): whether the project has a
+	// revision is the head the get's pull reads (finish_pull refuses one at none).
 	const RemoteProject *listed = nullptr;
 	for (const RemoteProject &project : core_.view().content.projects)
 		if (project.key == request.project_key)
 			listed = &project;
-	if (listed && listed->head <= 0) {
-		refuse(no_revision_text(request.project_key));
-		return;
-	}
 	ContentBinding binding{ account_.server, request.project_key, 0 };
 	get_dir_ = request.dir;
 	get_open_after_.clear();
@@ -538,8 +536,8 @@ void ContentController::finish_pull(ContentPull &pull) {
 		view.changes.clear();
 	} else {
 		if (pull.up_to_date() && !get_dir_.empty()) {
-			// A get of a project with no revision yet (one the list did not hold, as over the MCP):
-			// nothing written, no folder bound. An expansion's base with none: the expansion opens.
+			// A get of a project with no revision yet (its head as the pull read it, whatever the list
+			// said): nothing written, no folder bound. An expansion's base with none: the expansion opens.
 			const std::string open_after = std::move(get_open_after_);
 			get_dir_.clear();
 			get_base_key_.clear();

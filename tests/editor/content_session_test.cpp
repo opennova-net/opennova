@@ -282,10 +282,11 @@ static int test_get_expansion() {
 	return 0;
 }
 
-// A get of a project with no revision yet gets nothing: refused where the list holds it at none,
-// refused once its head is read where the list does not hold it (as over the MCP), no folder bound
-// and no project opened; an expansion whose base game's project has none still opens, its base
-// folder left unbound (F-4).
+// A get of a project with no revision yet gets nothing, by the head its pull reads (the list may be
+// older than the project: test_share_through_sessions gets one listed at none and pushed since):
+// refused whether the list holds it or not (as over the MCP), no folder bound and no project
+// opened; an expansion whose base game's project has none still opens, its base folder left
+// unbound (F-4).
 static int test_get_without_revision() {
 	test_temp::TempDir dir("opennova_content_session_no_revision");
 	const auto bound = [&](const std::string &folder) {
@@ -301,8 +302,8 @@ static int test_get_without_revision() {
 		s.send(request::content_sign_in(kServer, "taylor", "pw"));
 		TEST_EXPECT(s.content().projects.size() == 1 && s.content().projects[0].head == 0);
 		s.send(request::content_get("MOD", dir.file("Listed")));
-		TEST_EXPECT(s.refused("content.refused") && !s.session.view().project.open &&
-				!bound(dir.file("Listed")));
+		TEST_EXPECT(!s.session.view().project.open && !bound(dir.file("Listed")) &&
+				s.content().last.find("MOD has no revision yet") != std::string::npos);
 	}
 	{
 		FakeService service;
