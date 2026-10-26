@@ -273,8 +273,12 @@ void test_listen_host_self_join_lines() {
 			(id.pv3.empty() ? 0 : tlv_str("PV3", id.pv3));
 	const size_t hello_len = 1 + tlv_str("NVS", id.nvs) + identity + tlv("CI", 4);
 	const inmatch::GameConfig &cfg = host.ctx.config;
+	// SN is the protocol's copy of the name: a nameless session's is "Untitled"
+	// [orig: CNapiGameSession_CreateSession @0x4C97C0 - the empty name's default
+	//  @0x4C986F..0x4C9885].
+	CHECK(cfg.server_name.empty() && host.ctx.np_protocol.session_name == "Untitled");
 	const size_t reply_len = 1 + tlv("CI", 4) + identity + tlv("HK", 4) +
-			tlv_str("SN", cfg.server_name) + tlv("SF", 4) +
+			tlv_str("SN", host.ctx.np_protocol.session_name) + tlv("SF", 4) +
 			(cfg.game_type != 0 ? tlv("P1", 4) : 0) +
 			(host.ctx.np_protocol.build_flags != 0 ? tlv("P2", 4) : 0) +
 			(host.ctx.np_protocol.max_players != 0 ? tlv("MP", 4) : 0) +
