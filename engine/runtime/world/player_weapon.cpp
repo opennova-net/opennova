@@ -1469,6 +1469,18 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// commit mounts it, commit_mount) [orig: WeaponAction_ProcessAllEntities @0x5426AD ->
 	// WeaponAction_ProcessFrame @0x540E60 - weaponSlot->Def @0x540E71].
 	weapon_fsm_tick(w.def, active_slot, in, ev);
+	// The overheat emitter's leg reads the walked body, the local player, and its own
+	// camera word [orig: WeaponAction_ProcessAllEntities @0x5426BF].
+	if (player != nullptr) {
+		bool slot_has_def = false;
+		const uint8_t slot_adm = local_equipped_slot_def_adm(world, w, slot_has_def);
+		if (const WeaponTableEntry *slot_def =
+						slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr) {
+			HeatGlowWalk walk = heat_glow_walk_of(world, *player);
+			walk.first_person = view.camera_mode == 0;
+			weapon_heat_glow_update(world, walk, *slot_def, active_slot, ev);
+		}
+	}
 	// The tick's re-queue leaves as a deferred fire record (its dispatch next input frame
 	// runs the record's gates: the head, the cease fire, the live binding, the press leg's).
 	io.fire_deferred = active_slot.refire_queued;

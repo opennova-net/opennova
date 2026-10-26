@@ -1274,6 +1274,7 @@ void AiSystem::pump_personal_slot(World &world, Entity &owner, uint32_t logic_ti
     weapon_fire_environment_inputs(world, owner, inputs);
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, slot, inputs, events);
+    weapon_heat_glow_update(world, heat_glow_walk_of(world, owner), *weapon, slot, events);
     if (weapon->ammo_bucket != 0) slot.clip = own_clip;
     if (events.reload_requested && is_authority) queue_walk_reload(world, owner, *weapon);
 }
@@ -1326,6 +1327,8 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
         WeaponFsmEvents weapon_events;
         weapon_fsm_tick(weapon->action_fsm, mount->primary_weapon_slot,
                         inputs, weapon_events);
+        weapon_heat_glow_update(world, heat_glow_walk_of(world, owner), *weapon,
+                                mount->primary_weapon_slot, weapon_events);
         weapon_sound_publish(world, owner, weapon->action_fsm, weapon_events);
         if (weapon_events.reload_requested && is_authority)
             queue_walk_reload(world, *addressed, *weapon);

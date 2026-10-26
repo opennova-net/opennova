@@ -10,6 +10,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/fire_sound.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/vehicle_motor.h>
@@ -118,6 +119,44 @@ void fill_vehicle_trail_visual_rows(const World &world, std::vector<VehicleTrail
 			r_rows.push_back(std::move(row));
 		}
 	});
+}
+
+// Every live overheat emitter: the inline slot of each entity, each personal row, and
+// the local player's own slot. Rows with no effect named are dropped (retail spawns
+// nothing for a zero effect id, CEffectWorld_SpawnEmitterAtPosition @0x5F6E9D..0x5F6EB7).
+void fill_weapon_heat_glow_rows(const World &world, std::vector<WeaponHeatGlowRow> &r_rows) {
+	r_rows.clear();
+	const auto push = [&](const Entity *holder, int32_t slot_id, const WeaponSlotState &slot,
+			const WeaponFsmDef *def) {
+		if (!slot.heat_glow.live || def == nullptr) return;
+		const char *effect = def->actions[weapon_action::kOverheated].particle;
+		if (effect[0] == '\0') return;
+		WeaponHeatGlowRow row;
+		row.handle_packed = holder != nullptr ? holder->handle.packed : -1;
+		row.registry_spawn_id = holder != nullptr ? holder->registry_spawn_id : 0;
+		row.slot = slot_id;
+		row.effect = effect;
+		const auto &glow = slot.heat_glow;
+		row.pos = {float(from_fixed(glow.pos[0])), float(from_fixed(glow.pos[1])),
+				float(from_fixed(glow.pos[2]))};
+		row.dir = {float(from_fixed(glow.dir[0])), float(from_fixed(glow.dir[1])),
+				float(from_fixed(glow.dir[2]))};
+		row.control = float(double(glow.fraction) * 0.000015259022);
+		r_rows.push_back(std::move(row));
+	};
+	const auto fsm_of = [&](uint8_t adm) -> const WeaponFsmDef * {
+		const WeaponTableEntry *entry = world.tables.weapons.by_index(adm);
+		return entry != nullptr ? &entry->action_fsm : nullptr;
+	};
+	world.registry.for_each([&](const Entity &entity) {
+		push(&entity, 0, entity.primary_weapon_slot, fsm_of(entity.primary_weapon_slot_adm));
+		for (const auto &kv : entity.weapon_slots)
+			push(&entity, 1 + kv.first, kv.second, fsm_of(kv.second.adm_index));
+	});
+	if (world.local_player_state != nullptr) {
+		const LocalPlayerWeapon &w = world.local_player_state->weapon;
+		push(world.registry.get(world.cached.local_player), 0x10000, w.slot, &w.def);
+	}
 }
 
 // Drain the round impacts the flight sim resolved since the last call, each row already

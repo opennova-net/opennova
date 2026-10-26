@@ -2278,6 +2278,7 @@ public:
 	const opennova::particle::ParticleForceField *particle_force_field() const;
 	void fill_vehicle_trail_visual_rows(
 			std::vector<opennova::world::VehicleTrailVisualRow> &r_rows) const;
+	void fill_weapon_heat_glow_rows(std::vector<opennova::world::WeaponHeatGlowRow> &r_rows) const;
 
 	// The impact-scar draw list for ScarPresenter (simulation_scars.cpp):
 	// World::scars compiled through renderer::compile_scar_draws with the shell's

@@ -8,14 +8,21 @@
 
 #include <base/io/bam.h>
 #include <formats/def/def.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/player_weapon.h>
+#include <runtime/world/pose_provider.h>
+#include <runtime/world/present_drains.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <vector>
 
 using namespace opennova::world;
 using opennova::io::bam_add;
@@ -945,6 +952,196 @@ void test_vehicle_death_releases_or_destroys_the_eweap_group() {
     CHECK(w.registry.get(bunker_gun) != nullptr && w.registry.get(bunker)->ref_num == 9);
 }
 
+// The overheat emitter's anchor fake: every userpoint of `gun` resolves at
+// (index, 2, 3) facing +Y; it records the record's model and index.
+struct HeatPoints : IPoseProvider {
+    EntityHandle gun;
+    int index = 0;
+    const opennova::threedi::Threedi3di3 *model = nullptr;
+    bool resolve_userpoint_frame(World &, EntityHandle h, const opennova::threedi::Threedi3di3 *m,
+            int point, int32_t out[6], int32_t dir[3]) override {
+        if (h != gun) return false;
+        index = point;
+        model = m;
+        out[0] = point << 16;
+        out[1] = 2 << 16;
+        out[2] = 3 << 16;
+        out[3] = out[4] = out[5] = 0;
+        if (dir != nullptr) {
+            dir[0] = 0;
+            dir[1] = 1 << 16;
+            dir[2] = 0;
+        }
+        return true;
+    }
+};
+
+// The emplaced .50's heat model (heat_values 0.35,0.3 parsed as the existing FSM
+// rig's 1310 / 42; heat_effect HEAT, .5) with an OVERHEATED row naming its effect.
+void configure_heat_gun(WeaponTableEntry &e) {
+    e.name = "WPN_EMPLCD50";
+    e.valid = true;
+    e.clipsize = -1;
+    e.action_fsm.clip_capacity = -1;
+    for (int action = 0; action < weapon_action::kCount; ++action)
+        e.action_fsm.actions[action].id = action;
+    e.action_fsm.heat_per_shot = 1310;
+    e.action_fsm.heat_decay_per_tick = 42;
+    e.action_fsm.heat_glow_threshold = 32768;
+    std::strcpy(e.action_fsm.actions[weapon_action::kOverheated].particle, "FX_OVERHEAT1");
+}
+
+// An unoccupied hot gun walked as itself drives the overheat emitter on its own heat
+// userpoint: the fraction of the heat past the threshold, the gun as the tag, re-aimed
+// each hot tick; a zero gate byte takes no anchor; a gfx3 def anchors OVERHEATED's gfx3
+// point behind the launch byte; heat under the threshold releases it.
+// [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716; WeaponAction_ProcessFrame
+//  @0x541052..0x54125C (the EWeap branch @0x5410B4..0x5410DF); sub_545A00 @0x545A00;
+//  Entity_ComputeUserpointWorldTransform @0x545C60 (the gate @0x545D06..0x545D68)]
+void test_unoccupied_hot_gun_drives_its_overheat_emitter() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(0, 4);
+    w.registry.configure_pool(1, 4);
+    w.tables.weapons.entries.resize(3);
+    configure_heat_gun(w.tables.weapons.entries[1]);
+    configure_heat_gun(w.tables.weapons.entries[2]);
+    WeaponTableEntry &turret_def = w.tables.weapons.entries[2];
+    turret_def.name = "WPN_T80_DshKTURRET";
+    turret_def.third_person_model_asset = std::make_shared<const opennova::threedi::Threedi3di3>();
+    turret_def.launch_userpoint = 3;
+    turret_def.action_fsm.actions[weapon_action::kOverheated].particle_userpoint_3p = 4;
+    HeatPoints points;
+    w.pose_provider = &points;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_type_index = 2;
+    seed.item_attrib = kItemAttribEweap;
+    seed.position = {0.0f, 0.0f, 10.0f};
+    seed.primary_weapon_slot_adm = 1;
+    seed.heat_userpoint_byte = 5;
+    seed.weapon_userpoint_bytes[0][0] = 2; // the barrel-0 fire origin: the gate
+    const EntityHandle gun = w.registry.spawn(1, seed);
+    points.gun = gun;
+    Entity &g = *w.registry.get(gun);
+    // The frame's tick is 10: 1000 ticks of window are 42000 of heat.
+    g.primary_weapon_slot.heat_window_end_tick = 10 + 1000;
+    w.logic_tick = 11;
+    w.pump_weapon_actions();
+    const WeaponFsmDef &fsm = w.tables.weapons.entries[1].action_fsm;
+    const int32_t fraction = weapon_heat_glow_fraction(fsm, 42000);
+    CHECK(fraction == 18464);
+    CHECK(g.primary_weapon_slot.heat_glow.live);
+    CHECK(g.primary_weapon_slot.heat_glow.fraction == fraction);
+    CHECK(g.primary_weapon_slot.heat_glow.tag == gun.packed);
+    CHECK(points.index == 5 && points.model == nullptr);
+    CHECK(g.primary_weapon_slot.heat_glow.pos[0] == (5 << 16));
+    CHECK(g.primary_weapon_slot.heat_glow.dir[1] == (1 << 16));
+    std::vector<WeaponHeatGlowRow> rows;
+    fill_weapon_heat_glow_rows(w, rows);
+    CHECK(rows.size() == 1);
+    if (rows.size() == 1) {
+        CHECK(rows[0].handle_packed == gun.packed && rows[0].slot == 0);
+        CHECK(rows[0].effect == "FX_OVERHEAT1");
+        CHECK(rows[0].pos.x == 5.0f && rows[0].pos.y == 2.0f && rows[0].pos.z == 3.0f);
+        CHECK(std::fabs(rows[0].control - float(18464 * 0.000015259022)) < 1e-6f);
+    }
+    // Hotter on the next tick: re-aimed and re-intensified.
+    g.primary_weapon_slot.heat_window_end_tick = 11 + 1500;
+    w.logic_tick = 12;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.fraction == weapon_heat_glow_fraction(fsm, 63000));
+    // A zero gate byte takes no anchor: the live emitter keeps its last state.
+    g.weapon_userpoint_bytes[0][0] = 0;
+    const int32_t held = g.primary_weapon_slot.heat_glow.fraction;
+    g.primary_weapon_slot.heat_window_end_tick = 12 + 1000;
+    w.logic_tick = 13;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.live && g.primary_weapon_slot.heat_glow.fraction == held);
+    // Under the threshold: released, and no row.
+    g.primary_weapon_slot.heat_window_end_tick = 13 + 500;
+    w.logic_tick = 14;
+    w.pump_weapon_actions();
+    CHECK(!g.primary_weapon_slot.heat_glow.live);
+    fill_weapon_heat_glow_rows(w, rows);
+    CHECK(rows.empty());
+    // A gfx3 def: OVERHEATED's gfx3 point on the gfx3 model, behind the launch byte.
+    g.primary_weapon_slot_adm = 2;
+    g.primary_weapon_slot.heat_window_end_tick = 14 + 1000;
+    w.logic_tick = 15;
+    w.pump_weapon_actions();
+    CHECK(g.primary_weapon_slot.heat_glow.live);
+    CHECK(points.index == 4 && points.model == turret_def.third_person_model_asset.get());
+    g.primary_weapon_slot.heat_glow = {};
+    turret_def.launch_userpoint = 0;
+    g.primary_weapon_slot.heat_window_end_tick = 15 + 1000;
+    w.logic_tick = 16;
+    w.pump_weapon_actions();
+    CHECK(!g.primary_weapon_slot.heat_glow.live);
+}
+
+// The anchor by the walked body: a body riding the gun anchors the gun's heat point
+// unless the def has gfx3 (the camera-view leg, not ported) or the body is on foot; the
+// local player in first person anchors it only with no gfx1 and from a UseGun seat.
+// [orig: WeaponAction_ProcessFrame @0x541113..0x5411B9 (the local first-person branch
+//  @0x541113..0x541164, the other-body branch @0x54118A..0x5411B9, the carrier leg
+//  @0x54119E..0x5411B2)]
+void test_overheat_emitter_anchor_by_walked_body() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 4);
+    w.tables.weapons.entries.resize(2);
+    WeaponTableEntry &def = w.tables.weapons.entries[1];
+    configure_heat_gun(def);
+    HeatPoints points;
+    w.pose_provider = &points;
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.has_item_def = true;
+    seed.item_attrib = kItemAttribEweap;
+    seed.heat_userpoint_byte = 6;
+    seed.weapon_userpoint_bytes[0][0] = 2;
+    const EntityHandle gun = w.registry.spawn(1, seed);
+    points.gun = gun;
+    const Entity &g = *w.registry.get(gun);
+    WeaponFsmEvents hot;
+    hot.heat_glow_fraction = 1000;
+    const auto anchored = [&](const HeatGlowWalk &walk) {
+        WeaponSlotState slot;
+        points.index = 0;
+        weapon_heat_glow_update(w, walk, def, slot, hot);
+        return slot.heat_glow.live && points.index == 6 && slot.heat_glow.tag == gun.packed;
+    };
+    HeatGlowWalk body;
+    body.carrier = &g;
+    CHECK(anchored(body));   // a remote or AI gunner
+    HeatGlowWalk on_foot;
+    CHECK(!anchored(on_foot));
+    HeatGlowWalk local = body;
+    local.local = true;
+    local.first_person = true;
+    local.usegun_seat = true;
+    CHECK(anchored(local));  // no gfx1: the UseGun seat's carrier point
+    local.usegun_seat = false;
+    CHECK(!anchored(local)); // another seat: no anchor
+    local.usegun_seat = true;
+    def.has_first_person_model_reference = true;
+    CHECK(!anchored(local)); // gfx1: the first-person camera leg
+    local.first_person = false;
+    CHECK(anchored(local));  // the local third person takes the carrier point
+    def.third_person_model_asset = std::make_shared<const opennova::threedi::Threedi3di3>();
+    def.launch_userpoint = 3;
+    CHECK(!anchored(body));  // gfx3: the body's camera-view leg
+    // A release drops a live emitter whatever the walk.
+    WeaponSlotState slot;
+    slot.heat_glow.live = true;
+    WeaponFsmEvents release;
+    release.heat_glow_release = true;
+    weapon_heat_glow_update(w, on_foot, def, slot, release);
+    CHECK(!slot.heat_glow.live);
+}
+
 } // namespace
 
 int main() {
@@ -971,6 +1168,8 @@ int main() {
     test_parent_publication_ground_raw_yaw();
     test_parent_publication_gates();
     test_parent_publication_helo_clamped_pair();
+    test_unoccupied_hot_gun_drives_its_overheat_emitter();
+    test_overheat_emitter_anchor_by_walked_body();
     if (failures == 0) std::puts("emplaced_gun_channel: OK");
     return failures == 0 ? 0 : 1;
 }

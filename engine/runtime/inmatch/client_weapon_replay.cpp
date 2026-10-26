@@ -134,11 +134,13 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (row.type_id && row.weapon_slot_handle != 0xFFFF) borrowers.push_back(row.handle);
     std::sort(borrowers.begin(), borrowers.end());
     std::vector<uint16_t> pumped;
-    // walked_z is the Z of the entity the walk hands the frame: the borrowing body for a
-    // borrowed slot, the gun itself for an unoccupied one.
+    // walked_z is the Z of the entity the walk hands the frame and `walk` that entity as
+    // the overheat leg reads it: the borrowing body for a borrowed slot, the gun itself
+    // for an unoccupied one.
     // [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
     //  pool-1 push @0x542714]
-    const auto pump = [&](world::Entity &entity, int32_t walked_z) {
+    const auto pump = [&](world::Entity &entity, int32_t walked_z,
+                          const world::HeatGlowWalk &walk) {
         auto *mount = &entity;
         if (local_slot(world, *mount)) return;
         const auto *def = world.tables.weapons.by_index(mount->primary_weapon_slot_adm);
@@ -170,6 +172,7 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         input.last_tick_of_batch = world.rules.last_tick_of_batch;
         world::WeaponFsmEvents events;
         world::weapon_fsm_tick(def->action_fsm, slot, input, events);
+        world::weapon_heat_glow_update(world, walk, *def, slot, events);
         world::weapon_sound_publish(world, owner, def->action_fsm, events);
     };
     for (const auto handle : borrowers) {
@@ -178,14 +181,20 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
         if (!mount || std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end())
             continue;
         pumped.push_back(mount->handle.packed);
-        pump(*mount, row->z);
+        world::HeatGlowWalk walk; // the body's parentEntity is the carrier it rides
+        walk.carrier = world.registry.get(world::EntityHandle{row->carrier_handle});
+        walk.usegun_seat = walk.carrier != nullptr &&
+                seat_type(*row, *walk.carrier) == world::SeatType::Gunner;
+        pump(*mount, row->z, walk);
     }
     for (size_t i = 0; i < world.registry.pool_capacity(1); ++i) {
         auto *mount = world.registry.get(world::EntityHandle::make(1, static_cast<int>(i)));
         if (!mount || !mount->has_item_def || !(mount->item_attrib & world::kItemAttribEweap) ||
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||
                 std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end()) continue;
-        pump(*mount, mount->position.z.q16);
+        world::HeatGlowWalk walk;
+        walk.gun = mount;
+        pump(*mount, mount->position.z.q16, walk);
     }
 }
 

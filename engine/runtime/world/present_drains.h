@@ -115,6 +115,26 @@ struct VehicleTrailVisualRow {
 	bool section_tagged = true;
 };
 
+// One live overheat emitter (WeaponSlotState::heat_glow): the slot it belongs to (the
+// entity holding it and the slot: 0 its inline MountSlot, 1 + the combo a personal row,
+// 0x10000 the local player's own), the OVERHEATED(11) row's particle, the anchor and its
+// direction, and the 16.16 fraction as the spawn and update scale it for descriptor
+// +40/+44 (both the same value). The spawn's tag is an entity, so the group takes the
+// building-section gate.
+// [orig: WeaponAction_ProcessFrame @0x5411F0..0x54122C; CEffectWorld_SpawnEmitterAtPosition
+//  @0x5F6DF0 (+40 @0x5F6F10..0x5F6F2B, +44 @0x5F6F35..0x5F6F4B, the tag +0x0C @0x5F6EFB);
+//  CEffectEmitter_UpdatePositionAndParams @0x5F6810 (@0x5F688D..0x5F68BB), the scale
+//  0.000015259022 @0x5F6F28 / @0x5F689C]
+struct WeaponHeatGlowRow {
+	int32_t handle_packed = -1;
+	uint64_t registry_spawn_id = 0;
+	int32_t slot = 0;
+	std::string effect;
+	Vec3 pos;
+	Vec3 dir;
+	float control = 0.0f;
+};
+
 // One live death piece: the pool slot and its allocation generation (a
 // same-slot reuse is a new piece), the husk model source and the ONE section
 // it renders, the debris-type row (death_piece_trail_effect names its trail),
@@ -151,6 +171,7 @@ struct RoundGlowRow {
 // on the same tick yields nothing.
 void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualRow> &r_rows);
 void fill_vehicle_trail_visual_rows(const World &world, std::vector<VehicleTrailVisualRow> &r_rows);
+void fill_weapon_heat_glow_rows(const World &world, std::vector<WeaponHeatGlowRow> &r_rows);
 void drain_round_impact_rows(World &world, std::vector<RoundImpactPresentation> &r_rows);
 void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow> &r_rows);
 void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces);

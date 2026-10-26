@@ -120,6 +120,10 @@ struct WeaponTableEntry {
     //  Entity_ComputeUserpointTransform @0x545AEF..0x545BA5]
     std::shared_ptr<const threedi::Threedi3di3> third_person_model_asset;
     uint8_t launch_userpoint = 0; // +0x2D4
+    // The `heat_effect` name (+0x358): the carrying EWeap's model resolves it as its
+    // heat userpoint (Entity::heat_userpoint_byte), the overheat emitter's anchor.
+    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD]
+    std::string heat_effect;
     // weapon_class routing slot (0=accessory 1=primary 2=secondary 3=grenade). The
     // switch eligibility exempts 1/2 from the has-ammo requirement [orig: AdmDef+0x3A4
     // read @0x4e0294; keyword 'weapon_class' -> +0x3A4].

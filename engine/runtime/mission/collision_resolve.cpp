@@ -126,9 +126,11 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 // 1 <- weapl?up (def[0..2]), 2 <- weapr?up2 (def[9..11]), 3 <- weapl?up2
 // (def[6..8]); then the zero-fill [3..5] <- [0..2], [6..8] <- [0..2],
 // [9..11] <- [3..5] in that order. Names match case-insensitively; a byte is
-// the 1-based table index (0 = none). The weapon-def userpoint (+0x333) is
-// not carried (weapon.def+856 is unparsed).
-// [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa);
+// the 1-based table index (0 = none). The thirteenth byte (+0x333) is the
+// slot def's heat_effect name (weapon.def+0x358) on the same model, stored
+// after the fill: the overheat emitter's anchor.
+// [orig: Entity_InitBoneReferences @0x441470 (@0x4414e0..0x4415aa, the
+//  heat name @0x4415C2..0x4415CD);
 //  Entity_ResolveBoneUserpoints @0x545940; ModelGPM_FindUserpointByName
 //  @0x5b21ef]
 static uint8_t userpoint_index_by_name(const Threedi3di3 &model, const char *name) {
@@ -190,7 +192,7 @@ static bool scar_bones_null(const Threedi3di3 &model) {
 }
 
 static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
-		const Threedi3di3 &model, world::Entity &e) {
+		const Threedi3di3 &model, const world::WeaponTableEntry *slot_def, world::Entity &e) {
 	static constexpr int kSlotDefBase[4] = {3, 0, 9, 6};
 	uint8_t bytes[12] = {};
 	for (int slot = 0; slot < 4; ++slot) {
@@ -207,6 +209,8 @@ static void resolve_weapon_userpoint_bytes(const DefItemDef &def,
 	for (int slot = 0; slot < 4; ++slot)
 		for (int field = 0; field < 3; ++field)
 			e.weapon_userpoint_bytes[slot][field] = bytes[slot * 3 + field];
+	e.heat_userpoint_byte =
+			slot_def != nullptr ? userpoint_index_by_name(model, slot_def->heat_effect.c_str()) : 0;
 }
 
 // The def's `input_function` row and its `virtualdisplay <model> <userpoint>`
@@ -593,7 +597,15 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			}
 			if (!is_organic && (def->attrib & world::kItemAttribEweap) != 0u) {
 				if (const Threedi3di3 *m3 = deps.models.model(key).get()) {
-					resolve_weapon_userpoint_bytes(*def, *m3, *e);
+					// The slot def is the one the class init binds from the entity's
+					// weapon name [orig: WeaponSlot_InitFromEntityDef @0x5466C0].
+					const int slot_index = e->primary_weapon.empty()
+							? -1 : world.tables.weapons.index_of(e->primary_weapon.c_str());
+					resolve_weapon_userpoint_bytes(*def, *m3,
+							slot_index >= 0 && slot_index <= 0xFF
+									? world.tables.weapons.by_index(static_cast<uint8_t>(slot_index))
+									: nullptr,
+							*e);
 					// The gun's own first-person camera userpoint.
 					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
 					e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);

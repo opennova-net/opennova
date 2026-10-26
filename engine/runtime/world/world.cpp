@@ -754,6 +754,8 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     inputs.submerged = row.position.z.q16 <= world.env.water_z;
     WeaponFsmEvents events;
     weapon_fsm_tick(weapon->action_fsm, row.primary_weapon_slot, inputs, events);
+    weapon_heat_glow_update(world, heat_glow_walk_of(world, row), *weapon, row.primary_weapon_slot,
+            events);
     weapon_sound_publish(world, owner != nullptr ? *owner : row, weapon->action_fsm, events);
     if (events.reload_requested && world.ai.is_authority)
         queue_walk_reload(world, row, *weapon);

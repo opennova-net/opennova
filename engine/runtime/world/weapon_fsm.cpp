@@ -49,6 +49,22 @@ int32_t weapon_slot_world_heat_glow(const WeaponFsmDef &def,
     return static_cast<uint16_t>(heat);
 }
 
+// The dividend is the 64-bit (heat - threshold) << 16, its high half the delta's
+// arithmetic >> 16, and the divide a signed one that truncates toward zero.
+// [orig: WeaponAction_ProcessFrame @0x541052..0x541098 - the threshold +0x374
+//  @0x541052, the compare @0x54105A, the 0xFFFF cap @0x541068..0x54106A, the idiv
+//  @0x541086, the 0xFFFF clamp @0x54108E..0x541090, the zero test @0x541098]
+int32_t weapon_heat_glow_fraction(const WeaponFsmDef &def, int32_t heat) {
+    const int32_t threshold = def.heat_glow_threshold;
+    if (heat <= threshold) return 0;
+    int64_t delta = int64_t(heat) - threshold;
+    if (delta > 0xFFFF) delta = 0xFFFF;
+    const int64_t divisor = int64_t(0xFFFF) - threshold;
+    if (divisor == 0) return 0;
+    const int64_t fraction = (delta * 0x10000) / divisor;
+    return fraction > 0xFFFF ? 0xFFFF : static_cast<int32_t>(fraction);
+}
+
 namespace {
 
 // ASCII case-insensitive compare (the original binds action names via stricmp
@@ -335,8 +351,6 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
     // decay as no heat model.
     // [orig: @ 0x542f8b..0x542fdc]
     add_shot_heat(def, slot, in.current_tick);
-    // (the overheat glow emitter — actionTable[11] muzzle FX @ 0x54109e..0x54122c —
-    //  is an embedder effect seam, D-WPN-28)
     if (!in.is_local) { // [orig: @ 0x542fe9 -> LABEL_59]
         slot.counter = desc.delay_end;
         return;
@@ -1002,7 +1016,9 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
 
     // The heat window [orig: @ 0x540fed..0x541262]. A live window either denies the
     // next shot or, once it lapses (or the owner submerges with a def that is not
-    // Underwater), clears itself back to cold.
+    // Underwater), clears itself back to cold. Either way it orders the overheat
+    // emitter: driven while the heat stands past the glow threshold, released
+    // otherwise.
     if (slot.heat_window_end_tick != 0) {
         const bool window_live = slot.heat_window_end_tick > in.current_tick;
         const bool water_ok = !in.submerged || (def.flags & weapon_flag::kUnderwater) != 0;
@@ -1010,12 +1026,17 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
             // The overheat deny: a queued FIRE becomes the dry-fire click. Note it
             // does NOT cancel an in-flight FIRE, and nothing stops the heat from
             // climbing past kFull — the gun coughs until the level falls back under.
-            // [orig: @ 0x541046]
-            if (weapon_slot_accumulated_heat(def, slot, in.current_tick) >
-                        weapon_heat::kFull &&
-                slot.next == weapon_action::kFire)
+            // [orig: @ 0x541031 (the one heat read), @ 0x541046]
+            const int32_t heat = weapon_slot_accumulated_heat(def, slot, in.current_tick);
+            if (heat > weapon_heat::kFull && slot.next == weapon_action::kFire)
                 slot.next = weapon_action::kEmpty;
+            out.heat_glow_fraction = weapon_heat_glow_fraction(def, heat);
+            out.heat_glow_release = out.heat_glow_fraction == 0; // [orig: @ 0x541231]
+            out.heat_glow_clip = slot.shared_clip ? 0 : slot.clip; // the +0x10 word
+            out.heat_glow_current = slot.current;
+            out.heat_glow_next = slot.next;
         } else {
+            out.heat_glow_release = true;  // [orig: @ 0x54124A..0x54125C]
             slot.heat_window_end_tick = 0; // [orig: @ 0x54125f]
         }
     }

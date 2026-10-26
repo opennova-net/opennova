@@ -1292,6 +1292,12 @@ struct Entity {
     //  weapl?up, 2 <- weapr?up2, 3 <- weapl?up2) + the zero-fill
     //  Entity_ResolveBoneUserpoints @0x545940]
     uint8_t weapon_userpoint_bytes[4][3] = {};
+    // The cluster's thirteenth byte (entity+0x333): the slot def's `heat_effect`
+    // name (WeaponDef+0x358) resolved on the same model, the overheat emitter's
+    // anchor; read through weapon_heat_userpoint_byte below.
+    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD; sub_545A00 @0x545A00
+    //  (index 12)]
+    uint8_t heat_userpoint_byte = 0;
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
     // ctrlx/drvrx (empty-or-same, else the attach refuses, D-NET-398) and UseGun (ours only
     // when empty, D-NET-420), never by sitex; cleared only when THE claimant detaches. This
@@ -1705,13 +1711,23 @@ inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
     return e.weapon_userpoint_bytes[slot][field];
 }
 
+// The heat userpoint byte (cluster index 12); 0 unless the def has weapon slots.
+// [orig: sub_545A00 @0x545A00 - the attrib 0x20 test @0x545A14, +0x327 + 12
+//  @0x545A25]
+inline uint8_t weapon_heat_userpoint_byte(const Entity &e) {
+    return (e.item_attrib & kItemAttribEweap) != 0u ? e.heat_userpoint_byte : 0;
+}
+
 // The field a slot's action pair selects: the flash (1) while FIRE hands over
 // to RECOIL, the casing (2) through RECOIL, else the fire origin (0).
 // [orig: Entity_ComputeUserpointWorldTransform @0x545D17..0x545D3F]
+inline int weapon_userpoint_field(int32_t current, int32_t next) {
+    if (current == weapon_action::kFire)
+        return next == weapon_action::kRecoil ? 1 : 0;
+    return current == weapon_action::kRecoil ? 2 : 0;
+}
 inline int weapon_userpoint_field(const WeaponSlotState &slot) {
-    if (slot.current == weapon_action::kFire)
-        return slot.next == weapon_action::kRecoil ? 1 : 0;
-    return slot.current == weapon_action::kRecoil ? 2 : 0;
+    return weapon_userpoint_field(slot.current, slot.next);
 }
 
 } // namespace opennova::world

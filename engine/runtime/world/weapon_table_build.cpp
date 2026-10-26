@@ -311,6 +311,21 @@ world::WeaponTable build_weapon_table(
 		e.action_fsm.heat_per_shot = d.heat_per_shot;
 		e.action_fsm.heat_decay_per_tick = d.heat_decay_per_tick;
 		e.action_fsm.heat_glow_threshold = d.heat_glow_threshold;
+		e.heat_effect = d.heat_effect; // [orig: WeaponDef+0x358]
+		// Every action row's particle userpoint resolved on the gfx3 model once every
+		// def has parsed, the first case-insensitive match, 1-based (the overheat
+		// emitter's anchor on a gfx3 gun reads OVERHEATED's).
+		// [orig: WeaponDef_ResolveAllReferences @0x540270 - the +0x170 gate @0x5402D8,
+		//  the walk @0x540350..0x5403A9 (reset @0x54036F, lookup @0x540377, store
+		//  @0x54039E)]
+		const threedi::Threedi3di3 *gfx3_model = e.third_person_model_asset.get();
+		for (world::WeaponFsmAction &action : e.action_fsm.actions) {
+			action.particle_userpoint_3p = 0;
+			if (gfx3_model == nullptr || action.particle_userpoint[0] == '\0') continue;
+			const int point =
+					threedi::threedi_3di3_find_user_point(gfx3_model, action.particle_userpoint);
+			if (point >= 0) action.particle_userpoint_3p = static_cast<uint8_t>(point + 1);
+		}
 		e.weapon_class_slot = d.weapon_class_slot;
 		for (int k = 0; k < 7; ++k) e.classrounds[k] = d.classrounds[k];
 		e.switchcategory = d.switchcategory;

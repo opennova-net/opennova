@@ -640,7 +640,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.heat_decay_per_tick = parse_fixed16_digits_n(decay, strlen(decay)) / 6200;
                 parsed = 1;
             } else if (key_is(key, "heat_effect")) {
-                /* Effect name + the 16.16 glow threshold, slots 1 and 2 whatever
+                /* Anchor userpoint name + the 16.16 glow threshold, slots 1 and 2 whatever
                    the line's count; any further values on the line are unread in
                    retail too. [orig: @ 0x543e36 -> +0x358 (the copy
                    @0x543E4E..0x543E63) / +0x374 (@0x543E65..0x543E7A)] */

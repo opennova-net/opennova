@@ -419,6 +419,34 @@ bool carrier_weapon_world_pose(World &, const Entity &carrier, const WeaponTable
                                int32_t clip, int column, int32_t out[6],
                                int32_t out_direction[3] = nullptr);
 
+// The walked entity WeaponAction_ProcessFrame receives, as its overheat leg reads it:
+// an EWeap gun walked as itself (the pool-1 walk of an unoccupied gun), else a body
+// with the carrier it rides (its parentEntity, null on foot), whether that body is the
+// local player and its camera is in first person (g_CameraMode 0), and whether it sits
+// in a UseGun seat (parentSlot 3).
+// [orig: WeaponAction_ProcessAllEntities @0x542690 - the pool-0 push @0x5426BF, the
+//  pool-1 push @0x542714]
+struct HeatGlowWalk {
+    const Entity *gun = nullptr;
+    const Entity *carrier = nullptr;
+    bool local = false;
+    bool first_person = false;
+    bool usegun_seat = false;
+};
+// The walk for an entity the world holds (the local player's camera word from its view).
+HeatGlowWalk heat_glow_walk_of(const World &, const Entity &walked);
+
+// The overheat emitter's half of one pump of `slot` (its def `def`), after the tick
+// produced `events`: a release drops the emitter; a fraction aims and drives it, unless
+// the anchor does not resolve, which leaves the emitter as it stood. The anchor is the
+// heat userpoint of the gun the walk reaches, or OVERHEATED's gfx3 point on a gfx3 gun
+// walked as itself. The camera-view legs (a first-person gfx1 point through the view
+// camera, a body's gfx3 point through Entity_GetCameraTransform) are not ported: they
+// take no anchor (D-WPN-28).
+// [orig: WeaponAction_ProcessFrame @0x54109E..0x54125C]
+void weapon_heat_glow_update(World &, const HeatGlowWalk &walk, const WeaponTableEntry &def,
+                             WeaponSlotState &slot, const WeaponFsmEvents &events);
+
 // The UseGun gunner branch of the fire position, shared by every mounted
 // shooter's fire tick: a G-attached gun routed to its parent slot fires from
 // the HULL through the local-space helper, any other gun through its own

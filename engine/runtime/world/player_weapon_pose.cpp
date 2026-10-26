@@ -1,6 +1,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
@@ -45,7 +46,107 @@ void carrier_weapon_local_pose(World &world, Entity &carrier, const WeaponTableE
     carrier.veh.air_pitch_bam = saved_air_pitch;
     if (!posed) carrier_pose(world, carrier, out);
 }
+
+// Entity_ComputeUserpointWorldTransform handed a record: the slot def picks the
+// model and the gate byte as for a shot (a gfx3 def its model and launch byte, else
+// the carrier's own model and its barrel's byte in the slot's column), and a gate
+// that holds poses the record. The record is `point` of `record_model` (null = the
+// carrier's own), posed on that same model; retail poses the carrier model's heat
+// record on the gfx3 skeleton when a gfx3 def reaches this through a UseGun seat. The
+// raw leg (a zero gate) takes no anchor: retail copies the carrier's origin there and
+// leaves the direction local unwritten.
+// [orig: Entity_ComputeWeaponFireTransform @0x4011F0 (the record test @0x40123E, the
+//  world-space call @0x401299, the position/direction copies @0x4012A9..0x4012D7);
+//  Entity_ComputeUserpointWorldTransform @0x545C60 (the model and gate
+//  @0x545D06..0x545D55, the gate test @0x545D68, the record arg @0x545D6E, the pose
+//  @0x545E08)]
+bool heat_glow_point(World &world, const Entity &carrier, const WeaponTableEntry &def,
+                     const WeaponFsmEvents &leg, const threedi::Threedi3di3 *record_model,
+                     int point, int32_t pos[3], int32_t dir[3]) {
+    if (point == 0 || world.pose_provider == nullptr) return false;
+    const uint8_t gate = def.third_person_model_asset != nullptr
+            ? def.launch_userpoint
+            : weapon_userpoint_byte(carrier, int(uint32_t(leg.heat_glow_clip) & 3u),
+                                    weapon_userpoint_field(leg.heat_glow_current,
+                                                           leg.heat_glow_next));
+    int32_t out[6];
+    if (gate == 0 || !world.pose_provider->resolve_userpoint_frame(world, carrier.handle,
+                record_model, point, out, dir))
+        return false;
+    std::copy_n(out, 3, pos);
+    return true;
+}
 } // namespace
+
+HeatGlowWalk heat_glow_walk_of(const World &world, const Entity &walked) {
+    HeatGlowWalk walk;
+    if (walked.has_item_def && (walked.item_attrib & kItemAttribEweap) != 0) {
+        walk.gun = &walked;
+        return walk;
+    }
+    walk.carrier = walked.mounted ? world.registry.get(walked.mount_target) : nullptr;
+    walk.local = walked.handle == world.cached.local_player;
+    walk.first_person = walk.local && world.local_player_state != nullptr &&
+            world.local_player_state->view.camera_mode == 0;
+    walk.usegun_seat = walked.mounted && walked.mount_type == SeatType::Gunner;
+    return walk;
+}
+
+// The anchor by the walked entity:
+// - an EWeap walked as itself: no gfx3, its own heat point; a gfx3 def, OVERHEATED's
+//   gfx3 point (the FP bit, which needs the local player riding the gun, never holds
+//   on the pool-1 walk's unoccupied gun);
+// - the local player in first person: a gfx1 def takes the camera-view leg; with none,
+//   a UseGun seat takes its carrier's heat point, any other seat no anchor;
+// - any other body: a gfx3 def takes the camera-view leg, on foot no anchor, else the
+//   carrier's heat point.
+// The spawn carries the anchor's entity as its tag and the fraction in descriptor
+// +40/+44; each later hot tick re-aims and re-intensifies the live emitter.
+// [orig: WeaponAction_ProcessFrame @0x540E60 - the FP bit @0x540E8C..0x540ECF; the
+//  release @0x541231..0x541241 / @0x54124A..0x54125C; the OVERHEATED row @0x5410A7; the
+//  EWeap branch @0x5410BC..0x5410DF; the local first-person branch @0x541113..0x541164;
+//  the third-person / other-body branches @0x541166..0x5411B9; the shared carrier leg
+//  @0x54119E..0x5411B2; the descriptor +0 / +0x0C / +40 / +44 @0x5411F0..0x541200; the
+//  update CEffectEmitter_UpdatePositionAndParams @0x541213, the spawn
+//  CEffectWorld_SpawnEmitterAtPosition into the +0x1C handle @0x54122C;
+//  sub_545A00 @0x545A00 (index 12)]
+void weapon_heat_glow_update(World &world, const HeatGlowWalk &walk, const WeaponTableEntry &def,
+                             WeaponSlotState &slot, const WeaponFsmEvents &events) {
+    if (events.heat_glow_release) {
+        slot.heat_glow = {};
+        return;
+    }
+    if (events.heat_glow_fraction == 0) return;
+    const threedi::Threedi3di3 *gfx3 = def.third_person_model_asset.get();
+    const Entity *anchor = nullptr;
+    const threedi::Threedi3di3 *record_model = nullptr;
+    int point = 0;
+    if (walk.gun != nullptr) {
+        anchor = walk.gun;
+        if (gfx3 != nullptr) {
+            record_model = gfx3;
+            point = def.action_fsm.actions[weapon_action::kOverheated].particle_userpoint_3p;
+        } else {
+            point = weapon_heat_userpoint_byte(*anchor);
+        }
+    } else if (walk.local && walk.first_person) {
+        if (def.has_first_person_model_reference || !walk.usegun_seat || walk.carrier == nullptr)
+            return;
+        anchor = walk.carrier;
+        point = weapon_heat_userpoint_byte(*anchor);
+    } else {
+        if (gfx3 != nullptr || walk.carrier == nullptr) return;
+        anchor = walk.carrier;
+        point = weapon_heat_userpoint_byte(*anchor);
+    }
+    int32_t pos[3], dir[3];
+    if (!heat_glow_point(world, *anchor, def, events, record_model, point, pos, dir)) return;
+    slot.heat_glow.live = true;
+    slot.heat_glow.fraction = events.heat_glow_fraction;
+    slot.heat_glow.tag = anchor->handle.packed;
+    std::copy_n(pos, 3, slot.heat_glow.pos);
+    std::copy_n(dir, 3, slot.heat_glow.dir);
+}
 
 bool carrier_weapon_userpoint(World &world, const Entity &carrier, const WeaponTableEntry *fired,
                               int32_t clip, int column, int32_t out[6],

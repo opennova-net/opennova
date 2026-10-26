@@ -455,8 +455,10 @@ typedef struct DefWeaponDef {
        heat_per_shot = parse16_16(v0) / 100 (percent -> a 0..0x10000 fraction),
        heat_decay_per_tick = parse16_16(v1) / 6200 (percent-per-second -> per-tick
        at the 62 Hz logic rate). 0 in heat_per_shot disables the whole model.
-       'heat_effect <fxName>,<threshold>,...' — the overheat glow effect name and
-       the 16.16 heat level it starts at (stored raw, no divide). Shipped JO data
+       'heat_effect <userpoint>,<threshold>,...' — the userpoint the overheat
+       emitter anchors on (the carrying EWeap's model resolves the name; the
+       effect itself is the OVERHEATED action row's particle) and the 16.16 heat
+       level the emitter starts at (stored raw, no divide). Shipped JO data
        writes 'heat_effect heat, .5, 30, 60': the parser consumes only the first
        two values, so the trailing pair is authored-but-unread in retail too.
        'heat_sound <set>': the original resolves the first value token to a sound
@@ -472,7 +474,7 @@ typedef struct DefWeaponDef {
     int heat_per_shot;         /* +0x36C, 16.16; 0 = no heat model */
     int heat_decay_per_tick;   /* +0x370, 16.16 per logic tick */
     int heat_glow_threshold;   /* +0x374, 16.16; heat above this spawns the glow */
-    char heat_effect[64];      /* +0x358, the glow effect name ("heat") */
+    char heat_effect[64];      /* +0x358, the overheat anchor's userpoint name ("heat") */
     char heat_sound[128];      /* +0x368 holds the set; the name as written */
     /* Exact spread and weapon-weight carriers. Appended so every preceding C ABI
        field keeps its offset; the float mirrors above remain available to existing

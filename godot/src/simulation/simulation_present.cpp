@@ -93,6 +93,14 @@ void Simulation::fill_vehicle_trail_visual_rows(
 	opennova::world::fill_vehicle_trail_visual_rows(kernel_->world, r_rows);
 }
 
+void Simulation::fill_weapon_heat_glow_rows(
+		std::vector<opennova::world::WeaponHeatGlowRow> &r_rows) const {
+	r_rows.clear();
+	if (!kernel_)
+		return;
+	opennova::world::fill_weapon_heat_glow_rows(kernel_->world, r_rows);
+}
+
 Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// The record converts the entry's fixed 16.16 mission (x,y,z) to Godot
 	// (x, z, -y), like every entity read; no track (no kernel) reads as the
