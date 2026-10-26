@@ -4,8 +4,16 @@
 // stands apart). The model: a flags list read into a slot no line filled (a fault), the same after a file of longer
 // lines (none), a ';' attached ending the list, pdefs and a table row likewise. Through a session: two particle files
 // whose names put the flags first, an error that gates the build (particle.unfilled_token_slot, the use check);
-// renamed so the longer lines parse first, none.
+// renamed so the longer lines parse first, none. Through a validation whose paths read their files from a source of
+// their own (ProjectPaths::files: the game install as the game serves it, the game's own data's check): the same fault
+// from files the project's folder does not hold.
+#include <base/vfs/file_source.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/particle_token_slots.h>
+#include <editor/documents/validation_cache.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
+#include <editor/project/project_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -13,6 +21,8 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -105,12 +115,55 @@ int test_session() {
 	return 0;
 }
 
+// A source of its own, as the game install's view serves its files by their logical names.
+class Served final : public opennova::FileSource {
+public:
+	std::map<std::string, std::string> files;
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		const auto found = files.find(name);
+		if (found == files.end()) return false;
+		out.assign(found->second.begin(), found->second.end());
+		return true;
+	}
+	uint64_t stamp(const std::string &name) const override { return files.count(name) ? 1 : 0; }
+};
+
+int test_source() {
+	test_temp::TempDir dir("opennova_editor_particle_token_slots_source");
+	const std::string root = dir.file("install");
+	ProjectDocument document;
+	Diagnostic created;
+	TEST_EXPECT(create_project(root, "Served", "jo", document, created));
+	auto served = std::make_shared<Served>();
+	served->files["effects.ptl"] = kFlags;
+	served->files["ontable.ptl"] = table();
+	ProjectPaths paths = ProjectPaths::for_root(root);
+	paths.files = served;
+	AssetScan scan;
+	for (const auto &[name, text] : served->files) {
+		AssetEntry entry = editor_test::file_entry(name, name, AssetKind::Particles);
+		entry.size_bytes = text.size();
+		scan.entries.push_back(entry);
+	}
+	scan.index();
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput input{paths, document, scan, open};
+	AssetGraph graph;
+	ValidationCache cache;
+	size_t faults = 0;
+	for (const Diagnostic &d : validate_project(input, graph, cache))
+		if (d.code() == "particle.unfilled_token_slot") faults += d.asset == "effects.ptl" && d.line == 4 ? 1 : 100;
+	TEST_EXPECT(faults == 1);
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failed = 0;
 	failed += test_model();
 	failed += test_session();
+	failed += test_source();
 	if (failed == 0) std::printf("editor particle token slots: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }

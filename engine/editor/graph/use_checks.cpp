@@ -278,6 +278,17 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 	       " tokens come first (in this file, or in a particle file whose name sorts before it).";
 }
 
+// A file of the validation's scan as it sits, decoded as the game reads it (an SCR- or BFC-wrapped one unwrapped under
+// the target game's policy): through the paths' source by its logical name where they have one (the game install as
+// the game is served it, ProjectPaths::files), else the project's folder; false where it does not read.
+bool listed_bytes(const ValidationInput &input, const AssetEntry &asset, std::vector<uint8_t> &out) {
+	std::string error;
+	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
+	return (input.paths.files ? input.paths.files->read(asset.logical_name, out)
+	                          : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), out, error)) &&
+	       vfs_decode_payload(out, policy);
+}
+
 // The particle files as the game parses them at a mission's start (the .ptl and gore-set files the build packs, in the
 // archive walk's order [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's process-wide token
 // table: each list that reads a slot no line before it filled faults the game (documents/particle_token_slots.h), an
@@ -307,7 +318,7 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		const TextDocument *text = nullptr;
 	};
 	std::vector<Read> reads;
-	std::string key = input.paths.root + "\x1f" + std::to_string(policy);
+	std::string key = input.paths.root + "\x1f" + std::to_string(policy) + (input.paths.files ? "\x1fsource" : "");
 	for (const std::string &name : order) {
 		const AssetEntry *entry = input.scan.find(name);
 		if (!entry) continue;
@@ -330,11 +341,8 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		file.path = read.entry->relative_path;
 		if (read.text) {
 			file.bytes.assign(read.text->text().begin(), read.text->text().end());
-		} else {
-			std::string error;
-			if (!io::read_file_bytes(join_path(input.paths.root, read.entry->relative_path), file.bytes, error) ||
-			    !vfs_decode_payload(file.bytes, policy))
-				continue;
+		} else if (!listed_bytes(input, *read.entry, file.bytes)) {
+			continue;
 		}
 		files.push_back(std::move(file));
 	}
@@ -365,12 +373,7 @@ bool validation_text(const ValidationInput &input, const AssetEntry &asset, std:
 		}
 	}
 	std::vector<uint8_t> bytes;
-	std::string error;
-	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
-	if (!(input.paths.files ? input.paths.files->read(asset.logical_name, bytes)
-	                        : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), bytes, error)) ||
-	    !vfs_decode_payload(bytes, policy))
-		return false;
+	if (!listed_bytes(input, asset, bytes)) return false;
 	out.assign(bytes.begin(), bytes.end());
 	return true;
 }
