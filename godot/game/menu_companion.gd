@@ -117,17 +117,6 @@ func _edit_text(name: String, default_value := "") -> String:
 	return _driver.get_widget_text(id)
 
 
-# Fill a combo and pre-select the first row without firing the cascade (the fill is
-# programmatic; user selections come through widget_value_changed). select_row with
-# emit=false suppresses the relay; the _populating guard covers any incidental emit.
-func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
-	_populating = true
-	_driver.set_widget_items(combo, rows)
-	if rows.size() > 0:
-		_driver.select_row(combo, 0, false)
-	_populating = false
-
-
 # --- Weapon-slot icon mounts (the two loadout companions) -----------------------
 
 # Mount (once) and refresh one icon per weapon slot. `selected_for` maps a slot
