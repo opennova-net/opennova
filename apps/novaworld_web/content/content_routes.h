@@ -67,8 +67,12 @@ public:
 	// A history page's revisions: the default and the most.
 	static constexpr int kPageDefault = 50;
 	static constexpr int kPageMax = 200;
-	// The most a file's bytes may be through this program (each held in memory once).
-	static constexpr uint64_t kBodyMax = uint64_t(512) << 20;
+	// The most a file's bytes may be through this program's own blob routes (a directory's store,
+	// which signs no URLs: the local stack's and the tests'), each held in memory once: the cap
+	// the portal's nginx puts on every /api/ body (web/nginx.conf, client_max_body_size 32m), so
+	// the route refuses (413 too_large) exactly the sizes the proxy in front of it would. The S3
+	// store's transfers go straight to the store and take no cap here.
+	static constexpr uint64_t kBodyMax = uint64_t(32) << 20;
 
 	ContentRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 

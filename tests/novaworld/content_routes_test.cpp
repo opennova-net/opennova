@@ -10,12 +10,14 @@
 // the same parent told the head that won, one listing the head's files refused, one naming a file
 // the store lacks refused with its hash, a manifest out of its canonical form refused), its
 // history, manifest and files read back; a file the store got through no route of this program (as
-// an upload through the store's own URL puts one) held once a push names it; a game's project
-// made, refused, made public and renamed (a row change alone: the store names its objects by the
-// game's id, so a file uploaded under the old key serves a push under the new one) and deleted,
-// the route answering at once with its objects' game.purge queued, through the games' admin routes
-// (data_sets/data_set_routes.h); and a release built from a revision.
+// an upload through the store's own URL puts one) held once a push names it; a file past the blob
+// route's cap (the portal's /api/ body cap, web/nginx.conf's, which the test reads) refused 413;
+// a game's project made, refused, made public and renamed (a row change alone: the store names its
+// objects by the game's id, so a file uploaded under the old key serves a push under the new one)
+// and deleted, the route answering at once with its objects' game.purge queued, through the games'
+// admin routes (data_sets/data_set_routes.h); and a release built from a revision.
 
+#include "content/content_routes.h"
 #include "core/local_object_store.h"
 #include "data_sets/content_repository.h"
 #include "http_listener.h"
@@ -39,6 +41,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -418,6 +421,32 @@ int test_push(Harness &h) {
 	return 0;
 }
 
+// The blob route's cap is the portal's: web/nginx.conf's client_max_body_size in its /api/
+// location (the one proxy in front of web's routes), so the route refuses exactly what the proxy
+// would; one byte past it is 413 too_large, its bytes never put in the store.
+int test_body_cap(Harness &h) {
+	std::string conf, error;
+	TEST_EXPECT(io::read_file_text(
+			std::string(OPENNOVA_SOURCE_DIR) + "/web/nginx.conf", conf, error));
+	const size_t api = conf.find("location /api/ {");
+	TEST_EXPECT(api != std::string::npos);
+	const std::string directive = "client_max_body_size ";
+	const size_t at = conf.find(directive, api);
+	TEST_EXPECT(at != std::string::npos && at < conf.find('}', api));
+	const size_t number = at + directive.size();
+	const unsigned long megabytes = std::strtoul(conf.c_str() + number, nullptr, 10);
+	TEST_EXPECT(conf.find("m;", number) == conf.find_first_not_of("0123456789", number));
+	TEST_EXPECT((static_cast<uint64_t>(megabytes) << 20) == content::ContentRoutes::kBodyMax);
+
+	const std::string over(static_cast<size_t>(content::ContentRoutes::kBodyMax) + 1, 'o');
+	TEST_EXPECT(refused(h.upload("JO", sha_of(over), over), 413, "too_large"));
+	bool exists = true;
+	uint64_t size = 0;
+	TEST_EXPECT(
+			h.store.head(content::blob_key(h.jo, sha_of(over)), exists, size, error) && !exists);
+	return 0;
+}
+
 // A game's project through the games' admin routes (data_sets/data_set_routes.h): an expansion
 // of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
 // in its store, then the game made public and its key renamed, the file staying where it was (the
@@ -608,6 +637,7 @@ int main(int argc, char **argv) {
 			{ "who_reads_what", test_who_reads_what },
 			{ "who_pushes", test_who_pushes },
 			{ "push", test_push },
+			{ "body_cap", test_body_cap },
 			{ "game_projects", test_game_projects },
 			{ "release_route", test_release_route },
 		};
