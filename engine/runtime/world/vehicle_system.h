@@ -261,14 +261,15 @@ public:
     // [orig: Entity_InitAllFromModels @0x40E460]
     void run_weapon_slot_class_inits();
     const WeaponSlotState *resolve_mounted_ammo_slot(const Entity &mount) const;
-    // Resolve the EWeap MountSlot selected by retail's live route bit. A type-1
-    // vehicle uses its own embedded slot. An attached non-vehicle EWeap uses its
+    // Resolve the EWeap MountSlot selected by retail's live route bit. A PlayerControl row
+    // (def attrib 0x40) uses its own embedded slot. Any other EWeap uses its
     // own slot until redirect_to_parent_slot is set, then its groundEntity's slot,
     // read with no check of that entity; no groundEntity resolves null.
     // [orig: Entity_GetWeaponSlots @0x5460E0]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
     // The phase-8 mount-ammo record's slot: its writer and its reader each inline
-    // the route and, with the route bit set, repeat the setter's four groundEntity
+    // the route: a type-1 row its own slot whatever the route bit; a mountable gun its
+    // own slot, else, with the route bit set, its groundEntity's behind the setter's four
     // checks (designated_g_route_carrier); a failed check resolves no slot (the
     // writer's zero words, the reader's ignored words).
     // [orig: NetPacket_WritePlayerState @0x4FF6B0 (the route @0x4FFE18, the ground

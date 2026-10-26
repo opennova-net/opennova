@@ -288,11 +288,11 @@ const WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(const Entity &mo
     // cross-entity relationship proof below.
     if (!mount.primary_weapon_slot.redirect_to_parent_slot)
         return &mount.primary_weapon_slot;
-    // Stand-in note: the shared helper routes vehicles via the def+84 attrib
-    // bit 0x40 [orig: Entity_GetWeaponSlots @ 0x5460E0] while the phase-8
-    // writer keys def+92 type==1 [orig: @ 0x4FFE3F]; the shipped corpus stamps
-    // both together on every EWeap vehicle, so type==1 serves both sites.
-    if (mount.item_type == 1u)
+    // A PlayerControl row (def+0x54 attrib 0x40) keeps its own vehicle slot whatever the route
+    // bit says; the phase-8 writer's def+92 type == 1 test is that writer's alone
+    // (resolve_phase8_ammo_slot).
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6, +0x474 @0x5460FA]
+    if ((mount.item_attrib & kItemAttribPlayerControl) != 0u)
         return &mount.primary_weapon_slot;
 
     // The route bit sends the entity straight to its groundEntity's vehicle slot
@@ -316,13 +316,19 @@ WeaponSlotState *VehicleSystem::resolve_mounted_ammo_slot(Entity &mount) {
 }
 
 const WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(const Entity &mount) const {
-    // The route's groundEntity checks, which the shared helper never reads
-    // [orig: NetPacket_WritePlayerState @0x4FFE27..0x4FFE3F; NapiNPClientMsg_0x00A
-    //  @0x43050C..0x430524].
-    if (mount.primary_weapon_slot.redirect_to_parent_slot && mount.item_type != 1u &&
-            !designated_g_route_carrier(world_.registry.get(mount.ground_target)))
-        return nullptr;
-    return resolve_mounted_ammo_slot(mount);
+    // The writer's and the reader's own legs, not the shared helper's: the def and EWeap gate;
+    // a type-1 row (no mountable gun) its own vehicle slot whatever the route bit; a mountable
+    // gun its own slot with the route bit clear, else its groundEntity's behind the route's four
+    // checks (designated_g_route_carrier). Anything else writes the zero words.
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 - the gate @0x4FFE05 / @0x4FFE0B,
+    //  Entity_IsMountableGun @0x4FFE0F, the route bit @0x4FFE18 (own @0x4FFE1F), the ground
+    //  checks @0x4FFE27..0x4FFE3F, the type-1 leg @0x4FFE5F..0x4FFE65, the zero words
+    //  @0x4FFE7F; NapiNPClientMsg_0x00A @0x42FEC0 - @0x4304E5..0x43052E]
+    if (!mount.has_item_def || (mount.item_attrib & kItemAttribEweap) == 0u) return nullptr;
+    if (mount.item_type == 1u || !mount.primary_weapon_slot.redirect_to_parent_slot)
+        return &mount.primary_weapon_slot;
+    const Entity *ground = world_.registry.get(mount.ground_target);
+    return designated_g_route_carrier(ground) ? &ground->primary_weapon_slot : nullptr;
 }
 
 WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(Entity &mount) {

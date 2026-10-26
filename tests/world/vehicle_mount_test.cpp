@@ -2706,6 +2706,27 @@ void test_mounted_ammo_slot_route() {
           &direct_only.primary_weapon_slot);
     direct_only.primary_weapon_slot.redirect_to_parent_slot = true;
     CHECK(w.vehicles.resolve_mounted_ammo_slot(direct_only) == nullptr);
+    // A PlayerControl row (attrib 0x40) keeps its own slot under the route bit whatever its def
+    // type; a type-1 row without the attrib follows the route (here to no groundEntity).
+    // [orig: Entity_GetWeaponSlots @0x5460E0 - `test al, 40h` @0x5460F6, +0x474 @0x5460FA]
+    Entity controlled = direct_only;
+    controlled.item_type = 2;
+    controlled.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(controlled) == &controlled.primary_weapon_slot);
+    controlled.item_type = 1;
+    controlled.item_attrib = kItemAttribEweap;
+    CHECK(w.vehicles.resolve_mounted_ammo_slot(controlled) == nullptr);
+    // The phase-8 record keys the def type, not the attrib: a type-1 row writes its own slot
+    // under the route bit, a PlayerControl gun of another type routes to its groundEntity
+    // (here none: the zero words).
+    // [orig: NetPacket_WritePlayerState @0x4FF6B0 - Entity_IsMountableGun @0x4FFE0F, the
+    //  type-1 leg @0x4FFE5F..0x4FFE65, the ground checks @0x4FFE27..0x4FFE3F]
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == &controlled.primary_weapon_slot);
+    controlled.item_type = 2;
+    controlled.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == nullptr);
+    controlled.primary_weapon_slot.redirect_to_parent_slot = false;
+    CHECK(w.vehicles.resolve_phase8_ammo_slot(controlled) == &controlled.primary_weapon_slot);
 
     Entity parent;
     parent.kind = EntityKind::Item;
