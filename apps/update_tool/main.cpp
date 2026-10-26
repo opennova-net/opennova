@@ -230,7 +230,7 @@ int run_build(int argc, char **argv) {
 				line.command_file.c_str(), line.loose_rows, line.copy_rows, line.remove_rows,
 				line.blob_bytes);
 	std::printf("wrote %s (%llu bytes)\n", out.c_str(),
-			static_cast<unsigned long long>(bytes.size() + package_bytes));
+			static_cast<unsigned long long>(package_bytes));
 	return 0;
 }
 
