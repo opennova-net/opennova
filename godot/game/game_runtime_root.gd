@@ -28,10 +28,24 @@ static func is_headless() -> bool:
 	return DisplayServer.get_name() == "headless"
 
 
-func _ready() -> void:
+## The game's start, its first legs in the game's order and their one home: the command
+## line's init forces Num Lock on, saving its state for the exit (engine
+## controls::kVkNumLock carries the witness, D-NET-563), and only then does the start
+## read game.cfg (GameCfgStore, the first use of the block). False when that read sets
+## mpreset: the caller ends the process with exit code 0, before anything mounts, with
+## nothing saved and no shutdown, so Num Lock stays as the start forced it
+## (docs/gamecfg/game-cfg-re.md, the load; D-MNU-76). The launch checks and the
+## first-launch download ahead of it are OpenNova's own (ADR 0067) and touch no device.
+static func begin_game() -> bool:
+	LocalPlayerPresenter.start_process_num_lock()
 	if GameCfgStore.block().is_reset_exit():
-		get_tree().quit(0)
-		return
+		push_warning(
+				"GameRuntimeRoot: game.cfg's mpreset ends the process at the start (exit code 0)")
+		return false
+	return true
+
+
+func _ready() -> void:
 	if not LaunchFlags.product_supported():
 		if LaunchFlags.game_given():
 			push_error("OpenNova: unknown /game product: %s" % LaunchFlags.product())
@@ -58,6 +72,9 @@ func _ready() -> void:
 	if not has_content(resource_dir, LaunchFlags.loose_override_enabled(),
 			LaunchFlags.loose_root_allowed(), LaunchFlags.game()):
 		_show_bootstrap()
+		return
+	if not begin_game():
+		get_tree().quit(0)
 		return
 	RuntimeUpdates.begin_check()
 	if _can_embed_game_view():

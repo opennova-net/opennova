@@ -36,6 +36,28 @@ func test_embedding_decision_preserves_direct_runtime_fallbacks() -> void:
 			"a missing ImGui addon never blocks normal startup")
 
 
+func test_the_game_start_reads_game_cfg_after_num_lock_and_ends_on_mpreset() -> void:
+	# GameRuntimeRoot.begin_game is the start's one home (D-MNU-76): Num Lock's
+	# start, then the start's read of game.cfg in the working directory, a set
+	# mpreset answering false (the caller quits with 0) and a clear one true.
+	var dir := TestFs.cache_dir(self, "begin_game_cfg")
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", dir]))
+	var rows := [
+		["version = 29\r\nmpreset = 1\r\n", false],
+		["version = 29\r\nmpreset = 0\r\n", true],
+	]
+	for row in rows:
+		TestFs.write_text(self, dir.path_join("game.cfg"), row[0])
+		GameCfgStore.reset()
+		assert_eq(GameRuntimeRoot.begin_game(), row[1],
+				"mpreset %s" % ("clear" if row[1] else "set"))
+		assert_eq(FileAccess.get_file_as_string(dir.path_join("game.cfg")), row[0],
+				"the start's read writes nothing")
+	GameCfgStore.reset()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_bootstrap_requires_a_complete_packed_boot_set() -> void:
 	var dir := TestFs.cache_dir(self, "bootstrap_content")
 	assert_false(GameRuntimeRoot.has_content(dir), "a minimal download contains no game data yet")

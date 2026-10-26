@@ -115,6 +115,9 @@ func test_game_cfg_with_mpreset_ends_the_process_at_the_start() -> void:
 		log_text.contains("OpenNova: menu up from"),
 		"the process ends before the menu: %s" % log_text
 	)
+	assert_string_contains(log_text,
+			"GameRuntimeRoot: game.cfg's mpreset ends the process at the start (exit code 0)",
+			"the start's exit names itself (D-NET-310)")
 	assert_eq(FileAccess.get_file_as_string(cfg_path), text, "game.cfg is left as read")
 	assert_false(FileAccess.file_exists(dir.path_join("player.sav")), "no profile save")
 

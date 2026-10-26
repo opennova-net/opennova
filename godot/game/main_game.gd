@@ -296,21 +296,10 @@ func current_resource_root() -> ResourceRoot:
 
 
 func _ready() -> void:
-	var dir := LaunchFlags.resource_dir()
-	if dir.is_empty() and LaunchFlags.resource_dir_given():
-		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
-		get_tree().quit(2)
-		return
-	# The command line's init forces Num Lock on, saving its state for the exit
-	# (engine controls::kVkNumLock carries the witness, D-NET-563).
-	LocalPlayerPresenter.start_process_num_lock()
-	# The start's read of game.cfg (GameCfgStore, the first use of the block):
-	# a file that sets mpreset ends the process here with exit code 0, before
-	# anything mounts and with nothing saved (docs/gamecfg/game-cfg-re.md).
-	if GameCfgStore.block().is_reset_exit():
-		exit_process(0)
-		return
-	# The subsystems' init turns Scroll Lock off (the same witness).
+	# The launch checks, Num Lock's start and the start's read of game.cfg (its
+	# mpreset exit) ran in GameRuntimeRoot.begin_game, the process start's one home.
+	# The subsystems' init turns Scroll Lock off (engine controls::kVkNumLock
+	# carries the witness, D-NET-563).
 	LocalPlayerPresenter.start_process_scroll_lock()
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
@@ -1087,7 +1076,8 @@ func request_quit() -> void:
 
 
 ## The process exit on the cfg block's mpreset word: a read of game.cfg that
-## sets it (the start's, a mount's) or a session create that reads it
+## sets it (a mount's; the start's is GameRuntimeRoot.begin_game's) or a session
+## create that reads it
 ## (GameWorld.process_exit_requested). The process ends with `code` 0 there:
 ## nothing is saved (neither game.cfg nor the profile), the NovaWorld session
 ## the shell holds sends its goodbye burst alone, and the runtime comes down
