@@ -279,7 +279,21 @@ void test_authority_rounds() {
 
 } // namespace
 
+// The fire case's leg choice (world::weapon_fire_record_leg), the one home the game's records and
+// the weapon timing compiler share: the binding up runs the release leg; held, the press leg, or a
+// PowerThrow def's windup start from the keyboard alone.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - @0x4E07D9, @0x4E07E9, @0x4E08DC, @0x4E08FD,
+//  @0x4E090B]
+void test_fire_record_leg() {
+    CHECK(weapon_fire_record_leg(false, 0, true) == FireRecordLeg::kRelease);
+    CHECK(weapon_fire_record_leg(false, weapon_flag::kPowerThrow, true) == FireRecordLeg::kRelease);
+    CHECK(weapon_fire_record_leg(true, weapon_flag::kAuto, false) == FireRecordLeg::kPress);
+    CHECK(weapon_fire_record_leg(true, weapon_flag::kPowerThrow, true) == FireRecordLeg::kThrowStart);
+    CHECK(weapon_fire_record_leg(true, weapon_flag::kPowerThrow, false) == FireRecordLeg::kNone);
+}
+
 int main() {
+    test_fire_record_leg();
     test_hold_lengths();
     test_mid_fire_press_banks_only_while_held();
     test_mode_word();

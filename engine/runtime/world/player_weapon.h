@@ -42,6 +42,23 @@ enum : int32_t {
 };
 } // namespace weapon_flag
 
+// The fire row's record through the fire case (0x95), past its head, the cease fire and the
+// binocular view: the leg the record runs, by the binding's state at its dispatch and the
+// EquippedSlot def's flags. Held, the press leg, whose request a PowerThrow def replaces by its
+// windup's start, from the keyboard alone (a mouse or joystick press starts none); up, the
+// release leg. The one home of the choice: the game's records (LocalPlayer::fire_record) and
+// the weapon timing compiler's ideal frames both run it.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0x95: Input_IsBindingActive(0x95)
+//  @0x4E07D9, the release leg @0x4E07E9, the press leg @0x4E08DC (the PowerThrow sign bit
+//  @0x4E08FD, the device test @0x4E090B)]
+enum class FireRecordLeg : uint8_t { kRelease, kPress, kThrowStart, kNone };
+inline FireRecordLeg weapon_fire_record_leg(bool binding_down, int32_t def_flags,
+                                            bool from_keyboard) {
+    if (!binding_down) return FireRecordLeg::kRelease;
+    if ((def_flags & weapon_flag::kPowerThrow) == 0) return FireRecordLeg::kPress;
+    return from_keyboard ? FireRecordLeg::kThrowStart : FireRecordLeg::kNone;
+}
+
 // One drained presentation record — the per-tick anim/action payload the
 // shell's weapon-effects presenter consumes. Records stay in logic-tick order
 // until the embedder drains. world_position is the shooter's MISSION-space
