@@ -2751,6 +2751,46 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     CHECK(impacts[0].position.z == 1.0f);
 }
 
+// NoAge stops a round's aging only on the useownmove leg, by the round's own +0x114
+// copy: a ballistic noage round expires at its max age as a plain one does; a
+// useownmove noage round neither ages nor expires; a useownmove round without the
+// bit expires. [orig: Projectile_UpdatePhysics @0x4E9D70 - the +0x114 test
+//  @0x4E9F29..0x4E9F35 ahead of the useownmove decrement @0x4E9F37..0x4E9F4E; the
+//  ballistic tail's decrement @0x4EAA71..0x4EAA7F; RoundData_SpawnRound's copy
+//  @0x4EC615]
+void test_noage_stops_aging_only_on_the_useownmove_leg() {
+    const auto ticks_to_retire = [](bool own_move, bool noage, int32_t &age_out) {
+        Rig r;
+        AmmoTableEntry &ammo = r.world.tables.ammo.entries[0];
+        ammo.max_age_ticks = 3;
+        ammo.arm_age_ticks = 0;
+        ammo.notarmmed_ammo.clear();
+        ammo.flags = (own_move ? kAmmoFlagUseOwnMove : 0u) | (noage ? kAmmoFlagNoAge : 0u);
+        RoundSpawnParams p;
+        p.owner = r.shooter;
+        p.shooter_handle = r.shooter.packed;
+        p.origin = {0.0f, 50.0f, 20.0f}; // clear of the target
+        p.ammo_index = 0;
+        const int slot = r.world.round_sim.spawn(r.world, p);
+        CHECK(slot >= 0);
+        if (slot < 0) return -1;
+        const LiveRound &round = r.world.round_sim.rounds[static_cast<size_t>(slot)];
+        CHECK(round.max_age_ticks == 3 && round.noage == noage);
+        for (int tick = 1; tick <= 20; ++tick) {
+            r.world.round_sim.tick(r.world, nullptr);
+            if (!round.active) return tick;
+            age_out = round.age_ticks;
+        }
+        return 0; // still flying
+    };
+    int32_t age = -1;
+    const int plain = ticks_to_retire(false, false, age);
+    CHECK(plain > 0);
+    CHECK(ticks_to_retire(false, true, age) == plain);
+    CHECK(ticks_to_retire(true, false, age) > 0);
+    CHECK(ticks_to_retire(true, true, age) == 0 && age == 0);
+}
+
 // A round that strikes the water before it arms splashes with its notarmmedammo
 // def's row and leaves no dud child; an armed one, or one whose dud name is empty,
 // missing or the table's first def (the lookup's 0, a miss), keeps its own row.
@@ -4340,6 +4380,7 @@ static const NamedTest kTests[] = {
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
+    {"test_noage_stops_aging_only_on_the_useownmove_leg", test_noage_stops_aging_only_on_the_useownmove_leg},
     {"test_entity_dud_naming_the_first_def_is_a_miss", test_entity_dud_naming_the_first_def_is_a_miss},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},

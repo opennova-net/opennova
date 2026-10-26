@@ -1016,9 +1016,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.prev_z_q16 = params.origin.z.q16;
     r.vel.set_q16(launch_q16); // [orig: +0x98 / +0x9C / +0xA0 @0x4ec5dd..0x4ec60d]
     r.age_ticks = 0;
-    // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
-    // ammo max_age (already in 62 Hz ticks).
-    r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
+    // Every round's lifetime is the ammo's max_age (already in 62 Hz ticks); noage
+    // stops the aging only on the useownmove leg (the tick's age step), so it never
+    // lengthens it here.
+    r.max_age_ticks = ammo->max_age_ticks;
     // The +0x114 copy of the ammo flags [orig: @0x4EC615].
     r.noage = (ammo->flags & kAmmoFlagNoAge) != 0;
     r.priority = (ammo->flags & def::DEF_AMMO_FLAG_PRIORITY) != 0;
@@ -1625,12 +1626,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             retire_round(r);
             continue;
         }
-        ++r.age_ticks;
-
-        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
-
         const AmmoTableEntry *ammo = world.tables.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
+        // The age step. The useownmove leg skips its decrement while the round's
+        // +0x114 copy holds noage (0x4000); the ballistic tail's decrement tests no
+        // such bit, so a ballistic noage round ages and expires as any other. A motor
+        // that clears noage (a charge's rest) seeds the lifetime the decrement then
+        // takes one from. [orig: Projectile_UpdatePhysics @0x4E9D70 - the +0x114 test
+        //  @0x4E9F29..0x4E9F35 ahead of the decrement @0x4E9F37..0x4E9F4E; the ballistic
+        //  tail @0x4EAA71..0x4EAA7F]
+        if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 || !r.noage) ++r.age_ticks;
+
+        if (r.trail_slot >= 0) trails.append(r.trail_slot, trail_anchor(r));
 
         if (ammo && r.guided_family != GuidedFamily::None) tick_guided(world, r, *ammo, authoritative);
         // The +452 call, the flares' and rokt's [orig: Projectile_UpdatePhysics @0x4E9D70 (@0x4EA085)].
@@ -1674,9 +1681,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const bool has_move_effect =
                 ammo != nullptr && !ammo->impact_effects[1].effect.empty();
             if ((ammo_flags & kAmmoFlagUseOwnMove) != 0) {
-                const int32_t life_ticks =
-                    r.max_age_ticks == INT32_MAX ? INT32_MAX
-                                                 : r.max_age_ticks - r.age_ticks;
+                const int32_t life_ticks = r.max_age_ticks - r.age_ticks;
                 const bool clipped = round_effect_should_release_for_water(
                     ammo_flags, r.pos.z.q16, world.env.water_z);
                 if (clipped) {
@@ -1688,9 +1693,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             } else {
                 // The life the ballistic test reads is this tick's
                 // pre-decrement value (age was stepped above).
-                const int32_t life_before =
-                    r.max_age_ticks == INT32_MAX ? INT32_MAX
-                                                 : r.max_age_ticks - (r.age_ticks - 1);
+                const int32_t life_before = r.max_age_ticks - (r.age_ticks - 1);
                 if (round_effect_should_spawn(has_move_effect, r.move_effect_live,
                                               life_before, /*clipped_by_water=*/false)) {
                     r.move_effect_live = true;
@@ -1873,10 +1876,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 dud_replacement = r;
                 dud_replacement.ammo_index = dud;
                 dud_replacement.pos.set_q16(impact_q16);
-                dud_replacement.max_age_ticks =
-                    ((dud_ammo->flags & kAmmoFlagNoAge) != 0)
-                        ? INT32_MAX
-                        : dud_ammo->max_age_ticks;
+                dud_replacement.max_age_ticks = dud_ammo->max_age_ticks;
                 dud_replacement.trail_slot = -1;
                 has_dud_replacement = true;
             }

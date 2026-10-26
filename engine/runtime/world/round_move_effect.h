@@ -16,12 +16,13 @@ namespace opennova::world {
 // the live particles drain).
 //
 // The round's OWN life is not here: +0x2AC is seeded from the ammo's max_age
-// [orig: @0x4EC679], decremented each aging tick [orig: @0x4E9F37..0x4E9F4E,
-//  skipped under ammo flag 0x4000 `noage` @0x4E9F2F] and retired at <= 0 by
-// the Projectile_UpdatePhysics head [orig: @0x4E9DA7..0x4E9DAE] — so a
-// max_age of 0 retires the round on its first tick and "never times out" is
-// the noage flag. That leg is the live world/round_sim.cpp port
-// (`max_age_ticks`, `kAmmoFlagNoAge`, the expiry test).
+// [orig: @0x4EC679], decremented each aging tick [orig: the useownmove leg
+//  @0x4E9F37..0x4E9F4E, skipped while the round's +0x114 copy holds 0x4000 `noage`
+//  @0x4E9F2F; the ballistic tail @0x4EAA71..0x4EAA7F, which tests no such bit] and
+// retired at <= 0 by the Projectile_UpdatePhysics head [orig: @0x4E9DA7..0x4E9DAE]
+// — so a max_age of 0 retires the round on its first tick and "never times out"
+// is noage on a useownmove round. That leg is the live world/round_sim.cpp port
+// (`max_age_ticks`, LiveRound::noage, the age step, the expiry test).
 
 // The emitter is spawned LAZILY [orig: the `useownmove` leg @0x4E9F58..
 //  0x4E9F94; the ballistic leg @0x4EA8AE..0x4EA8D3]: an authored effect
