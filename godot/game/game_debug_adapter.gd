@@ -419,6 +419,12 @@ func _menu_shell() -> MenuShell:
 	return _shell.get_menu_shell() if _shell != null else null
 
 
+## The shell's in-world armory while it is open, else null.
+func _open_armory() -> ArmoryPresenter:
+	var armory := _shell.get_armory_presenter() if _shell != null else null
+	return armory if armory != null and armory.is_open() else null
+
+
 func _resource_root() -> ResourceRoot:
 	var menu := _menu_shell()
 	return menu.get_resource_root() if menu != null else null
@@ -437,44 +443,51 @@ static func _mission_in_catalog(root: ResourceRoot, mission: String) -> bool:
 
 func mcp_game_menu(args: Dictionary) -> Variant:
 	var shell := _menu_shell()
-	if shell == null:
+	# The in-world armory, while it is up, is the menu the player drives (it draws over
+	# every HUD element): the ops but screen and open reach it, through the same seams.
+	var armory := _open_armory()
+	if shell == null and armory == null:
 		return {"error": "no menu shell"}
+	var surface: Variant = armory if armory != null else shell
 	var op := String(args.get("op", ""))
 	match op:
 		"state":
-			return shell.menu_snapshot(bool(args.get("widgets", true)))
+			return surface.menu_snapshot(bool(args.get("widgets", true)))
 		"press":
 			var target := String(args.get("name", ""))
 			if target.is_empty():
 				return {"error": "press requires name"}
-			if not shell.menu_press(target):
+			if not surface.menu_press(target):
 				return {"error": "no widget named '%s'" % target}
-			return shell.menu_snapshot(false)
+			return surface.menu_snapshot(false)
 		"press_at", "move_at", "hold_at":
 			# press_at: a press and its release there; move_at / hold_at: one
 			# sample there with the button up / held, as a motion is.
 			if not args.has("x") or not args.has("y"):
 				return {"error": "%s requires x and y (design coords)" % op}
 			var at := Vector2(float(args["x"]), float(args["y"]))
-			var hit := shell.menu_press_at(at) if op == "press_at" \
-					else shell.menu_move_at(at, op == "hold_at")
-			var out := shell.menu_snapshot(false)
+			var hit: int = surface.menu_press_at(at) if op == "press_at" \
+					else surface.menu_move_at(at, op == "hold_at")
+			var out: Dictionary = surface.menu_snapshot(false)
 			out["hit_index"] = hit
 			return out
 		"click_at":
 			if not args.has("x") or not args.has("y"):
 				return {"error": "click_at requires x and y (design coords)"}
-			if not shell.menu_click_at(Vector2(float(args["x"]), float(args["y"]))):
+			if not surface.menu_click_at(Vector2(float(args["x"]), float(args["y"]))):
 				return {"error": "menu not visible"}
-			return shell.menu_snapshot(false)
+			return surface.menu_snapshot(false)
 		"key":
 			if not args.has("keycode"):
 				return {"error": "key requires keycode"}
-			var handled := shell.menu_key(
+			var handled: bool = surface.menu_key(
 					int(args["keycode"]), int(args.get("unicode", 0)))
-			var out2 := shell.menu_snapshot(false)
+			var out2: Dictionary = surface.menu_snapshot(false)
 			out2["handled"] = handled
 			return out2
+		"screen", "open" when armory != null:
+			return {"error": "the armory (weapon.mnu WEAPON) is up: %s is the shell menu's; "
+					% op + "game_control resume closes it"}
 		"screen":
 			var screen := String(args.get("name", ""))
 			if screen.is_empty():

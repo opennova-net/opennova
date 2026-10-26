@@ -230,10 +230,11 @@ func _loaded_remote_transition_skeletal() -> SkeletalAnim:
 	return sk
 
 
-func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> void:
+func test_emplaced_pose_leaves_the_right_hand_to_the_skin() -> void:
 	# Retail zeros model bone 16 (BN17 R Hand) while an organic occupies a
-	# controller/gunner/driver parent slot. The personal weapon is baked into the
-	# character mesh, so this is a skeletal collapse, not a child-node visibility gate.
+	# controller/gunner/driver parent slot; the personal weapon is baked into the
+	# character mesh. The fold is the bone walk's row, which our skin carries
+	# (ObjectModel's collapsed bones, below); the clip pose itself is untouched.
 	# [orig: Entity_BuildBoneTransformMatrices special rows; world-wac-ai-re.md §14.1]
 	var data := _open(PERSON)
 	var root := ResourceRoot.new()
@@ -247,20 +248,12 @@ func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> vo
 	var deltas: Array = []
 	for _i in range(9):
 		deltas.append(Basis.IDENTITY)
-	var normal: Array = sk.eval_pose_overlay(
-			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, false)
-	var mounted: Array = sk.eval_pose_overlay(
-			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0, true)
-	var normal_hand: Transform3D = normal[16]
-	var mounted_hand: Transform3D = mounted[16]
-	assert_true(mounted_hand.basis.x.is_zero_approx()
-			and mounted_hand.basis.y.is_zero_approx()
-			and mounted_hand.basis.z.is_zero_approx(),
-			"mounted BN17 has the zero-scale transform retail uses to clip the baked weapon")
-	assert_true(mounted_hand.origin.is_equal_approx(normal_hand.origin),
-			"the clip pose preserves BN17's sampled local joint")
-	assert_true(normal_hand.is_equal_approx(sk.eval_pose("anim_idle", 0.0)[16]),
-			"leaving the emplaced weapon restores BN17's authored pose")
+	var posed: Array = sk.eval_pose_overlay(
+			"anim_idle", 0.0, sk.get_overlay_classes(), deltas, "", 0.0)
+	var hand: Transform3D = posed[16]
+	assert_false(hand.basis.x.is_zero_approx(), "the clip pose keeps BN17's authored basis")
+	assert_true(hand.is_equal_approx(sk.eval_pose("anim_idle", 0.0)[16]),
+			"the identity overlay leaves BN17 as the clip poses it")
 
 
 func _char_model_at(data: ObjectData, skeletal: SkeletalAnim,
@@ -281,12 +274,11 @@ func _char_model_at(data: ObjectData, skeletal: SkeletalAnim,
 # registered SkinReference that headless GUT does not create reliably, so this
 # keeps the regression deterministic while still measuring deformed triangles,
 # rather than inferring fidelity from one bone transform.
-func _skinned_geometry_metrics(data: ObjectData, skeleton: Skeleton3D) -> Dictionary:
+func _skinned_geometry_metrics(data: ObjectData, model) -> Dictionary:
+	var skeleton: Skeleton3D = model.get_skeleton()
 	var matrices: Array[Transform3D] = []
 	for bone in range(skeleton.get_bone_count()):
-		matrices.append(skeleton.global_transform
-				* skeleton.get_bone_global_pose(bone)
-				* skeleton.get_bone_global_rest(bone).affine_inverse())
+		matrices.append(skeleton.global_transform * model.get_bone_skin_transform(bone))
 
 	var bounds := AABB()
 	var have_bounds := false
@@ -362,8 +354,8 @@ func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 	await get_tree().process_frame
 	authored_model.get_skeleton().force_update_all_bone_transforms()
 	collapsed_model.get_skeleton().force_update_all_bone_transforms()
-	var authored := _skinned_geometry_metrics(data, authored_model.get_skeleton())
-	var collapsed := _skinned_geometry_metrics(data, collapsed_model.get_skeleton())
+	var authored := _skinned_geometry_metrics(data, authored_model)
+	var collapsed := _skinned_geometry_metrics(data, collapsed_model)
 
 	assert_gt(int(authored.right_hand_vertices), 0,
 			"the fixture has vertices influenced by retail's BN17 R Hand row")
@@ -377,11 +369,10 @@ func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 
 
 func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
-	# The evaluator's zero-scale BN17 pose is a clip marker, not a world-space
-	# destination. Exercise ObjectModel's no-overlay fallback at a non-zero
-	# placement: the owner must collapse the bone at its current joint. Sending
-	# partially weighted vertices to world origin stretches triangles across the
-	# frame instead of clipping the baked weapon.
+	# ObjectModel folds BN17 in the skin at a non-zero placement, with no overlay:
+	# the bone collapses at its current joint. Sending partially weighted
+	# vertices to world origin would stretch triangles across the frame instead
+	# of clipping the baked weapon.
 	var data := _open(PERSON)
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
@@ -399,9 +390,7 @@ func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	await get_tree().process_frame
 	var skeleton: Skeleton3D = model.get_skeleton()
 	skeleton.force_update_all_bone_transforms()
-	var authored_hand := (skeleton.global_transform
-			* skeleton.get_bone_global_pose(16)
-			* skeleton.get_bone_global_rest(16).affine_inverse())
+	var authored_hand: Transform3D = skeleton.global_transform * model.get_bone_skin_transform(16)
 	var authored_joint := (skeleton.global_transform
 			* skeleton.get_bone_global_pose(16).origin)
 
@@ -409,9 +398,7 @@ func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	skeleton.force_update_all_bone_transforms()
-	var collapsed_hand := (skeleton.global_transform
-			* skeleton.get_bone_global_pose(16)
-			* skeleton.get_bone_global_rest(16).affine_inverse())
+	var collapsed_hand: Transform3D = skeleton.global_transform * model.get_bone_skin_transform(16)
 	assert_true(collapsed_hand.basis.x.is_zero_approx()
 			and collapsed_hand.basis.y.is_zero_approx()
 			and collapsed_hand.basis.z.is_zero_approx(),
@@ -423,11 +410,143 @@ func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	skeleton.force_update_all_bone_transforms()
-	var restored_hand := (skeleton.global_transform
-			* skeleton.get_bone_global_pose(16)
-			* skeleton.get_bone_global_rest(16).affine_inverse())
+	var restored_hand: Transform3D = skeleton.global_transform * model.get_bone_skin_transform(16)
 	assert_true(restored_hand.is_equal_approx(authored_hand),
 			"dismount restores the authored hand transform after a joint-local collapse")
+
+
+# A person's cut sections (the +0x134 section word a dismemberment cut sets) fold
+# their bones in the skin: a cut bone collapses at its joint, and a child of one
+# keeps turning as it did with its joint on that fold point, so a cut clone's hidden
+# hips leave its torso drawn (anim::collapse_bone_rows carries the witness: retail
+# zeroes the row before its fixed base matrix and places every pivot through the
+# parent's final row). Clearing the cut restores the authored skin.
+# [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (@0x4B1F10..0x4B1F31,
+#  @0x4B201E..0x4B20C3)]
+func test_cut_sections_fold_bones_and_their_children_keep_turning() -> void:
+	var data := _open(PERSON)
+	var root := ResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := SkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var model = ObjectModel.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.set_object_data(data)
+	model.play_body_clip_at("anim_idle", 0)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var skeleton: Skeleton3D = model.get_skeleton()
+	skeleton.force_update_all_bone_transforms()
+	# A bone with a child: the neck under the head (§14.2's BN14 / BN15).
+	var cut := -1
+	var child := -1
+	for bone in range(skeleton.get_bone_count()):
+		var parent := skeleton.get_bone_parent(bone)
+		if parent > 0:
+			cut = parent
+			child = bone
+	assert_gt(cut, 0, "the rig has a bone with a parent that is not the root")
+	var authored: Array[Transform3D] = []
+	for bone in range(skeleton.get_bone_count()):
+		authored.append(model.get_bone_skin_transform(bone))
+	var cut_joint: Vector3 = authored[cut] * skeleton.get_bone_global_rest(cut).origin
+
+	model.set_cut_sections(1 << cut)
+	assert_eq(model.get_cut_sections(), 1 << cut)
+	var folded: Transform3D = model.get_bone_skin_transform(cut)
+	assert_true(folded.basis.x.is_zero_approx() and folded.basis.y.is_zero_approx()
+			and folded.basis.z.is_zero_approx(), "the cut bone folds to nothing")
+	assert_true(folded.origin.is_equal_approx(cut_joint), "it folds at its joint")
+	var turned: Transform3D = model.get_bone_skin_transform(child)
+	assert_true(turned.basis.is_equal_approx(authored[child].basis),
+			"its child keeps turning as it did")
+	assert_true((turned * skeleton.get_bone_global_rest(child).origin).is_equal_approx(cut_joint),
+			"and its child's joint lands on the fold point")
+
+	model.set_cut_sections(0)
+	for bone in range(skeleton.get_bone_count()):
+		assert_true(model.get_bone_skin_transform(bone).is_equal_approx(authored[bone]),
+				"clearing the cut restores bone %d's skin" % bone)
+
+
+# A clone keeps one section and folds the rest: a pose written after the fold
+# was solved (a presenter's clip-phase stamp) must fold over the pose the
+# skeleton settles on, not the one the binds were solved for.
+func test_a_pose_written_after_the_fold_folds_where_the_skeleton_settles() -> void:
+	var data := _open(PERSON)
+	var root := ResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var sk := SkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm",
+			data.get_bone_origins(), data.get_bone_parents()))
+	var model = ObjectModel.new()
+	add_child_autofree(model)
+	model.set_skeletal_anim(sk)
+	model.set_object_data(data)
+	model.play_body_clip_at("anim_idle", 0)
+	await get_tree().process_frame
+	var skeleton: Skeleton3D = model.get_skeleton()
+	# The deepest bone stays; every bone above it folds.
+	var keep := -1
+	var depth := -1
+	for bone in range(skeleton.get_bone_count()):
+		var d := 0
+		var up := skeleton.get_bone_parent(bone)
+		while up >= 0:
+			d += 1
+			up = skeleton.get_bone_parent(up)
+		if d > depth:
+			depth = d
+			keep = bone
+	assert_gt(depth, 2, "the rig has a bone three deep")
+	var mask := 0
+	for bone in range(skeleton.get_bone_count()):
+		if bone != keep:
+			mask |= 1 << bone
+	model.set_cut_sections(mask)
+	await get_tree().process_frame
+
+	# A writer the fold never saw: the kept bone's parent and the kept bone turn.
+	var mid := skeleton.get_bone_parent(keep)
+	skeleton.set_bone_pose_rotation(mid,
+			skeleton.get_bone_pose_rotation(mid) * Quaternion(Vector3.UP, 0.8))
+	skeleton.set_bone_pose_rotation(keep,
+			skeleton.get_bone_pose_rotation(keep) * Quaternion(Vector3.RIGHT, 0.5))
+	await get_tree().process_frame
+
+	var landed := _fold_points(skeleton)
+	for bone in range(skeleton.get_bone_count()):
+		var skin: Transform3D = model.get_bone_skin_transform(bone)
+		if bone == keep:
+			var own: Transform3D = skeleton.get_bone_global_pose(bone) \
+					* skeleton.get_bone_global_rest(bone).affine_inverse()
+			assert_true(skin.basis.is_equal_approx(own.basis), "the kept bone keeps turning")
+			assert_true((skin * skeleton.get_bone_global_rest(bone).origin).is_equal_approx(
+					landed[bone]), "its joint lands on its parent's fold point")
+			continue
+		assert_true(skin.basis.x.is_zero_approx() and skin.basis.y.is_zero_approx()
+				and skin.basis.z.is_zero_approx(), "bone %d folds to nothing" % bone)
+		assert_true(skin.origin.is_equal_approx(landed[bone]),
+				"bone %d folds where the settled pose puts it" % bone)
+
+
+# Where each bone's joint lands under the current pose with every bone above it
+# folded (anim::collapse_bone_rows over the skin's rest binds): a root at its own
+# posed joint, a child carried by its parent's fold.
+func _fold_points(skeleton: Skeleton3D) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for bone in range(skeleton.get_bone_count()):
+		var joint := skeleton.get_bone_global_rest(bone).origin
+		var at: Vector3 = skeleton.get_bone_global_pose(bone).origin
+		var parent := skeleton.get_bone_parent(bone)
+		if parent >= 0 and parent < bone:
+			var parent_skin: Transform3D = skeleton.get_bone_global_pose(parent) \
+					* skeleton.get_bone_global_rest(parent).affine_inverse()
+			at += out[parent] - parent_skin * joint
+		out.append(at)
+	return out
 
 
 func _bone_poses(skel: Skeleton3D) -> Array:
@@ -611,7 +730,7 @@ func test_primary_blend_composes_weapon_channel_then_aim_overlay_once() -> void:
 			"anim_idle", idle_seconds,
 			"anim_walk_forward", walk_seconds, 0.35,
 			skeletal.get_overlay_classes(), deltas,
-			"anim_run_forward", weapon_seconds, false)
+			"anim_run_forward", weapon_seconds)
 	_assert_skeleton_pose_matches(
 			model.get_skeleton(), expected,
 			"primary blend then weapon mask then aim overlay")
@@ -1121,7 +1240,7 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 
 	var playhead := 0.37
 	sk.pose_skeleton(native_skel, "anim_reset", playhead, 0,
-			PackedInt32Array(), [], "", 0.0, false)
+			PackedInt32Array(), [], "", 0.0)
 	var pose: Array = sk.eval_pose("anim_reset", playhead, 0)
 	var count: int = mini(pose.size(), script_skel.get_bone_count())
 	assert_gt(count, 16, "pose covers the rig through bone 16")
@@ -1146,11 +1265,3 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 		var ds: float = native_skel.get_bone_pose_scale(i).distance_to(
 				script_skel.get_bone_pose_scale(i))
 		assert_lt(ds, 0.00001, "bone %d scale matches" % i)
-
-	# The BN17 collapse branch: zero scale, identity rotation, sampled origin.
-	sk.pose_skeleton(native_skel, "anim_reset", playhead, 0,
-			PackedInt32Array(), [], "", 0.0, true)
-	assert_eq(native_skel.get_bone_pose_scale(16), Vector3.ZERO,
-			"collapse_right_hand zero-scales bone 16")
-	assert_eq(native_skel.get_bone_pose_rotation(16), Quaternion.IDENTITY,
-			"collapse_right_hand clears bone 16 rotation")

@@ -1011,6 +1011,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// The mounted right-hand collapse rides its own packed field; edge-gated to
 	// the value change like the placed walk.
 	stamp_right_hand_collapsed(model, p, base, row.rhc);
+	stamp_cut_sections(model, p, base, row.cut_sections);
 	// Aim overlay: apply while valid, clear only on the valid->invalid edge.
 	// The apply itself is input-gated: identical overlay angles re-dispatch
 	// the identical delta set, so only changed inputs build the 9-basis Array.

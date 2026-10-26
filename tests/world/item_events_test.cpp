@@ -998,13 +998,14 @@ int test_chel_rotor_hidden_sections() {
     return 0;
 }
 
-// Only the person bone walk drops a +0x134 section from the draw: a building's
-// shot-out or blast-broken section and a vehicle's stay drawn (their world
-// callbacks collapse the +0x138 piece word alone), while a person's hides.
+// Only the person bone walk drops a +0x134 section from the draw, and it folds the
+// section's bone rather than hiding a part (PF_CUT_SECTIONS): a building's shot-out
+// or blast-broken section and a vehicle's stay drawn (their world callbacks
+// collapse the +0x138 piece word alone), and no part hides for a person's either.
 // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D);
 //  BoneCallback_bldg_World @0x4E21A0 (the read @0x4E22CF);
 //  Entity_BuildDeathSectionTransforms @0x492AF0 (the test @0x492C8D)]
-int test_section_mask_draws_only_on_persons() {
+int test_section_mask_hides_no_person_part() {
     Entity building;
     building.kind = EntityKind::Building;
     building.bldg_section_pivot = true;
@@ -1021,13 +1022,13 @@ int test_section_mask_draws_only_on_persons() {
     Entity person;
     person.kind = EntityKind::Organic;
     person.section_mask = 0x00010002u;
-    CHECK(item_hidden_sections(person) == 0x00010002u);
+    CHECK(item_hidden_sections(person) == 0);
     return 0;
 }
 
 int main() {
     if (test_chel_rotor_hidden_sections() != 0) return 1;
-    if (test_section_mask_draws_only_on_persons() != 0) return 1;
+    if (test_section_mask_hides_no_person_part() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
