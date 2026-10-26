@@ -2751,6 +2751,92 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     CHECK(impacts[0].position.z == 1.0f);
 }
 
+// A round that strikes the water before it arms splashes with its notarmmedammo
+// def's row and leaves no dud child; an armed one, or one whose dud name is empty,
+// missing or the table's first def (the lookup's 0, a miss), keeps its own row.
+// [orig: Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C32 (the zero test
+//  @0x4E9C22..0x4E9C24), the call @0x4E9D3E]
+void test_pre_arm_water_splash_takes_the_dud_row() {
+    for (const int arm_age : {5, 0}) {
+        for (const char *dud_name : {"SPLASH_DUD", "", "NOT_IN_THE_TABLE", "first_def"}) {
+            HeapWorldFixture fixture;
+            World &world = fixture.world;
+            world.registry.configure_pool(0, 4);
+            AmmoTableEntry first;
+            first.name = "FIRST_DEF";
+            first.valid = true;
+            first.velocity = 620;
+            first.max_age_ticks = 20;
+            AmmoTableEntry ammo;
+            ammo.name = "SPLASH";
+            ammo.valid = true;
+            ammo.velocity = 620;
+            ammo.max_age_ticks = 20;
+            ammo.arm_age_ticks = arm_age;
+            ammo.notarmmed_ammo = dud_name;
+            AmmoTableEntry dud;
+            dud.name = "SPLASH_DUD";
+            dud.valid = true;
+            dud.velocity = 1;
+            dud.max_age_ticks = 7;
+            world.tables.ammo.entries = {first, ammo, dud};
+            std::vector<uint16_t> heights(512u * 512u, 0);
+            std::vector<int> sectors(256u, 1);
+            opennova::terrain::TerrainHeightField flat;
+            flat.heightmap = heights.data();
+            flat.dim = 512;
+            flat.layout.sector_grid = sectors.data();
+            CollisionWorld collision;
+            collision.terrain = &flat;
+            collision.build_tick_tables(world);
+            world.collision = &collision;
+            world.env.water_z = 1 << 16;
+            RoundSpawnParams params;
+            params.origin = {10.0f, -20.0f, 3.0f};
+            params.ammo_index = 1;
+            const int slot = world.round_sim.spawn(world, params);
+            CHECK(slot >= 0);
+            if (slot < 0) continue;
+            world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+            world.round_sim.tick(world, &flat, &collision);
+            const auto &impacts = world.round_sim.impacts;
+            CHECK(impacts.size() == 1);
+            if (impacts.size() != 1) continue;
+            CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
+            const bool dud_row = arm_age == 5 && std::strcmp(dud_name, "SPLASH_DUD") == 0;
+            CHECK(impacts[0].ammo_index == (dud_row ? 2 : 1));
+            // No dud child replaces the round: whatever flies on is the round itself.
+            for (const auto &round : world.round_sim.rounds)
+                if (round.active) CHECK(round.ammo_index == 1);
+        }
+    }
+}
+
+// The entity legs take the lookup's 0 for a miss too: a pre-arm round whose dud
+// name is the table's first def keeps its own impact row (the Rig's target is a
+// person, the person handler's test). [orig: Projectile_HandleTerrainImpact_0
+//  @0x4E98F0 - `test eax,eax; jz` @0x4E9992..0x4E9994; the item handler
+//  Projectile_HandleEntityImpact @0x4E9390 - `cmp esi,ecx; jz` @0x4E9441..0x4E9443]
+void test_entity_dud_naming_the_first_def_is_a_miss() {
+    Rig r;
+    auto &entries = r.world.tables.ammo.entries;
+    entries.push_back(entries[0]);
+    entries[2].name = "ARMED_TWO";
+    entries[2].notarmmed_ammo = "armed"; // entry 0, matched ignoring case
+    RoundSpawnParams p;
+    p.owner = r.shooter;
+    p.shooter_handle = r.shooter.packed;
+    p.origin = {0.0f, 0.0f, 0.9f};
+    p.ammo_index = 2;
+    CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
+    r.world.round_sim.tick(r.world, nullptr); // age 1 < arm age 2
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    if (r.world.round_sim.impacts.size() == 1)
+        CHECK(r.world.round_sim.impacts[0].ammo_index == 2);
+    for (const auto &round : r.world.round_sim.rounds)
+        if (round.active) CHECK(round.ammo_index == 2);
+}
+
 void test_terrain_stop_records_the_round() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -4253,6 +4339,8 @@ static const NamedTest kTests[] = {
     {"test_terrain_impact_emits_permanent_scorch", test_terrain_impact_emits_permanent_scorch},
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
+    {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
+    {"test_entity_dud_naming_the_first_def_is_a_miss", test_entity_dud_naming_the_first_def_is_a_miss},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},
     {"test_visual_dynamic_proxy_excludes_shooter_self_slot", test_visual_dynamic_proxy_excludes_shooter_self_slot},

@@ -1838,14 +1838,29 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // entity, so the same lifecycle is projected as an in-slot logical child:
         // owner/kinematics/elapsed age survive, the dud definition supplies the new
         // lifetime, and the trail slot at retail +0x2B4 (exactly byte 692) does not.
-        const bool not_armed = entity_hit && ammo != nullptr &&
-                               r.age_ticks < ammo->arm_age_ticks;
+        const bool pre_arm = ammo != nullptr && r.age_ticks < ammo->arm_age_ticks;
+        const bool not_armed = entity_hit && pre_arm;
         int32_t impact_ammo_index = r.ammo_index;
         LiveRound dud_replacement;
         bool has_dud_replacement = false;
+        // A pre-arm round that strikes the water splashes with the dud def's row the
+        // same way, and leaves no child: the water leg only swaps the def it hands the
+        // effect processor [orig: Projectile_SpawnImpactEffect @0x4E9B80 - the age
+        // against AmmoDef+0x0C @0x4E9BF6..0x4E9C08, the AmmoDef+0xF1 name and its
+        // lookup @0x4E9C0A..0x4E9C32, the call with that def @0x4E9D2D..0x4E9D3E].
+        // Both legs take a lookup of 0 for a miss: AmmoDef_LookupByName returns 0
+        // for no match and for the table's first def alike [orig: `test eax,eax; jz`
+        // @0x4E9C22..0x4E9C24; Projectile_HandleEntityImpact `cmp esi,ecx; jz`
+        // @0x4E9441..0x4E9443; the person handler Projectile_HandleTerrainImpact_0
+        // `test eax,eax; jz` @0x4E9992..0x4E9994].
+        if (collision.hit_class == ProjectileHitClass::Water && pre_arm &&
+                !ammo->notarmmed_ammo.empty()) {
+            const int32_t dud = world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
+            if (dud > 0 && world.tables.ammo.by_index(dud) != nullptr) impact_ammo_index = dud;
+        }
         if (not_armed && !ammo->notarmmed_ammo.empty()) {
             const int32_t dud = world.tables.ammo.index_of(ammo->notarmmed_ammo.c_str());
-            const AmmoTableEntry *dud_ammo = world.tables.ammo.by_index(dud);
+            const AmmoTableEntry *dud_ammo = dud > 0 ? world.tables.ammo.by_index(dud) : nullptr;
             if (dud_ammo != nullptr) {
                 impact_ammo_index = dud;
                 dud_replacement = r;
