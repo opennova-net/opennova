@@ -278,9 +278,6 @@ static int test_strutil()
     TEST_EXPECT(strutil::to_lower("MiXeD09.TGA") == "mixed09.tga");
     TEST_EXPECT(strutil::iequals("Water.TGA", "water.tga"));
     TEST_EXPECT(!strutil::iequals("water", "water "));
-    TEST_EXPECT(strutil::iless("abc", "abd"));
-    TEST_EXPECT(!strutil::iless("ABD", "abc"));
-    TEST_EXPECT(strutil::iless("ab", "abc"));
     TEST_EXPECT(strutil::ends_with_icase("terrain.TRN", ".trn"));
     TEST_EXPECT(!strutil::ends_with_icase(".trn", "terrain.trn"));
     return 0;

@@ -37,52 +37,6 @@ static int failed = 0;
     if (!(cond)) { fprintf(stderr, "  FAIL: %s (line %d)\n", msg, __LINE__); return 0; } \
 } while (0)
 
-/* Test PFF3 magic detection */
-static int test_is_pff3_magic(void) {
-    uint8_t pff3_header[20] = {
-        0x14, 0x00, 0x00, 0x00,  /* header_size = 20 */
-        0x50, 0x46, 0x46, 0x33,  /* magic = "PFF3" */
-        0x01, 0x00, 0x00, 0x00,  /* num_entries = 1 */
-        0x24, 0x00, 0x00, 0x00,  /* entry_size = 36 */
-        0x14, 0x00, 0x00, 0x00,  /* file_table_offset = 20 */
-    };
-    CHECK(pff_is_pff(pff3_header, sizeof(pff3_header)), "PFF3 magic should be recognized");
-    return 1;
-}
-
-/* Test PFF4 magic detection */
-static int test_is_pff4_magic(void) {
-    uint8_t pff4_header[20] = {
-        0x14, 0x00, 0x00, 0x00,
-        0x50, 0x46, 0x46, 0x34,  /* "PFF4" */
-        0x01, 0x00, 0x00, 0x00,
-        0x24, 0x00, 0x00, 0x00,
-        0x14, 0x00, 0x00, 0x00,
-    };
-    CHECK(pff_is_pff(pff4_header, sizeof(pff4_header)), "PFF4 magic should be recognized");
-    return 1;
-}
-
-/* Test invalid magic rejection */
-static int test_rejects_invalid_magic(void) {
-    uint8_t invalid_header[20] = {
-        0x14, 0x00, 0x00, 0x00,
-        0x50, 0x46, 0x46, 0x35,  /* "PFF5" — invalid */
-        0x01, 0x00, 0x00, 0x00,
-        0x24, 0x00, 0x00, 0x00,
-        0x14, 0x00, 0x00, 0x00,
-    };
-    CHECK(!pff_is_pff(invalid_header, sizeof(invalid_header)), "PFF5 magic should be rejected");
-    return 1;
-}
-
-/* Test too-small buffer rejection */
-static int test_rejects_too_small_buffer(void) {
-    uint8_t small_buffer[10] = {0};
-    CHECK(!pff_is_pff(small_buffer, sizeof(small_buffer)), "Small buffer should be rejected");
-    return 1;
-}
-
 /* Test header size constants */
 static int test_header_size_constants(void) {
     CHECK(PFF_HEADER_SIZE == 20, "PFF_HEADER_SIZE should be 20");
@@ -202,27 +156,6 @@ static int test_find_case_insensitive(void) {
     CHECK(pff_find(&ar, "mixedcase.tga") != NULL, "lower-case query matches");
     CHECK(pff_find(&ar, "MIXEDCASE.TGA") != NULL, "upper-case query matches");
     CHECK(pff_find(&ar, "nope.tga") == NULL, "missing returns NULL");
-    pff_close(&ar);
-    remove(path);
-    return 1;
-}
-
-/* Legacy format: delta-encoded sizes + 0xACEDDEAD name obfuscation. */
-static int test_legacy_roundtrip(void) {
-    const uint8_t a_data[] = {10, 20, 30, 40};
-    const uint8_t b_data[] = {50, 60};
-    PffTestEntry entries[2] = {
-        { "leg1.bin", a_data, (uint32_t)sizeof(a_data), 0 },
-        { "leg2.bin", b_data, (uint32_t)sizeof(b_data), 0 },
-    };
-    const char *path = scratch("pff_rt_legacy.pff");
-    PffArchive ar;
-
-    CHECK(pff_test_write_legacy(path, entries, 2) == 0, "write legacy");
-    CHECK(pff_open_legacy(&ar, path) == 0, "open legacy");
-    CHECK(ar.entry_count == 2, "legacy entry count == 2");
-    CHECK(entry_bytes_equal(&ar, "leg1.bin", a_data, sizeof(a_data)), "leg1 bytes");
-    CHECK(entry_bytes_equal(&ar, "leg2.bin", b_data, sizeof(b_data)), "leg2 bytes (delta size)");
     pff_close(&ar);
     remove(path);
     return 1;
@@ -876,10 +809,6 @@ static int test_directory_at_the_top_of_32_bits(void) {
 }
 
 int main(void) {
-    RUN_TEST(test_is_pff3_magic);
-    RUN_TEST(test_is_pff4_magic);
-    RUN_TEST(test_rejects_invalid_magic);
-    RUN_TEST(test_rejects_too_small_buffer);
     RUN_TEST(test_header_size_constants);
     RUN_TEST(test_magic_constants);
     RUN_TEST(test_encrypted_flag_constant);
@@ -887,7 +816,6 @@ int main(void) {
     RUN_TEST(test_entry_struct_size);
     RUN_TEST(test_modern_roundtrip);
     RUN_TEST(test_find_case_insensitive);
-    RUN_TEST(test_legacy_roundtrip);
     RUN_TEST(test_write_then_open);
     RUN_TEST(test_write_deterministic);
     RUN_TEST(test_container_xor_roundtrip);

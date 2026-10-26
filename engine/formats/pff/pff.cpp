@@ -180,89 +180,6 @@ int pff_open(PffArchive *archive, const char *path)
     return 0;
 }
 
-int pff_open_legacy(PffArchive *archive, const char *path)
-{
-    FILE *f;
-    uint32_t count, i;
-    PffEntry *entries;
-    uint32_t raw[4];          /* 16-byte record: name dwords [0..2] (XOR'd), file offset [3] */
-    uint32_t cur_offset, next_offset;
-
-    if (!archive || !path) return -1;
-
-    memset(archive, 0, sizeof(*archive));
-
-    f = opennova::io::fopen_utf8(path, "rb"); /* UTF-8, long-path safe (base/io/os_path.h) */
-    if (!f) return -1;
-
-    /* num_entries lives at file offset 12 (PFF_OpenLegacyArchive @ 0x7683f0). */
-    if (opennova::io::fseek64(f, 12, SEEK_SET) != 0 || fread(&count, 4, 1, f) != 1
-        || !pff_count_sane(count)) {
-        fclose(f);
-        return -1;
-    }
-
-    /* Synthesize a header in the modern shape (legacy archives carry no magic on disk). */
-    archive->header.header_size = 16;
-    archive->header.magic = 0;
-    archive->header.num_entries = count;
-    archive->header.entry_size = PFF_ENTRY_SIZE;
-    archive->header.file_table_offset = 16;
-
-    entries = NULL;
-    if (count > 0) {
-        entries = (PffEntry *)calloc(count, sizeof(PffEntry));
-        if (!entries) {
-            fclose(f);
-            return -1;
-        }
-
-        /* The directory starts at offset 16. Records are 16 bytes; sizes are delta-encoded
-           from the next record's offset, so there are count+1 records (the last supplies the
-           terminating offset). Read one record ahead, mirroring the engine loop. */
-        if (fread(raw, 4, 4, f) != 4) {        /* record 0 */
-            free(entries);
-            fclose(f);
-            return -1;
-        }
-        next_offset = raw[3];
-        for (i = 0; i < count; ++i) {
-            uint32_t name0 = raw[0] ^ 0xACEDDEADu;
-            uint32_t name1 = raw[1] ^ 0xACEDDEADu;
-            uint32_t name2 = raw[2] ^ 0xACEDDEADu;
-            char namebuf[12];
-            size_t nl;
-
-            cur_offset = next_offset;
-            if (fread(raw, 4, 4, f) != 4) {     /* record i+1 */
-                free(entries);
-                fclose(f);
-                return -1;
-            }
-            next_offset = raw[3];
-
-            memcpy(namebuf + 0, &name0, 4);
-            memcpy(namebuf + 4, &name1, 4);
-            memcpy(namebuf + 8, &name2, 4);
-            nl = 0;
-            while (nl < sizeof(namebuf) && namebuf[nl] != '\0') ++nl;
-
-            entries[i].flags = 0;
-            entries[i].offset = cur_offset;
-            entries[i].size = next_offset - cur_offset;
-            memcpy(entries[i].filename, namebuf, nl); /* trailing bytes stay 0 (calloc) */
-        }
-    }
-
-    archive->entries = entries;
-    archive->entry_count = count;
-    archive->_file = f;
-
-    pff_sort_entries(archive);
-    pff_store_path(archive, path);
-    return 0;
-}
-
 void pff_close(PffArchive *archive)
 {
     if (!archive) return;
@@ -333,14 +250,6 @@ int pff_extract(const PffArchive *archive, const PffEntry *entry,
         pff_xor_buffer(out_buf, entry->size, 0x0312A4CEu);
 
     return 0;
-}
-
-int pff_is_pff(const uint8_t *data, size_t size)
-{
-    const PffHeader *hdr;
-    if (!data || size < PFF_HEADER_SIZE) return 0;
-    hdr = (const PffHeader *)data;
-    return pff_valid_magic(hdr->magic) ? 1 : 0;
 }
 
 std::string pff_entry_stored_name(const PffEntry &entry)

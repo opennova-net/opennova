@@ -60,14 +60,6 @@ typedef struct PffArchive {
    Models Jointops.exe PFF_Open @ 0x7682e0. */
 int pff_open(PffArchive *archive, const char *path);
 
-/* Open a legacy (pre-PFF3) archive: entry count at file offset 12, 16-byte directory records
-   {12-byte name across 3 dwords XOR 0xACEDDEAD, file offset}, sizes delta-encoded
-   (size[i] = offset[i+1] - offset[i], so there are count+1 records on disk). Returns 0 on
-   success. Models Jointops.exe PFF_OpenLegacyArchive @ 0x7683f0. Legacy archives carry no
-   magic, so the caller must select this explicitly (auto-detecting a magic-less format is
-   unsafe); retail JO uses only the modern format. */
-int pff_open_legacy(PffArchive *archive, const char *path);
-
 /* Close and free internal resources. */
 void pff_close(PffArchive *archive);
 
@@ -85,9 +77,6 @@ int pff_extract(const PffArchive *archive, const PffEntry *entry,
    entry is flagged encrypted. */
 int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
                 uint8_t *out_buf, size_t buf_size);
-
-/* Check if raw data starts with a valid PFF header. */
-int pff_is_pff(const uint8_t *data, size_t size);
 
 /* An entry's 16-byte name as the directory stores it: to its first NUL, all sixteen bytes when it
    fills the field with none after it; no case change, no trim (pff_norm_name makes the lookup's form). */
