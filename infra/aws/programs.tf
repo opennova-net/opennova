@@ -382,8 +382,9 @@ resource "aws_iam_role_policy" "ci_cost_read" {
 # operations bucket under local.data_prefix, data/), with hosting on: web
 # starts the admin page's uploads (multipart; the browser sends each part
 # through the site and web puts it), removes an abandoned tree's and reads the
-# packages the update service serves; the data program finalizes a tree,
-# validates and applies a release (server-side copies among it) and prunes.
+# packages the update service serves; the data program builds, validates and
+# applies a release (a validated upload's server-side copy among it), prunes the
+# trees and purges a deleted game's files.
 # Both read, write and delete under data/ alone, list it, and list the uploads
 # in flight (that listing takes no prefix condition; aborting one is scoped by
 # its key). The machines read the trees alone (fleet.tf); the fleet program
@@ -566,8 +567,8 @@ locals {
   }
 
   # The data program's task storage, in GiB: a tree's files and a release's
-  # package pass through its disk (the finalize, validate and apply jobs, a GiB
-  # or two each at once; Fargate's default is 20). The others keep the default.
+  # package pass through its disk (the build, validate and apply jobs, a GiB or
+  # two each at once; Fargate's default is 20). The others keep the default.
   task_ephemeral_storage_gib = { data = 40 }
 
   # The service's log group, a stream per container and task under the

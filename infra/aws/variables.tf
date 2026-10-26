@@ -109,7 +109,7 @@ variable "worker" {
 }
 
 variable "data" {
-  description = "The data program: the data sets' jobs over the game data's store (a tree's finalize, a release's build, validate and apply, the trees' prune), on 40 GiB of task storage. 2 GiB: a release's build holds its package's packed files while it packs them (a whole Joint Operations about 0.7 GB, DFX2 more). One task: its jobs' caps are global, so it never scales (min = max = desired)."
+  description = "The data program: the games' jobs over the deployment's store (a release's build, validate and apply, the trees' prune, a deleted game's purge), on 40 GiB of task storage. 2 GiB: a release's build holds its package's packed files while it packs them (a whole Joint Operations about 0.7 GB, DFX2 more). One task: its jobs' caps are global, so it never scales (min = max = desired)."
   type = object({
     cpu     = optional(number, 256)
     memory  = optional(number, 2048)
