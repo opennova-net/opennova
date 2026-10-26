@@ -50,8 +50,8 @@
         <h3 class="font-semibold text-ink-bright">{{ item.name }}</h3>
         <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{{ item.body }}</p>
         <div class="mt-5 space-y-3">
-          <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-secondary" :aria-label="'Download ' + item.name">Download</a>
-          <span v-else class="btn-secondary cursor-not-allowed opacity-50" aria-disabled="true">{{ unavailableLabel }}</span>
+          <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="'Download ' + item.name">Download</a>
+          <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">{{ unavailableLabel }}</span>
           <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="'build-' + item.file">
             <p>{{ item.file }}</p>
             <p v-if="item.build">{{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span></p>

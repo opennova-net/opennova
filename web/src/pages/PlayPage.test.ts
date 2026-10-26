@@ -19,7 +19,7 @@ describe('PlayPage', () => {
     const { page, router } = await open('/play?game=jointops');
     expect(page.get('#setup-title').text()).toBe('Joint Operations');
     expect(page.text()).toContain('your own purchased copy');
-    expect(page.text()).toContain('it ships no retail files');
+    expect(page.text()).toContain('ships no files from the original game');
     expect(page.find('a[href="/downloads#jointops"]').exists()).toBe(true);
     await page.get('input[value="dfx2"]').setValue();
     await flushPromises();
