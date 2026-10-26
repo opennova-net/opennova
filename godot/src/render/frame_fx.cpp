@@ -3,6 +3,7 @@
 #include "render/q3_source_registry.h"
 #include "render/rd_glsl.h"
 #include "render/rd_fullscreen.h"
+#include "util/color_convert.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
 #include "render/target_projection_xr_interface.h"
@@ -880,10 +881,7 @@ bool FrameFxCompositorEffect::Impl::initialize_rd() {
 	if (clear_black.is_empty())
 		clear_black.push_back(Color(0, 0, 0, 0));
 	if (clear_nvg_glow.is_empty()) {
-		const std::uint32_t argb = opennova::renderer::kNvgGlowClearColor;
-		clear_nvg_glow.push_back(Color(float((argb >> 16) & 0xFFu) / 255.0f,
-				float((argb >> 8) & 0xFFu) / 255.0f, float(argb & 0xFFu) / 255.0f,
-				float((argb >> 24) & 0xFFu) / 255.0f));
+		clear_nvg_glow.push_back(opennova::color_from_argb(opennova::renderer::kNvgGlowClearColor));
 	}
 	{
 		std::lock_guard<std::mutex> lock(diagnostics_mutex);
