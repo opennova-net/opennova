@@ -122,13 +122,16 @@ opennova_add_editor_test(project_validation)
 # end makes), a Save scanning and validating its one file, a stale import refused without writing.
 # And a project at the JO install's scale (a game install minted from OpenNova's own game and grown to
 # JO:CA's archives' 9,290 files, tests/editor/minted_install.h) opened a step at a time at the editor's
-# budget, its polls and wall time, and the install as the base layer under an expansion project's
-# graph: the program's part install_open (some 110 s), a row of its own beside the rest's (main).
+# budget, its polls and wall time (the program's part install_open, the editor shard's longest row: some
+# 180 s on CI, 2026-10-26), and the install as the base layer under an expansion project's graph (the
+# part install_layer, over an install of its own, G-109), each a row of its own beside the rest's (main).
 opennova_add_editor_executable(editor_long_operations_test SOURCES long_operations_test.cpp LIBS opennova_editor)
-add_test(NAME editor_long_operations COMMAND editor_long_operations_test --part main --parts main install_open
-         WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+add_test(NAME editor_long_operations COMMAND editor_long_operations_test --part main
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 add_test(NAME editor_long_operations_install_open COMMAND editor_long_operations_test --part install_open
-         --parts main install_open WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
+add_test(NAME editor_long_operations_install_layer COMMAND editor_long_operations_test --part install_layer
+         --parts main install_open install_layer WORKING_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
