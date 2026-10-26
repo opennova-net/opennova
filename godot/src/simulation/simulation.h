@@ -2041,11 +2041,6 @@ public:
 	// Ordinary sweeps occupy 0..0x10000, while zero-time wrapping states are
 	// preserved. The shell renders the model part from this value.
 	int get_entity_part_anim_phase(int p_index, int channel) const;
-	// True when the authority publishes this semantic channel. This is an
-	// ownership predicate, not a movement predicate: owned endpoints, including
-	// zero, must overwrite a prior pose. Channel 1 is suppressed by
-	// ItemDefAttrib 0x1000; channel 2 is unconditional.
-	bool get_entity_part_anim_active(int p_index, int channel) const;
 
 	// ONE batched present snapshot for the per-tick render pass: a flat PackedFloat32Array of
 	// get_entity_count() records, PF_STRIDE floats each, fields per the PresentField enum. Avoids the

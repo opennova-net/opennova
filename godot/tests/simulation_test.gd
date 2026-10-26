@@ -3239,8 +3239,6 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	assert_eq(_present_phase_for_origin(
 			sim, MissionData.KIND_ITEM, placed.index, 2), 0,
 			"the published SPECIAL2 phase holds the brain's zero fill")
-	assert_false(sim.get_entity_part_anim_active(0, 1))
-	assert_true(sim.get_entity_part_anim_active(0, 2))
 
 
 func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:

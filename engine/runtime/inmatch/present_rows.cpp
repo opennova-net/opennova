@@ -577,7 +577,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					// [orig: stores @0x4A3E2D/@0x4A3E38]
 					const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
 					const bool publish =
-							slot != 0 || ent == nullptr || (ent->item_attrib & 0x1000u) == 0;
+							slot != 0 || ent == nullptr ||
+							(ent->item_attrib & world::kItemAttribFastRope) == 0;
 					uint32_t phase_bits;
 					std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
 					// The float snapshot transports both 16-bit words as exact
@@ -916,7 +917,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		// [orig: HUD_CacheEntityDisplayInfo stores @0x4A3E2D/@0x4A3E38;
 		//  see docs/world/world-wac-ai-re.md]
 		const int32_t phase = ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
-		const bool publish = slot != 0 || (e.item_attrib & 0x1000u) == 0;
+		const bool publish = slot != 0 || (e.item_attrib & kItemAttribFastRope) == 0;
 		uint32_t phase_bits;
 		std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
 		// The float snapshot transports both 16-bit words as exact

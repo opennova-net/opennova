@@ -720,18 +720,6 @@ int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
 	return e->brain.f[AiBrain::kPartAnimPhase0 + (channel - 1)];
 }
 
-bool Simulation::get_entity_part_anim_active(int p_index, int channel) const {
-	if (!kernel_ || channel < 1 || channel > 2) return false;
-	AiEntity *e = kernel_->world.ai.at(p_index);
-	if (!e) return false;
-	if (channel == 1 && kernel_ != nullptr) {
-		const opennova::world::Entity *entity =
-				kernel_->world.registry.get(e->handle);
-		if (entity != nullptr && (entity->item_attrib & 0x1000u) != 0)
-			return false;
-	}
-	return true;
-}
 
 std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snapshot() const {
 	const uint64_t start_us =

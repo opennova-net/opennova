@@ -263,7 +263,7 @@ InfantryAttachmentPose infantry_attachment_pose(AiEntity &e, World &world) {
     // named point, exactly as Entity_GetBoneTransformAndOrientation does.
     named_point(world, *parent, "attach", point);
     std::copy_n(point, 3, result.point);
-    if ((parent->item_attrib & 0x1000u) != 0) {
+    if ((parent->item_attrib & kItemAttribFastRope) != 0) {
         if (AiEntity *controller = world.ai.for_handle(parent->handle)) {
             result.point[2] = controller->brain.f[141];
             controller->brain.f[142] = std::min(controller->brain.f[142], e.self->position.z.q16);

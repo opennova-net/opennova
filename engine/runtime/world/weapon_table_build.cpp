@@ -47,6 +47,7 @@ static_assert(world::kAmmoFlagNoDItems == DEF_AMMO_FLAG_NODITEMS);
 static_assert(world::kAmmoFlagDesignateTarget == DEF_AMMO_FLAG_DESIGNATETARGET);
 static_assert(world::kAmmoFlagIgnorFoilage == DEF_AMMO_FLAG_IGNORFOILAGE);
 static_assert(world::kItemAttribEweap == DEF_ITEM_ATTRIB_EWEAP);
+static_assert(world::kItemAttribFastRope == DEF_ITEM_ATTRIB_FASTROPE);
 static_assert(world::kItemAttribLandable == DEF_ITEM_ATTRIB_LANDABLE);
 static_assert(world::kItemAttribAIData == DEF_ITEM_ATTRIB_AIDATA);
 static_assert(world::kItemAttribChangeTeam == DEF_ITEM_ATTRIB_CHANGETEAM);

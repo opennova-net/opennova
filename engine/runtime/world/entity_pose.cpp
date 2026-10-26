@@ -789,7 +789,7 @@ bool EntityPoseProvider::panm_part_matrices(world::World &world,
 				? ai_entity->brain.f[world::AiBrain::kPartAnimPhase0 + channel]
 				: 0;
 	};
-	if (e == nullptr || (e->item_attrib & 0x1000u) == 0) {
+	if (e == nullptr || (e->item_attrib & world::kItemAttribFastRope) == 0) {
 		ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL1] = phase_for(0);
 	}
 	ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL2] = phase_for(1);

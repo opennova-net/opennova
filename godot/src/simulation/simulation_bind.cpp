@@ -385,7 +385,6 @@ void Simulation::_bind_methods() {
 					"snapshot", "base", "channel"),
 			&Simulation::decode_present_part_anim_phase);
 	ClassDB::bind_method(D_METHOD("get_entity_part_anim_phase", "index", "channel"), &Simulation::get_entity_part_anim_phase);
-	ClassDB::bind_method(D_METHOD("get_entity_part_anim_active", "index", "channel"), &Simulation::get_entity_part_anim_active);
 	ClassDB::bind_method(D_METHOD("get_present_snapshot"), &Simulation::get_present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_present_door_phases"),
 			&Simulation::get_present_door_phases);

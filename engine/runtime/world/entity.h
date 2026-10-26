@@ -248,6 +248,10 @@ inline constexpr uint32_t kItemAttribMoveCallback = 0x1u;
 inline constexpr uint32_t kItemAttribPowerup = 0x2u;
 inline constexpr uint32_t kItemAttribEweap = 0x20u;
 inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
+// FastRope: the carrier's VEHICLE_SPECIAL1 channel is the rope's, no part-anim word drives it
+// (the board point's Z reads its brain word instead, infantry_board.cpp)
+// [orig: HUD_CacheEntityDisplayInfo @0x4A3E18..0x4A3E38].
+inline constexpr uint32_t kItemAttribFastRope = 0x1000u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;

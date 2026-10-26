@@ -214,7 +214,8 @@ int Simulation::get_hud_big_zoom_q16() const {
 bool Simulation::get_hud_map_flip_180() const {
 	// AttribFlags::RotateMap180; the map-side witness is
 	// HudMinimapInput::flip_180 (hud/hud_minimap.h).
-	return kernel_ && (kernel_->world.tables.mission_attrib_flags & 0x20u) != 0;
+	return kernel_ && (kernel_->world.tables.mission_attrib_flags &
+			static_cast<uint32_t>(opennova::bms::AttribFlags::RotateMap180)) != 0;
 }
 
 float Simulation::get_local_player_yaw_deg() const {
