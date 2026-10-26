@@ -458,6 +458,40 @@ static int test_api_shapes() {
 	return 0;
 }
 
+// The Shell's transport's rules (godot/src/authoring/content_http, over editor::content_address and
+// content_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
+static int test_transport_rules() {
+	editor::ContentAddress at;
+	TEST_EXPECT(editor::content_address("https://opennova.net/api/content/projects?x=1#top", at) &&
+			at.tls && at.host == "opennova.net" && at.port == 443 &&
+			at.target == "/api/content/projects?x=1" && at.origin() == "https://opennova.net:443");
+	TEST_EXPECT(editor::content_address("http://127.0.0.1:8080", at) && !at.tls &&
+			at.host == "127.0.0.1" && at.port == 8080 && at.target == "/");
+	TEST_EXPECT(editor::content_address("https://bucket.s3?sig=1", at) && at.target == "/?sig=1");
+	TEST_EXPECT(editor::content_address("https://host#only", at) && at.target == "/");
+	for (const char *refused : { "ftp://host/x", "opennova.net/api", "https://user@host/",
+				 "http://[::1]:80/", "http://host:0/", "http://host:65536/", "http://host:x/",
+				 "https:///path", "" })
+		TEST_EXPECT(!editor::content_address(refused, at));
+
+	// A GET, PUT or DELETE goes again after a broken connection or a 5xx, three more times; a POST
+	// (a push, a sign-in) never does; a reply below 500, or a transfer that stalled, is the answer.
+	TEST_EXPECT(editor::kContentRetries == 3);
+	TEST_EXPECT(editor::content_goes_again("GET", 0, false, 0, true));
+	TEST_EXPECT(editor::content_goes_again("PUT", 2, true, 503, false));
+	TEST_EXPECT(editor::content_goes_again("DELETE", 1, true, 500, false));
+	TEST_EXPECT(!editor::content_goes_again("PUT", 3, true, 503, false));
+	TEST_EXPECT(!editor::content_goes_again("GET", 3, false, 0, true));
+	TEST_EXPECT(!editor::content_goes_again("POST", 0, false, 0, true));
+	TEST_EXPECT(!editor::content_goes_again("POST", 0, true, 503, false));
+	TEST_EXPECT(!editor::content_goes_again("GET", 0, true, 200, false));
+	TEST_EXPECT(!editor::content_goes_again("GET", 0, true, 404, false));
+	TEST_EXPECT(!editor::content_goes_again("GET", 0, false, 0, false)); // stalled, given up
+	TEST_EXPECT(!editor::content_goes_again("GET", 0, false, 503, false)); // no whole reply
+	std::printf("transport: the URLs it reaches, a request that may go again\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_share_and_pull();
@@ -466,6 +500,7 @@ int main() {
 	failures += test_bind_and_check();
 	failures += test_incomplete_folder();
 	failures += test_api_shapes();
+	failures += test_transport_rules();
 	if (failures == 0)
 		std::printf("content_client: all tests passed\n");
 	return failures == 0 ? 0 : 1;

@@ -44,6 +44,32 @@ struct ContentResponse {
 	std::string header(const std::string &name) const;
 };
 
+// A URL the Shell's transport reaches: http or https, its host and its port (443 or 80 where it
+// names none), and the path and query it asks, from its '/' (the fragment dropped); content_address
+// is false for any other (no scheme of the two, a user part or a bracketed address, a port outside
+// 1..65535, no host).
+struct ContentAddress {
+	bool tls = false;
+	std::string host;
+	int port = 0;
+	std::string target;
+	// "https://host:443": the connection a later request to it may use again.
+	std::string origin() const;
+};
+bool content_address(const std::string &url, ContentAddress &out);
+
+// How many more tries a request that may go again gets (content_goes_again).
+inline constexpr int kContentRetries = 3;
+
+// Whether a request goes again on a fresh connection after its try `attempt` (0 the first) came
+// to this: a method a client may send again when a connection fails under it (RFC 9110 9.2.2:
+// GET, PUT, DELETE), at most kContentRetries more tries, once its connection broke before or
+// during the reply (`lost`) or a whole reply (`replied`) was a 5xx (a store's 500, S3's 503
+// SlowDown). Every other end is the request's answer: a reply below 500, a request no retry may
+// repeat (a POST: a push, a sign-in), a transfer that stalled or was given up.
+bool content_goes_again(
+		const std::string &method, int attempt, bool replied, int status, bool lost);
+
 class ContentTransport {
 public:
 	virtual ~ContentTransport() = default;

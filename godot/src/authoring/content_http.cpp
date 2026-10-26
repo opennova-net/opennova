@@ -26,6 +26,7 @@ namespace godot {
 
 namespace {
 
+using opennova::editor::ContentAddress;
 using opennova::editor::ContentRequest;
 using opennova::editor::ContentResponse;
 
@@ -40,59 +41,11 @@ constexpr int64_t kKeepMs = 4000;
 // An upload's sending is given kStalledMs plus a millisecond for each kSlowestBytesPerMs bytes of
 // its body: HTTPClient says nothing of how much of a request has gone.
 constexpr int64_t kSlowestBytesPerMs = 16;
-// How many more tries a request that may go again gets once its connection breaks.
-constexpr int kRetries = 3;
 
 int64_t now_ms() {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now().time_since_epoch())
 			.count();
-}
-
-// A URL the transport can reach: http or https, a host and a port, and the path and query it asks.
-struct Address {
-	bool tls = false;
-	std::string host;
-	int port = 0;
-	std::string target;
-
-	std::string origin() const {
-		return (tls ? "https://" : "http://") + host + ":" + std::to_string(port);
-	}
-};
-
-bool split_url(const std::string &url, Address &out) {
-	std::string rest;
-	if (url.rfind("https://", 0) == 0) {
-		out.tls = true;
-		out.port = 443;
-		rest = url.substr(8);
-	} else if (url.rfind("http://", 0) == 0) {
-		out.tls = false;
-		out.port = 80;
-		rest = url.substr(7);
-	} else {
-		return false;
-	}
-	const size_t end = rest.find_first_of("/?#");
-	const std::string authority = rest.substr(0, end);
-	out.target = end == std::string::npos ? "/" : rest.substr(end);
-	if (out.target[0] != '/')
-		out.target = "/" + out.target;
-	const size_t hash = out.target.find('#');
-	if (hash != std::string::npos)
-		out.target.resize(hash);
-	if (authority.find_first_of("@[]") != std::string::npos)
-		return false;
-	const size_t colon = authority.find(':');
-	out.host = authority.substr(0, colon);
-	if (colon != std::string::npos) {
-		const std::optional<int> port = opennova::strutil::parse_int(authority.substr(colon + 1));
-		if (!port || *port < 1 || *port > 65535)
-			return false;
-		out.port = *port;
-	}
-	return !out.host.empty();
 }
 
 bool method_of(const std::string &name, HTTPClient::Method &out) {
@@ -110,12 +63,6 @@ bool method_of(const std::string &name, HTTPClient::Method &out) {
 		}
 	}
 	return false;
-}
-
-// RFC 9110 9.2.2: a request a client may send again when a connection fails under it.
-bool idempotent(HTTPClient::Method method) {
-	return method == HTTPClient::METHOD_GET || method == HTTPClient::METHOD_PUT ||
-			method == HTTPClient::METHOD_DELETE;
 }
 
 bool read_whole(const std::string &path, PackedByteArray &out, std::string &error) {
@@ -158,7 +105,7 @@ struct Connection {
 		origin.clear();
 	}
 
-	bool open_for(const Address &address) const {
+	bool open_for(const ContentAddress &address) const {
 		return client.is_valid() && origin == address.origin() && now_ms() - idle_since < kKeepMs &&
 				client->get_status() == HTTPClient::STATUS_CONNECTED;
 	}
@@ -174,7 +121,7 @@ public:
 
 private:
 	bool given_up() const { return exchange_.cancelled || stopping_; }
-	bool open(const Address &address, std::string &error);
+	bool open(const ContentAddress &address, std::string &error);
 	// Polled until the reply's head is in: false with `error` when none came, `retry` when the
 	// connection failed before any of it did.
 	bool await_head(int64_t sending_ms, bool &retry, std::string &error);
@@ -185,7 +132,7 @@ private:
 	const std::atomic<bool> &stopping_;
 };
 
-bool Worker::open(const Address &address, std::string &error) {
+bool Worker::open(const ContentAddress &address, std::string &error) {
 	connection_.close();
 	if (connection_.client.is_null()) {
 		connection_.client.instantiate();
@@ -333,9 +280,9 @@ bool Worker::read_body(ContentResponse &out, bool &lost) {
 ContentResponse Worker::run() {
 	const ContentRequest &request = exchange_.request;
 	ContentResponse out;
-	Address address;
+	ContentAddress address;
 	HTTPClient::Method method = HTTPClient::METHOD_GET;
-	if (!split_url(request.url, address)) {
+	if (!opennova::editor::content_address(request.url, address)) {
 		out.error = "not an address the editor can reach: " + request.url;
 		return out;
 	}
@@ -363,7 +310,8 @@ ContentResponse Worker::run() {
 	const int64_t sending_ms = ContentHttp::kStalledMs + body.size() / kSlowestBytesPerMs;
 	// A connection the far end breaks (a kept one it had closed, or one a store drops mid-reply, as
 	// S3 does now and then over a push's thousands of uploads), or a store's 5xx, costs a request
-	// that may go again another try on a fresh connection, kRetries times; any other request fails.
+	// that may go again another try on a fresh connection, kContentRetries times; any other request
+	// fails (editor::content_goes_again).
 	for (int attempt = 0;; ++attempt) {
 		out = ContentResponse();
 		const bool kept = connection_.open_for(address);
@@ -377,7 +325,7 @@ ContentResponse Worker::run() {
 		}
 		bool retry = false;
 		if (!await_head(sending_ms, retry, out.error)) {
-			if (retry && attempt < kRetries && idempotent(method))
+			if (opennova::editor::content_goes_again(request.method, attempt, false, 0, retry))
 				continue;
 			return out;
 		}
@@ -395,13 +343,12 @@ ContentResponse Worker::run() {
 		}
 		bool lost = false;
 		out.transport_ok = read_body(out, lost);
+		if (!opennova::editor::content_goes_again(
+					request.method, attempt, out.transport_ok, out.status, lost))
+			return out;
 		// A store that answers 5xx asks for the request again (S3's 500 and 503 SlowDown), after a
 		// moment.
-		const bool busy = out.transport_ok && out.status >= 500;
-		if ((out.transport_ok && !busy) || (!lost && !busy) || attempt >= kRetries ||
-				!idempotent(method))
-			return out;
-		if (busy)
+		if (out.transport_ok)
 			std::this_thread::sleep_for(std::chrono::milliseconds(500 * (attempt + 1)));
 	}
 }

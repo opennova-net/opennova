@@ -144,6 +144,50 @@ std::string ContentResponse::header(const std::string &name) const {
 	return {};
 }
 
+std::string ContentAddress::origin() const {
+	return (tls ? "https://" : "http://") + host + ":" + std::to_string(port);
+}
+
+bool content_address(const std::string &url, ContentAddress &out) {
+	out = ContentAddress();
+	std::string rest;
+	if (url.rfind("https://", 0) == 0) {
+		out.tls = true;
+		out.port = 443;
+		rest = url.substr(8);
+	} else if (url.rfind("http://", 0) == 0) {
+		out.port = 80;
+		rest = url.substr(7);
+	} else {
+		return false;
+	}
+	const size_t end = rest.find_first_of("/?#");
+	const std::string authority = rest.substr(0, end);
+	out.target = end == std::string::npos ? "/" : rest.substr(end);
+	if (out.target[0] != '/')
+		out.target = "/" + out.target;
+	const size_t hash = out.target.find('#');
+	if (hash != std::string::npos)
+		out.target.resize(hash);
+	if (authority.find_first_of("@[]") != std::string::npos)
+		return false;
+	const size_t colon = authority.find(':');
+	out.host = authority.substr(0, colon);
+	if (colon != std::string::npos) {
+		const std::optional<int> port = strutil::parse_int(authority.substr(colon + 1));
+		if (!port || *port < 1 || *port > 65535)
+			return false;
+		out.port = *port;
+	}
+	return !out.host.empty();
+}
+
+bool content_goes_again(
+		const std::string &method, int attempt, bool replied, int status, bool lost) {
+	const bool idempotent = method == "GET" || method == "PUT" || method == "DELETE";
+	return idempotent && attempt < kContentRetries && (lost || (replied && status >= 500));
+}
+
 std::string ContentApiError::line() const {
 	std::string out = message.empty() ? code : message;
 	out += " (" + code;
