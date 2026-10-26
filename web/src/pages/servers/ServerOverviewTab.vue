@@ -81,10 +81,10 @@
       </RouterLink>
     </section>
 
-    <!-- The data it runs on, and the update waiting when its data set has
-         newer data than the trees it was started on. -->
+    <!-- The game it runs, and the update waiting when its game has a newer
+         release than the trees it was started on. -->
     <section class="space-y-3" :aria-labelledby="ids.data">
-      <h2 :id="ids.data" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Game data</h2>
+      <h2 :id="ids.data" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Game</h2>
       <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
         <dt class="text-ink-muted">{{ gameName }}</dt>
         <dd class="text-ink">{{ dataVersionText(server.data.base) }}</dd>
@@ -256,8 +256,8 @@
 <script setup lang="ts">
 // A hosted server page's Overview tab: where the server is in its life
 // (requested -> starting -> running, then stopping -> stopped, or failed),
-// the game data it runs on with the owner's Update when its data set has
-// newer (POST /api/me/servers/<id>/update, which restarts it), its listing
+// the game it runs with the owner's Update when its game has a newer
+// release (POST /api/me/servers/<id>/update, which restarts it), its listing
 // (the owner's with the pushes its console lacks, MyServerCard embedded,
 // from GET /api/me/hosts) and, when its owner asked, its listing on
 // NovaLogic's NovaWorld (the server's `novalogic`: whether and why), its
@@ -332,7 +332,7 @@ const confirmingUpdate = ref(false);
 
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
 
-// The data the server runs on, and what its data set holds now.
+// The game the server runs, and what its game's newest release holds.
 const gameName = computed(() => props.server.data_set?.display_name || props.server.game_display_name || 'Game');
 const expansionName = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name || 'Expansion');
 
@@ -341,7 +341,7 @@ function dataVersionText(tree: PinnedTree | null): string {
   return tree.version || 'No version';
 }
 
-// The data set's (and expansion's) current versions, read when an update
+// The game's (and expansion's) current versions, read when an update
 // waits so the callout can name what is new: the owner's from GET
 // /api/me/servers, the admin's from GET /api/admin/data-sets.
 const current = ref<{ base: string; expansion: string } | null>(null);
@@ -523,7 +523,7 @@ async function cancelUpdate() {
   updateButton.value?.focus();
 }
 
-// The owner's update: the service restarts the server on its data set's
+// The owner's update: the service restarts the server on its game's
 // current data (its players drop); the reply shows at once and the page
 // follows it from there.
 async function confirmUpdate() {

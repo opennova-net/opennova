@@ -18,13 +18,13 @@ export type HostedState =
   | 'failed';
 
 // The owner's settings, as stored (hosted_settings.h HostedSettings). The
-// backend range-checks each one (check_settings) against the data sets it
+// backend range-checks each one (check_settings) against the games it
 // offers; utils/hostedSettings.ts mirrors those rules.
 export interface HostedSettings {
-  // The data set the server runs (HostedDataSet.id): a base game the service
+  // The game the server runs (HostedDataSet.id): a base game the service
   // offers.
   data_set_id: number;
-  // One of that data set's expansions (HostedExpansionOption.id), or null for
+  // One of that game's expansions (HostedExpansionOption.id), or null for
   // the base game alone.
   expansion_id: number | null;
   game_name: string;
@@ -58,7 +58,7 @@ export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<Hos
 // ready ones; absent or null for none).
 export type StartRequest = StartSettings & { own_machine?: boolean; address_id?: number | null };
 
-// The whole-number settings, each with its range per data set.
+// The whole-number settings, each with its range per game.
 export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
 
 // A whole-number setting's range, both ends included.
@@ -67,14 +67,14 @@ export interface SettingRange {
   max: number;
 }
 
-// One multiplayer mission a data set's current tree holds: its .bms file and
+// One multiplayer mission a game's current tree holds: its .bms file and
 // the title the game shows for it ('' when the archive names none).
 export interface HostedMission {
   file: string;
   title: string;
 }
 
-// One expansion a base data set offers (an expansion data set with a ready
+// One expansion a base game offers (an expansion game with a ready
 // tree): its id (the value of HostedSettings.expansion_id), its /exp code
 // ('jox01'), the name the page shows, the version of its current tree and
 // the missions that tree adds.
@@ -86,7 +86,7 @@ export interface HostedExpansionOption {
   missions: HostedMission[];
 }
 
-// A base data set the service offers hosted servers of (one with a ready
+// A base game the service offers hosted servers of (one with a ready
 // current tree; ADR 0064): the title it speaks, the version of its current
 // tree, the missions that tree holds, its expansions and the host screen's
 // ranges.
@@ -109,7 +109,7 @@ export interface HostedDataSet {
   novalogic_listing?: boolean;
 }
 
-// A data set a server runs, as its row names it.
+// A game a server runs, as its row names it.
 export interface HostedServerDataSet {
   id: number;
   display_name: string;
@@ -269,13 +269,13 @@ export interface HostedServer {
   // Operations", "Escalation"); the expansion's '' for the base game alone.
   game_display_name: string;
   expansion_display_name: string;
-  // The data set and expansion it runs, as their rows name them; null when
+  // The game and expansion it runs, as their rows name them; null when
   // a row is gone.
   data_set: HostedServerDataSet | null;
   expansion: HostedServerExpansion | null;
   // The trees it runs on.
   data: HostedServerData;
-  // Its data set (or expansion) has newer data than the trees it runs on: the
+  // Its game (or expansion) has a newer release than the trees it runs on: the
   // owner may update it (POST /api/me/servers/<id>/update), which restarts it.
   update_available: boolean;
   // An update was asked for: the supervisor restarts it on the current data
@@ -340,7 +340,7 @@ export interface HostingEntitlement {
 // GET /api/me/servers.
 export interface HostedServersResponse {
   // The service runs hosted servers (it has a fleet and offers at least one
-  // data set).
+  // game).
   enabled: boolean;
   // No hosted server place the account could take is free: the service's cap
   // is reached, or no pool the account has a free place in (shared machines,
@@ -348,7 +348,7 @@ export interface HostedServersResponse {
   // (at_capacity).
   full: boolean;
   entitlement: HostingEntitlement;
-  // The data sets a start may pick, in the service's order (the first is a
+  // The games a start may pick, in the service's order (the first is a
   // start's default); only the ones this deployment configured.
   data_sets: HostedDataSet[];
   // The service offers listing a server on NovaLogic's NovaWorld too
@@ -529,7 +529,7 @@ export interface FleetServer extends HostedServer {
   // the base game alone).
   base_tree_id: number | null;
   expansion_tree_id: number | null;
-  // It runs on an older tree than its data set's current one.
+  // It runs on an older tree than its game's current one.
   outdated: boolean;
   // Its starts so far (each start a new generation; 0 before its first).
   generation: number;

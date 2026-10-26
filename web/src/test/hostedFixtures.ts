@@ -1,4 +1,4 @@
-// Data sets, settings, servers and entitlements for the hosted server tests,
+// Games, settings, servers and entitlements for the hosted server tests,
 // shaped as GET /api/me/servers answers them. DFX2's limits differ from JO's
 // here on purpose, so a test can tell whose ranges a form applies; JO offers
 // Escalation (id 2), whose tree adds a mission of its own.

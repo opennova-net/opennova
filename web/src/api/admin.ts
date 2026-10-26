@@ -4,7 +4,7 @@
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
 // adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts, the static
-// addresses' in adminAddresses.ts, the content store's in content.ts; here are the
+// addresses' in adminAddresses.ts, the games' in dataSets.ts; here are the
 // NovaWorld service's status, sessions and lobby instances, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*: its machines, a
 // machine's page, the roll preview and the roll).
@@ -71,23 +71,21 @@ export type AdminErrorCode =
   | 'not_queued'
   | 'secret_dropped'
   | 'already_pending'
-  // The game data routes (dataSets.ts).
-  | 'invalid_files'
-  | 'upload_in_flight'
+  // The games' routes (dataSets.ts).
   | 'store_unavailable'
   | 'store_error'
-  | 'not_uploading'
-  | 'too_large'
   | 'duplicate_login'
   | 'duplicate_expansion'
+  | 'duplicate_key'
   | 'no_such_parent'
   | 'in_use'
-  | 'current'
-  | 'baseline'
-  | 'pinned'
+  | 'has_expansion'
+  | 'no_revision'
   | 'not_draft'
   | 'not_published'
   | 'published'
+  | 'validating'
+  | 'building'
   | 'up_to_date'
   // The static address routes (adminAddresses.ts).
   | 'invalid_name'
@@ -97,15 +95,6 @@ export type AdminErrorCode =
   | 'not_retryable'
   | 'address_limit'
   | 'addresses_disabled'
-  // The content store's admin routes (content.ts).
-  | 'duplicate_key'
-  | 'data_set_taken'
-  | 'no_such_data_set'
-  | 'no_such_base'
-  | 'has_expansion'
-  | 'no_data_set'
-  | 'no_revision'
-  | 'building'
   // The log route (logs.ts).
   | 'no_log_store'
   | 'logs_unavailable'
@@ -152,22 +141,20 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_queued',
   'secret_dropped',
   'already_pending',
-  'invalid_files',
-  'upload_in_flight',
   'store_unavailable',
   'store_error',
-  'not_uploading',
-  'too_large',
   'duplicate_login',
   'duplicate_expansion',
+  'duplicate_key',
   'no_such_parent',
   'in_use',
-  'current',
-  'baseline',
-  'pinned',
+  'has_expansion',
+  'no_revision',
   'not_draft',
   'not_published',
   'published',
+  'validating',
+  'building',
   'up_to_date',
   'invalid_name',
   'name_taken',
@@ -176,14 +163,6 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_retryable',
   'address_limit',
   'addresses_disabled',
-  'duplicate_key',
-  'data_set_taken',
-  'no_such_data_set',
-  'no_such_base',
-  'has_expansion',
-  'no_data_set',
-  'no_revision',
-  'building',
   'no_log_store',
   'logs_unavailable',
 ]);
@@ -245,40 +224,36 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That job carried a secret (a mail, a machine launch token) that was dropped when it ended, so it cannot run again.';
     case 'already_pending':
       return 'A job of that kind, or with the same key, is already waiting or running.';
-    case 'invalid_files':
-      return 'The files picked do not make a tree of that kind. Check the list and pick the folder again.';
-    case 'upload_in_flight':
-      return 'An upload to this data set is already in progress. Wait for it to finish, or delete the uploading tree first.';
     case 'store_unavailable':
       return 'The object store is not reachable right now. Try again shortly.';
     case 'store_error':
       return 'The object store refused the request (the server log says why). Try again shortly.';
-    case 'not_uploading':
-      return 'That tree is no longer taking uploads. Refresh the list.';
-    case 'too_large':
-      return 'The server refused an upload part as too large. Reload the page and upload again.';
     case 'duplicate_login':
-      return 'Another data set already uses that updater login.';
+      return 'Another game already uses that updater login.';
     case 'duplicate_expansion':
-      return 'That base already has an expansion with that code.';
+      return 'That base game already has an expansion with that code.';
+    case 'duplicate_key':
+      return "Another game's project already has that key.";
     case 'no_such_parent':
-      return 'The base that expansion would belong to no longer exists. Refresh the list.';
+      return 'The base game that expansion would build on no longer exists. Refresh the list.';
     case 'in_use':
-      return 'That data set is in use: a live server runs it, or an expansion belongs to it. Stop the servers or delete the expansion first.';
-    case 'current':
-      return "That tree is the data set's current data, so it stays. Upload or publish newer data first.";
-    case 'baseline':
-      return 'That tree is the baseline a release applies to, so it stays.';
-    case 'pinned':
-      return 'Live servers run on that tree, so it stays until they update or stop.';
+      return 'A live server runs that game. Stop its servers first.';
+    case 'has_expansion':
+      return 'An expansion builds on that game. Delete the expansion first.';
+    case 'no_revision':
+      return "That game's project has no such revision. Push one from the editor first.";
     case 'not_draft':
       return 'Only a draft release can be published. Refresh the list.';
     case 'not_published':
       return 'That release is not published. Refresh the list.';
     case 'published':
       return 'A published release cannot be deleted. Retire it first.';
+    case 'validating':
+      return 'The data program is checking that release. Wait for it to be a draft or invalid.';
+    case 'building':
+      return 'The data program is building that release. Wait for it to be a draft or to fail.';
     case 'up_to_date':
-      return 'That server already runs the current data.';
+      return "That server already runs its game's newest release.";
     case 'invalid_name':
       return `That name cannot name a static address. ${ADDRESS_NAME_RULE}`;
     case 'name_taken':
@@ -293,22 +268,6 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That account has a static address for every dedicated machine it has. Grant it another dedicated machine first.';
     case 'addresses_disabled':
       return 'This NovaWorld service sells no static address (ONNET_FLEET_MAX_ADDRESSES is 0, or its address settings are incomplete: the boot log says which).';
-    case 'duplicate_key':
-      return 'Another content project already has that key.';
-    case 'data_set_taken':
-      return "Another content project's releases already update that data set.";
-    case 'no_such_data_set':
-      return 'No data set has that id. Refresh the list.';
-    case 'no_such_base':
-      return 'No content project has that base key.';
-    case 'has_expansion':
-      return "An expansion's content project builds on this one. Delete the expansion's first.";
-    case 'no_data_set':
-      return "That content project's releases update no data set. Make it a data set's first.";
-    case 'no_revision':
-      return 'That project has no such revision. Push one from the editor first.';
-    case 'building':
-      return 'The data program is building that release. Wait for it to be a draft or to fail.';
     case 'no_log_store':
       return 'This NovaWorld service reads no log store (ONNET_LOG_STORE is unset or malformed: the boot log says which).';
     case 'logs_unavailable':

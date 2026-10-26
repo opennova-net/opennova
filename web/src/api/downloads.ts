@@ -1,6 +1,6 @@
 // The deployment's downloads host (ADR 0070; infra/aws/downloads.tf): the builds the
 // download buttons fetch, each under its stable name, beside manifest.json, which
-// .github/workflows/downloads.yml writes (scripts/stage_downloads.py).
+// .github/workflows/publish.yml writes (scripts/stage_downloads.py).
 
 // What manifest.json holds: the version the host serves, when it was published, where the
 // builds came from, and each file's size and SHA-256.

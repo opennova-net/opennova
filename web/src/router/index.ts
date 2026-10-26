@@ -42,8 +42,8 @@ import InfraSection from '../pages/admin/InfraSection.vue';
 import ProgramDetailSection from '../pages/admin/ProgramDetailSection.vue';
 import InfraResourceSection from '../pages/admin/InfraResourceSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
-import DataSetsSection from '../pages/admin/DataSetsSection.vue';
-import ContentSection from '../pages/admin/ContentSection.vue';
+import GamesSection from '../pages/admin/GamesSection.vue';
+import GameSection from '../pages/admin/GameSection.vue';
 import AddressesSection from '../pages/admin/AddressesSection.vue';
 import { requireUser } from './guards';
 
@@ -143,8 +143,9 @@ const router = createRouter({
           meta: { title: 'Admin: AWS resource' },
         },
         { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
-        { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
-        { path: 'content', component: ContentSection, meta: { title: 'Admin: Content' } },
+        { path: 'games', component: GamesSection, meta: { title: 'Admin: Games' } },
+        // A game by its project key, or by its id when it has none.
+        { path: 'games/:ref', component: GameSection, meta: { title: 'Admin: Game' } },
         // The sections' names before the admin pages were rebuilt, and the
         // NovaWorld service's and sessions' pages before they were one: old
         // links land on their new pages.

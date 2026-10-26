@@ -98,7 +98,7 @@
 
       <!-- The trees its agent holds. -->
       <section class="space-y-3" aria-labelledby="machine-trees">
-        <h2 id="machine-trees" class="text-xl font-semibold text-ink">Game data</h2>
+        <h2 id="machine-trees" class="text-xl font-semibold text-ink">Games</h2>
         <p v-if="detail.trees.length === 0" class="text-sm text-ink-muted">Its agent holds no tree.</p>
         <ul v-else class="space-y-2">
           <li v-for="t in detail.trees" :key="t.tree_id" class="machine-tree space-y-1 rounded-panel border border-border bg-panel p-3 text-sm">

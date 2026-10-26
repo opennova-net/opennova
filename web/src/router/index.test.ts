@@ -62,7 +62,8 @@ describe('router', () => {
     '/admin/jobs/77',
     '/admin/users/7',
     '/admin/usage',
-    '/admin/data-sets',
+    '/admin/games',
+    '/admin/games/JO',
     '/admin/cd-keys',
   ])('keeps %s', (path) => {
     expect(router.resolve(path).matched.at(-1)?.components?.default).not.toBe(NotFoundPage);

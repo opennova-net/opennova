@@ -109,7 +109,7 @@
 <script setup lang="ts">
 // The rotation editor of the hosted server form: an ordered list of mission
 // files (the first the starting map), picked from the missions the picked
-// game's data holds (GET /api/me/servers, its data set's and expansion's
+// game's data holds (GET /api/me/servers, its game's and expansion's
 // missions), shown by title with the file beneath. Each mission is in the
 // rotation at most once (the form dedupes the rotation it starts from), so a
 // mission's file keys its row and its ids.

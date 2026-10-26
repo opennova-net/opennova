@@ -1,7 +1,7 @@
 // The hosted server settings form: its defaults, and the backend's rules
 // (apps/novaworld_common/hosted/model/hosted_settings.h check_settings) checked in
 // the browser first, so the owner hears what is wrong before a start is spent
-// on it. The game (a base data set the service offers, by id) sets the
+// on it. The game (a base game the service offers, by its data set id) sets the
 // whole-number ranges, the expansions and the rotation's missions, which come
 // from the data itself (the current trees' mission lists). The backend checks
 // them again and stays the authority.
@@ -34,7 +34,7 @@ export const INT_FIELDS: readonly IntField[] = [
 ];
 
 // The backend's defaults for a field a start leaves out (HostedSettings); the
-// data set's is the first the service offers (0 stands for none here).
+// game's is the first the service offers (0 stands for none here).
 export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
   data_set_id: 0,
   expansion_id: null,
@@ -110,7 +110,7 @@ function isIntField(field: SettingsField): field is IntField {
   return (INT_FIELDS as readonly string[]).includes(field);
 }
 
-// The expansion choices of a data set, in words: the base game, then each
+// The expansion choices of a game, in words: the base game, then each
 // expansion by name.
 export function expansionChoices(dataSet: HostedDataSet): string {
   return ['the base game', ...dataSet.expansions.map((e) => e.display_name)].join(' or ');
@@ -124,7 +124,7 @@ export function fieldRule(field: SettingsField, dataSet: HostedDataSet | null): 
   return FIELD_RULES[field];
 }
 
-// The offered data set with this id, or null.
+// The offered game with this id, or null.
 export function findDataSet(dataSets: readonly HostedDataSet[], id: number): HostedDataSet | null {
   return dataSets.find((d) => d.id === id) ?? null;
 }
@@ -325,7 +325,7 @@ export interface CheckedSettings {
 }
 
 // Whether a start on `dataSet` may also list on NovaLogic's NovaWorld: the
-// service offers it and the data set takes it (Joint Operations alone).
+// service offers it and the game takes it (Joint Operations alone).
 export function offersNovaLogicListing(
   dataSet: HostedDataSet | null | undefined,
   novalogicListing: boolean,
@@ -336,7 +336,7 @@ export function offersNovaLogicListing(
 // Every field against the backend's rule, in the form's order: the game one
 // of `dataSets`, and the ranges, the expansion and the missions that game's
 // own. The listing on NovaLogic's NovaWorld goes as the form has it only
-// while the service offers it (`novalogicListing`) and the data set takes it
+// while the service offers it (`novalogicListing`) and the game takes it
 // (offersNovaLogicListing); else it goes false.
 // The game_name error for a NovaLogic listing over a name holding "Nova".
 export const NOVA_NAME_RULE =
