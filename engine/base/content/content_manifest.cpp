@@ -33,7 +33,7 @@ bool is_sha256_hex(std::string_view text) {
 
 // The io layer's strict check (base/io/cp1252.h), the store's rule.
 bool is_utf8(std::string_view text) {
-	return io::is_valid_utf8(text);
+	return opennova::is_valid_utf8(text);
 }
 
 bool is_content_path(std::string_view path, std::string &why) {
@@ -102,7 +102,7 @@ std::string folded_path(std::string_view path) {
 			out += path[i++];
 			continue;
 		}
-		io::utf8_append(out, simple_case_fold(code));
+		opennova::utf8_append(out, simple_case_fold(code));
 		i += length;
 	}
 	return out;

@@ -3,6 +3,7 @@
 // The environment's world light and fog record and the typed channel it publishes through, split from
 // ObjectModel's TU pair (one type per TU pair, ADR 0043).
 
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/vector3.hpp>

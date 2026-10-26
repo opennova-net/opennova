@@ -79,7 +79,7 @@ bool decode_text(std::string_view raw, std::string &out) {
 			}
 			if (cp == 0 || (cp >= 0xD800 && cp <= 0xDFFF))
 				return false;
-			io::utf8_append(out, cp);
+			opennova::utf8_append(out, cp);
 		} else {
 			return false;
 		}

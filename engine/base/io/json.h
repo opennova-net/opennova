@@ -3,7 +3,7 @@
 // import sidecars and build records (ADR 0046 d6). Portable on purpose: apps, ctests
 // and headless embedders read a project without Godot.
 //
-// Reading is strict (RFC 8259): UTF-8 text (io::is_valid_utf8's set: no overlong form, no
+// Reading is strict (RFC 8259): UTF-8 text (opennova::is_valid_utf8's set: no overlong form, no
 // surrogate, nothing past U+10FFFF), no comments, no trailing commas, no NaN/Infinity, the
 // seven escapes plus \uXXXX (surrogate pairs decode to UTF-8), no raw control characters
 // inside strings, nesting capped at kJsonMaxDepth. Writing is deterministic so a saved file
@@ -419,7 +419,7 @@ private:
 			const unsigned char cont = static_cast<unsigned char>(text_[pos_ + i]);
 			if ((cont & 0xC0) != 0x80) return fail("invalid UTF-8 continuation byte");
 		}
-		// The strict set (io::is_valid_utf8): no overlong form, no surrogate, nothing past U+10FFFF.
+		// The strict set (opennova::is_valid_utf8): no overlong form, no surrogate, nothing past U+10FFFF.
 		if (!is_valid_utf8(std::string_view(text_.data() + pos_, static_cast<size_t>(extra) + 1)))
 			return fail("invalid UTF-8 sequence");
 		out.append(text_.data() + pos_, static_cast<size_t>(extra) + 1);
@@ -467,7 +467,7 @@ private:
 				} else if (cp >= 0xDC00 && cp <= 0xDFFF) {
 					return fail("lone low surrogate");
 				}
-				io::utf8_append(out, cp);
+				opennova::utf8_append(out, cp);
 				break;
 			}
 			default: return fail("invalid escape");
