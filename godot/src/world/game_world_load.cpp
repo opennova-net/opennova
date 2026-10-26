@@ -119,61 +119,9 @@ Ref<ResourceRoot> GameWorld::mount_runtime_root(const String &p_dir) {
 
 // --- the load entries --------------------------------------------------------------
 
-// Load the world from `dir`, or from the persisted resource directory when
-// empty. Returns OK, or ERR_FILE_NOT_FOUND when the directory is unset/missing
-// the terrain (the caller decides whether to prompt). No fallbacks: the
-// chosen directory is the only place looked.
-int GameWorld::load_world(const String &p_dir) {
-	if (!mission_file_.is_empty()) {
-		return load_mission(mission_file_, p_dir);
-	}
-	Ref<ResourceRoot> resource_root = resolve_root(p_dir);
-	if (resource_root.is_null()) {
-		return ERR_CANT_OPEN;
-	}
-	if (!resource_root->has_file(terrain_file_)) {
-		emit_signal(kSignalLoadFailed,
-				vformat("%s not found in %s", terrain_file_, resource_root->get_root_dir()));
-		return ERR_FILE_NOT_FOUND;
-	}
-	if (!resource_root->has_file(env_file_)) {
-		emit_signal(kSignalLoadFailed,
-				vformat("%s not found in %s", env_file_, resource_root->get_root_dir()));
-		return ERR_FILE_NOT_FOUND;
-	}
-
-	set_water_world_rendering_enabled(false);
-	set_mission_water_height_override(NAN);
-	clear_mission_tile_info();
-	resource_root_ = resource_root;
-	load_environment(terrain_file_, env_file_);
-	// A world with no mission start loads its celestial bodies with its environment and draws them.
-	scene_.load_celestial_models(resource_root_, /*p_draws=*/true);
-	if (!load_terrain(terrain_file_, String(), env_file_.get_basename())) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
-		return ERR_CANT_OPEN;
-	}
-	// A world with no mission has no mission start: the terrain's mission textures stage (its
-	// texture slots, its build and the foliage's, D-NET-NEW-L2-46) follows the connect leg at once.
-	Ref<LoadTimeline> timeline = LoadTimeline::begin(vformat("World load %s", terrain_file_));
-	last_load_timeline_ = timeline;
-	load_terrain_textures(timeline, /*p_dedicated_host=*/false);
-	load_sky_maps(timeline, /*p_dedicated_host=*/false);
-	load_frame_fx_textures(timeline, /*p_dedicated_host=*/false);
-	timeline->finish();
-
-	world_ready_ = true;
-	prepare_autonomous_weather();
-	set_water_world_rendering_enabled(true);
-	emit_signal(kSignalWorldLoaded);
-	return OK;
-}
-
 // Load a mission (.bms): its header selects the terrain + environment, which
-// are resolved from `dir` (or the persisted resource directory) and loaded
-// through the same path as load_world, then the mission's placed objects are
-// populated into the world. Returns OK, or the same error codes as
-// load_world.
+// are resolved from `dir` (or the persisted resource directory), then the
+// mission's placed objects are populated into the world.
 int GameWorld::load_mission(const String &p_bms_name, const String &p_dir) {
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_MISSION_SETUP));

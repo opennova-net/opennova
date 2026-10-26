@@ -1088,19 +1088,6 @@ func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:
 	assert_signal_emitted_with_parameters(world, "mission_effects", [rows])
 
 
-func test_load_world_requires_hardcoded_environment_in_global_root() -> void:
-	var root := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("missing_env_%d" % Time.get_ticks_usec())
-	DirAccess.make_dir_recursive_absolute(root)
-	# Pass the runtime archive gate so this fixture reaches the missing-environment contract.
-	WorldFixture.write_pff(self, root.path_join("resource.pff"), [])
-	TestFs.write_text(self, root.path_join("Tmap.trn"), "terrain_name \"Tmap\"\n")
-
-	var world := WorldFixture.make_world(self)
-	await get_tree().process_frame
-
-	assert_eq(world.load_world(root), ERR_FILE_NOT_FOUND, "Runtime global root must contain full_00.env next to Tmap.trn.")
-
-
 func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	# game_world.tscn is the game shell's embeddable world. Pin the extraction:
 	# every engine node is present and the intra-scene NodePaths survived the
@@ -2890,13 +2877,10 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 	var fixture_dir := ProjectSettings.globalize_path(RuntimeFixture.directory())
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
-	world.mission_file = "boot-option.bms"
 
 	assert_eq(world.load_mission("mnml.bms"), OK)
 	assert_eq(world.get_loaded_mission_file(), "mnml.bms",
-		"the successful load argument, not the exported boot option, is the active mission")
-	assert_eq(world.mission_file, "boot-option.bms",
-		"loading does not repurpose the exported boot option as mutable runtime state")
+		"the successful load argument is the active mission")
 
 	world.unload()
 	assert_eq(world.get_loaded_mission_file(), "",

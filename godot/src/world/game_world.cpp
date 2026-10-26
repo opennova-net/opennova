@@ -1027,13 +1027,6 @@ void GameWorld::_bind_methods() {
 	ADD_SIGNAL(MethodInfo(kSignalMusicVarChanged, PropertyInfo(Variant::INT, "slot"),
 			PropertyInfo(Variant::INT, "value")));
 
-	ClassDB::bind_method(D_METHOD("set_mission_file", "value"), &GameWorld::set_mission_file);
-	ClassDB::bind_method(D_METHOD("get_mission_file"), &GameWorld::get_mission_file);
-	ClassDB::bind_method(D_METHOD("set_terrain_file", "value"), &GameWorld::set_terrain_file);
-	ClassDB::bind_method(D_METHOD("get_terrain_file"), &GameWorld::get_terrain_file);
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "mission_file"), "set_mission_file", "get_mission_file");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "terrain_file"), "set_terrain_file", "get_terrain_file");
-
 	ClassDB::bind_method(D_METHOD("set_resource_root", "root"), &GameWorld::set_resource_root);
 	ClassDB::bind_method(D_METHOD("set_resource_root_resolver", "resolver"),
 			&GameWorld::set_resource_root_resolver);
@@ -1096,7 +1089,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_static_method("GameWorld", D_METHOD("clamp_particle_density", "density"),
 			&GameWorld::clamp_particle_density);
 
-	ClassDB::bind_method(D_METHOD("load_world", "dir"), &GameWorld::load_world, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission", "bms_name", "dir"), &GameWorld::load_mission,
 			DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_loose_mission", "bms_name", "dir"),

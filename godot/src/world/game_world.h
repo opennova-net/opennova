@@ -187,18 +187,6 @@ public:
 
 	GameWorld();
 
-	// --- the exported boot options ------------------------------------------
-	// A mission (.bms) to boot into. When set, the mission's header selects the
-	// terrain + environment (terrain_file below is ignored) and its
-	// placed objects are populated into the world. Empty = load bare terrain +
-	// environment.
-	void set_mission_file(const String &p_value) { mission_file_ = p_value; }
-	String get_mission_file() const { return mission_file_; }
-	// The terrain loaded, by name, from the resource directory (beside the
-	// fixed default environment, env_file_). Used only when mission_file is empty.
-	void set_terrain_file(const String &p_value) { terrain_file_ = p_value; }
-	String get_terrain_file() const { return terrain_file_; }
-
 	// --- the injection seams ---------------------------------------------------
 	// Inject the resource root the next load resolves through. Runtime hosts
 	// and focused tests use this to keep one already-mounted resource session.
@@ -292,16 +280,11 @@ public:
 	static int clamp_particle_density(int p_density);
 
 	// --- the load entries ------------------------------------------------------
-	// Load the world from `dir`, or from the persisted resource directory when
-	// empty. Returns OK, or ERR_FILE_NOT_FOUND when the directory is
-	// unset/missing the terrain (the caller decides whether to prompt). No
-	// fallbacks: the chosen directory is the only place looked.
-	int load_world(const String &p_dir = String());
 	// Load a mission (.bms): its header selects the terrain + environment,
-	// which are resolved from `dir` (or the persisted resource directory) and
-	// loaded through the same path as load_world, then the mission's placed
-	// objects are populated into the world. Returns OK, or the same error
-	// codes as load_world.
+	// which are resolved from `dir` (or the persisted resource directory, the
+	// only place looked), then the mission's placed objects are populated into
+	// the world. Returns OK, or ERR_FILE_NOT_FOUND when the directory is
+	// unset or misses a file (the caller decides whether to prompt).
 	int load_mission(const String &p_bms_name, const String &p_dir = String());
 	// Load the exact saved, top-level loose BMS from the selected resource
 	// root. This tooling/test seam deliberately differs from load_mission(),
@@ -1311,11 +1294,6 @@ private:
 	// Edge latch for the compositor passes' RD GPU timestamps (F3 capture
 	// only).
 	bool stats_aux_gpu_timing_ = false;
-
-	// --- the exported boot options ---
-	String mission_file_;
-	String terrain_file_ = "Dvxi5.trn";
-	String env_file_ = "full_00.env";
 };
 
 } // namespace godot
