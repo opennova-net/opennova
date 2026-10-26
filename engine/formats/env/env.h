@@ -248,7 +248,8 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error);
 bool save_env_keys(std::ostream &output, const Config &cfg, const std::set<std::string> &keys, std::string &error);
 // The keywords a text's lines write, lower case, as the parser reads its lines (load_env): every keyword the parser
 // takes, but a keyframe colour (a colour line while a tod_begin's slot is the pointer's) and tod_begin and tod_end,
-// whose keyframes the Config holds.
+// whose keyframes the Config holds. Each by the name save_env writes it under (ambient_rgb, the ground's other name,
+// as ground_rgb).
 std::set<std::string> env_keys_written(const std::string &text);
 // The keywords whose lines `a` and `b` write otherwise (save_env's lines, a keyframe's aside).
 std::set<std::string> env_keys_differing(const Config &a, const Config &b);

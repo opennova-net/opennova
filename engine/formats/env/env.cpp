@@ -705,7 +705,10 @@ std::set<std::string> env_keys_written(const std::string &text) {
 			return;
 		}
 		if (is_tod_color_key(key) && in_slot) return;
-		if (is_env_key(key)) keys.insert(key);
+		// ambient_rgb is the ground's other name: one arm of the parser takes both into the ground's slot
+		// [orig: TimeOfDay_ParseProperty @ 0x57c789], and the writer writes the ground as ground_rgb.
+		if (key == "ambient_rgb") keys.insert("ground_rgb");
+		else if (is_env_key(key)) keys.insert(key);
 	});
 	return keys;
 }

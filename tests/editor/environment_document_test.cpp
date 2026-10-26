@@ -8,6 +8,7 @@
 // field.
 #include <algorithm>
 #include <cstdio>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -997,6 +998,29 @@ int test_overcast() {
 	return 0;
 }
 
+// A colour line under the parser's other name for it (ambient_rgb, the ground's: one arm takes both [orig:
+// TimeOfDay_ParseProperty @ 0x57c789]) is the ground's keyword the file writes: a save writes it, as ground_rgb, and a
+// mission reads the saved file as it read the file.
+int test_ambient_alias() {
+	const std::string overcast = "fog_level 900\r\nambient_rgb 10,20,30\r\n";
+	auto document = std::make_unique<EnvironmentDocument>();
+	Diagnostic error;
+	TEST_EXPECT(document->load_bytes(bytes_of(overcast), "overcast.def", AssetKind::OvercastDefs, "jo", error));
+	TEST_EXPECT(opennova::env::env_keys_written(overcast) == std::set<std::string>({"fog_level", "ground_rgb"}));
+	const std::string saved = document->serialize().text;
+	TEST_EXPECT(saved.find("ground_rgb 10,20,30\r\n") != std::string::npos && saved.find("ambient_rgb") == std::string::npos &&
+	            saved.find("fog_level 900\r\n") != std::string::npos);
+	// The .env present (no line of its own), so the colours with no keyframe stand to the end of the load.
+	const std::string trn = "polytrn_colormap c.tga\r\n", env;
+	opennova::env::MissionEnv as_read, as_saved;
+	opennova::env::load_mission_env({&trn, &overcast, &env}, as_read);
+	opennova::env::load_mission_env({&trn, &saved, &env}, as_saved);
+	TEST_EXPECT(config_difference(as_read.config, as_saved.config).empty() &&
+	            as_saved.config.scratch.ground.g > 19.5f / 255.0f && as_saved.config.scratch.ground.g < 20.5f / 255.0f);
+	std::printf("ambient_rgb: the ground's keyword, saved as ground_rgb\n");
+	return 0;
+}
+
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	int failures = test_type();
@@ -1008,6 +1032,7 @@ int main() {
 	failures += test_mission_terrain();
 	failures += test_fixtures(repo);
 	failures += test_overcast();
+	failures += test_ambient_alias();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
