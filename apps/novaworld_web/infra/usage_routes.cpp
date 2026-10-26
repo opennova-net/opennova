@@ -360,24 +360,6 @@ void put_now(crow::json::wvalue &out, const Now &n) {
 	value_or_null(out, "net_out_bps", n.out_bps);
 }
 
-std::string short_arn(const std::string &arn) {
-	const size_t slash = arn.rfind('/');
-	return slash == std::string::npos ? arn : arn.substr(slash + 1);
-}
-
-bool is_task_char(char c) {
-	return is_alnum(c) || c == '.' || c == '_' || c == '-';
-}
-
-std::optional<int64_t> id_param(const std::string &v) {
-	if (v.empty() || v.size() > 18 || !strutil::all_digits(v))
-		return std::nullopt;
-	const auto n = strutil::parse_llong(v);
-	if (!n || *n < 1)
-		return std::nullopt;
-	return static_cast<int64_t>(*n);
-}
-
 } // namespace
 
 std::optional<double> CounterRate::next(int64_t at, std::optional<int64_t> bytes) {
@@ -540,7 +522,7 @@ crow::response UsageRoutes::usage(const crow::request &req) {
 		const bool server = subject == "server";
 		const bool machine = subject == "machine";
 		if (server) {
-			const std::optional<int64_t> sid = id_param(id);
+			const std::optional<int64_t> sid = id_param(id.c_str());
 			if (!sid ||
 					db.query("SELECT 1 FROM hosted_servers WHERE id = $1;", { BindValue(*sid) })
 							.empty())
@@ -551,7 +533,7 @@ crow::response UsageRoutes::usage(const crow::request &req) {
 			limit["cpu"] = slot_cpus_;
 			limit["memory_bytes"] = slot_memory_bytes_;
 		} else if (machine) {
-			const std::optional<int64_t> mid = id_param(id);
+			const std::optional<int64_t> mid = id_param(id.c_str());
 			const auto rows = mid ? db.query("SELECT memory_total_bytes, disk_total_bytes FROM "
 											 "fleet_machines WHERE id = $1;",
 											{ BindValue(*mid) })
@@ -571,7 +553,7 @@ crow::response UsageRoutes::usage(const crow::request &req) {
 			out["id"] = id;
 			const std::string task = param("task");
 			if (!task.empty()) {
-				if (task.size() > 64 || !all_of(task, is_task_char) ||
+				if (task.size() > 64 || !all_of(task, is_object_name_char) ||
 						db.query("SELECT 1 FROM program_samples WHERE program = $1 AND task_id = "
 								 "$2 "
 								 "UNION ALL SELECT 1 FROM program_hourly WHERE program = $1 AND "

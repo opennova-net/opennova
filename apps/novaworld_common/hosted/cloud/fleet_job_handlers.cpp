@@ -2,6 +2,7 @@
 
 #include "core/loggable.h"
 #include "hosted/model/fleet_repository.h"
+#include "jobs/job_queue.h"
 
 #include <cstdio>
 #include <optional>
@@ -14,13 +15,8 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-int64_t member_int(const io::JsonValue &payload, const char *key) {
-	const io::JsonValue *v = payload.get(key);
-	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
-}
-
 jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const PlacementPolicy &limits) {
-	const int64_t id = member_int(ctx.job.payload, "machine_id");
+	const int64_t id = jobs::member_int(ctx.job.payload, "machine_id");
 	std::optional<FleetMachineRow> row;
 	int of_kind = 0;
 	{
@@ -109,7 +105,7 @@ jobs::JobResult launch(jobs::JobContext &ctx, MachineDriver &driver, const Place
 }
 
 jobs::JobResult describe(jobs::JobContext &ctx, MachineDriver &driver) {
-	const int64_t id = member_int(ctx.job.payload, "machine_id");
+	const int64_t id = jobs::member_int(ctx.job.payload, "machine_id");
 	const io::JsonValue *cloud_id = ctx.job.payload.get("cloud_id");
 	if (cloud_id == nullptr || !cloud_id->is_string() || cloud_id->string.empty())
 		return jobs::JobResult::fail("no cloud machine named");

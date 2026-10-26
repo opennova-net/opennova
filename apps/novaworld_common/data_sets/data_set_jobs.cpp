@@ -4,6 +4,7 @@
 #include "core/loggable.h"
 #include "data_set_files.h"
 #include "data_set_repository.h"
+#include "jobs/job_queue.h"
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -44,15 +45,6 @@ constexpr int kAttemptsApply = 3;
 constexpr int kAttemptsPrune = 3;
 constexpr int kAttemptsPurge = 10;
 constexpr int64_t kPrunePeriodMs = 60 * 60 * 1000;
-
-int64_t member_int(const io::JsonValue &payload, const char *key) {
-	const io::JsonValue *v = payload.get(key);
-	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
-}
-
-std::string id_text(int64_t id) {
-	return std::to_string(static_cast<long long>(id));
-}
 
 std::string join(const std::vector<std::string> &names) {
 	std::string out;
@@ -220,11 +212,11 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, Outcome outc
 		case Outcome::Ok:
 			if (!finish_tree(db, tree_id, ready)) {
 				std::printf("%s tree %s left building meanwhile; nothing written\n", kTag,
-						id_text(tree_id).c_str());
+						std::to_string(tree_id).c_str());
 				return jobs::JobResult::done();
 			}
 			std::printf("%s tree %s ready: %zu file%s, %s, %zu mission%s, version \"%s\"\n", kTag,
-					id_text(tree_id).c_str(), ready.files.size(),
+					std::to_string(tree_id).c_str(), ready.files.size(),
 					ready.files.size() == 1 ? "" : "s",
 					strutil::byte_size_text(static_cast<uint64_t>(ready.bytes)).c_str(),
 					ready.missions.size(), ready.missions.size() == 1 ? "" : "s",
@@ -233,7 +225,7 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, Outcome outc
 			return jobs::JobResult::done();
 		case Outcome::Refused:
 			set_tree_state(db, tree_id, TreeState::Building, TreeState::Failed, why);
-			std::fprintf(stderr, "%s tree %s failed: %s\n", kTag, id_text(tree_id).c_str(),
+			std::fprintf(stderr, "%s tree %s failed: %s\n", kTag, std::to_string(tree_id).c_str(),
 					loggable(why, 200).c_str());
 			return jobs::JobResult::done();
 		case Outcome::Transient:
@@ -242,11 +234,11 @@ jobs::JobResult settle_tree(jobs::JobContext &ctx, int64_t tree_id, Outcome outc
 	if (ctx.job.attempts >= ctx.job.max_attempts) {
 		set_tree_state(db, tree_id, TreeState::Building, TreeState::Failed, "the store: " + why);
 		std::fprintf(stderr, "%s tree %s failed after %d attempts: %s\n", kTag,
-				id_text(tree_id).c_str(), ctx.job.attempts, loggable(why, 200).c_str());
+				std::to_string(tree_id).c_str(), ctx.job.attempts, loggable(why, 200).c_str());
 		return jobs::JobResult::fail(why);
 	}
 	std::fprintf(stderr, "%s WARN tree %s: %s; the job runs again\n", kTag,
-			id_text(tree_id).c_str(), loggable(why, 200).c_str());
+			std::to_string(tree_id).c_str(), loggable(why, 200).c_str());
 	return jobs::JobResult::retry(why);
 }
 
@@ -449,7 +441,7 @@ bool map_sections(PackageFile &package, const std::vector<DataSetRow> &data_sets
 jobs::JobResult invalid_release(jobs::JobContext &ctx, int64_t release_id, const std::string &why) {
 	auto lease = ctx.pool.acquire();
 	set_release_status(*lease, release_id, ReleaseStatus::Validating, ReleaseStatus::Invalid, why);
-	std::fprintf(stderr, "%s release %s invalid: %s\n", kTag, id_text(release_id).c_str(),
+	std::fprintf(stderr, "%s release %s invalid: %s\n", kTag, std::to_string(release_id).c_str(),
 			loggable(why, 200).c_str());
 	return jobs::JobResult::done();
 }
@@ -463,17 +455,17 @@ jobs::JobResult release_transient(
 		set_release_status(*lease, release_id, ReleaseStatus::Validating, ReleaseStatus::Invalid,
 				"the store: " + why);
 		std::fprintf(stderr, "%s release %s invalid after %d attempts: %s\n", kTag,
-				id_text(release_id).c_str(), ctx.job.attempts, loggable(why, 200).c_str());
+				std::to_string(release_id).c_str(), ctx.job.attempts, loggable(why, 200).c_str());
 		return jobs::JobResult::fail(why);
 	}
 	std::fprintf(stderr, "%s WARN release %s: %s; the job runs again\n", kTag,
-			id_text(release_id).c_str(), loggable(why, 200).c_str());
+			std::to_string(release_id).c_str(), loggable(why, 200).c_str());
 	return jobs::JobResult::retry(why);
 }
 
 jobs::JobResult validate(
 		jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
-	const int64_t release_id = member_int(ctx.job.payload, "release_id");
+	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
 	std::vector<DataSetRow> data_sets;
 	bool built = false;
 	{
@@ -484,10 +476,10 @@ jobs::JobResult validate(
 		built = release->content_revision > 0;
 		data_sets = list_data_sets(*lease);
 	}
-	std::printf("%s release %s: validating\n", kTag, id_text(release_id).c_str());
+	std::printf("%s release %s: validating\n", kTag, std::to_string(release_id).c_str());
 	const std::string upload_key = release_upload_key(release_id);
 	std::string why;
-	ScratchDir scratch(io::utf8_join(scratch_root, "release-" + id_text(release_id)));
+	ScratchDir scratch(io::utf8_join(scratch_root, "release-" + std::to_string(release_id)));
 	if (!scratch.make(why))
 		return release_transient(ctx, release_id, why);
 	const std::string path = scratch.file("upload.sfs");
@@ -503,7 +495,8 @@ jobs::JobResult validate(
 		other = find_release_by_sha(*lease, sha256);
 	}
 	if (other && *other != release_id)
-		return invalid_release(ctx, release_id, "already uploaded as release " + id_text(*other));
+		return invalid_release(
+				ctx, release_id, "already uploaded as release " + std::to_string(*other));
 	PackageFile package;
 	if (!package.open(path, why))
 		return invalid_release(ctx, release_id, "not a 1SFS package: " + why);
@@ -526,17 +519,18 @@ jobs::JobResult validate(
 		auto lease = ctx.pool.acquire();
 		if (!set_release_validated(*lease, release_id, sha256, static_cast<int64_t>(size),
 					package.layout().product, sections)) {
-			std::printf(
-					"%s release %s left validating meanwhile\n", kTag, id_text(release_id).c_str());
+			std::printf("%s release %s left validating meanwhile\n", kTag,
+					std::to_string(release_id).c_str());
 			return jobs::JobResult::done();
 		}
 	}
 	std::string ignored;
 	if (!store.remove(upload_key, ignored))
 		std::fprintf(stderr, "%s WARN release %s: the upload %s stays: %s\n", kTag,
-				id_text(release_id).c_str(), upload_key.c_str(), loggable(ignored, 200).c_str());
+				std::to_string(release_id).c_str(), upload_key.c_str(),
+				loggable(ignored, 200).c_str());
 	std::printf("%s release %s draft: \"%s\" %s, %zu section%s\n", kTag,
-			id_text(release_id).c_str(), loggable(package.layout().product).c_str(),
+			std::to_string(release_id).c_str(), loggable(package.layout().product).c_str(),
 			strutil::byte_size_text(size).c_str(), sections.size(),
 			sections.size() == 1 ? "" : "s");
 	return jobs::JobResult::done();
@@ -555,7 +549,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	const std::string to = tree_prefix(tree_id);
 	if (!store.remove_prefix(to, why))
 		return Outcome::Transient;
-	ScratchDir scratch(io::utf8_join(scratch_root, "apply-" + id_text(tree_id)));
+	ScratchDir scratch(io::utf8_join(scratch_root, "apply-" + std::to_string(tree_id)));
 	if (!scratch.make(why))
 		return Outcome::Transient;
 	const std::string dir = scratch.file("tree");
@@ -635,14 +629,15 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	if (!put_manifest(store, scratch, tree_id, ready, why))
 		return Outcome::Transient;
 	std::printf("%s tree %s: %zu row%s applied, %zu file%s of the tree, %zu left out\n", kTag,
-			id_text(tree_id).c_str(), report.rows_applied, report.rows_applied == 1 ? "" : "s",
-			ready.files.size(), ready.files.size() == 1 ? "" : "s", left_out);
+			std::to_string(tree_id).c_str(), report.rows_applied,
+			report.rows_applied == 1 ? "" : "s", ready.files.size(),
+			ready.files.size() == 1 ? "" : "s", left_out);
 	return Outcome::Ok;
 }
 
 jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
-	const int64_t release_id = member_int(ctx.job.payload, "release_id");
-	const int64_t data_set_id = member_int(ctx.job.payload, "data_set_id");
+	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
+	const int64_t data_set_id = jobs::member_int(ctx.job.payload, "data_set_id");
 	std::optional<ReleaseSection> section;
 	std::optional<DataSetRow> data_set;
 	std::optional<DataSetTree> building; // a run again's tree
@@ -671,7 +666,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 				return jobs::JobResult::done();
 		}
 	}
-	std::printf("%s release %s -> %s: applying%s\n", kTag, id_text(release_id).c_str(),
+	std::printf("%s release %s -> %s: applying%s\n", kTag, std::to_string(release_id).c_str(),
 			loggable(data_set->display_name).c_str(), building ? " again" : "");
 	int64_t tree_id = 0;
 	if (building) {
@@ -708,10 +703,10 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 		const std::string prefix = tree_prefix(id);
 		std::string error;
 		if (!store.remove_prefix(prefix, error)) {
-			std::fprintf(stderr, "%s WARN tree %s: not pruned: %s\n", kTag, id_text(id).c_str(),
-					loggable(error, 200).c_str());
+			std::fprintf(stderr, "%s WARN tree %s: not pruned: %s\n", kTag,
+					std::to_string(id).c_str(), loggable(error, 200).c_str());
 			if (first_error.empty())
-				first_error = "tree " + id_text(id) + ": " + error;
+				first_error = "tree " + std::to_string(id) + ": " + error;
 			continue;
 		}
 		auto lease = ctx.pool.acquire();
@@ -730,7 +725,7 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 // whole. Its row went with the delete, its trees' rows with it, so the payload names them; a
 // prefix already gone removes nothing, so a run again after a store failure takes the rest.
 jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
-	const int64_t data_set_id = member_int(ctx.job.payload, "data_set_id");
+	const int64_t data_set_id = jobs::member_int(ctx.job.payload, "data_set_id");
 	std::vector<std::string> prefixes;
 	if (const io::JsonValue *trees = ctx.job.payload.get("trees"); trees && trees->is_array())
 		for (const io::JsonValue &tree : trees->array)
@@ -742,19 +737,20 @@ jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
 		std::string error;
 		if (!store.remove_prefix(prefix, error)) {
 			std::fprintf(stderr, "%s WARN game %s: %s not removed: %s\n", kTag,
-					id_text(data_set_id).c_str(), prefix.c_str(), loggable(error, 200).c_str());
+					std::to_string(data_set_id).c_str(), prefix.c_str(),
+					loggable(error, 200).c_str());
 			return jobs::JobResult::retry(prefix + ": " + error);
 		}
 	}
-	std::printf("%s game %s purged: %zu prefix%s removed\n", kTag, id_text(data_set_id).c_str(),
-			prefixes.size(), prefixes.size() == 1 ? "" : "es");
+	std::printf("%s game %s purged: %zu prefix%s removed\n", kTag,
+			std::to_string(data_set_id).c_str(), prefixes.size(), prefixes.size() == 1 ? "" : "es");
 	return jobs::JobResult::done();
 }
 
 } // namespace
 
 std::string tree_prefix(int64_t tree_id) {
-	return "trees/" + id_text(tree_id) + "/";
+	return "trees/" + std::to_string(tree_id) + "/";
 }
 
 std::string release_package_key(const std::string &sha256) {
@@ -762,14 +758,14 @@ std::string release_package_key(const std::string &sha256) {
 }
 
 std::string release_upload_key(int64_t release_id) {
-	return "updates/upload-" + id_text(release_id) + ".sfs";
+	return "updates/upload-" + std::to_string(release_id) + ".sfs";
 }
 
 int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {
 	jobs::NewJob job;
 	job.kind = kJobReleaseValidate;
 	job.payload.set("release_id", io::json_number(static_cast<double>(release_id)));
-	job.dedupe_key = std::string(kJobReleaseValidate) + ":" + id_text(release_id);
+	job.dedupe_key = std::string(kJobReleaseValidate) + ":" + std::to_string(release_id);
 	job.max_attempts = kAttemptsValidate;
 	return jobs::enqueue(db, job);
 }
@@ -782,8 +778,8 @@ int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t data
 	job.kind = kJobReleaseApply;
 	job.payload.set("release_id", io::json_number(static_cast<double>(release_id)));
 	job.payload.set("data_set_id", io::json_number(static_cast<double>(data_set_id)));
-	job.dedupe_key =
-			std::string(kJobReleaseApply) + ":" + id_text(release_id) + ":" + id_text(data_set_id);
+	job.dedupe_key = std::string(kJobReleaseApply) + ":" + std::to_string(release_id) + ":" +
+			std::to_string(data_set_id);
 	job.max_attempts = kAttemptsApply;
 	return jobs::enqueue(db, job);
 }
@@ -797,7 +793,7 @@ int64_t enqueue_game_purge(
 	for (const int64_t id : tree_ids)
 		trees.push(io::json_number(static_cast<double>(id)));
 	job.payload.set("trees", std::move(trees));
-	job.dedupe_key = std::string(kJobGamePurge) + ":" + id_text(data_set_id);
+	job.dedupe_key = std::string(kJobGamePurge) + ":" + std::to_string(data_set_id);
 	job.max_attempts = kAttemptsPurge;
 	return jobs::enqueue(db, job);
 }

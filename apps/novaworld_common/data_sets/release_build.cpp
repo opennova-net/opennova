@@ -43,15 +43,6 @@ constexpr size_t kLogMax = 256 * 1024;
 const std::vector<std::string> kToolEnvironment = { "PATH", "HOME", "LANG", "LC_*", "TMPDIR",
 	"TZ" };
 
-int64_t member_int(const io::JsonValue &payload, const char *key) {
-	const io::JsonValue *v = payload.get(key);
-	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
-}
-
-std::string id_text(int64_t id) {
-	return std::to_string(static_cast<long long>(id));
-}
-
 // One revision a build lays out: its game's id (where the store keeps its files), its project's
 // key (the folder it is laid out in), its number and its manifest's SHA-256.
 struct Source {
@@ -60,7 +51,7 @@ struct Source {
 	int64_t revision = 0;
 	std::string manifest_sha256;
 
-	std::string label() const { return key + " r" + id_text(revision); }
+	std::string label() const { return key + " r" + std::to_string(revision); }
 };
 
 // What a build makes, read in one lease: the release, its game (the data set its package
@@ -83,7 +74,7 @@ bool source_of(db::Database &db, const DataSetRow &project, int64_t number, Sour
 	const std::optional<content::ContentRevision> revision =
 			content::find_revision(db, project.id, number);
 	if (!revision) {
-		why = project.key + " has no revision " + id_text(number);
+		why = project.key + " has no revision " + std::to_string(number);
 		return false;
 	}
 	out.data_set_id = project.id;
@@ -186,7 +177,7 @@ public:
 			store_(store),
 			tools_(tools),
 			plan_(plan),
-			work_(io::utf8_join(scratch_root, "build-" + id_text(plan.release.id))),
+			work_(io::utf8_join(scratch_root, "build-" + std::to_string(plan.release.id))),
 			cache_(io::utf8_join(scratch_root, "content-cache")),
 			runner_(proc::filter_environment(kToolEnvironment), work_ + "-run") {}
 	~Build() { clear(); }
@@ -244,7 +235,7 @@ private:
 // The revision's files laid out in `dir` from the cache, its project's files synced down first.
 Step Build::lay_out(const Source &source, const std::string &dir, std::string &why) {
 	const std::string manifest_file =
-			io::utf8_join(work_, "manifest-" + source.key + "-" + id_text(source.revision));
+			io::utf8_join(work_, "manifest-" + source.key + "-" + std::to_string(source.revision));
 	std::string text;
 	if (!store_.get_file(content::manifest_key(source.data_set_id, source.manifest_sha256),
 				manifest_file, why) ||
@@ -256,7 +247,7 @@ Step Build::lay_out(const Source &source, const std::string &dir, std::string &w
 		why = source.label() + "'s manifest does not read" + (why.empty() ? "" : ": " + why);
 		return Step::Refused;
 	}
-	const std::string blobs = io::utf8_join(cache_, id_text(source.data_set_id));
+	const std::string blobs = io::utf8_join(cache_, std::to_string(source.data_set_id));
 	if (std::find(synced_.begin(), synced_.end(), source.data_set_id) == synced_.end()) {
 		if (!store_.sync_down(content::project_prefix(source.data_set_id) + "blobs/", blobs, why))
 			return Step::Transient;
@@ -442,8 +433,8 @@ jobs::JobResult refuse(
 		jobs::JobContext &ctx, int64_t release_id, const std::string &why, const std::string &log) {
 	auto lease = ctx.pool.acquire();
 	set_release_build_failed(*lease, release_id, why, log);
-	std::fprintf(stderr, "%s release %s build refused: %s\n", kTag, id_text(release_id).c_str(),
-			loggable(why, 200).c_str());
+	std::fprintf(stderr, "%s release %s build refused: %s\n", kTag,
+			std::to_string(release_id).c_str(), loggable(why, 200).c_str());
 	return jobs::JobResult::done();
 }
 
@@ -455,13 +446,13 @@ jobs::JobResult transient(
 		return jobs::JobResult::fail(why);
 	}
 	std::fprintf(stderr, "%s WARN release %s build: %s; the job runs again\n", kTag,
-			id_text(release_id).c_str(), loggable(why, 200).c_str());
+			std::to_string(release_id).c_str(), loggable(why, 200).c_str());
 	return jobs::JobResult::retry(why);
 }
 
 jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root,
 		const ReleaseTools &tools) {
-	const int64_t release_id = member_int(ctx.job.payload, "release_id");
+	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
 	BuildPlan plan;
 	std::string why;
 	{
@@ -472,11 +463,11 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		if (!plan_of(*lease, *release, plan, why)) {
 			set_release_build_failed(*lease, release_id, why, std::string());
 			std::fprintf(stderr, "%s release %s build refused: %s\n", kTag,
-					id_text(release_id).c_str(), loggable(why, 200).c_str());
+					std::to_string(release_id).c_str(), loggable(why, 200).c_str());
 			return jobs::JobResult::done();
 		}
 	}
-	std::printf("%s release %s: building %s version %s\n", kTag, id_text(release_id).c_str(),
+	std::printf("%s release %s: building %s version %s\n", kTag, std::to_string(release_id).c_str(),
 			plan.project.label().c_str(), loggable(plan.release.version).c_str());
 	Build made(store, scratch_root, tools, plan);
 	const Step step = made.run(why);
@@ -492,21 +483,21 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		auto lease = ctx.pool.acquire();
 		db::Transaction tx(*lease);
 		if (!set_release_built(*lease, release_id, made.log())) {
-			std::printf(
-					"%s release %s left building meanwhile\n", kTag, id_text(release_id).c_str());
+			std::printf("%s release %s left building meanwhile\n", kTag,
+					std::to_string(release_id).c_str());
 			return jobs::JobResult::done();
 		}
 		enqueue_release_validate(*lease, release_id);
 		tx.commit();
 	}
-	std::printf("%s release %s built: validating\n", kTag, id_text(release_id).c_str());
+	std::printf("%s release %s built: validating\n", kTag, std::to_string(release_id).c_str());
 	return jobs::JobResult::done();
 }
 
 } // namespace
 
 std::string release_build_key(int64_t release_id) {
-	return std::string(kJobReleaseBuild) + ":" + id_text(release_id);
+	return std::string(kJobReleaseBuild) + ":" + std::to_string(release_id);
 }
 
 int64_t enqueue_release_build(db::Database &db, int64_t release_id) {

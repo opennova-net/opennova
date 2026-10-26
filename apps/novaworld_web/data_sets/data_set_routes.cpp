@@ -2,6 +2,7 @@
 
 #include "core/loggable.h"
 #include "core/object_store.h"
+#include "core/text_util.h"
 #include "data_sets/content_repository.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
@@ -33,31 +34,12 @@ std::string creator_of(const RouteAccess &caller) {
 	return caller.user ? "admin " + caller.user->username : std::string("token");
 }
 
-crow::response db_failure(const char *route, const db::Error &e) {
-	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
-	return json_error(500, "db_error");
-}
-
-// {"error", "field", "message"}: which member the request got wrong.
-crow::response field_error(
-		int code, const char *error, const char *field, const std::string &message) {
-	crow::json::wvalue body;
-	body["error"] = error;
-	body["field"] = field;
-	body["message"] = message;
-	return json_reply(code, body);
-}
-
 crow::response no_such_data_set() {
 	return json_error(404, "not_found", "no data set has this id");
 }
 
 crow::response duplicate_key() {
 	return json_error(409, "duplicate_key", "another game's project has this key");
-}
-
-bool printable_ascii(std::string_view s) {
-	return std::all_of(s.begin(), s.end(), [](char c) { return c >= 0x21 && c <= 0x7E; });
 }
 
 bool valid_display_name(std::string_view name) {
@@ -89,20 +71,6 @@ bool valid_command_file(std::string_view name) {
 
 bool valid_visibility(std::string_view visibility) {
 	return content::visibility_from_name(visibility).has_value();
-}
-
-void id_or_null(crow::json::wvalue &out, const char *key, std::optional<int64_t> id) {
-	if (id)
-		out[key] = *id;
-	else
-		out[key] = nullptr;
-}
-
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
 }
 
 // A data set as the admin's JSON, with its live trees (pruned ones left out).

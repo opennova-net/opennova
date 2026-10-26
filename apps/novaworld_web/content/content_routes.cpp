@@ -33,35 +33,12 @@ namespace {
 using opennova::content::ContentFile;
 using hosted::DataSetRow;
 
-crow::response db_failure(const char *route, const db::Error &e) {
-	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
-	return json_error(500, "db_error");
-}
-
-crow::response store_unavailable() {
-	return json_error(503, "store_unavailable", "this NovaWorld service has no object store");
-}
-
-crow::response store_failure(const char *route, const std::string &error) {
-	std::fprintf(stderr, "[http] %s: the object store failed: %s\n", route, error.c_str());
-	return json_error(502, "store_error", "the object store did not take the request");
-}
-
 // A working copy bound to a key renamed since (or a game deleted) reads this: its binding names
 // the old key, so the editor's NovaWorld window binds it again.
 crow::response no_such_project() {
 	return json_error(404, "not_found",
 			"no game's project has this key (a renamed key or a deleted game: bind the project "
 			"again)");
-}
-
-crow::response field_error(
-		int code, const char *error, const char *field, const std::string &message) {
-	crow::json::wvalue body;
-	body["error"] = error;
-	body["field"] = field;
-	body["message"] = message;
-	return json_reply(code, body);
 }
 
 // A push and an upload are an admin's own: the Bearer token, a machine's, names no author.

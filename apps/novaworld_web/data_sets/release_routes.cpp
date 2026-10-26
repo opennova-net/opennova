@@ -2,6 +2,7 @@
 
 #include "core/loggable.h"
 #include "core/object_store.h"
+#include "core/text_util.h"
 #include "data_sets/data_set_jobs.h"
 #include "data_sets/data_set_repository.h"
 #include "data_sets/release_build.h"
@@ -27,29 +28,6 @@ std::string creator_of(const RouteAccess &caller) {
 	return caller.user ? "admin " + caller.user->username : std::string("token");
 }
 
-crow::response db_failure(const char *route, const db::Error &e) {
-	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
-	return json_error(500, "db_error");
-}
-
-crow::response field_error(
-		int code, const char *error, const char *field, const std::string &message) {
-	crow::json::wvalue body;
-	body["error"] = error;
-	body["field"] = field;
-	body["message"] = message;
-	return json_reply(code, body);
-}
-
-crow::response store_unavailable() {
-	return json_error(503, "store_unavailable", "this NovaWorld service has no object store");
-}
-
-crow::response store_failure(const char *route, const std::string &error) {
-	std::fprintf(stderr, "[http] %s: the object store failed: %s\n", route, error.c_str());
-	return json_error(502, "store_error", "the object store did not take the request");
-}
-
 crow::response no_such_release() {
 	return json_error(404, "not_found", "no release has this id");
 }
@@ -63,10 +41,6 @@ crow::response built_from_project() {
 bool has_project(db::Database &db, std::optional<int64_t> data_set_id) {
 	const std::optional<DataSetRow> game = data_set_id ? find_data_set(db, *data_set_id) : std::nullopt;
 	return game && !game->key.empty();
-}
-
-bool printable_ascii(std::string_view s) {
-	return std::all_of(s.begin(), s.end(), [](char c) { return c >= 0x21 && c <= 0x7E; });
 }
 
 bool valid_upload_id(std::string_view id) {

@@ -43,6 +43,12 @@
 
 namespace opennova::novaworld_server::jobs {
 
+// The payload's integer member `key`; 0 when it is absent or no number.
+inline int64_t member_int(const io::JsonValue &payload, const char *key) {
+	const io::JsonValue *v = payload.get(key);
+	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
+}
+
 // How long finished jobs are kept.
 inline constexpr int64_t kFinishedKeepS = 14 * 24 * 60 * 60;
 

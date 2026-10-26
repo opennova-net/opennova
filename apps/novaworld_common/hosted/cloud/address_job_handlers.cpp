@@ -7,6 +7,7 @@
 #include "hosted/model/address_repository.h"
 #include "hosted/model/fleet_jobs.h"
 #include "hosted/model/fleet_repository.h"
+#include "jobs/job_queue.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -17,11 +18,6 @@
 namespace opennova::novaworld_server::hosted {
 
 namespace {
-
-int64_t member_int(const io::JsonValue &payload, const char *key) {
-	const io::JsonValue *v = payload.get(key);
-	return v != nullptr && v->is_number() ? static_cast<int64_t>(v->number) : 0;
-}
 
 // The address's step on its own connection.
 template <typename Step> auto on_db(jobs::JobContext &ctx, const Step &step) {
@@ -42,7 +38,7 @@ void log_address(const HostedAddress &a, const std::string &what) {
 constexpr int64_t kAllocationsOffRetryMs = 10 * 60 * 1000;
 
 jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver &zone, bool allocations_on) {
-	const int64_t id = member_int(ctx.job.payload, "address_id");
+	const int64_t id = jobs::member_int(ctx.job.payload, "address_id");
 	std::optional<HostedAddress> a = address_of(ctx, id);
 	if (!a || (a->state != AddressState::Allocating && a->state != AddressState::Ready)) return jobs::JobResult::done();
 	if (a->allocation_id.empty()) {
@@ -103,8 +99,8 @@ jobs::JobResult allocate(jobs::JobContext &ctx, AddressDriver &driver, ZoneDrive
 }
 
 jobs::JobResult associate(jobs::JobContext &ctx, AddressDriver &driver) {
-	const int64_t id = member_int(ctx.job.payload, "address_id");
-	const int64_t machine_id = member_int(ctx.job.payload, "machine_id");
+	const int64_t id = jobs::member_int(ctx.job.payload, "address_id");
+	const int64_t machine_id = jobs::member_int(ctx.job.payload, "machine_id");
 	const std::optional<HostedAddress> a = address_of(ctx, id);
 	if (!a || a->state != AddressState::Ready || a->allocation_id.empty()) return jobs::JobResult::done();
 	const auto machines = on_db(ctx, [id](db::Database &db) { return live_machines_carrying(db, id); });
@@ -135,7 +131,7 @@ jobs::JobResult associate(jobs::JobContext &ctx, AddressDriver &driver) {
 }
 
 jobs::JobResult release(jobs::JobContext &ctx, AddressDriver &driver, ZoneDriver &zone) {
-	const int64_t id = member_int(ctx.job.payload, "address_id");
+	const int64_t id = jobs::member_int(ctx.job.payload, "address_id");
 	const std::optional<HostedAddress> a = address_of(ctx, id);
 	if (!a || a->state != AddressState::Releasing) return jobs::JobResult::done();
 	const auto machines = on_db(ctx, [id](db::Database &db) { return live_machines_carrying(db, id); });

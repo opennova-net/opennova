@@ -29,11 +29,6 @@ void iso_or_null(crow::json::wvalue &out, const char *key, const std::string &te
 	text_or_null(out, key, iso(text));
 }
 
-std::string short_arn(const std::string &arn) {
-	const size_t slash = arn.rfind('/');
-	return slash == std::string::npos ? arn : arn.substr(slash + 1);
-}
-
 // Whether `arn` is the revision the release names for `program`; null when the
 // release names none (none recorded, or it was not read).
 void on_release(crow::json::wvalue &out, const CloudSnapshot &cloud, const std::string &program,
