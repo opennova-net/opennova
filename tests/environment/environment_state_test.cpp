@@ -1442,7 +1442,7 @@ int main() {
 		// @ 0x60FCB1..0x60FCBA].
 		const opennova::env::BmsEnvOverrides high =
 				opennova::env::bms_env_overrides_from_header(0x1, 0x9000, 0, no_colour, no_colour, 0);
-		ok &= expect(opennova::env::mission_water_rung(high, opennova::env::Config(), 0.0f).height == 18432.0f,
+		ok &= expect(opennova::env::mission_water_rung(high, opennova::env::Config()).height == 18432.0f,
 				"a header word of 0x9000 sets the plane at 18432 units");
 		// The live Water node holds the override in world units (C-45): the same rungs.
 		const opennova::env::WaterHeightRungs held = opennova::env::water_height_rungs(12.0f, 10.5f, true);
@@ -1514,34 +1514,34 @@ int main() {
 		ok &= expect(!opennova::env::load_mission_env(texts, skipped),
 				"no .env: the load skips its pass");
 		ResolvedWaterHeight resolved =
-				opennova::env::mission_water_rung(none, skipped.config, 10.5f);
+				opennova::env::mission_water_rung(none, skipped.config);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 20.0f),
 				"the .env skipped, overcast.def's line over the .trn's is the environment's rung");
 		texts.environment = &env;
 		opennova::env::MissionEnv read;
 		ok &= expect(opennova::env::load_mission_env(texts, read), "the .env read");
-		resolved = opennova::env::mission_water_rung(none, read.config, 10.5f);
+		resolved = opennova::env::mission_water_rung(none, read.config);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 15.0f),
 				"the .env's line over overcast.def's");
 		texts.environment = nullptr;
 		texts.overcast = nullptr;
 		opennova::env::MissionEnv trn_only;
 		(void)opennova::env::load_mission_env(texts, trn_only);
-		resolved = opennova::env::mission_water_rung(none, trn_only.config, 10.5f);
+		resolved = opennova::env::mission_water_rung(none, trn_only.config);
 		ok &= expect(resolved.rung == WaterRung::Environment && near(resolved.height, 10.5f),
-				"the .trn's line alone: the same height as the terrain's");
+				"the .trn's line alone is the environment's: a time-of-day line, its first pass");
 		const opennova::env::BmsEnvOverrides flagged =
 				opennova::env::bms_env_overrides_from_header(0x1, 0, 0, no_colour, no_colour, 0);
-		resolved = opennova::env::mission_water_rung(flagged, skipped.config, 10.5f);
+		resolved = opennova::env::mission_water_rung(flagged, skipped.config);
 		ok &= expect(resolved.rung == WaterRung::Mission && resolved.height == 0.0f,
 				"the header's flagged zero over every line");
+		// No pass wrote the line: no plane. The global has no terrain writer, so a .trn holding the
+		// height is the first pass's line, never a rung of its own (env #46) [orig: g_EnvWaterHeightFixed's
+		// writers TimeOfDay_ParseProperty @ 0x57CB6A, Terrain_Init @ 0x60FCBA (the header's flagged word)].
 		const opennova::env::Config empty;
-		resolved = opennova::env::mission_water_rung(none, empty, 10.5f);
-		ok &= expect(resolved.rung == WaterRung::Terrain && near(resolved.height, 10.5f),
-				"a config with no line: OpenNova's terrain fallback (env #46)");
-		resolved = opennova::env::mission_water_rung(none, empty, 0.0f);
+		resolved = opennova::env::mission_water_rung(none, empty);
 		ok &= expect(resolved.rung == WaterRung::None && resolved.height == 0.0f,
-				"no line and no terrain height: no plane, never a stale one");
+				"a config with no line: no plane, never a stale one");
 	}
 
 	// The mission's config over a file set by name (load_mission_env_config): the header's terrain

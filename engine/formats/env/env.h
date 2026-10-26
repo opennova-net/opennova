@@ -393,8 +393,8 @@ struct BmsEnvOverrides {
 // @ 0x57de8a]. The water color is the water word itself, no envscale (Config::water_word).
 void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides);
 
-// The override layer a mission header authors: the water height (attrib bit 0x1; file s16
-// half-units), the fog distance (0x2), the fog color (0x4), and the ungated water color (any byte
+// The override layer a mission header authors: the water height (attrib bit 0x1; the file's
+// unsigned word, half-units), the fog distance (0x2), the fog color (0x4), and the ungated water color (any byte
 // nonzero) and murk (byte nonzero, * 0.01). The game reads the fog color as the dword over
 // fog_color[0..2] and the byte after them, so its red is fog_color[2] and its blue fog_color[0]
 // [orig: Game_StartMission @ 0x52538d, mov edx, g_BmsFogColorOverride @ 0xa76270, the header as

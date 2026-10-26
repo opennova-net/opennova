@@ -157,10 +157,14 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 				use.water_color[i] = info.water_color[i];
 			}
 		}
+		std::string terrain_text;
+		bool terrain_text_read = false;
 		if (!use.terrain_file.empty()) {
 			std::vector<uint8_t> bytes;
 			if (read_project_file(view, use.terrain_file, bytes)) {
-				const std::string text(bytes.begin(), bytes.end());
+				terrain_text.assign(bytes.begin(), bytes.end());
+				terrain_text_read = true;
+				const std::string &text = terrain_text;
 				std::istringstream input(text);
 				TrnConfig trn;
 				std::string error;
@@ -203,14 +207,21 @@ EnvironmentUses environment_uses(const SessionView &view, const std::string &pat
 			}
 		}
 		// The water plane by the game's ladder (env::mission_water_rung, its witnesses there): the
-		// header's override, then the environment's water height where this file writes one, then
-		// the terrain's, the fallback for a configuration that never read the .trn, as this file's
-		// own lines are (env #46).
-		const env::ResolvedWaterHeight water = env::mission_water_rung(use.overrides,
-				environment_read ? environment : env::Config(),
-				use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f);
+		// header's override, then the configuration the mission's time-of-day load makes of the
+		// terrain's .trn, overcast.def and this file, each line over the ones before it
+		// (env::load_mission_env; env #46). Its source for the inspector: this file where its own lines
+		// write the height, else the terrain's load (its .trn, or overcast.def after it).
+		env::MissionEnvTexts texts;
+		if (terrain_text_read) texts.terrain = &terrain_text;
+		if (overcast_read) texts.overcast = &overcast;
+		if (has_environment_text) texts.environment = &environment_lines;
+		env::MissionEnv mission_env;
+		(void)env::load_mission_env(texts, mission_env);
+		const env::ResolvedWaterHeight water = env::mission_water_rung(use.overrides, mission_env.config);
 		use.water_height = water.height;
 		use.water_from = water.rung;
+		if (water.rung == env::WaterRung::Environment && !(environment_read && environment.water_height_set))
+			use.water_from = env::WaterRung::Terrain;
 		uses.missions.push_back(std::move(use));
 	}
 	return uses;
@@ -248,7 +259,8 @@ std::string mission_clock_words(const EnvironmentMissionUse &use) {
 std::string water_words(const EnvironmentMissionUse &use) {
 	switch (use.water_from) {
 	case env::WaterRung::Mission: return "at " + number_words(use.water_height) + " m, from the mission's header";
-	case env::WaterRung::Terrain: return "at " + number_words(use.water_height) + " m, from the terrain";
+	case env::WaterRung::Terrain:
+		return "at " + number_words(use.water_height) + " m, from the terrain's load (its .trn, or overcast.def after it)";
 	case env::WaterRung::Environment: return "at " + number_words(use.water_height) + " m, from this environment";
 	case env::WaterRung::None: break;
 	}
