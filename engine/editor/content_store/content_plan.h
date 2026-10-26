@@ -29,9 +29,12 @@ struct LocalChange {
 };
 
 // The folder's changes since its base, by path. `unread` (ContentScan::unread) are files the folder
-// holds though their bytes could not be read: never taken for deleted.
+// holds though their bytes could not be read: never taken for deleted. With `listed_whole` false (a
+// scan that could not list every file, ContentScan::incomplete) no base file is taken for deleted:
+// one the list lacks may be one the walk could not tell, so only the files it read are changes.
 std::vector<LocalChange> local_changes(const std::vector<content::ContentFile> &base,
-		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread);
+		const std::vector<content::ContentFile> &local, const std::vector<std::string> &unread,
+		bool listed_whole = true);
 
 // One path of a pull.
 enum class PullStep : uint8_t {

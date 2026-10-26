@@ -296,6 +296,10 @@ ContentJobState ContentPull::step(uint64_t budget) {
 					return fail("cannot read revision " + std::to_string(remote_.head) + ": " +
 							error.line());
 				call_ = ContentCall();
+				// A get's folder made before it is listed: an empty folder is a whole list of none,
+				// a missing one no list at all.
+				std::error_code made;
+				fs::create_directories(system_path(paths_.root), made);
 				scan_ = std::make_unique<ContentScan>(paths_, export_dir_);
 				phase_ = Phase::Scan;
 				break;
@@ -303,6 +307,11 @@ ContentJobState ContentPull::step(uint64_t budget) {
 			case Phase::Scan: {
 				if (!scan_->step(budget > spent ? budget - spent : 1))
 					return state_;
+				// A file the list lacks would be planned as one the folder deleted, as a push would
+				// send it.
+				if (!scan_->incomplete().empty())
+					return fail("the folder could not all be listed; a pull compares every file: " +
+							scan_->incomplete());
 				std::vector<content::ContentFile> base;
 				std::string error;
 				if (!read_content_base(content_paths_, base, error))
@@ -440,7 +449,9 @@ ContentJobState ContentCheck::step(uint64_t budget) {
 				std::string error;
 				if (!read_content_base(ContentPaths::for_project(paths_), base, error))
 					return fail(error);
-				changes_ = local_changes(base, scan_->files(), scan_->unread());
+				// A folder not listed whole holds files the list lacks: none taken for deleted.
+				changes_ = local_changes(
+						base, scan_->files(), scan_->unread(), scan_->incomplete().empty());
 				problems_ = scan_->problems();
 				phase_ = Phase::Done;
 				state_ = ContentJobState::Done;

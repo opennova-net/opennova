@@ -165,6 +165,42 @@ static int test_scan() {
 	return 0;
 }
 
+// A folder the walk may list but not look into (read, no search permission): its entries' places
+// and sizes cannot be told, so the scan says it is incomplete and lacks the file, and a status over
+// it counts the file as no deletion (C-11). Where the system does not enforce the permission (a
+// run as root, Windows' ACLs), there is nothing to see and the case says so.
+static int test_scan_unlisted() {
+#ifndef _WIN32
+	test_temp::TempDir dir("opennova_content_scan_unlisted");
+	const std::string root = dir.file("Project");
+	TEST_EXPECT(put(root + "/project.opennova", "{}\n") && put(root + "/defs/a.def", "a\n") &&
+			put(root + "/locked/held.def", "held\n"));
+	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
+	const fs::path locked = editor::system_path(root + "/locked");
+	std::error_code ec;
+	fs::permissions(locked, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read,
+			fs::perm_options::replace, ec);
+	TEST_EXPECT(!ec);
+	std::error_code probe;
+	fs::file_size(locked / "held.def", probe);
+	if (probe) {
+		const editor::ContentScan scan = editor::scan_content(paths, "");
+		TEST_EXPECT(scan.done() && !scan.incomplete().empty() &&
+				scan.incomplete().find("held.def") != std::string::npos);
+		TEST_EXPECT(paths_of(scan.files()) ==
+				(std::vector<std::string>{ "defs/a.def", "project.opennova" }));
+		const std::vector<ContentFile> base = { file("defs/a.def", "a\n"),
+			file("locked/held.def", "held\n"), file("project.opennova", "{}\n") };
+		TEST_EXPECT(editor::local_changes(base, scan.files(), scan.unread(), false).empty());
+		std::printf("scan: a folder listed but not looked into, the scan incomplete\n");
+	} else {
+		std::printf("scan: the system enforces no search permission here: the unlisted case not run\n");
+	}
+	fs::permissions(locked, fs::perms::owner_all, fs::perm_options::add, ec);
+#endif
+	return 0;
+}
+
 static int test_plan() {
 	// The base, the folder and the revision, a path for each case.
 	const std::vector<ContentFile> base = { file("a", "1"), file("b", "1"), file("c", "1"),
@@ -195,6 +231,13 @@ static int test_plan() {
 	TEST_EXPECT(change("b") == "modified" && change("d") == "deleted" &&
 			change("e") == "modified" && change("f") == "added" && change("h") == "deleted" &&
 			change("i") == "modified" && change("a") == "none" && change("j") == "none");
+	// A folder not listed whole (ContentScan::incomplete): the files it read are changes, none it
+	// lacks is taken for deleted.
+	const std::vector<editor::LocalChange> listed =
+			editor::local_changes(base, local, unread, /*listed_whole=*/false);
+	TEST_EXPECT(listed.size() == 4);
+	for (const editor::LocalChange &c : listed)
+		TEST_EXPECT(c.change != editor::ContentChange::Deleted && c.path != "d" && c.path != "h");
 
 	editor::PullPlan plan = editor::plan_pull(base, local, unread, theirs);
 	const auto step = [&](const std::string &path) {
@@ -426,6 +469,7 @@ int main() {
 	int failures = 0;
 	failures += test_skipped_files();
 	failures += test_scan();
+	failures += test_scan_unlisted();
 	failures += test_plan();
 	failures += test_apply();
 	failures += test_apply_renames();

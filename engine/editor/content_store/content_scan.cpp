@@ -208,25 +208,47 @@ bool ContentScan::step(uint64_t budget) {
 				std::error_code ec;
 				const fs::directory_entry &entry = *walk_;
 				const fs::path path = entry.path();
-				if (entry.is_directory(ec)) {
+				// An entry whose type, place or size cannot be told (in a folder it may list but
+				// not look into) is a file the folder may hold that the list lacks: the scan is
+				// incomplete, so no comparison takes it for deleted. One gone since it was listed
+				// (or a link to nothing) is no file at all.
+				const auto unlisted = [this](const std::string &name,
+											  const std::error_code &why) {
+					if (why == std::errc::no_such_file_or_directory ||
+							why == std::errc::not_a_directory)
+						return;
+					const std::string line = name + " could not be listed: " + why.message();
+					if (incomplete_.empty())
+						incomplete_ = line;
+					problems_.push_back(line);
+				};
+				const bool directory = entry.is_directory(ec);
+				if (ec) {
+					unlisted(utf8_of(path), ec);
+				} else if (directory) {
 					const bool skipped = export_dir_.empty() ? is_dot_directory(path)
 															 : walk_skips_folder(path, export_dir_);
 					if (skipped)
 						walk_.disable_recursion_pending();
-				} else if (entry.is_regular_file(ec) &&
-						!content_skips_file(utf8_of(path.filename()))) {
+				} else if (const bool regular = entry.is_regular_file(ec); ec) {
+					unlisted(utf8_of(path), ec);
+				} else if (regular && !content_skips_file(utf8_of(path.filename()))) {
 					Listed file;
 					file.path = utf8_of(fs::relative(path, root_, ec));
 					file.system = path;
 					std::string why;
-					if (ec || !content::is_content_path(file.path, why)) {
-						problems_.push_back((ec ? utf8_of(path.filename()) : file.path) + ": " +
-								(ec ? ec.message() : why));
+					if (ec) {
+						unlisted(utf8_of(path), ec);
+					} else if (!content::is_content_path(file.path, why)) {
+						problems_.push_back(file.path + ": " + why);
 					} else {
 						file.size = entry.file_size(ec);
-						file.modified = io::file_modified_ticks(path);
-						if (!ec)
+						if (ec) {
+							unlisted(file.path, ec);
+						} else {
+							file.modified = io::file_modified_ticks(path);
 							listed_.push_back(std::move(file));
+						}
 					}
 				}
 				walk_.increment(ec);

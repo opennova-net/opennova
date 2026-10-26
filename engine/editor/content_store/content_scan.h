@@ -62,9 +62,10 @@ public:
 	// The paths of the files it listed but could not read: in the folder, though not in files(), so
 	// no comparison takes one for a file deleted.
 	const std::vector<std::string> &unread() const { return unread_; }
-	// Why the walk stopped before it listed every file (a folder it could not enter, the folder
-	// itself among them), "" when it listed them all: files() then lacks files the folder may
-	// hold, which a push would send as deleted.
+	// Why the list lacks files the folder may hold (a folder the walk could not enter, the folder
+	// itself among them; an entry whose type, place or size it could not tell, as in a folder it
+	// may list but not look into), "" when it listed them all: files() then lacks files a push
+	// would send as deleted and a pull would plan as deleted, and a status counts as none.
 	const std::string &incomplete() const { return incomplete_; }
 
 private:

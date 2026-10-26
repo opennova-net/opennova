@@ -62,7 +62,8 @@ const char *content_change_name(ContentChange change) {
 }
 
 std::vector<LocalChange> local_changes(const std::vector<ContentFile> &base,
-		const std::vector<ContentFile> &local, const std::vector<std::string> &unread) {
+		const std::vector<ContentFile> &local, const std::vector<std::string> &unread,
+		bool listed_whole) {
 	const Files base_files = by_path(base), local_files = by_path(local);
 	const std::unordered_set<std::string> unread_paths(unread.begin(), unread.end());
 	std::set<std::string> paths;
@@ -75,7 +76,8 @@ std::vector<LocalChange> local_changes(const std::vector<ContentFile> &base,
 		if (unread_paths.count(path))
 			continue;
 		if (const auto change = change_of(at(base_files, path), at(local_files, path)))
-			out.push_back({ path, *change });
+			if (listed_whole || *change != ContentChange::Deleted)
+				out.push_back({ path, *change });
 	}
 	return out;
 }
