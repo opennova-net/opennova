@@ -24,10 +24,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-std::string creator_of(const RouteAccess &caller) {
-	return caller.user ? "admin " + caller.user->username : std::string("token");
-}
-
 crow::response no_such_release() {
 	return json_error(404, "not_found", "no release has this id");
 }

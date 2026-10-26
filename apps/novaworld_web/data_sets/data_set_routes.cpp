@@ -29,11 +29,6 @@ namespace {
 // The titles a base data set may speak (the gameprofile codes opennova-serve's /game takes).
 constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
 
-// Who made a row: the admin session's account, or the Bearer token.
-std::string creator_of(const RouteAccess &caller) {
-	return caller.user ? "admin " + caller.user->username : std::string("token");
-}
-
 crow::response no_such_data_set() {
 	return json_error(404, "not_found", "no data set has this id");
 }

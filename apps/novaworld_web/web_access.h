@@ -69,6 +69,12 @@ struct RouteAccess {
 	std::optional<WebSessionUser> user;
 };
 
+// Who made a row an admin route writes (a CD key, a game, a release): "admin <name>" for the
+// session's account, "token" for the Bearer token.
+inline std::string creator_of(const RouteAccess &caller) {
+	return caller.user ? "admin " + caller.user->username : std::string("token");
+}
+
 // 429 {"error":"rate_limited"} with Retry-After: `wait` seconds.
 crow::response too_many_requests(int64_t wait);
 
