@@ -41,7 +41,12 @@ struct HostRegistration {
 	// host leg refuses an empty one: connect_or_host.h). [orig: CNapiGateManager_ProcessResponse
 	//  @0x4ced20 (LOBBYNAME)]
 	std::string lobby_name;
-	std::string server_name = "OpenNova Host"; // ServerName
+	// ServerName: the session name as the host dialog leaves it, never one made up: the
+	// dialog copies GAME_NAME as it stands, so a cleared name registers "" (game.cfg's
+	// default name, Menu/UNTITLED, is the cfg block's; D-MNU-77).
+	// [orig: HostDialog_ReadSettings @0x555946..0x555967; Config_SetDefaults
+	//  @0x54D1A1..0x54D1BE; CNapiGameSession_BuildHostVarLists @0x4D0BDB]
+	std::string server_name;
 	std::string server_message;               // Msg (serverMessage_560)
 	int max_players = 32;                     // MaxPlayers (HostSetup, the initial Host list)
 	// The in-match published cap (dword_24D211C: the cfg max, plus the dedicated slot when the host

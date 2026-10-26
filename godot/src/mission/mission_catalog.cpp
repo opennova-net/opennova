@@ -49,9 +49,6 @@ void MissionCatalog::_bind_methods() {
 			&MissionCatalog::rows);
 	ClassDB::bind_static_method("MissionCatalog",
 			D_METHOD("mission_names", "root"), &MissionCatalog::mission_names);
-	ClassDB::bind_static_method("MissionCatalog",
-			D_METHOD("first_mission_name", "root"),
-			&MissionCatalog::first_mission_name);
 }
 
 TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_root) {
@@ -86,11 +83,6 @@ PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root)
 		names.push_back(opennova::to_gd(row.file));
 	}
 	return names;
-}
-
-String MissionCatalog::first_mission_name(const Ref<ResourceRoot> &p_root) {
-	const PackedStringArray names = mission_names(p_root);
-	return names.is_empty() ? String() : names[0];
 }
 
 } // namespace godot

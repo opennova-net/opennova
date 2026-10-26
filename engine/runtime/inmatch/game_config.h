@@ -116,7 +116,8 @@ struct GameConfig {
 	// nstmout_path @proto+0x288] AND the wire bodies [orig: g_ServerNameStr @0x24D1FC4: the S2C 0x2C
 	// NetPacket_WriteServerNameAndMapFile @0x505780 + the 0x7B/0x60 serverName]; the original keeps
 	// several synced copies, unified here.
-	std::string server_name = "OpenNova Dev";  // [orig: g_ServerNameStr @0x24D1FC4 / game_settings +0x00]
+	// "" until a host applies its name (the global is BSS).
+	std::string server_name;  // [orig: g_ServerNameStr @0x24D1FC4 / game_settings +0x00]
 	std::string server_password;               // [orig game_settings +0x20] BuildFlags |0x8
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20

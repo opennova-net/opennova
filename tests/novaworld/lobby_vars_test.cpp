@@ -202,6 +202,15 @@ int main() {
 		// @0x551D4F; read @0x4FEF72].
 		expect(value_of(nw::make_host_var_list(nw::HostRegistration{}, text, true), "AllowPing") == "y",
 		       "a default registration advertises AllowPing y");
+		// A registration's ServerName is the session name the host dialog left, nothing made
+		// up: the dialog copies GAME_NAME as it stands and the host lists register it as it is,
+		// so a cleared name advertises "" (D-MNU-77).
+		// [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME into serverName_3A5, cap 0x20,
+		//  @0x555946..0x555967; CNapiGameSession_BuildHostVarLists @0x4D0BDB / @0x4D0D1B]
+		expect(nw::HostRegistration{}.server_name.empty(), "a default registration names none");
+		const auto unnamed = nw::make_host_var_list(nw::HostRegistration{}, text, true);
+		expect(value_of(unnamed, "ServerName").empty(),
+		       "an unnamed registration advertises an empty ServerName");
 	}
 
 	// 4. PlayerList: five VarFNum-keyed vars per slot.

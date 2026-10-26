@@ -564,29 +564,25 @@ func _restore_menu_after_novaworld() -> void:
 	_novaworld_menu_state_captured = false
 
 
-# The NovaWorld panel's session is hosting (the service's ServerHostResult landed). Resolve a
-# mission (the panel's pick, else the menu's selected one, else the first available .bms), fill the
-# callsign, and load it as a listen host through the SAME bring-up the mp.mnu host screen uses; the
-# hosting session rides in with the load and keeps the match registered.
+# The NovaWorld panel's session is hosting (the service's ServerHostResult landed). The host is
+# retail's host dialog left untouched: its mission and its session name are what the dialog's
+# readback gave (an empty name stays empty, as HostDialog_ReadSettings copies GAME_NAME as it
+# stands; engine inmatch/host_settings.cpp carries the witness). Fill the callsign and load it
+# as a listen host through the SAME bring-up the mp.mnu host screen uses; the hosting session
+# rides in with the load and keeps the match registered.
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
-	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
 	if mission.is_empty():
-		mission = _resolve_default_mission()
-	if mission.is_empty():
-		# Report back so the panel leaves "Starting..." instead of hanging silently, and leave the
-		# hosting the service just granted.
-		push_warning("NetSessionController: NovaWorld host requested but no mission is available")
+		# No mission to host: report back so the panel leaves "Starting..." instead of hanging
+		# silently, and leave the hosting the service just granted.
+		push_warning("NetSessionController: NovaWorld host requested with no mission")
 		if _novaworld_panel != null:
-			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
+			_novaworld_panel.host_failed("No mission selected to host.")
 		return
 	_hold_novaworld_client(_novaworld_panel.release_client())
 	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
-	config.mission = mission
 	config.player_name = _novaworld_player_name()
-	if config.server_name.is_empty():
-		config.server_name = "OpenNova Host"
 	_adopt_held_novaworld_client()
 	_shell.start_world_load(
 			LoadingScreenInfo.for_host(_resource_root(), mission, config.server_name,
@@ -701,18 +697,6 @@ func _release_novaworld_client() -> void:
 		_novaworld_client.queue_free()
 	_novaworld_client = null
 	_return_to_novaworld = false
-
-
-# A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
-# first .bms the resource root exposes. Empty when no mission is reachable.
-func _resolve_default_mission() -> String:
-	if _menu_shell != null:
-		var sel := String(_menu_shell.get_selected_mission())
-		if not sel.is_empty():
-			return sel
-	# The mounted menu root — the world's own root stays null until a mission loads. This is the same
-	# object the menu shell + mp host list missions from, and is non-null whenever the panel can open.
-	return MissionCatalog.first_mission_name(_resource_root())
 
 
 # --- Shared lookups --------------------------------------------------------------
