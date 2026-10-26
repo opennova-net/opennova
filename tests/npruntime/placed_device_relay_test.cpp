@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <variant>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -41,11 +42,7 @@ namespace w = opennova::world;
 constexpr int32_t kBaseItem = 1891;
 constexpr int32_t kEnemyItem = 1892;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 struct FlatField {
 	static constexpr int kDim = 512;

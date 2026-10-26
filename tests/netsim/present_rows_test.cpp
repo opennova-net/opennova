@@ -27,6 +27,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace w = opennova::world;
 namespace im = opennova::inmatch;
@@ -34,15 +35,9 @@ namespace nw = opennova;
 
 namespace {
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool ok, const char *what) {
-	if (!ok) {
-		std::printf("FAIL: %s\n", what);
-		++failures;
-	}
-	return ok;
-}
+using test_expect::expect;
 
 const float *row_at(const std::vector<float> &rows, size_t i) {
 	return rows.data() + i * w::PF_STRIDE;

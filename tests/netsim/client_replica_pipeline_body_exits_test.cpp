@@ -36,6 +36,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -43,13 +44,8 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace as = opennova::world::anim_state;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kInfantryType = 0x0042;

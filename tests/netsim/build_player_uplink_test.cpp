@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -36,11 +37,7 @@ namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace nw = opennova;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 int32_t carrier_heading_bam(const w::Entity &carrier) {
 	return carrier.heading; // the carrier's Yaw word

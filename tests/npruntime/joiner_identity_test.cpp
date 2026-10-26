@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <utility>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -20,10 +21,7 @@ static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::
 using namespace opennova;
 
 namespace {
-bool expect(bool condition, const char *message) {
-	if (!condition) std::fprintf(stderr, "FAIL: %s\n", message);
-	return condition;
-}
+using test_expect::expect;
 
 // Exercise the real auth/framing seam: ServerAuth.MI is the connection identity,
 // distinct from the roster index, entity handle, net ID and displayed callsign.

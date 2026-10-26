@@ -61,6 +61,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -82,11 +83,7 @@ public:
 	}
 };
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One remote joiner on a Serve Only host, admitted (its C2S 0x00 / 0x01 / 0x02 done) and
 // waiting for the spawn pump. Heap-held: a World and a server context overflow the 1 MB

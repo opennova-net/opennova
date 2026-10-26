@@ -63,6 +63,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -71,11 +72,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 w::PlayerSpawn player_spawn(float x, float y, float z, uint8_t team = 1) {
 	w::PlayerSpawn s;

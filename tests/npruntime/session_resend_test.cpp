@@ -25,6 +25,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -37,11 +38,7 @@ constexpr uint32_t kServerKey = 0x55667788u;
 const std::string kClientScrk = "CLIENT-LOSS-RECOVERY-SCRK";
 const std::string kServerScrk = "SERVER-LOSS-RECOVERY-SCRK";
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 void seed_host(inmatch::NapiNPServerCtx &ctx) {
 	ctx.is_authority = 1;

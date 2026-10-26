@@ -6,6 +6,7 @@
 #include <cstring>
 #include <optional>
 #include <vector>
+#include "../common/test_expect.h"
 
 using namespace opennova::def;
 
@@ -14,11 +15,7 @@ namespace {
 namespace ns = opennova::replication;
 using opennova::EntityClass;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 void copy_tag(char (&out)[16], const char *value) {
 	std::snprintf(out, sizeof(out), "%s", value);

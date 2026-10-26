@@ -9,16 +9,13 @@
 #include <cstdio>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A stand-in encoder with a configurable fixed header (2 B by default, 4 B for pool-3) followed by
 // cnt*rec_bytes. Encoded size is what the chunker's byte budget keys on.

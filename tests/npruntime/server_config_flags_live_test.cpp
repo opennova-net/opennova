@@ -46,17 +46,14 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 namespace game_type = opennova::game_type;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint32_t kTeamChoose = inmatch::GameConfig::kMpAttribTeamChoose;
 

@@ -42,17 +42,14 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 uint16_t read_u16_le(const std::vector<uint8_t> &bytes, std::size_t offset) {
 	return static_cast<uint16_t>(bytes[offset]) |

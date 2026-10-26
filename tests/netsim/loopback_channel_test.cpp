@@ -4,14 +4,11 @@
 #include <runtime/inmatch/loopback_channel.h>
 
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 bool check_s2c_fifo_order() {
 	opennova::replication::LoopbackChannel ch;

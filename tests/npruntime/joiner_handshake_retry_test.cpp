@@ -29,6 +29,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -38,11 +39,7 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool is_opcode(const std::vector<uint8_t> &datagram, uint8_t expected) {
 	uint8_t opcode = 0;

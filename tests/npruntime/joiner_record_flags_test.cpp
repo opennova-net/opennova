@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -38,11 +39,7 @@ constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
 constexpr uint16_t kSelf = 0x0005;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // The socket seam: keeps what the role ships, receives nothing.
 class KeepingSocket final : public IDatagramSocket {

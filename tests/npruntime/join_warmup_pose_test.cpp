@@ -29,16 +29,13 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr int32_t kOne = 65536;
 

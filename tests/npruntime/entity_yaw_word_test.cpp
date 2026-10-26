@@ -41,6 +41,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -49,11 +50,7 @@ namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace bms = opennova::bms;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // Retail's placed words: (90 - 100) << 16 = -655360, / 360 = -1820 (truncated), << 16;
 // (90 - 135) << 16 / 360 = -8192 exactly; (90 - 80) << 16 / 360 = 1820.

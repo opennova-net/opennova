@@ -46,17 +46,14 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
 namespace {
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A host that has been up for five CNetQuality sample periods: the healthy-LAN
 // steady state the captures witness (a measured frame rate at or above 16, so

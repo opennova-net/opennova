@@ -39,6 +39,7 @@
 #include <cstdlib>
 #include <optional>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -46,13 +47,8 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 constexpr int64_t kBamPerDegree = 11930464; // 2^32 / 360
 int32_t engine_heading_bam(int16_t mission_yaw) {

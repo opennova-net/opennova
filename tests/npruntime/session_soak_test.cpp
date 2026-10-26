@@ -52,6 +52,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -62,11 +63,7 @@ using namespace opennova;
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One end of an in-memory datagram wire: send_to lands in the inbox of the connected endpoint
 // whose address it names, tagged with this endpoint's address; recv_from drains this endpoint's

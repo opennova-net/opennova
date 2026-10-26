@@ -45,6 +45,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
@@ -55,13 +56,8 @@ namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 using namespace opennova::threedi;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;

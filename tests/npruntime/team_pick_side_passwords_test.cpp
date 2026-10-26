@@ -43,17 +43,14 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 namespace game_type = opennova::game_type;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // A mission's config as the cfg block hands it in: `type`, two teams, and the block's side
 // passwords "blue1" / "red1".

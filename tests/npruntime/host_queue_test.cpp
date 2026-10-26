@@ -49,6 +49,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -58,11 +59,7 @@ using opennova::ProtocolMessage;
 
 const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 struct CaptureDatagramSocket final : opennova::IDatagramSocket {
 	struct Incoming {

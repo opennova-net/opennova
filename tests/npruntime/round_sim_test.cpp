@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 using namespace opennova::def;
 
@@ -83,11 +84,7 @@ std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
 }
 using conn_fixture::make_seeded_conn;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 struct DeathAnimSource final : w::IRootMotionSource {
 	bool has_clip(int, int state_id) const override {

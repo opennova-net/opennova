@@ -41,6 +41,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -50,13 +51,8 @@ namespace w = opennova::world;
 
 const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";

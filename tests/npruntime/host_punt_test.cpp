@@ -47,6 +47,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -83,11 +84,7 @@ const std::vector<uint8_t> kCapturedPunt = {
 	0x4C, 0x6F, 0x67, 0x50, 0x75, 0x6E, 0x74, 0x45, 0x76, 0x65, 0x6E, 0x74, 0x00,
 };
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 void seed_joiner(inmatch::JoinerConnection &joiner) {
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,

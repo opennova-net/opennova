@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -27,13 +28,8 @@ constexpr uint16_t kSelf = 0x0005;
 constexpr uint16_t kHullType = 0x0248;
 constexpr uint16_t kPlayerType = 0x14B9;
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 struct View {
 	ns::ClientReplicaPipeline view;

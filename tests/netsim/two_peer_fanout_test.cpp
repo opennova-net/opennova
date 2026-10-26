@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -49,11 +50,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // The exact value the host's encoder + codec produce for one axis: compress the (wire - anchor)
 // delta, decompress it, add the anchor back. The client must land on precisely this.

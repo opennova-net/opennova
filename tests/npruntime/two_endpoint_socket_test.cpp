@@ -56,6 +56,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -67,11 +68,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // first-occurrence index of `tag` (or -1), and the present-only relative-order check — copied from
 // golden_lan_join_test so the §5.2a order assertions read identically against our own host's stream.

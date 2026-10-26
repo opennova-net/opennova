@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -28,11 +29,7 @@ constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kRowA = 0x0005;
 constexpr uint16_t kRowB = 0x0007;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // One mover tick for rows whose records keep arriving: these legs pin the
 // body pass's tail over hundreds of ticks with no staged motion, and a client

@@ -58,6 +58,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -73,11 +74,7 @@ namespace inmatch = opennova::inmatch;
 // crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
 constexpr uint32_t kHostKey = 0x0FE0E112u;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 // The pending-player spawn pump rides the shared one-second service, not every
 // tick: drive the match to its next periodic boundary so the following

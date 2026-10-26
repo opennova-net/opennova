@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/test_expect.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -50,13 +51,8 @@ namespace ns = opennova::replication;
 
 namespace {
 
-int failures = 0;
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+int &failures = test_expect::failures;
+using test_expect::expect;
 
 // A Deathmatch host's own player on a mission with one DM start marker: the add
 // places the body on the marker; the body then stands elsewhere (its motor moved

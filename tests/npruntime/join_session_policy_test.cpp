@@ -12,19 +12,15 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace inmatch = opennova::inmatch;
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+using test_expect::expect;
 
 bool contains(const std::string &s, const char *needle) {
 	return s.find(needle) != std::string::npos;

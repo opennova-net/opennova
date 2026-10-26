@@ -25,17 +25,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace ns = opennova::replication;
 using opennova::EntityClass;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kGunHandle = 0x100A;    // pool 1 slot 10 (the tripod)
 constexpr uint16_t kGunnerHandle = 0x002B; // pool 0 slot 43 (its gunner)

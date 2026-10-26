@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -36,11 +37,7 @@ namespace inmatch = opennova::inmatch;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 // An admitted, in-match joiner whose connection id is 3 (the create's index, the 0x82's MI) and
 // whose player body carries it, sends one C2S 0x48 whose body names another id (0x113F).

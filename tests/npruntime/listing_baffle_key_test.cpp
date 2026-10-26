@@ -32,20 +32,15 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include "../common/test_expect.h"
 
 using namespace opennova;
 
 namespace {
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool cond, const char *what) {
-	if (!cond) {
-		std::printf("FAIL: %s\n", what);
-		++failures;
-	}
-	return cond;
-}
+using test_expect::expect;
 
 const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
 

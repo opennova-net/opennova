@@ -44,6 +44,7 @@
 #include <limits>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -56,11 +57,7 @@ constexpr int kGapTicks = 8;    // per-entity record cadence (budget rotation)
 constexpr int kWarmupTicks = 32;
 constexpr int kMeasureTicks = 64;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 nw::EntityClass class_of(uint16_t type_id) {
 	if (type_id == kPlayerType) return nw::EntityClass::Player;

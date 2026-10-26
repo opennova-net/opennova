@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 using namespace opennova;
 using inmatch::JoinQueueRecord;
@@ -22,10 +23,7 @@ using inmatch::pre_game_entry_panel;
 
 namespace {
 
-bool expect(bool cond, const char *what) {
-	if (!cond) std::fprintf(stderr, "FAIL: %s\n", what);
-	return cond;
-}
+using test_expect::expect;
 
 const rtxt::File &gameerr() {
 	static const rtxt::File file = [] {

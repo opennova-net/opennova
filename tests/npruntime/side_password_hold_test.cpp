@@ -48,6 +48,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -55,11 +56,7 @@ namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 using Bytes = std::vector<uint8_t>;
 

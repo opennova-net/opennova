@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -41,11 +42,7 @@ namespace inmatch = opennova::inmatch;
 constexpr uint32_t kServerKey = 0x55667788u;
 const std::string kServerScrk = "SERVER-NSTMOUT-SCRK";
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool check_parse(const char *text, int32_t timeout_ms, int32_t msg_out_max, const char *message) {
 	CsConfig cfg;

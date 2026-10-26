@@ -47,6 +47,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -63,11 +64,7 @@ std::map<uint16_t, w::PersonalWeaponSlot> &slots_of(w::World &world,
 }
 using conn_fixture::make_seeded_conn;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 w::PlayerSpawn player_spawn(uint16_t net_id) {
 	w::PlayerSpawn s;

@@ -87,6 +87,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -103,11 +104,7 @@ std::vector<uint8_t> make_organic_spawn(
 		int32_t y, int32_t z, int32_t orient, uint8_t team,
 		uint16_t net_id, uint8_t anim_slot = 0, uint32_t owner = 0);
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 std::vector<uint8_t> encode_test_player_list(
 		std::initializer_list<PlayerListEntry> players) {

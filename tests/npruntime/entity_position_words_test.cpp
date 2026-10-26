@@ -57,6 +57,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -65,11 +66,7 @@ namespace w = opennova::world;
 namespace ns = opennova::replication;
 namespace bms = opennova::bms;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr int32_t kTdhHostY = static_cast<int32_t>(0xFBF9FF5Fu);
 constexpr int32_t kAshJoinerX = 0x01B8B335;

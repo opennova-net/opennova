@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -23,11 +24,7 @@ namespace nw = opennova;
 namespace ns = opennova::replication;
 namespace w = opennova::world;
 
-bool expect(bool condition, const char *message) {
-	if (condition) return true;
-	std::fprintf(stderr, "FAIL: %s\n", message);
-	return false;
-}
+using test_expect::expect;
 
 bool exact_registry_slot_contract() {
 	w::EntityRegistry registry;

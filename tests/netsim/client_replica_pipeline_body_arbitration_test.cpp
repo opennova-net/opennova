@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
@@ -27,14 +28,9 @@ using namespace opennova;
 namespace ns = opennova::replication;
 namespace as = opennova::world::anim_state;
 
-int failures = 0;
+int &failures = test_expect::failures;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	++failures;
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kPlayerType = 0x14B9;
 constexpr uint16_t kPlayerHandle = 0x0067;

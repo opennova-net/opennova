@@ -35,17 +35,14 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include "../common/test_expect.h"
 
 namespace {
 
 namespace nw = opennova;
 namespace ns = opennova::replication;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 constexpr uint16_t kNoCallbackType = 0x0111; // a `bldg`/`ewep`-class item (header-only record)
 constexpr uint16_t kVehicleType = 0x0222;    // a `cveh`-class item (15/21-B compact)

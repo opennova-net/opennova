@@ -61,6 +61,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/test_expect.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -70,11 +71,7 @@ namespace {
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
 
-bool expect(bool cond, const char *msg) {
-	if (cond) return true;
-	std::fprintf(stderr, "FAIL: %s\n", msg);
-	return false;
-}
+using test_expect::expect;
 
 std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
 		const std::string &server_scrk, uint32_t client_key,
