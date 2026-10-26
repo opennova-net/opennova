@@ -1,34 +1,15 @@
-// Data sets, trees and releases for the game data admin tests, shaped as
-// GET /api/admin/data-sets and GET /api/admin/releases answer them: JO (id 1)
-// with a ready tree and a live server, Escalation (id 2) under it with an
-// uploading tree, DFX2 (id 3) with no data.
+// Games, releases and revisions for the games admin tests, shaped as
+// GET /api/admin/data-sets, GET /api/admin/releases and a project's history
+// answer them: JO (id 1, project JO at r2) with a ready tree and a live
+// server, Escalation (id 2, project JOX01) under it with nothing pushed, DFX2
+// (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, no project).
 
-import type { DataSet, DataSetsResponse, Release, Tree } from '../types/dataSets';
-
-export function tree(id: number, overrides: Partial<Tree> = {}): Tree {
-  const state = overrides.state ?? 'ready';
-  return {
-    id,
-    state,
-    source: 'baseline',
-    release_id: null,
-    version: '1.7.5.5',
-    bytes: 1_250_000_000,
-    files: 7,
-    missions: 54,
-    pinned_by: 0,
-    error: '',
-    created_by: 'admin root',
-    created_at: '2026-10-16 10:00:00',
-    ready_at: state === 'ready' ? '2026-10-16 10:12:00' : null,
-    ...overrides,
-  };
-}
+import type { DataSet, DataSetsResponse, ProjectRevision, Release } from '../types/dataSets';
 
 export function dataSet(id: number, overrides: Partial<DataSet> = {}): DataSet {
   return {
     id,
-    display_name: `Data set ${id}`,
+    display_name: `Game ${id}`,
     kind: 'base',
     parent_id: null,
     expansion_code: '',
@@ -37,12 +18,13 @@ export function dataSet(id: number, overrides: Partial<DataSet> = {}): DataSet {
     updater_login: '',
     command_file: '',
     retail_updater: false,
+    key: `GAME${id}`,
+    visibility: 'private',
+    head: 0,
     current_tree: null,
-    baseline_tree_id: null,
     published_release: null,
     servers_live: 0,
     servers_outdated: 0,
-    trees: [],
     ...overrides,
   };
 }
@@ -52,12 +34,12 @@ export const JO_SET: DataSet = dataSet(1, {
   updater_login: 'JOTRus',
   command_file: 'JOPTR.CMD',
   retail_updater: true,
-  current_tree: { id: 10, version: '1.7.5.5', ready_at: '2026-10-16 10:12:00' },
-  baseline_tree_id: 10,
-  published_release: { id: 4, name: 'JO 1.7.5.5', sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12' },
+  key: 'JO',
+  head: 2,
+  current_tree: { id: 10, version: '1.7.5.9', ready_at: '2026-10-16 10:12:00' },
+  published_release: { id: 9, name: 'JO 1.7.5.9', sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12' },
   servers_live: 3,
   servers_outdated: 1,
-  trees: [tree(10, { pinned_by: 2 }), tree(11, { state: 'failed', version: '', error: 'version.txt is missing', bytes: 12, files: 1, missions: 0, created_at: '2026-10-15 09:00:00' })],
 });
 
 export const ESCALATION_SET: DataSet = dataSet(2, {
@@ -69,29 +51,42 @@ export const ESCALATION_SET: DataSet = dataSet(2, {
   game: '',
   updater_login: 'JOEus',
   command_file: 'JOEPTR.CMD',
-  trees: [tree(12, { state: 'uploading', version: '', bytes: 0, files: 0, missions: 0, ready_at: null })],
+  key: 'JOX01',
 });
 
-export const DFX2_SET: DataSet = dataSet(3, { display_name: 'Delta Force Xtreme 2', title: 'dfx2', game: 'dfx2_consumer' });
+export const DFX2_SET: DataSet = dataSet(3, { display_name: 'Delta Force Xtreme 2', title: 'dfx2', game: 'dfx2_consumer', key: 'DFX2', head: 1 });
+
+export const RUNTIME_SET: DataSet = dataSet(9, {
+  display_name: 'OpenNova runtime',
+  kind: 'update',
+  title: '',
+  game: '',
+  updater_login: 'ONRUNTIME',
+  command_file: 'ONRUNTIME.CMD',
+  key: null,
+  visibility: null,
+  published_release: { id: 7, name: 'v0.0.21', sha256: 'cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34' },
+});
 
 export function dataSetsResponse(overrides: Partial<DataSetsResponse> = {}): DataSetsResponse {
   return {
-    store: { kind: 'local' },
     titles: ['jo', 'dfx2'],
     games: [
       { slug: 'jop_2_consumer', display_name: 'Joint Operations' },
       { slug: 'dfx2_consumer', display_name: 'Delta Force Xtreme 2' },
       { slug: 'acidgambit_0_consumer', display_name: 'OpenNova' },
     ],
-    data_sets: [JO_SET, ESCALATION_SET, DFX2_SET],
+    data_sets: [JO_SET, ESCALATION_SET, DFX2_SET, RUNTIME_SET],
     ...overrides,
   };
 }
 
+// A release of JO built from its project's r2, published unless told.
 export function release(id: number, overrides: Partial<Release> = {}): Release {
   const status = overrides.status ?? 'published';
   return {
     id,
+    data_set_id: 1,
     status,
     name: `JO 1.7.5.${id}`,
     sha256: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12',
@@ -100,15 +95,40 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
     error: '',
     sections: [
       { data_set_id: 1, display_name: 'Joint Operations', expansion: '', command_file: 'JOPTR.CMD', version: `1.7.5.${id}`, tree: status === 'published' ? { id: 10, state: 'ready' } : null },
-      { data_set_id: 2, display_name: 'Escalation', expansion: 'jox01', command_file: 'JOEPTR.CMD', version: `1.7.5.${id}`, tree: null },
     ],
     created_by: 'admin root',
     created_at: '2026-10-16 11:00:00',
     published_at: status === 'published' || status === 'retired' ? '2026-10-16 11:30:00' : null,
     retired_at: status === 'retired' ? '2026-10-16 12:00:00' : null,
+    source: { project: 'JO', revision: 2, base_revision: null },
+    version: `1.7.5.${id}`,
+    build_log: '',
+    ...overrides,
+  };
+}
+
+// The runtime's release from CI: an upload, no source.
+export function runtimeRelease(id: number, overrides: Partial<Release> = {}): Release {
+  return release(id, {
+    data_set_id: 9,
+    name: 'v0.0.21',
+    package_product: 'OpenNova',
+    sections: [{ data_set_id: 9, display_name: 'OpenNova runtime', expansion: '', command_file: 'ONRUNTIME.CMD', version: '0.0.21', tree: null }],
     source: null,
     version: '',
-    build_log: '',
+    ...overrides,
+  });
+}
+
+export function revision(number: number, overrides: Partial<ProjectRevision> = {}): ProjectRevision {
+  return {
+    number,
+    author: 'biggy',
+    message: number === 1 ? 'Stock import' : 'weapon tweaks',
+    manifest_sha256: 'ab',
+    file_count: 1200,
+    bytes: 1_200_000_000,
+    created_at: '2026-10-25 12:00:00',
     ...overrides,
   };
 }
