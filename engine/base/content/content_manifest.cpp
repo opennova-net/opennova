@@ -7,21 +7,13 @@
 #include <base/content/case_fold.h>
 #include <base/io/cp1252.h>
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
 
 namespace opennova::content {
 
 namespace {
-
-// Whether `part` (a path's part, its extension included) is a name Windows keeps for a device.
-bool is_device_name(std::string_view part) {
-	const std::string stem = strutil::to_lower(part.substr(0, part.find('.')));
-	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul")
-		return true;
-	return stem.size() == 4 && (stem.compare(0, 3, "com") == 0 || stem.compare(0, 3, "lpt") == 0) &&
-			stem[3] >= '0' && stem[3] <= '9';
-}
 
 bool is_refused_char(unsigned char c) {
 	return c < 0x20 || c == 0x7F || c == '\\' || c == '<' || c == '>' || c == ':' || c == '"' ||
@@ -78,7 +70,7 @@ bool is_content_path(std::string_view path, std::string &why) {
 			why = "a part of the path ends in a dot or a space";
 			return false;
 		}
-		if (is_device_name(part)) {
+		if (io::is_windows_device_name(part)) {
 			why = "a part of the path is a Windows device's name";
 			return false;
 		}

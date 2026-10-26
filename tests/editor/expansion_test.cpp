@@ -132,9 +132,9 @@ static int test_name_rule() {
 	for (const char *name : { "a\\b", "a/b", "a:b", "a*b", "a?b", "a<b", "a>b", "a|b" })
 		TEST_EXPECT(refuses(name, "no folder's name can hold"));
 	TEST_EXPECT(refuses("mod.", "ends with a dot"));
-	for (const char *name : { "con", "NUL", "Prn", "aux", "com1", "LPT9", "con.x" })
+	for (const char *name : { "con", "NUL", "Prn", "aux", "com0", "com1", "LPT9", "con.x" })
 		TEST_EXPECT(refuses(name, "keeps for a device"));
-	TEST_EXPECT(takes("com0") && takes("console") && takes("lpt10"));
+	TEST_EXPECT(takes("console") && takes("lpt10"));
 	// A leading dot: the Mods list never lists the folder [orig: Expansion_ScanAndRegister @ 0x4a444b].
 	TEST_EXPECT(refuses(".mod", "starts with a dot") && refuses(".", "starts with a dot"));
 	TEST_EXPECT(takes(".mod", ExpansionNameUse::BuildsOn));

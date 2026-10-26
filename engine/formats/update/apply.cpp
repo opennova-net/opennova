@@ -104,11 +104,7 @@ bool is_safe_row_name(std::string_view name) {
 		if (c == '/' || c == '\\' || c == ':' || static_cast<unsigned char>(c) < 32)
 			return false;
 	if (name.back() == '.' || name.back() == ' ') return false;
-	const std::string stem = strutil::to_lower(std::string(name.substr(0, name.find('.'))));
-	if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul" ||
-			(stem.size() == 4 && (stem.rfind("com", 0) == 0 || stem.rfind("lpt", 0) == 0) &&
-					stem[3] >= '1' && stem[3] <= '9')) return false;
-	return true;
+	return !io::is_windows_device_name(name);
 }
 
 bool validate_commands(const CommandFile &commands, std::string &error) {

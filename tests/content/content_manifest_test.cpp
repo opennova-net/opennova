@@ -52,7 +52,7 @@ static int test_paths() {
 	TEST_EXPECT(path_refused("a\tb") && path_refused(std::string("a\0b", 3)));
 	TEST_EXPECT(path_refused("dir./x") && path_refused("name "));
 	TEST_EXPECT(path_refused("CON") && path_refused("art/nul.txt") && path_refused("Com1.def") &&
-			path_refused("lpt9"));
+			path_refused("lpt9") && path_refused("com0.txt") && path_refused("art/LPT\xC2\xB3"));
 	TEST_EXPECT(path_refused(".opennova/local.json") && path_refused(".OpenNova/build/x"));
 	TEST_EXPECT(path_ok("art/.opennova/x")); // only the project's own top folder is the machine's
 	TEST_EXPECT(path_refused("bad\xff.def") && path_refused("\xc0\xaf") &&

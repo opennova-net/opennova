@@ -268,7 +268,10 @@ inline std::string without_trailing_separator(std::string_view dir) {
 }
 
 // Whether `name` is one of Windows' device names, which a file or folder of the name (or of the
-// name before its first dot, any case) opens instead: CON, PRN, AUX, NUL, COM1..COM9, LPT1..LPT9.
+// name before its first dot, any case) opens instead: CON, PRN, AUX, NUL, COM0..COM9, LPT0..LPT9
+// and COM / LPT with a superscript one, two or three (U+00B9, U+00B2, U+00B3, in UTF-8), the set
+// Microsoft reserves ("Naming Files, Paths, and Namespaces"). The one check: the updater's row
+// names, the content store's paths and the editor's expansion names read it.
 inline bool is_windows_device_name(std::string_view name) {
 	std::string stem(name.substr(0, name.find('.')));
 	for (char &c : stem) {
@@ -278,8 +281,10 @@ inline bool is_windows_device_name(std::string_view name) {
 	for (const char *device : kDevices) {
 		if (stem == device) return true;
 	}
-	return stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) && stem[3] >= '1' &&
-	       stem[3] <= '9';
+	const bool port = stem.size() >= 4 && (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0);
+	if (port && stem.size() == 4) return stem[3] >= '0' && stem[3] <= '9';
+	return port && stem.size() == 5 && stem[3] == '\xC2' &&
+	       (stem[4] == '\xB9' || stem[4] == '\xB2' || stem[4] == '\xB3');
 }
 
 // Whether `inner` is `outer` or under it, by their spelling alone (each lexically normal, no link

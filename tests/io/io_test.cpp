@@ -969,9 +969,12 @@ static int test_path_chores()
     TEST_EXPECT(io::without_trailing_separator("/") == "/" && io::without_trailing_separator("") == "");
     TEST_EXPECT(io::without_trailing_separator("/srv/x//") == "/srv/x" && io::without_trailing_separator("a") == "a");
 
-    for (const char *device : {"CON", "con", "Prn", "AUX", "nul", "COM1", "com9", "LPT1", "lpt9", "nul.txt", "Con.tar.gz"})
+    // Microsoft's reserved set: COM0..9 and LPT0..9, and COM / LPT with a superscript 1, 2 or 3.
+    for (const char *device : {"CON", "con", "Prn", "AUX", "nul", "COM0", "COM1", "com9", "LPT0", "LPT1", "lpt9",
+                               "nul.txt", "Con.tar.gz", "COM\xC2\xB9", "lpt\xC2\xB2.txt", "Com\xC2\xB3"})
         TEST_EXPECT(io::is_windows_device_name(device));
-    for (const char *name : {"", "CONS", "CO", "COM0", "COM10", "LPT", "LPTX", "mycon", "a.con", ".con", "console"})
+    for (const char *name : {"", "CONS", "CO", "COM10", "LPT", "LPTX", "mycon", "a.con", ".con", "console",
+                             "COM\xC2\xB4", "COM\xC2", "LPT\xC2\xB9X"})
         TEST_EXPECT(!io::is_windows_device_name(name));
 
     namespace fs = std::filesystem;
