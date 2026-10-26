@@ -1,6 +1,7 @@
 #include <formats/env/env_celestial.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <base/io/rotating_prng.h>
 #include <base/io/tick_rate.h>
 #include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
@@ -603,10 +604,10 @@ SkyDomeMesh build_sky_dome_mesh(float sky_height) {
 // Water surface
 
 uint32_t water_noise_prng_step(uint32_t state) {
-	// [orig: PRNG_Next16 @ 0x6130a0] — rol4(state + rol11(state)) ^ 1.
-	const uint32_t rolled11 = (state << 11) | (state >> 21);
-	const uint32_t sum = state + rolled11;
-	return (((sum << 4) | (sum >> 28)) ^ 1u);
+	// [orig: PRNG_Next16 @ 0x6130a0] — rol4(state + rol11(state)) ^ 1, the
+	// recurrence io::rotating_prng_next16 steps.
+	(void)io::rotating_prng_next16(state);
+	return state;
 }
 
 WaterNoiseTables water_init_noise_tables() {
