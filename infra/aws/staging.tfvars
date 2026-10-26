@@ -4,7 +4,10 @@
 # ./deploy/run.sh --deployment staging infra ...). Staging gets an Elastic IP
 # of its own.
 
-# The service's programs (programs.tf) keep prod's shape: a task each.
+# The service's programs (programs.tf) keep prod's shape: a task each. The data
+# program packs a whole retail release (JO's export is 1.2 GB): at 2 GB its
+# opennova-update-tool build was killed for memory, so it runs at 1 vCPU, 8 GB.
+data = { cpu = 1024, memory = 8192 }
 
 azs = ["us-east-1a", "us-east-1b"]
 
@@ -27,6 +30,7 @@ fleet_max_addresses = 2
 fleet_ami = "al2023-ami-ecs-hvm-2023.0.20261009-kernel-6.1-x86_64"
 
 # Staging's account's budgets (observability.tf): its service tier runs about
-# $160 a month, about $70 while `app down` (DEPLOY.md, "Cost").
+# $200 a month with the data program at 1 vCPU, 8 GB (about $160 at 0.25 vCPU,
+# 2 GB), about $70 while `app down` (DEPLOY.md, "Cost").
 budget_monthly_usd = 200
 budget_egress_gb   = 200
