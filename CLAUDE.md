@@ -137,8 +137,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
-  code in the same change — no deprecation shims, migration paths, or compat readers for
-  files our tools write. Retail interop (wire/format parity) is the product, not
+  code in the same change — no compat shims or readers for our own files. The service
+  database's schema changes go in a new migration file, never an edit to a recorded one
+  (backend/README.md "Migrations"). Retail interop (wire/format parity) is the product, not
   back-compat, and is never relaxed.
 - Rendering targets the original fixed-function look, not PBR.
 - Networking is wire-compatible by design — the parity rule applied to the byte stream.

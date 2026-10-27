@@ -736,9 +736,11 @@ MigrationResult run_migrations(Database &db, const std::filesystem::path &migrat
 		if (const auto it = recorded.find(filename); it != recorded.end()) {
 			if (it->second != hash) {
 				throw Error(describe("",
-						"migration " + filename + " changed since it was applied (recorded sha256 " +
-								it->second + ", the file's " + hash +
-								"); until 1.0 migrations are edited in place: reset this database",
+						"migration " + filename +
+								" changed since it was applied (recorded sha256 " + it->second +
+								", the file's " + hash +
+								"); a recorded migration is never edited: put the change in a new "
+								"file (backend/README.md \"Migrations\")",
 						"run_migrations"));
 			}
 			result.skipped.push_back(filename);

@@ -6,11 +6,11 @@ schema and seed data.
 Contents:
 - `migrations/` — PostgreSQL DDL, applied on server boot by
   `opennova::db::run_migrations` (engine/net/novaworld/db/database.h) in
-  lexicographic order. Until 1.0 it is one file, `0001_baseline.sql`: the whole
-  schema and the rows it starts from. Each file runs in its own transaction,
-  and `_schema_migrations` records its name and SHA-256. The run holds a
-  database-wide advisory lock, so two servers booting on one database apply
-  each file once.
+  lexicographic order: `0001_baseline.sql`, the whole schema and the rows it
+  starts from, then each change since, one file each (`0002_players_projects.sql`,
+  ...). Each file runs in its own transaction, and `_schema_migrations` records
+  its name and SHA-256. The run holds a database-wide advisory lock, so two
+  servers booting on one database apply each file once.
 - `seed/` — idempotent inserts (`ON CONFLICT DO NOTHING`), safe to re-run. The
   server applies them after the migrations, under the same lock, at every
   boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
@@ -26,18 +26,21 @@ servers and their fleet; the jobs and the programs' use. It was squashed at
 prod's reset (2026-10) from the 25 migrations that had built it, which git
 history keeps.
 
-## Migrations until 1.0
+## Migrations
 
-Until 1.0 the NovaWorld service database is disposable: a schema change edits
-`0001_baseline.sql` in place, and a deployment whose database applied the old
-file is reset when it takes the change (DEPLOY.md, "Resetting the service
-database"). The file still runs once, in its own transaction, and
-`_schema_migrations` records its name and SHA-256: the server refuses to boot
-while a recorded file's SHA-256 no longer matches the file on disk, which is how
-a database that needs the reset shows. A recorded file the server does not have
-(a newer release's, or one of the 0002..0025 the squash replaced) is ignored; a
-database made before the squash records the old `0001_baseline.sql` too, so it
-is refused until reset. A local database is recreated with
+A schema change is a new migration file, `NNNN_short_name.sql`, numbered after
+the last one: ALTER, CREATE, DROP, UPDATE and DELETE statements that take the
+schema and the rows any deployment holds from where the files before it left
+them, so a release's change upgrades every database in place at its first boot.
+A file a deployment has applied is never edited again (0001 included: its header
+predates this rule): `_schema_migrations` records each file's SHA-256, and the
+server refuses to boot while a recorded file's bytes no longer match, so a fix is
+another new file. `tests/novaworld/backend_schema_test.cpp` pins each shipped
+file's SHA-256, and checks that a new one sorts after them. A recorded file the
+server does not have (a newer release's, or one of the 0002..0025 the squash
+replaced) is ignored; a database made before the squash records the old
+`0001_baseline.sql` too, so it is refused until reset once (DEPLOY.md,
+"Resetting the service database"). A local database is recreated with
 `scripts/dev_postgres.sh reset`.
 
 ## The database the server needs

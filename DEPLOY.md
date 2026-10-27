@@ -1233,13 +1233,14 @@ other's bucket.
 
 ### Resetting the service database
 
-Until 1.0 the service database is disposable: its one migration,
-`backend/migrations/0001_baseline.sql`, is edited in place, and a deployment whose database
-applied the old file is reset when it takes the change. The boot
-still refuses a recorded migration whose SHA-256 changed, which is how a database that needs
-the reset shows, and ignores a recorded one the program does not have (`backend/README.md`,
-"Migrations until 1.0"). `db reset-db` takes `--yes-drop-database [--orphan-subscriptions]
-[--no-backup] [--yes]`:
+No release needs a reset: a schema change is a new migration file
+(`backend/migrations/`, `backend/README.md` "Migrations"), which the first program to boot on
+the release applies to the database as it stands, its rows kept. The boot refuses a recorded
+migration whose SHA-256 changed and ignores a recorded one the program does not have. A
+database made before the 25 migrations were squashed into `0001_baseline.sql` records the old
+file, so it is reset once (prod's, planned); staging's, reset at the squash, upgrades in place.
+`db reset-db` stays for that, and for a database to start over. It takes
+`--yes-drop-database [--orphan-subscriptions] [--no-backup] [--yes]`:
 
 ```bash
 ./deploy/run.sh --deployment staging db reset-db --yes-drop-database
@@ -1269,9 +1270,9 @@ its files under an id the new database may give another product: remove those
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
 database does not reach stay until removed by hand.
 
-A release that changed the migration goes out in this order (staging's, for #1253; the release
-that squashed the 25 migrations into the one baseline goes out the same way, its database
-refusing the changed `0001_baseline.sql`):
+A database that refuses the release's migrations (one made before the squash, its record of
+the old `0001_baseline.sql` changed) takes it in this order (prod's planned reset; staging's
+went the same way at the squash):
 
 ```bash
 D='--deployment staging'
@@ -1281,9 +1282,9 @@ D='--deployment staging'
 ```
 
 The deploy finds the programs down and moves them to the release at no task (on the old
-database their boot would refuse the edited file); the reset starts them on the empty one.
-The store's files are never moved for a reset or a release: the database and the store are
-disposable until 1.0. The release that keyed the store by game id (it had named a project's
+database their boot would refuse the changed file); the reset starts them on the empty one.
+The store's files are never moved for a reset or a release. The release that keyed the store
+by game id (it had named a project's
 files by its key, `data/content/<KEY>/`) moves none either, and goes out with a reset (its
 database's record of the files each project holds names the old prefixes): every project's
 first push after it uploads its files once more, under its id, and the old

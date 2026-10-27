@@ -1234,11 +1234,10 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
 - **Migrations.** Each boot applies the `backend/migrations` files (`MIGRATIONS_DIR`)
   that `_schema_migrations` does not name yet, each in its own transaction, recording
   its SHA-256, then the seeds (`SEED_DIR`), all under a second advisory lock, so two
-  servers booting at once apply each file once. Until 1.0 the database is disposable: a
-  migration is edited in place, and a database that applied the old file is reset when it
-  takes the change. A recorded file whose SHA-256 has changed stops the boot, which is how
-  that shows; a recorded file the server does not have is ignored
-  ([`backend/README.md`](../../backend/README.md), "Migrations until 1.0"). A development
+  servers booting at once apply each file once. A schema change is a new file, so a
+  release upgrades its database in place; a recorded file is never edited, and one whose
+  SHA-256 has changed stops the boot; a recorded file the server does not have is ignored
+  ([`backend/README.md`](../../backend/README.md), "Migrations"). A development
   database is recreated with `scripts/dev_postgres.sh reset`; a deployment's, with
   DEPLOY.md's "Resetting the service database".
 
