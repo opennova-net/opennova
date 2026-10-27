@@ -2,14 +2,14 @@
 
 // The products' rows (backend/migrations/0001_baseline.sql, ADR 0064), each named by its key: the
 // games (kind game, a base game, or one expansion of a game; each with its project's visibility
-// and head, project_repository.h), OpenNova's apps (kind app: no game tree and no project;
-// products_app_check), their trees (each an immutable version of a game's
-// files in the object store, core/object_store.h, built from its published release), the
-// update releases (1SFS packages) and the sections each carries, and the trees each hosted server
-// is pinned to. The routes, the supervisor, the worker's jobs and the update listener share it;
-// every write that spans statements is one db::Transaction, and each state move a compare-and-set,
-// so two writers never both win. Crow-free. Each function throws db::Error on a database failure.
-// Service policy, not a port.
+// and head, project_repository.h, and the account it is the own project of, if any), OpenNova's
+// apps (kind app: no game tree and no project; products_app_check), their trees (each an
+// immutable version of a game's files in the object store, core/object_store.h, built from its
+// published release), the update releases (1SFS packages) and the sections each carries, and the
+// trees each hosted server is pinned to. The routes, the supervisor, the worker's jobs and the
+// update listener share it; every write that spans statements is one db::Transaction, and each
+// state move a compare-and-set, so two writers never both win. Crow-free. Each function throws
+// db::Error on a database failure. Service policy, not a port.
 
 #include <net/novaworld/db/database.h>
 
@@ -37,7 +37,7 @@ struct ProductRow {
 	std::optional<int64_t> parent_id; // an expansion's base game
 	std::string expansion_code; // an expansion's /exp code: "jox01"
 	std::string title; // a game's gameprofile code: "jo", "dfx2"
-	std::string lobby; // a game's games slug (its lobby)
+	std::string lobby; // a game's games slug (its lobby; "" for none)
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
@@ -50,6 +50,10 @@ struct ProductRow {
 	// ("public", "private"; "" for an app) and its newest revision (0 before the first push).
 	std::string visibility;
 	int64_t head = 0;
+	// The account whose own project it is (a game or an expansion an account made: never an app,
+	// never a retail game) and that account's username; none for the service's own.
+	std::optional<int64_t> owner_id;
+	std::string owner;
 	// The updater product as its packages name it (the command file's PRODUCT) and the executable
 	// its DONE runs ("" for an expansion): what a release build packs (release_build.h).
 	std::string product_name;
@@ -138,13 +142,19 @@ struct ReleaseSection {
 
 // --- products ---
 
+// An account's own projects (NewProduct::owner_id): at most kOwnedProjectsMax of them, and at most
+// kOwnedBytesMax in their stores together (project_repository.h owned_usage; the project routes
+// refuse an upload past it, whoever pushes it). The service's own take no limit.
+inline constexpr int64_t kOwnedProjectsMax = 10;
+inline constexpr int64_t kOwnedBytesMax = int64_t(4) << 30;
+
 struct NewProduct {
 	std::string display_name;
 	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id;
 	std::string expansion_code;
 	std::string title;
-	std::string lobby;
+	std::string lobby; // a game's ("" for none: an account's own game)
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
@@ -153,6 +163,9 @@ struct NewProduct {
 	std::string key;
 	std::string visibility;
 	std::string created_by;
+	// The account whose own project it is (a game or an expansion, never a retail one); none for
+	// the service's own, an admin's.
+	std::optional<int64_t> owner_id;
 };
 
 // What a product write came to.
@@ -165,10 +178,12 @@ enum class ProductOutcome : uint8_t {
 	NoSuchParent, // the parent is not a game (kind game)
 	InUse, // a live server runs it
 	HasExpansion, // an expansion has it as parent
+	TooManyProjects, // the owner has kOwnedProjectsMax projects already
 };
 
 // A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
-// the routes' to check: here only the database's own rules answer.
+// the routes' to check: here only the database's own rules answer, and for an owner's the count
+// of its projects (its players row held while it is counted, so two creates never both pass it).
 ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id);
 
 // What an admin may change afterwards.
@@ -194,9 +209,11 @@ std::optional<ProductRow> find_product(db::Database &db, int64_t id);
 std::vector<ProductRow> list_products(db::Database &db);
 // The expansions of the game `parent_id`, by id.
 std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id);
-// The games and expansions (each with its project, project_repository.h), by key in byte order;
-// the private ones only when `include_private`.
-std::vector<ProductRow> list_projects(db::Database &db, bool include_private);
+// The games and expansions (each with its project, project_repository.h), by key in byte order:
+// every one when `all`, else the public ones and the account `reader`'s own.
+std::vector<ProductRow> list_projects(db::Database &db, bool all, std::optional<int64_t> reader);
+// The games and expansions the account `owner_id` owns, by key in byte order.
+std::vector<ProductRow> list_owned_projects(db::Database &db, int64_t owner_id);
 // The product whose key is `key`; none when no product's is.
 std::optional<ProductRow> find_product_by_key(db::Database &db, std::string_view key);
 // How many live servers run `id` as their product or expansion.

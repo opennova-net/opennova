@@ -44,10 +44,11 @@ this directory's.
   launch, the sold capacity), so a change lands at the next decision with no redeploy.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
   `backend/migrations/0001_baseline.sql`). A product is a row named by its `key`, one **game**
-  (the baseline seeds the catalog's, and an admin may make more): a base game (kind `game`: its
-  `title`, the `gameprofile` code `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its
-  `lobby`, the `games` row whose lobby it lists in) or an **expansion** of one (its
-  `expansion_code`, `/exp jox01`); a third kind, `app`, is one of OpenNova's own programs with no
+  (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
+  "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
+  `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
+  lobby it lists in, none for an account's own until an admin gives it one) or an **expansion** of
+  one (its `expansion_code`, `/exp jox01`); a third kind, `app`, is one of OpenNova's own programs with no
   tree and no project ("Products" below). Every game and expansion has a **project** (its
   OpenNova Editor project's revisions, `../products/project_repository.h`), and its releases are
   built from it. Its data lives in the object store
@@ -616,17 +617,44 @@ product's. Every release is whole, so
 expansion's its own, beside its base game's): no tree is ever uploaded. The jobs a route
 enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`; the service
 README's "Background jobs") commit with the state move that causes them, and the data program
-(`apps/novaworld_data`) alone runs them. Every route is the admin's, each state change logged
-with its actor; without a store the store routes answer 503 `store_unavailable`, and a store
-call that fails mid-way 502 `store_error` (its own text to the log alone). The shapes
+(`apps/novaworld_data`) alone runs them. Every route below is the admin's, each state change
+logged with its actor; without a store the store routes answer 503 `store_unavailable`, and a
+store call that fails mid-way 502 `store_error` (its own text to the log alone). The shapes
 (`Product`, `Tree`, `Release`) are `apps/novaworld_web/products/`'s.
+
+**An account's own projects.** Any signed-in account may make projects of its own (a mod: an
+expansion of a game, the service's own, public or private, or one it may read; or a game that
+speaks `jo` or `dfx2`) and push to them from the OpenNova Editor: the row's `owner_id` names it
+(NULL for the service's own, every seeded row and every one an admin makes). One rule, every
+project route's (`../products/project_repository.h` `project_rights`): a project is read by
+anyone when public, else by its owner and the admins alone (404 `not_found` to anyone else, the
+same as no project); pushed by the own session of its owner or an admin (never the Bearer
+token); renamed, made public or private and deleted by its owner or an admin (403 `forbidden`
+to a reader who may not). An account holds at most 10 projects (`kOwnedProjectsMax`) and 4 GiB
+in their stores together (`kOwnedBytesMax`, its projects' `project_blobs`), whoever pushes to
+them. Its game lists in no lobby, and its projects get no release, updater product or tree until
+an admin gives them one: releases stay the admin's. Its delete, and the account's (the admin's
+`DELETE /api/admin/users/<id>`, which deletes its projects first and refuses 409 `in_use` or
+`has_expansion` while one may not go), queue each project's `product.purge` as the admin's
+delete does (`../products/product_jobs.h` `delete_product_purged`). The routes are
+`apps/novaworld_web/products/project_routes.h`'s (each on the account's own session, a state
+change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `wizard_login`, `download` and `description`, and its trees |
+| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage}` and, for one it may manage, `storage` |
+| `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility}`: a game (`game` a title) or an expansion (`base` a game's key, `expansion_code` as the admin's), the caller its owner: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion`; 429 (5, then one a minute) |
+| `PATCH /api/products/<key>` | `{display_name?, visibility?}` by its owner or an admin: 200 `{project}`; 400; 403 `forbidden`; 404 |
+| `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
+| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`) and the `titles` a game of its may speak |
+| `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload would take its projects past 4 GiB (none is signed then); the directory store's `PUT .../blobs/<sha256>` alike |
+
+| Route | Replies |
+| --- | --- |
+| `GET /api/admin/products` | the store's kind, the titles, the lobbies and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `wizard_login`, `download` and `description`, and its trees |
 | `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; an editor bound to the old key reads 404 `not_found` there and binds again) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
-| `DELETE /api/admin/products/<id>` | the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
+| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
+| `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
 | `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version` and, for a game's, its `source` revision |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
