@@ -58,9 +58,10 @@ func _settled(run_id: String) -> Dictionary:
 
 ## The run directories stay as bounded as the run records: past the newest `keep` (by the stamp
 ## each run id carries, not by name), they go with their artifacts, a stampless one first; a run
-## id's stamp is <date>-<time>, no space in the path.
+## id's stamp is <date>-<time>, no space in the path. The prune runs over a directory of the
+## test's own: the live runs directory holds whatever runs the suite's earlier probes left.
 func test_prune_run_dirs_keeps_the_newest_runs_by_stamp() -> void:
-	var root := ProjectSettings.globalize_path(ProbeRunner.RUNS_DIR)
+	var root := TestFs.cache_dir(self, "probe_prune")
 	var names := [
 		"zeta-20261026-090000-0001",
 		"alpha-20261026-100000-00ff",
@@ -81,6 +82,7 @@ func test_prune_run_dirs_keeps_the_newest_runs_by_stamp() -> void:
 	ProbeRunner.prune_run_dirs(root, 0)
 	assert_eq(DirAccess.get_directories_at(root).size(), 0)
 	ProbeRunner.prune_run_dirs(root.path_join("missing"), 1)
+	TestFs.remove_dir_recursive(root)
 
 	var started: Dictionary = _runner.start("echo", {})
 	assert_false(String(started["run_id"]).contains(" "), "the run id names a path with no space")
