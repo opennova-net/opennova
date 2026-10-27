@@ -131,6 +131,12 @@ void Simulation::select_vehicle_menu_row(int p_row) {
 	if (runtime_ != nullptr) runtime_->vehicle_menu().select_row(p_row);
 }
 
+String Simulation::get_vehicle_menu_preview_graphic() const {
+	if (!kernel_ || runtime_ == nullptr || kernel_->items_table() == nullptr) return String();
+	return opennova::cp1252_to_gd(opennova::inmatch::vehicle_menu_preview_graphic(
+			*kernel_->items_table(), runtime_->vehicle_menu().selection()));
+}
+
 bool Simulation::click_vehicle_menu(bool p_cancel) {
 	if (!kernel_ || runtime_ == nullptr) return false;
 	return runtime_->vehicle_menu().click(*runtime_, kernel_->world, p_cancel);

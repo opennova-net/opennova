@@ -478,6 +478,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_vehicle_menu_rows"), &Simulation::get_vehicle_menu_rows);
 	ClassDB::bind_method(D_METHOD("get_vehicle_menu_selected_row"),
 	                     &Simulation::get_vehicle_menu_selected_row);
+	ClassDB::bind_method(D_METHOD("get_vehicle_menu_preview_graphic"),
+	                     &Simulation::get_vehicle_menu_preview_graphic);
 	ClassDB::bind_method(D_METHOD("select_vehicle_menu_row", "row"),
 	                     &Simulation::select_vehicle_menu_row);
 	ClassDB::bind_method(D_METHOD("click_vehicle_menu", "cancel"), &Simulation::click_vehicle_menu);

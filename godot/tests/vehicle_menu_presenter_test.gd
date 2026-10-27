@@ -16,6 +16,9 @@ const VEHICLE_MNU := """<SCREEN>
     <WINDOW type="list" name="ITEM_LIST">
       <POSITION><LEFT>240</LEFT><TOP>80</TOP><RIGHT>560</RIGHT><BOTTOM>440</BOTTOM></POSITION>
     </WINDOW>
+    <WINDOW type="window" name="ITEM_DISPLAY">
+      <POSITION><LEFT>580</LEFT><TOP>80</TOP><RIGHT>780</RIGHT><BOTTOM>280</BOTTOM></POSITION>
+    </WINDOW>
     <WINDOW type="button" name="ACCEPT">
       <POSITION><LEFT>240</LEFT><TOP>470</TOP><RIGHT>390</RIGHT><BOTTOM>504</BOTTOM></POSITION>
       <STRING justify="CENTER" vjustify="CENTER">ACCEPT</STRING>
@@ -61,6 +64,20 @@ func test_the_screen_opens_from_vehicle_mnu_and_its_buttons_close_it() -> void:
 	assert_gte(list, 0, "the screen's ITEM_LIST")
 	assert_eq(driver.get_widget_items(list), world.get_sim().get_vehicle_menu_rows(),
 			"the ITEM_LIST shows the engine's rows")
+	# The ITEM_DISPLAY pane over its widget's rect, cleared to the draw's colour, showing the
+	# selected group's model [orig: Render_AvatarPreview3D @0x563C10, ITEM_DISPLAY's callback
+	# @0x564233].
+	var preview := presenter.get_preview()
+	assert_not_null(preview, "the ITEM_DISPLAY pane")
+	if preview != null:
+		var rect := driver.widget_frame_rect(driver.widget_id("ITEM_DISPLAY"))
+		assert_eq(preview.position, rect.position)
+		assert_eq(preview.size, rect.size)
+		assert_eq(preview.graphic(), world.get_sim().get_vehicle_menu_preview_graphic(),
+				"the pane asks for the selected group's graphic")
+		assert_eq(preview.preview_camera().fov, 30.0, "the 30 degree field")
+		assert_eq(preview.preview_camera().keep_aspect, Camera3D.KEEP_WIDTH,
+				"the field across the rect's width")
 	driver.widget_activated.emit(driver.widget_id("CANCEL"), "CANCEL")
 	assert_false(presenter.is_open(), "CANCEL closes the screen")
 	assert_signal_emit_count(presenter, "closed", 1)

@@ -51,6 +51,34 @@ struct VehicleSpawnGroup {
 };
 std::vector<VehicleSpawnGroup> vehicle_spawn_group_table(const def::DefItemsFile &items);
 
+// THE ITEM_DISPLAY PREVIEW (the screen's ITEM_DISPLAY custom draw, phase 1): the rect cleared
+// to D3DCOLOR 0x18 (depth 0.999), then, with a selection, the model of the items.def row whose
+// id is the selected group's (the first match, else row 0) turning in it. No selection, or a
+// row with no graphic, draws the clear alone.
+// [orig: VehicleMenu_RegisterCallbacks @0x5641C0 - ITEM_DISPLAY's callback @0x564233;
+//  Render_AvatarPreview3D @0x563C10 - the phase test @0x563C22, the clear @0x563C55..0x563C77,
+//  the selection @0x563C84, the row @0x563C96..0x563CA9 (ItemList_FindIndexByTypeId @0x49E100),
+//  its model @0x563CB5]
+inline constexpr uint32_t kVehiclePreviewClear = 0x00000018u;
+std::string vehicle_menu_preview_graphic(const def::DefItemsFile &items, int32_t selection);
+
+// The preview's view of a model whose bound box runs `box_min_q16` .. `box_max_q16` (16.16): the
+// box centre at the origin, the eye three times the box's half-diagonal out (the integer root
+// of the half-extents' 16.16 squares, times 3 / 65536), 60 degrees round from -z and a quarter
+// of that distance up, looking at the origin with +y up; the field 30 degrees across the rect's
+// width; the model turning about its centre by GetTickCount << 18 BAM, a turn in 16384 ms.
+// [orig: Render_AvatarPreview3D - the half-extents and centre @0x563CDB..0x563D47, the root
+//  @0x563D4F, the distance @0x563D67, the eye @0x563D7E..0x563D94, D3DXMatrixLookAtLH
+//  @0x563DC3, Render_SetViewProjectionWithDefaults(30) @0x563DDA, the yaw @0x563F6E, the
+//  centre's translation @0x563F7A..0x563FDD]
+struct VehiclePreviewView {
+	float eye[3] = {};     // render float space (x south, y up, z east), from the box centre
+	uint32_t yaw_bam = 0;  // the model pose's yaw
+	float fov_deg = 30.0f; // across the rect's width
+};
+VehiclePreviewView vehicle_preview_view(const int32_t box_min_q16[3],
+		const int32_t box_max_q16[3], uint32_t tick_ms);
+
 // One ITEM_LIST row: its text and its value (the group's index).
 struct VehicleMenuRow {
 	std::string text;

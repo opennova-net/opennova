@@ -31,6 +31,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -79,10 +80,12 @@ struct Items {
 	Items() {
 		rows.resize(3);
 		const char *names[] = {"Null", "Buggy", "Boat"};
+		const char *graphics[] = {"", "buggy.3di", "boat.3di"};
 		const int ids[] = {100000, 101291, 101300};
 		for (size_t i = 0; i < rows.size(); ++i) {
 			std::memset(&rows[i], 0, sizeof(rows[i]));
 			std::snprintf(rows[i].display_name, sizeof(rows[i].display_name), "%s", names[i]);
+			std::snprintf(rows[i].graphic, sizeof(rows[i].graphic), "%s", graphics[i]);
 			rows[i].id = ids[i];
 		}
 		file.entries = rows.data();
@@ -140,6 +143,37 @@ bool test_the_group_table_names_each_group() {
 			expect(groups[1].name == "Boat", "groups: 1300 names Boat") &&
 			expect(groups[2].item_id == 4242 && groups[2].name == "Null",
 					"groups: an id no row carries reads row 0's name");
+}
+
+// The ITEM_DISPLAY preview: the selected group's row's graphic (an id no row carries reads row 0,
+// which has none; no selection draws none), and the view: the eye three times the box's
+// half-diagonal out, 60 degrees round from -z and a quarter of it up, the yaw GetTickCount << 18.
+// [orig: Render_AvatarPreview3D @0x563C10 - @0x563C84..0x563CB5, @0x563CDB..0x563D94,
+//  @0x563F6E]
+bool test_the_preview_draws_the_selected_groups_model() {
+	const Items items;
+	bool ok = expect(inmatch::vehicle_menu_preview_graphic(items.file, 0) == "buggy.3di",
+			"preview: group 0's row") &&
+			expect(inmatch::vehicle_menu_preview_graphic(items.file, 1) == "boat.3di",
+					"preview: group 1's row") &&
+			expect(inmatch::vehicle_menu_preview_graphic(items.file, 2).empty(),
+					"preview: an id no row carries reads row 0, no graphic") &&
+			expect(inmatch::vehicle_menu_preview_graphic(items.file, -1).empty(),
+					"preview: no selection, no model");
+	// A box 4 x 2 x 4 units: half-extents (2, 1, 2), half-diagonal 3, the eye 9 units out.
+	const int32_t lo[3] = {-2 * 65536, -1 * 65536, -2 * 65536};
+	const int32_t hi[3] = {2 * 65536, 1 * 65536, 2 * 65536};
+	const inmatch::VehiclePreviewView view = inmatch::vehicle_preview_view(lo, hi, 1000);
+	const double distance = 3.0 * 3.0;
+	ok &= expect(std::fabs(view.eye[0] - std::sin(1.047196666666667) * distance) < 1e-4 &&
+					std::fabs(view.eye[1] - distance * 0.25) < 1e-4 &&
+					std::fabs(view.eye[2] + std::cos(1.047196666666667) * distance) < 1e-4,
+			"preview: the eye 60 degrees round and a quarter up") &&
+			expect(view.fov_deg == 30.0f, "preview: the 30 degree field") &&
+			expect(view.yaw_bam == 1000u << 18, "preview: the yaw GetTickCount << 18") &&
+			expect(inmatch::vehicle_preview_view(lo, hi, 16384).yaw_bam == 0u,
+					"preview: a turn each 16384 ms");
+	return ok;
 }
 
 bool test_the_first_open_asks_once_and_a_later_open_only_refills() {
@@ -360,6 +394,7 @@ bool test_a_second_session_in_the_process_polls_from_its_first_frame() {
 int main() {
 	bool ok = true;
 	ok &= test_the_group_table_names_each_group();
+	ok &= test_the_preview_draws_the_selected_groups_model();
 	ok &= test_the_first_open_asks_once_and_a_later_open_only_refills();
 	ok &= test_the_list_reads_the_bay_mask_and_the_reply();
 	ok &= test_the_poll_asks_every_frame_until_a_reply_then_every_64();

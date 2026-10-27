@@ -19,6 +19,7 @@ signal closed
 const MENU_FILE := "vehicle.mnu"
 const MENU_SCREEN := "VEHICLE"
 const LIST_CONTROL := "ITEM_LIST"
+const DISPLAY_CONTROL := "ITEM_DISPLAY"
 
 var _view: WorldView = null
 var _ui_parent: Node = null
@@ -29,6 +30,8 @@ var _layout_control: Control = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
+# The ITEM_DISPLAY pane over the screen's widget (null when the screen authors none).
+var _preview: VehiclePreview = null
 var _shown_rows := PackedStringArray()
 var _shown_selection := -2
 
@@ -56,6 +59,10 @@ func get_menu_frame() -> MenuFrame:
 	return _frame
 
 
+func get_preview() -> VehiclePreview:
+	return _preview
+
+
 ## Open the screen over live play: the screen shows, and the engine runs its open
 ## events (Simulation.open_vehicle_menu: the first parse's init, every open's
 ## activate) and this node shows what they listed.
@@ -69,6 +76,7 @@ func open() -> bool:
 	_shown_rows = PackedStringArray()
 	_shown_selection = -2
 	_refresh(sim)
+	_refresh_preview(sim)
 	# The menu draws over every HUD element, as the armory's does.
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
@@ -91,6 +99,7 @@ func teardown() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
+	_preview = null
 
 
 func _process(_delta: float) -> void:
@@ -104,6 +113,7 @@ func _process(_delta: float) -> void:
 	var sim: Simulation = _view.sim()
 	if sim != null:
 		_refresh(sim)
+		_refresh_preview(sim)
 
 
 # Build the compiled surface over the gameplay view from the world's root, the
@@ -124,7 +134,36 @@ func _ensure_menu() -> bool:
 	_audio = surface.audio
 	_driver = surface.driver
 	_frame.visible = false
+	_mount_preview(root)
 	return true
+
+
+# The ITEM_DISPLAY pane, a frame child over the widget's rect, as the game registers the
+# widget's custom draw (engine inmatch::vehicle_menu_preview_graphic).
+func _mount_preview(root: ResourceRoot) -> void:
+	var display := _driver.widget_id(DISPLAY_CONTROL)
+	if display < 0:
+		return
+	_preview = VehiclePreview.new()
+	_preview.name = "VehicleItemDisplay"
+	_preview.set_resource_root(root)
+	_frame.add_child(_preview)
+	_place_preview()
+
+
+func _place_preview() -> void:
+	if _preview == null or not is_instance_valid(_preview):
+		return
+	var rect := _driver.widget_frame_rect(_driver.widget_id(DISPLAY_CONTROL))
+	_preview.position = rect.position
+	_preview.size = rect.size
+	_preview.visible = rect.size.x > 0.0 and rect.size.y > 0.0
+
+
+# The selected group's model and its turn on the process clock (GetTickCount).
+func _refresh_preview(sim: Simulation) -> void:
+	if _preview != null and is_instance_valid(_preview):
+		_preview.show_graphic(sim.get_vehicle_menu_preview_graphic(), GameWorld.tick_count_ms())
 
 
 # The engine's rows and selection into the ITEM_LIST when they changed.
@@ -189,3 +228,4 @@ func _register_text_tables(root: ResourceRoot) -> void:
 
 func _recompute_fit() -> void:
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
+	_place_preview()
