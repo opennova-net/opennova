@@ -72,7 +72,7 @@ struct PlayerDeadRecord {
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
 // pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
-// 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
+// 0x42BA09 — slot+0x24, Entity_IsPersonType @0x434220,
 // HUD_SetTrackedEntityTarget @0x59D050]
 // S2C 0x24 "SETFLASH1 [n]": the lightning sequencer's timer A. The effect
 // pass applies it to the world's weather. [orig: NapiNPClientMsg_HandleTextCommand

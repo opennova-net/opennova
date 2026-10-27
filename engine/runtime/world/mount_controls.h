@@ -248,7 +248,7 @@ inline const Entity *entity_ground_word(const World &world, const Entity &e) {
 // The occupied seats of `carrier` and of every entity of its candidate slice that rides it
 // (its +0x28 the carrier), the carrier last; any of them dead, or without a def, a model or a
 // model userpoint, makes the whole count 0. A carrier with no slice counts its own seats.
-// [orig: Entity_CountActiveWeaponSlots @0x434E70 (dfx2.exe; Jointops.exe's @0x435070 has no
+// [orig: Entity_CountOccupiedSeats @0x434E70 (dfx2.exe; Jointops.exe's @0x435070 has no
 //  caller) - the slice +0x1BC / +0x1C0 @0x434E76..0x434E99, the walk to the count inclusive
 //  (the carrier at the count) @0x434EB2..0x434FD4, the +0x28 test @0x434EC3, the dead bit
 //  @0x434ECC, the def +0x20, the model +0x30 and its userpoint count +0xBC @0x434ED9..0x434EF3
@@ -395,7 +395,7 @@ inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
 // while the local player mans it and the gun's +0x28 carrier counts one occupied seat at most;
 // a gun with no +0x28 (whose count retail reads through a null pointer) takes the full one.
 // [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - `cmp eax, g_LocalPlayerEntity`
-//  @0x440875, Entity_CountActiveWeaponSlots(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A]
+//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A]
 inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mount,
 		bool local_gunner) {
 	if (world.rules.title != gameprofile::GAME_DFX2) return 0;
@@ -563,7 +563,7 @@ inline void emplaced_command_call(World &world, EntityHandle ground, uint32_t &s
 // That aircraft slot is the one the parent's class init bound from its authored
 // primary_weapon, the field an ewep's +0x2B4 slot binds from: its Def is the
 // parent's primary_weapon_slot_adm row.
-// [orig: Entity_InitInfantryBoneData @0x490160, call @0x49017b;
+// [orig: Entity_InitAircraftWeaponBones @0x490160, call @0x49017b;
 // WeaponSlot_InitFromEntityDef @0x5466c0, primary_weapon @0x5466d8]
 // [orig: Entity_UpdateTransformAndTurret @0x440ca0: parent @0x440cbf,
 //  model/table/index gates @0x440f04..0x440f34, entry = table +

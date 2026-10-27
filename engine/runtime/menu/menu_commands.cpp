@@ -88,7 +88,7 @@ constexpr ScreenRow kScreenRows[] = {
 	//  UI_DispatchScreenEvent @ 0x54e6a0; SinglePlayer_HandleStartEvent @ 0x561fb0, registered @ 0x5620c0]
 	{ "SINGLE_PLAYER", "ACCEPT", MenuCommand::StartMission, false },
 	// The updater's two buttons, neither gated on an update being available (app_message_command
-	// has the launch) [orig: UI_RegisterStartupCallbacks @ 0x555890 - sub_5557B0 @ 0x5557b0,
+	// has the launch) [orig: UI_RegisterStartupCallbacks @ 0x555890 - UI_StartupUpdateButton_OnEvent @ 0x5557b0,
 	//  which jumps to UI_LaunchUpdateProcess @ 0x55b0b0, registered @ 0x5558f2;
 	//  UI_RegisterOptionsCallbacks @ 0x55d610 (from Options_InitScreenOnce @ 0x55d87e) -
 	//  UI_LaunchUpdateProcess registered @ 0x55d7da]

@@ -19,7 +19,7 @@ int32_t bearing_to(int32_t dx, int32_t dy);
 // when the target is a person (its def's type 3) on a prone animation (flag 2) where the
 // foliage map grows something, else 0. Defined in infantry_combat.cpp.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - block 1 @0x4BC5A6..0x4BC5D8, block 2
-//  @0x4BC98A..0x4BC9BC; PlayerSlot_IsEntityInGame @0x434220 (its `cmp dword ptr [eax+5Ch], 3`
+//  @0x4BC98A..0x4BC9BC; Entity_IsPersonType @0x434220 (its `cmp dword ptr [eax+5Ch], 3`
 //  over the entity's +0x20 def: the person type, an IDB misnomer); g_AnimStateFlagsTable
 //  @0x8139E8; Foliage_SampleFoliageMapMask @0x606620]
 int32_t prone_foliage_concealment(const World &world, const Entity &target);

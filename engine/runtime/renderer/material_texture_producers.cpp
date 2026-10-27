@@ -107,7 +107,7 @@ MaterialTexturePixels load_material_chunk(const uint8_t *data, size_t size, uint
         // the map, what else the chunk holds, as the chunk's own buffer holds it; past the chunk, the
         // heap, zero here [orig: Texture_LoadAOC8Chunk @0x58F630..0x58F66E (the chunk node's data + 28);
         // ChunkFile_ParseRecursive @0x56F73D..0x56F752, each leaf chunk copied into a buffer of its own
-        // size (sub_56FA70 @0x56FA9E..0x56FAB0, sub_56F960 @0x56F9AE)].
+        // size (DynList_Assign @0x56FA9E..0x56FAB0, DynList_Reserve @0x56F9AE)].
         std::vector<uint8_t> lanes(size_t(count) * 4, 0);
         std::memcpy(lanes.data(), payload.p + 28,
                 size_t(std::min<uint64_t>(lanes.size(), uint64_t(payload.n) - 28)));

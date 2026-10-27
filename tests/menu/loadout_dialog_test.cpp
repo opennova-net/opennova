@@ -227,7 +227,7 @@ void test_armory_page_memory() {
 // row + 1, a TYPE pick its row, a grenade pick its row), the remembered count a weapon's
 // reselect shows, the class flip's save of the page it leaves and the ACCEPT's
 // [orig: UI_PopulateThreeCategoryLists @0x566db0; WeaponDef_RegisterUICallbacks @0x567020;
-//  sub_566620 @0x566620; sub_566650 @0x566650; WeaponDef_UISlotSelectCallback @0x566d70;
+//  UI_OnPrimaryAmmoCountSelected @0x566620; UI_OnPrimaryAmmoTypeSelected @0x566650; WeaponDef_UISlotSelectCallback @0x566d70;
 //  UI_OnPrimaryWeaponTypeChanged @0x5662d0; UI_HandleTeamClassSelection @0x566f60;
 //  WeaponLoadout_ApplyFromBuffer @0x565cd0].
 void test_armory_loadout_state() {

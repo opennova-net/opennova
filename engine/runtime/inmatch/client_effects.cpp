@@ -143,7 +143,7 @@ void set_tracked_entity_target(replication::ClientState &state, const world::Wor
     ++target.serial;
 }
 
-// PlayerSlot_IsEntityInGame: the entity's def is a person, type 3
+// Entity_IsPersonType: the entity's def is a person, type 3
 // [orig: @0x434220..0x434232 — entity+0x20 def, def+0x5C == 3]. A world
 // entity carries its def type; a decoded pool-0 row is an organic, whose
 // items.def rows are persons.
@@ -480,7 +480,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // A local-channel line: the sender slot's person becomes the
             // tracked target (the fold already ran the dispatcher's slot
             // gate). [orig: Chat_DispatchToChannel @0x42B910 — slot+0x24
-            //  @0x42b9ee, PlayerSlot_IsEntityInGame (def type 3) @0x42b9fb,
+            //  @0x42b9ee, Entity_IsPersonType (def type 3) @0x42b9fb,
             //  HUD_SetTrackedEntityTarget @0x42ba09]
             const replication::ClientRosterSlot &slot = state().roster[chat->slot];
             if (!slot.bound || slot.entity_slot < 0) continue;

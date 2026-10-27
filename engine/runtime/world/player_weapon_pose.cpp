@@ -109,7 +109,7 @@ HeatGlowWalk heat_glow_walk_of(const World &world, const Entity &walked) {
 //  @0x54119E..0x5411B2; the descriptor +0 / +0x0C / +40 / +44 @0x5411F0..0x541200; the
 //  update CEffectEmitter_UpdatePositionAndParams @0x541213, the spawn
 //  CEffectWorld_SpawnEmitterAtPosition into the +0x1C handle @0x54122C;
-//  sub_545A00 @0x545A00 (index 12)]
+//  Entity_GetWeaponBoneByte @0x545A00 (index 12)]
 void weapon_heat_glow_update(World &world, const HeatGlowWalk &walk, const WeaponTableEntry &def,
                              WeaponSlotState &slot, const WeaponFsmEvents &events) {
     if (events.heat_glow_release) {

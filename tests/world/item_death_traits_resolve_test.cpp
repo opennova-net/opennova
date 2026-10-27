@@ -342,7 +342,7 @@ static void test_final_husk_takes_the_xb_variant_and_a_clone_holds_none() {
 // aircraft cluster (+0x4D8), any other row neither. The reader takes the aircraft
 // cluster for a PlayerControl def, else the standard one. The CAMERA byte is the ewep
 // init's alone, under the same weapon test.
-// [orig: Entity_InitBoneReferences @0x441470 (@0x441495, @0x4414B4, @0x4414CD..0x4415B0); Entity_InitInfantryBoneData
+// [orig: Entity_InitBoneReferences @0x441470 (@0x441495, @0x4414B4, @0x4414CD..0x4415B0); Entity_InitAircraftWeaponBones
 //  @0x490160 (@0x4901AF..0x490292) from Entity_InitHelicopterAIFromDef @0x4686A2;
 //  Entity_GetWeaponSlotByte @0x5459C0 (@0x5459DA..0x5459F9)]
 static void test_weapon_userpoint_clusters_follow_the_class_row() {

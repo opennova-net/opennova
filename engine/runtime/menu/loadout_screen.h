@@ -96,7 +96,7 @@ double armory_screen_weight(const MenuRuntime &menu, const def::DefWeaponsFile &
 inline constexpr int kArmoryClassBuffers = 16;
 
 // The team mask the screen filters by and stages under, from the entity's team word: 2 for
-// a team of 1 or 3, else 1 [orig: Armory_ResolveSelectedClass @0x5642f0 - dword_25DCF30
+// a team of 1 or 3, else 1 [orig: Armory_ResolveSelectedClass @0x5642f0 - g_ArmoryTeamMask
 // @0x564330..0x56434e].
 inline int32_t armory_team_mask(int entity_team) {
 	return entity_team == 1 || entity_team == 3 ? 2 : 1;
@@ -118,8 +118,8 @@ public:
 	void stage(const playersav::Record &record, int entity_team, const playersav::KitPage &spawn);
 	// The on-show's gate: a stage when the team mask differs from the one the last on-show
 	// staged under (none at the start), which it keeps; true when it staged
-	// [orig: UI_InitTeamClassSelection @0x567370 - dword_83C948 (0xFFFFFFFF in the image)
-	//  against dword_25DCF30 @0x56740c, the store @0x567414, the stage @0x567419].
+	// [orig: UI_InitTeamClassSelection @0x567370 - g_ArmoryStagedTeamMask (0xFFFFFFFF in the image)
+	//  against g_ArmoryTeamMask @0x56740c, the store @0x567414, the stage @0x567419].
 	bool stage_on_show(const playersav::Record &record, int entity_team,
 			const playersav::KitPage &spawn);
 	// A class's page; a class outside 0..15 reads an empty page and stores nothing.
@@ -134,8 +134,8 @@ private:
 // The screen's counts by catalog row (weapon.def's row + 1): the AMMO1 count and the
 // AMMO2 count, -1 untouched; and the PRIMARY / SECONDARY ammo-type bytes, zero at the
 // start, which no populate resets
-// [orig: dword_25DCF48 / dword_25DCF4C, the 255 pairs up to 0x25DD744; byte_25E5748 /
-//  byte_25E5749].
+// [orig: g_ArmoryAmmoCounts / dword_25DCF4C, the 255 pairs up to 0x25DD744; g_ArmoryAmmoTypePri /
+//  g_ArmoryAmmoTypeSec].
 struct ArmoryScreenPairs {
 	std::vector<int32_t> clips;
 	std::vector<int32_t> secondary;
@@ -143,8 +143,8 @@ struct ArmoryScreenPairs {
 	int32_t clips_of(int32_t catalog_row) const;
 	int32_t secondary_of(int32_t catalog_row) const;
 	// The handlers' writes: an AMMO1 or AMMO2 pick its row + 1, a grenade pick its row
-	// [orig: sub_566620 / sub_5669C0 / sub_566D40 (offset 0 AMMO1, 1 AMMO2),
-	//  WeaponDef_UISlotSelectCallback @0x566d70; the TYPE picks sub_566650 / sub_5669F0].
+	// [orig: UI_OnPrimaryAmmoCountSelected / UI_OnSecondaryAmmoCountSelected / UI_OnAccessoryAmmoCountSelected (offset 0 AMMO1, 1 AMMO2),
+	//  WeaponDef_UISlotSelectCallback @0x566d70; the TYPE picks UI_OnPrimaryAmmoTypeSelected / UI_OnSecondaryAmmoTypeSelected].
 	void set_clips(int32_t catalog_row, int32_t value);
 	void set_secondary(int32_t catalog_row, int32_t value);
 };

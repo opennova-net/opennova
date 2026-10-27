@@ -610,7 +610,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					// aircraft cluster; any other row resolves neither, and both read 0.
 					// [orig: Entity_InitBoneReferences @0x441470 (the slot's weapon test
 					//  @0x441495, the cluster @0x4414CD..0x4415B0, the heat byte @0x4415CD);
-					//  Entity_InitInfantryBoneData @0x490160 (the 0x20 test @0x49016D, the
+					//  Entity_InitAircraftWeaponBones @0x490160 (the 0x20 test @0x49016D, the
 					//  cluster @0x4901AF..0x490292, the heat byte under the weapon @0x4902B4),
 					//  called from Entity_InitHelicopterAIFromDef @0x4686A2]
 					std::memset(e->weapon_userpoint_bytes, 0, sizeof(e->weapon_userpoint_bytes));

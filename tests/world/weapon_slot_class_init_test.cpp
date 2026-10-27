@@ -7,7 +7,7 @@
 // the rounds it was left with. A PlayerControl carrier's death refills its EWeap group's slots
 // from the weapon their init bound.
 // [orig: Entity_InitBoneReferences @0x441470 (WeaponSlot_InitFromEntityDef called @0x441482,
-//  WeaponSlot_SplitAmmoIntoClipAndReserve called @0x4415D8); Entity_InitInfantryBoneData
+//  WeaponSlot_SplitAmmoIntoClipAndReserve called @0x4415D8); Entity_InitAircraftWeaponBones
 //  @0x490160 (the calls @0x49017B / @0x490192); WeaponSlot_InitFromEntityDef @0x5466C0;
 //  WeaponSlot_SplitAmmoIntoClipAndReserve @0x546370; Entity_AttachToUseGunSlot @0x546B80;
 //  Entity_DetachFromVehicle @0x4355F0; Entity_RespawnVehicle @0x45FF40 (the class init call
@@ -110,7 +110,7 @@ struct Rig {
 // test, under its def's EWeap bit alone. Another row's init touches no slot.
 // [orig: Entity_InitBoneReferences @0x441482, the model / slot Def tests @0x44148D / @0x441495,
 //  the split @0x4415D8; WeaponSlot_InitFromEntityDef @0x54670F..0x546733;
-//  WeaponSlot_SplitAmmoIntoClipAndReserve @0x54637F..0x5463B5; Entity_InitInfantryBoneData
+//  WeaponSlot_SplitAmmoIntoClipAndReserve @0x54637F..0x5463B5; Entity_InitAircraftWeaponBones
 //  the attrib test @0x490169, the split @0x490192]
 void test_the_class_inits_bind_and_split() {
 	Rig r;

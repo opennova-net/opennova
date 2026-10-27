@@ -9,7 +9,7 @@
 //   - the host CNetQuality send window behind S2C 0x79 [orig: CNetQuality_UpdateMetrics @0x4C52C0];
 //   - C2S 0x0D chat: strip, throttle, the filter.txt sender-only rule and the
 //     per-channel fan [orig: NapiNPServer_HandleChatMessage @0x513760]; the chat
-//     filter's load and scoring [orig: TTS_LoadDictionaryFile @0x68A890, TTS_ProcessText @0x68A5F0];
+//     filter's load and scoring [orig: ChatFilter_LoadDictionaryFile @0x68A890, ChatFilter_ScoreLine @0x68A5F0];
 //   - C2S 0x3D stamps the frame clock [orig: NapiNPServerMsg_0x03D @0x500EC0];
 //   - C2S 0x42 -> S2C 0x70 from the limit table [orig: NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0];
 //   - C2S 0x51 permanent-death spectator convert + S2C 0x32 [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840];
@@ -434,7 +434,7 @@ std::vector<std::string> rule_slots(const std::vector<uint8_t> &table, size_t in
 
 // The chat filter over filter.txt: the rows tokenized into rules, an alternate's passes, the
 // exclusions, and the counts a line scores.
-// [orig: TTS_LoadDictionaryFile @0x68A890; TTS_TokenizeText @0x689C50; TTS_ProcessText @0x68A5F0;
+// [orig: ChatFilter_LoadDictionaryFile @0x68A890; ChatFilter_TokenizeText @0x689C50; ChatFilter_ScoreLine @0x68A5F0;
 //  ChatFilter_IsTextFiltered @0x4FD650]
 bool check_chat_filter() {
 	inmatch::ChatFilter none;

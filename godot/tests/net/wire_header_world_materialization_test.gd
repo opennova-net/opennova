@@ -130,7 +130,7 @@ func _designated_g_mission_fixture() -> Dictionary:
 # It is a chel EWeap row, as the shipped addeweapG carriers are (the Ka-52 and
 # the Apache): their class init binds the +0x474 slot the route reaches, which
 # a cveh's never does. [orig: Entity_InitHelicopterAIFromDef @0x4683C0 ->
-# Entity_InitInfantryBoneData @0x490160 (the attrib test @0x490169, the bind
+# Entity_InitAircraftWeaponBones @0x490160 (the attrib test @0x490169, the bind
 # @0x49017B)]
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
 # carrierswap (the dense-reorder refresh); "ambiguous" authors a second addeweap

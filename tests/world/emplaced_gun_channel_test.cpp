@@ -457,7 +457,7 @@ void test_parent_publication_helo_clamped_pair() {
     pr.r.look(look_heading, -25 * kBamPerDegree);
     // Aircraft +0x474 is bound from items.def primary_weapon by its class init at
     // its spawn, just as an ewep's +0x2B4 is; the clamp reads that bound Def.
-    // [orig: Entity_InitInfantryBoneData @0x490173..0x49017b;
+    // [orig: Entity_InitAircraftWeaponBones @0x490173..0x49017b;
     // WeaponSlot_InitFromEntityDef @0x5466d8..0x54670a; slot-1 def [edi+494h] @0x440fbc]
     auto &table = pr.r.w.tables.weapons;
     table.entries.resize(2);
@@ -1006,7 +1006,7 @@ void configure_heat_gun(WeaponTableEntry &e) {
 // each hot tick; a zero gate byte takes no anchor; a gfx3 def anchors OVERHEATED's gfx3
 // point behind the launch byte; heat under the threshold releases it.
 // [orig: WeaponAction_ProcessAllEntities @0x5426E9..0x542716; WeaponAction_ProcessFrame
-//  @0x541052..0x54125C (the EWeap branch @0x5410B4..0x5410DF); sub_545A00 @0x545A00;
+//  @0x541052..0x54125C (the EWeap branch @0x5410B4..0x5410DF); Entity_GetWeaponBoneByte @0x545A00;
 //  Entity_ComputeUserpointWorldTransform @0x545C60 (the gate @0x545D06..0x545D68)]
 void test_unoccupied_hot_gun_drives_its_overheat_emitter() {
     auto wp = std::make_unique<World>();
@@ -1174,7 +1174,7 @@ void test_dfx2_planar_rate() {
 // whose carrier counts one occupied seat at most (any rider dead, def-less or model-less makes
 // the count 0), the full one otherwise and for a gun with no carrier.
 // [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - @0x440875..0x4408A7;
-//  Entity_CountActiveWeaponSlots @0x434E70 (dfx2.exe)]
+//  Entity_CountOccupiedSeats @0x434E70 (dfx2.exe)]
 void test_dfx2_rate_pick_and_seat_count() {
     auto wp = std::make_unique<World>();
     World &w = *wp;

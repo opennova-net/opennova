@@ -5605,7 +5605,7 @@ static void test_bearing_due_minus_x_is_the_ftol_word() {
 // The prone-in-foliage concealment both NPC aim blocks add to their accuracy words: 40 for a
 // person target on a prone animation (flag 2) where the foliage map grows something, else 0.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4BC5A6..0x4BC5D8, @0x4BC98A..0x4BC9BC;
-//  PlayerSlot_IsEntityInGame @0x434220 (the def type 3 test); Foliage_SampleFoliageMapMask
+//  Entity_IsPersonType @0x434220 (the def type 3 test); Foliage_SampleFoliageMapMask
 //  @0x606620]
 static void test_prone_in_foliage_concealment() {
     World world;

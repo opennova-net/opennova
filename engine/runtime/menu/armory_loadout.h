@@ -59,9 +59,9 @@ struct ArmoryLoadout {
 	// weapon their fill read), a PRIMARY / SECONDARY _AMMO1_TYPE the row as its byte, a
 	// GRENADE_AMMO1..3 the row into its position's count; false for another control.
 	// [orig: WeaponDef_RegisterUICallbacks @0x567020 - the registrations
-	//  @0x56705d..0x5671e9; sub_566620 @0x566620, sub_5669C0 @0x5669c0, sub_566D40 @0x566d40
-	//  (offset 0 AMMO1, 1 AMMO2: pair + offset = row + 1 @0x56663e); sub_566650 @0x566650 /
-	//  sub_5669F0 @0x5669f0 (the byte @0x566661 / @0x566a01); WeaponDef_UISlotSelectCallback
+	//  @0x56705d..0x5671e9; UI_OnPrimaryAmmoCountSelected @0x566620, UI_OnSecondaryAmmoCountSelected @0x5669c0, UI_OnAccessoryAmmoCountSelected @0x566d40
+	//  (offset 0 AMMO1, 1 AMMO2: pair + offset = row + 1 @0x56663e); UI_OnPrimaryAmmoTypeSelected @0x566650 /
+	//  UI_OnSecondaryAmmoTypeSelected @0x5669f0 (the byte @0x566661 / @0x566a01); WeaponDef_UISlotSelectCallback
 	//  @0x566d70 (the position's row @0x566d7e, the store @0x566d9a)]
 	bool pick_count(const MenuRuntime &menu, const std::string &control, int row);
 

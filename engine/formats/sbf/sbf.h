@@ -19,7 +19,7 @@ inline constexpr uint32_t SBF_MAGIC = 0x30464253u;  /* 'SBF0' little-endian */
 /* The header's version and reserved words: the engine reads the 24-byte header
    whole and never reads either (the version at +4, the reserved word at +12:
    no reader of the header copy [orig: AudioVM_OpenContextFile @ 0x672160, the
-   ReadFile into stru_31C3824 @ 0x67221f, no xref to its +4 or +12; the dead
+   ReadFile into g_AudioVMBankHeader @ 0x67221f, no xref to its +4 or +12; the dead
    Sbf_OpenFile_Gamemus @ 0x4ED6C0's copy stru_C60D68 likewise]). No original
    writer of a bank is witnessed, so the writer writes its own constants, never
    a bank's: 0x100, the version every observed bank carries, and 0. */

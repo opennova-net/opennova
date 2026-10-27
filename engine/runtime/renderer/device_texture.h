@@ -218,7 +218,7 @@ uint32_t d3dx_default_texture_side(uint32_t side);
 // @ 0x6914D9..0x691520, the MipFilter BOX only for D3DX_DEFAULT @ 0x691565..0x69156A, D3DXFilterTexture
 // called with it @ 0x691B68..0x691B78; CBlt::BltNone @ 0x6E0D57; CBlt::Blt @ 0x6E30B5 (BltBox2D takes
 // filter 5 alone @ 0x6E110F); CBlt_BltLinear2D @ 0x6E19BC (filter 3 @ 0x6E19D7, the sums stored as
-// floats @ 0x6E1BBC..0x6E1CB8); the weights sub_6E18D0 @ 0x6E1946..0x6E19AA]
+// floats @ 0x6E1BBC..0x6E1CB8); the weights D3DXTex_BuildLinearWeights @ 0x6E1946..0x6E19AA]
 std::vector<DeviceTextureLevel> dds_reader_levels(std::vector<DeviceTextureLevel> file_levels);
 
 // The creation flags a model texture row's loader (`loader` Stage, Plain or Normal: material_texture

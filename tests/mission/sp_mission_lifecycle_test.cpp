@@ -322,7 +322,7 @@ int main() {
 		CHECK(world.out.dialog_line_stop);
 		CHECK(!world.out.audio_channels_shutdown);
 		// The SP tail parks the world-sound volume option until the next mission
-		// start's cine release [orig: sub_5280B0 called @0x516958].
+		// start's cine release [orig: Sound_ParkEffectsVolume called @0x516958].
 		CHECK(cine.world_sound_parked);
 		CHECK(cine.win_state == 0 && cine.win_build_frame == 95);
 		CHECK(cine.events.size() == 2);
@@ -436,7 +436,7 @@ int main() {
 				im::MainFrameExit::PostMenu);
 		// Parked through the whole end screen; the mission start's cine release puts
 		// the option back [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll
-		// @0x577940 -> sub_5280D0].
+		// @0x577940 -> Sound_RestoreEffectsVolume].
 		CHECK(cine.world_sound_parked);
 		cine.mission_start(false, false, world);
 		CHECK(!cine.world_sound_parked);
@@ -456,7 +456,7 @@ int main() {
 		// waiting lines with it [orig: Server_ProcessRoundEnd @0x516953].
 		CHECK(world.script.dialog.history().empty() && world.script.dialog.slots().empty());
 		// The playing line stops ahead of that reset [orig: @0x51694B], and the
-		// world-sound volume option parks [orig: sub_5280B0 called @0x516958].
+		// world-sound volume option parks [orig: Sound_ParkEffectsVolume called @0x516958].
 		CHECK(world.out.dialog_line_stop);
 		CHECK(cine.world_sound_parked);
 		CHECK(world.out.effects.count("round_end") == 1);

@@ -109,7 +109,7 @@ static_assert(kPatternCount == 72, "the table @0x84FDC8 holds 72 patterns");
 
 // The iteration caps: the global's initial 16, which the boot's dictionary load runs under (it
 // loads ahead of any chat), and the 4 every chat test sets ahead of its scoring.
-// [orig: dword_8506E8 (16 in the image); TTS_SetMaxIterations @0x68AB10 (the clamp to 16
+// [orig: dword_8506E8 (16 in the image); ChatFilter_SetMaxIterations @0x68AB10 (the clamp to 16
 //  @0x68AB17), its one call ChatFilter_IsTextFiltered @0x4FD655 (4)]
 constexpr int32_t kLoadIterations = 16;
 constexpr int32_t kChatIterations = 4;
@@ -126,7 +126,7 @@ struct Token {
 // [orig: ctx+0x1400 the count; ctx+8220 the pass, ctx+8224 the bit's divisor, ctx+8228 the
 //  alternates taken, ctx+8232 the alternates met]
 struct Pass {
-	// The entries and a zero one past the last, which TTS_RemoveDuplicateTokens' shift reads.
+	// The entries and a zero one past the last, which ChatFilter_RemoveDuplicateTokens' shift reads.
 	std::array<Token, kTokenSlots + 1> tokens{};
 	int count = 0;
 	int32_t pass = 0;
@@ -146,7 +146,7 @@ const char *token_of(int32_t pattern) {
 	return pattern >= 0 && pattern < kPatternCount ? kPatterns[pattern].token : "";
 }
 
-// [orig: TTS_IsConsonant @0x689BF0]: a letter A-Z / a-z other than a vowel; '1' and a space never.
+// [orig: ChatFilter_IsConsonant @0x689BF0]: a letter A-Z / a-z other than a vowel; '1' and a space never.
 bool is_consonant(char c) {
 	if (c == '1' || c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'A' ||
 			c == 'E' || c == 'I' || c == 'O' || c == 'U' || c == ' ')
@@ -154,13 +154,13 @@ bool is_consonant(char c) {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-// [orig: TTS_IsSpecialChar @0x689AE0]: '1', '0', '|' and the vowels, either case.
+// [orig: ChatFilter_IsVowel @0x689AE0]: '1', '0', '|' and the vowels, either case.
 bool is_vowel(char c) {
 	return c == '1' || c == '0' || c == '|' || c == 'a' || c == 'e' || c == 'i' || c == 'o' ||
 			c == 'u' || c == 'A' || c == 'E' || c == 'I' || c == 'O' || c == 'U';
 }
 
-// [orig: TTS_IsSpecialCharNoU @0x689B70]: the same, u and U excepted.
+// [orig: ChatFilter_IsVowelNoU @0x689B70]: the same, u and U excepted.
 bool is_vowel_no_u(char c) {
 	return c == '1' || c == '0' || c == '|' || c == 'a' || c == 'e' || c == 'i' || c == 'o' ||
 			c == 'A' || c == 'E' || c == 'I' || c == 'O';
@@ -182,7 +182,7 @@ bool prefix_matches(const char *text, const char *pattern) {
 	return true;
 }
 
-// [orig: TTS_TokenizeText @0x689C50]
+// [orig: ChatFilter_TokenizeText @0x689C50]
 void tokenize(Pass &p, const char *input, bool load, int32_t max_iterations) {
 	p.tokens.fill(Token{}); // @0x689C67
 	p.count = 0; // @0x689C69
@@ -271,7 +271,7 @@ void tokenize(Pass &p, const char *input, bool load, int32_t max_iterations) {
 }
 
 // A token next to one of the same token string merges into it: the run keeps its first entry and
-// the entries past it move down one [orig: TTS_RemoveDuplicateTokens @0x689F90 - prev -999
+// the entries past it move down one [orig: ChatFilter_RemoveDuplicateTokens @0x689F90 - prev -999
 // @0x689F98, the compares @0x689FB8..0x68A018, the shift @0x68A02C..0x68A044, the count
 // @0x68A04E..0x68A056].
 void remove_duplicates(Pass &p) {
@@ -306,7 +306,7 @@ bool slot_equals(const std::vector<uint8_t> &table, size_t at, const char *token
 // The first exclusion whose token slots match the tokens from `i`, its slots up to its first empty
 // one, marks those tokens and ends the walk. (Retail's reverse arm skips the walk; no caller sets
 // it.)
-// [orig: sub_68A260 @0x68A260 - the records @0x68A27B..0x68A2EB (stride 0x4C), the slots
+// [orig: ChatFilter_MarkExclusions @0x68A260 - the records @0x68A27B..0x68A2EB (stride 0x4C), the slots
 //  @0x68A293..0x68A2D9, the marks @0x68A2F3..0x68A314]
 void mark_exclusions(Pass &p, const std::vector<uint8_t> &table, int i) {
 	for (size_t record = 0; record + ChatFilter::kRuleBytes <= table.size() && table[record] != 0;
@@ -334,7 +334,7 @@ void mark_exclusions(Pass &p, const std::vector<uint8_t> &table, int i) {
 // Every word rule whose token slots match the tokens from `i`, not every one of those tokens
 // excluded, counts its O / R / S bits. (The reverse arm's skip of an F rule has no caller; the
 // matched rows the game also records have no reader.)
-// [orig: TTS_ScorePronunciationRules @0x68A080 - the records @0x68A0A5..0x68A250, the slots
+// [orig: ChatFilter_ScoreWordRules @0x68A080 - the records @0x68A0A5..0x68A250, the slots
 //  @0x68A10D..0x68A16B, the excluded test @0x68A16D, the counts @0x68A1D9..0x68A1F3]
 void score_rules(const Pass &p, const std::vector<uint8_t> &table, int i, ChatFilterCounts &out) {
 	for (size_t record = 0; record + ChatFilter::kRuleBytes <= table.size() && table[record] != 0;
@@ -369,7 +369,7 @@ void score_rules(const Pass &p, const std::vector<uint8_t> &table, int i, ChatFi
 // each the pass's tokens' strings in four-byte slots, a NUL past the last, the flags dword at +64;
 // a word's records then take the weight 1.0f at +68. A record past the table, or a slot past it, is
 // not written (retail writes on into the memory beyond).
-// [orig: TTS_TokenizeAndCollectResults @0x68A350 (the words) / TTS_TokenizeTextToRuleNames
+// [orig: ChatFilter_AddWordRecords @0x68A350 (the words) / ChatFilter_AddExclusionRecords
 //  @0x68A4B0 (the exclusions) - the CR / LF @0x68A367..0x68A39D, the table's end
 //  @0x68A3B3..0x68A3BB, the passes @0x68A3D7..0x68A487, the strcpy into each slot @0x68A435, the
 //  NUL @0x68A464, the flags @0x68A468, the weights @0x68A496]
@@ -437,7 +437,7 @@ bool next_token(const std::string &line, size_t &at, std::string &out) {
 
 ChatFilter::ChatFilter() : words_(kRules * kRuleBytes, 0), exclusions_(kRules * kRuleBytes, 0) {}
 
-// [orig: TTS_LoadDictionaryFile @0x68A890]
+// [orig: ChatFilter_LoadDictionaryFile @0x68A890]
 void ChatFilter::load(const uint8_t *data, std::size_t size) {
 	std::fill(words_.begin(), words_.end(), uint8_t{ 0 }); // memset @0x68A8A3
 	// No file, or no byte, loads nothing.
@@ -457,7 +457,7 @@ void ChatFilter::load(const uint8_t *data, std::size_t size) {
 	int32_t flags = 0;
 	// The row's word and its flags as the frame holds them: flags_str's 16 bytes and word_lower's
 	// 128 after them, so a flags token past 15 characters runs on into the word.
-	// [orig: TTS_LoadDictionaryFile - flags_str @esp+8, word_lower @esp+0x18]
+	// [orig: ChatFilter_LoadDictionaryFile - flags_str @esp+8, word_lower @esp+0x18]
 	std::array<char, 16 + kRowBytes + 1> frame{};
 	char *const flags_str = frame.data();
 	char *const word_lower = frame.data() + 16;
@@ -471,7 +471,7 @@ void ChatFilter::load(const uint8_t *data, std::size_t size) {
 	// [orig: ConfigFile_FindSectionGlobal("WORDS") @0x68A8D4, ConfigFile_ReadStringGlobal("ITEM")
 	//  @0x68A8E3, the loop @0x68A900..0x68AA11: strtok @0x68A911, strcpy + strlwr @0x68A93B /
 	//  @0x68A949, strtok @0x68A955, strcpy + strupr @0x68A97F / @0x68A98D, the O / R / S / F
-	//  strchr @0x68A99A..0x68A9EB, TTS_TokenizeAndCollectResults @0x68A9F5]
+	//  strchr @0x68A99A..0x68A9EB, ChatFilter_AddWordRecords @0x68A9F5]
 	if (configfile::ConfigSection *words = configfile::find_config_section(sections, "WORDS")) {
 		while (configfile::read_binary_entry(*words, "ITEM", nullptr, &row, kRowBytes)) {
 			size_t at = 0;
@@ -498,7 +498,7 @@ void ChatFilter::load(const uint8_t *data, std::size_t size) {
 		}
 	}
 	// [orig: ConfigFile_FindSectionGlobal("EXCLUSIONS") @0x68AA34, the loop @0x68AA5C..0x68AAC5:
-	//  strtok @0x68AA69, strcpy + strlwr @0x68AA8F / @0x68AA9D, TTS_TokenizeTextToRuleNames
+	//  strtok @0x68AA69, strcpy + strlwr @0x68AA8F / @0x68AA9D, ChatFilter_AddExclusionRecords
 	//  @0x68AAA9]
 	if (configfile::ConfigSection *exclusions =
 					configfile::find_config_section(sections, "EXCLUSIONS")) {
@@ -515,10 +515,10 @@ void ChatFilter::load(const uint8_t *data, std::size_t size) {
 	}
 }
 
-// [orig: TTS_ProcessText @0x68A5F0 - the counts cleared @0x68A603..0x68A615, strcpy @0x68A630,
+// [orig: ChatFilter_ScoreLine @0x68A5F0 - the counts cleared @0x68A603..0x68A615, strcpy @0x68A630,
 //  the CR / LF @0x68A64D..0x68A684, the pass @0x68A69E, the loop @0x68A6C5..0x68A786 (the
-//  divisor 1 @0x68A6C5, the alternates @0x68A6CF / @0x68A6D5, TTS_TokenizeText(.., 0) @0x68A6DB,
-//  TTS_RemoveDuplicateTokens @0x68A6E1, sub_68A260 per token @0x68A6F8, TTS_ScorePronunciationRules
+//  divisor 1 @0x68A6C5, the alternates @0x68A6CF / @0x68A6D5, ChatFilter_TokenizeText(.., 0) @0x68A6DB,
+//  ChatFilter_RemoveDuplicateTokens @0x68A6E1, ChatFilter_MarkExclusions per token @0x68A6F8, ChatFilter_ScoreWordRules
 //  per token @0x68A720, ++pass @0x68A73A, the text copied back unchanged @0x68A749 / @0x68A765, the
 //  end on no alternate taken or the cap @0x68A786), the counts out @0x68A7A3..0x68A7CB]
 ChatFilterCounts ChatFilter::score(const std::string &text) const {

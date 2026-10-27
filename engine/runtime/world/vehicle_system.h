@@ -253,7 +253,7 @@ public:
     // touches no slot. The mission start, a deployable and its addeweap children, a
     // joiner's arriving rows and a vehicle's respawn run it; no mount does.
     // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C); the
-    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData
+    //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones
     //  @0x490160]
     void run_weapon_slot_class_init(Entity &entity);
     // The mission start's pass of that leg over pools 2, 3, 1 and 0, as the model init

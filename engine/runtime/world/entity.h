@@ -919,7 +919,7 @@ struct Entity {
 	// retail joiner's 0x03, D-WPN-8).
 	// [orig: Entity_FireWeaponAndSendPacket @0x42BD80 - the read @0x42C01A, the shooter
 	//  @0x42C047 -> NetPacket_WriteEntityPositionUpdate's byte @0x42A7DA; PlayerClass_InitEntity
-	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitInfantryBoneData's
+	//  @0x4B1105; WeaponSlot_InitFromEntityDef @0x54673B, from Entity_InitAircraftWeaponBones's
 	//  attrib-0x20 leg @0x49016D..0x49017B; Entity_DetachFromVehicle @0x4356A3;
 	//  Server_ClientFiredRound @0x50BD48]
 	int16_t ammo_def_word = 0;
@@ -1343,14 +1343,14 @@ struct Entity {
     // The cluster's thirteenth byte (entity+0x333): the slot def's `heat_effect`
     // name (WeaponDef+0x358) resolved on the same model, the overheat emitter's
     // anchor; read through weapon_heat_userpoint_byte below.
-    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD; sub_545A00 @0x545A00
+    // [orig: Entity_InitBoneReferences @0x4415C2..0x4415CD; Entity_GetWeaponBoneByte @0x545A00
     //  (index 12)]
     uint8_t heat_userpoint_byte = 0;
     // The aircraft layout of the same thirteen bytes (entity+0x4D8..0x4E4), which only the
     // CHel / cpln class init resolves (the twelve names, then the slot def's heat name);
     // the reader takes it for a PlayerControl def (attrib 0x40), where the standard
     // cluster above is the ewep row init's alone.
-    // [orig: Entity_InitInfantryBoneData @0x490160 (the cluster @0x4901AF..0x49028C, the
+    // [orig: Entity_InitAircraftWeaponBones @0x490160 (the cluster @0x4901AF..0x49028C, the
     //  heat byte @0x4902B4), called from Entity_InitHelicopterAIFromDef @0x4686A2]
     uint8_t aircraft_weapon_userpoint_bytes[4][3] = {};
     uint8_t aircraft_heat_userpoint_byte = 0;
@@ -1772,7 +1772,7 @@ inline uint8_t weapon_userpoint_byte(const Entity &e, int slot, int field) {
 
 // The heat userpoint byte (cluster index 12); 0 unless the def has weapon slots, the
 // aircraft cluster's for a PlayerControl def.
-// [orig: sub_545A00 @0x545A00 - the attrib 0x20 test @0x545A12, the 0x40 test @0x545A16,
+// [orig: Entity_GetWeaponBoneByte @0x545A00 - the attrib 0x20 test @0x545A12, the 0x40 test @0x545A16,
 //  +0x4D8 + 12 @0x545A1E, +0x327 + 12 @0x545A2A]
 inline uint8_t weapon_heat_userpoint_byte(const Entity &e) {
     if ((e.item_attrib & kItemAttribEweap) == 0u) return 0;

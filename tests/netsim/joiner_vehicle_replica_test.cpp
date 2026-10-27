@@ -252,7 +252,7 @@ bool run_destroyed_bit_kills_the_client_row() {
 // [orig: Entity_SerializeVehicleState @0x460560 - the wire bit @0x460918, the row's dead bit
 //  @0x46092B, the pose copy @0x460933..0x460961, the Entity_RespawnVehicle call @0x460964;
 //  Entity_RespawnVehicle @0x45FF40 - the class init call @0x45FF68, Flags @0x460009;
-//  Entity_InitInfantryBoneData @0x490160 - the bind @0x49017B, the split @0x490192]
+//  Entity_InitAircraftWeaponBones @0x490160 - the bind @0x49017B, the split @0x490192]
 bool run_live_record_respawns_the_dead_client_row() {
 	Harness h;
 	bool ok = true;

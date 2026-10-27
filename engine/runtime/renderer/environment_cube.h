@@ -19,11 +19,11 @@ namespace opennova::renderer {
 
 inline constexpr int kEnvironmentCubeFaceCount = 6;
 
-// The cube quality word both cubes take their side from (dword_8409E4, 2 in
+// The cube quality word both cubes take their side from (g_RenderCubeQuality, 2 in
 // the image): each mission start sets it from the session's object texture
 // detail, 0 at detail 0, 1 at detail 1, else 2, ahead of the render
 // subsystems' init that makes the cubes [orig: Game_StartMission @0x524360 -
-// @0x52466D..0x524719 into sub_589A40 @0x589A40, ahead of
+// @0x52466D..0x524719 into Render_SetCubeQuality @0x589A40, ahead of
 // Render_InitRenderingSubsystems (the call @0x5259D1) -> Render_InitTextures
 // @0x58F6E0].
 inline constexpr int kCubeQualityWordInitial = 2;

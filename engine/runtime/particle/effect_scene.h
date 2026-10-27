@@ -445,7 +445,7 @@ public:
 	// The hard destroy: the group and every emitter it holds go now, their live particles with
 	// them, where a detach stops emission and lets the particles drain. Retail's emit toggle,
 	// powerup pickup and death-piece slot reuse destroy so; every other release detaches
-	// [orig: Effect_DestroyEmitterIfLive @ 0x5F6A20 -> sub_5E57C0 @ 0x5E57C0 (each child
+	// [orig: Effect_DestroyEmitterIfLive @ 0x5F6A20 -> CEffectGroup_DestroyChildren @ 0x5E57C0 (each child
 	//  virtual-deleted, @ 0x5E5823); CEffectEmitter_ReleaseSafe @ 0x5F69F0 /
 	//  Entity_ReleaseEffectEmitter @ 0x5F75D0 -> sub_5E5ED0 @ 0x5E5ED0 (each child's vtable +60,
 	//  the detach)].

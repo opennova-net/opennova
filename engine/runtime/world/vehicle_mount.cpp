@@ -236,9 +236,9 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
     if (row->air_class_init && (entity.item_attrib & kItemAttribEweap) != 0) {
         // The CHel / cpln init's tail, under the def's EWeap bit: the +0x474 slot bound, then
         // its startrounds split with no model test.
-        // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitInfantryBoneData (the
+        // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones (the
         //  call @0x4686A2, which the no-AI-slot leg's jz @0x468493 and the brain leg's jmp
-        //  @0x46869A both reach); Entity_InitInfantryBoneData @0x490160 - the
+        //  @0x46869A both reach); Entity_InitAircraftWeaponBones @0x490160 - the
         //  attrib test @0x490169, WeaponSlot_InitFromEntityDef on entity+0x474 (the call
         //  @0x49017B), the slot Def test @0x490180..0x49018B,
         //  WeaponSlot_SplitVehicleAmmoIntoClipAndReserve with def+0x5C (the call @0x490192)]

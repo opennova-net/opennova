@@ -313,7 +313,7 @@ void EpilogCine::end_event(const CineEvent &e, World &world) {
 
 void EpilogCine::mission_start(bool first_start, bool in_session, World &world) {
 	// [orig: Game_StartMission @0x525DA8 -> Cine_ReleaseAll @0x577940: the
-	//  parked sound option back (sub_5280D0), then every node destroyed]
+	//  parked sound option back (Sound_RestoreEffectsVolume), then every node destroyed]
 	world_sound_parked = false;
 	clear_events();
 	screen_active = false; // [orig: Game_ResetSessionHudState @0x434BDC]

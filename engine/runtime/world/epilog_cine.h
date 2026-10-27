@@ -260,9 +260,9 @@ struct EpilogCine {
 	// interface sound falls silent through the end screens; Cine_ReleaseAll
 	// (each mission start, and the mission teardown) puts the saved option
 	// back. The embedder's audio device applies it to the sound-effects buses.
-	// [orig: Server_ProcessRoundEnd @0x5164F0 - the sub_5280B0 call @0x516958
-	//  (dword_24E0898 = g_SoundVolumeOption, then 0, unless one is saved);
-	//  Cine_ReleaseAll @0x577940 -> sub_5280D0 (the saved option back); the
+	// [orig: Server_ProcessRoundEnd @0x5164F0 - the Sound_ParkEffectsVolume call @0x516958
+	//  (g_SoundVolumeParked = g_SoundVolumeOption, then 0, unless one is saved);
+	//  Cine_ReleaseAll @0x577940 -> Sound_RestoreEffectsVolume (the saved option back); the
 	//  option's readers SoundEmitter_UpdateAndMixTop8 @0x52891A,
 	//  Sound_PlayTriggerSetScaled @0x527B9D, Sound_PlayInterfaceTriggerSet
 	//  @0x527BED, Sound_Play3DPositional @0x527DFA, Sound_TickPendingSlots
