@@ -49,6 +49,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/dismemberment.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_spawn.h>
