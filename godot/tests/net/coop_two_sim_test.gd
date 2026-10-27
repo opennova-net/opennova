@@ -1132,7 +1132,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			attach_db, PackedInt32Array([5004])))
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	joiner.resolve_item_traits(traits_db)
 	var reached := false
 	for _tick in range(800):
@@ -1240,7 +1242,9 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			seat_db, PackedInt32Array([1419])))
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
@@ -1729,7 +1733,9 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			watercraft_db, PackedInt32Array([1291, 5008])))
 	joiner.resolve_item_traits(watercraft_db)
-	assert_true(joiner.load_from_mission_data(mission))
+	# The joiner's world is the host's S2C 0x0B header and the stream behind it (D-NET-194).
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
 	joiner.resolve_item_traits(watercraft_db)
 	assert_true(_drive_pair_to_match(host, joiner),
@@ -2557,13 +2563,10 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 
 
 
-# Moving decoded non-player infantry collide at their DECODED wire pose. This is
-# an explicit complete-BMS/debug negative-control fixture: the two sides load
-# missions differing only in the AI's authored position, so the joiner retains a
-# synthetic authored copy at (0, 12) while the host and wire hold the soldier at
-# (0, 8). A production header-only join has no such copy. The predicted round
-# must impact the wire proxy and leave the fixture copy untouched/non-colliding.
-func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
+# Moving decoded non-player infantry collide at their DECODED wire pose. A joiner's world holds
+# no copy of the mission's AI (its world is the host's S2C 0x0B header and the stream behind
+# it, D-NET-194), so the predicted round impacts the wire proxy at the host's (0, 8).
+func test_joiner_round_hits_decoded_ai_at_its_wire_pose() -> void:
 	var host_mission := MissionData.new()
 	assert_eq(host_mission.create_default(), OK)
 	assert_not_null(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
@@ -2571,14 +2574,6 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(20, 0, 0), Vector3.ZERO))
 	assert_not_null(host_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(0, 0, 0), Vector3.ZERO))
-	var joiner_mission := MissionData.new()
-	assert_eq(joiner_mission.create_default(), OK)
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
-			Vector3(0, 12, 0), Vector3.ZERO))
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
-			Vector3(20, 0, 0), Vector3.ZERO))
-	assert_not_null(joiner_mission.add_entity(MissionData.KIND_MARKER, OBJECTIVE_COOP_START_TYPE,
 			Vector3(0, 0, 0), Vector3.ZERO))
 
 	var host := Simulation.new()
@@ -2592,24 +2587,20 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GhostWatch"))
-	assert_true(joiner.load_from_mission_data(joiner_mission))
+	assert_true(WireJoinFixture.load_wire_header(host, joiner),
+			"the joiner loads the host's header-only mission")
 	_install_combat_tables(joiner)
-	assert_true(_drive_pair_to_match(host, joiner),
-			"ghost-pose shooter reached the real-UDP in-match seam")
-	if not joiner.is_joined_in_match():
-		return
-
+	# The kit before admission, as the shell applies it (and the fire round trip above does).
 	assert_true(joiner.apply_local_player_loadout([WeaponKitEntry.make("WPN_M4AUTO")], 8))
 	joiner.set_local_player_weapon(_fixture_m4(), {})
+	assert_true(_drive_pair_to_match(host, joiner),
+			"the shooter reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
 	for _settle in range(3):
 		joiner.step()
 		host.step()
 
-	var ghost_index := _organic_index_at_x(joiner, 0.0)
-	assert_gte(ghost_index, 0, "the complete-BMS fixture's authored AI copy exists")
-	var ghost_health_before := int(
-			joiner.entity_card_by_ai_index(ghost_index).get_health()) \
-			if ghost_index >= 0 else -1
 	host.drain_round_impacts()
 	joiner.drain_round_impacts()
 
@@ -2628,14 +2619,9 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 	if joiner_impacts.size() == 1:
 		var predicted_hit := (joiner_impacts[0] as RoundImpactRow).position
 		assert_lt(predicted_hit.distance_to(Vector3(0, 1, -7.4)), 0.75,
-				"the visual impact lands at the DECODED wire pose (mission y=8), "
-				+ "never at the complete-BMS fixture copy (y=12)")
+				"the visual impact lands at the decoded wire pose (mission y=8)")
 	assert_eq(host_impacts.size(), 1,
 			"host authority resolves the same round against its live AI")
-	if ghost_index >= 0:
-		assert_eq(int(joiner.entity_card_by_ai_index(ghost_index).get_health()),
-				ghost_health_before,
-				"the complete-BMS fixture AI never takes client damage")
 
 
 
