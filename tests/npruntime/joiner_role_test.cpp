@@ -6099,6 +6099,8 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 bool run_pool1_shooter_round_takes_its_indoors_state() {
 	Harness h;
 	auto &world = h.kernel->world;
+	// A header-only world: the materializer owns a native twin for each 0x0D row.
+	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	world.registry.configure_pool(2, 4);
 	h.role.poll_preload();
@@ -6121,6 +6123,8 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	defs[3].type = 6;
 	def::DefItemsFile items{defs, 4};
 	h.kernel->set_items_table(&items);
+	// The embedder's def sweep, which each materialized twin takes (its def type picks the walk).
+	h.kernel->resolve_item_traits([](int) { return uint8_t{0}; });
 	h.kernel->resolve_collision_instances();
 	// A static building whose blink box spans (10, -20, 0) +- 5 u.
 	w::Entity building;
