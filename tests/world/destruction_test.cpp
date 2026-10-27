@@ -2781,6 +2781,7 @@ void test_round_destroys_item() {
     barrel_seed.kind = EntityKind::Item;
     barrel_seed.item_id = 500;
     barrel_seed.has_item_def = true; // retail damage gate: geometry + ItemDef
+    barrel_seed.item_type_index = 1; // the def row's ordinal: the pool-1 table's +0x1C gate
     barrel_seed.health = 40;
     barrel_seed.position = Vec3{6.0f, 0.0f, 1.0f};
     barrel_seed.heading = placed_heading_bam(90); // identity model placement [orig: entity matrix @0x613F40]
