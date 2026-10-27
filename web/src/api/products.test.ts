@@ -5,20 +5,25 @@ import {
   REVISIONS_PAGE,
   buildRelease,
   createProduct,
+  createProject,
   deleteProduct,
+  deleteProject,
   deleteRelease,
+  fetchMyProjects,
   fetchProducts,
+  fetchProjects,
   fetchReleases,
   fetchRevisions,
   publishRelease,
   retireRelease,
   updateAllServers,
   updateProduct,
+  updateProject,
 } from './products';
-import { product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
+import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, myProjects, product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
 
 vi.mock('./client', () => ({
-  apiClient: { get: vi.fn() },
+  apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   adminClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
 }));
 
@@ -27,6 +32,9 @@ const post = vi.mocked(adminClient.post);
 const patch = vi.mocked(adminClient.patch);
 const del = vi.mocked(adminClient.delete);
 const publicGet = vi.mocked(apiClient.get);
+const publicPost = vi.mocked(apiClient.post);
+const publicPatch = vi.mocked(apiClient.patch);
+const publicDel = vi.mocked(apiClient.delete);
 
 function reply(data: unknown, status = 200) {
   return { status, data } as AxiosResponse;
@@ -61,7 +69,7 @@ describe('the products', () => {
         titles: ['jo'],
         games: [{ slug: 'jop_2_consumer', display_name: 'Joint Operations' }],
         products: [
-          { id: 4, display_name: 'OP: Acid Gambit', kind: 'game', title: 'jo', lobby: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14 },
+          { id: 4, display_name: 'OP: Acid Gambit', kind: 'game', title: 'jo', lobby: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14, owner: null },
           { id: 9, display_name: 'OpenNova runtime', kind: 'app', key: 'ONRUNTIME', visibility: null, head: 0, current_tree: null, published_release: null },
         ],
       }),
@@ -70,13 +78,19 @@ describe('the products', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const [game, runtime] = result.value.products;
-    expect([game.key, game.visibility, game.head, game.current_tree, game.published_release]).toEqual(['ACIDGAMBIT', 'public', 14, null, null]);
+    expect([game.key, game.visibility, game.head, game.current_tree, game.published_release, game.owner]).toEqual(['ACIDGAMBIT', 'public', 14, null, null, null]);
     expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['app', 'ONRUNTIME', null, 0]);
 
     get.mockResolvedValue(reply({ titles: [], games: [], products: [{ id: 'x' }] }));
     const bad = await fetchProducts();
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.error.code).toBe('unknown');
+  });
+
+  it("reads a player's product with its owner", async () => {
+    get.mockResolvedValue(reply(productsResponse({ products: [product(21, { key: 'NIGHTOPS', kind: 'expansion', parent_id: 1, owner: 'biggy' })] })));
+    const result = await fetchProducts();
+    expect(result.ok && result.value.products[0].owner).toBe('biggy');
   });
 
   it('creates a game with its project, changes it, renames its key and deletes it', async () => {
@@ -146,6 +160,87 @@ describe('the products', () => {
     expect(publicGet).toHaveBeenLastCalledWith('/products/JO/revisions', expect.objectContaining({ params: { limit: REVISIONS_PAGE } }));
     publicGet.mockResolvedValue(reply({ revisions: [{ number: 0 }] }));
     expect((await fetchRevisions('JO')).ok).toBe(false);
+    publicGet.mockRejectedValueOnce(refusal(404, { error: 'not_found', message: 'raw server text' }));
+    const gone = await fetchRevisions('NIGHTOPS');
+    expect(!gone.ok && gone.error.message).toBe('That project is not on NovaWorld, or it is private.');
+  });
+});
+
+describe('the projects', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('reads the projects the caller may read, filling what one leaves out', async () => {
+    publicGet.mockResolvedValue(
+      reply({
+        projects: [
+          NIGHTOPS_PROJECT,
+          { key: 'ACIDGAMBIT', title: 'OP: Acid Gambit', kind: 'game', game: 'jo', visibility: 'public', retail: false, base: null, product_id: 4, head: 14, owner: null, can_push: false },
+        ],
+      }),
+    );
+    const result = await fetchProjects();
+    expect(publicGet).toHaveBeenCalledWith('/products', expect.anything());
+    expect(result).toEqual({ ok: true, value: [NIGHTOPS_PROJECT, ACIDGAMBIT_PROJECT] });
+
+    // A kind the client does not know, a project with no key: refused whole.
+    publicGet.mockResolvedValue(reply({ projects: [{ ...NIGHTOPS_PROJECT, kind: 'app' }] }));
+    expect((await fetchProjects()).ok).toBe(false);
+    publicGet.mockResolvedValue(reply({ projects: [{ ...NIGHTOPS_PROJECT, key: '' }] }));
+    expect((await fetchProjects()).ok).toBe(false);
+  });
+
+  it("reads the account's own projects with their usage and limits", async () => {
+    publicGet.mockResolvedValue(reply(myProjects()));
+    expect(await fetchMyProjects()).toEqual({ ok: true, value: myProjects() });
+    expect(publicGet).toHaveBeenCalledWith('/me/projects', expect.anything());
+    publicGet.mockResolvedValue(reply({ projects: [], usage: { projects: 0 } }));
+    const bad = await fetchMyProjects();
+    expect(!bad.ok && bad.error.code).toBe('unknown');
+  });
+
+  it('makes a project, changes its name and who gets it, and deletes it, by its key', async () => {
+    publicPost.mockResolvedValue(reply({ project: NIGHTOPS_PROJECT }, 201));
+    const body = { key: 'NIGHTOPS', display_name: 'Night Ops', kind: 'expansion' as const, base: 'JO', expansion_code: 'nightops', visibility: 'public' as const };
+    expect(await createProject(body)).toEqual({ ok: true, value: NIGHTOPS_PROJECT });
+    expect(publicPost).toHaveBeenCalledWith('/products', body);
+
+    publicPatch.mockResolvedValue(reply({ project: { ...NIGHTOPS_PROJECT, title: 'Night Ops 2' } }));
+    const renamed = await updateProject('NIGHTOPS', { display_name: 'Night Ops 2' });
+    expect(renamed.ok && renamed.value.title).toBe('Night Ops 2');
+    expect(publicPatch).toHaveBeenCalledWith('/products/NIGHTOPS', { display_name: 'Night Ops 2' });
+
+    publicDel.mockResolvedValue(reply(null, 204));
+    expect(await deleteProject('NIGHTOPS')).toEqual({ ok: true, value: true });
+    expect(publicDel).toHaveBeenCalledWith('/products/NIGHTOPS');
+  });
+
+  it("says each refusal in a player's words, a field's rule for its field, never the server text", async () => {
+    const cases: [number, Record<string, unknown>, string, string, string][] = [
+      [400, { error: 'invalid_field', field: 'key' }, 'invalid_field', 'key', 'A key is 1 to 16 of A-Z, 0-9 and _.'],
+      [400, { error: 'invalid_field', field: 'expansion_code' }, 'invalid_field', 'expansion_code', 'A short name is 1 to 8 lowercase letters and digits.'],
+      [400, { error: 'missing_field', field: 'kind' }, 'missing_field', 'kind', 'The server refused one of the values sent. Check them and try again.'],
+      [404, { error: 'no_such_base' }, 'no_such_base', '', 'The game that mod is for is not on NovaWorld any more. Pick another.'],
+      [409, { error: 'duplicate_key' }, 'duplicate_key', '', 'Another project already has that key. Pick another.'],
+      [409, { error: 'duplicate_expansion' }, 'duplicate_expansion', '', 'That game already has a mod with that short name. Pick another.'],
+      [403, { error: 'too_many_projects' }, 'too_many_projects', '', 'You have as many projects as an account may have. Delete one to make another.'],
+      [429, {}, 'rate_limited', '', 'Too many requests. Try again in a little while.'],
+      [401, {}, 'unauthorized', '', 'Your session has ended. Log in again to manage your projects.'],
+    ];
+    for (const [status, data, code, field, words] of cases) {
+      publicPost.mockRejectedValueOnce(refusal(status, { ...data, message: 'raw server text' }));
+      const refused = await createProject({ key: 'X', display_name: 'X', kind: 'game', game: 'jo', visibility: 'private' });
+      expect(refused).toEqual({ ok: false, error: { code, status, field, message: words } });
+    }
+
+    publicDel.mockRejectedValueOnce(refusal(409, { error: 'has_expansion' }));
+    const base = await deleteProject('RANGERS');
+    expect(!base.ok && base.error.message).toBe('A mod is made for this game. Delete the mod first.');
+    publicPatch.mockRejectedValueOnce(refusal(403, { error: 'forbidden' }));
+    const notYours = await updateProject('ACIDGAMBIT', { visibility: 'private' });
+    expect(!notYours.ok && notYours.error.message).toBe("Only its owner and NovaWorld's admins may change that project.");
+    publicDel.mockRejectedValueOnce(refusal(500, { error: 'boom' }));
+    const odd = await deleteProject('RANGERS');
+    expect(!odd.ok && [odd.error.code, odd.error.message]).toEqual(['unknown', 'Something went wrong. Try again shortly. (HTTP 500)']);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findProduct, kindLine, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
+import { findProduct, kindLine, ownerLabel, ownerLink, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
 import { DFX2_PRODUCT, ESCALATION_PRODUCT, JO_PRODUCT, RUNTIME_PRODUCT, productsResponse, release, runtimeRelease } from '../test/productFixtures';
 
 const ALL = [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT];
@@ -19,6 +19,12 @@ describe('the products view', () => {
     expect(kindLine(JO_PRODUCT, ALL, lobbies)).toBe('Game Joint Operations, lobby Joint Operations');
     expect(kindLine(ESCALATION_PRODUCT, ALL, lobbies)).toBe('Expansion jox01 of Joint Operations');
     expect(kindLine(RUNTIME_PRODUCT, ALL, lobbies)).toBe('App, built by CI');
+  });
+
+  it("names a product's owner, NovaWorld's own as OpenNova, and finds a player's account by its name", () => {
+    expect(ownerLabel(JO_PRODUCT)).toBe('OpenNova');
+    expect(ownerLabel({ ...JO_PRODUCT, owner: 'biggy' })).toBe('biggy');
+    expect(ownerLink('biggy')).toEqual({ path: '/admin/users', query: { q: 'biggy' } });
   });
 
   it("finds each product's releases, the runtime's upload not yet read among them, and their published version", () => {
