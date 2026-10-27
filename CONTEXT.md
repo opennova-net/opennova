@@ -283,6 +283,14 @@ _Avoid_: shard, tenant (for a realm inside one database), region
 The in-game server list (`NovaWorldPanel` in `godot/game/novaworld_panel.gd` over the `NovaWorldClient` pump and `engine/net/novaworld/gate/gsb.cpp`) populated from the service's GSB/GLB data.
 _Avoid_: lobby, server list (in code)
 
+**Mods page**:
+The runtime NovaWorld menu's page (OpenNova's own panel, ADR 0074) listing NovaWorld's published
+public **mods** of the folder's game (`GET /api/mods`), with Install (it writes
+`expansion/<code>/UPDATE.WIZ` and runs the updater), Update and Remove, and the mods installed here
+that the list lacks. Joining a server on a mod this install lacks offers its install from there.
+Not retail's Options > Mods, which chooses among the mods installed.
+_Avoid_: mod browser, workshop, Options > Mods (retail's list of installed mods)
+
 **Wire-compatible / wire protocol**:
 Code that produces and consumes the exact byte stream the original game uses, so original
 and OpenNova endpoints interoperate: our clients can join original servers, our servers can
@@ -564,8 +572,10 @@ _Avoid_: dedicated server (for the binary), server exe, opennova-server
 Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>` lines of
 `ServerConfig_ApplyHostSetting`'s keys (a text form of the host screen) and
 `Mission <file> <launch option>` lines that seed the map rotation. Retail never reaches
-its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
-_Avoid_: server config, server.cfg, dedicated.cfg
+its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`). Not the Windows
+*hosts file*, whose one hand-written line points an original exe's `gs.novaworld.net` at a
+NovaWorld (ADR 0075).
+_Avoid_: server config, server.cfg, dedicated.cfg, hosts file (the Windows name-to-address file)
 
 **Hosted server**:
 An `opennova-serve` that an account starts from the NovaWorld site (ADR 0053), as many live at once
@@ -665,7 +675,8 @@ title)
 One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code), named
 by its key (`JO`, `ONEDITOR`): a **game**, an expansion or an **app**. The service keeps it,
 builds its **releases**, serves its published one to the updater and offers it on the downloads
-host; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are the updater's own product.
+host; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are the updater's own product (an
+account's own product's are its key: `KEY`, `KEY.CMD`, ADR 0074).
 Admins manage products in the admin's Products area.
 _Avoid_: data set (the code's old name), package (the file a release is)
 
@@ -688,6 +699,32 @@ _Avoid_: game data, content (as words a user meets; the store's objects keep the
 prefix), lobby (a `games` row), title (the identity a base game speaks), install (where a retail
 game's project began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
+**Player's game**:
+A base **game** an account made and released on NovaWorld (ADR 0074), beside OpenNova's own and
+the retail games. It is an updater product of its own (`KEY`, `KEY.CMD`; its key at most 11
+characters with no `QQ`): its folder's `UPDATE.WIZ` names it and carries `GAME=jo` or
+`GAME=dfx2`, the engine profile it runs as, and `/game` names it by its login in lower case, in
+its own folder alone. Its first published release gives it its **own lobby**; a public one gets
+its own zip (`player-<key>-game-windows.zip`) under Downloads' Players' games.
+_Avoid_: custom game, user game, mod (a mod is an expansion)
+
+**Mod**:
+An expansion **game** an account made of one of NovaWorld's games (OP: Acid Gambit, Joint
+Operations, DFX2 or a game of its own; ADR 0073, ADR 0074), released by its owner with an admin's
+approval and installed in game from the **Mods page** into `expansion/<code>/`, never from a
+downloads zip. Its **short name** (`expansion_code`: its project's expansion name, the folder and
+`/exp` name) is unique across NovaWorld without case, the service's own (`jox01`, `nifty`)
+included, so no second mod of any game can take it.
+_Avoid_: add-on, plugin, expansion code (in words a user meets: short name)
+
+**Own lobby**:
+The lobby (a `games` row) a **player's game** gets at its first published release (ADR 0074):
+slug `<key>_0_consumer` and gate tag `<key>:0` (the key in lower case), its pages copied from its
+title's template row (OP: Acid Gambit's for `jo`, DFX2's for `dfx2`). The release build writes that
+gate tag into the game's `gt.ssc`, so its players and its hosted servers list there, as OP: Acid
+Gambit's do; the gate and web find a lobby added while they run with no restart.
+_Avoid_: lobby (the program), realm
+
 **Tree**:
 The internal form of a **hosted server**'s data: one immutable version of a **game**'s files in
 the object store (`trees/<id>/` with a manifest of every file's name and size, and its
@@ -706,9 +743,18 @@ build the Publish workflow uploads. Validated, then a draft; published, it is wh
 service serves the game's updater and what its hosted servers run (the data program builds
 the game's **tree** from it); retired, or replaced by the next publish. Not a deployment's
 release (`app deploy`'s: the programs' task definitions, DEPLOY.md section 5) nor a GitHub
-release (a tag's assets): beside a game's release, say *deploy* and *tag* for those.
+release (a tag's assets): beside a game's release, say *deploy* and *tag* for those. A player's
+**project**'s releases are built and submitted by its owner (its **release right**) and reach
+others once an admin approves each, the last approved one staying live meanwhile (ADR 0074).
 _Avoid_: update (the mechanism), patch, package (the file; a release is the row), upload (only
 the runtime's arrive that way, and only from Publish)
+
+**Release right**:
+Who may build a **project**'s **releases** and publish them (ADR 0074; `project_rights`'
+`release`, equal to `push`): its owner's or an admin's own session, never the API token. An
+owner's publish submits the release (`awaiting_approval`); an admin approves it, which publishes
+it to everyone, or rejects it back to draft with a note. An admin's own publish needs no approval.
+_Avoid_: publish right, review (the approval is the admin's Approve)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
@@ -737,8 +783,10 @@ the project's files by path, SHA-256 and size (every file stored once by its SHA
 every folder of it is a **working copy** of. A project may have an owner, the account that made
 it (ADR 0073; OpenNova's own games and the retail games have none): a public project (OP: Acid
 Gambit's, OP: Nifty Package's, a player's public mod) is anyone's to get, a private one (the
-retail games', a player's private one) its owner's and the admins'; its owner and the admins
-push, and a push is not a **release** (releases stay the admins'). The editor's NovaWorld window
+retail games', a player's private one) its owner's and the admins' (unlisted, not secret: the
+update service serves a published release to anyone holding its wizard); its owner and the
+admins push and release it, an admin approving a player's release before others get it
+(ADR 0074), and a push is not a **release**. The editor's NovaWorld window
 is its client; the account area's Projects is a player's management of their own, the admin's
 Products area the admins' of every one.
 _Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
@@ -793,9 +841,9 @@ name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, 
 expansion it **builds on** (none: the base game). A project with no expansion name is standalone.
 The files the game reads by an expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, ...) are
 its **expansion files**.
-_Avoid_: mod for the expansion itself (A mod is New project's choice that makes a project building
-as one; "mod" is the Mods list's word for an installed one), base (for the expansion a project
-builds on: the base game is the install with none)
+_Avoid_: mod for the expansion itself (a **mod** is the NovaWorld product, and New project's
+choice that makes a project building as one; "mod" is the Mods list's word for an installed one),
+base (for the expansion a project builds on: the base game is the install with none)
 
 **Logical name**:
 The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
