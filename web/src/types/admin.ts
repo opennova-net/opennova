@@ -86,6 +86,9 @@ export interface AdminConnection {
   pn: string;
   // The game tag its sign-in named ('jop:cus2').
   identity: string;
+  // The executable its client hello named ('JOINTOPS.EXE', 'OPENNOVA.EXE'; ''
+  // for none): the client's own text, shown, never trusted.
+  ap: string;
   // Epoch milliseconds.
   created_ms: number;
   last_seen_ms: number;

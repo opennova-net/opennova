@@ -2829,14 +2829,18 @@ bool run_the_join_keeps_the_reported_address() {
 			"REPORTEDSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD");
 	auth.sip = 0x0A00A8C0u; // 192.168.0.10, the address the joiner dialed
 	auth.spn = 2302;
+	auth.ap = "Jointops.exe"; // a retail joiner's executable
 	const std::vector<uint8_t> bytes = client_auth_to_bytes(auth);
 	const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, bytes);
 	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 	if (!expect(!r.outbound.empty() && !ctx.np_protocol.connection_list.empty(),
 	            "the 0x42 is accepted")) return false;
 	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
-	return expect(conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
-	              "the node keeps the reported address beside its UDP source");
+	bool ok = expect(conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
+	                 "the node keeps the reported address beside its UDP source");
+	// And the executable its AP named, which opennova-serve's [join] line prints.
+	ok = expect(conn.application == "Jointops.exe", "the node keeps the joiner's AP") && ok;
+	return ok;
 }
 
 // A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
