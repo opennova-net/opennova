@@ -1242,11 +1242,16 @@ int test_type_index_zero_rows_take_no_visit() {
         auto heap = std::make_unique<World>();
         auto &w = *heap;
         w.registry.configure_pool(pool, 4);
+        // The fall is a client of the ground query: a world with no collision world
+        // steps none.
+        CollisionWorld collision;
+        w.collision = &collision;
         Entity seed;
         seed.kind = EntityKind::Item;
         seed.position = {40.0f, 40.0f, 20.0f};
         seed.drop_motion = DropMotion::Fall;
         seed.veh.vel_x = 65536; // one unit a tick along +x, well above the ground
+        seed.class_think_ticks = 10; // the item callback's clock, stepped every visit
         seed.item_type_index = 0;
         const EntityHandle bare = w.registry.spawn(pool, seed);
         seed.item_type_index = 1;
@@ -1259,6 +1264,10 @@ int test_type_index_zero_rows_take_no_visit() {
             w.update_pool1_slot(*w.registry.get(bare), ctx);
             w.update_pool1_slot(*w.registry.get(typed), ctx);
             CHECK(w.registry.get(bare)->pool1_visited);
+            // The pool-1 visit's trailing clock step runs on the typed row alone
+            // [orig: Entity_UpdatePool1Slot `add [esi+2ACh],-1` @0x4B8EA0].
+            CHECK(w.registry.get(bare)->class_think_ticks == 10);
+            CHECK(w.registry.get(typed)->class_think_ticks == 9);
         } else {
             // Each row on its own cohort tick.
             w.logic_tick = static_cast<uint32_t>(bare.slot());
