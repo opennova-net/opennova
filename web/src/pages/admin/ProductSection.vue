@@ -76,8 +76,8 @@
       <!-- Its deletion, behind its key (or name) typed. -->
       <form v-if="deleting" id="product-delete-form" class="space-y-3 rounded-panel border border-danger/40 bg-panel p-4 sm:p-6" @submit.prevent="confirmDelete">
         <p class="text-sm font-semibold text-danger">
-          Delete {{ product.display_name }}? Its releases, its servers' data and its project's history and files go, and an
-          editor bound to it can no longer pull or push. A game a live server runs, or an expansion builds on, stays.
+          Delete {{ product.display_name }}? Its releases, its servers' data and its project's history and files go, and
+          editors can no longer pull or push it. A game a live server runs, or an expansion builds on, stays.
         </p>
         <label for="product-delete-confirm" class="block text-sm text-ink">
           Type <span class="font-mono font-semibold">{{ confirmWord }}</span> to confirm
@@ -92,14 +92,19 @@
       <!-- The project: its revisions in the service. -->
       <section v-if="product.kind !== 'app'" class="space-y-3" aria-labelledby="product-project">
         <h2 id="product-project" class="text-xl font-semibold text-ink">Project</h2>
+        <p id="product-owner-line" class="text-sm text-ink">
+          Owner:
+          <RouterLink v-if="product.owner" :to="ownerLink(product.owner)" class="text-accent hover:text-ink-bright">{{ product.owner }}</RouterLink>
+          <template v-else>{{ ownerLabel(product) }}</template>
+        </p>
         <template v-if="product.key">
           <p id="product-project-line" class="text-sm text-ink">
             <span class="font-mono font-semibold">{{ product.key }}</span>,
-            {{ product.visibility === 'public' ? 'public: anyone may get it.' : 'private: admins only.' }}
+            {{ product.visibility === 'public' ? 'public: anyone may get it.' : product.owner ? 'private: its owner and admins only.' : 'private: admins only.' }}
             <template v-if="product.head > 0">
               Newest r{{ product.head }}<template v-if="newest"> by {{ newest.author }}: <q>{{ newest.message }}</q></template>.
             </template>
-            <template v-else>Nothing pushed yet: bind a project folder to {{ product.key }} in the editor and push.</template>
+            <template v-else>Nothing pushed yet: open its project in the editor and push.</template>
           </p>
           <div class="flex flex-wrap gap-2">
             <button v-if="product.head > 0" id="product-history-toggle" type="button" :class="secondaryButton" :aria-expanded="showHistory ? 'true' : 'false'" @click="showHistory = !showHistory">
@@ -129,7 +134,7 @@
               <button type="submit" :disabled="busy || newKey.trim().toUpperCase() === product.key" :class="primaryButton">Save key</button>
             </div>
             <p class="text-xs" :class="renameProblem ? 'text-danger' : 'text-ink-muted'">
-              {{ renameProblem || `An editor bound to ${product.key} pulls and pushes by that key: bind it again to the new one.` }}
+              {{ renameProblem || 'Editors find a project by its key: a project file naming the old key no longer reaches it.' }}
             </p>
           </form>
           <div v-if="showHistory" id="product-history" class="space-y-3">
@@ -292,7 +297,8 @@
 import { confirmAction } from '../../composables/useConfirm';
 // /admin/products/<key or id>: one product (GET /api/admin/products, and
 // GET /api/admin/releases for its releases). Its settings (PATCH) and its
-// deletion behind its key typed (DELETE); its project (key, visibility, the
+// deletion behind its key typed (DELETE); its owner (OpenNova's own, or a
+// player's, linking to the account); its project (key, visibility, the
 // newest revision and its history from GET /api/products/<key>/revisions,
 // a page at a time; a visibility change or a key rename by PATCH); its releases,
 // each built from a revision (POST /api/admin/products/<key>/releases),
@@ -326,6 +332,8 @@ import {
   creatorLabel,
   findProduct,
   kindLine,
+  ownerLabel,
+  ownerLink,
   productLink,
   releaseLabel,
   releaseStatusClass,
@@ -563,7 +571,7 @@ async function toggleVisibility() {
     fail(result.error.message);
     return;
   }
-  flash(visibility === 'public' ? `Anyone may now get ${g.key}.` : `Only admins may now get ${g.key}.`);
+  flash(visibility === 'public' ? `Anyone may now get ${g.key}.` : `Only ${g.owner ? 'its owner and admins' : 'admins'} may now get ${g.key}.`);
   await poll.readAgain();
 }
 

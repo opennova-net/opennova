@@ -16,7 +16,7 @@ import {
   updateProduct,
 } from '../../api/products';
 import { testRouter } from '../../test/router';
-import { JO_PRODUCT, productsResponse, release, revision, runtimeRelease } from '../../test/productFixtures';
+import { JO_PRODUCT, product, productsResponse, release, revision, runtimeRelease } from '../../test/productFixtures';
 
 vi.mock('../../api/products', async (importOriginal) => ({
   REVISIONS_PAGE: (await importOriginal<typeof import('../../api/products')>()).REVISIONS_PAGE,
@@ -92,6 +92,7 @@ describe('ProductSection', () => {
     expect(page.get('h1').text()).toBe('Joint Operations');
     expect(page.text()).toContain('Game Joint Operations, lobby Joint Operations');
     expect(history).toHaveBeenCalledWith('JO', undefined);
+    expect(page.get('#product-owner-line').text()).toBe('Owner: OpenNova');
     expect(page.get('#product-project-line').text()).toMatch(/^JO, private: admins only\.\s+Newest r2 by biggy: weapon tweaks\.$/);
 
     const rows = page.findAll('tr.product-release');
@@ -122,6 +123,29 @@ describe('ProductSection', () => {
     expect(revisions[0].text()).toContain('weapon tweaks');
     expect(revisions[1].text()).toContain('Stock import');
     expect(revisions[1].text()).toContain('biggy, 1200 files, 1.2 GB');
+  });
+
+  it("shows a player's product with its owner, nothing pushed, and what a rename does to editors", async () => {
+    const nightOps = product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', title: '', lobby: '', key: 'NIGHTOPS', visibility: 'public', owner: 'biggy' });
+    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, nightOps] }) });
+    update.mockResolvedValueOnce({ ok: true, value: { ...nightOps, visibility: 'private' } });
+    const page = await mountProduct('NIGHTOPS');
+    const owner = page.get('#product-owner-line a');
+    expect([owner.text(), owner.attributes('href')]).toEqual(['biggy', '/admin/users?q=biggy']);
+    expect(page.get('#product-project-line').text()).toMatch(/^NIGHTOPS,\s+public: anyone may get it\.\s+Nothing pushed yet: open its project in the editor and push\.$/);
+    expect(history).not.toHaveBeenCalled();
+
+    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, { ...nightOps, visibility: 'private' }] }) });
+    await page.get('#product-visibility').trigger('click');
+    await flushPromises();
+    expect(page.get('[role="status"]').text()).toBe('Only its owner and admins may now get NIGHTOPS.');
+    expect(page.get('#product-project-line').text()).toContain('private: its owner and admins only.');
+
+    await page.get('#product-rename-toggle').trigger('click');
+    expect(page.get('#product-rename-form').text()).toContain('Editors find a project by its key: a project file naming the old key no longer reaches it.');
+    await page.get('#product-delete-toggle').trigger('click');
+    expect(page.get('#product-delete-form').text()).toContain('editors can no longer pull or push it.');
+    expect(page.text()).not.toMatch(/\bbind|\bbound\b/i);
   });
 
   it("changes the project's visibility and renames its key, following it to its new address", async () => {

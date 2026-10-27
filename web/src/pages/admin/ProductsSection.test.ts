@@ -4,7 +4,7 @@ import type { Router } from 'vue-router';
 import ProductsSection from './ProductsSection.vue';
 import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { testRouter } from '../../test/router';
-import { product, productsResponse, release, runtimeRelease } from '../../test/productFixtures';
+import { JO_PRODUCT, product, productsResponse, release, runtimeRelease } from '../../test/productFixtures';
 
 vi.mock('../../api/products', () => ({
   createProduct: vi.fn(),
@@ -57,9 +57,23 @@ describe('ProductsSection', () => {
     expect(rows[2].text()).toContain('None');
     expect(rows[3].text()).toContain('From CI');
     expect(rows[3].text()).toContain('v0.0.21');
-    // No em dash in the page's copy, and no upload anywhere.
+    expect(rows.map((r) => r.get('.products-owner').text())).toEqual(['OpenNova', 'OpenNova', 'OpenNova', 'OpenNova']);
+    // No em dash in the page's copy, no upload anywhere, and no editor "binds".
     expect(page.text()).not.toContain('—');
     expect(page.find('input[type="file"]').exists()).toBe(false);
+    await page.get('#products-new-toggle').trigger('click');
+    expect(page.text()).not.toMatch(/\bbind/i);
+  });
+
+  it("names a player's product's owner, linking to the account", async () => {
+    sets.mockResolvedValue({
+      ok: true,
+      value: productsResponse({ products: [JO_PRODUCT, product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', key: 'NIGHTOPS', owner: 'biggy' })] }),
+    });
+    const page = await mountSection();
+    const owner = page.findAll('tr.products-row')[1].get('.products-owner a');
+    expect(owner.text()).toBe('biggy');
+    expect(owner.attributes('href')).toBe('/admin/users?q=biggy');
   });
 
   it('says why the products could not be read', async () => {
