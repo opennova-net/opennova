@@ -67,13 +67,20 @@ jobs:
     uses: ./.github/workflows/net-linux.yml
 
   # Built into the runner's docker and smoke-run, beside http-tests rather
-  # than after it; `push` below pushes the same build.
+  # than after it; `push` below pushes the same build. On the build legs'
+  # RunsOn runner (ci.yml's Linux label; DEPLOY.md "CI runners"), its layer
+  # cache (type=gha) in RunsOn's Magic Cache through the runs-on/action step;
+  # a fork's pull request builds on ubuntu-latest, cold.
   serve-image:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     timeout-minutes: 60
     permissions:
       contents: read
     steps:
+      # Magic Cache: the builds' type=gha layer cache goes to the ci account's
+      # S3 bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -166,16 +173,23 @@ jobs:
   # forks can't push to GHCR), once http-tests and the smoke run have passed: the same build, pushed. Its checkout is the
   # smoke run's, so every step hits the cache serve-image just exported for
   # this commit and the job compiles nothing, only uploads (a missed cache
-  # costs time alone: the same image builds again here).
+  # costs time alone: the same image builds again here). On RunsOn too, since
+  # only a RunsOn job reaches the Magic Cache serve-image exported to; 4 vCPUs
+  # and 16 GB (a standard runner's), as it only uploads. Never a pull
+  # request's, so no fork fallback.
   push:
     needs: [http-tests, serve-image]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: runs-on=${{ github.run_id }}/cpu=4/ram=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     steps:
+      # Magic Cache: the layer cache serve-image exported, read from the ci
+      # account's S3 bucket.
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive

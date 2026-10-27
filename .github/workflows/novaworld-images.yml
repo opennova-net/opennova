@@ -88,18 +88,27 @@ jobs:
   # The eight images, one bake, run beside http-tests rather than after it:
   # the one solve compiles the programs' shared build stage once, finishes the
   # six program targets together and builds the portal and the backup image
-  # alongside. It pushes nothing. Only push events export the layer cache,
-  # each image to its own scope (mode=min: the final image's layers; the
-  # build stage's `COPY . .` and compile layers change with every commit, so
-  # mode=max would write blobs no later build could hit), which `push` then
-  # builds from. A PR's layers would be readable by that PR alone and crowd
-  # the repository's 10 GB Actions cache, so a PR's or a manual run's build
-  # only reads it.
+  # alongside. It pushes nothing. Push events and manual runs export the
+  # layer cache, each image to its own scope (mode=min: the final image's
+  # layers; the build stage's `COPY . .` and compile layers change with every
+  # commit, so mode=max would write blobs no later build could hit), which
+  # `push` then builds from. A PR's layers would be readable by that PR alone,
+  # so a PR's build only reads it.
+  #
+  # On the build legs' RunsOn runner (ci.yml's Linux label; DEPLOY.md "CI
+  # runners"): the bake compiles the programs' build stage with Ninja on every
+  # core. The layer cache (type=gha) goes to RunsOn's Magic Cache through the
+  # runs-on/action step, as actions/cache does. A fork's pull request builds on
+  # ubuntu-latest, cold.
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     permissions:
       contents: read
     steps:
+      # Magic Cache: the bake's type=gha layer cache goes to the ci account's S3
+      # bucket (a no-op on GitHub's runners, a fork's).
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -125,12 +134,15 @@ jobs:
   # image builds again, the same). One target per job, not the eight in one
   # bake: a bake whose targets share the build stage but read different cache
   # scopes misses that stage and compiles it again. fail-fast is off so one
-  # failed push stops no other image's.
+  # failed push stops no other image's. On RunsOn too, since only a RunsOn job
+  # reaches the Magic Cache the build exported to; 4 vCPUs and 16 GB (a
+  # standard runner's), as each job only uploads. Never a pull request's, so
+  # no fork fallback.
   push:
     name: push (${{ matrix.target }})
     needs: [http-tests, build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: runs-on=${{ github.run_id }}/cpu=4/ram=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache
     permissions:
       contents: read
       packages: write
@@ -149,6 +161,10 @@ jobs:
           # The nightly backup task's image (pg_dump to S3; deploy/backup).
           - { target: backup, image: opennova-novaworld-backup }
     steps:
+      # Magic Cache: the layer cache the build exported, read from the ci
+      # account's S3 bucket.
+      - uses: runs-on/action@v2
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive

@@ -22,7 +22,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The build and test legs (test-core, test-linux, both gdext builds, the
-# Godot package) run on RunsOn's 16-vCPU runners in the
+# Godot package, and the tools' and the Blender add-on's packages in their
+# called workflows) run on RunsOn's 16-vCPU runners in the
 # Organization's ci account (infra/ci; DEPLOY.md, "CI runners"): an EC2 spot
 # instance of its own per job, launched for it and ended after it, on RunsOn's
 # images: Windows Server 2025 with Visual Studio 2022 (windows-latest and the
