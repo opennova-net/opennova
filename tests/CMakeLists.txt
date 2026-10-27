@@ -3330,6 +3330,12 @@ add_executable(candidate_slice_lifetime_test world/candidate_slice_lifetime_test
 target_link_libraries(candidate_slice_lifetime_test PRIVATE opennova_runtime opennova_formats)
 target_compile_features(candidate_slice_lifetime_test PRIVATE cxx_std_17)
 add_test(NAME candidate_slice_lifetime COMMAND candidate_slice_lifetime_test)
+# D-COL-20: a joiner's wire-keyed slices: a hidden pool-0 row sources one, a skipped pool-1 row
+# keeps its own, a new lifetime or a gone row holds none.
+add_executable(wire_candidate_slice_test world/wire_candidate_slice_test.cpp)
+target_link_libraries(wire_candidate_slice_test PRIVATE opennova_runtime opennova_formats)
+target_compile_features(wire_candidate_slice_test PRIVATE cxx_std_17)
+add_test(NAME wire_candidate_slice COMMAND wire_candidate_slice_test)
 
 add_executable(clamped_ground_query_test world/clamped_ground_query_test.cpp)
 target_link_libraries(clamped_ground_query_test PRIVATE opennova_runtime opennova_formats)

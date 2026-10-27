@@ -300,7 +300,8 @@ int32_t entity_proximity_radius(const CollisionWorld &cw, const Entity &e,
 void CollisionWorld::replace_wire_collision_proxies(
         std::vector<WirePersonCollisionProxy> persons,
         std::vector<WireDynamicCollisionProxy> dynamics,
-        uint16_t local_player_wire_handle) {
+        uint16_t local_player_wire_handle,
+        std::vector<WireSliceRow> skipped) {
     persons.erase(
         std::remove_if(persons.begin(), persons.end(),
                        [](const WirePersonCollisionProxy &proxy) {
@@ -339,6 +340,52 @@ void CollisionWorld::replace_wire_collision_proxies(
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
+    skipped.erase(std::remove_if(skipped.begin(), skipped.end(),
+                                 [](const WireSliceRow &row) {
+                                     return row.wire_handle == EntityHandle::kInvalid;
+                                 }),
+                  skipped.end());
+    std::stable_sort(skipped.begin(), skipped.end(),
+                     [](const WireSliceRow &a, const WireSliceRow &b) {
+                         return a.wire_handle < b.wire_handle;
+                     });
+    wire_skipped_rows_ = std::move(skipped);
+    // A row that left, or a new spawn into its handle, holds no slice from here (D-COL-20).
+    purge_stale_wire_slices();
+}
+
+// A decoded row's +0x1BC / +0x1C0 live in its record: they outlive every build whose gates
+// skip it, and a spawn into the handle clears them with the rest of the record (D-COL-20).
+// [orig: NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
+//  NapiNPClientMsg_0x00D @0x432D23; Entity_BuildProximityListsFromPools @0x4B8EB0 - a skipped
+//  row's words untouched]
+void CollisionWorld::purge_stale_wire_slices() {
+    const auto named = [&](uint16_t handle, uint64_t lifetime) {
+        const auto person = std::lower_bound(wire_person_proxies_.begin(),
+                wire_person_proxies_.end(), handle,
+                [](const WirePersonCollisionProxy &proxy, uint16_t h) {
+                    return proxy.wire_handle < h;
+                });
+        if (person != wire_person_proxies_.end() && person->wire_handle == handle)
+            return person->lifetime == lifetime;
+        const auto dynamic = std::lower_bound(wire_dynamic_proxies_.begin(),
+                wire_dynamic_proxies_.end(), handle,
+                [](const WireDynamicCollisionProxy &proxy, uint16_t h) {
+                    return proxy.wire_handle < h;
+                });
+        if (dynamic != wire_dynamic_proxies_.end() && dynamic->wire_handle == handle)
+            return dynamic->lifetime == lifetime;
+        const auto row = std::lower_bound(wire_skipped_rows_.begin(), wire_skipped_rows_.end(),
+                handle, [](const WireSliceRow &r, uint16_t h) { return r.wire_handle < h; });
+        return row != wire_skipped_rows_.end() && row->wire_handle == handle &&
+                row->lifetime == lifetime;
+    };
+    for (auto it = wire_candidates_.begin(); it != wire_candidates_.end();) {
+        if (!named(it->first, it->second.lifetime))
+            it = wire_candidates_.erase(it);
+        else
+            ++it;
+    }
 }
 
 void CollisionWorld::set_wire_person_proxy_live(uint16_t wire_handle,
@@ -1119,20 +1166,27 @@ void CollisionWorld::build_candidate_slices(World &world) {
     // 17-tick edge. Its entries remain registry collision targets because the
     // joiner hosts streamed pool-1/pool-2 models locally; only the SOURCE key
     // and pose are wire-owned. A verified registry_twin is the sole self-skip
-    // path -- equal packed numbers alone do not alias the domains.
-    wire_arena_.clear();
-    wire_candidates_.clear();
+    // path -- equal packed numbers alone do not alias the domains. As the
+    // registry build's, the fill restarts and a row the gates skip keeps its
+    // slice, over the entries the refill writes (D-COL-20).
+    // [orig: the fill @0x4B8ED0; the pool-0 test @0x4B8EF9..0x4B8F00; the
+    //  pool-1 gates @0x4B9127..0x4B9147]
+    if (wire_arena_.size() < static_cast<size_t>(kCandidateArenaCap))
+        wire_arena_.resize(static_cast<size_t>(kCandidateArenaCap));
+    wire_arena_used_ = 0;
+    purge_stale_wire_slices();
     const auto build_wire_for = [&](uint16_t wire_handle,
                                     const FixedVec3 &position_q16,
                                     int32_t bound_radius_q16, int32_t pad,
-                                    EntityHandle registry_twin) {
+                                    EntityHandle registry_twin, uint32_t lifetime) {
         // The row's own boundRadius word, a zero one included, as the
         // registry build reads it [orig: @0x4B8F02..0x4B8F0B /
         //  @0x4B9149..0x4B9152].
         const int32_t range = bound_radius_q16 + pad;
         CandidateSlice slice;
-        slice.start = static_cast<int32_t>(wire_arena_.size());
+        slice.start = wire_arena_used_;
         slice.count = 0;
+        slice.lifetime = lifetime;
         slice.built_pos[0] = position_q16.x;
         slice.built_pos[1] = position_q16.y;
         slice.built_pos[2] = position_q16.z;
@@ -1147,11 +1201,11 @@ void CollisionWorld::build_candidate_slices(World &world) {
                              d.y - position_q16.y,
                              d.z - position_q16.z) > total)
                 continue;
-            if (wire_arena_.size() >= 3000) break;
+            if (wire_arena_used_ >= kCandidateArenaCap) break;
             // The noage candidate gate, as the registry build's.
             // [orig: @0x4B8FCA / @0x4B920A]
             if (d.noage) continue;
-            wire_arena_.push_back(d.h);
+            wire_arena_[static_cast<size_t>(wire_arena_used_++)] = d.h;
             ++slice.count;
         }
         for (const StaticSlot &s : statics_) {
@@ -1169,8 +1223,8 @@ void CollisionWorld::build_candidate_slices(World &world) {
                              sy - position_q16.y,
                              sz - position_q16.z) > total)
                 continue;
-            if (wire_arena_.size() >= 3000) break;
-            wire_arena_.push_back(s.h);
+            if (wire_arena_used_ >= kCandidateArenaCap) break;
+            wire_arena_[static_cast<size_t>(wire_arena_used_++)] = s.h;
             ++slice.count;
         }
         wire_candidates_[wire_handle] = slice;
@@ -1179,15 +1233,34 @@ void CollisionWorld::build_candidate_slices(World &world) {
     // position (the copy at the table build; a move or a respawn after it moves
     // the live words). [orig: the source reads [esi+4] / [esi+8] / [esi+0Ch]
     //  @0x4B8F50 / @0x4B8F6B / @0x4B8F82 against g_DynProxX/Y/Z]
+    // The pool-0 walk in slot order: every person proxy, and every pool-0 row the
+    // person table passes over (a hidden or spectating body, a row that is no
+    // person), behind its in-use word alone. [orig: the pool-0 loop
+    // @0x4B8EE2..0x4B8F00]
+    size_t skipped = 0;
+    const auto skipped_pool0_through = [&](uint16_t handle) {
+        for (; skipped < wire_skipped_rows_.size() &&
+               wire_skipped_rows_[skipped].wire_handle < handle;
+             ++skipped) {
+            const WireSliceRow &row = wire_skipped_rows_[skipped];
+            if (row.pool0_source)
+                build_wire_for(row.wire_handle, row.position_q16, row.bound_radius_q16,
+                               0x40000, EntityHandle{}, row.lifetime);
+        }
+    };
     for (const WirePersonCollisionProxy &person : wire_person_proxies_) {
+        skipped_pool0_through(person.wire_handle);
         build_wire_for(person.wire_handle, person.live_position_q16,
-                       person.bound_radius_q16, 0x40000, EntityHandle{});
+                       person.bound_radius_q16, 0x40000, EntityHandle{}, person.lifetime);
     }
+    skipped_pool0_through(0xFFFF);
+    // The pool-1 walk: a proxy the source gates take (its def's attrib 0x20 unless
+    // type 1; a bit-0 row is no proxy); every other row keeps its slice.
     for (const WireDynamicCollisionProxy &dynamic : wire_dynamic_proxies_) {
         if (!dynamic.candidate_source_eligible) continue;
         build_wire_for(dynamic.wire_handle, dynamic.live_position_q16,
                        dynamic.bound_radius_q16, 0x60000,
-                       dynamic.registry_twin);
+                       dynamic.registry_twin, dynamic.lifetime);
     }
 }
 

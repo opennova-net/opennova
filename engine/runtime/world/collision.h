@@ -357,10 +357,14 @@ public:
     // packed wire and registry handle can never alias. There is deliberately
     // no projectile-only compatibility mutator: projectile traces and replica
     // sun lighting consume this same snapshot.
+    // `skipped` names the decoded rows the tables pass over (WireSliceRow): a wire slice
+    // stands while a proxy or a skipped row names its handle with the lifetime it was built
+    // for (D-COL-20).
     void replace_wire_collision_proxies(
             std::vector<WirePersonCollisionProxy> persons,
             std::vector<WireDynamicCollisionProxy> dynamics,
-            uint16_t local_player_wire_handle = 0xFFFF);
+            uint16_t local_player_wire_handle = 0xFFFF,
+            std::vector<WireSliceRow> skipped = {});
     // A decoded person's update ran after the table was built: its proxy takes the
     // person's live Position and dead bit (a handle no proxy names is ignored), which
     // the next repulsion's dead skip and push and the next trace's bone walk re-read
@@ -1104,9 +1108,9 @@ private:
         // The source position the slice was built at (wire slices only): a
         // row that has moved past its pad since then needs a fresh build.
         int32_t built_pos[3] = {0, 0, 0};
-        // The registry lifetime the slice was built for (registry slices
-        // only): the slot's words outlive a build the gates skip, never a
-        // respawn into the slot.
+        // The lifetime the slice was built for (a registry slot's spawn id, a
+        // decoded row's spawn revision): the slot's words outlive a build the
+        // gates skip, never a respawn into the slot.
         uint64_t lifetime = 0;
     };
     // The slot's slice as its current lifetime reads it (null for none). The
@@ -1284,9 +1288,16 @@ private:
     // lifetime it was built for (find_slice).
     const EntityRegistry *slice_registry_ = nullptr;
     // A distinct identity domain for decoded rows. Using a second arena/map is
-    // structural: wire H=0 and a registry L=0 are both valid simultaneously.
+    // structural: wire H=0 and a registry L=0 are both valid simultaneously. The
+    // wire arena keeps the registry arena's form: 3000 entries refilled from 0 at
+    // each build, a slice a build skips keeping its start and count (D-COL-20).
     std::vector<EntityHandle> wire_arena_;
+    int32_t wire_arena_used_ = 0;
     std::unordered_map<uint16_t, CandidateSlice> wire_candidates_;
+    // The decoded rows the tables pass over, by handle (replace_wire_collision_proxies).
+    std::vector<WireSliceRow> wire_skipped_rows_;
+    // Drop every wire slice no proxy or skipped row names with its lifetime.
+    void purge_stale_wire_slices();
     // Staged only for the duration of one resolve_replica call: the replica
     // peer spheres the person-repulsion loop walks after persons_, and the
     // calling row's own wire handle (self-exclusion). Empty for every

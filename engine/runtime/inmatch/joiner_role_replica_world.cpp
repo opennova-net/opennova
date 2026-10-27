@@ -1555,6 +1555,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	if (world.ai.collision == nullptr) return;
 	std::vector<world::WirePersonCollisionProxy> person_proxies;
 	std::vector<world::WireDynamicCollisionProxy> dynamic_proxies;
+	std::vector<world::WireSliceRow> skipped_rows;
 	uint16_t self_wire_handle = world::EntityHandle::kInvalid;
 	if (rt.has_self_handle())
 		self_wire_handle = rt.self_handle();
@@ -1570,21 +1571,43 @@ void JoinerRole::refresh_wire_collision_proxies() {
 				rt.state().entities) {
 			if (entity.handle == world::EntityHandle::kInvalid ||
 					(self_wire_handle != world::EntityHandle::kInvalid &&
-					 entity.handle == self_wire_handle) ||
-					(entity.state_flags_known &&
-					 (entity.state_flags & 0x01u) != 0))
+					 entity.handle == self_wire_handle))
 				continue;
+			const bool person = entity.cls == EntityClass::Player ||
+					entity.cls == EntityClass::Infantry;
+			// A row the tables pass over keeps its slice words: a pool-0 row still sources a
+			// slice behind its in-use word alone (a hidden person, a pool-0 row that is no
+			// person), and a pool-1 row keeps the slice it has (D-COL-20).
+			// [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 - the bit-0 skips @0x4B9382 /
+			//  @0x4B93E4; Entity_BuildProximityListsFromPools @0x4B8EB0 - the pool-0 test
+			//  @0x4B8EF9..0x4B8F00, the pool-1 bit-0 skip @0x4B9137..0x4B913B]
+			const auto skip = [&]() {
+				world::WireSliceRow row;
+				row.wire_handle = entity.handle;
+				row.lifetime = entity.spawn_revision;
+				if (wire_handle::pool(entity.handle) == wire_handle::kPoolOrganic) {
+					row.pool0_source = true;
+					row.position_q16 = world::FixedVec3{entity.x, entity.y, entity.z};
+					row.bound_radius_q16 =
+							kernel.wire_collision_shape_for_type(entity.type_id).bound_radius_q16;
+				}
+				skipped_rows.push_back(row);
+			};
+			if (entity.state_flags_known && (entity.state_flags & 0x01u) != 0) {
+				skip();
+				continue;
+			}
 
 			// Pool-0 organics (players AND non-player infantry) join the person
 			// walk at the decoded position; retail's client walks its wire-built
 			// pool 0 the same way [orig: Physics_RaycastAgainstProximityList
 			// @ 0x4e4a30 over the client-built person table].
-			if (entity.cls == EntityClass::Player ||
-					entity.cls == EntityClass::Infantry) {
+			if (person) {
 				const world::ResolvedCollisionShape shape =
 						kernel.wire_collision_shape_for_type(entity.type_id);
 				world::WirePersonCollisionProxy proxy;
 				proxy.wire_handle = entity.handle;
+				proxy.lifetime = entity.spawn_revision;
 				proxy.position_q16 = world::FixedVec3{
 						entity.x, entity.y, entity.z};
 				proxy.bound_radius_q16 = shape.bound_radius_q16;
@@ -1613,15 +1636,20 @@ void JoinerRole::refresh_wire_collision_proxies() {
 			// Pool-1 movers (vehicles, emplacements, runtime items) project
 			// their authored collision geometry at the decoded pose. Pool-2
 			// statics keep colliding through the locally loaded mission set.
-			if (wire_handle::pool(entity.handle) != wire_handle::kPoolItem)
+			if (wire_handle::pool(entity.handle) != wire_handle::kPoolItem) {
+				if (wire_handle::pool(entity.handle) == wire_handle::kPoolOrganic) skip();
 				continue;
+			}
 			const world::ResolvedCollisionShape shape =
 					kernel.wire_collision_shape_for_type(entity.type_id);
 			if (shape.model_id < 0 && shape.bound_radius_q16 == 0 &&
-					!shape.pool1_candidate_source_eligible)
+					!shape.pool1_candidate_source_eligible) {
+				skip();
 				continue;
+			}
 			world::WireDynamicCollisionProxy proxy;
 			proxy.wire_handle = entity.handle;
+			proxy.lifetime = entity.spawn_revision;
 			proxy.model_id = shape.model_id;
 			proxy.position_q16 = world::FixedVec3{
 					entity.x, entity.y, entity.z};
@@ -1655,7 +1683,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 	// wire proxies is a tracked residual).
 	world.ai.collision->replace_wire_collision_proxies(
 			std::move(person_proxies), std::move(dynamic_proxies),
-			self_wire_handle);
+			self_wire_handle, std::move(skipped_rows));
 }
 
 // The decoded persons' collision seams on the replica pipeline (wire_frame_providers' part,

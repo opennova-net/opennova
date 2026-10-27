@@ -513,6 +513,11 @@ struct WirePersonCollisionProxy {
     //  (Physics_RaycastAgainstBoneSections on g_PersonProxEntity, the call
     //  @0x4E4C59)]
     FixedVec3 live_position_q16;
+    // The row's lifetime (its spawn revision): a wire slice belongs to the lifetime it was
+    // built for, as the spawn's memset clears a slot's +0x1BC / +0x1C0 with the rest of it.
+    // [orig: NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
+    //  NapiNPClientMsg_0x00D @0x432D23]
+    uint32_t lifetime = 0;
 };
 
 // One decoded pool-1 mover (vehicle, emplacement, runtime item) projected into
@@ -565,6 +570,30 @@ struct WireDynamicCollisionProxy {
     int32_t uniform_scale_q16 = 0;  // entity+0x158/itemDef+0x1B8 effective scale
     FixedVec3 bbox_center_q16;       // entity+0x1FC..+0x204 sun/LOS origin offset
     bool candidate_source_eligible = false;
+    // The row's lifetime (its spawn revision): a wire slice belongs to the lifetime it was
+    // built for, as the spawn's memset clears a slot's +0x1BC / +0x1C0 with the rest of it.
+    // [orig: NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1;
+    //  NapiNPClientMsg_0x00D @0x432D23]
+    uint32_t lifetime = 0;
+};
+
+// A decoded pool-0 or pool-1 row the person and dynamic tables pass over (Flags bit 0, a pool-0
+// row that is no person, or a pool-1 row with no collision projection), as the wire slice build
+// still reads it: its lifetime, so a slice it holds outlives the builds that skip it, never a
+// respawn into its handle; and, for a pool-0 row, its position and bound radius, since a pool-0
+// row sources a slice behind its in-use word alone where the person table also tests its def
+// and Flags bit 0. A pool-1 row the source gates skip keeps the slice it has.
+// [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the pool-0 test @0x4B8EF9..0x4B8F00,
+//  the pool-1 gates @0x4B9127..0x4B9147 (in use, a def, Flags bit 0, attrib 0x20 unless type
+//  1); Entity_BuildProximityLists_Pool01 @0x4B9340 - the person table's in-use, def and bit-0
+//  tests @0x4B93D8..0x4B93E7]
+struct WireSliceRow {
+    uint16_t wire_handle = 0xFFFF;
+    uint32_t lifetime = 0;
+    // A pool-0 row: it sources a slice at its position with its bound radius.
+    bool pool0_source = false;
+    FixedVec3 position_q16;
+    int32_t bound_radius_q16 = 0;
 };
 
 enum class ProjectileHitClass : uint8_t {
