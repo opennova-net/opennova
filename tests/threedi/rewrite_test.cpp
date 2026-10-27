@@ -59,6 +59,7 @@ const Vector kExpected[] = {
 		{"synth/crate_cfac_pad.3di", 3256u, 0xcf901445bf11afc1ull},
 		{"synth/crate_mtrl0_ab_lum_upl113.3di", 3280u, 0xa359fad884887b6cull},
 		{"synth/crate_mtrl0_ad_lum_upl113.3di", 3280u, 0xbbf62d497efdb0feull},
+		{"synth/crate_occl_open.3di", 3628u, 0xca3d93240b6151aaull},
 		{"synth/crate_texture_unnamed.3di", 3256u, 0xb10ebb5e288d5af2ull},
 		{"synth/crate_usrp_no_part.3di", 3256u, 0x4f694666dc6b2755ull},
 		{"synth/gun.3di", 3764u, 0x9fd115f585aaf2f8ull},
