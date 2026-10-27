@@ -133,6 +133,9 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::present_wire_snapshot);
+	ClassDB::bind_method(
+			D_METHOD("materialize_wire_snapshot", "snap", "stride", "layout_revision"),
+			&EntityPresenter::materialize_wire_snapshot);
 	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
 			&EntityPresenter::set_render_culled);
 	ClassDB::bind_method(D_METHOD("clear_render_culled"),

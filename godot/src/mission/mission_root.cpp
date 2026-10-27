@@ -621,6 +621,20 @@ int MissionRoot::join_wire_present_pending() const {
 	return presenter != nullptr ? presenter->pending_spawn_count() : 0;
 }
 
+void MissionRoot::materialize_pending_wire_rows() {
+	EntityPresenter *presenter = entities();
+	if (sim_.is_null() || presenter == nullptr) {
+		return;
+	}
+	const int stride = sim_->get_present_stride();
+	if (stride <= 0) {
+		return;
+	}
+	const auto snapshot = sim_->build_present_snapshot();
+	presenter->materialize_wire_rows_view({snapshot->rows.data(), static_cast<int64_t>(snapshot->rows.size())},
+			stride, static_cast<int64_t>(snapshot->layout_revision));
+}
+
 void MissionRoot::warm_present_pipelines(const Vector3 &p_at_position) {
 	if (EntityPresenter *presenter = entities()) {
 		presenter->warm_fire_pipelines(p_at_position);

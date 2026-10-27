@@ -184,6 +184,13 @@ public:
 			int64_t p_layout_revision);
 	void present_wire_rows_view(PresentRowsView p_snap, int p_stride,
 			int64_t p_layout_revision);
+	// One wire pass that builds every cold row whatever the cold-spawn budget, which stands as it
+	// was after it: the load's, behind the loading screen, so no frame past the reveal builds a
+	// model (D-NET-1377). Retail draws every pool row from its first frame; the budget is this
+	// presenter's own pacing.
+	void materialize_wire_rows_view(PresentRowsView p_snap, int p_stride, int64_t p_layout_revision);
+	void materialize_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+			int64_t p_layout_revision);
 	// The wire walk's parts, timed (an instrument with no behaviour: MissionRoot takes it in
 	// place of present_wire_rows_view while the frame-stats board captures, for the F3 wire
 	// rows and the --verbose SessionLeg line). Nanoseconds per part; the rows' walk total

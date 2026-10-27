@@ -1748,6 +1748,16 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 		// alone, which draws the world under the opaque layer.
 		set_visible(true);
 		apply_presentation_hold_(false);
+		// Every wire row standing at the load's end (single player's and the host's synthetic
+		// attachments, a joiner's streamed rows) builds here, behind the loading screen, as a
+		// joiner's admission already holds its reveal until the presenter's queue drains: the
+		// frame below draws them, and no frame past the reveal builds one (the cold-spawn budget's
+		// four a frame had built single player's 25 vehicle weapons over the first seven frames,
+		// their instances set up in each next frame's first 3D render; D-NET-1377 parts (ii) and
+		// (iii)). Retail draws every pool row from its first frame.
+		leg("wire_rows");
+		if (runtime != nullptr) runtime->materialize_pending_wire_rows();
+		leg_end();
 		// The slot captures' casters pack their geometry here, every caster of the world, so a
 		// caster's first capture draws what the load made and not the first scene frame's pack
 		// (engine renderer/render_slot_shadow.h slot_casters_load_with_models carries the

@@ -169,6 +169,9 @@ public:
 	// Cold wire rows the presentation budget still owes. Zero before setup;
 	// SessionDrive keys the join-admission edge on this drain.
 	int join_wire_present_pending() const;
+	// The load's wire pass: every wire row standing at the load's end built at once, behind the
+	// loading screen (EntityPresenter::materialize_wire_rows_view, D-NET-1377).
+	void materialize_pending_wire_rows();
 	// Load-time warm hook: compile the fire-presentation pipelines (the
 	// tracer ribbon materials) behind the loading screen; see GameWorld's
 	// effect warm.

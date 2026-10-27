@@ -18,6 +18,7 @@
 #include "world/scar_presenter.h"
 
 #include <chrono>
+#include <limits>
 
 // The WIRE (joiner/MP) walk: the COLD path (spawn/defer/unresolved
 // bookkeeping, the liveness prune, held-weapon builds, the spawn signal and
@@ -418,6 +419,19 @@ EntityPresenter::WireProfile EntityPresenter::profile_present_wire_rows_view(
 void EntityPresenter::present_wire_snapshot(const PackedFloat32Array &p_snap,
 		int p_stride, int64_t p_layout_revision) {
 	present_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
+}
+
+void EntityPresenter::materialize_wire_rows_view(PresentRowsView p_snap, int p_stride,
+		int64_t p_layout_revision) {
+	const int budget = cold_spawn_budget_;
+	cold_spawn_budget_ = std::numeric_limits<int>::max();
+	present_wire_rows_view(p_snap, p_stride, p_layout_revision);
+	cold_spawn_budget_ = budget;
+}
+
+void EntityPresenter::materialize_wire_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+		int64_t p_layout_revision) {
+	materialize_wire_rows_view({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision);
 }
 
 void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
