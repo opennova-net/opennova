@@ -47,7 +47,9 @@ var _ui_parent: Node = null
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
 # has no size, so the fit follows the viewport instead.
 var _layout_control: Control = null
-var _team := 0
+# The profile store the screen's class pages stage from (its current weapon.sav
+# record); null stages empty pages (engine menu::ArmoryLoadoutBuffers).
+var _profiles: PlayerProfiles = null
 # The local player's class (5..9; 0 = unclassed SP spawn); the screen opens on it
 # [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped
 # by the armory ACCEPT until the spawn path carries a class of its own.
@@ -79,9 +81,20 @@ func setup(view: ArmoryWorldView, player_presenter_in: LocalPlayerPresenter,
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
-func set_player_team(team: int) -> void:
-	_team = team
-	_armory.set_player_team(team)
+func set_player_profiles(profiles: PlayerProfiles) -> void:
+	_profiles = profiles
+
+
+## The mission start's stage of the screen's class pages from the profile and the spawn
+## buffer, which every playing process runs (a dedicated host has no presenter); the
+## pages, counts and bytes otherwise outlive the mission (engine
+## menu::ArmoryLoadoutBuffers::stage carries the witness).
+func on_mission_started() -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null:
+		return
+	_armory.get_loadout().stage(_profiles, int(sim.get_local_player_team()),
+			sim.get_local_player_loadout())
 
 
 func is_open() -> bool:
@@ -172,17 +185,13 @@ func open() -> bool:
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94]
 	if not _ensure_menu():
 		return false
-	# The on-show protocol: the screen re-resolves the class and repopulates every
-	# open [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0].
-	# Re-read the spawned entity on every show. Entity teams use 1/3=blue and
-	# 2/4=red; the menu filter uses the profile-side 0=blue, 1=red domain.
-	var entity_team := int(sim.get_local_player_team())
-	if entity_team == 1 or entity_team == 3:
-		_team = 0
-	elif entity_team == 2 or entity_team == 4:
-		_team = 1
+	# The on-show protocol: the screen re-resolves the class, stages its class pages
+	# under its team gate and repopulates from the selected class's page every open
+	# [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0]. Re-read the
+	# spawned entity on every show: its team (1 / 3 blue, 2 / 4 red) is the stage's side
+	# and the lists' team filter.
 	_player_class = int(sim.get_local_player_class())
-	_armory.set_player_team(_team)
+	_armory.set_entity_team(int(sim.get_local_player_team()))
 	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
 	_armory.set_player_class(_player_class)
 	# D-MNU-10 (deliberate divergence, user decision 2026-07-11): the class spin is
@@ -192,54 +201,7 @@ func open() -> bool:
 	# and retail SP pins the class]. Our runtime is a listen session even offline
 	# (ADR 0009), and the SP loadout flow wants the choice.
 	_armory.set_class_selection_enabled(true)
-	var fallback_primary := String(sim.get_local_player_weapon_name())
-	# Retail resolves each visible parent tuple from the selected class's canonical
-	# buffer and routes it by that parent's weapon_class. It never scans the expanded
-	# runtime slot pool, whose hidden subclasses can occupy a different class.
-	# [orig: g_ArmoryLoadoutBufferByClass -> UI_PopulateAmmoTypeComboBoxes
-	# @0x564930; name/catalog resolve @0x564A00; slot route @0x564B47]
-	var current_primary := fallback_primary
-	var current_secondary := ""
-	var current_accessory := ""
-	var current_grenades: Array = []
-	var current_parent_clips := {
-		"PRIMARY": -1,
-		"SECONDARY": -1,
-		"ACCESSORY": -1,
-	}
-	var weapon_db: WeaponDatabase = _view.weapon_database()
-	if weapon_db != null and weapon_db.is_loaded():
-		current_primary = ""
-		for row: WeaponKitEntry in sim.get_local_player_loadout():
-			var weapon_name := row.name
-			var index: int = weapon_db.find_weapon(weapon_name)
-			if index < 0:
-				continue
-			match weapon_db.get_weapon(index).slot:
-				WeaponDatabase.SLOT_PRIMARY:
-					if current_primary.is_empty():
-						current_primary = weapon_name
-						current_parent_clips["PRIMARY"] = row.ammo_primary
-				WeaponDatabase.SLOT_SECONDARY:
-					if current_secondary.is_empty():
-						current_secondary = weapon_name
-						current_parent_clips["SECONDARY"] = row.ammo_primary
-				WeaponDatabase.SLOT_ACCESSORY:
-					if current_accessory.is_empty():
-						current_accessory = weapon_name
-						current_parent_clips["ACCESSORY"] = row.ammo_primary
-				WeaponDatabase.SLOT_GRENADE:
-					# The companion's grenade rows keep the persisted-profile shape
-					# (the loadout profile's "grenades" entries).
-					current_grenades.append({
-						"name": row.name,
-						"ammo_primary": row.ammo_primary,
-						"ammo_secondary": row.ammo_secondary,
-						"flags": row.flags,
-					})
-	_armory.set_current_loadout(
-			current_primary, current_secondary, current_accessory, current_grenades,
-			current_parent_clips)
+	_armory.set_stage_sources(_profiles, sim.get_local_player_loadout())
 	_armory.set_availability_lookup(
 			func(weapon_name: String) -> int:
 				return int(sim.get_weapon_availability(weapon_name)))
@@ -359,73 +321,40 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 			_frame.accept_event()
 
 
-# Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory/grenades + clip
-# requests) rebuilds the sim's slot pool and becomes the respawn kit; the sim's
-# commit event then reinstalls the FP viewmodel/FSM around the re-selected equipped
-# weapon. SP-local apply — the MP client path rides the 0x2F/0x5A loadout service.
+# Armory ACCEPT: the class's page, the team's knife first (the companion's), rebuilds
+# the sim's slot pool and becomes the respawn kit; the sim's commit event then
+# reinstalls the FP viewmodel/FSM around the re-selected equipped weapon. SP-local
+# apply — the MP client path rides the 0x2F/0x5A loadout service.
 # [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -> the tuple parse + sub-weapon
 #  expansion + WeaponSlot rebuild chain + Player_SelectWeaponSlot @0x4dd680 /
 #  Player_MountWeaponSlot @0x4dfa40]
-func _on_loadout_accepted(loadout: Dictionary) -> void:
+func _on_loadout_accepted(kit: Array[WeaponKitEntry], player_class: int) -> void:
 	if not can_dismiss():
 		return
 	_reset_all_input_state()
-	var primary := String(loadout.get("primary", ""))
-	_player_class = int(loadout.get("player_class", _player_class))
-	if _view != null:
-		var sim: Simulation = _view.sim()
-		var kit: Array[WeaponKitEntry] = []
-		for slot_key in ["primary", "secondary", "accessory"]:
-			var weapon_name := String(loadout.get(slot_key, ""))
-			if weapon_name.is_empty():
-				continue
-			kit.append(WeaponKitEntry.make(weapon_name,
-					int(loadout.get(slot_key + "_clips", -1))))
-		for value in loadout.get("grenades", []):
-			var grenade := value as Dictionary
-			var weapon_name := String(grenade.get("name", ""))
-			if weapon_name.is_empty():
-				continue
-			kit.append(WeaponKitEntry.make(weapon_name,
-					int(grenade.get("ammo_primary", -1)),
-					int(grenade.get("ammo_secondary", -1)),
-					int(grenade.get("flags", -1))))
-		var applied := false
-		if sim != null:
-			applied = bool(sim.apply_local_player_loadout(
-					kit, int(loadout.get("player_class", 0))))
-		if not applied:
-			close()
-			return
-		# In a session the apply sent its 0x2F and selects nothing: the screen
-		# closes (the apply's tail) and the host's grant mounts the kit (engine
-		# inmatch/loadout_submit.h armory_accept_in_session carries the witness).
-		if sim != null and sim.is_mp_session():
-			close()
-			return
-		if kit.is_empty():
-			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
-			# leaves the table bare; the knife fallback is the MISSION loader's rule,
-			# not the armory's].
-			_view.clear_local_player_weapon()
-			if _player_presenter != null:
-				_player_presenter.refresh_viewmodel()
-			close()
-			return
-		# The apply's select committed and mounted the equipped slot in the sim, and its
-		# mount request queued SWITCHRANK on that slot (engine world/player_loadout.cpp
-		# select_current_slot carries the witness): present the viewmodel for it now, with
-		# no second sim mount over that switch (the commit event would also catch up next
-		# tick).
-		var equipped := primary
-		if sim != null:
-			var equipped_name := sim.get_local_player_inventory().equipped_name
-			if not equipped_name.is_empty():
-				equipped = equipped_name
-		if not equipped.is_empty() \
-				and _view.present_local_player_weapon(equipped) \
-				and _player_presenter != null:
+	_player_class = player_class
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or not bool(sim.apply_local_player_loadout(kit, player_class)):
+		close()
+		return
+	# In a session the apply sent its 0x2F and selects nothing: the screen closes (the
+	# apply's tail) and the host's grant mounts the kit (engine
+	# inmatch/loadout_submit.h armory_accept_in_session carries the witness).
+	if sim.is_mp_session():
+		close()
+		return
+	# The apply's select committed and mounted the equipped slot in the sim, and its
+	# mount request queued SWITCHRANK on that slot (engine world/player_loadout.cpp
+	# select_current_slot carries the witness): present the viewmodel for it now, with
+	# no second sim mount over that switch (the commit event would also catch up next
+	# tick). A table the kit left bare equips nothing: no rendered/action weapon.
+	var equipped := String(sim.get_local_player_inventory().equipped_name)
+	if equipped.is_empty():
+		_view.clear_local_player_weapon()
+		if _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
+	elif _view.present_local_player_weapon(equipped) and _player_presenter != null:
+		_player_presenter.refresh_viewmodel()
 	close()
 
 

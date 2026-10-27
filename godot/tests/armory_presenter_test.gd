@@ -95,6 +95,21 @@ func _real_sim(entity_team: int = 2) -> Simulation:
 	return sim
 
 
+# A profile store whose red side's rifleman page (class 8) holds `kit`: the screen
+# stages the profile's side pages and shows the resolved class's, entity team 2 the
+# red side [orig: Armory_StageLoadoutBuffers @0x564290; UI_PopulateThreeCategoryLists
+# @0x566f3c].
+func _red_rifleman_profiles(kit: Array[WeaponKitEntry]) -> PlayerProfiles:
+	var entries: Array = []
+	for row in kit:
+		entries.append({"name": row.name, "ammo_primary": row.ammo_primary,
+				"ammo_secondary": row.ammo_secondary, "flags": row.flags})
+	var profiles := PlayerProfiles.new()
+	assert_eq(profiles.apply_character_selection({"player_class": 8, "team": 1,
+			"kit": entries, "kit_class": 8}), OK, "the red rifleman page is written")
+	return profiles
+
+
 func _make_world(sim: Simulation, weapons: WeaponDatabase) -> FakeArmoryView:
 	var view := FakeArmoryView.new()
 	view.root = PresenterFixture.root_over(self, TMP_DIR)
@@ -259,6 +274,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, player_presenter, overlay)
+	presenter.set_player_profiles(_red_rifleman_profiles([WeaponKitEntry.make(equipped)]))
 	_open_music_context()
 
 	assert_true(presenter.open(), "the staged player opens the armory")
@@ -284,7 +300,7 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var primary := driver.widget_id("PRIMARY")
 	assert_eq(driver.item_count(primary), red_rifleman.size() + 1,
 		"entity team 2 maps to the red weapon-filter domain")
-	assert_gt(driver.selected_row(primary), 0, "the authoritative equipped primary is reselected")
+	assert_gt(driver.selected_row(primary), 0, "the class page's primary is selected")
 
 	var menutxt: RtxtStringFile = Strings.get_table("menutxt")
 	var cancel := driver.widget_id("CANCEL")
@@ -304,9 +320,53 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
-	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
+	# Every shown grenade position still serializes, so the select's global walk takes
+	# the first grenade the rebuilt table holds [orig: WeaponLoadout_SerializeSelectionsToBuffer
+	# @0x5658b0 - the shown gate @0x565bde; Player_SelectWeaponSlot @0x4dd680 - the global
+	# scan @0x4dd76d..0x4dd794].
+	var after := String(sim.get_local_player_inventory().equipped_name)
+	assert_eq(after, "WPN_GRENADEFB", "NONE leaves the grenades, the first equipped")
+	assert_eq(world.present_weapon_calls, [equipped, after] as Array[String])
+	assert_eq(world.clear_calls, 0, "a table with a weapon clears nothing")
 	assert_eq(player_presenter.viewmodel_generation() - refresh_start, 2,
-			"both equip and unequip rebuild the FP view")
+			"both ACCEPTs rebuild the FP view")
+
+
+# The mission start stages the class pages from the profile whatever the last show
+# left (every playing process's Game_StartMission), and a show under the same team
+# mask stages nothing over the pages [orig: Game_StartMission @0x526195;
+# UI_InitTeamClassSelection @0x56740c..0x567419].
+func test_mission_start_stages_the_class_pages() -> void:
+	var weapons := _make_weapons()
+	var red_rifleman: Array[WeaponDef] = weapons.get_slot_weapons(
+			WeaponDatabase.SLOT_PRIMARY, 8, 1)
+	assert_gt(red_rifleman.size(), 0, "fixture has a red rifleman primary")
+	if red_rifleman.is_empty():
+		return
+	var primary := red_rifleman[0].name
+	var sim := _real_sim(2)
+	assert_true(sim.apply_local_player_loadout([WeaponKitEntry.make(primary)], 8))
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(_make_world(sim, weapons), null, overlay)
+	presenter.set_player_profiles(_red_rifleman_profiles([WeaponKitEntry.make(primary, 2)]))
+
+	assert_true(presenter.open(), "the staged player opens the armory")
+	var driver: MenuDriver = presenter.get_menu_driver()
+	var ammo := driver.widget_id("PRIMARY_AMMO1")
+	assert_eq(driver.selected_row(ammo), 1, "the first show stages the profile's two clips")
+	driver.select_row(ammo, 0)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_false(presenter.is_open(), "the ACCEPT closes the screen")
+	assert_true(presenter.open(), "the armory reopens")
+	assert_eq(driver.selected_row(ammo), 0, "the reopen shows the accepted page")
+	presenter.close()
+	presenter.on_mission_started()
+	assert_true(presenter.open(), "the armory opens in the next mission")
+	assert_eq(driver.selected_row(ammo), 1, "the mission start staged the profile's page again")
 
 
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:
@@ -347,37 +407,40 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
+	presenter.set_player_profiles(_red_rifleman_profiles([
+		WeaponKitEntry.make(primary, PRIMARY_CLIPS),
+		WeaponKitEntry.make(expected, ACCESSORY_CLIPS)]))
 
 	assert_true(presenter.open(), "a fresh armory presenter opens for the equipped local player")
 	var driver: MenuDriver = presenter.get_menu_driver()
 	assert_not_null(driver)
 	var accessory := driver.widget_id("ACCESSORY")
 	assert_gt(driver.selected_row(accessory), 0,
-		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
+		"ACCESSORY pre-selects the satchel the class page names")
 	assert_eq(driver.item_text(accessory, driver.selected_row(accessory)),
 		_weapon_display_text(rows[0] as WeaponDef),
-		"the selected accessory row is exactly the canonical satchel parent")
+		"the selected accessory row is exactly the page's satchel parent")
 	var primary_combo := driver.widget_id("PRIMARY")
 	assert_gt(driver.selected_row(primary_combo), 0,
-		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
+		"PRIMARY pre-selects the page's AK parent")
 	assert_eq(driver.item_text(primary_combo, driver.selected_row(primary_combo)),
 		_weapon_display_text(primary_rows[0] as WeaponDef),
 		"the selected primary row is exactly WPN_AK47AUTO")
 	var primary_ammo := driver.widget_id("PRIMARY_AMMO1")
 	var accessory_ammo := driver.widget_id("ACCESSORY_AMMO1")
 	assert_eq(driver.selected_row(primary_ammo), PRIMARY_CLIPS - 1,
-		"first open converts the canonical primary clip count to its zero-based row")
+		"first open converts the page's primary clip count to its zero-based row")
 	assert_eq(driver.selected_row(accessory_ammo), ACCESSORY_CLIPS - 1,
-		"first open converts the canonical satchel clip count to its zero-based row")
+		"first open converts the page's satchel clip count to its zero-based row")
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
 	for row: WeaponKitEntry in simulation.get_local_player_loadout():
 		accepted_by_name[row.name] = row.ammo_primary
 	assert_eq(int(accepted_by_name.get(primary, -1)), PRIMARY_CLIPS,
-		"untouched ACCEPT converts the primary row back to the canonical clip count")
+		"untouched ACCEPT serializes the page's primary count")
 	assert_eq(int(accepted_by_name.get(expected, -1)), ACCESSORY_CLIPS,
-		"untouched ACCEPT converts the satchel row back to the canonical clip count")
+		"untouched ACCEPT serializes the page's satchel count")
 
 
 func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
@@ -403,6 +466,7 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
+	presenter.set_player_profiles(_red_rifleman_profiles(kit))
 
 	assert_true(presenter.open(), "the real weapon.mnu armory opens")
 	var driver: MenuDriver = presenter.get_menu_driver()
@@ -415,7 +479,7 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 			grenade_rows[i].maxclips + 1,
 			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
 		assert_eq(driver.selected_row(grenade_combo), i + 1,
-			"%s preselects the authoritative canonical grenade count" % combo_name)
+			"%s preselects the page's grenade count" % combo_name)
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}

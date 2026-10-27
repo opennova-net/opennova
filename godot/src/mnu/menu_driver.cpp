@@ -1,12 +1,10 @@
 #include "mnu/menu_driver.h"
-#include "mnu/armory_loadout_pick.h"
 
 #include "audio/music_director.h"
 #include "mnu/menu_audio.h"
 #include "mnu/controls_model.h"
 #include "mission/mission_catalog.h"
 #include "mnu/menu_frame.h"
-#include "object/weapon_database.h"
 #include "object/avatar_database.h"
 #include "object/avatar_records.h"
 #include "player/player_profiles.h"
@@ -21,7 +19,6 @@
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
-#include <runtime/menu/loadout_screen.h>
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -41,28 +38,6 @@ using opennova::to_std;
 namespace godot {
 
 namespace {
-
-std::vector<int> loadout_indices(const TypedArray<WeaponDef> &p_rows) {
-	std::vector<int> indices;
-	for (int i = 0; i < p_rows.size(); ++i) {
-		const Ref<WeaponDef> row = p_rows[i];
-		indices.push_back(row.is_valid() ? row->get_index() : -1);
-	}
-	return indices;
-}
-
-opennova::menu::LoadoutParentIndices loadout_parents(const TypedArray<WeaponDef> &p_rows) {
-	opennova::menu::LoadoutParentIndices out{-1, -1, -1};
-	const auto indices = loadout_indices(p_rows);
-	for (size_t i = 0; i < out.size() && i < indices.size(); ++i) out[i] = indices[i];
-	return out;
-}
-
-TypedArray<WeaponDef> loadout_defs(const Ref<WeaponDatabase> &p_weapons, const std::vector<int> &p_indices) {
-	TypedArray<WeaponDef> out;
-	for (int index : p_indices) out.push_back(p_weapons->get_weapon(index));
-	return out;
-}
 
 std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<MissionCatalogRow> &rows) {
 	std::vector<opennova::menu::MissionChoice> choices;
@@ -1015,102 +990,6 @@ int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
 	return options_.consume(runtime_, input);
 }
 
-// ---- loadout screen adapters --------------------------------------------------------
-
-void MenuDriver::fill_armory_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-		int p_parent, const String &p_current_name, int p_current_clips, const Ref<RtxtStringFile> &p_text) {
-	const opennova::def::DefWeaponsFile empty{};
-	opennova::menu::armory_fill_ammo(runtime_, p_weapons.is_valid() ? p_weapons->native_file() : empty, to_std(p_control),
-			p_parent, to_std(p_current_name), p_current_clips, game_text_lookup(p_text));
-}
-
-namespace {
-
-opennova::menu::LoadoutSlotRows slot_rows(const PackedInt32Array &p_rows) {
-	opennova::menu::LoadoutSlotRows out;
-	out.reserve(static_cast<size_t>(p_rows.size()));
-	for (int i = 0; i < p_rows.size(); ++i) out.push_back(p_rows[i]);
-	return out;
-}
-
-const opennova::def::DefWeaponsFile &weapons_file(const Ref<WeaponDatabase> &p_weapons) {
-	static const opennova::def::DefWeaponsFile empty{};
-	return p_weapons.is_valid() ? p_weapons->native_file() : empty;
-}
-
-} // namespace
-
-PackedInt32Array MenuDriver::fill_loadout_slot(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-		int p_slot, int p_class_mask, int p_team_mask, const Callable &p_availability,
-		const String &p_none_label, const Ref<RtxtStringFile> &p_text) {
-	opennova::menu::WeaponAvailability availability;
-	if (p_availability.is_valid())
-		availability = [p_availability](const std::string &name) {
-			return int(p_availability.call(String(name.c_str())));
-		};
-	PackedInt32Array out;
-	for (const int32_t row : opennova::menu::loadout_fill_slot(runtime_, weapons_file(p_weapons),
-				 to_std(p_control), p_slot, p_class_mask, p_team_mask, availability, to_std(p_none_label),
-				 game_text_lookup(p_text)))
-		out.push_back(row);
-	return out;
-}
-
-int MenuDriver::loadout_selected_weapon(const String &p_control, const PackedInt32Array &p_rows) const {
-	return opennova::menu::loadout_selected_weapon(runtime_, to_std(p_control), slot_rows(p_rows));
-}
-
-void MenuDriver::select_loadout_weapon_name(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-		const PackedInt32Array &p_rows, const String &p_name) {
-	// The name back to the bytes a WeaponDef record's name reads from (Latin-1 both
-	// ways: String(const char *) and godot-cpp's ascii()),
-	// as the list's weapons hold them.
-	opennova::menu::loadout_select_weapon_name(runtime_, weapons_file(p_weapons), to_std(p_control),
-			slot_rows(p_rows), std::string(p_name.ascii().get_data()));
-}
-
-int MenuDriver::armory_selected_clips(const String &p_control) const {
-	return opennova::menu::armory_selected_clips(runtime_, to_std(p_control));
-}
-
-Ref<ArmoryLoadoutPick> MenuDriver::armory_loadout_pick(const Ref<WeaponDatabase> &p_weapons,
-		const PackedInt32Array &p_primary, const PackedInt32Array &p_secondary,
-		const PackedInt32Array &p_accessory, const TypedArray<WeaponDef> &p_grenades) const {
-	const opennova::menu::LoadoutSlotRows rows[3] = { slot_rows(p_primary), slot_rows(p_secondary),
-		slot_rows(p_accessory) };
-	Ref<ArmoryLoadoutPick> out;
-	out.instantiate();
-	out->assign(opennova::menu::armory_loadout_pick(runtime_, weapons_file(p_weapons), rows,
-			loadout_indices(p_grenades)));
-	return out;
-}
-
-TypedArray<WeaponDef> MenuDriver::fill_armory_grenades(const Ref<WeaponDatabase> &p_weapons,
-		int p_class_mask, int p_team_mask, const Array &p_current, const Callable &p_availability,
-		const Ref<RtxtStringFile> &p_text) {
-	if (p_weapons.is_null()) return {};
-	std::vector<opennova::playersav::KitEntry> current;
-	for (int i = 0; i < p_current.size(); ++i) {
-		const Dictionary row = p_current[i];
-		opennova::playersav::KitEntry entry;
-		entry.name = to_std(String(row.get("name", "")));
-		entry.ammo_primary = int(row.get("ammo_primary", -1));
-		current.push_back(std::move(entry));
-	}
-	opennova::menu::WeaponAvailability availability;
-	if (p_availability.is_valid())
-		availability = [p_availability](const std::string &name) { return int(p_availability.call(to_gd(name))); };
-	return loadout_defs(p_weapons, opennova::menu::armory_fill_grenades(runtime_, p_weapons->native_file(),
-			p_class_mask, p_team_mask, current, availability, game_text_lookup(p_text)));
-}
-
-double MenuDriver::armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
-		const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades) const {
-	if (p_weapons.is_null()) return 0.0;
-	return opennova::menu::armory_screen_weight(runtime_, p_weapons->native_file(),
-			loadout_parents(p_parents), loadout_indices(p_grenades));
-}
-
 int MenuDriver::update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
 		int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
 		const Ref<RtxtStringFile> &p_menutxt) {
@@ -1209,14 +1088,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_clear_color"),
 			&MenuDriver::vehicle_preview_clear_color);
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
-	ClassDB::bind_method(D_METHOD("fill_armory_ammo", "weapons", "control", "parent", "current_name", "current_clips", "text"), &MenuDriver::fill_armory_ammo);
-	ClassDB::bind_method(D_METHOD("fill_loadout_slot", "weapons", "control", "slot", "class_mask", "team_mask", "availability", "none_label", "text"), &MenuDriver::fill_loadout_slot);
-	ClassDB::bind_method(D_METHOD("loadout_selected_weapon", "control", "rows"), &MenuDriver::loadout_selected_weapon);
-	ClassDB::bind_method(D_METHOD("select_loadout_weapon_name", "weapons", "control", "rows", "name"), &MenuDriver::select_loadout_weapon_name);
-	ClassDB::bind_method(D_METHOD("armory_selected_clips", "control"), &MenuDriver::armory_selected_clips);
-	ClassDB::bind_method(D_METHOD("armory_loadout_pick", "weapons", "primary", "secondary", "accessory", "grenades"), &MenuDriver::armory_loadout_pick);
-	ClassDB::bind_method(D_METHOD("fill_armory_grenades", "weapons", "class_mask", "team_mask", "current", "availability", "text"), &MenuDriver::fill_armory_grenades);
-	ClassDB::bind_method(D_METHOD("armory_loadout_weight", "weapons", "parents", "grenades"), &MenuDriver::armory_loadout_weight);
 	ClassDB::bind_method(D_METHOD("set_mission_controls", "lists", "briefings", "accepts"), &MenuDriver::set_mission_controls);
 	ClassDB::bind_method(D_METHOD("clear_mission_rows"), &MenuDriver::clear_mission_rows);
 	ClassDB::bind_method(D_METHOD("seed_mission_list", "id", "rows"), &MenuDriver::seed_mission_list);

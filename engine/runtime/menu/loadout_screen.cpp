@@ -2,7 +2,7 @@
 
 #include "loadout_labels.h"
 #include "menu_runtime.h"
-#include <base/io/strutil.h>
+#include "player_info_kit.h"
 #include <runtime/world/player_loadout.h>
 
 #include <algorithm>
@@ -96,43 +96,6 @@ void loadout_select_weapon_row(MenuRuntime &menu, const std::string &control,
 	menu.select_row(combo, found, false);
 }
 
-void loadout_select_weapon_name(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const std::string &control, const LoadoutSlotRows &rows, const std::string &name) {
-	const int combo = menu.widget_id(control);
-	if (combo < 0 || name.empty()) return;
-	for (size_t row = 1; row < rows.size(); ++row) {
-		const auto *w = weapon(weapons, rows[row]);
-		if (w != nullptr && strutil::iequals(w->weapon_name, name)) {
-			menu.select_row(combo, static_cast<int>(row), false);
-			return;
-		}
-	}
-}
-
-ArmoryLoadoutPick armory_loadout_pick(const MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const LoadoutSlotRows (&rows)[3], const std::vector<int> &grenades) {
-	ArmoryLoadoutPick out;
-	for (size_t i = 0; i < std::size(kParents); ++i) {
-		const auto *w = weapon(weapons, loadout_selected_weapon(menu, kParents[i], rows[i]));
-		out.names[i] = w != nullptr ? std::string(w->weapon_name) : std::string();
-		out.clips[i] = armory_selected_clips(menu, kParents[i]);
-	}
-	// A grenade position's count is its GRENADE_AMMO row (the rows start at 0
-	// clips); a position at 0, or with no control, carries nothing.
-	for (size_t i = 0; i < grenades.size() && i < std::size(kGrenades); ++i) {
-		const int combo = menu.widget_id(kGrenades[i]);
-		const int clips = combo >= 0 ? menu.selected_row(combo) : 0;
-		const auto *w = weapon(weapons, grenades[i]);
-		if (clips <= 0 || w == nullptr) continue;
-		playersav::KitEntry entry;
-		entry.name = w->weapon_name;
-		entry.ammo_primary = clips;
-		entry.ammo_secondary = -1;
-		entry.flags = -1;
-		out.grenades.push_back(std::move(entry));
-	}
-	return out;
-}
 
 // [orig: PlayerInfo_PopulateAmmoComboBoxes @0x55def0; the ACCESSORY leg is the same
 //  logic inlined in PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8b0]
@@ -208,46 +171,7 @@ std::vector<int> player_info_fill_grenades(MenuRuntime &menu, const def::DefWeap
 	return indices;
 }
 
-// Controls are assigned BEFORE checking availability: a banned grenade keeps
-// its position with a zero-only row [orig: @0x5647a4..0x5648a6;
-//  WeaponDef_RegisterUICallbacks @0x567020 -> WeaponDef_UISlotSelectCallback, args 0/1/2].
-std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		int class_mask, int team_mask, const std::vector<playersav::KitEntry> &current,
-		const WeaponAvailability &availability, const hud::GameTextLookup &text) {
-	const auto indices = grenade_indices(weapons, class_mask, team_mask);
-	for (size_t i = 0; i < std::size(kGrenades); ++i) {
-		const int combo = menu.widget_id(kGrenades[i]);
-		if (combo < 0) continue;
-		const auto *w = i < indices.size() ? weapon(weapons, indices[i]) : nullptr;
-		const bool allowed = w && (!availability || availability(w->weapon_name) != 0);
-		const int maxclips = allowed ? w->maxclips : 0;
-		fill_clips(menu, combo, w, 0, maxclips, text);
-		if (!w) continue;
-		int selected = 0;
-		for (const auto &entry : current) {
-			if (!strutil::iequals(entry.name, w->weapon_name)) continue;
-			selected = world::player_info_default_grenade_row(entry.ammo_primary, maxclips);
-			break;
-		}
-		menu.select_row(combo, selected, false);
-	}
-	return indices;
-}
 
-// The armory's current-parent reselection: counts are one-based; a changed or
-// absent current name takes the full default [orig: the fill @0x565cd0].
-void armory_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const std::string &control, int parent, const std::string &current_name,
-		int current_clips, const hud::GameTextLookup &text) {
-	const int combo = menu.widget_id(control + "_AMMO1");
-	if (combo < 0) return;
-	const auto *w = weapon(weapons, parent);
-	const int maxclips = w ? w->maxclips : 0;
-	fill_clips(menu, combo, w, 1, maxclips, text);
-	if (maxclips <= 0) return;
-	if (current_name.empty() || !strutil::iequals(w->weapon_name, current_name)) current_clips = -1;
-	menu.select_row(combo, world::player_info_default_clip_row(current_clips, maxclips) - 1, false);
-}
 
 // Preserve the companion's grouping: sub-weapon terms first, then ONE parent
 // sum, then grenade terms. Parent counts <=0 use maxclips; sub-weapons also
@@ -281,35 +205,236 @@ double player_info_screen_weight(const MenuRuntime &menu, const def::DefWeaponsF
 	return total;
 }
 
-// The WEAPON screen still defers its ammo-TYPE/sub-weapon cascade. Parent
-// weights come first; extra-ammo terms read positive selected rows. An
-// absent grenade control contributes zero clips.
-// [orig: UI_CalculateEquippedWeaponsWeight @0x565490 -- adm[85]/65536 +
-//  (row+1)*ammoDef[84]/65536; PlayerInfo_CalculateLoadoutWeight @0x55f1f0 sibling;
-//  the grenade selected_row*adm[84] arm @0x5655c9..0x56561c]
-// NOT yet the retail gates (D-MNU-9): retail reads each AMMO1 / TYPE /
-// GRENADE arm only while its control IsShown (@0x565504 / @0x56556d /
-// @0x5655d6) and has no maxclips default for an unselected AMMO1 (no term at
-// all); this side reads hidden controls too and lets armory_selected_clips'
-// -1 fall to def_loadout_weight's maxclips term. Vacuous today (the armory
-// never hides these controls), pinned as ours in loadout_screen_test.
+// [orig: UI_CalculateEquippedWeaponsWeight @0x565490 - the weapon term adm[85] / 65536
+//  @0x5654e4, AMMO1 @0x565504..0x56554d and AMMO2 @0x56556d..0x5655b6 (the shown gates,
+//  (row + 1) * the row value's adm[84] / 65536), the grenade @0x5655d6..0x56561c (row *
+//  adm[84] / 65536); a float total]. The AMMO1 / AMMO2 rows carry the category's weapon
+// (their fill's value), the grenade rows the position's.
 double armory_screen_weight(const MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const LoadoutParentIndices &parents, const std::vector<int> &grenades) {
-	std::vector<def::DefWeaponDef> rows;
-	std::vector<int> counts;
+	float total = 0.0f;
+	const auto shown_row = [&menu](const std::string &name) {
+		const int id = menu.widget_id(name);
+		return id >= 0 && menu.is_widget_shown(id) ? menu.selected_row(id) : -1;
+	};
+	const auto add = [&total](double term) { total = static_cast<float>(term + total); };
 	for (size_t i = 0; i < parents.size(); ++i) {
 		const auto *w = weapon(weapons, parents[i]);
-		if (!w) continue;
-		rows.push_back(*w);
-		counts.push_back(armory_selected_clips(menu, kParents[i]));
-	}
-	double total = def::def_loadout_weight(rows.data(), counts.data(), rows.size());
-	for (size_t i = 0; i < grenades.size() && i < std::size(kGrenades); ++i) {
-		const int combo = menu.widget_id(kGrenades[i]);
-		const int clips = combo >= 0 ? menu.selected_row(combo) : 0;
-		if (clips > 0) total += def::def_extra_ammo_weight(weapon(weapons, grenades[i]), clips);
+		if (menu.widget_id(kParents[i]) >= 0) {
+			if (w) add(static_cast<double>(w->weaponweight));
+			for (const char *ammo : {"_AMMO1", "_AMMO2"}) {
+				const int row = shown_row(std::string(kParents[i]) + ammo);
+				if (w && row >= 0) add((row + 1) * static_cast<double>(w->clipweight));
+			}
+		}
+		const auto *g = i < grenades.size() ? weapon(weapons, grenades[i]) : nullptr;
+		const int row = shown_row(kGrenades[i]);
+		if (g && row >= 0) add(row * static_cast<double>(g->clipweight));
 	}
 	return total;
+}
+
+// --- the per-class loadout memory -------------------------------------------------
+
+namespace {
+
+const playersav::KitPage kEmptyPage{};
+
+// The count a fill selects: the row whose count `saved` names, the last (`maximum`) for an
+// untouched -1, none for any other [orig: `saved == i || (saved == -1 && i == maxclips)`
+// @0x564cda / @0x564e5a / @0x564880].
+int armory_count_row(int saved, int first, int last, int maximum) {
+	if (saved >= first && saved <= last) return saved - first;
+	if (saved == -1 && maximum >= first && maximum <= last) return maximum - first;
+	return -1;
+}
+
+} // namespace
+
+void ArmoryLoadoutBuffers::stage(const playersav::Record &record, int entity_team,
+		const playersav::KitPage &spawn) {
+	const playersav::Side &side = entity_team == 1 || entity_team == 3 ? record.blue : record.red;
+	for (int c = 5; c < kArmoryClassBuffers; ++c) {
+		const size_t at = static_cast<size_t>(c - 5);
+		pages_[static_cast<size_t>(c)] =
+				at < side.pages.size() ? side.pages[at] : playersav::KitPage{};
+	}
+	pages_[1] = spawn;
+}
+
+bool ArmoryLoadoutBuffers::stage_on_show(const playersav::Record &record, int entity_team,
+		const playersav::KitPage &spawn) {
+	const int32_t mask = armory_team_mask(entity_team);
+	if (mask == staged_team_mask_) return false;
+	staged_team_mask_ = mask;
+	stage(record, entity_team, spawn);
+	return true;
+}
+
+const playersav::KitPage &ArmoryLoadoutBuffers::page(int player_class) const {
+	return player_class >= 0 && player_class < kArmoryClassBuffers
+			? pages_[static_cast<size_t>(player_class)]
+			: kEmptyPage;
+}
+
+void ArmoryLoadoutBuffers::store(int player_class, playersav::KitPage page) {
+	if (player_class >= 0 && player_class < kArmoryClassBuffers)
+		pages_[static_cast<size_t>(player_class)] = std::move(page);
+}
+
+int32_t ArmoryScreenPairs::clips_of(int32_t catalog_row) const {
+	return catalog_row >= 0 && static_cast<size_t>(catalog_row) < clips.size()
+			? clips[static_cast<size_t>(catalog_row)]
+			: -1;
+}
+
+int32_t ArmoryScreenPairs::secondary_of(int32_t catalog_row) const {
+	return catalog_row >= 0 && static_cast<size_t>(catalog_row) < secondary.size()
+			? secondary[static_cast<size_t>(catalog_row)]
+			: -1;
+}
+
+void ArmoryScreenPairs::set_clips(int32_t catalog_row, int32_t value) {
+	if (catalog_row < 0) return;
+	if (static_cast<size_t>(catalog_row) >= clips.size())
+		clips.resize(static_cast<size_t>(catalog_row) + 1, -1);
+	clips[static_cast<size_t>(catalog_row)] = value;
+}
+
+void ArmoryScreenPairs::set_secondary(int32_t catalog_row, int32_t value) {
+	if (catalog_row < 0) return;
+	if (static_cast<size_t>(catalog_row) >= secondary.size())
+		secondary.resize(static_cast<size_t>(catalog_row) + 1, -1);
+	secondary[static_cast<size_t>(catalog_row)] = value;
+}
+
+void armory_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const std::string &control, int parent, ArmoryScreenPairs &pairs,
+		const hud::GameTextLookup &text) {
+	const int category = control == kParents[0] ? 0 : control == kParents[1] ? 1 : -1;
+	const int ammo1 = menu.widget_id(control + "_AMMO1");
+	const int type = category >= 0 ? menu.widget_id(control + "_AMMO1_TYPE") : -1;
+	const int ammo2 = menu.widget_id(control + "_AMMO2");
+	const auto *w = weapon(weapons, parent);
+	const int32_t row = catalog_index_of_row(parent);
+	if (ammo1 >= 0) {
+		if (w == nullptr || w->clipsize <= 0) {
+			menu.set_widget_shown(ammo1, false);
+			if (type >= 0) menu.set_widget_shown(type, false);
+			if (ammo2 >= 0) menu.set_widget_shown(ammo2, false);
+		} else {
+			menu.set_widget_shown(ammo1, true);
+			if (type >= 0) {
+				// The byte's row, -1 read as 0, ahead of the NOAMMOTYPES reset; a row the
+				// list lacks keeps its selection [orig: @0x564c0e..0x564c2e;
+				// CListWnd_SetRowVisibility @0x645190 refuses it @0x6451a5].
+				const int32_t shown = pairs.type[category] == -1 ? 0 : pairs.type[category];
+				if (shown >= 0 && shown < menu.item_count(type)) menu.select_row(type, shown, false);
+				menu.set_widget_shown(type, true);
+			}
+			fill_clips(menu, ammo1, w, 1, w->maxclips, text);
+			const bool locked = (w->flags2 & def::DEF_WEAPON_FLAG2_NOAMMOTYPES) != 0;
+			if (type >= 0) menu.set_widget_disabled(type, locked);
+			if (locked && category >= 0) pairs.type[category] = 0;
+			menu.select_row(ammo1,
+					armory_count_row(pairs.clips_of(row), 1, w->maxclips, w->maxclips), false);
+		}
+	}
+	// AMMO2 over a listed weapon: its other-round subclass's rows, else hidden (the NONE
+	// row's catalog entry, which carries no subclass, hides it too)
+	// [orig: @0x564d46..0x564e7f; the stricmp walk @0x564d6a..0x564d9c].
+	if (ammo2 >= 0) {
+		const auto *sub = w ? weapon(weapons, def::def_subclass_weapon_index(weapons.entries,
+										  weapons.count, parent))
+							: nullptr;
+		if (sub == nullptr || sub->clipsize <= 0) {
+			menu.set_widget_shown(ammo2, false);
+		} else {
+			menu.set_widget_shown(ammo2, true);
+			fill_clips(menu, ammo2, sub, 1, sub->maxclips, text);
+			const int pick =
+					armory_count_row(pairs.secondary_of(row), 1, sub->maxclips, sub->maxclips);
+			menu.select_row(ammo2, pick, false);
+		}
+	}
+}
+
+void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page,
+		ArmoryScreenPairs &pairs, const hud::GameTextLookup &text) {
+	for (const char *list : kParents) {
+		const int id = menu.widget_id(list);
+		if (id >= 0) menu.select_row(id, 0, false);
+	}
+	const PlayerInfoKitRestore walk = player_info_restore_kit(page, weapons);
+	pairs.clips = walk.ammo_primary;
+	pairs.secondary = walk.ammo_secondary;
+	for (size_t i = 0; i < std::size(kParents); ++i) {
+		if (walk.select[i] >= 0)
+			loadout_select_weapon_row(menu, kParents[i], rows[i], walk.select[i] - 1);
+		if (i < 2 && walk.has_type[i]) pairs.type[i] = walk.type[i];
+	}
+	for (size_t i = 0; i < std::size(kParents); ++i) {
+		const int parent = loadout_selected_weapon(menu, kParents[i], rows[i]);
+		armory_fill_ammo(menu, weapons, kParents[i], parent, pairs, text);
+	}
+}
+
+std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		int class_mask, int team_mask, const ArmoryScreenPairs &pairs,
+		const WeaponAvailability &availability, const hud::GameTextLookup &text) {
+	const auto indices = grenade_indices(weapons, class_mask, team_mask);
+	for (size_t i = 0; i < std::size(kGrenades); ++i) {
+		const int combo = menu.widget_id(kGrenades[i]);
+		if (combo < 0) continue;
+		const auto *w = i < indices.size() ? weapon(weapons, indices[i]) : nullptr;
+		menu.set_widget_shown(combo, w != nullptr);
+		if (w == nullptr) continue;
+		const bool allowed = !availability || availability(w->weapon_name) != 0;
+		const int last = allowed ? w->maxclips : 0;
+		fill_clips(menu, combo, w, 0, last, text);
+		const int32_t saved = pairs.clips_of(catalog_index_of_row(indices[i]));
+		menu.select_row(combo, armory_count_row(saved, 0, last, w->maxclips), false);
+	}
+	return indices;
+}
+
+playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
+		const def::DefWeaponsFile &weapons, const LoadoutSlotRows (&rows)[3],
+		const std::vector<int> &grenades, const ArmoryScreenPairs &pairs, int entity_team,
+		int selected_class) {
+	playersav::KitPage out;
+	const auto add = [&out](const std::string &name, int32_t primary, int32_t secondary,
+							 int32_t flags) {
+		playersav::KitEntry entry;
+		entry.name = name;
+		entry.ammo_primary = primary;
+		entry.ammo_secondary = secondary;
+		entry.flags = flags;
+		out.entries.push_back(std::move(entry));
+	};
+	add(entity_team == 2 || entity_team == 4 ? kKitKnifeRed : kKitKnifeBlue, kKitFiller, kKitFiller,
+			kKitFiller);
+	if (selected_class == kMedicPlayerClass) add(kKitMedpack, kKitFiller, kKitFiller, kKitFiller);
+	for (size_t i = 0; i < std::size(kParents); ++i) {
+		if (menu.widget_id(kParents[i]) < 0) continue;
+		const int parent = loadout_selected_weapon(menu, kParents[i], rows[i]);
+		const auto *w = weapon(weapons, parent);
+		if (w == nullptr) continue;
+		const int32_t row = catalog_index_of_row(parent);
+		// The type byte, sign-extended: -1 for ACCESSORY [orig: @0x565b64..0x565b8d].
+		const int32_t flags = i < 2 ? static_cast<int8_t>(pairs.type[i]) : -1;
+		add(w->weapon_name, pairs.clips_of(row), pairs.secondary_of(row), flags);
+	}
+	for (size_t i = 0; i < std::size(kGrenades); ++i) {
+		const int combo = menu.widget_id(kGrenades[i]);
+		if (combo < 0 || !menu.is_widget_shown(combo)) continue;
+		const auto *w = i < grenades.size() ? weapon(weapons, grenades[i]) : nullptr;
+		if (w == nullptr) continue;
+		const int32_t count = pairs.clips_of(catalog_index_of_row(grenades[i]));
+		add(w->weapon_name, count, kKitFiller, kKitFiller);
+	}
+	return out;
 }
 
 } // namespace opennova::menu

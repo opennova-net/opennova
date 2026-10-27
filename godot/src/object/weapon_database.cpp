@@ -67,9 +67,6 @@ void WeaponDatabase::_bind_methods() {
 			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
 			&WeaponDatabase::armory_resolve_selected_class);
 	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("armory_class_filter_mask", "selected_class"),
-			&WeaponDatabase::armory_class_filter_mask);
-	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_class_catalog"),
 			&WeaponDatabase::armory_class_catalog);
 
@@ -262,10 +259,6 @@ TypedArray<ArmoryClassRow> WeaponDatabase::armory_class_catalog() {
 		rows.push_back(row);
 	}
 	return rows;
-}
-
-int WeaponDatabase::armory_class_filter_mask(int p_selected_class) {
-	return opennova::world::armory_class_filter_mask(p_selected_class);
 }
 
 int WeaponDatabase::encumbrance_class(double weight) const {

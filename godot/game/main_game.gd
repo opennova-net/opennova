@@ -357,6 +357,7 @@ func _ready() -> void:
 	add_child(_armory_presenter)
 	_armory_presenter.setup(_world.armory_view(), _player_presenter,
 			_hud if _hud != null else self)
+	_armory_presenter.set_player_profiles(PlayerProfile.store())
 	_armory_presenter.opened.connect(func() -> void: _state = State.ARMORY)
 	_armory_presenter.closed.connect(resume)
 	# The vehicle screen over live play, like the armory (VEHICLE holds a screen).
@@ -972,7 +973,6 @@ func set_local_player_profile(profile: Dictionary) -> void:
 func _open_armory() -> bool:
 	if _armory_presenter == null:
 		return false
-	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return _armory_presenter.open()
 
 
@@ -1384,6 +1384,10 @@ func _on_world_loaded() -> void:
 	# here until unload (ADR 0042 d6): DevTools holds it in C++ (the stats-board
 	# pattern) and does the record push / request drain with no GDScript relay.
 	_dev_tools.set_simulation(sim)
+	# Every playing process's mission start stages the armory's class pages from the
+	# profile and the spawn buffer (ArmoryPresenter.on_mission_started).
+	if _armory_presenter != null:
+		_armory_presenter.on_mission_started()
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
 		return
@@ -2038,7 +2042,6 @@ func mcp_open_armory() -> Error:
 	# is the useitem key's gameplay rule (Simulation.local_player_use_item_arm)
 	# [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1], not a
 	# screen precondition — open() is the presenter's staged direct-open seam.
-	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return OK if _armory_presenter.open() else ERR_UNAVAILABLE
 
 
