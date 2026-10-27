@@ -16,6 +16,7 @@
 // against the PRE-lock history and sleeps 14 times to 270, leaving 14 units; the third
 // smooths (7 * 46 + 46 + 4) >> 3 = 46 again (a post-lock history of 256 would give 242 and
 // one sleep). Unlocked, the same first frame runs no update.
+#include <base/io/perf_clock.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/tick_accumulator.h>
@@ -156,6 +157,7 @@ void test_the_session_locks_a_live_frame_only() {
 	CHECK(first.ticks_run() == 1);
 	CHECK(first.frame_stamp_ms == 1013);
 	CHECK(clock.sleeps == 13);
+	CHECK(first.perf.lock_sleeps == 13);
 
 	// The word clear: no lock, no stamp handed back.
 	inmatch::FrameInput off = live;
@@ -164,6 +166,7 @@ void test_the_session_locks_a_live_frame_only() {
 	const inmatch::FrameOutcome second = session->advance(off);
 	CHECK(second.frame_stamp_ms == 0);
 	CHECK(clock.sleeps == 13);
+	CHECK(second.perf.lock_sleeps == 0);
 
 	// No stamp (not a live frame): no lock.
 	inmatch::FrameInput direct = live;
@@ -171,6 +174,50 @@ void test_the_session_locks_a_live_frame_only() {
 	const inmatch::FrameOutcome third = session->advance(direct);
 	CHECK(third.frame_stamp_ms == 0);
 	CHECK(clock.sleeps == 13);
+	CHECK(third.perf.lock_sleeps == 0);
+}
+
+// The session frame's phases, an instrument (FramePerf; the embedder's SIM_FRAME_* stats
+// slots): the bank counts the lock's sleeps, the updates' span holds their ticks, and the bank,
+// the updates and the legs past the drain are disjoint spans inside the frame's wall.
+struct SpinRole final : inmatch::Role {
+	mission::MissionKernel kernel;
+	SpinRole() { bind(kernel); }
+	inmatch::RoleKind kind() const override { return inmatch::RoleKind::SinglePlayer; }
+	void run_tick(const inmatch::TickInput &) override {
+		const uint64_t start = io::perf_now_us();
+		while (io::perf_now_us() - start < 1500) {
+		}
+	}
+	bool reset_to_baseline(inmatch::SessionError &) override { return true; }
+	void close() override {}
+};
+
+void test_the_frame_names_its_phases() {
+	auto role = std::make_unique<SpinRole>();
+	auto session = std::make_unique<inmatch::Session>(*role);
+	CHECK(session->begin_load().applied() && session->complete_load().applied());
+	FakeClock clock;
+	session->set_frame_lock_clock(&clock);
+
+	inmatch::FrameInput live;
+	live.delta_seconds = 0.002;
+	live.frame_lock = true;
+	live.frame_stamp_ms = clock.now;
+	const uint64_t start = io::perf_now_us();
+	const inmatch::FrameOutcome out = session->advance(live);
+	const int64_t wall = static_cast<int64_t>(io::perf_now_us() - start);
+	CHECK(out.ticks_run() == 1);
+	CHECK(out.perf.lock_sleeps == 13);
+	CHECK(out.perf.tick_us >= 1500);
+	CHECK(out.perf.bank_us >= 0);
+	CHECK(out.perf.render_legs_us >= 0);
+	CHECK(out.perf.bank_us + out.perf.tick_us + out.perf.render_legs_us <= wall);
+	// The input frame's parts sit inside the updates' span, beside the tick.
+	CHECK(out.perf.input_rows_us >= 0 && out.perf.input_drain_us >= 0 &&
+			out.perf.input_apply_us >= 0);
+	CHECK(out.perf.input_rows_us + out.perf.input_drain_us + out.perf.input_apply_us + 1500 <=
+			out.perf.tick_us);
 }
 
 } // namespace
@@ -181,6 +228,7 @@ int main() {
 	test_the_lock_stops_at_five_hundred_sleeps();
 	test_the_frame_rate_reads_the_locked_bank();
 	test_the_session_locks_a_live_frame_only();
+	test_the_frame_names_its_phases();
 	if (failures != 0) {
 		std::printf("frame_lock: %d failure(s)\n", failures);
 		return 1;

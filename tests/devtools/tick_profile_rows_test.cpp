@@ -129,6 +129,26 @@ void test_row_tree_shape() {
 	const int explosions = find_row("update_explosions");
 	CHECK(explosions >= 0 && parent_of(explosions) == update,
 			"the explosion lap nests under the entity update");
+	// The session frame's phases sit beside the sim step under the session leg, and its
+	// remainder is what is past all four.
+	const char *kPhases[] = {"session_frame_bank", "update_input_frames",
+			"session_frame_render_legs", "session_frame_marshal", "session_frame_other"};
+	for (const char *id : kPhases) {
+		const int row = find_row(id);
+		CHECK(row >= 0 && rows::kRows[row].depth == rows::kRows[find_row("sim")].depth,
+				"'%s' is a session-leg row beside the sim step", id);
+	}
+	const char *kInputParts[] = {"update_input_rows", "update_input_drain", "update_input_apply",
+			"update_input_other"};
+	for (const char *id : kInputParts) {
+		const int row = find_row(id);
+		CHECK(row >= 0 && std::strcmp(rows::kRows[parent_of(row)].id, "update_input_frames") == 0,
+				"'%s' nests under the updates' input frames", id);
+	}
+	const int other = find_row("session_frame_other");
+	CHECK(other >= 0 && rows::kRows[other].slot == Slot::SIM_ADVANCE &&
+					rows::kRows[other].slot_count == 4,
+			"the session frame's remainder is SIM_ADVANCE past its four phases");
 	const char *kRetired[] = {"world_ai", "ai_other_entities", "ai_auth_vehicles",
 			"ai_client_vehicles", "world_throwables", "world_weapons", "world_destruction",
 			"host_player"};

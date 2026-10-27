@@ -278,6 +278,8 @@ private:
 	// inactive and no producer reads a clock.
 	Ref<FrameStats> frame_stats_;
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
+	// The session frame's phases (FramePerf) onto the SIM_FRAME_* slots, as SIM_ADVANCE.
+	void fold_frame_phases(const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us);
 	opennova::inmatch::FrameInput begin_session_frame(
 			const Ref<MissionFrameInput> &p_input);
 	// A joiner sim with no load left to run (one that dialed after its own mission loaded)

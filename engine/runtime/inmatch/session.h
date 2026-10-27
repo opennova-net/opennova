@@ -316,6 +316,7 @@ struct TickOutcome {
 	TickStatus status = TickStatus::Declined;
 	int32_t logic_tick = 0;
 	int64_t tick_us = 0; // the role's tick alone (no input prologue, no observer)
+	int64_t input_us = 0; // the tick's input prologue (Role::apply_input), an instrument
 	int64_t net_us = 0;  // the tick's wire leg, as the role measured it
 	SessionError error;
 
@@ -338,6 +339,18 @@ struct FramePerf {
 	// The updates the frame's drain ran, paused ones included (the CPU share's
 	// update count, world::TickAccumulator::record_frame_work).
 	int32_t updates = 0;
+	// The frame's other phases, an instrument (the embedder's SIM_FRAME_* stats slots;
+	// tick_us above is the updates' span): the bank (its frame lock's sleeps included), the
+	// legs past the drain, and the lock's sleeps.
+	int64_t bank_us = 0;
+	int64_t render_legs_us = 0;
+	int32_t lock_sleeps = 0;
+	// Inside the updates, summed over them: the running updates' device-router passes (the
+	// keyboard pass, the sample, the records' queue), their input-event drains, and every
+	// tick's input prologue.
+	int64_t input_rows_us = 0;
+	int64_t input_drain_us = 0;
+	int64_t input_apply_us = 0;
 };
 
 struct FrameOutcome {
@@ -859,7 +872,8 @@ private:
 	world::FrameLockClock *frame_lock_clock_ = nullptr; // null = the tick-count one
 	// The frame's bank with its lock when the input asks for one (live frames only): the
 	// ticks due; `lock_stamp_ms` the lock's last read when it slept, else 0.
-	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms);
+	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,
+			int32_t &lock_sleeps);
 	// The mission-start frames still to draw (g_MissionStartBlankFrameCount) and whether the
 	// last one re-based the clock after its render (g_MainLoopRebaseClockAfterRender).
 	static constexpr int32_t kStartRebaseFrames = 3;

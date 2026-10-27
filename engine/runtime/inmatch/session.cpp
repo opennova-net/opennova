@@ -56,14 +56,17 @@ world::FrameLockClock &tick_count_frame_lock_clock() {
 
 void Session::set_frame_lock_clock(world::FrameLockClock *clock) { frame_lock_clock_ = clock; }
 
-int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms) {
+int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,
+		int32_t &lock_sleeps) {
 	lock_stamp_ms = 0;
+	lock_sleeps = 0;
 	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
 	world::FrameLock lock;
 	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &tick_count_frame_lock_clock();
 	lock.stamp_ms = input.frame_stamp_ms;
 	const int32_t due = accumulator_.bank(elapsed, &lock);
 	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
+	lock_sleeps = lock.sleeps;
 	return due;
 }
 
@@ -1141,12 +1144,14 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// edges of their own to consume, then the drain of its records
 		// (TickInputSource carries the witness).
 		const bool new_sample = previous_ran && kernel != nullptr;
+		const int64_t rows_start = now_us();
 		if (source != nullptr) source->run_update_rows(kernel->world.logic_tick, new_sample);
 		if (source != nullptr) {
 			latch_packet(source->sample_tick(kernel->world.logic_tick));
 			queue_update_records(*source);
 			consume_one_shots = true;
 		}
+		out.perf.input_rows_us += now_us() - rows_start;
 		TickInput tick_input = merged_tick_input(input, consume_one_shots);
 		tick_input.source = source;
 		// The mouse pump's axis input for this tick (world::MouseAxisPump
@@ -1159,7 +1164,9 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		// The update's drain, ahead of its body: a role tick's input prologue reads its
 		// outcome (TickInput::drained).
 		if (kernel != nullptr) {
+			const int64_t drain_start = now_us();
 			role_->drain_input_events(source, tick_input.player.held_action_bits, flips_apply);
+			out.perf.input_drain_us += now_us() - drain_start;
 			tick_input.drained = true;
 		}
 		// The drain left the word raised (an odd count of pause rows): the records behind
@@ -1191,6 +1198,7 @@ FrameOutcome Session::run_updates(int32_t due, const FrameInput &input, bool tra
 		//  the port does not model)]
 		tick_input.last_tick_of_batch = i + 1 == due;
 		TickOutcome tick = run_one_tick(tick_input);
+		out.perf.input_apply_us += tick.input_us;
 		if (tick.terminal()) {
 			out.status = tick.status == TickStatus::SessionLost
 					? FrameStatus::SessionLost : FrameStatus::Fatal;
@@ -1242,8 +1250,10 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	}
 	role_->kernel()->world.rules.last_tick_of_batch = input.last_tick_of_batch;
 	role_->kernel()->world.rules.update_head_stepped = input.head_stepped;
+	const int64_t input_start = now_us();
 	role_->apply_input(input);
 	const int64_t tick_start = now_us();
+	out.input_us = tick_start - input_start;
 	role_->run_tick(input);
 	// The lose cine's edit fade scaled the main loop's smoothing history from
 	// inside this update. Retail's store lands mid-drain, after the bank's EMA
@@ -1455,7 +1465,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 				? input.since_render_seconds : input.delta_seconds;
 		rebase_clock_ = false;
 		uint32_t lock_stamp_ms = 0;
-		const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
+		int32_t lock_sleeps = 0;
+		const int64_t bank_start = now_us();
+		const int32_t due = bank_frame(elapsed, input, lock_stamp_ms, lock_sleeps);
+		const int64_t bank_us = now_us() - bank_start;
 		// The mouse pump heads every main frame, ahead of the pause word's test, so its
 		// words hold what the paused frames pumped: the paused frame's cursor waits for
 		// its first update as a running frame's does, and no input frame consumes the
@@ -1468,9 +1481,12 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		pending_input_.cursor_dy += input.player.cursor_dy;
 		out = run_updates(due, input, /*transport=*/false);
 		out.frame_stamp_ms = lock_stamp_ms;
+		out.perf.bank_us = bank_us;
+		out.perf.lock_sleeps = lock_sleeps;
 		// A frame whose updates all stayed paused ran no tick.
 		if (out.ticks.empty() && !out.terminal()) out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
+		const int64_t render_start = now_us();
 		// The render callback's choice after the drain (draws_scene, with the head's cine and
 		// world-skip legs); both arms count.
 		step_scene_head(input, out);
@@ -1493,6 +1509,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 			step_map_overlay_death_clear(out);
 			step_cine_render_frame();
 		}
+		out.perf.render_legs_us = now_us() - render_start;
 		return out;
 	}
 	if (state_ != State::Running) {
@@ -1517,7 +1534,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 			? input.since_render_seconds : input.delta_seconds;
 	rebase_clock_ = false;
 	uint32_t lock_stamp_ms = 0;
-	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms);
+	int32_t lock_sleeps = 0;
+	const int64_t bank_start = now_us();
+	const int32_t due = bank_frame(elapsed, input, lock_stamp_ms, lock_sleeps);
 	// A lock that slept restamped the frame's start with its last read, which the CPU share
 	// measures its work from [orig: Game_MainLoop @0x52B8D7, the share's read
 	// @0x52BA9B..0x52BAA1].
@@ -1528,12 +1547,16 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		role_->observe_frame_rate(accumulator_.average_fps());
 		role_->observe_cpu_share(accumulator_.cpu_percent());
 	}
+	const int64_t bank_us = now_us() - bank_start;
 	out = run_updates(due, input, /*transport=*/false);
 	out.frame_stamp_ms = lock_stamp_ms;
+	out.perf.bank_us = bank_us;
+	out.perf.lock_sleeps = lock_sleeps;
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
 	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
+	const int64_t render_start = now_us();
 	// The render callback reads its view word after the drain and draws the scene frame or the
 	// status page in its place (draws_scene, with the head's cine and world-skip legs); each
 	// arm's render counts.
@@ -1587,6 +1610,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		step_map_overlay_death_clear(out);
 		step_cine_render_frame();
 	}
+	out.perf.render_legs_us = now_us() - render_start;
 	return out;
 }
 

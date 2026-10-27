@@ -292,10 +292,23 @@ bool Simulation::session_draws_scene(const Ref<HudToggles> &p_toggles) const {
 
 Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
-	const opennova::inmatch::FrameOutcome outcome =
-			session_.advance(begin_session_frame(p_input));
+	// The marshalling's two halves, timed for the board (fold_frame_phases): the typed input
+	// ahead of the session frame, the fold and the outcome after it.
+	const bool timing = runtime_profiling_enabled_ && frame_stats_.is_valid();
+	Time *time = timing ? Time::get_singleton() : nullptr;
+	const int64_t head_start = time != nullptr ? static_cast<int64_t>(time->get_ticks_usec()) : 0;
+	const opennova::inmatch::FrameInput input = begin_session_frame(p_input);
+	const int64_t head_us =
+			time != nullptr ? static_cast<int64_t>(time->get_ticks_usec()) - head_start : 0;
+	const opennova::inmatch::FrameOutcome outcome = session_.advance(input);
+	const int64_t tail_start = time != nullptr ? static_cast<int64_t>(time->get_ticks_usec()) : 0;
 	fold_frame_stats(outcome);
-	return godot_outcome(outcome);
+	Ref<MissionFrameOutcome> out = godot_outcome(outcome);
+	if (time != nullptr) {
+		fold_frame_phases(outcome.perf,
+				head_us + static_cast<int64_t>(time->get_ticks_usec()) - tail_start);
+	}
+	return out;
 }
 
 Ref<MissionFrameOutcome> Simulation::step_session_frame(

@@ -33,4 +33,21 @@ void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outco
 			});
 }
 
+// Every captured frame, as MissionRoot's SIM_ADVANCE is, so the phases and their parent cover
+// the same frames (a frame of no tick banks and runs its legs too).
+void Simulation::fold_frame_phases(
+		const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us) {
+	if (!runtime_profiling_enabled_ || !frame_stats_.is_valid()) return;
+	FrameStats &stats = **frame_stats_;
+	if (!stats.is_capture_active()) return;
+	stats.add(FrameStats::SIM_FRAME_BANK, p_perf.bank_us);
+	stats.add(FrameStats::SIM_FRAME_UPDATES, p_perf.tick_us);
+	stats.add(FrameStats::SIM_FRAME_INPUT_ROWS, p_perf.input_rows_us);
+	stats.add(FrameStats::SIM_FRAME_INPUT_DRAIN, p_perf.input_drain_us);
+	stats.add(FrameStats::SIM_FRAME_INPUT_APPLY, p_perf.input_apply_us);
+	stats.add(FrameStats::SIM_FRAME_RENDER_LEGS, p_perf.render_legs_us);
+	stats.add(FrameStats::SIM_FRAME_MARSHAL, p_marshal_us);
+	stats.add(FrameStats::SIM_FRAME_LOCK_SLEEPS, p_perf.lock_sleeps);
+}
+
 } // namespace godot

@@ -15,8 +15,8 @@ extends Node
 ## (GameWorld.is_post_load_frames_open: a joiner's run on to its first C2S 0x0C), every window
 ## under SLOW_FRAME_US prints too, as a PostLoadFrame line: the S2C 0x0F's first-send window,
 ## frame by frame. And every SESSION_WINDOW_US of wall time a running mission's frames take, one
-## SessionLeg line gives the session leg's parts as means per frame (the session frame's ticks,
-## sinks and remainder, the present walks, the wire walk's parts, the joiner's tick phases): what
+## SessionLeg line gives the session leg's parts as means per frame (the session frame's bank,
+## updates, render legs and marshalling, the updates' ticks, sinks and input frames, the present walks, the wire walk's parts, the joiner's tick phases): what
 ## a steady frame's session leg costs, part by part.
 
 const SLOW_FRAME_US := 100_000
@@ -40,7 +40,11 @@ const US_PER_MS := 1000.0
 const SESSION_PREFIXES: Array[String] = ["sim_", "present_", "effects_"]
 ## The SessionLeg line's remainders: [name, base slot name, the part slot names under it].
 const SESSION_REMAINDERS := [
-	["session_frame_other", "SIM_ADVANCE", ["SIM_STEP", "SIM_SINK"]],
+	["session_frame_other", "SIM_ADVANCE", ["SIM_FRAME_BANK", "SIM_FRAME_UPDATES",
+			"SIM_FRAME_RENDER_LEGS", "SIM_FRAME_MARSHAL"]],
+	["update_input_frames", "SIM_FRAME_UPDATES", ["SIM_STEP", "SIM_SINK"]],
+	["update_input_other", "SIM_FRAME_UPDATES", ["SIM_STEP", "SIM_SINK", "SIM_FRAME_INPUT_ROWS",
+			"SIM_FRAME_INPUT_DRAIN", "SIM_FRAME_INPUT_APPLY"]],
 	["sim_step_other", "SIM_STEP", ["SIM_HOST_PREP", "SIM_HOST_PUMP", "SIM_PLAYER_TAIL",
 			"SIM_WEAPON_WALK", "SIM_NET", "SIM_CLIENT_MATERIALIZE", "SIM_CLIENT_MIRROR",
 			"SIM_CLIENT_PROXIES", "SIM_CLIENT_WORLD", "SIM_CLIENT_ATTACH", "SIM_CLIENT_PLAYER",
@@ -151,8 +155,8 @@ static func session_slots() -> PackedInt32Array:
 	return slots
 
 
-## One session window's line: its frames, the mean wall, updates, wire rows and the cold
-## re-plans, then each session-leg time slot's mean per frame at SESSION_MIN_PART_US or more in
+## One session window's line: its frames, the mean wall, updates, the frame lock's sleeps, wire
+## rows and the cold re-plans, then each session-leg time slot's mean per frame at SESSION_MIN_PART_US or more in
 ## the board's order (world_runtime first), then the SESSION_REMAINDERS, in milliseconds.
 static func session_leg_line(sums: PackedInt64Array, frames: int, frame: int, unix_ms: int) -> String:
 	if frames <= 0 or sums.size() < FrameStats.SLOT_COUNT:
@@ -173,9 +177,10 @@ static func session_leg_line(sums: PackedInt64Array, frames: int, frame: int, un
 		for part: String in remainder[2]:
 			rest -= sums[slot_id(part)]
 		parts.append("%s %.2f" % [remainder[0], per_frame.call(rest) / US_PER_MS])
-	return "%s: frame=%d unix_ms=%d over %d frame(s): wall %.1f ms, updates %.2f, wire rows %.0f, cold plans %d, per frame ms: %s" % [
+	return "%s: frame=%d unix_ms=%d over %d frame(s): wall %.1f ms, updates %.2f, lock sleeps %.2f, wire rows %.0f, cold plans %d, per frame ms: %s" % [
 		SESSION_LABEL, frame, unix_ms, frames, per_frame.call(sums[FrameStats.FRAME_WALL]) / US_PER_MS,
 		per_frame.call(sums[FrameStats.SIM_TICKS]),
+		per_frame.call(sums[FrameStats.SIM_FRAME_LOCK_SLEEPS]),
 		per_frame.call(sums[FrameStats.PRESENT_WIRE_ROWS]),
 		sums[FrameStats.PRESENT_WIRE_COLD_PLANS], ", ".join(parts)]
 
