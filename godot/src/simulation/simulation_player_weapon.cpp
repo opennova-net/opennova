@@ -138,7 +138,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (!p || !entity) return Ref<PlayerAimOverlay>();
 
-	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
+	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(kernel_->world, *p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
 	// (engine: runtime/world/infantry_weapon_channel.cpp). The lean term is the sim's lean angle

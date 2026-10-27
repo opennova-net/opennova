@@ -119,9 +119,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 				}
 			}
 		}
-		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].
+		// The speaking pulse rides the mixer meter's first stage [orig: @ 0x5a3e8f..0x5a3e91].
 		if (tag.speaking) {
-			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level255);
+			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level);
 		}
 		// Distance alpha 255 -> 63 over 50..300 m [orig: @ 0x5a3eeb..0x5a3f18].
 		const uint32_t argb =

@@ -606,6 +606,10 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 				player->team, ctx.death_screen, ctx.game_type, out,
 				[player_hp](uint16_t) { return player_hp; }, &w);
 	}
+	// The speaking entity's tag, by the voice channel's speaker (a joiner's decoded
+	// speaker by its row's handle) [orig: HUD_DrawEntityLabel @0x5a3e89].
+	const world::EntityHandle speaker = w.script.voice.speaker();
+	for (world::FriendlyTagSource &tag : out) tag.speaking = speaker.valid() && tag.entity == speaker;
 	return true;
 }
 

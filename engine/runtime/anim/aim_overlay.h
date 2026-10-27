@@ -119,6 +119,10 @@ struct AimOverlayInputs {
     int32_t lean = 0;
     int32_t pitch_blend = 0;
     int32_t pitch_kick_accum = 0;
+    // The speaking entity's head kick, added to the head build's pitch alone: the mixer
+    // meter's g_AudioOutLevel << 17 for the body that is g_VoicePlaybackEntity, 0 for any
+    // other (world::speaking_head_kick). [orig: @ 0x4b17e8..0x4b17fb]
+    int32_t speaking_kick = 0;
     // g_AnimStateFlagsTable[animStateId] & 0x40: the aim-overlay branch. Prone walks
     // (0x603), rolls, and deaths lack it and take the reduced branch.
     bool aim_state = false;

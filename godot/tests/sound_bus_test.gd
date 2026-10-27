@@ -5,7 +5,7 @@ extends GutTest
 ## graph and silences ALL playback; this caught that class of bug headlessly, with no
 ## audio device, after the first attempt shipped silent.
 
-const BUSES := ["Master", "SFX", "Music", "Ambient", "Voice"]
+const BUSES := ["Master", "SFX", "Music", "Ambient", "Voice", "ScriptVoice"]
 
 
 func test_default_bus_layout_defines_routed_buses() -> void:
@@ -28,5 +28,10 @@ func test_default_bus_layout_defines_routed_buses() -> void:
 		var idx := AudioServer.get_bus_index(name)
 		assert_eq(AudioServer.get_bus_send(idx), StringName("Master"),
 			"bus '%s' routes to Master" % name)
+	# Channel zero's voices play on ScriptVoice, the bus the mixer meter reads, which
+	# routes to Voice so the dialog volume still applies.
+	var script_voice := AudioServer.get_bus_index("ScriptVoice")
+	assert_eq(AudioServer.get_bus_send(script_voice), StringName("Voice"),
+		"bus 'ScriptVoice' routes to Voice")
 
 	AudioServer.set_bus_layout(prev)

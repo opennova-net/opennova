@@ -1188,11 +1188,12 @@ struct HudFrameState {
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
 	// [orig: g_EnvFogDistCurrent @ 0x5a3b28]; one speaking level shared by the
-	// (single) speaking entity [orig: g_AudioOutLevelStage1].
+	// (single) speaking entity: the mixer meter's first stage, 0..0x3FF
+	// [orig: g_AudioOutLevelStage1 read @ 0x5a3e91].
 	std::vector<HudFriendlyTag> friendly_tags;
 	int friendly_tag_mode = 2;
 	int32_t fog_dist_q16 = INT32_MAX;
-	int speaking_level255 = 0;
+	int32_t speaking_level = 0;
 	// The radio-request icon's VIEWER gate: the local player's mount state
 	// (+0x168) is a Controller (2) or Driver (5) seat, or the local player
 	// carries its own +885 latch [orig: HUD_DrawEntityLabel @0x5a3bba..

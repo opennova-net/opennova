@@ -1812,6 +1812,9 @@ public:
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
+	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak; its first stage.
+	void advance_audio_out_meter(double p_seconds, float p_peak);
+	int32_t audio_out_stage1() const;
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
 	// One dialog tick over the world's table: the device loads and plays each line, then the

@@ -1632,7 +1632,8 @@ void JoinerRole::wire_frame_providers() {
         if (row == nullptr) return false;
         type_id = row->type_id;
         const ClientReplicaPresentContext context{
-                &kernel_->seat_specs, &kernel_->world.tables.weapons, true, nullptr};
+                &kernel_->seat_specs, &kernel_->world.tables.weapons, true, nullptr,
+                &kernel_->world};
         return skeletal_pose_inputs_for_client(*row, state, context, inputs);
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);

@@ -33,12 +33,11 @@ void compute_aim_overlay_angles(const AimOverlayInputs &in,
 
     // Built unconditionally at the top of the original, before the branch split.
     // v142 (head/full aim): Roll = torsoRoll + lean/2 while Yaw/Pitch stay the aim pair.
-    // [orig: @ 0x4b17e5 + 0x4b180a. The speaking entity's pitch kick (the body
-    //  that is g_VoicePlaybackEntity, `cmp` @ 0x4b17e8, takes g_AudioOutLevel << 17,
-    //  @ 0x4b17f0..0x4b17fb) is not ported: the level is retail's software mixer's
-    //  output meter, which ours does not have (D-INF-11, PERMANENT class C;
-    //  world-wac-ai-re §14.3 / §14.5).]
-    out[kOverlayHead] = {A, P, bam_add(TR, bam_sar(LN, 1))};
+    // The speaking entity's head takes the mixer meter's kick on its pitch (the body that
+    // is g_VoicePlaybackEntity, `cmp` @ 0x4b17e8: Pitch = savedPitch + g_AudioOutLevel << 17,
+    // @ 0x4b17f0..0x4b17fb), for this build alone: the body build restores the body pitch.
+    // [orig: @ 0x4b17e5 + 0x4b180a]
+    out[kOverlayHead] = {A, bam_add(P, in.speaking_kick), bam_add(TR, bam_sar(LN, 1))};
     // v132 (body): bodyHeading / bodyPitch / original Roll. [orig: @ 0x4b182e]
     out[kOverlayBody] = {B, Q, R};
     // v143 / v144 (leg chains): the leg chase yaws with body pitch. [orig: @ 0x4b1845 /

@@ -922,6 +922,14 @@ target_include_directories(sound_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(sound_profile_test PRIVATE cxx_std_17)
 add_test(NAME sound_profile COMMAND sound_profile_test)
 
+# The mixer's output meter and its readers: the block stage, its cadence and smoothing, the
+# bus-peak scale, the speaking head kick and TALK register (runtime/audio/audio_out_meter.h).
+add_executable(audio_out_meter_test audio/audio_out_meter_test.cpp)
+target_link_libraries(audio_out_meter_test PRIVATE opennova_runtime)
+target_include_directories(audio_out_meter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(audio_out_meter_test PRIVATE cxx_std_17)
+add_test(NAME audio_out_meter COMMAND audio_out_meter_test)
+
 add_executable(infantry_stance_sound_test world/infantry_stance_sound_test.cpp)
 target_link_libraries(infantry_stance_sound_test PRIVATE opennova_runtime)
 add_test(NAME infantry_stance_sound COMMAND infantry_stance_sound_test)

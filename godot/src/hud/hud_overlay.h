@@ -314,9 +314,10 @@ public:
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play
 	// camera with its view distance and fed to the compiler's element; the
-	// environment's live fog distance rides along for the fog cull (the
-	// speaking level stays the dialog-channel follow-up). `shown` false, no
-	// sim, or the OFF mode clears the tags.
+	// environment's live fog distance rides along for the fog cull, and the
+	// mixer meter's first stage for the speaking tag's pulse
+	// (Simulation::audio_out_stage1). `shown` false, no sim, or the OFF mode
+	// clears the tags.
 	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
 			const Projection &p_camera_projection, float p_fog_distance_units,
 			const Ref<Simulation> &p_sim);
@@ -406,8 +407,8 @@ public:
 	int get_sight_scale_index() const;
 	// Per-frame environment feed: the fog cull distance in world units (<= 0
 	// disables; the 16.16 form is this seam's) and the speaking entity's voice
-	// level 0..255.
-	void set_friendly_tag_env(float p_fog_distance_units, int p_speaking_level255);
+	// level, the mixer meter's first stage 0..0x3FF.
+	void set_friendly_tag_env(float p_fog_distance_units, int32_t p_speaking_level);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
 	// retained overlay buffer. The colormap is bound as the session's

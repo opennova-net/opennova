@@ -258,14 +258,14 @@ bool friendly_tag_text_visible(int mode, int32_t dist_q16) {
 // [orig: the MMX block @0x5a3e98..0x5a3ebf — punpcklbw(c,c) >> 1 (~c*128.5)
 // paddusw (level << 6) per 16-bit lane, >> 8, packuswb: each channel
 // saturates at c/2 + level/4]
-uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255) {
-	const uint32_t lvl = static_cast<uint32_t>(std::clamp(level255, 0, 255));
+uint32_t friendly_tag_speaking_blend(uint32_t argb, int32_t level) {
+	// `psllw mm1, 6` shifts the 16-bit lane: the word's low 16 bits.
+	const uint32_t lane_add = (static_cast<uint32_t>(level) << 6) & 0xFFFFu;
 	uint32_t out = argb & 0xFF000000u;
 	for (int shift = 0; shift <= 16; shift += 8) {
 		const uint32_t c = (argb >> shift) & 0xFFu;
 		// The duplicated-byte lane is c*257; >>1 then +level<<6 then >>8.
-		const uint32_t lane = std::min<uint32_t>(
-				((c * 257u) >> 1) + (lvl << 6), 0xFFFFu);
+		const uint32_t lane = std::min<uint32_t>(((c * 257u) >> 1) + lane_add, 0xFFFFu);
 		out |= std::min<uint32_t>(lane >> 8, 0xFFu) << shift;
 	}
 	return out;

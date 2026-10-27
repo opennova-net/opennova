@@ -243,7 +243,7 @@ bool MissionPeople::aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOv
 	const world::Entity *entity = w.registry.get(found->second);
 	// A body the init hid draws nothing in the game [orig: Entity_UpdateInfantryAI @0x4B9A03].
 	if (body == nullptr || entity == nullptr || ((entity->flags | entity->engine_flags) & 1u) != 0) return false;
-	anim::compute_aim_overlay_angles(world::aim_overlay_inputs_for(*body, *entity), out);
+	anim::compute_aim_overlay_angles(world::aim_overlay_inputs_for(w, *body, *entity), out);
 	return true;
 }
 

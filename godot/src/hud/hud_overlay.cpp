@@ -1483,12 +1483,13 @@ Vector2 HudOverlay::get_attach_label_position(int p_index) const {
 // [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
 //  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
 //  HUD_ClipPointToFrustumAndProject @0x5a3b47, fog g_EnvFogDistCurrent
-//  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+//  @0x5a3b28. The speaking pulse's level is the mixer meter's first stage.]
 void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
 		const Projection &p_camera_projection, float p_fog_distance_units,
 		const Ref<Simulation> &p_sim) {
 	state_.friendly_tags.clear();
-	set_friendly_tag_env(p_fog_distance_units, 0);
+	set_friendly_tag_env(p_fog_distance_units,
+			p_sim.is_valid() ? p_sim->audio_out_stage1() : 0);
 	std::vector<opennova::world::FriendlyTagSource> tags;
 	if (p_shown && p_sim.is_valid() &&
 			state_.friendly_tag_mode != static_cast<int>(opennova::hud::FriendlyTagMode::kOff) &&
@@ -1520,8 +1521,7 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			tag.team = t.team;
 			tag.health_ratio_fp16 = t.health_ratio_fp16;
 			tag.medic = t.medic;
-			// The speaking pulse is the overlay's own env feed, not a sim fact.
-			tag.speaking = false;
+			tag.speaking = t.speaking;
 			tag.player = t.player;
 			// The downed legs (D-HUD-20 residue a): the compiler's recolor / count.
 			tag.dead = t.dead;
@@ -1626,10 +1626,10 @@ int HudOverlay::get_sight_scale_index() const {
 }
 
 void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
-		int p_speaking_level255) {
+		int32_t p_speaking_level) {
 	const int32_t fog_q16 = opennova::io::float_to_fp16_16_sat(p_fog_distance_units);
 	state_.fog_dist_q16 = fog_q16 > 0 ? fog_q16 : INT32_MAX;
-	state_.speaking_level255 = p_speaking_level255;
+	state_.speaking_level = p_speaking_level;
 }
 
 void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio_menu_open,

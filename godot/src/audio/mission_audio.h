@@ -215,6 +215,10 @@ public:
 	// row runs it on a frame that draws the scene alone; under the status page the busy word
 	// holds (engine world::ScriptVoiceChannel::frame carries the witness).
 	void update_script_voice();
+	// The mixer meter's feed: the peak of the bus channel zero's voices play on (the
+	// "ScriptVoice" bus) over `p_delta` seconds, handed to the engine's meter
+	// (Simulation::advance_audio_out_meter). GameWorld's script_voice row runs it each frame.
+	void meter_script_voice(double p_delta);
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
@@ -272,6 +276,9 @@ private:
 	AudioStreamPlayer *_spawn_dialog_voice(const Ref<AudioStreamWAV> &p_stream, int p_volume);
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
+	// The bus channel zero's voices (the scripted voice, the WAC wave) play on: "ScriptVoice",
+	// which sends to "Voice", else "Voice", else "Master".
+	static StringName _script_voice_bus();
 	void _on_script_voice_finished(int64_t p_serial, int64_t p_player_id);
 	void _install_voice_resolver();
 	void _stop_script_voice(bool p_report_finished);

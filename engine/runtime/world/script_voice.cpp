@@ -175,4 +175,15 @@ void ScriptVoiceChannel::reset() {
     state_.max_distance = 0;
 }
 
+int32_t speaking_head_kick(const World &world, EntityHandle body) {
+    if (!body.valid() || world.script.voice.speaker() != body) return 0;
+    return static_cast<int32_t>(static_cast<uint32_t>(world.audio_out_meter.level()) << 17);
+}
+
+int32_t talk_ctrl_register_value(const World &world, EntityHandle body) {
+    if (!body.valid() || world.script.voice.speaker() != body) return 0;
+    const uint32_t value = static_cast<uint32_t>(world.audio_out_meter.stage1()) << 6;
+    return static_cast<int32_t>(value > 0x10000u ? 0x10000u : value);
+}
+
 } // namespace opennova::world

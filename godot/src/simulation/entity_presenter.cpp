@@ -68,10 +68,12 @@ struct CtrlRegisters {
 	const std::string owner_world_heat = "present:world_heat";
 	const std::string owner_doors = "present:doors";
 	const std::string owner_death = "present:death";
+	const std::string owner_talk = "present:talk";
 	int vehicle_tires[14];
 	int vehicle_tracks[4];
 	int doors[30];
 	static constexpr int death = opennova::threedi::THREEDI_CTRL_DEATH;
+	static constexpr int talk = opennova::threedi::THREEDI_CTRL_TALK;
 	CtrlRegisters() {
 		for (int i = 0; i < 14; ++i) vehicle_tires[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_TIRE00 + i;
 		for (int i = 0; i < 4; ++i) vehicle_tracks[i] = opennova::threedi::THREEDI_CTRL_VEHICLE_WHEELS00 + i;
@@ -1178,6 +1180,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		model->clear_ctrl_overrides_owned_native(names().owner_doors);
 		model->clear_ctrl_overrides_owned_native("present:destruction");
 		model->clear_ctrl_overrides_owned_native(names().owner_death);
+		model->clear_ctrl_overrides_owned_native(names().owner_talk);
 		model->end_ctrl_update();
 	}
 }
@@ -1527,7 +1530,11 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			if (death_work) {
 				model->set_ctrl_override_native(names().owner_death, names().death,
 						field_i(p, base, opennova::world::PF_DEATH_CTRL));
-				++stat_control_dispatches_;
+				// The same callback's TALK register, the speaking row's mixer meter
+				// (the engine's PF_TALK_CTRL word; 0 for every other row).
+				model->set_ctrl_override_native(names().owner_talk, names().talk,
+						field_i(p, base, opennova::world::PF_TALK_CTRL));
+				++stat_control_dispatches_; // the skin callback's one dispatch
 			}
 			// A falling/cold EWEAP release precedes generic phase replay. This
 			// preserves the master compatibility surface for a third-party node

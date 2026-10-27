@@ -765,9 +765,7 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 	AudioStreamPlayer *voice = _wac_voice_node();
 	if (voice == nullptr) {
 		voice = memnew(AudioStreamPlayer);
-		if (AudioServer::get_singleton()->get_bus_index(StringName(kVoiceBus)) >= 0) {
-			voice->set_bus(StringName(kVoiceBus));
-		}
+		voice->set_bus(_script_voice_bus());
 		add_child(voice);
 		wac_voice_id_ = ObjectID(voice->get_instance_id());
 	}

@@ -262,6 +262,11 @@ enum PresentField : int {
     // a corpse timer) publishes it too.
     // [orig: BoneCallback_org0_Skin @0x4e3669..0x4e368e]
     PF_DEATH_CTRL,
+    // The same callback's TALK register (CTRL ordinal 5, the speaking mouth):
+    // world::talk_ctrl_register_value, min(g_AudioOutLevelStage1 << 6, 0x10000)
+    // for the organic row that is g_VoicePlaybackEntity, 0 for every other.
+    // [orig: BoneCallback_org0_Skin @0x4e3624..0x4e364e]
+    PF_TALK_CTRL,
     // Existing person Flags 0x20 selects the special item-185 projection
     // radius. This carries received/copy-propagated state; it does not invent
     // the still-unported parachute deployment physics.

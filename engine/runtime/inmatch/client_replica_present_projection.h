@@ -9,6 +9,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace opennova::world {
+class World;
+} // namespace opennova::world
+
 namespace opennova::inmatch {
 
 // The carried objects the decoded state links, keyed by carrier handle: the
@@ -30,6 +34,9 @@ struct ClientReplicaPresentContext {
 	const world::WeaponTable *weapons = nullptr;
 	bool project_remote_appearance = true;
 	const std::unordered_map<uint16_t, uint16_t> *carried_types = nullptr;
+	// The world whose voice channel names the speaker and whose mixer meter it reads
+	// (world::speaking_head_kick, world::talk_ctrl_register_value); none reads 0.
+	const world::World *world = nullptr;
 };
 
 // Initialize one world::PF_* row, including every non-zero sentinel.

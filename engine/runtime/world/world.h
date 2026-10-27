@@ -40,6 +40,7 @@
 #include <runtime/world/script_squad.h>
 #include <runtime/world/script_input.h>
 #include <runtime/world/script_voice.h>
+#include <runtime/audio/audio_out_meter.h>
 #include <runtime/world/match.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/entity_commands.h>
@@ -1293,6 +1294,10 @@ public:
 	ZoneSystem zones;
 	// The command map's placed-waypoint table (world/user_waypoints.h).
 	UserWaypointTable user_waypoints;
+	// The software mixer's output meter (audio/audio_out_meter.h), which the device advances
+	// once a frame: the speaking entity's head kick, TALK register and tag pulse read it
+	// (speaking_head_kick, talk_ctrl_register_value).
+	audio::AudioOutMeter audio_out_meter;
 	// Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in

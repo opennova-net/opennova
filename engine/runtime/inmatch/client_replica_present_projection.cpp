@@ -4,6 +4,7 @@
 #include <runtime/inmatch/client_replica_present.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/person_overlays.h>
+#include <runtime/world/script_voice.h>
 
 #include <algorithm>
 
@@ -165,6 +166,14 @@ void project_client_replica_present_row(
 	if (!aim_overlay_inputs_for_client(
 				entity, state, seat_specs, inputs, &blocking_seat))
 		return;
+	// The speaking body's head kick and TALK register off the mixer meter: a joiner's
+	// decoded speaker is named by its row's handle (ScriptVoiceChannel::entity_set).
+	if (context.world != nullptr) {
+		const world::EntityHandle body{entity.handle};
+		inputs.speaking_kick = world::speaking_head_kick(*context.world, body);
+		row[world::PF_TALK_CTRL] =
+				static_cast<float>(world::talk_ctrl_register_value(*context.world, body));
+	}
 	// The collapsed right-hand row: a blocking seat without the Player bit.
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the special row @0x4B1F84..0x4B1F92]
 	const bool collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
@@ -321,6 +330,9 @@ bool skeletal_pose_inputs_for_client(
 	if (!aim_overlay_inputs_for_client(
 				entity, state, seat_specs, out.overlay, &blocking_seat))
 		return false;
+	if (context.world != nullptr)
+		out.overlay.speaking_kick =
+				world::speaking_head_kick(*context.world, world::EntityHandle{entity.handle});
 	out.collapse_right_hand = entity.cls == EntityClass::Infantry && blocking_seat;
 	// The projection's armed branch: the row's own primary channel, current,
 	// playhead, served ring entry, armed park and the blending source pair; a

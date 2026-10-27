@@ -5,6 +5,8 @@
 
 #include <godot_cpp/classes/audio_server.hpp>
 #include <godot_cpp/core/math.hpp>
+
+#include <algorithm>
 #include <godot_cpp/core/object.hpp>
 
 #include <formats/lwf/lwf.h>
@@ -20,6 +22,26 @@ void MissionAudio::_install_voice_resolver() {
         auto *bank = Object::cast_to<SoundBank>(ObjectDB::get_instance(bank_id));
         return bank ? bank->select_radio_set(name, listener_view_flags, bank_member) : std::nullopt;
     });
+}
+
+StringName MissionAudio::_script_voice_bus() {
+    AudioServer *server = AudioServer::get_singleton();
+    if (server->get_bus_index("ScriptVoice") >= 0) return StringName("ScriptVoice");
+    return server->get_bus_index("Voice") >= 0 ? StringName("Voice") : StringName("Master");
+}
+
+void MissionAudio::meter_script_voice(double p_delta) {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null()) return;
+    AudioServer *server = AudioServer::get_singleton();
+    const int bus = server->get_bus_index(_script_voice_bus());
+    float peak = 0.0f;
+    for (int pair = 0; bus >= 0 && pair < server->get_bus_channels(bus); ++pair) {
+        const float db = std::max(server->get_bus_peak_volume_left_db(bus, pair),
+                server->get_bus_peak_volume_right_db(bus, pair));
+        peak = std::max(peak, static_cast<float>(Math::db_to_linear(db)));
+    }
+    sim->advance_audio_out_meter(p_delta, peak);
 }
 
 void MissionAudio::_stop_script_voice(bool p_report_finished) {
@@ -109,8 +131,7 @@ void MissionAudio::_follow_script_voice(const opennova::world::ScriptVoiceChanne
     script_voice_id_ = ObjectID(node->get_instance_id());
     node->connect("finished", Callable(this, "_on_script_voice_finished").bind(
             int64_t(p_frame.serial), int64_t(uint64_t(script_voice_id_))));
-    const StringName bus = AudioServer::get_singleton()->get_bus_index("Voice") >= 0
-            ? StringName("Voice") : StringName("Master");
+    const StringName bus = _script_voice_bus();
     const float volume_db = static_cast<float>(SoundBank::volume_db_from_255(p_frame.volume));
     if (auto *voice = Object::cast_to<AudioStreamPlayer>(node)) {
         voice->set_bus(bus);

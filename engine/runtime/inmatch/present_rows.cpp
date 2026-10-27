@@ -372,7 +372,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 	const std::unordered_map<uint16_t, uint16_t> carried_types =
 			carried_object_types_by_carrier(cs);
 	const ClientReplicaPresentContext replica_present_context{
-			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types};
+			&kernel.seat_specs, &kernel.world.tables.weapons, joiner, &carried_types,
+			&kernel.world};
 	size_present_rows(out, count);
 	door_phases.clear();
 	float *w = out.data();
@@ -445,9 +446,14 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			// The org0 skin callback's DEATH register off the authoritative
 			// organic row's dead flag + corpse timer [orig: BoneCallback_org0_Skin
 			// @0x4e3669..0x4e368e].
-			if (ent->kind == EntityKind::Organic)
+			if (ent->kind == EntityKind::Organic) {
 				r[PF_DEATH_CTRL] = static_cast<float>(death_ctrl_register_value(
 						((ent->flags | ent->engine_flags) & kEntityFlagDead) != 0, ent->corpse_timer));
+				// Its TALK register off the mixer meter [orig: BoneCallback_org0_Skin
+				// @0x4e3624..0x4e364e].
+				r[PF_TALK_CTRL] = static_cast<float>(
+						talk_ctrl_register_value(kernel.world, ent->handle));
+			}
 			// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 			// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 			// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md). The compact
@@ -618,7 +624,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				}
 				if (ent != nullptr) {
 					const anim::AimOverlayInputs inputs =
-							world::aim_overlay_inputs_for(*ae, *ent);
+							world::aim_overlay_inputs_for(kernel.world, *ae, *ent);
 					anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 					anim::compute_aim_overlay_angles(inputs, angles);
 					write_present_overlay(r, angles);
@@ -844,6 +850,10 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_DEATH_CTRL] = static_cast<float>(e.kind == EntityKind::Organic
 			? death_ctrl_register_value(((e.flags | e.engine_flags) & kEntityFlagDead) != 0, e.corpse_timer)
 			: 0xFFFF);
+	// Its TALK register: the speaking organic row's mixer meter, 0 for every other
+	// [orig: BoneCallback_org0_Skin @0x4e3624..0x4e364e].
+	r[PF_TALK_CTRL] = static_cast<float>(
+			e.kind == EntityKind::Organic ? talk_ctrl_register_value(w, e.handle) : 0);
 	// The authority owns the exact MoveOrder stance latch (bits 8/9 of
 	// Player_PackInputStateToEntity @0x4df450; the MATCHTERRAIN tier reads them at
 	// Terrain_RenderSectorEntitiesBySide @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
@@ -957,7 +967,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 					static_cast<float>(ae->inf.wpn_prev_variant);
 		}
 	}
-	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(*ae, e);
+	const anim::AimOverlayInputs inputs = world::aim_overlay_inputs_for(w, *ae, e);
 	anim::AimOverlayAngles angles[anim::kOverlayClassCount];
 	anim::compute_aim_overlay_angles(inputs, angles);
 	write_present_overlay(r, angles);
@@ -976,7 +986,7 @@ bool local_player_person_overlays(const PresentRowsContext &context, PersonOverl
 	const AiEntity *ae = e != nullptr ? w.ai.for_handle(e->handle) : nullptr;
 	if (ae == nullptr || !ae->inf.active) return false;
 	PersonOverlayInputs in =
-			pool_person_overlay_inputs(w, *e, *ae, world::aim_overlay_inputs_for(*ae, *e));
+			pool_person_overlay_inputs(w, *e, *ae, world::aim_overlay_inputs_for(w, *ae, *e));
 	// A joiner's own body carries what the authority attached to its entity
 	// there: the S2C 0x2F relation names that entity's handle (H), and the
 	// retail client's 0x0A local block attaches the carried object to the

@@ -195,6 +195,12 @@ int main() {
 			"level 0 halves each channel");
 	expect(hud::friendly_tag_speaking_blend(0xFF00FF00u, 255) == 0xFF3FBF3Fu,
 			"level 255 lifts every channel by ~level/4");
+	// The level is the meter's first stage, 0..0x3FF: its top saturates every lane
+	// (`psllw mm1, 6` of 0x3FF is 0xFFC0) [orig: @0x5a3e9d..0x5a3eae].
+	expect(hud::friendly_tag_speaking_blend(0x8000FF00u, 0x3FF) == 0x80FFFFFFu,
+			"the meter's top level saturates every channel");
+	expect(hud::friendly_tag_speaking_blend(0xFF000000u, 0x200) == 0xFF808080u,
+			"level 0x200 lifts a black channel to 0x80");
 	expect(hud::half_bright_keep_alpha(0xC005FA0Du) == 0xC0027D06u,
 			"the text fold halves RGB and keeps the fade alpha");
 

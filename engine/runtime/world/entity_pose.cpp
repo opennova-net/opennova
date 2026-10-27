@@ -595,7 +595,7 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	in.source_phase = r_ai->inf.anim_prev_clip_phase;
 	in.source_variant = r_ai->inf.anim_prev_variant;
 	in.blend_weight = r_ai->inf.anim_blend_weight;
-	in.overlay = aim_overlay_inputs_for(*r_ai, *r_entity);
+	in.overlay = aim_overlay_inputs_for(world, *r_ai, *r_entity);
 	// Every body splices its own secondary channel's mask bones when it carries the
 	// Player bit, sits in no control / gunner / driver seat and its requested state has
 	// flag 0x40: a host's remote players and the local body alike, armed or not.

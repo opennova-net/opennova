@@ -1550,7 +1550,7 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	// The speaking pulse lifts the color.
 	state.friendly_tags[0].player = false;
 	state.friendly_tags[0].speaking = true;
-	state.speaking_level255 = 255;
+	state.speaking_level = 255;
 	const HudDrawList &speak = compiler.compile(state, 1024.0f, 768.0f);
 	const uint32_t pulsed = (217u << 24) |
 			(opennova::hud::friendly_tag_speaking_blend(

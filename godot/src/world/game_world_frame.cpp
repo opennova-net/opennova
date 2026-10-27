@@ -716,6 +716,8 @@ GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {
 	MissionAudio *audio = get_mission_audio();
 	if (!world_ready_ || audio == nullptr) return kLegSkipped;
 	audio->update_script_voice();
+	// The mixer meter's feed for the frame (MissionAudio::meter_script_voice).
+	audio->meter_script_voice(frame_delta_);
 	return kLegRan;
 }
 

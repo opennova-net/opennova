@@ -8,6 +8,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/script_voice.h>
 #include <runtime/world/vehicle_mount.h>
 
 namespace opennova::world {
@@ -30,9 +31,11 @@ inline anim::MountMode mount_mode_for(const world::Entity &entity) {
 			: anim::MountMode::OnFoot;
 }
 
-inline anim::AimOverlayInputs aim_overlay_inputs_for(
+inline anim::AimOverlayInputs aim_overlay_inputs_for(const world::World &world,
 		const world::AiEntity &entity, const world::Entity &world_entity) {
 	anim::AimOverlayInputs in;
+	// The speaking entity's head kick off the mixer meter (world::speaking_head_kick).
+	in.speaking_kick = speaking_head_kick(world, world_entity.handle);
 	in.aim_yaw = entity.heading;
 	in.aim_pitch = entity.pitch;
 	in.body_yaw = entity.inf.body_heading;

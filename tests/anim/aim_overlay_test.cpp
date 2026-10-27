@@ -541,6 +541,35 @@ void test_held_weapon_attach_mounted_copies_the_arm() {
     CHECK(same_angles(compute_held_weapon_attach_angles(in), on_foot));
 }
 
+// The speaking entity's mixer-meter kick rides the head build's pitch alone: the body and the
+// arms keep theirs, and a seated body's neck, a copy of the head matrix, carries it too.
+// [orig: @ 0x4b17e8..0x4b17fb, the head build @ 0x4b180a, the body build's restore
+//  @ 0x4b1813..0x4b182e; the seated neck copy @ 0x4b1b4c..0x4b1ba9]
+void test_speaking_kick_lifts_the_head_alone() {
+    AimOverlayInputs in;
+    in.aim_yaw = 20 * kBamDeg;
+    in.aim_pitch = 9 * kBamDeg;
+    in.body_pitch = 4 * kBamDeg;
+    in.aim_state = true;
+    AimOverlayAngles quiet[kOverlayClassCount];
+    compute_aim_overlay_angles(in, quiet);
+    in.speaking_kick = 0x1FF << 17;
+    AimOverlayAngles speaking[kOverlayClassCount];
+    compute_aim_overlay_angles(in, speaking);
+    CHECK(speaking[kOverlayHead].pitch == opennova::io::bam_add(quiet[kOverlayHead].pitch, in.speaking_kick));
+    CHECK(speaking[kOverlayHead].yaw == quiet[kOverlayHead].yaw);
+    for (int c : {kOverlayBody, kOverlayArm, kOverlaySpine, kOverlayUpperSpine, kOverlayLegR})
+        CHECK(same_angles(speaking[c], quiet[c]));
+    CHECK(same_angles(compute_held_weapon_attach_angles(in), [&] {
+        AimOverlayInputs q = in;
+        q.speaking_kick = 0;
+        return compute_held_weapon_attach_angles(q);
+    }()));
+    in.mount_mode = MountMode::Seated;
+    compute_aim_overlay_angles(in, speaking);
+    CHECK(speaking[kOverlayNeck].pitch == speaking[kOverlayHead].pitch);
+}
+
 int main() {
     test_bone_class_map();
     test_aim_branch_blends();
@@ -555,6 +584,7 @@ int main() {
     test_weapon_channel_splices_world_rotations();
     test_held_weapon_attach_basis();
     test_held_weapon_attach_mounted_copies_the_arm();
+    test_speaking_kick_lifts_the_head_alone();
     if (failures == 0) std::printf("aim_overlay_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }
