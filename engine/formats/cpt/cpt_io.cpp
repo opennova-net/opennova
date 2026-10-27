@@ -25,8 +25,6 @@ static constexpr uint32_t DPTH_MAGIC = 0x48545044; // "DPTH"
 static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
 static constexpr uint32_t NMAP_MAGIC = 0x50414D4E; // "NMAP"
-// The NMAP section's normal map: 1024 x 1024 A8R8G8B8 [orig: Terrain_LoadLodStorage @ 0x6037DE, @ 0x6037F6].
-static constexpr size_t kNmapBytes = 0x400000;
 
 
 // The CDEP/POLY bit codec is the shared io::BitReader / io::BitWriter
@@ -114,6 +112,21 @@ bool write_depth_section(BitWriter &bits,
 	if (!depth_buffer.empty()) {
 		bits.write_bytes(depth_buffer.data(), depth_buffer.size() * sizeof(uint16_t));
 	}
+	return true;
+}
+
+// The NMAP section, for a file whose model holds a normal map: its id on the next dword, then the map's bytes as
+// stored, which the game's walk reads there [orig: Terrain_LoadLodStorage @ 0x6037BD..0x6037F6]. False, with
+// `error`, for a map of another size.
+bool write_normal_map_section(BitWriter &bits, const std::vector<uint8_t> &normal_map, std::string &error) {
+	if (normal_map.empty()) return true;
+	if (normal_map.size() != kCptNormalMapBytes) {
+		error = "NMAP normal map must be 1024 x 1024 A8R8G8B8 (4 MiB)";
+		return false;
+	}
+	bits.align_dword();
+	bits.write_bytes("NMAP", 4);
+	bits.write_bytes(normal_map.data(), normal_map.size());
 	return true;
 }
 
@@ -333,9 +346,10 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 	}
 	std::memcpy(&out.header, data, sizeof(CptFile::Header));
 
-	// The chunk walk from byte 160, each id on a dword boundary: CDEP decodes the atlas, NMAP's 4 MiB normal map is
-	// passed over, POLY ends the walk, any other id is passed as its dword [orig: Terrain_LoadLodStorage @ 0x6035FA,
-	// @ 0x603605..0x603804; NMAP @ 0x6037C2..0x6037F6]. DPTH is the raw atlas the original editor reads [orig:
+	// The chunk walk from byte 160, each id on a dword boundary: CDEP decodes the atlas, NMAP's 4 MiB is the normal
+	// map the game then takes in place of generating one, POLY ends the walk, any other id is passed as its dword
+	// [orig: Terrain_LoadLodStorage @ 0x6035FA, @ 0x603605..0x603804; NMAP @ 0x6037C2..0x6037F6, the generation
+	// skipped @ 0x603CA0..0x603CA8]. DPTH is the raw atlas the original editor reads [orig:
 	// JOTACmed.exe MissionDocument_LoadTerrain @ 0x44c64b] and TrnGen writes; the game returns at it with no terrain
 	// [orig: Terrain_LoadLodStorage @ 0x6037B7].
 	BitReader bits(data + 160, size - 160);
@@ -354,7 +368,13 @@ bool load_cpt(const uint8_t *data, size_t size, CptFile &out, std::string &error
 				return false;
 			}
 		} else if (section == NMAP_MAGIC) {
-			bits.skip_bytes(kNmapBytes);
+			// A second NMAP reads over the first, as into the game's one buffer. A file ending inside the map
+			// holds what it has, the rest zero (the game reads on past the file).
+			out.normal_map.assign(kCptNormalMapBytes, 0);
+			const size_t held = static_cast<size_t>(
+					std::min<uint64_t>(bits.remaining_bits() / 8u, kCptNormalMapBytes));
+			bits.read_bytes(out.normal_map.data(), held);
+			bits.skip_bytes(kCptNormalMapBytes - held);
 		} else if (section == POLY_MAGIC) {
 			poly = true;
 		}
@@ -396,6 +416,7 @@ bool save_cpt(const CptFile &cpt, std::vector<uint8_t> &out, std::string &error)
 	bits.write_bytes(&raw_header, sizeof(CptFile::Header));
 	bits.align_dword();
 	if (!write_depth_section(bits, cpt.depth_format, cpt.depth_buffer, error)) return false;
+	if (!write_normal_map_section(bits, cpt.normal_map, error)) return false;
 	if (!write_poly_section(bits, cpt.tiles, error)) return false;
 	// The file carries four zero bytes past the stream's high-water mark.
 	out = bits.bytes(4);

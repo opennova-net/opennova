@@ -45,6 +45,10 @@ struct CptFile {
 	Header header{};
 	DepthFormat depth_format = DepthFormat::DPTH;
 	std::vector<uint16_t> depth_buffer;
+	// The NMAP section's normal map as the file stores it, kCptNormalMapBytes of 1024 x 1024 A8R8G8B8
+	// texels (B, G, R, A bytes); empty for a file with none, whose normal map the game generates
+	// (terrain::load_heightfield_normal_map).
+	std::vector<uint8_t> normal_map;
 	std::vector<TileData> tiles;
 
 	static CptFile read(const std::string &path);
@@ -60,6 +64,9 @@ struct CptFile {
 // @ 0x603CC0..0x603CFE].
 inline constexpr int kCptGridSide = 1024;
 inline constexpr int kCptLevelsMax = 5;
+
+// The NMAP section's bytes: a 1024 x 1024 A8R8G8B8 normal map [orig: Terrain_LoadLodStorage @ 0x6037D9..0x6037F6].
+inline constexpr size_t kCptNormalMapBytes = 0x400000;
 
 // The level count the game reads, the header's word at +6 [orig: Terrain_LoadLodStorage @ 0x60380E].
 inline int cpt_header_levels(const CptFile::Header &header) {

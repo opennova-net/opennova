@@ -281,7 +281,7 @@ std::vector<uint8_t> one_tile_file(uint32_t lod_count, uint32_t chunk, const std
 }
 
 // The game's walk [orig: Terrain_LoadLodStorage @ 0x603550]: no magic test; the chunk ids on dword boundaries, an
-// unknown one passed as its dword and NMAP's 4 MiB normal map passed over whole (@ 0x603605..0x603804); the header's
+// unknown one passed as its dword and NMAP's 4 MiB read whole as the normal map (@ 0x603605..0x603804); the header's
 // level count at +6, at most five (@ 0x60380E..0x60381C); each level a grid walked rows outer, its tiles placed by
 // their order, an is_single tile ending its level (@ 0x603BF0), a tile of no vertices kept; the chunk size each tile
 // stores, and of its lists the eight the draw reads [orig: LODTileCache_UpdateSlots @ 0x602572].
@@ -305,6 +305,36 @@ bool check_game_walk() {
 	if (!expect(opennova::load_cpt(bytes.data(), bytes.size(), read, error) && read.tiles.size() == 5,
 	            "a file of another magic, an unknown id and an NMAP reads its five tiles"))
 		return false;
+	if (!expect(read.normal_map.size() == opennova::kCptNormalMapBytes &&
+	                    std::memcmp(read.normal_map.data(), "POLY", 4) == 0 &&
+	                    std::memcmp(read.normal_map.data() + opennova::kCptNormalMapBytes - 4, "POLY", 4) == 0,
+	            "the NMAP's 4 MiB are the file's normal map"))
+		return false;
+
+	// A model holding a normal map writes it as an NMAP between its depth and its POLY, read back whole; a model
+	// without one writes none [orig: Terrain_LoadLodStorage @ 0x6037BD..0x6037F6].
+	{
+		opennova::CptFile mapped = two;
+		mapped.normal_map.resize(opennova::kCptNormalMapBytes);
+		for (size_t i = 0; i < mapped.normal_map.size(); ++i) mapped.normal_map[i] = uint8_t(i * 7u + (i >> 12));
+		std::vector<uint8_t> written;
+		opennova::CptFile back;
+		if (!expect(opennova::save_cpt(mapped, written, error) &&
+		                    std::memcmp(written.data() + poly, "NMAP", 4) == 0 &&
+		                    std::memcmp(written.data() + poly + 4 + opennova::kCptNormalMapBytes, "POLY", 4) == 0 &&
+		                    opennova::load_cpt(written.data(), written.size(), back, error) &&
+		                    back.normal_map == mapped.normal_map && back.tiles.size() == 5,
+		            "a model's normal map writes as an NMAP and reads back whole"))
+			return false;
+		mapped.normal_map.resize(16);
+		if (!expect(!opennova::save_cpt(mapped, written, error) && error.find("NMAP") != std::string::npos,
+		            "a normal map of another size is refused"))
+			return false;
+		opennova::CptFile none;
+		if (!expect(opennova::load_cpt(bytes.data(), poly, none, error) && none.normal_map.empty(),
+		            "a file with no NMAP holds no normal map"))
+			return false;
+	}
 	const uint16_t places[4][2] = {{0, 0}, {512, 0}, {0, 512}, {512, 512}};
 	bool placed = read.tiles[0].tile_x == 0 && read.tiles[0].tile_y == 0 && read.tiles[0].tile_size == 1024;
 	for (int i = 0; i < 4; ++i) {
