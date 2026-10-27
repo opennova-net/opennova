@@ -334,9 +334,10 @@ seed_game() {
     [[ "$(reply_code)" == 201 ]] || die "the push failed: HTTP $(reply_code) $reply"
     head="$(jq -r '.head' <<< "$reply")"
 
-    # A release built from that revision, validated, then published.
+    # A release built from that revision (the project's own release route, on
+    # the dev admin's session as the push), validated, then published.
     version="1.0.$head"
-    reply="$(admin_api POST "/api/admin/products/$key/releases" \
+    reply="$(session_api POST "/api/products/$key/releases" \
         "$(jq -cn --arg v "$version" --argjson r "$head" '{version: $v, revision: $r}')")"
     [[ "$(reply_code)" == 201 ]] || die "building a release of $key r$head failed: HTTP $(reply_code) $reply"
     release="$(jq -r '.release.id' <<< "$reply")"

@@ -462,21 +462,18 @@ void HostedRoutes::register_routes(WebApp &app) {
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
 // service runs hosted servers: a machine driver and at least one offered product
 // ), "novalogic_listing" (enabled, and a start may also list its server on
-// NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused at_capacity: every place under
-// ONNET_HOSTED_CAP is taken, or the account has a free place in a pool and
-// the fleet has no room in any pool it has one in: a shared server while
-// shared_used < shared_servers, one on a dedicated machine while own_used <
-// own_machines), "entitlement"
-// (its hosting entitlement, billing/entitlement.h: {max_servers (its shared
-// servers and its dedicated machines together), used (its live servers, a
-// stopping one included), shared_servers, shared_used (those of them on shared
-// machines), own_machines (its dedicated machines), own_used (those of them on
-// dedicated machines), can_start, source (its shared servers': "none", "tier"
-// or "comp"), tier (its granting support tier, null for none), granted (an
-// admin grants it hosting, billing::admin_granted: it buys no tier, dedicated
-// machine or static address)}),
-// "products" (the products a start may pick, product_repository.h
-// offered_products: the bases with a ready current tree, each {id,
+// NovaLogic's NovaWorld: ONNET_NOVALOGIC_LISTING), "full" (a start now would be refused
+// at_capacity: every place under ONNET_HOSTED_CAP is taken, or the account has a free place in a
+// pool and the fleet has no room in any pool it has one in: a shared server while shared_used <
+// shared_servers, one on a dedicated machine while own_used < own_machines), "entitlement" (its
+// hosting entitlement, billing/entitlement.h: {max_servers (its shared servers and its dedicated
+// machines together), used (its live servers, a stopping one included), shared_servers, shared_used
+// (those of them on shared machines), own_machines (its dedicated machines), own_used (those of
+// them on dedicated machines), can_start, source (its shared servers': "none", "tier" or "comp"),
+// tier (its granting support tier, null for none), granted (an admin grants it hosting,
+// billing::admin_granted: it buys no tier, dedicated machine or static address)}), "products" (the
+// products a start of the account's may pick, product_repository.h offered_products: the service's
+// own, every account's public ones and its own, the bases with a ready current tree, each {id,
 // display_name, title, version, missions [{file, title}] (its tree's
 // multiplayer missions: the rotation picker's list, and the rotation a start
 // takes when it names none), limits {max_players, time_limit, kill_limit,
@@ -513,7 +510,8 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const std::vector<OfferedProduct> offered = hosting_on_ ? offered_products(*db_conn) : std::vector<OfferedProduct>();
+		const std::vector<OfferedProduct> offered =
+				hosting_on_ ? offered_products(*db_conn, owner) : std::vector<OfferedProduct>();
 		const bool enabled = hosting_on_ && !offered.empty();
 		out["enabled"] = enabled;
 		out["novalogic_listing"] = enabled && novalogic_listing_;
@@ -636,7 +634,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (!hosting_on_) return json_error(503, "hosting_disabled", "this NovaWorld service runs no hosted servers");
 	std::vector<OfferedProduct> offered;
 	try {
-		offered = offered_products(*pool_.acquire());
+		offered = offered_products(*pool_.acquire(), user.id);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers failed: %s\n", e.what());
 		return json_error(500, "db_error");

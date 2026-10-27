@@ -15,6 +15,7 @@
 
 #include <net/novaworld/db/database.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -41,11 +42,13 @@ struct ProjectCaller {
 // What a caller may do with a project.
 // Read: a public one, or any as an admin or its owner (else it is no project to the caller).
 // Manage (its name, its visibility, its delete): an admin or its owner. Push: an admin's or its
-// owner's own session, never the token, so every revision names its author.
+// owner's own session, never the token, so every revision names its author. Release (build,
+// publish, retire and delete its releases, ADR 0074): as push.
 struct ProjectRights {
 	bool read = false;
 	bool manage = false;
 	bool push = false;
+	bool release = false;
 };
 // The one rule every project route answers by; an app's key names no project, so none of it.
 ProjectRights project_rights(const hosted::ProductRow &project, const ProjectCaller &caller);
@@ -67,6 +70,13 @@ struct ProjectRevision {
 
 // A product's key: 1 to 16 of A-Z, 0-9 and _ (products.key's check).
 bool valid_key(std::string_view key);
+// An account's own project's key (ADR 0074): a key of at most kOwnedKeyMax characters holding no
+// "QQ" (without case), since its updater product is the key (updater_login KEY, command_file
+// KEY.CMD): KEY.CMD fits a 1SFS name's 15 characters, and no value of its wizard holds the
+// territory placeholder the updater replaces (formats/update/update_wizard.h
+// substitute_territory).
+inline constexpr size_t kOwnedKeyMax = 11;
+bool valid_owned_key(std::string_view key);
 
 // --- revisions ---
 
@@ -108,10 +118,13 @@ struct ProjectStorage {
 ProjectStorage project_storage(db::Database &db, int64_t product_id);
 
 // What the account `owner_id`'s own projects come to together: how many, and the bytes their
-// stores hold (product_repository.h kOwnedProjectsMax, kOwnedBytesMax).
+// stores and their releases' packages hold (product_repository.h kOwnedProjectsMax,
+// kOwnedBytesMax): `bytes` the two together, `release_bytes` the packages alone (every release of
+// theirs not deleted).
 struct OwnedUsage {
 	int64_t projects = 0;
 	int64_t bytes = 0;
+	int64_t release_bytes = 0;
 };
 OwnedUsage owned_usage(db::Database &db, int64_t owner_id);
 

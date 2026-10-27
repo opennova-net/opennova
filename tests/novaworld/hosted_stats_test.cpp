@@ -61,8 +61,10 @@ int64_t count_rows(Database &db, const std::string &sql) {
 // (seeded with a ready tree at the first call).
 int64_t make_server(Database &db, int64_t owner, const char *state) {
 	int64_t jo = hosted_rig::seeded_product(db, "Joint Operations");
-	if (hosted::offered_products(db).empty()) jo = hosted_rig::seed_data(db).jo;
-	const auto r = hosted::request_server(db, owner, valid_settings(jo), hosted::offered_products(db), 100, kWall);
+	if (hosted::offered_products(db, std::nullopt).empty())
+		jo = hosted_rig::seed_data(db).jo;
+	const auto r = hosted::request_server(
+			db, owner, valid_settings(jo), hosted::offered_products(db, std::nullopt), 100, kWall);
 	if (r.outcome != hosted::RequestOutcome::Created) return 0;
 	db.exec("UPDATE hosted_servers SET state = $1 WHERE id = $2;", { BindValue(std::string(state)), BindValue(r.id) });
 	return r.id;

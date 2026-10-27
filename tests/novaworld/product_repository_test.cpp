@@ -1,12 +1,15 @@
 // The games' rows (apps/novaworld_common/products/product_repository.h) on a migrated
 // database of the test's own: the seeded games (in their seeded order) with their projects' keys,
-// a game created, changed and refused (a duplicate login, a duplicate key, a duplicate
-// expansion, no base parent, an expansion building on it, in use); trees from building to ready
-// (the product's current tree follows), what a start may pick and what may be pruned; releases
-// of their games validated (an upload naming none takes its base section's), published (the
-// previous one retired), retired, and a built one naming its game; the servers' pins, the
-// owner's update and the admin's update-all; the products' holds on the servers' rows reading
-// a server as live exactly when the hosted servers' own rule does.
+// a game created, changed and refused (a duplicate login, command file or download, a duplicate
+// key, an expansion code another expansion of any game has without case, no base parent, an
+// expansion building on it, in use); trees from building to ready (the product's current tree
+// follows), what a start may pick (the service's own, every account's public ones, the caller's
+// own) and what may be pruned; releases of their games validated (an upload naming none takes
+// its base section's), published (the previous one retired), retired, and a built one naming its
+// game; an account's own game's first publish giving it its own lobby, which its delete takes;
+// its releases in flight and its starts of the day; the mods a game lists; the servers' pins, the
+// owner's update and the admin's update-all; the products' holds on the servers' rows reading a
+// server as live exactly when the hosted servers' own rule does.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -15,6 +18,7 @@
 #include "products/product_repository.h"
 #include "products/tree_files.h"
 
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -134,6 +138,7 @@ int test_products() {
 	int64_t ignored = 0;
 	TEST_EXPECT(create_product(db, dup, ignored) == ProductOutcome::DuplicateLogin);
 	dup.updater_login = "BHD2us";
+	dup.command_file = "BHD2PTR.CMD";
 	TEST_EXPECT(create_product(db, dup, ignored) == ProductOutcome::DuplicateKey);
 	NewProduct ts;
 	ts.display_name = "Team Sabre";
@@ -148,6 +153,36 @@ int test_products() {
 	NewProduct again = ts; // the same code under the same game, by another key
 	again.key = "SABRE2";
 	TEST_EXPECT(create_product(db, again, ignored) == ProductOutcome::DuplicateExpansion);
+	// An expansion code names its folder in any game's install: unique across every game, without
+	// case, the service's own (jox01, nifty) among them.
+	again.parent_id = jo;
+	again.expansion_code = "BHX01";
+	TEST_EXPECT(create_product(db, again, ignored) == ProductOutcome::DuplicateExpansion);
+	again.parent_id = bhd_id;
+	again.expansion_code = "Nifty";
+	TEST_EXPECT(create_product(db, again, ignored) == ProductOutcome::DuplicateExpansion);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'SABRE2';").empty());
+	// So does the database's own index, whatever writes the row.
+	{
+		bool refused = false;
+		try {
+			db.exec("INSERT INTO products (key, display_name, kind, parent_id, expansion_code, "
+					"visibility) VALUES ('SABRE3', 'X', 'expansion', $1, 'JOX01', 'private');",
+					{ BindValue(bhd_id) });
+		} catch (const db::Error &) {
+			refused = true;
+		}
+		TEST_EXPECT(refused);
+	}
+	// A command file and a download are unique too (the command file without case).
+	NewProduct named = bhd;
+	named.key = "BHDNAMED";
+	named.updater_login = "BHDNAMED";
+	named.command_file = "joptr.cmd";
+	TEST_EXPECT(create_product(db, named, ignored) == ProductOutcome::DuplicateCommandFile);
+	named.command_file = "BHDNAMED.CMD";
+	named.download = "jointops-game-windows.zip";
+	TEST_EXPECT(create_product(db, named, ignored) == ProductOutcome::DuplicateDownload);
 	NewProduct orphan = ts;
 	orphan.expansion_code = "bhx02";
 	orphan.key = "ORPHAN";
@@ -164,6 +199,9 @@ int test_products() {
 	ProductPatch steal;
 	steal.updater_login = "JOTRUS";
 	TEST_EXPECT(update_product(db, bhd_id, steal) == ProductOutcome::DuplicateLogin);
+	steal.updater_login = "BHDus";
+	steal.command_file = "DFX2.cmd";
+	TEST_EXPECT(update_product(db, bhd_id, steal) == ProductOutcome::DuplicateCommandFile);
 	// Its project renamed and made public; a key another game's project has refused.
 	ProductPatch project;
 	project.key = "BHAWK";
@@ -200,7 +238,7 @@ int test_trees_and_offered() {
 	Database db = tdb.open();
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	const int64_t dfx2 = seeded(db, "Delta Force Xtreme 2");
-	TEST_EXPECT(offered_products(db).empty());
+	TEST_EXPECT(offered_products(db, std::nullopt).empty());
 
 	// A release's tree: building -> ready; the product's current tree is then this one, and the
 	// base is offered with its missions.
@@ -209,7 +247,8 @@ int test_trees_and_offered() {
 	const auto fresh = find_tree(db, t1);
 	TEST_EXPECT(fresh && fresh->state == TreeState::Building && !fresh->release_id &&
 			fresh->files.empty() && fresh->missions.empty() && fresh->created_by == "worker");
-	TEST_EXPECT(offered_products(db).empty() && !find_product(db, jo)->current_tree_id);
+	TEST_EXPECT(
+			offered_products(db, std::nullopt).empty() && !find_product(db, jo)->current_tree_id);
 	TEST_EXPECT(finish_tree(db, t1,
 			ready_with("JO V1.7.5.3", { { "a.bms", "Alpha" }, { "b.bms", "Bravo" } })));
 	TEST_EXPECT(!finish_tree(db, t1, ready_with("again", {}))); // ready, no longer building
@@ -220,7 +259,7 @@ int test_trees_and_offered() {
 			ready->version_text == "JO V1.7.5.3" && ready->bytes == 1010 && !ready->ready_at.empty());
 	const auto jo_row = find_product(db, jo);
 	TEST_EXPECT(jo_row && jo_row->current_tree_id == t1);
-	std::vector<OfferedProduct> offered = offered_products(db);
+	std::vector<OfferedProduct> offered = offered_products(db, std::nullopt);
 	TEST_EXPECT(offered.size() == 1 && offered[0].id == jo && offered[0].tree_id == t1 &&
 			offered[0].title == "jo" && offered[0].missions.size() == 2 && offered[0].expansions.empty());
 	TEST_EXPECT(find_offered(offered, jo) != nullptr && find_offered(offered, dfx2) == nullptr);
@@ -228,7 +267,7 @@ int test_trees_and_offered() {
 	// The expansion's tree: offered under its base once ready.
 	const int64_t tx = create_tree(db, jox, std::nullopt, "worker");
 	TEST_EXPECT(finish_tree(db, tx, ready_with("JOX V1.0", { { "x.bms", "Xray" } })));
-	offered = offered_products(db);
+	offered = offered_products(db, std::nullopt);
 	TEST_EXPECT(offered.size() == 1 && offered[0].expansions.size() == 1 &&
 			offered[0].expansions[0].id == jox && offered[0].expansions[0].code == "jox01" &&
 			offered[0].expansions[0].tree_id == tx && offered[0].expansions[0].missions.size() == 1);
@@ -264,6 +303,52 @@ int test_trees_and_offered() {
 	TEST_EXPECT(prunable_trees(db, -1).empty());
 	db.exec("UPDATE product_trees SET state = 'pruned', pruned_at = NULL WHERE id = $1;", { BindValue(t4) });
 	TEST_EXPECT(prunable_trees(db, 3600) == std::vector<int64_t>{ t4 });
+
+	// An account's own products: a private game offered to its owner alone, a public one to
+	// everyone; an expansion only beside its game, which must be offered too.
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
+			"('offer_a', 'x', '0ff00001', '1', 'A'), ('offer_b', 'x', '0ff00002', '1', 'B');");
+	const int64_t a =
+			db.query("SELECT id FROM players WHERE username = 'offer_a';")[0].as_int(0).value_or(0);
+	const int64_t b =
+			db.query("SELECT id FROM players WHERE username = 'offer_b';")[0].as_int(0).value_or(0);
+	const auto own = [&db](const char *key, int64_t owner, const char *visibility,
+							 std::optional<int64_t> parent) -> int64_t {
+		NewProduct p;
+		p.display_name = key;
+		p.kind = parent ? ProductKind::Expansion : ProductKind::Game;
+		p.parent_id = parent;
+		p.expansion_code = parent ? "x" + std::string(key) : std::string();
+		for (char &c : p.expansion_code)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		p.title = "jo";
+		p.key = key;
+		p.visibility = visibility;
+		p.owner_id = owner;
+		int64_t id = 0;
+		TEST_EXPECT(create_product(db, p, id) == ProductOutcome::Ok);
+		const int64_t tree = create_tree(db, id, std::nullopt, "worker");
+		TEST_EXPECT(finish_tree(db, tree, ready_with("1", {})));
+		return id;
+	};
+	const int64_t a_private = own("APRIV", a, "private", std::nullopt);
+	const int64_t a_public = own("APUB", a, "public", std::nullopt);
+	const int64_t a_mod = own("AMOD", a, "public", a_private);
+	const int64_t b_mod = own("BMOD", b, "private", jo);
+	const auto ids = [](const std::vector<OfferedProduct> &list) {
+		std::vector<int64_t> out;
+		for (const OfferedProduct &p : list) {
+			out.push_back(p.id);
+			for (const OfferedExpansion &e : p.expansions)
+				out.push_back(e.id);
+		}
+		return out;
+	};
+	TEST_EXPECT(
+			(ids(offered_products(db, std::nullopt)) == std::vector<int64_t>{ jo, jox, a_public }));
+	TEST_EXPECT((ids(offered_products(db, a)) ==
+			std::vector<int64_t>{ jo, jox, a_private, a_mod, a_public }));
+	TEST_EXPECT((ids(offered_products(db, b)) == std::vector<int64_t>{ jo, jox, b_mod, a_public }));
 	return 0;
 }
 
@@ -345,6 +430,154 @@ int test_releases() {
 	TEST_EXPECT(find_release(db, r4)->status == ReleaseStatus::Invalid && find_release(db, r4)->error == "no 1SFS trailer");
 	TEST_EXPECT(delete_release(db, r1) && !delete_release(db, r1));
 	TEST_EXPECT(find_tree(db, built) && !find_tree(db, built)->release_id);
+	TEST_EXPECT(list_releases_of(db, jox).size() == 1 && list_releases_of(db, jox)[0].id == r5);
+	TEST_EXPECT(list_releases_of(db, runtime).size() == 1);
+	return 0;
+}
+
+// A validated release of `product_id`, built from a revision (a draft, its one section).
+int64_t draft_of(Database &db, int64_t product_id, const char *cmd, const char *sha,
+		const std::string &version = "1.0") {
+	NewBuiltRelease made;
+	made.name = sha;
+	made.created_by = "user maker";
+	made.product_id = product_id;
+	made.revision = 1;
+	made.version = version;
+	const int64_t id = create_built_release(db, made);
+	TEST_EXPECT(set_release_built(db, id, ""));
+	TEST_EXPECT(set_release_validated(
+			db, id, sha, 100, "x", { { product_id, "", cmd, version, 1, 1 } }));
+	return id;
+}
+
+// An account's own projects' releases (ADR 0074): an own game's first publish adds its own lobby
+// (a games row copied from its title's template, OP: Acid Gambit's for jo and DFX2's for dfx2),
+// a second publish adds none, and its delete takes it; the account's releases in flight and its
+// starts of the day; the mods a game lists (the published public ones and the reader's own).
+int test_own_releases() {
+	TestDatabase tdb({ /*migrate=*/true, /*seed_games=*/true });
+	Database db = tdb.open();
+	const int64_t jo = seeded(db, "Joint Operations");
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES "
+			"('maker', 'x', '0aa00001', '1', 'Maker'), ('other', 'x', '0aa00002', '1', 'Other');");
+	const int64_t maker =
+			db.query("SELECT id FROM players WHERE username = 'maker';")[0].as_int(0).value_or(0);
+	const int64_t other =
+			db.query("SELECT id FROM players WHERE username = 'other';")[0].as_int(0).value_or(0);
+	const auto own = [&db](const char *key, const char *title, int64_t owner,
+							 std::optional<int64_t> parent, const char *code,
+							 const char *visibility) -> int64_t {
+		NewProduct p;
+		p.display_name = std::string(key) + " name";
+		p.kind = parent ? ProductKind::Expansion : ProductKind::Game;
+		p.parent_id = parent;
+		p.expansion_code = code;
+		p.title = title;
+		p.key = key;
+		p.updater_login = key;
+		p.command_file = std::string(key) + ".CMD";
+		p.visibility = visibility;
+		p.owner_id = owner;
+		int64_t id = 0;
+		TEST_EXPECT(create_product(db, p, id) == ProductOutcome::Ok);
+		return id;
+	};
+	TEST_EXPECT(own_lobby_slug("MY_GAME") == "my_game_0_consumer" &&
+			own_gate_tag("MY_GAME") == "my_game:0" &&
+			own_download("MY_GAME") == "player-my_game-game-windows.zip");
+
+	// The first publish of an own game adds its own lobby, the template's other columns copied.
+	const int64_t game = own("MYGAME", "jo", maker, std::nullopt, "", "public");
+	const int64_t r1 = draft_of(db, game, "MYGAME.CMD", "sha-1");
+	TEST_EXPECT(find_product(db, game)->lobby.empty());
+	TEST_EXPECT(publish_release(db, r1));
+	TEST_EXPECT(find_product(db, game)->lobby == "mygame_0_consumer");
+	const auto row = db.query(
+			"SELECT g.display_name, g.lobby_name, g.gate_tag, g.title, g.gsb_path, g.start_page, "
+			"g.ver1, g.exp_bits, g.pfid, g.startup_query FROM games g, games t "
+			"WHERE g.slug = 'mygame_0_consumer' AND t.slug = 'acidgambit_0_consumer' "
+			"AND g.start_page = t.start_page AND g.host_page = t.host_page AND g.ver1 = t.ver1 "
+			"AND g.ver2 = t.ver2 AND g.exp_bits = t.exp_bits AND g.pfid = t.pfid "
+			"AND g.startup_query = t.startup_query;");
+	TEST_EXPECT(row.size() == 1 && row[0].as_text(0) == "MYGAME name" &&
+			row[0].as_text(1) == "mygame_0_consumer" && row[0].as_text(2) == "mygame:0" &&
+			row[0].as_text(3) == "jo" && row[0].as_text(4) == "mygame_0.gsb?a=1");
+	// A second publish adds none; a dfx2 game copies DFX2's row.
+	const int64_t r2 = draft_of(db, game, "MYGAME.CMD", "sha-2");
+	TEST_EXPECT(publish_release(db, r2));
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug LIKE 'mygame%';").size() == 1);
+	const int64_t dgame = own("MYDFX", "dfx2", maker, std::nullopt, "", "private");
+	TEST_EXPECT(publish_release(db, draft_of(db, dgame, "MYDFX.CMD", "sha-3")));
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM games g, games t WHERE g.slug = 'mydfx_0_consumer' "
+					 "AND t.slug = 'dfx2_consumer' AND g.title = 'dfx2' "
+					 "AND g.join_lan_url = t.join_lan_url AND g.glsvss_request = t.glsvss_request "
+					 "AND g.pfid = '38';")
+					.size() == 1);
+	// The service's own games keep their seeded lobbies.
+	TEST_EXPECT(find_product(db, jo)->lobby == "jop_2_consumer");
+
+	// Its releases in flight, and its starts of the UTC day (five, a deleted one still counted).
+	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 0);
+	NewBuiltRelease building;
+	building.name = "MYGAME 2.0";
+	building.product_id = game;
+	building.revision = 1;
+	building.version = "2.0";
+	const int64_t r4 = create_built_release(db, building);
+	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 1 &&
+			count_owned_releases_in_flight(db, other) == 0);
+	TEST_EXPECT(set_release_built(db, r4, ""));
+	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 1); // validating
+	TEST_EXPECT(set_release_status(db, r4, ReleaseStatus::Validating, ReleaseStatus::Invalid, "x"));
+	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 0);
+	for (int i = 0; i < 5; ++i)
+		TEST_EXPECT(take_release_start(db, maker, 5));
+	TEST_EXPECT(!take_release_start(db, maker, 5));
+	TEST_EXPECT(delete_release(db, r4) && !take_release_start(db, maker, 5));
+	TEST_EXPECT(take_release_start(db, other, 5));
+	// A new UTC day starts over at one.
+	db.exec("UPDATE release_starts SET day = day - interval '1 day' WHERE player_id = $1;",
+			{ BindValue(maker) });
+	TEST_EXPECT(take_release_start(db, maker, 5));
+	TEST_EXPECT(db.query("SELECT started FROM release_starts WHERE player_id = $1;",
+						  { BindValue(maker) })[0]
+						.as_int(0) == 1);
+
+	// The mods of a game: the published public ones, and the reader's own private ones.
+	const int64_t pub = own("PUBMOD", "", maker, jo, "pubmod", "public");
+	const int64_t priv = own("PRIVMOD", "", maker, jo, "privmod", "private");
+	const int64_t unpublished = own("DRAFTMOD", "", maker, jo, "draftmod", "public");
+	const int64_t on_own = own("OWNMOD", "", other, game, "ownmod", "public");
+	TEST_EXPECT(publish_release(db, draft_of(db, pub, "PUBMOD.CMD", "sha-5", "1.2.3")));
+	TEST_EXPECT(publish_release(db, draft_of(db, priv, "PRIVMOD.CMD", "sha-6")));
+	draft_of(db, unpublished, "DRAFTMOD.CMD", "sha-7");
+	TEST_EXPECT(publish_release(db, draft_of(db, on_own, "OWNMOD.CMD", "sha-8")));
+	const auto keys = [](const std::vector<ModRow> &mods) {
+		std::vector<std::string> out;
+		for (const ModRow &m : mods)
+			out.push_back(m.key);
+		return out;
+	};
+	TEST_EXPECT((keys(list_mods(db, "joptr.cmd", std::nullopt)) ==
+			std::vector<std::string>{ "PUBMOD" }));
+	TEST_EXPECT((keys(list_mods(db, "JOPTR.CMD", other)) == std::vector<std::string>{ "PUBMOD" }));
+	TEST_EXPECT((keys(list_mods(db, "JOPTR.CMD", maker)) ==
+			std::vector<std::string>{ "PRIVMOD", "PUBMOD" }));
+	TEST_EXPECT((keys(list_mods(db, "MYGAME.CMD", std::nullopt)) ==
+			std::vector<std::string>{ "OWNMOD" }));
+	TEST_EXPECT(list_mods(db, "DFX2.CMD", maker).empty());
+	const std::vector<ModRow> mods = list_mods(db, "JOPTR.CMD", std::nullopt);
+	TEST_EXPECT(mods.size() == 1 && mods[0].code == "pubmod" && mods[0].name == "PUBMOD name" &&
+			mods[0].owner == std::optional<std::string>("maker") && mods[0].version == "1.2.3" &&
+			mods[0].updater_login == "PUBMOD" && mods[0].command_file == "PUBMOD.CMD");
+
+	// An own game's delete takes its own lobby.
+	TEST_EXPECT(delete_product(db, on_own) == ProductOutcome::Ok);
+	TEST_EXPECT(delete_product(db, game) == ProductOutcome::Ok);
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'mygame_0_consumer';").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'jop_2_consumer';").size() == 1);
 	return 0;
 }
 
@@ -463,6 +696,8 @@ int main(int argc, char **argv) {
 	if (int rc = test_trees_and_offered())
 		return rc;
 	if (int rc = test_releases())
+		return rc;
+	if (int rc = test_own_releases())
 		return rc;
 	if (int rc = test_pins())
 		return rc;

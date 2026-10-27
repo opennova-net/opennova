@@ -366,7 +366,9 @@ struct Rig {
 	// valid_settings on Joint Operations' product.
 	hosted::HostedSettings settings() const { return valid_settings(data.jo); }
 	// What a start may pick now (product_repository.h).
-	std::vector<hosted::OfferedProduct> offered() { return hosted::offered_products(db); }
+	std::vector<hosted::OfferedProduct> offered() {
+		return hosted::offered_products(db, std::nullopt);
+	}
 	// The request of a new owner an admin granted one server.
 	int64_t request(const std::string &owner, std::optional<hosted::HostedSettings> settings = std::nullopt) {
 		const int64_t user = make_player(db, owner, 1);

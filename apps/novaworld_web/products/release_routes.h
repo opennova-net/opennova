@@ -2,13 +2,16 @@
 
 // The releases' admin routes (ADR 0064; apps/novaworld_common/hosted/README.md "Products"): every
 // product's, built by the data program (products/release_build.h) from a game's project (the
-// project routes' release route) or from an app's build uploaded into the object store (the
+// project routes' release route, its owner's or an admin's, products/project_routes.h, which
+// publish, retire and delete a project's own releases as these do) or from an app's build
+// uploaded into the object store (the
 // Publish workflow's: one multipart upload each, every part PUT through this program; a game
 // answers 409 built_from_project), an updatable app's packed and validated as a game's is
 // (release.validate), a download-only app's kept as uploaded, published to the updater (the
 // update listener serves the packages, updater/release_catalog.h) and built into their
-// products' trees (one release.apply job per section), retired and deleted. Each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY
-// like every /api route), its state change logged with its actor and status (AccessMiddleware):
+// products' trees (one release.apply job per section), retired and deleted. Each behind
+// WebAccess::require_admin (and ONNET_API_PROXY_ONLY like every /api route), its state change
+// logged with its actor and status (AccessMiddleware):
 //
 //   GET    /api/admin/releases                 every release with its sections, newest first
 //   POST   /api/admin/releases                 {name?, size, product_id, version}: an app's
@@ -50,6 +53,26 @@ struct ReleaseRow; // products/product_repository.h
 // release's {project, revision, base_revision (or null)}, null for an upload), version,
 // build_log}.
 crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
+
+// What a release's publish, retire and delete come to, the admin's routes' and a project's own
+// (products/project_routes.h) alike, `actor` naming who in the log line ("admin <name>",
+// "user <name>", "token"). The publish: a draft published (its sections' products serve it to the
+// updater, the release they named before retired; an account's own game's first gets its own
+// lobby, product_repository.h publish_release), one release.apply per section and the downloads
+// host's render (downloads.publish) queued, in one transaction: 202 {"release"}; 409 not_draft.
+// The retire: a published release retired and downloads.publish queued, in one transaction: 202
+// {"release"}; 409 not_published. The delete: a draft, invalid, retired or uploading (abandoned)
+// release, its objects removed (an app's uploaded build, with the upload in flight aborted, and
+// the package's upload key, which an invalid one may keep, then its package or download once it
+// has a sha; a missing object is no failure), the row gone: 204; 409 published (retire it
+// first), validating or building (the data program is on it; a building one whose job ended may
+// go); 502 store_error; 503 store_unavailable (no store).
+crow::response publish_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor);
+crow::response retire_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor);
+crow::response delete_release_reply(
+		db::Database &db, ObjectStore *store, const ReleaseRow &release, const std::string &actor);
 
 class ReleaseRoutes {
 public:

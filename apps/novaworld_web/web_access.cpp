@@ -203,6 +203,12 @@ RouteAccess WebAccess::require_admin(const crow::request &req) {
 	return access;
 }
 
+void WebAccess::note_admin_actor(const crow::request &req, const WebSessionUser &user) {
+	if (user.role == "admin" && is_state_changing(req))
+		app_.get_context<AccessMiddleware>(req).admin_actor =
+				"session '" + loggable(user.username) + "'";
+}
+
 RequestCaller WebAccess::identify(const crow::request &req) {
 	RequestCaller caller;
 	caller.token = bearer_authorized(req);

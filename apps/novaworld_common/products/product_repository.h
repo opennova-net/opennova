@@ -143,10 +143,24 @@ struct ReleaseSection {
 // --- products ---
 
 // An account's own projects (NewProduct::owner_id): at most kOwnedProjectsMax of them, and at most
-// kOwnedBytesMax in their stores together (project_repository.h owned_usage; the project routes
-// refuse an upload past it, whoever pushes it). The service's own take no limit.
+// kOwnedBytesMax in their stores and their releases' packages together (project_repository.h
+// owned_usage; the project routes refuse an upload or a release past it, whoever pushes it). The
+// service's own take no limit, nor an admin's own (owned_limits_apply).
 inline constexpr int64_t kOwnedProjectsMax = 10;
 inline constexpr int64_t kOwnedBytesMax = int64_t(4) << 30;
+
+// Whether the owned limits bind the account `owner_id`'s own projects: every account's but an
+// admin's.
+bool owned_limits_apply(db::Database &db, int64_t owner_id);
+
+// What an account's own game gets from its key, in lower case (ADR 0074): the games row its first
+// publish adds (publish_release: the lobby "<key>_0_consumer", its gate tag "<key>:0", its .gsb
+// "<key>_0.gsb?a=1") and, a public one's, its download on the downloads host
+// ("player-<key>-game-windows.zip", given at its create: no download of the service's own
+// starts with "player-").
+std::string own_lobby_slug(std::string_view key);
+std::string own_gate_tag(std::string_view key);
+std::string own_download(std::string_view key);
 
 struct NewProduct {
 	std::string display_name;
@@ -154,10 +168,12 @@ struct NewProduct {
 	std::optional<int64_t> parent_id;
 	std::string expansion_code;
 	std::string title;
-	std::string lobby; // a game's ("" for none: an account's own game)
+	std::string lobby; // a game's ("" for none: an account's own game, until its first publish)
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
+	// Its file's name on the downloads host ("" for none; an account's own game's own_download).
+	std::string download;
 	// Its key and its project's visibility (an admin makes games and expansions alone, each with
 	// its project).
 	std::string key;
@@ -173,8 +189,10 @@ enum class ProductOutcome : uint8_t {
 	Ok,
 	NotFound,
 	DuplicateLogin, // another product holds the updater login (without case)
+	DuplicateCommandFile, // another product holds the command file (without case)
+	DuplicateDownload, // another product's download has the name
 	DuplicateKey, // another product has the key
-	DuplicateExpansion, // the parent has an expansion of that code
+	DuplicateExpansion, // another expansion, of any game, has the code (without case)
 	NoSuchParent, // the parent is not a game (kind game)
 	InUse, // a live server runs it
 	HasExpansion, // an expansion has it as parent
@@ -183,7 +201,8 @@ enum class ProductOutcome : uint8_t {
 
 // A new row; `id` its id on Ok. The shapes (the kind's fields, the code, the login, the key) are
 // the routes' to check: here only the database's own rules answer, and for an owner's the count
-// of its projects (its players row held while it is counted, so two creates never both pass it).
+// of its projects (its players row held while it is counted, so two creates never both pass it;
+// an admin's own are not counted, owned_limits_apply).
 ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id);
 
 // What an admin may change afterwards.
@@ -200,8 +219,9 @@ struct ProductPatch {
 };
 ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &patch);
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
-// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge);
-// InUse while a live server names it, HasExpansion while an expansion has it as parent.
+// are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge;
+// an account's own game's own lobby, its games row, goes with it); InUse while a live server
+// names it, HasExpansion while an expansion has it as parent.
 ProductOutcome delete_product(db::Database &db, int64_t id);
 
 std::optional<ProductRow> find_product(db::Database &db, int64_t id);
@@ -239,7 +259,10 @@ struct OfferedProduct {
 	std::vector<TreeMission> missions;
 	std::vector<OfferedExpansion> expansions;
 };
-std::vector<OfferedProduct> offered_products(db::Database &db);
+// What the account `caller` may start (none: what any account may): the service's own products,
+// every account's public ones and the caller's own, each with a ready current tree (an expansion
+// beside its game, which must be offered too).
+std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int64_t> caller);
 // Pure lookups over the list (inline: check_settings runs them without the database).
 inline const OfferedProduct *find_offered(const std::vector<OfferedProduct> &offered, int64_t id) {
 	for (const OfferedProduct &d : offered)
@@ -324,6 +347,14 @@ std::optional<ReleaseRow> find_release(db::Database &db, int64_t id);
 std::optional<int64_t> find_release_by_sha(db::Database &db, std::string_view sha256);
 // Every release, newest first.
 std::vector<ReleaseRow> list_releases(db::Database &db);
+// The releases of the product `product_id` (ReleaseRow::product_id), newest first.
+std::vector<ReleaseRow> list_releases_of(db::Database &db, int64_t product_id);
+// How many releases of the account `owner_id`'s own projects are building or validating.
+int64_t count_owned_releases_in_flight(db::Database &db, int64_t owner_id);
+// One more release counted as started by the account `player_id` on this UTC day
+// (release_starts), while it has started fewer than `max` that day; false, nothing counted, once
+// it has. A release deleted since still counts.
+bool take_release_start(db::Database &db, int64_t player_id, int64_t max);
 std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id);
 // `from` -> `to` (with `error` for invalid); false when the row left `from`.
 bool set_release_status(db::Database &db, int64_t id, ReleaseStatus from, ReleaseStatus to,
@@ -343,7 +374,11 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
 // draft -> published: each section's product's published_release_id becomes `id` (a release with
 // no section, a download-only app's, its own product's), and a release no product names any
-// more is retired. False when the row left draft.
+// more is retired. An account's own game with no lobby gets its own in the same transaction: a
+// games row of own_lobby_slug (its lobby name too), gate tag own_gate_tag, .gsb
+// "<key>_0.gsb?a=1", its name and title, its other columns its title's template row's (OP: Acid
+// Gambit's for jo, Delta Force Xtreme 2's for dfx2, kOwnLobbyTemplates; none while that row is
+// missing), and its products.lobby that slug. False when the row left draft.
 bool publish_release(db::Database &db, int64_t id);
 // published -> retired, its sections' products' published_release_id cleared. False when
 // the row left published.
@@ -367,6 +402,32 @@ struct PublishedSection {
 };
 // Every product with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);
+
+// The games rows an account's own game's lobby copies (publish_release), by its title.
+struct OwnLobbyTemplate {
+	const char *title;
+	const char *slug;
+};
+inline constexpr OwnLobbyTemplate kOwnLobbyTemplates[] = {
+	{ "jo", "acidgambit_0_consumer" },
+	{ "dfx2", "dfx2_consumer" },
+};
+
+// A mod a game's players may install (GET /api/mods): an expansion with an updater product and a
+// published release.
+struct ModRow {
+	std::string key;
+	std::string code; // its expansion code: its expansion/<code>/ folder
+	std::string name;
+	std::optional<std::string> owner; // its owner's username; none for the service's own
+	std::string version; // its published release's (its section's VERSION when it names none)
+	std::string updater_login;
+	std::string command_file;
+};
+// The mods of the game whose command file is `game_command_file` (without case): the public ones
+// and the account `reader`'s own, by key in byte order.
+std::vector<ModRow> list_mods(
+		db::Database &db, std::string_view game_command_file, std::optional<int64_t> reader);
 
 // --- the hosted servers' pins ---
 

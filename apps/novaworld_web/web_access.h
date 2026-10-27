@@ -182,6 +182,11 @@ public:
 	// (products/project_routes.h).
 	RequestCaller identify(const crow::request &req);
 
+	// An admin's session acting through a route any account may reach (an account's own project,
+	// products/project_routes.h): a state change it makes is logged as require_admin's are, with
+	// its actor and the reply's status (AccessMiddleware).
+	void note_admin_actor(const crow::request &req, const WebSessionUser &user);
+
 	// The login brake both logins run. take_login_address draws the attempt
 	// from the route's address bucket (0, else the Retry-After seconds).
 	// begin_password_check draws one token from the route's (username,

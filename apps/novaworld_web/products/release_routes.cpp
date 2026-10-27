@@ -120,6 +120,74 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	return out;
 }
 
+crow::response publish_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor) {
+	size_t applies = 0;
+	{
+		db::Transaction tx(db);
+		if (!publish_release(db, release.id))
+			return json_error(409, "not_draft", "only a draft (a validated release) is published");
+		for (const ReleaseSection &s : list_sections(db, release.id))
+			if (enqueue_release_apply(db, release.id, s.product_id) != 0)
+				++applies;
+		enqueue_downloads_publish(db);
+		tx.commit();
+	}
+	std::printf("[http] release %lld '%s' published by %s: %zu apply job(s)\n",
+			static_cast<long long>(release.id), loggable(release.name).c_str(),
+			loggable(actor).c_str(), applies);
+	crow::json::wvalue out;
+	out["release"] = release_json(db, *find_release(db, release.id));
+	return json_reply(202, out);
+}
+
+crow::response retire_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor) {
+	{
+		db::Transaction tx(db);
+		if (!retire_release(db, release.id))
+			return json_error(409, "not_published", "only a published release is retired");
+		enqueue_downloads_publish(db);
+		tx.commit();
+	}
+	std::printf("[http] release %lld '%s' retired by %s\n", static_cast<long long>(release.id),
+			loggable(release.name).c_str(), loggable(actor).c_str());
+	crow::json::wvalue out;
+	out["release"] = release_json(db, *find_release(db, release.id));
+	return json_reply(202, out);
+}
+
+crow::response delete_release_reply(
+		db::Database &db, ObjectStore *store, const ReleaseRow &release, const std::string &actor) {
+	if (release.status == ReleaseStatus::Published)
+		return json_error(409, "published", "retire this release before deleting it");
+	if (release.status == ReleaseStatus::Validating)
+		return json_error(
+				409, "validating", "the data program is validating this release; wait for it");
+	// A build whose job ended without settling its row (its attempts spent on a data task
+	// replaced mid-build) leaves it building with no one on it: that one may go.
+	if (release.status == ReleaseStatus::Building &&
+			jobs::job_pending(db, release_build_key(release.id)))
+		return json_error(
+				409, "building", "the data program is building this release; wait for it");
+	if (store == nullptr)
+		return store_unavailable();
+	std::string error;
+	if (!store->abort_uploads_under(release_source_key(release.id), error) ||
+			!store->remove(release_source_key(release.id), error) ||
+			!store->remove(release_upload_key(release.id), error) ||
+			(!release.sha256.empty() &&
+					(!store->remove(release_package_key(release.sha256), error) ||
+							!store->remove(release_download_key(release.sha256), error))))
+		return store_failure("DELETE a release", error);
+	if (!delete_release(db, release.id))
+		return no_such_release();
+	std::printf("[http] release %lld '%s' (%s) deleted by %s\n", static_cast<long long>(release.id),
+			loggable(release.name).c_str(), release_status_name(release.status),
+			loggable(actor).c_str());
+	return crow::response(204);
+}
+
 void ReleaseRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/releases").methods("GET"_method)([this](const crow::request &req) {
 		return list(req);
@@ -341,10 +409,7 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 	}
 }
 
-// POST /api/admin/releases/<id>/publish — a draft published: its sections' products serve it
-// to the updater (the release they named before is retired), one release.apply job per section
-// and the downloads host's render (downloads.publish), in one transaction; 202 {"release"}; 404
-// not_found; 409 not_draft.
+// POST /api/admin/releases/<id>/publish — publish_release_reply's; 404 not_found.
 crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -354,32 +419,13 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
-		size_t applies = 0;
-		{
-			db::Transaction tx(*db_conn);
-			if (!publish_release(*db_conn, release->id))
-				return json_error(
-						409, "not_draft", "only a draft (a validated release) is published");
-			for (const ReleaseSection &s : list_sections(*db_conn, release->id))
-				if (enqueue_release_apply(*db_conn, release->id, s.product_id) != 0)
-					++applies;
-			enqueue_downloads_publish(*db_conn);
-			tx.commit();
-		}
-		std::printf("[http] release %lld '%s' published by %s: %zu apply job(s)\n",
-				static_cast<long long>(release->id), loggable(release->name).c_str(),
-				loggable(creator_of(caller)).c_str(), applies);
-		crow::json::wvalue out;
-		out["release"] = release_json(*db_conn, *find_release(*db_conn, release->id));
-		return json_reply(202, out);
+		return publish_release_reply(*db_conn, *release, creator_of(caller));
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/releases/<id>/publish", e);
 	}
 }
 
-// POST /api/admin/releases/<id>/retire — a published release retired (its products serve
-// none) and the downloads host's render (downloads.publish) queued, in one transaction, 202
-// {"release"}; 404 not_found; 409 not_published.
+// POST /api/admin/releases/<id>/retire — retire_release_reply's; 404 not_found.
 crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -389,30 +435,13 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
-		{
-			db::Transaction tx(*db_conn);
-			if (!retire_release(*db_conn, release->id))
-				return json_error(409, "not_published", "only a published release is retired");
-			enqueue_downloads_publish(*db_conn);
-			tx.commit();
-		}
-		std::printf("[http] release %lld '%s' retired by %s\n", static_cast<long long>(release->id),
-				loggable(release->name).c_str(), loggable(creator_of(caller)).c_str());
-		crow::json::wvalue out;
-		out["release"] = release_json(*db_conn, *find_release(*db_conn, release->id));
-		return json_reply(202, out);
+		return retire_release_reply(*db_conn, *release, creator_of(caller));
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/releases/<id>/retire", e);
 	}
 }
 
-// DELETE /api/admin/releases/<id> — a draft, invalid, retired or uploading (abandoned)
-// release: its objects removed (an app's uploaded build, with the upload in flight aborted, and
-// the package's upload key, which an invalid one may keep, then its package or download once it
-// has a sha; a missing object is no failure), the row gone, 204; 404 not_found; 409 published
-// (retire it first),
-// validating or building (the data program is on it; a building one whose job ended may go); 502
-// store_error; 503 store_unavailable.
+// DELETE /api/admin/releases/<id> — delete_release_reply's; 404 not_found.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -422,33 +451,7 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
-		if (release->status == ReleaseStatus::Published)
-			return json_error(409, "published", "retire this release before deleting it");
-		if (release->status == ReleaseStatus::Validating)
-			return json_error(
-					409, "validating", "the data program is validating this release; wait for it");
-		// A build whose job ended without settling its row (its attempts spent on a data task
-		// replaced mid-build) leaves it building with no one on it: that one may go.
-		if (release->status == ReleaseStatus::Building &&
-				jobs::job_pending(*db_conn, release_build_key(release->id)))
-			return json_error(
-					409, "building", "the data program is building this release; wait for it");
-		if (store_ == nullptr)
-			return store_unavailable();
-		std::string error;
-		if (!store_->abort_uploads_under(release_source_key(release->id), error) ||
-				!store_->remove(release_source_key(release->id), error) ||
-				!store_->remove(release_upload_key(release->id), error) ||
-				(!release->sha256.empty() &&
-						(!store_->remove(release_package_key(release->sha256), error) ||
-								!store_->remove(release_download_key(release->sha256), error))))
-			return store_failure("DELETE /api/admin/releases/<id>", error);
-		if (!delete_release(*db_conn, release->id))
-			return no_such_release();
-		std::printf("[http] release %lld '%s' (%s) deleted by %s\n",
-				static_cast<long long>(release->id), loggable(release->name).c_str(),
-				release_status_name(release->status), loggable(creator_of(caller)).c_str());
-		return crow::response(204);
+		return delete_release_reply(*db_conn, store_, *release, creator_of(caller));
 	} catch (const db::Error &e) {
 		return db_failure("DELETE /api/admin/releases/<id>", e);
 	}

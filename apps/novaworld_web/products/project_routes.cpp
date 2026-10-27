@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -57,6 +58,14 @@ crow::response manage_forbidden() {
 	return json_error(
 			403, "forbidden", "only its owner and NovaWorld's admins change this project");
 }
+crow::response release_forbidden() {
+	return json_error(
+			403, "forbidden", "only its owner and NovaWorld's admins release this project");
+}
+
+crow::response no_such_release() {
+	return json_error(404, "not_found", "the project has no release of this id");
+}
 
 // An upload that would take an account's own projects past their stores' quota: 413
 // {"error": "quota_exceeded", "used", "limit"}, the bytes they hold and the most they may.
@@ -84,10 +93,20 @@ ProjectCaller project_caller(const WebSessionUser &user) {
 	return out;
 }
 
-// Whether the account's own projects, `owner_id`'s, have room for `bytes` more in their stores.
+// Whether the account's own projects, `owner_id`'s, have room for `bytes` more (an admin's own
+// always do: hosted::owned_limits_apply).
 bool owner_has_room(db::Database &db, int64_t owner_id, int64_t bytes, int64_t &used) {
+	if (!hosted::owned_limits_apply(db, owner_id))
+		return true;
 	used = owned_usage(db, owner_id).bytes;
 	return bytes <= hosted::kOwnedBytesMax - used;
+}
+
+int64_t bytes_of(const std::vector<StoredBlob> &blobs) {
+	int64_t bytes = 0;
+	for (const StoredBlob &blob : blobs)
+		bytes += blob.bytes;
+	return bytes;
 }
 
 // A revision's message: UTF-8 with no control character but a line break or a tab.
@@ -130,10 +149,11 @@ std::optional<ProductRow> readable(
 }
 
 // The files of `unrecorded` the project's store holds at their sizes (each an upload through the
-// store's own URL, which no request records) into `found`, the rest into `absent`; false with
-// `error` when the store fails. A few are asked of the store one by one; more by one listing of
-// the project's files, since each store call is a process of the AWS CLI's (a first push of a
-// retail game names thousands).
+// store's own URL, which no request records) into `found`, the rest into `absent`; an object the
+// store holds at another size than the one named is removed (no manifest may name it, and no
+// count holds it); false with `error` when the store fails. A few are asked of the store one by
+// one; more by one listing of the project's files, since each store call is a process of the AWS
+// CLI's (a first push of a retail game names thousands).
 bool sort_by_store(ObjectStore &store, int64_t product_id,
 		const std::vector<StoredBlob> &unrecorded, std::vector<StoredBlob> &found,
 		std::vector<StoredBlob> &absent, std::string &error) {
@@ -157,6 +177,8 @@ bool sort_by_store(ObjectStore &store, int64_t product_id,
 		} else if (!store.head(object, exists, size, error)) {
 			return false;
 		}
+		if (exists && size != static_cast<uint64_t>(blob.bytes) && !store.remove(object, error))
+			return false;
 		(exists && size == static_cast<uint64_t>(blob.bytes) ? found : absent).push_back(blob);
 	}
 	return true;
@@ -189,9 +211,9 @@ crow::json::wvalue revision_json(const ProjectRevision &r) {
 // gameprofile code it runs as: a game's title, an expansion's base game's), expansion_code ("" for
 // a game), visibility, retail, base (an expansion's base game's key, or null), product_id (its
 // game's), head, owner (the username of the account whose own project it is, null for the
-// service's own), can_push and can_manage (what the caller may do, project_rights)}, and for one
-// who may manage it its storage ({files, bytes}). `games` holds the game an expansion builds on,
-// by its id.
+// service's own), can_push, can_manage and can_release (what the caller may do, project_rights),
+// release (its published release's {id, version}, null for none)}, and for one who may manage it
+// its storage ({files, bytes}). `games` holds the game an expansion builds on, by its id.
 crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const ProjectCaller &caller,
 		const std::unordered_map<int64_t, ProductRow> &games) {
 	const ProjectRights rights = project_rights(p, caller);
@@ -219,6 +241,20 @@ crow::json::wvalue project_json(db::Database &db, const ProductRow &p, const Pro
 		out["owner"] = nullptr;
 	out["can_push"] = rights.push;
 	out["can_manage"] = rights.manage;
+	out["can_release"] = rights.release;
+	const std::optional<hosted::ReleaseRow> published = p.published_release_id
+			? hosted::find_release(db, *p.published_release_id)
+			: std::nullopt;
+	if (published) {
+		out["release"]["id"] = published->id;
+		std::string version = published->version;
+		for (const hosted::ReleaseSection &s : hosted::list_sections(db, published->id))
+			if (version.empty() && s.product_id == p.id)
+				version = s.version;
+		out["release"]["version"] = version;
+	} else {
+		out["release"] = nullptr;
+	}
 	if (rights.manage) {
 		const ProjectStorage storage = project_storage(db, p.id);
 		out["storage"]["files"] = storage.blobs;
@@ -245,12 +281,19 @@ std::unordered_map<int64_t, ProductRow> base_of(db::Database &db, const ProductR
 	return games;
 }
 
-// Whether a new expansion of `caller`'s own may build on `game`: a game of the service's own,
-// public or private (a mod of the installed Joint Operations builds on JO), or one the caller may
-// read.
+// Whether a new expansion of `caller`'s own may build on `game` (ADR 0074): a game of the
+// service's own, public or private (a mod of the installed Joint Operations builds on JO), or one
+// of the caller's own; never another account's, so no account's mod keeps another's game from its
+// delete.
 bool may_build_on(const ProductRow &game, const ProjectCaller &caller) {
 	return game.kind == hosted::ProductKind::Game &&
-			(!game.owner_id || project_rights(game, caller).read);
+			(!game.owner_id || (caller.user_id && game.owner_id == caller.user_id));
+}
+
+// The seconds to the next UTC midnight, when an account's day of releases starts over.
+int64_t seconds_to_utc_midnight() {
+	const int64_t now = static_cast<int64_t>(std::time(nullptr));
+	return 86400 - now % 86400;
 }
 
 // An optional text member that may also come as null (absent).
@@ -371,10 +414,38 @@ void ProjectRoutes::register_routes(WebApp &app) {
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return push(req, key);
 			});
-	CROW_ROUTE(app, "/api/admin/products/<string>/releases")
+	CROW_ROUTE(app, "/api/products/<string>/releases")
+			.methods("GET"_method)([this](const crow::request &req, const std::string &key) {
+				return releases(req, key);
+			});
+	CROW_ROUTE(app, "/api/products/<string>/releases")
 			.methods("POST"_method)([this](const crow::request &req, const std::string &key) {
 				return release(req, key);
 			});
+	CROW_ROUTE(app, "/api/products/<string>/releases/<uint>/publish")
+			.methods("POST"_method)(
+					[this](const crow::request &req, const std::string &key, uint64_t id) {
+						return release_change(req, key, id, ReleaseChange::Publish);
+					});
+	CROW_ROUTE(app, "/api/products/<string>/releases/<uint>/retire")
+			.methods("POST"_method)(
+					[this](const crow::request &req, const std::string &key, uint64_t id) {
+						return release_change(req, key, id, ReleaseChange::Retire);
+					});
+	CROW_ROUTE(app, "/api/products/<string>/releases/<uint>")
+			.methods("DELETE"_method)(
+					[this](const crow::request &req, const std::string &key, uint64_t id) {
+						return release_change(req, key, id, ReleaseChange::Delete);
+					});
+	CROW_ROUTE(app, "/api/mods").methods("GET"_method)([this](const crow::request &req) {
+		return mods(req);
+	});
+}
+
+void ProjectRoutes::audit(
+		const crow::request &req, const ProductRow &project, const WebSessionUser &user) {
+	if (project.owner_id != user.id)
+		access_.note_admin_actor(req, user);
 }
 
 // GET /api/products — {"projects"} by key: the public ones and the caller's own, and for an admin
@@ -398,15 +469,20 @@ crow::response ProjectRoutes::list(const crow::request &req) {
 
 // POST /api/products — {"key", "display_name", "kind", "game"?, "base"?, "expansion_code"?,
 // "visibility"}: a project of the caller's own (its owner), on its own session with the CSRF
-// header: a game (kind "game", game the title it speaks: jo or dfx2; it lists in no lobby) or an
-// expansion (kind "expansion", base a game's key: one of the service's own, public or private (a
-// mod of the installed Joint Operations builds on JO), or one the caller may read;
-// expansion_code as the admin's create takes it; a game named beside it must be the base's), its
-// key and visibility as the admin's create takes them; no release, updater product or tree (an
-// admin's to give). A null optional member is an absent one. One that passes its shapes draws a
-// token from the account's kCreatePerUser bucket (429). 201 {"project"}; 400 invalid_json,
-// missing_field, invalid_field (each with the field); 403 too_many_projects {limit} (it owns
-// kOwnedProjectsMax); 404 no_such_base; 409 duplicate_key, duplicate_expansion.
+// header: a game (kind "game", game the title it speaks: jo or dfx2; its lobby its first publish's,
+// product_repository.h publish_release) or an expansion (kind "expansion", base a game's key: one
+// of the service's own, public or private (a mod of the installed Joint Operations builds on JO),
+// or one of the caller's own; expansion_code as the admin's create takes it, unique across every
+// product without case; a game named beside it must be the base's), its visibility as the
+// admin's create takes it, its key 1 to kOwnedKeyMax (11) of A-Z, 0-9 and _ without "QQ"
+// (project_repository.h valid_owned_key). Its updater product is its key (updater_login KEY,
+// command_file KEY.CMD), a game's download hosted::own_download's. A null optional member is an
+// absent one. One that passes its shapes draws a token from the account's kCreatePerUser bucket
+// (429). 201 {"project"}; 400 invalid_json, missing_field, invalid_field (each with the field);
+// 403 too_many_projects {limit} (it owns kOwnedProjectsMax; an admin's own are not counted); 404
+// no_such_base; 409 duplicate_key (another product has the key, or its updater product or
+// download name), duplicate_expansion {field: "expansion_code"} (another mod, of any game, has
+// the code).
 crow::response ProjectRoutes::create(const crow::request &req) {
 	static constexpr const char *kRoute = "POST /api/products";
 	auto caller = access_.require_user(req);
@@ -439,8 +515,10 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (!key)
 		return field_error(400, "missing_field", "key", "every project has a key");
-	if (!valid_key(*key))
-		return field_error(400, "invalid_field", "key", "key is 1 to 16 of A-Z, 0-9 and _");
+	if (!valid_owned_key(*key))
+		return field_error(400, "invalid_field", "key",
+				"key is 1 to 11 of A-Z, 0-9 and _, without QQ (the update service names the "
+				"project by it)");
 	if (!display_name)
 		return field_error(400, "missing_field", "display_name", "display_name is required");
 	if (!hosted::valid_display_name(*display_name))
@@ -490,6 +568,11 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 	product.visibility = *visibility;
 	product.owner_id = user.id;
 	product.created_by = (user.role == "admin" ? "admin " : "player ") + user.username;
+	// Its updater product: the key names it to the update service (ADR 0074).
+	product.updater_login = *key;
+	product.command_file = *key + ".CMD";
+	if (*kind == hosted::ProductKind::Game)
+		product.download = hosted::own_download(*key);
 	try {
 		auto db_conn = pool_.acquire();
 		if (*kind == hosted::ProductKind::Game) {
@@ -519,9 +602,13 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 			}
 			case hosted::ProductOutcome::DuplicateKey:
 				return json_error(409, "duplicate_key", "another project has this key");
+			case hosted::ProductOutcome::DuplicateLogin:
+			case hosted::ProductOutcome::DuplicateCommandFile:
+			case hosted::ProductOutcome::DuplicateDownload:
+				return json_error(409, "duplicate_key",
+						"another product's updater or download already goes by this key");
 			case hosted::ProductOutcome::DuplicateExpansion:
-				return json_error(
-						409, "duplicate_expansion", "the base game has an expansion of this code");
+				return hosted::duplicate_expansion();
 			case hosted::ProductOutcome::NoSuchParent:
 				return no_such_base();
 			default:
@@ -603,6 +690,7 @@ crow::response ProjectRoutes::update(const crow::request &req, const std::string
 			return no_such_project();
 		if (!project_rights(*p, who).manage)
 			return manage_forbidden();
+		audit(req, *p, *caller.user);
 		switch (hosted::update_product(*db_conn, p->id, patch)) {
 			case hosted::ProductOutcome::Ok:
 				break;
@@ -644,6 +732,7 @@ crow::response ProjectRoutes::remove(const crow::request &req, const std::string
 			return no_such_project();
 		if (!project_rights(*p, who).manage)
 			return manage_forbidden();
+		audit(req, *p, *caller.user);
 		// With no store there are no objects: nothing to purge.
 		switch (hosted::delete_product_purged(*db_conn, p->id, store_ != nullptr)) {
 			case hosted::ProductOutcome::Ok:
@@ -666,14 +755,14 @@ crow::response ProjectRoutes::remove(const crow::request &req, const std::string
 	return crow::response(204);
 }
 
-// GET /api/me/projects — {"projects", "usage": {"projects", "bytes"}, "limits": {"projects",
-// "bytes"}, "games", "titles"}: the caller's own projects by key (each project_json's), how many
-// there are and the bytes their stores hold, and the most an account may have of each
+// GET /api/me/projects — {"projects", "usage": {"projects", "bytes", "release_bytes"}, "limits":
+// {"projects", "bytes"}, "games", "titles"}: the caller's own projects by key (each
+// project_json's), how many there are and the bytes their stores and their releases' packages
+// hold (release_bytes the packages alone), and the most an account may have of each
 // (kOwnedProjectsMax, kOwnedBytesMax); and what a new project of its may be: the games it may
-// build an expansion on (POST /api/products' base: the service's own, public or private, and the
-// ones the caller may read), each {"key", "title" (its name), "game" (the title it speaks)} by
-// key, and the titles a game of its may speak (hosted::kTitles). On its own session; 401 without
-// one.
+// build an expansion on (POST /api/products' base: the service's own, public or private, and its
+// own), each {"key", "title" (its name), "game" (the title it speaks)} by key, and the titles a
+// game of its may speak (hosted::kTitles). On its own session; 401 without one.
 crow::response ProjectRoutes::mine(const crow::request &req) {
 	auto caller = access_.require_user(req);
 	if (caller.refusal)
@@ -691,6 +780,7 @@ crow::response ProjectRoutes::mine(const crow::request &req) {
 		const OwnedUsage usage = owned_usage(*db_conn, caller.user->id);
 		out["usage"]["projects"] = usage.projects;
 		out["usage"]["bytes"] = usage.bytes;
+		out["usage"]["release_bytes"] = usage.release_bytes;
 		std::vector<const ProductRow *> bases;
 		for (const auto &[id, game] : games)
 			if (may_build_on(game, who))
@@ -839,7 +929,8 @@ crow::response ProjectRoutes::blob(
 // project's store does not hold at their sizes, each with the request that uploads it; on the
 // own session of one who may push it. 400 invalid_json, invalid_field; 401; 403 session_required,
 // forbidden; 404 not_found; 413 quota_exceeded {used, limit} when an account's own project's
-// files to upload would take its projects past kOwnedBytesMax together (none signed then).
+// files to upload, or the ones its store got through its own URLs since, would take its projects
+// past kOwnedBytesMax together (none signed or recorded then).
 crow::response ProjectRoutes::missing(const crow::request &req, const std::string &key) {
 	auto caller = pusher(req);
 	if (caller.refusal)
@@ -875,29 +966,27 @@ crow::response ProjectRoutes::missing(const crow::request &req, const std::strin
 			return no_such_project();
 		if (!project_rights(*p, who).push)
 			return push_forbidden();
+		audit(req, *p, *caller.user);
 		product_id = p->id;
 		absent = missing_blobs(*db_conn, p->id, wanted);
 		// A file an earlier push uploaded through the store's own URL but never committed (an
 		// upload past its URL's hour, a push that failed) is held once the store has it, so a push
-		// again uploads only the rest.
+		// again uploads only the rest. An account's own projects hold at most kOwnedBytesMax
+		// together, whoever pushes to them: no such file is recorded, and no upload signed, that
+		// would take them past it.
+		std::vector<StoredBlob> found;
 		if (store_ != nullptr && !absent.empty()) {
-			std::vector<StoredBlob> found, still;
+			std::vector<StoredBlob> still;
 			std::string error;
 			if (!sort_by_store(*store_, p->id, absent, found, still, error))
 				return store_failure("POST /api/products/<key>/missing", error);
-			record_blobs(*db_conn, p->id, found);
 			absent = std::move(still);
 		}
-		// An account's own projects hold at most kOwnedBytesMax together, whoever pushes to them:
-		// no upload is signed that would take them past it.
-		if (p->owner_id && !absent.empty()) {
-			int64_t bytes = 0;
-			for (const StoredBlob &blob : absent)
-				bytes += blob.bytes;
-			int64_t used = 0;
-			if (!owner_has_room(*db_conn, *p->owner_id, bytes, used))
-				return quota_exceeded(used);
-		}
+		int64_t used = 0;
+		if (p->owner_id && !(found.empty() && absent.empty()) &&
+				!owner_has_room(*db_conn, *p->owner_id, bytes_of(found) + bytes_of(absent), used))
+			return quota_exceeded(used);
+		record_blobs(*db_conn, p->id, found);
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/products/<key>/missing", e);
 	}
@@ -1000,6 +1089,7 @@ crow::response ProjectRoutes::upload(
 			return no_such_project();
 		if (!project_rights(*p, who).push)
 			return push_forbidden();
+		audit(req, *p, *caller.user);
 		int64_t used = 0;
 		if (p->owner_id && !missing_blobs(*db_conn, p->id, { { sha, size } }).empty() &&
 				!owner_has_room(*db_conn, *p->owner_id, size, used))
@@ -1023,8 +1113,9 @@ crow::response ProjectRoutes::upload(
 // (its canonical text, base/project/project_manifest.h) pushed as the revision after `parent`,
 // 201 {"revision", "head"}, on the own session of one who may push it (its owner or an admin);
 // 400 invalid_json, missing_field, invalid_field, invalid_manifest, unchanged, missing_blobs
-// {"hashes"}; 401; 403 session_required, forbidden; 404 not_found; 409 stale {"head"}; 503
-// store_unavailable.
+// {"hashes"}; 401; 403 session_required, forbidden; 404 not_found; 409 stale {"head"}; 413
+// quota_exceeded {used, limit} (files its store got through its own URLs that would take an
+// account's own projects past kOwnedBytesMax together, none recorded); 503 store_unavailable.
 crow::response ProjectRoutes::push(const crow::request &req, const std::string &key) {
 	static constexpr const char *kRoute = "POST /api/products/<key>/revisions";
 	auto caller = pusher(req);
@@ -1062,6 +1153,7 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 			return no_such_project();
 		if (!project_rights(*p, who).push)
 			return push_forbidden();
+		audit(req, *p, *caller.user);
 		if (p->head != *parent) {
 			crow::json::wvalue stale;
 			stale["error"] = "stale";
@@ -1084,6 +1176,10 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 		if (!sort_by_store(*store_, p->id, missing_blobs(*db_conn, p->id, listed), found, absent,
 					held_error))
 			return store_failure(kRoute, held_error);
+		int64_t used = 0;
+		if (p->owner_id && !found.empty() &&
+				!owner_has_room(*db_conn, *p->owner_id, bytes_of(found), used))
+			return quota_exceeded(used);
 		record_blobs(*db_conn, p->id, found);
 		if (!absent.empty()) {
 			crow::json::wvalue refusal;
@@ -1132,17 +1228,51 @@ crow::response ProjectRoutes::push(const crow::request &req, const std::string &
 	}
 }
 
-// POST /api/admin/products/<key>/releases — {"version", "revision"?, "base_revision"?}: a
-// release of the game the key names that the data program builds (products/release_build.h)
-// from the revision (the head when none is named) and, for an expansion's, its base game's (its
-// head), its package's version `version`: 201 {"release"}, building, its release.build queued in
-// the same transaction; an admin's alone, an account's own project's too; 400 invalid_json,
-// invalid_field, no_revision (no such revision, none pushed yet, or no base game); 404 not_found
-// (no product's key, or an app's); 503 store_unavailable.
-crow::response ProjectRoutes::release(const crow::request &req, const std::string &key) {
-	auto caller = access_.require_admin(req);
+// GET /api/products/<key>/releases — {"releases"}: the project's releases, newest first, each
+// as the admin's (hosted::release_json), for one who may release it, on its own session; 401; 403
+// forbidden (one the caller may read but not release); 404 not_found.
+crow::response ProjectRoutes::releases(const crow::request &req, const std::string &key) {
+	auto caller = access_.require_user(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
+	const ProjectCaller who = project_caller(*caller.user);
+	crow::json::wvalue out;
+	try {
+		auto db_conn = pool_.acquire();
+		db::ReadSnapshot snapshot(*db_conn);
+		const auto p = readable(*db_conn, key, who);
+		if (!p)
+			return no_such_project();
+		if (!project_rights(*p, who).release)
+			return release_forbidden();
+		std::vector<crow::json::wvalue> list;
+		for (const hosted::ReleaseRow &r : hosted::list_releases_of(*db_conn, p->id))
+			list.push_back(hosted::release_json(*db_conn, r));
+		out["releases"] = std::move(list);
+	} catch (const db::Error &e) {
+		return db_failure("GET /api/products/<key>/releases", e);
+	}
+	return no_store(json_reply(200, out));
+}
+
+// POST /api/products/<key>/releases — {"version", "revision"?, "base_revision"?}: a release of the
+// project that the data program builds (products/release_build.h) from the revision (the head
+// when none is named) and, for an expansion's, its base game's (its head), its package's version
+// `version`: 201 {"release"}, building, its release.build queued in the same transaction, its
+// created_by "user <name>" or "admin <name>"; on its own session with the CSRF header of one who
+// may release it (its owner or an admin). An account that is no admin starts one at a time and
+// kReleasesPerDay a UTC day (a deleted one still counts), and none while its own projects' usage
+// is at kOwnedBytesMax. 400 invalid_json, invalid_field, no_revision (no such revision, none
+// pushed yet, or no base game); 401; 403 forbidden; 404 not_found; 409 release_in_progress (one
+// of its own projects' releases is building or validating); 413 quota_exceeded {used, limit}; 429
+// too_many_releases {limit} with Retry-After (the seconds to the next UTC midnight); 503
+// store_unavailable.
+crow::response ProjectRoutes::release(const crow::request &req, const std::string &key) {
+	static constexpr const char *kRoute = "POST /api/products/<key>/releases";
+	auto caller = access_.require_user(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	const WebSessionUser &user = *caller.user;
 	if (store_ == nullptr)
 		return store_unavailable();
 	auto body = JsonBody::parse(req.body);
@@ -1157,12 +1287,16 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 	if (!version || !hosted::valid_release_version(*version))
 		return field_error(400, "invalid_field", "version",
 				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
+	const ProjectCaller who = project_caller(user);
 	try {
 		auto db_conn = pool_.acquire();
 		db::Transaction tx(*db_conn);
-		const auto p = project_of(*db_conn, key);
+		const auto p = readable(*db_conn, key, who);
 		if (!p)
 			return no_such_project();
+		if (!project_rights(*p, who).release)
+			return release_forbidden();
+		audit(req, *p, user);
 		const int64_t number = revision.value_or(p->head);
 		if (number <= 0 || !find_revision(*db_conn, p->id, number))
 			return json_error(400, "no_revision", "the project has no such revision");
@@ -1174,9 +1308,33 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 				return json_error(
 						400, "no_revision", "the base game's project has no such revision");
 		}
+		// An admin's start takes no limit. Another's holds its own row while its releases are
+		// counted, so two starts of one account's wait on each other here.
+		if (user.role != "admin") {
+			db_conn->query("SELECT 1 FROM players WHERE id = $1 FOR NO KEY UPDATE;",
+					{ db::BindValue(user.id) });
+			if (hosted::count_owned_releases_in_flight(*db_conn, user.id) > 0)
+				return json_error(409, "release_in_progress",
+						"one of your releases is building; start another once it is done");
+			if (p->owner_id) {
+				const int64_t used = owned_usage(*db_conn, *p->owner_id).bytes;
+				if (used >= hosted::kOwnedBytesMax)
+					return quota_exceeded(used);
+			}
+			if (!hosted::take_release_start(*db_conn, user.id, kReleasesPerDay)) {
+				crow::json::wvalue refusal;
+				refusal["error"] = "too_many_releases";
+				refusal["message"] = "an account starts at most " +
+						std::to_string(kReleasesPerDay) + " releases a day (UTC)";
+				refusal["limit"] = kReleasesPerDay;
+				crow::response res = json_reply(429, refusal);
+				res.set_header("Retry-After", std::to_string(seconds_to_utc_midnight()));
+				return res;
+			}
+		}
 		hosted::NewBuiltRelease made;
 		made.name = p->key + " " + *version;
-		made.created_by = caller.user ? "admin " + caller.user->username : std::string("token");
+		made.created_by = (user.role == "admin" ? "admin " : "user ") + user.username;
 		made.product_id = p->id;
 		made.revision = number;
 		made.base_revision = base_number;
@@ -1187,12 +1345,96 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 		const auto row = hosted::find_release(*db_conn, id);
 		if (!row)
 			return json_error(500, "db_error");
+		std::printf("[http] %s: %s r%lld, release %lld building, started by '%s'\n", kRoute,
+				p->key.c_str(), static_cast<long long>(number), static_cast<long long>(id),
+				loggable(user.username).c_str());
 		crow::json::wvalue out;
 		out["release"] = hosted::release_json(*db_conn, *row);
 		return no_store(json_reply(201, out));
 	} catch (const db::Error &e) {
-		return db_failure("POST /api/admin/products/<key>/releases", e);
+		return db_failure(kRoute, e);
 	}
+}
+
+// POST /api/products/<key>/releases/<id>/publish, POST /api/products/<key>/releases/<id>/retire
+// and DELETE /api/products/<key>/releases/<id> — one of the project's releases published,
+// retired or deleted as the admin's release routes do it (release_routes.h
+// publish_release_reply, retire_release_reply, delete_release_reply: 202 {"release"} or 204, and
+// their refusals), on its own session with the CSRF header of one who may release it (its owner
+// or an admin); 401; 403 forbidden; 404 not_found (no project the caller may read, or no release
+// of the project's).
+crow::response ProjectRoutes::release_change(
+		const crow::request &req, const std::string &key, uint64_t id, ReleaseChange change) {
+	auto caller = access_.require_user(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	const WebSessionUser &user = *caller.user;
+	const ProjectCaller who = project_caller(user);
+	try {
+		auto db_conn = pool_.acquire();
+		const auto p = readable(*db_conn, key, who);
+		if (!p)
+			return no_such_project();
+		if (!project_rights(*p, who).release)
+			return release_forbidden();
+		const auto release = hosted::find_release(*db_conn, path_id(id));
+		if (!release || release->product_id != p->id)
+			return no_such_release();
+		audit(req, *p, user);
+		const std::string actor = (user.role == "admin" ? "admin " : "user ") + user.username;
+		switch (change) {
+			case ReleaseChange::Publish:
+				return hosted::publish_release_reply(*db_conn, *release, actor);
+			case ReleaseChange::Retire:
+				return hosted::retire_release_reply(*db_conn, *release, actor);
+			case ReleaseChange::Delete:
+				break;
+		}
+		return hosted::delete_release_reply(*db_conn, store_, *release, actor);
+	} catch (const db::Error &e) {
+		return db_failure("/api/products/<key>/releases/<id>", e);
+	}
+}
+
+// GET /api/mods?game=<command file> — {"mods": [{"key", "code", "name", "owner", "version",
+// "updater_login", "command_file"}]}: the mods a game's players may install (ADR 0074), the
+// expansions with an updater product and a published release whose base game's command file is
+// `game` (JOPTR.CMD, DFX2.CMD, ACIDGAMBIT.CMD, an account's own game's <KEY>.CMD; without case),
+// the public ones and, with the session of their owner, its private ones, by key (code its
+// expansion code, the expansion/<code>/ folder; owner its owner's username, null for the
+// service's own; version its published release's). Anyone's, signed in or not; 400
+// invalid_query with no game.
+crow::response ProjectRoutes::mods(const crow::request &req) {
+	const char *game = req.url_params.get("game");
+	if (game == nullptr || *game == '\0')
+		return json_error(400, "invalid_query", "game is a base game's command file: JOPTR.CMD");
+	const RequestCaller caller = access_.identify(req);
+	std::optional<int64_t> reader;
+	if (caller.user)
+		reader = caller.user->id;
+	crow::json::wvalue out;
+	try {
+		auto db_conn = pool_.acquire();
+		std::vector<crow::json::wvalue> list;
+		for (const hosted::ModRow &m : hosted::list_mods(*db_conn, game, reader)) {
+			crow::json::wvalue mod;
+			mod["key"] = m.key;
+			mod["code"] = m.code;
+			mod["name"] = m.name;
+			if (m.owner)
+				mod["owner"] = *m.owner;
+			else
+				mod["owner"] = nullptr;
+			mod["version"] = m.version;
+			mod["updater_login"] = m.updater_login;
+			mod["command_file"] = m.command_file;
+			list.push_back(std::move(mod));
+		}
+		out["mods"] = std::move(list);
+	} catch (const db::Error &e) {
+		return db_failure("GET /api/mods", e);
+	}
+	return no_store(json_reply(200, out));
 }
 
 } // namespace opennova::novaworld_server::projects

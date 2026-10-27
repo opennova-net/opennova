@@ -128,6 +128,47 @@ constexpr const char *kReleaseProductsSql =
 		"UNION SELECT product_id FROM releases WHERE id = $1 AND product_id IS NOT NULL "
 		"AND NOT EXISTS (SELECT 1 FROM release_sections WHERE release_id = $1)";
 
+std::string lower_key(std::string_view key) {
+	std::string out(key);
+	for (char &c : out)
+		if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c - 'A' + 'a');
+	return out;
+}
+
+// The own lobby of each account's own game that release $1 publishes and that has none yet
+// (publish_release): its games row copied from its title's template row, then its lobby.
+void add_own_lobbies(db::Database &db, int64_t release_id) {
+	const auto games = db.query(std::string("SELECT id, key, display_name, title FROM products "
+											"WHERE id IN (") +
+					kReleaseProductsSql +
+					") AND kind = 'game' AND owner_id IS NOT NULL AND lobby = '';",
+			{ BindValue(release_id) });
+	for (const auto &r : games) {
+		const std::string key = r.as_text(1).value_or("");
+		const std::string title = r.as_text(3).value_or("");
+		const char *from = nullptr;
+		for (const OwnLobbyTemplate &t : kOwnLobbyTemplates)
+			if (title == t.title)
+				from = t.slug;
+		if (from == nullptr)
+			continue;
+		const std::string slug = own_lobby_slug(key);
+		db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+				"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+				"glsvss_request, glsvss_rims, glsvss_agrms) "
+				"SELECT $1, $2, $1, $3, $4, start_page, host_page, $5, join_lan_url, ver1, ver2, "
+				"exp_bits, pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms "
+				"FROM games WHERE slug = $6 ON CONFLICT DO NOTHING;",
+				{ BindValue(slug), BindValue(r.as_text(2).value_or("")),
+						BindValue(own_gate_tag(key)), BindValue(title),
+						BindValue(lower_key(key) + "_0.gsb?a=1"), BindValue(std::string(from)) });
+		db.exec("UPDATE products SET lobby = $2, updated_at = now() WHERE id = $1 "
+				"AND EXISTS (SELECT 1 FROM games WHERE slug = $2);",
+				{ BindValue(r.as_int(0).value_or(0)), BindValue(slug) });
+	}
+}
+
 // A live hosted server as SQL on hosted_servers' state: the hosted servers'
 // own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
 // the products' holds on the servers' rows read without the model above them;
@@ -173,6 +214,23 @@ std::optional<ReleaseStatus> release_status_from_name(std::string_view name) {
 
 // --- products ---
 
+bool owned_limits_apply(db::Database &db, int64_t owner_id) {
+	const auto rows = db.query("SELECT role FROM players WHERE id = $1;", { BindValue(owner_id) });
+	return rows.empty() || rows.front().as_text(0).value_or("") != "admin";
+}
+
+std::string own_lobby_slug(std::string_view key) {
+	return lower_key(key) + "_0_consumer";
+}
+
+std::string own_gate_tag(std::string_view key) {
+	return lower_key(key) + ":0";
+}
+
+std::string own_download(std::string_view key) {
+	return "player-" + lower_key(key) + "-game-windows.zip";
+}
+
 ProductOutcome create_product(db::Database &db, const NewProduct &product, int64_t &id) {
 	db::Transaction tx(db);
 	if (product.kind == ProductKind::Expansion) {
@@ -183,12 +241,13 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	}
 	if (product.owner_id) {
 		// The owner's row held while its projects are counted: two creates of one account's wait
-		// on each other here, so the count never passes its cap.
-		db.query("SELECT 1 FROM players WHERE id = $1 FOR NO KEY UPDATE;",
+		// on each other here, so the count never passes its cap. An admin's own are not counted.
+		const auto owner = db.query("SELECT role FROM players WHERE id = $1 FOR NO KEY UPDATE;",
 				{ BindValue(*product.owner_id) });
+		const bool admin = !owner.empty() && owner.front().as_text(0).value_or("") == "admin";
 		const auto owned = db.query("SELECT count(*) FROM products WHERE owner_id = $1;",
 				{ BindValue(*product.owner_id) });
-		if (!owned.empty() && owned.front().as_int(0).value_or(0) >= kOwnedProjectsMax)
+		if (!admin && !owned.empty() && owned.front().as_int(0).value_or(0) >= kOwnedProjectsMax)
 			return ProductOutcome::TooManyProjects;
 	}
 	if (!product.updater_login.empty() &&
@@ -196,18 +255,30 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 						{ BindValue(product.updater_login) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
+	if (!product.command_file.empty() &&
+			!db.query("SELECT 1 FROM products WHERE upper(command_file) = upper($1::text);",
+					   { BindValue(product.command_file) })
+					.empty())
+		return ProductOutcome::DuplicateCommandFile;
+	if (!product.download.empty() &&
+			!db.query("SELECT 1 FROM products WHERE download = $1;",
+					   { BindValue(product.download) })
+					.empty())
+		return ProductOutcome::DuplicateDownload;
 	if (!db.query("SELECT 1 FROM products WHERE key = $1;", { BindValue(product.key) }).empty())
 		return ProductOutcome::DuplicateKey;
+	// An expansion's code names its folder (expansion/<code>/) in any game's install: unique
+	// across every product, without case.
 	if (product.kind == ProductKind::Expansion &&
-			!db.query("SELECT 1 FROM products WHERE parent_id = $1 AND expansion_code = $2;",
-						{ db::int_or_null(product.parent_id), BindValue(product.expansion_code) })
-					 .empty())
+			!db.query("SELECT 1 FROM products WHERE lower(expansion_code) = lower($1::text);",
+					   { BindValue(product.expansion_code) })
+					.empty())
 		return ProductOutcome::DuplicateExpansion;
 	const bool game = product.kind == ProductKind::Game;
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
-			"updater_login, command_file, retail, key, visibility, created_by, owner_id) "
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;",
+			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
@@ -216,7 +287,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by),
-					db::int_or_null(product.owner_id) });
+					db::int_or_null(product.owner_id), BindValue(product.download) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return ProductOutcome::Ok;
@@ -247,6 +318,12 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 						{ BindValue(row.updater_login), BindValue(id) })
 					 .empty())
 		return ProductOutcome::DuplicateLogin;
+	if (!row.command_file.empty() &&
+			!db.query("SELECT 1 FROM products WHERE upper(command_file) = upper($1::text) AND id "
+					  "<> $2;",
+					   { BindValue(row.command_file), BindValue(id) })
+					.empty())
+		return ProductOutcome::DuplicateCommandFile;
 	if (!db.query("SELECT 1 FROM products WHERE key = $1 AND id <> $2;",
 						{ BindValue(row.key), BindValue(id) })
 					 .empty())
@@ -264,7 +341,9 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 
 ProductOutcome delete_product(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	if (db.query("SELECT 1 FROM products WHERE id = $1 FOR UPDATE;", { BindValue(id) }).empty())
+	const auto row = db.query("SELECT owner_id, lobby, key FROM products WHERE id = $1 FOR UPDATE;",
+			{ BindValue(id) });
+	if (row.empty())
 		return ProductOutcome::NotFound;
 	if (count_live_servers_of(db, id) > 0)
 		return ProductOutcome::InUse;
@@ -274,6 +353,13 @@ ProductOutcome delete_product(db::Database &db, int64_t id) {
 			"WHERE id = $1;",
 			{ BindValue(id) });
 	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
+	// An account's own game's own lobby goes with it (never a lobby an admin gave it).
+	const std::string lobby = row.front().as_text(1).value_or("");
+	if (row.front().as_int(0) && !lobby.empty() &&
+			lobby == own_lobby_slug(row.front().as_text(2).value_or("")))
+		db.exec("DELETE FROM games WHERE slug = $1 "
+				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
+				{ BindValue(lobby) });
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -321,13 +407,16 @@ int count_live_servers_of(db::Database &db, int64_t id) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
-std::vector<OfferedProduct> offered_products(db::Database &db) {
+std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int64_t> caller) {
 	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.lobby, "
 			"t.id, t.version_text, t.missions::text "
 			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
-			"WHERE d.kind <> 'app' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
+			"WHERE d.kind <> 'app' AND t.state = 'ready' "
+			"AND (d.owner_id IS NULL OR d.visibility = 'public' OR d.owner_id = $1) "
+			"ORDER BY (d.kind = 'expansion'), d.id;",
+			{ db::int_or_null(caller) });
 	for (const auto &r : rows) {
 		const bool game = r.as_text(2).value_or("") == "game";
 		if (game) {
@@ -523,6 +612,36 @@ std::vector<ReleaseRow> list_releases(db::Database &db) {
 	return out;
 }
 
+std::vector<ReleaseRow> list_releases_of(db::Database &db, int64_t product_id) {
+	std::vector<ReleaseRow> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kReleaseColumns +
+						 " FROM releases WHERE product_id = $1 ORDER BY id DESC;",
+				 { BindValue(product_id) }))
+		out.push_back(row_to_release(r));
+	return out;
+}
+
+int64_t count_owned_releases_in_flight(db::Database &db, int64_t owner_id) {
+	const auto rows =
+			db.query("SELECT count(*) FROM releases r JOIN products p ON p.id = r.product_id "
+					 "WHERE p.owner_id = $1 AND r.status IN ('building', 'validating');",
+					{ BindValue(owner_id) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+bool take_release_start(db::Database &db, int64_t player_id, int64_t max) {
+	// The UTC day's midnight; a row of an earlier day starts over at one.
+	const auto rows = db.query(
+			"INSERT INTO release_starts (player_id, day, started) "
+			"VALUES ($1, date_trunc('day', now(), 'UTC'), 1) "
+			"ON CONFLICT (player_id) DO UPDATE SET day = EXCLUDED.day, started = CASE "
+			"WHEN release_starts.day = EXCLUDED.day THEN release_starts.started + 1 ELSE 1 END "
+			"WHERE release_starts.day <> EXCLUDED.day OR release_starts.started < $2 "
+			"RETURNING started;",
+			{ BindValue(player_id), BindValue(max) });
+	return !rows.empty();
+}
+
 std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id) {
 	std::vector<ReleaseSection> out;
 	for (const auto &r : db.query(
@@ -592,6 +711,7 @@ bool publish_release(db::Database &db, int64_t id) {
 	for (const auto &r : previous)
 		if (const auto release = r.as_int(0))
 			retire_if_unreferenced(db, *release);
+	add_own_lobbies(db, id);
 	tx.commit();
 	return true;
 }
@@ -636,6 +756,34 @@ std::vector<PublishedSection> published_sections(db::Database &db) {
 		p.sha256 = r.as_text(5).value_or("");
 		p.retail = r.as_int(6).value_or(0) != 0;
 		out.push_back(std::move(p));
+	}
+	return out;
+}
+
+std::vector<ModRow> list_mods(
+		db::Database &db, std::string_view game_command_file, std::optional<int64_t> reader) {
+	std::vector<ModRow> out;
+	for (const auto &r : db.query(
+				 "SELECT e.key, e.expansion_code, e.display_name, o.username, "
+				 "COALESCE(NULLIF(r.version, ''), s.version, ''), e.updater_login, e.command_file "
+				 "FROM products e JOIN products g ON g.id = e.parent_id "
+				 "JOIN releases r ON r.id = e.published_release_id AND r.status = 'published' "
+				 "LEFT JOIN release_sections s ON s.release_id = r.id AND s.product_id = e.id "
+				 "LEFT JOIN players o ON o.id = e.owner_id "
+				 "WHERE e.kind = 'expansion' AND e.updater_login <> '' AND g.command_file <> '' "
+				 "AND upper(g.command_file) = upper($1::text) "
+				 "AND (e.visibility = 'public' OR e.owner_id = $2) "
+				 "ORDER BY e.key COLLATE \"C\";",
+				 { BindValue(std::string(game_command_file)), db::int_or_null(reader) })) {
+		ModRow m;
+		m.key = r.as_text(0).value_or("");
+		m.code = r.as_text(1).value_or("");
+		m.name = r.as_text(2).value_or("");
+		m.owner = r.as_text(3);
+		m.version = r.as_text(4).value_or("");
+		m.updater_login = r.as_text(5).value_or("");
+		m.command_file = r.as_text(6).value_or("");
+		out.push_back(std::move(m));
 	}
 	return out;
 }

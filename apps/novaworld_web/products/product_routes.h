@@ -64,6 +64,10 @@ bool valid_visibility(std::string_view visibility);
 // product, has_expansion while an expansion builds on it.
 crow::response product_in_use();
 crow::response product_has_expansion();
+// A create's refusal of an expansion code another expansion, of any game, has (without case: it
+// names the expansion/<code>/ folder of every install), the admin's and an owner's alike: 409
+// {"error": "duplicate_expansion", "field": "expansion_code", "message"}.
+crow::response duplicate_expansion();
 
 class ProductRoutes {
 public:

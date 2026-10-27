@@ -521,7 +521,7 @@ int main(int argc, char **argv) {
 			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::ProductKind::Game, "", jo_source);
 			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::ProductKind::Game, "", dfx2_source);
 			expect(jo_tree != 0 && dfx2_tree != 0, "each product has a ready tree in the store");
-			const auto offered = hosted::offered_products(*db);
+			const auto offered = hosted::offered_products(*db, std::nullopt);
 			expect(offered.size() == 2, "both products are offered");
 			const auto lower = [](std::string s) {
 				for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

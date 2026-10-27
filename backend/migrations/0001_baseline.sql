@@ -66,7 +66,10 @@ CREATE UNIQUE INDEX idx_players_email ON players(email);
 -- A client's gate tag selects its row, which decides the gate's answer (the
 -- LobbyName, the startupurl, the GLSVSS leg), the .gsb list its browser
 -- fetches and the game its listings land under. The rows are the seed's
--- (backend/seed/0001_games.sql). title is the engine's game profile code the
+-- (backend/seed/0001_games.sql), and an account's own game's, which its first
+-- publish adds (products/product_repository.h publish_release: the lobby
+-- <key>_0_consumer, gate tag <key>:0, its other columns its title's template
+-- row's). title is the engine's game profile code the
 -- row's clients speak (engine/base/gameprofile: 'jo', 'dfx2');
 -- startup_query the gate's startupurl after "nwprepare.dll?"; glsvss_* the
 -- gate's GLSVSSREQUEST / GLSVSSRIMS / GLSVSSAGRMS (an empty request sends
@@ -722,10 +725,11 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- routes' name for it, its project's and its downloads' entry), a game, an
 -- expansion or an app. kind 'game' speaks a title (the gameprofile code
 -- opennova-serve's /game takes: 'jo', 'dfx2') and lists in a lobby (lobby: the
--- games row's slug; '' for none, an account's own game's until an admin gives
--- it one); kind 'expansion' is one expansion of its parent game
+-- games row's slug; '' for none, an account's own game's until its first
+-- publish adds its own); kind 'expansion' is one expansion of its parent game
 -- (expansion_code: the /exp code and the expansion/<code>/ directory,
--- 'jox01'); a game's and an expansion's hosted servers' files are built by the
+-- 'jox01', unique across every product without case, so no two mods of any
+-- games share a folder name); a game's and an expansion's hosted servers' files are built by the
 -- data program into the deployment's object store as immutable trees from its
 -- published release, each hosted server pinned to the trees it started on,
 -- updated when its owner says (current_tree_id is the tree new starts take, the
@@ -735,7 +739,8 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- Blender add-on) none; its releases are built from CI's uploaded builds.
 --
 -- Its updater product (ADR 0064 d5, d9): updater_login and command_file
--- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve),
+-- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve;
+-- each unique without case),
 -- wizard_login the login its stock UPDATE.WIZ names before the territory
 -- (JOTRqq; '' when it is updater_login itself), and its name as its packages
 -- give it (the release build's: the command file's PRODUCT and the executable
@@ -768,8 +773,12 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- never a retail game; NULL for the service's own (every seeded row, and every
 -- one an admin makes). It goes with its account (ON DELETE CASCADE: the
 -- account's delete queues each one's product.purge first, as a product's own
--- delete does). An account's own game lists in no lobby, and gets no release,
--- updater product or tree, until an admin gives it one.
+-- delete does). Its key is at most 11 characters with no QQ, and its updater
+-- product is its key (updater_login KEY, command_file KEY.CMD: 1SFS's 15
+-- characters, and no territory placeholder for the updater to replace), its
+-- download, a public game's, player-<key>-game-windows.zip, each given at its
+-- create (apps/novaworld_web/products/project_routes.h). Its owner releases
+-- and publishes it; an own game's first publish gives it its own lobby.
 CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     key                  text NOT NULL UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
@@ -803,10 +812,11 @@ CREATE TABLE products (
     -- An account's own is a game or an expansion, never a retail one.
     CONSTRAINT products_owner_check CHECK (owner_id IS NULL OR (kind <> 'app' AND NOT retail))
 );
-CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
+CREATE UNIQUE INDEX idx_products_expansion ON products(lower(expansion_code)) WHERE expansion_code <> '';
 CREATE INDEX idx_products_parent ON products(parent_id);
 CREATE INDEX idx_products_owner ON products(owner_id) WHERE owner_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_products_login ON products(upper(updater_login)) WHERE updater_login <> '';
+CREATE UNIQUE INDEX idx_products_command_file ON products(upper(command_file)) WHERE command_file <> '';
 CREATE UNIQUE INDEX idx_products_download ON products(download) WHERE download <> '';
 
 -- One version of a product's files in the store (trees/<id>/...), built by the
@@ -877,6 +887,17 @@ CREATE TABLE releases (
     build_log        text NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX idx_releases_sha ON releases(sha256) WHERE sha256 <> '';
+CREATE INDEX idx_releases_product ON releases(product_id, id);
+
+-- How many releases an account started on its UTC day (day: that day's
+-- midnight): the owner release route's daily cap
+-- (apps/novaworld_web/products/project_routes.h kReleasesPerDay), counted
+-- apart from the releases so a deleted one still counts.
+CREATE TABLE release_starts (
+    player_id bigint PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+    day       timestamptz NOT NULL,
+    started   bigint NOT NULL CHECK (started > 0)
+);
 
 -- One section of a package (the base product's, then one per PACKAGEBREAK),
 -- mapped to the product whose command_file it carries; version the command

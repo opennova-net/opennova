@@ -1,6 +1,7 @@
 #include "product_jobs.h"
 
 #include "core/loggable.h"
+#include "downloads_job.h"
 #include "jobs/job_queue.h"
 #include "product_repository.h"
 #include "project_repository.h"
@@ -672,9 +673,11 @@ jobs::JobResult prune(jobs::JobContext &ctx, ObjectStore &store) {
 // --- product.purge ---
 
 // A deleted game's objects: its trees' prefixes and its project's (content/<id>/), each removed
-// whole. Its row went with the delete, its trees' rows with it, so the payload names them; a
-// prefix already gone removes nothing, so a run again after a store failure takes the rest.
-jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
+// whole, its releases' objects, and the release build's cache of its project's files on this
+// program's disk (project-cache/<id> under `scratch_root`, release_build.h). Its row went with the
+// delete, its trees' and releases' rows with it, so the payload names them; a prefix or object
+// already gone removes nothing, so a run again after a store failure takes the rest.
+jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root) {
 	const int64_t product_id = jobs::member_int(ctx.job.payload, "product_id");
 	std::vector<std::string> prefixes;
 	if (const io::JsonValue *trees = ctx.job.payload.get("trees"); trees && trees->is_array())
@@ -692,8 +695,29 @@ jobs::JobResult purge(jobs::JobContext &ctx, ObjectStore &store) {
 			return jobs::JobResult::retry(prefix + ": " + error);
 		}
 	}
-	std::printf("%s game %s purged: %zu prefix%s removed\n", kTag,
-			std::to_string(product_id).c_str(), prefixes.size(), prefixes.size() == 1 ? "" : "es");
+	size_t objects = 0;
+	if (const io::JsonValue *keys = ctx.job.payload.get("objects"); keys && keys->is_array())
+		for (const io::JsonValue &key : keys->array) {
+			if (!key.is_string() || key.string.empty())
+				continue;
+			std::string error;
+			if (!store.remove(key.string, error)) {
+				std::fprintf(stderr, "%s WARN game %s: %s not removed: %s\n", kTag,
+						std::to_string(product_id).c_str(), key.string.c_str(),
+						loggable(error, 200).c_str());
+				return jobs::JobResult::retry(key.string + ": " + error);
+			}
+			++objects;
+		}
+	if (product_id > 0 && !scratch_root.empty()) {
+		std::error_code ec;
+		fs::remove_all(io::os_path(io::utf8_join(
+							   scratch_root, "project-cache/" + std::to_string(product_id))),
+				ec);
+	}
+	std::printf("%s game %s purged: %zu prefix%s and %zu object%s removed\n", kTag,
+			std::to_string(product_id).c_str(), prefixes.size(), prefixes.size() == 1 ? "" : "es",
+			objects, objects == 1 ? "" : "s");
 	return jobs::JobResult::done();
 }
 
@@ -797,8 +821,8 @@ int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t prod
 	return jobs::enqueue(db, job);
 }
 
-int64_t enqueue_product_purge(
-		db::Database &db, int64_t product_id, const std::vector<int64_t> &tree_ids) {
+int64_t enqueue_product_purge(db::Database &db, int64_t product_id,
+		const std::vector<int64_t> &tree_ids, const std::vector<std::string> &objects) {
 	jobs::NewJob job;
 	job.kind = kJobProductPurge;
 	job.payload.set("product_id", io::json_number(static_cast<double>(product_id)));
@@ -806,6 +830,10 @@ int64_t enqueue_product_purge(
 	for (const int64_t id : tree_ids)
 		trees.push(io::json_number(static_cast<double>(id)));
 	job.payload.set("trees", std::move(trees));
+	io::JsonValue keys = io::JsonValue::make_array();
+	for (const std::string &key : objects)
+		keys.push(io::json_string(key));
+	job.payload.set("objects", std::move(keys));
 	job.dedupe_key = std::string(kJobProductPurge) + ":" + std::to_string(product_id);
 	job.delay_ms = kProductPurgeDelaySeconds * 1000;
 	job.max_attempts = kAttemptsPurge;
@@ -823,11 +851,29 @@ ProductOutcome delete_product_purged(db::Database &db, int64_t id, bool purge) {
 	for (const ProductTree &t : list_trees(db, id))
 		if (!(t.state == TreeState::Pruned && !t.pruned_at.empty()))
 			trees.push_back(t.id);
+	// Its releases go with it, their objects with its own: a built one's upload and package, an
+	// app's uploaded build and download.
+	std::vector<std::string> objects;
+	const std::vector<ReleaseRow> releases = list_releases_of(db, id);
+	for (const ReleaseRow &r : releases) {
+		objects.push_back(release_upload_key(r.id));
+		objects.push_back(release_source_key(r.id));
+		if (!r.sha256.empty()) {
+			objects.push_back(release_package_key(r.sha256));
+			objects.push_back(release_download_key(r.sha256));
+		}
+	}
+	const std::optional<ProductRow> product = find_product(db, id);
 	const ProductOutcome outcome = delete_product(db, id);
 	if (outcome != ProductOutcome::Ok)
 		return outcome;
+	for (const ReleaseRow &r : releases)
+		delete_release(db, r.id);
 	if (purge)
-		enqueue_product_purge(db, id, trees);
+		enqueue_product_purge(db, id, trees, objects);
+	// A download it offered leaves the downloads host.
+	if (product && product->published_release_id && !product->download.empty())
+		enqueue_downloads_publish(db);
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -871,7 +917,8 @@ void register_product_jobs(
 	registry.add({ kJobTreePrune, [&store](jobs::JobContext &ctx) { return prune(ctx, store); },
 			kCapPrune });
 	jobs::JobKind purge_kind{ kJobProductPurge,
-		[&store](jobs::JobContext &ctx) { return purge(ctx, store); }, kCapPurge };
+		[&store, scratch_dir](jobs::JobContext &ctx) { return purge(ctx, store, scratch_dir); },
+		kCapPurge };
 	purge_kind.retry_base_ms = 10 * 1000;
 	purge_kind.retry_max_ms = 10 * 60 * 1000;
 	registry.add(std::move(purge_kind));

@@ -239,7 +239,7 @@ int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::str
 
 // What a start may pick now (product_repository.h).
 std::vector<opennova::novaworld_server::hosted::OfferedProduct> offered(Harness &h) {
-	return opennova::novaworld_server::hosted::offered_products(*h.pool.acquire());
+	return opennova::novaworld_server::hosted::offered_products(*h.pool.acquire(), std::nullopt);
 }
 
 // A reply for a failure line: its status and body, or why no reply came.
@@ -6666,7 +6666,8 @@ int test_admin_fleet_routes(Harness &h) {
 	settings.game_name = "Fleet Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner) {
-		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, owner, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(ana);
@@ -6900,7 +6901,8 @@ int test_hosted_stats_routes(Harness &h) {
 	settings.game_name = "Stats Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t who) {
-		const auto r = hosted::request_server(*db, who, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, who, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(owner);
@@ -7093,8 +7095,8 @@ int test_hosted_usage_route(Harness &h) {
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner, const char *name) {
 		settings.game_name = name;
-		const auto r = hosted::request_server(
-				*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, owner, settings,
+				hosted::offered_products(*db, std::nullopt), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const auto to_running = [&](int64_t id) {

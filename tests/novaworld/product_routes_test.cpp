@@ -344,6 +344,10 @@ int test_create_patch_delete(Harness &h) {
 			409, "duplicate_login"));
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"XNEW","command_file":"joptr.cmd","key":"X","visibility":"public"})"),
+			409, "duplicate_command_file"));
+	TEST_EXPECT(refused(
+			h.admin("POST", "/api/admin/products",
 					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"JO","visibility":"public"})"),
 			409, "duplicate_key"));
 	TEST_EXPECT(refused(
@@ -383,6 +387,12 @@ int test_create_patch_delete(Harness &h) {
 										std::to_string(bhd) +
 										R"(,"expansion_code":"bhx01","key":"SABRE2","visibility":"private"})"),
 			409, "duplicate_expansion"));
+	// An expansion code is unique across every game, without case: Escalation's under another.
+	reply = h.admin("POST", "/api/admin/products",
+			R"({"display_name":"Not Escalation","kind":"expansion","parent_id":)" +
+					std::to_string(bhd) +
+					R"(,"expansion_code":"jox01","key":"SABRE2","visibility":"private"})");
+	TEST_EXPECT(refused(reply, 409, "duplicate_expansion") && field_of(reply) == "expansion_code");
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
 					R"({"display_name":"Orphan","kind":"expansion","parent_id":99999,"expansion_code":"bhx02","key":"ORPHAN","visibility":"private"})"),
@@ -406,6 +416,8 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(json && !json["product"]["retail"].b());
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"updater_login":"JOTRUS"})"), 409,
 			"duplicate_login"));
+	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"command_file":"Dfx2.Cmd"})"), 409,
+			"duplicate_command_file"));
 	reply = h.admin("PATCH", base, R"({"command_file":""})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "command_file");
 	json = json_of(h.admin("PATCH", base, R"({"updater_login":"","command_file":""})"), 200);

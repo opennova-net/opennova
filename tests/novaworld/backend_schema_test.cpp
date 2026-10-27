@@ -84,20 +84,19 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
-		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants",
-		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
-		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
-		"fleet_machines", "fleet_slot_reports",
-		"games", "host_keys", "host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
-		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
-		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
-		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "join_tickets",
-		"lobby_commands", "lobby_goodbyes", "lobby_instances",
+		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state", "cd_key_activations",
+		"cd_keys", "comp_grants", "fleet_launch_backoff", "fleet_leader", "fleet_machine_egress",
+		"fleet_machine_events", "fleet_machine_hourly", "fleet_machine_samples",
+		"fleet_machine_trees", "fleet_machines", "fleet_slot_reports", "games", "host_keys",
+		"host_players", "host_roster", "hosted_address_orphans", "hosted_addresses",
+		"hosted_admin_links", "hosted_console_commands", "hosted_console_replies",
+		"hosted_limits_hold", "hosted_server_console", "hosted_server_events",
+		"hosted_server_hourly", "hosted_server_samples", "hosted_server_starts", "hosted_servers",
+		"jobs", "join_tickets", "lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
 		"product_trees", "products", "program_hourly", "program_samples", "project_blobs",
-		"project_revisions", "release_sections", "releases", "server_status", "service_meta",
-		"unknown_messages", "web_sessions" };
+		"project_revisions", "release_sections", "release_starts", "releases", "server_status",
+		"service_meta", "unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -750,6 +749,18 @@ int test_game_projects() {
 			"SELECT 'MINEX', 'Mine too', 'expansion', g.id, 'minex', 'public', p.id "
 			"FROM products g, players p WHERE g.key = 'MINE' AND p.username = 'maker';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'MINE' AND lobby = '';").size() == 1);
+	// An expansion code is unique across every game without case (it names the expansion/<code>/
+	// folder of any install), and so is a command file.
+	TEST_EXPECT(refused(db,
+			"INSERT INTO products (key, display_name, kind, parent_id, expansion_code, "
+			"visibility) SELECT 'MINEY', 'Y', 'expansion', id, 'JOX01', 'public' "
+			"FROM products WHERE key = 'MINE';"));
+	TEST_EXPECT(refused(db,
+			"UPDATE products SET updater_login = 'MINE', command_file = 'joptr.cmd' "
+			"WHERE key = 'MINE';"));
+	// An account's releases started on a UTC day go with the account.
+	TEST_EXPECT(
+			has_column(db, "release_starts", "day") && has_column(db, "release_starts", "started"));
 	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
 	TEST_EXPECT(refused(db,
 			"INSERT INTO products (key, display_name, kind, owner_id) "
