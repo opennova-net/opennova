@@ -79,17 +79,23 @@ void NovaWorldPutDialog::fill(const SessionView &view) {
 	key_typed_ = false;
 	public_ = false;
 	base_.clear();
-	// The likeliest empty project: its key or its name the project's, else one of the project's game.
+	// The likeliest empty project: an expansion's by its code, its key or its name the project's, else one
+	// of the project's game.
+	const std::string expansion = view.project.document ? view.project.document->expansion.name : std::string();
 	const std::vector<const RemoteProject *> empty = empty_projects(view.novaworld);
 	const RemoteProject *likely = nullptr;
 	for (const RemoteProject *project : empty)
-		if (project->key == key_ || strutil::iequals(project->title, title)) likely = project;
+		if (!expansion.empty() && project->kind == "expansion" && strutil::iequals(project->expansion_code, expansion))
+			likely = project;
+	for (const RemoteProject *project : empty)
+		if (!likely && (project->key == key_ || strutil::iequals(project->title, title))) likely = project;
 	for (const RemoteProject *project : empty)
 		if (!likely && project->game == game) likely = project;
 	if (!likely && !empty.empty()) likely = empty.front();
 	empty_ = likely ? likely->key : std::string();
 	// A new project of the account's unless there is an empty one it is likely for.
-	create_ = !likely || (likely->key != key_ && !strutil::iequals(likely->title, title));
+	create_ = !likely || (likely->key != key_ && !strutil::iequals(likely->title, title) &&
+	                      !(!expansion.empty() && strutil::iequals(likely->expansion_code, expansion)));
 }
 
 void NovaWorldPutDialog::draw(Workspace &workspace) {
