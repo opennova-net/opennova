@@ -16,7 +16,7 @@
 // terminate's tag check (a machine
 // without both of this deployment's tags never ended) and its idempotence,
 // list_tagged's scope and its throw, the slots' ports, and every CLI failure,
-// timeout and malformed reply; its config checks and the data sets' volume
+// timeout and malformed reply; its config checks and the products' volume
 // labels. The shipped machine script (hosted/cloud/machine/machine_user_data.sh):
 // its blanks and their render, no xtrace, the token and the machine id written
 // owner-only in an owner-only directory, the slots' ports reserved, and the
@@ -1318,7 +1318,7 @@ int test_fleet_config() {
 				c.slot_memory_mb == defaults.slot_memory_mb && c.slot_cpus == defaults.slot_cpus &&
 				c.internal_address == defaults.internal_address;
 	};
-	// The templates by kind, as fleet.tf writes them; never the old per-data-set map.
+	// The templates by kind, as fleet.tf writes them; never the old per-product map.
 	TEST_EXPECT(refused("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES", "lt-0123456789abcdef0"));
 	TEST_EXPECT(refused("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES", "[\"lt-0123456789abcdef0\"]"));
 	TEST_EXPECT(refused(

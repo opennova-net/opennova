@@ -61,7 +61,7 @@
 //                                   "version": "<its version.txt's line>",
 //                                   "files": [{"name", "size"}]}}}
 //
-// A tree (ADR 0064) is one immutable version of a data set's files in the
+// A tree (ADR 0064) is one immutable version of a product's files in the
 // object store, which the agent fetches from its `url` into <trees root>/<id>
 // (its own `aws s3 sync`, or a directory copy for file://) and checks against
 // the manifest (`files`: every name with its size), then binds into a

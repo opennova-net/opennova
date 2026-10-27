@@ -182,10 +182,9 @@ jobs:
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
           # The parity runner's scenario aim_at arithmetic (retail's look yaw).
           python -B -m unittest discover -s scripts/net -p "test_*.py"
-          # Publish's helpers (publish.yml): the downloads host's layout (its
-          # stable names and manifest) and the runtime release's upload.
-          python -B -m unittest discover -s scripts -p test_stage_downloads.py
-          python -B -m unittest discover -s scripts -p test_publish_runtime.py
+          # Publish's helper (publish.yml): the apps' releases through the admin
+          # API, and the downloads host's files for a tag's GitHub release.
+          python -B -m unittest discover -s scripts -p test_publish_apps.py
 
       # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
       # required `test` check gates it; package-switcher-windows.yml runs it
@@ -1199,19 +1198,18 @@ jobs:
             exit 1
           fi
 
-  # The game archives (one per game: OpenNova's own, Joint Operations and
-  # DFX2, the same runtime with its game's wizards) and the editor archive (the
-  # editor plus the runtime it plays a project with).
+  # The runtime's and the editor's plain builds (ADR 0072): the runtime zip
+  # (opennova.exe and the updater pair) and the editor zip (oneditor.exe and the
+  # onplay.exe it plays a project with, one flat folder), neither with a wizard or
+  # a command file. The update service packs both; the game zips are rendered from
+  # its published runtime on the deployment's downloads host.
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [build-gdextension-windows]
     permissions:
       contents: read
-      actions: read   # staging's published runtime package, another run's artifact
     outputs:
-      game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
-      jointops_artifact_url: ${{ steps.upload_jointops.outputs.artifact-url }}
-      dfx2_artifact_url: ${{ steps.upload_dfx2.outputs.artifact-url }}
+      runtime_artifact_url: ${{ steps.upload_runtime.outputs.artifact-url }}
       editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -1253,7 +1251,7 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
-      # Build the updater executables and full runtime package with the root cache.
+      # Build the updater executables and the update tool (the smoke packages) with the root cache.
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -1265,30 +1263,6 @@ jobs:
           flavour: win-root
           mode: restore
 
-      # A pull request's runtime package is what a staging Publish serves next, so it carries
-      # the removals since the one staging serves now (publish.yml keeps that package as the
-      # staging-runtime-package artifact), as release.yml's carry the preceding release's for
-      # prod (apps/update/README.md: --previous). None kept yet, or a fork's build: none.
-      - name: Download staging's published runtime package
-        id: previous
-        if: github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $listed = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts?name=staging-runtime-package&per_page=1" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Could not list staging's runtime package" }
-          $latest = @($listed.artifacts | Where-Object { -not $_.expired }) | Select-Object -First 1
-          if ($latest) {
-            $folder = Join-Path $env:RUNNER_TEMP 'previous-runtime'
-            New-Item -ItemType Directory -Path $folder -Force | Out-Null
-            gh run download $latest.workflow_run.id --repo $env:GITHUB_REPOSITORY --name staging-runtime-package --dir $folder
-            if ($LASTEXITCODE -ne 0) { throw "Could not download staging's runtime package" }
-            $packages = @(Get-ChildItem -LiteralPath $folder -Filter 'opennova-runtime-windows-*.sfs')
-            if ($packages.Count -ne 1) { throw "staging's runtime package artifact holds $($packages.Count) packages" }
-            "package=$($packages[0].FullName)" >> $env:GITHUB_OUTPUT
-          }
-
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); pushes and manual runs export in
       # release mode like the release workflow.
@@ -1298,14 +1272,12 @@ jobs:
           CMAKE_GENERATOR: Ninja
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
           CMAKE_C_COMPILER_LAUNCHER: sccache
-          PREVIOUS_RUNTIME_PACKAGE: ${{ steps.previous.outputs.package }}
         # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
         # page names it.
         run: >-
           scripts/package_godot_windows.ps1 -SkipBuild
           -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
           -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
-          -PreviousRuntimePackage "$env:PREVIOUS_RUNTIME_PACKAGE"
 
       - name: Save Godot export templates
         if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
@@ -1317,42 +1289,21 @@ jobs:
             ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
           key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
-      - name: Upload OpenNova Windows game zip
-        id: upload_game
+      # The five builds Publish takes from a run (publish.yml): these two and the
+      # Blender add-on's, the tools' and the switcher's (their own workflows).
+      - name: Upload the runtime's plain build
+        id: upload_runtime
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-game-windows-v*.zip
+          path: dist/opennova-runtime-windows-v*.zip
           archive: false
           if-no-files-found: error
 
-      - name: Upload Joint Operations Windows game zip
-        id: upload_jointops
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/jointops-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload DFX2 Windows game zip
-        id: upload_dfx2
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/dfx2-game-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload OpenNova Windows editor zip
+      - name: Upload the editor's plain build
         id: upload_editor
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-editor-windows-v*.zip
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload the full runtime update
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-windows-v*.sfs
           archive: false
           if-no-files-found: error
 
@@ -1362,10 +1313,10 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-blender-windows.yml
 
-  # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
+  # The tools, the native apps (opennova-3di, opennova-extract, opennova-lan-probe,
   # opennova-parity, opennova-serve, opennova-update-tool and opennova-wire)
-  # in one zip, built for PRs and tagged releases alike. The NovaWorld server is Linux-only (its
-  # container image).
+  # in one zip, opennova-tools-windows.zip, built for PRs and tagged releases alike.
+  # The NovaWorld server is Linux-only (its container image).
   package-apps-windows:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
@@ -1382,6 +1333,31 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/package-switcher-windows.yml
 
+  # Every same-repo pull request's run publishes its five builds to staging once
+  # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky
+  # test never holds a build back (ADR 0072): Publish (publish.yml) has staging's
+  # service pack the runtime and the editor and publish all five, its downloads
+  # host then offers them (the game zips rendered from the runtime), and an
+  # installed editor or game updates in place. The newest run wins: one publish at
+  # a time, never cancelled once begun. A fork's run has no secrets and is
+  # skipped. Not a required check: until staging runs this branch's service, an
+  # app's build is refused there. The called job asks for no more than this
+  # grant (a called job never gets more than its caller's).
+  publish-staging:
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: publish-staging
+      cancel-in-progress: false
+    permissions:
+      contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
+      actions: read     # this run's artifacts
+    uses: ./.github/workflows/publish.yml
+    with:
+      deployment: staging
+      run_id: ${{ github.run_id }}
+    secrets: inherit
+
   # Surface the Windows packages on the PR as a single comment that updates
   # in place after every package succeeds. A failed package leaves the previous
   # comment untouched.
@@ -1396,12 +1372,10 @@ jobs:
       - name: Post or update the build-links comment
         uses: actions/github-script@v7
         env:
-          GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
-          JOINTOPS_URL: ${{ needs.package-godot-windows.outputs.jointops_artifact_url }}
-          DFX2_URL: ${{ needs.package-godot-windows.outputs.dfx2_artifact_url }}
+          RUNTIME_URL: ${{ needs.package-godot-windows.outputs.runtime_artifact_url }}
           EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
-          APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
+          TOOLS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
           SWITCHER_URL: ${{ needs.package-switcher-windows.outputs.artifact_url }}
         with:
           script: |
@@ -1416,16 +1390,14 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The game uses the debug export template and template_debug GDExtension, and talks to OpenNova's staging service alone: it updates from update.staging.opennova.net and its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the apps and the switcher are Release builds. Tagged releases publish every package, with the game in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the tools and the switcher are Release builds. This run publishes all five to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
-              `| Game: opennova.exe, update.exe and revupdat.exe; the first launch downloads OpenNova's game, OP: Acid Gambit, and in a Joint Operations or Delta Force Xtreme 2 folder it plays that install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
-              `| Joint Operations: the same runtime; unzipped into an empty folder, the first launch downloads Joint Operations and Escalation | [jointops-game-windows.zip](${process.env.JOINTOPS_URL}) |`,
-              `| Delta Force Xtreme 2: the same runtime; unzipped into an empty folder, the first launch downloads Delta Force Xtreme 2 | [dfx2-game-windows.zip](${process.env.DFX2_URL}) |`,
-              `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
+              `| Runtime: opennova.exe, update.exe and revupdat.exe, the plain build the service packs as ONRUNTIME (the game zips on staging's downloads host are this runtime with each game's wizards) | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
+              `| Editor: oneditor.exe and onplay.exe, the runtime it plays a project with, in one folder with the updater pair (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Tools: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-tools-windows.zip](${process.env.TOOLS_URL}) |`,
               `| Switcher: opennova-switcher.exe, a tray app that points the original dfx2.exe at OpenNova's NovaWorld through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

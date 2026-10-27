@@ -1,13 +1,15 @@
 // opennova-novaworld-data: the data program (program/program.h). The job pool
-// (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) over the hosted data sets'
-// jobs alone (data_sets/data_set_jobs.h: release.validate, release.apply,
-// tree.prune; data_sets/release_build.h: release.build, which runs
-// opennova-project and opennova-update-tool from beside this program) on the
-// object store, and the scheduler of its one
-// periodic kind (data_set_schedule: tree.prune, while there is a store), in
-// every data process with no election. What it runs is what web's data set and
+// (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) over the hosted products'
+// jobs alone (products/product_jobs.h: release.validate, release.apply,
+// tree.prune; products/release_build.h: release.build, which runs
+// opennova-project and opennova-update-tool from beside this program;
+// products/downloads_job.h: downloads.publish, which writes the downloads host,
+// ONNET_DOWNLOADS_URL) on the object store, and the scheduler of its one
+// periodic kind (product_schedule: tree.prune, while there is a store), in
+// every data process with no election. What it runs is what web's product and
 // release routes and its own scheduler enqueued. It holds the store's
-// credentials (the task role's data_store) and the disk a tree or a package
+// credentials (the task role's data_store, and its downloads_publish on the
+// downloads bucket) and the disk a tree, a package or a download
 // passes through, and nothing of the fleet, billing or mail (it reads no
 // hosting policy, the store alone: program/server_config.h object_store_of):
 // a release's build or tree can occupy it, never a machine launch. With no object
@@ -17,10 +19,11 @@
 #include "program/program.h"
 
 #include "core/object_store_stack.h"
-#include "data_sets/data_set_jobs.h"
-#include "data_sets/release_build.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
+#include "products/downloads_job.h"
+#include "products/product_jobs.h"
+#include "products/release_build.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -50,22 +53,38 @@ hosted::ReleaseTools release_tools(const ServerConfig &config) {
 int run(const program::Boot &boot) {
 	const ServerConfig &config = boot.config;
 
-	// The object store the data sets' jobs run over, whether or not hosting is
-	// on (web's data set routes upload into it either way). Outlives the pool.
+	// The object store the products' jobs run over, whether or not hosting is
+	// on (web's product routes upload into it either way). Outlives the pool.
 	const std::optional<ObjectStoreConfig> store_config = object_store_of(config);
 	ObjectStoreStack store;
+	// The downloads host's bucket (ONNET_DOWNLOADS_URL), which downloads.publish writes; with
+	// none (a local stack) the job writes nothing.
+	const std::optional<ObjectStoreConfig> downloads_config = downloads_store_of(config);
+	ObjectStoreStack downloads;
 	jobs::JobRegistry registry;
 	if (store_config) {
 		std::string error;
 		store = make_object_store(*store_config, config.aws_cli, error);
 		if (!store.store)
 			return program::fatal("the object store: " + error);
-		std::printf("[boot] data sets: jobs over the %s store\n", store.store->kind());
-		hosted::register_data_set_jobs(registry, *store.store, store.scratch.path().u8string());
+		std::printf("[boot] products: jobs over the %s store\n", store.store->kind());
+		if (downloads_config) {
+			downloads = make_object_store(*downloads_config, config.aws_cli, error);
+			if (!downloads.store)
+				return program::fatal("the downloads host: " + error);
+			std::printf("[boot] products: the downloads host over the %s store\n",
+					downloads.store->kind());
+		} else {
+			std::printf("[boot] products: no downloads host (ONNET_DOWNLOADS_URL); "
+						"downloads.publish writes nothing\n");
+		}
+		hosted::register_product_jobs(registry, *store.store, store.scratch.path().u8string());
 		hosted::register_release_build(
 				registry, *store.store, store.scratch.path().u8string(), release_tools(config));
+		hosted::register_downloads_publish(registry, *store.store, downloads.store.get(),
+				store.scratch.path().u8string(), config.update_host);
 	} else {
-		std::printf("[boot] data sets: no object store (ONNET_OBJECT_STORE_URL); no data set "
+		std::printf("[boot] products: no object store (ONNET_OBJECT_STORE_URL); no product "
 					"job runs\n");
 	}
 
@@ -74,9 +93,9 @@ int run(const program::Boot &boot) {
 	pool_config.name = "data";
 	jobs::WorkerPool workers(boot.pool, registry, pool_config);
 	workers.start();
-	// The data sets' prune of the trees nothing needs, while there is a store.
+	// The products' prune of the trees nothing needs, while there is a store.
 	jobs::Scheduler scheduler(boot.pool,
-			store_config ? hosted::data_set_schedule() : std::vector<jobs::PeriodicJob>{});
+			store_config ? hosted::product_schedule() : std::vector<jobs::PeriodicJob>{});
 	scheduler.start();
 
 	Watchdog watchdog;

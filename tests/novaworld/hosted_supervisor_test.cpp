@@ -1,9 +1,9 @@
 // The hosted servers' supervisor and what it stands on (apps/novaworld_common/
 // hosted), on a migrated database with a FakeDriver whose machines' agents the
 // test plays (hosted_fake_driver.h, hosted_fleet_rig.h) and a hand-stepped
-// clock: the data sets (the host limits by title, what a start may pick from
-// the rows with ready trees, a server whose data set has no data), the owner's
-// settings and their checks against the data set's title's limits, its
+// clock: the products (the host limits by title, what a start may pick from
+// the rows with ready trees, a server whose product has no data), the owner's
+// settings and their checks against the product's title's limits, its
 // expansions with data and its trees' missions, the files and the arguments
 // rendered from them for a slot (read back by the formats' own readers; /game
 // per title), the trees a start pins and the sync carries, the service accounts (minted,
@@ -69,17 +69,17 @@ std::string file_of(Rig &rig, int64_t id, const std::string &name) {
 
 // --- the settings and the renders ---------------------------------------------
 
-// The offered data sets check_settings is run against here, as
-// offered_data_sets lists them: Joint Operations (title jo) with Escalation
+// The offered products check_settings is run against here, as
+// offered_products lists them: Joint Operations (title jo) with Escalation
 // (jox01), Delta Force Xtreme 2 (dfx2) and OpenNova's own data (jo), each with
 // its tree's missions.
-std::vector<hosted::OfferedDataSet> offered_for_rules() {
-	std::vector<hosted::OfferedDataSet> out;
-	hosted::OfferedDataSet jo;
+std::vector<hosted::OfferedProduct> offered_for_rules() {
+	std::vector<hosted::OfferedProduct> out;
+	hosted::OfferedProduct jo;
 	jo.id = 1;
 	jo.display_name = "Joint Operations";
 	jo.title = "jo";
-	jo.game = "jop_2_consumer";
+	jo.lobby = "jop_2_consumer";
 	jo.tree_id = 10;
 	jo.version = "JO V1.7.5.3";
 	jo.missions = { { "SERVETST.BMS", "Serve Test" }, { "second.bms", "Second" }, { "ASH_G11A.BMS", "Ash" },
@@ -92,19 +92,19 @@ std::vector<hosted::OfferedDataSet> offered_for_rules() {
 	jox.missions = { { "escal.bms", "Escalation Map" } };
 	jo.expansions.push_back(jox);
 	out.push_back(jo);
-	hosted::OfferedDataSet dfx2;
+	hosted::OfferedProduct dfx2;
 	dfx2.id = 3;
 	dfx2.display_name = "Delta Force Xtreme 2";
 	dfx2.title = "dfx2";
-	dfx2.game = "dfx2_consumer";
+	dfx2.lobby = "dfx2_consumer";
 	dfx2.tree_id = 12;
 	dfx2.missions = { { "servetst.bms", "Serve Test" }, { "second.bms", "Second" } };
 	out.push_back(dfx2);
-	hosted::OfferedDataSet on;
+	hosted::OfferedProduct on;
 	on.id = 4;
 	on.display_name = "OpenNova";
 	on.title = "jo";
-	on.game = "acidgambit_0_consumer";
+	on.lobby = "acidgambit_0_consumer";
 	on.tree_id = 13;
 	on.missions = dfx2.missions;
 	out.push_back(on);
@@ -112,7 +112,7 @@ std::vector<hosted::OfferedDataSet> offered_for_rules() {
 }
 
 int test_settings_rules() {
-	const std::vector<hosted::OfferedDataSet> offered = offered_for_rules();
+	const std::vector<hosted::OfferedProduct> offered = offered_for_rules();
 	const auto check = [&offered](const hosted::HostedSettings &c) { return hosted::check_settings(c, offered); };
 	hosted::HostedSettings s = valid_settings(1);
 	TEST_EXPECT(!check(s));
@@ -177,44 +177,44 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.max_score = 0; }), "max_score"));
 	TEST_EXPECT(refused(with([](auto &c) { c.respawn = -1; }), "respawn"));
 	TEST_EXPECT(refused(with([](auto &c) { c.start_delay = 301; }), "start_delay"));
-	// The expansion: one of the data set's with data.
+	// The expansion: one of the product's with data.
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 99; }), "expansion_id"));
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 1; }), "expansion_id")); // the base itself
 	TEST_EXPECT(!check(with([](auto &c) { c.expansion_id = 2; })));
-	// The data set: one the service offers, whose title's limits the whole numbers take.
-	TEST_EXPECT(refused(with([](auto &c) { c.data_set_id = 0; }), "data_set_id"));
-	TEST_EXPECT(refused(with([](auto &c) { c.data_set_id = 77; }), "data_set_id"));
-	TEST_EXPECT(!check(with([](auto &c) { c.data_set_id = 3; })));
-	TEST_EXPECT(!check(with([](auto &c) { c.data_set_id = 4; })));
+	// The product: one the service offers, whose title's limits the whole numbers take.
+	TEST_EXPECT(refused(with([](auto &c) { c.product_id = 0; }), "product_id"));
+	TEST_EXPECT(refused(with([](auto &c) { c.product_id = 77; }), "product_id"));
+	TEST_EXPECT(!check(with([](auto &c) { c.product_id = 3; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.product_id = 4; })));
 	// Delta Force Xtreme 2's host screen takes 100 players, Joint Operations' and
 	// OpenNova's 64 (host_limits.h, by the base's title).
 	TEST_EXPECT(!check(with([](auto &c) {
-		c.data_set_id = 3;
+		c.product_id = 3;
 		c.max_players = 100;
 	})));
 	TEST_EXPECT(refused(with([](auto &c) {
-		c.data_set_id = 3;
+		c.product_id = 3;
 		c.max_players = 101;
 	}), "max_players"));
 	TEST_EXPECT(refused(with([](auto &c) {
-		c.data_set_id = 4;
+		c.product_id = 4;
 		c.max_players = 65;
 	}), "max_players"));
 	TEST_EXPECT(refused(with([](auto &c) {
-		c.data_set_id = 3;
+		c.product_id = 3;
 		c.expansion_id = 2;
 	}), "expansion_id"));
 	TEST_EXPECT(refused(with([](auto &c) {
-		c.data_set_id = 4;
+		c.product_id = 4;
 		c.expansion_id = 2;
 	}), "expansion_id"));
 	{
-		// Only what is offered: a data set with no data is refused.
-		const std::vector<hosted::OfferedDataSet> jo_only = { offered[0] };
+		// Only what is offered: a product with no data is refused.
+		const std::vector<hosted::OfferedProduct> jo_only = { offered[0] };
 		hosted::HostedSettings dfx2 = s;
-		dfx2.data_set_id = 3;
+		dfx2.product_id = 3;
 		const auto r = hosted::check_settings(dfx2, jo_only);
-		TEST_EXPECT(r && r->field == "data_set_id" && r->reason == "is no data set this service offers");
+		TEST_EXPECT(r && r->field == "product_id" && r->reason == "is no game this service offers");
 		TEST_EXPECT(!hosted::check_settings(s, jo_only));
 		const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
 		hosted::HostedSettings big = s;
@@ -222,10 +222,10 @@ int test_settings_rules() {
 		const auto too_many = hosted::check_settings(big, offered);
 		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 2 to 64");
 		hosted::HostedSettings escalation = s;
-		escalation.data_set_id = 3;
+		escalation.product_id = 3;
 		escalation.expansion_id = 2;
 		const auto no_exp = hosted::check_settings(escalation, offered);
-		TEST_EXPECT(no_exp && no_exp->reason == "is no expansion of this data set with data");
+		TEST_EXPECT(no_exp && no_exp->reason == "is no expansion of this game with data");
 	}
 	// The rotation: 1..kMissionsMax names, each a .bms file name among the base's
 	// missions plus the expansion's (by file, without case).
@@ -241,7 +241,7 @@ int test_settings_rules() {
 	{
 		const auto unknown = check(with([](auto &c) { c.missions = { "second.bms", "unknown.bms" }; }));
 		TEST_EXPECT(unknown && unknown->field == "missions" &&
-				unknown->reason == "names \"unknown.bms\", which is no mission of this data set");
+				unknown->reason == "names \"unknown.bms\", which is no mission of this game");
 	}
 	// The expansion's missions count only with the expansion picked.
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "escal.bms" }; }), "missions"));
@@ -397,7 +397,7 @@ int test_renders() {
 		}
 	}
 
-	// Each data set speaks its title (its row's); OpenNova's data speaks Joint
+	// Each product speaks its title (its row's); OpenNova's data speaks Joint
 	// Operations', and no expansion is no /exp.
 	s.expansion_id.reset();
 	const hosted::LaunchSpec dfx2 = hosted::render_launch(s, "dfx2", "", in);
@@ -412,27 +412,27 @@ int test_renders() {
 	return 0;
 }
 
-// --- the data sets ----------------------------------------------------------------
+// --- the products ----------------------------------------------------------------
 
-// A server whose data set has no data at its placement (its tree pruned since
+// A server whose product has no data at its placement (its tree pruned since
 // the request, no ready current tree, and no pins to keep) fails before any
 // account or machine: no restart mends that. An expansion with no data, and a
-// data set row gone, the same.
+// product row gone, the same.
 int test_no_data() {
 	Rig rig("hosted_no_data");
 	hosted::HostedSettings settings = valid_settings(rig.data.dfx2);
 	settings.missions = { "dfx2_a.bms" };
 	const int64_t id = rig.request("gone_owner", settings);
 	TEST_EXPECT(id > 0);
-	TEST_EXPECT(rig.server(id)->settings.data_set_id == rig.data.dfx2);
-	// Its data goes: the tree pruned, the data set with no current tree.
-	rig.db.exec("UPDATE data_sets SET current_tree_id = NULL WHERE id = $1;", { BindValue(rig.data.dfx2) });
+	TEST_EXPECT(rig.server(id)->settings.product_id == rig.data.dfx2);
+	// Its data goes: the tree pruned, the product with no current tree.
+	rig.db.exec("UPDATE products SET current_tree_id = NULL WHERE id = $1;", { BindValue(rig.data.dfx2) });
 	hosted::mark_tree_pruned(rig.db, rig.data.dfx2_tree);
 	rig.tick(); // -> provisioning
 	rig.tick(); // -> failed
 	const auto row = rig.server(id);
 	TEST_EXPECT(row && row->state == State::Failed);
-	TEST_EXPECT(row && row->failure_reason == "its data set has no data");
+	TEST_EXPECT(row && row->failure_reason == "its game has no data");
 	TEST_EXPECT(rig.fake.launches == 0 && row && !row->service_user_id && !row->machine_ref);
 
 	// The expansion's data goes while the base's stays.
@@ -440,14 +440,14 @@ int test_no_data() {
 	escalation.expansion_id = rig.data.jox;
 	const int64_t exp = rig.request("gone_exp_owner", escalation);
 	TEST_EXPECT(exp > 0);
-	rig.db.exec("UPDATE data_sets SET current_tree_id = NULL WHERE id = $1;", { BindValue(rig.data.jox) });
+	rig.db.exec("UPDATE products SET current_tree_id = NULL WHERE id = $1;", { BindValue(rig.data.jox) });
 	rig.tick();
 	rig.tick();
 	TEST_EXPECT(rig.state(exp) == State::Failed && rig.server(exp)->failure_reason == "its expansion has no data");
 	TEST_EXPECT(rig.fake.launches == 0);
 
-	// The data set row gone (its id set NULL on the server's row): named as such.
-	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
+	// The product row gone (its id set NULL on the server's row): named as such.
+	const int64_t on = seeded_product(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
 	hosted::HostedSettings on_settings = valid_settings(on);
 	on_settings.missions = { "on.bms" };
@@ -455,18 +455,18 @@ int test_no_data() {
 	TEST_EXPECT(orphan > 0);
 	// Seeded OpenNova includes NIFTY. Remove the unused child first so this
 	// fixture can exercise a missing base row without violating its parent FK.
-	rig.db.exec("DELETE FROM data_sets WHERE parent_id = $1;", { BindValue(on) });
-	rig.db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(on) });
+	rig.db.exec("DELETE FROM products WHERE parent_id = $1;", { BindValue(on) });
+	rig.db.exec("DELETE FROM products WHERE id = $1;", { BindValue(on) });
 	rig.tick();
 	rig.tick();
-	TEST_EXPECT(rig.state(orphan) == State::Failed && rig.server(orphan)->failure_reason == "its data set is gone");
+	TEST_EXPECT(rig.state(orphan) == State::Failed && rig.server(orphan)->failure_reason == "its game is gone");
 	return 0;
 }
 
 // The host limits by title (host_limits.h) and what a start may pick
-// (offered_data_sets: the bases with a ready current tree, each with its
+// (offered_products: the bases with a ready current tree, each with its
 // expansions that have one), over the rig's seeded rows.
-int test_data_sets() {
+int test_products() {
 	const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
 	const hosted::HostLimits &dfx2 = hosted::host_limits_for_title("dfx2");
 	TEST_EXPECT(jo.max_players.min == 2 && jo.max_players.max == 64 && jo.time_limit.max == 300 &&
@@ -475,13 +475,13 @@ int test_data_sets() {
 	// Every title this service hosts runs Joint Operations' rules but DFX2's cap.
 	TEST_EXPECT(&hosted::host_limits_for_title("opennova") == &jo && &hosted::host_limits_for_title("") == &jo);
 
-	Rig rig("hosted_data_sets");
-	const std::vector<hosted::OfferedDataSet> offered = rig.offered();
+	Rig rig("hosted_products");
+	const std::vector<hosted::OfferedProduct> offered = rig.offered();
 	// Joint Operations with Escalation, then Delta Force Xtreme 2; OpenNova,
 	// with no tree, is not offered.
 	TEST_EXPECT(offered.size() == 2);
 	if (offered.size() != 2) return 1;
-	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].game == "jop_2_consumer" &&
+	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].lobby == "jop_2_consumer" &&
 			offered[0].display_name == "Joint Operations" && offered[0].tree_id == rig.data.jo_tree &&
 			offered[0].version == "JO V1.7.5.3" && offered[0].missions.size() == 3 &&
 			offered[0].missions[1].file == "SERVETST.BMS" && offered[0].missions[1].title == "Map SERVETST.BMS");
@@ -490,22 +490,22 @@ int test_data_sets() {
 			offered[0].expansions[0].tree_id == rig.data.jox_tree && offered[0].expansions[0].missions.size() == 1);
 	TEST_EXPECT(offered[1].id == rig.data.dfx2 && offered[1].title == "dfx2" && offered[1].expansions.empty() &&
 			offered[1].missions.size() == 2);
-	const int64_t on = seeded_data_set(rig.db, "OP: Acid Gambit");
+	const int64_t on = seeded_product(rig.db, "OP: Acid Gambit");
 	TEST_EXPECT(hosted::find_offered(offered, rig.data.jo) != nullptr && hosted::find_offered(offered, on) == nullptr);
 	TEST_EXPECT(hosted::find_offered_expansion(offered[0], rig.data.jox) != nullptr &&
 			hosted::find_offered_expansion(offered[0], rig.data.jo) == nullptr);
 	// Each title is a gameprofile code opennova-serve's /game takes.
-	for (const hosted::OfferedDataSet &d : offered)
+	for (const hosted::OfferedProduct &d : offered)
 		TEST_EXPECT(opennova::gameprofile::gameprofile_by_code(d.title.c_str()) != nullptr);
 	// A ready tree offers OpenNova's data, speaking Joint Operations' title.
 	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
-	const std::vector<hosted::OfferedDataSet> now = rig.offered();
+	const std::vector<hosted::OfferedProduct> now = rig.offered();
 	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "jo" && now[2].version == "ON V0.1");
 	return 0;
 }
 
-// The trees a server is pinned to (ADR 0064): its first start takes its data
-// sets' current trees; a crash restart and a fleet-caused replace keep them
+// The trees a server is pinned to (ADR 0064): its first start takes its products'
+// current trees; a crash restart and a fleet-caused replace keep them
 // while newer data arrives (the owner's view says an update waits); the
 // owner's update places the server again on the current trees, a new
 // generation, no restart counted; the admin's update-all does the same for
@@ -558,7 +558,7 @@ int test_pins_and_updates() {
 	rig.step();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 &&
-			contains(last_detail(db, id), "updated to its data set's current data"));
+			contains(last_detail(db, id), "updated to its game's current data"));
 	TEST_EXPECT(!rig.to_running(id, 9304).empty());
 	row = rig.server(id);
 	TEST_EXPECT(row->generation == 4 && row->base_tree_id == jo_tree2 && row->expansion_tree_id == rig.data.jox_tree &&
@@ -702,9 +702,9 @@ int test_requests() {
 	Rig rig("hosted_requests");
 	Database &db = rig.db;
 	const auto settings = rig.settings();
-	const std::vector<hosted::OfferedDataSet> offered = rig.offered();
+	const std::vector<hosted::OfferedProduct> offered = rig.offered();
 	const auto request = [&](int64_t user, const hosted::HostedSettings &with,
-								 const std::vector<hosted::OfferedDataSet> &sets, int cap) {
+								 const std::vector<hosted::OfferedProduct> &sets, int cap) {
 		return hosted::request_server(db, user, with, sets, cap, kWall);
 	};
 	const int64_t unentitled = make_player(db, "req_unentitled", 0);
@@ -742,14 +742,14 @@ int test_requests() {
 	const auto row = hosted::find_server(db, first.id);
 	TEST_EXPECT(row && row->state == State::Requested && row->owner_user_id == a);
 	TEST_EXPECT(row->settings.missions == settings.missions && row->settings.game_name == settings.game_name);
-	TEST_EXPECT(row->settings.data_set_id == rig.data.jo && !row->settings.expansion_id);
+	TEST_EXPECT(row->settings.product_id == rig.data.jo && !row->settings.expansion_id);
 	TEST_EXPECT(!row->base_tree_id && !row->expansion_tree_id && !row->update_requested);
 	TEST_EXPECT(!row->machine_ref && row->slot == -1 && row->generation == 0 && row->serve_image.empty());
-	// A data set not offered is refused here too.
+	// A product not offered is refused here too.
 	hosted::HostedSettings dfx2 = settings;
-	dfx2.data_set_id = rig.data.dfx2;
+	dfx2.product_id = rig.data.dfx2;
 	dfx2.missions = { "dfx2_a.bms" };
-	const std::vector<hosted::OfferedDataSet> jo_only = { offered[0] };
+	const std::vector<hosted::OfferedProduct> jo_only = { offered[0] };
 	const int64_t e = make_player(db, "req_e", 1);
 	TEST_EXPECT(request(e, dfx2, jo_only, 3).outcome == hosted::RequestOutcome::InvalidSettings);
 	TEST_EXPECT(hosted::list_servers_of(db, e).empty());
@@ -963,7 +963,7 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(row->game_port == 32768 && row->generation == 1 && row->serve_image == kServeImage);
 	TEST_EXPECT(row->provider == "fake" && row->container == "srv-" + std::to_string(id) + "-g1");
 	TEST_EXPECT(row->machine_address == "10.0.1.1");
-	// Its first start pinned it to its data sets' current trees.
+	// Its first start pinned it to its products' current trees.
 	TEST_EXPECT(row->base_tree_id == rig.data.jo_tree && row->expansion_tree_id == rig.data.jox_tree &&
 			!row->update_requested);
 	TEST_EXPECT(contains(last_detail(rig.db, id), "with tree " + std::to_string(rig.data.jo_tree) +
@@ -2871,7 +2871,7 @@ int main(int argc, char **argv) {
 	const int failures = test_parts::run(argc, argv, {
 		{ "settings_rules", { test_settings_rules } },
 		{ "renders", { test_renders } },
-		{ "data_sets", { test_data_sets } },
+		{ "products", { test_products } },
 		{ "no_data", { test_no_data } },
 		{ "pins_and_updates", { test_pins_and_updates } },
 		{ "service_accounts", { test_service_accounts } },

@@ -136,7 +136,7 @@ static int test_tokens() {
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
 		            back == operation);
 	}
-	for (int i = 0; i <= static_cast<int>(PickPurpose::ContentFolder); ++i) {
+	for (int i = 0; i <= static_cast<int>(PickPurpose::NovaWorldFolder); ++i) {
 		const auto purpose = static_cast<PickPurpose>(i);
 		PickPurpose back = PickPurpose::None;
 		TEST_EXPECT(*pick_purpose_token(purpose) && pick_purpose_from_token(pick_purpose_token(purpose), back) &&
@@ -155,8 +155,8 @@ static int test_tokens() {
 	}
 	for (const Resolution resolution : { Resolution::KeepMine, Resolution::TakeTheirs }) {
 		Resolution back = Resolution::KeepMine;
-		TEST_EXPECT(*content_resolution_token(resolution) &&
-		            content_resolution_from_token(content_resolution_token(resolution), back) && back == resolution);
+		TEST_EXPECT(*novaworld_resolution_token(resolution) &&
+		            novaworld_resolution_from_token(novaworld_resolution_token(resolution), back) && back == resolution);
 	}
 	for (int i = 0; i <= static_cast<int>(DiagnosticSeverity::Error); ++i) {
 		const auto severity = static_cast<DiagnosticSeverity>(i);

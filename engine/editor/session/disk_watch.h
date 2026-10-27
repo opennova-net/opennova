@@ -14,7 +14,7 @@ struct PollBudget;
 struct ProjectPaths;
 
 // The project files `changed` (project-relative) that something other than the editor's own saves wrote
-// (another program, a content store pull: session/content_controller.h) taken into `changes`: each a file
+// (another program, a NovaWorld pull: session/novaworld_controller.h) taken into `changes`: each a file
 // read again, and an import source among them, or one whose import record changed, imported again (its
 // record and its source both there).
 void add_changed_files(const ProjectPaths &paths, const std::vector<std::string> &changed, ExternalChanges &changes);

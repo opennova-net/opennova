@@ -25,7 +25,7 @@ target_link_libraries(opennova_novaworld_fleet_core
         opennova_novaworld_jobs
         opennova_novaworld_accounts
         opennova_novaworld_billing
-        opennova_novaworld_data_sets
+        opennova_novaworld_products
         opennova_novaworld_hosting_protocol
         opennova_novaworld_hosting_model
         opennova_novaworld_service

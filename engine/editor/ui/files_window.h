@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <editor/assets/asset_kind.h>
-#include <editor/content_store/content_plan.h>
+#include <editor/novaworld/novaworld_plan.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/view_event_mailbox.h>
@@ -262,10 +262,10 @@ private:
 	// The project the selection is for: another one starts it afresh (the session starts its filter and
 	// kind afresh).
 	std::string shown_root_;
-	// The content store's changes by path (ADR 0069): a row's mark and its Discard changes, made again
-	// as the content concern moves.
-	std::unordered_map<std::string, ContentChange> content_changes_;
-	uint64_t content_revision_ = UINT64_MAX;
+	// NovaWorld's changes by path (ADR 0069): a row's mark and its Discard changes, made again
+	// as the NovaWorld concern moves.
+	std::unordered_map<std::string, NovaWorldChange> novaworld_changes_;
+	uint64_t novaworld_revision_ = UINT64_MAX;
 	// Rename... (the workspace's file_rename: the file and the name typed), and the name its preview was
 	// last asked for.
 	ui_kit::HeldPopup rename_popup_;

@@ -31,7 +31,7 @@ export const ADMIN_AREAS: readonly AdminArea[] = [
     sections: [
       { to: '/admin/novaworld', label: 'NovaWorld', description: 'Sign-in, live sessions and lobby instances' },
       { to: '/admin/fleet', label: 'Fleet', description: 'Machines and servers, their moves, the roll' },
-      { to: '/admin/games', label: 'Games', description: "Each game's project, its releases and the servers running it" },
+      { to: '/admin/products', label: 'Products', description: 'Each game and app: its project, its releases and the servers running it' },
       { to: '/admin/addresses', label: 'Static addresses', description: "Dedicated machines' fixed addresses and names" },
       { to: '/admin/settings', label: 'Settings', description: 'Subscriptions on or off, and how big the fleet may grow' },
     ],

@@ -86,6 +86,18 @@ func test_editor_variant_boots_headless() -> void:
 	assert_eq(_seam.get_recent_projects(), PackedStringArray())
 
 
+## Help > Update OpenNova Editor... (update_editor, ADR 0072) in a source run: the shell refuses it, nothing
+## started, and the editor stays (it never asked to quit). An installed editor's update, update.exe started over its
+## folder, is the packaging smoke's (scripts/package_godot_windows.ps1 Test-UpdaterBoot).
+func test_update_editor_is_refused_in_a_source_run() -> void:
+	if _app == null:
+		return
+	var refused: String = _app.update_editor()
+	assert_string_contains(refused, "source run")
+	assert_false(bool(_seam.state(["project"]).get("project", {}).get("quit_requested", true)),
+			"refused, the editor stays")
+
+
 ## editor_screenshot's window restore (restore_window_for_capture): headless there is no window, so nothing is
 ## minimized to bring back and nothing is minimized again (the windowed suite's editor_screenshot_minimized_test
 ## brings a minimized one back).

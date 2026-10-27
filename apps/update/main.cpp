@@ -3,9 +3,6 @@
 #include "client.h"
 #include "platform.h"
 
-#include <base/io/os_path.h>
-#include <formats/update/apply.h>
-
 #include <ctime>
 #include <fstream>
 
@@ -76,8 +73,9 @@ bool execute(const updater::Options &options, updater::Result &result, std::stri
 }
 
 // After a run: revupdat replaces a staged update.new and relaunches the updater (retail hands
-// over after every loose pass, D-UPD-4), else /RUN starts the command file's EXE (legacy) or
-// opennova.exe. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_RUN_REVUPDAT and US_DONE]
+// over after every loose pass, D-UPD-4), else /RUN starts what relaunch_command names: the
+// command file's EXE (legacy, an app's folder) or opennova.exe. [orig: Cupdate2Dlg_StateTick
+// @ 0x408170 (UPDATE.EXE), US_RUN_REVUPDAT and US_DONE]
 bool finish(const updater::Options &options, const std::vector<std::string> &original,
 		const updater::Result &result, std::string &error) {
 	if (!result.revision_pending && !options.run) return true;
@@ -88,15 +86,9 @@ bool finish(const updater::Options &options, const std::vector<std::string> &ori
 		return updater::launch_detached(options.runtime_dir / "revupdat.exe", launch_dir,
 				updater::revision_handoff_arguments(options, original, updater::process_id()), error);
 	}
-	std::filesystem::path program = options.runtime_dir / "opennova.exe";
-	if (options.legacy && !result.launch_exe.empty()) {
-		if (!update::is_safe_row_name(result.launch_exe)) { error = "Unsafe EXE in update command."; return false; }
-		program = options.resource_dir / io::os_path(result.launch_exe);
-	}
-	auto run_args = options.run_args;
-	if (!options.legacy && run_args.empty())
-		run_args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
-	return updater::launch_detached(program, launch_dir, run_args, error);
+	updater::Launch launch;
+	return updater::relaunch_command(options, result.app, result.launch_exe, launch, error) &&
+			updater::launch_detached(launch.program, launch_dir, launch.args, error);
 }
 
 #ifdef _WIN32

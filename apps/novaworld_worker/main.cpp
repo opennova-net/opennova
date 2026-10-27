@@ -6,7 +6,7 @@
 // (worker_schedule.h), in every worker process with no election (the
 // schedule keys keep each bucket single). What it runs is what its scheduler,
 // the fleet's supervisor and web's routes enqueued; any number of worker
-// processes share the queue. The data sets' jobs are the data program's
+// processes share the queue. The products' jobs are the data program's
 // (apps/novaworld_data). Its watchdog watches the pool's claim loop and the
 // scheduler's ticks: a slow job occupies its worker, never a watched loop.
 

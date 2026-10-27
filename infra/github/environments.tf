@@ -57,7 +57,7 @@ resource "github_repository_environment" "staging" {
 }
 
 # The Publish workflow's (.github/workflows/publish.yml) admin API token, with which it publishes
-# a build's runtime release to the deployment's NOVAWORLD_URL: the deployment's own
+# a run's app releases to the deployment's NOVAWORLD_URL: the deployment's own
 # (app-<deployment>/admin_api_token, the vault's; DEPLOY.md, "The downloads host").
 resource "github_actions_environment_secret" "admin_api_token" {
   for_each    = toset(keys(local.deploy_accounts))

@@ -21,10 +21,10 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
-#include <editor/ui/content_window.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_window.h>
+#include <editor/ui/novaworld_window.h>
 #include <editor/ui/output_window.h>
 #include <editor/ui/preview_window.h>
 #include <editor/ui/problems_window.h>
@@ -119,9 +119,9 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 // above it Files 260 pixels of a 1280-wide window and the Inspector 320, kept as shares of
 // the width a window has when the layout is built (each ratio of the node it splits: the
 // Inspector's of what Files leaves); the centre 37.5% Document, 62.5% Preview. Once
-// built, Document has the focus, Files is the left's tab (Content beside it) and Problems the
+// built, Document has the focus, Files is the left's tab (NovaWorld beside it) and Problems the
 // bottom's. The dockspace id is the editor's own: a layout saved before the workspace had these
-// windows (v2's had no Content) is not found, so this one is built once, and the user's docking
+// windows (v2's had no NovaWorld) is not found, so this one is built once, and the user's docking
 // persists after.
 devtools::DockLayout editor_layout() {
 	devtools::DockLayout layout;
@@ -190,7 +190,7 @@ EditorWindows::EditorWindows() {
 		pass_.register_window(std::move(problems));
 	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
-	pass_.register_window(std::make_unique<ContentWindow>(*this));
+	pass_.register_window(std::make_unique<NovaWorldWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
 	pass_.set_open(true); // the editor's workspace has no closed state
@@ -233,9 +233,9 @@ void EditorWindows::request(EditorRequest request) {
 		request.path.clear();
 		request.values.clear();
 	}
-	// A content project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
-	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::ContentFolder) {
-		content_get_key_ = request.project_key;
+	// A NovaWorld project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
+	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::NovaWorldFolder) {
+		novaworld_get_key_ = request.project_key;
 		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
@@ -489,13 +489,13 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
 		stream_pick_ = StreamPick();
 		break;
-	case PickPurpose::ContentFolder:
+	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.
-		if (!content_get_key_.empty()) {
+		if (!novaworld_get_key_.empty()) {
 			const bool slash = path.back() == '/' || path.back() == '\\';
-			request(request::content_get(content_get_key_, path + (slash ? "" : "/") + content_get_key_));
+			request(request::novaworld_get(novaworld_get_key_, path + (slash ? "" : "/") + novaworld_get_key_));
 		}
-		content_get_key_.clear();
+		novaworld_get_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}
@@ -516,6 +516,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_go_menu(v);
 	draw_build_menu(v);
 	draw_windows_items(v, document);
+	draw_help_menu(v);
 	// The modals, every frame, whichever window or menu opened them: the one the session's order shows
 	// (shown_modal) opens, the others held wait closed.
 	bring_modal_forward(v);
@@ -568,6 +569,23 @@ void EditorWindows::draw_navigation(const SessionView &v) {
 		}
 		ImGui::PopID();
 	}
+}
+
+// Help (ADR 0072), after Windows (the pass appends its own Help windows to it): the build this editor is, a line
+// to read, then Update OpenNova Editor..., which asks the Shell to update the editor in place (update_editor:
+// update.exe started over the editor's folder, the editor quit). Enabled while the view lets the editor quit
+// (update_refusal, whose words its tooltip gives); the Shell refuses what only it can tell (a source run, a
+// folder without update.exe or OPENNOVA.WIZ) on the status line.
+void EditorWindows::draw_help_menu(const SessionView &v) {
+	if (!ImGui::BeginMenu("Help")) return;
+	const std::string build = build_label_.empty() ? std::string("OpenNova Editor, a source run") : build_label_;
+	ImGui::MenuItem(build.c_str(), nullptr, false, false);
+	const std::string refusal = update_refusal(v);
+	if (menu_item("Update OpenNova Editor...", nullptr, refusal.empty())) request(request::update_editor());
+	ui_kit::tooltip(refusal.empty() ? "Installs NovaWorld's newest OpenNova Editor over this one: the editor quits, "
+	                                  "updates and starts again."
+	                                : refusal);
+	ImGui::EndMenu();
 }
 
 void EditorWindows::draw_file_menu(const SessionView &v) {
@@ -783,11 +801,11 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 		request(request::export_project());
 	ui_kit::tooltip("Build, then copy the build into the project's export folder as what ships.");
 	// ADR 0069 d7: a release of the project's revision, built on the service; the NovaWorld window asks its version.
-	const ContentView &content = v.content;
-	const bool releases = content.bound && content.signed_in && content.role == "admin" && content.revision > 0;
-	const std::string release = content.revision > 0 ? "Release r" + std::to_string(content.revision) + "..." : "Release...";
-	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::ContentRelease)))
-		window_requests::focus(*this, "content");
+	const NovaWorldView &novaworld = v.novaworld;
+	const bool releases = novaworld.bound && novaworld.signed_in && novaworld.role == "admin" && novaworld.revision > 0;
+	const std::string release = novaworld.revision > 0 ? "Release r" + std::to_string(novaworld.revision) + "..." : "Release...";
+	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
+		window_requests::focus(*this, "novaworld");
 	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
 	                         : "An admin releases a project on NovaWorld, from a revision pushed to it.");
 	if (menu_item("Show export folder", nullptr,
@@ -1051,16 +1069,16 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in the content store (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
-	const std::string content_text = content_status_text(v.content);
+	// The project's standing in NovaWorld (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
+	const std::string novaworld_text = novaworld_status_text(v.novaworld);
 
-	// Each part's width, left to right: the content store's standing, the unsaved files, the problem
+	// Each part's width, left to right: NovaWorld's standing, the unsaved files, the problem
 	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the
 	// end of the menus to the end of the bar's content.
 	const float gap = ImGui::GetStyle().ItemSpacing.x;
 	constexpr size_t kParts = 5;
 	float widths[kParts] = {};
-	if (!content_text.empty()) widths[0] = ui_kit::text_width(content_text.c_str());
+	if (!novaworld_text.empty()) widths[0] = ui_kit::text_width(novaworld_text.c_str());
 	if (!unsaved.empty()) widths[1] = ui_kit::unsaved_dot_width() + gap + ui_kit::text_width(unsaved_text.c_str());
 	widths[2] = ui_kit::severity_count_width(errors) + gap + ui_kit::severity_count_width(warnings);
 	if (!state.empty()) widths[3] = ui_kit::text_width(state.c_str());
@@ -1102,11 +1120,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ImGui::SetCursorPosX(x);
 		return clicked;
 	};
-	if (first == 0 && !content_text.empty()) {
-		if (clickable("##content", widths[0], "The project on NovaWorld: its revision, your changes and what "
+	if (first == 0 && !novaworld_text.empty()) {
+		if (clickable("##novaworld", widths[0], "The project on NovaWorld: its revision, your changes and what "
 		                                     "others pushed since. Shows the NovaWorld window."))
-			window_requests::focus(*this, "content");
-		ImGui::TextUnformatted(content_text.c_str());
+			window_requests::focus(*this, "novaworld");
+		ImGui::TextUnformatted(novaworld_text.c_str());
 	}
 	if (first <= 1 && !unsaved.empty()) {
 		if (clickable("##unsaved", widths[1], "Files with unsaved changes.")) ImGui::OpenPopup("unsaved");

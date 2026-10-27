@@ -31,7 +31,7 @@ struct BuildAfterBase {
 // An expansion of a project's base game (ADR 0046 T5) plays over that project's export, so the editor
 // makes the export itself where it is missing or older than the project (project/base_project.h's
 // base_export_of), as the server's release build exports a base game before its expansion
-// (apps/novaworld_common/data_sets/release_build.cpp) and as `opennova-project export` does: the base
+// (apps/novaworld_common/products/release_build.cpp) and as `opennova-project export` does: the base
 // project opened in a session of its own (no process seam, the editor's preferences in memory, its
 // workspace neither read nor written), its validation stepped as the editor's polls step it, then its
 // Export (the build over its gate, the copy into its export folder, the stamp of its files recorded:

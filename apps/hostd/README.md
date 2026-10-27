@@ -32,8 +32,8 @@ A **machine** is the EC2 virtual machine; a **shared machine** packs up to K ser
 machine (`hosted/protocol/slots.h`): slot k is the game's UDP port 32768 + k (open to everyone), the
 remote admin's TCP port 32800 + k (open to the service alone), the container's user
 10001 + k and the working directory `/srv/slots/slot-k` (0700, that user's). At most 32
-slots; a dedicated machine has slot 0 alone. A **tree** is one immutable version of a data
-set's files in the object store (CONTEXT.md "Tree"): a server is pinned to a base tree
+slots; a dedicated machine has slot 0 alone. A **tree** is one immutable version of a product's
+files in the object store (CONTEXT.md "Tree"): a server is pinned to a base tree
 (stock JO, DFX2) and, with an expansion, to an expansion tree (Escalation's), and the
 machine holds each tree it needs at `/opt/game/<tree id>/`.
 
@@ -329,7 +329,7 @@ rather than a docker container: the runtime of a machine that is itself a contai
 no docker, the local stack's (`apps/novaworld_common/hosted/cloud/docker_machine_driver.h`, which
 starts the hostd image as its serve user with `--runtime process --nft none --log-dir
 /var/log/opennova`, the stack's log volume). A start
-is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
+is `<--serve> --resource-dir <the product's mount path> <opennova-serve's arguments>` in the
 slot's directory, its environment the system's variables (`PATH`, `HOME`, `LANG`, `LC_*`,
 `TZ`, `TMPDIR`) and the env file's, its output where the agent's own goes (the machine
 container's log), or with `--log-dir` (the local stack's log volume) to that start's own

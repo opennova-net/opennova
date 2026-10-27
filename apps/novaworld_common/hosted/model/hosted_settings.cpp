@@ -52,10 +52,10 @@ bool is_mission_file_name(std::string_view name) {
 }
 
 std::optional<SettingsRefusal> check_settings(
-		const HostedSettings &s, const std::vector<OfferedDataSet> &offered) {
-	const OfferedDataSet *data_set = find_offered(offered, s.data_set_id);
-	if (!data_set) return SettingsRefusal{ "data_set_id", "is no data set this service offers" };
-	if (s.list_on_novalogic && !novalogic_lists(*data_set))
+		const HostedSettings &s, const std::vector<OfferedProduct> &offered) {
+	const OfferedProduct *product = find_offered(offered, s.product_id);
+	if (!product) return SettingsRefusal{ "product_id", "is no game this service offers" };
+	if (s.list_on_novalogic && !novalogic_lists(*product))
 		return SettingsRefusal{ "list_on_novalogic",
 			"NovaLogic's NovaWorld lists Joint Operations servers only" };
 	{
@@ -88,7 +88,7 @@ std::optional<SettingsRefusal> check_settings(
 			return SettingsRefusal{ "game_password",
 				"takes printable ASCII with no space or double quote" };
 	}
-	const HostLimits &limits = host_limits_for_title(data_set->title);
+	const HostLimits &limits = host_limits_for_title(product->title);
 	if (auto r = out_of_range("max_players", s.max_players, limits.max_players)) return r;
 	if (auto r = out_of_range("time_limit", s.time_limit, limits.time_limit)) return r;
 	if (auto r = out_of_range("kill_limit", s.kill_limit, limits.kill_limit)) return r;
@@ -97,9 +97,9 @@ std::optional<SettingsRefusal> check_settings(
 	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
 	const OfferedExpansion *expansion = nullptr;
 	if (s.expansion_id) {
-		expansion = find_offered_expansion(*data_set, *s.expansion_id);
+		expansion = find_offered_expansion(*product, *s.expansion_id);
 		if (!expansion)
-			return SettingsRefusal{ "expansion_id", "is no expansion of this data set with data" };
+			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
@@ -110,9 +110,9 @@ std::optional<SettingsRefusal> check_settings(
 			return SettingsRefusal{ "missions",
 				"names \"" + loggable(m, 40) +
 						"\", which is no .bms file name of letters, digits, _ and -" };
-		if (!lists_mission(data_set->missions, m) && !(expansion && lists_mission(expansion->missions, m)))
+		if (!lists_mission(product->missions, m) && !(expansion && lists_mission(expansion->missions, m)))
 			return SettingsRefusal{ "missions",
-				"names \"" + loggable(m, 40) + "\", which is no mission of this data set" };
+				"names \"" + loggable(m, 40) + "\", which is no mission of this game" };
 	}
 	return std::nullopt;
 }

@@ -30,7 +30,7 @@ TARGET level are the two structural seams:
      service's layered libraries (apps/novaworld_common/README.md "Build
      layout and tests"; the include lint's SERVICE LAYERS): only the
      worker's targets reach the cloud's library, the data program and the
-     data sets never reach hosting, billing or the accounts, the gate and the
+     products never reach hosting, billing or the accounts, the gate and the
      lobby reach only the core, the program runtime and the service, and
      hostd never reaches the service or the program runtime (it builds
      without them).
@@ -110,7 +110,7 @@ CONTAINED = [
 NW = "opennova_novaworld_"
 NW_CORE, NW_PROTOCOL, NW_PROGRAM = NW + "core", NW + "hosting_protocol", NW + "program"
 NW_JOBS, NW_ACCOUNTS, NW_BILLING = NW + "jobs", NW + "accounts", NW + "billing"
-NW_DATA_SETS, NW_MODEL, NW_CLOUD = NW + "data_sets", NW + "hosting_model", NW + "hosting_cloud"
+NW_PRODUCTS, NW_MODEL, NW_CLOUD = NW + "products", NW + "hosting_model", NW + "hosting_cloud"
 NW_GATE = [NW + "gate", NW + "gate_core"]
 NW_LOBBY = [NW + "lobby", NW + "lobby_core"]
 NW_WEB = [NW + "web", WEB_CORE_TARGET]
@@ -124,7 +124,7 @@ HOSTD_TARGETS = ["opennova_hostd", "opennova_hostd_core"]
 # protocol on Linux too): a graphviz dump of a tree configured without it lacks
 # them, which vacates no rule. The files walk always sees them.
 SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET, REDIS_TARGET, NW_CORE, NW_PROTOCOL, NW_PROGRAM,
-                 NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+                 NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_PRODUCTS, NW_MODEL, NW_CLOUD,
                  *NW_GATE, *NW_LOBBY, *NW_WEB, *NW_FLEET, *NW_WORKER, *NW_DATA}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
@@ -175,9 +175,9 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         set(),
     ),
     (
-        "the data program reads the store and the data sets alone (decision 2 of the "
-        "service's split): it and the data sets never reach hosting, billing or the accounts",
-        NW_DATA + [NW_DATA_SETS],
+        "the data program reads the store and the products alone (decision 2 of the "
+        "service's split): it and the products never reach hosting, billing or the accounts",
+        NW_DATA + [NW_PRODUCTS],
         [NW_MODEL, NW_BILLING, NW_ACCOUNTS],
         set(),
     ),
@@ -185,7 +185,7 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         "the gate and the lobby stand on the core, the program runtime and the service "
         "alone: no domain library, no other program's code, no Redis",
         NW_GATE + NW_LOBBY,
-        [NW_PROTOCOL, NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_DATA_SETS, NW_MODEL, NW_CLOUD,
+        [NW_PROTOCOL, NW_JOBS, NW_ACCOUNTS, NW_BILLING, NW_PRODUCTS, NW_MODEL, NW_CLOUD,
          WEB_CORE_TARGET, NW + "fleet_core", NW + "worker_core", REDIS_TARGET],
         set(),
     ),

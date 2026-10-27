@@ -1,7 +1,7 @@
 #include "release_catalog.h"
 
 #include "core/object_store.h"
-#include "data_sets/data_set_jobs.h"
+#include "products/product_jobs.h"
 
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
@@ -74,8 +74,8 @@ bool list_section_files(
 // with /run and exits, so a command without it leaves the game closed. Retail's own command
 // files are not witnessed (the installs ship none); an expansion's nested run takes no /RUN.
 // [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE: the EXE launched when /RUN]
-const char *title_executable(const hosted::DataSetRow &row) {
-	if (row.kind != hosted::DataSetKind::Base)
+const char *title_executable(const hosted::ProductRow &row) {
+	if (row.kind != hosted::ProductKind::Game)
 		return "";
 	if (row.title == "jo")
 		return "Jointops.exe";
@@ -91,10 +91,10 @@ ReleaseCatalog::ReleaseCatalog(std::string cache_dir, std::string update_host) :
 
 bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &error) {
 	std::vector<hosted::PublishedSection> sections;
-	std::vector<hosted::DataSetRow> data_sets;
+	std::vector<hosted::ProductRow> products;
 	try {
 		sections = hosted::published_sections(db);
-		data_sets = hosted::list_data_sets(db);
+		products = hosted::list_products(db);
 	} catch (const db::Error &e) {
 		error = e.what();
 		return false;
@@ -122,7 +122,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 	// A retail product nothing has published answers current: its retail installs are as
 	// their last retail patch left them. OpenNova's own products are never stood in for, so
 	// an unpublished one stays refused and a first install fails rather than finding nothing.
-	for (const hosted::DataSetRow &row : data_sets) {
+	for (const hosted::ProductRow &row : products) {
 		if (!row.retail || row.updater_login.empty() || row.command_file.empty() ||
 				next.count(strutil::to_upper(row.updater_login)))
 			continue;
@@ -146,7 +146,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 			const auto it = products_.find(login);
 			changed = changed || it == products_.end() || it->second.sha256 != product.sha256 ||
 					it->second.command_file != product.command_file ||
-					it->second.retail_updater != product.retail_updater;
+					it->second.retail != product.retail;
 		}
 		products_.swap(next);
 	}
@@ -161,7 +161,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 }
 
 bool ReleaseCatalog::current_section(
-		const hosted::DataSetRow &row, hosted::PublishedSection &section, std::string &why) {
+		const hosted::ProductRow &row, hosted::PublishedSection &section, std::string &why) {
 	update::CommandFile command;
 	command.exe = title_executable(row);
 	command.product = row.display_name;
@@ -180,7 +180,7 @@ bool ReleaseCatalog::current_section(
 		why = "its current package cannot be written";
 		return false;
 	}
-	section.data_set_id = row.id;
+	section.product_id = row.id;
 	section.updater_login = row.updater_login;
 	section.command_file = row.command_file;
 	section.sha256 = io::sha256_hex(bytes.data(), bytes.size());
@@ -307,7 +307,7 @@ bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSec
 	product.login = section.updater_login;
 	product.command_file = section.command_file;
 	product.sha256 = section.sha256;
-	product.retail_updater = section.retail;
+	product.retail = section.retail;
 	return list_section_files(dir, product.files, why);
 }
 
@@ -367,7 +367,7 @@ std::vector<std::string> ReleaseCatalog::server_hosts(std::string_view login) co
 	const Product *product = find(login);
 	if (product == nullptr)
 		return {};
-	return { product->retail_updater ? std::string(update::kRetailGatewayHosts[0]) : update_host_ };
+	return { product->retail ? std::string(update::kRetailGatewayHosts[0]) : update_host_ };
 }
 
 std::string ReleaseCatalog::command_file_name(std::string_view login) const {

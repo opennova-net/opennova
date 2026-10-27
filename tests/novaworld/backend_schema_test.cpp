@@ -85,8 +85,7 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_checkout_reservations", "billing_customers", "billing_events",
 		"billing_subscriptions", "billing_sync_backoff", "billing_sync_state",
-		"cd_key_activations", "cd_keys", "comp_grants", "content_blobs",
-		"content_revisions", "data_set_trees", "data_sets",
+		"cd_key_activations", "cd_keys", "comp_grants",
 		"fleet_launch_backoff", "fleet_leader", "fleet_machine_egress", "fleet_machine_events",
 		"fleet_machine_hourly", "fleet_machine_samples", "fleet_machine_trees",
 		"fleet_machines", "fleet_slot_reports",
@@ -96,8 +95,9 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_samples", "hosted_server_starts", "hosted_servers", "jobs", "join_tickets",
 		"lobby_commands", "lobby_goodbyes", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"program_hourly", "program_samples", "release_sections", "releases", "server_status",
-		"service_meta", "unknown_messages", "web_sessions" };
+		"product_trees", "products", "program_hourly", "program_samples", "project_blobs",
+		"project_revisions", "release_sections", "releases", "server_status", "service_meta",
+		"unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -118,14 +118,14 @@ int test_migrations_create_expected_tables() {
 		"billing_customers.livemode", "billing_events.livemode",
 		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
-		"data_sets.retail", "fleet_machines.launch_refused", "fleet_machines.was_draining",
+		"fleet_machines.launch_refused", "fleet_machines.was_draining",
 		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
 		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
-		"lobby_sessions.listed",
+		"lobby_sessions.listed", "products.retail",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -662,25 +662,25 @@ int test_hosted_server_game() {
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
 	        "max_score, respawn, start_delay, missions) "
 	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
-	// A server runs a data set by row: the seeded Joint Operations and its Escalation; no game
+	// A server runs a product by row: the seeded Joint Operations and its Escalation; no game
 	// or expansion column.
-	const auto rows = db.query("SELECT data_set_id, team_ff, own_machine, update_requested FROM hosted_servers "
+	const auto rows = db.query("SELECT product_id, team_ff, own_machine, update_requested FROM hosted_servers "
 	                           "WHERE game_name = 'Default';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].is_null(0));
 	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0 && rows[0].as_int(3) == 0);
 	TEST_EXPECT(!has_column(db, "hosted_servers", "game") && !has_column(db, "hosted_servers", "expansion"));
 	// A slot's report carries why its container never started.
 	TEST_EXPECT(has_column(db, "fleet_slot_reports", "reason"));
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, data_set_id, expansion_id, game_name, "
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, game_name, "
 	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
 	        "SELECT p.id, 'stopped', b.id, e.id, 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players p, "
-	        "data_sets b, data_sets e WHERE p.username = 'host_game' AND b.game = 'jop_2_consumer' "
+	        "products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' "
 	        "AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
-	const auto own = db.query("SELECT d.game, e.expansion_code FROM hosted_servers s "
-	                          "JOIN data_sets d ON d.id = s.data_set_id JOIN data_sets e ON e.id = s.expansion_id "
+	const auto own = db.query("SELECT d.lobby, e.expansion_code FROM hosted_servers s "
+	                          "JOIN products d ON d.id = s.product_id JOIN products e ON e.id = s.expansion_id "
 	                          "WHERE s.game_name = 'Own';");
 	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "jop_2_consumer" && own[0].as_text(1).value() == "jox01");
-	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET data_set_id = 99999 WHERE game_name = 'Own';"));
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET product_id = 99999 WHERE game_name = 'Own';"));
 	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
 	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE game_name = 'Default';");
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE state = 'running';").size() == 2);
@@ -688,40 +688,50 @@ int test_hosted_server_game() {
 	return 0;
 }
 
-// A game's project on its data_sets row: every seeded game keyed (our own public, the retail ones
-// private) but the runtime; a key and its visibility come together, a key is unique and of its
-// shape, and the runtime takes none. The project tables and the releases
-// name the game by its row.
+// Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
+// and an expansion's project on its products row (our own public, the retail ones private), an
+// app with none; a key unique and of its shape, a game's visibility never cleared, an app given
+// none. The project tables and the releases name the product by its row.
 int test_game_projects() {
 	TestDatabase scratch;
 	Database db = scratch.open();
-	const auto keyed = db.query("SELECT display_name, key, visibility, head FROM data_sets "
-	                            "WHERE key IS NOT NULL ORDER BY key;");
+	const auto keys = db.query("SELECT key FROM products ORDER BY id;");
+	const std::vector<std::string> seeded = { "JO", "DFX2", "ACIDGAMBIT", "JOX01", "ONRUNTIME", "NIFTY",
+		"ONEDITOR", "ONTOOLS", "ONBLENDER", "ONSWITCHER" };
+	TEST_EXPECT(keys.size() == seeded.size());
+	for (size_t i = 0; i < keys.size() && i < seeded.size(); ++i)
+		TEST_EXPECT(keys[i].as_text(0).value() == seeded[i]);
+	const auto keyed = db.query("SELECT display_name, key, visibility, head FROM products "
+	                            "WHERE kind <> 'app' ORDER BY key;");
 	const std::vector<std::pair<std::string, std::string>> expected = { { "ACIDGAMBIT", "public" },
 		{ "DFX2", "private" }, { "JO", "private" }, { "JOX01", "private" }, { "NIFTY", "public" } };
 	TEST_EXPECT(keyed.size() == expected.size());
 	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
 		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
 		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM data_sets WHERE kind = 'update' AND key IS NULL "
-	                     "AND visibility IS NULL;").size() == 1);
-	TEST_EXPECT(!has_column(db, "data_sets", "retail_updater") && has_column(db, "data_sets", "retail") &&
-	            !has_column(db, "data_sets", "baseline_tree_id") &&
-	            !has_column(db, "data_set_trees", "baseline_tree_id") &&
-	            !has_column(db, "data_set_trees", "source") && has_column(db, "releases", "data_set_id") &&
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 5);
+	// The updatable apps' updater products, and each download's file named once.
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND updater_login <> '';").size() == 2);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 7);
+	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
+	                        "WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));
+	TEST_EXPECT(!has_column(db, "products", "retail_updater") && has_column(db, "products", "retail") &&
+	            !has_column(db, "products", "baseline_tree_id") &&
+	            !has_column(db, "product_trees", "baseline_tree_id") &&
+	            !has_column(db, "product_trees", "source") && has_column(db, "releases", "product_id") &&
 	            !has_column(db, "releases", "content_project_id") &&
-	            has_column(db, "content_revisions", "data_set_id") &&
-	            has_column(db, "content_blobs", "data_set_id"));
-	TEST_EXPECT(refused(db, "UPDATE data_sets SET visibility = NULL WHERE key = 'DFX2';"));
-	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'JO' WHERE key = 'DFX2';"));
-	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'dfx2' WHERE key = 'DFX2';"));
-	TEST_EXPECT(refused(db, "UPDATE data_sets SET key = 'RUNTIME', visibility = 'private' "
-	                        "WHERE kind = 'update';"));
-	TEST_EXPECT(refused(db, "UPDATE data_sets SET visibility = 'secret' WHERE key = 'DFX2';"));
-	db.exec("UPDATE data_sets SET key = 'DFX2X' WHERE key = 'DFX2';");
-	TEST_EXPECT(db.query("SELECT 1 FROM data_sets WHERE key = 'DFX2X';").size() == 1);
-	TEST_EXPECT(refused(db, "INSERT INTO data_set_trees (data_set_id, state) SELECT id, 'uploading' "
-	                        "FROM data_sets WHERE key = 'JO';"));
+	            has_column(db, "project_revisions", "product_id") &&
+	            has_column(db, "project_blobs", "product_id"));
+	TEST_EXPECT(refused(db, "UPDATE products SET visibility = NULL WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET key = 'JO' WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET key = 'dfx2' WHERE key = 'DFX2';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'private' WHERE key = 'ONRUNTIME';"));
+	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'secret' WHERE key = 'DFX2';"));
+	db.exec("UPDATE products SET key = 'DFX2X' WHERE key = 'DFX2';");
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);
+	TEST_EXPECT(refused(db, "INSERT INTO product_trees (product_id, state) SELECT id, 'uploading' "
+	                        "FROM products WHERE key = 'JO';"));
 	return 0;
 }
 

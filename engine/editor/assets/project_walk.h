@@ -2,8 +2,8 @@
 
 // The project walk's one rule for the folders it passes over (ADR 0046 S13 A3, S16): a
 // dot-directory (`.opennova/`, `.git/`), the export folder, and the staging and set-aside folders
-// an export keeps beside it. The project scan, its folder listing and the content store's scan
-// (content_store/content_scan.h, ADR 0069) walk a project by it, so a file one of them meets is a
+// an export keeps beside it. The project scan, its folder listing and NovaWorld's scan
+// (novaworld/novaworld_scan.h, ADR 0069) walk a project by it, so a file one of them meets is a
 // file of the project to each.
 
 #include <filesystem>

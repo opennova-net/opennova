@@ -229,7 +229,7 @@ static int test_guard_column_is_the_prompt() {
 	}
 	// Export (S16) guards as Build does; a texture's split (S18) and a move (DI-03) as a rename does.
 	// DI-25: a delete, a duplicate, a folder's rename, a folder's delete with what it holds and the file history's
-	// undo and redo too. ADR 0069: a content get (it opens another project), a pull and a push (each on the files as saved),
+	// undo and redo too. ADR 0069: a NovaWorld get (it opens another project), a pull and a push (each on the files as saved),
 	// and a restore of the file (its unsaved edits first).
 	TEST_EXPECT(prompted == 26 && went_ahead == kEditorRequestKindCount - 26);
 	return 0;
@@ -295,10 +295,10 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
 		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
 		// ADR 0069: a get opens another project; a pull writes the files and a push reads them, as saved.
-		{EditorRequestKind::ContentGet, "Get a project", "Save all"},
-		{EditorRequestKind::ContentPull, "Pull", "Save all and pull"},
-		{EditorRequestKind::ContentPush, "Push", "Save all and push"},
-		{EditorRequestKind::ContentRestore, "Restore main.mnu", "Save"},
+		{EditorRequestKind::NovaWorldGet, "Get a project", "Save all"},
+		{EditorRequestKind::NovaWorldPull, "Pull", "Save all and pull"},
+		{EditorRequestKind::NovaWorldPush, "Push", "Save all and push"},
+		{EditorRequestKind::NovaWorldRestore, "Restore main.mnu", "Save"},
 	};
 	size_t guarded = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {

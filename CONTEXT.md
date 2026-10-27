@@ -253,7 +253,7 @@ _Avoid_: data worker, uploader
 
 **Working copy**:
 A folder on a disk that holds a game's **project** at a revision (its base), bound to it by
-`.opennova/content/`: what it changed since its base is its push, what others pushed since its
+`.opennova/novaworld/`: what it changed since its base is its push, what others pushed since its
 pull. Every OpenNova Editor project folder of a game is one.
 _Avoid_: checkout, clone, mirror
 
@@ -511,8 +511,8 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 
 **Godot product**:
 One of the two applications exported from the `godot/` project: the OpenNova game
-runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export adds the runtime MCP
-for the editor) and the OpenNova Editor (`opennova-editor.exe`, ADR 0046). Backend
+runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export, `onplay.exe` beside the
+editor, adds the runtime MCP for the editor) and the OpenNova Editor (`oneditor.exe`, ADR 0046). Backend
 services and development tools are outside this taxonomy (ADR 0015); so are
 `opennova-serve` (ADR 0051) and the OpenNova Switcher (ADR 0054).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
@@ -662,20 +662,32 @@ needed, never filled with JO's value.
 _Avoid_: game (when you mean the identity: a **game** is the catalog's product, which speaks a
 title)
 
+**Product**:
+One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code), named
+by its key (`JO`, `ONEDITOR`): a **game**, an expansion or an **app**. The service keeps it,
+builds its **releases**, serves its published one to the updater and offers it on the downloads
+host; its updater login and command file (`JOTRus`, `JOPTR.CMD`) are the updater's own product.
+Admins manage products in the admin's Products area.
+_Avoid_: data set (the code's old name), package (the file a release is)
+
+**App**:
+A **product** that is one of OpenNova's own programs, not played: the runtime (`ONRUNTIME`) and
+the OpenNova Editor (`ONEDITOR`), each updatable like a game (an updater login, a command file),
+and the download-only tools (`ONTOOLS`), Blender add-on (`ONBLENDER`) and Switcher
+(`ONSWITCHER`). An app has no **project** and no **hosted server**.
+_Avoid_: tool (for the runtime or the editor), program (the NovaWorld service's programs)
+
 **Game**:
-The one name a user meets for a product the NovaWorld service keeps, updates and hosts (ADR
-0071): OP: Acid Gambit, OP: Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2
-and the OpenNova runtime. A base game speaks a **title** and lists in a lobby; an expansion
-builds on its base game (Escalation on Joint Operations, OP: Nifty Package on OP: Acid
-Gambit); the runtime has no **project** and no **hosted server**. A game has a **project**
-(keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is
-what players update to and what its hosted servers run. Admins manage games in the admin's
-Games area. In code a game is a `data_sets` row (the editor's routes name it
-`/api/content/projects/<key>`); a `games` row is a lobby, not a game.
-_Avoid_: data set, game data, content (as words a user meets; the code keeps `data_sets` and
-`content_*`), lobby (a `games` row), title (the identity a base game speaks), product (the
-updater's word: a game's login and command file), install (where a retail game's project
-began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
+The one name a user meets for a **product** that is played (ADR 0071): OP: Acid Gambit, OP:
+Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2. A base game speaks a
+**title** and lists in a lobby; an expansion builds on its base game (Escalation on Joint
+Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (keyed
+`ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is what
+players update to and what its hosted servers run. In code a game is a `products` row (the
+editor's routes name it `/api/products/<key>`); a `games` row is a lobby, not a game.
+_Avoid_: game data, content (as words a user meets; the store's objects keep their `content/<id>/`
+prefix), lobby (a `games` row), title (the identity a base game speaks), install (where a retail
+game's project began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
 **Tree**:
 The internal form of a **hosted server**'s data: one immutable version of a **game**'s files in
@@ -725,11 +737,11 @@ keeps none of it in a database. In NovaWorld, the game's line of revisions, each
 the project's files by path, SHA-256 and size (every file stored once by its SHA-256), which
 every folder of it is a **working copy** of. A public project (OP: Acid Gambit's, OP: Nifty
 Package's) is anyone's to get, a private one (the retail games') an admin's; admins push, and
-a push is not a **release**. The editor's NovaWorld window is its client, the admin's Games
+a push is not a **release**. The editor's NovaWorld window is its client, the admin's Products
 area its management.
 _Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
 New project's choice), game directory (the runtime's mounted root), content project, content store
-(the code's `content_*` names), repository, git, depot, asset server
+(the editor code's old names), repository, git, depot, asset server
 
 **Game install**:
 The folder of an installed NovaLogic game (Joint Operations) that a project imports from and

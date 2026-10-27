@@ -80,14 +80,14 @@ target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
 
-# The content store's manifest (base/content, ADR 0069): the paths a project's file may have
+# A project revision's manifest (base/project, ADR 0069): the paths a project's file may have
 # (each Windows rule, the machine's own folder, UTF-8), two paths one file once folded, the
 # canonical text read back and every other text of the same files refused.
-add_executable(content_manifest_test content/content_manifest_test.cpp)
-target_link_libraries(content_manifest_test PRIVATE opennova_base)
-target_compile_features(content_manifest_test PRIVATE cxx_std_17)
-target_include_directories(content_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME content_manifest COMMAND content_manifest_test)
+add_executable(project_manifest_test project/project_manifest_test.cpp)
+target_link_libraries(project_manifest_test PRIVATE opennova_base)
+target_compile_features(project_manifest_test PRIVATE cxx_std_17)
+target_include_directories(project_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME project_manifest COMMAND project_manifest_test)
 
 # The child-process seam (base/proc): a child from an argv array with no shell, run
 # against the test binary itself (its path is the argument; `--child <mode>` makes it

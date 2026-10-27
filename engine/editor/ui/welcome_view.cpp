@@ -13,8 +13,8 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
-#include <editor/ui/content_window.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/novaworld_window.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -68,17 +68,17 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::PopID();
 }
 
-// The projects of the content store (ADR 0069): a project got from it opens. Its sign-in is the NovaWorld window's,
+// The projects of NovaWorld (ADR 0069): a project got from it opens. Its sign-in is the NovaWorld window's,
 // which the button shows over the welcome page.
 void draw_from_store(Workspace &workspace) {
 	const SessionView &v = workspace.view();
-	if (!v.content.available) return;
+	if (!v.novaworld.available) return;
 	ImGui::Spacing();
 	ImGui::SeparatorText("Get a project from NovaWorld");
-	draw_content_projects(workspace);
-	if (v.content.signed_in) return;
+	draw_novaworld_projects(workspace);
+	if (v.novaworld.signed_in) return;
 	ImGui::SameLine();
-	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "content");
+	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "novaworld");
 	ui_kit::tooltip("Signs in with your NovaWorld account: an admin sees the private projects too.");
 }
 

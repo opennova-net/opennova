@@ -40,7 +40,7 @@ class NovaLogicLobbies;
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 namespace infra { class AlarmStore; class CostStore; class InfraStatus; class LogStore; class MetricsStore; }
-namespace content { class ContentUrls; }
+namespace projects { class ProjectUrls; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the retail login chain's in
@@ -83,11 +83,11 @@ namespace content { class ContentUrls; }
 //                         (infra/usage_routes.h): what everything uses and
 //                         the programs' tasks; CostRoutes
 //                         (infra/cost_routes.h): the month's AWS bill
-//   games               — DataSetRoutes and ReleaseRoutes (data_sets/): the
-//                         games (each a data set, its project with it) and
-//                         their releases, a project-less game's package
+//   products            — ProductRoutes and ReleaseRoutes (products/): the
+//                         products (a game's project with it) and their
+//                         releases, a project-less product's package
 //                         uploaded through this program part by part (ADR 0064)
-//   content store       — ContentRoutes (content/): the games' projects'
+//   projects            — ProjectRoutes (products/): the games' projects'
 //                         revisions, manifests and files, the editor's
 //                         pushes, and a release built from a revision (ADR 0069)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
@@ -169,18 +169,18 @@ public:
 	// start(); it must outlive the listener. Null: the view says none is read.
 	void set_cost_store(infra::CostStore *store) { cost_store_ = store; }
 
-	// The object store the hosted data sets' trees, the projects' files and the
+	// The object store the hosted products' trees, the projects' files and the
 	// update packages live in (core/object_store.h; core/object_store_stack.h
-	// make_object_store), which the games', release and content routes read and
+	// make_object_store), which the games', release and project routes read and
 	// write. Set before start(); it
 	// must outlive the listener. Null: no store (those routes answer
 	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
-	// The object store's own signed URLs (content/content_urls.h: S3's), which the content routes
+	// The object store's own signed URLs (products/project_urls.h: S3's), which the project routes
 	// hand the editor in place of carrying a file's bytes. Set before start(); it must outlive the
 	// listener. Null: the routes carry the bytes (a directory's store).
-	void set_content_urls(content::ContentUrls *urls) { content_urls_ = urls; }
+	void set_project_urls(projects::ProjectUrls *urls) { project_urls_ = urls; }
 
 	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -215,7 +215,7 @@ public:
 	void set_novalogic_listing(bool offered) { novalogic_listing_ = offered; }
 
 	// The periodic jobs the deployment's programs schedule (the worker's
-	// worker_schedule.h and the data program's data set prune, from the same
+	// worker_schedule.h and the data program's product prune, from the same
 	// settings): the admin's jobs page shows each
 	// one's schedule, and runs one now on request (jobs/job_routes.h). Set
 	// before start(); unset, none.
@@ -367,8 +367,8 @@ private:
 	infra::CostStore *cost_store_ = nullptr;
 	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
-	// The store's signed URLs (set_content_urls); null: none.
-	content::ContentUrls *content_urls_ = nullptr;
+	// The store's signed URLs (set_project_urls); null: none.
+	projects::ProjectUrls *project_urls_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;

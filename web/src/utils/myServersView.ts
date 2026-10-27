@@ -21,7 +21,7 @@ import type { MyServer } from '../types/myServers';
 export type HostingView = 'loading' | 'error' | 'off' | 'locked' | 'ready';
 
 function offered(data: HostedServersResponse): boolean {
-  return data.enabled && data.data_sets.length > 0;
+  return data.enabled && data.products.length > 0;
 }
 
 export function hostingView(data: HostedServersResponse | null, failed: boolean): HostingView {

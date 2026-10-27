@@ -30,6 +30,19 @@ bool parse_options(const std::vector<std::string> &args,
 		const std::filesystem::path &executable, Options &out, std::string &error);
 const char *usage();
 
+// What /RUN starts once a run is done (retail's DONE starts its command file's EXE): a legacy run's
+// command file's EXE in its install (the retail game's own call), else opennova.exe beside the
+// updater; an app's folder's (the editor's: Result::app), its command file's EXE beside the updater.
+// Each takes the --run-arg values, and opennova.exe, given none, `-- /game <game> --resource-dir
+// <content>`. False with `error` for an EXE that is not a bare file name, or an app whose command
+// file names none. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE]
+struct Launch {
+	std::filesystem::path program;
+	std::vector<std::string> args;
+};
+bool relaunch_command(const Options &options, bool app, const std::string &exe, Launch &out,
+		std::string &error);
+
 // The self-update hand-off (D-UPD-4): once update.exe has staged update.new it starts revupdat,
 // which replaces update.exe and relaunches it with the same install, as retail's REVUPDAT relaunches
 // UPDATE with its own command line. [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE),

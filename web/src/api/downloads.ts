@@ -1,36 +1,41 @@
-// The deployment's downloads host (ADR 0070; infra/aws/downloads.tf): the builds the
-// download buttons fetch, each under its stable name, beside manifest.json, which
-// .github/workflows/publish.yml writes (scripts/stage_downloads.py).
+// The deployment's downloads host (ADR 0070, ADR 0072; infra/aws/downloads.tf): each product's
+// published release, the ones with a download, under its stable name, beside manifest.json, which
+// the data program writes whenever a release is published or retired (DEPLOY.md, "The downloads
+// host").
 
-// One build on the host: its size, its SHA-256, and the version its file name carried (the
-// game zips' and the editor's; the other tools' carry none).
-export interface DownloadsFile {
-  size: number;
-  sha256: string;
-  version?: string;
+// What a product is: a game, an expansion of one, or an app (the runtime, the editor, the tools).
+export type ProductKind = 'game' | 'expansion' | 'app';
+
+// One product as the manifest lists it: its key, kind, name and description, then its download:
+// the file's stable name (null for a product the host offers none of: the runtime, an expansion
+// a game's zip installs), and its size, SHA-256, version, release and when that was published,
+// each null until the product has a published release.
+export interface DownloadsProduct {
+  key: string;
+  kind: ProductKind;
+  name: string;
+  description: string;
+  file: string | null;
+  size: number | null;
+  sha256: string | null;
+  version: string | null;
+  release: string | number | null;
+  published: string | null;
 }
 
-// What manifest.json holds (scripts/stage_downloads.py writes every field, and each Publish
-// writes the whole file): the version the host serves, when it was published, where the
-// builds came from (a release's or a CI run's URL), the commit they were made from, the build
-// kind (release or debug) and the deployment its builds talk to (prod or staging), and each
-// file.
+// What manifest.json holds: when it was written, and every product of the deployment in its
+// order.
 export interface DownloadsManifest {
-  version: string;
-  published: string;
-  source: string;
-  commit: string;
-  build: string;
-  talks_to: string;
-  files: Record<string, DownloadsFile>;
+  written: string;
+  products: DownloadsProduct[];
 }
 
 // The downloads host's base URL for the site at `hostname`: the deployment's own,
 // downloads.<the site's hostname> (prod's site opennova.net and www.opennova.net take
 // downloads.opennova.net, staging's staging.opennova.net takes downloads.staging.opennova.net),
 // so the one portal image serves either deployment. null for a site with no downloads host (a
-// local stack on localhost, an address), whose buttons read "Not published yet" (ADR 0070 d4:
-// the site never links GitHub's releases for a build).
+// local stack on localhost, an address), whose buttons read "Unavailable" (ADR 0070 d4: the site
+// never links GitHub's releases for a build).
 export function downloadsBase(hostname: string): string | null {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (!host.includes('.') || /^[\d.]+$/.test(host) || host.includes(':') || host.endsWith('.localhost')) {
@@ -39,23 +44,34 @@ export function downloadsBase(hostname: string): string | null {
   return `https://downloads.${host.replace(/^www\./, '')}`;
 }
 
-function optionalString(value: unknown): boolean {
-  return value === undefined || typeof value === 'string';
+const KINDS: readonly string[] = ['game', 'expansion', 'app'];
+
+function stringOrNull(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+function isProduct(value: unknown): value is DownloadsProduct {
+  if (typeof value !== 'object' || value === null) return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.key === 'string' &&
+    typeof p.kind === 'string' &&
+    KINDS.includes(p.kind) &&
+    typeof p.name === 'string' &&
+    typeof p.description === 'string' &&
+    stringOrNull(p.file) &&
+    (p.size === null || typeof p.size === 'number') &&
+    stringOrNull(p.sha256) &&
+    stringOrNull(p.version) &&
+    (p.release === null || typeof p.release === 'string' || typeof p.release === 'number') &&
+    stringOrNull(p.published)
+  );
 }
 
 function isManifest(value: unknown): value is DownloadsManifest {
   if (typeof value !== 'object' || value === null) return false;
   const m = value as Record<string, unknown>;
-  if (typeof m.version !== 'string' || typeof m.published !== 'string' || typeof m.files !== 'object' || m.files === null) {
-    return false;
-  }
-  if (typeof m.commit !== 'string' || typeof m.build !== 'string' || typeof m.talks_to !== 'string') return false;
-  return Object.values(m.files as Record<string, unknown>).every((file) => {
-    const f = file as Record<string, unknown> | null;
-    return (
-      f !== null && typeof f === 'object' && typeof f.size === 'number' && typeof f.sha256 === 'string' && optionalString(f.version)
-    );
-  });
+  return typeof m.written === 'string' && Array.isArray(m.products) && m.products.every(isProduct);
 }
 
 // The host's manifest, or null when it cannot be read (the host not up yet, offline), when the

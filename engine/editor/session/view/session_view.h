@@ -4,11 +4,11 @@
 
 #include <editor/session/editor_request.h>
 #include <editor/session/view/activity_view.h>
-#include <editor/session/view/content_view.h>
 #include <editor/session/view/dialogs_view.h>
 #include <editor/session/view/documents_view.h>
 #include <editor/session/view/findings_view.h>
 #include <editor/session/view/navigation_view.h>
+#include <editor/session/view/novaworld_view.h>
 #include <editor/session/view/project_view.h>
 #include <editor/session/view/view_events.h>
 #include <editor/session/view/view_revisions.h>
@@ -37,7 +37,7 @@ struct SessionView {
 	DialogsView dialogs;
 	WorkspaceView workspace;
 	NavigationView navigation;
-	ContentView content;
+	NovaWorldView novaworld;
 	ViewEvents events;
 
 	// Whether the session's busy gate takes a request of `kind` now: not busy_refuses over the
@@ -46,6 +46,13 @@ struct SessionView {
 	// take its request.
 	bool allows(EditorRequestKind kind) const;
 };
+
+// Why Help > Update OpenNova Editor... (update_editor, ADR 0072) cannot run now, "" when it can: the
+// update quits the editor for update.exe to replace its files, so nothing may be lost or left behind:
+// a document with unsaved changes, a game Play started, or an operation a Quit would wait on (the busy
+// gate refuses Quit). The shell refuses the rest, which only it can tell: a source run, a folder
+// without update.exe or OPENNOVA.WIZ.
+std::string update_refusal(const SessionView &view);
 
 // The editor's OS window title, which the shell applies when it changes: "OpenNova Editor",
 // the open project's name before it ("Armory - OpenNova Editor"), and a bullet (U+25CF)

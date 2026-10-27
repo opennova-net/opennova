@@ -387,8 +387,11 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_eq(String(state.get("status", {}).get("status", "")), "No project open.")
 	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
 			"the pickers need a person")
+	# ADR 0072: an editor update is a person's, the editor quitting under it.
+	assert_true((await _call("editor_request", {"kind": "update_editor"})).get("_error", "").contains("person"),
+			"an editor update needs a person")
 	# ADR 0069: a NovaWorld sign-in is a person's, its password never on the wire.
-	assert_true((await _call("editor_request", {"kind": "content_sign_in", "username": "a", "password": "b"}))
+	assert_true((await _call("editor_request", {"kind": "novaworld_sign_in", "username": "a", "password": "b"}))
 			.get("_error", "").contains("person"), "a sign-in needs a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
 	assert_true(str((await _call("editor_request", {"kind": "build"})).get("outcome", {})).contains("project.none"))
@@ -499,6 +502,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(served.has("set_workspace") and served.has("play_sound") and served.has("stop_sound") and
 			served.has("apply_confirmation"))
 	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
+	assert_false(served.has("update_editor"), "an editor update needs a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
 			"build takes no \"path\" (it takes out_dir, rehash, report)"))

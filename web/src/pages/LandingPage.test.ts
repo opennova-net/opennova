@@ -17,7 +17,7 @@ describe('LandingPage', () => {
     const page = await open();
     expect(page.get('h1').text()).toBe('OpenNova');
     const links = page.findAll('a').map((a) => a.attributes('href'));
-    for (const href of ['/play', '/play?game=jointops', '/lobby', '/support', '/downloads', '/downloads#tools']) expect(links).toContain(href);
+    for (const href of ['/play', '/play?game=jointops', '/lobby', '/support', '/downloads', '/downloads#apps']) expect(links).toContain(href);
     for (const id of ['game', 'retail', 'online', 'editor', 'downloads', 'run-it-yourself']) expect(page.find(`#${id}`).exists()).toBe(true);
     expect(page.text()).toContain('OP: Acid Gambit');
     expect(page.text()).toContain('OP: Nifty Package');

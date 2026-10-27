@@ -59,7 +59,7 @@ the whole bring-up.
     hostd's log from CloudWatch; `fleet console MACHINE`: its EC2 serial console; `fleet
     shell MACHINE`: ECS Exec into its hostd; `fleet roll [--dry-run]`:
     the machines older than the pinned AMI replaced; their games' data is the site's
-    Games area, DEPLOY.md "Hosted game servers", not the toolbox's);
+    Products area, DEPLOY.md "Hosted game servers", not the toolbox's);
   - `aws <args...>`: the AWS CLI in the deployment's account.
 
   Every Terraform state lives in an S3 bucket of a deployment's account, versioned and

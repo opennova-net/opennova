@@ -158,7 +158,7 @@ int test_request_server_one_count_at_a_time() {
 	const hosted_rig::SeededData data = hosted_rig::seed_data(db);
 	const auto start = [&data](Database &conn, int64_t owner, int cap) {
 		return hosted::request_server(conn, owner, valid_settings(data.jo),
-				hosted::offered_data_sets(conn), cap, kWall)
+				hosted::offered_products(conn), cap, kWall)
 				.outcome;
 	};
 	using Outcome = hosted::RequestOutcome;
@@ -317,7 +317,7 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 				if (!nws::create_user(h, p).ok)
 					throw std::runtime_error("create_user");
 				const auto started = hosted::request_server(
-						h, sam, valid_settings(seeded.jo), hosted::offered_data_sets(h), 10, kWall);
+						h, sam, valid_settings(seeded.jo), hosted::offered_products(h), 10, kWall);
 				if (started.outcome != hosted::RequestOutcome::Created)
 					throw std::runtime_error("request_server");
 			},

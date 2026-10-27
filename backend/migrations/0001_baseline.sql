@@ -713,81 +713,91 @@ CREATE INDEX idx_billing_checkout_reservations_session
     ON billing_checkout_reservations(checkout_session) WHERE checkout_session <> '';
 
 -- ===========================================================================
--- The games as data sets, their releases and their projects (ADR 0064, ADR
--- 0069; apps/novaworld_common/data_sets/data_set_repository.h,
--- content_repository.h)
+-- The products (the games and OpenNova's apps), their releases and their
+-- projects (ADR 0064, ADR 0069; apps/novaworld_common/products/
+-- product_repository.h, project_repository.h)
 -- ===========================================================================
 
--- A game: one data set, a base game or one expansion, its hosted servers' files
--- built by the data program into the deployment's object store as immutable
--- trees from its published release; each hosted server pinned to the trees it
--- started on, updated when its owner says. kind 'base' speaks a title (the
--- gameprofile code opennova-serve's /game takes: 'jo', 'dfx2') and lists in a
--- lobby (game: the games row's slug); kind 'expansion' is one expansion of its
--- parent base (expansion_code: the /exp code and the expansion/<code>/
--- directory, 'jox01'); kind 'update' is a standalone updater product with no
--- game tree, no lobby, no parent and no project (OpenNova's runtime, ADR 0067).
--- current_tree_id is the tree new starts take (the newest ready one).
+-- A product: one row of the catalog, named by its key ('JO', 'ONEDITOR': the
+-- routes' name for it, its project's and its downloads' entry), a game, an
+-- expansion or an app. kind 'game' speaks a title (the gameprofile code
+-- opennova-serve's /game takes: 'jo', 'dfx2') and lists in a lobby (lobby: the
+-- games row's slug); kind 'expansion' is one expansion of its parent game
+-- (expansion_code: the /exp code and the expansion/<code>/ directory,
+-- 'jox01'); a game's and an expansion's hosted servers' files are built by the
+-- data program into the deployment's object store as immutable trees from its
+-- published release, each hosted server pinned to the trees it started on,
+-- updated when its owner says (current_tree_id is the tree new starts take, the
+-- newest ready one). kind 'app' is one of OpenNova's own programs, with no game
+-- tree, no lobby, no parent and no project (ADR 0067): an updatable one (the
+-- runtime, the editor) has an updater login, a download-only one (the tools, the
+-- Blender add-on, the Switcher) none; its releases are built from CI's uploaded
+-- builds.
 --
 -- Its updater product (ADR 0064 d5, d9): updater_login and command_file
--- (JOTRus, JOPTR.CMD; '' for a data set the update service does not serve), and
--- its name as its packages give it (the release build's: the command file's
--- PRODUCT and the executable its DONE runs, '' for an expansion). retail
--- whether it is a retail game (NovaLogic's install: its SERVER.LST names
--- ftp.novaworld.com, reached through the Switcher, where our own game's names
--- the deployment's update host; its project's revision 1 the stock install).
--- published_release_id is the release the update listener serves and its tree
--- is built from.
+-- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve),
+-- wizard_login the login its stock UPDATE.WIZ names before the territory
+-- (JOTRqq; '' when it is updater_login itself), and its name as its packages
+-- give it (the release build's: the command file's PRODUCT and the executable
+-- its DONE runs, '' for an expansion). retail whether it is a retail game
+-- (NovaLogic's install: its SERVER.LST names ftp.novaworld.com, reached through
+-- the Switcher, where our own product's names the deployment's update host; its
+-- project's revision 1 the stock install). published_release_id is the release
+-- the update listener serves, its tree is built from and its download is.
+-- download is its file's stable name on the deployment's downloads host
+-- ('jointops-game-windows.zip'; '' for a product offered as no download),
+-- description the words the downloads page shows beside it.
 --
--- Its project (ADR 0069): an OpenNova Editor project's own files as a linear
--- history of revisions in the content store (content_revisions). key names it
--- in the routes ('JO', 'JOX01'; NULL for a game with no project, OpenNova's
--- runtime, whose releases arrive from CI), and the store names its files by the
--- game's id (content/<id>/blobs/<sha256>, content/<id>/manifests/<sha256>.json;
--- core/object_store.h, base/content/content_manifest.h), so a key's rename is a
--- row update. visibility is who may read it (a public project is anyone's to
--- pull, a private one, a retail game's, an admin's alone), head the newest
--- revision's number (0 before the first push: a push names it as its parent and
--- moves it on in the same statement, content_repository.h commit_revision). An
--- expansion's base game is its parent, whose project a release build exports
--- beside it; a retail game's revision 1 is the stock install imported afresh,
--- what its releases count their removals from (ADR 0067 d6).
-CREATE TABLE data_sets (
+-- Its project (ADR 0069), a game's and an expansion's alone: an OpenNova Editor
+-- project's own files as a linear history of revisions in the project store
+-- (project_revisions), named in the routes by the product's key; the store
+-- names its files by the product's id (content/<id>/blobs/<sha256>,
+-- content/<id>/manifests/<sha256>.json; core/object_store.h,
+-- base/project/project_manifest.h), so a key's rename is a row update.
+-- visibility is who may read it (a public project is anyone's to pull, a
+-- private one, a retail game's, an admin's alone; NULL for an app, which has
+-- none), head the newest revision's number (0 before the first push: a push
+-- names it as its parent and moves it on in the same statement,
+-- project_repository.h commit_revision). An expansion's base game is its
+-- parent, whose project a release build exports beside it; a retail game's
+-- revision 1 is the stock install imported afresh, what its releases count
+-- their removals from (ADR 0067 d6).
+CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    key                  text NOT NULL UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
     display_name         text NOT NULL CHECK (display_name <> ''),
-    kind                 text NOT NULL CHECK (kind IN ('base', 'expansion', 'update')),
-    parent_id            bigint REFERENCES data_sets(id) ON DELETE RESTRICT,
+    kind                 text NOT NULL CHECK (kind IN ('game', 'expansion', 'app')),
+    parent_id            bigint REFERENCES products(id) ON DELETE RESTRICT,
     expansion_code       text NOT NULL DEFAULT '',
     title                text NOT NULL DEFAULT '',
-    game                 text NOT NULL DEFAULT '',
+    lobby                text NOT NULL DEFAULT '',
     current_tree_id      bigint,
     created_by           text NOT NULL DEFAULT '',
     created_at           timestamptz NOT NULL DEFAULT now(),
     updated_at           timestamptz NOT NULL DEFAULT now(),
     updater_login        text NOT NULL DEFAULT '',
     command_file         text NOT NULL DEFAULT '',
+    wizard_login         text NOT NULL DEFAULT '',
     retail               boolean NOT NULL DEFAULT false,
     published_release_id bigint,
-    key                  text UNIQUE CHECK (key ~ '^[A-Z0-9_]{1,16}$'),
     visibility           text CHECK (visibility IN ('public', 'private')),
     head                 bigint NOT NULL DEFAULT 0 CHECK (head >= 0),
     product_name         text NOT NULL DEFAULT '',
     product_exe          text NOT NULL DEFAULT '',
-    CHECK ((kind = 'base') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND game <> '')),
-    CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND game = '')),
-    CONSTRAINT data_sets_updater_check CHECK ((updater_login = '') = (command_file = '')),
-    -- A standalone updater product: a login and its command file, and nothing a game has.
-    CONSTRAINT data_sets_update_check CHECK (kind <> 'update' OR (
-        parent_id IS NULL AND expansion_code = '' AND title = '' AND game = '' AND
-        updater_login <> '' AND current_tree_id IS NULL)),
-    CONSTRAINT data_sets_project_check CHECK ((key IS NULL) = (visibility IS NULL)),
-    CONSTRAINT data_sets_update_project_check CHECK (kind <> 'update' OR key IS NULL)
+    download             text NOT NULL DEFAULT '',
+    description          text NOT NULL DEFAULT '',
+    CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND lobby <> '')),
+    CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND lobby = '')),
+    CONSTRAINT products_updater_check CHECK ((updater_login = '') = (command_file = '')),
+    -- A game and an expansion have a project; an app has none.
+    CONSTRAINT products_app_check CHECK ((kind = 'app') = (visibility IS NULL))
 );
-CREATE UNIQUE INDEX idx_data_sets_expansion ON data_sets(parent_id, expansion_code) WHERE kind = 'expansion';
-CREATE INDEX idx_data_sets_parent ON data_sets(parent_id);
-CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE updater_login <> '';
+CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
+CREATE INDEX idx_products_parent ON products(parent_id);
+CREATE UNIQUE INDEX idx_products_login ON products(upper(updater_login)) WHERE updater_login <> '';
+CREATE UNIQUE INDEX idx_products_download ON products(download) WHERE download <> '';
 
--- One version of a data set's files in the store (trees/<id>/...), built by the
+-- One version of a product's files in the store (trees/<id>/...), built by the
 -- data program from a published release (release.apply). Its life: building
 -- (the worker applies the release to an empty tree, measures the files and
 -- lists its missions) -> ready; failed with `error`; pruned once no start and
@@ -796,9 +806,9 @@ CREATE UNIQUE INDEX idx_data_sets_login ON data_sets(upper(updater_login)) WHERE
 -- [{"file", "title"}] once ready (the multiplayer missions its archives list:
 -- what the start form offers), version_text the release's version, release_id
 -- the release it was built from (NULL once that release is deleted).
-CREATE TABLE data_set_trees (
+CREATE TABLE product_trees (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    data_set_id      bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id       bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     state            text NOT NULL CHECK (state IN ('building', 'ready', 'failed', 'pruned')),
     version_text     text NOT NULL DEFAULT '',
     manifest         jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -811,35 +821,35 @@ CREATE TABLE data_set_trees (
     pruned_at        timestamptz,
     release_id       bigint
 );
-CREATE INDEX idx_data_set_trees_data_set ON data_set_trees(data_set_id, id);
+CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 
--- An update release: a 1SFS package, each section a whole build of the data
--- set whose command file it carries, served to retail UPDATE.EXE by the web
--- program's update listener and built into that data set's tree from nothing
--- (release.apply). A game with a project builds its releases from its
--- revisions; one with none (OpenNova's runtime) has its packages uploaded.
+-- An update release: a 1SFS package, each section a whole build of the product
+-- whose command file it carries, served to retail UPDATE.EXE by the web
+-- program's update listener and built into that product's tree from nothing
+-- (release.apply). A game builds its releases from its project's revisions;
+-- an app (OpenNova's runtime) has its packages uploaded.
 -- The package is updates/<sha256>.sfs once validated (updates/upload-<id>.sfs
 -- before): uploading -> validating (the worker parses it and maps each section
--- to a data set by its command file) -> draft | invalid -> published (its
--- sections' data sets serve it to the updater and get a tree built from it) ->
--- retired. data_set_id is the game it is a release of (a built one's from the
+-- to a product by its command file) -> draft | invalid -> published (its
+-- sections' products serve it to the updater and get a tree built from it) ->
+-- retired. product_id is the game it is a release of (a built one's from the
 -- start, an upload's once its validation maps its base section);
 -- package_product the 1SFS trailer's; name the release's label.
 --
 -- A release built from a revision of its game's project (ADR 0069 d7;
--- data_sets/release_build.h): the data program's release.build job exports the
+-- products/release_build.h): the data program's release.build job exports the
 -- revision (an expansion's beside its base game's revision), packs it whole (a
 -- retail game's carrying its removals since the stock revision's export), and
 -- hands the package to release.validate as an uploaded one is. building ->
 -- validating, or invalid with `error`; build_log what the tools said.
--- content_revision and base_revision are the revisions built, version the
+-- revision and base_revision are the revisions built, version the
 -- package's.
 CREATE TABLE releases (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     status           text NOT NULL DEFAULT 'uploading'
         CONSTRAINT releases_status_check CHECK (status IN
             ('uploading', 'building', 'validating', 'invalid', 'draft', 'published', 'retired')),
-    data_set_id      bigint REFERENCES data_sets(id) ON DELETE SET NULL,
+    product_id       bigint REFERENCES products(id) ON DELETE SET NULL,
     sha256           text NOT NULL DEFAULT '',
     bytes            bigint NOT NULL DEFAULT 0,
     package_product  text NOT NULL DEFAULT '',
@@ -849,7 +859,7 @@ CREATE TABLE releases (
     created_at       timestamptz NOT NULL DEFAULT now(),
     published_at     timestamptz,
     retired_at       timestamptz,
-    content_revision bigint,
+    revision         bigint,
     base_revision    bigint,
     version          text NOT NULL DEFAULT '',
     build_log        text NOT NULL DEFAULT ''
@@ -857,36 +867,36 @@ CREATE TABLE releases (
 CREATE UNIQUE INDEX idx_releases_sha ON releases(sha256) WHERE sha256 <> '';
 
 -- One section of a package (the base product's, then one per PACKAGEBREAK),
--- mapped to the data set whose command_file it carries; version the command
+-- mapped to the product whose command_file it carries; version the command
 -- file's VERSION; tree_id the tree its publish built (NULL until the
 -- release.apply job made it).
 CREATE TABLE release_sections (
     release_id   bigint NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
-    data_set_id  bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+    product_id   bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     expansion    text NOT NULL DEFAULT '',
     command_file text NOT NULL,
     version      text NOT NULL DEFAULT '',
     row_count    bigint NOT NULL DEFAULT 0,
     blob_bytes   bigint NOT NULL DEFAULT 0,
-    tree_id      bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    PRIMARY KEY (release_id, data_set_id)
+    tree_id      bigint REFERENCES product_trees(id) ON DELETE SET NULL,
+    PRIMARY KEY (release_id, product_id)
 );
 
-ALTER TABLE data_sets
-    ADD CONSTRAINT data_sets_current_tree_fkey
-        FOREIGN KEY (current_tree_id) REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    ADD CONSTRAINT data_sets_published_release_fkey
+ALTER TABLE products
+    ADD CONSTRAINT products_current_tree_fkey
+        FOREIGN KEY (current_tree_id) REFERENCES product_trees(id) ON DELETE SET NULL,
+    ADD CONSTRAINT products_published_release_fkey
         FOREIGN KEY (published_release_id) REFERENCES releases(id) ON DELETE SET NULL;
-ALTER TABLE data_set_trees
-    ADD CONSTRAINT data_set_trees_release_fkey
+ALTER TABLE product_trees
+    ADD CONSTRAINT product_trees_release_fkey
         FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE SET NULL;
 
 -- One revision of a game's project: its number (1, 2, ...; its parent is the
 -- one before), the admin who pushed it (author_id, kept as created_by once the
 -- account is gone), its message, its manifest's SHA-256 and what the manifest
 -- lists.
-CREATE TABLE content_revisions (
-    data_set_id     bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+CREATE TABLE project_revisions (
+    product_id      bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     number          bigint NOT NULL CHECK (number > 0),
     author_id       bigint REFERENCES players(id) ON DELETE SET NULL,
     created_by      text NOT NULL,
@@ -895,49 +905,76 @@ CREATE TABLE content_revisions (
     file_count      bigint NOT NULL CHECK (file_count >= 0),
     bytes           bigint NOT NULL CHECK (bytes >= 0),
     created_at      timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (data_set_id, number)
+    PRIMARY KEY (product_id, number)
 );
 
 -- The files a project's store holds, each once by its SHA-256 (what a push
 -- need not upload again, and the project's storage).
-CREATE TABLE content_blobs (
-    data_set_id bigint NOT NULL REFERENCES data_sets(id) ON DELETE CASCADE,
+CREATE TABLE project_blobs (
+    product_id  bigint NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     sha256      text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
     bytes       bigint NOT NULL CHECK (bytes >= 0),
     created_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (data_set_id, sha256)
+    PRIMARY KEY (product_id, sha256)
 );
 
--- The seeded games, in this order, so each keeps its id across a reset (ids 1
--- to 6; DEPLOY.md "Resetting the service database"): the retail games, the
--- update service serving their updaters (the Switcher sends them to it), their
--- projects private and keyed JO, DFX2 and JOX01; OpenNova's own game (OP: Acid
--- Gambit) and its nifty expansion (OP: Nifty Package), complete packages served
--- at the deployment's update host, their projects public and keyed by their
--- logins; and OpenNova's runtime, a standalone updater product (ADR 0067). DFX2's
--- updater product is the Steam DFX2's UPDATE.WIZ (CMD=DFX2.CMD,
--- PRODUCT_LOGIN=DFX2). None holds a tree or a revision until a release of its
--- is published.
-INSERT INTO data_sets (display_name, kind, title, game, updater_login, command_file, retail,
-                       key, visibility, product_name, product_exe)
-VALUES ('Joint Operations', 'base', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD', true,
-        'JO', 'private', 'Joint Operations', 'Jointops.exe'),
-       ('Delta Force Xtreme 2', 'base', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD', true,
-        'DFX2', 'private', 'Delta Force Xtreme 2', 'dfx2.exe'),
-       ('OP: Acid Gambit', 'base', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT', 'ACIDGAMBIT.CMD',
-        false, 'ACIDGAMBIT', 'public', 'OP: Acid Gambit', 'opennova.exe');
-INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                       retail, key, visibility, product_name)
-SELECT 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', true, 'JOX01', 'private',
-       'Joint Operations: Escalation'
-FROM data_sets WHERE kind = 'base' AND game = 'jop_2_consumer';
-INSERT INTO data_sets (display_name, kind, updater_login, command_file)
-VALUES ('OpenNova runtime', 'update', 'ONRUNTIME', 'ONRUNTIME.CMD');
-INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, updater_login, command_file,
-                       key, visibility, product_name)
-SELECT 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'NIFTY', 'public',
+-- The seeded products, in this order, so each keeps its id across a reset (ids
+-- 1 to 6 as they were before the apps, DEPLOY.md "Resetting the service
+-- database": the store keeps a project's files under its id): the retail
+-- games, the update service serving their updaters (the Switcher sends them to
+-- it), their projects private; OpenNova's own game (OP: Acid Gambit) and its
+-- nifty expansion (OP: Nifty Package), complete packages served at the
+-- deployment's update host, their projects public; OpenNova's runtime (ADR
+-- 0067); then the editor, updatable like the runtime, and the download-only
+-- tools, Blender add-on and Switcher. DFX2's updater product is the Steam
+-- DFX2's UPDATE.WIZ (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), JO's and Escalation's
+-- JO:CA's (JOTRqq, JOEqq before the territory). None holds a tree, a revision
+-- or a download until a release of its is published.
+INSERT INTO products (key, display_name, kind, title, lobby, updater_login, command_file,
+                      wizard_login, retail, visibility, product_name, product_exe, download,
+                      description)
+VALUES ('JO', 'Joint Operations', 'game', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD',
+        'JOTRqq', true, 'private', 'Joint Operations', 'Jointops.exe',
+        'jointops-game-windows.zip',
+        'Set up for Joint Operations: unzip it into an empty folder and the first launch '
+        'downloads Joint Operations and its Escalation expansion. Or copy its files into an '
+        'existing install and run opennova.exe in place of Jointops.exe.'),
+       ('DFX2', 'Delta Force Xtreme 2', 'game', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD',
+        '', true, 'private', 'Delta Force Xtreme 2', 'dfx2.exe', 'dfx2-game-windows.zip',
+        'Set up for Delta Force Xtreme 2: unzip it into an empty folder and the first launch '
+        'downloads Delta Force Xtreme 2.'),
+       ('ACIDGAMBIT', 'OP: Acid Gambit', 'game', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT',
+        'ACIDGAMBIT.CMD', '', false, 'public', 'OP: Acid Gambit', 'opennova.exe',
+        'opennova-game-windows.zip',
+        'Our own game, downloaded on the first launch.');
+INSERT INTO products (key, display_name, kind, parent_id, expansion_code, updater_login,
+                      command_file, wizard_login, retail, visibility, product_name)
+SELECT 'JOX01', 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', 'JOEqq', true,
+       'private', 'Joint Operations: Escalation'
+FROM products WHERE key = 'JO';
+INSERT INTO products (key, display_name, kind, updater_login, command_file, product_name,
+                      product_exe, description)
+VALUES ('ONRUNTIME', 'OpenNova runtime', 'app', 'ONRUNTIME', 'ONRUNTIME.CMD', 'OpenNova Runtime',
+        'opennova.exe', 'The game runtime every game download carries.');
+INSERT INTO products (key, display_name, kind, parent_id, expansion_code, updater_login,
+                      command_file, visibility, product_name)
+SELECT 'NIFTY', 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'public',
        'OP: Nifty Package'
-FROM data_sets WHERE kind = 'base' AND game = 'acidgambit_0_consumer';
+FROM products WHERE key = 'ACIDGAMBIT';
+INSERT INTO products (key, display_name, kind, updater_login, command_file, product_name,
+                      product_exe, download, description)
+VALUES ('ONEDITOR', 'OpenNova Editor', 'app', 'ONEDITOR', 'ONEDITOR.CMD', 'OpenNova Editor',
+        'oneditor.exe', 'opennova-editor-windows.zip', 'The editor we made OP: Acid Gambit with.'),
+       ('ONTOOLS', 'Tools and dedicated server', 'app', '', '', '', '',
+        'opennova-tools-windows.zip',
+        'The command-line tools and opennova-serve, the dedicated server our hosted servers '
+        'run. Players on the original game and on OpenNova can join it.'),
+       ('ONBLENDER', 'Blender add-on', 'app', '', '', '', '', 'opennova-blender-addon-windows.zip',
+        'Imports and exports .3di models and their animations in Blender 5.'),
+       ('ONSWITCHER', 'OpenNova Switcher', 'app', '', '', '', '', 'opennova-switcher-windows.zip',
+        'Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that '
+        'points it at our NovaWorld or an address you choose. OpenNova and the original '
+        'Jointops.exe don''t need it.');
 
 -- ===========================================================================
 -- Hosted game servers and their fleet (ADR 0053, ADR 0065, ADR 0066;
@@ -1027,11 +1064,11 @@ CREATE TABLE hosted_address_orphans (
 -- server's container runs, pinned at each start (a deploy's new image reaches a
 -- server at its next start, never mid-run).
 --
--- Its game: data_set_id the base data set it runs and expansion_id the
+-- Its game: product_id the base product it runs and expansion_id the
 -- expansion of it its owner picked (NULL for none); it is pinned to the trees
 -- its start took (base_tree_id, expansion_tree_id: NULL before its first start)
 -- and keeps them through crash restarts and moves until its owner asks for an
--- update (update_requested: the supervisor restarts it on the data sets'
+-- update (update_requested: the supervisor restarts it on the products'
 -- current trees, then clears the flag). address_id is the static address an
 -- own-machine server asked for (one live server per address).
 -- list_on_novalogic is its owner's ask that it be listed on NovaLogic's
@@ -1078,10 +1115,10 @@ CREATE TABLE hosted_servers (
     generation        bigint NOT NULL DEFAULT 0,
     serve_image       text NOT NULL DEFAULT '',
     -- Its game.
-    data_set_id       bigint REFERENCES data_sets(id) ON DELETE SET NULL,
-    expansion_id      bigint REFERENCES data_sets(id) ON DELETE SET NULL,
-    base_tree_id      bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
-    expansion_tree_id bigint REFERENCES data_set_trees(id) ON DELETE SET NULL,
+    product_id        bigint REFERENCES products(id) ON DELETE SET NULL,
+    expansion_id      bigint REFERENCES products(id) ON DELETE SET NULL,
+    base_tree_id      bigint REFERENCES product_trees(id) ON DELETE SET NULL,
+    expansion_tree_id bigint REFERENCES product_trees(id) ON DELETE SET NULL,
     update_requested  boolean NOT NULL DEFAULT false,
     address_id        bigint REFERENCES hosted_addresses(id) ON DELETE SET NULL,
     list_on_novalogic boolean NOT NULL DEFAULT false
@@ -1092,7 +1129,7 @@ CREATE INDEX idx_hosted_servers_service_user ON hosted_servers(service_user_id);
 CREATE UNIQUE INDEX idx_hosted_servers_live_slot ON hosted_servers(machine_ref, slot)
     WHERE machine_ref IS NOT NULL AND state NOT IN ('stopped', 'failed');
 CREATE INDEX idx_hosted_servers_machine_ref ON hosted_servers(machine_ref);
-CREATE INDEX idx_hosted_servers_data_set ON hosted_servers(data_set_id);
+CREATE INDEX idx_hosted_servers_product ON hosted_servers(product_id);
 CREATE INDEX idx_hosted_servers_pins ON hosted_servers(base_tree_id, expansion_tree_id)
     WHERE state NOT IN ('stopped', 'failed');
 CREATE UNIQUE INDEX idx_hosted_servers_one_per_address ON hosted_servers(address_id)
@@ -1370,7 +1407,7 @@ CREATE TABLE fleet_launch_backoff (
 -- owner's and an admin's stop, the cause set when the stop is asked; stop: the
 -- service's own (its owner's account deleted or no longer active); update: the
 -- owner's update to the current data; limits: its owner's entitlement no longer
--- covers it; no_data: its data set has none; link_lost: its admin link stopped
+-- covers it; no_data: its product has none; link_lost: its admin link stopped
 -- answering; data_unavailable: its machine could not fetch its data, no restart
 -- counted). A limits end also keeps the limit its server was past (StopLimit):
 -- its owner's servers on shared machines ('shared_servers'), or its dedicated

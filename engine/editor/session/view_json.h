@@ -33,7 +33,7 @@ enum class ViewSection : uint8_t {
 	Events,
 	Workspace,
 	Navigation,
-	Content,
+	NovaWorld,
 	kCount,
 };
 

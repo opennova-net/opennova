@@ -5,7 +5,8 @@ package_godot_windows.ps1 stamped godot/project.godot's config/version into them
 exes' VERSIONINFO and the runtime package's VERSION (the version the updater tells a
 player, ADR 0067 d8). v0.0.19 was tagged on a config/version of 0.0.18 and shipped as
 0.0.18. The tag now reaches the script, which stamps it for the exports and puts the
-tracked files back after them.
+tracked files back after them. The script's builds are the plain runtime and editor zips
+the service packs (ADR 0072); its smoke packages carry the same version.
 """
 import re
 import unittest
@@ -30,7 +31,8 @@ class ReleaseVersion(unittest.TestCase):
         self.assertIn('[string]$Version = ""', params)
         # project.godot is read only when no -Version is given.
         self.assertRegex(self.script, re.compile(r"\nif \(\$Version\) \{.*?\n\} else \{\s*\$projectGodot = ", re.S))
-        for use in ('--version", $Version', "-windows-v$Version.zip", "-windows-v$Version.sfs"):
+        for use in ('--version", $Version', "opennova-runtime-windows-v$Version.zip",
+                    "opennova-editor-windows-v$Version.zip"):
             self.assertIn(use, self.script)
 
     def test_the_stamped_files_are_put_back(self):

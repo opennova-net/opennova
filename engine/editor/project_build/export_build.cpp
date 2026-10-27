@@ -10,7 +10,7 @@
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <editor/assets/project_walk.h>
-#include <editor/content_store/content_scan.h>
+#include <editor/novaworld/novaworld_scan.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
@@ -121,7 +121,7 @@ std::string project_files_stamp(const std::string &root, const std::string &expo
 			if (walk_skips_folder(it->path(), exported)) it.disable_recursion_pending();
 			continue;
 		}
-		if (!it->is_regular_file(kind) || content_skips_file(utf8_of(it->path().filename()))) continue;
+		if (!it->is_regular_file(kind) || novaworld_skips_file(utf8_of(it->path().filename()))) continue;
 		// The size and last write the listing read (directory_entry's), so no file is opened.
 		Stamped file;
 		file.path = utf8_of(it->path().lexically_relative(top));

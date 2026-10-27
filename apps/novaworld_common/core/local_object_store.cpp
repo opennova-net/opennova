@@ -44,7 +44,8 @@ std::string LocalObjectStore::url_of(std::string_view key) const {
 	return object_store_url(config, key);
 }
 
-bool LocalObjectStore::put_file(std::string_view key, const std::string &path, std::string &error) {
+bool LocalObjectStore::put_file(std::string_view key, const std::string &path, std::string &error,
+		const PutOptions & /*options*/) {
 	if (!is_store_key(key)) {
 		error = "not a store key: " + std::string(key);
 		return false;

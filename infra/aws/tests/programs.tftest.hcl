@@ -589,7 +589,7 @@ run "environments" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_NOVALOGIC_LISTING"] == "1"
       ]) && alltrue([for p in ["web", "worker"] : { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"]) &&
     alltrue([for p in ["gate", "lobby", "web", "fleet", "worker", "data"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_URL")]))
-    error_message = "web, the fleet and the worker read the fleet's policy (hosting off without a data set); no program is handed the machines' URL without hosting"
+    error_message = "web, the fleet and the worker read the fleet's policy (hosting off without a product); no program is handed the machines' URL without hosting"
   }
   assert {
     condition = (

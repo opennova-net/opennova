@@ -367,7 +367,7 @@ int test_launches_lobby_failures() {
 
 // A server whose data its machines cannot fetch, start after start (no restart is
 // counted for it, so it never fails): three in a row, or a run of them past a
-// quarter of an hour, is a warn on the server naming its data set, its trees and
+// quarter of an hour, is a warn on the server naming its product, its trees and
 // hostd's last reason; past an hour, a danger.
 int test_data_unavailable() {
 	hosted::HealthInputs in = healthy();
@@ -377,7 +377,7 @@ int test_data_unavailable() {
 	d.since = kNow - hosted::kDataFailingS;
 	d.reason = "its data could not be fetched: aws s3 sync exited 1: fatal error: An error "
 			   "occurred (AccessDenied)";
-	d.data_set = "Joint Operations";
+	d.product = "Joint Operations";
 	d.base_tree = 41;
 	in.servers[0].data_failures = d;
 	// Two, within the quarter hour: nothing yet.
@@ -402,14 +402,14 @@ int test_data_unavailable() {
 			found[0].text.rfind("Its data could not be fetched at its last start, 16 min ago "
 								"(Joint Operations, trees 41 and 42); hostd's last reason: ",
 					0) == 0);
-	// Past an hour: a danger; a data set gone and no reason recorded say so.
+	// Past an hour: a danger; a game gone and no reason recorded say so.
 	in.servers[0].data_failures->since = kNow - hosted::kDataFailingDangerS - 1;
-	in.servers[0].data_failures->data_set.clear();
+	in.servers[0].data_failures->product.clear();
 	in.servers[0].data_failures->reason = "its data could not be fetched";
 	found = of(hosted::fleet_health(in, {}), "data_unavailable");
 	TEST_EXPECT(found.size() == 1 && found[0].level == HealthLevel::Danger &&
 			found[0].text ==
-					"Its data could not be fetched at its last start, 60 min ago (its data set is "
+					"Its data could not be fetched at its last start, 60 min ago (its game is "
 					"gone, trees 41 and 42).");
 	TEST_EXPECT(hosted::health_gauges(in, hosted::fleet_health(in, {})).danger == 1);
 	// None in a row: nothing.

@@ -61,7 +61,7 @@ struct ExportRequest {
 
 // The stamp of a project's files as they stand: every file the project walk reaches (assets/project_walk.h:
 // no dot-directory, so never the machine's own `.opennova/`, and no export folder; none a machine makes
-// beside a project, content_skips_file), each by its path, its size and its last write, hashed (SHA-256,
+// beside a project, novaworld_skips_file), each by its path, its size and its last write, hashed (SHA-256,
 // 64 hex digits). Nothing is read but the folders' listings, so a stamp of the JO install's 9,300 files
 // takes a walk alone. `export_dir` is the project's export folder (ProjectPaths::export_dir).
 std::string project_files_stamp(const std::string &root, const std::string &export_dir);

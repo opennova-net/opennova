@@ -307,7 +307,7 @@ void PlayController::start(const PlayIntent &intent) {
 	if (!in_install && (executable.empty() || !fs::is_regular_file(system_path(executable), ec))) {
 		core_.report(make_finding(CoreFinding::PlayRuntimeMissing, DiagnosticSeverity::Error,
 		                          executable.empty()
-		                                  ? "No game runtime is set; choose opennova.exe in File > Project settings..."
+		                                  ? "No game runtime is set; choose one (opennova.exe) in File > Project settings..."
 		                                  : "The game runtime was not found: " + executable));
 		view_.activity.status = "The game runtime was not found.";
 		core_.touch(ViewConcern::Output);

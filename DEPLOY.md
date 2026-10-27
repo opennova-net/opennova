@@ -216,8 +216,8 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
     --hostd-tag sha-<serve>` (both images come from one `serve-image.yml` run, so one
     tag); the first site admin (section 4, "The first site admin"); the games (section 7,
     "Turning it on", step 6: each game's project pushed from the OpenNova Editor, a release
-    of it built and published on the admin's Games page, and the runtime's release by a
-    staging Publish, without which an OpenNova first install fails); Stripe's "Send test
+    of it built and published on the admin's Products page, and the apps' releases by a
+    staging Publish, without whose runtime an OpenNova first install fails); Stripe's "Send test
     webhook"; the smoke tests ("Smoke tests").
 12. **Prod**, with `P='--deployment prod'`: its gate's Elastic IP, made once in the prod
     account (`./deploy/run.sh $P aws ec2 allocate-address --domain vpc
@@ -1068,16 +1068,16 @@ write its release manifests and point its release, register task definition revi
 (handing them the stack's task roles alone), point its cluster's services, its fleet
 cluster's hostd and its backup schedule at them, open ECS Exec into its web container
 (the admin API on the task's loopback: after hostd's roll, `app deploy` asks which hostd
-image each machine's agent reports, as an operator's run does), publish its downloads
-host's files (below), and nothing else. A run whose exec is refused (the org stack not
+image each machine's agent reports, as an operator's run does), and nothing else. A run whose exec is refused (the org stack not
 yet applied) logs the refused call, confirms nothing, and goes on.
 
 ### The downloads host
 
-Each deployment serves its builds at a host of its own (ADR 0070), which the site's
-download buttons fetch: prod's `downloads.<domain>` the tagged releases (release builds,
-which talk to prod), staging's `downloads.staging.<domain>` a pull request's CI build
-(debug builds, which talk to staging). `infra/aws/downloads.tf` makes it: a private bucket,
+Each deployment serves its products' downloads at a host of its own (ADR 0070, ADR 0072),
+which the site's download buttons fetch: prod's `downloads.<domain>` prod's published releases
+(the tagged releases' release builds, which talk to prod), staging's
+`downloads.staging.<domain>` staging's (a pull request's debug builds, which talk to
+staging). `infra/aws/downloads.tf` makes it: a private bucket,
 `opennova-<deployment>-downloads-<account id>`, which a CloudFront distribution alone reads
 (origin access control; the account's S3 public access block stands), a certificate ACM
 issues in us-east-1 (the stack's `aws.us_east_1` provider; CloudFront takes its
@@ -1088,46 +1088,59 @@ drop it for a browser's fetch, which carries `Priority`). Cloudflare's proxy sta
 site's: game archives go through CloudFront, whose free tier covers a terabyte a month.
 Without a zone there is none of it.
 
-The host holds the current set alone, each build under its stable name
-(`opennova-game-windows.zip`, `jointops-game-windows.zip`, `dfx2-game-windows.zip`,
-`opennova-editor-windows.zip`, `opennova-blender-addon-windows.zip`,
-`opennova-apps-windows.zip`, `opennova-switcher-windows.zip`) beside `manifest.json` (the
-version, when it was published, where the builds came from, the commit they were made from,
-the build kind and what it talks to (`release` and `prod`, or `debug` and `staging`), and
-each file's size, SHA-256 and version, the `-v<version>` its name carried when it had one;
-`scripts/stage_downloads.py`). The site reads the manifest to say what the set is (its
-version, build kind, commit linked to its source and publish time) and each build (its
-version, size and SHA-256), and shows a build's button once the manifest lists it ("Not
-published yet" before; never a GitHub link). Older releases and the Switcher's checksum stay on the GitHub
-releases.
+The host serves the products' published releases alone (ADR 0072), each product with a
+download under its stable name: the games' `opennova-game-windows.zip` (OP: Acid Gambit),
+`jointops-game-windows.zip` and `dfx2-game-windows.zip`, and the apps'
+`opennova-editor-windows.zip`, `opennova-tools-windows.zip`,
+`opennova-blender-addon-windows.zip` and `opennova-switcher-windows.zip`, beside
+`manifest.json`: `{written, products: [{key, kind, name, description, file, size, sha256,
+version, release, published}]}`, every product listed, its file's fields null until it has a
+published release (the runtime, Escalation and OP: Nifty Package have no download of their
+own). The data program writes it: publishing or retiring a release queues its
+`downloads.publish` job, which renders every product that has a download and a published
+release, uploads each, writes the manifest last and removes what the set no longer
+has, each with a short `Cache-Control` (five minutes, the manifest one), so the new set is
+what the host serves within minutes, with no invalidation. A game's zip is the runtime's
+published package applied into an empty folder with its `ONRUNTIME.CMD`, plus the
+`UPDATE.WIZ` naming a retail game's product and an `expansion/<code>/UPDATE.WIZ` for each of
+its expansions with an updater login, every wizard naming this deployment's update host; the
+editor's is its package applied with its `ONEDITOR.CMD`; the others are their builds as
+uploaded. The data program's role may list, read, write and remove the bucket's objects
+(`infra/aws/programs.tf`), and its `ONNET_DOWNLOADS_URL` (`s3://<the bucket>`) names it; with
+none (a local stack) the job logs and skips. Neither the deploy user nor the GitHub deploy
+role writes the bucket. The site's Downloads page draws itself from the manifest: each product
+with a file, games first, then apps, with its version, size and SHA-256 and a button to its
+file once it has a published release ("Not published yet" before; never a GitHub link). Older releases stay on the
+GitHub releases, and a release's notes give the Switcher zip's SHA-256.
 
-**Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071), run in
-the deployment's environment. One run ships one build everywhere the deployment offers it:
-the runtime's release to the deployment's update service ("The update service", section 7)
-and the builds to its downloads host. Its source:
+**Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071, ADR
+0072), run in the deployment's environment. One run releases one run's five apps (the
+runtime, the editor, the tools, the Blender add-on and the Switcher, each the plain build its
+package job uploaded) on the deployment, `scripts/publish_apps.py publish`: each build uploaded
+through the deployment's admin API as a release of its product (looked up by its key), each
+waited until the service has made it a draft (it packs an updatable app with the
+`OPENNOVA.WIZ` naming its own update host, and stores a download-only app as uploaded), and
+only then all published, so a refusal publishes none. A download-only app whose zip is its
+published release's, byte for byte, is left as it is. Its source:
 
-- `prod` with a release tag (`v0.0.21`): the release's assets. `release.yml` starts this run
-  for every tag (a dispatch, `gh workflow run publish.yml --ref master -f deployment=prod -f
-  release=<tag>`, since the prod environment takes protected branches alone), and prod's
-  reviewers approve it.
-- `staging` with a CI run id (a pull request's run: its Actions URL's number), from the
-  Actions tab (Publish, `staging`). A master run is refused: its builds are release builds,
-  which talk to prod.
+- `prod`: a tag's `release.yml` run, release builds, which talk to prod, each release's
+  VERSION the tag's (`v0.0.22` gives `0.0.22`) and its name `OpenNova <app> <tag>`.
+  `release.yml` starts it for every tag (a dispatch, `gh workflow run publish.yml --ref
+  master -f deployment=prod -f release=<tag> -f run_id=<its run>`, since the prod
+  environment takes protected branches alone), and prod's reviewers approve it. Once the
+  apps are published it waits for the host's manifest to list their new releases (`publish_apps.py
+  attach`) and attaches every file the host serves to the tag's GitHub release, as
+  `<name>-<tag>.zip`.
+- `staging`: a pull request's CI run, debug builds, which talk to staging, each release's
+  VERSION the head's `config/version` and the run's number (`0.0.22.123`: a VERSION is dotted
+  numbers alone) and its name `OpenNova <app> PR #<n> (<sha>)`. `ci.yml`'s `publish-staging`
+  calls it for every run of a branch of this repository once its package jobs pass, so the
+  newest run is what staging serves; a fork's run has no secrets and is skipped. From the
+  Actions tab (Publish, `staging`, a run id) a run publishes again. A master run is refused:
+  its builds are release builds, which talk to prod.
 
-It downloads the source's builds (the tag's assets, or the run's `*-windows*` artifacts),
-the runtime's `opennova-runtime-windows-*.sfs` among them, and lays out the stable names
-and the manifest (`scripts/stage_downloads.py`). Then it publishes the runtime's release
-through the deployment's admin API (`scripts/publish_runtime.py`: uploaded, waited through
-validation and published, named `OpenNova runtime <tag>` or `OpenNova runtime PR #<n>
-(<sha>)`), so an install's next check offers it; a package the service refuses stops the
-run before the host changes. A staging run keeps the package it published as its
-`staging-runtime-package` artifact (90 days), and a pull request's CI build packages its
-runtime with that one as `--previous`, so a file the published release holds and the new
-build drops is removed from staging's installs, as a tag's release carries the preceding
-release's removals (`release.yml`).
-The runtime is the one game whose releases are uploaded (every
-other game's are built from its project, "The games", section 7), and Publish alone uploads
-them, with each environment's secret `ADMIN_API_TOKEN` (the vault's
+Every app's releases arrive from Publish alone (every game's are built from its project,
+"The games", section 7), with each environment's secret `ADMIN_API_TOKEN` (the vault's
 `app-<deployment>/admin_api_token`) and variable `NOVAWORLD_URL` (the deployment's site:
 `https://opennova.net` and `https://staging.opennova.net`, or your `https://<domain>` and
 `https://staging.<domain>`). `infra/github` makes both from the vault (`cloudflare/domain`,
@@ -1137,52 +1150,39 @@ repository variables the older workflows read (`PUBLISH_DOWNLOADS`,
 `PUBLISH_RUNTIME_UPDATES`, `UPDATE_PUBLISH_URL`) and any repository-level `ADMIN_API_TOKEN`
 secret are read no more: delete them.
 
-Last it syncs the downloads host, with the deployment's GitHub deploy role (which may list,
-write and remove the downloads bucket's objects and nothing of its settings): the builds go
-up first, a build the set no longer has removed, then the manifest, each with a short
-`Cache-Control` (five minutes, the manifest one), so the new set is what the host serves
-within minutes, with no invalidation.
-
-An operator publishes the same way from the toolbox (the deploy user may write the
-downloads bucket's objects; the runtime's release takes the deployment's admin token, the
-vault's `app-<deployment>/admin_api_token`, in a file), for instance a pull request's build
-to staging before the workflow is on master. In `.scratch/` (git ignores it; the toolbox
-sees the checkout as `/workspace`):
+An operator publishes the same way from the toolbox, with the deployment's admin token (the
+vault's `app-<deployment>/admin_api_token`) in a file, for instance a pull request's builds to
+staging before the workflow is on master. In `.scratch/` (git ignores it; the toolbox sees the
+checkout as `/workspace`):
 
 ```bash
-gh run download <run id> --pattern '*-windows*' --dir .scratch/dl   # a pull request's CI run
-python scripts/stage_downloads.py --from .scratch/dl --to .scratch/stage \
-    --version 'PR #<n> (<sha>)' --source https://github.com/<repo>/actions/runs/<run id> \
-    --commit <the head's full sha> --build debug
-python scripts/publish_runtime.py --url https://staging.<domain> --token-file .scratch/staging.token \
-    --from .scratch/dl --name 'OpenNova runtime PR #<n> (<sha>)'
-B=$(./deploy/run.sh --deployment staging infra output -raw downloads_bucket)
-./deploy/run.sh --deployment staging aws s3 sync .scratch/stage "s3://$B/" --exclude manifest.json \
-    --delete --content-type application/zip --cache-control 'public, max-age=300'
-./deploy/run.sh --deployment staging aws s3 cp .scratch/stage/manifest.json "s3://$B/manifest.json" \
-    --content-type application/json --cache-control 'public, max-age=60'
+gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a pull request's CI run
+python scripts/publish_apps.py publish --url https://staging.<domain> \
+    --token-file .scratch/staging.token --from .scratch/dl \
+    --version <its config/version>.<the run's number> --label 'PR #<n> (<sha>)'
 ```
 
 **Bringing it up**, once per deployment, staging first:
 
 1. `./deploy/run.sh org apply` (type `org`): the deploy user's `opennova-deploy-downloads`
-   policy (CloudFront, the us-east-1 certificate, the bucket's policy and objects) and each
-   GitHub deploy role's grant on its downloads bucket.
+   policy (CloudFront, the us-east-1 certificate and the bucket's own settings).
 2. `./deploy/run.sh --deployment staging infra apply`: the bucket, the certificate and its
    validation record, the distribution and the CNAME (`infra output downloads_host`,
-   `downloads_bucket`). The apply waits for ACM to validate (minutes) and not for
+   `downloads_bucket`), and the data program's grant on the bucket and its
+   `ONNET_DOWNLOADS_URL`. The apply waits for ACM to validate (minutes) and not for
    CloudFront to deploy, which takes up to a quarter of an hour more before the host
    answers.
-3. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
-   above), run Publish for `staging` with a pull request's run id, and check:
-   `curl -s https://downloads.staging.<domain>/manifest.json`, and the runtime's release
-   published on the admin's Games page.
-4. `--deployment staging app deploy` with a portal image of this change or later: the
-   site's buttons point at the host.
-5. The same for prod (`--deployment prod infra apply`, the `prod` environment's two
-   settings, Publish with a release tag, `app deploy --promote staging`). From then on
-   `release.yml` starts prod's Publish for every tag; a run that finds no host fails at its
-   sync, the runtime's release already published.
+3. `--deployment staging app deploy` with images of this change or later: the data
+   program writes the host, and the site's buttons read it.
+4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
+   above), let a pull request's CI publish (or run Publish for `staging` with its run id),
+   and check: the five apps' releases published on the admin's Products page, and `curl -s
+   https://downloads.staging.<domain>/manifest.json`. A game's zip appears once the game's
+   own release is published too.
+5. The same for prod (`--deployment prod infra apply`, `app deploy --promote staging`, the
+   `prod` environment's two settings, Publish with a release tag). From then on
+   `release.yml` starts prod's Publish for every tag; a run whose host never lists the new
+   releases fails at the attach, the apps already published.
 
 ## 6. Backups
 
@@ -1252,16 +1252,17 @@ failed dump stops it, nothing changed), stops every program (`app down`), drops 
 database and makes it again in a one-off task (the same `CREATE DATABASE` as `db
 bootstrap`), and starts every program again (`app up`), the first to boot applying every
 migration. Every row goes with the reset: accounts, sessions, host keys, CD keys, DFX2
-activations, billing links, the hosted servers, machines and static addresses, the games'
-revisions, releases and trees (the seeded games come back, with no revision); make the
+activations, billing links, the hosted servers, machines and static addresses, the products'
+revisions, releases and trees (the seeded products come back, with no revision); make the
 first site admin again (section 4). On prod it asks for `prod` besides
 `--yes-drop-database`. The reset drops the database alone: the next `fleet.sweep`
 terminates every machine no row names (so every hosted server ends) and records the static
 addresses the cloud still holds as orphans, never releasing them; the projects' files stay
-in the ops bucket under `data/content/<game id>/` (the store names a project's files by its
-game's id, never its key), and the baseline seeds the six games in one order, so each seeded
-game keeps its id and a project pushed again uploads none it already had, while a game an admin
-made has its files under an id the new database may give another game: remove those
+in the ops bucket under `data/content/<product id>/` (the store names a project's files by its
+product's id, never its key), and the baseline seeds the products in one order (the six games
+as before the apps, ids 1 to 6, then the four apps that came after), so each seeded game keeps
+its id and a project pushed again uploads none it already had, while a game an admin made has
+its files under an id the new database may give another product: remove those
 (`data/content/<id>/` past the seeded six) by hand; and the trees' files stay under
 `data/trees/<id>/` while the new database numbers its trees from 1 again. A new tree empties its prefix before it takes files (at its release's
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
@@ -1289,8 +1290,8 @@ first push after it uploads its files once more, under its id, and the old
 again (`ONNET_BOOTSTRAP_ADMIN`: section 4, "The first site admin"), push each game's project
 again from the OpenNova Editor (its NovaWorld window says
 to bind again; a retail game's stock import first, its revision 1), release and publish it
-on the admin's Games page ("The games", section 7), and run Publish for the runtime ("The
-downloads host", section 5): the reset took every game's revisions and releases.
+on the admin's Products page ("The games", section 7), and run Publish for the apps ("The
+downloads host", section 5): the reset took every product's revisions and releases.
 
 ## 7. Hosted game servers
 
@@ -1353,7 +1354,7 @@ expansion). **New game** makes a game and its project in one form. A game's page
 on which release).
 
 A **release** is built from a revision: **Release r<head>...** on the game's page, or the
-editor's **Build > Release...** (`POST /api/admin/content/projects/<key>/releases`), queues
+editor's **Build > Release...** (`POST /api/admin/products/<key>/releases`), queues
 the data program's `release.build`, which exports the revision with `opennova-project` (an
 expansion's after its base game's revision, laid out by its key beside it, the expansion's
 `base_project` pointed there whatever folder its author keeps the base game's project in),
@@ -1361,8 +1362,8 @@ packs it whole with `opennova-update-tool build
 --full` (its removals since the last release carried, and a retail game's since its stock
 revision) and validates it, leaving a draft (or `invalid`, with what the tools said in its
 log). Nothing is uploaded on the page: a game with a project refuses an uploaded package
-(409 `built_from_project`), and the runtime's releases come from the Publish workflow
-("The downloads host", section 5). **Publish** on the page makes a draft the game's served
+(409 `built_from_project`), and an app's releases (the runtime's among them) come from the
+Publish workflow ("The downloads host", section 5). **Publish** on the page makes a draft the game's served
 release (the one before retired) and has the data program apply it (`release.apply`),
 which builds the game's next **tree** from empty out of the whole package, an expansion's
 beside its base game's published tree, and lists its multiplayer missions, which are the
@@ -1385,8 +1386,10 @@ package to the updater ("The update service", below).
 The store is the deployment's operations bucket under `data/` (one bucket per deployment,
 so the prefix carries no deployment): `content/` (the projects' files and revisions'
 manifests, each file once by its SHA-256), `trees/<tree id>/<file>` with its `manifest.json`
-(each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages)
-and `updates/upload-<release id>.sfs` (a runtime package before validation).
+(each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages),
+`updates/upload-<release id>.sfs` (a built package before validation),
+`updates/source-<release id>.zip` (an app's uploaded build until its release is built) and
+`updates/<sha256>.zip` (a download-only app's builds, kept as uploaded).
 `ONNET_OBJECT_STORE_URL` (`s3://opennova-<deployment>-ops-<account id>/data`) and
 `ONNET_OBJECT_STORE_REGION` name it to web, the fleet, the worker and the data program. The machines' hostd fetches a tree
 with `aws s3 sync` under its task role, which reads `data/trees/` and nothing else of
@@ -1452,8 +1455,8 @@ into its own bucket.
    refused with a 409). From the OpenNova Editor, signed in as an admin of this deployment
    (a debug editor reaches staging, a release editor prod), push each game's project, a
    retail game's stock import first (its revision 1); then on each game's page **Release
-   r<head>...** and **Publish** ("The games", above). The runtime's release comes with
-   the Publish workflow ("The downloads host", section 5). A game is offered to owners
+   r<head>...** and **Publish** ("The games", above). The apps' releases, the runtime's
+   among them, come with the Publish workflow ("The downloads host", section 5). A game is offered to owners
    once its current tree is ready; until then a server of it fails at launch, saying its
    game has no data (not counted as a crash). Each deployment's admins push and release on
    that deployment alone: staging's games never reach prod's bucket, nor the other way.
@@ -1525,24 +1528,25 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
 serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail_updater` on, its SERVER.LST names `ftp.novaworld.com`, which the
+game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which the
 Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
 switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
 (web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
 does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
-`OPENNOVA.WIZ` names, else `update.opennova.net`. A release game zip writes prod's there,
-and a debug one (`-ExportMode debug`, what PR CI builds) staging's,
-`update.staging.opennova.net`, so a PR's zip updates from staging alone. The runtime's
-update package carries the same wizard, so an install that takes a runtime release takes
-that release's wizard and the deployment it names. An
-OpenNova game (`retail_updater` off) that no published release serves is refused, so an
+`OPENNOVA.WIZ` names, else `update.opennova.net`. The data program writes that wizard into
+each updatable app's package (the runtime's, the editor's) naming web's `ONNET_UPDATE_HOST`,
+and refuses to pack one without it, so an install that takes an app's release takes the
+deployment its wizard names: prod's packages name `update.opennova.net`, staging's
+`update.staging.opennova.net`, and a game zip the host renders carries the runtime's. An
+OpenNova game (`retail` off) that no published release serves is refused, so an
 OpenNova first install fails until the runtime's release and its game's are published; a retail one with none is answered current, from a package web writes into its
 cache itself. A game's package is built by the data program from a revision of its project
 ("The games", above; ADR 0069 decision 5): the editor's **Build > Release...** or the game's
-admin page starts it, and the game's page publishes it. The runtime's is the CI build's
-`opennova-runtime-windows-*.sfs`, which Publish uploads through the admin API, waits through
-validation and publishes ("The downloads host", section 5): prod's for every release tag,
+admin page starts it, and the game's page publishes it. An updatable app's is packed by the
+data program from the plain build Publish uploads (`opennova-runtime-windows-v*.zip`,
+`opennova-editor-windows-v*.zip`), with its published release as `--previous`, and published
+by Publish once validated ("The downloads host", section 5): prod's for every release tag,
 staging's from a pull request's run. The packages are the games' published releases; web
 fetches one from the store the first time the updater asks for it, into its task's storage.
 

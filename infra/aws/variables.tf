@@ -427,7 +427,7 @@ variable "cache_auth_token" {
 # ---------------------------------------------------------------------------
 
 variable "hosted_enabled" {
-  description = "Whether hosted game servers are on (DEPLOY.md \"Hosted game servers\"). On: fleet.tf makes the machines' launch templates, image parameter, security group and roles, programs.tf gives web and the worker the game data's store (the deployment's operations bucket under data/, which admins fill by publishing releases on the site's Games pages, ADR 0071), and the programs' environment names the ec2 provider and the store. Off (the default): fleet.tf creates nothing and the programs run with hosting off. The role boundary must hold the store's S3 actions before the apply that turns it on (infra/aws/iam/README.md: the org stack applies it)."
+  description = "Whether hosted game servers are on (DEPLOY.md \"Hosted game servers\"). On: fleet.tf makes the machines' launch templates, image parameter, security group and roles, programs.tf gives web and the worker the game data's store (the deployment's operations bucket under data/, which admins fill by publishing releases on the site's Products pages, ADR 0071), and the programs' environment names the ec2 provider and the store. Off (the default): fleet.tf creates nothing and the programs run with hosting off. The role boundary must hold the store's S3 actions before the apply that turns it on (infra/aws/iam/README.md: the org stack applies it)."
   type        = bool
   default     = false
 }
@@ -518,7 +518,7 @@ variable "fleet_ami" {
 }
 
 variable "machine_root_volume_gb" {
-  description = "The machines' root volume, in GiB: the OS, docker, the serve image, the slots' working directories, and the data trees hostd fetches from the store under /opt/game (a tree per data set version its servers pin, about 2 GiB for JO's; a shared machine holds several at once)."
+  description = "The machines' root volume, in GiB: the OS, docker, the serve image, the slots' working directories, and the data trees hostd fetches from the store under /opt/game (a tree per product version its servers pin, about 2 GiB for JO's; a shared machine holds several at once)."
   type        = number
   default     = 40
 }

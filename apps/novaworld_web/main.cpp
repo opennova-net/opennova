@@ -9,13 +9,11 @@
 
 #include "accounts/auth.h"
 #include "accounts/mail_stack.h"
-#include "content/content_urls.h"
 #include "billing/billing_stack.h"
 #include "core/loggable.h"
 #include "core/object_store.h"
 #include "core/object_store_stack.h"
 #include "core/scratch_dir.h"
-#include "data_sets/data_set_jobs.h"
 #include "hosted/model/hosted_policy.h"
 #include "http_listener.h"
 #include "infra/alarm_store.h"
@@ -24,6 +22,8 @@
 #include "infra/log_store.h"
 #include "infra/metrics_store.h"
 #include "novalogic_lobbies.h"
+#include "products/product_jobs.h"
+#include "products/project_urls.h"
 #include "program/program.h"
 #include "redis_client.h"
 #include "updater/update_listener.h"
@@ -126,7 +126,7 @@ int run(const program::Boot &boot) {
 	// Whether the routes queue the welcome and reset mails (mail.send jobs, a
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
-	// The object store the games' routes read and write (the admin's Games
+	// The object store the products' routes read and write (the admin's Products
 	// page, the editor's pushes). Declared before the listener, which it outlives.
 	ObjectStoreStack store;
 	if (hosting.store_ok) {
@@ -134,7 +134,7 @@ int run(const program::Boot &boot) {
 		store = make_object_store(hosting.store, config.aws_cli, error);
 		if (!store.store)
 			return program::fatal("the object store: " + error);
-		std::printf("[boot] data sets: routes over the %s store\n", store.store->kind());
+		std::printf("[boot] products: routes over the %s store\n", store.store->kind());
 	}
 
 	// The admin's infrastructure view's AWS reads (infra/infra_status.h): the
@@ -193,18 +193,18 @@ int run(const program::Boot &boot) {
 	// alone); GET /livez and /healthz read the main loop's last check.
 	Watchdog watchdog;
 
-	// The content store's files (content/content_urls.h, ADR 0069): straight between the editor and
+	// The projects' files (products/project_urls.h, ADR 0069): straight between the editor and
 	// S3 through URLs presigned with web's task role; a directory's store has none, and the content
 	// routes carry the bytes. Declared before the listener, which it outlives.
-	std::optional<content::S3ContentUrls> content_urls;
+	std::optional<projects::S3ProjectUrls> project_urls;
 	if (store.store && hosting.store.kind == ObjectStoreConfig::Kind::S3) {
 		infra::AwsApiConfig aws = infra::infra_config_from_env(infra_stack.scratch.path().u8string()).aws;
 		const std::string why = infra::AwsApi::check_config(aws);
 		if (why.empty()) {
-			content_urls.emplace(*infra_stack.runner, std::move(aws), hosting.store);
-			std::printf("[boot] content store: files move through S3's presigned URLs\n");
+			project_urls.emplace(*infra_stack.runner, std::move(aws), hosting.store);
+			std::printf("[boot] projects: files move through S3's presigned URLs\n");
 		} else {
-			std::fprintf(stderr, "[boot] WARN content store: no presigned URLs (%s); files move through web\n",
+			std::fprintf(stderr, "[boot] WARN projects: no presigned URLs (%s); files move through web\n",
 					why.c_str());
 		}
 	}
@@ -235,15 +235,15 @@ int run(const program::Boot &boot) {
 	// data program's while there is a store), read from the same settings.
 	std::vector<jobs::PeriodicJob> schedules = worker_schedule(config, hosting);
 	if (hosting.store_ok)
-		for (jobs::PeriodicJob &p : hosted::data_set_schedule())
+		for (jobs::PeriodicJob &p : hosted::product_schedule())
 			schedules.push_back(std::move(p));
 	http.set_job_schedules(std::move(schedules));
-	// The games' routes (data_sets/, content/) work on the deployment's object store
+	// The products' routes (products/) work on the deployment's object store
 	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
 	// routes answer 503 store_unavailable.
 	ObjectStore *object_store = store.store.get();
 	http.set_object_store(object_store);
-	http.set_content_urls(content_urls ? &*content_urls : nullptr);
+	http.set_project_urls(project_urls ? &*project_urls : nullptr);
 	if (!http.start(config))
 		return program::fatal("HTTP listener start failed");
 

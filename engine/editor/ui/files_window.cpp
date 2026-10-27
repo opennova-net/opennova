@@ -232,12 +232,12 @@ void FilesWindow::refresh(const SessionView &view) {
 		make_counts(view);
 	}
 	if (tree_moved || counts_moved) ++rebuilds_;
-	// The content store's changes (ADR 0069), apart from the rows' own rebuild.
-	const uint64_t content = view.revisions.of(ViewConcern::Content);
-	if (another || content != content_revision_ || view.content.changes.size() != content_changes_.size()) {
-		content_revision_ = content;
-		content_changes_.clear();
-		for (const LocalChange &change : view.content.changes) content_changes_[change.path] = change.change;
+	// NovaWorld's changes (ADR 0069), apart from the rows' own rebuild.
+	const uint64_t novaworld = view.revisions.of(ViewConcern::NovaWorld);
+	if (another || novaworld != novaworld_revision_ || view.novaworld.changes.size() != novaworld_changes_.size()) {
+		novaworld_revision_ = novaworld;
+		novaworld_changes_.clear();
+		for (const LocalChange &change : view.novaworld.changes) novaworld_changes_[change.path] = change.change;
 	}
 }
 
@@ -781,10 +781,10 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	if (dirty) marks += spacing + ui_kit::unsaved_dot_width();
 	if (counts.errors) marks += spacing + ui_kit::severity_count_width(counts.errors);
 	if (counts.warnings) marks += spacing + ui_kit::severity_count_width(counts.warnings);
-	// Its change since the project's revision in the content store (ADR 0069): A added, M changed.
-	const auto content = content_changes_.find(entry.relative_path);
-	const bool added = content != content_changes_.end() && content->second == ContentChange::Added;
-	const char *letter = content == content_changes_.end() || content->second == ContentChange::Deleted ? nullptr
+	// Its change since the project's revision in NovaWorld (ADR 0069): A added, M changed.
+	const auto change = novaworld_changes_.find(entry.relative_path);
+	const bool added = change != novaworld_changes_.end() && change->second == NovaWorldChange::Added;
+	const char *letter = change == novaworld_changes_.end() || change->second == NovaWorldChange::Deleted ? nullptr
 	                     : added                                                                        ? "A"
 	                                                                                                    : "M";
 	if (letter) marks += spacing + ui_kit::text_width(letter);
@@ -818,7 +818,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		ImGui::TextColored(ui_kit::change_color(added ? Document::RecordChange::Added : Document::RecordChange::Changed),
 		                   "%s", letter);
 		ui_kit::tooltip(std::string(added ? "Added" : "Changed") + " since revision " +
-		                std::to_string(view.content.revision) + ": in the next push.");
+		                std::to_string(view.novaworld.revision) + ": in the next push.");
 	}
 	if (ImGui::TableNextColumn()) ui_kit::clipped_text(asset_kind_label(entry.kind));
 	// The size, right-aligned; listed by cost, what the game's textures of it take (none: blank).
@@ -864,12 +864,12 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	draw_move_menu(view, entry);
 	draw_chore_entries(view, entry);
-	// A file changed since the project's revision in the content store (ADR 0069): the revision's file back.
-	if (content_changes_.count(entry.relative_path)) {
-		const bool discards = view.allows(EditorRequestKind::ContentRestore);
+	// A file changed since the project's revision in NovaWorld (ADR 0069): the revision's file back.
+	if (novaworld_changes_.count(entry.relative_path)) {
+		const bool discards = view.allows(EditorRequestKind::NovaWorldRestore);
 		if (ImGui::MenuItem("Discard changes", nullptr, false, discards) && discards)
-			workspace_.request(request::content_restore(entry.relative_path));
-		ui_kit::tooltip("Puts back the file as revision " + std::to_string(view.content.revision) +
+			workspace_.request(request::novaworld_restore(entry.relative_path));
+		ui_kit::tooltip("Puts back the file as revision " + std::to_string(view.novaworld.revision) +
 		                " has it; yours goes to the project's trash (kept until Empty the trash).");
 	}
 	if (ImGui::MenuItem("About this file...")) workspace_.request(request::about_file(entry.relative_path));

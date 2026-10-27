@@ -7,7 +7,7 @@ Redis ("Redis" below). Linux only: it ships as its images and runs on ECS Fargat
 service per program (DEPLOY.md). Implements the matchmaking/backend half of NovaWorld (the gate, the
 session handshake, the browser/host/play container services, and the legacy
 `NW*.dll` HTTP flow). Protocol record: [`docs/net/novaworld-net-re.md`](../../docs/net/novaworld-net-re.md).
-The hosted servers (the fleet, its supervisor, the data sets, the console) are
+The hosted servers (the fleet, its supervisor, the products, the console) are
 [`hosted/README.md`](hosted/README.md).
 
 ## Listeners
@@ -47,7 +47,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
 | worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver; the scheduler of its periodic kinds | more workers, more threads each |
-| data (`apps/novaworld_data`) | the job pool over the data sets' jobs on the object store (the releases' build, validate and apply, each game's tree built from its published release, and the trees' prune: a build runs `opennova-project` and `opennova-update-tool` from beside the program, naming `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) and the scheduler of their prune | one task (the data jobs' caps are global) |
+| data (`apps/novaworld_data`) | the job pool over the products' jobs on the object store (the releases' build, validate and apply, each game's tree built from its published release, and the trees' prune: a build runs `opennova-project` and `opennova-update-tool` from beside the program, naming `ONNET_UPDATE_HOST` in our own game's `UPDATE.WIZ`) and on the downloads host's bucket (`ONNET_DOWNLOADS_URL`: the products' downloads and their manifest), and the scheduler of their prune | one task (the data jobs' caps are global) |
 
 Each program's own code lives in its directory, a static library its tests drive in
 process (`opennova_novaworld_<program>_core`; the worker and the data program have their
@@ -320,11 +320,12 @@ policy, not a port.
 | `stats.prune` | the machines' minutes rolled up into their hours; the hosted servers' and the machines' samples past 48 h, their hours past 400 days, the machines' egress months past 13, the programs' task minutes rolled up by the hour (minutes past 48 h, hours past 400 days), the fleet's machines ended or failed 14 days ago | hourly | worker | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | worker | 1 |
 | `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | worker | 1 |
-| `release.build` | a release built from a revision of its game's project: exported and packed whole (`data_sets/release_build.h`), then validated as an upload is | the admin's release of a revision | data | 1 |
-| `release.validate` | a built or uploaded update package read, mapped to its data sets (an upload of a game with a project refused), made a draft or invalid (`data_sets/data_set_jobs.h`) | a build's end, the runtime's upload completion | data | 1 |
-| `release.apply` | one section of a published release built into its data set's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game data set (an `update` row's gets none) | data | 1 |
+| `release.build` | a release built (`products/release_build.h`): a game's from a revision of its project, exported and packed whole; an updatable app's from its uploaded build, unpacked, given its `OPENNOVA.WIZ` and packed whole; each then validated; a download-only app's build kept as uploaded, a draft | the admin's release of a revision, an app's upload completion | data | 1 |
+| `release.validate` | a built update package read, mapped to its products, made a draft or invalid (`products/product_jobs.h`) | a build's end | data | 1 |
+| `release.apply` | one section of a published release built into its product's tree from nothing (every release is whole), a new tree | the admin's publish, one per section of a game product (an `app` row's gets none) | data | 1 |
 | `tree.prune` | the objects of the prunable trees removed | hourly (the data program's schedule), after each apply | data | 1 |
-| `game.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
+| `product.purge` | a deleted game's objects removed: its trees' prefixes and its project's files and manifests (`content/<id>/`) | the admin's delete of a game, in its transaction, due 75 minutes after it (past the presigned transfers' hour and the jobs then on its trees) | data | 1 |
+| `downloads.publish` | the downloads host written from the published releases (`products/downloads_job.h`): each product's download rendered (a game's the runtime's package with its wizards, the editor's its package, the others as uploaded) and put under its stable name, `manifest.json` after, every other object removed | the admin's publish and retire, in their transaction | data | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`) reads the jobs table and the fleet leader's row alone,
@@ -408,7 +409,7 @@ The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
 (3 / 2345), product family, pages and gate answer's shape are JO's; its gate tag,
 LobbyName and browser list are its own, so anyone running ON data lands in its lobby.
 Expansion bits: bit 0 is the base game and bit 1 JO's `jox01`; DFX2's and ON's rows carry
-bit 0 alone (OP: Acid Gambit's `nifty` expansion, a data set the baseline seeds, has no bit here).
+bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, has no bit here).
 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
@@ -1464,8 +1465,8 @@ it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 | `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
 | `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
 | `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
-| `opennova_novaworld_data_sets` | `data_sets/` | core, jobs | web, the fleet, the worker, data |
-| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, data_sets, hosting_protocol | web, the fleet, the worker |
+| `opennova_novaworld_products` | `products/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, products, hosting_protocol | web, the fleet, the worker |
 | `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
 
 Every library that reaches the database links the service (`opennova_novaworld_service`)

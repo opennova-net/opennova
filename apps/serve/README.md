@@ -399,7 +399,7 @@ master), beside the machine agent's own image from the same file (its `hostd` ta
 `ghcr.io/<owner>/opennova-hostd`: `apps/hostd/README.md`). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
 service pinned for that server and runs it in the server's slot as below, with the server's
-base data set's tree bound read-only at `/opt/game` and, when it runs an expansion, the
+base product's tree bound read-only at `/opt/game` and, when it runs an expansion, the
 expansion's tree at `/opt/game/expansion/<code>` (ADR 0064; `apps/hostd/README.md`; DEPLOY.md,
 "Hosted game servers"), `/game <code>` naming its title and `/exp <code>` its expansion.
 

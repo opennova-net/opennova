@@ -233,7 +233,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 				 "(array_agg(st.expansion_tree_id ORDER BY st.generation DESC))[1], "
 				 "COALESCE(d.display_name, '') "
 				 "FROM hosted_server_starts st JOIN hosted_servers s ON s.id = st.server_id "
-				 "LEFT JOIN data_sets d ON d.id = s.data_set_id "
+				 "LEFT JOIN products d ON d.id = s.product_id "
 				 "WHERE s.state NOT IN ('stopped', 'failed') AND st.ended_at IS NOT NULL AND "
 				 "st.cause = 'data_unavailable' AND st.generation > COALESCE((SELECT "
 				 "max(b.generation) FROM hosted_server_starts b WHERE b.server_id = st.server_id "
@@ -246,7 +246,7 @@ HealthInputs read_health(db::Database &db, const PlacementPolicy *policy) {
 		d.reason = r.as_text(3).value_or("");
 		d.base_tree = r.as_int(4).value_or(0);
 		d.expansion_tree = r.as_int(5);
-		d.data_set = r.as_text(6).value_or("");
+		d.product = r.as_text(6).value_or("");
 		data_failures[r.as_int(0).value_or(0)] = std::move(d);
 	}
 	for (HealthServer &s : in.servers)
@@ -513,7 +513,7 @@ std::vector<Finding> fleet_health(const HealthInputs &in, const ReleaseImages &r
 				(d.count == 1 ? std::string("start, ")
 							  : std::to_string(d.count) + " starts, the first ") +
 				age_text(failing) + " ago (" +
-				(d.data_set.empty() ? std::string("its data set is gone") : d.data_set) + ", " +
+				(d.product.empty() ? std::string("its game is gone") : d.product) + ", " +
 				trees + ")";
 		text += reason.empty() ? std::string(".")
 							   : "; hostd's last reason: " + std::string(reason) + ".";

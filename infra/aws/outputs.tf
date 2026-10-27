@@ -75,7 +75,7 @@ output "downloads_host" {
 
 output "downloads_bucket" {
   value       = length(aws_s3_bucket.downloads) > 0 ? aws_s3_bucket.downloads[0].bucket : null
-  description = "The downloads host's bucket, which .github/workflows/publish.yml publishes to; null without a zone"
+  description = "The downloads host's bucket, which the data program's downloads.publish job writes (ONNET_DOWNLOADS_URL); null without a zone"
 }
 
 output "novaworld_host" {
@@ -85,7 +85,7 @@ output "novaworld_host" {
 
 output "ops_bucket" {
   value       = local.ops_bucket_name
-  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees and the update packages) and the database dumps (novaworld/)"
+  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the products' trees and the update packages) and the database dumps (novaworld/)"
 }
 
 output "ssm_prefix" {

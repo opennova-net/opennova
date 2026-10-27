@@ -3,6 +3,7 @@
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <formats/update/apply.h>
 
 #include <chrono>
 #include <cstddef>
@@ -28,6 +29,9 @@ const char *usage() {
 	return "update.exe [--check] /game <acidgambit|jo|dfx2> [--runtime-dir <dir>]\n"
 			"  [--resource-dir <dir>] [--no-runtime] [--server <host>] [--port <n>]\n"
 			"  [--parent-pid <pid>] [/RUN] [--run-arg <argument>]... [/VERBOSE]\n"
+			"An app's folder (its OPENNOVA.WIZ naming another login than ONRUNTIME, the editor's)\n"
+			"  updates that app alone, /game and --no-runtime refused; /RUN starts its EXE:\n"
+			"  update.exe [--check] [--parent-pid <pid>] [/RUN] [--run-arg <argument>]...\n"
 			"Legacy: update.exe <window-handle> /DIR <install> /RUN /VERBOSE\n"
 			"Check exits: 0 current, 10 available, 1 failure, 2 usage.\n";
 }
@@ -92,6 +96,20 @@ bool parse_options(const std::vector<std::string> &args,
 	o.resource_dir = std::filesystem::absolute(o.resource_dir, ec).lexically_normal();
 	if (ec) { error = "invalid resource directory"; return false; }
 	out = std::move(o);
+	return true;
+}
+
+bool relaunch_command(const Options &options, bool app, const std::string &exe, Launch &out,
+		std::string &error) {
+	Launch launch{options.runtime_dir / "opennova.exe", options.run_args};
+	if (app && exe.empty()) { error = "The app's update command names no EXE."; return false; }
+	if ((app || options.legacy) && !exe.empty()) {
+		if (!update::is_safe_row_name(exe)) { error = "Unsafe EXE in update command."; return false; }
+		launch.program = (app ? options.runtime_dir : options.resource_dir) / io::os_path(exe);
+	}
+	if (!app && !options.legacy && launch.args.empty())
+		launch.args = {"--", "/game", options.game, "--resource-dir", io::utf8_path(options.resource_dir)};
+	out = std::move(launch);
 	return true;
 }
 

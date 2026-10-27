@@ -8,7 +8,7 @@
 // real opennova-serve children (ctest passes both binaries) over synthetic
 // packed trees (hosted_tree_support.h: resource.pff, localres.pff holding
 // serve_test_support.h's deathmatch map, language.pff holding the game text,
-// version.txt), one per data set: the seeded Joint Operations and Delta Force
+// version.txt), one per product: the seeded Joint Operations and Delta Force
 // Xtreme 2 rows (the baseline's) each given a ready tree in a local object
 // store (ADR 0064), which the agent fetches into its trees root (--trees-root)
 // from the file:// URL the sync's reply names, checks against the manifest and
@@ -17,10 +17,10 @@
 //   * no lobby live (the service's lobby drained): the first start below waits
 //     in provisioning, no machine launched, until the lobby takes clients again;
 //   * the owner, granted a server (comp_grants), starts a Joint
-//     Operations server with POST /api/me/servers (its data_set_id and the
+//     Operations server with POST /api/me/servers (its product_id and the
 //     mission its tree lists); the supervisor launches a shared machine, whose
 //     agent bootstraps and syncs, places the server on its first slot, pins it
-//     to the data set's current tree, mints its service account srv-<id> and
+//     to the product's current tree, mints its service account srv-<id> and
 //     renders its files, which the agent writes to the slot's directory before
 //     it starts opennova-serve over the fetched tree's directory with /game jo;
 //     it logs in as that account, hosts and lists; the server reaches running;
@@ -55,7 +55,6 @@
 
 #include "accounts/web_session.h"
 #include "core/local_object_store.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
 #include "hosted/cloud/fleet_job_handlers.h"
 #include "hosted/internal_listener.h"
@@ -66,6 +65,7 @@
 #include "hosted/model/machine_driver.h"
 #include "hosted/supervisor.h"
 #include "jobs/worker_pool.h"
+#include "products/product_repository.h"
 #include "serve/serve_test_support.h"
 
 #include "net_http.h"
@@ -495,10 +495,10 @@ int main(int argc, char **argv) {
 	{
 		// Declared first, so the database's files and the working directories go last.
 		test_temp::TempDir temp("hosted_local_e2e");
-		// Two synthetic packed trees, two data sets: each one deathmatch map (named
-		// after its data set, so the listing tells which tree a server mounted)
+		// Two synthetic packed trees, two products: each one deathmatch map (named
+		// after its product, so the listing tells which tree a server mounted)
 		// and the game text, packed as a retail install is; each put in the local
-		// object store under trees/<id>/ as its seeded data set's ready current
+		// object store under trees/<id>/ as its seeded product's ready current
 		// tree (the manifest hashed, the missions read from the archives).
 		const fs::path jo_source = temp.path / "jo_source";
 		const fs::path dfx2_source = temp.path / "dfx2_source";
@@ -515,14 +515,14 @@ int main(int argc, char **argv) {
 		int64_t dfx2_tree = 0;
 		{
 			auto db = service.pool.acquire();
-			jo_set = hosted_trees::seeded_data_set(*db, "Joint Operations");
-			dfx2_set = hosted_trees::seeded_data_set(*db, "Delta Force Xtreme 2");
-			expect(jo_set != 0 && dfx2_set != 0, "the seeded data sets are there");
-			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::DataSetKind::Base, "", jo_source);
-			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::DataSetKind::Base, "", dfx2_source);
-			expect(jo_tree != 0 && dfx2_tree != 0, "each data set has a ready tree in the store");
-			const auto offered = hosted::offered_data_sets(*db);
-			expect(offered.size() == 2, "both data sets are offered");
+			jo_set = hosted_trees::seeded_product(*db, "Joint Operations");
+			dfx2_set = hosted_trees::seeded_product(*db, "Delta Force Xtreme 2");
+			expect(jo_set != 0 && dfx2_set != 0, "the seeded products are there");
+			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::ProductKind::Game, "", jo_source);
+			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::ProductKind::Game, "", dfx2_source);
+			expect(jo_tree != 0 && dfx2_tree != 0, "each product has a ready tree in the store");
+			const auto offered = hosted::offered_products(*db);
+			expect(offered.size() == 2, "both products are offered");
 			const auto lower = [](std::string s) {
 				for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 				return s;
@@ -530,7 +530,7 @@ int main(int argc, char **argv) {
 			for (const auto &d : offered) {
 				expect(d.missions.size() == 1 &&
 								lower(d.missions[0].file) == (d.id == jo_set ? "servetst.bms" : "dfxtest.bms"),
-						"each offered data set lists its tree's mission");
+						"each offered product lists its tree's mission");
 			}
 		}
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
@@ -611,7 +611,7 @@ int main(int argc, char **argv) {
 		int64_t id = 0;
 		if (!session.empty()) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
-					"{\"data_set_id\":" + std::to_string(jo_set) +
+					"{\"product_id\":" + std::to_string(jo_set) +
 							",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
 							"\"missions\":[\"servetst.bms\"]}");
 			const auto json = crow::json::load(body_text(reply));
@@ -645,7 +645,7 @@ int main(int argc, char **argv) {
 			expect(running, "the hosted server is placed, started on its slot, lists with its service account and runs");
 		}
 
-		// The second owner's server, on Delta Force Xtreme 2's data set, beside it.
+		// The second owner's server, on Delta Force Xtreme 2's product, beside it.
 		int64_t second_owner = 0;
 		if (running) {
 			nws::CreateUserParams p;
@@ -664,7 +664,7 @@ int main(int argc, char **argv) {
 		int64_t dfx2_id = 0;
 		if (!second.empty()) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(second, true),
-					"{\"data_set_id\":" + std::to_string(dfx2_set) +
+					"{\"product_id\":" + std::to_string(dfx2_set) +
 							",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8,"
 							"\"missions\":[\"dfxtest.bms\"]}");
 			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
@@ -703,14 +703,14 @@ int main(int argc, char **argv) {
 			const fs::path dir = slot_dir(driver, service, id);
 			expect(fs::exists(dir / "server.host") && fs::exists(dir / "credentials.txt"),
 					"its slot's directory was written from its files");
-			expect(jo->settings.data_set_id == jo_set && dfx2->settings.data_set_id == dfx2_set &&
+			expect(jo->settings.product_id == jo_set && dfx2->settings.product_id == dfx2_set &&
 							!jo->settings.expansion_id && !dfx2->settings.expansion_id &&
 							jo->settings.missions == std::vector<std::string>{ "servetst.bms" } &&
 							dfx2->settings.missions == std::vector<std::string>{ "dfxtest.bms" },
-					"the rows name their data sets and rotations");
+					"the rows name their products and rotations");
 			expect(jo->base_tree_id == jo_tree && dfx2->base_tree_id == dfx2_tree &&
 							!jo->expansion_tree_id && !dfx2->expansion_tree_id,
-					"each server is pinned to its data set's current tree");
+					"each server is pinned to its product's current tree");
 			// The trees on the machine: fetched from the store, marked, reported present
 			// with their bytes.
 			expect(fs::is_regular_file(driver.tree_dir(jo_tree) / ".ready") &&

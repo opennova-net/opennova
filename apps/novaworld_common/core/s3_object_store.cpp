@@ -45,7 +45,11 @@ S3ObjectStore::S3ObjectStore(ObjectStoreConfig config, proc::CommandRunner &runn
 		timeouts_(timeouts) {}
 
 std::string S3ObjectStore::full_key(std::string_view key) const {
-	return config_.root + "/" + std::string(key);
+	return object_store_key(config_, key);
+}
+
+std::string S3ObjectStore::root_prefix() const {
+	return config_.root.empty() ? std::string() : config_.root + "/";
 }
 
 std::string S3ObjectStore::s3_url(std::string_view key) const {
@@ -101,13 +105,19 @@ bool S3ObjectStore::run(const std::vector<std::string> &argv, int timeout_ms, st
 	return false;
 }
 
-bool S3ObjectStore::put_file(std::string_view key, const std::string &path, std::string &error) {
+bool S3ObjectStore::put_file(std::string_view key, const std::string &path, std::string &error,
+		const PutOptions &options) {
 	if (!is_store_key(key)) {
 		error = "not a store key: " + std::string(key);
 		return false;
 	}
+	std::vector<std::string> params = { path, s3_url(key) };
+	if (!options.content_type.empty())
+		params.insert(params.end(), { "--content-type", options.content_type });
+	if (!options.cache_control.empty())
+		params.insert(params.end(), { "--cache-control", options.cache_control });
 	std::string out;
-	return run(s3("cp", { path, s3_url(key) }), timeouts_.transfer_ms, out, error);
+	return run(s3("cp", std::move(params)), timeouts_.transfer_ms, out, error);
 }
 
 bool S3ObjectStore::get_file(std::string_view key, const std::string &path, std::string &error) {
@@ -150,7 +160,7 @@ bool S3ObjectStore::list(
 	const io::JsonValue *contents = json.get("Contents");
 	if (contents == nullptr || !contents->is_array())
 		return true;
-	const std::string root = config_.root + "/";
+	const std::string root = root_prefix();
 	for (const io::JsonValue &item : contents->array) {
 		if (!item.is_object())
 			continue;
@@ -292,7 +302,7 @@ bool S3ObjectStore::abort_uploads_under(std::string_view prefix, std::string &er
 	const io::JsonValue *uploads = json.get("Uploads");
 	if (uploads == nullptr || !uploads->is_array())
 		return true;
-	const std::string root = config_.root + "/";
+	const std::string root = root_prefix();
 	for (const io::JsonValue &item : uploads->array) {
 		if (!item.is_object())
 			continue;

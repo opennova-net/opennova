@@ -9,11 +9,8 @@
 #include "billing/tiers.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
-#include "content/content_routes.h"
 #include "core/health.h"
 #include "core/object_store.h"
-#include "data_sets/data_set_routes.h"
-#include "data_sets/release_routes.h"
 #include "host_routes.h"
 #include "hosted/address_routes.h"
 #include "hosted/console_routes.h"
@@ -31,6 +28,9 @@
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
 #include "password_reset_routes.h"
+#include "products/product_routes.h"
+#include "products/project_routes.h"
+#include "products/release_routes.h"
 #include "program/catalog_repository.h"
 #include "program/server_config.h"
 #include "redis_client.h"
@@ -251,13 +251,13 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->costs.register_routes(impl_->app);
 	impl_->settings.set_fleet(fleet_placement_);
 	impl_->settings.register_routes(impl_->app);
-	impl_->data_sets.set_store(object_store_);
-	impl_->data_sets.register_routes(impl_->app);
+	impl_->products.set_store(object_store_);
+	impl_->products.register_routes(impl_->app);
 	impl_->releases.set_store(object_store_);
 	impl_->releases.register_routes(impl_->app);
-	impl_->content_routes.set_store(object_store_);
-	impl_->content_routes.set_urls(content_urls_);
-	impl_->content_routes.register_routes(impl_->app);
+	impl_->project_routes.set_store(object_store_);
+	impl_->project_routes.set_urls(project_urls_);
+	impl_->project_routes.register_routes(impl_->app);
 	if (object_store_ != nullptr)
 		std::printf("[http] games routes over the %s object store\n", object_store_->kind());
 	else

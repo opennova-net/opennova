@@ -430,7 +430,7 @@ int test_naming_and_starts() {
 
 	// A start naming it: refused while it is not ready, and on a shared machine.
 	hosted::PlacementPolicy policy;
-	const auto offered = hosted::offered_data_sets(db);
+	const auto offered = hosted::offered_products(db);
 	auto start = [&](int64_t owner, bool own, std::optional<int64_t> address) {
 		return hosted::request_server(db, owner, valid_settings(data.jo), offered, 24, now, own, &policy, address);
 	};

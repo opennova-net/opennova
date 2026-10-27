@@ -38,10 +38,9 @@
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
-#include "core/clock.h"
 #include "connection_routes.h"
+#include "core/clock.h"
 #include "core/health.h"
-#include "data_sets/data_set_repository.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/console_drain.h"
@@ -64,6 +63,7 @@
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"
 #include "nw_udp_listener.h"
+#include "products/product_repository.h"
 #include "program/server_config.h"
 #include "session_store.h"
 #include "web_access.h"
@@ -184,7 +184,7 @@ struct Harness {
 	// The first listener's Redis (its own namespace): what every web process
 	// sharing it would see.
 	nws::RedisPool *redis = nullptr;
-	// The seeded data sets (the baseline's) the harness gave ready trees: Joint
+	// The seeded products (the baseline's) the harness gave ready trees: Joint
 	// Operations (missions a.bms, alpha.bms, first.bms, second.bms), Escalation
 	// under it (escal.bms) and Delta Force Xtreme 2 (dfx2_a.bms, dfx2_b.bms);
 	// OpenNova's has none, so it is not offered.
@@ -218,17 +218,17 @@ std::string body_text(const net::HttpReply &reply) {
 	return std::string(reply.body.begin(), reply.body.end());
 }
 
-// The seeded data set named `display_name` (the baseline's rows), 0 for none.
-int64_t data_set_named(opennova::db::Database &db, const char *display_name) {
-	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;", { opennova::db::BindValue(display_name) });
+// The seeded product named `display_name` (the baseline's rows), 0 for none.
+int64_t product_named(opennova::db::Database &db, const char *display_name) {
+	const auto rows = db.query("SELECT id FROM products WHERE display_name = $1;", { opennova::db::BindValue(display_name) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }
 
-// A ready tree of `data_set_id` with `version` and `missions` (each titled after itself); its id.
-int64_t seed_tree(opennova::db::Database &db, int64_t data_set_id, const std::string &version,
+// A ready tree of `product_id` with `version` and `missions` (each titled after itself); its id.
+int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::string &version,
 		const std::vector<std::string> &missions) {
 	namespace hosted = opennova::novaworld_server::hosted;
-	const int64_t id = hosted::create_tree(db, data_set_id, std::nullopt, "harness");
+	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "harness");
 	hosted::TreeReady ready;
 	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
@@ -237,9 +237,9 @@ int64_t seed_tree(opennova::db::Database &db, int64_t data_set_id, const std::st
 	return hosted::finish_tree(db, id, ready) ? id : 0;
 }
 
-// What a start may pick now (data_set_repository.h).
-std::vector<opennova::novaworld_server::hosted::OfferedDataSet> offered(Harness &h) {
-	return opennova::novaworld_server::hosted::offered_data_sets(*h.pool.acquire());
+// What a start may pick now (product_repository.h).
+std::vector<opennova::novaworld_server::hosted::OfferedProduct> offered(Harness &h) {
+	return opennova::novaworld_server::hosted::offered_products(*h.pool.acquire());
 }
 
 // A reply for a failure line: its status and body, or why no reply came.
@@ -379,7 +379,7 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(hosts[0]["players"].i() == 2);
 	TEST_EXPECT(hosts[0]["maxPlayers"].i() == 32);
 	TEST_EXPECT(str(hosts[0]["region"]) == "us");
-	// The mission, and the expansion a joiner needs by its data set's name.
+	// The mission, and the expansion a joiner needs by its product's name.
 	TEST_EXPECT(str(hosts[0]["mission"]) == "AS - Kombang Valley");
 	TEST_EXPECT(str(hosts[0]["gameType"]) == "AAS");
 	TEST_EXPECT(str(hosts[0]["expansion"]) == "Escalation");
@@ -5596,14 +5596,14 @@ void end_stopping_servers(Harness &h) {
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
-// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and the seeded data sets with
+// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and the seeded products with
 // ready trees, Joint Operations' (with Escalation) and Delta Force Xtreme 2's,
 // and no supervisor, so rows stay where the routes put them): the session and
-// CSRF refusals, the data sets the owner's view lists (each with its tree's
+// CSRF refusals, the products the owner's view lists (each with its tree's
 // missions, limits and expansions), the comp grants (PUT
 // /api/admin/users/<id>/comp, admin only), the settings' refusals (the
-// data set, the expansion and the rotation among them), the starts (on the
-// first data set with every mission of its tree when it names none, and on
+// product, the expansion and the rotation among them), the starts (on the
+// first product with every mission of its tree when it names none, and on
 // Delta Force Xtreme 2's with its own) up
 // to the account's hosting entitlement in each pool (server_limit with the shared
 // counts past it, a stopping server counting), the cap and `full`, another account's id
@@ -5639,7 +5639,7 @@ int test_hosted_server_routes(Harness &h) {
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
-	// four (the data set refusals, then an expansion start with no entitlement),
+	// four (the product refusals, then an expansion start with no entitlement),
 	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
 	// one of them and it must move to a new account.
 
@@ -5691,14 +5691,14 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
 	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && !json["entitlement"]["granted"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
-	// The data sets with data, bases by id (Joint Operations first; OpenNova's
+	// The products with data, bases by id (Joint Operations first; OpenNova's
 	// has no tree, so it is not offered): each one's id, name, title, version,
 	// its tree's missions (the site's picker and the default rotation), its
 	// title's limits and its expansions with data.
-	TEST_EXPECT(json.has("data_sets") && json["data_sets"].size() == 2);
-	if (json.has("data_sets") && json["data_sets"].size() == 2) {
-		const auto &jo = json["data_sets"][0];
-		const auto &dfx2 = json["data_sets"][1];
+	TEST_EXPECT(json.has("products") && json["products"].size() == 2);
+	if (json.has("products") && json["products"].size() == 2) {
+		const auto &jo = json["products"][0];
+		const auto &dfx2 = json["products"][1];
 		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
 				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
 		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
@@ -5755,7 +5755,7 @@ int test_hosted_server_routes(Harness &h) {
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
-	// The data set: one with data (OpenNova's row is there, with no tree), whose
+	// The product: one with data (OpenNova's row is there, with no tree), whose
 	// expansions the expansion is one of, and whose missions the rotation
 	// names; own_machine a flag.
 	const std::string jo = std::to_string(h.jo_id), dfx2 = std::to_string(h.dfx2_id);
@@ -5765,18 +5765,18 @@ int test_hosted_server_routes(Harness &h) {
 		const char *error;
 		const char *field;
 	};
-	const RefusedBody data_set_refused[] = {
-		{ "{\"data_set_id\":999999,\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "data_set_id" },
-		{ "{\"data_set_id\":" + on + ",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "data_set_id" },
-		{ "{\"data_set_id\":" + dfx2 + ",\"game_name\":\"x\",\"expansion_id\":" + jox + "}", "invalid_settings",
+	const RefusedBody product_refused[] = {
+		{ "{\"product_id\":999999,\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":" + on + ",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":" + dfx2 + ",\"game_name\":\"x\",\"expansion_id\":" + jox + "}", "invalid_settings",
 				"expansion_id" },
-		{ "{\"data_set_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"escal.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"data_set_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"dfx2_a.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"data_set_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_field", "" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"escal.bms\"]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"dfx2_a.bms\"]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_field", "" },
 		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
 	size_t refusals = 0;
-	for (const RefusedBody &r : data_set_refused) {
+	for (const RefusedBody &r : product_refused) {
 		// Four draws from Eve's bucket, the rest from Gus's.
 		reply = start(refusals++ < 4 ? eve : gus, r.body);
 		json = crow::json::load(body_text(reply));
@@ -5787,7 +5787,7 @@ int test_hosted_server_routes(Harness &h) {
 	}
 	// Escalation's missions count with the expansion picked (the rotation then
 	// spans both), refused past the settings at the entitlement: gus has none yet.
-	reply = start(gus, "{\"data_set_id\":" + jo + ",\"expansion_id\":" + jox +
+	reply = start(gus, "{\"product_id\":" + jo + ",\"expansion_id\":" + jox +
 							",\"game_name\":\"x\",\"missions\":[\"first.bms\",\"escal.bms\"]}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
@@ -5833,13 +5833,13 @@ int test_hosted_server_routes(Harness &h) {
 	// Not asked to list on NovaLogic's NovaWorld: no state of one.
 	TEST_EXPECT(json["server"].has("novalogic") &&
 			json["server"]["novalogic"].t() == crow::json::type::Null);
-	// No data set named: the first offered, with its names; no expansion (null is
+	// No product named: the first offered, with its names; no expansion (null is
 	// the base game alone, as the start form sends it); not started yet, so no data
 	// and nothing newer.
-	TEST_EXPECT(json["server"]["settings"]["data_set_id"].i() == h.jo_id &&
+	TEST_EXPECT(json["server"]["settings"]["product_id"].i() == h.jo_id &&
 			json["server"]["settings"]["expansion_id"].t() == crow::json::type::Null);
-	TEST_EXPECT(json["server"]["data_set"]["id"].i() == h.jo_id &&
-			str(json["server"]["data_set"]["display_name"]) == "Joint Operations");
+	TEST_EXPECT(json["server"]["product"]["id"].i() == h.jo_id &&
+			str(json["server"]["product"]["display_name"]) == "Joint Operations");
 	TEST_EXPECT(json["server"]["expansion"].t() == crow::json::type::Null);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Joint Operations");
 	TEST_EXPECT(str(json["server"]["expansion_display_name"]).empty());
@@ -5862,7 +5862,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	// The second takes every mission of its data set's tree when it names none
+	// The second takes every mission of its product's tree when it names none
 	// (with Escalation, the expansion's after the base's).
 	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox + "}");
 	json = crow::json::load(body_text(reply));
@@ -5889,11 +5889,11 @@ int test_hosted_server_routes(Harness &h) {
 	reply = start(ben, "{\"game_name\":\"Ben's\"}");
 	TEST_EXPECT(reply.code == 202);
 	const int64_t ben_server = crow::json::load(body_text(reply))["server"]["id"].i();
-	reply = start(cy, "{\"data_set_id\":" + dfx2 + ",\"game_name\":\"Cy's\"}");
+	reply = start(cy, "{\"product_id\":" + dfx2 + ",\"game_name\":\"Cy's\"}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %s\n", describe(reply).c_str());
 	// Delta Force Xtreme 2's server takes its tree's missions.
-	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["data_set_id"].i() == h.dfx2_id);
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["product_id"].i() == h.dfx2_id);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
 			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
@@ -5976,7 +5976,7 @@ int test_hosted_server_routes(Harness &h) {
 	// pins and is behind by the rule, so the update is asked (idempotent); an
 	// ended one is not_live, another account's 404; one pinned to the current
 	// trees is up_to_date. The admin's update-all marks every outdated live
-	// server, of one data set or all.
+	// server, of one product or all.
 	auto update = [&h](const Owner &o, int64_t id) {
 		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/update", { with_session(o.session), kCsrf });
 	};
@@ -5997,14 +5997,14 @@ int test_hosted_server_routes(Harness &h) {
 			str(json["server"]["data"]["base"]["version"]) == "JO V1.7.5.3" &&
 			json["server"]["data"]["expansion"]["tree_id"].i() == h.jox_tree);
 	TEST_EXPECT(h.send("POST", "/api/admin/hosted/update-all", { with_session(ana.session), kCsrf }).code == 403);
-	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":" + jo + "}");
+	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"product_id\":" + jo + "}");
 	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["updating"].i() == 0);
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{}");
 	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["updating"].i() == 1); // Cy's
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/hosted/" + std::to_string(cy_server), { kBearer })));
 	TEST_EXPECT(json["server"]["update_requested"].b() && json["server"]["outdated"].b() &&
 			json["server"]["base_tree_id"].t() == crow::json::type::Null);
-	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":\"x\"}");
+	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"product_id\":\"x\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
 	// A dedicated machine: none without one (a grant of shared servers is no
@@ -6170,7 +6170,7 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send_to(h.secure_port, "GET", "/api/me/servers", { with_cookie(nws::kWebSessionHostCookie, token) });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["full"].b() &&
-			json["data_sets"].size() == 0);
+			json["products"].size() == 0);
 	return 0;
 }
 
@@ -6203,7 +6203,7 @@ int test_hosted_listing_owner(Harness &h) {
 
 	// The hosted server and its service account, as the supervisor makes them.
 	hosted::HostedSettings settings;
-	settings.data_set_id = h.jo_id;
+	settings.product_id = h.jo_id;
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
@@ -6700,11 +6700,11 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(hosted::mark_launched(*db, machine.id, launched));
 	TEST_EXPECT(hosted::record_sync(*db, machine.id, "test-agent", {}).has_value());
 	hosted::HostedSettings settings;
-	settings.data_set_id = h.jo_id;
+	settings.product_id = h.jo_id;
 	settings.game_name = "Fleet Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner) {
-		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(ana);
@@ -6934,11 +6934,11 @@ int test_hosted_stats_routes(Harness &h) {
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
 	auto db = h.pool.acquire();
 	hosted::HostedSettings settings;
-	settings.data_set_id = h.jo_id;
+	settings.product_id = h.jo_id;
 	settings.game_name = "Stats Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t who) {
-		const auto r = hosted::request_server(*db, who, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
+		const auto r = hosted::request_server(*db, who, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(owner);
@@ -7126,13 +7126,13 @@ int test_hosted_usage_route(Harness &h) {
 	// on its slot 0, Ana's running on the dedicated machine, Ana's waiting for a
 	// place, and Ben's ended.
 	hosted::HostedSettings settings;
-	settings.data_set_id = h.jo_id;
+	settings.product_id = h.jo_id;
 	settings.game_name = "Usage Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner, const char *name) {
 		settings.game_name = name;
 		const auto r = hosted::request_server(
-				*db, owner, settings, hosted::offered_data_sets(*db), 50, nws::wall_now_s());
+				*db, owner, settings, hosted::offered_products(*db), 50, nws::wall_now_s());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const auto to_running = [&](int64_t id) {
@@ -7347,7 +7347,7 @@ int test_hosted_console_routes(Harness &h) {
 	auto reply = get("/api/me/servers/999999/players", as_owner);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	hosted::HostedSettings settings;
-	settings.data_set_id = h.jo_id;
+	settings.product_id = h.jo_id;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
@@ -9276,7 +9276,7 @@ int with_harness(const char *part) {
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
 		// put them), with a cap of 4, a local object store (never read here) and
-		// the seeded data sets given ready trees: Joint Operations with
+		// the seeded products given ready trees: Joint Operations with
 		// Escalation, and Delta Force Xtreme 2; OpenNova's has none.
 		config.hosted_provider = "docker";
 		config.hosted_cap = 4;
@@ -9288,10 +9288,10 @@ int with_harness(const char *part) {
 		int64_t jo_id = 0, jox_id = 0, dfx2_id = 0, on_id = 0, jo_tree = 0, jox_tree = 0, dfx2_tree = 0;
 		{
 			auto db = pool.acquire();
-			jo_id = data_set_named(*db, "Joint Operations");
-			jox_id = data_set_named(*db, "Escalation");
-			dfx2_id = data_set_named(*db, "Delta Force Xtreme 2");
-			on_id = data_set_named(*db, "OP: Acid Gambit");
+			jo_id = product_named(*db, "Joint Operations");
+			jox_id = product_named(*db, "Escalation");
+			dfx2_id = product_named(*db, "Delta Force Xtreme 2");
+			on_id = product_named(*db, "OP: Acid Gambit");
 			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
 			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
 			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });

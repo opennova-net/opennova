@@ -10,9 +10,6 @@
 #include "billing/billing_routes.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
-#include "content/content_routes.h"
-#include "data_sets/data_set_routes.h"
-#include "data_sets/release_routes.h"
 #include "host_routes.h"
 #include "hosted/address_routes.h"
 #include "hosted/console_routes.h"
@@ -28,6 +25,9 @@
 #include "jobs/job_routes.h"
 #include "lobby_routes.h"
 #include "password_reset_routes.h"
+#include "products/product_routes.h"
+#include "products/project_routes.h"
+#include "products/release_routes.h"
 #include "program/catalog_repository.h"
 #include "redis_client.h"
 #include "settings_routes.h"
@@ -64,9 +64,9 @@ struct HttpListener::Impl {
 			usage(access, pool, redis),
 			attention(access, pool, redis),
 			costs(access, redis),
-			data_sets(access, pool),
+			products(access, pool),
 			releases(access, pool),
-			content_routes(access, pool) {}
+			project_routes(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -119,10 +119,10 @@ struct HttpListener::Impl {
 	infra::AttentionRoutes attention;
 	// The month's AWS costs (infra/cost_routes.h).
 	infra::CostRoutes costs;
-	// The data sets', the releases' and the content store's routes (data_sets/, content/).
-	hosted::DataSetRoutes data_sets;
+	// The products', the releases' and the project routes (products/).
+	hosted::ProductRoutes products;
 	hosted::ReleaseRoutes releases;
-	content::ContentRoutes content_routes;
+	projects::ProjectRoutes project_routes;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;

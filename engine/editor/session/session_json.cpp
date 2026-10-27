@@ -77,7 +77,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::NewProjectBase, "new_project_base"},
 	{PickPurpose::TextureImage, "texture_image"},
 	{PickPurpose::MusicStreamWave, "music_stream_wave"},
-	{PickPurpose::ContentFolder, "content_folder"},
+	{PickPurpose::NovaWorldFolder, "novaworld_folder"},
 };
 
 constexpr Token<UnsavedChoice> kChoiceTokens[] = {
@@ -1137,7 +1137,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return false;
 	case F::Resolution: {
 		Resolution resolution = Resolution::KeepMine;
-		if (json.is_string() && content_resolution_from_token(json.string, resolution)) {
+		if (json.is_string() && novaworld_resolution_from_token(json.string, resolution)) {
 			request.resolution = resolution;
 			return true;
 		}
@@ -1283,7 +1283,7 @@ bool field_to_json(
 	case F::Version: out = json_string(request.version); return !request.version.empty();
 	case F::Revision: out = json_number(double(request.revision)); return request.revision > 0;
 	case F::Resolution:
-		out = json_string(content_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
+		out = json_string(novaworld_resolution_token(request.resolution.value_or(Resolution::KeepMine)));
 		return request.resolution.has_value();
 	case F::kCount: break;
 	}
@@ -1321,8 +1321,8 @@ bool select_mode_from_token(const std::string &token, SelectMode &out) { return 
 bool unsaved_choice_from_token(const std::string &token, UnsavedChoice &out) {
 	return value_of(kChoiceTokens, token, out);
 }
-const char *content_resolution_token(Resolution resolution) { return token_of(kResolutionTokens, resolution); }
-bool content_resolution_from_token(const std::string &token, Resolution &out) {
+const char *novaworld_resolution_token(Resolution resolution) { return token_of(kResolutionTokens, resolution); }
+bool novaworld_resolution_from_token(const std::string &token, Resolution &out) {
 	return value_of(kResolutionTokens, token, out);
 }
 bool diagnostic_severity_from_token(const std::string &token, DiagnosticSeverity &out) {

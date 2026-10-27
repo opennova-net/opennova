@@ -1,0 +1,671 @@
+// The project routes (apps/novaworld_web/products/project_routes.h, ADR 0069), driven
+// in-process: a database of the run's own (migrated with the games seed, so the five seeded
+// games' projects are there), a Redis namespace, a local object store in a temp directory, the Crow
+// HttpListener on a port the OS picks, and requests as the site's sessions (an admin's and a
+// player's, logged in through POST /api/login) and as the Bearer admin. The cases share the
+// listener and run in order: who reads what (the public projects anyone's, the private ones an
+// admin's alone, 404 to anyone else); who may push (no one signed out, no player, not the Bearer
+// token, no session without the CSRF header); a push of a private retail project from nothing
+// (the files it lacks, each uploaded and checked by its SHA-256, the revision, a second push on
+// the same parent told the head that won, one listing the head's files refused, one naming a file
+// the store lacks refused with its hash, a manifest out of its canonical form refused), its
+// history, manifest and files read back; a file the store got through no route of this program (as
+// an upload through the store's own URL puts one) held once a push names it; a file past the blob
+// route's cap (the portal's /api/ body cap, web/nginx.conf's, which the test reads) refused 413;
+// a game's project made, refused, made public and renamed (a row change alone: the store names its
+// objects by the game's id, so a file uploaded under the old key serves a push under the new one)
+// and deleted, the route answering at once with its objects' product.purge queued, through the games'
+// admin routes (products/product_routes.h); and a release built from a revision.
+
+#include "accounts/auth.h"
+#include "accounts/web_session.h"
+#include "core/local_object_store.h"
+#include "http_listener.h"
+#include "net_http.h"
+#include "net_sockets.h"
+#include "products/product_jobs.h"
+#include "products/project_repository.h"
+#include "products/project_routes.h"
+#include "products/project_urls.h"
+#include "program/server_config.h"
+
+#include <base/io/file_io.h>
+#include <base/io/sha256.h>
+#include <base/project/project_manifest.h>
+#include <net/novaworld/db/database.h>
+
+#include <crow/json.h>
+
+#include "common/temp_dir.h"
+#include "common/test_database.h"
+#include "common/test_expect.h"
+#include "common/test_redis.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#ifndef OPENNOVA_SOURCE_DIR
+#error "OPENNOVA_SOURCE_DIR must be set by CMake"
+#endif
+
+namespace net = opennova::net;
+namespace nws = opennova::novaworld_server;
+namespace projects = opennova::novaworld_server::projects;
+namespace io = opennova::io;
+using opennova::project::ProjectFile;
+using opennova::db::BindValue;
+using opennova::db::ConnectionPool;
+
+namespace {
+
+constexpr const char *kAdminToken = "content-routes-admin-token";
+constexpr const char *kBearer = "Authorization: Bearer content-routes-admin-token";
+constexpr const char *kJson = "Content-Type: application/json";
+constexpr const char *kOctets = "Content-Type: application/octet-stream";
+constexpr const char *kCsrf = "X-OpenNova-Request: 1";
+
+struct Harness {
+	ConnectionPool &pool;
+	nws::LocalObjectStore &store;
+	uint16_t port = 0;
+	std::string admin; // the admin's session cookie, "Cookie: ..."
+	std::string player; // a player's
+	std::string own_game; // our own game's project's key (its updater login)
+	int64_t jo = 0; // the seeded Joint Operations game's id
+
+	net::HttpReply send(const char *method, const std::string &path,
+			const std::vector<std::string> &headers = {}, const std::string &body = {}) const {
+		const std::string url = "http://127.0.0.1:" + std::to_string(port) + path;
+		return net::http_exchange(
+				method, url, headers, body, 30000, [](const std::string &host, net::Endpoint &out) {
+					return net::resolve_ipv4(host, out, false);
+				});
+	}
+	// The admin's session, as the editor sends a request: the cookie and the CSRF header.
+	net::HttpReply as_admin(
+			const char *method, const std::string &path, const std::string &body = {}) const {
+		return send(method, path, { kJson, kCsrf, admin }, body);
+	}
+	net::HttpReply upload(
+			const std::string &key, const std::string &sha, const std::string &bytes) const {
+		return send("PUT", "/api/products/" + key + "/blobs/" + sha,
+				{ kOctets, kCsrf, admin }, bytes);
+	}
+};
+
+std::string body_text(const net::HttpReply &reply) {
+	return std::string(reply.body.begin(), reply.body.end());
+}
+
+std::string describe(const net::HttpReply &reply) {
+	if (!reply.transport_ok)
+		return "no reply (" + reply.error + ")";
+	return "HTTP " + std::to_string(reply.code) + " " + body_text(reply).substr(0, 600);
+}
+
+// The reply's JSON when it came with `code`; an empty value (and the reply logged) otherwise.
+crow::json::rvalue json_of(const net::HttpReply &reply, int code) {
+	if (!reply.transport_ok || reply.code != code) {
+		std::fprintf(stderr, "  %s, want %d\n", describe(reply).c_str(), code);
+		return {};
+	}
+	return crow::json::load(body_text(reply));
+}
+
+// Whether the reply came with `code` and the error `error` (logged otherwise).
+bool refused(const net::HttpReply &reply, int code, const char *error) {
+	const auto json = crow::json::load(body_text(reply));
+	const std::string got =
+			json && json.has("error") ? std::string(json["error"].s()) : std::string();
+	if (reply.transport_ok && reply.code == code && got == error)
+		return true;
+	std::fprintf(stderr, "  %s, want %d %s\n", describe(reply).c_str(), code, error);
+	return false;
+}
+
+std::string header_of(const net::HttpReply &reply, const char *name) {
+	for (const std::string &line : reply.headers) {
+		const auto colon = line.find(':');
+		if (colon == std::string::npos)
+			continue;
+		std::string key = line.substr(0, colon);
+		for (char &c : key)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		std::string want = name;
+		for (char &c : want)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (key != want)
+			continue;
+		size_t start = colon + 1;
+		while (start < line.size() && line[start] == ' ')
+			++start;
+		return line.substr(start);
+	}
+	return {};
+}
+
+std::string sha_of(const std::string &bytes) {
+	return io::sha256_hex(bytes.data(), bytes.size());
+}
+
+ProjectFile file_of(const std::string &path, const std::string &bytes) {
+	return { path, sha_of(bytes), bytes.size() };
+}
+
+// A push's body: {parent, message, manifest} with the manifest's text a JSON string.
+std::string push_body(int64_t parent, const std::string &message, const std::string &manifest) {
+	crow::json::wvalue body;
+	body["parent"] = parent;
+	body["message"] = message;
+	body["manifest"] = manifest;
+	return body.dump();
+}
+
+// The missing request's body for `files`.
+std::string missing_body(const std::vector<ProjectFile> &files) {
+	std::vector<crow::json::wvalue> blobs;
+	for (const ProjectFile &file : files) {
+		crow::json::wvalue blob;
+		blob["sha256"] = file.sha256;
+		blob["size"] = static_cast<int64_t>(file.size);
+		blobs.push_back(std::move(blob));
+	}
+	crow::json::wvalue body;
+	body["blobs"] = std::move(blobs);
+	return body.dump();
+}
+
+// An account with `role`, logged in through POST /api/login: its "Cookie: ..." header, "" when
+// the login failed.
+std::string signed_in(Harness &h, const std::string &username, const char *role) {
+	static int next = 0;
+	char pcid[16];
+	std::snprintf(pcid, sizeof(pcid), "%08x", 0xc0de0000u + static_cast<unsigned>(next++));
+	nws::CreateUserParams p;
+	p.username = username;
+	p.password = "content-routes-pw1";
+	p.pcid = pcid;
+	p.nwh = "1";
+	p.nwhandle = username;
+	const auto made = nws::create_user(*h.pool.acquire(), p);
+	if (!made.ok)
+		return {};
+	h.pool.acquire()->exec(
+			"UPDATE players SET role = $1 WHERE id = $2;", { BindValue(role), BindValue(made.id) });
+	const auto reply = h.send("POST", "/api/login", { kJson, kCsrf },
+			"{\"username\":\"" + username + "\",\"password\":\"content-routes-pw1\"}");
+	if (!reply.transport_ok || reply.code != 200)
+		return {};
+	const std::string prefix = std::string(nws::kWebSessionCookie) + "=";
+	for (const std::string &line : reply.headers) {
+		const auto at = line.find(prefix);
+		if (at == std::string::npos)
+			continue;
+		const auto value = at + prefix.size();
+		return "Cookie: " + prefix + line.substr(value, line.find(';', value) - value);
+	}
+	return {};
+}
+
+// The keys a project list holds.
+std::vector<std::string> keys_of(const crow::json::rvalue &json) {
+	std::vector<std::string> keys;
+	if (json && json.has("projects"))
+		for (const auto &p : json["projects"])
+			keys.emplace_back(p["key"].s());
+	return keys;
+}
+
+int test_who_reads_what(Harness &h) {
+	// Anyone, and a player: our own two projects, which no one but an admin may push.
+	for (const std::vector<std::string> &headers :
+			{ std::vector<std::string>{}, std::vector<std::string>{ h.player } }) {
+		const auto json = json_of(h.send("GET", "/api/products", headers), 200);
+		const auto keys = keys_of(json);
+		TEST_EXPECT(keys.size() == 2);
+		for (const auto &p : json["projects"])
+			TEST_EXPECT(std::string(p["visibility"].s()) == "public" && !p["can_push"].b() &&
+					!p.has("storage"));
+	}
+	// An admin, by session or by token: every project, its storage beside it.
+	for (const std::vector<std::string> &headers :
+			{ std::vector<std::string>{ h.admin }, std::vector<std::string>{ kBearer } }) {
+		const auto json = json_of(h.send("GET", "/api/products", headers), 200);
+		const auto keys = keys_of(json);
+		const auto holds = [&keys](const char *key) {
+			return std::find(keys.begin(), keys.end(), key) != keys.end();
+		};
+		TEST_EXPECT(keys.size() == 5 && holds("DFX2") && holds("JO") && holds("JOX01"));
+		for (const auto &p : json["projects"])
+			TEST_EXPECT(p["can_push"].b() && p.has("storage") && p["head"].i() == 0);
+	}
+	// An app's key names no project, even to an admin.
+	TEST_EXPECT(refused(h.send("GET", "/api/products/ONRUNTIME", { h.admin }), 404, "not_found"));
+	const auto jox01 = json_of(h.send("GET", "/api/products/JOX01", { h.admin }), 200);
+	TEST_EXPECT(jox01 && std::string(jox01["project"]["base"].s()) == "JO" &&
+			jox01["project"]["retail"].b() && jox01["head_revision"].t() == crow::json::type::Null);
+	const auto own = json_of(h.send("GET", "/api/products/" + h.own_game), 200);
+	TEST_EXPECT(own && own["project"]["base"].t() == crow::json::type::Null);
+	// A private project is no one's but an admin's: the same 404 as no project.
+	TEST_EXPECT(refused(h.send("GET", "/api/products/JO"), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("GET", "/api/products/JO", { h.player }), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("GET", "/api/products/JO/revisions"), 404, "not_found"));
+	TEST_EXPECT(refused(h.send("GET", "/api/products/NOPE"), 404, "not_found"));
+	return 0;
+}
+
+int test_who_pushes(Harness &h) {
+	const std::string body = missing_body({ file_of("a.def", "alpha") });
+	const std::string path = "/api/products/" + h.own_game + "/missing";
+	TEST_EXPECT(refused(h.send("POST", path, { kJson, kCsrf }, body), 401, "unauthorized"));
+	TEST_EXPECT(refused(h.send("POST", path, { kJson, kCsrf, h.player }, body), 403, "forbidden"));
+	TEST_EXPECT(refused(h.send("POST", path, { kJson, kBearer }, body), 403, "session_required"));
+	TEST_EXPECT(
+			refused(h.send("POST", path, { kJson, h.admin }, body), 403, "csrf_header_required"));
+	TEST_EXPECT(refused(h.send("POST", "/api/products/" + h.own_game + "/revisions",
+								{ kJson, kBearer }, push_body(0, "x", "{}")),
+			403, "session_required"));
+	TEST_EXPECT(
+			refused(h.send("PUT", "/api/products/" + h.own_game + "/blobs/" + sha_of("x"),
+							{ kOctets, kBearer }, "x"),
+					403, "session_required"));
+	return 0;
+}
+
+int test_push(Harness &h) {
+	const std::string alpha = "alpha bytes", bravo(70000, 'b');
+	const std::vector<ProjectFile> files = { file_of("defs/a.def", alpha),
+		file_of("art/b.tga", bravo) };
+	const std::string manifest = opennova::project::encode_manifest(files);
+
+	// The files the store lacks, each with its upload.
+	auto json = json_of(
+			h.as_admin("POST", "/api/products/JO/missing", missing_body(files)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 2);
+	for (const auto &m : json["missing"])
+		TEST_EXPECT(std::string(m["upload"]["method"].s()) == "PUT" &&
+				std::string(m["upload"]["url"].s()) ==
+						"/api/products/JO/blobs/" + std::string(m["sha256"].s()));
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/products/JO/missing",
+								"{\"blobs\": [{\"sha256\": \"xyz\", \"size\": 1}]}"),
+			400, "invalid_field"));
+	TEST_EXPECT(refused(h.upload("JO", sha_of("other"), alpha), 400, "sha256_mismatch"));
+	TEST_EXPECT(refused(h.upload("JO", "NOT-A-SHA", alpha), 400, "invalid_sha256"));
+	TEST_EXPECT(json_of(h.upload("JO", files[0].sha256, alpha), 200));
+	TEST_EXPECT(json_of(h.upload("JO", files[1].sha256, bravo), 200));
+	json = json_of(
+			h.as_admin("POST", "/api/products/JO/missing", missing_body(files)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+
+	// The first revision.
+	json = json_of(h.as_admin("POST", "/api/products/JO/revisions",
+						   push_body(0, "Stock import", manifest)),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 1 && json["revision"]["number"].i() == 1 &&
+			std::string(json["revision"]["author"].s()) == "content_admin" &&
+			json["revision"]["file_count"].i() == 2 &&
+			json["revision"]["bytes"].i() == static_cast<int64_t>(alpha.size() + bravo.size()) &&
+			std::string(json["revision"]["manifest_sha256"].s()) ==
+					opennova::project::manifest_sha256(manifest));
+
+	// A second push on the same parent: told the head that won.
+	const auto stale = h.as_admin(
+			"POST", "/api/products/JO/revisions", push_body(0, "Also first", manifest));
+	TEST_EXPECT(
+			refused(stale, 409, "stale") && crow::json::load(body_text(stale))["head"].i() == 1);
+	// The head's own files again; a file the store lacks; a manifest out of its form.
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/products/JO/revisions",
+								push_body(1, "Again", manifest)),
+			400, "unchanged"));
+	const std::vector<ProjectFile> more = { files[0], files[1],
+		file_of("missions/m.bms", "never sent") };
+	const auto lacking = h.as_admin("POST", "/api/products/JO/revisions",
+			push_body(1, "More", opennova::project::encode_manifest(more)));
+	TEST_EXPECT(refused(lacking, 400, "missing_blobs"));
+	// The reply kept whole: a member read off a temporary document outlives what it points into.
+	const auto lacked = crow::json::load(body_text(lacking));
+	TEST_EXPECT(lacked && lacked["hashes"].size() == 1 &&
+			std::string(lacked["hashes"][0].s()) == more[2].sha256);
+	std::string spaced = manifest;
+	spaced.insert(spaced.find('\n'), " ");
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/products/JO/revisions",
+								push_body(1, "Spaced", spaced)),
+			400, "invalid_manifest"));
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/products/JO/revisions",
+								push_body(1, std::string("bad\x01", 4), manifest)),
+			400, "invalid_field"));
+
+	// Read back: the history, the manifest's very text, the files.
+	json = json_of(h.send("GET", "/api/products/JO/revisions", { h.admin }), 200);
+	TEST_EXPECT(json && json["revisions"].size() == 1 &&
+			std::string(json["revisions"][0]["message"].s()) == "Stock import");
+	const auto text = h.send("GET", "/api/products/JO/revisions/1/manifest", { h.admin });
+	TEST_EXPECT(text.code == 200 && body_text(text) == manifest &&
+			header_of(text, "Cache-Control").rfind("private", 0) == 0);
+	TEST_EXPECT(refused(h.send("GET", "/api/products/JO/revisions/2/manifest", { h.admin }),
+			404, "not_found"));
+	const auto got =
+			h.send("GET", "/api/products/JO/blobs/" + files[1].sha256, { h.admin });
+	TEST_EXPECT(got.code == 200 && body_text(got) == bravo);
+	TEST_EXPECT(refused(
+			h.send("GET", "/api/products/JO/blobs/" + files[1].sha256), 404, "not_found"));
+	TEST_EXPECT(
+			refused(h.send("GET", "/api/products/JO/blobs/" + sha_of("none"), { h.admin }),
+					404, "not_found"));
+	json = json_of(h.send("GET", "/api/products/JO", { h.admin }), 200);
+	TEST_EXPECT(json && json["project"]["head"].i() == 1 &&
+			json["head_revision"]["number"].i() == 1 &&
+			json["project"]["storage"]["files"].i() == 2);
+
+	// A file the store got through no route here, as an upload through its own URL puts one: held
+	// once a push names it at its size.
+	const std::string charlie = "charlie";
+	{
+		test_temp::TempDir scratch("project_routes_direct");
+		const std::string path = scratch.file("c.bin");
+		std::string error;
+		TEST_EXPECT(io::write_file_atomic(path, charlie, error));
+		TEST_EXPECT(h.store.put_file(projects::blob_key(h.jo, sha_of(charlie)), path, error));
+	}
+	const std::vector<ProjectFile> direct = { files[0], file_of("defs/c.def", charlie) };
+	json = json_of(
+			h.as_admin("POST", "/api/products/JO/revisions",
+					push_body(1, "Direct upload", opennova::project::encode_manifest(direct))),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 2);
+	json = json_of(
+			h.as_admin("POST", "/api/products/JO/missing", missing_body(direct)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+	json = json_of(h.send("GET", "/api/products/JO/revisions?limit=1", { h.admin }), 200);
+	TEST_EXPECT(json && json["revisions"].size() == 1 && json["revisions"][0]["number"].i() == 2);
+	json = json_of(h.send("GET", "/api/products/JO/revisions?before=2", { h.admin }), 200);
+	TEST_EXPECT(json && json["revisions"].size() == 1 && json["revisions"][0]["number"].i() == 1);
+	TEST_EXPECT(refused(h.send("GET", "/api/products/JO/revisions?limit=0", { h.admin }),
+			400, "invalid_query"));
+
+	// More such files than a push asks the store of one by one: held by one listing of the store.
+	std::vector<ProjectFile> many = { files[0] };
+	{
+		test_temp::TempDir scratch("project_routes_many");
+		for (int i = 0; i < 6; ++i) {
+			const std::string bytes = "many-" + std::to_string(i);
+			const std::string path = scratch.file(("m" + std::to_string(i)).c_str());
+			std::string error;
+			TEST_EXPECT(io::write_file_atomic(path, bytes, error));
+			TEST_EXPECT(h.store.put_file(projects::blob_key(h.jo, sha_of(bytes)), path, error));
+			many.push_back(file_of("many/" + std::to_string(i) + ".def", bytes));
+		}
+	}
+	json = json_of(h.as_admin("POST", "/api/products/JO/revisions",
+						   push_body(2, "Many", opennova::project::encode_manifest(many))),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 3);
+
+	// Where each file is downloaded from: this program's own blob route (a directory's store signs
+	// no URLs), an admin's alone for a private project.
+	const std::string hashes =
+			"{\"hashes\": [\"" + files[0].sha256 + "\", \"" + files[1].sha256 + "\"]}";
+	json = json_of(h.as_admin("POST", "/api/products/JO/downloads", hashes), 200);
+	TEST_EXPECT(json && json["downloads"].size() == 2 &&
+			std::string(json["downloads"][0]["url"].s()) ==
+					"/api/products/JO/blobs/" + files[0].sha256 &&
+			std::string(json["downloads"][0]["method"].s()) == "GET");
+	TEST_EXPECT(
+			refused(h.send("POST", "/api/products/JO/downloads", { kJson, kCsrf }, hashes),
+					404, "not_found"));
+	TEST_EXPECT(refused(h.as_admin("POST", "/api/products/JO/downloads",
+								"{\"hashes\": [\"not-a-sha\"]}"),
+			400, "invalid_field"));
+	return 0;
+}
+
+// A deleted game's purge waits out every presigned transfer handed out before the delete.
+static_assert(opennova::novaworld_server::hosted::kProductPurgeDelaySeconds >
+		opennova::novaworld_server::projects::S3ProjectUrls::kExpiresS);
+
+// The blob route's cap is the portal's: web/nginx.conf's client_max_body_size in its /api/
+// location (the one proxy in front of web's routes), so the route refuses exactly what the proxy
+// would; one byte past it is 413 too_large, its bytes never put in the store.
+int test_body_cap(Harness &h) {
+	std::string conf, error;
+	TEST_EXPECT(io::read_file_text(
+			std::string(OPENNOVA_SOURCE_DIR) + "/web/nginx.conf", conf, error));
+	const std::string location = "location /api/ {";
+	const size_t api = conf.find(location);
+	TEST_EXPECT(api != std::string::npos);
+	// The location's own closing brace, past the blocks nested in it (its `if`).
+	size_t end = api + location.size();
+	for (int depth = 1; end < conf.size() && depth > 0; ++end) {
+		if (conf[end] == '{')
+			++depth;
+		else if (conf[end] == '}')
+			--depth;
+	}
+	const std::string directive = "client_max_body_size ";
+	const size_t at = conf.find(directive, api);
+	TEST_EXPECT(at != std::string::npos && at < end);
+	const size_t number = at + directive.size();
+	const unsigned long megabytes = std::strtoul(conf.c_str() + number, nullptr, 10);
+	TEST_EXPECT(conf.find("m;", number) == conf.find_first_not_of("0123456789", number));
+	TEST_EXPECT((static_cast<uint64_t>(megabytes) << 20) == projects::ProjectRoutes::kBodyMax);
+
+	const std::string over(static_cast<size_t>(projects::ProjectRoutes::kBodyMax) + 1, 'o');
+	TEST_EXPECT(refused(h.upload("JO", sha_of(over), over), 413, "too_large"));
+	bool exists = true;
+	uint64_t size = 0;
+	TEST_EXPECT(
+			h.store.head(projects::blob_key(h.jo, sha_of(over)), exists, size, error) && !exists);
+	return 0;
+}
+
+// A game's project through the games' admin routes (products/product_routes.h): an expansion
+// of Joint Operations made with its project, which builds on JO's, a key in use refused; a file
+// in its store, then the game made public and its key renamed, the file staying where it was (the
+// store names it by the game's id) and still held, the old key no project's (its 404 telling a
+// working copy bound to it to bind again); a push begun under the old key (its file uploaded
+// there) committed under the new one, its manifest read back; Joint Operations kept from deletion
+// while an expansion builds on it; the mod deleted at once, its files left for the data program's
+// product.purge, queued with its id.
+int test_game_projects(Harness &h) {
+	const auto admin = [&](const char *method, const std::string &path,
+							   const std::string &body = {}) {
+		return h.send(method, path, { kJson, kBearer }, body);
+	};
+	auto json = json_of(admin("POST", "/api/admin/products",
+								"{\"display_name\": \"A mod\", \"kind\": \"expansion\", "
+								"\"parent_id\": " + std::to_string(h.jo) +
+										", \"expansion_code\": \"mod\", \"key\": \"MOD\", "
+										"\"visibility\": \"private\"}"),
+			201);
+	TEST_EXPECT(json && std::string(json["product"]["key"].s()) == "MOD" &&
+			std::string(json["product"]["visibility"].s()) == "private" &&
+			json["product"]["head"].i() == 0);
+	const int64_t mod = json ? json["product"]["id"].i() : 0;
+	json = json_of(h.send("GET", "/api/products/MOD", { h.admin }), 200);
+	TEST_EXPECT(json && std::string(json["project"]["base"].s()) == "JO" &&
+			std::string(json["project"]["title"].s()) == "A mod" &&
+			json["project"]["product_id"].i() == mod && !json["project"]["retail"].b());
+	TEST_EXPECT(refused(h.send("GET", "/api/products/MOD"), 404, "not_found"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/products",
+								"{\"display_name\": \"Again\", \"kind\": \"game\", \"title\": "
+								"\"jo\", \"lobby\": \"jop_2_consumer\", \"key\": \"MOD\", "
+								"\"visibility\": \"public\"}"),
+			409, "duplicate_key"));
+
+	// A file in its store; made public and renamed, the file stays where it is.
+	TEST_EXPECT(json_of(h.upload("MOD", sha_of("mod file"), "mod file"), 200));
+	const std::string game = "/api/admin/products/" + std::to_string(mod);
+	TEST_EXPECT(refused(admin("PATCH", game, "{\"key\": \"JO\"}"), 409, "duplicate_key"));
+	json = json_of(admin("PATCH", game,
+						   "{\"visibility\": \"public\", \"key\": \"MODDED\", \"display_name\": "
+						   "\"Renamed\"}"),
+			200);
+	TEST_EXPECT(json && std::string(json["product"]["key"].s()) == "MODDED" &&
+			std::string(json["product"]["visibility"].s()) == "public");
+	bool exists = false;
+	uint64_t size = 0;
+	std::string error;
+	const std::string mod_file = projects::blob_key(mod, sha_of("mod file"));
+	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
+	const auto old_key = h.send("GET", "/api/products/MOD", { h.admin });
+	TEST_EXPECT(refused(old_key, 404, "not_found") &&
+			body_text(old_key).find("bind the project again") != std::string::npos);
+	json = json_of(h.send("GET", "/api/products/MODDED"), 200);
+	TEST_EXPECT(json && std::string(json["project"]["title"].s()) == "Renamed");
+	json = json_of(h.as_admin("POST", "/api/products/MODDED/missing",
+						   missing_body({ file_of("mod.def", "mod file") })),
+			200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+
+	// A push across a rename: its file uploaded under MODDED, the key renamed MODA, its revision
+	// pushed under MODA with nothing to upload again, its manifest read back.
+	const std::string across = "uploaded before the rename";
+	TEST_EXPECT(json_of(h.upload("MODDED", sha_of(across), across), 200));
+	TEST_EXPECT(json_of(admin("PATCH", game, "{\"key\": \"MODA\"}"), 200));
+	const std::vector<ProjectFile> pushed = { file_of("mod.def", "mod file"),
+		file_of("across.def", across) };
+	json = json_of(
+			h.as_admin("POST", "/api/products/MODA/missing", missing_body(pushed)), 200);
+	TEST_EXPECT(json && json["missing"].size() == 0);
+	const std::string pushed_manifest = opennova::project::encode_manifest(pushed);
+	json = json_of(h.as_admin("POST", "/api/products/MODA/revisions",
+						   push_body(0, "Across a rename", pushed_manifest)),
+			201);
+	TEST_EXPECT(json && json["head"].i() == 1);
+	const auto read_back =
+			h.send("GET", "/api/products/MODA/revisions/1/manifest", { h.admin });
+	TEST_EXPECT(read_back.code == 200 && body_text(read_back) == pushed_manifest);
+
+	// Joint Operations stays while an expansion builds on it; the mod goes at once, its files
+	// left for the data program's purge.
+	TEST_EXPECT(refused(admin("DELETE", "/api/admin/products/" + std::to_string(h.jo)), 409,
+			"has_expansion"));
+	const auto gone = admin("DELETE", game);
+	TEST_EXPECT(gone.transport_ok && gone.code == 204);
+	TEST_EXPECT(h.store.head(mod_file, exists, size, error) && exists);
+	const auto purge = h.pool.acquire()->query(
+			"SELECT count(*) FROM jobs WHERE kind = 'product.purge' AND state = 'queued' AND "
+			"(payload->>'product_id')::bigint = $1;",
+			{ BindValue(mod) });
+	TEST_EXPECT(!purge.empty() && purge.front().as_int(0).value_or(0) == 1);
+	TEST_EXPECT(
+			refused(h.send("GET", "/api/products/MODA", { h.admin }), 404, "not_found"));
+	return 0;
+}
+
+// A release built from a revision (products/release_build.h): refused with no version or no such
+// revision, a player refused; made building with its build queued, and kept from deletion while
+// the data program is on it.
+int test_release_route(Harness &h) {
+	const auto admin = [&](const char *method, const std::string &path,
+							   const std::string &body = {}) {
+		return h.send(method, path, { kJson, kBearer }, body);
+	};
+	const std::string jo = "/api/admin/products/JO/releases";
+	TEST_EXPECT(refused(admin("POST", jo, "{\"version\": \"1.x\"}"), 400, "invalid_field"));
+	TEST_EXPECT(refused(admin("POST", jo, "{}"), 400, "invalid_field"));
+	TEST_EXPECT(refused(admin("POST", jo, "{\"version\": \"1.0\", \"revision\": 99}"), 400,
+			"no_revision"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/products/JOX01/releases",
+								"{\"version\": \"1.0\"}"),
+			400, "no_revision"));
+	TEST_EXPECT(refused(admin("POST", "/api/admin/products/NOPE/releases",
+								"{\"version\": \"1.0\"}"),
+			404, "not_found"));
+	TEST_EXPECT(refused(h.send("POST", jo, { kJson, kCsrf, h.player }, "{\"version\": \"1.0\"}"),
+			403, "forbidden"));
+
+	const auto head = json_of(h.send("GET", "/api/products/JO", { h.admin }), 200);
+	TEST_EXPECT(head && head["project"]["head"].i() >= 1);
+	const int64_t number = head ? head["project"]["head"].i() : 0;
+	const auto made = json_of(admin("POST", jo, "{\"version\": \"1.0.1\"}"), 201);
+	TEST_EXPECT(made && std::string(made["release"]["status"].s()) == "building" &&
+			made["release"]["product_id"].i() == h.jo &&
+			std::string(made["release"]["source"]["project"].s()) == "JO" &&
+			made["release"]["source"]["revision"].i() == number &&
+			std::string(made["release"]["version"].s()) == "1.0.1" &&
+			std::string(made["release"]["name"].s()) == "JO 1.0.1");
+	const int64_t id = made ? made["release"]["id"].i() : 0;
+	const auto queued = h.pool.acquire()->query(
+			"SELECT count(*) FROM jobs WHERE kind = 'release.build' AND "
+			"(payload->>'release_id')::bigint = $1;",
+			{ opennova::db::BindValue(id) });
+	TEST_EXPECT(!queued.empty() && queued.front().as_int(0).value_or(0) == 1);
+	TEST_EXPECT(
+			refused(admin("DELETE", "/api/admin/releases/" + std::to_string(id)), 409, "building"));
+	return 0;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
+	TEST_EXPECT(net::startup() == 0);
+	int rc = 1;
+	{
+		test_temp::TempDir temp("project_routes");
+		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		ConnectionPool pool(database.options());
+		test_redis::TestRedis redis;
+		nws::LocalObjectStore store(temp.file("store"));
+
+		nws::ServerConfig config;
+		config.public_host = "127.0.0.1";
+		config.web_host = "127.0.0.1";
+		config.admin_api_token = kAdminToken;
+		config.http_port = 0;
+		config.web_dist_dir = temp.path / "web_dist";
+		config.templates_dir = temp.path / "templates";
+		config.static_dir = temp.path / "static";
+		std::filesystem::create_directories(config.templates_dir);
+
+		nws::HttpListener http(pool, redis.pool());
+		http.set_object_store(&store);
+		TEST_EXPECT(http.start(config));
+		TEST_EXPECT(http.bound_port() != 0);
+
+		Harness harness{ pool, store, http.bound_port() };
+		harness.admin = signed_in(harness, "content_admin", "admin");
+		harness.player = signed_in(harness, "content_player", "player");
+		TEST_EXPECT(!harness.admin.empty() && !harness.player.empty());
+		{
+			const auto rows = pool.acquire()->query("SELECT updater_login FROM products WHERE "
+													"kind = 'game' AND updater_login <> '' "
+													"AND NOT retail;");
+			TEST_EXPECT(rows.size() == 1);
+			harness.own_game = rows.front().as_text(0).value_or("");
+			const auto jo = pool.acquire()->query("SELECT id FROM products WHERE key = 'JO';");
+			TEST_EXPECT(jo.size() == 1);
+			harness.jo = jo.empty() ? 0 : jo.front().as_int(0).value_or(0);
+		}
+
+		struct Case {
+			const char *name;
+			int (*fn)(Harness &);
+		};
+		const Case cases[] = {
+			{ "who_reads_what", test_who_reads_what },
+			{ "who_pushes", test_who_pushes },
+			{ "push", test_push },
+			{ "body_cap", test_body_cap },
+			{ "game_projects", test_game_projects },
+			{ "release_route", test_release_route },
+		};
+		rc = 0;
+		for (const Case &c : cases) {
+			const int result = c.fn(harness);
+			std::printf("project_routes: %s %s\n", c.name, result == 0 ? "ok" : "FAILED");
+			rc |= result;
+		}
+		http.stop();
+	}
+	net::shutdown();
+	return rc;
+}

@@ -66,8 +66,9 @@ bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 	product.dir = dir;
 	product.command = wizard.cmd;
 	product.login = wizard.product_login;
-	product.native = product.native || strutil::iequals(product.login, "ONRUNTIME") ||
-			strutil::iequals(product.login, "ACIDGAMBIT");
+	// OpenNova's own products install every row of a new release (D-UPD-6): the runtime and an
+	// app (native from their caller), and the game whose wizard names OP: Acid Gambit's CMD.
+	product.native = product.native || update::wizard_product(wizard.cmd) == "acidgambit";
 	return true;
 }
 
@@ -416,7 +417,9 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 	// @0x407794]
 	worker.shown.product = command->product.empty() ? "Your NovaLogic Product" : command->product;
 	worker.status("Checking file versions...");
-	if (worker.options.legacy && result.launch_exe.empty()) result.launch_exe = command->exe;
+	// /RUN starts a legacy run's and an app's own EXE (relaunch_command).
+	if ((worker.options.legacy || product.app) && result.launch_exe.empty()) result.launch_exe = command->exe;
+	result.app = result.app || product.app;
 	update::CommandFile selected = *command;
 	selected.rows.clear();
 	std::string target = ".";
@@ -586,17 +589,29 @@ bool update_product(Worker &worker, const Product &product, Result &result) {
 } // namespace
 
 // The runtime, the selected game and every expansion/<name>/ with an UPDATE.WIZ, each a product
-// of its own. [orig: Cupdate2Dlg_RunExpansionUpdates @ 0x407f10 (UPDATE.EXE);
-// Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
+// of its own; an app's folder, that app alone. [orig: Cupdate2Dlg_RunExpansionUpdates @ 0x407f10
+// (UPDATE.EXE); Cupdate2Dlg_RunWizardsIn @ 0x406290 (UPDATE.EXE)]
 bool discover_products(const Options &o, std::vector<Product> &out, std::string &error) {
 	out.clear();
 	std::error_code ec;
-	if (!o.no_runtime) {
-		Product runtime{o.runtime_dir, "ONRUNTIME", "ONRUNTIME.CMD", {}, true};
-		const fs::path wizard = named_file(o.runtime_dir, "OPENNOVA.WIZ");
-		if (fs::exists(wizard, ec) && !wizard_product(o.runtime_dir, wizard, runtime, error)) return false;
+	// The folder's OPENNOVA.WIZ names the app it holds: the runtime (ONRUNTIME, also with no
+	// wizard), which updates the game beside it, or another app (the editor's ONEDITOR), whose
+	// folder holds no game and no expansion, so it updates that app alone.
+	Product runtime{o.runtime_dir, std::string(update::kRuntimeLogin), std::string(update::kRuntimeCommandFile),
+			{}, true};
+	const fs::path wizard = named_file(o.runtime_dir, "OPENNOVA.WIZ");
+	if (fs::exists(wizard, ec) && !wizard_product(o.runtime_dir, wizard, runtime, error)) return false;
+	if (!strutil::iequals(runtime.login, update::kRuntimeLogin)) {
+		if (o.game_explicit || o.no_runtime) {
+			error = "This folder holds " + runtime.login + " alone (its OPENNOVA.WIZ): /game and --no-runtime do not apply.";
+			return false;
+		}
+		runtime.app = true;
+		runtime.gateways = service_gateways(o.runtime_dir);
 		out.push_back(std::move(runtime));
+		return true;
 	}
+	if (!o.no_runtime) out.push_back(std::move(runtime));
 	// The folder's own UPDATE.WIZ names what it holds (boot_policy.h folder_product, ADR 0067
 	// d2). A launch without /game takes that product, and a product the folder does not hold
 	// is refused, so OpenNova content never lands over another game's data. A legacy launch
@@ -629,7 +644,8 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 	}
 	if (native_content) {
-		out.push_back({o.resource_dir, "ACIDGAMBIT", "ACIDGAMBIT.CMD", {}, true});
+		out.push_back({o.resource_dir, std::string(update::kAcidGambitLogin),
+				std::string(update::kAcidGambitCommandFile), {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;
@@ -659,13 +675,19 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 }
 
 VersionMark version_mark(const fs::path &dir) {
-	// The wizard's CMD; a folder with none is OpenNova's own (the client's rule, discover_products).
-	std::string wizard;
-	const std::string command = vfs_update_wizard_text(io::utf8_path(dir), wizard)
-	                                    ? update::read_update_wizard(wizard).cmd
-	                                    : std::string(update::kAcidGambitCommandFile);
+	// The wizard's CMD; a folder with none is an app's when its OPENNOVA.WIZ names another login
+	// than the runtime's (its own command file), else OpenNova's own game's (the client's rule,
+	// discover_products).
+	std::string wizard, ignored;
+	std::string command(update::kAcidGambitCommandFile);
+	if (vfs_update_wizard_text(io::utf8_path(dir), wizard)) {
+		command = update::read_update_wizard(wizard).cmd;
+	} else if (io::read_file_text(io::utf8_path(named_file(dir, "OPENNOVA.WIZ")), wizard, ignored)) {
+		const update::UpdateWizard app = update::read_update_wizard(wizard);
+		if (!app.product_login.empty() && !strutil::iequals(app.product_login, update::kRuntimeLogin))
+			command = app.cmd;
+	}
 	std::vector<uint8_t> bytes;
-	std::string ignored;
 	if (command.empty() || !update::is_safe_row_name(command) ||
 			!io::read_file_bytes(io::utf8_path(dir / command), bytes, ignored))
 		return {};

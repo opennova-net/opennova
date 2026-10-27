@@ -724,7 +724,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     launch = commands.add_parser("launch", help="start the editor with --mcp-port and wait for its endpoint")
     launch.add_argument("--editor", default=None,
-                        help="a packaged opennova-editor.exe (default: the Godot binary at the source project)")
+                        help="a packaged oneditor.exe (default: the Godot binary at the source project)")
     launch.add_argument("--godot", default=None, help="Godot 4.6.1 binary (default: GODOT_BIN, else .godot-bin/)")
     launch.add_argument("--project-dir", default=str(PROJECT_DIR), help="the Godot project directory (source runs)")
     launch.add_argument("--open", default=None, metavar="DIR", help="open this OpenNova project at boot (--project)")

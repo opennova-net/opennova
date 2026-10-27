@@ -170,7 +170,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
 		if (runtime.edited) set("runtime", io::JsonValue::make_string(runtime_.sent()));
-		ui_kit::tooltip("opennova.exe; left empty, the one packaged beside the editor. " +
+		ui_kit::tooltip("A game runtime (opennova.exe); left empty, the onplay.exe packaged beside the editor. " +
 		                (v.activity.runtime_executable.empty() ? std::string("No runtime is found now.")
 		                                                       : "Play runs " + v.activity.runtime_executable + "."));
 	}

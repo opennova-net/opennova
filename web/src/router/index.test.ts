@@ -72,8 +72,8 @@ describe('router', () => {
     '/admin/jobs/77',
     '/admin/users/7',
     '/admin/usage',
-    '/admin/games',
-    '/admin/games/JO',
+    '/admin/products',
+    '/admin/products/JO',
     '/admin/cd-keys',
   ])('keeps %s', async (path) => {
     expect(await resolvedPage(path)).not.toBe(NotFoundPage);
