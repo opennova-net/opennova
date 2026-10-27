@@ -657,7 +657,8 @@ OpenNova Editor (pre-1.0, experimental).
 
 Keep the folder's files together: Play runs the onplay.exe beside oneditor.exe
 (or set another runtime in the editor's File > Project settings...), and
-update.exe and revupdat.exe update the editor in place.
+Help > Update OpenNova Editor... updates the editor in place through update.exe
+and revupdat.exe.
 "@
 
 $runtimeStage = New-StageDir ".stage-opennova-runtime-windows"

@@ -113,6 +113,8 @@ enum class EditorRequestKind {
 	PickDirectory,
 	PickFile,
 	RevealPath,
+	// Help > Update OpenNova Editor... (ADR 0072): the updater started over the editor's folder, the editor quit
+	UpdateEditor,
 	// A font made from a glyph sheet (round S23 lane A): its font set written in fonts/ naming the sheet, then
 	// imported (import/font_import.h)
 	NewFont,

@@ -29,7 +29,8 @@ An `OPENNOVA.WIZ` naming another login than `ONRUNTIME` makes the folder that ap
 editor's names `ONEDITOR` / `ONEDITOR.CMD`. There `update.exe` updates that app alone,
 with no game and no expansion, and refuses `/game` and `--no-runtime`; `/RUN` starts
 the EXE its command file names (`oneditor.exe`), with the `--run-arg` values alone, and
-the result box reads that command file's `VERSION`.
+the result box reads that command file's `VERSION`. The editor's Help > Update OpenNova
+Editor... runs `update.exe /RUN --parent-pid <pid>` there and quits.
 
 The Joint Operations and DFX2 zips (`jointops-game-windows`, `dfx2-game-windows`) are the
 runtime with the `UPDATE.WIZ` naming that game's product. Unzipped into an empty folder,

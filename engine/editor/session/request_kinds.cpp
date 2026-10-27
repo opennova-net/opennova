@@ -1380,6 +1380,15 @@ constexpr RequestKindRow kRows[] = {
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
 			.row,
+	Request(K::UpdateEditor, "update_editor", nullptr,
+			"The editor updated in place (Help > Update OpenNova Editor..., ADR 0072): update.exe beside it "
+			"started with /RUN and the editor's process id, then the editor quits; the updater waits for it to "
+			"go, installs NovaWorld's newest release of the editor and starts it again. A person's alone: the "
+			"editor quits under it. Refused, nothing started: unsaved changes, a game Play started or a Quit the "
+			"running operation refuses (update_refusal), a source run, or a folder with no update.exe or "
+			"OPENNOVA.WIZ (an editor not installed from its download).")
+			.served_by(ServedBy::ShellNeedsPerson)
+			.row,
 	// A font made from a glyph sheet is an import of it (round S23 lane A): the set and its record written, then the
 	// refresh that imports it, as a terrain's.
 	Request(K::NewFont, "new_font", serve_new_font,

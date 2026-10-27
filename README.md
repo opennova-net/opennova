@@ -142,8 +142,8 @@ include the game's dev tools (Insert).
 
 The editor ships as `opennova-editor-windows-v<version>.zip`, one flat folder: the
 OpenNova Editor (`oneditor.exe`) and beside it `onplay.exe`, the game it plays your
-project with, and the `update.exe` that updates the editor in place. No Godot install
-is needed. The editor is pre-1.0 and experimental, and works on
+project with, and the `update.exe` that updates the editor in place (Help > Update
+OpenNova Editor...). No Godot install is needed. The editor is pre-1.0 and experimental, and works on
 OpenNova, Joint Operations (Escalation included) and Delta Force Xtreme 2 projects
 today; what it edits is listed above.
 

@@ -47,6 +47,13 @@ struct SessionView {
 	bool allows(EditorRequestKind kind) const;
 };
 
+// Why Help > Update OpenNova Editor... (update_editor, ADR 0072) cannot run now, "" when it can: the
+// update quits the editor for update.exe to replace its files, so nothing may be lost or left behind:
+// a document with unsaved changes, a game Play started, or an operation a Quit would wait on (the busy
+// gate refuses Quit). The shell refuses the rest, which only it can tell: a source run, a folder
+// without update.exe or OPENNOVA.WIZ.
+std::string update_refusal(const SessionView &view);
+
 // The editor's OS window title, which the shell applies when it changes: "OpenNova Editor",
 // the open project's name before it ("Armory - OpenNova Editor"), and a bullet (U+25CF)
 // after the name while a file has unsaved changes.

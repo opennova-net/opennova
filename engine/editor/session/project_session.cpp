@@ -128,17 +128,21 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 	RequestNames names;
 	bool ok = json.is_object();
 	if (!ok) error = "A request is a JSON object.";
-	// A kind the shell serves with a person to answer it (the pickers) never comes through here:
-	// refused by its kind, before its fields are read, naming the fields that carry what it picks.
+	// A kind the shell serves with a person to answer it (the pickers, update_editor) never comes through
+	// here: refused by its kind, before its fields are read, naming the fields that carry what a picker
+	// picks.
 	const io::JsonValue *token = ok ? json.get("kind") : nullptr;
 	EditorRequestKind kind = EditorRequestKind::Rescan;
 	if (token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).served_by == ServedBy::ShellNeedsPerson) {
 		ok = false;
-		error = "The pickers need a person: pass what they pick instead, a project's folder as the "
-				"dir of new_project or open_project, the game install or the runtime as "
-				"settings.game_install or settings.runtime_executable of apply_project_settings, "
-				"files to import as the paths of preview_import.";
+		error = kind == EditorRequestKind::UpdateEditor
+				? "update_editor needs a person: the editor quits to update itself (Help > Update OpenNova "
+				  "Editor...)."
+				: "The pickers need a person: pass what they pick instead, a project's folder as the "
+				  "dir of new_project or open_project, the game install or the runtime as "
+				  "settings.game_install or settings.runtime_executable of apply_project_settings, "
+				  "files to import as the paths of preview_import.";
 	}
 	// A kind the session serves for a person alone (novaworld_sign_in: a password) is refused alike.
 	if (token && token->is_string() && request_kind_from_token(token->string, kind) &&

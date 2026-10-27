@@ -206,6 +206,13 @@ public:
 	// True when Play drives the Godot binary at the source checkout instead of a
 	// packaged runtime.
 	bool is_source_run() const;
+	// Help > Update OpenNova Editor... (update_editor, ADR 0072), as the windows raise it: update.exe beside the
+	// editor started over the editor's own folder, which its OPENNOVA.WIZ makes the editor's (ONEDITOR), with
+	// /RUN and this process's id, then the editor quits, so the updater waits for it to go, installs the newest
+	// release and starts oneditor.exe again (apps/update/README.md). Refused, nothing started, with why (the
+	// status line says it): what the view refuses (update_refusal), a source run, a folder without update.exe or
+	// OPENNOVA.WIZ, an updater that does not start. "" once it started.
+	String update_editor();
 
 protected:
 	void _notification(int p_what);

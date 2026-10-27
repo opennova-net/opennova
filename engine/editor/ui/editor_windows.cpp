@@ -516,6 +516,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_go_menu(v);
 	draw_build_menu(v);
 	draw_windows_items(v, document);
+	draw_help_menu(v);
 	// The modals, every frame, whichever window or menu opened them: the one the session's order shows
 	// (shown_modal) opens, the others held wait closed.
 	bring_modal_forward(v);
@@ -568,6 +569,23 @@ void EditorWindows::draw_navigation(const SessionView &v) {
 		}
 		ImGui::PopID();
 	}
+}
+
+// Help (ADR 0072), after Windows (the pass appends its own Help windows to it): the build this editor is, a line
+// to read, then Update OpenNova Editor..., which asks the Shell to update the editor in place (update_editor:
+// update.exe started over the editor's folder, the editor quit). Enabled while the view lets the editor quit
+// (update_refusal, whose words its tooltip gives); the Shell refuses what only it can tell (a source run, a
+// folder without update.exe or OPENNOVA.WIZ) on the status line.
+void EditorWindows::draw_help_menu(const SessionView &v) {
+	if (!ImGui::BeginMenu("Help")) return;
+	const std::string build = build_label_.empty() ? std::string("OpenNova Editor, a source run") : build_label_;
+	ImGui::MenuItem(build.c_str(), nullptr, false, false);
+	const std::string refusal = update_refusal(v);
+	if (menu_item("Update OpenNova Editor...", nullptr, refusal.empty())) request(request::update_editor());
+	ui_kit::tooltip(refusal.empty() ? "Installs NovaWorld's newest OpenNova Editor over this one: the editor quits, "
+	                                  "updates and starts again."
+	                                : refusal);
+	ImGui::EndMenu();
 }
 
 void EditorWindows::draw_file_menu(const SessionView &v) {

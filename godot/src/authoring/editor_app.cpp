@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <runtime/devtools/imgui_pass.h>
+#include <runtime/menu/menu_runtime.h>
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
@@ -140,6 +141,7 @@ void EditorApp::_bind_methods() {
 			"get_play_engine_args");
 	ClassDB::bind_method(D_METHOD("get_loaded_variant"), &EditorApp::get_loaded_variant);
 	ClassDB::bind_method(D_METHOD("is_source_run"), &EditorApp::is_source_run);
+	ClassDB::bind_method(D_METHOD("update_editor"), &EditorApp::update_editor);
 	ClassDB::bind_method(D_METHOD("_on_dir_selected", "dir"), &EditorApp::_on_dir_selected);
 	ClassDB::bind_method(D_METHOD("_on_file_selected", "file"), &EditorApp::_on_file_selected);
 	ClassDB::bind_method(D_METHOD("_on_files_selected", "files"), &EditorApp::_on_files_selected);
@@ -190,11 +192,50 @@ void EditorApp::ensure_session() {
 	});
 #if OPENNOVA_EDITOR_UI
 	windows_->set_view(&session_->view());
+	// The build Help names, as the game's STARTUP screen names its own (D-MNU-76): the exported editor's
+	// config/version, the commit packaging stamped and staging for a debug export; none for a source run.
+	ProjectSettings *project = ProjectSettings::get_singleton();
+	const std::string version = opennova::to_std(String(project->get_setting("application/config/version", "")));
+	const std::string commit = opennova::to_std(String(project->get_setting("application/config/build_commit", "")));
+	windows_->set_build_label(is_source_run()
+					? std::string()
+					: opennova::menu::runtime_build_label(version, commit, OS::get_singleton()->is_debug_build()));
 #endif
 }
 
 bool EditorApp::is_source_run() const {
 	return !OS::get_singleton()->has_feature("template");
+}
+
+String EditorApp::update_editor() {
+	ensure_session();
+	std::string refused = opennova::editor::update_refusal(session_->view());
+	OS *os = OS::get_singleton();
+	const String dir = os->get_executable_path().get_base_dir();
+	const String updater = dir.path_join("update.exe");
+	if (refused.empty() && is_source_run())
+		refused = "A source run updates from its checkout: only an installed editor updates itself.";
+	if (refused.empty() && !FileAccess::file_exists(updater))
+		refused = "update.exe is missing from the editor's folder: download the editor again.";
+	if (refused.empty() && !FileAccess::file_exists(dir.path_join("OPENNOVA.WIZ")))
+		refused = "OPENNOVA.WIZ is missing from the editor's folder: download the editor again.";
+	if (refused.empty()) {
+		// As the game's UPDATE starts it (godot/game/runtime_updates.gd), less its game's arguments: the
+		// editor's folder is the app's own, which update.exe updates alone.
+		PackedStringArray arguments;
+		arguments.push_back("/RUN");
+		arguments.push_back("--parent-pid");
+		arguments.push_back(String::num_int64(os->get_process_id()));
+		if (os->create_process(updater, arguments, false) <= 0) refused = "Could not start update.exe.";
+	}
+	if (!refused.empty()) {
+#if OPENNOVA_EDITOR_UI
+		windows_->pass().post_status(refused, opennova::devtools::StatusLevel::Error);
+#endif
+		return opennova::to_gd(refused);
+	}
+	session_->handle(opennova::editor::request::quit());
+	return String();
 }
 
 // Where Play finds the game (opennova::editor::make_play_launcher): this binary at the
@@ -721,6 +762,9 @@ void EditorApp::serve(const EditorRequest &p_request) {
 			if (!p_request.path.empty()) {
 				OS::get_singleton()->shell_show_in_file_manager(opennova::to_gd(p_request.path), true);
 			}
+			break;
+		case EditorRequestKind::UpdateEditor:
+			update_editor();
 			break;
 		default:
 			break;
