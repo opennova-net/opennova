@@ -2,7 +2,12 @@
 #include <cstdint>
 namespace opennova { struct WeaponPickupNotice; }
 namespace opennova::replication { struct ClientState; struct ClientEntityState; }
-namespace opennova::world { class World; class LocalPlayer; struct RoundSourceState; }
+namespace opennova::world {
+class World;
+class LocalPlayer;
+struct RoundSourceState;
+struct Entity;
+}
 namespace opennova::mission { class MissionKernel; }
 namespace opennova::inmatch {
 class ClientRuntime;
@@ -12,9 +17,9 @@ void replica_weapon_action_source(const replication::ClientEntityState &, world:
         uint8_t flags, world::RoundSourceState &);
 void tick_replica_weapon_slots(replication::ClientState &, world::World &);
 // A decoded shooter's Flags 0x800000 for the round its round event spawns: a
-// person row's resolver-kept mirror, a pool-1 row's BB walk recomputed at the
-// event (D-COL-13), another row's received word.
-bool replica_shooter_indoors(mission::MissionKernel &, const replication::ClientEntityState &);
+// person row's resolver-kept mirror, another row's native twin's Flags word (the
+// world's entity pass rebuilds it, D-COL-13), or with no twin its received word.
+bool replica_shooter_indoors(const replication::ClientEntityState &, const world::Entity *twin);
 // One S2C 0x35 powerup weapon grant the receive folded: naming the joiner's own player, it
 // lands the weapon its copy of the row names and mounts it (world/powerup.h
 // powerup_weapon_grant_received); the caller queues its mount's 0x1D at the 0x35's place.

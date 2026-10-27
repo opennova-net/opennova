@@ -6070,11 +6070,12 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 
 } // namespace
 
-// A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
-// entity, which its BB walk rebuilds on each think visit (the def type picks
-// the walk: the candidate slice for type 1, none for type 5, the static
-// building prefix otherwise). Each shooter's 0x0D carries 0x800000, and the
-// rounds come 20 ticks after it, past the 17-tick candidate-slice edge:
+// A pool-1 shooter's round takes the Indoors bit retail's client keeps in the
+// entity's Flags word, its native twin's here (D-COL-13), which the entity
+// pass's BB walk rebuilds on each think visit (the def type picks the walk: the
+// candidate slice for type 1, none for type 5, the static building prefix
+// otherwise). Each shooter's 0x0D carries 0x800000, and the rounds come 20 ticks
+// after it, past the 17-tick candidate-slice edge:
 // - the cveh vehicle: a row a 0x0D lands after the mission start's class-init
 //   pass has no brain (+0x64; only that init builds one), so its state machine
 //   returns before re-arming +0x2AC and the think gate passes on every visit;
@@ -6083,7 +6084,11 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 // - the type-5 row: no walk on any visit, so the bit stays clear;
 // - the type-6 object, Null class: its first visit, in the 0x0D frame's pass,
 //   walks the static prefix, which already holds the box, and NullClass then
-//   freezes its clock, so the bit stays set.
+//   freezes its clock, so the bit stays set;
+// - a vehicle a 0x0D lands while the client's pre-round timer holds the pass:
+//   no visit rebuilds its word, so its round reads the 0x0D's raw bit, outside
+//   any box (Game_ProcessMainFrame - `cmp g_ClientPreRoundTimer` @0x52672C ahead
+//   of the Entity_UpdateAllEntities call @0x52674B).
 // [orig: NapiNPClientMsg_0x00D - the memset @0x432D1B..0x432D23, the Flags
 //  store @0x432D7D, the callbacks @0x433301 / @0x43331A; Entity_UpdatePool1Slot
 //  - the gate @0x4B8E1B..0x4B8E22, the walk @0x4B8E25, the class call @0x4B8E3C;
@@ -6174,8 +6179,8 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	// vehicle's slice holds the building.
 	for (int t = 0; t < 20; ++t) h.role.run_tick(h.input);
 	bool ok = true;
-	for (const Case &c : cases) {
-		ok &= expect(h.role.runtime->state().find(c.handle) != nullptr, "the 0x0D row landed");
+	const auto check = [&](uint16_t handle, bool indoors, const char *what) {
+		ok &= expect(h.role.runtime->state().find(handle) != nullptr, "the 0x0D row landed");
 		world.round_sim.reset();
 		FrameUpdate frame;
 		frame.carried_handle = 0xFFFF;
@@ -6183,16 +6188,35 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 		RoundEventRecord ev;
 		ev.flags = kRoundEventFlagAdmIndexed;
 		ev.adm_index = 1;
-		ev.shooter_handle = c.handle;
+		ev.shooter_handle = handle;
 		frame.round_events.push_back(ev);
 		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
 		const w::LiveRound *round = nullptr;
 		for (const w::LiveRound &r : world.round_sim.rounds)
 			if (r.active) round = &r;
 		ok &= expect(round != nullptr, "the round event spawned its round");
-		if (round == nullptr) continue;
-		ok &= expect(round->indoors_word == c.indoors && round->indoors_flags == c.indoors, c.what);
+		if (round != nullptr)
+			ok &= expect(round->indoors_word == indoors && round->indoors_flags == indoors, what);
+	};
+	for (const Case &c : cases) check(c.handle, c.indoors, c.what);
+	h.role.runtime->state().preround_delay_seconds = 5;
+	PoolSpawnBatch held;
+	PoolSpawnRecord rec;
+	rec.spawn_flags = 0x0020;
+	rec.slot_id = 0x1007;
+	rec.item_type_id = 1291;
+	rec.pos_x = 60 << 16;
+	rec.pos_y = -20 << 16;
+	rec.pos_z = 2 << 16;
+	rec.entity_flags = w::kEntityFlagIndoors;
+	held.records.push_back(rec);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(held));
+	for (int t = 0; t < 20; ++t) {
+		h.role.runtime->state().preround_delay_seconds = 5;
+		h.role.run_tick(h.input);
 	}
+	check(0x1007, true, "a vehicle the held pass never visits keeps its 0x0D word outside any box");
+	h.role.runtime->state().preround_delay_seconds = 0;
 	return ok;
 }
 
