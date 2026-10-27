@@ -617,10 +617,11 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
 		bool preserve_slot_state, bool allow_same_weapon_rebake, WeaponInventory *inventory,
-		PlayerViewState &view) {
+		PlayerViewState &view, bool tool_seed) {
 	// [orig: Player_MountWeaponSlot @0x4DFA40; the declaration carries the rule]
 	WeaponInstallData data;
 	if (!install_data_by_name(world, name, allow_same_weapon_rebake, data)) return false;
+	data.tool_seed = tool_seed;
 	local_weapon_install(world, w, data, preserve_slot_state, allow_same_weapon_rebake,
 			inventory, view);
 	return true;
@@ -802,7 +803,8 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 			const int32_t combo = own_def->rank +
 					weapon_combo::kRanksPerCategory * own_def->category;
 			const WeaponInventorySlot *own = inventory->slot(combo);
-			if (own != nullptr && own->adm_index == installed) {
+			const bool landed = own != nullptr && own->adm_index == installed;
+			if (landed) {
 				w.slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons, *inventory, combo);
                 w.slot.scope_zero = own->scope_zero;
                 w.slot.scope_zoom = own->scope_zoom;
@@ -813,13 +815,16 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 			}
 			w.slot.shared_clip = own_def->ammo_bucket != 0;
 			w.slot.reserve = weapon_pool_get(*inventory, own_def->ammo_class_id);
-			ammo_from_inventory = true;
+			// A tool's mount of a def the loadout never landed seeds below.
+			ammo_from_inventory = landed || !data.tool_seed;
 		}
 		if (!ammo_from_inventory) {
-			// No slot table to read: a harness or the editor's weapon preview with no
-			// inventory, or a def the weapon table lacks. Every game mount passes the
-			// local player's inventory (the spawn and the switch commit), so this seed,
-			// a full magazine and the def's carried reserve, is the tools' alone.
+			// No slot table to read (a harness or the editor's weapon preview with no
+			// inventory, a def the weapon table lacks), or a tool's mount of a def the
+			// loadout never landed (WeaponInstallData::tool_seed). Every game mount
+			// passes the local player's inventory and no tool seed (the spawn and the
+			// switch commit), so this seed, a full magazine and the def's carried
+			// reserve, is the tools' alone.
 			w.slot.clip = clipsize > 0 ? clipsize : 0;
 			w.slot.reserve = data.startrounds;
 		}

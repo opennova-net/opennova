@@ -294,6 +294,11 @@ struct WeaponInstallData {
     int32_t run_anim = 0;
     int32_t clipsize = 0;
     int32_t startrounds = 0;
+    // A tool's mount (the shell's by-name or by-definition install: the debug viewmodel
+    // seam, the set_viewmodel_weapon control, a harness): a def the loadout never landed
+    // takes a full magazine and its carried reserve instead of the cleared slot's words.
+    // No game path mounts such a def; the spawn and the switch commit leave this false.
+    bool tool_seed = false;
     std::vector<WeaponFsmActionRow> rows;
     // A mount by name: the weapon table's entry of that name carries the
     // descriptors its load baked, and the mount runs those, baking nothing.
@@ -609,7 +614,8 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 // the def's END]
 bool local_weapon_install_by_name(World &world, LocalPlayerWeapon &w, const std::string &name,
                                   bool preserve_slot_state, bool allow_same_weapon_rebake,
-                                  WeaponInventory *inventory, PlayerViewState &view);
+                                  WeaponInventory *inventory, PlayerViewState &view,
+                                  bool tool_seed = false);
 // The spawn's mount by name (the embedder's sync of the EquippedSlot the spawn settled, a
 // fresh slot): local_weapon_install_by_name's install with none of the mount's view words,
 // as retail's spawn writes none: Player_InitPlayer's select stores the slot with no view

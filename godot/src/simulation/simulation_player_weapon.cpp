@@ -242,8 +242,11 @@ void Simulation::install_local_player_weapon(const Ref<WeaponDef> &p_def,
 		const Dictionary &p_clip_seconds, bool p_preserve_slot_state,
 		bool p_allow_same_weapon_rebake) {
 	if (!kernel_ || p_def.is_null()) return;
-	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon,
-			install_data_from_def(p_def->value(), p_clip_seconds),
+	// A definition object's install is a tool's mount: a def the loadout never landed takes
+	// the tools' seed (engine world/player_weapon.h WeaponInstallData::tool_seed, D-WPN-7).
+	opennova::world::WeaponInstallData data = install_data_from_def(p_def->value(), p_clip_seconds);
+	data.tool_seed = true;
+	opennova::world::local_weapon_install(kernel_->world, kernel_->local.weapon, data,
 			p_preserve_slot_state, p_allow_same_weapon_rebake,
 			kernel_->local.inventory_valid ? &kernel_->local.inventory : nullptr, kernel_->local.view);
 }

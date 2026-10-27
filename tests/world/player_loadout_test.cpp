@@ -237,6 +237,25 @@ void test_a_mount_reads_the_defs_own_slot() {
     local_weapon_install(r.world, r.weapon, data, false, false, nullptr, view);
     CHECK(r.weapon.slot.clip == 30);
     CHECK(r.weapon.slot.reserve == 210);
+
+    // A tool's mount (the shell's by-name install, the debug viewmodel seam) of the def
+    // the loadout never landed takes the same seed; a landed def still reads its slot.
+    WeaponInstallData tool = data;
+    tool.tool_seed = true;
+    local_weapon_install(r.world, r.weapon, tool, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 30);
+    CHECK(r.weapon.slot.reserve == 210);
+    WeaponInstallData landed_tool;
+    landed_tool.name = "WPN_M4AUTO";
+    landed_tool.clipsize = 30;
+    landed_tool.startrounds = 210;
+    landed_tool.tool_seed = true;
+    const int16_t m4_class = t.entries[static_cast<size_t>(r.m4)].ammo_class_id;
+    weapon_inventory_set_loaded_rounds(t, r.inventory, 3 * 65, 9);
+    weapon_pool_set(t, r.inventory, m4_class, 33);
+    local_weapon_install(r.world, r.weapon, landed_tool, false, false, &r.inventory, view);
+    CHECK(r.weapon.slot.clip == 9);
+    CHECK(r.weapon.slot.reserve == 33);
 }
 
 void test_armor_carry_bit_follows_accepted_loadout() {

@@ -1313,8 +1313,12 @@ bool MissionKernel::restore_baseline() {
 
 bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve_slot_state,
 		bool allow_same_weapon_rebake) {
+	// The shell's by-name install is a tool's mount (the debug viewmodel seam, the
+	// set_viewmodel_weapon control, the dev tools' rebakes, a switch the commit did not
+	// mount): a def the loadout never landed takes the tools' seed (D-WPN-7).
 	return w::local_weapon_install_by_name(world, local.weapon, weapon_name, preserve_slot_state,
-			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
+			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view,
+			/*tool_seed=*/true);
 }
 
 bool MissionKernel::install_spawn_weapon(const std::string &weapon_name) {
