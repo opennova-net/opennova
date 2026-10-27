@@ -125,21 +125,25 @@ buttons fetch it from `downloads.opennova.net`; staging's site
 `downloads.staging.opennova.net` the same way (DEPLOY.md, "The downloads host"). Every
 release stays on the [GitHub releases](https://github.com/opennova-net/opennova/releases).
 
-CI and tagged releases publish one game zip per game, each the same runtime set up
-for its game: `opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty
-Package), `jointops-game-windows-v<version>.zip` (Joint Operations and Escalation) and
+There is one game zip per game, each the same runtime set up for its game:
+`opennova-game-windows-v<version>.zip` (OP: Acid Gambit and OP: Nifty Package),
+`jointops-game-windows-v<version>.zip` (Joint Operations and Escalation) and
 `dfx2-game-windows-v<version>.zip` (Delta Force Xtreme 2). Each contains
 `opennova.exe`, its native dependencies, `update.exe`, `revupdat.exe`, and the small
-bootstrap configuration: the Joint Operations and DFX2 zips add the `UPDATE.WIZ`
-naming their game (and Escalation's `expansion/jox01/UPDATE.WIZ`). Unzipped into an
-empty folder, a zip's first run downloads its game from OpenNova's update service.
-Debug builds include the game's dev tools (Insert). Tagged releases also attach
-`opennova-runtime-windows-v<version>.sfs`, the same runtime packed as the update
-`update.exe` installs.
+bootstrap configuration: the runtime's `OPENNOVA.WIZ` and `ONRUNTIME.CMD`, and in the
+Joint Operations and DFX2 zips the `UPDATE.WIZ` naming their game (and Escalation's
+`expansion/jox01/UPDATE.WIZ`). Unzipped into an empty folder, a zip's first run
+downloads its game from OpenNova's update service. CI builds the runtime and the editor
+as plain builds (`opennova-runtime-windows-v<version>.zip`,
+`opennova-editor-windows-v<version>.zip`, with no wizard); the update service packs
+each into a release, and publishing it renders the game zips on the deployment's
+downloads host. A pull request's debug builds are published to staging that way, and
+include the game's dev tools (Insert).
 
-They also publish `opennova-editor-windows-v<version>.zip`, one flat folder: the
+The editor ships as `opennova-editor-windows-v<version>.zip`, one flat folder: the
 OpenNova Editor (`oneditor.exe`) and beside it `onplay.exe`, the game it plays your
-project with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
+project with, and the `update.exe` that updates the editor in place. No Godot install
+is needed. The editor is pre-1.0 and experimental, and works on
 OpenNova, Joint Operations (Escalation included) and Delta Force Xtreme 2 projects
 today; what it edits is listed above.
 
@@ -149,8 +153,8 @@ Tagged [releases](https://github.com/opennova-net/opennova/releases) include
 Blender 5.0 or newer using **Preferences > Get Extensions > Install from Disk**.
 The add-on currently supports Windows x64.
 
-The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
-comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
+The native apps ship together as the tools, `opennova-tools-windows.zip` (on a PR's
+build comment) and `opennova-tools-windows-v<version>.zip` (on tagged releases): the
 `opennova-3di`, `opennova-extract`, `opennova-lan-probe`, `opennova-parity`,
 `opennova-update-tool` (builds and serves packed game updates for NovaLogic's updater) and
 `opennova-wire` command-line tools and the headless game server
@@ -169,8 +173,8 @@ Operations install too, but the original `Jointops.exe` does not need it: a host
 Operations server can also list on NovaLogic's NovaWorld, where the game finds it as it
 is. Nor does `opennova.exe`, whose NovaWorld screen reaches OpenNova's NovaWorld
 (`nw.opennova.net`) by itself. It needs administrator rights, since the hosts file does. The
-exe is unsigned, so releases also carry the zip's SHA-256
-(`opennova-switcher-windows-v<version>.zip.sha256`) to check before running it.
+exe is unsigned, so a release's notes give the zip's SHA-256 to check before running
+it.
 See [switcher/README.md](switcher/README.md).
 
 ## Run your own NovaWorld

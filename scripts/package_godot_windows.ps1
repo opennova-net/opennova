@@ -1,24 +1,26 @@
-# Build the minimal Windows game ZIPs (one per game: OpenNova's own, Joint Operations and
-# DFX2), the editor ZIP and the ONRUNTIME update package. Each game zip is the same runtime
-# with the wizards naming its game; update.exe installs that game on the first launch, so this
-# script needs no content checkout.
+# Build the two plain Windows builds the update service packs (ADR 0072): the runtime,
+# opennova-runtime-windows-v<version>.zip (opennova.exe, its DLL, the updater pair and
+# README.txt), and the editor, opennova-editor-windows-v<version>.zip (one flat folder: oneditor.exe
+# and onplay.exe with their DLLs, the updater pair and README.txt). Neither holds a wizard or a
+# command file: the service writes each app's OPENNOVA.WIZ into its package, and the downloads
+# host's zips (each game's: the runtime with its game's wizards) are rendered from the published
+# releases. Publish (.github/workflows/publish.yml) uploads both. The updater smoke packs them
+# locally into packages it never ships. This script needs no content checkout.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
-#        [-PreviousRuntimePackage <prior.sfs>] [-Version <n.n.n>] [-BuildCommit <sha>]
+#        [-Version <n.n.n>] [-BuildCommit <sha>]
 
 param(
-    # The version the packages carry: the zips' names, the exes' VERSIONINFO, the
-    # project's config/version in the exports and every update package's VERSION
-    # (ADR 0067 d8: the one a player is told). release.yml passes the release tag
-    # without its "v"; empty (PR CI, local runs) takes godot/project.godot's
-    # config/version.
+    # The version the builds carry: the zips' names, the exes' VERSIONINFO, the
+    # project's config/version in the exports and the smoke packages' VERSION. The
+    # service stamps each release's own (ADR 0067 d8: the one a player is told).
+    # release.yml passes the release tag without its "v"; empty (PR CI, local runs)
+    # takes godot/project.godot's config/version.
     [string]$Version = "",
     # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
     # and downloads the DLLs into godot\bin; -SkipBuild then skips the per-job
     # rebuild. Local runs omit it and build normally. See
     # .github/workflows/ci.yml build-gdextension-windows.
     [switch]$SkipBuild,
-    # Carry removals from the previous full runtime release so any older install converges.
-    [string]$PreviousRuntimePackage = "",
     # Godot export mode. "release" (default; what the release workflow ships):
     # --export-release, and the packaged exes load the template_release
     # GDExtensions. "debug" (pull-request CI): --export-debug, and the packaged exes
@@ -151,15 +153,13 @@ if ($ExportMode -eq "debug") {
     $SHIPPED_EDITOR_DLL = $EDITOR_RELEASE_DLL
 }
 $NeedsReleaseDll = ($ExportMode -eq "release")
-# The deployment a package talks to is its export mode's: a release package
-# prod's, a debug one (PR CI's) staging's (DEPLOY.md "Deployments: dev, staging
-# and prod"). The exported game's NovaWorld target picks the same deployment's
-# gate by its build (godot/game/novaworld_settings.gd), and update.exe dials the
-# gateway the zip's OPENNOVA.WIZ names (apps/update/client.cpp service_gateways):
-# the zip always carries that wizard, as the runtime's update package does, so
-# the updater's compiled fallback, prod's, is never what a zip install dials.
-$UPDATE_HOST = if ($ExportMode -eq "debug") { "update.staging.opennova.net" } else { "update.opennova.net" }
-Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf); updates from $UPDATE_HOST) ==="
+# The deployment a build talks to is its export mode's: a release build prod's, a
+# debug one (PR CI's, which only staging publishes) staging's (DEPLOY.md
+# "Deployments: dev, staging and prod"). The exported game's NovaWorld target picks
+# the deployment's gate by its build (godot/game/novaworld_settings.gd); update.exe
+# dials the gateway its folder's OPENNOVA.WIZ names (apps/update/client.cpp
+# service_gateways), which the deployment's service writes into the package.
+Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf)) ==="
 
 if ($SkipBuild) {
     Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
@@ -211,9 +211,6 @@ function Find-BuiltTool {
 $UPDATE_EXE = Find-BuiltTool "update" "update"
 $REVUPDAT_EXE = Find-BuiltTool "revupdat" "revupdat"
 $UPDATE_TOOL = Find-BuiltTool "update_tool" "opennova-update-tool"
-if ($PreviousRuntimePackage) {
-    $PreviousRuntimePackage = (Resolve-Path -LiteralPath $PreviousRuntimePackage).Path
-}
 
 $DIST = "$ROOT\dist"
 New-Item -ItemType Directory -Force -Path $DIST | Out-Null
@@ -223,8 +220,8 @@ $RUNTIME_EXE = "$DIST\opennova.exe"
 # their names differ, and each loads its own GDExtension (oneditor[d].dll, opennova[d].dll).
 $PLAY_EXE = "$DIST\editor\onplay.exe"
 $EDITOR_EXE = "$DIST\editor\oneditor.exe"
+$RUNTIME_ZIP = "$DIST\opennova-runtime-windows-v$Version.zip"
 $EDITOR_ZIP = "$DIST\opennova-editor-windows-v$Version.zip"
-$RUNTIME_SFS = "$DIST\opennova-runtime-windows-v$Version.sfs"
 
 function Invoke-GodotExport {
     param([string]$PresetName, [string]$OutputPath)
@@ -350,8 +347,7 @@ function Test-GodotAppBoot {
     param([string]$ExePath, [string]$Label)
 
     Write-Host "=== Boot smoke: $Label ==="
-    # A fresh minimal package reaches its embedded bootstrap without content or network:
-    # OpenNova's own folder (no wizard) and the JO and DFX2 folders (their wizards) alike.
+    # A fresh minimal package reaches its embedded bootstrap without content or network.
     $bootstrap = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "--no-update" -ExpectedExit 1
     if ($bootstrap -notmatch "OpenNova: content installation required") {
         Write-Host $bootstrap.TrimEnd()
@@ -416,26 +412,24 @@ function Copy-ImGuiLibs {
     return @($name)
 }
 
-# A full package carries every current runtime file. Previous release removals
-# are retained so clients can skip releases. Content and expansion files are
-# separate products; the base builder omits expansion/ from ONRUNTIME. Its
-# command file ships in the zip beside the files it lists, so a fresh install's
-# first check finds the runtime current instead of fetching it again.
-function New-RuntimeUpdate {
-    param([string]$StageDir)
-    $empty = New-StageDir ".stage-update-empty"
-    $command = Join-Path $StageDir "ONRUNTIME.CMD"
-    try {
-        $arguments = @("build", "--from", $empty, "--to", $StageDir, "--out", $RUNTIME_SFS,
-            "--base", "ONRUNTIME.CMD", "--product-name", "OpenNova Runtime", "--exe", "opennova.exe",
-            "--product", "OpenNova Runtime", "--version", $Version, "--full", "--command-out", $command)
-        if ($PreviousRuntimePackage) { $arguments += @("--previous", $PreviousRuntimePackage) }
-        & $UPDATE_TOOL @arguments
-        if ($LASTEXITCODE -ne 0) { throw "Building the full runtime update failed" }
-        & $UPDATE_TOOL inspect $RUNTIME_SFS
-        if ($LASTEXITCODE -ne 0) { throw "The runtime update could not be read back" }
-    }
-    finally { Remove-Item -LiteralPath $empty -Recurse -Force }
+# A local update package of a shipped stage, never shipped, as the service packs an updatable
+# app's plain build (ADR 0072): the stage's files and the OPENNOVA.WIZ naming $Login, from empty,
+# every file a row. $Folder is left as the app's download unzips: those files, the wizard and
+# the command file, so a check there finds the app current.
+function New-SmokePackage {
+    param([string]$StageDir, [string]$Folder, [string]$Empty, [string]$Login, [string]$Command,
+        [string]$Exe, [string]$Name, [string]$Package)
+    New-Item -ItemType Directory -Path $Folder | Out-Null
+    Copy-Item -Path (Join-Path $StageDir "*") -Destination $Folder
+    [IO.File]::WriteAllText((Join-Path $Folder "OPENNOVA.WIZ"),
+        "[HEADER]`r`nCMD=$Command`r`nURL=127.0.0.1`r`nPRODUCT_LOGIN=$Login`r`n")
+    $arguments = @("build", "--from", $Empty, "--to", $Folder, "--out", $Package,
+        "--base", $Command, "--product-name", $Name, "--exe", $Exe,
+        "--product", $Name, "--version", $Version, "--full", "--command-out", (Join-Path $Folder $Command))
+    & $UPDATE_TOOL @arguments
+    if ($LASTEXITCODE -ne 0) { throw "Building the $Login smoke package failed" }
+    & $UPDATE_TOOL inspect $Package
+    if ($LASTEXITCODE -ne 0) { throw "The $Login smoke package could not be read back" }
 }
 
 function Invoke-UpdaterSmoke {
@@ -467,35 +461,38 @@ function Invoke-UpdaterSmoke {
     finally { if (-not $proc.HasExited) { $proc.Kill(); $proc.WaitForExit() }; $proc.Dispose() }
 }
 
-# Read-only checks against our own loopback server prove the shipped updater
-# loads, speaks the protocol and reports missing files without contacting a service.
-# $GameStages are the jointops and dfx2 stages with the files each stages ($Staged).
+# Read-only checks against our own loopback server prove the shipped updaters load, speak the
+# protocol, tell an app's folder from the runtime's and report missing files, without
+# contacting a service. They run on smoke copies (New-SmokePackage): the stages stay as staged.
 function Test-UpdaterBoot {
-    param([string]$StageDir, [object[]]$GameStages)
+    param([string]$RuntimeStage, [string]$EditorStage)
     $smoke = New-StageDir ".stage-update-smoke"
     $server = $null
     try {
-        $exe = Join-Path $StageDir "update.exe"
+        $exe = Join-Path $RuntimeStage "update.exe"
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--help" -ExpectedExit 0 -LogDir $smoke
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 2 -LogDir $smoke
-        # JO's, Escalation's and DFX2's products with no rows (as the service answers an
-        # unpublished retail product) prove the public current=0 result without teaching
-        # this packaging script to decode SFS files.
         $empty = Join-Path $smoke "empty"
         New-Item -ItemType Directory -Path $empty | Out-Null
-        $packages = @()
-        foreach ($command in @("JOPTR.CMD", "JOEPTR.CMD", "DFX2.CMD")) {
-            $package = Join-Path $smoke "$command.sfs"
-            & $UPDATE_TOOL build --from $empty --to $empty --out $package --base $command --version 1.7.5.7 --full
-            if ($LASTEXITCODE -ne 0) { throw "Building the current-product smoke fixture $command failed" }
-            $packages += "--package `"$package`""
-        }
+        $runtime = Join-Path $smoke "runtime"
+        $editor = Join-Path $smoke "editor"
+        $runtimePackage = Join-Path $smoke "ONRUNTIME.sfs"
+        $editorPackage = Join-Path $smoke "ONEDITOR.sfs"
+        New-SmokePackage -StageDir $RuntimeStage -Folder $runtime -Empty $empty -Login "ONRUNTIME" `
+            -Command "ONRUNTIME.CMD" -Exe "opennova.exe" -Name "OpenNova Runtime" -Package $runtimePackage
+        New-SmokePackage -StageDir $EditorStage -Folder $editor -Empty $empty -Login "ONEDITOR" `
+            -Command "ONEDITOR.CMD" -Exe "oneditor.exe" -Name "OpenNova Editor" -Package $editorPackage
+        # OP: Acid Gambit's product with no rows, as the service answers an unpublished game: the
+        # runtime folder's game, current.
+        $gamePackage = Join-Path $smoke "ACIDGAMBIT.sfs"
+        & $UPDATE_TOOL build --from $empty --to $empty --out $gamePackage --base ACIDGAMBIT.CMD --version $Version --full
+        if ($LASTEXITCODE -ne 0) { throw "Building the current-game smoke fixture failed" }
         $probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
         $probe.Start()
         $port = $probe.LocalEndpoint.Port
         $probe.Stop()
         $server = Start-Process -FilePath $UPDATE_TOOL -WindowStyle Hidden -PassThru `
-            -ArgumentList "serve --package `"$RUNTIME_SFS`" $($packages -join ' ') --product ONRUNTIME=ONRUNTIME.CMD --product JOTRus=JOPTR.CMD --product JOEus=JOEPTR.CMD --product DFX2=DFX2.CMD --server-host 127.0.0.1 --port $port --loopback" `
+            -ArgumentList "serve --package `"$runtimePackage`" --package `"$editorPackage`" --package `"$gamePackage`" --product ONRUNTIME=ONRUNTIME.CMD --product ONEDITOR=ONEDITOR.CMD --product ACIDGAMBIT=ACIDGAMBIT.CMD --server-host 127.0.0.1 --port $port --loopback" `
             -RedirectStandardOutput (Join-Path $smoke "server.log") -RedirectStandardError (Join-Path $smoke "server-error.log")
         $ready = $false
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -506,40 +503,26 @@ function Test-UpdaterBoot {
             finally { $socket.Dispose() }
         }
         if (-not $ready) { throw "Loopback updater smoke server did not start" }
-        # A JO-shaped folder: JO:CA's wizard (its CMD names the product) and nothing else.
-        $jo = Join-Path $smoke "jo"
-        New-Item -ItemType Directory -Path $jo | Out-Null
-        [IO.File]::WriteAllText((Join-Path $jo "UPDATE.WIZ"), "[HEADER]`r`nCMD=JOPTR.CMD`r`nURL=127.0.0.1`r`nPRODUCT_LOGIN=JOTRqq`r`n")
-        # The staged runtime (its ONRUNTIME.CMD beside it) and the JO folder are both
-        # current: 0, with /game and with the folder's wizard choosing the product.
-        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 0 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
-        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 0 -LogDir $smoke `
-            -Arguments "--check --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
-        Assert-StageHoldsOnly -StageDir $jo -Staged @("UPDATE.WIZ")
-        # A runtime directory holding only its wizard lacks every runtime row: 10.
+        # The runtime's folder as its download unzips (its files, OPENNOVA.WIZ and ONRUNTIME.CMD),
+        # its own update.exe run there with no /game: the runtime and OP: Acid Gambit, current, 0.
+        Invoke-UpdaterSmoke -Exe (Join-Path $runtime "update.exe") -ExpectedExit 0 -LogDir $smoke `
+            -Arguments "--check --server 127.0.0.1 --port $port"
+        # The editor's likewise, its OPENNOVA.WIZ naming ONEDITOR: the app alone, current, 0.
+        Invoke-UpdaterSmoke -Exe (Join-Path $editor "update.exe") -ExpectedExit 0 -LogDir $smoke `
+            -Arguments "--check --server 127.0.0.1 --port $port"
+        # An editor folder holding only its wizard lacks every row: 10, and nothing written.
         $bare = Join-Path $smoke "bare"
         New-Item -ItemType Directory -Path $bare | Out-Null
-        Copy-Item -LiteralPath (Join-Path $StageDir "OPENNOVA.WIZ") -Destination $bare
-        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 10 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$bare`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
+        Copy-Item -LiteralPath (Join-Path $editor "OPENNOVA.WIZ") -Destination $bare
+        $editorUpdater = Join-Path $EditorStage "update.exe"
+        Invoke-UpdaterSmoke -Exe $editorUpdater -ExpectedExit 10 -LogDir $smoke `
+            -Arguments "--check --runtime-dir `"$bare`" --server 127.0.0.1 --port $port"
         Assert-StageHoldsOnly -StageDir $bare -Staged @("OPENNOVA.WIZ")
-        # OpenNova content never targets another game's folder: refused before any row.
-        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
-            -Arguments "--check /game acidgambit --runtime-dir `"$StageDir`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
-        # Each game zip as unzipped: its own update.exe, its runtime current through the
-        # ONRUNTIME.CMD it carries, and its wizards naming its game's products (JO's with
-        # Escalation's, DFX2's), every one current: 0, and nothing written.
-        foreach ($game in $GameStages) {
-            Invoke-UpdaterSmoke -Exe (Join-Path $game.Dir "update.exe") -ExpectedExit 0 -LogDir $smoke `
-                -Arguments "--check --runtime-dir `"$($game.Dir)`" --resource-dir `"$($game.Dir)`" --server 127.0.0.1 --port $port"
-            Assert-StageHoldsOnly -StageDir $game.Dir -Staged $game.Staged
-        }
         $server.Kill()
         $server.WaitForExit()
-        Invoke-UpdaterSmoke -Exe $exe -ExpectedExit 1 -LogDir $smoke `
-            -Arguments "--check /game jo --runtime-dir `"$bare`" --resource-dir `"$jo`" --server 127.0.0.1 --port $port"
-        Assert-StageHoldsOnly -StageDir $jo -Staged @("UPDATE.WIZ")
+        Invoke-UpdaterSmoke -Exe $editorUpdater -ExpectedExit 1 -LogDir $smoke `
+            -Arguments "--check --runtime-dir `"$bare`" --server 127.0.0.1 --port $port"
+        Assert-StageHoldsOnly -StageDir $bare -Staged @("OPENNOVA.WIZ")
     }
     finally {
         if ($null -ne $server) {
@@ -574,11 +557,11 @@ function Assert-StageHoldsOnly {
         elseif (-not $files.Contains($rel)) { $rel }
     })
     if ($unexpected.Count -gt 0) {
-        throw "The game stage holds files this script did not stage, which the zip would ship: $($unexpected -join ', ')"
+        throw "The stage holds files this script did not stage, which the zip would ship: $($unexpected -join ', ')"
     }
     $missing = @($files | Where-Object { -not (Test-Path -LiteralPath (Join-Path $StageDir $_) -PathType Leaf) })
     if ($missing.Count -gt 0) {
-        throw "Files this script staged are gone from the game stage: $($missing -join ', ')"
+        throw "Files this script staged are gone from the stage: $($missing -join ', ')"
     }
     Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
@@ -620,13 +603,12 @@ finally {
     [IO.File]::WriteAllText($projectPath, $projectOriginal)
 }
 
-# --- the game zips: opennova.exe + its runtime DLL + the updater pair side by side, one
-#     zip per game, each with the wizards naming its game's update products. The runtime
-#     files are the same in all three, so one ONRUNTIME package (built from OpenNova's
-#     stage, the one with no root wizard) updates every one; each carries its command file.
-#     A folder with no UPDATE.WIZ is OP: Acid Gambit's; JO's and DFX2's are the wizards
-#     their stock installs ship (updater-re section 2; ADR 0067 d2), so the first launch
-#     downloads that game, and Escalation registers by its wizard alone.
+# --- the runtime's plain build: opennova.exe + its runtime DLL + the updater pair side by side
+#     and README.txt, no wizard and no command file. The service packs it as ONRUNTIME (with
+#     the OPENNOVA.WIZ it writes), and each game's download is that package with the wizards
+#     naming the game's products (ADR 0072): a folder with no UPDATE.WIZ is OP: Acid Gambit's;
+#     JO's and DFX2's carry the wizards their stock installs ship (updater-re section 2; ADR
+#     0067 d2), so the first launch downloads that game. README.txt ships in every one of them.
 $launchHelp = @"
 OpenNova (pre-1.0, experimental)
 
@@ -656,93 +638,17 @@ Online play: choose OpenNova in the NovaWorld menu. The OpenNova Switcher is
 only needed for the original dfx2.exe, whose NovaLogic NovaWorld is down.
 "@
 if ($ExportMode -eq "debug") {
-    $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`n$UPDATE_HOST, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."
+    $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`nupdate.staging.opennova.net, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."
 }
 
-# A wizard's text: the product's command file, the export mode's update host and its login.
-function Get-WizardText {
-    param([string]$Command, [string]$Login)
-    return "[HEADER]`r`nCMD=$Command`r`nURL=$UPDATE_HOST`r`nPRODUCT_LOGIN=$Login`r`n"
-}
-
-# The game zips: their file name's prefix, their stage and the wizards each adds
-# (relative path -> text). JO's and Escalation's logins carry the territory placeholder
-# their stock wizards do (JOTRqq, JOEqq: JOTRus and JOEus with no cc.bin); DFX2's has none.
-$GAMES = @(
-    @{ Prefix = "opennova"; Wizards = [ordered]@{
-        "expansion\nifty\UPDATE.WIZ" = (Get-WizardText "NIFTY.CMD" "NIFTY") } },
-    @{ Prefix = "jointops"; Wizards = [ordered]@{
-        "UPDATE.WIZ" = (Get-WizardText "JOPTR.CMD" "JOTRqq")
-        "expansion\jox01\UPDATE.WIZ" = (Get-WizardText "JOEPTR.CMD" "JOEqq") } },
-    @{ Prefix = "dfx2"; Wizards = [ordered]@{
-        "UPDATE.WIZ" = (Get-WizardText "DFX2.CMD" "DFX2") } }
-)
-
-try {
-    foreach ($game in $GAMES) {
-        $stagePath = New-StageDir ".stage-$($game.Prefix)-game-windows"
-        $game.Dir = $stagePath
-        $game.Zip = "$DIST\$($game.Prefix)-game-windows-v$Version.zip"
-        $staged = New-Object System.Collections.Generic.List[string]
-        $game.Staged = $staged
-        $stagedExe = Join-Path $stagePath "opennova.exe"
-        Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
-        $staged.Add("opennova.exe")
-        Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
-        $staged.Add((Split-Path $SHIPPED_RUNTIME_DLL -Leaf))
-        foreach ($name in @(Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug"))) {
-            $staged.Add($name)
-        }
-        Copy-Item -LiteralPath $UPDATE_EXE, $REVUPDAT_EXE -Destination $stagePath
-        $staged.Add("update.exe")
-        $staged.Add("revupdat.exe")
-        [IO.File]::WriteAllText((Join-Path $stagePath "OPENNOVA.WIZ"), (Get-WizardText "ONRUNTIME.CMD" "ONRUNTIME"))
-        $staged.Add("OPENNOVA.WIZ")
-        foreach ($wizard in $game.Wizards.GetEnumerator()) {
-            $path = Join-Path $stagePath $wizard.Key
-            New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
-            [IO.File]::WriteAllText($path, $wizard.Value)
-            $staged.Add($wizard.Key)
-        }
-        Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
-        $staged.Add("README.txt")
-        Test-GodotAppBoot -ExePath $stagedExe -Label "$($game.Prefix)-game-windows"
-    }
-    $native = $GAMES[0]
-    New-RuntimeUpdate -StageDir $native.Dir
-    foreach ($game in $GAMES) {
-        if ($game -ne $native) {
-            Copy-Item -LiteralPath (Join-Path $native.Dir "ONRUNTIME.CMD") -Destination $game.Dir
-        }
-        $game.Staged.Add("ONRUNTIME.CMD")
-    }
-    Test-UpdaterBoot -StageDir $native.Dir -GameStages @($GAMES | Where-Object { $_ -ne $native })
-    foreach ($game in $GAMES) {
-        Assert-StageHoldsOnly -StageDir $game.Dir -Staged $game.Staged
-        Compress-Archive -Path (Join-Path $game.Dir "*") -DestinationPath $game.Zip -Force
-        if (-not (Test-Path -LiteralPath $game.Zip)) { throw "Packaging produced no $($game.Prefix) zip" }
-    }
-}
-finally {
-    foreach ($game in $GAMES) {
-        if ($game.Dir -and (Test-Path -LiteralPath $game.Dir)) { Remove-Item -LiteralPath $game.Dir -Recurse -Force }
-    }
-}
-
-# --- the editor zip: one flat folder, the editor (its DLL and ImGui) and beside it the Play
-#     child (onplay.exe and the runtime DLL), where the editor's Play looks for it. In a debug
-#     export the Play child's ImGui library is the editor's own file (the addon's imguid.dll); a
-#     release Play export carries none (the preset's imgui/release). ---
-$stagePath = New-StageDir ".stage-opennova-editor-windows"
-try {
-    $stagedEditorExe = Join-Path $stagePath "oneditor.exe"
-    $stagedPlayExe = Join-Path $stagePath "onplay.exe"
-    Copy-Item -LiteralPath $EDITOR_EXE -Destination $stagedEditorExe
-    Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $stagePath
-    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $stagePath -Required $true | Out-Null
-    Copy-Item -LiteralPath $PLAY_EXE -Destination $stagedPlayExe
-    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
-    $editorHelp = @"
+# --- the editor's plain build: one flat folder, the editor (its DLL and ImGui) and beside it
+#     the Play child (onplay.exe and the runtime DLL), where the editor's Play looks for it,
+#     the updater pair and README.txt, no wizard and no command file. The service packs it as
+#     ONEDITOR, whose OPENNOVA.WIZ makes the folder the editor's: update.exe there updates the
+#     editor alone and starts oneditor.exe again. In a debug export the Play child's ImGui
+#     library is the editor's own file (the addon's imguid.dll); a release Play export carries
+#     none (the preset's imgui/release). ---
+$editorHelp = @"
 OpenNova Editor (pre-1.0, experimental).
 
   oneditor.exe   the editor: create or open a project, fill in the files the game
@@ -750,15 +656,62 @@ OpenNova Editor (pre-1.0, experimental).
   onplay.exe     the game the editor's Play runs your project with
 
 Keep the folder's files together: Play runs the onplay.exe beside oneditor.exe
-(or set another runtime in the editor's File > Project settings...).
+(or set another runtime in the editor's File > Project settings...), and
+update.exe and revupdat.exe update the editor in place.
 "@
-    Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $editorHelp -Encoding UTF8
+
+$runtimeStage = New-StageDir ".stage-opennova-runtime-windows"
+$editorStage = New-StageDir ".stage-opennova-editor-windows"
+try {
+    $runtimeStaged = New-Object System.Collections.Generic.List[string]
+    $stagedExe = Join-Path $runtimeStage "opennova.exe"
+    Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
+    $runtimeStaged.Add("opennova.exe")
+    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $runtimeStage
+    $runtimeStaged.Add((Split-Path $SHIPPED_RUNTIME_DLL -Leaf))
+    foreach ($name in @(Copy-ImGuiLibs -ExeDir $DIST -Destination $runtimeStage -Required ($ExportMode -eq "debug"))) {
+        $runtimeStaged.Add($name)
+    }
+    Copy-Item -LiteralPath $UPDATE_EXE, $REVUPDAT_EXE -Destination $runtimeStage
+    $runtimeStaged.Add("update.exe")
+    $runtimeStaged.Add("revupdat.exe")
+    Set-Content -LiteralPath (Join-Path $runtimeStage "README.txt") -Value $launchHelp -Encoding UTF8
+    $runtimeStaged.Add("README.txt")
+    Test-GodotAppBoot -ExePath $stagedExe -Label "opennova-runtime-windows"
+
+    $editorStaged = New-Object System.Collections.Generic.List[string]
+    $stagedEditorExe = Join-Path $editorStage "oneditor.exe"
+    $stagedPlayExe = Join-Path $editorStage "onplay.exe"
+    Copy-Item -LiteralPath $EDITOR_EXE -Destination $stagedEditorExe
+    $editorStaged.Add("oneditor.exe")
+    Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $editorStage
+    $editorStaged.Add((Split-Path $SHIPPED_EDITOR_DLL -Leaf))
+    foreach ($name in @(Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $editorStage -Required $true)) {
+        $editorStaged.Add($name)
+    }
+    Copy-Item -LiteralPath $PLAY_EXE -Destination $stagedPlayExe
+    $editorStaged.Add("onplay.exe")
+    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $editorStage
+    $editorStaged.Add((Split-Path $SHIPPED_RUNTIME_DLL -Leaf))
+    Copy-Item -LiteralPath $UPDATE_EXE, $REVUPDAT_EXE -Destination $editorStage
+    $editorStaged.Add("update.exe")
+    $editorStaged.Add("revupdat.exe")
+    Set-Content -LiteralPath (Join-Path $editorStage "README.txt") -Value $editorHelp -Encoding UTF8
+    $editorStaged.Add("README.txt")
     Test-EditorAppBoot -EditorExe $stagedEditorExe -PlayExe $stagedPlayExe
-    Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $EDITOR_ZIP -Force
+
+    Test-UpdaterBoot -RuntimeStage $runtimeStage -EditorStage $editorStage
+    Assert-StageHoldsOnly -StageDir $runtimeStage -Staged $runtimeStaged
+    Compress-Archive -Path (Join-Path $runtimeStage "*") -DestinationPath $RUNTIME_ZIP -Force
+    if (-not (Test-Path -LiteralPath $RUNTIME_ZIP)) { throw "Packaging produced no runtime zip" }
+    Assert-StageHoldsOnly -StageDir $editorStage -Staged $editorStaged
+    Compress-Archive -Path (Join-Path $editorStage "*") -DestinationPath $EDITOR_ZIP -Force
     if (-not (Test-Path -LiteralPath $EDITOR_ZIP)) { throw "Packaging produced no editor zip" }
 }
 finally {
-    Remove-Item -LiteralPath $stagePath -Recurse -Force
+    foreach ($stage in @($runtimeStage, $editorStage)) {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    }
 }
 Write-Host "=== Done ==="
-Get-Item -LiteralPath (@($GAMES | ForEach-Object { $_.Zip }) + @($EDITOR_ZIP, $RUNTIME_SFS)) | Select-Object Name, Length
+Get-Item -LiteralPath @($RUNTIME_ZIP, $EDITOR_ZIP) | Select-Object Name, Length

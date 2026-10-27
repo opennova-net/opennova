@@ -42,7 +42,7 @@ switcher.
 `opennova-switcher.exe` carries no code signature. The first run may show SmartScreen's
 "Windows protected your PC" (**More info**, then **Run anyway**), and the UAC prompt
 names an unknown publisher. Since it runs as administrator, check the download first: a
-tagged release lists `opennova-switcher-windows-v<version>.zip.sha256` beside the zip, and
+tagged release's notes give the SHA-256 of `opennova-switcher-windows-v<version>.zip`, and
 in PowerShell
 
 ```powershell

@@ -4,10 +4,10 @@ on:
   workflow_call:
     outputs:
       artifact_id:
-        description: ID of the Windows apps zip
+        description: ID of the Windows tools zip (opennova-tools-windows.zip)
         value: ${{ jobs.package.outputs.artifact_id }}
       artifact_url:
-        description: Download URL of the Windows apps zip
+        description: Download URL of the Windows tools zip
         value: ${{ jobs.package.outputs.artifact_url }}
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
 
       - name: Package apps
         shell: bash
-        run: scripts/package_apps.sh dist/opennova-apps-windows.zip
+        run: scripts/package_apps.sh dist/opennova-tools-windows.zip
 
       # Every exe runs without an installed VC++ runtime and reaches its usage
       # exit.
@@ -59,7 +59,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $unpacked = (New-Item -ItemType Directory -Force build/apps-package-smoke).FullName
-          Expand-Archive -LiteralPath dist/opennova-apps-windows.zip -DestinationPath $unpacked -Force
+          Expand-Archive -LiteralPath dist/opennova-tools-windows.zip -DestinationPath $unpacked -Force
           # Each CLI's usage call and the exit code it documents for it.
           $clis = @(
             @{ Exe = "opennova-3di.exe"; Arguments = @(); Code = 2 },
@@ -93,11 +93,11 @@ jobs:
           exit 0
 
       # Upload the zip directly, without a second archive wrapper.
-      - name: Upload apps zip
+      - name: Upload the tools zip
         id: upload
         uses: actions/upload-artifact@v7
         with:
-          path: dist/opennova-apps-windows.zip
+          path: dist/opennova-tools-windows.zip
           archive: false
           if-no-files-found: error
 

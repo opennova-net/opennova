@@ -38,11 +38,11 @@ the wizard names, every row is prechecked, and in an empty folder every row is m
 so a whole release installs the whole game.
 
 Every product updates through the gateways the runtime's `OPENNOVA.WIZ` names (its
-`URL`, `URL2` and `URL3`); a product's own wizard URLs are never dialed. The game zip
-writes that wizard by its export mode: `update.opennova.net`, production's, in a release
-package, and `update.staging.opennova.net`, staging's, in a debug one (`-ExportMode
-debug`, what PR CI builds), so one updater build serves both. With no `OPENNOVA.WIZ`, or
-one naming no URL, the gateway is production's, `update.opennova.net`.
+`URL`, `URL2` and `URL3`); a product's own wizard URLs are never dialed. The update
+service writes that wizard into each updatable app's package (ADR 0072), naming its own
+update host: `update.opennova.net` on production, `update.staging.opennova.net` on
+staging, so one updater build serves both. CI's plain builds carry none. With no
+`OPENNOVA.WIZ`, or one naming no URL, the gateway is production's, `update.opennova.net`.
 
 The existing retail protocol, command files, CRCs, NLZ payloads and PFF writer are
 shared with the service.
@@ -58,12 +58,15 @@ selection are not implemented. Advertised servers are tried as failover peers.
 
 Native release packages must use `opennova-update-tool build --full`, with
 `--previous <last-package.sfs>` after the first release. This includes reverted
-files and carries removals across skipped releases. Keep the preceding published
-package available to the release pipeline. Native packages retain the format's
+files and carries removals across skipped releases. The update service builds every
+release so, its `--previous` the product's published release. Native packages retain the format's
 flat product files and 15-character payload names. The native client downloads
 all rows when the command file changes, avoiding the retail prefix-CRC precheck
 for a newly published release; subsequent repair checks retain the retail CRC
 and archive timestamp behavior.
 
-Build the runtime package with `--base ONRUNTIME.CMD --product "OpenNova Runtime" --version <v>`:
-every package's PRODUCT and VERSION are the release's, and no version file is read or written (ADR 0067).
+The runtime's package is built with `--base ONRUNTIME.CMD --product "OpenNova Runtime" --exe
+opennova.exe --version <v>`, the editor's with `--base ONEDITOR.CMD --product "OpenNova Editor"
+--exe oneditor.exe`: every package's PRODUCT and VERSION are the release's, and no version file
+is read or written (ADR 0067). `scripts/package_godot_windows.ps1` packs both the same way
+into smoke packages its updater checks serve, never shipped.

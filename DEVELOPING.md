@@ -145,24 +145,31 @@ deferred. A stale DLL shows up as GDScript "class not found" errors for classes 
 
 ### Runtime and game distribution
 
-The engine repository and its CI hold and ship no game data. The Windows runtime
-package contains the engine, its native dependencies, `update.exe`, and
-`revupdat.exe`, in one game zip per game (`scripts/package_godot_windows.ps1`):
-`opennova-game-windows` (OP: Acid Gambit, a folder with no wizard),
-`jointops-game-windows` (JO's `UPDATE.WIZ` and Escalation's `expansion/jox01/UPDATE.WIZ`)
-and `dfx2-game-windows` (DFX2's `UPDATE.WIZ`). Unzipped into an empty folder, a zip's
-first run downloads its whole game. One runtime update package serves all three, each
-zip carrying its command file.
+The engine repository and its CI hold and ship no game data. CI builds the runtime and
+the editor as plain builds (`scripts/package_godot_windows.ps1`, ADR 0072):
+`opennova-runtime-windows` (the engine, its native dependencies, `update.exe`,
+`revupdat.exe` and `README.txt`) and `opennova-editor-windows` (one flat folder:
+`oneditor.exe`, its Play child `onplay.exe`, their DLLs and the same updater pair), neither
+with a wizard or a command file. The update service packs each into a release of its app,
+`ONRUNTIME` or `ONEDITOR`, writing the `OPENNOVA.WIZ` that names it, and publishing renders
+the downloads from the published releases: one game zip per game, the runtime's package
+with its `ONRUNTIME.CMD`, `opennova-game-windows` (OP: Acid Gambit, a folder with no
+wizard), `jointops-game-windows` (JO's `UPDATE.WIZ` and Escalation's
+`expansion/jox01/UPDATE.WIZ`) and `dfx2-game-windows` (DFX2's `UPDATE.WIZ`). Unzipped into
+an empty folder, a game zip's first run downloads its whole game. One runtime release
+serves all three. In the editor's folder, whose `OPENNOVA.WIZ` names `ONEDITOR`,
+`update.exe` updates the editor alone (apps/update/README.md).
 
-A package talks to its export mode's deployment (DEPLOY.md "Deployments: dev, staging and
-prod"). A release package (`scripts/package_godot_windows.ps1`'s default: tagged releases
-and master pushes) updates from `update.opennova.net`, and its NovaWorld menu's OpenNova
-target dials `nw.opennova.net`. A debug package (`-ExportMode debug`: the zip PR CI
-builds) updates from `update.staging.opennova.net` and dials `nw.staging.opennova.net`,
-so testing a PR's zip never touches production. The update host is the `URL=` of the
-zip's `OPENNOVA.WIZ` (the runtime update it ships carries the same wizard); the gate is
-the exported build's own (`NovaWorldSettings.opennova_host`). A source run's NovaWorld
-target dials loopback ("Test with our Godot game").
+A build talks to its export mode's deployment (DEPLOY.md "Deployments: dev, staging and
+prod"). A release build (`scripts/package_godot_windows.ps1`'s default: tagged releases
+and master pushes) is published to prod, whose service names `update.opennova.net` in its
+`OPENNOVA.WIZ`, and its NovaWorld menu's OpenNova target dials `nw.opennova.net`. A debug
+build (`-ExportMode debug`: what PR CI builds and publishes to staging) updates from
+`update.staging.opennova.net` and dials `nw.staging.opennova.net`, so testing a PR's
+build never touches production. The update host is the `URL=` of the `OPENNOVA.WIZ` the
+deployment's service writes into the package; the gate is the exported build's own
+(`NovaWorldSettings.opennova_host`). A source run's NovaWorld target dials loopback
+("Test with our Godot game").
 
 Every game (ADR 0071) has its OpenNova Editor project in NovaWorld (ADR 0069), never in a
 repository: OP: Acid Gambit's and its expansion OP: Nifty Package's (with their Blender
@@ -378,7 +385,7 @@ Every setting and its default: `apps/novaworld_common/README.md`, "Configuration
 
 `opennova-serve` (`apps/serve`, ADR 0051) is the game's Serve Only host with no window,
 configured by retail's host file. Build and run it against an install, with the sample host
-file (`apps/serve/example.host`, shipped in the apps zip):
+file (`apps/serve/example.host`, shipped in the tools zip):
 
 ```bash
 cmake --build build --config Release --target opennova_serve
@@ -487,14 +494,18 @@ Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
 `git push origin v0.0.N`). `release.yml`'s `gate` job refuses a tag that is not on
 master or whose commit has no green master-push `ci.yml` run (it waits for one still
 running), so the release ships only what every required CI gate already passed; the
-package jobs then build the game, editor, Blender add-on, apps and switcher zips and the
-runtime's packed update, `opennova-runtime-windows-<tag>.sfs`, every one stamped with the
-tag's version (the exes' file versions and the runtime update's VERSION, which the updater
-shows a player), whatever `godot/project.godot`'s `config/version` says. Then `release.yml` starts
-Publish for prod (`.github/workflows/publish.yml`; ADR 0071), which waits for the prod
-environment's reviewers: it publishes the runtime's update as the runtime's release on prod's
-update service through the admin API, then the tag's builds on prod's downloads host
-(DEPLOY.md, "The downloads host").
+package jobs then build the five apps' plain builds as the run's artifacts (the runtime's
+and the editor's zips, the Blender add-on's, the tools' and the switcher's), the runtime
+and the editor stamped with the tag's version (the exes' file versions), whatever
+`godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
+(its notes, with the switcher zip's SHA-256) and starts Publish for prod
+(`.github/workflows/publish.yml` with deployment `prod`, the tag and its own run id; ADR
+0072), which waits for the prod environment's reviewers: prod's service packs and publishes
+the five apps, each release's VERSION the tag's (the version the updater shows a player),
+its downloads host offers them (DEPLOY.md, "The downloads host"), and Publish attaches the
+zips the host serves to the GitHub release. A pull request's CI run publishes its five
+builds to staging the same way, once its package jobs pass (`ci.yml`'s `publish-staging`;
+a branch of this repository's alone).
 
 ## Troubleshooting
 
