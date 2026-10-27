@@ -72,7 +72,7 @@ describe('ProductSection', () => {
       value: [
         release(10, { status: 'building', sections: [], bytes: 0, sha256: '', build_log: '$ opennova-project export\n' }),
         release(9),
-        release(8, { status: 'draft' }),
+        release(8, { status: 'draft', created_by: 'user biggy' }),
         release(7, { status: 'retired' }),
         runtimeRelease(6),
         runtimeRelease(11, { status: 'uploading', product_id: null, sections: [] }),
@@ -106,6 +106,12 @@ describe('ProductSection', () => {
     expect(rows[1].findAll('button').map((b) => b.text())).toEqual(['Retire release 1.7.5.9']);
     expect(rows[2].findAll('button').map((b) => b.text())).toEqual(['Publish release 1.7.5.8', 'Delete release 1.7.5.8']);
     expect(rows[3].findAll('button').map((b) => b.text())).toEqual(['Delete release 1.7.5.7']);
+    // Who started each: an admin or a player, linked to the account in the users list.
+    const creators = rows.map((r) => r.get('.product-release-creator'));
+    expect(creators[1].text()).toBe('by admin root');
+    expect(creators[1].get('a').attributes('href')).toBe('/admin/users?q=root');
+    expect(creators[2].text()).toBe('by biggy');
+    expect(creators[2].get('a').attributes('href')).toBe('/admin/users?q=biggy');
 
     expect(page.findAll('a').find((a) => a.text() === 'View these servers in the fleet')?.attributes('href')).toBe('/admin/fleet?game=1');
     expect(page.get('#product-servers-line').text()).toBe('3 live servers. New servers start on 1.7.5.9.');

@@ -212,7 +212,14 @@
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
                   <RelativeTime :value="r.created_at" :now="now" />
-                  <span class="block">{{ creatorLabel(r.created_by) }}</span>
+                  <span class="product-release-creator block">
+                    {{ releaseCreator(r.created_by).words }}
+                    <RouterLink
+                      v-if="releaseCreator(r.created_by).account"
+                      :to="{ path: '/admin/users', query: { q: releaseCreator(r.created_by).account } }"
+                      class="text-accent hover:text-ink-bright"
+                    >{{ releaseCreator(r.created_by).account }}</RouterLink>
+                  </span>
                 </td>
                 <td class="space-x-3 whitespace-nowrap px-4 py-3 text-right text-xs">
                   <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="publish(r)">
@@ -301,8 +308,9 @@ import { confirmAction } from '../../composables/useConfirm';
 // player's, linking to the account); its project (key, visibility, the
 // newest revision and its history from GET /api/products/<key>/revisions,
 // a page at a time; a visibility change or a key rename by PATCH); its releases,
-// each built from a revision (POST /api/admin/products/<key>/releases),
-// then published, retired or deleted; and its servers moved to the published
+// each with the account that started it, built from a revision (POST
+// /api/products/<key>/releases, the player route an admin may use for any
+// project), then published, retired or deleted; and its servers moved to the published
 // release (POST /api/admin/hosted/update-all). The runtime's page has its
 // releases alone. The page polls, faster while a release is being worked on.
 import { computed, ref, watch } from 'vue';
@@ -329,12 +337,12 @@ import { formatBytes } from '../../utils/format';
 import {
   KEY_RULE,
   VERSION_RULE,
-  creatorLabel,
   findProduct,
   kindLine,
   ownerLabel,
   ownerLink,
   productLink,
+  releaseCreator,
   releaseLabel,
   releaseStatusClass,
   releaseStatusLabel,
