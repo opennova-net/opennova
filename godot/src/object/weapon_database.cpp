@@ -214,12 +214,12 @@ int WeaponDatabase::player_info_class_mask(int p_playerclass_value) {
 String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const {
 	const opennova::def::DefWeaponDef *w = row(p_index);
 	if (w == nullptr) return String();
-	return opennova::to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
+	return opennova::cp1252_to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
 }
 
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 		const Ref<RtxtStringFile> &p_gameui) {
-	return opennova::to_gd(opennova::menu::loadout_weight_line(p_total,
+	return opennova::cp1252_to_gd(opennova::menu::loadout_weight_line(p_total,
 			game_text_lookup(p_menutxt), game_text_lookup(p_gameui)));
 }
 

@@ -71,8 +71,9 @@ void ScoreFeedback::_bind_methods() {
 
 // --- ScoreboardHeader -------------------------------------------------------
 
-String ScoreboardHeader::get_server() const { return to_gd(value_.server_name); }
-String ScoreboardHeader::get_mission() const { return to_gd(value_.mission_name); }
+// The session's own bytes (the wire's server name, the mission's title), as the board draws them.
+String ScoreboardHeader::get_server() const { return opennova::cp1252_to_gd(value_.server_name); }
+String ScoreboardHeader::get_mission() const { return opennova::cp1252_to_gd(value_.mission_name); }
 
 void ScoreboardHeader::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(ScoreboardHeader, Variant::BOOL, known)
@@ -124,7 +125,8 @@ PackedStringArray EndRoundStatistics::get_label_keys() const {
 
 PackedStringArray EndRoundStatistics::get_values() const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundStatisticsRow &row : value_.rows) out.push_back(to_gd(row.value));
+	for (const opennova::hud::EndRoundStatisticsRow &row : value_.rows)
+		out.push_back(opennova::cp1252_to_gd(row.value));
 	return out;
 }
 
@@ -163,10 +165,12 @@ void RoundOutcome::_bind_methods() {
 
 // --- EndRoundColumn ---------------------------------------------------------
 
-String EndRoundColumn::get_header() const { return to_gd(value_.header); }
+String EndRoundColumn::get_header() const { return opennova::cp1252_to_gd(value_.header); }
 String EndRoundColumn::get_header_key() const { return to_gd(value_.header_key); }
-String EndRoundColumn::get_header_fallback() const { return to_gd(value_.header_fallback); }
-String EndRoundColumn::get_literal() const { return to_gd(value_.literal); }
+String EndRoundColumn::get_header_fallback() const {
+	return opennova::cp1252_to_gd(value_.header_fallback);
+}
+String EndRoundColumn::get_literal() const { return opennova::cp1252_to_gd(value_.literal); }
 
 void EndRoundColumn::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(EndRoundColumn, Variant::STRING, header)
@@ -189,7 +193,7 @@ String EndRoundRow::get_name() const { return opennova::cp1252_to_gd(value_.name
 String EndRoundRow::get_squad() const { return opennova::cp1252_to_gd(value_.squad); }
 PackedStringArray EndRoundRow::get_cells() const {
 	PackedStringArray out;
-	for (const std::string &c : value_.cells) out.push_back(to_gd(c));
+	for (const std::string &c : value_.cells) out.push_back(opennova::cp1252_to_gd(c));
 	return out;
 }
 

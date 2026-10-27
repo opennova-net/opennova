@@ -907,7 +907,7 @@ void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display
 	const bool was_active = wep.active;
 	wep = opennova::hud::HudWeaponState{};
 	wep.active = was_active;
-	wep.display_name = opennova::to_std(p_display_name);
+	wep.display_name = opennova::gd_to_retail_text(p_display_name);
 	wep.capacity = p_clipsize;
 	wep.rounds_per_icon = p_rounds_per_icon;
 	wep.clipgfx_offset_x = p_clipgfx_offset.x;
@@ -963,20 +963,21 @@ void HudOverlay::reset_overlay_buffers() {
 }
 
 void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
-	state_.kill_announcement.text = opennova::to_std(text);
+	state_.kill_announcement.text = opennova::gd_to_retail_text(text);
 	state_.kill_announcement.tick = static_cast<uint32_t>(tick);
 	queue_redraw();
 }
 
 void HudOverlay::push_message(const String &p_text) {
-	compiler_.push_message(opennova::to_std(p_text), static_cast<int>(state_.main_frame));
+	compiler_.push_message(opennova::gd_to_retail_text(p_text),
+			static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).
-	compiler_.push_feed_line(opennova::to_std(p_text),
+	compiler_.push_feed_line(opennova::gd_to_retail_text(p_text),
 			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
@@ -999,7 +1000,7 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 			case opennova::hud::ChatSink::Channel3:
 				break; // neither is a ring
 		}
-		if (post.announce) announcement = opennova::to_gd(post.text);
+		if (post.announce) announcement = opennova::cp1252_to_gd(post.text);
 	}
 	if (!posts.empty()) queue_redraw();
 	return announcement;
@@ -1010,7 +1011,7 @@ int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
 	if (p_sim.is_null()) return static_cast<int>(opennova::hud::ChatSendResult::Refused);
 	const int dispatch =
 			p_all ? opennova::hud::kChatDispatchGlobal : opennova::hud::kChatDispatchTeam;
-	std::string text = opennova::to_std(p_text);
+	std::string text = opennova::gd_to_retail_text(p_text);
 	const opennova::hud::ChatSendResult result =
 			p_sim->send_chat_line(dispatch, text, state_.main_frame);
 	if (result == opennova::hud::ChatSendResult::Flooded) {
@@ -1127,7 +1128,7 @@ void HudOverlay::set_overlay_pass_called(bool p_called) {
 }
 
 void HudOverlay::set_objectives_header(const String &p_text) {
-	state_.objectives_header = opennova::to_std(p_text);
+	state_.objectives_header = opennova::gd_to_retail_text(p_text);
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
@@ -1154,8 +1155,8 @@ void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
 		board.players_line = strings.players_line;
 		board.spectators_line = strings.spectators_line;
 		board.footer = strings.footer;
-		board.server_name = opennova::to_std(header->get_server());
-		board.mission_title = opennova::to_std(header->get_mission());
+		board.server_name = opennova::gd_to_retail_text(header->get_server());
+		board.mission_title = opennova::gd_to_retail_text(header->get_mission());
 	} else {
 		board = opennova::hud::HudScoreboardState();
 	}
@@ -1183,7 +1184,7 @@ PackedStringArray HudOverlay::get_scoreboard_header_text() const {
 	const opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	PackedStringArray out;
 	for (const std::string *text : { &sb.title, &sb.game_type_label, &sb.players_line, &sb.spectators_line, &sb.footer })
-		out.push_back(opennova::to_gd(*text));
+		out.push_back(opennova::cp1252_to_gd(*text));
 	return out;
 }
 
@@ -1241,12 +1242,12 @@ void HudOverlay::set_end_round_statistics(bool p_shown, bool p_raised,
 	opennova::hud::HudEndRoundStatisticsState &st = state_.end_round_statistics;
 	st.shown = p_shown;
 	st.raised = p_raised;
-	st.title = opennova::to_std(p_title);
+	st.title = opennova::gd_to_retail_text(p_title);
 	for (int64_t i = 0; i < 4; ++i) {
 		st.labels[i] = i < p_labels.size()
-				? opennova::to_std(p_labels[i]) : std::string();
+				? opennova::gd_to_retail_text(p_labels[i]) : std::string();
 		st.values[i] = i < p_values.size()
-				? opennova::to_std(p_values[i]) : std::string();
+				? opennova::gd_to_retail_text(p_values[i]) : std::string();
 	}
 	queue_redraw();
 }
@@ -1298,7 +1299,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 }
 
 void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
-	compiler_.push_chat_line(opennova::to_std(p_text),
+	compiler_.push_chat_line(opennova::gd_to_retail_text(p_text),
 			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
@@ -1321,7 +1322,7 @@ void HudOverlay::set_message_log_shown(bool p_shown) {
 }
 
 void HudOverlay::set_message_log_title(const String &p_title) {
-	state_.message_log_title = opennova::to_std(p_title);
+	state_.message_log_title = opennova::gd_to_retail_text(p_title);
 	queue_redraw();
 }
 
@@ -1356,7 +1357,7 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 void HudOverlay::set_waypoint(const String &p_name, int p_distance_m,
 		const Vector2 &p_mission_position, float p_altitude_wu) {
 	state_.waypoint.present = true;
-	state_.waypoint.name = opennova::to_std(p_name);
+	state_.waypoint.name = opennova::gd_to_retail_text(p_name);
 	state_.waypoint.distance_m = p_distance_m;
 	state_.waypoint.world_x = opennova::io::float_to_fp16_16_sat(p_mission_position.x);
 	state_.waypoint.world_y = opennova::io::float_to_fp16_16_sat(p_mission_position.y);
@@ -1398,8 +1399,8 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
 	// The override table first (game_text_lookup, D-NET-675).
-	return opennova::to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
-			opennova::to_std(p_key).c_str(), opennova::to_std(p_fallback).c_str()));
+	return opennova::cp1252_to_gd(game_text_lookup(p_gametext)(opennova::hud::kGameTextOverlays,
+			opennova::to_std(p_key).c_str(), opennova::gd_to_retail_text(p_fallback).c_str()));
 }
 
 } // namespace
@@ -1471,7 +1472,7 @@ String HudOverlay::get_attach_label_text(int p_index) const {
 	if (p_index < 0 || p_index >= static_cast<int>(state_.attach_labels.size())) {
 		return String();
 	}
-	return opennova::to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
+	return opennova::cp1252_to_gd(state_.attach_labels[static_cast<size_t>(p_index)].text);
 }
 
 Vector2 HudOverlay::get_attach_label_position(int p_index) const {
@@ -1645,7 +1646,7 @@ void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio
 void HudOverlay::set_slot_bar_key_labels(const PackedStringArray &p_labels_by_category) {
 	for (size_t c = 0; c < slot_bar_key_labels_.size(); ++c)
 		slot_bar_key_labels_[c] = static_cast<int64_t>(c) < p_labels_by_category.size()
-				? opennova::to_std(p_labels_by_category[static_cast<int64_t>(c)])
+				? opennova::gd_to_retail_text(p_labels_by_category[static_cast<int64_t>(c)])
 				: std::string();
 }
 
@@ -1665,11 +1666,11 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 			: opennova::inmatch::HudRoleFacts();
 	state_.emotes_menu = facts.emotes_menu;
 	state_.radio_menu = facts.radio_menu;
-	state_.paused_text = opennova::to_std(overlay_text(p_gametext, "STROVER7", ""));
+	state_.paused_text = opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER7", ""));
 	state_.breath_samples = facts.breath.samples;
 	state_.breath_time = facts.breath.breath_time;
 	state_.round_over = facts.breath.round_over;
-	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
+	state_.breath_label = opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER91", ""));
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
 	state_.net_quality = facts.net_quality;
@@ -1677,10 +1678,13 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	// The connection status line and the start timer with their Overlays texts (engine
 	// hud/hud_frame.h HudConnectStatus / HudStartTimer carry the witness).
 	state_.connect_status = facts.connect_status;
-	state_.connect_status.label = opennova::to_std(overlay_text(p_gametext, "STROVER54", ""));
+	state_.connect_status.label =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER54", ""));
 	state_.start_timer.seconds = facts.start_timer_seconds;
-	state_.start_timer.label = opennova::to_std(overlay_text(p_gametext, "STROVER59", ""));
-	state_.start_timer.footer = opennova::to_std(overlay_text(p_gametext, "STROVER63", ""));
+	state_.start_timer.label =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER59", ""));
+	state_.start_timer.footer =
+			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER63", ""));
 	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {

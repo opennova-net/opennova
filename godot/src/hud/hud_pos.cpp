@@ -350,33 +350,35 @@ String HudPos::waypoint_label(const Ref<RtxtStringFile> &p_mission,
 	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
 	const std::string name = opennova::hud::waypoint_display_name(key, p_in_session, game_type,
 			game_text_lookup(p_mission), gametext);
-	return opennova::to_gd(opennova::hud::waypoint_label_text(name, key, game_type, gametext));
+	return opennova::cp1252_to_gd(
+			opennova::hud::waypoint_label_text(name, key, game_type, gametext));
 }
 
 String HudPos::subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
 		int p_header_id) {
-	return opennova::to_gd(opennova::hud::subgoal_message(p_lost, p_header_id,
+	return opennova::cp1252_to_gd(opennova::hud::subgoal_message(p_lost, p_header_id,
 			game_text_lookup(p_mission)));
 }
 
 String HudPos::objective_header(const Ref<RtxtStringFile> &p_gametext) {
-	return opennova::to_gd(opennova::hud::objective_header(game_text_lookup(p_gametext)));
+	return opennova::cp1252_to_gd(opennova::hud::objective_header(game_text_lookup(p_gametext)));
 }
 
 String HudPos::objective_directive(const Ref<RtxtStringFile> &p_mission, bool p_win,
 		int p_header_id) {
-	return opennova::to_gd(opennova::hud::objective_directive(p_win, p_header_id,
+	return opennova::cp1252_to_gd(opennova::hud::objective_directive(p_win, p_header_id,
 			game_text_lookup(p_mission)));
 }
 
 String HudPos::triggered_text(const Ref<RtxtStringFile> &p_mission, int p_text_id) {
-	return opennova::to_gd(opennova::hud::triggered_text(p_text_id, game_text_lookup(p_mission)));
+	return opennova::cp1252_to_gd(
+			opennova::hud::triggered_text(p_text_id, game_text_lookup(p_mission)));
 }
 
 String HudPos::weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 		const String &p_weapon_id) {
-	return opennova::to_gd(opennova::hud::weapon_display_name(opennova::to_std(p_weapon_id),
-			game_text_lookup(p_gametext)));
+	return opennova::cp1252_to_gd(opennova::hud::weapon_display_name(
+			opennova::to_std(p_weapon_id), game_text_lookup(p_gametext)));
 }
 
 // --- loading screen (hud/loading_screen.h carries the values/witnesses) -----

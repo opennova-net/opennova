@@ -46,10 +46,10 @@ String resolve_column_header(const opennova::hud::EndRoundTextLookup &lookup,
 	std::string text = c.header_fallback;
 	if (!c.header_key.empty()) {
 		std::string value;
-		if (lookup(c.header_key, value) && !value.empty()) return opennova::to_gd(value);
+		if (lookup(c.header_key, value) && !value.empty()) return opennova::cp1252_to_gd(value);
 	}
 	if (!text.empty() && text[0] == '!') text.erase(0, 1);
-	return opennova::to_gd(text);
+	return opennova::cp1252_to_gd(text);
 }
 
 } // namespace
@@ -101,7 +101,7 @@ TypedArray<EndRoundColumn> Simulation::get_end_round_columns(int p_table_width,
 	const opennova::hud::EndRoundTextLookup lookup = overlays_lookup(p_gametext);
 	for (opennova::inmatch::StatScreenColumn c :
 			opennova::inmatch::stat_screen_columns(er.board, false, p_table_width)) {
-		c.header = opennova::to_std(resolve_column_header(lookup, c));
+		c.header = opennova::gd_to_retail_text(resolve_column_header(lookup, c));
 		Ref<EndRoundColumn> column;
 		column.instantiate();
 		column->assign(c);

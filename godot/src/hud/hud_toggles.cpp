@@ -84,7 +84,7 @@ String HudToggles::verbose_toast_key() const {
 	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
 }
 String HudToggles::mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale) {
-	return opennova::to_gd(
+	return opennova::cp1252_to_gd(
 			opennova::hud::mouse_scale_toast(game_text_lookup(p_gametext), p_scale));
 }
 void HudToggles::cycle_hud_color() {

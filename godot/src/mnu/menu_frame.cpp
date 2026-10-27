@@ -595,7 +595,11 @@ void MenuFrame::set_widget_caret(int p_index, int p_caret) {
 }
 
 void MenuFrame::set_widget_text(int p_index, const String &p_text, int p_hotkey_pos) {
-	opennova::menu::frame_set_text(state_, p_index, opennova::to_std(p_text), p_hotkey_pos);
+	set_widget_text_bytes(p_index, opennova::gd_to_retail_text(p_text), p_hotkey_pos);
+}
+
+void MenuFrame::set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos) {
+	opennova::menu::frame_set_text(state_, p_index, p_text, p_hotkey_pos);
 	queue_redraw();
 }
 
@@ -639,7 +643,7 @@ void MenuFrame::set_widget_items(int p_index,
 	std::vector<std::string> items;
 	items.reserve(static_cast<size_t>(p_items.size()));
 	for (int64_t i = 0; i < p_items.size(); ++i) {
-		items.push_back(opennova::to_std(p_items[i]));
+		items.push_back(opennova::gd_to_retail_text(p_items[i]));
 	}
 	set_widget_item_texts(p_index, items);
 }

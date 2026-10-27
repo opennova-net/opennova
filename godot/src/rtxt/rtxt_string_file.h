@@ -129,8 +129,9 @@ public:
 	// defaults' texts).
 	static std::shared_ptr<const opennova::rtxt::File> installed_text_override();
 	// The section lookup (rtxt::find_with_text_override) over p_table: the
-	// installed override's entry first, then the table's, converted as
-	// get_string_in_section converts it; false with no table or no entry.
+	// installed override's entry first, then the table's, its bytes as the
+	// table holds them (the game draws, joins and sends a table's bytes);
+	// false with no table or no entry.
 	static bool find_text(const RtxtStringFile &p_table, const char *p_section, const char *p_key,
 			std::string &r_out);
 	// That text, or p_fallback for no table or no entry (GameText_GetStringWithFallback's

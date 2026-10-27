@@ -281,7 +281,7 @@ bool RtxtStringFile::find_text(const RtxtStringFile &p_table, const char *p_sect
 	const opennova::rtxt::Entry *entry =
 			opennova::rtxt::find_with_text_override(p_table.file_, p_section, p_key);
 	if (entry == nullptr) return false;
-	r_out = opennova::to_std(std_to_gd(entry->text));
+	r_out = entry->text;
 	return true;
 }
 

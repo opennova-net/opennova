@@ -157,7 +157,8 @@ public:
 		if (MenuFrame *f = frame()) f->set_widget_checked(index, checked);
 	}
 	void set_widget_text(int index, const std::string &text, int hotkey_pos) override {
-		if (MenuFrame *f = frame()) f->set_widget_text(index, to_gd(text), hotkey_pos);
+		// The runtime's bytes as they are, as the items go (D-MNU-49).
+		if (MenuFrame *f = frame()) f->set_widget_text_bytes(index, text, hotkey_pos);
 	}
 	void set_widget_items(int index, const std::vector<std::string> &items) override {
 		// The items as the runtime holds them, bytes and all: a round trip
@@ -214,7 +215,8 @@ public:
 	}
 	std::string get_widget_text(int index) const override {
 		MenuFrame *f = frame();
-		return f != nullptr ? to_std(f->get_widget_text(index)) : std::string();
+		return f != nullptr ? opennova::gd_to_retail_text(f->get_widget_text(index))
+							: std::string();
 	}
 	int item_count(int index) const override {
 		MenuFrame *f = frame();
@@ -631,13 +633,17 @@ void MenuDriver::set_widget_checked(int p_id, bool p_checked) {
 }
 bool MenuDriver::is_widget_checked(int p_id) const { return runtime_.is_widget_checked(p_id); }
 String MenuDriver::set_widget_text(int p_id, const String &p_text) {
-	return to_gd(runtime_.set_widget_text(p_id, to_std(p_text)));
+	return menu_text_to_gd(runtime_.set_widget_text(p_id, opennova::gd_to_retail_text(p_text)));
 }
 String MenuDriver::get_widget_text(int p_id) const {
 	return menu_text_to_gd(runtime_.get_widget_text(p_id));
 }
 void MenuDriver::set_widget_items(int p_id, const PackedStringArray &p_items) {
-	runtime_.set_widget_items(p_id, to_std_strings(p_items));
+	std::vector<std::string> items;
+	items.reserve(static_cast<size_t>(p_items.size()));
+	for (int64_t i = 0; i < p_items.size(); ++i)
+		items.push_back(opennova::gd_to_retail_text(p_items[i]));
+	runtime_.set_widget_items(p_id, items);
 }
 PackedStringArray MenuDriver::get_widget_items(int p_id) const {
 	return menu_texts_to_gd(runtime_.get_widget_items(p_id));
@@ -653,7 +659,7 @@ TypedArray<MnuActionRow> MenuDriver::widget_actions(int p_id) const {
 	return doc_.is_valid() ? doc_->get_widget_actions(p_id) : TypedArray<MnuActionRow>();
 }
 void MenuDriver::select_row_by_value(int p_id, const String &p_value, bool p_emit) {
-	runtime_.select_row_by_value(p_id, to_std(p_value), p_emit);
+	runtime_.select_row_by_value(p_id, opennova::gd_to_retail_text(p_value), p_emit);
 }
 void MenuDriver::select_row(int p_id, int p_row, bool p_emit) {
 	runtime_.select_row(p_id, p_row, p_emit);

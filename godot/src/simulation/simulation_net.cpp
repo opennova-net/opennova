@@ -1460,10 +1460,10 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 
 void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 	if (runtime_) runtime_->state().kill_announcement.record(
-			opennova::to_std(text), static_cast<uint32_t>(tick));
+			opennova::gd_to_retail_text(text), static_cast<uint32_t>(tick));
 }
 String Simulation::get_kill_announcement_text() const {
-	return runtime_ ? opennova::to_gd(runtime_->state().kill_announcement.text) : String();
+	return runtime_ ? opennova::cp1252_to_gd(runtime_->state().kill_announcement.text) : String();
 }
 int64_t Simulation::get_kill_announcement_tick(int64_t now) {
 	if (!runtime_) return 0;

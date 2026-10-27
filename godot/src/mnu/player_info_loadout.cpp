@@ -24,7 +24,7 @@ void PlayerInfoLoadout::fill_slots(const Ref<MenuDriver> &p_driver, const Ref<We
 		const Ref<RtxtStringFile> &p_gametext) {
 	if (p_driver.is_null()) return;
 	value_.fill_slots(p_driver->runtime(), weapons_of(p_weapons), p_class_mask, p_team_mask,
-			to_std(p_none_label), game_text_lookup(p_gametext));
+			opennova::gd_to_retail_text(p_none_label), game_text_lookup(p_gametext));
 }
 
 void PlayerInfoLoadout::restore(const Ref<MenuDriver> &p_driver, const Ref<PlayerInfoKitRestore> &p_page,

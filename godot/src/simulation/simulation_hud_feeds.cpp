@@ -117,7 +117,7 @@ String Simulation::get_command_map_rules_text(const Ref<RtxtStringFile> &p_gamet
 	std::string text;
 	if (!opennova::inmatch::command_map_rules_text(role_view(), game_text_lookup(p_gametext), text))
 		return String();
-	return opennova::to_gd(text);
+	return opennova::cp1252_to_gd(text);
 }
 
 Ref<ScoreFeedback> Simulation::take_score_feedback() {

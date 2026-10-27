@@ -173,6 +173,13 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 			"the presenter expires the banner on the logic tick")
 	assert_eq(sim.get_kill_announcement_text(), "XYZ",
 			"expiration retains the death-screen text")
+	# The banner's text is the page's bytes end to end: a script's "é" is the one byte 0xE9,
+	# one glyph as the game draws it, and reads back as its character (D-HUD-57).
+	now = sim.get_logic_tick()
+	sim.retain_feed_announcement("Café", now)
+	presenter.tick(false)
+	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 4, "one glyph a byte, the é one byte")
+	assert_eq(sim.get_kill_announcement_text(), "Café", "and it reads back as written")
 	presenter.set_hud_detail_level(start)
 
 
