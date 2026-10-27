@@ -477,6 +477,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_records.cpp  # process_session_admission's tag arms of JoinerConnection, by family
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_transfer.cpp  # the retained transfer chunks (0x45 / 0x60 / 0x64) of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_kill_page.cpp  # the C2S 0x28 -> S2C 0x4E kill page

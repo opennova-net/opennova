@@ -1308,6 +1308,29 @@ private:
 	void process_session_admission(const ProtocolPacketHeader &hdr,
 			std::vector<ProtocolMessage> messages, const SessionDeframeAdmission &admission,
 			PollResult &out);
+	// One admitted game record's pass through the tag arms (joiner_connection_records.cpp): the
+	// poll's result, the replies its handlers queue in wire order, the packet's admission, the
+	// ACK of the record's containing packet, whether it is a 0x5A that decoded, and whether this
+	// packet carried the 0x0F that completes the admission.
+	struct RecordPass {
+		PollResult &out;
+		std::vector<ProtocolMessage> &periodic_replies;
+		const SessionDeframeAdmission &admission;
+		uint32_t packet_ack;
+		bool valid_weapon_loadout;
+		bool &world_state_load_seen;
+	};
+	// The arms by message family, in the chain's order; each false when none takes the record.
+	bool on_join_record(const ProtocolMessage &m, RecordPass &pass);
+	bool on_mission_record(const ProtocolMessage &m, RecordPass &pass);
+	bool on_world_record(const ProtocolMessage &m, RecordPass &pass);
+	bool on_control_record(const ProtocolMessage &m, RecordPass &pass);
+	bool on_deployment_record(const ProtocolMessage &m, RecordPass &pass);
+	// The deployment release: the reply seen, the stage complete when asked, and on a known
+	// self handle the in-match phase, its edge onto `out`.
+	void release_deployment(bool deployment_complete, PollResult &out);
+	// The admission's initial sync-tail stage, completed at once by a latched early 0x11.
+	void enter_initial_sync_tail();
 	// A packet the manager receive queued for the client pump: its opcode and its body past
 	// the opcode (NWU-decrypted). [orig: the protocol FIFO's 12-byte header {address, port,
 	//  opcode} and the packet (NapiFifo_WritePacketAtomic @0x637520)]
