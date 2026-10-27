@@ -1110,13 +1110,16 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.has_saved_live = true;
 		// The own row's eye is the World body's (LocalPlayer), never restamped here.
 		q.has_eye = es.cls == EntityClass::Player && !is_self;
-		// A free-standing body still attached is a dead org1 body its record still seats (the
-		// live one takes the seated branch): its seat attach's Flags 0x40 stands until the
-		// detach, so its resolve sets the mounted latch.
-		// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34;
-		//  Entity_UpdateInfantryAI @0x4B9910 - the call @0x4BF7F2; Entity_DetachFromVehicle
-		//  @0x4355F0 - Flags &= ~0x40 @0x435910]
-		q.mounted_latch = es.carrier_handle != wire_handle::kInvalid;
+		// The resolver's mounted latch is a parent with Health above 0, or the seat attach's
+		// Flags 0x40. A dead body its record still seats has neither: its Health is 0, and the
+		// death edge cleared 0x40 | 0x80 (org1 clears 0x40 again on each dead tick ahead of
+		// this call), so its resolve applies the push forces.
+		// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - var_68 @0x4B2BE0..0x4B2BFE
+		//  (+0x16C set and the Health word above 0), the latch @0x4B2D10..0x4B2D34;
+		//  Entity_UpdateInfantryAI @0x4B9910 - the death edge's `and eax, 0FFFFFF3Fh`
+		//  @0x4B9D2A, the dead tick's `and eax, 0FFFFFFBFh` @0x4B9D60, the call @0x4BF7F2;
+		//  Entity_UpdateInfantryPlayerBody's edge @0x4B4CC7]
+		q.mounted_latch = es.carrier_handle != wire_handle::kInvalid && !es.net_health_zero;
 		const int32_t clearance = (*resolver)(q);
 		es.x = q.pos[0];
 		es.y = q.pos[1];
@@ -1491,7 +1494,9 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const Replic
 
 // A live seated org1 body's mounted tail: past its seat branch and the mounted fire window, on
 // its eight-tick key (the update's stagger key, the bare tick on a client), it runs the movement
-// resolver over the capsule its dual update returned, the return discarded. The resolver reads
+// resolver over the capsule its dual update returned, the return discarded, whether or not the
+// channel has a track (the head zeroes the dual update's out ahead of it; a channel with no
+// track returns no frame here, and `frame` is the zero frame). The resolver reads
 // the body's own words: the seat pose the seat branch left, its velocity (the seat branch zeroed
 // the vertical word), Flags, savedLivePose (the head's stamp, last tick's seat pose) and the
 // derived org1 eye, the latch set by the seat attach's Flags 0x40; its clear and blink set
@@ -1500,7 +1505,8 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const Replic
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the key `g_CurrentTick + 36 * entity+0x7C`
 //  @0x4B9948..0x4B9959, its `& 7` @0x4BA066..0x4BA072, the mount test @0x4BF4B3..0x4BF4C9, the
 //  key test @0x4BF5A5..0x4BF5AD, the call @0x4BF5BE (the capsule locals @0x4BF5B3..0x4BF5BC, the
-//  dual update's out @0x4B9A22..0x4B9A48); Entity_MovementCollisionResolver @0x4B2BD0 - the
+//  dual update's out @0x4B9A22..0x4B9A48, zeroed @0x4B9A34..0x4B9A44, and no track test ahead
+//  of the call); Entity_MovementCollisionResolver @0x4B2BD0 - the
 //  at-rest skip @0x4B2C1E..0x4B2CEC, the clear @0x4B2D2E..0x4B2D36, the blink set
 //  @0x4B34C0..0x4B3502, the probe @0x4B3D95]
 void ClientReplicaPipeline::resolve_seated_org1(ClientEntityState &es,
@@ -1842,7 +1848,7 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 			if (follows_carrier_seat(es)) follow_carrier_seat(es, carrier);
 			es.rm_look_due = true;
 			es.rm_look_seated = true;
-			if (seat_frame_have) resolve_seated_org1(es, seat_frame, rm_key);
+			resolve_seated_org1(es, seat_frame_have ? seat_frame : world::RootMotionFrame{}, rm_key);
 		}
 		// A seated player row's view phase (row_org2_view_phase), its record's Flags 0x40 taking
 		// the skip branch: the Yaw held 120 degrees about the body heading its last seat carry left

@@ -2,19 +2,22 @@
 // its dual update (the channel, armed across its records) and stamps savedLivePose from the pose
 // its last update left; the seat branch clears the chute, in-air, afloat, ladder, dive and armory
 // bits and the vertical velocity, keeping Indoors (0x800000), then poses the body on its seat; the
-// mounted tail runs the movement resolver on the eight-tick key over the channel's capsule, its
-// Flags out the row's, so the Indoors bit is re-derived. A seated player row runs no resolve; its
-// channel runs at its head too (a starved tick advances it), and its update poses it at its
-// mounted site, after its head's stamp. A dead body its record still seats resolves
-// free-standing with the mounted latch its seat attach's Flags 0x40 sets. Both replica resolves
+// mounted tail runs the movement resolver on the eight-tick key over the channel's capsule (the
+// zero frame when the channel has no track), its Flags out the row's, so the Indoors bit is
+// re-derived. A seated player row runs no resolve; its channel runs at its head too (a starved
+// tick advances it), and its update poses it at its mounted site, after its head's stamp. A dead
+// body its record still seats resolves free-standing with no mounted latch: its Health is 0 and
+// its death edge cleared the seat attach's Flags 0x40. Both replica resolves
 // read the body's current state (+0x2BC): the arbitrated current, or the state its death edge
 // stored that tick, never the record's raw byte.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the dual update @0x4B9A48, the stamp
 //  @0x4B9A53..0x4B9A6E, the key `& 7` @0x4BA066..0x4BA072, the seat block @0x4BEBEC..0x4BEC15,
 //  the mounted tail @0x4BF4B3..0x4BF5BE, the free-standing call @0x4BF7F2;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF ahead of the starved
-//  exit @0x4B4669..0x4B4670; Entity_MovementCollisionResolver @0x4B2BD0 - the latch
-//  @0x4B2D2B..0x4B2D34, the clear @0x4B2D2E..0x4B2D36; Entity_AttachToVehicleSlot @0x4946D0 -
+//  exit @0x4B4669..0x4B4670; the dual update's out zeroed @0x4B9A34..0x4B9A44;
+//  Entity_MovementCollisionResolver @0x4B2BD0
+//  - var_68 @0x4B2BE0..0x4B2BFE, the latch @0x4B2D10..0x4B2D34, the clear @0x4B2D2E..0x4B2D36;
+//  the death edges' Flags clears @0x4B9D2A / @0x4B9D60 / @0x4B4CC7; Entity_AttachToVehicleSlot @0x4946D0 -
 //  `or ecx, 40h` @0x494760; the resolver's +0x2BC reads @0x4B2C05 / @0x4B3A77, the death edges'
 //  stores @0x4B4CA3 / @0x4B9CFE..0x4B9D06; the org2 stamp @0x4B4190..0x4B419C, its mounted
 //  site's pose @0x4B63C7 / @0x4B6510]
@@ -54,12 +57,15 @@ constexpr uint16_t kGround = 0x2001; // the probe's hit the stub resolver answer
 
 int32_t fixed_of(double v) { return static_cast<int32_t>(v * 65536.0); }
 
-// Looping clips over one adm, every state authored, the capsule 1..2 u.
+// Looping clips over one adm, every state authored, the capsule 1..2 u (`tracks` false: the
+// channel has no track and returns no frame).
 struct BodySource final : public opennova::world::IRootMotionSource {
+	bool tracks = true;
 	bool has_clip(int, int) const override { return true; }
 	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
 		++phase;
 		out = {};
+		if (!tracks) return false;
 		out.capsule_bottom = 1 << 16;
 		out.capsule_top = 2 << 16;
 		return true;
@@ -207,6 +213,20 @@ void test_seated_org1_resolves_on_its_eight_tick_key() {
 			"the sixteenth tick's resolve sets the Indoors bit");
 }
 
+// The mounted tail runs whether or not the body's channel has a track: with none, the resolve
+// reads the zero frame (the head's zeroed out).
+void test_seated_org1_with_no_track_still_resolves() {
+	Rig rig(nw::EntityClass::Infantry);
+	rig.src.tracks = false;
+	for (int i = 0; i < 8; ++i) rig.tick();
+	expect(rig.view->frame_tick() == 8 && rig.rider_queries() == 1 &&
+					rig.queries.back().mounted_latch,
+			"a seated body whose channel has no track still resolves on its key");
+	expect(rig.rider_queries() == 1 && rig.queries.back().capsule_bottom == 0 &&
+					rig.queries.back().capsule_top == 0,
+			"its resolve reads the zero frame");
+}
+
 // The head stamps savedLivePose from the pose the body's last update left, ahead of this
 // update's seat pose: the hull's move this tick shows as the resolve's pos less its saved pose,
 // in the walk's first half and in its parked half alike.
@@ -273,9 +293,12 @@ void test_seated_player_row_runs_no_resolve() {
 			"a starved seated player's head still advances its channel");
 }
 
-// A dead body its record still seats takes the free-standing branch, whose resolve carries the
-// mounted latch its seat attach's Flags 0x40 set; a free-standing live body's carries none.
-void test_dead_seated_body_resolves_with_the_latch() {
+// A dead body its record still seats takes the free-standing branch, whose resolve carries no
+// mounted latch: its Health is 0, so its parent sets none, and the death edge cleared the seat
+// attach's Flags 0x40, so the push forces apply; a free-standing live body's carries none either.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - var_68 @0x4B2BE0..0x4B2BFE, the latch
+//  @0x4B2D10..0x4B2D34; Entity_UpdateInfantryAI @0x4B9910 - @0x4B9D2A, @0x4B9D60]
+void test_dead_seated_body_resolves_without_the_latch() {
 	Rig rig(nw::EntityClass::Infantry);
 	const int16_t death = as::kDeathBulletBase + 6;
 	rig.view->apply(nw::s2c::ENTITY_DEATH,
@@ -283,8 +306,8 @@ void test_dead_seated_body_resolves_with_the_latch() {
 			 static_cast<uint8_t>(death & 0xFF), static_cast<uint8_t>(death >> 8)});
 	rig.tick();
 	expect(rig.rider().carrier_handle == kHull && rig.rider_queries() >= 1 &&
-					rig.queries.back().mounted_latch,
-			"the dead seated body's free-standing resolve sets the mounted latch");
+					!rig.queries.back().mounted_latch,
+			"the dead seated body's free-standing resolve sets no mounted latch");
 	Rig free_standing(nw::EntityClass::Infantry, false, /*seated=*/false);
 	free_standing.tick();
 	expect(free_standing.rider_queries() == 1 && !free_standing.queries.back().mounted_latch,
@@ -344,7 +367,8 @@ int main() {
 	test_seated_org1_seat_block_scrubs_its_flags();
 	test_seated_org1_channel_survives_its_records();
 	test_seated_player_row_runs_no_resolve();
-	test_dead_seated_body_resolves_with_the_latch();
+	test_seated_org1_with_no_track_still_resolves();
+	test_dead_seated_body_resolves_without_the_latch();
 	test_resolves_read_the_current_state();
 	test_seated_player_pose_is_its_mounted_sites();
 	if (failures != 0) {
