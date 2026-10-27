@@ -815,7 +815,8 @@ static int test_downloads() {
 			jo_entry->get_string("version", "") == "1.0.0" &&
 			jo_entry->get_string("release", "") == "Joint Operations 1.0" &&
 			jo_entry->get_string("published", "").size() == 20 &&
-			!jo_entry->get_string("description", "").empty());
+			!jo_entry->get_string("description", "").empty() && jo_entry->get("owner") &&
+			jo_entry->get("owner")->is_null());
 	TEST_EXPECT(unoffered(manifest, "DFX2") && unoffered(manifest, "ACIDGAMBIT") &&
 			unoffered(manifest, "ONBLENDER") && unoffered(manifest, "ONRUNTIME") &&
 			entry_of(manifest, "ONRUNTIME")->get("file")->is_null() &&
@@ -865,7 +866,8 @@ static int test_downloads() {
 	TEST_EXPECT(pub_entry &&
 			pub_entry->get_string("file", "") == "player-pubgame-game-windows.zip" &&
 			pub_entry->get_string("version", "") == "1.0" &&
-			pub_entry->get_string("kind", "") == "game");
+			pub_entry->get_string("kind", "") == "game" &&
+			pub_entry->get_string("owner", "") == "maker");
 	TEST_EXPECT(entry_of(manifest, "PRIVGAME") == nullptr &&
 			!fs::exists(io::os_path(io::utf8_join(host, "player-privgame-game-windows.zip"))));
 

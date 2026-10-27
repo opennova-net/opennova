@@ -31,12 +31,13 @@
 //                      the site reads):
 //
 //                        {"written": "<ISO 8601 UTC>",
-//                         "products": [{"key", "kind", "name", "description", "file", "size",
-//                                       "sha256", "version", "release", "published"}]}
+//                         "products": [{"key", "kind", "name", "description", "owner", "file",
+//                                       "size", "sha256", "version", "release", "published"}]}
 //
 //                      every product the host offers listed in list_products' order (games,
 //                      expansions, apps; an account's own game once it has a published release:
-//                      no private one, no account's own expansion), file its download's name
+//                      no private one, no account's own expansion), owner the username of the
+//                      account whose game it is (null for the service's own), file its download's name
 //                      (null with none), size, sha256, version (its
 //                      release's, else its section's VERSION), release (its id) and published
 //                      (ISO 8601 UTC) null while it offers no rendered download. Every other

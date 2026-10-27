@@ -1093,8 +1093,9 @@ download under its stable name: the games' `opennova-game-windows.zip` (OP: Acid
 `jointops-game-windows.zip` and `dfx2-game-windows.zip`, and the apps'
 `opennova-editor-windows.zip`, `opennova-tools-windows.zip` and
 `opennova-blender-addon-windows.zip`, beside
-`manifest.json`: `{written, products: [{key, kind, name, description, file, size, sha256,
-version, release, published}]}`, every product listed, its file's fields null until it has a
+`manifest.json`: `{written, products: [{key, kind, name, description, owner, file, size,
+sha256, version, release, published}]}` (`owner` a player's game's account, null for the
+service's own), every product listed, its file's fields null until it has a
 published release (the runtime, Escalation and OP: Nifty Package have no download of their
 own). The data program writes it: publishing or retiring a release queues its
 `downloads.publish` job, which renders every product that has a download and a published

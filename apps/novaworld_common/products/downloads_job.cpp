@@ -305,6 +305,9 @@ std::string manifest_json(
 		item.set("kind", io::json_string(product_kind_name(p.kind)));
 		item.set("name", io::json_string(p.display_name));
 		item.set("description", io::json_string(p.description));
+		// The account that made it, for a player's own game (the site's Players' games); null
+		// for the service's own.
+		item.set("owner", string_or_null(p.owner, p.owner_id.has_value()));
 		item.set("file", string_or_null(p.download, !p.download.empty()));
 		item.set("size",
 				has ? io::json_number(static_cast<double>(it->second.size))
