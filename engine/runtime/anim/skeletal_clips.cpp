@@ -10,6 +10,7 @@
 #include <runtime/world/body_anim.h>
 
 #include <algorithm>
+#include <iterator>
 #include <cstring>
 #include <memory>
 #include <string_view>
@@ -265,6 +266,16 @@ void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
 		bones_ = anim::ClipSampler(skeleton_bf, table_positions,
 				/*model_bind=*/false, nullptr, rig_parents).header().bones;
 		skeleton_file_bones_ = skeleton_bf.bone_count;
+		// A model row past the skeleton's records takes row 0's rest turn: the viewmodel's builder
+		// fills each such slot with row 0's composed matrix, which the sampler's row-0 turn
+		// (ClipSampler: rows past the channels) over this rest reproduces; with an identity rest
+		// the row turned by row 0's raw channel instead (D-INF-13's FP sweep: L115A's row 39).
+		// [orig: BoneAnim_BuildWorldMatrices @0x40C400 - the padding loop @0x40C591..0x40C5BE
+		//  (slot 0 copied to each slot from the bone count to modelDef+0x34)]
+		if (model_table && skeleton_bf.num_bones > 0)
+			for (size_t i = skeleton_bf.num_bones; i < bones_.size(); ++i)
+				std::copy(std::begin(bones_[0].rest_rotation), std::end(bones_[0].rest_rotation),
+						std::begin(bones_[i].rest_rotation));
 		// Legacy positional override (no parents supplied): model-supplied
 		// per-bone bind positions OVERRIDE the reset .bad's — BadBone.position
 		// is a lossy export, the .3di carries the real pivots.

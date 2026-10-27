@@ -299,6 +299,30 @@ int main() {
         expect(same, "a clip's own bind records pose nothing");
     }
 
+    // A model row past the skeleton's records (L115A's row 39 over its 39-bone reset): the
+    // viewmodel's builder fills its slot with row 0's composed matrix, so under row 0 it deforms
+    // exactly as row 0 does. [orig: BoneAnim_BuildWorldMatrices @0x40C400 - the padding loop
+    // @0x40C591..0x40C5BE]
+    {
+        std::vector<anim::Vec3> padded_rel = rel;
+        padded_rel.push_back({0.31f, 0.22f, -0.11f});
+        std::vector<int> padded_parents = parents;
+        padded_parents.push_back(0);
+        SkeletalClips padded;
+        if (expect(padded.load_from_files(&files, "skel", {{"anim_clip", "clip"}}, padded_rel, padded_parents),
+                    "the padded rig loads")) {
+            for (int key = 0; key < 2; ++key) {
+                std::vector<PoseBone> pose;
+                padded.eval_pose("anim_clip", playheads[key], 0, pose);
+                std::vector<SkeletalClips::RestTransform> globals;
+                anim::pose_globals(pose, padded.parents(), pose.size(), -1, globals);
+                const Row row0 = render_row(anim::rest_mul(globals[0], padded.rest_global_inverse()[0]));
+                const Row row4 = render_row(anim::rest_mul(globals[kRows], padded.rest_global_inverse()[kRows]));
+                expect(same_row(row4, row0, 2e-4f), "a padded row deforms as row 0 under it");
+            }
+        }
+    }
+
     // A root off the model origin turns about the origin, as the builder's pivot block leaves it
     // (its parent row is its own, so -p * M + p * M cancels).
     // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B1FE7, @0x4B201E..0x4B2158]
