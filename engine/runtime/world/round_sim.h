@@ -212,6 +212,23 @@ struct RoundSpawnParams {
     // mounted shooter's re-simulated round from clipping the shooter's own
     // vehicle proxy — the wire-side ray[18] mount-exclusion analog.
     uint16_t shooter_carrier_handle = 0xFFFF;
+    // The round's fourth exclusion (+388), which every proximity walk skips beside the
+    // shooter and its mount: the firing slot's carrier word for a slot fire (a gun's or
+    // a vehicle's, none for a person's own slot or a slotless source), and on the host
+    // a remote fire's swap to its moving ground entity.
+    // [orig: Entity_FireWeaponAndSendPacket's seventh argument, the request +84
+    //  @0x42BF2D / +40 @0x42C004; Server_ClientFiredRound - +84 @0x50BACB, the swap
+    //  @0x50BD1E, roundParams[10] @0x50BE4B / @0x50BF10 / @0x50C802; RoundData_AddRound
+    //  hit_params[10] @0x4FDC3D; RoundData_SpawnRound round[97] @0x4EC4E8; the compares
+    //  Projectile_RaycastProximitySlots @0x4E5572 / @0x4E5782 / @0x4E5983,
+    //  Physics_RaycastAgainstProximityList @0x4E4C4E]
+    EntityHandle excluded_carrier;
+    // The shooter's and its ground entity's savedLivePose - Position, summed: an
+    // instantkillzone round queues its kill zone that far from the spawn point.
+    // [orig: Server_ClientFiredRound @0x50BBAC..0x50BBF2 into roundParams[7..9];
+    //  RoundData_SpawnRound's push @0x4EC20E; WeaponEffect_PushExplosionQueueEntry, the
+    //  entry = position + offset @0x4E83C0]
+    FixedVec3 kill_zone_offset{};
     // The decoded wire shooter's team, for rounds spawned WITHOUT a local owner
     // entity (the joiner's remote rounds): retail resolves the wire shooter and
     // copies its team — the friend/enemy TrcrID item and tracer styling key on it;
@@ -270,6 +287,7 @@ struct LiveRound {
     EntityHandle owner;
     uint16_t shooter_handle = 0xFFFF;
     uint16_t shooter_carrier_handle = 0xFFFF;
+    EntityHandle excluded_carrier; // +388 (RoundSpawnParams::excluded_carrier)
     int32_t ammo_index = -1;
     uint8_t adm_index = 0;
     uint16_t shot_seq = 0;
@@ -956,6 +974,10 @@ void detonate_round(World &world, const LiveRound &round, const EntityPosition &
 // round and blast damage paths share [orig: Entity_CountMountedEntities
 // @ 0x435970; Entity_ApplyOccupantDamageScale @ 0x4E5A50].
 int vehicle_occupant_count(const World &world, EntityHandle vehicle);
+
+// The fire's kill-zone offset (RoundSpawnParams::kill_zone_offset): the shooter's
+// savedLivePose - Position plus its ground entity's, each where a pose is stamped.
+FixedVec3 round_kill_zone_offset(const World &world, const Entity *shooter);
 int32_t apply_vehicle_occupant_scale(const World &world, const Entity &target,
                                      int32_t damage);
 

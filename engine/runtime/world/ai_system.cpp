@@ -1376,7 +1376,7 @@ void AiSystem::pump_gunner_slot(World &world, Entity &owner, uint32_t logic_tick
 		//  WeaponAction_Fire @0x542B10; Entity_FireWeaponAndSendPacket @0x42BD80;
 		//  Server_ClientFiredRound @0x50BAA0]
 		(void)fire_ai_round(world, *gunner, fire, fire[3], fire[4], weapon->ammo_index,
-				fire_mode, mount->primary_weapon_slot_adm);
+				fire_mode, mount->primary_weapon_slot_adm, mount->primary_weapon_slot.carrier);
     }
 }
 

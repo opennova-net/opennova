@@ -10,6 +10,7 @@
 
 namespace opennova::world {
 class World;
+struct Entity;
 }
 
 namespace opennova::inmatch {
@@ -37,6 +38,16 @@ struct RadioCallRule {
 //  — the key VMacros_BuildRemappedName(buf, call, 6, entity) @0x5bfe7e, the row-0 type gate
 //  @0x5bfe86, the stricmp walk @0x5bfe98..0x5bfeb9]
 const RadioCallRule *radio_call_find_rule(const std::string &key);
+
+// The far point `units` whole units down a player's weapon view: its fire pose (the
+// local player's own weapon view; a remote player's gunner seat, EWeap controller seat
+// or on-foot eye) into `fire`, and the point (units, 0, 0) through it. The far point's
+// water and terrain clips ride the caller's ray (its own terrain and water walks).
+// [orig: Entity_BuildCameraFromWeaponView @0x4B0F30 (Entity_CalcWeaponFirePosition, the
+//  (units, 0, 0) transform, Terrain_ClipLineToWaterHeight, the heightmap ray unless
+//  Flags 0x800000)]
+void weapon_view_far_point(world::World &world, const world::Entity &sender, int32_t units,
+		int32_t fire[6], int32_t far_point[3]);
 
 // The host side of a Radio-menu pick (C2S 0x13 -> S2C 0x6D). The sender must
 // hold a live, non-spectator slot whose player is alive and whose radio

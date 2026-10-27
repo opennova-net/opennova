@@ -759,7 +759,10 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // instantkillzone: the kill zone queues at the spawn point and no round
         // flies [orig: @0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry].
         ExplosionEntry explosion;
-        explosion.pos = params.origin;
+        const FixedVec3 at = params.origin.q16();
+        explosion.pos.set_q16({io::bam_add(at.x, params.kill_zone_offset.x),
+                io::bam_add(at.y, params.kill_zone_offset.y),
+                io::bam_add(at.z, params.kill_zone_offset.z)});
         explosion.dir_bam = params.dir_yaw_bam;
         explosion.type = ammo->kztype;
         explosion.ammo_index = params.ammo_index;
@@ -1005,6 +1008,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.owner = params.owner;
     r.shooter_handle = params.shooter_handle;
     r.shooter_carrier_handle = params.shooter_carrier_handle;
+    r.excluded_carrier = params.excluded_carrier;
     r.ammo_index = params.ammo_index;
     r.adm_index = params.adm_index;
     r.mass_q16 = signed_from_u32(uint32_t(ammo->weight_in_grains) << 16) / 250;
@@ -1192,6 +1196,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.owner = params.owner;
         r.shooter_handle = params.shooter_handle;
         r.shooter_carrier_handle = params.shooter_carrier_handle;
+        r.excluded_carrier = params.excluded_carrier;
         r.ammo_index = params.ammo_index;
         r.adm_index = params.adm_index;
         r.mass_q16 = signed_from_u32(uint32_t(ammo.weight_in_grains) << 16) / 250;
@@ -1779,6 +1784,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.start = position_q16;
         trace.end = end_q16;
         trace.owner = r.owner;
+        trace.extra_ignore = r.excluded_carrier;
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
         // The terrain gate skips the raycast on either of the round's Indoors
@@ -2390,6 +2396,21 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
     }
     target_ring.count_down(); // [orig: Weapon_UpdateAllProjectiles @0x4EC020 (@0x4EC0A1..0x4EC0CF)]
     trails.tick();
+}
+
+FixedVec3 round_kill_zone_offset(const World &world, const Entity *shooter) {
+    FixedVec3 sum{0, 0, 0};
+    const auto add = [&sum](const Entity &e) {
+        if (!e.saved_live_valid) return;
+        const FixedVec3 at = e.position.q16();
+        sum.x = io::bam_add(sum.x, io::bam_sub(e.saved_live_pos[0], at.x));
+        sum.y = io::bam_add(sum.y, io::bam_sub(e.saved_live_pos[1], at.y));
+        sum.z = io::bam_add(sum.z, io::bam_sub(e.saved_live_pos[2], at.z));
+    };
+    if (shooter == nullptr) return sum;
+    add(*shooter);
+    if (const Entity *ground = world.registry.get(shooter->ground_target)) add(*ground);
+    return sum;
 }
 
 } // namespace opennova::world

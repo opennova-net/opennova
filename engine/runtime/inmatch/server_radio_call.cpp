@@ -149,6 +149,26 @@ bool rule_admits(const RadioCallRule &rule, const world::World &world,
 //  Physics_RaycastEntityPoolsAndUpdate @0x539580 and its hit +4..+0xC]
 void designation_point(world::World &world, const world::Entity &sender, int32_t out[3]) {
 	int32_t fire[6] = {};
+	int32_t far_point[3];
+	weapon_view_far_point(world, sender, kDesignationRayUnits, fire, far_point);
+	std::copy_n(far_point, 3, out);
+	if (world.collision == nullptr) return;
+	world::ProjectileTrace trace;
+	trace.owner = sender.handle;
+	trace.start = {fire[0], fire[1], fire[2]};
+	trace.end = {far_point[0], far_point[1], far_point[2]};
+	trace.walk_terrain = ((sender.flags | sender.engine_flags) & world::kEntityFlagIndoors) == 0;
+	const world::ProjectileHit hit = world.collision->trace_aim(world, trace);
+	if (!hit.hit()) return;
+	out[0] = hit.position_q16.x;
+	out[1] = hit.position_q16.y;
+	out[2] = hit.position_q16.z;
+}
+
+} // namespace
+
+void weapon_view_far_point(world::World &world, const world::Entity &sender, int32_t units,
+		int32_t fire[6], int32_t far_point[3]) {
 	const world::WeaponTableEntry *held = world.tables.weapons.by_index(sender.equipped_adm_index);
 	world::LocalPlayer *local = world.local_player_state;
 	if (sender.handle == world.cached.local_player && local != nullptr) {
@@ -176,25 +196,12 @@ void designation_point(world::World &world, const world::Entity &sender, int32_t
 		               : sender.pitch_bam;
 		fire[5] = body ? body->roll : sender.roll_bam;
 	}
-	const int32_t forward[3] = {kDesignationRayUnits << 16, 0, 0};
-	int32_t far_point[3];
+	const int32_t forward[3] = {units << 16, 0, 0};
 	world::collision_matrix_from_euler(fire[3], fire[4], fire[5], fire)
 			.transform_point(forward, far_point);
-	std::copy_n(far_point, 3, out);
-	if (world.collision == nullptr) return;
-	world::ProjectileTrace trace;
-	trace.owner = sender.handle;
-	trace.start = {fire[0], fire[1], fire[2]};
-	trace.end = {far_point[0], far_point[1], far_point[2]};
-	trace.walk_terrain = ((sender.flags | sender.engine_flags) & world::kEntityFlagIndoors) == 0;
-	const world::ProjectileHit hit = world.collision->trace_aim(world, trace);
-	if (!hit.hit()) return;
-	out[0] = hit.position_q16.x;
-	out[1] = hit.position_q16.y;
-	out[2] = hit.position_q16.z;
 }
 
-} // namespace
+namespace {
 
 const RadioCallRule *radio_call_find_rule(const std::string &key) {
 	// [orig: RadioCall_FindRuleByKey @0x5BFE50 — `if (!rules[0].type) return

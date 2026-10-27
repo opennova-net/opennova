@@ -1100,9 +1100,11 @@ public:
     //  Entity_FireWeaponAndSendPacket @0x542C5E -> Server_ClientFiredRound's local pass
     //  (the flags and adm into the ring @0x50C780..0x50C790) -> RoundData_AddRound
     //  @0x4fdb40 + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
+    // `slot_carrier` is the firing slot's carrier word (WeaponSlotState::carrier), the
+    // round's fourth exclusion.
     bool fire_ai_round(World &world, AiEntity &e, const int32_t origin[3], int32_t yaw_bam,
                        int32_t pitch_bam, int32_t ammo_index, int32_t fire_mode,
-                       uint8_t fire_adm);
+                       uint8_t fire_adm, uint16_t slot_carrier);
 
     // The SM/turret fire-transform solve [orig: Entity_ComputeWeaponFireTransform_0
     // @0x456980 — the D-AI-2 core]. Solves the muzzle origin + aim toward `target`

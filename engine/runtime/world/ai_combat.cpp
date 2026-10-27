@@ -617,7 +617,7 @@ void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/
 // byte and the slot's adm; the host presents the FIRE row (action_leg_presentation).]
 bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
                              int32_t yaw_bam, int32_t pitch_bam, int32_t ammo_index,
-                             int32_t fire_mode, uint8_t fire_adm) {
+                             int32_t fire_mode, uint8_t fire_adm, uint16_t slot_carrier) {
     if (world.tables.ammo.by_index(ammo_index) == nullptr) return false;
     // The send refuses every shot under a cease fire at its head: no round, no ring
     // record. The slot's fire action ran all the same (it ignores the send's return), so
@@ -646,6 +646,12 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     rp.dir_pitch_bam = pitch_bam;
     rp.ammo_index = ammo_index;
     rp.adm_index = adm_index;
+    // The slot's carrier word rides the send as the round's fourth exclusion, and the
+    // local pass sums the kill-zone offset [orig: WeaponAction_Fire @0x542B1F /
+    //  @0x542C4F; Server_ClientFiredRound @0x50BBAC..0x50BBF2, roundParams[10]
+    //  @0x50BF10].
+    rp.excluded_carrier = EntityHandle{slot_carrier};
+    rp.kill_zone_offset = round_kill_zone_offset(world, e.self);
     // A slotless gunner's adm arm hands the pool the fresh word, the ring the
     // spawned round's [orig: Server_ClientFiredRound's `!v91` leg @0x50BE8A ->
     //  RoundData_AddRound ring+28 @0x4FDCF5].

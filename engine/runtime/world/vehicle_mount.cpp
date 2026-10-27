@@ -144,6 +144,9 @@ bool VehicleSystem::init_weapon_slot_from_entity_def(Entity &entity) {
     entity.primary_weapon_slot = WeaponSlotState{};
     entity.primary_weapon_slot_adm = kAdmSlotNone;
     entity.primary_weapon_owner = EntityHandle{};
+    // The carrier word is the entity, whatever the name binds [orig: @0x546749 /
+    //  @0x546756, both legs].
+    entity.primary_weapon_slot.carrier = entity.handle.packed;
     // An empty name binds nothing, nor does one the table does not hold ("null" among them).
     // [orig: the name test @0x5466E1; AdmDef_FindIndexByName @0x53FD80 (the call @0x5466E8);
     //  AdmDef_GetEntryByIndex @0x53FC80 (the call @0x5466F8), the entry test @0x546704]

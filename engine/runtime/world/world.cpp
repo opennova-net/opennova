@@ -788,7 +788,7 @@ static void pump_unoccupied_weapon_slot(World &world, Entity &row, uint32_t fram
     const int32_t fire_mode = ((events.fired_clip_before_consume & 3) << 4) | 2;
     (void)world.ai.fire_ai_round(world, *shooter, fire, shooter->heading,
             io::bam_add(shooter->pitch, shooter->inf.recoil_pitch), weapon->ammo_index, fire_mode,
-            row.primary_weapon_slot_adm);
+            row.primary_weapon_slot_adm, row.primary_weapon_slot.carrier);
 }
 
 void World::pump_weapon_actions() {

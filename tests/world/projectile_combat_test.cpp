@@ -2751,6 +2751,75 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     CHECK(impacts[0].position.z == 1.0f);
 }
 
+// The round's fourth exclusion (+388) passes its entity in every walk, the person's
+// included: a round fired through the target excludes it and flies on; without the
+// exclusion it strikes. [orig: RoundData_SpawnRound round[97] @0x4EC4E8;
+//  Physics_RaycastAgainstProximityList @0x4E4C4E; Projectile_RaycastProximitySlots
+//  @0x4E5572 / @0x4E5782 / @0x4E5983]
+void test_the_fourth_exclusion_passes_its_entity() {
+    for (const bool excluded : {true, false}) {
+        Rig r;
+        r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+        RoundSpawnParams p;
+        p.owner = r.shooter;
+        p.shooter_handle = r.shooter.packed;
+        p.origin = {0.0f, 0.0f, 0.9f};
+        p.ammo_index = 0;
+        if (excluded) p.excluded_carrier = r.target;
+        CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
+        r.world.round_sim.tick(r.world, nullptr);
+        CHECK(r.world.round_sim.hits.empty() == excluded);
+        CHECK((r.world.registry.get(r.target)->health == 100) == excluded);
+    }
+}
+
+// An instantkillzone round queues its kill zone at the spawn point plus the fire's
+// offset, the shooter's and its ground entity's savedLivePose - Position.
+// [orig: Server_ClientFiredRound @0x50BBAC..0x50BBF2; RoundData_SpawnRound @0x4EC20E;
+//  WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
+void test_an_instant_kill_zone_takes_the_fire_offset() {
+    Rig r;
+    AmmoTableEntry &zone = r.world.tables.ammo.entries[0];
+    zone.flags = kAmmoFlagInstantKillZone;
+    zone.kztype = ammo_kz::kStandard;
+    Entity &shooter = *r.world.registry.get(r.shooter);
+    shooter.saved_live_valid = true;
+    shooter.saved_live_pos[0] = shooter.position.x.q16 - 0x8000; // half a unit behind
+    shooter.saved_live_pos[1] = shooter.position.y.q16;
+    shooter.saved_live_pos[2] = shooter.position.z.q16 + 0x4000;
+    r.world.registry.configure_pool(1, 2);
+    Entity truck;
+    truck.kind = EntityKind::Item;
+    truck.position = {7.0f, 0.0f, 0.0f};
+    const EntityHandle truck_h = r.world.registry.spawn(1, truck);
+    Entity &ground = *r.world.registry.get(truck_h);
+    ground.saved_live_valid = true;
+    ground.saved_live_pos[0] = ground.position.x.q16;
+    ground.saved_live_pos[1] = ground.position.y.q16 + 0x10000;
+    ground.saved_live_pos[2] = ground.position.z.q16;
+    r.world.registry.get(r.shooter)->ground_target = truck_h;
+    const FixedVec3 offset = round_kill_zone_offset(r.world, r.world.registry.get(r.shooter));
+    CHECK(offset.x == -0x8000 && offset.y == 0x10000 && offset.z == 0x4000);
+    RoundSpawnParams p;
+    p.owner = r.shooter;
+    p.shooter_handle = r.shooter.packed;
+    p.origin.set_q16({3 << 16, 4 << 16, 5 << 16});
+    p.ammo_index = 0;
+    p.kill_zone_offset = offset;
+    r.world.round_sim.spawn(r.world, p);
+    CHECK(r.world.explosions.queue.size() == 1);
+    if (r.world.explosions.queue.size() == 1) {
+        const FixedVec3 at = r.world.explosions.queue[0].pos.q16();
+        CHECK(at.x == (3 << 16) - 0x8000 && at.y == (4 << 16) + 0x10000 &&
+              at.z == (5 << 16) + 0x4000);
+    }
+    // No stamped pose, no offset.
+    shooter.saved_live_valid = false;
+    ground.saved_live_valid = false;
+    const FixedVec3 none = round_kill_zone_offset(r.world, r.world.registry.get(r.shooter));
+    CHECK(none.x == 0 && none.y == 0 && none.z == 0);
+}
+
 // NoAge stops a round's aging only on the useownmove leg, by the round's own +0x114
 // copy: a ballistic noage round expires at its max age as a plain one does; a
 // useownmove noage round neither ages nor expires; a useownmove round without the
@@ -4381,6 +4450,8 @@ static const NamedTest kTests[] = {
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
     {"test_noage_stops_aging_only_on_the_useownmove_leg", test_noage_stops_aging_only_on_the_useownmove_leg},
+    {"test_the_fourth_exclusion_passes_its_entity", test_the_fourth_exclusion_passes_its_entity},
+    {"test_an_instant_kill_zone_takes_the_fire_offset", test_an_instant_kill_zone_takes_the_fire_offset},
     {"test_entity_dud_naming_the_first_def_is_a_miss", test_entity_dud_naming_the_first_def_is_a_miss},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},

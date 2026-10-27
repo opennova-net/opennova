@@ -315,6 +315,15 @@ struct WeaponSlotState {
     // capability flags on the attachment definition.
     // [orig: shared EWeap slot helper @0x5460e0; writer gate @0x4ffe18]
     bool redirect_to_parent_slot = false;
+    // The slot's carrier word (MountSlot+0x38), a packed EntityHandle: the entity
+    // whose built-in slot this is (a gun's, a vehicle's), none for a person's own slot.
+    // A slot fire hands it on as the round's fourth exclusion. A remote client's slot
+    // fire on the host stores that fire's exclusion here for the fire action and then
+    // clears the word for good.
+    // [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the stores @0x546749 / @0x546756;
+    //  WeaponAction_Fire @0x542B10 - the read @0x542B1F, the seventh argument @0x542C4F;
+    //  Server_ClientFiredRound @0x50BAA0 - the store @0x50C2FD, the clear @0x50C31A]
+    uint16_t carrier = 0xFFFF;
     // The heat window's expiry tick. Each shot pushes it further out; the level is
     // derived from what is left of it (weapon_slot_accumulated_heat). 0 = cold.
     // [orig: MountSlot+0x14; stamp @ 0x542fa0/@ 0x542fb4, clear @ 0x54125f]

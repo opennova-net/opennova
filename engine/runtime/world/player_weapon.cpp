@@ -1720,8 +1720,15 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				// [orig: RoundData_SpawnRound @ 0x4ec199 on the fire
 				//  descriptor's slot].
 				if (WeaponSlotState *fire_slot =
-								active_local_weapon_slot(world, w))
+								active_local_weapon_slot(world, w)) {
 					round.tracer_counter = &fire_slot->tracer_shot_counter;
+					// The slot's carrier word is the round's fourth exclusion: a gun's
+					// or vehicle's slot excludes that carrier, a personal slot none
+					// [orig: WeaponAction_Fire @0x542B1F / @0x542C4F].
+					round.excluded_carrier = EntityHandle{fire_slot->carrier};
+				}
+				// [orig: Server_ClientFiredRound's offsets @0x50BBAC..0x50BBF2]
+				round.kill_zone_offset = round_kill_zone_offset(world, shooter);
 				if (!io.is_authority && io.carrier_exclusion)
 					// The joiner's OWN predicted round runs the wire-proxy walk with
 					// the local mount exclusion dead, so resolve the carrier gate from

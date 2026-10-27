@@ -999,7 +999,20 @@ void test_the_walk_queues_reloads_in_slot_order() {
 
 } // namespace
 
+// The gun's built-in slot names the gun as its carrier, the round's fourth exclusion
+// for a fire through it; a person's own slot names none.
+// [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the stores @0x546749 / @0x546756]
+void test_the_gun_slot_names_its_carrier() {
+	Rig r;
+	CHECK(r.gun().primary_weapon_slot.carrier == r.gun_h.packed);
+	r.gun().primary_weapon = ""; // a gun naming no weapon still names its carrier
+	CHECK(!r.world.vehicles.init_weapon_slot_from_entity_def(r.gun()));
+	CHECK(r.gun().primary_weapon_slot.carrier == r.gun_h.packed);
+	CHECK(w::WeaponSlotState{}.carrier == w::EntityHandle::kInvalid);
+}
+
 int main() {
+	test_the_gun_slot_names_its_carrier();
 	test_the_authority_refuses_a_held_gun_and_borrows_its_slot();
 	test_a_client_forces_the_gun_claim();
 	test_a_lone_guns_gunner_refuses_at_the_seat_first();
