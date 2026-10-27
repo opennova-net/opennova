@@ -1318,8 +1318,8 @@ void Server::announce_joins() {
 		// The client its 0x42's AP names ("Jointops.exe", "opennova.exe"), when it named one.
 		const std::string client =
 				conn.application.empty() ? std::string() : " running " + conn.application;
-		io::logf(io::LogLevel::kInfo, "opennova-serve: [join] \"%s\" %s%s", conn.player_name.c_str(),
-				via.c_str(), client.c_str());
+		io::logf(io::LogLevel::kInfo, "opennova-serve: [join] \"%s\" %s%s",
+				conn.player_name.c_str(), via.c_str(), client.c_str());
 	}
 	for (auto it = announced_joins_.begin(); it != announced_joins_.end();)
 		it = present.count(*it) != 0 ? std::next(it) : announced_joins_.erase(it);

@@ -2836,8 +2836,9 @@ bool run_the_join_keeps_the_reported_address() {
 	if (!expect(!r.outbound.empty() && !ctx.np_protocol.connection_list.empty(),
 	            "the 0x42 is accepted")) return false;
 	const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
-	bool ok = expect(conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
-	                 "the node keeps the reported address beside its UDP source");
+	bool ok = expect(
+			conn.reported_ip == 0x0A00A8C0u && conn.reported_port == 2302 && conn.peer == peer,
+			"the node keeps the reported address beside its UDP source");
 	// And the executable its AP named, which opennova-serve's [join] line prints.
 	ok = expect(conn.application == "Jointops.exe", "the node keeps the joiner's AP") && ok;
 	return ok;
