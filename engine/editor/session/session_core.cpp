@@ -328,6 +328,15 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	if (!novaworld.empty() && !is_novaworld_key(novaworld))
 		return refused_for(CoreFinding::ProjectFieldInvalid,
 		                   "\"" + novaworld + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+	// A project's folder is its own: none inside another project's, whose scans and pushes would take it in.
+	for (fs::path folder = io::os_path(dir).lexically_normal().parent_path(); !folder.empty(); folder = folder.parent_path()) {
+		std::error_code ec;
+		if (fs::is_regular_file(folder / kProjectFileName, ec))
+			return refused_for(CoreFinding::ProjectFieldInvalid,
+			                   dir + " is inside the project " + io::utf8_generic_path(folder) +
+			                           ": make the new project in a folder of its own.");
+		if (folder == folder.parent_path()) break;
+	}
 	// The base game's project named by its folder (a Browse... names it whole) is kept from this project's folder,
 	// so a clone finds it where the repository keeps it.
 	ProjectExpansion expansion = asked;

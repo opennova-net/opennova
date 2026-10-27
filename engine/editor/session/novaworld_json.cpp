@@ -81,6 +81,7 @@ JsonValue novaworld_section(const SessionView &view) {
 	put.set("base", json_string(novaworld.put.base));
 	put.set("expansion_code", json_string(novaworld.put.expansion_code));
 	put.set("refusal", json_string(novaworld.put.refusal));
+	put.set("refused", json_string(novaworld.put_refusal));
 	out.set("put", put);
 	JsonValue standing = JsonValue::make_object();
 	standing.set("checked", JsonValue::make_bool(novaworld.checked));

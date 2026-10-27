@@ -4,10 +4,13 @@
 #include <cfloat>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
+#include <system_error>
 #include <utility>
 
 #include <base/io/json.h>
+#include <base/io/os_path.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
@@ -465,13 +468,44 @@ std::vector<EditorRequest> EditorWindows::take_requests_of(EditorRequestKind kin
 	return out;
 }
 
+namespace {
+
+// Whether the folder `path` holds a file or a folder other than the machine's own .opennova, and no project.
+bool holds_files(const std::string &path) {
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	const fs::path folder = io::os_path(path);
+	if (!fs::is_directory(folder, ec) || fs::exists(folder / kProjectFileName, ec)) return false;
+	for (const fs::directory_entry &entry : fs::directory_iterator(folder, ec))
+		if (entry.path().filename() != ".opennova") return true;
+	return false;
+}
+
+// A folder's name for a project titled `title`: what no folder name holds left out, "New project" for none left.
+std::string folder_name_for(const std::string &title) {
+	std::string name;
+	for (const char c : title)
+		if (static_cast<unsigned char>(c) >= 32 && std::strchr("<>:\"/\\|?*", c) == nullptr) name += c;
+	while (!name.empty() && (name.back() == ' ' || name.back() == '.')) name.pop_back();
+	while (!name.empty() && name.front() == ' ') name.erase(name.begin());
+	return name.empty() ? std::string("New project") : name;
+}
+
+} // namespace
+
 void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	if (path.empty()) return; // cancelled
 	switch (purpose) {
 	// The new-project form's fields are the workspace's.
-	case PickPurpose::NewProjectLocation:
-		window_requests::set_workspace(*this, "new_project", "dir", io::JsonValue::make_string(path));
+	case PickPurpose::NewProjectLocation: {
+		// A folder that holds files of its own (Documents, the desktop) takes the project in a folder of its name
+		// inside it, as Get takes a project in a folder of its key's: a project's files are every file of its folder,
+		// and a push sends them all.
+		std::string dir = path;
+		if (holds_files(path)) dir = path + "/" + folder_name_for(view().workspace.new_project.title);
+		window_requests::set_workspace(*this, "new_project", "dir", io::JsonValue::make_string(dir));
 		break;
+	}
 	case PickPurpose::NewProjectInstall:
 		window_requests::set_workspace(*this, "new_project", "game_install", io::JsonValue::make_string(path));
 		break;

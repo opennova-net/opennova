@@ -1,7 +1,13 @@
 #include <editor/session/base_setup.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <utility>
+
+#include <base/io/file_io.h>
+#include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 
 #include <editor/session/novaworld_controller.h>
 #include <editor/session/project_session.h>
@@ -20,7 +26,17 @@ std::string first_error(const std::vector<Diagnostic> &findings, const char *oth
 	return otherwise;
 }
 
+// The mark a setup keeps in the folder while it runs.
+std::string mark_of(const std::string &dir) {
+	return ProjectPaths::for_root(dir).cache_dir + "/base_setup";
+}
+
 } // namespace
+
+bool base_setup_half_made(const std::string &dir) {
+	std::error_code ec;
+	return !dir.empty() && std::filesystem::is_regular_file(system_path(mark_of(dir)), ec);
+}
 
 BaseSetupOperation::BaseSetupOperation(NovaWorldController &controller, BaseSetup setup,
 		std::string install, Preferences preferences) :
@@ -45,6 +61,15 @@ bool BaseSetupOperation::fail(std::string why) {
 bool BaseSetupOperation::step(const StepBudget &budget) {
 	if (done_)
 		return true;
+	if (!marked_) {
+		// Marked before anything is made, so a setup that never finishes is known by the next one.
+		marked_ = true;
+		std::error_code ec;
+		std::filesystem::create_directories(system_path(ProjectPaths::for_root(setup_.dir).cache_dir), ec);
+		std::string error;
+		if (!io::write_file_atomic(mark_of(setup_.dir), setup_.key + "\n", error))
+			return fail("its folder could not be marked: " + error);
+	}
 	if (pull_) {
 		// Got as a get's pull gets a project into an empty folder: its working copy at the head.
 		if (pull_->step(std::max<uint64_t>(budget.bytes, 1)) == NovaWorldJobState::Running)
@@ -53,9 +78,7 @@ bool BaseSetupOperation::step(const StepBudget &budget) {
 			return fail(pull_->error().empty() ? "the get was cancelled" : pull_->error());
 		if (pull_->up_to_date())
 			return fail(setup_.key + " has no revision yet");
-		ok_ = true;
-		done_ = true;
-		return true;
+		return finished();
 	}
 	if (!started_) {
 		// Made as New project makes a game you own: the project, then every file of its game imported as
@@ -79,6 +102,12 @@ bool BaseSetupOperation::step(const StepBudget &budget) {
 	if (last.kind != OperationKind::ImportApply || last.end != OperationEnd::Done)
 		return fail(first_error(last.findings, "its game's files were not imported"));
 	session_.reset(); // the project closed: its documents and its graph go
+	return finished();
+}
+
+bool BaseSetupOperation::finished() {
+	std::error_code ec;
+	std::filesystem::remove(system_path(mark_of(setup_.dir)), ec);
 	ok_ = true;
 	done_ = true;
 	return true;

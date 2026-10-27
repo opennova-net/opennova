@@ -73,6 +73,7 @@ private:
 	ui_kit::HeldText<kWorkspaceExpansion> name_;
 	InstallFieldCheck check_;
 	bool changing_install_ = false; // Change... asked: the field in place of the editor's install's line
+	bool short_typed_ = false;      // a short name typed: no longer offered from the name
 };
 
 // The Document window with no project open, which then has the whole workspace (the other windows stand

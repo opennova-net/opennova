@@ -26,11 +26,14 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include <base/io/file_io.h>
 #include <base/io/json.h>
+#include <editor/session/base_setup.h>
+#include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
 #include <editor/novaworld/novaworld_account.h>
@@ -468,6 +471,18 @@ static int test_player_projects() {
 			s.session.view().project.document->novaworld.empty() &&
 			service.made["MYGAME"].head == 1);
 
+	// A player's key as the service takes it (up to 11, no "QQ"): refused up front, nothing asked; a project inside
+	// another's folder refused, nothing made.
+	s.send(request::new_project(dir.file("Keys"), "Keys"));
+	s.send(request::novaworld_put_new("TWELVECHARSX", "Keys", ""));
+	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("TWELVECHARSX"));
+	s.send(request::novaworld_put_new("AQQB", "Keys", ""));
+	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("AQQB"));
+	s.send(request::new_project(dir.file("Keys/Inner"), "Inner"));
+	editor::ProjectDocument inner;
+	editor::Diagnostic inner_why;
+	TEST_EXPECT(s.session.view().project.refused.find("is inside the project") != std::string::npos &&
+			!editor::open_project(dir.file("Keys/Inner"), inner, inner_why));
 	// A mod whose name the service's rule refuses: refused up front, nothing asked.
 	s.send(request::new_expansion_project(dir.file("Loud"), "Loud", "LoudMod"));
 	s.send(request::novaworld_check());
@@ -658,8 +673,13 @@ static int test_new_mod() {
 	TEST_EXPECT(s.refused("novaworld.refused") &&
 			s.session.view().activity.status.find("lists no game NOPE") != std::string::npos);
 
-	// Got beside it, the mod made on it and opened.
+	// Got beside it, the mod made on it and opened; a base the editor left half-made there (its setup's mark) made
+	// again.
+	TEST_EXPECT(put(dir.file("got/MOD/.opennova/base_setup"), "MOD") && put(dir.file("got/MOD/half.def"), "half"));
 	s.send(mod("got/Night", "Night", "night"));
+	std::string half;
+	TEST_EXPECT(!opennova::io::read_file_text(dir.file("got/MOD/half.def"), half, error) &&
+			!editor::base_setup_half_made(dir.file("got/MOD")) && s.said("left half-made"));
 	editor::NovaWorldWorkingCopy copy;
 	TEST_EXPECT(copy_at(dir.file("got/MOD"), copy) && copy.key == "MOD" && copy.revision == 1);
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.document->title == "Night" &&
@@ -673,7 +693,10 @@ static int test_new_mod() {
 			s.session.view().project.document->expansion.base_project == "../MOD" &&
 			service.downloads == downloads);
 
-	// A retail game's: none without an install of its game; imported from one.
+	// A retail game's: none without an install of its game; imported from one. (The project got above, among the
+	// recent projects now, gone: the one found first otherwise.)
+	std::error_code removed;
+	std::filesystem::remove_all(opennova::io::os_path(dir.file("got")), removed);
 	service.retail = true;
 	s.send(request::novaworld_check()); // listed again: a retail game's now
 	s.send(mod("retail/Night", "Night", "night"));
@@ -702,6 +725,11 @@ static int test_new_mod() {
 			s.session.view().project.document->expansion.name == minted_install::kExpansion &&
 			s.session.view().project.document->expansion.base_project == "../MOD" &&
 			s.said("A mod's project in"));
+	// A game you own stays the player's: never put on NovaWorld by one.
+	s.send(request::open_project(dir.file("retail/MOD")));
+	s.send(request::novaworld_put_new("MINE", "Mine", ""));
+	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("MINE") &&
+			s.session.view().activity.status.find("A game you own holds the game's own files") != std::string::npos);
 	std::printf("new mod: of a game got from NovaWorld beside it, of one on this computer already, of a retail "
 				"game's imported from the game install; a game you own's expansion on its base game's project\n");
 	return 0;

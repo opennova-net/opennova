@@ -92,6 +92,16 @@ std::string copy_gone_text() {
 	return "The folder's working copy state is gone: Check sets it up again.";
 }
 
+// Why the account may not put `doc` on NovaWorld at all ("" it may): a game you own (a standalone project of the
+// game's own files, imported from a game install: its archives recorded) is the game's, and only an admin puts a
+// retail game's project there.
+std::string own_game_refusal(const ProjectDocument &doc, bool admin) {
+	if (admin || !doc.expansion.standalone() || doc.archives.empty())
+		return {};
+	return "A game you own holds the game's own files, which are not yours to put on NovaWorld: make a mod of it "
+		   "instead (New project, A mod).";
+}
+
 // What an operation of `kind` is called at the start of a line ("The pull", "The get" for a get's pull).
 std::string noun_of(OperationKind kind, bool get) {
 	std::string noun = get && kind == OperationKind::NovaWorldPull ? "the get" : operation_kind_row(kind).noun;
@@ -113,6 +123,8 @@ std::string created_refusal(
 		const NovaWorldApiError &error, const std::string &key, const std::string &code) {
 	if (error.code == "duplicate_key")
 		return "NovaWorld has a project " + key + " already: choose another key.";
+	if (error.code == "invalid_field" && error.field == "key")
+		return "NovaWorld takes no key " + key + ": up to 11 of A-Z, 0-9 and _, without \"QQ\".";
 	// A mod's short name is NovaWorld's own across every game (expansion\<code>\ in any install).
 	if (error.code == "duplicate_expansion" ||
 			(error.status == 409 && error.field == "expansion_code"))
@@ -187,6 +199,10 @@ bool base_project_folder(const std::string &dir, std::string &out) {
 }
 
 } // namespace
+
+bool novaworld_player_key(const std::string &key) {
+	return is_novaworld_key(key) && key.size() <= kPlayerKeyMost && key.find("QQ") == std::string::npos;
+}
 
 std::string novaworld_put_mismatch(const ProjectDocument &doc, const RemoteProject &project) {
 	const bool mod = !doc.expansion.standalone();
@@ -348,6 +364,7 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 	plan.game = doc.target_game;
 	if (doc.expansion.standalone()) {
 		plan.kind = "game";
+		plan.refusal = own_game_refusal(doc, account_.admin());
 		return plan;
 	}
 	plan.kind = "expansion";
@@ -566,6 +583,14 @@ void NovaWorldController::put(const EditorRequest &request) {
 		refuse("A NovaWorld project's key is 1 to 16 of A-Z, 0-9 and _ (ACIDGAMBIT).");
 		return;
 	}
+	if (const std::string own = own_game_refusal(doc, account_.admin()); !own.empty()) {
+		refuse(own);
+		return;
+	}
+	if (request.create && !account_.admin() && !novaworld_player_key(request.project_key)) {
+		refuse("A key of yours is up to 11 of A-Z, 0-9 and _, without \"QQ\": " + request.project_key + " is not.");
+		return;
+	}
 	if (put_.started() || put_waiting_) {
 		refuse("The project is being put on NovaWorld already.");
 		return;
@@ -598,6 +623,7 @@ void NovaWorldController::put(const EditorRequest &request) {
 	} else {
 		ask = novaworld_api::project(account_, request.project_key);
 	}
+	core_.view().novaworld.put_refusal.clear();
 	put_root_ = core_.paths().root;
 	put_server_ = account_.server;
 	put_key_ = request.project_key;
@@ -912,6 +938,7 @@ void NovaWorldController::poll() {
 		else if (!put_create_ && same_open)
 			refused = novaworld_put_mismatch(*core_.view().project.document, project);
 		if (!refused.empty()) {
+			view.put_refusal = refused; // the Put dialog says it under its fields
 			view.last = "The project was not put on NovaWorld: " + refused;
 			core_.refuse_request(make_finding(
 					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
@@ -1132,7 +1159,9 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 			// is there already (make_base: got from NovaWorld, or a retail game's imported from the
 			// game install), the mod opened then; one the editor cannot make said so, the mod opened.
 			std::string base_dir;
-			if (!base_key.empty() && base_project_folder(dir, base_dir) && empty_folder(base_dir)) {
+			if (!base_key.empty() && base_project_folder(dir, base_dir))
+				start_over_half_made(base_dir);
+			if (!base_key.empty() && !base_dir.empty() && empty_folder(base_dir)) {
 				ProjectDocument mod;
 				Diagnostic unread;
 				const std::string game = ::opennova::editor::open_project(dir, mod, unread)
@@ -1339,9 +1368,11 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 		make_project(mod);
 		return;
 	}
-	// Else one made beside the mod, in a folder named by the game's key.
+	// Else one made beside the mod, in a folder named by the game's key (one the editor left half-made made
+	// again).
 	const std::string dir = io::utf8_generic_path(
 			io::os_path(request.dir).lexically_normal().parent_path() / io::os_path(game->key));
+	start_over_half_made(dir);
 	if (!empty_folder(dir)) {
 		refuse(dir + " holds files and no project of " + title +
 				": make the mod in another folder, or move them.");
@@ -1380,6 +1411,17 @@ bool NovaWorldController::make_base(
 	return true;
 }
 
+void NovaWorldController::start_over_half_made(const std::string &dir) {
+	if (!base_setup_half_made(dir))
+		return;
+	std::error_code ec;
+	fs::remove_all(system_path(dir), ec);
+	core_.note("NovaWorld: " + (ec ? "The base game's project left half-made in " + dir +
+											 " could not be removed (" + ec.message() + ")."
+								   : "The base game's project left half-made in " + dir +
+											 " was removed, to be made again."));
+}
+
 std::string NovaWorldController::local_base(const std::string &dir, const RemoteGame &game) const {
 	std::vector<std::string> roots = core_.view().project.recent_projects;
 	const fs::path mod = io::os_path(dir).lexically_normal();
@@ -1393,7 +1435,7 @@ std::string NovaWorldController::local_base(const std::string &dir, const Remote
 	for (const std::string &root : roots) {
 		ProjectDocument doc;
 		Diagnostic unread;
-		if (io::os_path(root).lexically_normal() == mod ||
+		if (io::os_path(root).lexically_normal() == mod || base_setup_half_made(root) ||
 				!fs::is_regular_file(system_path(root + "/" + kProjectFileName), ec) ||
 				!::opennova::editor::open_project(root, doc, unread) || !doc.expansion.standalone() ||
 				doc.target_game != game.game)
@@ -1432,6 +1474,11 @@ OperationOutcome NovaWorldController::finish_base(BaseSetupOperation &operation)
 		return outcome;
 	}
 	view_last(setup.title + "'s project is in " + setup.dir + ".");
+	// It is the editor's to find again, as a project of the author's: among the recent projects.
+	core_.preferences().remember_recent_project(setup.dir);
+	Diagnostic unsaved;
+	if (!core_.preferences().save(unsaved))
+		core_.report(unsaved);
 	if (opens)
 		core_.open_project(setup.then.dir);
 	else

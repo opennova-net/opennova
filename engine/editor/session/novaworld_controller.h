@@ -43,6 +43,11 @@ class BaseSetupOperation;
 struct BaseSetup;
 class SessionCore;
 
+// A player's NovaWorld key, as the service takes one (ADR 0074 d4): 1 to 11 of A-Z, 0-9 and _ (so KEY.CMD fits
+// 1SFS's 15), without "QQ" (the territory substitution). An admin's may be 16 (is_novaworld_key).
+inline constexpr size_t kPlayerKeyMost = 11;
+bool novaworld_player_key(const std::string &key);
+
 // Why the open project `doc` cannot be put on the empty NovaWorld project `project` ("" it can): it
 // is no game or mod as the project is, of another game, or a mod of another short name. A put onto
 // one is refused by it, and the Put dialog chooses only an empty project it finds none in.
@@ -165,6 +170,9 @@ private:
 	void make_project(const EditorRequest &request);
 	// The calls outside the slot in the view: whether one is in flight, and what NovaWorld is asked.
 	void show_calls();
+	// The folder `dir` emptied where a base game's project the editor began there was left half-made (its
+	// setup's mark, base_setup.h), said in Output.
+	void start_over_half_made(const std::string &dir);
 	// A base game's project's operation started (refused busy where the slot is taken).
 	void start_base(std::unique_ptr<BaseSetupOperation> operation);
 	// `words` the view's last line and Output's.

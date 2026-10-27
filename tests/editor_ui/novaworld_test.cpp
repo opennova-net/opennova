@@ -255,13 +255,23 @@ void test_put_and_sign_in() {
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on NovaWorld...: one novaworld_check as it opens");
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("A game of Joint Operations") != std::string::npos, "what it makes, shown");
+	CHECK(text.find("A game for Joint Operations") != std::string::npos && text.find("Who gets it") != std::string::npos,
+	      "what it makes, and who gets it, shown");
 	ui.activate(put_item({"Put"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);
 	CHECK(made && made->create && made->project_key == "MYMOD" && made->title == "My Mod" &&
 	              made->visibility == "public",
 	      "Put: one novaworld_put of a new public project, keyed from its name");
+	// It stays open while NovaWorld answers, and says a refusal under its fields.
+	c.put_refusal = "NovaWorld has a project MYMOD already: choose another key.";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("NovaWorld has a project MYMOD already") != std::string::npos,
+	      "the put refused: said in the dialog, its fields kept");
+	c.put_refusal.clear();
+	ui.activate(put_item({"Cancel"}));
+	ui.drain();
 	// An empty project the account may push that the project is not (a mod, the project a game): none chosen,
 	// and Put waits for one.
 	RemoteProject empty_mod = mod_project();
@@ -273,12 +283,9 @@ void test_put_and_sign_in() {
 	ui.activate(novaworld_item({"Put on NovaWorld..."}));
 	ui.frames(2);
 	ui.drain();
-	ui.activate(put_item({"An empty project you may push"}));
-	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("Choose one") != std::string::npos, "an empty mod is not chosen for a game");
-	ui.activate(put_item({"Put"}));
-	CHECK(ui.drain().empty(), "Put waits for a project chosen");
+	CHECK(logged_frame(ui).find("An empty project you may push") == std::string::npos,
+	      "an empty mod is no choice for a game: no empty project offered");
 	ui.activate(put_item({"Cancel"}));
 	ui.drain();
 	c.projects = {mod_project()};
@@ -293,6 +300,8 @@ void test_put_and_sign_in() {
 	raised = ui.drain();
 	const EditorRequest *taken = one(raised, EditorRequestKind::NovaWorldPut);
 	CHECK(taken && !taken->create && taken->project_key == "MOD", "Put: one novaworld_put of the empty MOD");
+	ui.activate(put_item({"Cancel"}));
+	ui.drain();
 	c.projects.front().head = 5;
 	// A mod: its base game named as the games the account may make a mod of name it.
 	c.put.kind = "expansion";
@@ -309,6 +318,24 @@ void test_put_and_sign_in() {
 	ui.drain();
 	c.put.kind = "game";
 	c.put.base.clear();
+	// A player's key, as the service takes it: up to 11, no "QQ".
+	{
+		ProjectDocument quest;
+		quest.title = "QQuest of the Long Night";
+		v.project.document = std::make_shared<const ProjectDocument>(quest);
+		c.role = "player";
+		ui.activate(novaworld_item({"Put on NovaWorld..."}));
+		ui.frames(2);
+		ui.drain();
+		ui.activate(put_item({"Put"}));
+		raised = ui.drain();
+		made = one(raised, EditorRequestKind::NovaWorldPut);
+		CHECK(made && made->project_key == "QUESTOFTHEL", "a player's key: up to 11, no QQ");
+		ui.activate(put_item({"Cancel"}));
+		ui.drain();
+		c.role = "admin";
+		v.project.document = std::make_shared<const ProjectDocument>(doc);
+	}
 
 	// Set up for a key the service does not show: said so, and Check.
 	c.key = "NOPE";
@@ -458,6 +485,8 @@ void test_settings_section() {
 	const std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);
 	CHECK(made && made->create && made->project_key == "MYMOD", "settings: Put on NovaWorld... puts it there");
+	ui.activate(put_item({"Cancel"}));
+	ui.drain();
 	ui.activate(item_id(ImHashStr("Project settings"), {"Cancel"}));
 	ui.drain();
 	std::printf("content: Project settings' NovaWorld section\n");

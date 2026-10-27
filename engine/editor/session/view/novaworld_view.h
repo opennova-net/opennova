@@ -70,6 +70,8 @@ struct NovaWorldView {
 		std::string refusal;
 	};
 	PutPlan put;
+	// Why the service refused the last put, in a line ("" none, or a put asked since): the Put dialog says it.
+	std::string put_refusal;
 	// Its standing as the last check, pull or push left it: the project's head (when the service
 	// answered; the project's ask and its setup set it too), the folder's changes since its base,
 	// and what kept a file out of them. `head_error` says why the head is unknown: for a project

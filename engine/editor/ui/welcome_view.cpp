@@ -234,6 +234,23 @@ bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
 	return !project || project->retail;
 }
 
+// A mod's short name as NovaWorld takes one (the service's expansion code): 1 to 8 of a-z and 0-9.
+bool short_name_ok(const std::string &name) {
+	return !name.empty() && name.size() <= 8 &&
+	       std::all_of(name.begin(), name.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
+}
+
+// The short name a mod named `title` is offered, as the website offers it: its letters and digits, small, at most 8.
+std::string short_name_for(const std::string &title) {
+	std::string name;
+	for (const char c : title) {
+		if (name.size() == 8) break;
+		if (c >= 'A' && c <= 'Z') name += char(c - 'A' + 'a');
+		else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) name += c;
+	}
+	return name;
+}
+
 // A new game's title: the one chosen, else NovaWorld's first.
 std::string new_game_title(const WorkspaceView::NewProject &form, const NovaWorldView &novaworld) {
 	return !form.game.empty() || novaworld.titles.empty() ? form.game : novaworld.titles.front();
@@ -379,7 +396,9 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const Chosen chosen = chosen_of(form, novaworld, stock);
 	std::string why; // why Create waits ("" it does not)
 	const auto name_field = [&] {
-		if (ImGui::InputText("Name", title_.text, sizeof(title_.text))) set("title", io::JsonValue::make_string(title_.sent()));
+		if (!ImGui::InputText("Name", title_.text, sizeof(title_.text))) return false;
+		set("title", io::JsonValue::make_string(title_.sent()));
+		return true;
 	};
 	// What it is of is NovaWorld's (ADR 0074): signed out, nothing to choose from.
 	if (!novaworld.available) {
@@ -388,7 +407,10 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	} else if (!novaworld.signed_in) {
 		ui_kit::quiet_text("Sign in to NovaWorld to make a project: its games are NovaWorld's.");
 		ImGui::SameLine();
-		if (ImGui::SmallButton("Sign in...##new_project")) window_requests::focus(workspace, "novaworld");
+		if (ImGui::SmallButton("Sign in...##new_project")) {
+			if (form.open) set("open", io::JsonValue::make_bool(false)); // the modal out of the sign-in's way
+			window_requests::focus(workspace, "novaworld");
+		}
 		ui_kit::tooltip("Shows the NovaWorld window, where you sign in.");
 		why = "Sign in to NovaWorld first.";
 	} else if (set_up) {
@@ -423,9 +445,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			ui_kit::tooltip("The NovaWorld game the mod changes. Create makes the mod on its project: the one on this "
 			                "computer, or one made beside the mod first (a retail game's imported from your game install, "
 			                "any other got from NovaWorld).");
-			name_field();
-			if (ImGui::InputText("Short name", name_.text, sizeof(name_.text))) set("expansion", io::JsonValue::make_string(name_.sent()));
-			ui_kit::tooltip("The mod's folder, expansion\\<name>\\, and what a player types to play it: /exp <name>.");
+			// Its short name offered from its name, as the website offers it, until one is typed.
+			if (name_field() && !short_typed_)
+				set("expansion", io::JsonValue::make_string(short_name_for(title_.sent())));
+			if (ImGui::InputText("Short name", name_.text, sizeof(name_.text))) {
+				short_typed_ = true;
+				set("expansion", io::JsonValue::make_string(name_.sent()));
+			}
+			ui_kit::tooltip("Up to 8 lowercase letters and digits, used by no other mod: the mod's folder, "
+			                "expansion\\<name>\\, and what a player types to play it, /exp <name>.");
 			break;
 		}
 		case Making::Game: {
@@ -445,7 +473,9 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	}
 	// A mod's short name, as the game's rule takes it (its own form's, or one a set up project names).
 	if (why.empty() && form.making == Making::Mod) {
-		const std::string problem = expansion_name_problem(form.expansion, ExpansionNameUse::Own);
+		const std::string problem = !short_name_ok(form.expansion)
+		                                    ? std::string("A short name is up to 8 lowercase letters and digits.")
+		                                    : expansion_name_problem(form.expansion, ExpansionNameUse::Own);
 		if (!problem.empty()) {
 			ui_kit::refusal_text(problem);
 			why = problem;
@@ -503,7 +533,10 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
-	if (!why.empty()) ui_kit::tooltip(why);
+	if (!why.empty()) {
+		ui_kit::tooltip(why);
+		ui_kit::quiet_text(why); // what Create waits for, under it
+	}
 	else if (form.making == Making::Stock)
 		ui_kit::tooltip("Makes the project and imports every file of the game from your game install into it, the "
 		                "game's own files as it ships them.");

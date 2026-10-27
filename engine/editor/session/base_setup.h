@@ -10,7 +10,9 @@
 // within the poll's budget, so the editor keeps drawing. Any other game's is got from NovaWorld: a
 // pull of its head into the empty folder, which is then its working copy. Its finish hands it to the
 // controller, which goes on with what waited on it (NovaWorldController::finish_base: the mod made
-// on it, or the got mod opened). Cancelled, what it made so far stays in the folder.
+// on it, or the got mod opened). While it runs the folder carries its mark (.opennova/base_setup), gone once the
+// project is in: a folder still marked was left half-made (cancelled, failed, the editor closed), which the next
+// setup there removes and makes again (base_setup_half_made).
 
 #include <cstdint>
 #include <memory>
@@ -35,6 +37,9 @@ struct BaseSetup {
 	std::string title;
 	EditorRequest then;
 };
+
+// Whether `dir` holds a base game's project a setup began and did not finish (its mark).
+bool base_setup_half_made(const std::string &dir);
 
 class BaseSetupOperation : public SessionOperation {
 public:
@@ -61,6 +66,8 @@ public:
 
 private:
 	bool fail(std::string why);
+	// The project is in: its mark removed.
+	bool finished();
 
 	NovaWorldController &controller_;
 	BaseSetup setup_;
@@ -69,6 +76,7 @@ private:
 	MemoryPreferencesStore preferences_;
 	std::unique_ptr<ProjectSession> session_; // the import's, while it makes and imports the project
 	bool started_ = false;
+	bool marked_ = false;
 	std::unique_ptr<NovaWorldPull> pull_;
 	bool done_ = false;
 	bool ok_ = false;
