@@ -4532,16 +4532,28 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
 	var driver: MenuDriver = presenter.get_menu_driver()
 	assert_not_null(driver)
+	# The world's local player is class 1, whose page the on-show stages from the spawn
+	# buffer [orig: Armory_StageLoadoutBuffers @0x5642e3], so the first visit shows the kit.
 	assert_gt(driver.selected_row(driver.widget_id("PRIMARY")), 0,
 		"the current primary is not NONE on first visit")
 	assert_gt(driver.selected_row(driver.widget_id("ACCESSORY")), 0,
 		"the current satchel is not NONE on first visit")
 
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	# An untouched ACCEPT applies the page as the game serializes it: the blue entity's
+	# knife first, the page's primary and satchel, then every shown grenade position, its
+	# count untouched; class 1 filters no class, so the catalog's first three grenades
+	# [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 - the knife
+	#  @0x5658ca..0x56595b, the shown gate @0x565bde].
+	var accepted_names: Array[String] = ["WPN_KNIFE"]
+	accepted_names.append_array(expected_names)
+	var grenades: Array[WeaponDef] = weapons.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, -1, 2)
+	for grenade in grenades.slice(0, 3):
+		accepted_names.append(grenade.name)
 	var after_names: Array[String] = []
 	for value in sim.get_local_player_loadout():
 		after_names.append((value as WeaponKitEntry).name)
-	assert_eq(after_names, expected_names,
-		"accepting the untouched first-open rows preserves the exact canonical kit")
+	assert_eq(after_names, accepted_names,
+		"accepting the untouched first-open rows applies the page the game writes")
 	world.unload()
 	Strings.clear()
