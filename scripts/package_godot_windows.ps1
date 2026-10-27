@@ -634,8 +634,7 @@ With no --resource-dir, game data is read from the executable's folder.
 
 Updates include the OpenNova runtime, the selected game and its installed
 expansions. --no-update disables checks and installation for this launch.
-Online play: choose OpenNova in the NovaWorld menu. The OpenNova Switcher is
-only needed for the original dfx2.exe, whose NovaLogic NovaWorld is down.
+Online play: choose OpenNova in the NovaWorld menu.
 "@
 if ($ExportMode -eq "debug") {
     $launchHelp += "`n`nThis is a development build. It updates from OpenNova's staging service,`nupdate.staging.opennova.net, and the NovaWorld menu's OpenNova choice plays on`nstaging's NovaWorld, nw.staging.opennova.net, not the live service."

@@ -44,7 +44,6 @@ All commands are Git Bash, inside the current worktree only.
     for d in scripts/ci scripts/lint scripts/ida scripts/mcp scripts/net; do
         python -B -m unittest discover -s $d -p "test_*.py"; done   # the gates job's script tests
     python -B -m unittest discover -s scripts -p test_publish_apps.py   # Publish's helper
-    dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo  # the Switcher's xunit suite
     python -B docs/tools/ledger_check.py --check     # the ledger scoreboard (docs repo)
 
 Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
@@ -59,14 +58,13 @@ A slice that moves the `docs/` pointer must name a commit already on docs `maste
   comments. Do not merge — the maintainer merges.
 - CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
   PRs build the `template_debug` GDExtension; master and manual runs also build
-  `template_release`. Packaging runs four Windows jobs: `package-godot-windows` (the
+  `template_release`. Packaging runs three Windows jobs: `package-godot-windows` (the
   runtime's and the editor's plain builds, ADR 0072: the minimal runtime with its content
   updater, ADR 0067, and the flat editor folder, each boot-smoked and updater-smoked),
   `package-blender-windows` (the Blender add-on; that workflow also runs
   `tests/blender/*_test.py` under Blender against the packaged add-on),
-  `package-apps-windows` (the tools, the native apps) and `package-switcher-windows` (the
-  Switcher's xunit suite, then `opennova-switcher.exe` in its zip). PRs package
-  debug-mode exports; a same-repo PR's `publish-staging` then publishes the five to
+  and `package-apps-windows` (the tools, the native apps). PRs package
+  debug-mode exports; a same-repo PR's `publish-staging` then publishes the four to
   staging (not a required check).
 
 ## 5. Advance the train

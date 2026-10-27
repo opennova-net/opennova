@@ -50,7 +50,7 @@
 # revision; the release's build and publish are the admin API's). Nothing is
 # uploaded by hand: a hosted server's data is the game's published release.
 # DEVELOPING.md "Run the NovaWorld servers locally" has the rest: the ports, the
-# dev accounts, pointing a retail client at it with the OpenNova Switcher.
+# dev accounts, pointing a retail client at it with a hosts-file line.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -479,8 +479,7 @@ The local NovaWorld stack runs (project $project).
   site            http://localhost:$site_port  (the portal; its API at /api)
   site admin      log in as test / test (the seeded dev admin)
   admin API       Authorization: Bearer $admin_token
-  retail client   the OpenNova Switcher: Custom address... $address
-                  (or the hosts line: $address gs.novaworld.net); allow UDP 7597 and 64206
+  retail client   the hosts line: $address gs.novaworld.net; allow UDP 7597 and 64206
   opennova.exe    its NovaWorld screen's OpenNova target: a source run dials 127.0.0.1;
                   a packaged one takes --novaworld-host $address
   dev accounts    test/test, foo/foo, test1..3/test

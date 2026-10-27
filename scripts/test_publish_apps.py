@@ -19,7 +19,6 @@ BUILDS = {
     "ONEDITOR": "opennova-editor-windows-v0.0.22.zip",
     "ONTOOLS": "opennova-tools-windows.zip",
     "ONBLENDER": "opennova-blender-addon-windows.zip",
-    "ONSWITCHER": "opennova-switcher-windows.zip",
 }
 
 
@@ -146,20 +145,20 @@ class PublishAppsTest(unittest.TestCase):
         self.assertEqual(sorted(self.parts.values()), sorted(f"{key} build".encode() for key in BUILDS))
         # Nothing is published before every release is a draft.
         publishes = self.calls("POST", "/publish")
-        self.assertEqual(len(publishes), 5)
+        self.assertEqual(len(publishes), 4)
         self.assertLess(max(self.calls("POST", "/complete") + self.calls("GET", "/releases")), min(publishes))
 
     def test_an_unchanged_download_only_app_is_left_as_it_is(self):
-        switcher = hashlib.sha256(b"ONSWITCHER build").hexdigest()
-        self.product("ONSWITCHER")["published_release"] = {"id": 3, "name": "old", "sha256": switcher}
+        addon = hashlib.sha256(b"ONBLENDER build").hexdigest()
+        self.product("ONBLENDER")["published_release"] = {"id": 3, "name": "old", "sha256": addon}
         # An updatable app's published sha is its package's: its build is always uploaded.
         runtime = hashlib.sha256(b"ONRUNTIME build").hexdigest()
         self.product("ONRUNTIME")["published_release"] = {"id": 4, "name": "old", "sha256": runtime}
         results = {result["key"]: result for result in self.run_publish()}
-        self.assertTrue(results["ONSWITCHER"]["unchanged"] and results["ONSWITCHER"]["release"] is None)
+        self.assertTrue(results["ONBLENDER"]["unchanged"] and results["ONBLENDER"]["release"] is None)
         self.assertEqual(results["ONRUNTIME"]["release"]["status"], "published")
-        self.assertNotIn(self.product("ONSWITCHER")["id"], [r["product_id"] for r in self.releases.values()])
-        self.assertEqual(len(self.calls("POST", "/publish")), 4)
+        self.assertNotIn(self.product("ONBLENDER")["id"], [r["product_id"] for r in self.releases.values()])
+        self.assertEqual(len(self.calls("POST", "/publish")), 3)
 
     def test_a_refused_build_publishes_nothing(self):
         self.invalid = 42
@@ -209,7 +208,7 @@ class PublishAppsTest(unittest.TestCase):
                                       "--from", str(self.dist), "--version", "0.0.22", "--label", "v0.0.22",
                                       "--out", str(out), "--wait-timeout", "5"])
         self.assertEqual(code, 0)
-        self.assertEqual(len(json.loads(out.read_text(encoding="utf-8"))), 5)
+        self.assertEqual(len(json.loads(out.read_text(encoding="utf-8"))), 4)
 
     def test_main_refuses_a_bad_version_label_or_token_before_any_request(self):
         def main(*extra, token="test-token"):
@@ -224,9 +223,9 @@ class PublishAppsTest(unittest.TestCase):
 
     def test_attach_waits_for_the_new_releases_then_names_the_files_for_the_tag(self):
         published = [{"key": "ONRUNTIME", "unchanged": False, "release": {"id": 40, "name": "OpenNova Runtime v0.0.22"}},
-                     {"key": "ONSWITCHER", "unchanged": True, "release": None}]
+                     {"key": "ONBLENDER", "unchanged": True, "release": None}]
         game = b"the JO game zip"
-        switcher = b"the switcher"
+        addon = b"the Blender add-on"
         entry = {"kind": "app", "version": "0.0.22", "published": "2026-10-27T12:00:00Z"}
         self.host["manifest.json"] = json.dumps({"written": "x", "products": [
             dict(entry, key="ONRUNTIME", file=None, size=None, sha256=None, release=39)]}).encode()
@@ -239,14 +238,14 @@ class PublishAppsTest(unittest.TestCase):
                     dict(entry, key="ONRUNTIME", file=None, size=None, sha256=None, release=40),
                     dict(entry, key="JO", kind="game", file="jointops-game-windows.zip", size=len(game),
                          sha256=hashlib.sha256(game).hexdigest(), release=12),
-                    dict(entry, key="ONSWITCHER", file="opennova-switcher-windows.zip", size=len(switcher),
-                         sha256=hashlib.sha256(switcher).hexdigest(), release=3),
+                    dict(entry, key="ONBLENDER", file="opennova-blender-addon-windows.zip", size=len(addon),
+                         sha256=hashlib.sha256(addon).hexdigest(), release=3),
                     dict(entry, key="NIFTY", kind="expansion", file=None, size=None, sha256=None, release=None)]}).encode()
             return original(url, timeout)
 
         original = publish_apps.fetch
         self.host["jointops-game-windows.zip"] = game
-        self.host["opennova-switcher-windows.zip"] = switcher
+        self.host["opennova-blender-addon-windows.zip"] = addon
         out = Path(self.directory.name) / "assets"
         manifest = f"{self.url}/downloads/manifest.json"
         with contextlib.redirect_stderr(io.StringIO()):
@@ -256,7 +255,7 @@ class PublishAppsTest(unittest.TestCase):
             finally:
                 publish_apps.fetch = original
         self.assertEqual([path.name for path in files],
-                         ["jointops-game-windows-v0.0.22.zip", "opennova-switcher-windows-v0.0.22.zip"])
+                         ["jointops-game-windows-v0.0.22.zip", "opennova-blender-addon-windows-v0.0.22.zip"])
         self.assertEqual(files[0].read_bytes(), game)
         # A file that is not what the manifest says is refused.
         self.host["jointops-game-windows.zip"] = b"tampered"

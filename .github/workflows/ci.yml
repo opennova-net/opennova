@@ -102,7 +102,7 @@ jobs:
           python scripts/lint/format_lint.py --github
 
   # The repository gates on Windows, off the build legs' critical path: the
-  # maturity lints and the switcher's xunit suite, reported through `test`.
+  # maturity lints and the scripts' unit suites, reported through `test`.
   gates:
     runs-on: windows-latest
     needs: [changes]
@@ -185,20 +185,6 @@ jobs:
           # Publish's helper (publish.yml): the apps' releases through the admin
           # API, and the downloads host's files for a tag's GitHub release.
           python -B -m unittest discover -s scripts -p test_publish_apps.py
-
-      # The OpenNova Switcher's xunit suite (switcher/, ADR 0054): here, the
-      # required `test` check gates it; package-switcher-windows.yml runs it
-      # again before it packages the exe.
-      - name: Set up .NET (switcher)
-        if: env.CODE == 'true'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Switcher tests (.NET)
-        if: env.CODE == 'true'
-        shell: bash
-        run: dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo
 
   # The C++ engine + ctest suite on Windows as two shards (test-core), two
   # runners at once, each its own build from the same compiler cache, and
@@ -1289,8 +1275,8 @@ jobs:
             ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
           key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
-      # The five builds Publish takes from a run (publish.yml): these two and the
-      # Blender add-on's, the tools' and the switcher's (their own workflows).
+      # The four builds Publish takes from a run (publish.yml): these two and the
+      # Blender add-on's and the tools' (their own workflows).
       - name: Upload the runtime's plain build
         id: upload_runtime
         uses: actions/upload-artifact@v7
@@ -1325,18 +1311,10 @@ jobs:
       actions: write   # its compiler cache's branch save replaces older entries
     uses: ./.github/workflows/package-apps-windows.yml
 
-  # The OpenNova Switcher (switcher/, .NET, ADR 0054): its xunit suite and the
-  # single-file opennova-switcher.exe in one zip, built for PRs and tagged
-  # releases alike.
-  package-switcher-windows:
-    needs: [changes]
-    if: needs.changes.outputs.code == 'true'
-    uses: ./.github/workflows/package-switcher-windows.yml
-
-  # Every same-repo pull request's run publishes its five builds to staging once
+  # Every same-repo pull request's run publishes its four builds to staging once
   # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky
   # test never holds a build back (ADR 0072): Publish (publish.yml) has staging's
-  # service pack the runtime and the editor and publish all five, its downloads
+  # service pack the runtime and the editor and publish all four, its downloads
   # host then offers them (the game zips rendered from the runtime), and an
   # installed editor or game updates in place. The newest run wins: one publish at
   # a time, never cancelled once begun. A fork's run has no secrets and is
@@ -1344,7 +1322,7 @@ jobs:
   # app's build is refused there. The called job asks for no more than this
   # grant (a called job never gets more than its caller's).
   publish-staging:
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     concurrency:
       group: publish-staging
@@ -1363,7 +1341,7 @@ jobs:
   # comment untouched.
   pr-build-links:
     runs-on: ubuntu-latest
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -1376,7 +1354,6 @@ jobs:
           EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
           TOOLS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
-          SWITCHER_URL: ${{ needs.package-switcher-windows.outputs.artifact_url }}
         with:
           script: |
             // A hidden marker lets us find our own comment across runs, so there
@@ -1390,7 +1367,7 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on, the tools and the switcher are Release builds. This run publishes all five to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
+              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on and the tools are Release builds. This run publishes all four to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
               '',
               '| Build | Download |',
               '| --- | --- |',
@@ -1398,7 +1375,6 @@ jobs:
               `| Editor: oneditor.exe and onplay.exe, the runtime it plays a project with, in one folder with the updater pair (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               `| Tools: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-tools-windows.zip](${process.env.TOOLS_URL}) |`,
-              `| Switcher: opennova-switcher.exe, a tray app that points the original dfx2.exe at OpenNova's NovaWorld through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
             ].join('\n');

@@ -68,11 +68,11 @@ jobs:
             sleep 60
           done
 
-  # A tag's run builds the five apps' plain builds as its artifacts, ci.yml's
+  # A tag's run builds the four apps' plain builds as its artifacts, ci.yml's
   # names (ADR 0072): the runtime's and the editor's (release mode) here, the
-  # Blender add-on's, the tools' and the switcher's in their own workflows. Publish
+  # Blender add-on's and the tools' in their own workflows. Publish
   # (publish.yml) takes them from this run: prod's service packs and publishes all
-  # five, and the GitHub release gets the zips prod's downloads host then serves
+  # four, and the GitHub release gets the zips prod's downloads host then serves
   # (each game's among them, rendered from the runtime).
   package-godot-windows:
     needs: gate
@@ -136,49 +136,21 @@ jobs:
       actions: write
     uses: ./.github/workflows/package-apps-windows.yml
 
-  package-switcher-windows:
-    needs: gate
-    uses: ./.github/workflows/package-switcher-windows.yml
-    with:
-      # The exe's file and product version: stamp the tag into it.
-      version: ${{ github.ref_name }}
-
   # The GitHub release, its notes alone, once every build is in: Publish attaches the
   # zips prod's downloads host serves, once prod has published them.
   release:
     runs-on: ubuntu-latest
-    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows, package-switcher-windows]
+    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows]
     permissions:
       contents: write
     steps:
-      # The switcher's exe is unsigned, so the notes state its zip's SHA-256 for a player
-      # to check before running it elevated (switcher/README.md): the zip Publish attaches
-      # is this build as uploaded.
-      - name: Download the switcher's build
-        uses: actions/download-artifact@v8
-        with:
-          path: dist
-          artifact-ids: ${{ needs.package-switcher-windows.outputs.artifact_id }}
-          merge-multiple: true
-          skip-decompress: true
-
-      - name: SHA-256 of the switcher zip
-        id: switcher
-        shell: bash
-        run: |
-          sha="$(sha256sum dist/opennova-switcher-windows.zip | cut -d' ' -f1)"
-          echo "$sha  opennova-switcher-windows-${GITHUB_REF_NAME}.zip"
-          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          body: |
-            SHA-256 of `opennova-switcher-windows-${{ github.ref_name }}.zip`: `${{ steps.switcher.outputs.sha256 }}`
           generate_release_notes: true
 
   # The release onto prod through Publish (publish.yml), this run's builds its source:
-  # prod's service packs and publishes the five apps, and the GitHub release gets the
+  # prod's service packs and publishes the four apps, and the GitHub release gets the
   # zips prod's downloads host serves, once prod's reviewers approve. Publish runs from
   # master: prod's environment takes runs from protected branches alone, never a tag's.
   publish:

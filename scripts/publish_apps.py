@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish's apps: a build's five apps released on a deployment's update service (ADR 0072).
+"""Publish's apps: a build's four apps released on a deployment's update service (ADR 0072).
 
 .github/workflows/publish.yml runs `publish` once per Publish over the run's artifacts in --from
 (a pull request's CI run, or a tag's release.yml run): each app's plain build, the artifact's zip
@@ -12,7 +12,7 @@ all of them published, so a refusal of any one publishes none:
       --from dist --version 0.0.22 --label v0.0.22 --out published.json
 
 A download-only app whose zip is byte for byte the one its published release holds (a rebuild
-of an unchanged Switcher) is left as it is, "unchanged". An updatable app always uploads: its
+of an unchanged app) is left as it is, "unchanged". An updatable app always uploads: its
 build differs every time, and its published release holds the package the service packed.
 
 For prod, `attach` then waits until the downloads host's manifest.json lists every app the run
@@ -60,7 +60,6 @@ APPS = (
     App("ONEDITOR", "opennova-editor-windows-v*.zip", "Editor", True),
     App("ONTOOLS", "opennova-tools-windows.zip", "Tools", False),
     App("ONBLENDER", "opennova-blender-addon-windows.zip", "Blender add-on", False),
-    App("ONSWITCHER", "opennova-switcher-windows.zip", "Switcher", False),
 )
 
 
@@ -300,7 +299,7 @@ def read_token(path: Path) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
-    release = commands.add_parser("publish", help="release and publish the five apps of a run's builds")
+    release = commands.add_parser("publish", help="release and publish the four apps of a run's builds")
     release.add_argument("--url", required=True, help="the deployment's site (its NOVAWORLD_URL)")
     release.add_argument("--token-file", required=True, type=Path, help="the file holding its admin API token")
     release.add_argument("--from", dest="source_dir", required=True, type=Path,

@@ -1,6 +1,6 @@
 name: Publish
-# Releases one run's five apps on a deployment (ADR 0072; DEPLOY.md, "The downloads
-# host"): the runtime, the editor, the tools, the Blender add-on and the Switcher, each
+# Releases one run's four apps on a deployment (ADR 0072; DEPLOY.md, "The downloads
+# host"): the runtime, the editor, the tools and the Blender add-on, each
 # the plain build its package job uploaded as the run's artifact, uploaded as a release
 # of its product through the deployment's admin API (the environment's ADMIN_API_TOKEN
 # secret and NOVAWORLD_URL variable), waited until every one is a draft and then all
