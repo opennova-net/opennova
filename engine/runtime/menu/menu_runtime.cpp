@@ -1634,6 +1634,10 @@ void MenuRuntime::move_mouse(float x, float y, bool button_down) {
 	mouse_seen_ = true;
 }
 
+void MenuRuntime::adopt_mouse_state(float x, float y, bool button_down) {
+	if (!mouse_seen_) move_mouse(x, y, button_down);
+}
+
 bool MenuRuntime::press_mouse(float x, float y, bool double_click) {
 	if (frame_ == nullptr || !frame_->is_configured()) return false;
 	sync_popup_();

@@ -387,7 +387,9 @@ public:
 	// --- input (the shell's _gui_input owners forward here) ---
 	// The mouse as the game takes it (engine MenuRuntime): each event as its message arrives
 	// (move_mouse, press_mouse, release_mouse; take_mouse_event samples one), the pump once a
-	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
+	// frame after them (pump_mouse), which reads the device's mouse before this menu's first
+	// message (MenuRuntime::adopt_mouse_state, D-MNU-79). process_mouse is one whole sample (a
+	// scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
 	void move_mouse(const Vector2 &p_position, bool p_button_down);
 	// `p_double_click`: the platform's double click (InputEventMouseButton::double_click).

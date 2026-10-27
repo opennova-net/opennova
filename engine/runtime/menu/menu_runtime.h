@@ -614,6 +614,15 @@ public:
 	// A move: the point and the left button the pump reads [orig: g_MouseState, and input_mask, the
 	// last message's wParam, which CWnd_ProcessMouseEvent reads @ 0x647b04].
 	void move_mouse(float x, float y, bool button_down);
+	// The device's mouse state where no message has reached this runtime yet. The game's pump runs
+	// every frame over the process's mouse state, which every mouse message since boot leaves, so a
+	// menu opened under a still mouse pumps at that point, and draws its CURSOR there, from its
+	// first frame (D-MNU-79). Once a message has arrived its point is the pump's and this does
+	// nothing.
+	// [orig: CUIScene_EndFrame @ 0x63e600 - the pump @ 0x63e687..0x63e6b5, gated on dword_84BCD0,
+	//  1 in the image and written only by sub_63B640 / sub_63B650, which nothing calls;
+	//  CUIScene_DrawScreensAndCursor @ 0x63bf60 - the CURSOR at g_MouseState.x / .y @ 0x63bfda]
+	void adopt_mouse_state(float x, float y, bool button_down);
 	// The press, as its message arrives. An open dropdown takes it first [orig:
 	// CWnd_DispatchMouseEventToChildren @ 0x647917 hands every event to g_UIActiveComboWnd]: a row
 	// picks, a press outside its cell and its list closes it [orig: CComboWnd_HandleEvent

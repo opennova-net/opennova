@@ -97,6 +97,11 @@ func test_explicit_authored_data_boots_its_menu() -> void:
 			"UPDATE", "EXIT"]:
 		assert_true(driver.has_widget(widget_name), "%s is authored" % widget_name)
 	var frame := menu.get_frame()
+	# The game draws the screen's CURSOR at the mouse from the first frame, no mouse message
+	# needed (D-MNU-79): the frame's pump alone applies it.
+	menu.update_menu_frame()
+	assert_eq(driver.get_applied_pointer(), frame.get_cursor_texture(),
+			"before any mouse event, the claim's CURSOR is the OS cursor")
 	# One mouse sample resolves the screen's claimed pointer.
 	driver.process_mouse(Vector2(400, 300), false)
 	assert_not_null(frame.get_cursor_texture(),

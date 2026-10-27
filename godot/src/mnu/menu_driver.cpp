@@ -803,6 +803,14 @@ bool MenuDriver::release_mouse(const Vector2 &p_position) {
 }
 
 void MenuDriver::pump_mouse() {
+	// The device's pointer, frame-local as the events are, until this menu's first message: the
+	// pump and the claim's CURSOR from the first frame (D-MNU-79).
+	MenuFrame *frame = frame_();
+	if (frame != nullptr && frame->is_inside_tree()) {
+		const Vector2 at = frame->get_local_mouse_position();
+		runtime_.adopt_mouse_state(at.x, at.y,
+				Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT));
+	}
 	runtime_.pump_mouse();
 }
 
