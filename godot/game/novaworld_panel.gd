@@ -16,10 +16,11 @@ extends Control
 # handshake against our server -> on a verified session the browser fills from
 # the server list -> Host a Game registers a row other clients can see.
 #
-# Mods (ADR 0074): the Mods page lists NovaWorld's published public mods of the
-# game this folder holds, and installs, updates and removes them through the
-# updater; joining a server that runs a listed mod this install lacks offers its
-# install, and the relaunch joins that server once signed in.
+# Mods (ADR 0074): the Mods page, open before and after the sign-in, lists
+# NovaWorld's published public mods of the game this folder holds and the mods
+# installed here, and installs, updates and removes them through the updater;
+# joining a server that runs a listed mod this install lacks offers its install,
+# and the relaunch joins that server once signed in.
 
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
@@ -127,7 +128,6 @@ var _closing := false
 var _suppress_client_messages := false
 # The host request awaiting its ServerHostResult (start_hosting in flight).
 var _pending_host_config: HostSessionConfig
-var _mods_button: Button
 var _mods_view: Control
 var _mods_intro: Label
 var _mods_tree: Tree
@@ -144,6 +144,8 @@ var _mods_request: HTTPRequest
 # The server the relaunch after a mod's install joins once the list holds it
 # (`--novaworld-join`, join_when_listed); 0 for none.
 var _pending_join_rid := 0
+# The screen the session is on behind the Mods page, which its Back returns to.
+var _mods_return_screen := Screen.CONNECTING
 
 
 func _ready() -> void:
@@ -189,7 +191,6 @@ func _bind_scene_ui() -> void:
 	_message_button = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageButton")
 	_message_back_button = get_node(
 			pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageBackButton")
-	_mods_button = get_node(pages + "LobbyView/Actions/ModsButton")
 	_mods_view = get_node(pages + "ModsView")
 	_mods_intro = get_node(pages + "ModsView/ModsIntro")
 	_mods_tree = get_node(pages + "ModsView/ModsTree")
@@ -243,9 +244,12 @@ func _bind_scene_ui() -> void:
 	_host_cancel_button.pressed.connect(_on_host_cancel_pressed)
 	_message_button.pressed.connect(_on_message_action_pressed)
 	_message_back_button.pressed.connect(_on_message_back_pressed)
-	_mods_button.pressed.connect(_on_mods_pressed)
+	# The Mods page opens from the header on every screen, and from the games list.
+	for path in [base + "Header/ModsButton", pages + "LobbyView/Actions/ModsButton"]:
+		var mods_button: Button = get_node(path)
+		mods_button.pressed.connect(_on_mods_pressed)
 	var mods_back: Button = get_node(pages + "ModsView/ModsActions/BackButton")
-	mods_back.pressed.connect(_return_to_lobby)
+	mods_back.pressed.connect(_on_mods_back_pressed)
 	_mod_install_button.pressed.connect(_on_mod_install_pressed)
 	_mod_update_button.pressed.connect(_on_mod_update_pressed)
 	_mod_remove_button.pressed.connect(_on_mod_remove_pressed)
@@ -279,6 +283,15 @@ func _bind_scene_ui() -> void:
 func _set_screen(next: int) -> void:
 	if next == Screen.LOBBY and not _logged_in:
 		next = Screen.LOGIN
+	# The Mods page stays up over the session's moves behind it (a connect, the
+	# sign-in page, a list landing): its Back returns to where the session is.
+	if _screen == Screen.MODS and next in [Screen.CONNECTING, Screen.LOGIN, Screen.LOBBY]:
+		_mods_return_screen = next
+		return
+	_show_screen(next)
+
+
+func _show_screen(next: int) -> void:
 	_screen = next
 	if _connecting_view != null:
 		_connecting_view.visible = next == Screen.CONNECTING
@@ -715,9 +728,7 @@ func _on_server_list_updated(_updated: Array) -> void:
 		return
 	_browser_loading = false
 	_refresh_servers()
-	# The Mods page stays up over a list that lands behind it.
-	if _screen != Screen.MODS:
-		_set_screen(Screen.LOBBY)
+	_set_screen(Screen.LOBBY)
 	if not _mods_listed:
 		_request_mods()
 	if _pending_join_rid != 0:
@@ -1128,9 +1139,18 @@ func _populate_missions() -> void:
 # not listed here.
 
 func _on_mods_pressed() -> void:
-	_set_screen(Screen.MODS)
+	if _screen != Screen.MODS:
+		_mods_return_screen = _screen
+	_show_screen(Screen.MODS)
 	_request_mods()
 	_show_mods()
+
+
+func _on_mods_back_pressed() -> void:
+	var back := _mods_return_screen
+	if back == Screen.LOBBY and not _logged_in:
+		back = Screen.LOGIN
+	_show_screen(back)
 
 
 ## The mod list's request: GET <site>/api/mods?game=<command file>.
@@ -1203,11 +1223,13 @@ static func mod_title(mod: ModListing) -> String:
 	return title if not title.is_empty() else mod.code
 
 
+# The page's rows: the listed mods, then each mod installed here the list does
+# not hold (a private one, a retired one, another service's), by its folder's
+# name, marked as not listed once a list has loaded, which only Remove takes.
 func _show_mods() -> void:
 	if _mods_tree == null:
 		return
-	var selected := _selected_mod()
-	var selected_code := selected.code if selected != null else ""
+	var selected_code := _selected_code()
 	_mods_tree.clear()
 	var root := _mods_tree.create_item()
 	for mod in _mods:
@@ -1218,6 +1240,15 @@ func _show_mods() -> void:
 		item.set_text(3, "Installed" if RuntimeUpdates.has_mod(mod.code) else "")
 		item.set_metadata(0, mod)
 		if mod.code == selected_code:
+			item.select(0)
+	for code in RuntimeUpdates.installed_mods():
+		if _mod_for(code) != null:
+			continue
+		var item := _mods_tree.create_item(root)
+		item.set_text(0, code)
+		item.set_text(3, "Installed, not listed" if _mods_listed else "Installed")
+		item.set_metadata(0, code)
+		if code == selected_code:
 			item.select(0)
 	var game := LaunchFlags.product_name()
 	if _mods_request != null and not _mods_listed:
@@ -1232,17 +1263,34 @@ func _show_mods() -> void:
 	_update_mod_buttons()
 
 
+# The selected row's listed mod; null for none, or for a mod the list does not hold.
 func _selected_mod() -> ModListing:
+	var meta: Variant = _selected_row_meta()
+	return meta if meta is ModListing else null
+
+
+# The selected row's expansion code, listed or not; "" for none.
+func _selected_code() -> String:
+	var meta: Variant = _selected_row_meta()
+	if meta is ModListing:
+		return (meta as ModListing).code
+	return meta if meta is String else ""
+
+
+# A Mods page row's metadata: its ModListing, or the folder name of a mod the list
+# does not hold; null for no selection.
+func _selected_row_meta() -> Variant:
 	if _mods_tree == null or _mods_tree.get_selected() == null:
 		return null
-	return _mods_tree.get_selected().get_metadata(0) as ModListing
+	return _mods_tree.get_selected().get_metadata(0)
 
 
 func _update_mod_buttons() -> void:
 	var mod := _selected_mod()
-	var installed := mod != null and RuntimeUpdates.has_mod(mod.code)
+	var code := _selected_code()
+	var installed := not code.is_empty() and RuntimeUpdates.has_mod(code)
 	_mod_install_button.disabled = mod == null or installed
-	_mod_update_button.disabled = not installed
+	_mod_update_button.disabled = mod == null or not installed
 	_mod_remove_button.disabled = not installed
 
 
@@ -1270,16 +1318,16 @@ func _on_mod_update_pressed() -> void:
 
 
 func _on_mod_remove_pressed() -> void:
-	var mod := _selected_mod()
-	if mod == null:
+	var code := _selected_code()
+	if code.is_empty():
 		return
-	var code := mod.code
+	var title := mod_title(_selected_mod()) if _selected_mod() != null else code
 	if resource_root != null and String(resource_root.get_expansion()).to_lower() == code.to_lower():
 		_show_message(("%s is the mod the game is playing now. Choose the base game under "
-				+ "Options, Mods, then remove it.") % mod_title(mod), "Back", Callable(), Screen.MODS)
+				+ "Options, Mods, then remove it.") % title, "Back", Callable(), Screen.MODS)
 		return
 	if not RuntimeUpdates.remove_mod(code):
-		_show_message("%s could not be removed.\n\n%s" % [mod_title(mod), RuntimeUpdates.last_error],
+		_show_message("%s could not be removed.\n\n%s" % [title, RuntimeUpdates.last_error],
 				"Back", Callable(), Screen.MODS)
 		return
 	_installed_listed = false
@@ -1641,6 +1689,11 @@ func mod_count() -> int:
 	return _mods.size()
 
 
+## The Mods page's rows: the listed mods and the installed ones the list does not hold.
+func mod_row_count() -> int:
+	return _mods_tree.get_root().get_child_count() if _mods_tree.get_root() != null else 0
+
+
 ## The Mods page's row text: its four columns.
 func mod_cells(index: int) -> PackedStringArray:
 	var item := _mods_tree.get_root().get_child(index)
@@ -1668,6 +1721,10 @@ func mod_buttons_enabled() -> Array[bool]:
 
 func press_mods() -> void:
 	_on_mods_pressed()
+
+
+func press_mods_back() -> void:
+	_on_mods_back_pressed()
 
 
 func press_mod_install() -> void:

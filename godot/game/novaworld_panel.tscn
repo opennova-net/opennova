@@ -218,6 +218,11 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(155, 0)
 layout_mode = 2
 
+[node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
+layout_mode = 2
+text = "Mods"
+tooltip_text = "NovaWorld's mods of this game: install, update and remove them."
+
 [node name="BackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
 layout_mode = 2
 text = "Back"
@@ -555,7 +560,7 @@ theme_override_constants/separation = 8
 
 [node name="BackButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
 layout_mode = 2
-text = "Back to Games"
+text = "Back"
 
 [node name="ModsSpacer" type="Control" parent="Center/Shell/Margin/RootVBox/Pages/ModsView/ModsActions"]
 layout_mode = 2

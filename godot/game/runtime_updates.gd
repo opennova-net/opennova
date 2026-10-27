@@ -103,6 +103,14 @@ func has_mod(code: String) -> bool:
 	return not code.is_empty() and DirAccess.dir_exists_absolute(mod_dir(code))
 
 
+## The mods installed here: every expansion/<code>/ folder, by its name.
+func installed_mods() -> PackedStringArray:
+	var expansions := _resource_dir.path_join("expansion")
+	if _resource_dir.is_empty() or not DirAccess.dir_exists_absolute(expansions):
+		return PackedStringArray()
+	return DirAccess.get_directories_at(expansions)
+
+
 ## A mod's install, as the NovaWorld screen runs it (ADR 0074): its folder's
 ## UPDATE.WIZ naming its product (the updater takes every expansion folder with a
 ## wizard as a product of its own), then the updater as UPDATE starts it, the game

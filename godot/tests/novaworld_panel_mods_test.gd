@@ -113,6 +113,46 @@ func test_remove_deletes_the_mods_folder() -> void:
 			"the other mods' folder stays")
 
 
+# A mod installed here that the list does not hold (a private one, a retired one,
+# another service's) shows by its folder's name, marked, and only Remove takes it.
+func test_an_installed_mod_the_list_does_not_hold_shows_with_remove_alone() -> void:
+	_install_folder("other")
+	_install_folder("secret")
+	var panel := _make_panel()
+	panel.apply_mods_reply(200, MODS_REPLY)
+	assert_eq(panel.mod_count(), 2, "the list's own")
+	assert_eq(panel.mod_row_count(), 3, "and the installed one it does not hold")
+	assert_eq(panel.mod_cells(2), PackedStringArray(["secret", "", "", "Installed, not listed"]))
+	panel.select_mod_for_test(2)
+	assert_eq(panel.mod_buttons_enabled(), [false, false, true] as Array[bool], "Remove alone")
+	panel.press_mod_remove()
+	assert_false(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion/secret")))
+	assert_eq(panel.mod_row_count(), 2, "gone from the page")
+	var unlisted := _make_panel()
+	unlisted.apply_mods_reply(500, "")
+	assert_eq(unlisted.mod_cells(0), PackedStringArray(["other", "", "", "Installed"]),
+			"with no list loaded, an installed mod shows, not marked")
+	unlisted.select_mod_for_test(0)
+	assert_eq(unlisted.mod_buttons_enabled(), [false, false, true] as Array[bool])
+
+
+# The Mods page opens before the sign-in too, and stays up while the session
+# connects behind it; its Back returns to where the session got to.
+func test_the_mods_page_opens_before_the_sign_in() -> void:
+	var panel := _make_panel()
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.CONNECTING)
+	panel.press_mods()
+	assert_true(panel.mods_visible())
+	panel.client_for_test().emit_signal("connected")
+	assert_true(panel.mods_visible(), "the connect lands behind the page")
+	panel.press_mods_back()
+	assert_true(panel.login_visible(), "back to the sign-in the session reached")
+	panel.client_for_test().emit_signal("login_succeeded", "ljim")
+	panel.press_mods()
+	panel.press_mods_back()
+	assert_true(panel.browser_visible(), "from the games, back to the games")
+
+
 # Nothing is written when the updater cannot start: the folder is no half install.
 func test_an_install_the_updater_cannot_run_writes_nothing_and_says_why() -> void:
 	var panel := _make_panel()
