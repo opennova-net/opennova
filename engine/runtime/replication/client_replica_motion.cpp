@@ -640,6 +640,21 @@ void row_org1_slope_pass(ClientEntityState &es, uint32_t key, uint32_t def_attri
 			io::bam_sar(io::bam_add(io::bam_sub(pitch_slope, es.rm_body_pitch), 4), 3));
 }
 
+// The body's current state (+0x2BC) the movement resolver reads, its anim table's bit 0 (the
+// at-rest discriminant) and its repulsion's dragger and carry states: the arbitrated current
+// (net_anim_current, the record's byte before any record arbitrated), or the state this tick's
+// death edge stored ahead of the resolve (`death_state`, -1 for none). The record's raw byte
+// (anim_state_id) differs while a deferral or a gait insert holds the channel.
+// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - `mov edx, [esi+2BCh]` @0x4B2C05, the
+//  table test @0x4B2C1E, `mov eax, [esi+2BCh]` @0x4B3A77; the death edges' +0x2BC stores
+//  Entity_UpdateInfantryPlayerBody @0x4B4CA3 / @0x4B4CAB and Entity_UpdateInfantryAI
+//  @0x4B9CFE..0x4B9D06, ahead of the calls @0x4B7CF4 / @0x4BF7F2]
+int row_resolve_state(const ClientEntityState &es, int death_state) {
+	if (death_state >= 0) return death_state;
+	return es.net_anim_current >= 0 ? static_cast<int>(es.net_anim_current)
+	                                : static_cast<int>(es.anim_state_id);
+}
+
 // What a player row's body pass reads beyond its own words: the carrier pose and the ground's
 // occupant words for its ride, its driver's hold and its ride link, whether its ground entity is a
 // vehicle in its crash state, which lifts its view phase's Yaw clamp and skips its pitch lag, and
@@ -1074,8 +1089,10 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.source_bound_radius_q16 = bound_resolver != nullptr && *bound_resolver
 				? (*bound_resolver)(es.type_id)
 				: 0;
-		q.anim_state_id = es.anim_state_id;
-		q.anim_state_flags = world::infantry_anim_flags(es.anim_state_id);
+		// The resolver reads the body's current state (+0x2BC): the arbitrated current, or the
+		// state this tick's death edge stored, never the record's raw byte (row_resolve_state).
+		q.anim_state_id = row_resolve_state(es, death_state);
+		q.anim_state_flags = world::infantry_anim_flags(q.anim_state_id);
 		q.tick = tick;
 		q.peers = peers;
 		q.peer_count = peer_count;
@@ -1499,9 +1516,9 @@ void ClientReplicaPipeline::resolve_seated_org1(ClientEntityState &es,
 	q.source_bound_radius_q16 = replica_bound_radius_resolver_
 			? replica_bound_radius_resolver_(es.type_id)
 			: 0;
-	// The anim state as the free-standing call reads it (row_root_motion_tick).
-	q.anim_state_id = es.anim_state_id;
-	q.anim_state_flags = world::infantry_anim_flags(es.anim_state_id);
+	// The body's current state (+0x2BC) as the free-standing call reads it (row_resolve_state).
+	q.anim_state_id = row_resolve_state(es, -1);
+	q.anim_state_flags = world::infantry_anim_flags(q.anim_state_id);
 	q.tick = rm_key;
 	q.peers = contact_peer_scratch_.data();
 	q.peer_count = static_cast<int32_t>(contact_peer_scratch_.size());

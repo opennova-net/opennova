@@ -5,14 +5,17 @@
 // mounted tail runs the movement resolver on the eight-tick key over the channel's capsule, its
 // Flags out the row's, so the Indoors bit is re-derived. A seated player row runs no resolve, and
 // its channel runs at its head too (a starved tick advances it). A dead body its record still
-// seats resolves free-standing with the mounted latch its seat attach's Flags 0x40 sets.
+// seats resolves free-standing with the mounted latch its seat attach's Flags 0x40 sets. Both
+// replica resolves read the body's current state (+0x2BC): the arbitrated current, or the state
+// its death edge stored that tick, never the record's raw byte.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - the dual update @0x4B9A48, the stamp
 //  @0x4B9A53..0x4B9A6E, the key `& 7` @0x4BA066..0x4BA072, the seat block @0x4BEBEC..0x4BEC15,
 //  the mounted tail @0x4BF4B3..0x4BF5BE, the free-standing call @0x4BF7F2;
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF ahead of the starved
 //  exit @0x4B4669..0x4B4670; Entity_MovementCollisionResolver @0x4B2BD0 - the latch
 //  @0x4B2D2B..0x4B2D34, the clear @0x4B2D2E..0x4B2D36; Entity_AttachToVehicleSlot @0x4946D0 -
-//  `or ecx, 40h` @0x494760]
+//  `or ecx, 40h` @0x494760; the resolver's +0x2BC reads @0x4B2C05 / @0x4B3A77, the death edges'
+//  stores @0x4B4CA3 / @0x4B9CFE..0x4B9D06]
 
 #include <runtime/replication/client_replica_pipeline.h>
 
@@ -286,6 +289,32 @@ void test_dead_seated_body_resolves_with_the_latch() {
 			"a free-standing live body's resolve sets none");
 }
 
+// Both replica resolves read the body's current state: the arbitrated current where the record's
+// raw byte differs, and on the death edge's tick the state the edge stored.
+void test_resolves_read_the_current_state() {
+	Rig rig(nw::EntityClass::Infantry, false, /*seated=*/false);
+	rig.tick();
+	ns::ClientEntityState &rider = rig.rider();
+	rider.net_anim_current = as::kIdle;
+	rider.anim_state_id = as::kWalkForward;
+	rig.tick();
+	expect(rig.rider_queries() == 2 && rig.queries.back().anim_state_id == as::kIdle,
+			"the free-standing resolve reads the arbitrated current, not the record's byte");
+	const int16_t death = as::kDeathBulletBase + 6;
+	rig.view->apply(nw::s2c::ENTITY_DEATH,
+			{static_cast<uint8_t>(kRider & 0xFF), static_cast<uint8_t>(kRider >> 8),
+			 static_cast<uint8_t>(death & 0xFF), static_cast<uint8_t>(death >> 8)});
+	rig.tick();
+	expect(rig.rider_queries() == 3 && rig.queries.back().anim_state_id == death,
+			"the death edge's tick resolves in the state the edge stored");
+	Rig seated(nw::EntityClass::Infantry);
+	seated.rider().net_anim_current = as::kIdle;
+	seated.rider().anim_state_id = as::kWalkForward;
+	for (int i = 0; i < 8; ++i) seated.tick();
+	expect(seated.rider_queries() == 1 && seated.queries.back().anim_state_id == as::kIdle,
+			"the seated resolve reads the arbitrated current");
+}
+
 } // namespace
 
 int main() {
@@ -295,6 +324,7 @@ int main() {
 	test_seated_org1_channel_survives_its_records();
 	test_seated_player_row_runs_no_resolve();
 	test_dead_seated_body_resolves_with_the_latch();
+	test_resolves_read_the_current_state();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;
