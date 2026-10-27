@@ -94,6 +94,7 @@ int test_session_rows() {
 	Database db = scratch.open();
 	// A client signed in as account 41, playing on a listing since half a minute ago.
 	lobbydb::SessionRow a = session(1, 40001);
+	a.ap = "JOINTOPS.EXE";
 	a.user_id = 41;
 	a.playing_rid = 0x0A000031u;
 	a.play_addr = "203.0.113.31:32768";
@@ -109,6 +110,7 @@ int test_session_rows() {
 	TEST_EXPECT(rows[0].id == a.id && lobbydb::same_columns(rows[0], a));
 	TEST_EXPECT(rows[0].connected_ms == a.connected_ms && rows[0].last_seen_ms == a.last_seen_ms);
 	TEST_EXPECT(rows[0].rid == 0 && !rows[0].host_user_id && rows[0].user_id == 41);
+	TEST_EXPECT(rows[0].ap == "JOINTOPS.EXE" && rows[1].ap.empty());
 	TEST_EXPECT(rows[0].playing_rid == 0x0A000031u && rows[0].play_addr == "203.0.113.31:32768" &&
 			rows[0].playing_since_ms == kNow - 30000);
 	TEST_EXPECT(lobbydb::session_addr(rows[0]) == "10.1.2.3:40001");
@@ -142,6 +144,12 @@ int test_session_rows() {
 	rows = lobbydb::list_sessions(db);
 	TEST_EXPECT(lobbydb::same_columns(rows[0], changed) && rows[0].user_id == 43 &&
 			rows[0].playing_since_ms == 0);
+	// The client's executable is a column the lobby writes again.
+	changed.ap = "OPENNOVA.EXE";
+	TEST_EXPECT(!lobbydb::same_columns(changed, rows[0]));
+	lobbydb::update_session(db, changed);
+	rows = lobbydb::list_sessions(db);
+	TEST_EXPECT(rows[0].ap == "OPENNOVA.EXE");
 	lobbydb::touch_sessions(db, {{a.id, kNow + 5000}, {b.id, kNow + 7000}, {999999, kNow}});
 	rows = lobbydb::list_sessions(db);
 	TEST_EXPECT(rows[0].last_seen_ms == kNow + 5000 && rows[1].last_seen_ms == kNow + 7000);

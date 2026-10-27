@@ -571,7 +571,10 @@ port) and keeps each flow on one task.
   starts a new logical connection, updated as the session's statements change it (the
   account it signed in as, RID, hosting, listing, what it plays on), deleted with the drop;
   `last_seen_at` lags by up to 10 s. The receive thread writes the row before it answers the
-  statement that changed it. The account (`user_id`) is the one whose live retail login a
+  statement that changed it. `ap` is the admitting `ClientHello`'s `AP`, the client's
+  executable as its menu reads it (`JOINTOPS.EXE`, `DFX2.EXE`, `OPENNOVA.EXE`): the one field
+  that tells our client from retail's, and the client's own text, so it is shown, never
+  trusted. The account (`user_id`) is the one whose live retail login a
   `Cookie` list's `LOGINSESSIONTAG` named when the lobby resolved it, pinned for the
   session's life however that login ends (a later tag naming another account moves it; the
   tag itself, a secret, stays in the lobby's memory). What it plays on is its latest
@@ -597,7 +600,7 @@ plays on its own server too); any other is a **client**. A session's game is its
 a server's by its listing's `LobbyName`, else by its game tag (aliases included). A
 server's listing says what it is: `hosted` (a live hosted server of the fleet's, linked to
 `/admin/fleet/<id>`), `owned` (its HostKey names an account) or `anonymous`, and retail's
-Serve Only flag (`Dedicated`). A client's server is the listing its `PlaySetup` named, by
+Serve Only flag (`Dedicated`). Each session's **Client** is its `ap`. A client's server is the listing its `PlaySetup` named, by
 RID, while it is listed (its address alone otherwise: a LAN server, one no lobby lists).
 The page shows the clients and the servers as two tables, each session's lobby linked to
 the lobby program's usage of that instance's task, and the lobby instances below them
@@ -605,7 +608,7 @@ the lobby program's usage of that instance's task, and the lobby instances below
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed, and `novalogic_players`: a hosted server listed on NovaLogic's NovaWorld too, the players that service sent it, who hold no session here though its `players` counts them; null for any other server and while its agent reports none) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
+| `GET /api/admin/connections` | admin | every session, oldest first: its row's `session_id`, its instance (`lobby_id`) and that instance's task (`lobby_task_id`), state, game tag, `ap` (the client's executable), address, times, `kind` (`client` or `server`), `title` (`{slug, display_name}`, null for a tag no games row answers to), `account` (`via` `host_key` or `login`), `host` while it hosts (with `server_kind` and `dedicated`, null while not listed, and `novalogic_players`: a hosted server listed on NovaLogic's NovaWorld too, the players that service sent it, who hold no session here though its `players` counts them; null for any other server and while its agent reports none) and `playing` while it plays (`rid`, null for no listing at its address; `addr`, `since_ms`, `listed`, `server_name`, `hosted_server_id`) |
 | `POST /api/admin/connections/<session id>/end` | admin | 202, an `end_session` command for the instance holding it: the client gets its `ServerGoodBye` burst and the connection drops (`Logout`), as the NAPI server role ends a connection it asked to disconnect; 404 for a session that ended; 409 `hosting` (with its `rid`: stop the listing instead, since ending its session only parks it for the re-host) |
 
 ## Pushing statements to a listed server

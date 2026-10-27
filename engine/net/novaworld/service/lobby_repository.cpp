@@ -30,7 +30,8 @@ constexpr const char *kSessionColumns =
 		"hosting, listed, host_user_id, server_name, mission_name, players, max_players, "
 		"(extract(epoch FROM connected_at) * 1000)::bigint, "
 		"(extract(epoch FROM last_seen_at) * 1000)::bigint, COALESCE(lobby_id, 0), "
-		"playing_rid, play_addr, COALESCE((extract(epoch FROM playing_since) * 1000)::bigint, 0)";
+		"playing_rid, play_addr, COALESCE((extract(epoch FROM playing_since) * 1000)::bigint, 0), "
+		"ap";
 
 constexpr const char *kInstanceColumns =
 		"id, endpoint, state, (extract(epoch FROM started_at) * 1000)::bigint, "
@@ -73,6 +74,7 @@ SessionRow row_to_session(const db::Row &r) {
 	s.playing_rid = static_cast<uint32_t>(r.as_int(19).value_or(0));
 	s.play_addr = r.as_text(20).value_or("");
 	s.playing_since_ms = r.as_int(21).value_or(0);
+	s.ap = r.as_text(22).value_or("");
 	return s;
 }
 
@@ -231,7 +233,7 @@ bool same_columns(const SessionRow &a, const SessionRow &b) {
 			a.server_name == b.server_name && a.mission_name == b.mission_name &&
 			a.players == b.players && a.max_players == b.max_players &&
 			a.playing_rid == b.playing_rid && a.play_addr == b.play_addr &&
-			a.playing_since_ms == b.playing_since_ms;
+			a.playing_since_ms == b.playing_since_ms && a.ap == b.ap;
 }
 
 int64_t insert_session(db::Database &db, const SessionRow &row) {
@@ -239,16 +241,16 @@ int64_t insert_session(db::Database &db, const SessionRow &row) {
 			"INSERT INTO lobby_sessions (connection_id, peer_ip, peer_port, state, pn, identity, "
 			"user_id, rid, hosting, listed, host_user_id, server_name, mission_name, players, "
 			"max_players, connected_at, last_seen_at, lobby_id, playing_rid, play_addr, "
-			"playing_since) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, "
-			"$15, to_timestamp($16::float8 / 1000), to_timestamp($17::float8 / 1000), $18, $19, "
-			"$20, to_timestamp($21::float8 / 1000)) RETURNING id;",
+			"playing_since, ap) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, "
+			"$14, $15, to_timestamp($16::float8 / 1000), to_timestamp($17::float8 / 1000), $18, "
+			"$19, $20, to_timestamp($21::float8 / 1000), $22) RETURNING id;",
 			{ i64(row.connection_id), str(row.peer_ip), i64(row.peer_port), str(row.state),
 					str(row.pn), str(row.identity), db::int_or_null(row.user_id), rid_bind(row.rid),
 					flag(row.hosting), flag(row.listed), db::int_or_null(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
 					i64(row.max_players), i64(row.connected_ms), i64(row.last_seen_ms),
 					lobby_bind(row.lobby_id), rid_bind(row.playing_rid), str(row.play_addr),
-					ms_bind(row.playing_since_ms) });
+					ms_bind(row.playing_since_ms), str(row.ap) });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
 }
 
@@ -257,13 +259,13 @@ void update_session(db::Database &db, const SessionRow &row) {
 			"state = $5, pn = $6, identity = $7, user_id = $8, rid = $9, hosting = $10, "
 			"listed = $11, host_user_id = $12, server_name = $13, mission_name = $14, "
 			"players = $15, max_players = $16, playing_rid = $17, play_addr = $18, "
-			"playing_since = to_timestamp($19::float8 / 1000) WHERE id = $1;",
+			"playing_since = to_timestamp($19::float8 / 1000), ap = $20 WHERE id = $1;",
 			{ i64(row.id), i64(row.connection_id), str(row.peer_ip), i64(row.peer_port),
 					str(row.state), str(row.pn), str(row.identity), db::int_or_null(row.user_id),
 					rid_bind(row.rid), flag(row.hosting), flag(row.listed), db::int_or_null(row.host_user_id),
 					str(row.server_name), str(row.mission_name), i64(row.players),
 					i64(row.max_players), rid_bind(row.playing_rid), str(row.play_addr),
-					ms_bind(row.playing_since_ms) });
+					ms_bind(row.playing_since_ms), str(row.ap) });
 }
 
 void update_session_listing(db::Database &db, int64_t id, uint32_t rid, bool hosting, bool listed,

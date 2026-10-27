@@ -152,6 +152,7 @@ int main(int argc, char **argv) {
 	cfg.client_index = 0x50555348u;
 	cfg.connection_keys = [] { return opennova::ConnectionKeys{ 0x434D4453u, opennova::make_dev_scrk() }; };
 	cfg.na = "push:host";
+	cfg.ap = "JOINTOPS.EXE";
 	cfg.cookie_vars = []() {
 		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
 	};
@@ -215,6 +216,7 @@ int main(int argc, char **argv) {
 			expect(row->state == "active" && row->identity == "push:host" &&
 			               row->pn == "NOVAWORLDUDP",
 			       "the row is the active session's, with its NA and PN");
+			expect(row->ap == "JOINTOPS.EXE", "the row keeps the executable its Hello's AP named");
 			expect(!row->hosting && !row->listed && row->rid == 0, "the row hosts nothing yet");
 			expect(row->connected_ms > 0 && row->last_seen_ms >= row->connected_ms,
 			       "the row's times are wall-clock ones");

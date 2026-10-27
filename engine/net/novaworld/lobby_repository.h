@@ -104,6 +104,7 @@ struct SessionRow {
 	std::string state; // "handshaking", "active" or "closing"
 	std::string pn;
 	std::string identity;
+	std::string ap; // the Hello's AP, the client's executable (Connection::ap)
 	// The account it signed in as (LobbyState::user_id); unset for none.
 	std::optional<int64_t> user_id;
 	uint32_t rid = 0; // 0: none

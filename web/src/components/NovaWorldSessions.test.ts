@@ -26,6 +26,7 @@ function session(id: number, over: Partial<AdminConnection> = {}): AdminConnecti
     state: 'active',
     pn: 'NOVAWORLDUDP',
     identity: 'jop:cus2',
+    ap: 'JOINTOPS.EXE',
     created_ms: NOW - 3 * 60_000,
     last_seen_ms: NOW - 5_000,
     addr: `198.51.100.${id % 250}:32768`,
@@ -103,8 +104,8 @@ describe('NovaWorldSessions', () => {
     );
     const headers = (table: string) =>
       page.findAll(`.sessions-${table} thead th`).map((th) => th.text().replace(/[▲▼]/g, '').trim());
-    expect(headers('clients')).toEqual(['Session', 'Account', 'Game', 'Lobby', 'Playing on', 'Address', 'Connected', 'Last heard', 'Actions']);
-    expect(headers('servers')).toEqual(['Session', 'Account', 'Game', 'Lobby', 'Server', 'Players', 'Address', 'Connected', 'Last heard', 'Actions']);
+    expect(headers('clients')).toEqual(['Session', 'Account', 'Game', 'Client', 'Lobby', 'Playing on', 'Address', 'Connected', 'Last heard', 'Actions']);
+    expect(headers('servers')).toEqual(['Session', 'Account', 'Game', 'Client', 'Lobby', 'Server', 'Players', 'Address', 'Connected', 'Last heard', 'Actions']);
     // Newest first in each: 13 connected a minute ago, 11 three.
     expect(clientRows().map((r) => r.get('th span').text())).toEqual(['13', '11']);
     expect(serverRows().map((r) => r.get('th span').text())).toEqual(['12']);
@@ -119,11 +120,11 @@ describe('NovaWorldSessions', () => {
     expect(page.get('.sessions-summary').text()).toContain('0 signed in: 0 clients and 0 servers;');
   });
 
-  it('names each session in words: its state, game, lobby and times', async () => {
+  it('names each session in words: its state, game, client, lobby and times', async () => {
     await mountSection([
       session(11),
-      session(12, { state: 'handshaking', pn: 'JOINTOPERATIONS', identity: '', title: null, lobby_task_id: '', created_ms: NOW - 30_000, last_seen_ms: NOW - 30_000 }),
-      session(13, { state: 'closing', pn: 'NOVAWORLDUDP', identity: 'http:push', title: null, lobby_id: 0, created_ms: 0, last_seen_ms: 0 }),
+      session(12, { state: 'handshaking', pn: 'JOINTOPERATIONS', identity: '', ap: 'OPENNOVA.EXE', title: null, lobby_task_id: '', created_ms: NOW - 30_000, last_seen_ms: NOW - 30_000 }),
+      session(13, { state: 'closing', pn: 'NOVAWORLDUDP', identity: 'http:push', ap: '', title: null, lobby_id: 0, created_ms: 0, last_seen_ms: 0 }),
     ]);
     const [handshaking, signedIn, closing] = clientRows();
     expect(handshaking.get('th').text()).toBe('12Signing in');
@@ -133,6 +134,10 @@ describe('NovaWorldSessions', () => {
     expect(signedIn.get('.session-game').text()).toBe('Joint Operationsjop:cus2');
     expect(handshaking.get('.session-game').text()).toBe('Joint Operations');
     expect(closing.get('.session-game').text()).toBe('Not knownhttp:push');
+    // The client: the executable its hello named.
+    expect(signedIn.get('.session-client').text()).toBe('JOINTOPS.EXE');
+    expect(handshaking.get('.session-client').text()).toBe('OPENNOVA.EXE');
+    expect(closing.get('.session-client').text()).toBe('Not known');
     // The lobby, linked to its task's usage on the lobby program's page.
     const lobby = signedIn.get('.session-lobby a');
     expect(lobby.text()).toBe('Lobby 1');

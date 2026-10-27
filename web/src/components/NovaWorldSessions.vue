@@ -69,6 +69,10 @@
                 <span v-else class="text-ink-muted" title="Its game tag names no game this NovaWorld runs">Not known</span>
                 <span v-if="c.identity" class="block font-mono text-xs text-ink-muted" title="The game tag it signed in with">{{ c.identity }}</span>
               </td>
+              <td class="session-client whitespace-nowrap px-4 py-3">
+                <span v-if="c.ap" class="font-mono text-xs" title="The executable it signed in with">{{ c.ap }}</span>
+                <span v-else class="text-ink-muted">Not known</span>
+              </td>
               <td class="session-lobby whitespace-nowrap px-4 py-3">
                 <template v-if="c.lobby_id">
                   <RouterLink
@@ -229,6 +233,7 @@ const leading: Column[] = [
   { label: 'Session', key: 'id' },
   { label: 'Account', key: 'account' },
   { label: 'Game', key: null },
+  { label: 'Client', key: null },
   { label: 'Lobby', key: null },
 ];
 const trailing: Column[] = [

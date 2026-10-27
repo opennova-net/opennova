@@ -669,6 +669,7 @@ lobbydb::SessionRow NwUdpListener::session_row_locked(const PeerAddr &peer,
 	row.state = connection_state_name(conn.state);
 	row.pn = conn.pn;
 	row.identity = conn.identity;
+	row.ap = conn.ap;
 	const uint64_t steady_now = steady_now_ms();
 	const int64_t unix_now = wall_now_ms();
 	row.connected_ms = unix_ms_of_steady(conn.created_ms, steady_now, unix_now);
@@ -1253,6 +1254,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			conn.created_ms = steady_now_ms();
 			conn.last_seen_ms = conn.created_ms;
 			conn.pn = hello.pn;
+			conn.ap = hello.ap;
 			manager_.notify_handshake(conn);
 			{
 				// Insert after notify_handshake: a replacement Hello can fire
