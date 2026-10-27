@@ -340,8 +340,9 @@ static void test_final_husk_takes_the_xb_variant_and_a_clone_holds_none() {
 // The weapon userpoint clusters are the class row's init's: the ewep row resolves the
 // standard cluster (+0x327) once its slot binds a weapon, the CHel / cpln init the
 // aircraft cluster (+0x4D8), any other row neither. The reader takes the aircraft
-// cluster for a PlayerControl def, else the standard one.
-// [orig: Entity_InitBoneReferences @0x441470 (@0x4414CD..0x4415B0); Entity_InitInfantryBoneData
+// cluster for a PlayerControl def, else the standard one. The CAMERA byte is the ewep
+// init's alone, under the same weapon test.
+// [orig: Entity_InitBoneReferences @0x441470 (@0x441495, @0x4414B4, @0x4414CD..0x4415B0); Entity_InitInfantryBoneData
 //  @0x490160 (@0x4901AF..0x490292) from Entity_InitHelicopterAIFromDef @0x4686A2;
 //  Entity_GetWeaponSlotByte @0x5459C0 (@0x5459DA..0x5459F9)]
 static void test_weapon_userpoint_clusters_follow_the_class_row() {
@@ -362,7 +363,8 @@ static void test_weapon_userpoint_clusters_follow_the_class_row() {
         CHECK(items.ok);
         if (!items.ok) continue;
         const TempRoot root("cluster");
-        root.put("Barrel1.3di", with_renamed_user_point(armory, "Armory", "FIRE_R"));
+        root.put("Barrel1.3di", with_renamed_user_point(
+                with_renamed_user_point(armory, "Armory", "FIRE_R"), "Ground", "CAMERA"));
         Rig rig(root, items, 5097);
         // The slot binds a weapon, then the sweep runs again.
         WeaponTableEntry gun;
@@ -376,6 +378,8 @@ static void test_weapon_userpoint_clusters_follow_the_class_row() {
         const std::string name(row);
         CHECK((e.weapon_userpoint_bytes[0][0] != 0) == (name == "ewep"));
         CHECK((e.aircraft_weapon_userpoint_bytes[0][0] != 0) == (name == "CHel" || name == "cpln"));
+        // The CAMERA byte rides the ewep init's weapon test with the standard cluster.
+        CHECK((e.camera_userpoint_byte != 0) == (name == "ewep"));
     }
     Entity reader;
     reader.item_attrib = kItemAttribEweap;

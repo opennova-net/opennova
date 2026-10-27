@@ -618,17 +618,20 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							sizeof(e->aircraft_weapon_userpoint_bytes));
 					e->heat_userpoint_byte = 0;
 					e->aircraft_heat_userpoint_byte = 0;
-					if (strutil::iequals(def->ai_function, "ewep") && slot_def != nullptr)
+					e->camera_userpoint_byte = 0;
+					if (strutil::iequals(def->ai_function, "ewep") && slot_def != nullptr) {
+						// The gun's own first-person camera userpoint, ahead of the cluster
+						// under the same test; no other class row's init writes it.
+						// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
+						e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);
 						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
 								e->weapon_userpoint_bytes, e->heat_userpoint_byte);
+					}
 					if (strutil::iequals(def->ai_function, "chel") ||
 							strutil::iequals(def->ai_function, "cpln"))
 						resolve_weapon_userpoint_bytes(*def, *m3, slot_def,
 								e->aircraft_weapon_userpoint_bytes,
 								e->aircraft_heat_userpoint_byte);
-					// The gun's own first-person camera userpoint.
-					// [orig: Entity_InitBoneReferences @0x4414A9..0x4414B4 -> +0x318]
-					e->camera_userpoint_byte = userpoint_index_by_name(*m3, kUserPointCameraName);
 				}
 			}
 			resolve_virtual_display_camera(*def, deps, *e);

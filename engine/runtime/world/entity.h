@@ -567,8 +567,9 @@ struct Entity {
 	uint8_t look_userpoint_byte = 0; // def+1351, LOOK; fire-validation LOS origin
 	uint8_t target_userpoint_byte = 0;
 	// The mounted first-person camera sources (world/local_player_view.h,
-	// local_player_mounted_camera). An EWEAP resolves the "CAMERA" userpoint of
-	// its OWN model (entity+0x318, 1-based, 0 = none). A carrier whose def
+	// local_player_mounted_camera). An ewep row whose slot binds a weapon resolves
+	// the "CAMERA" userpoint of its OWN model (entity+0x318, 1-based, 0 = none);
+	// no other class row's init writes it. A carrier whose def
 	// authors `virtualdisplay <model> <userpoint>` carries that userpoint's
 	// record position out of the VIRTUAL-DISPLAY model; retail keeps the byte
 	// def+0x1C0 and reads the record at use. input_class is the def's
