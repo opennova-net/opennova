@@ -818,9 +818,9 @@ ProductOutcome delete_product_purged(db::Database &db, int64_t id, bool purge) {
 
 ProductOutcome delete_owned_products(db::Database &db, int64_t owner_id, bool purge) {
 	db::Transaction tx(db);
-	const auto owned = db.query(
-			"SELECT id FROM products WHERE owner_id = $1 ORDER BY (kind = 'game'), id;",
-			{ db::BindValue(owner_id) });
+	const auto owned =
+			db.query("SELECT id FROM products WHERE owner_id = $1 ORDER BY (kind = 'game'), id;",
+					{ db::BindValue(owner_id) });
 	for (const auto &r : owned) {
 		const ProductOutcome outcome = delete_product_purged(db, r.as_int(0).value_or(0), purge);
 		if (outcome != ProductOutcome::Ok && outcome != ProductOutcome::NotFound)

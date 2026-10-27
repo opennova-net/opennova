@@ -327,8 +327,9 @@ void ProjectRoutes::register_routes(WebApp &app) {
 
 	CROW_ROUTE(app, "/api/products")
 			.methods("GET"_method)([this](const crow::request &req) { return list(req); });
-	CROW_ROUTE(app, "/api/products")
-			.methods("POST"_method)([this](const crow::request &req) { return create(req); });
+	CROW_ROUTE(app, "/api/products").methods("POST"_method)([this](const crow::request &req) {
+		return create(req);
+	});
 	CROW_ROUTE(app, "/api/products/<string>")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key) {
 				return project(req, key);
@@ -341,8 +342,9 @@ void ProjectRoutes::register_routes(WebApp &app) {
 			.methods("DELETE"_method)([this](const crow::request &req, const std::string &key) {
 				return remove(req, key);
 			});
-	CROW_ROUTE(app, "/api/me/projects")
-			.methods("GET"_method)([this](const crow::request &req) { return mine(req); });
+	CROW_ROUTE(app, "/api/me/projects").methods("GET"_method)([this](const crow::request &req) {
+		return mine(req);
+	});
 	CROW_ROUTE(app, "/api/products/<string>/revisions")
 			.methods("GET"_method)([this](const crow::request &req, const std::string &key) {
 				return revisions(req, key);
@@ -498,8 +500,8 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 			if (!parent || !may_build_on(*parent, project_caller(user)))
 				return no_such_base();
 			if (game && *game != parent->title)
-				return field_error(400, "invalid_field", "game",
-						"an expansion speaks its base game's title");
+				return field_error(
+						400, "invalid_field", "game", "an expansion speaks its base game's title");
 			product.parent_id = parent->id;
 			product.expansion_code = *expansion_code;
 		}

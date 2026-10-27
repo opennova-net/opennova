@@ -871,7 +871,7 @@ int main(int argc, char **argv) {
 			{ "refused", test_refused },
 			{ "list", test_list },
 			{ "create_patch_delete", test_create_patch_delete },
-		{ "owned_product", test_owned_product },
+			{ "owned_product", test_owned_product },
 			{ "trees", test_trees },
 			{ "releases", test_releases },
 			{ "runtime_release", test_runtime_release },

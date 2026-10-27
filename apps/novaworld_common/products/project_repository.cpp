@@ -163,10 +163,9 @@ ProjectStorage project_storage(db::Database &db, int64_t product_id) {
 }
 
 OwnedUsage owned_usage(db::Database &db, int64_t owner_id) {
-	const auto rows = db.query(
-			"SELECT (SELECT count(*) FROM products WHERE owner_id = $1), "
-			"(SELECT COALESCE(sum(b.bytes), 0)::bigint FROM project_blobs b "
-			"JOIN products p ON p.id = b.product_id WHERE p.owner_id = $1);",
+	const auto rows = db.query("SELECT (SELECT count(*) FROM products WHERE owner_id = $1), "
+							   "(SELECT COALESCE(sum(b.bytes), 0)::bigint FROM project_blobs b "
+							   "JOIN products p ON p.id = b.product_id WHERE p.owner_id = $1);",
 			{ BindValue(owner_id) });
 	OwnedUsage usage;
 	if (!rows.empty()) {

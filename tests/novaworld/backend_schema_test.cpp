@@ -738,22 +738,23 @@ int test_game_projects() {
 	// gone with the account (the game and its expansion in the one delete). Every seeded row is
 	// the service's own.
 	TEST_EXPECT(has_column(db, "products", "owner_id") &&
-	            has_index(db, "products", "idx_products_owner"));
+			has_index(db, "products", "idx_products_owner"));
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE owner_id IS NOT NULL;").empty());
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
-	        "VALUES ('maker', 'x', '0c0de001', '1', 'Maker');");
+			"VALUES ('maker', 'x', '0c0de001', '1', 'Maker');");
 	db.exec("INSERT INTO products (key, display_name, kind, title, visibility, owner_id) "
-	        "SELECT 'MINE', 'Mine', 'game', 'jo', 'private', id FROM players "
-	        "WHERE username = 'maker';");
+			"SELECT 'MINE', 'Mine', 'game', 'jo', 'private', id FROM players "
+			"WHERE username = 'maker';");
 	db.exec("INSERT INTO products (key, display_name, kind, parent_id, expansion_code, "
-	        "visibility, owner_id) "
-	        "SELECT 'MINEX', 'Mine too', 'expansion', g.id, 'minex', 'public', p.id "
-	        "FROM products g, players p WHERE g.key = 'MINE' AND p.username = 'maker';");
+			"visibility, owner_id) "
+			"SELECT 'MINEX', 'Mine too', 'expansion', g.id, 'minex', 'public', p.id "
+			"FROM products g, players p WHERE g.key = 'MINE' AND p.username = 'maker';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'MINE' AND lobby = '';").size() == 1);
 	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
-	TEST_EXPECT(refused(db, "INSERT INTO products (key, display_name, kind, owner_id) "
-	                        "SELECT 'MYAPP', 'App', 'app', id FROM players "
-	                        "WHERE username = 'maker';"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO products (key, display_name, kind, owner_id) "
+			"SELECT 'MYAPP', 'App', 'app', id FROM players "
+			"WHERE username = 'maker';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET owner_id = 99999 WHERE key = 'MINE';"));
 	db.exec("DELETE FROM players WHERE username = 'maker';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key IN ('MINE', 'MINEX');").empty());

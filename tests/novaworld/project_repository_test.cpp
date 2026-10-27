@@ -90,8 +90,7 @@ static int test_seeded_projects() {
 	TEST_EXPECT(all.size() == 5);
 	for (size_t i = 0; i < all.size(); ++i)
 		TEST_EXPECT(all[i].head == 0 && (i == 0 || all[i - 1].key < all[i].key));
-	const std::vector<hosted::ProductRow> visible =
-			hosted::list_projects(db, false, std::nullopt);
+	const std::vector<hosted::ProductRow> visible = hosted::list_projects(db, false, std::nullopt);
 	TEST_EXPECT(visible.size() == 2 && visible[0].key < visible[1].key);
 	for (const hosted::ProductRow &p : visible)
 		TEST_EXPECT(p.key == game.login || p.key == expansion.login);
@@ -324,8 +323,8 @@ static int test_owned_projects() {
 	hosted::NewProduct past = game;
 	past.key = "ANNPAST";
 	int64_t ignored = 0;
-	TEST_EXPECT(hosted::create_product(db, past, ignored) ==
-			hosted::ProductOutcome::TooManyProjects);
+	TEST_EXPECT(
+			hosted::create_product(db, past, ignored) == hosted::ProductOutcome::TooManyProjects);
 	TEST_EXPECT(owned_usage(db, ann).projects == hosted::kOwnedProjectsMax &&
 			!hosted::find_product_by_key(db, "ANNPAST"));
 
@@ -354,7 +353,7 @@ static int test_owned_projects() {
 						.size() == 1);
 	TEST_EXPECT(db.query("SELECT 1 FROM project_blobs WHERE product_id IN ($1, $2);",
 						  { BindValue(game_id), BindValue(mod_id) })
-						.empty());
+					.empty());
 	// Without a store (no objects) none is queued.
 	hosted::NewProduct cals = game;
 	cals.key = "CALGAME";
