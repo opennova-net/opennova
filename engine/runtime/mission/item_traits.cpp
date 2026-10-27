@@ -526,14 +526,21 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // vehicle's respawn stores Health and Armor itself, D-PWR-14), and
         // no later sweep re-runs them, so a joiner's resweep on each streamed
         // topology change leaves an existing body's words alone, its own body's
-        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only; a
-        // loaded pool-3 body's stores here are D-PWR-13.
-        // [orig: Entity_InitFromItemDef @0x49E550 - Health @0x49E5C0, Armor
-        //  @0x49E5CE - called @0x42E84D / @0x546A15;
-        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - Armor @0x522A1A /
-        //  @0x522B78 / @0x522D00]
+        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only, and a
+        // pool-3 body (a BMS marker or waypoint, a joiner's 0x20 row) is never
+        // given those stores: its slot's memset leaves the destroy timer,
+        // Health and Armor 0, and the load's pool-3 pass runs only the model
+        // init, whose one Health store is an hp-0 def's 1 (above).
+        // [orig: Entity_InitFromItemDef @0x49E550 - the destroy timer @0x49E5B3,
+        //  Health @0x49E5C0, Armor @0x49E5CE - called @0x42E84D / @0x546A15;
+        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - the destroy timer
+        //  @0x5229F8, Armor @0x522A1A / @0x522B78 / @0x522D00, pools 1, 2 and 0;
+        //  the memsets Entity_SpawnFromBMSRecord @0x40EA27 and
+        //  NapiNPClientMsg_0x020 @0x425C7C; Entity_InitAllFromModels @0x40E460,
+        //  called @0x52567F -> Entity_InitFromModel @0x40DCA6]
         if (def != nullptr && !e->item_init_done) {
-            e->destroy_timer = def->destroy_timing_ticks[0];
+            const bool item_init = e->handle.pool() != 3;
+            e->destroy_timer = item_init ? def->destroy_timing_ticks[0] : 0;
             e->item_init_done = true;
             // The lift is the mission start's reload over the loaded pools,
             // which runs ahead of the round init's player spawn, so no player
@@ -550,10 +557,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
             //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
             //  called @0x4A9F3A]
-            if (hp != 0 && e->health == 100 &&
-                    ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
-                e->health = hp; // still at the promotion default
-            e->mana = e->mana_max;
+            if (!item_init) {
+                if (hp != 0) e->health = 0; // the memset's word
+                e->mana = 0;
+            } else {
+                if (hp != 0 && e->health == 100 &&
+                        ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
+                    e->health = hp; // still at the promotion default
+                e->mana = e->mana_max;
+            }
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
             // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50],

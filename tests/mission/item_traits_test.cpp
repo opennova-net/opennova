@@ -1324,6 +1324,43 @@ int main() {
         player->hp = 100;
     }
 
+    // ---- a pool-3 body takes no item init (D-PWR-13) ----
+    // Its slot's memset leaves the destroy timer, Health and Armor 0, and the
+    // load's pool-3 pass runs only the model init, whose one Health store is an
+    // hp-0 def's 1; the reload's stores walk pools 1, 2 and 0. The same row in
+    // pool 1 lifts to its hp and takes its Armor and destroy timer.
+    // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 (@0x5229F8 /
+    //  @0x522A07 / @0x522A1A); Entity_SpawnFromBMSRecord @0x40EA27;
+    //  Entity_InitFromModel @0x40DCA6]
+    {
+        rifle->mana = 40;
+        rifle->destroy_timing_ticks[0] = 77;
+        World mw;
+        mw.registry.configure_pool(1, 4);
+        mw.registry.configure_pool(3, 4);
+        const EntityHandle marker_h = spawn(mw, 3, 510, EntityKind::Marker);
+        const EntityHandle hp0_marker_h = spawn(mw, 3, 520, EntityKind::Marker);
+        const EntityHandle item_h = spawn(mw, 1, 510, EntityKind::Item);
+        mission::resolve_item_traits(mw, file, wire_class, nullptr);
+        const Entity *marker = mw.registry.get(marker_h);
+        CHECK(marker != nullptr && marker->health == 0);
+        CHECK(marker != nullptr && marker->health_max == 30);
+        CHECK(marker != nullptr && marker->mana == 0);
+        CHECK(marker != nullptr && marker->destroy_timer == 0);
+        const Entity *hp0_marker = mw.registry.get(hp0_marker_h);
+        CHECK(hp0_marker != nullptr && hp0_marker->health == 1);
+        const Entity *item = mw.registry.get(item_h);
+        CHECK(item != nullptr && item->health == 30);
+        CHECK(item != nullptr && item->mana == 40);
+        CHECK(item != nullptr && item->destroy_timer == 77);
+        // A later sweep (a joiner's topology resweep) leaves the words alone.
+        mw.registry.get(marker_h)->health = 5;
+        mission::resolve_item_traits(mw, file, wire_class, nullptr);
+        CHECK(mw.registry.get(marker_h) != nullptr && mw.registry.get(marker_h)->health == 5);
+        rifle->mana = 0;
+        rifle->destroy_timing_ticks[0] = 0;
+    }
+
     def_free_items(&file);
     test_graphic_model_is_the_loads_result();
     test_a_bay_takes_its_groups_unit_types();
