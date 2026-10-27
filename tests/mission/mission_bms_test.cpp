@@ -239,6 +239,17 @@ int main() {
 	TEST_EXPECT(bms_file.group_records.size() == opennova::bms::kGroupRecordCount);
 	TEST_EXPECT(bms_file.wav_list_records.size() == opennova::bms::kWavListRecordCount);
 
+	// A File built in memory holds a zero header and zero counts (the parse fills every byte): the
+	// mission promote reads the header's words, the body zones' health and mana rates among them,
+	// so a garbage word would drain a synthetic mission's player body.
+	{
+		opennova::bms::File fresh;
+		const auto *bytes = reinterpret_cast<const uint8_t *>(&fresh.header);
+		TEST_EXPECT(std::all_of(bytes, bytes + sizeof(fresh.header), [](uint8_t b) { return b == 0; }));
+		TEST_EXPECT(fresh.events_count == 0 && fresh.trigger_count == 0 && fresh.action_count == 0 &&
+				fresh.bounding_box_count == 0);
+	}
+
 	// A Mission box's name over its two words, the second its last four characters: written and read back as
 	// it stands, as the game loads a box's 36 bytes whole and reads the word with ref_id [orig:
 	// Mission_LoadBMSFile @0x40fcdc; Entity_UpdateInfantryPlayerBody @0x4b60b6..0x4b60c4].

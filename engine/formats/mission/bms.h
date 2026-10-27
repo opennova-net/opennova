@@ -998,7 +998,9 @@ enum class MisFrame : uint8_t {
 };
 
 struct File {
-    Header header;
+    // Zeroed in a File built in memory (the parse fills every byte): the header is a packed POD,
+    // and the mission promote reads its words (the body zones' health and mana rates among them).
+    Header header{};
     WeaponLoadout loadout;
     // [orig: word_A76416 @hdr+0x246 bytes] second chunk after the weapon loadout (the engine seeks past it).
     // [orig editor: MIS_ExportBmsFile @0x44f920 builds it via MIS_BuildWeaponAvailabilityChunk @0x432c00 — an
@@ -1020,10 +1022,10 @@ struct File {
     std::vector<BoundingBox> bounding_boxes;
 
     // Counts read from file (for validation)
-    int32_t events_count;
-    int32_t trigger_count;
-    int32_t action_count;
-    int32_t bounding_box_count;
+    int32_t events_count = 0;
+    int32_t trigger_count = 0;
+    int32_t action_count = 0;
+    int32_t bounding_box_count = 0;
 
     // The frame the entities' heights are in (MisFrame).
     MisFrame mis_frame = MisFrame::Bms;
