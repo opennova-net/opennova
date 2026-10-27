@@ -146,7 +146,7 @@ bool ReleaseCatalog::refresh(db::Database &db, ObjectStore &store, std::string &
 			const auto it = products_.find(login);
 			changed = changed || it == products_.end() || it->second.sha256 != product.sha256 ||
 					it->second.command_file != product.command_file ||
-					it->second.retail_updater != product.retail_updater;
+					it->second.retail != product.retail;
 		}
 		products_.swap(next);
 	}
@@ -307,7 +307,7 @@ bool ReleaseCatalog::load_section(ObjectStore &store, const hosted::PublishedSec
 	product.login = section.updater_login;
 	product.command_file = section.command_file;
 	product.sha256 = section.sha256;
-	product.retail_updater = section.retail;
+	product.retail = section.retail;
 	return list_section_files(dir, product.files, why);
 }
 
@@ -367,7 +367,7 @@ std::vector<std::string> ReleaseCatalog::server_hosts(std::string_view login) co
 	const Product *product = find(login);
 	if (product == nullptr)
 		return {};
-	return { product->retail_updater ? std::string(update::kRetailGatewayHosts[0]) : update_host_ };
+	return { product->retail ? std::string(update::kRetailGatewayHosts[0]) : update_host_ };
 }
 
 std::string ReleaseCatalog::command_file_name(std::string_view login) const {

@@ -79,7 +79,7 @@ private:
 		std::string login;
 		std::string command_file;
 		std::string sha256;
-		bool retail_updater = false;
+		bool retail = false;
 		std::map<std::string, std::string> files; // by upper-cased name: its path in the cache
 	};
 	// A package's sections that carry a command file: what a published section is matched
