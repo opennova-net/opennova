@@ -704,6 +704,7 @@ void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;
 	deaths.clear();
+	medic_interactions.clear();
 	impacts.clear();
 	hits.clear();
 	fired.clear();

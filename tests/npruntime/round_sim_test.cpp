@@ -691,6 +691,17 @@ bool test_retail_random_spread_vectors() {
 	return true;
 }
 
+// The reset drops every per-tick drain, the kill-zone pass's medic interactions with the
+// deaths: a restored world holds no transaction its pre-restore tick admitted.
+bool test_reset_drops_the_pending_medic_interactions() {
+	w::World world;
+	world.round_sim.medic_interactions.push_back(w::MedicInteraction{});
+	world.round_sim.deaths.push_back(w::RoundDeath{});
+	world.round_sim.reset();
+	return expect(world.round_sim.medic_interactions.empty() && world.round_sim.deaths.empty(),
+			"the reset clears the medic interactions with the deaths");
+}
+
 bool test_spawn_spread_then_recoil() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
@@ -1927,6 +1938,7 @@ int main() {
 	if (!test_every_allocated_round_flies()) return 1;
 	if (!test_ammo_arm_word_follows_the_slot()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
+	if (!test_reset_drops_the_pending_medic_interactions()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_spawn_spread_reads_the_rules_word()) return 1;
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
