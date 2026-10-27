@@ -42,10 +42,10 @@ namespace {
 // The retail switches a run hands the game (an expansion's /exp), at the head of the line the game walks: its walk
 // reads its config tokenizer's split, which a "//" or a ';' outside quotes ends and which holds 30 tokens with the
 // program's [orig: Game_ParseCommandLineAndInit @ 0x4a7310 -> Config_TokenizeLine @ 0x53CB60] (boot_policy
-// walk_retail_switches), so a switch behind a path option (a run directory on a share, "//server/...", a folder named
-// with a ';') or behind a long run of options would be cut off. A packaged runtime walks its whole process line, a
-// source run the arguments after `--` (the shell's LaunchFlags::parse); the OpenNova options are read from the
-// argument list wherever they stand.
+// walk_retail_switches), over the line without the OpenNova options (without_own_options), so a path option's value
+// (a run directory on a share, "//server/...", a folder named with a ';') cuts nothing off wherever it stands. A
+// packaged runtime walks its whole process line, a source run the arguments after `--` (the shell's
+// LaunchFlags::parse); the OpenNova options are read from the argument list wherever they stand.
 void append_retail_switches(LaunchPlan &plan) {
 	if (plan.expansion.empty()) return;
 	plan.args.push_back(kLaunchFlagExpansion);

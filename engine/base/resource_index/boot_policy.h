@@ -294,6 +294,22 @@ std::vector<std::string> retail_command_line_tokens(const std::string &command_l
 // it does the game's own line: `/w,/LAN` is two tokens, a ';' or "//" ends the line.
 std::string retail_command_line(const std::vector<std::string> &args);
 
+// An OpenNova option a launch's line may hold: its name (any case), and whether the argument
+// after it is its value.
+struct OwnOption {
+    const char *name;
+    bool takes_value;
+};
+
+// `command_line` as the walk reads it: OpenNova's own options taken out. The line is split into
+// its arguments as the OS splits one (a blank outside quotes ends an argument, a '"' toggles the
+// quoting), each argument past the program's that names one of the `count` `options` is dropped
+// with its value when it takes one, and the rest are kept as written. Retail's line never held
+// them: a value with a ';' or a "//" in it (a share's path, //server/...) would end the line
+// there, and they would count toward its 30 tokens (lane G's Q-G2, the maintainer's decision
+// 2026-10-27).
+std::string without_own_options(const std::string &command_line, const OwnOption *options, std::size_t count);
+
 struct LaunchFlags : RetailSwitches {
     std::string game;              // /game <code>, lowercased
     bool game_given = false;
@@ -323,7 +339,8 @@ struct LaunchFlags : RetailSwitches {
 // The launch's flags: the OpenNova options from `args`, the retail switches walked over
 // `command_line` (the game's own line: the process's, proc::own_command_line, or the shell's
 // arguments after Godot's `--` spelled as one), or over `args` spelled as one
-// (retail_command_line) when it is empty.
+// (retail_command_line) when it is empty, either without the OpenNova options
+// (without_own_options).
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args, const std::string &command_line = "");
 
 // The LAN fallbacks: a set flag wins, an unset one yields the caller's default.

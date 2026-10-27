@@ -92,9 +92,10 @@ void LaunchFlags::_bind_methods() {
 // `... /exp jox01 -- --after-update`), else its arguments spelled as one. A source
 // run (the editor binary, no "template" feature) puts Godot's own arguments ahead of
 // `--` (its --path, and the scene's res:// path, whose "//" would end the line), so
-// its line is the arguments after `--`, spelled as one. OpenNova's own options there
-// are tokens the walk passes over as retail passes an unknown one. Tests substitute
-// the token list through set_args_override, which is walked as a line spelling it.
+// its line is the arguments after `--`, spelled as one. The walk reads the line
+// without OpenNova's own options (without_own_options), which retail's never held.
+// Tests substitute the token list through set_args_override, which is walked as a
+// line spelling it.
 opennova::LaunchFlags LaunchFlags::parse() {
 	if (args_override_set_) return opennova::parse_launch_flags(args_override_);
 	std::vector<std::string> args;

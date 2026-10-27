@@ -160,10 +160,83 @@ std::string retail_command_line(const std::vector<std::string> &args) {
     return line;
 }
 
+std::string without_own_options(const std::string &command_line, const OwnOption *options, std::size_t count) {
+    // The arguments as written, each a run of the line up to a blank outside quotes.
+    struct Span {
+        std::size_t begin, end;
+    };
+    std::vector<Span> spans;
+    for (std::size_t i = 0; i < command_line.size();) {
+        if (command_line[i] == ' ' || command_line[i] == '\t') {
+            ++i;
+            continue;
+        }
+        const std::size_t begin = i;
+        bool quoted = false;
+        for (; i < command_line.size(); ++i) {
+            const char c = command_line[i];
+            if (c == '"') quoted = !quoted;
+            else if (!quoted && (c == ' ' || c == '\t')) break;
+        }
+        spans.push_back({begin, i});
+    }
+    const auto own = [&](const Span &span) -> const OwnOption * {
+        std::string name;
+        for (std::size_t i = span.begin; i < span.end; ++i)
+            if (command_line[i] != '"') name += command_line[i];
+        for (std::size_t at = 0; at < count; ++at)
+            if (strutil::iequals(name, options[at].name)) return &options[at];
+        return nullptr;
+    };
+    std::string out;
+    for (std::size_t at = 0; at < spans.size(); ++at) {
+        if (at > 0) {
+            if (const OwnOption *option = own(spans[at])) {
+                if (option->takes_value) ++at;
+                continue;
+            }
+        }
+        if (!out.empty()) out += ' ';
+        out.append(command_line, spans[at].begin, spans[at].end - spans[at].begin);
+    }
+    return out;
+}
+
+namespace {
+
+// The game's own options (LaunchFlags), and `--`, Godot's end of its own.
+constexpr OwnOption kLaunchOwnOptions[] = {
+    {"--", false},
+    {kLaunchFlagGame, true},
+    {kLaunchFlagNoUpdate, false},
+    {kLaunchFlagAfterUpdate, false},
+    {kLaunchFlagResourceDir, true},
+    {kLaunchFlagLooseMission, true},
+    {kLaunchFlagLooseRoot, false},
+    {kLaunchFlagMission, true},
+    {kLaunchFlagLanHost, true},
+    {kLaunchFlagLanRotation, true},
+    {kLaunchFlagLanJoin, true},
+    {kLaunchFlagLanPort, true},
+    {kLaunchFlagLanGametype, true},
+    {kLaunchFlagLanMode, true},
+    {kLaunchFlagLanMaxPlayers, true},
+    {kLaunchFlagSpectator, false},
+    {kLaunchFlagSpectatorPassword, true},
+    {kLaunchFlagCallsign, true},
+    {kLaunchFlagCapturePcap, true},
+    {kLaunchFlagMcpPort, true},
+    {kLaunchFlagNovaWorldHost, true},
+    {kLaunchFlagWorkingDir, true},
+};
+
+} // namespace
+
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args, const std::string &command_line) {
     LaunchFlags f;
-    static_cast<RetailSwitches &>(f) = walk_retail_switches(
-            retail_command_line_tokens(command_line.empty() ? retail_command_line(args) : command_line));
+    static_cast<RetailSwitches &>(f) = walk_retail_switches(retail_command_line_tokens(
+            without_own_options(command_line.empty() ? retail_command_line(args) : command_line,
+                    kLaunchOwnOptions, sizeof(kLaunchOwnOptions) / sizeof(kLaunchOwnOptions[0]))));
     f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
     f.game_given = has_flag(args, kLaunchFlagGame);
     f.no_update = has_flag(args, kLaunchFlagNoUpdate);

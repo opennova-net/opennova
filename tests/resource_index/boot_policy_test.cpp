@@ -210,6 +210,32 @@ void test_the_retail_walk() {
     CHECK(parse_launch_flags({"/w,/LAN"}).lan);
     CHECK(!parse_launch_flags({"e;f", "/LAN"}).lan && !parse_launch_flags({"res://x.tscn", "/LAN"}).lan);
     CHECK(parse_launch_flags({"C:\\Program Files\\x", "/LAN"}).lan);
+
+    // The walk's line holds none of OpenNova's own options, which retail's never held: a share's
+    // path (its "//") or a ';' in one's value ends nothing, and they count toward no 30 tokens, so
+    // the retail switches after them are read (lane G's Q-G2).
+    const LaunchFlags unc = parse_launch_flags({"--resource-dir", "//server/share/jo", "/HOST", "host.txt", "/LAN"});
+    CHECK(unc.resource_dir == "//server/share/jo" && unc.host_file == std::optional<std::string>("host.txt") &&
+          unc.lan);
+    const LaunchFlags given = parse_launch_flags({},
+            "\"C:\\Games\\opennova.exe\" --resource-dir \"//server/my share\" --lan-rotation a.bms;b.bms "
+            "/exp jox01 -- --no-update /LAN");
+    CHECK(given.expansion == "jox01" && given.lan);
+    CHECK(without_own_options("game.exe --resource-dir //s/x /exp jox01 --loose-root /LAN", nullptr, 0) ==
+          "game.exe --resource-dir //s/x /exp jox01 --loose-root /LAN");
+    const OwnOption options[] = {{"--resource-dir", true}, {"--loose-root", false}};
+    CHECK(without_own_options("game.exe  --Resource-Dir \"//s/my x\" /exp jox01\t--loose-root /LAN", options, 2) ==
+          "game.exe /exp jox01 /LAN");
+    CHECK(without_own_options("--loose-root /LAN", options, 2) == "--loose-root /LAN"); // the program's token
+    std::vector<std::string> many;
+    for (int i = 0; i < 15; ++i) {
+        many.push_back("--lan-port");
+        many.push_back("1");
+    }
+    many.push_back("/LAN");
+    CHECK(parse_launch_flags(many).lan); // 31 arguments ahead of /LAN, none of them the walk's
+    // A token of no OpenNova option still ends the line where retail's would.
+    CHECK(!parse_launch_flags({"//server/share", "/LAN"}).lan);
 }
 
 // What ends an /exp token on the command line [orig: Config_TokenizeLine @ 0x53cb60]: a

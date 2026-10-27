@@ -82,6 +82,14 @@ void run_the_maxplayers_switch() {
 			       "opennova-serve.exe --resource-dir x /HOST h.host,/LAN") == 0 &&
 	               line.host_file == "h.host" && line.lan_switch,
 	       "the command line split as the game splits it: a comma ends a token");
+	// The walk's line holds none of the server's own options: a share's path ("//") in a value
+	// ends nothing, so the retail switches after it are read (lane G's Q-G2).
+	serve::ServeOptions share;
+	expect(serve::parse_serve_options({"--resource-dir", "//server/share/jo", "--stats-file", "a;b", "/HOST",
+			       "h.host", "/LAN"}, share, error,
+			       "opennova-serve.exe --resource-dir //server/share/jo --stats-file a;b /HOST h.host /LAN") == 0 &&
+	               share.resource_dir == "//server/share/jo" && share.host_file == "h.host" && share.lan_switch,
+	       "a share's path in --resource-dir cuts no retail switch off");
 
 	expect(cap_after("MaxPlayers 8\r\n", 0) == 8, "no switch: the file's MaxPlayers");
 	expect(cap_after("MaxPlayers 8\r\n", 12) == 12, "the switch replaces the file's MaxPlayers");

@@ -193,13 +193,42 @@ bool lane_claims(const Lister *own, const Lister *other, const PeerAddr &from, c
 
 const char *serve_usage() { return kUsage; }
 
+namespace {
+
+// The server's own options, as the loop below reads them: the walk's line holds none of them
+// (without_own_options).
+constexpr OwnOption kServeOwnOptions[] = {
+	{"--help", false},
+	{"-h", false},
+	{"--loose-root", false},
+	{"--log-debug", false},
+	{"--resource-dir", true},
+	{kLaunchFlagGame, true},
+	{"--lan-port", true},
+	{"--master-host", true},
+	{"--master-gate-port", true},
+	{"--credentials", true},
+	{"--also-master-host", true},
+	{"--also-master-gate-port", true},
+	{"--also-credentials", true},
+	{"--allow-public", false},
+	{"--status-page", true},
+	{"--stats-file", true},
+	{"--exit-file", true},
+	{"--second-listing-file", true},
+};
+
+} // namespace
+
 int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
 		const std::string &command_line) {
 	// The retail switches, read as the game reads its own command line: one walk over the line's
 	// tokens, a value-taking switch stepping onto its value, any token it does not know passed over
-	// (walk_retail_switches) [orig: Game_ParseCommandLineAndInit @0x4a7310].
-	const RetailSwitches retail = walk_retail_switches(
-			retail_command_line_tokens(command_line.empty() ? retail_command_line(args) : command_line));
+	// (walk_retail_switches) [orig: Game_ParseCommandLineAndInit @0x4a7310]; the line without the
+	// server's own options, which retail's never held (without_own_options).
+	const RetailSwitches retail = walk_retail_switches(retail_command_line_tokens(
+			without_own_options(command_line.empty() ? retail_command_line(args) : command_line,
+					kServeOwnOptions, sizeof(kServeOwnOptions) / sizeof(kServeOwnOptions[0]))));
 	out.loose_override = retail.loose_override;
 	out.expansion = retail.expansion;
 	out.host_file = retail.host_file.value_or(std::string());
