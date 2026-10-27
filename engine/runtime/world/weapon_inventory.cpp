@@ -552,7 +552,8 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
             const WeaponTableEntry *sub = table.by_index(
                     static_cast<uint8_t>(static_cast<int32_t>(slot->adm_index) + k));
             if (sub == nullptr) continue;
-            const int32_t sub_combo = static_cast<int32_t>(sub->category) * 65 + sub->rank;
+            const int32_t sub_combo =
+                    static_cast<int32_t>(sub->category) * weapon_combo::kRanksPerCategory + sub->rank;
             if (sub->ammo_class_id == def->ammo_class_id) continue;
             // The FIRST sub-entry of a different ammo class ends the scan: its
             // clips ride the MAIN def's clipweight, then the loop breaks — a

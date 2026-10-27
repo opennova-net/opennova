@@ -1808,8 +1808,8 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					mounted_def != nullptr) {
 				io.reload = local_reload_request_wire(world, actor_handle,
 						static_cast<uint16_t>(
-								static_cast<uint16_t>(mounted_def->category) * 65u +
-								static_cast<uint16_t>(mounted_def->rank)));
+								mounted_def->category * weapon_combo::kRanksPerCategory +
+								mounted_def->rank));
 			}
 		}
 	}

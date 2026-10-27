@@ -198,7 +198,7 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 			fired_adm = mounted_adm;
 		} else {
 			const auto found = shooter->weapon_slots.find(
-					static_cast<uint16_t>(uint16_t(adm->category) * 65u + adm->rank));
+					static_cast<uint16_t>(adm->category * world::weapon_combo::kRanksPerCategory + adm->rank));
 			if (found == shooter->weapon_slots.end()) return;
 			personal = &found->second;
 			slot_def = world->tables.weapons.by_index(personal->adm_index);
@@ -278,7 +278,8 @@ void Server_HandleClientFiredRound(const GameConfig &config, NapiNPConnection &c
 		} else {
 			shooter->equipped_slot = {};
 			shooter->equipped_slot.kind = world::WeaponSlotRef::kPersonal;
-			shooter->equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
+			shooter->equipped_slot.combo =
+					static_cast<uint16_t>(adm->category * world::weapon_combo::kRanksPerCategory + adm->rank);
 			shooter->equipped_slot.adm = personal->adm_index;
 		}
 		// The slot's fire action re-enters the handler with the weapon that

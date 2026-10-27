@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
+#include <runtime/world/weapon_inventory.h> // weapon_combo
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -37,8 +38,8 @@ void queue_walk_reload(World &world, const Entity &addressed,
     request.reload_param = addressed.has_item_def &&
             (addressed.item_attrib & kItemAttribEweap) != 0
             ? uint16_t(0xFFFF)
-            : static_cast<uint16_t>(static_cast<uint16_t>(weapon.category) * 65u +
-                                    static_cast<uint16_t>(weapon.rank));
+            : static_cast<uint16_t>(weapon.category * weapon_combo::kRanksPerCategory +
+                                    weapon.rank);
     world.out.weapon_reloads.push_back(request);
 }
 
