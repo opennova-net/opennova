@@ -560,9 +560,11 @@ int exercise_data(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	const std::string log = read_text(log_path);
 	TEST_EXPECT(has(log, boot_line("data")));
-	TEST_EXPECT(has(log, "[boot] products: jobs over the local store"));
+	TEST_EXPECT(has(log, "[boot] products: jobs over the local store") &&
+			has(log, "[boot] products: no downloads host (ONNET_DOWNLOADS_URL)"));
 	TEST_EXPECT(has(log, "[jobs] 2 worker thread(s) data-") &&
-			has(log, "for product.purge, release.apply, release.build, release.validate, tree.prune"));
+			has(log, "for downloads.publish, product.purge, release.apply, release.build, "
+					 "release.validate, tree.prune"));
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kNwUdpLine) && !has(log, kHttpLine) &&
 			!has(log, "[fleet]") && !has(log, "jobs.prune"));
 	if (livez_ok(process, log_path) != 0)

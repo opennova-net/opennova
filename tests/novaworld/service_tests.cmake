@@ -1182,7 +1182,11 @@ set_tests_properties(product_jobs PROPERTIES TIMEOUT 300)
 # revision packed whole with its UPDATE.WIZ, and the refusals (no updater product; a revision that
 # is no project, the export's words kept as the build's log). The apps' releases from their
 # uploaded builds: the editor's packed whole with the OPENNOVA.WIZ the build writes (refused with
-# no update host, or a build that is no zip), the tools' kept as uploaded with no section.
+# no update host, or a build that is no zip), the tools' kept as uploaded with no section. The
+# downloads host written from the published releases into a directory store
+# (products/downloads_job.h): JO's zip the runtime's package with the served ONRUNTIME.CMD and
+# its wizards, the editor's its package with ONEDITOR.CMD, the tools' as uploaded, the manifest
+# every product, a stale object removed, a retired release's zip dropped.
 add_executable(release_build_test novaworld/release_build_test.cpp)
 target_link_libraries(release_build_test PRIVATE
     opennova_novaworld_products opennova_novaworld_service opennova_project_cli opennova_editor

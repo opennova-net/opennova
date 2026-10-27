@@ -24,14 +24,20 @@ struct ObjectStoreConfig {
 	enum class Kind { S3, Local };
 	Kind kind = Kind::Local;
 	std::string bucket; // S3
-	std::string root; // S3: the key prefix with no slashes at either end; local: the directory
+	// S3: the key prefix with no slashes at either end ("" for the bucket's top, the downloads
+	// host's); local: the directory.
+	std::string root;
 	std::string region; // S3
 };
 
-// `s3://<bucket>/<root>` (the root one or more path parts) or `file:///<dir>` into `out`; false
-// with `error` otherwise. `region` is S3's (required there).
+// `s3://<bucket>/<root>` (the root none, or one or more path parts) or `file:///<dir>` into
+// `out`; false with `error` otherwise. `region` is S3's (required there).
 bool parse_object_store_url(std::string_view url, std::string_view region, ObjectStoreConfig &out,
 		std::string &error);
+
+// `key` under an S3 store's root, as the bucket names it: `<root>/<key>`, or `key` itself at the
+// bucket's top.
+std::string object_store_key(const ObjectStoreConfig &config, std::string_view key);
 
 // Whether `key` is one the store takes: parts of [A-Za-z0-9_.-], '/' between them, no part
 // "." or "..", at most 512 bytes.
@@ -45,6 +51,13 @@ std::string object_store_url(const ObjectStoreConfig &config, std::string_view k
 struct StoredObject {
 	std::string key; // relative to the root
 	uint64_t size = 0;
+};
+
+// What a put sets on the object beside its bytes, "" leaving the store's own: its Content-Type
+// and its Cache-Control, which the downloads host serves (S3 keeps both; a directory neither).
+struct PutOptions {
+	std::string content_type;
+	std::string cache_control;
 };
 
 // One part of a multipart upload as the uploader completes it.
@@ -62,7 +75,8 @@ public:
 	// `file:///<dir>/<key>`.
 	virtual std::string url_of(std::string_view key) const = 0;
 
-	virtual bool put_file(std::string_view key, const std::string &path, std::string &error) = 0;
+	virtual bool put_file(std::string_view key, const std::string &path, std::string &error,
+			const PutOptions &options = {}) = 0;
 	virtual bool get_file(std::string_view key, const std::string &path, std::string &error) = 0;
 	virtual bool copy(std::string_view from_key, std::string_view to_key, std::string &error) = 0;
 	virtual bool list(

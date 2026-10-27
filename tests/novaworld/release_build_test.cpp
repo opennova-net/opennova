@@ -18,7 +18,10 @@
 // them) and validated into a draft of its one section; refused with no update host, and for a
 // build that is no zip; the tools' kept as uploaded under their digest, a draft of no section,
 // published to their product alone, the same bytes again refused; each upload removed once its
-// release is made.
+// release is made. The downloads host (products/downloads_job.h) written from the published
+// releases into a directory store: Joint Operations' zip the runtime's package applied with the
+// served ONRUNTIME.CMD, its UPDATE.WIZ and Escalation's; the editor's its package with its
+// ONEDITOR.CMD; the tools' as uploaded; the manifest every product; a retire drops its zip.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -30,12 +33,14 @@
 #include "core/local_object_store.h"
 #include "core/zip_files.h"
 #include "jobs/worker_pool.h"
+#include "products/downloads_job.h"
 #include "products/product_jobs.h"
 #include "products/product_repository.h"
 #include "products/project_repository.h"
 #include "products/release_build.h"
 
 #include <base/io/file_io.h>
+#include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
@@ -608,6 +613,159 @@ static int test_download_only() {
 	return 0;
 }
 
+// `path`'s text, "" when it does not read.
+static std::string text_of(const std::string &path) {
+	std::string text, error;
+	return io::read_file_text(path, text, error) ? text : std::string();
+}
+
+// The manifest's entry for `key`, null when it lists none.
+static const io::JsonValue *entry_of(const io::JsonValue &manifest, const char *key) {
+	const io::JsonValue *products = manifest.get("products");
+	if (products == nullptr || !products->is_array())
+		return nullptr;
+	for (const io::JsonValue &item : products->array)
+		if (item.get_string("key", "") == key)
+			return &item;
+	return nullptr;
+}
+
+// Whether the manifest lists `key` as offering no download: its file's fields null.
+static bool unoffered(const io::JsonValue &manifest, const char *key) {
+	const io::JsonValue *entry = entry_of(manifest, key);
+	return entry != nullptr && entry->get("sha256") && entry->get("sha256")->is_null() &&
+			entry->get("size")->is_null() && entry->get("release")->is_null() &&
+			entry->get("published")->is_null();
+}
+
+// The downloads host written from the published releases (products/downloads_job.h) into a
+// directory store: the runtime, the editor and the tools built from their uploads and published,
+// Joint Operations given a published release. JO's zip is the runtime's package applied with the
+// served ONRUNTIME.CMD beside it, its UPDATE.WIZ and Escalation's naming the update host and
+// their stock logins; the editor's its package applied with its ONEDITOR.CMD; the tools' their
+// upload byte for byte. The manifest lists every product, those offering no download (no file,
+// or no published release) with null fields; an object of no product's removed. The editor's
+// release retired: its zip gone, its entry null.
+static int test_downloads() {
+	Rig rig("opennova_release_build_downloads");
+	LocalObjectStore downloads(rig.temp.file("downloads"));
+	hosted::register_downloads_publish(
+			rig.registry, rig.store, &downloads, rig.temp.file("scratch"), "update.example.com");
+	const std::string runtime_zip = rig.temp.file("runtime.zip");
+	const std::string editor_zip = rig.temp.file("editor.zip");
+	const std::string tools_zip = rig.temp.file("tools.zip");
+	TEST_EXPECT(zip_of(rig.temp.file("runtime"),
+			{ "opennova.exe", "opennova.dll", "update.exe", "revupdat.exe", "README.txt" },
+			runtime_zip));
+	TEST_EXPECT(zip_of(
+			rig.temp.file("editor"), { "oneditor.exe", "onplay.exe", "update.exe" }, editor_zip));
+	TEST_EXPECT(zip_of(rig.temp.file("tools"), { "opennova-serve" }, tools_zip));
+	const int64_t runtime = rig.upload_app("ONRUNTIME", runtime_zip, "0.0.22");
+	const int64_t editor = rig.upload_app("ONEDITOR", editor_zip, "0.0.22");
+	const int64_t tools = rig.upload_app("ONTOOLS", tools_zip, "0.0.22");
+	rig.run_jobs();
+	for (const int64_t id : { runtime, editor, tools })
+		TEST_EXPECT(hosted::publish_release(rig.db, id));
+	// Joint Operations' published release, as a publish leaves it (the downloads read no game's
+	// package: its zip is the runtime's with its wizards).
+	const auto jo = hosted::find_product_by_key(rig.db, "JO");
+	TEST_EXPECT(jo.has_value());
+	if (!jo)
+		return 1;
+	const int64_t game = hosted::create_release(
+			rig.db, "Joint Operations 1.0", 1, "admin taylor", jo->id, "1.0.0");
+	rig.db.exec("UPDATE releases SET status = 'published', published_at = now() WHERE id = $1;",
+			{ BindValue(game) });
+	rig.db.exec("UPDATE products SET published_release_id = $1 WHERE id = $2;",
+			{ BindValue(game), BindValue(jo->id) });
+	// An object no product names, a set before this one's.
+	const std::string stale = rig.temp.file("stale.zip");
+	std::string error;
+	TEST_EXPECT(io::write_file_atomic(stale, std::string("old"), error) &&
+			downloads.put_file("opennova-old-windows.zip", stale, error));
+	TEST_EXPECT(hosted::enqueue_downloads_publish(rig.db) > 0);
+	rig.run_jobs();
+
+	const std::string host = downloads.root();
+	io::JsonValue manifest;
+	TEST_EXPECT(io::json_parse(text_of(io::utf8_join(host, "manifest.json")), manifest, error));
+	TEST_EXPECT(manifest.get_string("written", "").size() == 20 &&
+			!fs::exists(io::os_path(io::utf8_join(host, "opennova-old-windows.zip"))));
+	const io::JsonValue *jo_entry = entry_of(manifest, "JO");
+	const std::string jo_zip = io::utf8_join(host, "jointops-game-windows.zip");
+	uint64_t size = 0;
+	std::string sha256;
+	TEST_EXPECT(jo_entry && hosted::digest_file(jo_zip, size, sha256, error) &&
+			jo_entry->get_string("file", "") == "jointops-game-windows.zip" &&
+			jo_entry->get_string("sha256", "") == sha256 &&
+			jo_entry->get("size")->number == static_cast<double>(size) &&
+			jo_entry->get_string("kind", "") == "game" &&
+			jo_entry->get_string("version", "") == "1.0.0" &&
+			jo_entry->get_string("release", "") == "Joint Operations 1.0" &&
+			jo_entry->get_string("published", "").size() == 20 &&
+			!jo_entry->get_string("description", "").empty());
+	TEST_EXPECT(unoffered(manifest, "DFX2") && unoffered(manifest, "ACIDGAMBIT") &&
+			unoffered(manifest, "ONBLENDER") && unoffered(manifest, "ONRUNTIME") &&
+			entry_of(manifest, "ONRUNTIME")->get("file")->is_null() &&
+			unoffered(manifest, "JOX01") &&
+			!fs::exists(io::os_path(io::utf8_join(host, "dfx2-game-windows.zip"))));
+
+	// JO's zip: the runtime's package applied, the served command file beside it, the wizards.
+	const std::string jo_dir = rig.temp.file("jo-unzipped");
+	TEST_EXPECT(unzip_files(jo_zip, jo_dir, error));
+	const auto runtime_release = hosted::find_release(rig.db, runtime);
+	update::SfsPackage package;
+	TEST_EXPECT(runtime_release && rig.package(*runtime_release, package) &&
+			package.sections.size() == 1);
+	const update::SfsEntry *served =
+			package.sections.empty() ? nullptr : entry_named(package.sections[0], "ONRUNTIME.CMD");
+	TEST_EXPECT(served &&
+			text_of(io::utf8_join(jo_dir, "ONRUNTIME.CMD")) ==
+					std::string(served->data.begin(), served->data.end()));
+	TEST_EXPECT(text_of(find_file(jo_dir, "opennova.exe")) == "synthetic opennova.exe" &&
+			text_of(find_file(jo_dir, "OPENNOVA.WIZ")).find("CMD=ONRUNTIME.CMD\r\n") !=
+					std::string::npos);
+	const std::string jo_wiz = text_of(io::utf8_join(jo_dir, "UPDATE.WIZ"));
+	TEST_EXPECT(jo_wiz.find("CMD=JOPTR.CMD\r\n") != std::string::npos &&
+			jo_wiz.find("URL=update.example.com\r\n") != std::string::npos &&
+			jo_wiz.find("PRODUCT_LOGIN=JOTRqq\r\n") != std::string::npos);
+	const std::string jox_wiz = text_of(io::utf8_join(jo_dir, "expansion/jox01/UPDATE.WIZ"));
+	TEST_EXPECT(jox_wiz.find("CMD=JOEPTR.CMD\r\n") != std::string::npos &&
+			jox_wiz.find("URL=update.example.com\r\n") != std::string::npos &&
+			jox_wiz.find("PRODUCT_LOGIN=JOEqq\r\n") != std::string::npos);
+
+	// The editor's: its package applied with its command file; the tools': their upload.
+	const std::string editor_dir = rig.temp.file("editor-unzipped");
+	TEST_EXPECT(unzip_files(io::utf8_join(host, "opennova-editor-windows.zip"), editor_dir, error));
+	TEST_EXPECT(text_of(find_file(editor_dir, "oneditor.exe")) == "synthetic oneditor.exe" &&
+			!text_of(io::utf8_join(editor_dir, "ONEDITOR.CMD")).empty() &&
+			text_of(find_file(editor_dir, "OPENNOVA.WIZ")).find("PRODUCT_LOGIN=ONEDITOR\r\n") !=
+					std::string::npos);
+	const io::JsonValue *editor_entry = entry_of(manifest, "ONEDITOR");
+	TEST_EXPECT(editor_entry && editor_entry->get_string("release", "") == "ONEDITOR 0.0.22" &&
+			editor_entry->get_string("version", "") == "0.0.22" &&
+			editor_entry->get_string("kind", "") == "app");
+	std::string uploaded, offered;
+	TEST_EXPECT(hosted::digest_file(tools_zip, size, uploaded, error) &&
+			hosted::digest_file(
+					io::utf8_join(host, "opennova-tools-windows.zip"), size, offered, error) &&
+			uploaded == offered && entry_of(manifest, "ONTOOLS") &&
+			entry_of(manifest, "ONTOOLS")->get_string("sha256", "") == uploaded);
+
+	// The editor's release retired: the host drops its zip, the manifest its fields.
+	TEST_EXPECT(hosted::retire_release(rig.db, editor));
+	TEST_EXPECT(hosted::enqueue_downloads_publish(rig.db) > 0);
+	rig.run_jobs();
+	TEST_EXPECT(io::json_parse(text_of(io::utf8_join(host, "manifest.json")), manifest, error));
+	TEST_EXPECT(unoffered(manifest, "ONEDITOR") &&
+			!fs::exists(io::os_path(io::utf8_join(host, "opennova-editor-windows.zip"))) &&
+			fs::exists(io::os_path(jo_zip)));
+	std::printf("downloads: JO's zip the runtime's package with its wizards, the editor's its "
+				"package, the tools' as uploaded, the manifest every product; a retire drops "
+				"its zip\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
@@ -617,6 +775,7 @@ int main(int argc, char **argv) {
 	failures += test_refusals();
 	failures += test_app_build();
 	failures += test_download_only();
+	failures += test_downloads();
 	if (failures == 0)
 		std::printf("release_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;

@@ -15,8 +15,9 @@
 //                                               release uploading
 //   PUT    /api/admin/releases/<id>/parts/<n>?upload_id=<u>   one part's bytes, {etag} back
 //   POST   /api/admin/releases/<id>/complete   the upload completed: building + release.build
-//   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section
-//   POST   /api/admin/releases/<id>/retire     a published one retired
+//   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section,
+//                                               and downloads.publish (products/downloads_job.h)
+//   POST   /api/admin/releases/<id>/retire     a published one retired, and downloads.publish
 //   DELETE /api/admin/releases/<id>            a draft, invalid, retired or uploading one gone
 //
 // Every reply is an error code with our own message, never database or store text; a

@@ -5,6 +5,7 @@
 #include "core/text_util.h"
 #include "http_json.h"
 #include "jobs/job_queue.h"
+#include "products/downloads_job.h"
 #include "products/product_jobs.h"
 #include "products/product_repository.h"
 #include "products/release_build.h"
@@ -341,8 +342,9 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/admin/releases/<id>/publish — a draft published: its sections' products serve it
-// to the updater (the release they named before is retired), and one release.apply job per
-// section, in one transaction; 202 {"release"}; 404 not_found; 409 not_draft.
+// to the updater (the release they named before is retired), one release.apply job per section
+// and the downloads host's render (downloads.publish), in one transaction; 202 {"release"}; 404
+// not_found; 409 not_draft.
 crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -361,6 +363,7 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 			for (const ReleaseSection &s : list_sections(*db_conn, release->id))
 				if (enqueue_release_apply(*db_conn, release->id, s.product_id) != 0)
 					++applies;
+			enqueue_downloads_publish(*db_conn);
 			tx.commit();
 		}
 		std::printf("[http] release %lld '%s' published by %s: %zu apply job(s)\n",
@@ -375,7 +378,8 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/admin/releases/<id>/retire — a published release retired (its products serve
-// none), 202 {"release"}; 404 not_found; 409 not_published.
+// none) and the downloads host's render (downloads.publish) queued, in one transaction, 202
+// {"release"}; 404 not_found; 409 not_published.
 crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -385,8 +389,13 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 		const auto release = find_release(*db_conn, path_id(id));
 		if (!release)
 			return no_such_release();
-		if (!retire_release(*db_conn, release->id))
-			return json_error(409, "not_published", "only a published release is retired");
+		{
+			db::Transaction tx(*db_conn);
+			if (!retire_release(*db_conn, release->id))
+				return json_error(409, "not_published", "only a published release is retired");
+			enqueue_downloads_publish(*db_conn);
+			tx.commit();
+		}
 		std::printf("[http] release %lld '%s' retired by %s\n", static_cast<long long>(release->id),
 				loggable(release->name).c_str(), loggable(creator_of(caller)).c_str());
 		crow::json::wvalue out;

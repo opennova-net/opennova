@@ -1207,23 +1207,24 @@ void test_menu_bar_status() {
 
 	// A window too narrow for all of it: the parts on the left go first, what was said the
 	// first of them; the buttons stay. Back and Forward lead the bar, two arrows' room taken
-	// before the menus, and the Go menu's (DI-18) among them.
+	// before the menus, and the Go menu's (DI-18) and Help's (ADR 0072, after Windows) among them.
 	const float arrows = 2.0f * (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) +
-	                     ImGui::CalcTextSize("Go").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+	                     ImGui::CalcTextSize("Go").x + ImGui::CalcTextSize("Help").x +
+	                     ImGui::GetStyle().ItemSpacing.x * 4.0f;
 	ImGui::GetIO().DisplaySize = ImVec2(580.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
-	CHECK(text.find("menus/a") == std::string::npos && in_order(text, {"Windows", "2 unsaved", "Built", "Stop"}),
+	CHECK(text.find("menus/a") == std::string::npos && in_order(text, {"Windows", "Help", "2 unsaved", "Built", "Stop"}),
 	      "narrower: what was said left out first");
 	ImGui::GetIO().DisplaySize = ImVec2(360.0f + arrows, 700.0f);
 	ui.frames(3);
 	text = logged_frame(ui);
-	CHECK(text.find("2 unsaved") == std::string::npos && in_order(text, {"Windows", "Stop"}), "narrow: the unsaved count left out");
+	CHECK(text.find("2 unsaved") == std::string::npos && in_order(text, {"Windows", "Help", "Stop"}), "narrow: the unsaved count left out");
 
 	// At every width the right end starts after the last menu and Stop ends inside the bar.
 	const ImGuiID bar_id = menu_bar_id();
 	const std::vector<ImGuiID> menus = {item_id(bar_id, {"File"}), item_id(bar_id, {"Edit"}), item_id(bar_id, {"Go"}),
-	                                    item_id(bar_id, {"Build"}), item_id(bar_id, {"Windows"})};
+	                                    item_id(bar_id, {"Build"}), item_id(bar_id, {"Windows"}), item_id(bar_id, {"Help"})};
 	const std::vector<ImGuiID> parts = {item_id(bar_id, {"status", "##unsaved"}), item_id(bar_id, {"status", "##problems"}),
 	                                    item_id(bar_id, {"status", "Build"}), item_id(bar_id, {"status", "Play"}),
 	                                    item_id(bar_id, {"status", "Stop"})};

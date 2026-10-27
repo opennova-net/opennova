@@ -1098,7 +1098,7 @@ version, release, published}]}`, every product listed, its file's fields null un
 published release (the runtime, Escalation and OP: Nifty Package have no download of their
 own). The data program writes it: publishing or retiring a release queues its
 `downloads.publish` job, which renders every product that has a download and a published
-release, uploads what changed, writes the manifest last and removes what the set no longer
+release, uploads each, writes the manifest last and removes what the set no longer
 has, each with a short `Cache-Control` (five minutes, the manifest one), so the new set is
 what the host serves within minutes, with no invalidation. A game's zip is the runtime's
 published package applied into an empty folder with its `ONRUNTIME.CMD`, plus the
@@ -1387,8 +1387,10 @@ package to the updater ("The update service", below).
 The store is the deployment's operations bucket under `data/` (one bucket per deployment,
 so the prefix carries no deployment): `content/` (the projects' files and revisions'
 manifests, each file once by its SHA-256), `trees/<tree id>/<file>` with its `manifest.json`
-(each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages)
-and `updates/upload-<release id>.sfs` (a runtime package before validation).
+(each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages),
+`updates/upload-<release id>.sfs` (a built package before validation),
+`updates/source-<release id>.zip` (an app's uploaded build until its release is built) and
+`updates/<sha256>.zip` (a download-only app's builds, kept as uploaded).
 `ONNET_OBJECT_STORE_URL` (`s3://opennova-<deployment>-ops-<account id>/data`) and
 `ONNET_OBJECT_STORE_REGION` name it to web, the fleet, the worker and the data program. The machines' hostd fetches a tree
 with `aws s3 sync` under its task role, which reads `data/trees/` and nothing else of

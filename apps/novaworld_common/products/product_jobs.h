@@ -60,6 +60,7 @@
 #include "jobs/worker_pool.h"
 #include "product_repository.h"
 
+#include <formats/update/apply.h>
 #include <net/novaworld/db/database.h>
 
 #include <cstdint>
@@ -89,6 +90,18 @@ std::string release_download_key(const std::string &sha256);
 // The file's size and SHA-256 (lower-case hex), streamed: what names a package or a download in
 // the store. False with `error` when it does not read.
 bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, std::string &error);
+
+// What applying a package's section came to: done, refused for good (a package that does not
+// read, lacks the section or whose rows do not apply), or a read the job runs again for.
+enum class ApplyOutcome : uint8_t { Ok, Refused, Transient };
+// The section of the package at `package_path` (a 1SFS on disk) that carries `command_file`
+// under the PACKAGEBREAK `expansion` ("" for the base) applied to the directory `dir` with
+// formats/update/apply.h (every release is whole, so its rows make every file and archive from
+// nothing, ADR 0008): `report` what its rows wrote, `command` the command file's bytes. A tree's
+// build (release.apply) and a download's (products/downloads_job.h) share it.
+ApplyOutcome apply_section_to(const std::string &package_path, const std::string &expansion,
+		const std::string &command_file, const std::string &dir, update::ApplyReport &report,
+		std::vector<uint8_t> &command, std::string &why);
 
 // How old a ready or failed tree must be before tree.prune takes it (product_repository.h
 // prunable_trees).
