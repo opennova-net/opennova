@@ -1410,13 +1410,13 @@ void test_replica_gun_window_reads_the_composed_frame() {
         gunner.mount_bone = 1;
         // Within the window: the word is the row's frame less the look.
         gunner.heading_bam = bam_sub(row_frame, 0x01000000);
-        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr, false,
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
                 opennova::inmatch::ReplicaGunLeg::Pool1Walk);
         CHECK(state.find(twin_h.packed)->emplaced_gun_yaw_word == 0x0100);
         CHECK(state.find(2)->heading_bam == bam_sub(row_frame, 0x01000000));
         // Past it: pinned, and the look written back off the frame the window read.
         state.find(2)->heading_bam = bam_sub(row_frame, 0x30000000);
-        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr, false,
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
                 opennova::inmatch::ReplicaGunLeg::Pool1Walk);
         const int16_t pinned = state.find(twin_h.packed)->emplaced_gun_yaw_word;
         CHECK(pinned == 0x2000);

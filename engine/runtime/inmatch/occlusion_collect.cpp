@@ -83,7 +83,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		const world::EntityHandle h{handle};
 		world::Entity *twin = !joiner || h.pool() != 0
 				? replication::replica_row_entity(materializer, kernel.world, h,
-						es.type_id, kernel.wire_header_world)
+						es.type_id)
 				: nullptr;
 		if (twin != nullptr && (twin->bms_id != 0 ||
 				twin->spawn_origin != world::kSpawnOriginNone))

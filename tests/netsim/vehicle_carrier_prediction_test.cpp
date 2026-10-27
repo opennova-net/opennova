@@ -30,6 +30,7 @@
 #include <runtime/world/world.h>
 
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 
 #include <cmath>
 #include <cstdint>
@@ -107,7 +108,7 @@ w::Entity hull_seed(w::Vec3 pos, uint8_t team) {
 	return v;
 }
 
-// Mirror a spawned registry entity into the joiner's replica row the way the
+// Mirror a materialized twin's seed into the joiner's replica row the way the
 // load stream would have (identity + pose), so the fold and the mirror agree.
 replication::ClientEntityState &seed_row(replication::ClientState &state,
                                          w::EntityHandle h, const w::Entity &e,
@@ -177,7 +178,8 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	// one parked; a bridge (pool-2 static) with a hull driving over it. The
 	// deck spawns first, so its mover runs ahead of its riders' each tick.
 	const w::Entity deck = hull_seed({origin.x + 20.0f, origin.y, origin.z}, team);
-	const w::EntityHandle deck_h = world.registry.spawn(1, deck);
+	const w::EntityHandle deck_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, deck, EntityClass::Vehicle);
 	// A rider's spawn pose IS the composed seat pose: the record's (2, 0, 1)
 	// offset is CARRIER-LOCAL (the deck's engine heading is 90 deg at mission
 	// yaw 0), so it is lifted through the deck pose rather than added in world.
@@ -188,15 +190,19 @@ bool run_carried_vehicles_predict_and_ride_their_carrier() {
 	const w::Entity rider = hull_seed({float(rider_seat.x) / 65536.0f,
 	                                          float(rider_seat.y) / 65536.0f,
 	                                          float(rider_seat.z) / 65536.0f}, team);
-	const w::EntityHandle rider_h = world.registry.spawn(1, rider);
-	const w::EntityHandle parked_h = world.registry.spawn(1, rider);
+	const w::EntityHandle rider_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, rider, EntityClass::Vehicle);
+	const w::EntityHandle parked_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, rider, EntityClass::Vehicle);
 	w::Entity bridge;
 	bridge.kind = w::EntityKind::Building;
 	bridge.item_id = kBridgeType;
 	bridge.position = {origin.x - 20.0f, origin.y, origin.z};
-	const w::EntityHandle bridge_h = world.registry.spawn(2, bridge);
+	const w::EntityHandle bridge_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 2, bridge, EntityClass::Unknown);
 	const w::Entity bridged = hull_seed({origin.x - 20.0f, origin.y, origin.z + 1.0f}, team);
-	const w::EntityHandle bridged_h = world.registry.spawn(1, bridged);
+	const w::EntityHandle bridged_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, bridged, EntityClass::Vehicle);
 	if (!expect(deck_h.valid() && rider_h.valid() && parked_h.valid() && bridge_h.valid() &&
 	                    bridged_h.valid(),
 	            "the deck, its riders, the bridge and the bridged hull spawned"))

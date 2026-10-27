@@ -688,9 +688,11 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	const Ref<ItemDatabase> pending_item_db = pending_item_traits_db_;
 	pending_item_traits_db_.unref();
 	reset_world();
-	// Do not infer this from the role: tests/tools and legacy direct joins may
-	// still load a complete BMS, whose authored promotion is already canonical.
-	// Only the production 616-byte S2C header needs wire-time materialization.
+	// The mission's form, not the role's: a host loads a complete BMS, whose
+	// authored promotion is canonical; a production join loads the 616-byte S2C
+	// header, which needs wire-time materialization. The joiner reads its
+	// materializer's rows alone, so a complete BMS a test hands a joiner keeps
+	// its authored rows out of the joiner's per-row reads.
 	kernel_->wire_header_world = p_mission->is_wire_header_only();
 	// The editor's live, in-memory mission (unsaved edits included) adopts
 	// into the kernel with no file source; definition tables remain available

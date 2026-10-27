@@ -334,10 +334,9 @@ public:
 	}
 	void observe_cpu_share(int32_t cpu_percent) override { uplink_cpu_percent_ = cpu_percent; }
 
-	// The exact-handle materialized world twin of a decoded wire row (null when
-	// the handle has no truthful local carrier). Header-only joins read the
-	// materializer's owned rows; full-BMS joins read the promoted registry row
-	// (spawn-origin gated).
+	// The exact-handle materialized world twin of a decoded wire row: the
+	// materializer's owned row (null when the handle has no truthful local
+	// carrier).
 	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle);
 	// The world's stance requests an after-receive leg raised, queued at its message's place
 	// among the receive's sends: the receive's `occurrence`-th message of `at`
@@ -385,9 +384,9 @@ public:
 	// when it moves.
 	uint64_t world_sync_serial() const { return world_sync_serial_; }
 
-	// The exact-packed-row materializer of a wire-header world (the kernel's
-	// wire_header_world flag names the mission form; the joiner frame owns
-	// the fold, the embedder reads the placed rows it stamped).
+	// The exact-packed-row materializer: a joiner's world is header-only (every join opens the
+	// host's S2C 0x0B header alone, D-NET-194), so every decoded pool 1..3 row has its owned twin;
+	// the joiner frame owns the fold, the embedder reads the placed rows it stamped.
 	replication::ClientWorldMaterializer &materializer() { return materializer_; }
 	const replication::ClientWorldMaterializer &materializer() const {
 		return materializer_;

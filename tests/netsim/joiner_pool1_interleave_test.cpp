@@ -34,6 +34,7 @@
 #include <runtime/world/world.h>
 
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -128,7 +129,8 @@ struct Harness {
 		tank.spawn_origin = (1u << 24) | 3u;
 		tank.position = at;
 		tank.health = tank.health_max = 3000;
-		expect(kernel->world.registry.spawn_at(w::EntityHandle{kCarrier}, tank) ==
+		expect(test_common::materialize_twin_at(role.materializer(), role.runtime->state(),
+		               kernel->world, w::EntityHandle{kCarrier}, tank, EntityClass::Vehicle) ==
 		               w::EntityHandle{kCarrier},
 		       "the tank spawns at its slot");
 		test_common::brain_hull(kernel->world, w::EntityHandle{kCarrier});
@@ -137,7 +139,8 @@ struct Harness {
 		hull.item_type_index = 2;
 		hull.spawn_origin = (1u << 24) | 4u;
 		hull.position = {at.x, at.y, at.z + 3.0f};
-		expect(kernel->world.registry.spawn_at(w::EntityHandle{kDeckHull}, hull) ==
+		expect(test_common::materialize_twin_at(role.materializer(), role.runtime->state(),
+		               kernel->world, w::EntityHandle{kDeckHull}, hull, EntityClass::Vehicle) ==
 		               w::EntityHandle{kDeckHull},
 		       "the deck hull spawns at its slot");
 		role.runtime->view().set_item_class_resolver(

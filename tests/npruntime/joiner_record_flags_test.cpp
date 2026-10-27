@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/replica_twin.h"
 #include "../common/test_expect.h"
 
 namespace {
@@ -220,7 +221,8 @@ bool run_the_self_record_mount_edge_snaps_l() {
 	controller.retail_slot = 8;
 	controller.source_name = "ctrlx00";
 	vehicle.seats.push_back(controller);
-	const w::EntityHandle vh = world.registry.spawn(1, vehicle);
+	const w::EntityHandle vh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, vehicle, EntityClass::Vehicle);
 	auto &row = h.role.runtime->state().upsert(vh.packed);
 	row.type_id = static_cast<uint16_t>(vehicle.item_id);
 	row.cls = EntityClass::Vehicle;
@@ -395,7 +397,8 @@ bool run_the_self_record_floor_holds_l_ground_link() {
 	floor.spawn_origin = w::spawn_origin_pack(static_cast<uint32_t>(w::EntityKind::Building), 0);
 	floor.position = local->position;
 	floor.bound_radius = 8.0f;
-	const w::EntityHandle fh = world.registry.spawn(2, floor);
+	const w::EntityHandle fh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 2, floor, EntityClass::NoNetworkCallback);
 	if (!expect(fh.valid() && fh.pool() == 2, "floor: the building took a pool-2 slot"))
 		return false;
 	auto &row = h.role.runtime->state().upsert(fh.packed);

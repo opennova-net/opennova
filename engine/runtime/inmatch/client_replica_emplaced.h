@@ -28,8 +28,7 @@ enum class ReplicaGunLeg { Pool1Walk, AfterOwnBody };
 // and the type).
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world, uint16_t self_handle,
-		const replication::ClientWorldMaterializer *materializer, bool wire_header_world,
-		ReplicaGunLeg leg);
+		const replication::ClientWorldMaterializer *materializer, ReplicaGunLeg leg);
 // The carrier render callback's gun words on a joiner's present row: the
 // words its ewep children published on the carrier's replica row stand for
 // the brain words the tank/helo callback reads. `twin` is the carrier's

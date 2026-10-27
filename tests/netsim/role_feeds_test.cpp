@@ -1033,7 +1033,6 @@ int main() {
 		world::World &w = kernel.world;
 		w.registry.configure_pool(1, 4);
 		w.registry.configure_pool(2, 4);
-		kernel.wire_header_world = true;
 		world::Entity building;
 		building.kind = world::EntityKind::Building;
 		building.item_type = 5;

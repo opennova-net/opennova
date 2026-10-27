@@ -1317,8 +1317,7 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			const world::EntityHandle h{ handle };
 			const world::Entity *joiner_twin = h.pool() != 0
-					? replication::replica_row_entity(view.materializer, w, h, es.type_id,
-							kernel.wire_header_world)
+					? replication::replica_row_entity(view.materializer, w, h, es.type_id)
 					: nullptr;
 			// The wire walk defers authored rows to their placed node (or static
 			// batch). Do not repeat the same native ray query and cache an update

@@ -58,6 +58,7 @@
 #include "../common/file_io.h"
 #include "../common/flat_floor.h"
 #include "../common/hull_brain.h"
+#include "../common/replica_twin.h"
 #include "../common/test_paths.h"
 
 #include <algorithm>
@@ -330,8 +331,10 @@ bool run_spawn_edge_latch_reads_the_frames_target_team() {
 	target.has_item_def = true;
 	target.item_attrib = 0x8000u;
 	target.team = 2;
+	target.item_id = 123;
 	target.spawn_origin = 0; // a placed row the mirror follows
-	const w::EntityHandle target_h = h.kernel->world.registry.spawn(1, target);
+	const w::EntityHandle target_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), h.kernel->world, 1, target, EntityClass::NoNetworkCallback);
 	TeamAssign assign;
 	assign.entity_handle = target_h.packed;
 	assign.team = 0; // L's own seeded team
@@ -672,84 +675,15 @@ bool run_spawn_stamps_equipped_adm_from_midframe_grant() {
 }
 
 
-// A full-BMS join's promote spawns each carrier's addeweap child with no spawn
-// origin, riding its carrier's attachment row; it is the decoded slot's own
-// entity on both peers, so the replica rule takes it and a confirmed gunner
-// mount on it attaches the local body (D-NET-620).
-// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6; Entity_SpawnAddEWeapChildren: the
-//  Pool_AllocEntry call @0x40F393]
-bool run_full_bms_child_gun_mount() {
-	Harness h;
-	w::World &world = h.kernel->world;
-	world.registry.configure_pool(1, 16);
-	world.load_systems();
-	h.role.poll_preload();
-	constexpr uint16_t self_handle = 0x0005;
-	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
-	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
-	h.role.run_tick(h.input);
-	w::Entity *local = h.kernel->local.player();
-	if (!expect(local != nullptr && !h.kernel->wire_header_world,
-			"child gun: a full-BMS joiner's local body")) return false;
-	w::Entity carrier;
-	carrier.kind = w::EntityKind::Item;
-	carrier.item_id = 1889;
-	carrier.has_item_def = true;
-	carrier.item_type = 1;
-	carrier.spawn_origin = (1u << 24) | 4u;
-	carrier.position = local->position;
-	carrier.position.x += 1.0f;
-	carrier.health = carrier.health_max = 1000;
-	carrier.team = local->team;
-	const w::EntityHandle ch = world.registry.spawn(1, carrier);
-	w::Entity gun;
-	gun.kind = w::EntityKind::Item;
-	gun.item_id = 1887;
-	gun.has_item_def = true;
-	gun.item_type = 1;
-	gun.spawn_origin = w::kSpawnOriginNone;
-	gun.position = world.registry.get(ch)->position;
-	gun.health = gun.health_max = 100;
-	gun.team = local->team;
-	gun.emplacement_parent = ch;
-	gun.emplacement_parent_spawn_id = world.registry.get(ch)->registry_spawn_id;
-	gun.emplacement_pose_metadata_resolved = true;
-	w::Seat gunner;
-	gunner.type = w::SeatType::Gunner;
-	gunner.bone_index = 1;
-	gunner.source_name = "gunrx00";
-	gun.seats.push_back(gunner);
-	const w::EntityHandle gh = world.registry.spawn(1, gun);
-	for (const w::EntityHandle row_handle : {ch, gh}) {
-		auto &row = h.role.runtime->state().upsert(row_handle.packed);
-		row.type_id = static_cast<uint16_t>(world.registry.get(row_handle)->item_id);
-		row.cls = EntityClass::NoNetworkCallback;
-	}
-	auto &self = h.role.runtime->state().upsert(self_handle);
-	self.cls = EntityClass::Player;
-	self.type_id = w::kPlayerInfantryTypeId;
-	self.carrier_handle = gh.packed;
-	self.mount_bone = 1;
-	self.state_flags = w::kEntityFlagMounted;
-	self.state_flags_known = true;
-	h.role.run_tick(h.input);
-	local = h.kernel->local.player();
-	return expect(local != nullptr && local->mounted && local->mount_target == gh,
-			"a confirmed gunner mount on a full-BMS addeweap child attaches the local body");
-}
-
 // A decoded pool-1 mover's collision proxy names the decoded row's own native
-// row as its registry twin by the replica rule (D-NET-676): a header-only
-// world's owned lifetime, never a same-type newcomer spawned at the handle
-// after it; on a full-BMS join the promoted (spawn-origin) row, never the
-// joiner's own unattached spawn of the type. Retail keeps one entity per slot,
-// the wire handle naming the slot's entity.
+// row as its registry twin by the replica rule (D-NET-676): the joiner's owned
+// lifetime, never a same-type newcomer spawned at the handle after it. Retail
+// keeps one entity per slot, the wire handle naming the slot's entity.
 // [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the handle's slot address]
-bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
+bool run_wire_proxy_twin_takes_the_owned_lifetime() {
 	constexpr uint16_t kType = 1291;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = wire_header_world;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -768,67 +702,36 @@ bool run_wire_proxy_twin_takes_the_owned_lifetime(bool wire_header_world) {
 	h.kernel->set_items_table(&items);
 	h.kernel->resolve_collision_instances();
 	const w::EntityHandle own{0x1003};
-	const w::EntityHandle other{0x1004};
 	bool ok = true;
-	if (wire_header_world) {
-		PoolSpawnBatch batch;
-		PoolSpawnRecord rec;
-		rec.slot_id = own.packed;
-		rec.item_type_id = kType;
-		rec.pos_x = 10 << 16;
-		rec.pos_y = -20 << 16;
-		rec.pos_z = 2 << 16;
-		batch.records.push_back(rec);
-		h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
-		h.role.run_tick(h.input);
-		const w::Entity *mine = world.registry.get(own);
-		const w::WireDynamicCollisionProxy *proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
-		ok &= expect(mine != nullptr && h.role.materializer().owned(world, own) == mine &&
-						proxy != nullptr && proxy->registry_twin == own,
-				"wire proxy: a header-only world's owned row is the proxy's twin");
-		world.registry.despawn(own);
-		w::Entity newcomer;
-		newcomer.kind = w::EntityKind::Item;
-		newcomer.item_id = kType;
-		newcomer.alive = true;
-		newcomer.position = {10.0f, -20.0f, 2.0f};
-		if (!expect(world.registry.spawn_at(own, newcomer) == own &&
-						h.role.materializer().owned(world, own) == nullptr,
-				"wire proxy: a same-type newcomer at the handle is not the owned lifetime"))
-			return false;
-		h.role.run_tick(h.input);
-		proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
-		ok &= expect(proxy != nullptr && !proxy->registry_twin.valid(),
-				"wire proxy: the slot's same-type newcomer is no twin of the decoded row");
-		return ok;
-	}
-	// A full-BMS join: the promoted row (its spawn origin set) and the joiner's
-	// own spawn of the same type (no origin, no attachment).
-	w::Entity promoted;
-	promoted.kind = w::EntityKind::Item;
-	promoted.item_id = kType;
-	promoted.alive = true;
-	promoted.spawn_origin = (1u << 24) | 4u;
-	w::Entity local_spawn = promoted;
-	local_spawn.spawn_origin = w::kSpawnOriginNone;
-	if (!expect(world.registry.spawn_at(own, promoted) == own &&
-					world.registry.spawn_at(other, local_spawn) == other,
-			"wire proxy: the full-BMS rows spawn"))
-		return false;
-	for (const w::EntityHandle row_handle : {own, other}) {
-		auto &row = h.role.runtime->state().upsert(row_handle.packed);
-		row.type_id = kType;
-		row.cls = EntityClass::Vehicle;
-	}
+	PoolSpawnBatch batch;
+	PoolSpawnRecord rec;
+	rec.slot_id = own.packed;
+	rec.item_type_id = kType;
+	rec.pos_x = 10 << 16;
+	rec.pos_y = -20 << 16;
+	rec.pos_z = 2 << 16;
+	batch.records.push_back(rec);
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
 	h.role.run_tick(h.input);
-	const w::WireDynamicCollisionProxy *promoted_proxy =
-			h.kernel->collision.wire_dynamic_proxy(own.packed);
-	const w::WireDynamicCollisionProxy *local_proxy =
-			h.kernel->collision.wire_dynamic_proxy(other.packed);
-	ok &= expect(promoted_proxy != nullptr && promoted_proxy->registry_twin == own,
-			"wire proxy: a full-BMS join's promoted row is its decoded row's twin");
-	ok &= expect(local_proxy != nullptr && !local_proxy->registry_twin.valid(),
-			"wire proxy: the joiner's own same-type spawn is no twin of the decoded row");
+	const w::Entity *mine = world.registry.get(own);
+	const w::WireDynamicCollisionProxy *proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+	ok &= expect(mine != nullptr && h.role.materializer().owned(world, own) == mine &&
+					proxy != nullptr && proxy->registry_twin == own,
+			"wire proxy: a header-only world's owned row is the proxy's twin");
+	world.registry.despawn(own);
+	w::Entity newcomer;
+	newcomer.kind = w::EntityKind::Item;
+	newcomer.item_id = kType;
+	newcomer.alive = true;
+	newcomer.position = {10.0f, -20.0f, 2.0f};
+	if (!expect(world.registry.spawn_at(own, newcomer) == own &&
+					h.role.materializer().owned(world, own) == nullptr,
+			"wire proxy: a same-type newcomer at the handle is not the owned lifetime"))
+		return false;
+	h.role.run_tick(h.input);
+	proxy = h.kernel->collision.wire_dynamic_proxy(own.packed);
+	ok &= expect(proxy != nullptr && !proxy->registry_twin.valid(),
+			"wire proxy: the slot's same-type newcomer is no twin of the decoded row");
 	return ok;
 }
 
@@ -930,7 +833,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		// Array order differs from the numbered HUD list: driver is key 1.
 		vehicle.seats.insert(vehicle.seats.begin(), passenger);
 	}
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	// The buggy row's class init brains the hull: its client mover runs past its head.
 	test_common::brain_hull(world, vh);
 	w::EntityHandle previous_driver;
@@ -1159,7 +1063,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	adjacent.position = h.kernel->local.player_position();
 	adjacent.position.x += 1.0f;
 	adjacent.seats[0].occupant = {};
-	const auto adjacent_h = world.registry.spawn(1, adjacent);
+	const auto adjacent_h = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 1, adjacent, EntityClass::Vehicle);
 	// Seated, the scan admits only what the rider looks at (5 deg cone).
 	look_at(world, local->handle, adjacent.position.x, adjacent.position.y, adjacent.position.z);
 	std::vector<w::AttachLabel> labels;
@@ -1226,6 +1131,7 @@ bool run_request_turns_l_before_the_0x26() {
 	if (!expect(body != nullptr, "request fixture has L and its body")) return false;
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 127; // the streamed row's type
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
@@ -1239,7 +1145,8 @@ bool run_request_turns_l_before_the_0x26() {
 	seat.source_name = "sitex00";
 	seat.yaw_offset = 30;
 	vehicle.seats.push_back(seat);
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
 	body->inf.target_heading = body->heading;
 	h.kernel->local.input.look_heading = body->heading;
@@ -1689,9 +1596,10 @@ bool run_replica_turret_channel() {
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
- if (!expect(world.registry.spawn(1, twin).packed == 0x1000,
-   "the world twin shares the wire handle")) return false;
  auto &state = h.role.runtime->state();
+ if (!expect(test_common::materialize_twin(h.role.materializer(), state, world, 1, twin,
+     EntityClass::NoNetworkCallback).packed == 0x1000,
+   "the world twin shares the wire handle")) return false;
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  spec.item_attrib2 = def::DEF_ITEM_ATTRIB2_ISTURRET;
@@ -1787,8 +1695,9 @@ bool run_remote_gunner_channel_precedes_its_chase() {
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
- const uint16_t gun_handle = world.registry.spawn(1, twin).packed;
  auto &state = h.role.runtime->state();
+ const uint16_t gun_handle = test_common::materialize_twin(h.role.materializer(), state, world,
+   1, twin, EntityClass::NoNetworkCallback).packed;
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  w::Seat seat;
@@ -1847,7 +1756,8 @@ bool run_local_replica_turret_channel() {
  seat.bone_index = 1;
  seat.source_name = "UseGun";
  gun.seats.push_back(seat);
- const auto handle = world.registry.spawn(1,gun);
+ const auto handle = test_common::materialize_twin(h.role.materializer(),
+   h.role.runtime->state(),world,1,gun,EntityClass::NoNetworkCallback);
  mission::ItemSeatSpec spec;
  spec.type_id = 123;
  spec.item_attrib2 = gun.item_attrib2;
@@ -1927,7 +1837,8 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	hull.item_attrib = w::kItemAttribEweap;
 	hull.primary_weapon = "WPN_HULL";
 	hull.health = 100;
-	const w::EntityHandle hull_h = world.registry.spawn(1, hull);
+	const w::EntityHandle hull_h = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, hull,
+			EntityClass::NoNetworkCallback);
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
 	gun.has_item_def = true;
@@ -1946,7 +1857,8 @@ bool run_the_route_apply_keeps_ls_adm_byte() {
 	seat.bone_index = 1;
 	seat.source_name = "UseGun";
 	gun.seats.push_back(seat);
-	const w::EntityHandle gun_h = world.registry.spawn(1, gun);
+	const w::EntityHandle gun_h = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, gun,
+			EntityClass::NoNetworkCallback);
 	w::Entity *live_gun = world.registry.get(gun_h);
 	w::Entity *live_hull = world.registry.get(hull_h);
 	auto &state = h.role.runtime->state();
@@ -2322,10 +2234,13 @@ bool run_a_pickup_mount_queues_at_the_0x35s_place() {
 			// mission's rows.
 			w::Entity row;
 			row.kind = w::EntityKind::Item;
+			row.item_id = 126;
 			row.spawn_origin = 0;
 			row.powerup_weapon = static_cast<uint8_t>(
 					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
-			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			const w::EntityHandle row_handle = test_common::materialize_twin(
+					h.role.materializer(), h.role.runtime->state(), h.kernel->world, 1, row,
+					EntityClass::NoNetworkCallback);
 			WeaponPickupNotice notice;
 			notice.picker_handle = 0x0005;
 			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
@@ -2654,9 +2569,12 @@ bool run_a_grant_behind_a_pickup_rebuilds_its_table() {
 					h.kernel->world.tables.weapons.index_of("WPN_PU_MORTAR"));
 			w::Entity row;
 			row.kind = w::EntityKind::Item;
+			row.item_id = 126;
 			row.spawn_origin = 0;
 			row.powerup_weapon = static_cast<uint8_t>(mortar);
-			const w::EntityHandle row_handle = h.kernel->world.registry.spawn(1, row);
+			const w::EntityHandle row_handle = test_common::materialize_twin(
+					h.role.materializer(), h.role.runtime->state(), h.kernel->world, 1, row,
+					EntityClass::NoNetworkCallback);
 			WeaponPickupNotice notice;
 			notice.picker_handle = 0x0005;
 			notice.powerup_handle = static_cast<uint16_t>(row_handle.packed);
@@ -3447,7 +3365,6 @@ bool run_tail_carried_word_lands_on_l() {
 	constexpr uint16_t kFlagType = 4091;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	h.role.poll_preload();
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -3646,6 +3563,7 @@ bool run_a_seated_death_sends_the_seat_leave() {
 	if (!expect(local != nullptr, "seated death: L spawned")) return false;
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.item_id = 127; // the streamed row's type
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.position = local->position;
@@ -3658,7 +3576,8 @@ bool run_a_seated_death_sends_the_seat_leave() {
 	seat.retail_slot = 0;
 	seat.source_name = "sitex00";
 	vehicle.seats.push_back(seat);
-	const auto vh = world.registry.spawn(1, vehicle);
+	const auto vh = test_common::materialize_twin(h.role.materializer(), h.role.runtime->state(), world, 1, vehicle,
+			EntityClass::Vehicle);
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
 	self.type_id = w::kPlayerInfantryTypeId;
@@ -4008,16 +3927,18 @@ bool run_the_respawn_arm_lands_l_in_its_receive() {
 	constexpr int32_t kHutYaw = static_cast<int32_t>(0xAAAAAAABu);
 	w::Entity hut;
 	hut.kind = w::EntityKind::Building;
+	hut.item_id = 1203;
 	hut.position = {100.0f, 200.0f, 10.0f};
 	hut.heading = kHutYaw;
 	hut.bound_radius = 1.0f;
 	hut.alive = true;
-	const w::EntityHandle hh = world.registry.spawn(2, hut);
-	h.kernel->collision.build_initial_tables(world);
 	h.role.poll_preload();
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
+	const w::EntityHandle hh = test_common::materialize_twin(h.role.materializer(),
+			h.role.runtime->state(), world, 2, hut, EntityClass::NoNetworkCallback);
+	h.kernel->collision.build_initial_tables(world);
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
 	self_row.cls = EntityClass::Player;
 	self_row.type_id = w::kPlayerInfantryTypeId;
@@ -5837,7 +5758,6 @@ bool run_deploy_action_converts_a_dead_permanent_death_player() {
 bool run_the_settle_materializes_the_world_stream() {
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(2, 32);
 	h.role.poll_preload();
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -5894,7 +5814,6 @@ bool run_the_header_load_binds_the_streamed_guns() {
 	constexpr uint16_t kGunType = 4093;
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	for (const char *name : {"WPN_KNIFE", "WPN_TESTGUN"}) {
 		w::WeaponTableEntry def;
@@ -5991,7 +5910,6 @@ bool run_a_full_spawn_row_loads_its_def() {
 
 	Harness h;
 	w::World &world = h.kernel->world;
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	h.kernel->set_assets(&store);
 	h.kernel->set_items_table(&items);
@@ -6100,8 +6018,6 @@ bool run_the_ewep_stale_ground_asks_leave_as_0x0f() {
 bool run_pool1_shooter_round_takes_its_indoors_state() {
 	Harness h;
 	auto &world = h.kernel->world;
-	// A header-only world: the materializer owns a native twin for each 0x0D row.
-	h.kernel->wire_header_world = true;
 	world.registry.configure_pool(1, 16);
 	world.registry.configure_pool(2, 4);
 	h.role.poll_preload();
@@ -6548,9 +6464,7 @@ int main() {
 	ok &= run_confirmed_vehicle_drive(4);
 	ok &= run_confirmed_vehicle_drive(0, true);
 	ok &= run_confirmed_vehicle_drive(0, true, true);
-	ok &= run_full_bms_child_gun_mount();
-	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(true);
-	ok &= run_wire_proxy_twin_takes_the_owned_lifetime(false);
+	ok &= run_wire_proxy_twin_takes_the_owned_lifetime();
 	ok &= run_dead_joiner_keeps_its_wire_proxies();
 	ok &= run_flare_descriptor_carries_the_pilot_handheld();
 	ok &= run_guided_fire_preserves_selected_target();

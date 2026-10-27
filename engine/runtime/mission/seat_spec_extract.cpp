@@ -377,7 +377,7 @@ void refresh_item_seat_spec(world::World &world,
 			occupants[seat.retail_slot] = seat.occupant;
 	}
 
-	// A promoted child (authority or complete-BMS joiner) already owns the exact
+	// A promoted child (the authority's) already owns the exact
 	// stored addeweap slot; keep that identity across definition refreshes even
 	// when sibling types repeat. A streamed 0x0D row names its slot by its
 	// subType (field 0x80, the slot index the spawn stamped; absent = slot 0),

@@ -451,10 +451,10 @@ public:
 	// The loaded document is a true S2C 0x0B mission: the 616-byte BMS header
 	// alone. Retail allocates pools 1..3 while consuming 0x0D/0x10/0x20; the
 	// joiner role's materializer gives local world consumers the same exact
-	// packed rows, and the seat-spec refresh keys on this flag for every
-	// role. Full-BMS joiners never enter that path and keep ordinary
-	// promotion untouched. Per-load state the embedder sets after the
-	// document opens (a fresh kernel reads false).
+	// packed rows. Every join opens this form (D-NET-194; JoinerRole::bind sets
+	// it); a host's complete BMS keeps it false, and the seat-spec refresh keys
+	// on it. Per-load state the embedder sets after the document opens (a fresh
+	// kernel reads false).
 	bool wire_header_world = false;
 	std::vector<PromoteOptions::AiProfileRow> ai_profiles;
 	PromoteResult promo;

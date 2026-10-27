@@ -191,7 +191,7 @@ bool run_replica_person_ewep(world::World &world, replication::ClientState &stat
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
-	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
+	return materializer_.owned(world, handle);
 }
 
 // A 0x18 record runs its row's def+0x148 class init after its ground word landed: a gnrc / gnrl /
@@ -226,7 +226,7 @@ void JoinerRole::materialize_world_stream() {
 }
 
 void JoinerRole::run_streamed_weapon_slot_class_inits() {
-	if (kernel_ == nullptr || !kernel_->wire_header_world) return;
+	if (kernel_ == nullptr) return;
 	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
 	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B]
 	kernel_->world.vehicles.run_weapon_slot_class_inits();
@@ -237,7 +237,6 @@ void JoinerRole::materialize_replica_world() {
 	world::World &world = kernel.world;
 	world::LocalPlayer &lp = kernel.local;
 	ClientRuntime &rt = *runtime;
-	if (!kernel_->wire_header_world) return;
 
 	const replication::ClientState &state = rt.state();
 	if (wire_world_topology_revision_seen_ == state.topology_revision &&
@@ -1132,9 +1131,7 @@ void JoinerRole::apply_mounted_ammo_update() {
 	}
 
 	const world::EntityHandle handle{ammo.mount_handle};
-	world::Entity *mount = kernel_->wire_header_world
-			? materializer_.owned(world, handle)
-			: world.registry.get(handle);
+	world::Entity *mount = materializer_.owned(world, handle);
 	// A streamed row can arrive in a later initial-state page. Unlike an invalid
 	// item class, absence is not a verdict: retain this revision and retry after
 	// the materializer has populated the exact packed slot.
@@ -1164,11 +1161,9 @@ void JoinerRole::apply_mounted_ammo_update() {
 // visibility from registry positions (a driven-off vehicle must occlude at its
 // live position, not its spawn point), and the collision tick tables pick up the
 // same fix. Type-guarded against the row the replica rule gives that exact
-// streamed identity: a wire-header mission's materialized row, or a full-BMS
-// join's promoted one, the records and the promote's addeweap children (no
-// spawn origin, riding their carrier's attachment row) alike; the joiner's own
-// spawns (the spawn-origin sentinel, no attachment) are skipped. Those rows
-// also mirror orientation/team because collision and seat consumers observe them.
+// streamed identity, the materializer's owned row; any other row at the handle
+// is skipped. Those rows also mirror orientation/team because collision and
+// seat consumers observe them.
 namespace {
 
 // The class update the joiner's world runs for a row no compact writes: an
@@ -1212,7 +1207,7 @@ void JoinerRole::mirror_mission_entity(replication::ClientEntityState &es) {
 	// registry row here, not the other way round.
 	// [orig: NapiNPClientMsg_0x02F @0x430E10, the one client writer of a
 	//  flag's pose]
-	if (kernel_->wire_header_world && replication::is_carry_objective(es.type_id)) {
+	if (replication::is_carry_objective(es.type_id)) {
 		es.x = local->position.x.q16;
 		es.y = local->position.y.q16;
 		es.z = local->position.z.q16;
@@ -1669,8 +1664,7 @@ void JoinerRole::refresh_wire_collision_proxies() {
 			// never a later same-type occupant of the handle (D-NET-676)
 			// [orig: NapiNPClientMsg_EntityDeath @0x42EBC6, the slot address].
 			if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
-						world, world::EntityHandle{entity.handle}, entity.type_id,
-						kernel.wire_header_world))
+						world, world::EntityHandle{entity.handle}, entity.type_id))
 				proxy.registry_twin = twin->handle;
 			proxy.live_flags = wire_proxy_live_flags(entity);
 			dynamic_proxies.push_back(proxy);
@@ -1889,8 +1883,7 @@ uint32_t JoinerRole::wire_proxy_live_flags(const replication::ClientEntityState 
 	uint32_t flags = row.state_flags_known ? (row.state_flags & world::kEntityFlagCarried) : 0u;
 	if (wire_handle::pool(row.handle) == wire_handle::kPoolItem)
 		if (const world::Entity *twin = replication::replica_row_entity(&materializer_,
-					kernel_->world, world::EntityHandle{row.handle}, row.type_id,
-					kernel_->wire_header_world))
+					kernel_->world, world::EntityHandle{row.handle}, row.type_id))
 			flags |= twin->engine_flags & 0x02000000u;
 	return flags;
 }

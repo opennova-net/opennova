@@ -95,6 +95,9 @@ void JoinerRole::bind(mission::MissionKernel &kernel) {
 	// The previous kernel may already be gone (a load swaps it before the
 	// rebind); only the new one is touched.
 	Role::bind(kernel);
+	// A joiner's world is header-only: every join opens the host's S2C 0x0B header alone
+	// (D-NET-194), and every decoded pool 1..3 row has its materializer-owned twin.
+	kernel.wire_header_world = true;
 	if (runtime) runtime->set_profile(&kernel.profile);
 	if (runtime) runtime->set_weapon_table(&kernel.world.tables.weapons);
 	// The +368 readers (the vehicle sound and part-spin gates) resolve remote
@@ -745,7 +748,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 			if (!mission::pool_takes_item_seat_spec(lifetime.handle.pool())) continue;
 			if (world::Entity *entity = kernel.world.registry.get(lifetime))
 				mission::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
-						kernel.wire_header_world);
+						/*p_wire_header_world=*/true);  // a joiner's world is header-only
 		}
 	};
 	refresh_seats(sync.spawned);
@@ -1283,7 +1286,7 @@ void JoinerRole::pump() {
 		const devtools::ProfileScope prewalk(world.profile, devtools::Slot::SIM_WALK_REPLICA_POOL0);
 		devtools::ProfileLap parts(world.profile); // its three parts (an instrument)
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
-				&materializer_, kernel.wire_header_world, ReplicaGunLeg::Pool1Walk);
+				&materializer_, ReplicaGunLeg::Pool1Walk);
 		parts.mark(devtools::Slot::SIM_WALK_REPLICA_GUNS);
 		rt.view().tick_remote_motion_through_self();
 		parts.mark(devtools::Slot::SIM_WALK_REPLICA_MIDDLE);
@@ -1440,7 +1443,7 @@ void JoinerRole::pump() {
 			world.out.destruction.effects.push_back(std::move(effect));
 		}
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle(),
-				&materializer_, kernel.wire_header_world, ReplicaGunLeg::AfterOwnBody);
+				&materializer_, ReplicaGunLeg::AfterOwnBody);
 		rt.tick_remote_recoil();
 	}
 	rt.view().tick_org1_looks(); // org1's looks, after the gun channels and the recoil

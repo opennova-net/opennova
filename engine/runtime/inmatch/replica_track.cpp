@@ -35,9 +35,9 @@ void rebuild_route(world::World &world, const replication::ClientState &state) {
 		// [orig: `mov [esi+218h], bl` @0x42fff0 (dfx2.exe)]; JO's skip
 		// [orig: NapiNPClientMsg_0x00F @0x42e497]
 		if (state.world_state.waypoint_done_stored) entry.done = wp.done != 0;
-		// The marker's own position: the registry's pool-3 entity (a
-		// full-BMS joiner promoted it), else the decoded pool-3 row (a
-		// wire-header joiner streamed it), else whatever the old entry held.
+		// The marker's own position: the registry's pool-3 entity (the
+		// materializer's row), else the decoded pool-3 row, else whatever
+		// the old entry held.
 		const world::EntityHandle marker_h = world::EntityHandle::make(3, wp.slot_id);
 		if (const world::Entity *marker = world.registry.get(marker_h)) {
 			entry.x = marker->position.x.q16;

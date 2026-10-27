@@ -63,12 +63,12 @@ int32_t replica_parent_profile_type(const world::World &world, const world::Enti
 //  @0x440CBF; NapiNPClientMsg_0x00D target store @0x4332D7]
 void publish_replica_gun_words(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
-		const replication::ClientWorldMaterializer *materializer, bool wire_header_world) {
+		const replication::ClientWorldMaterializer *materializer) {
 	for (const replication::ClientEntityState &child : state.entities) {
 		const uint16_t carrier_handle = replication::persistent_carrier_handle(child);
 		if (carrier_handle == wire_handle::kInvalid) continue;
 		const world::Entity *child_twin = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{child.handle}, child.type_id, wire_header_world);
+				world::EntityHandle{child.handle}, child.type_id);
 		if (child_twin == nullptr || !child_twin->emplaced_update ||
 				world::emplaced_slot_def(world, *child_twin) == nullptr)
 			continue;
@@ -89,7 +89,7 @@ void publish_replica_gun_words(replication::ClientState &state,
 				attachment->anchor.bone_index == 0 || attachment->anchor_subobject != 0)
 			continue;
 		const world::Entity *carrier_twin = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{carrier->handle}, carrier->type_id, wire_header_world);
+				world::EntityHandle{carrier->handle}, carrier->type_id);
 		if (carrier_twin == nullptr)
 			continue;
 		// The words the class update publishes: past the slew, ahead of the counter-rotation and
@@ -139,7 +139,7 @@ void write_present_replica_vehicle_gun(float *record, const world::World &world,
 void tick_replica_emplaced_channels(replication::ClientState &state,
 		const std::vector<mission::ItemSeatSpec> &specs, world::World &world,
 		uint16_t self_handle, const replication::ClientWorldMaterializer *materializer,
-		bool wire_header_world, ReplicaGunLeg leg) {
+		ReplicaGunLeg leg) {
 	const bool pool1 = leg == ReplicaGunLeg::Pool1Walk;
 	// The seated persons, in row order: a carrier's gunner is found among them, not by a
 	// walk of every row for each carrier. Retail reaches the carrier from its rider, whose
@@ -159,7 +159,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 		// wire entity's type: a reused handle, a same-type newcomer included,
 		// must not forward a foreign phase (D-NET-620).
 		world::Entity *const local_mount = replication::replica_row_entity(materializer, world,
-				world::EntityHandle{mount.handle}, mount.type_id, wire_header_world);
+				world::EntityHandle{mount.handle}, mount.type_id);
 		const world::Entity *spin_source = local_mount;
 		const bool same_type = spin_source != nullptr;
 		if (pool1) mount.emplaced_spin_phase = same_type ? spin_source->emplaced_spin_phase : 0;
@@ -279,6 +279,6 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 			break;
 		}
 	}
-	if (!pool1) publish_replica_gun_words(state, specs, world, materializer, wire_header_world);
+	if (!pool1) publish_replica_gun_words(state, specs, world, materializer);
 }
 } //namespace opennova::inmatch

@@ -399,12 +399,12 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored
 		// registry entity behind the decoded handle, so EntityIndex can defer
-		// that row to MissionPresentPass. A production header-only joiner instead presents
-		// every streamed row wire-direct: pools 1-3 have exact-handle native gameplay rows,
-		// but those rows carry the spawn-origin sentinel and therefore no authored-node
-		// identity. The guarded fill below exists only for an explicit complete-BMS/debug
-		// join, where authored promotion supplied a matching type at the same handle.
-		// Hidden/alive/animation state still comes from the wire. Remote pool-0 organics
+		// that row to MissionPresentPass. A joiner's world is header-only: pools 1-3 have
+		// the materializer's exact-handle native gameplay rows, and the guarded fill below
+		// takes the placed identity it stamped on the initial stream's rows at the pool-0
+		// fence (assign_placement_origins); a row streamed later carries the spawn-origin
+		// sentinel and presents wire-direct. Hidden/alive/animation state still comes
+		// from the wire. Remote pool-0 organics
 		// remain wire-rendered through their remote-request-shaped body path.
 		const EntityHandle h{es.handle};
 		const Entity *ent = (!joiner) ? kernel.world.registry.get(h) : nullptr;
@@ -413,7 +413,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// (replication::replica_row_entity; D-NET-620).
 		const Entity *owned = joiner
 				? replication::replica_row_entity(context.materializer, kernel.world, h,
-						es.type_id, kernel.wire_header_world)
+						es.type_id)
 				: nullptr;
 		// Retail's terrain collector sends pool-1 model rows through
 		// Render_SectorEntity; pool-2 statics and pool-3 marker models join the
