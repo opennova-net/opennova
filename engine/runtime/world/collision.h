@@ -799,9 +799,13 @@ public:
     // read a registry row's own words; without it the last resolve's end pose stands
     // in (an unstamped harness row). eye_offset (optional) is the row's CameraOffset
     // as its mover stored it; without it the resolver derives the org1 eye.
+    // mounted_latch is the row's mounted latch, which a decoded row's caller answers
+    // (a row attached to a seat carries the attach's Flags 0x40): it suppresses every
+    // model push force, as a registry row's Flags 0x40 or live modeled parent does.
     // [orig: Entity_UpdateInfantryPlayerBody @0x4B4190..0x4B419C, the call @0x4B7CF4;
     //  Entity_UpdateInfantryAI @0x4B9A53..0x4B9A6E; Entity_MovementCollisionResolver
-    //  @0x4B2BD0 - the eye @0x4B2EE2..0x4B2EFB]
+    //  @0x4B2BD0 - the eye @0x4B2EE2..0x4B2EFB, the latch @0x4B2BE0..0x4B2C02 /
+    //  @0x4B2D10..0x4B2D3F]
     int32_t resolve_replica(World &world, ResolveState &state, int32_t pos[3],
                             int32_t vel_xy[2], int32_t &vel_z,
                             int32_t capsule_bottom, int32_t capsule_top,
@@ -811,7 +815,8 @@ public:
                             int32_t peer_count, uint16_t exclude_handle,
                             uint32_t *entity_flags, EntityHandle *out_ground,
                             const int32_t *saved_live_pos = nullptr,
-                            const int32_t *eye_offset = nullptr, int32_t item_id = 0);
+                            const int32_t *eye_offset = nullptr, int32_t item_id = 0,
+                            bool mounted_latch = false);
     // A wire replica row's ground column (raycast_ground) through the same
     // candidate slice its resolve reads (resolve_replica's staging), the row's
     // Flags mirror gating the terrain clamp. The player body's slope conform
@@ -1326,6 +1331,8 @@ private:
     // Staged like replica_flags_: the calling row's savedLivePose, which
     // resolve_entity reads where it reads a registry row's own words.
     const int32_t *replica_saved_live_ = nullptr;
+    // Staged like replica_flags_: the calling row's mounted latch (resolve_replica).
+    bool replica_mounted_latch_ = false;
     // resolve_replica's candidate staging under the reserved invalid key, which
     // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
     size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,

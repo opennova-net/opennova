@@ -2911,6 +2911,25 @@ void test_replica_resolve_candidates_ground_and_peers() {
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
 
+    // (b2) D-COL-15: a seated row's mounted latch (its seat attach's Flags 0x40, which
+    // the caller answers) suppresses the model push force: the same capsule stays put,
+    // while the resolve still runs its contacts and clears the staged zone bits.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34,
+    //  the force gates @0x4B3045..0x4B30AF / @0x4B3658..0x4B36B9]
+    {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(6.6), fx(10.0), fx(0.0)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        uint32_t flags = kEntityFlagIndoors;
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               &flags, &ground, nullptr, nullptr, 0, /*mounted_latch=*/true);
+        CHECK(pos[0] == fx(6.6)); // no push out of the face
+        CHECK((flags & kEntityFlagIndoors) == 0); // the resolve-start clear still ran
+    }
+
     // (c) Peer repulsion + self-exclusion, far from every model candidate.
     {
         CollisionWorld::ResolveState state;

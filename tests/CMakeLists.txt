@@ -5429,6 +5429,14 @@ add_executable(netsim_client_replica_pipeline_body_exits_test
 target_link_libraries(netsim_client_replica_pipeline_body_exits_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_pipeline_body_exits
     COMMAND netsim_client_replica_pipeline_body_exits_test)
+# D-COL-15: a joiner's live seated org1 row's head (its channel, its savedLivePose stamp), its seat
+# block's scrub and its mounted tail's eight-tick resolve; a seated player row's head channel; a
+# dead seated body's mounted latch.
+add_executable(netsim_client_replica_seated_org1_resolve_test
+    netsim/client_replica_seated_org1_resolve_test.cpp)
+target_link_libraries(netsim_client_replica_seated_org1_resolve_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME netsim_client_replica_seated_org1_resolve
+    COMMAND netsim_client_replica_seated_org1_resolve_test)
 # D-NET-NEW-L5-47..50: the player body's view phase both bodies share, and the authority's seated
 # body running it (the skip branch's legs, the seat Yaw clamp and its skips, the crashed mount's
 # pitch skip, the prone local's mount clear, the chase camera's halved driver Pitch).

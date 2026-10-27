@@ -133,6 +133,12 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                 (parent != nullptr &&
                  (parent->has_item_def || has_instance(world, parent->handle)));
     }
+    // A decoded row's latch is its caller's (resolve_replica): the row's seat attach sets its
+    // Flags 0x40, which its Flags mirror does not carry.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - `and edx, 40h` / `or eax, edx`
+    //  @0x4B2D2B..0x4B2D34; Entity_AttachToVehicleSlot @0x4946D0 - `or ecx, 40h` @0x494760,
+    //  the store @0x494775]
+    if (ent == nullptr && replica_mounted_latch_) suppress_model_force = true;
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
     // The previous-tick CL latch, read BEFORE the per-resolve clear: it selects
@@ -1050,7 +1056,8 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
                                         int32_t peer_count, uint16_t exclude_handle,
                                         uint32_t *entity_flags, EntityHandle *out_ground,
                                         const int32_t *saved_live_pos,
-                                        const int32_t *eye_offset, int32_t item_id) {
+                                        const int32_t *eye_offset, int32_t item_id,
+                                        bool mounted_latch) {
     // The row's candidate slice. Retail refreshes every pool-0 entity's slice
     // on the 17-tick edge — the client's wire-built persons included — and the
     // movement resolver walks that slice, up to 16 ticks stale by design
@@ -1078,6 +1085,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_flags_ = entity_flags;
     replica_saved_live_ = saved_live_pos;
     replica_item_id_ = item_id;
+    replica_mounted_latch_ = mounted_latch;
     int16_t health_dummy = 100; // damage legs are authority-gated off anyway
     const EntityHandle replica_key; // kInvalid — pool 15 slot 4095, never allocated
     // The row's own CameraOffset is the eye point, as retail's resolver reads the
@@ -1094,6 +1102,7 @@ int32_t CollisionWorld::resolve_replica(World &world, ResolveState &state, int32
     replica_flags_ = nullptr;
     replica_saved_live_ = nullptr;
     replica_item_id_ = 0;
+    replica_mounted_latch_ = false;
     unstage_replica_candidates(arena_mark);
     return clearance;
 }

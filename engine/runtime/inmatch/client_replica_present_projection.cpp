@@ -172,15 +172,16 @@ void project_client_replica_present_row(
 	// An armed row presents the same simulation-owned primary channel whose
 	// root delta moves the replica, a corpse's death clip included (the mover's
 	// death edge commits it). Frozen (bit0) or unresolved rows, and every carried
-	// row but a seated player's, are disarmed by the fold and fall back to the
-	// latest wire state. A seated player row presents the channel its pass runs
-	// (tick_seated_body, D-NET-330), as an authoritative body presents its own
-	// (present_rows.cpp write_present_body): the bone build samples the body's
-	// primary channel, seated or not.
+	// row but a seated body's, are disarmed by the fold and fall back to the
+	// latest wire state. A seated row, a player's or an org1 body's, presents the
+	// channel its pass runs at its head (advance_seated_channel, D-NET-330), as an
+	// authoritative body presents its own (present_rows.cpp write_present_body): the
+	// bone build samples the body's primary channel, seated or not.
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF
-	//  ahead of the mounted site @0x4B637C..0x4B638F; Entity_BuildBoneTransformMatrices
-	//  @0x4B1290 - the primary channel @0x4B1355, AnimChannel_ComputeBoneMatrices
-	//  called @0x4B1388]
+	//  ahead of the mounted site @0x4B637C..0x4B638F; Entity_UpdateInfantryAI @0x4B9910 -
+	//  the dual update @0x4B9A48 ahead of the seat branch @0x4BE8F7;
+	//  Entity_BuildBoneTransformMatrices @0x4B1290 - the primary channel @0x4B1355,
+	//  AnimChannel_ComputeBoneMatrices called @0x4B1388]
 	const bool root_motion_armed = entity.rm_adm_id >= 0 && entity.rm_state >= 0;
 	if (root_motion_armed) {
 		// The channel already ran the per-record receive arbitration + the

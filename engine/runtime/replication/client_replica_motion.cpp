@@ -7,6 +7,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 
 #include "client_replica_body_arbitration.h"
+#include "client_replica_channel.h"
 #include "client_replica_legs.h"
 
 #include <runtime/audio/sound_profile.h>            // kSlot* (the replica mover legs' profile slots)
@@ -639,172 +640,6 @@ void row_org1_slope_pass(ClientEntityState &es, uint32_t key, uint32_t def_attri
 			io::bam_sar(io::bam_add(io::bam_sub(pitch_slope, es.rm_body_pitch), 4), 3));
 }
 
-// One served ring entry for a decoded row's channel (world::AnimVariantRings,
-// D-NET-196): entry 0 without the shared table.
-int32_t row_serve_ring(world::AnimVariantRings *rings, const world::IRootMotionSource &src,
-                       const ClientEntityState &es, int state) {
-	return rings != nullptr ? rings->serve(&src, es.rm_adm_id, state) : 0;
-}
-
-// A decoded row's AnimMap primary channel, its state half: the gait insert, the
-// re-init onto `target_state` (the insert's, when one replaces the request) and
-// the deferred promotion. Returns whether the promotion released a loop parked on
-// its boundary this tick (row_channel_advance treats that as the wrap).
-// [orig: AnimMap_UpdateEntity @0x40B5F0]
-bool row_channel_prepare(ClientEntityState &es, world::IRootMotionSource &src,
-                         world::AnimVariantRings *rings, int &target_state) {
-	const int blend_key_state = target_state;
-	if (es.net_anim_pending == 0 && es.rm_state >= 0 &&
-			es.net_anim_current >= 0 && target_state != es.rm_state) {
-		const int trans =
-				world::gait_stance_transition_clip(es.rm_state, target_state);
-		if (trans >= 0 && src.clip_length_ticks(es.rm_adm_id, trans, 0) >= 0) {
-			es.net_anim_pending = static_cast<int16_t>(target_state);
-			es.net_anim_pending_boundary = -1;
-			es.net_anim_current = static_cast<int16_t>(trans);
-			target_state = trans;
-		}
-	}
-	// A channel re-init plays the played state's ring head and advances it, from
-	// the heads every body of the .adm shares (the client's own World body too)
-	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778: the head read @0x40B740,
-	// table[S] = node+0x24 @0x40B746..0x40B749, slot+0x44 = node @0x40B76F].
-	const auto serve = [&](int state) { return row_serve_ring(rings, src, es, state); };
-	if (es.rm_state < 0) {
-		es.rm_state = static_cast<int16_t>(target_state);
-		es.rm_prev_state = static_cast<int16_t>(target_state);
-		es.rm_variant = serve(target_state);
-		es.rm_prev_variant = es.rm_variant;
-		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
-				? es.net_anim_ratio
-				: 0;
-		es.net_anim_ratio_live = false;
-		es.rm_prev_phase = es.rm_phase;
-		es.rm_blend_weight = 1.0f;
-		es.rm_blend_step = 0.0f;
-		es.rm_prev_bottom_live = false;
-	} else if (target_state != es.rm_state) {
-		if (es.rm_blend_weight >= 1.0f) {
-			es.rm_prev_state = es.rm_state;
-			es.rm_prev_phase = es.rm_phase;
-			es.rm_prev_variant = es.rm_variant;
-		}
-		es.rm_state = static_cast<int16_t>(target_state);
-		es.rm_variant = serve(target_state);
-		es.rm_phase = (es.cls == EntityClass::Player && es.net_anim_ratio_live)
-				? es.net_anim_ratio
-				: 0;
-		es.net_anim_ratio_live = false;
-		// A deferred state armed against the previous clip re-arms on the new
-		// clip: the park is only ever the playing clip's own wrap.
-		es.net_anim_pending_boundary = -1;
-		es.rm_blend_weight = 0.0f;
-		es.rm_blend_step =
-				(world::infantry_anim_flags(blend_key_state) & 0x400u) != 0
-						? (1.0f / 15.0f)
-						: 0.1f;
-	}
-	// The clip-end deferred promotion [orig: the deferral arms the channel's
-	// end-notify each tick (@0x40b7db/@0x40b7ad), AnimChannel_AdvancePlayback
-	// latches it at the next loop wrap / one-shot end (@0x40b1ae/@0x40b18f),
-	// and AnimMap promotes on the latched flag (@0x40b795/@0x40b7c3) — the
-	// promoted retarget lands on the NEXT tick, as here]. The boundary is
-	// armed lazily in the growing-phase convention; a queue behind an
-	// already-finished one-shot (or a track-less state) promotes immediately —
-	// the shipped hold-wedge safety, recorded inside D-NET-209.
-	// The promotion that releases a channel parked on its boundary leaves the
-	// loop on its end, so the old channel wraps on that tick (as
-	// world::advance_primary_channel's kReleased).
-	bool released = false;
-	if (es.net_anim_pending != 0) {
-		if (es.net_anim_pending_boundary < 0) {
-			const int32_t len =
-					src.clip_length_ticks(es.rm_adm_id, es.rm_state, es.rm_variant);
-			if (len <= 0) {
-				es.net_anim_pending_boundary = es.rm_phase;
-			} else if (src.clip_loops(es.rm_adm_id, es.rm_state, es.rm_variant)) {
-				es.net_anim_pending_boundary = src.clip_boundary_after(
-						es.rm_adm_id, es.rm_state, es.rm_phase, es.rm_variant);
-			} else {
-				es.net_anim_pending_boundary = len;
-			}
-		}
-		if (es.rm_phase >= es.net_anim_pending_boundary) {
-			released = es.rm_phase == es.net_anim_pending_boundary;
-			es.net_anim_current = es.net_anim_pending;
-			es.net_anim_pending = 0;
-			es.net_anim_pending_boundary = -1;
-			// The promoted request starts at frame zero on its retarget —
-			// retail zeroes the +0x377 seed every tick [orig: @0x40b7e4].
-			es.net_anim_ratio_live = false;
-		}
-	}
-	return released;
-}
-
-// The channel's playhead half: the advance (parked while armed) and an unarmed
-// loop wrap's ring serve, or the blend's two halves. False = no track.
-// [orig: AnimMap_UpdateEntity @0x40B5F0 (the advance @0x40B7FE)]
-bool row_channel_advance(ClientEntityState &es, world::IRootMotionSource &src,
-                         world::AnimVariantRings *rings, bool released,
-                         world::RootMotionFrame &frame) {
-	bool have = false;
-	const auto serve = [&](int state) { return row_serve_ring(rings, src, es, state); };
-	if (es.rm_blend_weight >= 1.0f) {
-		int32_t phase = es.rm_phase;
-		const int state = es.rm_state;
-		const int32_t variant = es.rm_variant;
-		const bool armed = es.net_anim_pending != 0;
-		// With a deferral armed, the boundary tick samples the parked clip end
-		// (the promote above read the latch first) [orig: AnimChannel_AdvancePlayback
-		// @0x40B193..0x40B1B1; AnimMap_UpdateEntity advance @0x40B7FE].
-		have = src.advance_armed(es.rm_adm_id, state, variant, phase,
-		                         armed ? es.net_anim_pending_boundary : -1, frame);
-		es.rm_phase = phase;
-		// An unarmed loop that wraps serves its playing state's ring: another entry
-		// fades in from its first frame over eight ticks, the same entry plays on;
-		// an armed channel parks instead and serves nothing. The wrap tick reads
-		// both halves at weight 0: the wrapped entry's motion and extents, the
-		// incoming entry's trigger word at t = 0.
-		// [orig: AnimChannel_AdvancePlayback @0x40B140 (the park @0x40B19E, the
-		//  callback @0x40B1C8) -> AnimMap_AdvanceToNextAnim @0x40BDF0: the serve
-		//  @0x40BE02..0x40BE07, the same-entry return @0x40BE09..0x40BE0C, the
-		//  eight-tick init @0x40BE13..0x40BE24; world::advance_primary_channel]
-		const bool wrapped = released
-				? src.clip_loops(es.rm_adm_id, state, variant)
-				: !armed && src.clip_wraps_at(es.rm_adm_id, state, variant, es.rm_phase);
-		if (have && wrapped) {
-			const int32_t served = serve(state);
-			if (served != variant) {
-				es.rm_prev_state = es.rm_state;
-				es.rm_prev_variant = variant;
-				es.rm_prev_phase = es.rm_phase;
-				es.rm_variant = served;
-				es.rm_phase = 0;
-				es.rm_blend_weight = 0.0f;
-				es.rm_blend_step = anim::kWrapFadeStep;
-				int32_t outgoing_phase = es.rm_prev_phase - 1;
-				int32_t incoming_phase = -1;
-				src.advance_blended(es.rm_adm_id, state, variant, outgoing_phase, state, served,
-				                    incoming_phase, es.rm_blend_weight, frame);
-			}
-		}
-	} else {
-		es.rm_blend_weight += es.rm_blend_step;
-		if (es.rm_blend_weight >= 1.0f) {
-			es.rm_blend_weight = 1.0f;
-			es.rm_blend_step = 0.0f;
-		}
-		int32_t pphase = es.rm_prev_phase, tphase = es.rm_phase;
-		have = src.advance_blended(es.rm_adm_id, es.rm_prev_state, es.rm_prev_variant, pphase,
-		                           es.rm_state, es.rm_variant, tphase, es.rm_blend_weight,
-		                           frame);
-		es.rm_prev_phase = pphase;
-		es.rm_phase = tphase;
-	}
-	return have;
-}
-
 // What a player row's body pass reads beyond its own words: the carrier pose and the ground's
 // occupant words for its ride, its driver's hold and its ride link, whether its ground entity is a
 // vehicle in its crash state, which lifts its view phase's Yaw clamp and skips its pitch lag, and
@@ -1258,6 +1093,13 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		q.has_saved_live = true;
 		// The own row's eye is the World body's (LocalPlayer), never restamped here.
 		q.has_eye = es.cls == EntityClass::Player && !is_self;
+		// A free-standing body still attached is a dead org1 body its record still seats (the
+		// live one takes the seated branch): its seat attach's Flags 0x40 stands until the
+		// detach, so its resolve sets the mounted latch.
+		// [orig: Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34;
+		//  Entity_UpdateInfantryAI @0x4B9910 - the call @0x4BF7F2; Entity_DetachFromVehicle
+		//  @0x4355F0 - Flags &= ~0x40 @0x435910]
+		q.mounted_latch = es.carrier_handle != wire_handle::kInvalid;
 		const int32_t clearance = (*resolver)(q);
 		es.x = q.pos[0];
 		es.y = q.pos[1];
@@ -1564,38 +1406,17 @@ static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 	return false;
 }
 
-// A seated body's pass, which ends at the mounted site: the primary channel at its
-// head (its capsule is the eye's extent), the site's scrub, the seat carry, then the
-// site's four leg words, a passenger's lean keys and the eye, in that order. The
-// seated row presents this channel, as every armed row does (D-NET-330).
-// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the dual update @0x4B41DF; the
-//  seat carry Entity_GetBoneTransformAndOrientation @0x4B6510 (+0x8C @0x4B654E, the legs
+// A seated player body's pass ends at the mounted site: the site's scrub, the seat carry, then
+// the site's four leg words, a passenger's lean keys and the eye over the channel's capsule
+// (`frame`, this tick's from advance_seated_channel, or none), in that order.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the seat carry
+//  Entity_GetBoneTransformAndOrientation @0x4B6510 (+0x8C @0x4B654E, the legs
 //  @0x4B6554 / @0x4B655A, Roll @0x4B6572, +0x90 @0x4B6575); the site's leg words
 //  @0x4B668B..0x4B66A3; the passenger test `cmp [esi+168h], 1` @0x4B6684, left
 //  @0x4B66B5, right @0x4B66C3; the local test @0x4B66CD; the eye @0x4B66D9..0x4B68FC (the
 //  extent cap @0x4B66D9..0x4B66EC)]
-void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat) {
-	world::RootMotionFrame frame;
-	bool have = false;
-	if (root_motion_ != nullptr && es.rm_adm_id >= 0) {
-		int target_state = es.net_anim_current >= 0
-				? static_cast<int>(es.net_anim_current)
-				: static_cast<int>(es.anim_state_id);
-		const bool bottom_reset_state =
-				(target_state >= world::anim_state::kClimbIdle &&
-				 target_state <= world::anim_state::kClimbIdle + 3) ||
-				(target_state >= world::anim_state::kDeathGrenadeBase &&
-				 target_state <= world::anim_state::kDeathGrenadeBase + 3);
-		const bool released = row_channel_prepare(es, *root_motion_, anim_rings_, target_state);
-		if (bottom_reset_state) es.rm_prev_bottom_live = false;
-		have = row_channel_advance(es, *root_motion_, anim_rings_, released, frame);
-		// The capsule-bottom history the AnimMap update rewrites every update
-		// [orig: AnimMap_UpdateEntity @0x40B88E..0x40B8A0].
-		if (have) {
-			es.rm_prev_bottom = frame.capsule_bottom;
-			es.rm_prev_bottom_live = true;
-		}
-	}
+void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat,
+		const world::RootMotionFrame *frame) {
 	const ClientEntityState *carrier = state_.find(es.carrier_handle);
 	// The mounted site's scrub on every seated pass, ahead of the seat carry: the
 	// chute, in-air, afloat, ladder, dive and armory bits, the vertical velocity and
@@ -1637,11 +1458,65 @@ void ClientReplicaPipeline::tick_seated_body(ClientEntityState &es, const Replic
 	// The eye: the channel's capsule extent capped at 0xD000, the four turns over
 	// the seat's words (world::player_body_capsule_eye, the authority's seated leg
 	// too).
-	if (!have) return;
-	int32_t extent = frame.capsule_top - frame.capsule_bottom;
+	if (frame == nullptr) return;
+	int32_t extent = frame->capsule_top - frame->capsule_bottom;
 	if (extent > 0xD000) extent = 0xD000;
 	world::player_body_capsule_eye(extent, es.lean_angle, es.heading_bam, es.rm_body_heading,
 	                               es.roll_bam, es.rm_body_pitch, es.eye_offset);
+}
+
+// A live seated org1 body's mounted tail: past its seat branch and the mounted fire window, on
+// its eight-tick key (the update's stagger key, the bare tick on a client), it runs the movement
+// resolver over the capsule its dual update returned, the return discarded. The resolver reads
+// the body's own words: the seat pose the seat branch left, its velocity (the seat branch zeroed
+// the vertical word), Flags, savedLivePose (the head's stamp, last tick's seat pose) and the
+// derived org1 eye, the latch set by the seat attach's Flags 0x40; its clear and blink set
+// re-derive the Indoors bit (0x800000) the seat branch's mask kept, and its probe stores the
+// ground link the next update's head stores back (D-COL-15).
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the key `g_CurrentTick + 36 * entity+0x7C`
+//  @0x4B9948..0x4B9959, its `& 7` @0x4BA066..0x4BA072, the mount test @0x4BF4B3..0x4BF4C9, the
+//  key test @0x4BF5A5..0x4BF5AD, the call @0x4BF5BE (the capsule locals @0x4BF5B3..0x4BF5BC, the
+//  dual update's out @0x4B9A22..0x4B9A48); Entity_MovementCollisionResolver @0x4B2BD0 - the
+//  at-rest skip @0x4B2C1E..0x4B2CEC, the clear @0x4B2D2E..0x4B2D36, the blink set
+//  @0x4B34C0..0x4B3502, the probe @0x4B3D95]
+void ClientReplicaPipeline::resolve_seated_org1(ClientEntityState &es,
+		const world::RootMotionFrame &frame, uint32_t rm_key) {
+	if (!replica_contact_resolver_ || (rm_key & 7u) != 0u) return;
+	ReplicaContactQuery q;
+	q.row_handle = es.handle;
+	q.row_lifetime = es.spawn_revision;
+	q.row_respawn = es.respawn_revision;
+	q.type_id = es.type_id;
+	q.is_player_class = false;
+	q.pos[0] = es.x;
+	q.pos[1] = es.y;
+	q.pos[2] = es.z;
+	q.vel_xy[0] = es.rm_vel_xy[0];
+	q.vel_xy[1] = es.rm_vel_xy[1];
+	q.vel_z = es.rm_vel_z;
+	q.capsule_bottom = frame.capsule_bottom;
+	q.capsule_top = frame.capsule_top;
+	q.source_bound_radius_q16 = replica_bound_radius_resolver_
+			? replica_bound_radius_resolver_(es.type_id)
+			: 0;
+	// The anim state as the free-standing call reads it (row_root_motion_tick).
+	q.anim_state_id = es.anim_state_id;
+	q.anim_state_flags = world::infantry_anim_flags(es.anim_state_id);
+	q.tick = rm_key;
+	q.peers = contact_peer_scratch_.data();
+	q.peer_count = static_cast<int32_t>(contact_peer_scratch_.size());
+	q.entity_flags = es.rm_entity_flags;
+	for (int axis = 0; axis < 3; ++axis) q.saved_live_pos[axis] = es.net_saved_live_pose[axis];
+	q.has_saved_live = true;
+	q.has_eye = false;
+	q.mounted_latch = true;
+	(void)replica_contact_resolver_(q);
+	es.x = q.pos[0];
+	es.y = q.pos[1];
+	es.z = q.pos[2];
+	es.rm_vel_z = q.vel_z;
+	es.rm_entity_flags = q.entity_flags;
+	es.resolved_ground = q.out_ground;
 }
 
 // The look of every org1 row whose visit this tick reached it. A free-standing row takes the
@@ -1876,6 +1751,23 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	const bool in_vehicle = es.carrier_handle != wire_handle::kInvalid &&
 			!(es.cls == EntityClass::Infantry && es.net_health_zero);
 	if (in_vehicle) {
+		// A seated body's dual update at its update's head, ahead of its chase and the chase's
+		// starved exit (advance_seated_channel): a remote player body's and an org1 body's. The
+		// client's own seated row's channel is its World body's.
+		const bool seated_channel = es.mount_bone != 0 &&
+				(es.cls == EntityClass::Infantry ||
+				 (es.cls == EntityClass::Player && es.handle != self_handle));
+		world::RootMotionFrame seat_frame;
+		const bool seat_frame_have = seated_channel && advance_seated_channel(es, seat_frame);
+		// The org1 head then stamps savedLivePose from the position the body's last update left
+		// it, its last seat pose: this update's seat pose is its seat branch's, below.
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - @0x4B9A53..0x4B9A6E, after the dual update
+		//  @0x4B9A48]
+		if (es.cls == EntityClass::Infantry) {
+			es.net_saved_live_pose[0] = es.x;
+			es.net_saved_live_pose[1] = es.y;
+			es.net_saved_live_pose[2] = es.z;
+		}
 		// A seated body runs the chase apply too (no exit ahead of it tests the seat): the
 		// seated record resets its count, and with no record for 512 ticks it starves and
 		// returns ahead of its ride link and its mounted site. Its position step is the
@@ -1903,13 +1795,26 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		//  ride @0x4BA45D..0x4BA88E ahead of the seat branch @0x4BE8F7]
 		if (es.cls == EntityClass::Infantry && carrier_pose_provider_)
 			row_deck_ride(es, carrier_pose_provider_, deck_ride_yaw_adds(es), /*seated=*/true);
-		// A live seated org1 body reaches its seat branch, whose look half runs after the tick's
-		// gun channels (tick_org1_looks).
+		// A live seated org1 body reaches its seat branch. With a parent that has a def, the
+		// branch clears the chute, in-air, afloat, ladder, dive and armory bits (the mask keeps
+		// Indoors, 0x800000) and the vertical velocity, then poses the body on its seat (the
+		// row's carrier-local sample); its look half runs after the tick's gun channels
+		// (tick_org1_looks). The mounted tail follows (resolve_seated_org1).
 		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the seat test @0x4B9960..0x4B9985, the
-		//  branch @0x4BE8F7]
+		//  branch @0x4BE8F7, the parent's def test @0x4BEBEC..0x4BEBFD, `and dword ptr [esi+24h],
+		//  0FF8F57DFh` @0x4BEC03, `mov [esi+0A0h], ebx` @0x4BEC15, the seat pose
+		//  Entity_AttachToBoneAndUpdateTransform @0x4BEC23 / the bone pose @0x4BED4E..0x4BEDDA,
+		//  the mounted tail @0x4BF4B3..0x4BF5BE]
 		if (es.cls == EntityClass::Infantry) {
+			const ClientEntityState *carrier = state_.find(es.carrier_handle);
+			if (carrier != nullptr) {
+				es.rm_entity_flags &= 0xFF8F57DFu;
+				es.rm_vel_z = 0;
+			}
+			if (follows_carrier_seat(es)) follow_carrier_seat(es, carrier);
 			es.rm_look_due = true;
 			es.rm_look_seated = true;
+			if (seat_frame_have) resolve_seated_org1(es, seat_frame, rm_key);
 		}
 		// A seated player row's view phase (row_org2_view_phase), its record's Flags 0x40 taking
 		// the skip branch: the Yaw held 120 degrees about the body heading its last seat carry left
@@ -1956,12 +1861,12 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		if (es.cls == EntityClass::Player && es.handle != self_handle &&
 				ground_occupant_provider_)
 			row_ride_link(es, state_, ground_occupant_provider_);
-		// A seated body's pass runs its channel and ends at the mounted site
-		// (bone 0 is a deck, not a seat) [orig: Entity_UpdateInfantryPlayerBody
-		// @0x4B40E0 - the dual update call @0x4B41DF, the site selector on the mount
-		// word +0x16C @0x4B637C..0x4B638F].
+		// A seated player body's pass ends at the mounted site, the eye over the channel its
+		// head ran (bone 0 is a deck, not a seat) [orig: Entity_UpdateInfantryPlayerBody
+		// @0x4B40E0 - the site selector on the mount word +0x16C @0x4B637C..0x4B638F].
 		if (seated_player && es.mount_bone != 0)
-			tick_seated_body(es, seat_resolved ? &seat : nullptr);
+			tick_seated_body(es, seat_resolved ? &seat : nullptr,
+					seat_frame_have ? &seat_frame : nullptr);
 		return;
 	}
 	// No vehicle mover tests wire bit 0 [orig: Entity_UpdatePool1Slot calls the mover
@@ -2440,9 +2345,14 @@ void ClientReplicaPipeline::visit_parked_rows(std::vector<ParkedRow> &rows) {
 		//  bone pose through the branch @0x4B64EF to the Entity_GetBoneTransformAndOrientation
 		//  call @0x4B6510, ahead of the eye restamp]
 		// An organic body whose update exits ahead of its mounted site keeps its pose
-		// (body_update_ends_ahead).
+		// (body_update_ends_ahead). A seated org1 body's update poses it at its seat branch,
+		// after its head's savedLivePose stamp read the pose its last update left
+		// (visit_remote_row's seated branch).
+		// [orig: Entity_UpdateInfantryAI @0x4B9910 - the stamp @0x4B9A53..0x4B9A6E ahead of the
+		//  seat pose @0x4BEC23 / @0x4BED4E..0x4BEDDA]
 		const bool organic = es.cls == EntityClass::Player || es.cls == EntityClass::Infantry;
-		if (follows_carrier_seat(es) && !(organic && body_update_ends_ahead(es)))
+		if (es.cls != EntityClass::Infantry && follows_carrier_seat(es) &&
+				!(organic && body_update_ends_ahead(es)))
 			follow_carrier_seat(es, state_.find(es.carrier_handle));
 		visit_remote_row(es, parked_self_, parked_tick_);
 	}

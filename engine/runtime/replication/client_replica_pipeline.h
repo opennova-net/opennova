@@ -29,6 +29,7 @@ class CharacterRegistry; // runtime/inmatch/character_registry.h
 namespace opennova::world {
 class IRootMotionSource;
 class AnimVariantRings;
+struct RootMotionFrame;
 struct WeaponTable;
 struct LiveRound;
 struct HitRecord;
@@ -266,6 +267,13 @@ public:
 		// NPC row, whose eye the resolver derives (the org1 restamp at a rest lean).
 		int32_t eye_offset[3] = {};
 		bool has_eye = false;
+		// The row's mounted latch: a row attached to a seat (its record names one, carrier_handle)
+		// carries the attach's Flags 0x40, live or dead, which the row's Flags mirror does not;
+		// the resolver then suppresses every model push force.
+		// [orig: Entity_AttachToVehicleSlot @0x4946D0 - `or ecx, 40h` @0x494760;
+		//  Entity_DetachFromVehicle @0x4355F0 - Flags &= ~0x40 @0x435910;
+		//  Entity_MovementCollisionResolver @0x4B2BD0 - the latch @0x4B2D2B..0x4B2D34]
+		bool mounted_latch = false;
 	};
 	using ReplicaContactResolver = std::function<int32_t(ReplicaContactQuery &)>;
 	void set_replica_contact_resolver(ReplicaContactResolver resolver) {
@@ -972,10 +980,18 @@ private:
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
-	// A seated player row's body pass (client_replica_motion.cpp): its primary
-	// channel, the seat carry (from `seat`, its resolved seat frame, or none), a
-	// passenger's lean keys and the mounted eye.
-	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat);
+	// A seated body's primary channel at its update's head (client_replica_motion.cpp): true
+	// with this tick's frame when the channel has a track.
+	bool advance_seated_channel(ClientEntityState &es, world::RootMotionFrame &frame);
+	// A seated player row's mounted site (client_replica_motion.cpp): the seat carry (from
+	// `seat`, its resolved seat frame, or none), a passenger's lean keys and the mounted eye
+	// over `frame`, this tick's channel frame (or none).
+	void tick_seated_body(ClientEntityState &es, const ReplicaSeatFrame *seat,
+			const world::RootMotionFrame *frame);
+	// A live seated org1 row's mounted tail on its eight-tick key: the movement resolver over
+	// its channel's capsule (client_replica_motion.cpp).
+	void resolve_seated_org1(ClientEntityState &es, const world::RootMotionFrame &frame,
+			uint32_t rm_key);
 	// One row's whole visit in tick_remote_motion's walk, and the walk's corpse
 	// erase (client_replica_motion.cpp).
 	void visit_remote_row(ClientEntityState &es, uint16_t self_handle, uint32_t rm_key);
