@@ -60,10 +60,6 @@ inline int mounted_anim_state_for_seat(const Entity &target, const Seat &seat, c
 	return state;
 }
 
-// Whole degrees -> 32-bit binary angle by the original's multiplier, used for the commanded
-// elevation (brain+0x314) only. [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
-constexpr int64_t kBamPerDegreeInt = 11930464; // trunc(2^32/360) — the original multiplier
-
 // Saturation clamp on the death-velocity magnitude. [orig: flt_7C19E0 = 0x4EFFFE00.]
 constexpr double kDeathSpeedClamp = 2147418112.0;
 

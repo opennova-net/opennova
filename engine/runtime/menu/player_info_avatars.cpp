@@ -1,6 +1,7 @@
 #include <runtime/menu/player_info_avatars.h>
 
 #include <base/crt/crt_rng.h>
+#include <base/io/bam.h>
 #include <formats/avatars/preview_animation.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/player_info_kit.h>
@@ -180,10 +181,9 @@ int32_t player_info_preview_yaw_step(int32_t yaw, bool hovered, uint32_t tick_ms
 
 int32_t player_info_preview_initial_yaw_bam(uint32_t seed) {
 	// [orig: PlayerInfo_InitPreviewModel @0x560128 (srand), @0x5601a2..0x5601b7]
-	constexpr int32_t kBamPerWholeDegree = 0xB60B60;
 	crt::crt_srand(seed);
 	const int32_t degrees = static_cast<int32_t>(crt::crt_rand15()) % avatars::kPreviewInitialYawRangeDeg;
-	return degrees * kBamPerWholeDegree;
+	return io::bam_mul(degrees, io::kBamPerWholeDegree);
 }
 
 } // namespace opennova::menu

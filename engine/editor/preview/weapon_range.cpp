@@ -406,8 +406,7 @@ void WeaponRange::bias_(bool suppressed, float units[3], float rot_deg[3]) const
 	world::player_view_bias_view_units(local_->view, suppressed, zero, units);
 	int32_t bam[3];
 	world::local_player_viewmodel_rotation_bias(world_.get(), local_->weapon, local_->view, bam);
-	constexpr double kDegreesPerBam = 360.0 / 4294967296.0;
-	for (int i = 0; i < 3; ++i) rot_deg[i] = float(bam[i] * kDegreesPerBam);
+	for (int i = 0; i < 3; ++i) rot_deg[i] = float(bam[i] * io::kDegreesPerBam);
 }
 
 void WeaponRange::fire_shots_(int32_t tick) {

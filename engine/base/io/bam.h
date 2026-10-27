@@ -78,6 +78,13 @@ inline int32_t bam_from_radians(double radians) {
 	return static_cast<int32_t>(static_cast<int64_t>(std::llround(radians * kBamPerRadian)));
 }
 
+// Retail's whole-degree scale, trunc(2^32 / 360): every `atol * 0xB60B60` site in the
+// image multiplies an integer degree count by it with imul, so the product wraps
+// (bam_mul). kDegreesPerBam is the exact inverse scale, for tools and presentation-only
+// conversions with no retail counterpart.
+constexpr int32_t kBamPerWholeDegree = 0xB60B60;
+constexpr double kDegreesPerBam = 360.0 / 4294967296.0;
+
 // The plain angle constants every port aliases (the same one-home rule as the
 // BAM scales above): pi and the degree <-> radian scales.
 constexpr double kPi = 3.14159265358979323846;

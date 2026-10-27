@@ -1099,8 +1099,8 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         return true;
     case 0x16: // commanded elevation, degrees -> BAM32 [orig: @0x4659EF —
                // brain+0x314 = arg * 11930464; the solver's WEAPON_PITCHLOCKED leg]
-        e.brain.f[AiBrain::kElevationBias] =
-                static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
+               // [orig: AI_HandleCommand @0x4659F2 (imul 0B60B60h)]
+        e.brain.f[AiBrain::kElevationBias] = io::bam_mul(ev.f[3], io::kBamPerWholeDegree);
         return true;
     default:
         // 13..20 have no shared command arm: state-specific event handlers
