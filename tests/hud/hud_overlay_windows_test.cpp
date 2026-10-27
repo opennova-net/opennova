@@ -275,6 +275,18 @@ void test_view_veil_layer(const fnt_font_t *font) {
 					span.element == HudElement::FrameRateOverlay)
 				CHECK(at_or_before(span.end, list.panels_begin));
 		}
+		// Each window and panel draws whole before the next: an order break closes the Tab
+		// list's run and the pause text's, so the device leg's kind runs keep the walk's order.
+		const auto closed = [&list](const HudDrawCursor &end) {
+			for (const HudDrawList::TopBegin &mark : list.order_breaks)
+				if (mark.quads == end.quads && mark.tris == end.tris && mark.lines == end.lines &&
+						mark.glyphs == end.glyphs && mark.underlines == end.underlines)
+					return true;
+			return false;
+		};
+		for (const HudElementSpan &span : list.element_spans)
+			if (span.element == HudElement::Scoreboard || span.element == HudElement::PausedText)
+				CHECK(closed(span.end));
 	}
 	// The Tab list's call site: a dead local body, or the round over, draws none.
 	state.local_dead = true;

@@ -2257,7 +2257,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	const FlatRange above = flat_span_(p_list, top, p_list.panels_begin);
 	if (!flat_empty_(above)) {
 		ensure_top_item_();
-		render_flat_(top_item_, p_list, above);
+		render_flat_runs_(top_item_, p_list, above);
 	}
 	const FlatRange panels = flat_span_(p_list, p_list.panels_begin, end);
 	if (flat_empty_(panels)) {
@@ -2265,7 +2265,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	}
 	ensure_panels_canvas_();
 	sync_panels_canvas_();
-	render_flat_(panels_item_, p_list, panels);
+	render_flat_runs_(panels_item_, p_list, panels);
 }
 
 void HudOverlay::ensure_panels_canvas_() {

@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
@@ -1309,12 +1310,13 @@ struct HudDrawList {
 	// [orig: Render_ProcessMainSceneFrame - the menu @0x5CAE13..0x5CAE31 (sub_54B990
 	//  @0x5CAE31), then HUD_DrawOverlayPanels @0x5CAE3B]. SIZE_MAX: none.
 	TopBegin panels_begin;
-	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
-	// submits each run between consecutive breaks as its own quads / tris /
-	// lines / glyphs group, so an element that must layer in the walk's
-	// order (the vehicle-bay logos over what came before and under what
-	// comes after) is not lifted above the later quads. Each break is the
-	// kind cursors at the point it was marked.
+	// Kind-grouping restarts in the flat HUD: the device leg submits each run
+	// between consecutive breaks as its own quads / tris / lines / glyphs
+	// group, so an element that must layer in the walk's order (the
+	// vehicle-bay logos over what came before and under what comes after;
+	// each window and overlay panel above the big map, layered_) is not
+	// lifted above the later quads. Each break is the kind cursors at the
+	// point it was marked.
 	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
 	// Which element of the walk emitted each run of the flat lists (and drew a map pass), in the
@@ -1772,6 +1774,17 @@ private:
 		const bool map = draw_list_.map.visible, big_map = draw_list_.big_map.visible;
 		draw();
 		note_element_(element, from, !map && draw_list_.map.visible, !big_map && draw_list_.big_map.visible);
+	}
+	// An element above the big map (the gameplay overlays' windows and legs, the overlay panels),
+	// which draws whole before the next, its quads under its own text and over the last one's,
+	// as the game draws each in turn: the run of one that drew closed by an order break, which the
+	// device leg's kind runs keep (order_breaks) [orig: HUD_DrawGameplayOverlays @0x5BDE60;
+	// HUD_DrawOverlayPanels @0x5C0060].
+	template <typename Draw>
+	void layered_(HudElement element, Draw &&draw) {
+		const size_t spans = draw_list_.element_spans.size();
+		element_(element, std::forward<Draw>(draw));
+		if (draw_list_.element_spans.size() != spans) mark_order_break();
 	}
 	HudDrawCursor draw_cursor_() const;
 	void note_element_(HudElement element, const HudDrawCursor &from, bool map, bool big_map);

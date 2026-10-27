@@ -741,20 +741,21 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 void HudFrameCompiler::compile_overlay_panels(const HudFrameState &state, float w, float h) {
 	draw_list_.panels_begin = {draw_list_.quads.size(), draw_list_.tris.size(),
 			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size()};
-	element_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, w, h); });
-	element_(HudElement::EndRoundStatistics, [&] { element_end_round_statistics(state, w, h); });
-	element_(HudElement::MessageLog, [&] { element_message_log(state, w, h); });
+	// Each panel draws whole before the next (layered_).
+	layered_(HudElement::EndRoundOverlay, [&] { element_end_round_overlay(state, w, h); });
+	layered_(HudElement::EndRoundStatistics, [&] { element_end_round_statistics(state, w, h); });
+	layered_(HudElement::MessageLog, [&] { element_message_log(state, w, h); });
 	if (!state.combat.death_screen) {
-		element_(HudElement::VoiceMenus, [&] {
+		layered_(HudElement::VoiceMenus, [&] {
 			element_voice_macro_menu(state, state.emotes_menu, kHudEmotesMenuContextRow, w, h);
 		});
-		element_(HudElement::VoiceMenus, [&] {
+		layered_(HudElement::VoiceMenus, [&] {
 			element_voice_macro_menu(state, state.radio_menu, kHudRadioMenuContextRow, w, h);
 		});
 	}
-	element_(HudElement::PausedText, [&] { element_paused_text(state, w, h); });
-	element_(HudElement::ChatInput, [&] { element_chat_input(state, w, h); });
-	element_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, w, h); });
+	layered_(HudElement::PausedText, [&] { element_paused_text(state, w, h); });
+	layered_(HudElement::ChatInput, [&] { element_chat_input(state, w, h); });
+	layered_(HudElement::KillAnnouncement, [&] { element_kill_announcement(state, w, h); });
 }
 
 // HUD_DrawGameplayOverlays, which the scene frame calls after the big map, so
@@ -780,7 +781,7 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	// then @0x5cad1d CTipSystem_Draw(1)]. /NOHUD does not reach it (the
 	// gameplay-overlay gate below is HUD_DrawGameplayOverlays').
 	if (state.minimap.map_mode != 0 && !state.local_dead)
-		element_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
+		layered_(HudElement::TipAlternate, [&] { element_tip(state, true, w, h); });
 	if (state.overlay_master == 0u) return;
 	// The head legs, in their order. The level-3 skip jumps past the overlay and the bar to the
 	// FARP leg (the service prompt's own level test keeps that) (D-NET-NEW-LI-32,
@@ -789,26 +790,28 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	// status line and the start timer follow the bar, past its round-over gate
 	// (D-NET-NEW-LI-42) [orig: HUD_DrawPingDisplay called @0x5BDED8, HUD_DrawTimerOverlay
 	// called @0x5BDEDD].
+	// Each window draws whole before the next (layered_).
 	if (state.hud_detail_level != 3) {
-		element_(HudElement::FrameRateOverlay, [&] { element_frame_rate_overlay(state, w, h); });
-		element_(HudElement::BreathBar, [&] { element_breath_bar(state, w, h); });
-		element_(HudElement::ConnectStatus, [&] { element_connect_status(state, w, h); });
-		element_(HudElement::StartTimer, [&] { element_start_timer(state, w, h); });
+		layered_(HudElement::FrameRateOverlay, [&] { element_frame_rate_overlay(state, w, h); });
+		layered_(HudElement::BreathBar, [&] { element_breath_bar(state, w, h); });
+		layered_(HudElement::ConnectStatus, [&] { element_connect_status(state, w, h); });
+		layered_(HudElement::StartTimer, [&] { element_start_timer(state, w, h); });
 	}
-	element_(HudElement::ServicePrompt, [&] { element_service_prompt(state, w, h); });
+	layered_(HudElement::ServicePrompt, [&] { element_service_prompt(state, w, h); });
 	// The Tab player list while the local body is alive and the round runs (D-HUD-73)
 	// [orig: `test Flags, 2` @0x5be121, HUD_DrawKillListIfVisible @0x5be124 - its g_RoundOver
 	//  and g_ScoreboardPanelVisible tests @0x424310].
 	if (!state.local_dead && !state.round_over)
-		element_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
-	element_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
-	element_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
-	element_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
+		layered_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
+	layered_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
+	layered_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
+	layered_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
 	// @0x5be185; UI_DrawQuitConfirmDialog @0x5be1ce]. Out of a session
 	// it would also draw the save-game list (sub_5B72E0 / sub_5B74B0
 	// @0x5be1dd..0x5be1eb); the dialog only opens in a session.
-	if (state.hud_detail_level != 3) element_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });
+	if (state.hud_detail_level != 3)
+		layered_(HudElement::QuitDialog, [&] { element_quit_dialog(state, w, h); });
 }
 
 // docs/interface/hud-re.md (D-HUD-27, D-HUD-30).
