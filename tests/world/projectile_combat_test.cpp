@@ -312,7 +312,7 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.rounds[static_cast<size_t>(source_slot)].trail_slot >= 0);
     const LiveRound source =
         r.world.round_sim.rounds[static_cast<size_t>(source_slot)];
-    r.world.round_sim.tick(r.world, nullptr); // age 1 < arm age 2
+    r.world.round_sim.tick(r.world, nullptr); // elapsed 0 at the handler < arm age 2
     CHECK(r.world.registry.get(r.target)->health == 100);
     CHECK(r.world.round_sim.hits.empty());
     CHECK(r.world.round_sim.deaths.empty());
@@ -365,6 +365,21 @@ void test_arming_dud_and_armed_damage() {
     CHECK(r.world.round_sim.hits[0].damage == 25);
     CHECK(r.world.round_sim.impacts.size() == 1);
     CHECK(r.world.round_sim.impacts[0].ammo_index == 0);
+
+    // An arm age of 1 is still pre-arm at the first tick: the handler reads the elapsed
+    // age (+0x2A4 less +0x2AC) before the ballistic tail's step, 0 here.
+    // [orig: Projectile_HandleEntityImpact `sub ecx,[ebx+2ACh]` @0x4E9400, the compare
+    //  @0x4E9414; Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89]
+    r.world.round_sim.reset();
+    r.world.registry.get(r.target)->health = 100;
+    r.clear_events();
+    r.world.tables.ammo.entries[0].arm_age_ticks = 1;
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.registry.get(r.target)->health == 100);
+    CHECK(r.world.round_sim.hits.empty());
+    CHECK(r.world.round_sim.impacts.size() == 1);
+    if (!r.world.round_sim.impacts.empty()) CHECK(r.world.round_sim.impacts[0].ammo_index == 1);
 }
 
 // JO:CA's base ammo.def ends on GRENADE_NOEXP's `end` and the file's NUL, with
@@ -2753,11 +2768,12 @@ void test_water_impact_splash_is_pushed_along_the_ray() {
     CHECK(to_fixed(impacts[0].position.x) == 828466 + 19659);
     CHECK(std::fabs(impacts[0].position.y + 20.0f) < 0.001f);
     CHECK(impacts[0].position.z == 1.0f);
-    // The round flies on under the water: its remaining life halves (20 - (19 >> 1) past
-    // the tick's age step), its velocity words shift right by three ahead of the tail's
-    // gravity and drag, and it parks 0x800 past the crossing (the handler's point plus
-    // 0x1000). [orig: Projectile_SpawnImpactEffect @0x4E9C3C, @0x4E9CFE..0x4E9D0C;
-    //  Projectile_UpdatePhysics @0x4EA83D..0x4EA896]
+    // The round flies on under the water: its remaining life halves ((20 >> 1) - 1 left,
+    // the tail's step after the halving), its velocity words shift right by three ahead
+    // of the tail's gravity and drag, and it parks 0x800 past the crossing (the handler's
+    // point plus 0x1000). [orig: Projectile_SpawnImpactEffect @0x4E9C3C,
+    //  @0x4E9CFE..0x4E9D0C; Projectile_UpdatePhysics @0x4EA83D..0x4EA896, the tail
+    //  @0x4EAA71..0x4EAA89]
     const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
     CHECK(round.active);
     CHECK(round.age_ticks == 11);
@@ -2802,6 +2818,53 @@ void test_a_clipwater_round_ends_at_the_water() {
     CHECK(!world.round_sim.rounds[static_cast<size_t>(slot)].active);
 }
 
+// A water stop halves the remaining life the tick found (+0x2AC, the def lifetime less
+// the elapsed age), and the ballistic tail's step follows: one off a word above 1, a
+// word of 1 to 0. 20 left: 10, then 9. 21 left: 10, then 9. 3 left: 1, then 0, the
+// round expiring at the next tick's head. [orig: Projectile_SpawnImpactEffect `sar
+// [ebx+2ACh], 1` @0x4E9C3C; Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89]
+void test_a_water_stop_halves_the_life_the_tick_found() {
+    struct Case { int32_t max_age; int32_t age; int32_t age_after; };
+    for (const Case c : {Case{20, 0, 11}, Case{21, 0, 12}, Case{20, 17, 20}}) {
+        HeapWorldFixture fixture;
+        World &world = fixture.world;
+        world.registry.configure_pool(0, 4);
+        AmmoTableEntry ammo;
+        ammo.name = "SPLASH";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = c.max_age;
+        world.tables.ammo.entries.push_back(ammo);
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld collision;
+        collision.terrain = &flat;
+        collision.build_tick_tables(world);
+        world.collision = &collision;
+        world.env.water_z = 1 << 16;
+        RoundSpawnParams params;
+        params.origin = {10.0f, -20.0f, 3.0f};
+        params.ammo_index = 0;
+        const int slot = world.round_sim.spawn(world, params);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+        round.vel = Vec3{8.0f, 0.0f, -6.0f};
+        round.age_ticks = c.age;
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(world.round_sim.impacts.size() == 1);
+        CHECK(round.active);
+        CHECK(round.age_ticks == c.age_after);
+        if (c.age_after < c.max_age) continue;
+        world.round_sim.tick(world, &flat, &collision);
+        CHECK(!round.active); // the lifetime head releases it
+    }
+}
+
 // The terrain handler's effect stands on the ground under its point (0x800 short of the
 // hit), and a kill-zone round that has not armed plays its notarmmed def's effect or,
 // with none, nothing: no effect, scorch or hit record. A round with no kill zone plays
@@ -2811,8 +2874,11 @@ void test_a_clipwater_round_ends_at_the_water() {
 //  @0x4E92E9; Projectile_UpdatePhysics @0x4EA603..0x4EA65C]
 void test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud() {
     struct Case { int kztype; int arm_age; const char *dud; int impacts; int ammo_index; };
+    // An arm age of 1 is still pre-arm at a fresh round's first impact: the handler reads
+    // the elapsed age before the tail's step, 0 on the round's first tick.
     for (const Case c : {Case{0, 5, "", 1, 0}, Case{2, 5, "", 0, -1}, Case{2, 5, "TERRAIN_DUD", 1, 1},
-                         Case{2, 5, "not_in_the_table", 0, -1}}) {
+                         Case{2, 5, "not_in_the_table", 0, -1}, Case{2, 1, "", 0, -1},
+                         Case{2, 1, "TERRAIN_DUD", 1, 1}}) {
         HeapWorldFixture fixture;
         World &world = fixture.world;
         world.registry.configure_pool(0, 4);
@@ -2979,7 +3045,10 @@ void test_noage_stops_aging_only_on_the_useownmove_leg() {
 // [orig: Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C32 (the zero test
 //  @0x4E9C22..0x4E9C24), the call @0x4E9D3E]
 void test_pre_arm_water_splash_takes_the_dud_row() {
-    for (const int arm_age : {5, 0}) {
+    // An arm age of 1 is still pre-arm at the round's first tick (elapsed 0, the tail's
+    // step after the handler) [orig: Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C08;
+    //  Projectile_UpdatePhysics @0x4EAA71..0x4EAA89].
+    for (const int arm_age : {5, 1, 0}) {
         for (const char *dud_name : {"SPLASH_DUD", "", "NOT_IN_THE_TABLE", "first_def"}) {
             HeapWorldFixture fixture;
             World &world = fixture.world;
@@ -3025,7 +3094,7 @@ void test_pre_arm_water_splash_takes_the_dud_row() {
             CHECK(impacts.size() == 1);
             if (impacts.size() != 1) continue;
             CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
-            const bool dud_row = arm_age == 5 && std::strcmp(dud_name, "SPLASH_DUD") == 0;
+            const bool dud_row = arm_age > 0 && std::strcmp(dud_name, "SPLASH_DUD") == 0;
             CHECK(impacts[0].ammo_index == (dud_row ? 2 : 1));
             // No dud child replaces the round: whatever flies on is the round itself.
             for (const auto &round : world.round_sim.rounds)
@@ -3051,7 +3120,7 @@ void test_entity_dud_naming_the_first_def_is_a_miss() {
     p.origin = {0.0f, 0.0f, 0.9f};
     p.ammo_index = 2;
     CHECK(r.world.round_sim.spawn(r.world, p) >= 0);
-    r.world.round_sim.tick(r.world, nullptr); // age 1 < arm age 2
+    r.world.round_sim.tick(r.world, nullptr); // elapsed 0 at the handler < arm age 2
     CHECK(r.world.round_sim.impacts.size() == 1);
     if (r.world.round_sim.impacts.size() == 1)
         CHECK(r.world.round_sim.impacts[0].ammo_index == 2);
@@ -4566,6 +4635,7 @@ static const NamedTest kTests[] = {
     {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_pre_arm_water_splash_takes_the_dud_row", test_pre_arm_water_splash_takes_the_dud_row},
     {"test_a_clipwater_round_ends_at_the_water", test_a_clipwater_round_ends_at_the_water},
+    {"test_a_water_stop_halves_the_life_the_tick_found", test_a_water_stop_halves_the_life_the_tick_found},
     {"test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud",
      test_terrain_impact_stands_on_the_ground_and_a_pre_arm_round_takes_its_dud},
     {"test_noage_stops_aging_only_on_the_useownmove_leg", test_noage_stops_aging_only_on_the_useownmove_leg},

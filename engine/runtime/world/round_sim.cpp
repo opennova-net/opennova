@@ -1740,6 +1740,14 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // The round's words as they stand [orig: Projectile_UpdatePhysics - Position
         //  @0x4EA22C..0x4EA23D, velocity @0x4EA0DC..0x4EA0E8].
         const FixedVec3 position_q16 = r.pos.q16();
+        // The handlers read the lifetime as the tick found it: the ballistic leg takes
+        // its one off the remaining word (+0x2AC) only at its tail, after them, and each
+        // handler's elapsed age is the def lifetime (+0x2A4) less that word. Ours stepped
+        // the age at the head, so the age they read is one back. [orig:
+        //  Projectile_UpdatePhysics - the tail @0x4EAA71..0x4EAA89;
+        //  Projectile_HandleEntityImpact `sub ecx,[ebx+2ACh]` @0x4E9400, the compare
+        //  @0x4E9414; Projectile_SpawnImpactEffect @0x4E9BF6..0x4E9C08]
+        const int32_t entry_age = io::bam_sub(r.age_ticks, 1);
         FixedVec3 velocity_q16 = r.vel.q16();
 
         const FixedVec3 incoming_velocity_q16 = velocity_q16;
@@ -1877,7 +1885,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // entity, so the same lifecycle is projected as an in-slot logical child:
         // owner/kinematics/elapsed age survive, the dud definition supplies the new
         // lifetime, and the trail slot at retail +0x2B4 (exactly byte 692) does not.
-        const bool pre_arm = ammo != nullptr && r.age_ticks < ammo->arm_age_ticks;
+        const bool pre_arm = ammo != nullptr && entry_age < ammo->arm_age_ticks;
         const bool not_armed = entity_hit && pre_arm;
         int32_t impact_ammo_index = r.ammo_index;
         LiveRound dud_replacement;
@@ -2298,7 +2306,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         //  @0x4E9C40..0x4E9C81: no authority test].
         bool kill_zone_pushed = false;
         if (ammo != nullptr) {
-            const bool armed = r.age_ticks >= ammo->arm_age_ticks;
+            const bool armed = entry_age >= ammo->arm_age_ticks;
             bool produce = false;
             switch (collision.hit_class) {
                 case ProjectileHitClass::Terrain:
@@ -2314,8 +2322,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                               ammo->kz_damage != 0;
                     break;
                 case ProjectileHitClass::Water: {
-                    const int32_t remaining = r.max_age_ticks - r.age_ticks;
-                    const int32_t halved_age = r.max_age_ticks - (remaining >> 1);
+                    const int32_t remaining = io::bam_sub(r.max_age_ticks, entry_age);
+                    const int32_t halved_age = io::bam_sub(r.max_age_ticks, io::bam_sar(remaining, 1));
                     produce = armed && (ammo->kztype & 1) != 0 &&
                               halved_age > ammo->arm_age_ticks;
                     break;
@@ -2420,14 +2428,18 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // velocity words right by three; the round flies on from the ray point 0x800
         // past the crossing (the handler's point plus 0x1000) unless its ammo carries
         // ClipWater (0x1000000), which releases it. The common gravity/drag tail then
-        // applies. [orig: Projectile_SpawnImpactEffect @0x4E9B80 - `sar [ebx+2ACh], 1`
+        // applies. The halving takes the word the tick found, and the tail's step
+        // follows it: one off a word above 1, a word of 1 to 0, a lower word kept.
+        // [orig: Projectile_SpawnImpactEffect @0x4E9B80 - `sar [ebx+2ACh], 1`
         //  @0x4E9C3C, the velocity @0x4E9CFE..0x4E9D0C, the ClipWater release
         //  @0x4E9D50..0x4E9D53; Projectile_UpdatePhysics - the +0x1000 @0x4EA83D, the
-        //  park @0x4EA848..0x4EA896]
+        //  park @0x4EA848..0x4EA896, the tail @0x4EAA71..0x4EAA89]
         if (collision.hit_class == ProjectileHitClass::Water && !submerged_stall &&
                 (ammo_flags & kAmmoFlagClipWater) == 0) {
-            r.age_ticks = signed_from_u32(uint32_t(r.max_age_ticks) -
-                    uint32_t(io::bam_sar(io::bam_sub(r.max_age_ticks, r.age_ticks), 1)));
+            int32_t remaining = io::bam_sar(io::bam_sub(r.max_age_ticks, entry_age), 1);
+            if (remaining > 1) remaining = io::bam_sub(remaining, 1);
+            else if (remaining == 1) remaining = 0;
+            r.age_ticks = io::bam_sub(r.max_age_ticks, remaining);
             velocity_q16 = FixedVec3{io::bam_sar(velocity_q16.x, 3), io::bam_sar(velocity_q16.y, 3),
                     io::bam_sar(velocity_q16.z, 3)};
             const FixedVec3 next_position = round_ray_point(position_q16, incoming_velocity_q16,
