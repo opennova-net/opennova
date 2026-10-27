@@ -190,7 +190,8 @@ func start(name: String, raw_args: Variant) -> Dictionary:
 	run.started_ticks_ms = Time.get_ticks_msec()
 	run.started_at = Time.get_datetime_string_from_system(true, true)
 	run.run_id = "%s-%s-%04x" % [
-		name, run.started_at.replace("-", "").replace(":", "").replace("T", "-"), randi() & 0xFFFF]
+		name, run.started_at.replace("-", "").replace(":", "").replace(" ", "-"), randi() & 0xFFFF]
+	prune_run_dirs(ProjectSettings.globalize_path(RUNS_DIR), KEEP_RUNS - 1)
 	run.artifact_dir = ProjectSettings.globalize_path(RUNS_DIR.path_join(run.run_id))
 	DirAccess.make_dir_recursive_absolute(run.artifact_dir)
 
@@ -337,6 +338,42 @@ func _find(run_id: String) -> Run:
 		if run.run_id == run_id:
 			return run
 	return null
+
+
+## The directories under `root` past the newest `keep` deleted with what they hold, so the runs'
+## PNG and JSON artifacts stay as bounded on disk as their records (KEEP_RUNS). A run's age is the
+## stamp its id carries (<name>-YYYYMMDD-HHMMSS-xxxx, read from the right, so a name holding "-"
+## parses); a directory with no stamp is older than every run's and goes first.
+static func prune_run_dirs(root: String, keep: int) -> void:
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return
+	var unstamped: Array[String] = []
+	var stamped := PackedStringArray()
+	for entry in dir.get_directories():
+		var fields := entry.rsplit("-", true, 3)
+		if fields.size() == 4 and fields[1].length() == 8 and fields[1].is_valid_int() \
+				and fields[2].length() == 6 and fields[2].is_valid_int():
+			stamped.append("%s%s/%s" % [fields[1], fields[2], entry])
+		else:
+			unstamped.append(entry)
+	stamped.sort()
+	var oldest_first: Array[String] = unstamped.duplicate()
+	for key in stamped:
+		oldest_first.append(key.get_slice("/", 1))
+	for index in range(oldest_first.size() - maxi(keep, 0)):
+		_remove_tree(root.path_join(oldest_first[index]))
+
+
+static func _remove_tree(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	for entry in dir.get_directories():
+		_remove_tree(path.path_join(entry))
+	for entry in dir.get_files():
+		DirAccess.remove_absolute(path.path_join(entry))
+	DirAccess.remove_absolute(path)
 
 
 func _live_world() -> GameWorld:

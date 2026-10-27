@@ -56,6 +56,38 @@ func _settled(run_id: String) -> Dictionary:
 	return await _runner.status(run_id, 0, 0)
 
 
+## The run directories stay as bounded as the run records: past the newest `keep` (by the stamp
+## each run id carries, not by name), they go with their artifacts, a stampless one first; a run
+## id's stamp is <date>-<time>, no space in the path.
+func test_prune_run_dirs_keeps_the_newest_runs_by_stamp() -> void:
+	var root := ProjectSettings.globalize_path(ProbeRunner.RUNS_DIR)
+	var names := [
+		"zeta-20261026-090000-0001",
+		"alpha-20261026-100000-00ff",
+		"hud-pass-20261026-110000-1234",
+		"echo-20261025-235959-abcd",
+		"stray",
+	]
+	for run_dir in names:
+		var path := root.path_join(run_dir)
+		DirAccess.make_dir_recursive_absolute(path.path_join("nested"))
+		var file := FileAccess.open(path.path_join("capture.png"), FileAccess.WRITE)
+		file.store_string("x")
+		file.close()
+	ProbeRunner.prune_run_dirs(root, 2)
+	var left := Array(DirAccess.get_directories_at(root))
+	left.sort()
+	assert_eq(left, ["alpha-20261026-100000-00ff", "hud-pass-20261026-110000-1234"])
+	ProbeRunner.prune_run_dirs(root, 0)
+	assert_eq(DirAccess.get_directories_at(root).size(), 0)
+	ProbeRunner.prune_run_dirs(root.path_join("missing"), 1)
+
+	var started: Dictionary = _runner.start("echo", {})
+	assert_false(String(started["run_id"]).contains(" "), "the run id names a path with no space")
+	assert_eq(String(started["run_id"]).rsplit("-", true, 3).size(), 4)
+	await _settled(started["run_id"])
+
+
 func test_list_reports_the_catalog_with_availability() -> void:
 	var listing := _runner.list()
 	var probes: Array = listing["probes"]
