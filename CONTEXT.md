@@ -511,8 +511,8 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 
 **Godot product**:
 One of the two applications exported from the `godot/` project: the OpenNova game
-runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export adds the runtime MCP
-for the editor) and the OpenNova Editor (`opennova-editor.exe`, ADR 0046). Backend
+runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export, `onplay.exe` beside the
+editor, adds the runtime MCP for the editor) and the OpenNova Editor (`oneditor.exe`, ADR 0046). Backend
 services and development tools are outside this taxonomy (ADR 0015); so are
 `opennova-serve` (ADR 0051) and the OpenNova Switcher (ADR 0054).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime

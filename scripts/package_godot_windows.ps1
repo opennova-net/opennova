@@ -219,8 +219,10 @@ $DIST = "$ROOT\dist"
 New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 
 $RUNTIME_EXE = "$DIST\opennova.exe"
-$PLAY_EXE = "$DIST\play\opennova.exe"
-$EDITOR_EXE = "$DIST\editor\opennova-editor.exe"
+# The editor's two exports land in one folder, as its zip ships them: their PCKs are embedded and
+# their names differ, and each loads its own GDExtension (oneditor[d].dll, opennova[d].dll).
+$PLAY_EXE = "$DIST\editor\onplay.exe"
+$EDITOR_EXE = "$DIST\editor\oneditor.exe"
 $EDITOR_ZIP = "$DIST\opennova-editor-windows-v$Version.zip"
 $RUNTIME_SFS = "$DIST\opennova-runtime-windows-v$Version.sfs"
 
@@ -369,13 +371,13 @@ function Test-GodotAppBoot {
 function Test-EditorAppBoot {
     param([string]$EditorExe, [string]$PlayExe)
 
-    Write-Host "=== Boot smoke: opennova-play-runtime ==="
+    Write-Host "=== Boot smoke: onplay ==="
     $usage = Invoke-GodotAppBoot -ExePath $PlayExe -UserArgs "--resource-dir" -ExpectedExit 2
     if ($usage -notmatch "--resource-dir needs a path") {
         Write-Host $usage.TrimEnd()
         throw "Boot smoke did not report the Play runtime's --resource-dir usage error"
     }
-    Write-Host "=== Boot smoke: opennova-editor ==="
+    Write-Host "=== Boot smoke: oneditor ==="
     $editor = Invoke-GodotAppBoot -ExePath $EditorExe -UserArgs "--editor-smoke" -ExpectedExit 0
     if ($editor -notmatch "OpenNova Editor: smoke ok") {
         Write-Host $editor.TrimEnd()
@@ -607,10 +609,10 @@ try {
     Write-Host "=== Exporting opennova.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 
-    Write-Host "=== Exporting the editor's Play runtime ==="
+    Write-Host "=== Exporting onplay.exe, the editor's Play runtime ==="
     Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
 
-    Write-Host "=== Exporting opennova-editor.exe ==="
+    Write-Host "=== Exporting oneditor.exe ==="
     Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
 }
 finally {
@@ -727,30 +729,28 @@ finally {
     }
 }
 
-# --- the editor zip: editor/ (the editor + its DLL + ImGui) and runtime/ (the Play
-#     child + the runtime DLL), the layout the editor's Play looks for ---
+# --- the editor zip: one flat folder, the editor (its DLL and ImGui) and beside it the Play
+#     child (onplay.exe and the runtime DLL), where the editor's Play looks for it. In a debug
+#     export the Play child's ImGui library is the editor's own file (the addon's imguid.dll); a
+#     release Play export carries none (the preset's imgui/release). ---
 $stagePath = New-StageDir ".stage-opennova-editor-windows"
 try {
-    $editorDir = Join-Path $stagePath "editor"
-    $runtimeDir = Join-Path $stagePath "runtime"
-    New-Item -ItemType Directory -Path $editorDir, $runtimeDir | Out-Null
-    $stagedEditorExe = Join-Path $editorDir "opennova-editor.exe"
-    $stagedPlayExe = Join-Path $runtimeDir "opennova.exe"
+    $stagedEditorExe = Join-Path $stagePath "oneditor.exe"
+    $stagedPlayExe = Join-Path $stagePath "onplay.exe"
     Copy-Item -LiteralPath $EDITOR_EXE -Destination $stagedEditorExe
-    Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $editorDir
-    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $editorDir -Required $true | Out-Null
+    Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $stagePath
+    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $stagePath -Required $true | Out-Null
     Copy-Item -LiteralPath $PLAY_EXE -Destination $stagedPlayExe
-    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $runtimeDir
-    Copy-ImGuiLibs -ExeDir (Split-Path $PLAY_EXE -Parent) -Destination $runtimeDir -Required ($ExportMode -eq "debug") | Out-Null
+    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
     $editorHelp = @"
-OpenNova Editor (experimental).
+OpenNova Editor (pre-1.0, experimental).
 
-  editor\opennova-editor.exe   the editor: create or open a project, fill in the
-                               files the game needs, build, play
-  runtime\opennova.exe         the game the editor's Play runs your project with
+  oneditor.exe   the editor: create or open a project, fill in the files the game
+                 needs, build, play
+  onplay.exe     the game the editor's Play runs your project with
 
-Keep the two folders side by side: Play looks for runtime\opennova.exe next to
-the editor folder (or set another runtime in the editor's File > Project settings...).
+Keep the folder's files together: Play runs the onplay.exe beside oneditor.exe
+(or set another runtime in the editor's File > Project settings...).
 "@
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $editorHelp -Encoding UTF8
     Test-EditorAppBoot -EditorExe $stagedEditorExe -PlayExe $stagedPlayExe

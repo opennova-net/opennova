@@ -222,21 +222,25 @@ bool strict_first_run_starts_again(bool had_config, bool has_config, bool exited
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);
 
-// How Play starts the game: the packaged runtime beside the editor, or a source run that
+// How Play starts the game: the Play child packaged beside the editor (onplay.exe), or a source run that
 // drives the Godot binary at the checkout. The shell makes it (make_play_launcher: it knows
 // where it runs from and allocates the MCP port); the settings can name another runtime.
 struct PlayLauncher {
 	bool source_run = false;
-	std::string executable;          // opennova.exe, or the Godot binary for a source run
+	std::string executable;          // onplay.exe (or a runtime the settings name), or the Godot binary for a source run
 	std::string godot_project_dir;   // the checkout's godot/ directory (source runs only)
 	std::vector<std::string> engine_args; // Godot options for the child, before the game flags
 	int mcp_port = 0;                // 0 = no endpoint
 };
 
+// The Play child the editor's package ships in the editor's one flat folder, beside oneditor.exe:
+// the runtime's own export under a name of its own, so the folder holds no opennova.exe to clash
+// with a game folder's, and every name fits the update package's 15 characters.
+inline constexpr const char *kPlayRuntimeExe = "onplay.exe";
+
 // The launcher of an editor running as `editor_executable`: a source run drives that binary
-// on `godot_project_dir`; a packaged editor runs the runtime the package puts beside it, in
-// the release layout's runtime/ directory next to the editor's own
-// (<editor dir>/../runtime/opennova.exe).
+// on `godot_project_dir`; a packaged editor runs the Play child its package puts beside it
+// (<editor dir>/onplay.exe).
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,
                                 const std::string &godot_project_dir, int mcp_port,
                                 std::vector<std::string> engine_args);

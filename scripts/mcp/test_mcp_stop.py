@@ -290,7 +290,7 @@ class LaunchTest(unittest.TestCase):
     def test_the_console_wrapper_is_never_launched(self):
         with tempfile.TemporaryDirectory() as folder:
             for wrapper, real in (("Godot_v4.6.1-stable_win64_console.exe", "Godot_v4.6.1-stable_win64.exe"),
-                                  ("opennova-editor.console.exe", "opennova-editor.exe")):
+                                  ("oneditor.console.exe", "oneditor.exe")):
                 (Path(folder) / real).write_bytes(b"")
                 self.assertEqual(game_mcp.runtime_sibling(Path(folder) / wrapper).name, real)
             self.assertEqual(game_mcp.runtime_sibling(Path(folder) / "lone.console.exe").name, "lone.console.exe")

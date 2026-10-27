@@ -112,11 +112,11 @@ static int test_launch_plans() {
 	TEST_EXPECT(launch_plan_command_line(make_play_launch_plan("C:/a b/opennova.exe", "/x y", "/r", "", 0))
 	                    .find("\"C:/a b/opennova.exe\"") == 0);
 
-	// A packaged editor runs the runtime the release layout puts beside it; a source run
+	// A packaged editor runs the Play child its one flat folder holds beside it; a source run
 	// drives its own binary on the checkout.
-	const PlayLauncher packaged =
-	        make_play_launcher(false, "C:/OpenNova/editor/opennova_editor.exe", "", 8123, {"--headless"});
-	TEST_EXPECT(!packaged.source_run && packaged.executable == "C:/OpenNova/runtime/opennova.exe");
+	const PlayLauncher packaged = make_play_launcher(false, "C:/OpenNova Editor/oneditor.exe", "", 8123, {"--headless"});
+	TEST_EXPECT(std::string(kPlayRuntimeExe) == "onplay.exe");
+	TEST_EXPECT(!packaged.source_run && packaged.executable == "C:/OpenNova Editor/onplay.exe");
 	TEST_EXPECT(packaged.godot_project_dir.empty() && packaged.mcp_port == 8123);
 	TEST_EXPECT(packaged.engine_args == std::vector<std::string>({"--headless"}));
 	const PlayLauncher from_source = make_play_launcher(true, "C:/tools/godot.exe", "C:/repo/godot/", 0, {});

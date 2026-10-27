@@ -25,7 +25,7 @@ enum class CoreFinding;
 inline constexpr int kLocalSettingsSchemaVersion = 2;
 
 struct LocalSettings {
-	std::string runtime_executable; // the opennova.exe Play launches ("" = beside the editor)
+	std::string runtime_executable; // the runtime Play launches ("" = the onplay.exe beside the editor)
 	// The project's game install (ADR 0046 d6/d10: project-local): what it imports from,
 	// depends on and plays in ("" = none). The editor and opennova-project both read it here.
 	std::string game_install;

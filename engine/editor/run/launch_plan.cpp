@@ -833,8 +833,7 @@ PlayLauncher make_play_launcher(bool source_run, const std::string &editor_execu
 		launcher.executable = editor_executable;
 		launcher.godot_project_dir = godot_project_dir;
 	} else {
-		launcher.executable =
-		        utf8_of(path_of(editor_executable).parent_path().parent_path() / "runtime" / "opennova.exe");
+		launcher.executable = utf8_of(path_of(editor_executable).parent_path() / kPlayRuntimeExe);
 	}
 	return launcher;
 }

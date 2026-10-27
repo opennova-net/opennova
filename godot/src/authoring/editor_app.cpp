@@ -198,7 +198,7 @@ bool EditorApp::is_source_run() const {
 }
 
 // Where Play finds the game (opennova::editor::make_play_launcher): this binary at the
-// checkout for a source run, else the runtime packaged beside the editor.
+// checkout for a source run, else the Play child packaged beside the editor (onplay.exe).
 PlayLauncher EditorApp::make_launcher(int p_mcp_port) const {
 	const bool source_run = is_source_run();
 	std::vector<std::string> engine_args;
@@ -842,7 +842,7 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Open a project folder");
 			break;
 		case PickPurpose::RuntimeExecutable:
-			picker_->set_title("Choose the game runtime (opennova.exe)");
+			picker_->set_title("Choose the game runtime (opennova.exe or onplay.exe)");
 			filters.push_back("*.exe ; Game runtime");
 			break;
 		case PickPurpose::GameInstall:

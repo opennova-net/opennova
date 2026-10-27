@@ -37,7 +37,7 @@ bundled native `opennova-3di` readers and writers. See its documentation for
 round-trip limitations.
 
 The OpenNova Editor (pre-1.0 and experimental, ADR 0046) is a separately exported
-application, `opennova-editor.exe`, for the data of the JO and newer titles, starting with
+application, `oneditor.exe`, for the data of the JO and newer titles, starting with
 Joint Operations. A project is a directory of loose game files, a base game or an
 expansion. A Problems list checks every file the engine expects by name and offers fixes
 (one Fix all makes a blank but bootable game). Each file opens in a tab with its unsaved
@@ -137,9 +137,9 @@ Debug builds include the game's dev tools (Insert). Tagged releases also attach
 `opennova-runtime-windows-v<version>.sfs`, the same runtime packed as the update
 `update.exe` installs.
 
-They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
-OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
-with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
+They also publish `opennova-editor-windows-v<version>.zip`, one flat folder: the
+OpenNova Editor (`oneditor.exe`) and beside it `onplay.exe`, the game it plays your
+project with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
 OpenNova, Joint Operations (Escalation included) and Delta Force Xtreme 2 projects
 today; what it edits is listed above.
 
