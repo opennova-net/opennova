@@ -106,7 +106,7 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	// run by the runtime's executable (as the baseline names the seeded ones).
 	if (plan.product.product_name.empty() && !plan.product.retail) {
 		plan.product.product_name = plan.product.display_name;
-		if (plan.product.kind == ProductKind::Base)
+		if (plan.product.kind == ProductKind::Game)
 			plan.product.product_exe = "opennova.exe";
 	}
 	if (plan.product.product_name.empty()) {

@@ -36,8 +36,8 @@ inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
 
 // The owner's settings, as stored (hosted_servers' columns); text in UTF-8.
 struct HostedSettings {
-	// The product it runs (products.id, a base: its title opennova-serve
-	// speaks with /game, its game the lobby it lists in) and the expansion of
+	// The product it runs (products.id, a game: its title opennova-serve
+	// speaks with /game, and its lobby, the games row it lists in) and the expansion of
 	// it, when the owner picked one (/exp with its code).
 	int64_t product_id = 0;
 	std::optional<int64_t> expansion_id;
@@ -131,7 +131,7 @@ inline constexpr const char *kNovaLogicListedGame = "jop_2_consumer";
 // Whether a server on `product` may also list on NovaLogic's NovaWorld (check_settings refuses
 // list_on_novalogic for one that may not).
 inline bool novalogic_lists(const OfferedProduct &product) {
-	return product.game == kNovaLogicListedGame;
+	return product.lobby == kNovaLogicListedGame;
 }
 
 // The value the vault's NovaLogic account fields hold until the real account goes in

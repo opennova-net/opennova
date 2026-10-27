@@ -157,7 +157,7 @@ struct Rig {
 	OwnGame own_game() {
 		const auto rows = db.query(
 				"SELECT key, command_file, display_name FROM products "
-				"WHERE kind = 'base' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
+				"WHERE kind = 'game' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
 		OwnGame own;
 		if (rows.size() == 1) {
 			own.key = rows.front().as_text(0).value_or("");
@@ -429,9 +429,9 @@ static int test_refusals() {
 	Rig rig("opennova_release_build_refusals");
 	hosted::NewProduct loose;
 	loose.display_name = "Loose";
-	loose.kind = hosted::ProductKind::Base;
+	loose.kind = hosted::ProductKind::Game;
 	loose.title = "jo";
-	loose.game = "jop_2_consumer";
+	loose.lobby = "jop_2_consumer";
 	loose.key = "LOOSE";
 	loose.visibility = "private";
 	int64_t loose_id = 0;

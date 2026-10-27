@@ -207,9 +207,9 @@ int run(const test_temp::TempDir &dir) {
 		auto db = pool.acquire();
 		hosted::NewProduct b;
 		b.display_name = "Synthetic";
-		b.kind = hosted::ProductKind::Base;
+		b.kind = hosted::ProductKind::Game;
 		b.title = "jo";
-		b.game = "jop_2_consumer";
+		b.lobby = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
 		b.created_by = "test";

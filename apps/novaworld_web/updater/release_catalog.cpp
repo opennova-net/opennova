@@ -75,7 +75,7 @@ bool list_section_files(
 // files are not witnessed (the installs ship none); an expansion's nested run takes no /RUN.
 // [orig: Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE), US_DONE: the EXE launched when /RUN]
 const char *title_executable(const hosted::ProductRow &row) {
-	if (row.kind != hosted::ProductKind::Base)
+	if (row.kind != hosted::ProductKind::Game)
 		return "";
 	if (row.title == "jo")
 		return "Jointops.exe";

@@ -621,7 +621,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 std::optional<Supervisor::ServerData> Supervisor::data_of(db::Database &db, const HostedServer &s, std::string &why) {
 	ServerData out;
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
-	if (!base || base->kind != ProductKind::Base) {
+	if (!base || base->kind != ProductKind::Game) {
 		why = "its game is gone";
 		return std::nullopt;
 	}

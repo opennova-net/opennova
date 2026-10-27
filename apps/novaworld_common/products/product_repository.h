@@ -1,9 +1,9 @@
 #pragma once
 
-// The games' rows (backend/migrations/0001_baseline.sql, ADR 0064): the products an admin created
-// (one game each: a base game, or one expansion of a base; a game with a project carries its key,
-// visibility and head, project_repository.h), standalone updater products (kind update, no game
-// tree and no project; products_update_check), their trees (each an immutable version of the product's
+// The products' rows (backend/migrations/0001_baseline.sql, ADR 0064): the games an admin created
+// (kind game, a base game, or one expansion of a game; a game with a project carries its key,
+// visibility and head, project_repository.h), standalone updater products (kind app, no game
+// tree and no project; products_app_check), their trees (each an immutable version of a game's
 // files in the object store, core/object_store.h, built from its published release), the
 // update releases (1SFS packages) and the sections each carries, and the trees each hosted server
 // is pinned to. The routes, the supervisor, the worker's jobs and the update listener share it;
@@ -22,19 +22,19 @@
 
 namespace opennova::novaworld_server::hosted {
 
-enum class ProductKind : uint8_t { Base, Expansion, Update };
-const char *product_kind_name(ProductKind kind); // "base", "expansion", "update" (no hosted tree)
+enum class ProductKind : uint8_t { Game, Expansion, App };
+const char *product_kind_name(ProductKind kind); // "game", "expansion", "app" (no hosted tree)
 std::optional<ProductKind> product_kind_from_name(std::string_view name);
 
 // A products row.
 struct ProductRow {
 	int64_t id = 0;
 	std::string display_name;
-	ProductKind kind = ProductKind::Base;
-	std::optional<int64_t> parent_id; // an expansion's base
+	ProductKind kind = ProductKind::Game;
+	std::optional<int64_t> parent_id; // an expansion's base game
 	std::string expansion_code; // an expansion's /exp code: "jox01"
-	std::string title; // a base's gameprofile code: "jo", "dfx2"
-	std::string game; // a base's games slug (its lobby)
+	std::string title; // a game's gameprofile code: "jo", "dfx2"
+	std::string lobby; // a game's games slug (its lobby)
 	std::string updater_login; // "" when the update service does not serve it
 	std::string command_file;
 	// A retail game (NovaLogic's install): its updater's SERVER.LST names ftp.novaworld.com, and
@@ -133,11 +133,11 @@ struct ReleaseSection {
 
 struct NewProduct {
 	std::string display_name;
-	ProductKind kind = ProductKind::Base;
+	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id;
 	std::string expansion_code;
 	std::string title;
-	std::string game;
+	std::string lobby;
 	std::string updater_login;
 	std::string command_file;
 	bool retail = false;
@@ -154,7 +154,7 @@ enum class ProductOutcome : uint8_t {
 	DuplicateLogin, // another product holds the updater login (without case)
 	DuplicateKey, // another game's project has the key
 	DuplicateExpansion, // the parent has an expansion of that code
-	NoSuchParent, // the parent is not a base product
+	NoSuchParent, // the parent is not a game (kind game)
 	InUse, // a live server runs it
 	HasExpansion, // an expansion has it as parent
 };
@@ -166,7 +166,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 // What an admin may change afterwards.
 struct ProductPatch {
 	std::optional<std::string> display_name;
-	std::optional<std::string> game; // a base's
+	std::optional<std::string> lobby; // a game's
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
 	std::optional<bool> retail;
@@ -182,9 +182,9 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 ProductOutcome delete_product(db::Database &db, int64_t id);
 
 std::optional<ProductRow> find_product(db::Database &db, int64_t id);
-// Every row: bases, expansions, then standalone updater products, each by id.
+// Every row: games, expansions, then apps, each by id.
 std::vector<ProductRow> list_products(db::Database &db);
-// The expansions of base `parent_id`, by id.
+// The expansions of the game `parent_id`, by id.
 std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id);
 // The games with a project (a key, project_repository.h), by key in byte order; the private
 // ones only when `include_private`.
@@ -194,7 +194,7 @@ std::optional<ProductRow> find_product_by_key(db::Database &db, std::string_view
 // How many live servers run `id` as their product or expansion.
 int count_live_servers_of(db::Database &db, int64_t id);
 
-// A product a start may pick: a base with a ready current tree, each of its expansions
+// A product a start may pick: a game with a ready current tree, each of its expansions
 // with one beside it. The start form's list and check_settings' `offered`.
 struct OfferedExpansion {
 	int64_t id = 0;
@@ -208,7 +208,7 @@ struct OfferedProduct {
 	int64_t id = 0;
 	std::string display_name;
 	std::string title;
-	std::string game;
+	std::string lobby;
 	int64_t tree_id = 0;
 	std::string version;
 	std::vector<TreeMission> missions;

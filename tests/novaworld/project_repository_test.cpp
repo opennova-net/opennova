@@ -49,7 +49,7 @@ SeededProduct seeded(Database &db, const std::string &where, const std::vector<B
 SeededProduct retail(Database &db, const char *command_file) {
 	return seeded(db, "command_file = $1 AND retail", { BindValue(command_file) });
 }
-// Our own game's ("base") or its expansion's: the one of the kind the update service serves that
+// Our own game's ("game") or its expansion's: the one of the kind the update service serves that
 // is no retail game's.
 SeededProduct own(Database &db, const char *kind) {
 	return seeded(db, "kind = $1 AND updater_login <> '' AND NOT retail", { BindValue(kind) });
@@ -76,7 +76,7 @@ NewRevision revision(const std::string &message, std::optional<int64_t> author =
 static int test_seeded_projects() {
 	TestDatabase tdb;
 	Database db = tdb.open();
-	const SeededProduct game = own(db, "base"), expansion = own(db, "expansion");
+	const SeededProduct game = own(db, "game"), expansion = own(db, "expansion");
 	const SeededProduct jo_set = retail(db, "JOPTR.CMD"), jox_set = retail(db, "JOEPTR.CMD"),
 						dfx2_set = retail(db, "DFX2.CMD");
 	TEST_EXPECT(game.id && expansion.id && jo_set.id && jox_set.id && dfx2_set.id);
@@ -113,7 +113,7 @@ static int test_seeded_projects() {
 	TEST_EXPECT(hosted::find_product(db, jo->id)->key == "JO" &&
 			!project(db, "NOPE"));
 	// The runtime, a game with no project.
-	const auto runtime = db.query("SELECT id FROM products WHERE kind = 'update';");
+	const auto runtime = db.query("SELECT id FROM products WHERE kind = 'app';");
 	TEST_EXPECT(runtime.size() == 1 &&
 			hosted::find_product(db, runtime.front().as_int(0).value_or(0))->key.empty());
 	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
@@ -239,7 +239,7 @@ static int test_pushes() {
 			commit_revision(db, 999999, 0, revision("Nowhere"), head) == CommitOutcome::NotFound);
 	// A game with no project takes no revision.
 	const int64_t runtime =
-			db.query("SELECT id FROM products WHERE kind = 'update';").front().as_int(0).value_or(0);
+			db.query("SELECT id FROM products WHERE kind = 'app';").front().as_int(0).value_or(0);
 	TEST_EXPECT(
 			commit_revision(db, runtime, 0, revision("Runtime"), head) == CommitOutcome::NotFound);
 	TEST_EXPECT(project(db, "JOX01")->head == 3 && project(db, "JO")->head == 0);

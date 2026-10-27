@@ -75,7 +75,7 @@ struct HostedServer {
 	// a dedicated-machine server's), kept through its restarts and moves; unset for
 	// none, and once the address lapses.
 	std::optional<int64_t> address_id;
-	// The trees it is pinned to (products/product_repository.h, ADR 0064): the base product's
+	// The trees it is pinned to (products/product_repository.h, ADR 0064): the game's
 	// and, with an expansion, the expansion's, taken from the products'
 	// current trees at its first start and kept through crash restarts and moves
 	// until its owner asks for an update (update_requested: the supervisor starts

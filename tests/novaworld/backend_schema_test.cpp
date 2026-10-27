@@ -673,9 +673,9 @@ int test_hosted_server_game() {
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, game_name, "
 	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
 	        "SELECT p.id, 'stopped', b.id, e.id, 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players p, "
-	        "products b, products e WHERE p.username = 'host_game' AND b.game = 'jop_2_consumer' "
+	        "products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' "
 	        "AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
-	const auto own = db.query("SELECT d.game, e.expansion_code FROM hosted_servers s "
+	const auto own = db.query("SELECT d.lobby, e.expansion_code FROM hosted_servers s "
 	                          "JOIN products d ON d.id = s.product_id JOIN products e ON e.id = s.expansion_id "
 	                          "WHERE s.game_name = 'Own';");
 	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "jop_2_consumer" && own[0].as_text(1).value() == "jox01");
@@ -702,7 +702,7 @@ int test_game_projects() {
 	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
 		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
 		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'update' AND key IS NULL "
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND key IS NULL "
 	                     "AND visibility IS NULL;").size() == 1);
 	TEST_EXPECT(!has_column(db, "products", "retail_updater") && has_column(db, "products", "retail") &&
 	            !has_column(db, "products", "baseline_tree_id") &&
@@ -715,7 +715,7 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'JO' WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'dfx2' WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = 'RUNTIME', visibility = 'private' "
-	                        "WHERE kind = 'update';"));
+	                        "WHERE kind = 'app';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET visibility = 'secret' WHERE key = 'DFX2';"));
 	db.exec("UPDATE products SET key = 'DFX2X' WHERE key = 'DFX2';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);

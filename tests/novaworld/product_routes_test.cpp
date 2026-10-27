@@ -242,14 +242,14 @@ int test_list(Harness &h) {
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
 	TEST_EXPECT(json["products"].size() == 6);
-	TEST_EXPECT(str(json["products"][0]["kind"]) == "base" &&
+	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
-			str(json["products"][5]["kind"]) == "update");
+			str(json["products"][5]["kind"]) == "app");
 	const auto jo = listed_product(h, h.jo);
 	TEST_EXPECT(jo);
 	TEST_EXPECT(str(jo["display_name"]) == "Joint Operations" && str(jo["title"]) == "jo" &&
-			str(jo["game"]) == "jop_2_consumer" && str(jo["updater_login"]) == "JOTRus" &&
-			str(jo["command_file"]) == "JOPTR.CMD" && jo["retail_updater"].b());
+			str(jo["lobby"]) == "jop_2_consumer" && str(jo["updater_login"]) == "JOTRus" &&
+			str(jo["command_file"]) == "JOPTR.CMD" && jo["retail"].b());
 	TEST_EXPECT(str(jo["key"]) == "JO" && str(jo["visibility"]) == "private" &&
 			jo["head"].i() == 0 && !jo.has("baseline_tree_id"));
 	TEST_EXPECT(is_null(jo["parent_id"]) && is_null(jo["current_tree"]) &&
@@ -261,10 +261,10 @@ int test_list(Harness &h) {
 			str(jox["key"]) == "JOX01");
 	// The runtime: a game with no project, its releases from CI.
 	const auto runtime = listed_product(h, h.runtime);
-	TEST_EXPECT(runtime && str(runtime["kind"]) == "update" &&
+	TEST_EXPECT(runtime && str(runtime["kind"]) == "app" &&
 			str(runtime["updater_login"]) == "ONRUNTIME" && is_null(runtime["key"]) &&
 			is_null(runtime["visibility"]) && runtime["head"].i() == 0 &&
-			!runtime["retail_updater"].b());
+			!runtime["retail"].b());
 	return 0;
 }
 
@@ -273,36 +273,36 @@ int test_create_patch_delete(Harness &h) {
 	// The shapes.
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/products", "nope"), 400, "invalid_json"));
 	net::HttpReply reply = h.admin("POST", "/api/admin/products",
-			R"({"kind":"base","title":"jo","game":"jop_2_consumer"})");
+			R"({"kind":"game","title":"jo","lobby":"jop_2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "display_name");
 	reply = h.admin("POST", "/api/admin/products", R"({"display_name":"X","kind":"other"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "kind");
-	reply = h.admin("POST", "/api/admin/products", R"({"display_name":"X","kind":"update"})");
+	reply = h.admin("POST", "/api/admin/products", R"({"display_name":"X","kind":"app"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "kind");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"bhd","game":"jop_2_consumer"})");
+			R"({"display_name":"X","kind":"game","title":"bhd","lobby":"jop_2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "title");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"no_such_lobby"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "game");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"no_such_lobby"})");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","expansion_code":"x"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","expansion_code":"x"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "expansion_code");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":1,"kind":"base","title":"jo","game":"jop_2_consumer"})");
+			R"({"display_name":1,"kind":"game","title":"jo","lobby":"jop_2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "display_name");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","updater_login":"BHDus"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"BHDus"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "command_file");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","updater_login":"BHD us","command_file":"BHDPTR.CMD"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"BHD us","command_file":"BHDPTR.CMD"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "updater_login");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","updater_login":"BHDus","command_file":"BHDPTR.TXT"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"BHDus","command_file":"BHDPTR.TXT"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "command_file");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","retail_updater":"yes"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "retail_updater");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","retail":"yes"})");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "retail");
 	reply = h.admin("POST", "/api/admin/products",
 			R"({"display_name":"X","kind":"expansion","expansion_code":"bhx01"})");
 	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "parent_id");
@@ -314,39 +314,39 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "title");
 	// A project's key and visibility come together, each of its shape.
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","key":"BHD"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"BHD"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","visibility":"public"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","visibility":"public"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","key":"bhd","visibility":"public"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"bhd","visibility":"public"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "key");
 	reply = h.admin("POST", "/api/admin/products",
-			R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","key":"BHD","visibility":"secret"})");
+			R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"BHD","visibility":"secret"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "visibility");
 	// A duplicate login (without case) and a key another game's project has are the database's
 	// refusals.
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","updater_login":"jotrus","command_file":"X.CMD"})"),
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","updater_login":"jotrus","command_file":"X.CMD"})"),
 			409, "duplicate_login"));
 	TEST_EXPECT(refused(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"X","kind":"base","title":"jo","game":"jop_2_consumer","key":"JO","visibility":"public"})"),
+					R"({"display_name":"X","kind":"game","title":"jo","lobby":"jop_2_consumer","key":"JO","visibility":"public"})"),
 			409, "duplicate_key"));
 
 	// A base with its project.
 	auto json = json_of(
 			h.admin("POST", "/api/admin/products",
-					R"({"display_name":"Black Hawk Down","kind":"base","title":"dfx2","game":"dfx2_consumer","updater_login":"BHDus","command_file":"BHDPTR.CMD","retail_updater":true,"key":"BHD","visibility":"private"})"),
+					R"({"display_name":"Black Hawk Down","kind":"game","title":"dfx2","lobby":"dfx2_consumer","updater_login":"BHDus","command_file":"BHDPTR.CMD","retail":true,"key":"BHD","visibility":"private"})"),
 			201);
 	TEST_EXPECT(json);
 	const int64_t bhd = json["product"]["id"].i();
 	TEST_EXPECT(bhd != 0 && str(json["product"]["display_name"]) == "Black Hawk Down" &&
 			str(json["product"]["title"]) == "dfx2" &&
 			str(json["product"]["updater_login"]) == "BHDus" &&
-			json["product"]["retail_updater"].b() && json["product"]["trees"].size() == 0 &&
+			json["product"]["retail"].b() && json["product"]["trees"].size() == 0 &&
 			is_null(json["product"]["current_tree"]) && json["product"]["servers_live"].i() == 0);
 	TEST_EXPECT(str(json["product"]["key"]) == "BHD" &&
 			str(json["product"]["visibility"]) == "private" && json["product"]["head"].i() == 0);
@@ -383,8 +383,8 @@ int test_create_patch_delete(Harness &h) {
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "display_name");
 	// The updater product: a flag, a login another holds, a command file without its login,
 	// both cleared.
-	json = json_of(h.admin("PATCH", base, R"({"retail_updater":false})"), 200);
-	TEST_EXPECT(json && !json["product"]["retail_updater"].b());
+	json = json_of(h.admin("PATCH", base, R"({"retail":false})"), 200);
+	TEST_EXPECT(json && !json["product"]["retail"].b());
 	TEST_EXPECT(refused(h.admin("PATCH", base, R"({"updater_login":"JOTRUS"})"), 409,
 			"duplicate_login"));
 	reply = h.admin("PATCH", base, R"({"command_file":""})");
@@ -392,8 +392,8 @@ int test_create_patch_delete(Harness &h) {
 	json = json_of(h.admin("PATCH", base, R"({"updater_login":"","command_file":""})"), 200);
 	TEST_EXPECT(json && str(json["product"]["updater_login"]).empty());
 	reply = h.admin(
-			"PATCH", "/api/admin/products/" + std::to_string(ts), R"({"game":"dfx2_consumer"})");
-	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "game");
+			"PATCH", "/api/admin/products/" + std::to_string(ts), R"({"lobby":"dfx2_consumer"})");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
 	json = json_of(h.admin("PATCH", base, R"({"game":"acidgambit_0_consumer"})"), 200);
 	TEST_EXPECT(json && str(json["product"]["game"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/products/99999", R"({"display_name":"X"})"),
@@ -666,7 +666,7 @@ int test_releases(Harness &h) {
 	// An upload naming a game with no project, which then gets one: its parts and its completion
 	// refused (its releases are built now).
 	json = json_of(h.admin("POST", "/api/admin/products",
-						   R"({"display_name":"Loose","kind":"base","title":"jo","game":"jop_2_consumer"})"),
+						   R"({"display_name":"Loose","kind":"game","title":"jo","lobby":"jop_2_consumer"})"),
 			201);
 	TEST_EXPECT(json);
 	const int64_t loose = json ? json["product"]["id"].i() : 0;

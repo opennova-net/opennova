@@ -721,11 +721,11 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- A product: a game (a base game or one expansion), its hosted servers' files
 -- built by the data program into the deployment's object store as immutable
 -- trees from its published release; each hosted server pinned to the trees it
--- started on, updated when its owner says. kind 'base' speaks a title (the
+-- started on, updated when its owner says. kind 'game' speaks a title (the
 -- gameprofile code opennova-serve's /game takes: 'jo', 'dfx2') and lists in a
--- lobby (game: the games row's slug); kind 'expansion' is one expansion of its
--- parent base (expansion_code: the /exp code and the expansion/<code>/
--- directory, 'jox01'); kind 'update' is a standalone updater product with no
+-- lobby (lobby: the games row's slug); kind 'expansion' is one expansion of its
+-- parent game (expansion_code: the /exp code and the expansion/<code>/
+-- directory, 'jox01'); kind 'app' is a standalone updater product with no
 -- game tree, no lobby, no parent and no project (OpenNova's runtime, ADR 0067).
 -- current_tree_id is the tree new starts take (the newest ready one).
 --
@@ -755,11 +755,11 @@ CREATE INDEX idx_billing_checkout_reservations_session
 CREATE TABLE products (
     id                   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     display_name         text NOT NULL CHECK (display_name <> ''),
-    kind                 text NOT NULL CHECK (kind IN ('base', 'expansion', 'update')),
+    kind                 text NOT NULL CHECK (kind IN ('game', 'expansion', 'app')),
     parent_id            bigint REFERENCES products(id) ON DELETE RESTRICT,
     expansion_code       text NOT NULL DEFAULT '',
     title                text NOT NULL DEFAULT '',
-    game                 text NOT NULL DEFAULT '',
+    lobby                text NOT NULL DEFAULT '',
     current_tree_id      bigint,
     created_by           text NOT NULL DEFAULT '',
     created_at           timestamptz NOT NULL DEFAULT now(),
@@ -773,15 +773,15 @@ CREATE TABLE products (
     head                 bigint NOT NULL DEFAULT 0 CHECK (head >= 0),
     product_name         text NOT NULL DEFAULT '',
     product_exe          text NOT NULL DEFAULT '',
-    CHECK ((kind = 'base') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND game <> '')),
-    CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND game = '')),
+    CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '' AND lobby <> '')),
+    CHECK ((kind = 'expansion') = (parent_id IS NOT NULL AND expansion_code <> '' AND title = '' AND lobby = '')),
     CONSTRAINT products_updater_check CHECK ((updater_login = '') = (command_file = '')),
     -- A standalone updater product: a login and its command file, and nothing a game has.
-    CONSTRAINT products_update_check CHECK (kind <> 'update' OR (
-        parent_id IS NULL AND expansion_code = '' AND title = '' AND game = '' AND
+    CONSTRAINT products_app_check CHECK (kind <> 'app' OR (
+        parent_id IS NULL AND expansion_code = '' AND title = '' AND lobby = '' AND
         updater_login <> '' AND current_tree_id IS NULL)),
     CONSTRAINT products_project_check CHECK ((key IS NULL) = (visibility IS NULL)),
-    CONSTRAINT products_update_project_check CHECK (kind <> 'update' OR key IS NULL)
+    CONSTRAINT products_app_project_check CHECK (kind <> 'app' OR key IS NULL)
 );
 CREATE UNIQUE INDEX idx_products_expansion ON products(parent_id, expansion_code) WHERE kind = 'expansion';
 CREATE INDEX idx_products_parent ON products(parent_id);
@@ -918,26 +918,26 @@ CREATE TABLE content_blobs (
 -- updater product is the Steam DFX2's UPDATE.WIZ (CMD=DFX2.CMD,
 -- PRODUCT_LOGIN=DFX2). None holds a tree or a revision until a release of its
 -- is published.
-INSERT INTO products (display_name, kind, title, game, updater_login, command_file, retail,
+INSERT INTO products (display_name, kind, title, lobby, updater_login, command_file, retail,
                       key, visibility, product_name, product_exe)
-VALUES ('Joint Operations', 'base', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD', true,
+VALUES ('Joint Operations', 'game', 'jo', 'jop_2_consumer', 'JOTRus', 'JOPTR.CMD', true,
         'JO', 'private', 'Joint Operations', 'Jointops.exe'),
-       ('Delta Force Xtreme 2', 'base', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD', true,
+       ('Delta Force Xtreme 2', 'game', 'dfx2', 'dfx2_consumer', 'DFX2', 'DFX2.CMD', true,
         'DFX2', 'private', 'Delta Force Xtreme 2', 'dfx2.exe'),
-       ('OP: Acid Gambit', 'base', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT', 'ACIDGAMBIT.CMD',
+       ('OP: Acid Gambit', 'game', 'jo', 'acidgambit_0_consumer', 'ACIDGAMBIT', 'ACIDGAMBIT.CMD',
         false, 'ACIDGAMBIT', 'public', 'OP: Acid Gambit', 'opennova.exe');
 INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
                       retail, key, visibility, product_name)
 SELECT 'Escalation', 'expansion', id, 'jox01', 'JOEus', 'JOEPTR.CMD', true, 'JOX01', 'private',
        'Joint Operations: Escalation'
-FROM products WHERE kind = 'base' AND game = 'jop_2_consumer';
+FROM products WHERE kind = 'game' AND lobby = 'jop_2_consumer';
 INSERT INTO products (display_name, kind, updater_login, command_file)
-VALUES ('OpenNova runtime', 'update', 'ONRUNTIME', 'ONRUNTIME.CMD');
+VALUES ('OpenNova runtime', 'app', 'ONRUNTIME', 'ONRUNTIME.CMD');
 INSERT INTO products (display_name, kind, parent_id, expansion_code, updater_login, command_file,
                       key, visibility, product_name)
 SELECT 'OP: Nifty Package', 'expansion', id, 'nifty', 'NIFTY', 'NIFTY.CMD', 'NIFTY', 'public',
        'OP: Nifty Package'
-FROM products WHERE kind = 'base' AND game = 'acidgambit_0_consumer';
+FROM products WHERE kind = 'game' AND lobby = 'acidgambit_0_consumer';
 
 -- ===========================================================================
 -- Hosted game servers and their fleet (ADR 0053, ADR 0065, ADR 0066;

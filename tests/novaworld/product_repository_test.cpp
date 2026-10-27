@@ -68,8 +68,8 @@ int test_products() {
 			seeded(db, "OP: Acid Gambit") == 3 && jox == 4 && seeded(db, "OpenNova runtime") == 5 &&
 			seeded(db, "OP: Nifty Package") == 6);
 	const auto jo_row = find_product(db, jo);
-	TEST_EXPECT(jo_row && jo_row->kind == ProductKind::Base && jo_row->title == "jo" &&
-			jo_row->game == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
+	TEST_EXPECT(jo_row && jo_row->kind == ProductKind::Game && jo_row->title == "jo" &&
+			jo_row->lobby == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
 			jo_row->command_file == "JOPTR.CMD" && jo_row->retail && !jo_row->current_tree_id &&
 			jo_row->key == "JO" && jo_row->visibility == "private" && jo_row->head == 0);
 	const auto jox_row = find_product(db, jox);
@@ -77,9 +77,9 @@ int test_products() {
 			jox_row->expansion_code == "jox01" && jox_row->updater_login == "JOEus" &&
 			jox_row->key == "JOX01" && jox_row->retail);
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
-	TEST_EXPECT(all[0].kind == ProductKind::Base && all[3].kind == ProductKind::Expansion);
+	TEST_EXPECT(all[0].kind == ProductKind::Game && all[3].kind == ProductKind::Expansion);
 	const auto runtime = find_product(db, seeded(db, "OpenNova runtime"));
-	TEST_EXPECT(runtime && runtime->kind == ProductKind::Update && runtime->game.empty() &&
+	TEST_EXPECT(runtime && runtime->kind == ProductKind::App && runtime->lobby.empty() &&
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
 			runtime->updater_login == "ONRUNTIME" && runtime->command_file == "ONRUNTIME.CMD" &&
 			!runtime->retail && runtime->key.empty() && runtime->visibility.empty());
@@ -94,14 +94,14 @@ int test_products() {
 	TEST_EXPECT(native_expansions.size() == 1 && native_expansions[0].expansion_code == "nifty" &&
 			native_expansions[0].updater_login == "NIFTY" &&
 			native_expansions[0].command_file == "NIFTY.CMD" && native_expansions[0].key == "NIFTY");
-	TEST_EXPECT(tree_file_rules(ProductKind::Update, "").empty());
+	TEST_EXPECT(tree_file_rules(ProductKind::App, "").empty());
 
 	// A new base, a new expansion of it, and the refusals.
 	NewProduct bhd;
 	bhd.display_name = "Black Hawk Down";
-	bhd.kind = ProductKind::Base;
+	bhd.kind = ProductKind::Game;
 	bhd.title = "bhd";
-	bhd.game = "bhd_consumer";
+	bhd.lobby = "bhd_consumer";
 	bhd.updater_login = "BHDus";
 	bhd.command_file = "BHDPTR.CMD";
 	bhd.key = "BHD";
@@ -150,13 +150,13 @@ int test_products() {
 	project = {};
 	project.key = "JO";
 	TEST_EXPECT(update_product(db, bhd_id, project) == ProductOutcome::DuplicateKey);
-	ProductPatch lobby;
-	lobby.game = "acidgambit_0_consumer";
-	TEST_EXPECT(update_product(db, bhd_id, lobby) == ProductOutcome::Ok);
-	TEST_EXPECT(find_product(db, bhd_id)->game == "acidgambit_0_consumer");
+	ProductPatch moved;
+	moved.lobby = "acidgambit_0_consumer";
+	TEST_EXPECT(update_product(db, bhd_id, moved) == ProductOutcome::Ok);
+	TEST_EXPECT(find_product(db, bhd_id)->lobby == "acidgambit_0_consumer");
 	// An expansion lists in its parent's lobby: a game patched onto it changes nothing.
-	TEST_EXPECT(update_product(db, ts_id, lobby) == ProductOutcome::Ok);
-	TEST_EXPECT(find_product(db, ts_id)->game.empty());
+	TEST_EXPECT(update_product(db, ts_id, moved) == ProductOutcome::Ok);
+	TEST_EXPECT(find_product(db, ts_id)->lobby.empty());
 	TEST_EXPECT(update_product(db, 99999, patch) == ProductOutcome::NotFound);
 
 	// A base with an expansion cannot go; the expansion can; then the base.
@@ -403,26 +403,26 @@ int test_live_rule() {
 // The files a tree holds by kind (tree_files.h): the required ones, the optional ones,
 // the canonical spellings and the mission pair.
 int test_files() {
-	const auto base = tree_file_rules(ProductKind::Base, "");
+	const auto base = tree_file_rules(ProductKind::Game, "");
 	TEST_EXPECT(base.size() == 7 && base[0].name == "resource.pff" && base[0].required &&
 			base[2].name == "language.pff" && base[2].required && !base[3].required &&
 			base[5].name == "_NSTMOUT.TXT");
 	const auto exp = tree_file_rules(ProductKind::Expansion, "jox01");
 	TEST_EXPECT(exp.size() == 4 && exp[0].name == "jox01.pff" && exp[1].name == "jox01L.pff" &&
 			exp[2].name == "version.txt" && exp[2].required && exp[3].name == "gt.ssc" && !exp[3].required);
-	TEST_EXPECT(canonical_tree_file(ProductKind::Base, "", "RESOURCE.PFF") == "resource.pff");
-	TEST_EXPECT(canonical_tree_file(ProductKind::Base, "", "_nstmout.txt") == "_NSTMOUT.TXT");
-	TEST_EXPECT(canonical_tree_file(ProductKind::Base, "", "jox01.pff").empty());
-	TEST_EXPECT(canonical_tree_file(ProductKind::Base, "", "Jointops.exe").empty());
+	TEST_EXPECT(canonical_tree_file(ProductKind::Game, "", "RESOURCE.PFF") == "resource.pff");
+	TEST_EXPECT(canonical_tree_file(ProductKind::Game, "", "_nstmout.txt") == "_NSTMOUT.TXT");
+	TEST_EXPECT(canonical_tree_file(ProductKind::Game, "", "jox01.pff").empty());
+	TEST_EXPECT(canonical_tree_file(ProductKind::Game, "", "Jointops.exe").empty());
 	TEST_EXPECT(canonical_tree_file(ProductKind::Expansion, "jox01", "JOX01L.PFF") == "jox01L.pff");
 	TEST_EXPECT(canonical_tree_file(ProductKind::Expansion, "jox01", "resource.pff").empty());
-	TEST_EXPECT(missing_tree_files(ProductKind::Base, "", { "resource.pff", "localres.pff" }) ==
+	TEST_EXPECT(missing_tree_files(ProductKind::Game, "", { "resource.pff", "localres.pff" }) ==
 			std::vector<std::string>{ "language.pff" });
-	TEST_EXPECT(missing_tree_files(ProductKind::Base, "", { "RESOURCE.PFF", "localres.pff", "language.pff" }).empty());
+	TEST_EXPECT(missing_tree_files(ProductKind::Game, "", { "RESOURCE.PFF", "localres.pff", "language.pff" }).empty());
 	TEST_EXPECT(missing_tree_files(ProductKind::Expansion, "jox01", { "jox01.pff" }) ==
 			(std::vector<std::string>{ "jox01L.pff", "version.txt" }));
-	TEST_EXPECT(mission_pair_of(ProductKind::Base, "").missions == "localres.pff" &&
-			mission_pair_of(ProductKind::Base, "").texts == "language.pff");
+	TEST_EXPECT(mission_pair_of(ProductKind::Game, "").missions == "localres.pff" &&
+			mission_pair_of(ProductKind::Game, "").texts == "language.pff");
 	TEST_EXPECT(mission_pair_of(ProductKind::Expansion, "jox01").missions == "jox01.pff" &&
 			mission_pair_of(ProductKind::Expansion, "jox01").texts == "jox01L.pff");
 	return 0;

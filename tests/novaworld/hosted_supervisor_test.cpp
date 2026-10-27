@@ -79,7 +79,7 @@ std::vector<hosted::OfferedProduct> offered_for_rules() {
 	jo.id = 1;
 	jo.display_name = "Joint Operations";
 	jo.title = "jo";
-	jo.game = "jop_2_consumer";
+	jo.lobby = "jop_2_consumer";
 	jo.tree_id = 10;
 	jo.version = "JO V1.7.5.3";
 	jo.missions = { { "SERVETST.BMS", "Serve Test" }, { "second.bms", "Second" }, { "ASH_G11A.BMS", "Ash" },
@@ -96,7 +96,7 @@ std::vector<hosted::OfferedProduct> offered_for_rules() {
 	dfx2.id = 3;
 	dfx2.display_name = "Delta Force Xtreme 2";
 	dfx2.title = "dfx2";
-	dfx2.game = "dfx2_consumer";
+	dfx2.lobby = "dfx2_consumer";
 	dfx2.tree_id = 12;
 	dfx2.missions = { { "servetst.bms", "Serve Test" }, { "second.bms", "Second" } };
 	out.push_back(dfx2);
@@ -104,7 +104,7 @@ std::vector<hosted::OfferedProduct> offered_for_rules() {
 	on.id = 4;
 	on.display_name = "OpenNova";
 	on.title = "jo";
-	on.game = "acidgambit_0_consumer";
+	on.lobby = "acidgambit_0_consumer";
 	on.tree_id = 13;
 	on.missions = dfx2.missions;
 	out.push_back(on);
@@ -481,7 +481,7 @@ int test_products() {
 	// with no tree, is not offered.
 	TEST_EXPECT(offered.size() == 2);
 	if (offered.size() != 2) return 1;
-	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].game == "jop_2_consumer" &&
+	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].lobby == "jop_2_consumer" &&
 			offered[0].display_name == "Joint Operations" && offered[0].tree_id == rig.data.jo_tree &&
 			offered[0].version == "JO V1.7.5.3" && offered[0].missions.size() == 3 &&
 			offered[0].missions[1].file == "SERVETST.BMS" && offered[0].missions[1].title == "Map SERVETST.BMS");

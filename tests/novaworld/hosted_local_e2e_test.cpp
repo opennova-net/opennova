@@ -518,8 +518,8 @@ int main(int argc, char **argv) {
 			jo_set = hosted_trees::seeded_product(*db, "Joint Operations");
 			dfx2_set = hosted_trees::seeded_product(*db, "Delta Force Xtreme 2");
 			expect(jo_set != 0 && dfx2_set != 0, "the seeded products are there");
-			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::ProductKind::Base, "", jo_source);
-			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::ProductKind::Base, "", dfx2_source);
+			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::ProductKind::Game, "", jo_source);
+			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::ProductKind::Game, "", dfx2_source);
 			expect(jo_tree != 0 && dfx2_tree != 0, "each product has a ready tree in the store");
 			const auto offered = hosted::offered_products(*db);
 			expect(offered.size() == 2, "both products are offered");

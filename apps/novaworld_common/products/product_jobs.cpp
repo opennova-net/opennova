@@ -124,7 +124,7 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 		const std::map<std::string, std::string> &files, std::vector<TreeMission> &out,
 		std::string &why) {
 	std::vector<mission_catalog::Row> rows;
-	if (product.kind == ProductKind::Base) {
+	if (product.kind == ProductKind::Game) {
 		ResourceIndex index;
 		if (!index.scan(
 					dir, std::string(), VfsMountMode::Packed, VfsArchiveDiscovery::RetailTable) ||
@@ -379,7 +379,7 @@ bool check_section(PackageFile &package, const update::SfsSectionSpans &section,
 }
 
 // Each section of the package mapped to the one product whose command file it carries: a base
-// section (no PACKAGEBREAK) to a base product or standalone updater, an expansion section
+// section (no PACKAGEBREAK) to a game or an app, an expansion section
 // to an expansion of its code and, when the package carries a base section, of that base.
 // None or two refuse.
 bool map_sections(PackageFile &package, const std::vector<ProductRow> &products,
@@ -651,7 +651,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 			return jobs::JobResult::done();
 		sha256 = release->sha256;
 		product = find_product(db, product_id);
-		if (!product || product->kind == ProductKind::Update ||
+		if (!product || product->kind == ProductKind::App ||
 				product->published_release_id != release_id)
 			return jobs::JobResult::done();
 		for (const ReleaseSection &s : list_sections(db, release_id))
@@ -772,7 +772,7 @@ int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {
 
 int64_t enqueue_release_apply(db::Database &db, int64_t release_id, int64_t product_id) {
 	const auto product = find_product(db, product_id);
-	if (!product || product->kind == ProductKind::Update)
+	if (!product || product->kind == ProductKind::App)
 		return 0;
 	jobs::NewJob job;
 	job.kind = kJobReleaseApply;

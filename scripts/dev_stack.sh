@@ -297,7 +297,7 @@ seed_game() {
         || die "web names no store (ONNET_OBJECT_STORE_URL): hosting cannot take a game"
     row="$(jq -c --arg k "$key" '[.products[] | select(.key == $k)] | first // empty' <<< "$reply")"
     [[ -n "$row" ]] || die "no game has the project key $key (the database seeds JO, DFX2 and ACIDGAMBIT)"
-    [[ "$(jq -r '.kind' <<< "$row")" == base ]] || die "$key is an expansion: a hosted server runs a base game"
+    [[ "$(jq -r '.kind' <<< "$row")" == game ]] || die "$key is an expansion: a hosted server runs a game"
     id="$(jq -r '.id' <<< "$row")"
     title="$(jq -r '.title' <<< "$row")"
     head="$(jq -r '.head // 0' <<< "$row")"

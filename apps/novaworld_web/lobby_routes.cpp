@@ -35,7 +35,7 @@ ExpansionNames expansion_names(db::Database &db) {
 	const auto sets = hosted::list_products(db);
 	std::map<int64_t, std::string> base_game;
 	for (const auto &d : sets)
-		if (d.kind == hosted::ProductKind::Base) base_game[d.id] = d.game;
+		if (d.kind == hosted::ProductKind::Game) base_game[d.id] = d.lobby;
 	for (const auto &d : sets)
 		if (d.kind == hosted::ProductKind::Expansion && d.parent_id)
 			out[{ base_game[*d.parent_id], d.expansion_code }] = d.display_name;

@@ -12,7 +12,7 @@
 //   release.validate  {release_id}, cap 1. The package at updates/upload-<id>.sfs: the release
 //                     must be validating. Its SHA-256 (another release's: invalid), read as
 //                     1SFS, each section mapped to one product by the command file it carries
-//                     (a base section to a base product or standalone updater product, an
+//                     (a base section to a game or an app, an
 //                     expansion section to an expansion of that code under the package's
 //                     base), every row of each command file
 //                     checked as the apply library checks it (its blob there, inflating to its

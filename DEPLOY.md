@@ -1525,7 +1525,7 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
 serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail_updater` on, its SERVER.LST names `ftp.novaworld.com`, which the
+game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which the
 Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
 switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
 off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
@@ -1536,7 +1536,7 @@ and a debug one (`-ExportMode debug`, what PR CI builds) staging's,
 `update.staging.opennova.net`, so a PR's zip updates from staging alone. The runtime's
 update package carries the same wizard, so an install that takes a runtime release takes
 that release's wizard and the deployment it names. An
-OpenNova game (`retail_updater` off) that no published release serves is refused, so an
+OpenNova game (`retail` off) that no published release serves is refused, so an
 OpenNova first install fails until the runtime's release and its game's are published; a retail one with none is answered current, from a package web writes into its
 cache itself. A game's package is built by the data program from a revision of its project
 ("The games", above; ADR 0069 decision 5): the editor's **Build > Release...** or the game's

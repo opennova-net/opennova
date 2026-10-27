@@ -26,7 +26,7 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// The titles a base product may speak (the gameprofile codes opennova-serve's /game takes).
+// The titles a game may speak (the gameprofile codes opennova-serve's /game takes).
 constexpr std::array<const char *, 2> kTitles = { "jo", "dfx2" };
 
 crow::response no_such_product() {
@@ -77,10 +77,10 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	id_or_null(out, "parent_id", d.parent_id);
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
-	out["game"] = d.game;
+	out["lobby"] = d.lobby;
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
-	out["retail_updater"] = d.retail;
+	out["retail"] = d.retail;
 	text_or_null(out, "key", d.key);
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
@@ -148,9 +148,9 @@ void ProductRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
-// (what a base may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
-// every game (bases, expansions, then the runtime), each {id, display_name, kind, parent_id,
-// expansion_code, title, game, updater_login, command_file, retail_updater, key (its project's,
+// (what a game may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
+// every product (games, expansions, then the runtime), each {id, display_name, kind, parent_id,
+// expansion_code, title, lobby, updater_login, command_file, retail, key (its project's,
 // or null), visibility ("public", "private", or null with no project), head (its project's newest
 // revision, 0 before the first push), current_tree ({id, version, ready_at} or null),
 // published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
@@ -189,9 +189,9 @@ crow::response ProductRoutes::list(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, game?,
-// updater_login?, command_file?, retail_updater?, key?, visibility?}: a new game, a base (title
-// one of the titles, game a games slug) or expansion (parent_id a base, expansion_code
+// POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, lobby?,
+// updater_login?, command_file?, retail?, key?, visibility?}: a new product, a game (title
+// one of the titles, lobby a games slug) or expansion (parent_id a game, expansion_code
 // [a-z0-9]{1,8}); the updater's product both or neither (a login of 1..32 printable characters,
 // a command file of 1..15 ending .CMD); its project's key (1..16 of A-Z, 0-9, _) and visibility
 // (public or private) both or neither (a game with a key has a project). 201 {"product"}; 400
@@ -219,14 +219,14 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	note("expansion_code");
 	const auto title = body->text("title");
 	note("title");
-	const auto game = body->text("game");
-	note("game");
+	const auto lobby = body->text("lobby");
+	note("lobby");
 	const auto updater_login = body->text("updater_login");
 	note("updater_login");
 	const auto command_file = body->text("command_file");
 	note("command_file");
-	const auto retail_updater = body->flag("retail_updater");
-	note("retail_updater");
+	const auto retail = body->flag("retail");
+	note("retail");
 	const auto key = body->text("key");
 	note("key");
 	const auto visibility = body->text("visibility");
@@ -236,37 +236,37 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	if (!display_name)
 		return field_error(400, "missing_field", "display_name", "display_name is required");
 	if (!kind_name)
-		return field_error(400, "missing_field", "kind", "kind is base or expansion");
+		return field_error(400, "missing_field", "kind", "kind is game or expansion");
 	if (!valid_display_name(*display_name))
 		return field_error(400, "invalid_field", "display_name",
 				"display_name is 1 to 64 characters with no control characters");
 	const auto kind = product_kind_from_name(*kind_name);
-	if (!kind || *kind == ProductKind::Update)
-		return field_error(400, "invalid_field", "kind", "kind is base or expansion");
+	if (!kind || *kind == ProductKind::App)
+		return field_error(400, "invalid_field", "kind", "kind is game or expansion");
 
 	NewProduct product;
 	product.display_name = *display_name;
 	product.kind = *kind;
 	product.created_by = creator_of(caller);
-	if (*kind == ProductKind::Base) {
+	if (*kind == ProductKind::Game) {
 		if (parent_id || expansion_code)
 			return field_error(400, "invalid_field", parent_id ? "parent_id" : "expansion_code",
-					"a base has no parent and no expansion code");
+					"a game has no parent and no expansion code");
 		if (!title)
-			return field_error(400, "missing_field", "title", "a base speaks a title");
+			return field_error(400, "missing_field", "title", "a game speaks a title");
 		if (!valid_title(*title))
 			return field_error(400, "invalid_field", "title", "title is jo or dfx2");
-		if (!game)
+		if (!lobby)
 			return field_error(
-					400, "missing_field", "game", "a base lists in a lobby (a games slug)");
+					400, "missing_field", "lobby", "a game lists in a lobby (a games slug)");
 		product.title = *title;
-		product.game = *game;
+		product.lobby = *lobby;
 	} else {
-		if (title || game)
-			return field_error(400, "invalid_field", title ? "title" : "game",
+		if (title || lobby)
+			return field_error(400, "invalid_field", title ? "title" : "lobby",
 					"an expansion speaks its parent's title and lobby");
 		if (!parent_id)
-			return field_error(400, "missing_field", "parent_id", "an expansion has a base parent");
+			return field_error(400, "missing_field", "parent_id", "an expansion has a game for parent");
 		if (!expansion_code)
 			return field_error(400, "missing_field", "expansion_code", "an expansion has a code");
 		if (!valid_expansion_code(*expansion_code))
@@ -288,7 +288,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		product.updater_login = *updater_login;
 		product.command_file = *command_file;
 	}
-	product.retail = retail_updater.value_or(false);
+	product.retail = retail.value_or(false);
 	if (key.has_value() != visibility.has_value())
 		return field_error(400, "invalid_field", key ? "visibility" : "key",
 				"key and visibility come together: a game with a key has a project");
@@ -304,9 +304,9 @@ crow::response ProductRoutes::create(const crow::request &req) {
 
 	try {
 		auto db_conn = pool_.acquire();
-		if (*kind == ProductKind::Base &&
-				catalog::GameCatalog::load(*db_conn).by_slug(*game) == nullptr)
-			return field_error(400, "invalid_field", "game", "game is no games slug");
+		if (*kind == ProductKind::Game &&
+				catalog::GameCatalog::load(*db_conn).by_slug(*lobby) == nullptr)
+			return field_error(400, "invalid_field", "lobby", "lobby is no games slug");
 		int64_t id = 0;
 		switch (create_product(*db_conn, product, id)) {
 			case ProductOutcome::Ok:
@@ -320,7 +320,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 				return json_error(
 						409, "duplicate_expansion", "the base has an expansion of this code");
 			case ProductOutcome::NoSuchParent:
-				return json_error(409, "no_such_parent", "parent_id is no base product");
+				return json_error(409, "no_such_parent", "parent_id is no game");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -336,8 +336,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	}
 }
 
-// PATCH /api/admin/products/<id> — any of {display_name, game (a base's), updater_login,
-// command_file, retail_updater, key, visibility}, the shapes as the create's; after it the key
+// PATCH /api/admin/products/<id> — any of {display_name, lobby (a game's), updater_login,
+// command_file, retail, key, visibility}, the shapes as the create's; after it the key
 // and visibility are both set or neither (the runtime takes neither: its releases arrive from
 // CI). A new key renames the project in its row alone: the store names a project's objects by
 // the game's id (content/<id>/, project_repository.h), so none moves and a push begun under the old
@@ -359,14 +359,14 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	ProductPatch patch;
 	patch.display_name = body->text("display_name");
 	note("display_name");
-	patch.game = body->text("game");
-	note("game");
+	patch.lobby = body->text("lobby");
+	note("lobby");
 	patch.updater_login = body->text("updater_login");
 	note("updater_login");
 	patch.command_file = body->text("command_file");
 	note("command_file");
-	patch.retail = body->flag("retail_updater");
-	note("retail_updater");
+	patch.retail = body->flag("retail");
+	note("retail");
 	patch.key = body->text("key");
 	note("key");
 	patch.visibility = body->text("visibility");
@@ -385,12 +385,12 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 		const auto row = find_product(*db_conn, path_id(id));
 		if (!row)
 			return no_such_product();
-		if (patch.game) {
-			if (row->kind != ProductKind::Base)
+		if (patch.lobby) {
+			if (row->kind != ProductKind::Game)
 				return field_error(
-						400, "invalid_field", "game", "an expansion lists in its parent's lobby");
-			if (catalog::GameCatalog::load(*db_conn).by_slug(*patch.game) == nullptr)
-				return field_error(400, "invalid_field", "game", "game is no games slug");
+						400, "invalid_field", "lobby", "an expansion lists in its parent's lobby");
+			if (catalog::GameCatalog::load(*db_conn).by_slug(*patch.lobby) == nullptr)
+				return field_error(400, "invalid_field", "lobby", "lobby is no games slug");
 		}
 		const std::string login = patch.updater_login.value_or(row->updater_login);
 		const std::string command_file = patch.command_file.value_or(row->command_file);
@@ -404,7 +404,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 		if (!command_file.empty() && !valid_command_file(command_file))
 			return field_error(400, "invalid_field", "command_file",
 					"command_file is 1 to 15 characters ending in .CMD");
-		if ((patch.key || patch.visibility) && row->kind == ProductKind::Update)
+		if ((patch.key || patch.visibility) && row->kind == ProductKind::App)
 			return field_error(400, "invalid_field", patch.key ? "key" : "visibility",
 					"the runtime has no project: its releases arrive from CI");
 		const std::string key = patch.key.value_or(row->key);

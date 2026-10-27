@@ -635,7 +635,7 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(!harness.admin.empty() && !harness.player.empty());
 		{
 			const auto rows = pool.acquire()->query("SELECT updater_login FROM products WHERE "
-													"kind = 'base' AND updater_login <> '' "
+													"kind = 'game' AND updater_login <> '' "
 													"AND NOT retail;");
 			TEST_EXPECT(rows.size() == 1);
 			harness.own_game = rows.front().as_text(0).value_or("");

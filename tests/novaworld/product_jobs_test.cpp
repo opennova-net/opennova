@@ -300,9 +300,9 @@ struct Rig {
 	bool make_synthetic_products(int64_t &base, int64_t &expansion) {
 		NewProduct b;
 		b.display_name = "Synthetic";
-		b.kind = ProductKind::Base;
+		b.kind = ProductKind::Game;
 		b.title = "jo";
-		b.game = "jop_2_consumer";
+		b.lobby = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
 		b.retail = true;

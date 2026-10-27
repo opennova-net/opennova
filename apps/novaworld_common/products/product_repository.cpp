@@ -10,13 +10,13 @@ namespace {
 
 using db::BindValue;
 
-constexpr std::array<const char *, 3> kKindNames = { "base", "expansion", "update" };
+constexpr std::array<const char *, 3> kKindNames = { "game", "expansion", "app" };
 constexpr std::array<const char *, 4> kTreeStateNames = { "building", "ready", "failed", "pruned" };
 constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "validating", "invalid",
 	"draft", "published", "retired", "building" };
 
 constexpr const char *kProductColumns =
-		"id, display_name, kind, parent_id, expansion_code, title, game, updater_login, "
+		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
 		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head";
 constexpr const char *kTreeColumns =
@@ -31,11 +31,11 @@ ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
 	d.id = r.as_int(0).value_or(0);
 	d.display_name = r.as_text(1).value_or("");
-	d.kind = product_kind_from_name(r.as_text(2).value_or("")).value_or(ProductKind::Base);
+	d.kind = product_kind_from_name(r.as_text(2).value_or("")).value_or(ProductKind::Game);
 	d.parent_id = r.as_int(3);
 	d.expansion_code = r.as_text(4).value_or("");
 	d.title = r.as_text(5).value_or("");
-	d.game = r.as_text(6).value_or("");
+	d.lobby = r.as_text(6).value_or("");
 	d.updater_login = r.as_text(7).value_or("");
 	d.command_file = r.as_text(8).value_or("");
 	d.retail = r.as_int(9).value_or(0) != 0;
@@ -165,7 +165,7 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	if (product.kind == ProductKind::Expansion) {
 		const auto parent = db.query("SELECT kind FROM products WHERE id = $1 FOR SHARE;",
 				{ db::int_or_null(product.parent_id) });
-		if (parent.empty() || parent.front().as_text(0).value_or("") != "base")
+		if (parent.empty() || parent.front().as_text(0).value_or("") != "game")
 			return ProductOutcome::NoSuchParent;
 	}
 	if (!product.updater_login.empty() &&
@@ -181,16 +181,16 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 						{ db::int_or_null(product.parent_id), BindValue(product.expansion_code) })
 					 .empty())
 		return ProductOutcome::DuplicateExpansion;
-	const bool base = product.kind == ProductKind::Base;
+	const bool game = product.kind == ProductKind::Game;
 	const auto rows = db.query(
-			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, game, "
+			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
 			"updater_login, command_file, retail, key, visibility, created_by) "
 			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
-					base ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
-					BindValue(base ? std::string() : product.expansion_code),
-					BindValue(base ? product.title : std::string()),
-					BindValue(base ? product.game : std::string()),
+					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
+					BindValue(game ? std::string() : product.expansion_code),
+					BindValue(game ? product.title : std::string()),
+					BindValue(game ? product.lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
 					BindValue(db::Bool{ product.retail }), db::text_or_null(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by) });
@@ -207,8 +207,8 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 	ProductRow row = rows.front();
 	if (patch.display_name)
 		row.display_name = *patch.display_name;
-	if (patch.game && row.kind == ProductKind::Base)
-		row.game = *patch.game;
+	if (patch.lobby && row.kind == ProductKind::Game)
+		row.lobby = *patch.lobby;
 	if (patch.updater_login)
 		row.updater_login = *patch.updater_login;
 	if (patch.command_file)
@@ -229,10 +229,10 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 						{ BindValue(row.key), BindValue(id) })
 					 .empty())
 		return ProductOutcome::DuplicateKey;
-	db.exec("UPDATE products SET display_name = $2, game = $3, updater_login = $4, "
+	db.exec("UPDATE products SET display_name = $2, lobby = $3, updater_login = $4, "
 			"command_file = $5, retail = $6, key = $7, visibility = $8, updated_at = now() "
 			"WHERE id = $1;",
-			{ BindValue(id), BindValue(row.display_name), BindValue(row.game),
+			{ BindValue(id), BindValue(row.display_name), BindValue(row.lobby),
 					BindValue(row.updater_login), BindValue(row.command_file),
 					BindValue(db::Bool{ row.retail }), db::text_or_null(row.key),
 					db::text_or_null(row.visibility) });
@@ -264,7 +264,7 @@ std::optional<ProductRow> find_product(db::Database &db, int64_t id) {
 }
 
 std::vector<ProductRow> list_products(db::Database &db) {
-	return query_products(db, "ORDER BY (kind = 'update'), (kind = 'expansion'), id", {});
+	return query_products(db, "ORDER BY (kind = 'app'), (kind = 'expansion'), id", {});
 }
 
 std::vector<ProductRow> list_expansions_of(db::Database &db, int64_t parent_id) {
@@ -296,18 +296,18 @@ int count_live_servers_of(db::Database &db, int64_t id) {
 std::vector<OfferedProduct> offered_products(db::Database &db) {
 	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
-			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.game, "
+			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.lobby, "
 			"t.id, t.version_text, t.missions::text "
 			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
-			"WHERE d.kind <> 'update' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
+			"WHERE d.kind <> 'app' AND t.state = 'ready' ORDER BY (d.kind = 'expansion'), d.id;");
 	for (const auto &r : rows) {
-		const bool base = r.as_text(2).value_or("") == "base";
-		if (base) {
+		const bool game = r.as_text(2).value_or("") == "game";
+		if (game) {
 			OfferedProduct d;
 			d.id = r.as_int(0).value_or(0);
 			d.display_name = r.as_text(1).value_or("");
 			d.title = r.as_text(5).value_or("");
-			d.game = r.as_text(6).value_or("");
+			d.lobby = r.as_text(6).value_or("");
 			d.tree_id = r.as_int(7).value_or(0);
 			d.version = r.as_text(8).value_or("");
 			decode_tree_missions(r.as_text(9).value_or("[]"), d.missions);
@@ -590,7 +590,7 @@ std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t product_i
 		std::optional<int64_t> expansion_id) {
 	const auto base = db.query(
 			"SELECT d.current_tree_id FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
-			"WHERE d.id = $1 AND d.kind = 'base' AND t.state = 'ready';",
+			"WHERE d.id = $1 AND d.kind = 'game' AND t.state = 'ready';",
 			{ BindValue(product_id) });
 	if (base.empty() || !base.front().as_int(0))
 		return std::nullopt;
