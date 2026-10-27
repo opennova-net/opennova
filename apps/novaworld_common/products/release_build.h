@@ -30,7 +30,7 @@
 //                  deployment's update host (refused with none), packed whole the same way
 //                  against its published release, every file of its build a row (no file left
 //                  out), then validated as a game's is. A download-only app's (the tools, the
-//                  Blender add-on, the Switcher) is its build kept as uploaded under its own
+//                  Blender add-on) is its build kept as uploaded under its own
 //                  digest (release_download_key), the release a draft with no section. Either
 //                  removes the uploaded build after. A refusal (no project, no product, a build
 //                  that does not unpack, a tool failing) makes the release invalid with its

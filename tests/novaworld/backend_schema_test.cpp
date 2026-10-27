@@ -699,7 +699,7 @@ int test_game_projects() {
 	Database db = scratch.open();
 	const auto keys = db.query("SELECT key FROM products ORDER BY id;");
 	const std::vector<std::string> seeded = { "JO", "DFX2", "ACIDGAMBIT", "JOX01", "ONRUNTIME", "NIFTY",
-		"ONEDITOR", "ONTOOLS", "ONBLENDER", "ONSWITCHER" };
+		"ONEDITOR", "ONTOOLS", "ONBLENDER" };
 	TEST_EXPECT(keys.size() == seeded.size());
 	for (size_t i = 0; i < keys.size() && i < seeded.size(); ++i)
 		TEST_EXPECT(keys[i].as_text(0).value() == seeded[i]);
@@ -711,10 +711,10 @@ int test_game_projects() {
 	for (size_t i = 0; i < keyed.size() && i < expected.size(); ++i)
 		TEST_EXPECT(keyed[i].as_text(1).value() == expected[i].first &&
 		            keyed[i].as_text(2).value() == expected[i].second && keyed[i].as_int(3) == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 5);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND visibility IS NULL;").size() == 4);
 	// The updatable apps' updater products, and each download's file named once.
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE kind = 'app' AND updater_login <> '';").size() == 2);
-	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 7);
+	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE download <> '';").size() == 6);
 	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
 	                        "WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));

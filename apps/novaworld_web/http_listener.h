@@ -387,9 +387,8 @@ private:
 	// NovaLogic's servers for the Lobbies page (set_novalogic_lobbies).
 	NovaLogicLobbies *novalogic_lobbies_ = nullptr;
 	// config.web_host, set in start() before Crow runs (host_url(game) /
-	// gsb_url(game)), and config.public_host (the switcher's /api/server-info).
+	// gsb_url(game)).
 	std::string web_host_;
-	std::string public_host_;
 	// config.site_url, set in start() before Crow runs: the welcome mail's link.
 	std::string site_url_;
 };

@@ -732,8 +732,7 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- newest ready one). kind 'app' is one of OpenNova's own programs, with no game
 -- tree, no lobby, no parent and no project (ADR 0067): an updatable one (the
 -- runtime, the editor) has an updater login, a download-only one (the tools, the
--- Blender add-on, the Switcher) none; its releases are built from CI's uploaded
--- builds.
+-- Blender add-on) none; its releases are built from CI's uploaded builds.
 --
 -- Its updater product (ADR 0064 d5, d9): updater_login and command_file
 -- (JOTRus, JOPTR.CMD; '' for a product the update service does not serve),
@@ -742,7 +741,7 @@ CREATE INDEX idx_billing_checkout_reservations_session
 -- give it (the release build's: the command file's PRODUCT and the executable
 -- its DONE runs, '' for an expansion). retail whether it is a retail game
 -- (NovaLogic's install: its SERVER.LST names ftp.novaworld.com, reached through
--- the Switcher, where our own product's names the deployment's update host; its
+-- a hosts-file line, where our own product's names the deployment's update host; its
 -- project's revision 1 the stock install). published_release_id is the release
 -- the update listener serves, its tree is built from and its download is.
 -- download is its file's stable name on the deployment's downloads host
@@ -935,12 +934,12 @@ CREATE TABLE project_blobs (
 -- The seeded products, in this order, so each keeps its id across a reset (ids
 -- 1 to 6 as they were before the apps, DEPLOY.md "Resetting the service
 -- database": the store keeps a project's files under its id): the retail
--- games, the update service serving their updaters (the Switcher sends them to
--- it), their projects private; OpenNova's own game (OP: Acid Gambit) and its
+-- games, the update service serving their updaters (a hosts-file line sends them
+-- to it), their projects private; OpenNova's own game (OP: Acid Gambit) and its
 -- nifty expansion (OP: Nifty Package), complete packages served at the
 -- deployment's update host, their projects public; OpenNova's runtime (ADR
 -- 0067); then the editor, updatable like the runtime, and the download-only
--- tools, Blender add-on and Switcher. DFX2's updater product is the Steam
+-- tools and Blender add-on. DFX2's updater product is the Steam
 -- DFX2's UPDATE.WIZ (CMD=DFX2.CMD, PRODUCT_LOGIN=DFX2), JO's and Escalation's
 -- JO:CA's (JOTRqq, JOEqq before the territory). None holds a tree, a revision
 -- or a download until a release of its is published.
@@ -984,11 +983,7 @@ VALUES ('ONEDITOR', 'OpenNova Editor', 'app', 'ONEDITOR', 'ONEDITOR.CMD', 'OpenN
         'The command-line tools and opennova-serve, the dedicated server our hosted servers '
         'run. Players on the original game and on OpenNova can join it.'),
        ('ONBLENDER', 'Blender add-on', 'app', '', '', '', '', 'opennova-blender-addon-windows.zip',
-        'Imports and exports .3di models and their animations in Blender 5.'),
-       ('ONSWITCHER', 'OpenNova Switcher', 'app', '', '', '', '', 'opennova-switcher-windows.zip',
-        'Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that '
-        'points it at our NovaWorld or an address you choose. OpenNova and the original '
-        'Jointops.exe don''t need it.');
+        'Imports and exports .3di models and their animations in Blender 5.');
 
 -- ===========================================================================
 -- Hosted game servers and their fleet (ADR 0053, ADR 0065, ADR 0066;

@@ -14,8 +14,8 @@
 # web's ephemeral state in the cache (cache.tf).
 #
 # Here: the account's names, the roles' common trust, and the gate's Elastic
-# IP. Retail clients find the gate by it (gs.novaworld.net, the Switcher's
-# hosts block), so prod adopts its existing address by allocation id
+# IP. Retail clients find the gate by it (gs.novaworld.net, their hosts
+# file's line), so prod adopts its existing address by allocation id
 # (var.service_eip_allocation_id: the address transferred into the prod
 # account): Terraform only reads it, so no plan can release it. Prod never
 # makes an address, and staging never adopts one: it gets an address of its

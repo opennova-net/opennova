@@ -6,7 +6,7 @@
 # One internet-facing network load balancer in both public subnets, cross-zone,
 # each zone's node on an Elastic IP: zone a's is the gate's address
 # (service.tf: prod's adopted one, 54.162.79.147, which retail's hosts file
-# and the Switcher name, never released), zone b's one of its own. Retail
+# names, never released), zone b's one of its own. Retail
 # clients reach the gate, the lobby and web's HTTP routes at zone a's address
 # alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST), which the
 # gate's own unproxied name, nw, also names (edge.tf; OpenNova's client dials

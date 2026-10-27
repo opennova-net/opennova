@@ -58,9 +58,9 @@ int test_products() {
 	TestDatabase tdb;
 	Database db = tdb.open();
 	// Three games, their two expansions, and the apps: the runtime and the editor (updatable), the
-	// tools, the Blender add-on and the Switcher (download-only).
+	// tools and the Blender add-on (download-only).
 	const std::vector<ProductRow> all = list_products(db);
-	TEST_EXPECT(all.size() == 10);
+	TEST_EXPECT(all.size() == 9);
 	const int64_t jo = seeded(db, "Joint Operations"), jox = seeded(db, "Escalation");
 	TEST_EXPECT(jo != 0 && jox != 0);
 	// The baseline seeds them in one order, so each keeps its id across a reset (the store names
@@ -68,8 +68,7 @@ int test_products() {
 	TEST_EXPECT(jo == 1 && seeded(db, "Delta Force Xtreme 2") == 2 &&
 			seeded(db, "OP: Acid Gambit") == 3 && jox == 4 && seeded(db, "OpenNova runtime") == 5 &&
 			seeded(db, "OP: Nifty Package") == 6 && seeded(db, "OpenNova Editor") == 7 &&
-			seeded(db, "Tools and dedicated server") == 8 && seeded(db, "Blender add-on") == 9 &&
-			seeded(db, "OpenNova Switcher") == 10);
+			seeded(db, "Tools and dedicated server") == 8 && seeded(db, "Blender add-on") == 9);
 	const auto jo_row = find_product(db, jo);
 	TEST_EXPECT(jo_row && jo_row->kind == ProductKind::Game && jo_row->title == "jo" &&
 			jo_row->lobby == "jop_2_consumer" && jo_row->updater_login == "JOTRus" &&
@@ -84,7 +83,7 @@ int test_products() {
 			jox_row->download.empty());
 	TEST_EXPECT(list_expansions_of(db, jo).size() == 1);
 	TEST_EXPECT(all[0].kind == ProductKind::Game && all[3].kind == ProductKind::Expansion &&
-			all[5].kind == ProductKind::App && all[9].kind == ProductKind::App);
+			all[5].kind == ProductKind::App && all[8].kind == ProductKind::App);
 	const auto runtime = find_product(db, seeded(db, "OpenNova runtime"));
 	TEST_EXPECT(runtime && runtime->kind == ProductKind::App && runtime->lobby.empty() &&
 			runtime->title.empty() && !runtime->parent_id && !runtime->current_tree_id &&
@@ -97,7 +96,7 @@ int test_products() {
 			editor->command_file == "ONEDITOR.CMD" && editor->product_exe == "oneditor.exe" &&
 			editor->product_name == "OpenNova Editor" &&
 			editor->download == "opennova-editor-windows.zip");
-	for (const char *key : { "ONTOOLS", "ONBLENDER", "ONSWITCHER" }) {
+	for (const char *key : { "ONTOOLS", "ONBLENDER" }) {
 		const auto app = find_product_by_key(db, key);
 		TEST_EXPECT(app && app->kind == ProductKind::App && app->updater_login.empty() &&
 				app->command_file.empty() && !app->download.empty() && app->visibility.empty());

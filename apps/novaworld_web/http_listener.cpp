@@ -16,7 +16,6 @@
 #include "hosted/console_routes.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
-#include "hosted/model/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "http_listener_impl.h"
@@ -195,7 +194,6 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->access.configure(config);
 
 	web_host_ = config.web_host; // host_url(game) / gsb_url(game), with the port Crow binds
-	public_host_ = public_host;
 	site_url_ = config.site_url; // the welcome mail's link
 
 	// The games catalogue the retail routes answer from (one lobby per title):
@@ -652,10 +650,9 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 
 // Public JSON API: what the web portal reads (lobbies, stats, self-signup, and
 // the website's session routes; the logged-in account's listed servers are
-// host_routes.h's), the games catalog, the health probes, and the switcher's
-// server-info. None names a joiner, an owner or a sender's address: the
-// listing dump (/api/hosts) and the unknown-message samples (/api/unknowns)
-// are admin routes.
+// host_routes.h's), the games catalog and the health probes. None names a
+// joiner, an owner or a sender's address: the listing dump (/api/hosts) and the
+// unknown-message samples (/api/unknowns) are admin routes.
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -829,26 +826,6 @@ void HttpListener::register_public_api_routes() {
 		res.set_header("Cache-Control", "no-store");
 		return res;
 	});
-
-	// The OpenNova Switcher's (switcher/) one question: the address to point
-	// retail's NovaWorld hostname at in the hosts file, the public_host the gate
-	// advertises as POSTIPADDRESS. The site's domain is behind Cloudflare's proxy,
-	// so DNS cannot give it. Read-only and unauthenticated (the address is
-	// public); 503 when public_host is no dotted quad, which no hosts line can
-	// name, or one no client can be sent to: 0.0.0.0/8, multicast and 240.0.0.0/4
-	// (the switcher refuses those too).
-	CROW_ROUTE(app, "/api/server-info")([host = public_host_]() {
-		const auto address = hosted::parse_ipv4(host);
-		const uint32_t first_octet = address ? *address >> 24 : 0;
-		if (first_octet == 0 || first_octet >= 224)
-			return json_error(503, "no_public_ipv4");
-		crow::json::wvalue out;
-		out["novaworld_ip"] = host;
-		crow::response res = json_reply(200, out);
-		res.set_header("Cache-Control", "no-store");
-		return res;
-	});
-
 }
 
 // Static serving: web/dist index + assets, retail /static/* client

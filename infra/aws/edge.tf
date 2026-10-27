@@ -23,7 +23,7 @@
 # below. CNAMEs to its
 # DNS name (Cloudflare flattens the apex's), whose answers are its two zones'
 # Elastic IPs. Proxied by default so the site gets Cloudflare TLS. Retail
-# clients follow no name to the gate (gs.novaworld.net, the Switcher's hosts
+# clients follow no name to the gate (gs.novaworld.net, their hosts file's
 # line) and the gate announces the balancer's zone-a address (ONNET_WEB_HOST,
 # service.tf); OpenNova's own client follows the gate's name, below.
 resource "cloudflare_record" "web_root" {
@@ -55,8 +55,8 @@ resource "cloudflare_record" "web_www" {
 # Cloudflare's proxy would not pass, so the name resolves straight to the
 # balancer. The service's SERVER.LST sends the updater here for a product
 # served by OpenNova's update service; one served the retail way names
-# ftp.novaworld.com, which the Switcher's managed block maps to the gate's
-# address, the balancer's zone-a address (ADR 0064).
+# ftp.novaworld.com, which a hosts-file line maps to the gate's address, the
+# balancer's zone-a address (ADR 0064).
 resource "cloudflare_record" "update" {
   count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
@@ -71,8 +71,8 @@ resource "cloudflare_record" "update" {
 
 # The gate's name (local.novaworld_host), never proxied: the gate speaks UDP,
 # which Cloudflare's proxy would not pass. An A record at the balancer's zone-a
-# address, the one the gate announces and /api/server-info reports (the
-# Switcher's hosts line), so it names the gate alone, never zone b. OpenNova's
+# address, the one the gate announces (retail's hosts-file line names it), so
+# it names the gate alone, never zone b. OpenNova's
 # own client dials it for its OpenNova NovaWorld (ADR 0010 d2), and a
 # self-run opennova-serve lists on it with --master-host.
 resource "cloudflare_record" "novaworld" {

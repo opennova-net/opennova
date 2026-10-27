@@ -248,10 +248,10 @@ int test_list(Harness &h) {
 			str(json["titles"][1]) == "dfx2");
 	TEST_EXPECT(json["games"].size() == 3 && str(json["games"][2]["slug"]) == "jop_2_consumer" &&
 			!str(json["games"][2]["display_name"]).empty());
-	TEST_EXPECT(json["products"].size() == 10);
+	TEST_EXPECT(json["products"].size() == 9);
 	TEST_EXPECT(str(json["products"][0]["kind"]) == "game" &&
 			str(json["products"][3]["kind"]) == "expansion" &&
-			str(json["products"][5]["kind"]) == "app" && str(json["products"][9]["kind"]) == "app");
+			str(json["products"][5]["kind"]) == "app" && str(json["products"][8]["kind"]) == "app");
 	const auto jo = listed_product(h, h.jo);
 	TEST_EXPECT(jo);
 	TEST_EXPECT(str(jo["display_name"]) == "Joint Operations" && str(jo["title"]) == "jo" &&

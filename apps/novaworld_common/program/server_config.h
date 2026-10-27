@@ -20,8 +20,8 @@ namespace opennova::novaworld_server {
 // `project_local_dev_flow.md`) so existing dev flows keep working.
 struct ServerConfig {
 	// The gate's public address (ONNET_PUBLIC_HOST): its POSTIPADDRESS, where
-	// a hosting client's status blobs land, the hosted servers' master host on
-	// a cloud machine, and the switcher's address. Set to the LAN IP for
+	// a hosting client's status blobs land, and the hosted servers' master host
+	// on a cloud machine. Set to the LAN IP for
 	// cross-machine testing; localhost is enough for single-host dev.
 	std::string public_host = "127.0.0.1";
 	// Whether ONNET_PUBLIC_HOST was set (non-empty) in the environment: the

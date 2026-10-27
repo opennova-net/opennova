@@ -304,7 +304,7 @@ int test_retail_first_install(const test_temp::TempDir &temp) {
 }
 
 // The service names retail's ftp.novaworld.com in SERVER.LST for the products a stock
-// UPDATE.EXE reaches through the Switcher; this client dials the gateway it came through.
+// UPDATE.EXE reaches through a hosts-file line; this client dials the gateway it came through.
 int test_retail_server_list(const test_temp::TempDir &temp) {
 	Server server({"ftp.novaworld.com"});
 	std::string error;

@@ -3983,44 +3983,6 @@ int test_unknown_path_404(Harness &h) {
 	return 0;
 }
 
-// GET /api/server-info, the OpenNova Switcher's route: the configured public_host
-// (the address the gate advertises) with no credential, never cached; the Secure
-// listener, which trusts no proxy, answers it as well. A listener whose
-// public_host is a hostname answers 503 no_public_ipv4 (a hosts line names an
-// address), and so does one whose public_host no client can be sent to.
-int test_server_info(Harness &h) {
-	for (const uint16_t port : { h.port, h.secure_port }) {
-		const auto reply = h.send_to(port, "GET", "/api/server-info", { from_ip("198.51.100.91") });
-		if (reply.code != 200)
-			std::fprintf(
-					stderr, "  :%u %s\n", static_cast<unsigned>(port), describe(reply).c_str());
-		TEST_EXPECT(reply.transport_ok && reply.code == 200);
-		TEST_EXPECT(body_text(reply) == "{\"novaworld_ip\":\"127.0.0.1\"}");
-		TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-		TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
-	}
-
-	for (const char *public_host : { "nw.example.test", "0.0.0.0", "0.1.2.3", "224.0.0.1",
-				 "240.0.0.1", "255.255.255.255" }) {
-		nws::ServerConfig config;
-		config.public_host = public_host;
-		config.http_port = 0;
-		config.web_dist_dir = h.temp_root / "web_dist";
-		config.templates_dir = h.temp_root / "templates";
-		config.static_dir = h.temp_root / "static";
-		test_redis::TestRedis redis;
-		nws::HttpListener listener(h.pool, redis.pool());
-		TEST_EXPECT(listener.start(config));
-		const auto refused = h.send_to(listener.bound_port(), "GET", "/api/server-info");
-		listener.stop();
-		if (refused.code != 503)
-			std::fprintf(stderr, "  %s: %s\n", public_host, describe(refused).c_str());
-		TEST_EXPECT(refused.transport_ok && refused.code == 503);
-		TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
-	}
-	return 0;
-}
-
 // GET /api/lobbies/novalogic, the Lobbies page's list of the servers on NovaLogic's
 // NovaWorld: with ONNET_NOVALOGIC_LOBBIES off (the harness listener, as every listener
 // given no list) enabled false, no servers and nothing fetched. A listener of its own
@@ -4998,13 +4960,13 @@ int test_dfx2_join_lan(Harness &h) {
 int test_api_proxy_only(Harness &h) {
 	for (const auto &[method, path] :
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
-					{ "GET", "/api/lobbies" }, { "GET", "/api/server-info" },
-					{ "GET", "/api/no-such-route" }, { "POST", "/api/login" },
-					{ "POST", "/api/register" }, { "POST", "/api/auth/forgot" },
-					{ "POST", "/api/auth/reset" }, { "GET", "/api/admin/users" },
-					{ "PUT", "/api/admin/server-status" }, { "GET", "/api/me/hosts" },
-					{ "POST", "/api/me/hosts/1/command" }, { "POST", "/api/me/hosts/1/stop" },
-					{ "GET", "/api/admin/hosts" }, { "POST", "/api/admin/hosts/1/command" },
+					{ "GET", "/api/lobbies" }, { "GET", "/api/no-such-route" },
+					{ "POST", "/api/login" }, { "POST", "/api/register" },
+					{ "POST", "/api/auth/forgot" }, { "POST", "/api/auth/reset" },
+					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
+					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
+					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
+					{ "POST", "/api/admin/hosts/1/command" },
 					{ "POST", "/api/admin/hosts/1/stop" } }) {
 		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
 		if (reply.code != 403)
@@ -9163,7 +9125,6 @@ int run(Harness &h, const char *part) {
 		{ "titles", "cd_key_routes", test_cd_key_routes },
 		{ "titles", "dfx2_activation", test_dfx2_activation },
 		{ "titles", "unknown_path_404", test_unknown_path_404 },
-		{ "titles", "server_info", test_server_info },
 		{ "titles", "novalogic_lobbies_route", test_novalogic_lobbies_route },
 		{ "titles", "healthz", test_healthz },
 		{ "lobby", "admin_host_push", test_admin_host_push },

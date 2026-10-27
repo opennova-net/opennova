@@ -88,8 +88,8 @@ std::vector<std::string> service_gateways(const fs::path &runtime_dir) {
 }
 
 // The update server a SERVER.LST row names, as dialed: the service names retail's
-// ftp.novaworld.com for the products a stock UPDATE.EXE reaches through the Switcher's hosts
-// block; this client reaches that same service at the gateway it came through instead.
+// ftp.novaworld.com for the products a stock UPDATE.EXE reaches through a hosts-file line;
+// this client reaches that same service at the gateway it came through instead.
 std::string dialed_server(const std::string &listed, const std::string &gateway) {
 	const std::string host = strutil::to_lower(strutil::trim(listed));
 	const std::string_view domain = "novaworld.com";

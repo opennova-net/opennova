@@ -8,7 +8,7 @@
 // fetching and unpacking new packages off the pump's way, so a stall watchdog watching
 // the pump's turns is never tripped by a download. Started by web's main when
 // ONNET_UPDATE_HOST is set (the name SERVER.LST sends a client of this deployment to;
-// retail's own names reach it through the Switcher's hosts block); logs as
+// retail's own names reach it through a hosts-file line); logs as
 // opennova-update-tool's serve does. Service policy, not a port.
 
 #include "updater/release_catalog.h"
