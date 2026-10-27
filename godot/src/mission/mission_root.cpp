@@ -25,9 +25,7 @@ namespace {
 constexpr const char *kEntitiesName = "Entities";
 constexpr const char *kSignalEffectsDrained = "effects_drained";
 constexpr const char *kSignalFixedTickCompleted = "fixed_tick_completed";
-constexpr const char *kSignalSimulationRestarted = "simulation_restarted";
 constexpr const char *kSignalCaptureChanged = "capture_changed";
-constexpr const char *kResetWireRuntimeState = "reset_wire_runtime_state";
 constexpr const char *kOnCaptureChanged = "_on_frame_stats_capture_changed";
 
 int64_t now_usec() {
@@ -89,7 +87,6 @@ void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("play"), &MissionRoot::play);
 	ClassDB::bind_method(D_METHOD("pause"), &MissionRoot::pause);
 	ClassDB::bind_method(D_METHOD("step_once"), &MissionRoot::step_once);
-	ClassDB::bind_method(D_METHOD("stop"), &MissionRoot::stop);
 
 	// Emitted per authoritative 62.5 Hz logic step with that step's drained
 	// side effects (MissionEffect rows), synchronously inside the catch-up
@@ -99,10 +96,6 @@ void MissionRoot::_bind_methods() {
 	// step's side effects have been delivered. Presentation-only fixed-step
 	// systems (particles) subscribe here instead of integrating render delta.
 	ADD_SIGNAL(MethodInfo(kSignalFixedTickCompleted, PropertyInfo(Variant::INT, "logic_tick")));
-	// Emitted after Stop rewinds simulation and authored transforms.
-	// GameWorld-owned presentation systems use this boundary to discard
-	// transient runtime state.
-	ADD_SIGNAL(MethodInfo(kSignalSimulationRestarted));
 
 	BIND_ENUM_CONSTANT(STATS_ROLE_SINGLE_PLAYER);
 	BIND_ENUM_CONSTANT(STATS_ROLE_HOST);
@@ -417,10 +410,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 				Object::cast_to<Node3D>(p_container), index_);
 		presenter->set_synthetic_origin_only(sp_attachment_present);
 	}
-	// The Stop -> Play boundary: the one connect resets the wire registry AND
-	// the presenter's four passes (destruction, throwable, scars reset their
-	// runtime state inside reset_wire_runtime_state).
-	connect(kSignalSimulationRestarted, Callable(presenter, kResetWireRuntimeState));
 	// The four tick-driven present passes are EntityPresenter's own (ADR 0043
 	// d9): the fire pass (AI/remote fire sound + muzzle effect + tracers off
 	// the sim's fired/tracer drains; a joiner re-runs decoded S2C tag-2 rounds
@@ -440,9 +429,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// ADR 0035: the native session owns lifecycle/cadence and invokes one
 	// synchronous per-tick presentation sink (this root). The camera remains a
 	// Godot device; a dedicated host has none.
-	// Capture the authored node transforms now (pre-tick) so Stop restores them whether the caller
-	// played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
-	capture_transforms();
 	const int64_t setup_end = now_usec();
 	UtilityFunctions::print_verbose(vformat(
 			"MissionRoot: setup %d ms: stage %d ms, boot %d ms, index and presenter %d ms (%d placed "
@@ -1010,7 +996,7 @@ Ref<MissionPerfCounters> MissionRoot::get_perf_counters() const {
 	return out;
 }
 
-// --- Debug/tooling transport (Play / Step / Stop) -----------------------------
+// --- Debug/tooling transport (Play / Pause / Step) ----------------------------
 
 bool MissionRoot::is_transport_locked() const {
 	// Delegates to the native predicate (S14) — one home for the rule.
@@ -1050,38 +1036,6 @@ bool MissionRoot::step_once() {
 	return tick();
 }
 
-void MissionRoot::stop() {
-	// Worse than pause on a live session: the restart below rewinds the world under
-	// peers that are still streaming against it. See is_transport_locked().
-	if (is_transport_locked()) {
-		return;
-	}
-	if (sim_.is_valid()) {
-		sim_->reset_session();
-	}
-	clear_present_effect_poses();
-	restore_transforms();
-	emit_signal(kSignalSimulationRestarted);
-}
-
-void MissionRoot::capture_transforms() {
-	orig_transforms_.clear();
-	for_each_present_node([this](ObjectModel *p_node) {
-		orig_transforms_.insert(p_node->get_instance_id(), p_node->get_transform());
-	});
-}
-
-void MissionRoot::restore_transforms() {
-	for (const KeyValue<uint64_t, Transform3D> &entry : orig_transforms_) {
-		ObjectModel *node = Object::cast_to<ObjectModel>(ObjectDB::get_instance(ObjectID(entry.key)));
-		if (node != nullptr) {
-			node->set_transform(entry.value);
-			node->set_present_visible(true); // undo any visibility intent the placed walk wrote
-		}
-	}
-	orig_transforms_.clear();
-}
-
 void MissionRoot::for_each_present_node(const std::function<void(ObjectModel *)> &p_fn) {
 	if (sim_.is_null() || index_.is_null()) {
 		return;
@@ -1106,7 +1060,7 @@ void MissionRoot::for_each_present_node(const std::function<void(ObjectModel *)>
 
 // The explicit detach order (verbatim from the GDScript driver): the stats
 // board hook, the profiling gate, the session close, the pose latch, the
-// Stop -> Play connect, the presenter's teardown, then the captured pass
+// presenter's teardown, then the captured pass
 // inputs and the sim itself. In the game the placer's MissionObjects
 // container is this root's child and unload() queue_free()s it FIRST, so the
 // teardown below finds the container's nodes already gone exactly as it did
@@ -1134,10 +1088,6 @@ void MissionRoot::_exit_tree() {
 	}
 	clear_present_effect_poses();
 	if (EntityPresenter *presenter = entities()) {
-		const Callable reset_wire(presenter, kResetWireRuntimeState);
-		if (is_connected(kSignalSimulationRestarted, reset_wire)) {
-			disconnect(kSignalSimulationRestarted, reset_wire);
-		}
 		// Frees the wire bodies + held weapons and the tracer mesh under the
 		// container, the husk models + effect anchors, the throwable models and
 		// the scar meshes under the owner models.

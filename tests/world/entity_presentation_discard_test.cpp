@@ -106,7 +106,6 @@ struct KindRole final : im::Role {
 	explicit KindRole(im::RoleKind kind) : role_kind(kind) {}
 	im::RoleKind kind() const override { return role_kind; }
 	void run_tick(const im::TickInput &) override {}
-	bool reset_to_baseline(im::SessionError &) override { return true; }
 	void close() override {}
 };
 

@@ -138,7 +138,6 @@ struct ProbeRole final : inmatch::Role {
 	ProbeRole() { bind(kernel); }
 	inmatch::RoleKind kind() const override { return inmatch::RoleKind::SinglePlayer; }
 	void run_tick(const inmatch::TickInput &) override { ++ticks; }
-	bool reset_to_baseline(inmatch::SessionError &) override { return true; }
 	void close() override {}
 };
 
@@ -189,7 +188,6 @@ struct SpinRole final : inmatch::Role {
 		while (io::perf_now_us() - start < 1500) {
 		}
 	}
-	bool reset_to_baseline(inmatch::SessionError &) override { return true; }
 	void close() override {}
 };
 

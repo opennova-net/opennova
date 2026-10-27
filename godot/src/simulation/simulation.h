@@ -311,7 +311,6 @@ private:
 	bool begin_session_load();
 	void complete_session_load();
 	void fail_session_load(const char *p_message);
-	void restore_world_baseline();
 	// The session's per-tick observer (inmatch::TickObserver): the HUD map death
 	// gate after every tick, then the Godot pipeline's tick sink.
 	void after_tick() override;
@@ -883,7 +882,6 @@ public:
 	void set_tick_sink(TickSink *p_sink) { session_tick_sink_ = p_sink; }
 	bool pause_session();
 	bool resume_session();
-	bool reset_session();
 	void close_session();
 	// The dev tools' board: SIM_STEP and the SIM_* phase slots are fed here
 	// while the profiling clocks run and the board captures.

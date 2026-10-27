@@ -215,12 +215,6 @@ bool Simulation::resume_session() {
 	return out.applied() || out.code == opennova::inmatch::TransitionCode::NoOp;
 }
 
-bool Simulation::reset_session() {
-	const opennova::inmatch::TransitionResult out = session_.reset_to_baseline();
-	if (out.applied()) restore_world_baseline();
-	return out.applied();
-}
-
 void Simulation::close_session() {
 	(void)session_.close();
 }

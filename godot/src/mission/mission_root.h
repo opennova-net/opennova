@@ -57,8 +57,7 @@ class MissionEnvironment;
 //
 // Cadence: inmatch::Session banks wall clock and dispatches 0..N 62.5 Hz ticks;
 // tick() asks that same session for one deterministic local/test step. The
-// engine's WAC/BMS dividers remain inside their systems. Stop rewinds both the
-// native world baseline and the authored node transforms captured at setup.
+// engine's WAC/BMS dividers remain inside their systems.
 //
 // Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
 // loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
@@ -235,9 +234,9 @@ public:
 	// the record's JSON edge).
 	Ref<MissionPerfCounters> get_perf_counters() const;
 
-	// --- Debug/tooling transport (Play / Step / Stop) -----------------------
+	// --- Debug/tooling transport (Play / Pause / Step) ----------------------
 
-	// True while a live net session owns this runtime, i.e. the Play/Step/Stop
+	// True while a live net session owns this runtime, i.e. the Play/Pause/Step
 	// transport is locked out. The world tick is the
 	// ONLY pump for the session socket (`Simulation::step` is the sole caller of
 	// host_pump/joiner_pump), so halting it stops the C2S uplink, the keepalive and
@@ -261,13 +260,8 @@ public:
 	// tests/tooling previews share this primitive. False when the session
 	// refused the step (a net role, nothing loaded).
 	bool step_once();
-	// Stop: rewind the world to the play-start baseline AND restore the
-	// authored node transforms, so the placed world is left exactly as it
-	// was. Safe to call when never played.
-	void stop();
-
 	// The sim drops with this root's reference when it leaves the tree (a
-	// reload / Stop queue_free()s the root): the explicit detach order.
+	// reload queue_free()s the root): the explicit detach order.
 	void _exit_tree() override;
 
 protected:
@@ -319,8 +313,6 @@ private:
 	void read_frame_perf(const Ref<MissionFrameOutcome> &p_outcome);
 	int stats_role_value() const;
 	void feed_projectile_trace_stats();
-	void capture_transforms();
-	void restore_transforms();
 	// Walk the nodes the present pass drives (resolved from the current
 	// snapshot through the shared index).
 	void for_each_present_node(const std::function<void(ObjectModel *)> &p_fn);
@@ -341,8 +333,6 @@ private:
 	Ref<MissionData> mission_;
 	Ref<EntityIndex> index_;
 	Ref<MissionObjectPlacer> registry_placer_;
-	// node -> Transform3D captured at setup, for restore-on-stop.
-	HashMap<uint64_t, Transform3D> orig_transforms_;
 	int64_t perf_tick_us_ = 0;
 	int64_t perf_sim_us_ = 0;
 	int64_t perf_present_us_ = 0;

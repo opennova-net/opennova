@@ -450,7 +450,6 @@ public:
 	}
 	virtual void run_tick(const TickInput &input) = 0;
 	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
-	virtual bool reset_to_baseline(SessionError &error) = 0;
 	virtual void close() = 0;
 	// The client-side replica runtime this role folds (the HostClient's or the
 	// joiner's); null for the bare local role and a dedicated host.
@@ -805,7 +804,6 @@ public:
 	// own flip applies inside the update that reads it (run_updates).
 	TransitionResult pause();
 	TransitionResult resume();
-	TransitionResult reset_to_baseline();
 	TransitionResult close();
 
 	// A mode change's reset: the bank, its smoothing history and the FR counter

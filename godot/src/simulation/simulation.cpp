@@ -721,40 +721,6 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	return true;
 }
 
-// The Godot legs after the role's baseline restore (reset_session): the
-// engine half — the local weapon's epoch resets (the borrowed-UseGun
-// reinstall event), the world + WAC runtime rewind, the view reset, the
-// fresh-soldier .adm re-ground and the shell's item-trait re-stamp — is the
-// kernel's restore; the host role rebuilt its HostClient view from the
-// restored pools and re-armed the minimap scan; the joiner role re-armed its
-// rematerialization fold.
-void Simulation::restore_world_baseline() {
-	if (!world_installed_) return;
-	runtime_ = active_role().client_runtime();
-	install_console_seams();
-	// The host role rebuilt its score-feedback revision stream; joiners retain
-	// theirs. Consume the current baseline so old cursor values cannot hide a
-	// new equal-numbered notification (or replay an old joiner notification).
-	net_.score_feedback_updates_seen = runtime_ != nullptr
-			? runtime_->state().score_feedback.updates : 0;
-	// The logic tick rewinds and the runtime may be recreated below — a cached
-	// minimap snapshot keyed on (revision, tick) could collide across epochs.
-	present_.minimap_snapshot_valid = false;
-	present_.minimap_overlays_valid = false;
-	if (kernel_->wire_header_world) {
-		// ClientState survives Stop/Start, while the body-empty baseline removes
-		// its registry carriers. Force one exact rematerialization fold; retain the
-		// already-built portal tables because their handles remain identical and
-		// the occlusion models' weld records are intentionally one-shot mutable.
-		net_.deploy_zone_registry.invalidate();
-	}
-	if (assets_.collision_item_db.is_valid())
-		resolve_collision_instances(assets_.collision_item_db);
-	// The restored world can share a tick number with a previously cached view.
-	// Force the next FollowOwner query to rebuild against the post-restart epoch.
-	invalidate_present_effect_pose_cache();
-}
-
 bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 	if (!world_installed_) {
 		UtilityFunctions::push_warning(

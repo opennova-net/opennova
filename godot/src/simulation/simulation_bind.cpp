@@ -66,7 +66,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step_session_frame", "input"),
 			&Simulation::step_session_frame);
 	ClassDB::bind_method(D_METHOD("resume_session"), &Simulation::resume_session);
-	ClassDB::bind_method(D_METHOD("reset_session"), &Simulation::reset_session);
 	ClassDB::bind_method(D_METHOD("set_frame_stats", "stats"),
 			&Simulation::set_frame_stats);
 	ClassDB::bind_method(D_METHOD("get_frame_stats"),

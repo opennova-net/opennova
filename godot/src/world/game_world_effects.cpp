@@ -222,46 +222,6 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	}
 }
 
-void GameWorld::on_runtime_simulation_restarted() {
-    if (MissionAudio *audio = get_mission_audio()) {
-        audio->reset_oneshot_playback();
-    }
-	// A Stop/restart can restore the saved personal slot while the presenter still
-	// owns an emplaced model. Consume that control event synchronously; no fixed
-	// tick runs while stopped.
-	LocalPlayerPresenter *presenter = local_view_presenter();
-	if (presenter != nullptr) {
-		presenter->present_fixed_weapon_tick(drain_local_player_weapon_events());
-	}
-	if (terrain_ != nullptr) {
-		terrain_->clear_terrain_scorches();
-	}
-	EffectWorld *effect_world = get_effect_world();
-	if (effect_world == nullptr) {
-		resync_weather_after_restore();
-		return;
-	}
-	effect_world->reset_runtime_state();
-    open_script_effects();
-	// Persistent item effects belong to the restored entity set, not the scene
-	// that was just discarded. Re-register their admission and owner identities;
-	// restore emits fresh controller-start lifecycle events for occupied baselines.
-	item_fx_->reattach();
-	if (light_director_.is_valid()) {
-		light_director_->reattach();
-	}
-	resync_weather_after_restore();
-}
-
-// The restored baseline rewound the World's weather home; the render owner
-// snaps its color blocks back onto the restored targets.
-void GameWorld::resync_weather_after_restore() {
-	Weather *weather = weather_;
-	if (weather != nullptr) {
-		weather->resync_colors_now();
-	}
-}
-
 // One wire-spawn router for both directors, subscribed to the entity
 // presenter's spawn signal in start_effect_world.
 void GameWorld::on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id) {

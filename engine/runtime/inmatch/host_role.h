@@ -331,7 +331,6 @@ public:
 	// [orig: Server_TickUpdate @0x51DB57/@0x51DB63 g_MissionExitReason 4/3;
 	//  read by Game_ProcessMainFrame @0x526806..0x526867].
 	bool session_lost(SessionError &error) const override;
-	bool reset_to_baseline(SessionError &error) override;
 	// The host's mission exit: the round-reset 0x25 queued to every in-match remote
 	// (nothing transmits it), then on the destroy arm the "NP.C:SH:STOP" burst to
 	// every connection.
@@ -420,10 +419,6 @@ private:
     uint64_t local_round_reset_seen_ = 0;
     // The own client's 0x0F / local 0x50 track legs consumed (replica_track.h).
     ReplicaTrackSeen track_seen_;
-    // The host's own connection as the kernel's last baseline capture found it (the
-    // mission start's, ahead of its own 0x0B, or a later one): a rewind restores both
-    // (reset_to_baseline).
-    std::optional<NapiNPConnection> own_connection_at_baseline_;
 };
 
 } // namespace opennova::inmatch

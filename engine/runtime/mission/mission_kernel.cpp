@@ -458,7 +458,6 @@ void MissionKernel::capture_baseline() {
 	wac_baseline = wac.capture_runtime_state();
 	have_baseline = true;
 	have_wac_baseline = true;
-	if (baseline_captured) baseline_captured();
 }
 
 int MissionKernel::spawn_local_player_at_start(uint32_t game_type) {

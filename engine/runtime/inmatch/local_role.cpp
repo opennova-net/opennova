@@ -77,12 +77,6 @@ bool LocalRole::session_lost(SessionError &error) const {
 	return true;
 }
 
-bool LocalRole::reset_to_baseline(SessionError &error) {
-	if (kernel_->restore_baseline()) return true;
-	error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
-	return false;
-}
-
 // The bare authority's mission exit: the teardown's pool destruction and the
 // one-shot PostMission sweep [orig: Game_TeardownMission @0x52266C].
 void LocalRole::close() {

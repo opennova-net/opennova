@@ -93,9 +93,9 @@ class Simulation;
 // rings). The driver runs the row walks, then present_passes() — fire ->
 // destruction -> throwable -> scars, scars LAST: the entity-ring meshes
 // parent under section nodes the row walks built and the husk grafts onto the
-// placed/wire models. A zero-tick frame runs only the row walks. The
-// Stop -> Play boundary (reset_wire_runtime_state) resets the passes' runtime
-// state with the wire registry.
+// placed/wire models. A zero-tick frame runs only the row walks. The teardown
+// (reset_wire_runtime_state) resets the passes' runtime state with the wire
+// registry.
 class EntityPresenter : public Node3D {
 	using PresentRowsView = opennova::world::PresentRowsView;
 	GDCLASS(EntityPresenter, Node3D)
@@ -281,8 +281,8 @@ public:
 	void register_wire_held_weapon(int p_handle, ObjectModel *p_node);
 
 	// Free every wire body/weapon and forget the wire plan, caches and
-	// verdicts, then reset the present passes' runtime state (the Stop ->
-	// Play boundary; the sim's restart signal).
+	// verdicts, then reset the present passes' runtime state (the teardown's
+	// first leg).
 	void reset_wire_runtime_state();
 	// Wire teardown plus the placed plan's release and the passes' teardown
 	// (the node is going away).

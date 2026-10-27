@@ -1017,7 +1017,7 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 			"teardown releases the world's local view presenter")
 
 
-func test_fx2ssn_executes_with_entity_orientation_and_restores_on_retry() -> void:
+func test_fx2ssn_executes_with_entity_orientation() -> void:
 	var root_dir := _stage_building_terrain_fixture("fx2ssn")
 	WorldFixture.stage_effects(root_dir)
 	# Publish the script entry before ResourceRoot indexes the fixture.
@@ -1062,12 +1062,6 @@ func test_fx2ssn_executes_with_entity_orientation_and_restores_on_retry() -> voi
 	if active.size() == 1:
 		assert_gt(active[0].id, initial_id)
 		assert_eq(active[0].source_tick, 62, "presentation retains the WAC source tick across frame batching")
-	world.get_runtime().stop() # mission restart also resets the presentation owners
-	rows = effects.get_debug_group_report()
-	assert_eq(rows.size(), 1, "retry replays the sealed initial descriptor once")
-	if rows.size() == 1:
-		assert_eq(rows[0].name, FX_PERSISTENT_EFFECT)
-		assert_false(rows[0].detached)
 	world.unload()
 
 

@@ -2294,19 +2294,6 @@ bool JoinerRole::session_lost(SessionError &error) const {
 	return false;
 }
 
-// The editor Stop/Start rewind on a joiner: the kernel's restore, then one
-// exact rematerialization fold of the retained ClientState (the body-empty
-// baseline removed its registry carriers; the portal tables stay, their
-// handles are identical and the weld records one-shot mutable).
-bool JoinerRole::reset_to_baseline(SessionError &error) {
-	if (!kernel_->restore_baseline()) {
-		error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
-		return false;
-	}
-	if (kernel_->wire_header_world) reset_materialization();
-	return true;
-}
-
 // Leaving: the session's teardown at the mission's exit, by its post-mission route, its
 // datagrams riding the shell's send leg. A route that destroys the session leaves through
 // FullDestroy, which latches "N.C:SWWAD[1]:<exit reason>" when nothing is latched (a load

@@ -275,7 +275,6 @@ public:
 	// that ends inside it renders nothing (Session::renders carries the witness).
 	bool in_final_wait() const override { return runtime && runtime->in_final_wait(); }
 	bool session_lost(SessionError &error) const override;
-	bool reset_to_baseline(SessionError &error) override;
 	void close() override;
 	// Input action 3 on a joiner, the quit to the main menu (the in-game menu's confirmed
 	// exit, the admin's GOTO MENUSTATE): exit reason 1, then the connection's user leave runs

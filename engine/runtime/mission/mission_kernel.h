@@ -305,9 +305,6 @@ public:
 	// view). Null = no session peer of its own (a dedicated host, a joiner,
 	// the bare kernel) [orig: Game_StartMission @0x526189..0x526255].
 	std::function<void()> net_mission_start_end;
-	// The net half's own state beside every baseline capture_baseline takes (a host role's own
-	// connection, which its reset_to_baseline puts back with the world). Null = none.
-	std::function<void()> baseline_captured;
 	// The precipitation pool's per-render update for a camera at (x, y, z)
 	// mission 16.16: the wrap into the camera volume and the re-floor of every
 	// wrapped drop on terrain / water / the first entity under it

@@ -27,7 +27,6 @@
 #include <runtime/inmatch/server_powerup.h> // ServerRemoteWeaponTables
 #include <runtime/inmatch/server_spawn.h> // Player_InitPlayerSideWords (the mission start's body leg)
 #include <runtime/inmatch/server_tick.h>
-#include <runtime/inmatch/server_vehicle_spawn.h> // Server_InitEntityLimitTable (the rewind)
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/player_loadout.h>
@@ -264,12 +263,6 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	// Its mission start ends with the /PROFILE roster pass, then its C2S 0x0B
 	// (D-NET-NEW-L4-5) [orig: Game_StartMission - CServerLog_WritePlayerNameRecord
 	//  @0x52617B ahead of CNapiNetwork_QueueReliableMessage @0x52624B].
-	// The own connection beside every baseline the kernel takes (reset_to_baseline).
-	kernel.baseline_captured = [this] {
-		own_connection_at_baseline_.reset();
-		for (const NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
-			if (conn.type == NapiNPConnection::kTypeClientSide) own_connection_at_baseline_ = conn;
-	};
 	kernel.net_mission_start_end = [this] {
 		const NapiNPServerCtx &ctx = state.host_owner.ctx;
 		if (ctx.logs.profile != nullptr && kernel_ != nullptr)
@@ -1603,61 +1596,6 @@ std::optional<ConnectionErrorRecord> HostRole::own_client_error_record() const {
 	record.disconnect_text = event->dstr;
 	record.disconnect_param = event->dpc;
 	return record;
-}
-
-// The editor Stop/Start rewind: the kernel's own restore with the own connection as
-// the baseline's capture left it, then a fresh HostClient view re-fed from the
-// restored world's pools (the static, spawn, organic and marker batches) and the
-// minimap's initial scan re-armed. A baseline the mission start took holds the own
-// slot short of its join: that restore is a mission start, as retail's
-// single-player restart is, and ends as the start did, with the own client's 0x0B,
-// so the next frame's receive pump runs the own join, whose clear unhides the body
-// the start's local-player block hid (out of a session no 0x0A re-sets it).
-// [orig: Game_RestartRoundSP @0x5263A0 - Server_DisconnectAndResetAllPlayerSlots
-//  @0x5263D4, Game_StartMission(1) @0x5263DB; Game_StartMission - the hide @0x525C9E,
-//  the 0x0B @0x52624B / @0x526255; Server_OnPlayerJoin - the clear @0x51A7DA, the
-//  0x0A behind is_in_session @0x51A824]
-bool HostRole::reset_to_baseline(SessionError &error) {
-	mission::MissionKernel &kernel = *kernel_;
-	if (!kernel.restore_baseline()) {
-		error = {SessionErrorCode::TickFailed, "mission baseline is unavailable"};
-		return false;
-	}
-	// The restart's mission start rebuilds the vehicle EntityLimit table, the consumed
-	// per-team slots with it [orig: Game_RestartRoundSP @0x5263DB -> Game_StartMission(1) ->
-	//  EntityLimit_InitTable @0x509A70 (the call @0x526182)].
-	Server_InitEntityLimitTable(state.host_owner.ctx);
-	if (state.client_runtime) {
-		state.host_loop.clear();
-		if (own_connection_at_baseline_)
-			for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
-				if (conn.type == NapiNPConnection::kTypeClientSide) conn = *own_connection_at_baseline_;
-		make_client_runtime(state.host_owner.ctx.config.game_type);
-		// The replacement local client starts with zero score. Reset the
-		// matching sender cache too, or an equal post-retry award is suppressed.
-		// [orig: Server_PlayerAdd @0x51D50A (slot+0x14C zeroed at install; also
-		//  @0x51CD00 before the whole-slot memset @0x51CD06);
-		//  Server_UpdateCaptureZoneProximity @0x50874E..0x508790 (GetFieldPlusOne
-		//  0x1C @0x508749, cmp/store slot+0x14C @0x50874E/@0x50875F, the 0x81
-		//  send @0x508790)]
-		for (NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
-			if (conn.link.transport == &state.host_loop)
-				conn.reply.score_delta_sound_value = 0;
-		replication::ClientReplicaPipeline &view = state.client_runtime->view();
-		view.apply(0x10, opennova::encode_static_entity_batch(
-				replication::build_pool2_static_batch(kernel.world)));
-		view.apply(0x0D, opennova::encode_pool_spawn_batch(
-				replication::build_pool1_spawn_batch(kernel.world)));
-		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				replication::build_pool0_organic_batch(kernel.world)));
-		view.apply(0x20, opennova::encode_pool3_sync_batch(
-				replication::build_pool3_marker_batch(kernel.world)));
-		inmatch::Server_RearmMinimapInitialScan(state.host_owner.ctx);
-		if (own_connection_at_baseline_ &&
-				own_connection_at_baseline_->slot_state == PlayerSlotState::AwaitJoin)
-			send_own_mission_status();
-	}
-	return true;
 }
 
 void authority_dialog_line_loaded(NapiNPServerCtx &ctx, ClientRuntime *own_client,

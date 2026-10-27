@@ -754,7 +754,6 @@ public:
 	// main loop banks GetTickCount's difference; Godot's process step is capped
 	// (D-NET-NEW-LI-6). A synthetic driver stepping tick() banks its own delta.
 	double take_frame_elapsed_seconds();
-	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
@@ -1004,7 +1003,6 @@ private:
     void drain_unshown_script_effects();
 	void route_dialog_lines();
 	void route_terrain_scorches();
-	void resync_weather_after_restore();
 
 	// --- the world's retained scene nodes (game_world.tscn; absent from a
 	//     code-built world), bound through the one scene table ---

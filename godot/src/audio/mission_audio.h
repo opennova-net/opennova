@@ -137,7 +137,6 @@ public:
 			const Transform3D &p_camera_xform);
     void play_script_sounds(const std::vector<opennova::world::ScriptSoundEvent> &p_events,
             const Transform3D &p_camera_xform);
-    void reset_oneshot_playback();
 	// The audio channel shutdown, as a device: every channel this node owns
 	// falls silent (the one-shot pool, the ambient pool with its candidate claims
 	// dropped, the dialog and WAC voices), so the ambient mix takes its channels

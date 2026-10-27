@@ -64,7 +64,6 @@ struct TickRecorder final : Role {
 		ticks.push_back(kernel.world.logic_tick);
 		++kernel.world.logic_tick;
 	}
-	bool reset_to_baseline(SessionError &) override { return true; }
 	void close() override {}
 
 	// The ticks (relative to `start`) whose input satisfied `pred`.

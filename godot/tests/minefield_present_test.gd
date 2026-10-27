@@ -11,7 +11,7 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_root)
 		_root = ""
 
-func test_mission_field_submits_markers_and_restores_them_on_stop() -> void:
+func test_mission_field_submits_markers() -> void:
 	var defs := FileAccess.get_file_as_string(RuntimeFixture.file("items.def")) + """
 begin "Synthetic marked field"
  id 101896
@@ -65,11 +65,3 @@ end
 		assert_true(marker.is_visible_in_tree())
 	presenter.present_passes()
 	assert_eq(_world.find_children("MineMarker_*", "ObjectModel", true, false).size(), 7)
-	runtime.stop()
-	await get_tree().process_frame
-	presenter.present_passes()
-	var restored := _world.find_children("MineMarker_*", "ObjectModel", true, false)
-	assert_eq(restored.size(), 7, "stop restores the field and replaces marker lifetimes")
-	for i in mini(restored.size(), transforms.size()):
-		assert_true((restored[i] as Node3D).global_transform.is_equal_approx(transforms[i]),
-				"layout and random rotations rewind together")

@@ -1584,7 +1584,6 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
 	runtime->connect("fixed_tick_completed", callable_mp(this, &GameWorld::on_runtime_fixed_tick));
-	runtime->connect("simulation_restarted", callable_mp(this, &GameWorld::on_runtime_simulation_restarted));
 	// A browsable listen host: register it with the NovaWorld gate (F1), if
 	// one was configured. No-op for single-player, joiners, and pure-LAN play.
 	drive_.on_runtime_started(opts, p_bms_name);

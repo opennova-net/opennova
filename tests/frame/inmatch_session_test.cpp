@@ -31,7 +31,6 @@ struct TickProbe final : Role {
 	std::vector<uint32_t> ticks_seen;    // World::logic_tick at the tick's head
 	std::vector<int32_t> frame_rates;     // every FR-counter value the session handed over
 	int32_t logic_tick = 100;
-	int reset_calls = 0;
 	int close_calls = 0;
 	TickStatus next_status = TickStatus::Ran;
 	RoleKind probe_kind = RoleKind::SinglePlayer;
@@ -58,12 +57,6 @@ struct TickProbe final : Role {
 	bool session_lost(SessionError &error) const override {
 		if (next_status != TickStatus::SessionLost) return false;
 		error = {SessionErrorCode::SessionLost, "peer left"};
-		return true;
-	}
-	bool reset_to_baseline(SessionError &) override {
-		++reset_calls;
-		logic_tick = 100;
-		kernel.world.logic_tick = 100;
 		return true;
 	}
 	void close() override { ++close_calls; }
@@ -251,12 +244,9 @@ int main() {
 		if (!expect(after_start.ticks_run() == 2 && !after_start.start_blank,
 				"after the start frames the full frame time banks again")) return 1;
 
-		// An unsampled render clock falls back to the frame delta. The restart is no
-		// mode init, so the bank keeps its history: the residual 16 plus the 48 ms
-		// (768 units), smoothed against 336: (7 * 336 + 784 + 4) >> 3 = 392 units,
-		// 6 quanta from phase 5, one tick (phase 8).
-		if (!expect(session.reset_to_baseline().applied() &&
-				session.resume().applied(), "restart runs again")) return 1;
+		// An unsampled render clock falls back to the frame delta, over the bank's
+		// history: the residual 16 plus the 48 ms (768 units), smoothed against 336:
+		// (7 * 336 + 784 + 4) >> 3 = 392 units, 6 quanta from phase 5, one tick (phase 8).
 		FrameInput unsampled;
 		unsampled.delta_seconds = TickAccumulator::kTickDt * 3.0;
 		if (!expect(session.advance(unsampled).ticks_run() == 1,
@@ -264,8 +254,8 @@ int main() {
 	}
 
 	// Under the pause the scene frame still draws, so the start frames count down there too:
-	// the SP restart arms three and leaves the session paused, and its first three paused
-	// frames present black and re-base, the fourth not; each paused frame past a re-based
+	// a start paused ahead of its first frame keeps the three it armed, and its first three
+	// paused frames present black and re-base, the fourth not; each paused frame past a re-based
 	// render banks only the time since it (its paused updates none), the fifth its full
 	// 160 ms over the seed-only history, 2 updates, as the running frames above
 	// [orig: Game_MainLoop @0x52BAA7..0x52BAC6 (the render callback @0x52BAC6), the re-base
@@ -277,8 +267,8 @@ int main() {
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
-		if (!expect(session.reset_to_baseline().applied() && session.state() == State::Paused,
-				"paused start: the restart leaves the session paused")) return 1;
+		if (!expect(session.pause().applied() && session.state() == State::Paused,
+				"paused start: the pause holds the start's armed frames")) return 1;
 		FrameInput slow;
 		slow.delta_seconds = TickAccumulator::kTickDt * 10.0;
 		slow.since_render_seconds = 0.0;
@@ -497,11 +487,10 @@ int main() {
 		}
 	}
 
-	// Pause, a manual step and a reset keep the bank and its smoothing history
-	// (D-NET-NEW-LI-8): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4, and
-	// a restart is no mode init [orig: Game_MainLoop @0x52B630 (the mode init
-	// @0x52B715 / @0x52B71B, the EMA's store @0x52B866, the drain's phase @0x52BA6B);
-	// Game_RestartRoundSP @0x5263A0]. Manual step and reset stay local-only.
+	// Pause and a manual step keep the bank and its smoothing history
+	// (D-NET-NEW-LI-8): no pause writes g_TickPhase or g_FrameTimeSmoothedFp4
+	// [orig: Game_MainLoop @0x52B630 (the mode init @0x52B715 / @0x52B71B, the EMA's
+	// store @0x52B866, the drain's phase @0x52BA6B)]. Manual step stays local-only.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
 		TickProbe &target = *target_heap;
@@ -513,17 +502,14 @@ int main() {
 		if (!expect(session.pause().applied(), "pause applies")) return 1;
 		if (!expect(session.step_once().ticks_run() == 1,
 				"paused local session can step once")) return 1;
-		if (!expect(session.reset_to_baseline().applied() && target.reset_calls == 1 &&
-				session.state() == State::Paused,
-				"reset restores baseline and remains paused")) return 1;
-		if (!expect(session.resume().applied(), "resume after reset")) return 1;
+		if (!expect(session.resume().applied(), "resume after the step")) return 1;
 		// The stall drained its clamped 8000 units to 0 at phase 125; the 1 ms frame
 		// fast-forwards through that history: (7 * 8000 + 16 + 4) >> 3 = 7002 units,
 		// 109 quanta from phase 125, 27 ticks (a cold bank would drain nothing).
 		FrameInput tiny;
 		tiny.delta_seconds = 0.001;
 		if (!expect(session.advance(tiny).ticks_run() == 27,
-				"pause/reset kept the stall's bank history")) return 1;
+				"pause and step kept the stall's bank history")) return 1;
 	}
 
 	// The pause row's flip applies at the update whose input frame reads it: a
@@ -765,9 +751,6 @@ int main() {
 				"network role rejects manual step")) return 1;
 		if (!expect(session.last_perf().ticks == 0,
 				"rejected manual step clears stale frame perf")) return 1;
-		if (!expect(session.reset_to_baseline().code ==
-					TransitionCode::RejectedForNetworkRole,
-				"network role rejects reset")) return 1;
 	}
 
 	// Joiners expose their pre-load connection state.

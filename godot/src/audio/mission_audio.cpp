@@ -535,14 +535,6 @@ void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_dista
                     p_distance_q16));
 }
 
-void MissionAudio::reset_oneshot_playback() {
-    if (bank_.is_valid()) {
-        bank_->reset_oneshots(this);
-    }
-    recent_fire_head_ = 0;
-    recent_fire_count_ = 0;
-}
-
 void MissionAudio::shutdown_audio_channels() {
 	if (bank_.is_valid()) {
 		bank_->reset_oneshots(this);

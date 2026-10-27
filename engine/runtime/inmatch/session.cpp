@@ -1696,38 +1696,6 @@ TransitionResult Session::resume() {
 	return transition(State::Running);
 }
 
-TransitionResult Session::reset_to_baseline() {
-	if (kind_ != RoleKind::SinglePlayer) {
-		return rejected(TransitionCode::RejectedForNetworkRole,
-				{SessionErrorCode::NetworkRoleLocked,
-						"network sessions cannot reset"});
-	}
-	if (state_ != State::Running &&
-			state_ != State::Paused) {
-		return rejected(TransitionCode::InvalidState,
-				invalid_transition("reset requires Running or Paused"));
-	}
-	const State from = state_;
-	SessionError error;
-	if (role_ == nullptr || !role_->reset_to_baseline(error)) {
-		if (!error) error = {SessionErrorCode::TickFailed,
-				"mission baseline reset failed"};
-		return fail(error);
-	}
-	// A restart is a mission start inside the running mode, no mode init: the
-	// update's exit test calls it, so the main loop's bank runs on (pause() carries
-	// the witness) and only the input latch restarts [orig: Game_ProcessMainFrame
-	// @0x5263F0 (the Game_RestartRoundSP call @0x52682C); Game_RestartRoundSP
-	// @0x5263a0 -> Game_StartMission @0x525e1f (the call @0x5263DB)].
-	pending_input_ = {};
-	latest_camera_ = {};
-	last_perf_ = {};
-	start_rebase_frames_ = kStartRebaseFrames;
-	rebase_clock_ = true;
-	set_state(State::Paused);
-	return {TransitionCode::Applied, from,
-			State::Paused, {}};
-}
 
 TransitionResult Session::close() {
 	if (state_ == State::Unloaded)

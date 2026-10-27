@@ -730,12 +730,11 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 
 // Its own frame: main's locals already fill the 1 MB test stack.
 void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
-	// --- the 0x4C report's count is the process's: a remade client runs on --
+	// --- the 0x4C report's count is the process's --------------------------
 	// Retail keeps the count in one global that only the report zeroes, so a
-	// client remade mid-cycle (a retry's, a map change's) reports on the same
-	// 311-frame beat; the embedder's ClientProcessState carries it across
-	// sessions. Here the role remakes its client at frame 200 and the host's
-	// level still lands at frame 312.
+	// client remade mid-cycle (a map change's) reports on the same 311-frame
+	// beat; the embedder's ClientProcessState carries it across sessions. Here
+	// the count stands at 200 at frame 201 and the host's level lands at frame 312.
 	// [orig: g_NetQualityReportTimer @0xA85B84 - Client_ProcessNetworkFrame
 	//  @0x42C239 / @0x42C246, its only writers]
 	{
@@ -772,11 +771,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		kernel.capture_baseline();
 		int stored_at = -1;
 		for (int frame = 1; frame <= 600 && stored_at < 0; ++frame) {
-			if (frame == 201) {
-				CHECK(process.net_quality_report_timer == 200);
-				inmatch::SessionError reset_error;
-				CHECK(role.reset_to_baseline(reset_error));
-			}
+			if (frame == 201) CHECK(process.net_quality_report_timer == 200);
 			role.run_tick(tick_input(0));
 			for (const inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
 				if (conn.link.owned_entity == kernel.world.cached.local_player &&
@@ -1143,21 +1138,15 @@ int main() {
 		host.host_loop.client_send(c2s::ENTITY_UPLINK, std::vector<uint8_t>{0});
 		role.run_tick(tick_input(0));
 		CHECK(host.host_loop.c2s_pending() == 0);
-		// Recreate the local replica and repeat an equal point award. Both the
-		// sender's comparison cache and the client's score epoch must restart.
+		// A point award reaches the local replica's score feedback.
 		const w::EntityHandle scorer = kernel.world.cached.local_player;
 		CHECK(kernel.world.match.player(scorer) != nullptr);
-		kernel.capture_baseline();
-		for (int attempt = 0; attempt < 2; ++attempt) {
+		if (kernel.world.match.player(scorer) != nullptr) {
 			kernel.world.match.player(scorer)->stats[w::MatchStats::kPoints] = 17;
 			for (int tick = 0; tick < 62; ++tick) role.run_tick(tick_input(0));
 			const auto &feedback = host.client_runtime->state().score_feedback;
 			CHECK(feedback.updates == 1);
 			CHECK(feedback.score == 17 && feedback.delta == 17);
-			inmatch::SessionError reset_error;
-			CHECK(role.reset_to_baseline(reset_error));
-			CHECK(kernel.world.match.player(scorer)->stats[w::MatchStats::kPoints] == 0);
-			CHECK(host.client_runtime->state().score_feedback.updates == 0);
 		}
 	}
 
