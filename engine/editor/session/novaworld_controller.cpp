@@ -208,6 +208,7 @@ void NovaWorldController::set_accounts(NovaWorldAccountStore *accounts) {
 	account_ = accounts_->load();
 	show_account();
 	account_changed();
+	list_projects(); // what New project offers is NovaWorld's
 }
 
 void NovaWorldController::show_account() {
@@ -478,8 +479,10 @@ void NovaWorldController::list_projects() {
 	// The games a new project of the account's may be a mod of: a signed-in account's alone.
 	games_ = account_.signed_in() ? NovaWorldCall(*transport_, novaworld_api::my_projects(account_))
 								  : NovaWorldCall();
-	if (!account_.signed_in())
+	if (!account_.signed_in()) {
 		core_.view().novaworld.games.clear();
+		core_.view().novaworld.titles.clear();
+	}
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
@@ -828,8 +831,12 @@ void NovaWorldController::poll() {
 		NovaWorldApiError error;
 		// A list that fails leaves the games as they were: a new project names its base itself
 		// then.
-		if (novaworld_api::read_my_games(games_.reply(), games, error))
+		std::vector<std::string> titles;
+		if (novaworld_api::read_my_games(games_.reply(), games, error) &&
+				novaworld_api::read_my_titles(games_.reply(), titles, error)) {
 			view.games = std::move(games);
+			view.titles = std::move(titles);
+		}
 		games_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}

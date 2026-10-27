@@ -124,6 +124,9 @@ bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldA
 NovaWorldRequest my_projects(const NovaWorldAccount &account);
 bool read_my_games(
 		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
+// The same reply's titles a new game of the account's may run as (gameprofile codes: "jo", "dfx2").
+bool read_my_titles(
+		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error);
 // Why `what` ("push", "release") would pass the account's storage (413 quota_exceeded {used, limit}:
 // a push's files it asks to upload or an upload, a release's package), in a line's words; "" for any
 // other reply.

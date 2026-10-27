@@ -473,9 +473,6 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::NewProjectInstall:
 		window_requests::set_workspace(*this, "new_project", "game_install", io::JsonValue::make_string(path));
 		break;
-	case PickPurpose::NewProjectBase: // kept from the new project's folder by the session as it makes it
-		window_requests::set_workspace(*this, "new_project", "base_project", io::JsonValue::make_string(path));
-		break;
 	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(*this, purpose, path, view().project.root); break;

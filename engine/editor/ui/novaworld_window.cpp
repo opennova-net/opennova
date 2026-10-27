@@ -40,20 +40,29 @@ void copy_text(char *buffer, size_t size, const std::string &text) {
 	buffer[n] = '\0';
 }
 
-// Set up...: the New project form filled for the empty project `project` (what it makes: a game you own for a
-// retail game's, a mod for an expansion's, a new game otherwise; its name; the key its project file takes).
+// Set up...: the New project form filled with all the empty project `project` says (a project made on the website,
+// ADR 0074): what it makes (a game you own of a retail game or expansion, a mod of its base game as its short name,
+// a new game of its title), its name, the key its project file takes, and its folder, one of the key's name beside
+// the folder the form last named, else beside the last project opened; the form then asks only what is left (the
+// folder where none is known, the install where its game needs one).
 void set_up(Workspace &workspace, const RemoteProject &project) {
+	const SessionView &v = workspace.view();
 	const bool mod = !project.retail && project.kind == "expansion";
 	io::JsonValue members = io::JsonValue::make_object();
 	members.set("making", io::JsonValue::make_string(project.retail ? "stock" : mod ? "mod" : "game"));
 	members.set("title", io::JsonValue::make_string(project.title.empty() ? project.key : project.title));
-	// A retail expansion is the install's own (installed); a mod builds as its code on its base game, NovaWorld's.
-	members.set("installed", io::JsonValue::make_string(project.retail ? project.expansion_code : std::string()));
-	if (mod) {
-		members.set("expansion", io::JsonValue::make_string(project.expansion_code));
-		members.set("base_key", io::JsonValue::make_string(project.base));
-	}
+	members.set("stock", io::JsonValue::make_string(project.retail ? project.key : std::string()));
+	members.set("base_key", io::JsonValue::make_string(mod ? project.base : std::string()));
+	members.set("expansion", io::JsonValue::make_string(mod ? project.expansion_code : std::string()));
+	members.set("game", io::JsonValue::make_string(!project.retail && !mod ? project.game : std::string()));
 	members.set("novaworld", io::JsonValue::make_string(project.key));
+	const std::string beside = !v.workspace.new_project.dir.empty() ? v.workspace.new_project.dir
+	                           : !v.project.recent_projects.empty() ? v.project.recent_projects.front()
+	                                                                 : std::string();
+	if (!beside.empty()) {
+		const std::string parent = beside.substr(0, beside.find_last_of("/\\"));
+		if (parent != beside) members.set("dir", io::JsonValue::make_string(parent + "/" + project.key));
+	}
 	window_requests::set_workspace(workspace, "new_project", std::move(members));
 }
 

@@ -92,13 +92,13 @@ struct WorkspaceView {
 	// The new-project form (the welcome page's, File > New project...'s modal): whether the modal is open
 	// (the welcome page shows the form whenever no project is open), what it makes (`making`: a game you own,
 	// its game's every file imported; a mod of a game; a new game of its own), its name, its folder, the game
-	// install it imports from (the editor's own until one is named: `install_named`), the install's game a game
-	// you own is (`installed`: "" the base game, else an installed expansion by its folder's name), the base game's
-	// project a game you own's expansion is made on (T5; offered the folder beside it that holds one), the
-	// NovaWorld game a mod is of (`base_key`, ADR 0074: one of the novaworld view's games, by key; its project
-	// found or made as the mod is), a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
-	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none). New project raises
-	// new_project with them; nothing here makes a project.
+	// install it imports from (the editor's own until one is named: `install_named`; asked only where the game
+	// needs one), and what it is of, each one of NovaWorld's (ADR 0074; the novaworld view's lists): a game you
+	// own's retail game or expansion (`stock`, its project's key: JO, JOX01, DFX2), a mod's base game (`base_key`,
+	// one of the games; its project found or made as the mod is) and a new game's title (`game`, a gameprofile code
+	// of the titles, "" the first); a mod's name, the expansion it builds as (ADR 0046 S16), and the NovaWorld
+	// project it is set up for (the welcome page's Set up..., ADR 0069: its key, "" none; the form then shows only
+	// what that project does not say). New project raises new_project with them; nothing here makes a project.
 	enum class Making : uint8_t { Stock, Mod, Game };
 	struct NewProject {
 		bool open = false;
@@ -107,9 +107,9 @@ struct WorkspaceView {
 		std::string dir;
 		std::string game_install;
 		bool install_named = false;
-		std::string installed;
-		std::string base_project;
+		std::string stock;
 		std::string base_key;
+		std::string game;
 		std::string expansion;
 		std::string novaworld;
 	};

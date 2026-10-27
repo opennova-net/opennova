@@ -672,6 +672,10 @@ void test_thirty_tabs() {
 void test_welcome_view() {
 	SessionView v;
 	v.workspace.new_project.making = WorkspaceView::Making::Game; // a new game: no install needed
+	// Its title NovaWorld's (ADR 0074): signed in, the titles listed.
+	v.novaworld.available = true;
+	v.novaworld.signed_in = true;
+	v.novaworld.titles = {"jo", "dfx2"};
 	v.project.recent_projects = {"C:/mods/Armory", "C:/mods/Other", "C:/mods/Gone"};
 	v.project.recent_details = {{"C:/mods/Armory", true, "Armory Mod", "Joint Operations", "jxm", "jox01"},
 	                            {"C:/mods/Other", true, "Other", "Joint Operations", "", ""},
@@ -686,7 +690,7 @@ void test_welcome_view() {
 	CHECK(in_order(logged_frame(ui), {"OpenNova Editor", "Open a project", "Open a project folder...", "Armory Mod",
 	                                  "Joint Operations, as the expansion jxm on jox01", "C:/mods/Armory", "Other",
 	                                  "No project here now", "C:/mods/Gone", "New project", "A game you own", "A mod",
-	                                  "A new game", "Game install", "No game install chosen", "Name", "Folder",
+	                                  "A new game", "Joint Operations", "A game for", "Name", "Folder",
 	                                  "Create project", "No project open."}),
 	      "the welcome page");
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
@@ -710,8 +714,9 @@ void test_welcome_view() {
 	ui.frames(2);
 	ui.activate(item_id(document, {"Create project"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game",
-	      "Create: the folder picked, the name typed");
+	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game" &&
+	              requests[0].game == "jo" && requests[0].game_install.empty(),
+	      "Create: the folder picked, the name typed, NovaWorld's first title, no install");
 	ui.activate(item_id(document, {"Open a project folder..."}));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::OpenProject, "Open...");

@@ -90,9 +90,10 @@ public:
 	// NovaWorldOperation's finish: what the job of the operation `kind` came to, taken in.
 	OperationOutcome finish_job(OperationKind kind, std::unique_ptr<NovaWorldJob> job);
 
-	// new_project naming a base_key (the New project form's A mod of, ADR 0074): the mod made on that
-	// NovaWorld game's project, a project of it on this computer already (local_base) or one made
-	// beside the mod first (make_base), in a folder named by the game's key.
+	// new_project naming a base_key (the New project form's A mod of, and a game you own's retail
+	// expansion, ADR 0074): the expansion made on that NovaWorld game's project, a project of it on
+	// this computer already (local_base) or one made beside it first (make_base), in a folder named by
+	// the game's key.
 	void new_mod(const EditorRequest &request);
 	// BaseSetupOperation's finish: what waited on the base game's project goes on (the mod made on
 	// it, a got mod opened), or why it was not made is said (a got mod opened all the same).

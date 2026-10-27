@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "editor_ui_test_support.h"
+#include "editor/novaworld_fake_service.h"
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -291,26 +292,67 @@ void test_files_kind_and_card() {
 	      "another project: the card closed, every kind listed");
 }
 
-// The welcome page's install: the editor's last chosen in the field, checked (a CheckInstall raised once,
-// not again while the answer stands), what it holds said under it; a folder picked for it checked in its
-// turn; one that holds no game holds Create back; Create carries the install, a game you own's every file
-// imported (all), titled as its game; an installed expansion of it waits for the base game's project, a
-// folder its Browse... picks. A new project with few files says where the game's files come from (File >
-// Import...).
+// The welcome page's A game you own (ADR 0074): NovaWorld's retail games and expansions to choose from, the install
+// asked only once one is chosen; the editor's own install, checked (a CheckInstall raised once, not again while the
+// answer stands), said in a line where it is that game's, so Create needs nothing more and carries it, every file
+// imported (all), titled as the game; a game the editor's install is not shows the field, held back until a folder
+// that holds that game is named; an expansion goes on its base game's project (base_key) with the install's line
+// again. A new project with few files says where the game's files come from (File > Import...).
 void test_welcome_install_and_first_steps() {
 	SessionView v;
 	// The editor's own install fills the form, never the one in effect (an open project's own, or a
 	// session's).
 	v.project.editor_install = "C:/Games/JO";
 	v.project.retail_directory = "C:/Session/Other";
+	NovaWorldView &novaworld = v.novaworld;
+	novaworld.available = true;
+	novaworld.signed_in = true;
+	novaworld.username = "admin";
+	novaworld.role = "admin";
+	const auto retail = [](const char *key, const char *title, const char *game, const char *code, const char *base) {
+		RemoteProject project;
+		project.key = key;
+		project.title = title;
+		project.kind = code[0] ? "expansion" : "game";
+		project.game = game;
+		project.expansion_code = code;
+		project.base = base;
+		project.retail = true;
+		return project;
+	};
+	novaworld.projects = {retail("JO", "Joint Operations", "jo", "", ""),
+	                      retail("JOX01", "Joint Operations: Escalation", "jo", "jox01", "JO"),
+	                      retail("DFX2", "Delta Force 2", "dfx2", "", "")};
+	novaworld.games = {{"DFX2", "Delta Force 2", "dfx2"}, {"JO", "Joint Operations", "jo"}};
 	Ui ui;
 	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
 	ui.windows.set_view(&v);
 	ui.frames(4);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Choose the game") != std::string::npos && text.find("Game install") == std::string::npos,
+	      "nothing chosen: NovaWorld's games to choose from, no install asked yet");
+	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "no install checked before one is needed");
+	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
+	ui.activate(item_id(welcome, {"Game"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"  Joint Operations: Escalation (JOX01)"}));
 	std::vector<EditorRequest> raised = ui.drain();
+	CHECK(workspace_sets(raised, "new_project", "stock").size() == 1 &&
+	              workspace_sets(raised, "new_project", "stock")[0].string == "JOX01",
+	      "a retail expansion chosen: its key the form's");
+	ImGui::ClosePopupsExceptModals();
+	// JO chosen: the editor's install checked, said in a line.
+	v.workspace.new_project.stock = "JO";
+	v.workspace.new_project.dir = "C:/mods/New";
+	v.revisions.touch(ViewConcern::Workspace);
+	ui.frames(2);
+	raised = ui.drain();
 	const EditorRequest *check = only(raised, EditorRequestKind::CheckInstall);
 	CHECK(check && check->game_install == "C:/Games/JO", "the editor's install checked");
-	CHECK(logged_frame(ui).find("Checking the folder...") != std::string::npos, "until it is answered: checking");
+	ui.away();
+	CHECK(logged_frame(ui).find("Checking your game install...") != std::string::npos, "until it is answered: checking");
+	ui.activate(item_id(welcome, {"Create project"}));
+	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create waits for the check");
 	v.project.install_check.root = absolute_install_path("C:/Games/JO");
 	v.project.install_check.game = "jo";
 	v.project.install_check.exists = v.project.install_check.mounts = v.project.install_check.executable = true;
@@ -318,106 +360,87 @@ void test_welcome_install_and_first_steps() {
 	v.project.install_check.expansions = {{"jox01", "Escalation"}};
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
-	std::string text = logged_frame(ui);
-	CHECK(text.find(": 9,290 files, the expansion Escalation (jox01).") != std::string::npos, "what it holds");
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Uses your Joint Operations install, C:/Games/JO.") != std::string::npos &&
+	              text.find("Game install") == std::string::npos,
+	      "the editor's install, that game's: one line, no field");
 	CHECK(only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr, "asked once");
-	// The view's one slot taken by another field's check (Project settings'): this field keeps its
-	// own answer.
+	// The view's one slot taken by another field's check (Project settings'): this field keeps its own answer.
 	const InstallCheck answered = v.project.install_check;
 	v.project.install_check = InstallCheck();
 	v.project.install_check.root = absolute_install_path("C:/Elsewhere");
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
-	CHECK(logged_frame(ui).find(": 9,290 files") != std::string::npos && only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr,
-	      "another field's check over the slot: this field's line as it was, nothing asked again");
+	ui.away();
+	CHECK(logged_frame(ui).find("Uses your Joint Operations install") != std::string::npos &&
+	              only(ui.drain(), EditorRequestKind::CheckInstall) == nullptr,
+	      "another field's check over the slot: this form's line as it was, nothing asked again");
 	v.project.install_check = answered;
-	// The field cleared: what a project made then takes, the editor's install.
-	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
-	ImGui::ActivateItemByID(item_id(welcome, {"Game install"}));
-	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
-	ui.frames(2);
-	ui.key(ImGuiMod_Ctrl, true);
-	ui.key(ImGuiKey_A, true);
-	ui.key(ImGuiKey_A, false);
-	ui.key(ImGuiMod_Ctrl, false);
-	ui.key(ImGuiKey_Backspace, true);
-	ui.key(ImGuiKey_Backspace, false);
-	ImGui::ClearActiveID();
-	ui.frames(2);
-	CHECK(logged_frame(ui).find("Left empty, it takes the editor's install, C:/Games/JO.") != std::string::npos,
-	      "the field cleared: the install a project takes then said");
 	// A refused New project or Open says why on the page.
 	v.project.refused = "The project could not be created: C:/mods/New holds a project already.";
 	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("C:/mods/New holds a project already.") != std::string::npos, "the refusal said on the page");
 	v.project.refused.clear();
-	// A folder picked: checked; it holds no game: Create held back. The picks fill the form, the workspace's
-	// (the MCP gaps lane: set_workspace, which the session takes, here the view it would make).
-	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
-	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Empty");
+	ui.activate(item_id(welcome, {"Create project"}));
 	raised = ui.drain();
-	CHECK(workspace_sets(raised, "new_project", "dir").size() == 1 &&
-	              !workspace_sets(raised, "new_project", "game_install").empty() &&
-	              workspace_sets(raised, "new_project", "game_install").back().string == "C:/Empty",
-	      "the picks fill the form, the workspace's");
-	v.workspace.new_project.dir = "C:/mods/New";
-	v.workspace.new_project.game_install = "C:/Empty";
+	const EditorRequest *made = only(raised, EditorRequestKind::NewProject);
+	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && made->all &&
+	              made->title == "Joint Operations" && made->game == "jo" && made->expansion.empty() && made->base_key.empty(),
+	      "Create: a game you own, nothing more to fill, the editor's install carried, every file imported");
+	// DFX2: the editor's install is JO's, so the field, held back until a DFX2 install is named.
+	v.workspace.new_project.stock = "DFX2";
+	v.revisions.touch(ViewConcern::Workspace);
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Game install") != std::string::npos && text.find("Needs a Delta Force: Xtreme 2 install") != std::string::npos,
+	      "another game than the editor's install's: the field, and what it needs");
+	ui.activate(item_id(welcome, {"Create project"}));
+	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
+	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/DFX2");
+	raised = ui.drain();
+	CHECK(!workspace_sets(raised, "new_project", "game_install").empty() &&
+	              workspace_sets(raised, "new_project", "game_install").back().string == "C:/Games/DFX2",
+	      "the pick fills the form, the workspace's");
+	v.workspace.new_project.game_install = "C:/Games/DFX2";
 	v.workspace.new_project.install_named = true;
 	v.revisions.touch(ViewConcern::Workspace);
 	ui.frames(2);
 	raised = ui.drain();
 	check = only(raised, EditorRequestKind::CheckInstall);
-	CHECK(check && check->game_install == "C:/Empty", "the folder picked checked");
+	CHECK(check && check->game_install == "C:/Games/DFX2", "the folder picked checked");
 	v.project.install_check = InstallCheck();
-	v.project.install_check.root = absolute_install_path("C:/Empty");
-	v.project.install_check.exists = true;
-	v.revisions.touch(ViewConcern::Preferences);
-	ui.frames(2);
-	CHECK(logged_frame(ui).find("No game here") != std::string::npos, "no game here, said");
-	ui.activate(item_id(welcome, {"Create project"}));
-	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
-	ui.windows.deliver_pick(PickPurpose::NewProjectInstall, "C:/Games/JO");
-	v.workspace.new_project.game_install = "C:/Games/JO";
-	v.revisions.touch(ViewConcern::Workspace);
-	v.project.install_check.root = absolute_install_path("C:/Games/JO");
-	v.project.install_check.mounts = true;
-	v.project.install_check.expansions = {{"jox01", "Joint Operations: Escalation"}};
+	v.project.install_check.root = absolute_install_path("C:/Games/DFX2");
+	v.project.install_check.game = "dfx2";
+	v.project.install_check.exists = v.project.install_check.mounts = true;
 	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
 	ui.drain();
 	ui.activate(item_id(welcome, {"Create project"}));
-	const std::vector<EditorRequest> creating = ui.drain();
-	const EditorRequest *made = only(creating, EditorRequestKind::NewProject);
-	CHECK(made && made->dir == "C:/mods/New" && made->game_install == "C:/Games/JO" && made->all &&
-	              made->title == "Joint Operations" && made->expansion.empty(),
-	      "Create: a game you own, with the install, every file imported");
-	// Its expansion: made on the base game's project, which Create waits for (its Browse... picks a folder, the
-	// workspace's); named, Create raises it.
-	v.workspace.new_project.installed = "jox01";
+	const std::vector<EditorRequest> owned = ui.drain();
+	made = only(owned, EditorRequestKind::NewProject);
+	CHECK(made && made->game_install == "C:/Games/DFX2" && made->all && made->game == "dfx2" &&
+	              made->title == "Delta Force 2",
+	      "Create: a game you own of DFX2, its install named");
+	// An expansion, on the editor's install again: made on its base game's project (base_key), which the session
+	// finds or makes.
+	v.workspace.new_project.stock = "JOX01";
+	v.workspace.new_project.game_install.clear();
+	v.workspace.new_project.install_named = false;
 	v.revisions.touch(ViewConcern::Workspace);
+	v.project.install_check = answered;
+	v.revisions.touch(ViewConcern::Preferences);
 	ui.frames(2);
-	CHECK(logged_frame(ui).find("Make Joint Operations first") != std::string::npos, "no base game's project: said plainly");
+	ui.drain();
 	ui.activate(item_id(welcome, {"Create project"}));
-	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");
-	ui.activate(item_id(welcome, {"Browse...##base"}));
-	raised = ui.drain();
-	const EditorRequest *base_pick = only(raised, EditorRequestKind::PickDirectory);
-	CHECK(base_pick && base_pick->purpose == PickPurpose::NewProjectBase, "its Browse... asks the shell for a folder");
-	ui.windows.deliver_pick(PickPurpose::NewProjectBase, "C:/mods/JO");
-	CHECK(workspace_sets(ui.drain(), "new_project", "base_project").size() == 1, "the pick fills the form");
-	v.workspace.new_project.base_project = "../JO";
-	v.revisions.touch(ViewConcern::Workspace);
-	ui.frames(2);
-	ui.activate(item_id(welcome, {"Create project"}));
-	made = nullptr;
 	const std::vector<EditorRequest> expanding = ui.drain();
 	made = only(expanding, EditorRequestKind::NewProject);
-	CHECK(made && made->all && made->expansion == "jox01" && made->base_project == "../JO" && made->builds_on.empty() &&
-	              made->title == "Joint Operations: Escalation",
-	      "Create: the installed expansion on the base game's project");
-	v.workspace.new_project.installed.clear();
-	v.workspace.new_project.base_project.clear();
+	CHECK(made && made->all && made->expansion == "jox01" && made->base_key == "JO" && made->base_project.empty() &&
+	              made->game_install == "C:/Games/JO" && made->title == "Joint Operations: Escalation",
+	      "Create: the retail expansion on its base game's project, found or made by the session");
+	v.workspace.new_project.stock.clear();
 	v.revisions.touch(ViewConcern::Workspace);
 	// A project open with nothing in it, few files: where the game's files come from.
 	v.project.open = true;
@@ -449,6 +472,11 @@ void test_modals_one_at_a_time() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
+	// New project's games are NovaWorld's (ADR 0074): a service to sign in to, the titles listed.
+	novaworld_fake::FakeService service;
+	session.set_novaworld_transport(&service);
+	session.handle(request::novaworld_sign_in(novaworld_fake::kServer, novaworld_fake::kPlayer, "player-pw"));
+	session.run_operations();
 	CHECK(session.handle(request::new_project(dir.file("project"), "Modal")), "a project");
 	session.run_operations();
 	editor_test::create_missing_files(session);

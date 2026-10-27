@@ -355,6 +355,7 @@ void test_get_a_project() {
 	SessionView v = tracked_view();
 	v.project.open = false;
 	v.project.root.clear();
+	v.novaworld.titles = {"jo"};
 	// Beside MOD (the account's to push): an empty expansion's project it may push, and another's it may read.
 	RemoteProject empty;
 	empty.key = "EMPTY";
@@ -405,7 +406,7 @@ void test_get_a_project() {
 	ui.drain();
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	CHECK(form.novaworld == "EMPTY" && form.making == WorkspaceView::Making::Mod && form.expansion == "mine" &&
-	              form.title == "Mine" && form.installed.empty() && form.base_key == "MOD",
+	              form.title == "Mine" && form.stock.empty() && form.game.empty() && form.base_key == "MOD",
 	      "Set up...: the form filled for EMPTY, a mod as mine");
 	// The form set up for it says so, its clear taking it off, and Create names it.
 	v.workspace.new_project.making = WorkspaceView::Making::Game;
@@ -483,12 +484,12 @@ void test_mod_form() {
 	ui.drain();
 	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
 	std::string text = logged_frame(ui);
-	CHECK(text.find("Sign in to NovaWorld to make a mod") != std::string::npos &&
+	CHECK(text.find("Sign in to NovaWorld to make a project") != std::string::npos &&
 	              text.find("Base game's project") == std::string::npos && text.find("A project of yours") == std::string::npos,
 	      "signed out: sign in to make a mod, no base game's project to name");
 	ui.activate(item_id(document, {"Create project"}));
 	CHECK(ui.drain().empty(), "signed out: Create waits");
-	ui.activate(item_id(document, {"Sign in...##mod"}));
+	ui.activate(item_id(document, {"Sign in...##new_project"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::SetWorkspace &&
 	              raised[0].workspace.find("novaworld") != std::string::npos,
@@ -525,16 +526,56 @@ void test_mod_form() {
 	      "a retail game's mod: an install of its game named first");
 	ui.activate(item_id(document, {"Create project"}));
 	CHECK(ui.drain().empty(), "no install of its game: Create waits");
-	// A game NovaWorld lets the account get: Create makes the mod of it.
+	// A game NovaWorld lets the account get: no install asked, and Create makes the mod of it.
 	form.base_key = "ACIDGAMBIT";
 	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Game install") == std::string::npos, "a mod of a game NovaWorld gives: no install asked");
 	ui.activate(item_id(document, {"Create project"}));
 	raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NewProject);
 	CHECK(made && made->base_key == "ACIDGAMBIT" && made->expansion == "nightops" && made->base_project.empty() &&
-	              made->title == "Night Ops" && made->dir == "C:/mods/Night Ops",
-	      "Create: new_project of the mod, its game by key");
-	std::printf("content: the New project form's A mod of, signed out and in\n");
+	              made->title == "Night Ops" && made->dir == "C:/mods/Night Ops" && made->game_install.empty(),
+	      "Create: new_project of the mod, its game by key, no install");
+
+	// Set up... of a mod made on the website (ADR 0074): everything it says filled, only the folder asked; the folder
+	// beside the last one named; Create with nothing to fill.
+	RemoteProject web;
+	web.key = "WEBMOD";
+	web.title = "Web Mod";
+	web.kind = "expansion";
+	web.game = "jo";
+	web.base = "ACIDGAMBIT";
+	web.expansion_code = "webmod";
+	web.can_push = true;
+	v.novaworld.projects = {acid, web};
+	v.project.recent_projects = {"C:/mods/Armory"};
+	ui.serve_workspace = true;
+	auto *nw = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
+	CHECK(nw != nullptr, "the NovaWorld window");
+	if (!nw) return;
+	nw->show_anyway();
+	ui.focus("NovaWorld");
+	ui.activate(item_id(Ui::window_id("NovaWorld"), {"novaworld_yours", "WEBMOD", "Set up..."}));
+	ui.drain();
+	CHECK(form.making == WorkspaceView::Making::Mod && form.base_key == "ACIDGAMBIT" && form.expansion == "webmod" &&
+	              form.title == "Web Mod" && form.novaworld == "WEBMOD" && form.dir == "C:/mods/WEBMOD",
+	      "Set up...: the form filled with what the project says, its folder beside the last");
+	ui.focus("Document");
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("A mod of OP: Acid Gambit (ACIDGAMBIT), as webmod, named Web Mod") != std::string::npos &&
+	              text.find("Short name") == std::string::npos && text.find("A game you own") == std::string::npos &&
+	              text.find("Game install") == std::string::npos,
+	      "set up: what it makes in a line, nothing it says asked again, no install");
+	ui.activate(item_id(document, {"Create project"}));
+	raised = ui.drain();
+	made = one(raised, EditorRequestKind::NewProject);
+	CHECK(made && made->project_key == "WEBMOD" && made->base_key == "ACIDGAMBIT" && made->expansion == "webmod" &&
+	              made->dir == "C:/mods/WEBMOD",
+	      "set up: Create with nothing to fill");
+	std::printf("content: the New project form's A mod of, signed out and in; Set up... of a website's mod\n");
 }
 
 } // namespace

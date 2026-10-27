@@ -19,7 +19,6 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
-#include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
@@ -98,10 +97,9 @@ int test_table_and_wire() {
 }
 
 // The new-project form: its fields set as a person types them (nothing made), the install named once given,
-// what it makes by its token (stock first; one no choice has refused, nothing changed); an expansion on a
-// project's base game (a game you own's expansion, a mod of a project of the author's) offered the first folder
-// beside its own that holds a standalone project of the game, until one is named; the state section writes the
-// form as it shows; the modal opened closes once new_project makes the project. File > Import...'s first step
+// what it makes by its token (stock first; one no choice has refused, nothing changed); what it is of NovaWorld's
+// by key (a game you own's retail game or expansion, a mod's base game; one that is no key refused) and a new
+// game's title; the state section writes the form as it shows; the modal opened closes once new_project makes the project. File > Import...'s first step
 // is a project's, shown and closed with no preview open.
 int test_new_project_form() {
 	test_temp::TempDir dir("opennova_editor_workspace_form");
@@ -112,42 +110,33 @@ int test_new_project_form() {
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	TEST_EXPECT(form.title == "My Game" && !form.install_named && form.making == WorkspaceView::Making::Stock);
 	JsonValue answer = wire(session, R"({"new_project": {"open": true, "making": "mod", "title": "Operation Nightfall", "dir": ")" +
-	                                         dir.file("work/nightfall") + R"(", "installed": "jox01", "expansion": "nightfall"}})");
+	                                         dir.file("work/nightfall") + R"(", "base_key": "JO", "expansion": "nightfall"}})");
 	TEST_EXPECT(answer.get_bool("ok", false) && answer.get("outcome") && answer.get("outcome")->get_bool("done", false));
 	TEST_EXPECT(form.open && form.making == WorkspaceView::Making::Mod && form.title == "Operation Nightfall" &&
-	            form.dir == dir.file("work/nightfall") && form.installed == "jox01" && form.base_key.empty() &&
-	            form.expansion == "nightfall" && form.base_project.empty() && !form.install_named && !v.project.open);
+	            form.dir == dir.file("work/nightfall") && form.base_key == "JO" && form.stock.empty() && form.game.empty() &&
+	            form.expansion == "nightfall" && !form.install_named && !v.project.open);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"game_install": "C:/Games/JO"}})")));
 	TEST_EXPECT(form.install_named && form.game_install == "C:/Games/JO");
 	JsonValue shown = section(session);
 	const JsonValue *made = shown.get("new_project");
 	TEST_EXPECT(made && made->get_bool("open", false) && made->get_string("title", "") == "Operation Nightfall" &&
 	            made->get_string("game_install", "") == "C:/Games/JO" && made->get_bool("install_named", false) &&
-	            made->get_string("making", "") == "mod" && made->get_string("installed", "") == "jox01" &&
-	            made->get_string("base_key", "x").empty() && made->get_string("expansion", "") == "nightfall");
+	            made->get_string("making", "") == "mod" && made->get_string("base_key", "") == "JO" &&
+	            made->get_string("stock", "x").empty() && made->get_string("game", "x").empty() &&
+	            made->get_string("expansion", "") == "nightfall");
 	// What it makes is one of the three.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "remake"}})")) &&
 	            refused_with(session, "workspace.refused") && form.making == WorkspaceView::Making::Mod);
-	// A mod is of a NovaWorld game, by its key (refused where it is no key); a game you own's expansion is offered the
-	// folder beside its own that holds a standalone project of the game (Base, by name, before Other; an expansion's
-	// project passed over), until one is named.
-	ProjectDocument base;
-	Diagnostic error;
-	TEST_EXPECT(create_project(dir.file("work/Base"), "Base", "jo", base, error));
-	ProjectDocument other;
-	TEST_EXPECT(create_project(dir.file("work/Other"), "Other", "jo", other, error));
-	ProjectDocument expansion;
-	TEST_EXPECT(create_project(dir.file("work/Aside"), "Aside", "jo", expansion, error, ProjectExpansion{ "asd" }));
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_key": "JO"}})")) && form.base_key == "JO" &&
-	            form.base_project.empty() && section(session).get("new_project")->get_string("base_key", "") == "JO");
+	// What it is of is NovaWorld's, by key (refused where it is no key): a game you own's retail game or expansion, a
+	// mod's base game; and a new game's title.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_key": "not a key"}})")) &&
 	            refused_with(session, "workspace.refused") && form.base_key == "JO");
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "stock", "installed": "", "base_project": ""}})")));
-	TEST_EXPECT(form.base_project.empty());
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"installed": "jox01"}})")) && form.base_project == "../Base");
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_project": "../Other"}})")) &&
-	            form.base_project == "../Other");
-	TEST_EXPECT(sibling_base_project(dir.file("lone/New"), "jo").empty());
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "stock", "stock": "JOX01"}})")) &&
+	            form.stock == "JOX01" && section(session).get("new_project")->get_string("stock", "") == "JOX01");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"stock": "jox01"}})")) &&
+	            refused_with(session, "workspace.refused") && form.stock == "JOX01");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "game", "game": "dfx2"}})")) &&
+	            form.game == "dfx2" && section(session).get("new_project")->get_string("game", "") == "dfx2");
 	// File > Import...'s first step is a project's.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"sources": true}})")) &&
 	            refused_with(session, "workspace.refused") && !v.workspace.import.sources);

@@ -40,8 +40,10 @@ struct NovaWorldView {
 	std::vector<RemoteProject> projects;
 	std::string projects_error;
 	// The games a new project of the signed-in account's may be a mod of (GET /api/me/projects), as
-	// last listed: a put's base game is found among them, or chosen from them.
+	// last listed: a put's base game is found among them, or chosen from them; and the titles a new game
+	// of its may run as (the same reply's: "jo", "dfx2").
 	std::vector<RemoteGame> games;
+	std::vector<std::string> titles;
 	// The open project's place on NovaWorld: the key its project file names ("" not on NovaWorld),
 	// whether its folder is a working copy of that project on the account's service (its state
 	// there), and its base revision.

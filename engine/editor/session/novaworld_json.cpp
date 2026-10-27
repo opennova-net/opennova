@@ -66,6 +66,7 @@ JsonValue novaworld_section(const SessionView &view) {
 		games.push(std::move(game));
 	}
 	out.set("games", games);
+	out.set("titles", io::json_string_array(novaworld.titles));
 	JsonValue copy = JsonValue::make_object();
 	copy.set("key", json_string(novaworld.key));
 	copy.set("tracked", JsonValue::make_bool(novaworld.tracked));

@@ -315,6 +315,7 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", own);
 			out.set("games", games);
+			out.set("titles", io::json_string_array({ "jo", "dfx2" }));
 			return json(200, out);
 		}
 		if (request.url == std::string(kServer) + "/api/products") {

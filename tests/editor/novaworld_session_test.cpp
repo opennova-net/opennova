@@ -673,8 +673,10 @@ static int test_new_mod() {
 	TEST_EXPECT(s.refused("novaworld.refused") &&
 			s.session.view().activity.status.find("is made from a Joint Operations install") != std::string::npos);
 	std::vector<minted_install::File> game;
-	TEST_EXPECT(minted_install::base_game(game, error) &&
-			minted_install::write_install(dir.file("install"), game, std::string(), {}, error));
+	std::vector<minted_install::File> expansion;
+	TEST_EXPECT(minted_install::base_game(game, error) && minted_install::expansion_game(expansion, error) &&
+			minted_install::write_install(
+					dir.file("install"), game, minted_install::kExpansion, expansion, error));
 	editor::EditorRequest installed = mod("retail/Night", "Night", "night");
 	installed.game_install = dir.file("install");
 	s.send(installed);
@@ -683,8 +685,18 @@ static int test_new_mod() {
 			base.target_game == "jo" && !base.archives.empty() && base.novaworld.empty());
 	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Night") &&
 			s.session.view().project.document->expansion.base_project == "../MOD");
+	// A game you own of the install's expansion (New project's retail expansion: base_key its base game): made on
+	// the base game's project beside it, the one just made, every file of the expansion imported.
+	editor::EditorRequest owned = request::new_stock_project(
+			dir.file("retail/Nifty"), "Nifty", dir.file("install"), minted_install::kExpansion);
+	owned.base_key = "MOD";
+	s.send(owned);
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Nifty") &&
+			s.session.view().project.document->expansion.name == minted_install::kExpansion &&
+			s.session.view().project.document->expansion.base_project == "../MOD" &&
+			s.said("A mod's project in"));
 	std::printf("new mod: of a game got from NovaWorld beside it, of one on this computer already, of a retail "
-				"game's imported from the game install\n");
+				"game's imported from the game install; a game you own's expansion on its base game's project\n");
 	return 0;
 }
 

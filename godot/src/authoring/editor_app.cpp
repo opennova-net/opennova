@@ -893,9 +893,6 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		case PickPurpose::NewProjectInstall:
 			picker_->set_title("Choose the game install folder");
 			break;
-		case PickPurpose::NewProjectBase:
-			picker_->set_title("Choose the base game's project folder");
-			break;
 		case PickPurpose::ImportFiles:
 			picker_->set_title("Import files or PFF contents");
 			break;

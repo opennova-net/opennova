@@ -369,6 +369,24 @@ bool read_my_games(
 	return true;
 }
 
+bool read_my_titles(
+		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error) {
+	out.clear();
+	io::JsonValue json;
+	if (!json_reply(reply, 200, json, error))
+		return false;
+	const io::JsonValue *list = json.get("titles");
+	if (!list || !list->is_array()) {
+		error.code = "bad_reply";
+		error.message = "the service's reply lists no titles";
+		return false;
+	}
+	for (const io::JsonValue &title : list->array)
+		if (title.is_string())
+			out.push_back(title.string);
+	return true;
+}
+
 std::string quota_text(const NovaWorldResponse &reply, const char *what) {
 	io::JsonValue json;
 	std::string ignored;
