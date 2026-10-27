@@ -207,9 +207,11 @@ crow::json::rvalue listed_product(const Harness &h, int64_t id) {
 	const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
 	if (!json)
 		return {};
+	// Read again into a value of its own: an element's copy still points into the listing's
+	// text, which goes with `json`.
 	for (const auto &d : json["products"])
 		if (d["id"].i() == id)
-			return d;
+			return crow::json::load(crow::json::wvalue(d).dump());
 	return {};
 }
 
