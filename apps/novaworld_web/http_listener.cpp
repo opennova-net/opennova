@@ -197,16 +197,18 @@ bool HttpListener::start(const ServerConfig &config) {
 	site_url_ = config.site_url; // the welcome mail's link
 
 	// The games catalogue the retail routes answer from (one lobby per title):
-	// each row's .gsb route registers below, and each retail page fills in its
-	// client's game's values.
+	// each row's .gsb list, and each retail page's client's game's values.
 	try {
-		impl_->games = catalog::GameCatalog::load(*db_pool_.acquire());
+		impl_->games = std::make_shared<const catalog::GameCatalog>(
+				catalog::GameCatalog::load(*db_pool_.acquire()));
+		impl_->games_read = std::chrono::steady_clock::now();
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] games catalogue read failed: %s\n", e.what());
 		return false;
 	}
-	if (impl_->games.empty())
-		std::fprintf(stderr, "[http] WARN no games rows: no .gsb route, no game for a retail page\n");
+	if (impl_->games->empty())
+		std::fprintf(
+				stderr, "[http] WARN no games rows: no .gsb list, no game for a retail page\n");
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
@@ -377,6 +379,38 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 		}
 	}
 	return std::nullopt;
+}
+
+void HttpListener::set_games_refresh(std::chrono::milliseconds refresh) {
+	impl_->games_refresh = refresh;
+}
+
+std::shared_ptr<const catalog::GameCatalog> HttpListener::games_now() {
+	{
+		std::lock_guard<std::mutex> lock(impl_->games_mu);
+		if (std::chrono::steady_clock::now() - impl_->games_read < impl_->games_refresh)
+			return impl_->games;
+	}
+	// One request reads it again; any other meanwhile answers from the load it has.
+	std::unique_lock<std::mutex> loading(impl_->games_load_mu, std::try_to_lock);
+	if (loading.owns_lock()) {
+		std::shared_ptr<const catalog::GameCatalog> fresh;
+		try {
+			fresh = std::make_shared<const catalog::GameCatalog>(
+					catalog::GameCatalog::load(*db_pool_.acquire()));
+		} catch (const db::Error &e) {
+			std::fprintf(stderr,
+					"[http] WARN games catalogue read failed: %s; the last load "
+					"answers\n",
+					e.what());
+		}
+		std::lock_guard<std::mutex> lock(impl_->games_mu);
+		if (fresh)
+			impl_->games = std::move(fresh);
+		impl_->games_read = std::chrono::steady_clock::now();
+	}
+	std::lock_guard<std::mutex> lock(impl_->games_mu);
+	return impl_->games;
 }
 
 std::string HttpListener::host_url(const catalog::GameRow &game) const {
@@ -918,6 +952,15 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 						res.body, {{"WEB_ROOT", web_root_for(web_host_, impl_->app.port())}});
 				return res;
 			}
+		}
+
+		// A games row's server browser list, by its gsb_path (gsb_reply), the catalogue as it
+		// stands: an account's own game's lobby, added since this program started, serves too.
+		if (ext == ".gsb" && subpath.find('/') == std::string::npos) {
+			const auto games = games_now();
+			for (const catalog::GameRow &game : games->games())
+				if (!game.gsb_path.empty() && game.gsb_route() == "/" + subpath)
+					return gsb_reply(game);
 		}
 
 		// A root image from static/, as the live /nonbhdx2.tga (D-NET-1332).

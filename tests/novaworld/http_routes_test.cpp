@@ -2042,6 +2042,8 @@ int test_menu_urls_name_bound_port(Harness &h) {
 // retail page's GSB_SERVER is the requesting client's game's: the gate tag
 // /nwprepare.dll carries (and echoes as the GT cookie), else the GT cookie,
 // else the NWPF cookie's product family, else the page's prefix, else JO's.
+// A row added since the start (an account's own game's lobby, which its first
+// publish adds) serves its .gsb and its pages as the seeded rows do.
 int test_lobby_per_title(Harness &h) {
 	auto reply = h.send("GET", "/api/games");
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
@@ -2109,6 +2111,39 @@ int test_lobby_per_title(Harness &h) {
 	for (const Listed &l : listed)
 		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), l.rid);
 
+	// A lobby added since the start, as an account's own game's first publish adds one (OP: Acid
+	// Gambit's columns under its own tag): its .gsb lists its host, its pages name its .gsb.
+	h.pool.acquire()->exec(
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) "
+			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
+			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, pfid, "
+			"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = 3104;
+		row.gsid = "GSID-Title MINE";
+		row.game = "mygame_0_consumer";
+		row.server_name = "Title MINE";
+		row.host_ip = "10.0.31.1";
+		row.host_port = 32768;
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+		const auto gsb = h.send("GET", "/mygame_0.gsb?a=1");
+		TEST_EXPECT(gsb.transport_ok && gsb.code == 200);
+		opennova::GsbResponse parsed;
+		TEST_EXPECT(opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed));
+		int titled = 0;
+		for (const auto &s : parsed.servers)
+			if (s.server_name.rfind("Title ", 0) == 0)
+				titled += s.server_name == "Title MINE" ? 1 : 100;
+		TEST_EXPECT(titled == 1);
+		opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), row.rid);
+		const auto missing = h.send("GET", "/nogame_0.gsb");
+		TEST_EXPECT(missing.transport_ok && missing.code == 404);
+	}
+
 	// The menu URL page as each client's game fills it.
 	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
 	// HOST_URL names the game's host page (DFX2's its own, the OpenNova row JO's).
@@ -2125,6 +2160,7 @@ int test_lobby_per_title(Harness &h) {
 		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
 		{ "acidgambit:0", "/acidgambit_0.gsb" },
+		{ "mygame:0", "/mygame_0.gsb" },
 		{ "nobody:1", "/jop_2.gsb" },
 	};
 	for (const Prepared &p : prepared) {
@@ -2179,6 +2215,8 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(start_of("gt=dfx2:0:cus:buffy") == dfx2_start);
 	TEST_EXPECT(start_of("gt=acidgambit:0") == jo_start);
 	TEST_EXPECT(start_of("gt=jop:cus2") == jo_start);
+	TEST_EXPECT(start_of("gt=mygame:0") == jo_start);
+	h.pool.acquire()->exec("DELETE FROM games WHERE slug = 'mygame_0_consumer';");
 	return 0;
 }
 
@@ -9357,6 +9395,9 @@ int with_harness(const char *part) {
 		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
+		// The games catalogue read again at every request (test_lobby_per_title's lobby added
+		// after the start).
+		http.set_games_refresh(std::chrono::milliseconds(0));
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 

@@ -29,6 +29,10 @@ class UnknownTracker;
 namespace db { class ConnectionPool; class Database; }
 } // namespace opennova
 
+namespace crow {
+struct response;
+}
+
 namespace opennova::novaworld_server {
 
 struct ServerConfig;
@@ -38,7 +42,10 @@ class ObjectStore;
 class NovaLogicLobbies;
 
 namespace billing { class Billing; }
-namespace catalog { struct GameRow; }
+namespace catalog {
+struct GameRow;
+class GameCatalog;
+} //namespace catalog
 namespace infra { class AlarmStore; class CostStore; class InfraStatus; class LogStore; class MetricsStore; }
 namespace projects { class ProjectUrls; }
 
@@ -95,11 +102,13 @@ namespace projects { class ProjectUrls; }
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
 //
-// One lobby per title: start() loads the games catalogue once
-// (catalog::GameCatalog), registers each row's .gsb route, and every retail
-// page fills in the requesting client's game's values (its gsb URL, its page
-// names where the request names none, its expansion bits), the game its
-// gate tag names (catalog::GameCatalog::for_client).
+// One lobby per title: start() loads the games catalogue (catalog::GameCatalog),
+// read again each minute a request comes (games_now: an account's own game's
+// lobby, which its first publish adds, answers with no restart); the catch-all
+// serves each row's .gsb list, and every retail page fills in the requesting
+// client's game's values (its gsb URL, its page names where the request names
+// none, its expansion bits), the game its gate tag names
+// (catalog::GameCatalog::for_client).
 //
 // Crow is async + multi-threaded internally; we just hand it a thread to
 // own. start() spawns that thread and returns once Crow serves; stop()
@@ -182,6 +191,10 @@ public:
 	// hand the editor in place of carrying a file's bytes. Set before start(); it must outlive the
 	// listener. Null: the routes carry the bytes (a directory's store).
 	void set_project_urls(projects::ProjectUrls *urls) { project_urls_ = urls; }
+	// How old the games catalogue a request reads may grow before one reads it again
+	// (games_now); a test's shorter one. Before start().
+	static constexpr std::chrono::milliseconds kGamesRefresh{ 60 * 1000 };
+	void set_games_refresh(std::chrono::milliseconds refresh);
 
 	// Each container's memory and CPUs (hosted/model/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -291,6 +304,13 @@ private:
 	// jop_2_relay.mnx; D-NET-1301).
 	std::string host_url(const catalog::GameRow &game) const;
 	std::string gsb_url(const catalog::GameRow &game) const;
+
+	// The games catalogue as it stands, read again once it is kGamesRefresh old (by the first
+	// request then; a read that fails keeps the last load, and the next waits as long). A handler
+	// holds what it returns for as long as it reads a row of it.
+	std::shared_ptr<const catalog::GameCatalog> games_now();
+	// A games row's .gsb list (the server browser's blob of the hosts listed under its LobbyName).
+	crow::response gsb_reply(const catalog::GameRow &game);
 
 	struct Impl;
 	std::unique_ptr<Impl> impl_;

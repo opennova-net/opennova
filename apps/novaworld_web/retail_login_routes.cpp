@@ -93,8 +93,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string url_param = req.url_params.get("url") ? req.url_params.get("url") : "";
 		const char *pfid_param = req.url_params.get("pfid");
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
+		const auto games = games_now();
 		const catalog::GameRow &game =
-				client_game(impl_->games, req, cookies, pfid_param ? pfid_param : "", url_param);
+				client_game(*games, req, cookies, pfid_param ? pfid_param : "", url_param);
 		const std::string url   = url_param.empty() ? game.start_page : url_param;
 		const std::string ver1  = req.url_params.get("ver1") ? req.url_params.get("ver1") : "";
 		const std::string ver2  = req.url_params.get("ver2") ? req.url_params.get("ver2") : "";
@@ -138,8 +139,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const char *named_page = req.url_params.get("IN") ? req.url_params.get("IN")
 		                         : req.url_params.get("OUT") ? req.url_params.get("OUT")
 		                                                     : req.url_params.get("MSGBASE");
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
-		                                           named_page ? named_page : "");
+		const auto games = games_now();
+		const catalog::GameRow &game =
+				client_game(*games, req, cookies, {}, named_page ? named_page : "");
 		const std::string in_p   = req.url_params.get("IN")      ? req.url_params.get("IN")      : game.page("main.htm");
 		const std::string out_p  = req.url_params.get("OUT")     ? req.url_params.get("OUT")     : game.page("login.htm");
 		const std::string msgbase = req.url_params.get("MSGBASE")? req.url_params.get("MSGBASE") : game.page("msg.htm");
@@ -250,7 +252,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// The login's game: the client's gate tag (the GT cookie), else the
 		// form's pfid and success page. Its access row and expansion bits are
 		// the ones this login checks and grants.
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies,
+		const auto games = games_now();
+		const catalog::GameRow &game = client_game(*games, req, cookies,
 				field_or("pfid", std::string()), field_or("success", std::string()));
 		const std::string &game_slug = game.slug;
 		auto render_login_message = [&](const std::string &message) {
@@ -498,7 +501,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// must re-authenticate there rather than be silently re-bound to
 			// an account here. (user_id stays 0 → no active session, and any
 			// authenticated action downstream still requires a real login.)
-			const catalog::GameRow &fresh_game = client_game(impl_->games, req, cookies, {}, {});
+			const auto games = games_now();
+			const catalog::GameRow &fresh_game = client_game(*games, req, cookies, {}, {});
 			// It ends with this reply (the erase below), so it is never stored.
 			LoginSession fresh;
 			fresh.session_tag = sessions_.generate_tag("NWLogin.dll");
@@ -521,7 +525,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 
 		// The main page this renders lists the client's game's servers.
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {}, session->success);
+		const auto games = games_now();
+		const catalog::GameRow &game = client_game(*games, req, cookies, {}, session->success);
 		TemplateVars vars{
 			{"IN",           session->success},
 			{"OUT",          session->failure},
@@ -590,8 +595,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		if (classify_relay_request(has_relay_first_call_query(req), !logout_tag.empty()) ==
 				RelayLeg::First) {
 			const char *success_param = req.url_params.get("success");
-			const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
-			                                           success_param ? success_param : "");
+			const auto games = games_now();
+			const catalog::GameRow &game =
+					client_game(*games, req, cookies, {}, success_param ? success_param : "");
 			LogoutSession s;
 			s.session_tag = sessions_.generate_tag("NWLogout.dll");
 			s.success = success_param ? success_param : game.page("login.htm");
@@ -646,7 +652,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 
 		const std::string named = relay ? relay->success : std::string();
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {}, named);
+		const auto games = games_now();
+		const catalog::GameRow &game = client_game(*games, req, cookies, {}, named);
 		const std::string success_tpl = named.empty() ? game.page("login.htm") : named;
 		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
 				loggable_secret(tag).c_str(), persist_it != cookies.end() ? 1 : 0,
@@ -689,8 +696,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	auto handle_generic = [this, templates_dir](const crow::request &req) {
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const char *success_param = req.url_params.get("success");
-		const catalog::GameRow &game = client_game(impl_->games, req, cookies, {},
-		                                           success_param ? success_param : "");
+		const auto games = games_now();
+		const catalog::GameRow &game =
+				client_game(*games, req, cookies, {}, success_param ? success_param : "");
 		const std::string tpl = success_param ? success_param : game.page("main.htm");
 		const bool exists = template_file(templates_dir, tpl).has_value();
 
