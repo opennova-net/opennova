@@ -4,11 +4,11 @@
 // server, Escalation (id 2, project JOX01) under it with nothing pushed, DFX2
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
 // app with no project), all the service's own. And projects as the player
-// routes answer them (GET /api/products, GET /api/me/projects): biggy's mod
-// NIGHTOPS of JO at r3 and his game RANGERS for DFX2 with nothing pushed,
-// beside the public OP: Acid Gambit.
+// routes answer them (GET /api/me/projects): biggy's mod NIGHTOPS of JO at r3
+// and his game RANGERS for DFX2 with nothing pushed, and the games a new one
+// may be for: the retail JO and DFX2, the public OP: Acid Gambit and RANGERS.
 
-import type { MyProjects, Product, ProductsResponse, Project, ProjectRevision, Release } from '../types/products';
+import type { MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
 
 export function product(id: number, overrides: Partial<Product> = {}): Product {
   return {
@@ -172,23 +172,20 @@ export const NIGHTOPS_PROJECT: Project = project('NIGHTOPS', {
 
 export const RANGERS_PROJECT: Project = project('RANGERS', { title: 'Rangers', game: 'dfx2', product_id: 22 });
 
-// The service's own public game, as a player reads it.
-export const ACIDGAMBIT_PROJECT: Project = project('ACIDGAMBIT', {
-  title: 'OP: Acid Gambit',
-  product_id: 4,
-  head: 14,
-  visibility: 'public',
-  owner: null,
-  can_push: false,
-  can_manage: false,
-  storage: null,
-});
+export const PROJECT_GAMES: ProjectGame[] = [
+  { key: 'JO', title: 'Joint Operations', game: 'jo' },
+  { key: 'DFX2', title: 'Delta Force Xtreme 2', game: 'dfx2' },
+  { key: 'ACIDGAMBIT', title: 'OP: Acid Gambit', game: 'jo' },
+  { key: 'RANGERS', title: 'Rangers', game: 'dfx2' },
+];
 
 export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
   return {
     projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
     usage: { projects: 2, bytes: 300 * 1024 * 1024 },
     limits: { projects: 10, bytes: 4 * 1024 * 1024 * 1024 },
+    games: PROJECT_GAMES,
+    titles: ['jo', 'dfx2'],
     ...overrides,
   };
 }

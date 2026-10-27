@@ -1,10 +1,11 @@
 // The account's projects pages' shared words and lookups
 // (pages/account/ProjectsPage.vue, the list; NewProjectPage.vue, a new one;
-// ProjectPage.vue, one project): the games a project may be for, its kind in
-// a line, the key and short name a name suggests, and the routes' rules in
-// words, which the API's refusals reuse (api/products.ts).
+// ProjectPage.vue, one project): a project's kind in a line, its base game
+// named from the games the service lists, the key and short name a name
+// suggests, and the routes' rules in words, which the API's refusals reuse
+// (api/products.ts).
 
-import type { Project, ProjectVisibility } from '../types/products';
+import type { Project, ProjectGame, ProjectVisibility } from '../types/products';
 import { KEY_RULE, titleName } from './productsView';
 
 export { KEY_RULE };
@@ -19,39 +20,16 @@ export const KEY_HINT = 'A key is 1 to 16 of A-Z, 0-9 and _.';
 export const SHORT_NAME_HINT = 'A short name is 1 to 8 lowercase letters and digits.';
 export const NAME_HINT = 'A name is 1 to 64 characters.';
 
-// The games a new game may be for (the routes' titles).
-export const GAME_TITLES: readonly string[] = ['jo', 'dfx2'];
-
-export interface BaseGame {
-  key: string;
-  name: string;
-}
-
-// The retail games, on every NovaWorld under the keys it seeds. They are
-// private, so a player's list of projects leaves them out, yet a mod of an
-// installed Joint Operations is a mod of JO.
-export const RETAIL_GAMES: readonly BaseGame[] = [
-  { key: 'JO', name: 'Joint Operations' },
-  { key: 'DFX2', name: 'Delta Force Xtreme 2' },
-];
-
-// The games a mod may be for: the retail ones first, then every other game the
-// caller may read (GET /api/products), each by its listed name.
-export function baseGames(projects: readonly Project[]): BaseGame[] {
-  const games = projects.filter((p) => p.kind === 'game').map((p) => ({ key: p.key, name: p.title || p.key }));
-  const retail = RETAIL_GAMES.map((r) => games.find((g) => g.key === r.key) ?? r);
-  return [...retail, ...games.filter((g) => !RETAIL_GAMES.some((r) => r.key === g.key))];
-}
-
-// A base game's name by its key; the key itself when no game read has it.
-export function baseName(key: string, projects: readonly Project[]): string {
-  return baseGames(projects).find((g) => g.key === key)?.name ?? key;
+// A base game's name by its key, from the games a mod may be for
+// (GET /api/me/projects); the key itself when none has it.
+export function baseName(key: string, games: readonly ProjectGame[]): string {
+  return games.find((g) => g.key === key)?.title ?? key;
 }
 
 // "A mod of Joint Operations" or "A game for Joint Operations".
-export function projectKindLine(project: Project, projects: readonly Project[]): string {
+export function projectKindLine(project: Project, games: readonly ProjectGame[]): string {
   if (project.kind === 'expansion') {
-    if (project.base) return `A mod of ${baseName(project.base, projects)}`;
+    if (project.base) return `A mod of ${baseName(project.base, games)}`;
     return project.game ? `A mod of ${titleName(project.game)}` : 'A mod';
   }
   return project.game ? `A game for ${titleName(project.game)}` : 'A game';

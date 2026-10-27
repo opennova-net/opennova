@@ -4,7 +4,7 @@
       <RouterLink to="/me/projects" class="text-sm text-accent hover:text-ink-bright">All projects</RouterLink>
       <h1 class="break-words text-3xl font-semibold text-ink">{{ project?.title ?? (missing ? 'No such project' : 'Project') }}</h1>
       <p v-if="project" id="project-kind-line" class="text-sm text-ink-muted">
-        <span class="font-mono text-ink">{{ project.key }}</span>, {{ projectKindLine(project, projects ?? []) }}<template v-if="project.kind === 'expansion' && project.expansion_code">
+        <span class="font-mono text-ink">{{ project.key }}</span>, {{ projectKindLine(project, mine?.games ?? []) }}<template v-if="project.kind === 'expansion' && project.expansion_code">
           (short name <span class="font-mono">{{ project.expansion_code }}</span>)</template>
       </p>
     </header>
@@ -15,7 +15,7 @@
     <div role="alert" :class="error ? 'rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger' : 'sr-only'">{{ error }}</div>
 
     <div v-if="missing" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
-      NovaWorld has no project {{ projectKey }} you may see.
+      No project of yours has the key {{ projectKey }}.
       <RouterLink to="/me/projects" class="text-accent hover:text-ink-bright">See your projects</RouterLink>
     </div>
     <div v-else-if="!project" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
@@ -114,10 +114,10 @@
 </template>
 
 <script setup lang="ts">
-// /me/projects/<key>: one project (found among the ones the account may read,
-// GET /api/products, which also names the games a mod is of): what it is, who
-// gets it, its newest revision and the bytes it stores; for its owner (and an
-// admin) its visibility and its name changed (PATCH /api/products/<key>) and
+// /me/projects/<key>: one of the account's projects (found in GET
+// /api/me/projects, which also names the games a mod is of): what it is, who
+// gets it, its newest revision and the bytes it stores; its visibility and its
+// name changed (PATCH /api/products/<key>) and
 // its deletion behind its key typed (DELETE); and its history
 // (GET /api/products/<key>/revisions), a page at a time. Nothing here changes
 // by itself but a push from the editor, so the page reads again when its tab
@@ -125,11 +125,11 @@
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
-import { REVISIONS_PAGE, deleteProject, fetchProjects, fetchRevisions, updateProject, type ProjectError } from '../../api/products';
+import { REVISIONS_PAGE, deleteProject, fetchMyProjects, fetchRevisions, updateProject, type ProjectError } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
-import type { Project, ProjectRevision } from '../../types/products';
+import type { MyProjects, Project, ProjectRevision } from '../../types/products';
 import { formatMemory } from '../../utils/format';
 import { NAME_MAX, nameProblem, projectKindLine, visibilityLine } from '../../utils/projectsView';
 
@@ -140,16 +140,17 @@ const router = useRouter();
 const { refresh: refreshSession } = useSession();
 const projectKey = computed(() => String(route.params.key ?? ''));
 
-// Every project the account may read; null until the first read answered.
-const projects = ref<Project[] | null>(null);
+// The account's projects and the games a mod may be for; null until the first
+// read answered.
+const mine = ref<MyProjects | null>(null);
 const loadFailed = ref(false);
 const busy = ref(false);
 const now = ref(Date.now());
 const message = ref('');
 const error = ref('');
 
-const project = computed(() => projects.value?.find((p) => p.key === projectKey.value) ?? null);
-const missing = computed(() => projects.value !== null && project.value === null);
+const project = computed(() => mine.value?.projects.find((p) => p.key === projectKey.value) ?? null);
+const missing = computed(() => mine.value !== null && project.value === null);
 
 function flash(text: string) {
   message.value = text;
@@ -174,14 +175,15 @@ function refused(e: ProjectError) {
 
 usePolling({
   async read(signal) {
-    const result = await fetchProjects(signal);
+    const result = await fetchMyProjects(signal);
     if (signal.aborted) return false;
     now.value = Date.now();
     if (!result.ok) {
-      loadFailed.value = true;
+      if (result.error.code === 'unauthorized') await onSessionEnded();
+      else loadFailed.value = true;
       return false;
     }
-    projects.value = result.value;
+    mine.value = result.value;
     loadFailed.value = false;
     return true;
   },
@@ -190,7 +192,7 @@ usePolling({
 
 // The project as a change answered it, in place until the next read.
 function replace(changed: Project) {
-  if (projects.value) projects.value = projects.value.map((p) => (p.key === changed.key ? changed : p));
+  if (mine.value) mine.value = { ...mine.value, projects: mine.value.projects.map((p) => (p.key === changed.key ? changed : p)) };
 }
 
 // ---------------------------------------------------------------------------

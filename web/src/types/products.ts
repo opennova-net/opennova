@@ -144,12 +144,24 @@ export interface ProjectStorage {
   bytes: number;
 }
 
-// GET /api/me/projects: the account's own projects, and how many it has and
-// the bytes they store against the most it may.
+// A game a mod may be for, as GET /api/me/projects lists it: its key, its
+// name (its product's display name) and the game it runs as ('jo').
+export interface ProjectGame {
+  key: string;
+  title: string;
+  game: string;
+}
+
+// GET /api/me/projects: the account's own projects, how many it has and the
+// bytes they store against the most it may, and what a new one may be: a mod
+// of one of `games` (every game product, public or private), or a game of its
+// own running as one of `titles` ('jo', 'dfx2').
 export interface MyProjects {
   projects: Project[];
   usage: { projects: number; bytes: number };
   limits: { projects: number; bytes: number };
+  games: ProjectGame[];
+  titles: string[];
 }
 
 // POST /api/products's body: a project of the caller's own. A game names the

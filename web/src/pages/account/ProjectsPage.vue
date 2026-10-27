@@ -67,7 +67,7 @@
               </span>
             </div>
             <p class="text-sm text-ink">
-              <span class="font-mono">{{ p.key }}</span>, {{ projectKindLine(p, readable) }}<template v-if="p.kind === 'expansion' && p.expansion_code">
+              <span class="font-mono">{{ p.key }}</span>, {{ projectKindLine(p, data.games) }}<template v-if="p.kind === 'expansion' && p.expansion_code">
                 (short name <span class="font-mono">{{ p.expansion_code }}</span>)</template>
             </p>
             <p class="text-sm text-ink-muted">
@@ -85,17 +85,16 @@
 // its key, what it is (a mod of a game, or a game), who gets it, its newest
 // revision and the bytes it stores, linking to its page (ProjectPage.vue);
 // how many it has and the bytes they store against the most it may, and New
-// project (NewProjectPage.vue) while it may make another. The games' names
-// come from the projects the account may read (GET /api/products). Nothing
-// here changes by itself but a push from the editor, so the page reads again
-// when its tab is shown.
+// project (NewProjectPage.vue) while it may make another. A mod's game is
+// named from the games the same reply lists. Nothing here changes by itself
+// but a push from the editor, so the page reads again when its tab is shown.
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import AllowanceMeter from '../../components/AllowanceMeter.vue';
-import { fetchMyProjects, fetchProjects } from '../../api/products';
+import { fetchMyProjects } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';
-import type { MyProjects, Project } from '../../types/products';
+import type { MyProjects } from '../../types/products';
 import { formatMemory } from '../../utils/format';
 import { myProjectLink, projectKindLine } from '../../utils/projectsView';
 
@@ -104,9 +103,6 @@ const router = useRouter();
 const { refresh: refreshSession } = useSession();
 
 const data = ref<MyProjects | null>(null);
-// Every project the account may read, for its games' names; empty while
-// unread (a mod of a game not read then shows the game's key).
-const readable = ref<Project[]>([]);
 const loadError = ref('');
 
 const atLimit = computed(() => !!data.value && data.value.usage.projects >= data.value.limits.projects);
@@ -131,7 +127,7 @@ async function onSessionEnded() {
 
 const poll = usePolling({
   async read(signal, background) {
-    const [mine, all] = await Promise.all([fetchMyProjects(signal), fetchProjects(signal)]);
+    const mine = await fetchMyProjects(signal);
     if (signal.aborted) return false;
     if (!mine.ok) {
       if (mine.error.code === 'unauthorized') {
@@ -143,7 +139,6 @@ const poll = usePolling({
     }
     data.value = mine.value;
     loadError.value = '';
-    if (all.ok) readable.value = all.value;
     return true;
   },
   next: () => null,

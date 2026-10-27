@@ -22,6 +22,7 @@ import type {
   LobbyOption,
   NewProduct,
   Project,
+  ProjectGame,
   ProjectPatch,
   ProjectRevision,
   PublishedRelease,
@@ -187,13 +188,29 @@ function pickAmounts(value: unknown): { projects: number; bytes: number } | null
   return { projects: v.projects, bytes: v.bytes };
 }
 
+function pickProjectGame(value: unknown): ProjectGame | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.key !== 'string' || v.key === '') return null;
+  return { key: v.key, title: text(v.title) || v.key, game: text(v.game) };
+}
+
+// The account's projects and amounts must read right; the games and titles a
+// new one may take are read leniently (none, or one malformed, is left out:
+// the form then says there is nothing to pick).
 function pickMyProjects(data: unknown): MyProjects | null {
   const v = data as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
   const projects = every(v.projects, pickProject);
   const usage = pickAmounts(v.usage);
   const limits = pickAmounts(v.limits);
-  return projects && usage && limits ? { projects, usage, limits } : null;
+  if (!projects || !usage || !limits) return null;
+  return {
+    projects,
+    usage,
+    limits,
+    games: Array.isArray(v.games) ? v.games.map(pickProjectGame).filter((g): g is ProjectGame => g !== null) : [],
+    titles: Array.isArray(v.titles) ? v.titles.filter((t): t is string => typeof t === 'string' && t !== '') : [],
+  };
 }
 
 function every<T>(list: unknown, pick: (value: unknown) => T | null): T[] | null {
@@ -400,17 +417,9 @@ async function projectCall<T>(
 
 const projectPath = (key: string): string => `/products/${encodeURIComponent(key)}`;
 
-// GET /api/products: the projects the caller may read, by key: the public
-// ones, its own, and for an admin every one.
-export function fetchProjects(signal?: AbortSignal): Promise<ProjectResult<Project[]>> {
-  return projectCall(
-    () => apiClient.get<unknown>('/products', { signal }),
-    (data) => every((data as { projects?: unknown } | null)?.projects, pickProject),
-  );
-}
-
 // GET /api/me/projects: the account's own projects, with how many it has and
-// the bytes they store against the most it may.
+// the bytes they store against the most it may, and the games and titles a
+// new one may be for.
 export function fetchMyProjects(signal?: AbortSignal): Promise<ProjectResult<MyProjects>> {
   return projectCall(() => apiClient.get<unknown>('/me/projects', { signal }), pickMyProjects);
 }

@@ -11,7 +11,6 @@ import {
   deleteRelease,
   fetchMyProjects,
   fetchProducts,
-  fetchProjects,
   fetchReleases,
   fetchRevisions,
   publishRelease,
@@ -20,7 +19,7 @@ import {
   updateProduct,
   updateProject,
 } from './products';
-import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, myProjects, product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
+import { NIGHTOPS_PROJECT, myProjects, product, productsResponse, release, revision, runtimeRelease } from '../test/productFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
@@ -169,33 +168,52 @@ describe('the products', () => {
 describe('the projects', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('reads the projects the caller may read, filling what one leaves out', async () => {
-    publicGet.mockResolvedValue(
-      reply({
-        projects: [
-          NIGHTOPS_PROJECT,
-          { key: 'ACIDGAMBIT', title: 'OP: Acid Gambit', kind: 'game', game: 'jo', visibility: 'public', retail: false, base: null, product_id: 4, head: 14, owner: null, can_push: false },
-        ],
-      }),
-    );
-    const result = await fetchProjects();
-    expect(publicGet).toHaveBeenCalledWith('/products', expect.anything());
-    expect(result).toEqual({ ok: true, value: [NIGHTOPS_PROJECT, ACIDGAMBIT_PROJECT] });
-
-    // A kind the client does not know, a project with no key: refused whole.
-    publicGet.mockResolvedValue(reply({ projects: [{ ...NIGHTOPS_PROJECT, kind: 'app' }] }));
-    expect((await fetchProjects()).ok).toBe(false);
-    publicGet.mockResolvedValue(reply({ projects: [{ ...NIGHTOPS_PROJECT, key: '' }] }));
-    expect((await fetchProjects()).ok).toBe(false);
-  });
-
-  it("reads the account's own projects with their usage and limits", async () => {
+  it("reads the account's own projects with their usage and limits, and the games and titles a new one may take", async () => {
     publicGet.mockResolvedValue(reply(myProjects()));
     expect(await fetchMyProjects()).toEqual({ ok: true, value: myProjects() });
     expect(publicGet).toHaveBeenCalledWith('/me/projects', expect.anything());
     publicGet.mockResolvedValue(reply({ projects: [], usage: { projects: 0 } }));
     const bad = await fetchMyProjects();
     expect(!bad.ok && bad.error.code).toBe('unknown');
+  });
+
+  it('fills what a project leaves out and refuses one it cannot read', async () => {
+    const lean = { key: 'RANGERS', kind: 'game', product_id: 22 };
+    publicGet.mockResolvedValue(reply({ ...myProjects(), projects: [lean] }));
+    const result = await fetchMyProjects();
+    expect(result.ok && result.value.projects[0]).toEqual({
+      key: 'RANGERS',
+      title: 'RANGERS',
+      kind: 'game',
+      game: '',
+      expansion_code: '',
+      visibility: 'private',
+      retail: false,
+      base: null,
+      product_id: 22,
+      head: 0,
+      owner: null,
+      can_push: false,
+      can_manage: false,
+      storage: null,
+    });
+
+    // A kind the client does not know, a project with no key: refused whole.
+    publicGet.mockResolvedValue(reply({ ...myProjects(), projects: [{ ...NIGHTOPS_PROJECT, kind: 'app' }] }));
+    expect((await fetchMyProjects()).ok).toBe(false);
+    publicGet.mockResolvedValue(reply({ ...myProjects(), projects: [{ ...NIGHTOPS_PROJECT, key: '' }] }));
+    expect((await fetchMyProjects()).ok).toBe(false);
+  });
+
+  it('reads the games and titles leniently: none is none, a malformed one is left out', async () => {
+    const { games: _games, titles: _titles, ...rest } = myProjects();
+    publicGet.mockResolvedValue(reply(rest));
+    const none = await fetchMyProjects();
+    expect(none.ok && [none.value.games, none.value.titles]).toEqual([[], []]);
+
+    publicGet.mockResolvedValue(reply({ ...rest, games: [{ key: 'JO', title: 'Joint Operations', game: 'jo' }, { title: 'no key' }, 'JO'], titles: ['jo', 7, ''] }));
+    const some = await fetchMyProjects();
+    expect(some.ok && [some.value.games, some.value.titles]).toEqual([[{ key: 'JO', title: 'Joint Operations', game: 'jo' }], ['jo']]);
   });
 
   it('makes a project, changes its name and who gets it, and deletes it, by its key', async () => {

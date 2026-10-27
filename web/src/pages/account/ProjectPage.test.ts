@@ -2,8 +2,8 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import ProjectPage from './ProjectPage.vue';
-import { REVISIONS_PAGE, deleteProject, fetchProjects, fetchRevisions, updateProject } from '../../api/products';
-import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT, revision } from '../../test/productFixtures';
+import { REVISIONS_PAGE, deleteProject, fetchMyProjects, fetchRevisions, updateProject } from '../../api/products';
+import { NIGHTOPS_PROJECT, myProjects, project, revision } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
 const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
@@ -11,7 +11,7 @@ const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
 vi.mock('../../api/products', async (importOriginal) => ({
   REVISIONS_PAGE: (await importOriginal<typeof import('../../api/products')>()).REVISIONS_PAGE,
   deleteProject: vi.fn(),
-  fetchProjects: vi.fn(),
+  fetchMyProjects: vi.fn(),
   fetchRevisions: vi.fn(),
   updateProject: vi.fn(),
 }));
@@ -20,7 +20,7 @@ vi.mock('../../composables/useSession', async () => {
   return { useSession: () => ({ user: shallowRef(null), refresh: refreshSession }) };
 });
 
-const readable = vi.mocked(fetchProjects);
+const mine = vi.mocked(fetchMyProjects);
 const history = vi.mocked(fetchRevisions);
 const update = vi.mocked(updateProject);
 const remove = vi.mocked(deleteProject);
@@ -42,7 +42,7 @@ describe('ProjectPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    readable.mockResolvedValue({ ok: true, value: [ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT] });
+    mine.mockResolvedValue({ ok: true, value: myProjects() });
     history.mockResolvedValue({ ok: true, value: [revision(3, { message: 'night maps' }), revision(2), revision(1)] });
   });
 
@@ -133,17 +133,25 @@ describe('ProjectPage', () => {
     expect(router.currentRoute.value.path).toBe('/me/projects');
   });
 
-  it('sends an ended session to the login', async () => {
+  it('sends an ended session to the login, from a change or a read', async () => {
     update.mockResolvedValueOnce({ ok: false, error: { code: 'unauthorized', status: 401, field: '', message: 'ended' } });
     const page = await mountProject();
     await page.get('#project-visibility').trigger('click');
     await flushPromises();
     expect(refreshSession).toHaveBeenCalled();
     expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/me/projects/NIGHTOPS');
+    wrapper?.unmount();
+
+    refreshSession.mockClear();
+    mine.mockResolvedValue({ ok: false, error: { code: 'unauthorized', status: 401, field: '', message: 'ended' } });
+    await mountProject('RANGERS');
+    expect(refreshSession).toHaveBeenCalled();
+    expect(router.currentRoute.value.fullPath).toBe('/login?redirect=/me/projects/RANGERS');
   });
 
-  it("offers no change of a project the account may only read, and says when there is none", async () => {
-    const page = await mountProject('ACIDGAMBIT');
+  it("offers no change of a project the service says it may not manage, and says when there is none", async () => {
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [project('LOCKED', { can_manage: false })] }) });
+    const page = await mountProject('LOCKED');
     expect(page.text()).toContain("Only its owner and NovaWorld's admins may change it.");
     expect(page.find('#project-visibility').exists()).toBe(false);
     expect(page.find('#project-delete-toggle').exists()).toBe(false);
@@ -151,6 +159,6 @@ describe('ProjectPage', () => {
 
     const missing = await mountProject('NOPE');
     expect(missing.get('h1').text()).toBe('No such project');
-    expect(missing.text()).toContain('NovaWorld has no project NOPE you may see.');
+    expect(missing.text()).toContain('No project of yours has the key NOPE.');
   });
 });

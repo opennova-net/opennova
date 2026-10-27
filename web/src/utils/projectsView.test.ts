@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  baseGames,
   baseName,
   fieldRule,
   myProjectLink,
@@ -10,28 +9,19 @@ import {
   suggestShortName,
   visibilityLine,
 } from './projectsView';
-import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT, project } from '../test/productFixtures';
-
-const READABLE = [ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT];
+import { NIGHTOPS_PROJECT, PROJECT_GAMES, RANGERS_PROJECT, project } from '../test/productFixtures';
 
 describe('the projects view', () => {
-  it('offers a mod the retail games first, then every game the account may read, by name', () => {
-    expect(baseGames(READABLE)).toEqual([
-      { key: 'JO', name: 'Joint Operations' },
-      { key: 'DFX2', name: 'Delta Force Xtreme 2' },
-      { key: 'ACIDGAMBIT', name: 'OP: Acid Gambit' },
-      { key: 'RANGERS', name: 'Rangers' },
-    ]);
-    // An admin reads JO itself: once, by its listed name, in the retail place.
-    const jo = project('JO', { title: 'Joint Operations (retail)', owner: null, retail: true });
-    expect(baseGames([ACIDGAMBIT_PROJECT, jo]).map((g) => g.name)).toEqual(['Joint Operations (retail)', 'Delta Force Xtreme 2', 'OP: Acid Gambit']);
-    expect(baseName('ACIDGAMBIT', READABLE)).toBe('OP: Acid Gambit');
-    expect(baseName('GONE', READABLE)).toBe('GONE');
+  it('names a base game by the games the service lists, else by its key', () => {
+    expect(baseName('ACIDGAMBIT', PROJECT_GAMES)).toBe('OP: Acid Gambit');
+    expect(baseName('JO', [])).toBe('JO');
+    expect(baseName('GONE', PROJECT_GAMES)).toBe('GONE');
   });
 
   it('says what a project is', () => {
-    expect(projectKindLine(NIGHTOPS_PROJECT, READABLE)).toBe('A mod of Joint Operations');
-    expect(projectKindLine(project('X', { kind: 'expansion', base: 'ACIDGAMBIT' }), READABLE)).toBe('A mod of OP: Acid Gambit');
+    expect(projectKindLine(NIGHTOPS_PROJECT, PROJECT_GAMES)).toBe('A mod of Joint Operations');
+    expect(projectKindLine(project('X', { kind: 'expansion', base: 'ACIDGAMBIT' }), PROJECT_GAMES)).toBe('A mod of OP: Acid Gambit');
+    expect(projectKindLine(project('Z', { kind: 'expansion', base: null, game: 'jo' }), [])).toBe('A mod of Joint Operations');
     expect(projectKindLine(RANGERS_PROJECT, [])).toBe('A game for Delta Force Xtreme 2');
     expect(projectKindLine(project('Y', { game: '' }), [])).toBe('A game');
     expect(visibilityLine('public')).toBe('Public: anyone may get it.');

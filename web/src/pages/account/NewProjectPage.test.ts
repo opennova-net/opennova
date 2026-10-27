@@ -2,20 +2,19 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import NewProjectPage from './NewProjectPage.vue';
-import { createProject, fetchMyProjects, fetchProjects } from '../../api/products';
-import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT, myProjects, project } from '../../test/productFixtures';
+import { createProject, fetchMyProjects } from '../../api/products';
+import { RANGERS_PROJECT, myProjects, project } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
 const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
 
-vi.mock('../../api/products', () => ({ createProject: vi.fn(), fetchMyProjects: vi.fn(), fetchProjects: vi.fn() }));
+vi.mock('../../api/products', () => ({ createProject: vi.fn(), fetchMyProjects: vi.fn() }));
 vi.mock('../../composables/useSession', async () => {
   const { shallowRef } = await import('vue');
   return { useSession: () => ({ user: shallowRef(null), refresh: refreshSession }) };
 });
 
 const mine = vi.mocked(fetchMyProjects);
-const readable = vi.mocked(fetchProjects);
 const create = vi.mocked(createProject);
 
 function submit(page: VueWrapper) {
@@ -40,7 +39,6 @@ describe('NewProjectPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mine.mockResolvedValue({ ok: true, value: myProjects() });
-    readable.mockResolvedValue({ ok: true, value: [ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT] });
   });
 
   afterEach(() => {
@@ -51,7 +49,7 @@ describe('NewProjectPage', () => {
   it('makes a mod of a game, its key and short name following its name until typed over', async () => {
     create.mockResolvedValue({ ok: true, value: project('NIGHTOPS2', { kind: 'expansion', base: 'JO', expansion_code: 'nops' }) });
     const page = await mountPage();
-    // The retail games first, then the games the account may read.
+    // The games the service lists, private retail ones among them, the first picked.
     expect(page.findAll('#new-project-base option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2', 'OP: Acid Gambit', 'Rangers']);
     expect(value(page, '#new-project-base')).toBe('JO');
 
@@ -155,10 +153,29 @@ describe('NewProjectPage', () => {
     expect(page.text()).toContain('You have 10 projects, the most an account may have.');
   });
 
-  it('offers a mod of the retail games when the other games could not be read', async () => {
-    readable.mockResolvedValue({ ok: false, error: { code: 'network', status: null, field: '', message: 'offline' } });
+  it("names a title the page does not know by its code", async () => {
+    mine.mockResolvedValue({ ok: true, value: myProjects({ titles: ['jo', 'bhd'] }) });
     const page = await mountPage();
-    expect(page.findAll('#new-project-base option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2']);
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations', 'BHD']);
+  });
+
+  it('says there is nothing to pick when the service lists no game, and the submit says why', async () => {
+    mine.mockResolvedValue({ ok: true, value: myProjects({ games: [], titles: [] }) });
+    const page = await mountPage();
+    expect(page.findAll('#new-project-base option').map((o) => o.text())).toEqual(['Nothing to pick']);
+    await page.get('#new-project-name').setValue('Night Ops');
+    submit(page);
+    await flushPromises();
+    expect(create).not.toHaveBeenCalled();
+    expect(page.text()).toContain('NovaWorld lists no game to make a mod of right now.');
+
+    await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Nothing to pick']);
+    submit(page);
+    await flushPromises();
+    expect(create).not.toHaveBeenCalled();
+    expect(page.text()).toContain('NovaWorld lists no game to make one for right now.');
     expect(page.text()).not.toContain('—');
   });
 });

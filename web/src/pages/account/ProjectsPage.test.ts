@@ -2,20 +2,19 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import ProjectsPage from './ProjectsPage.vue';
-import { fetchMyProjects, fetchProjects } from '../../api/products';
-import { ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT, myProjects, project } from '../../test/productFixtures';
+import { fetchMyProjects } from '../../api/products';
+import { myProjects, project } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
 const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
 
-vi.mock('../../api/products', () => ({ fetchMyProjects: vi.fn(), fetchProjects: vi.fn() }));
+vi.mock('../../api/products', () => ({ fetchMyProjects: vi.fn() }));
 vi.mock('../../composables/useSession', async () => {
   const { shallowRef } = await import('vue');
   return { useSession: () => ({ user: shallowRef(null), refresh: refreshSession }) };
 });
 
 const mine = vi.mocked(fetchMyProjects);
-const readable = vi.mocked(fetchProjects);
 
 describe('ProjectsPage', () => {
   let wrapper: VueWrapper | null = null;
@@ -31,7 +30,6 @@ describe('ProjectsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mine.mockResolvedValue({ ok: true, value: myProjects() });
-    readable.mockResolvedValue({ ok: true, value: [ACIDGAMBIT_PROJECT, NIGHTOPS_PROJECT, RANGERS_PROJECT] });
   });
 
   afterEach(() => {
@@ -59,11 +57,18 @@ describe('ProjectsPage', () => {
     expect(page.text()).not.toContain('—');
   });
 
-  it("names a mod's game by its key when the games could not be read", async () => {
-    readable.mockResolvedValue({ ok: false, error: { code: 'network', status: null, field: '', message: 'offline' } });
-    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [project('MYMOD', { kind: 'expansion', base: 'RANGERS', expansion_code: 'mymod' })] }) });
+  it("names a mod's game from the reply's games, else by its key", async () => {
+    mine.mockResolvedValue({
+      ok: true,
+      value: myProjects({
+        projects: [project('MYMOD', { kind: 'expansion', base: 'RANGERS', expansion_code: 'mymod' }), project('OURMOD', { kind: 'expansion', base: 'ACIDGAMBIT' })],
+        games: [{ key: 'ACIDGAMBIT', title: 'OP: Acid Gambit', game: 'jo' }],
+      }),
+    });
     const page = await mountPage();
-    expect(page.get('article.project-card').text()).toContain('MYMOD, A mod of RANGERS');
+    const cards = page.findAll('article.project-card');
+    expect(cards[0].text()).toContain('MYMOD, A mod of RANGERS');
+    expect(cards[1].text()).toContain('OURMOD, A mod of OP: Acid Gambit');
   });
 
   it('offers no new project at the most an account may have, and says so', async () => {

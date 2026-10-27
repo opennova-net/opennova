@@ -86,7 +86,8 @@
         <div class="space-y-1">
           <label for="new-project-base" :class="labelClass">A mod of</label>
           <select id="new-project-base" v-model="form.base" :disabled="busy" :aria-invalid="errors.base ? 'true' : undefined" class="field">
-            <option v-for="g in bases" :key="g.key" :value="g.key">{{ g.name }}</option>
+            <option v-if="bases.length === 0" value="" disabled>Nothing to pick</option>
+            <option v-for="g in bases" :key="g.key" :value="g.key">{{ g.title }}</option>
           </select>
           <p v-if="errors.base" class="text-xs text-danger">{{ errors.base }}</p>
         </div>
@@ -115,7 +116,8 @@
       <div v-else class="space-y-1 sm:max-w-sm">
         <label for="new-project-game" :class="labelClass">A game for</label>
         <select id="new-project-game" v-model="form.game" :disabled="busy" :aria-invalid="errors.game ? 'true' : undefined" class="field">
-          <option v-for="t in GAME_TITLES" :key="t" :value="t">{{ titleName(t) }}</option>
+          <option v-if="titles.length === 0" value="" disabled>Nothing to pick</option>
+          <option v-for="t in titles" :key="t" :value="t">{{ titleName(t) }}</option>
         </select>
         <p class="text-xs" :class="errors.game ? 'text-danger' : 'text-ink-muted'">{{ errors.game || 'The game it runs as.' }}</p>
       </div>
@@ -146,25 +148,24 @@
 // /me/projects/new: a new project of the account's own (POST /api/products),
 // offered while it has fewer than the most it may (GET /api/me/projects).
 // Its name suggests its key and, for a mod, its short name, each until typed
-// over; a mod is of a game the account may read (GET /api/products) or a
-// retail one, a game of its own is for Joint Operations or Delta Force Xtreme
-// 2. The form checks the routes' rules first, and a refusal of one field is
-// said under that field. A project made goes to its page.
+// over; a mod is of one of the games that reply lists (any game product,
+// private ones too: a mod of an installed Joint Operations is a mod of JO), a
+// game of its own runs as one of its titles. The form checks the routes'
+// rules first, and a refusal of one field is said under that field. A project
+// made goes to its page.
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
-import { createProject, fetchMyProjects, fetchProjects, type ProjectError } from '../../api/products';
+import { createProject, fetchMyProjects, type ProjectError } from '../../api/products';
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
-import type { MyProjects, NewProject, Project, ProjectVisibility } from '../../types/products';
+import type { MyProjects, NewProject, ProjectVisibility } from '../../types/products';
 import { titleName } from '../../utils/productsView';
 import {
-  GAME_TITLES,
   KEY_HINT,
   KEY_RULE,
   NAME_MAX,
   SHORT_NAME_HINT,
   SHORT_NAME_RULE,
-  baseGames,
   myProjectLink,
   nameProblem,
   suggestKey,
@@ -183,7 +184,6 @@ const router = useRouter();
 const { refresh: refreshSession } = useSession();
 
 const mine = ref<MyProjects | null>(null);
-const readable = ref<Project[]>([]);
 const loadError = ref('');
 const notice = ref('');
 const busy = ref(false);
@@ -193,9 +193,9 @@ const form = reactive({
   name: '',
   key: '',
   kind: 'expansion' as 'game' | 'expansion',
-  base: 'JO',
+  base: '',
   shortName: '',
-  game: 'jo',
+  game: '',
   visibility: 'private' as ProjectVisibility,
 });
 // The key and short name follow the name until typed over.
@@ -203,7 +203,8 @@ const keyTyped = ref(false);
 const shortNameTyped = ref(false);
 const errors = ref<Partial<Record<Field, string>>>({});
 
-const bases = computed(() => baseGames(readable.value));
+const bases = computed(() => mine.value?.games ?? []);
+const titles = computed(() => mine.value?.titles ?? []);
 const atLimit = computed(() => !!mine.value && mine.value.usage.projects >= mine.value.limits.projects);
 
 useUnsavedChanges(() => !done.value && (form.name.trim() !== '' || form.key.trim() !== '' || form.shortName.trim() !== ''));
@@ -220,16 +221,16 @@ async function onSessionEnded() {
 
 async function load() {
   loadError.value = '';
-  const [result, all] = await Promise.all([fetchMyProjects(), fetchProjects()]);
+  const result = await fetchMyProjects();
   if (!result.ok) {
     if (result.error.code === 'unauthorized') return onSessionEnded();
     loadError.value = result.error.message;
     return;
   }
-  // Without the list, a mod may still be of a retail game.
-  if (all.ok) readable.value = all.value;
-  if (!bases.value.some((g) => g.key === form.base)) form.base = bases.value[0]?.key ?? '';
   mine.value = result.value;
+  // A pick the new reply no longer offers falls back to the first offered.
+  if (!bases.value.some((g) => g.key === form.base)) form.base = bases.value[0]?.key ?? '';
+  if (!titles.value.includes(form.game)) form.game = titles.value[0] ?? '';
 }
 
 // The form against the routes' rules; the body to send when it passes.
@@ -244,12 +245,14 @@ function check(): NewProject | null {
   const body: NewProject = { key, display_name: displayName, kind: form.kind, visibility: form.visibility };
   if (form.kind === 'expansion') {
     const code = form.shortName.trim().toLowerCase();
-    if (!bases.value.some((g) => g.key === form.base)) found.base = 'Pick the game the mod is for.';
+    if (bases.value.length === 0) found.base = 'NovaWorld lists no game to make a mod of right now.';
+    else if (!bases.value.some((g) => g.key === form.base)) found.base = 'Pick the game the mod is for.';
     if (!SHORT_NAME_RULE.test(code)) found.expansion_code = SHORT_NAME_HINT;
     body.base = form.base;
     body.expansion_code = code;
   } else {
-    if (!GAME_TITLES.includes(form.game)) found.game = 'Pick the game it is for.';
+    if (titles.value.length === 0) found.game = 'NovaWorld lists no game to make one for right now.';
+    else if (!titles.value.includes(form.game)) found.game = 'Pick the game it is for.';
     body.game = form.game;
   }
   errors.value = found;
