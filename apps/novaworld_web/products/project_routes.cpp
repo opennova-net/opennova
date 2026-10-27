@@ -1361,8 +1361,10 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 // retired or deleted as the admin's release routes do it (release_routes.h
 // publish_release_reply, retire_release_reply, delete_release_reply: 202 {"release"} or 204, and
 // their refusals), on its own session with the CSRF header of one who may release it (its owner
-// or an admin); 401; 403 forbidden; 404 not_found (no project the caller may read, or no release
-// of the project's).
+// or an admin). An owner who is no admin publishes for approval (ADR 0074): its draft waits for
+// an admin's publish (submit_release_reply: awaiting_approval, 202 {"release"}; 409 not_draft),
+// and its delete withdraws one awaiting. 401; 403 forbidden; 404 not_found (no project the
+// caller may read, or no release of the project's).
 crow::response ProjectRoutes::release_change(
 		const crow::request &req, const std::string &key, uint64_t id, ReleaseChange change) {
 	auto caller = access_.require_user(req);
@@ -1384,7 +1386,9 @@ crow::response ProjectRoutes::release_change(
 		const std::string actor = (user.role == "admin" ? "admin " : "user ") + user.username;
 		switch (change) {
 			case ReleaseChange::Publish:
-				return hosted::publish_release_reply(*db_conn, *release, actor);
+				return user.role == "admin"
+						? hosted::publish_release_reply(*db_conn, *release, actor)
+						: hosted::submit_release_reply(*db_conn, *release, actor);
 			case ReleaseChange::Retire:
 				return hosted::retire_release_reply(*db_conn, *release, actor);
 			case ReleaseChange::Delete:

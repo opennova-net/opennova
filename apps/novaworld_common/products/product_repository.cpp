@@ -12,8 +12,8 @@ using db::BindValue;
 
 constexpr std::array<const char *, 3> kKindNames = { "game", "expansion", "app" };
 constexpr std::array<const char *, 4> kTreeStateNames = { "building", "ready", "failed", "pruned" };
-constexpr std::array<const char *, 7> kReleaseStatusNames = { "uploading", "validating", "invalid",
-	"draft", "published", "retired", "building" };
+constexpr std::array<const char *, 8> kReleaseStatusNames = { "uploading", "validating", "invalid",
+	"draft", "published", "retired", "building", "awaiting_approval" };
 
 constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
@@ -26,7 +26,7 @@ constexpr const char *kTreeColumns =
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
-		"build_log";
+		"build_log, review_note";
 
 ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
@@ -94,6 +94,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.base_revision = r.as_int(13).value_or(0);
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
+	rel.review_note = r.as_text(16).value_or("");
 	return rel;
 }
 
@@ -694,8 +695,8 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 
 bool publish_release(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	db.exec("UPDATE releases SET status = 'published', published_at = now(), retired_at = NULL "
-			"WHERE id = $1 AND status = 'draft';",
+	db.exec("UPDATE releases SET status = 'published', published_at = now(), retired_at = NULL, "
+			"review_note = '' WHERE id = $1 AND status IN ('draft', 'awaiting_approval');",
 			{ BindValue(id) });
 	if (db.changes() == 0)
 		return false;
@@ -714,6 +715,39 @@ bool publish_release(db::Database &db, int64_t id) {
 	add_own_lobbies(db, id);
 	tx.commit();
 	return true;
+}
+
+bool submit_release(db::Database &db, int64_t id) {
+	db.exec("UPDATE releases SET status = 'awaiting_approval', review_note = '' "
+			"WHERE id = $1 AND status = 'draft';",
+			{ BindValue(id) });
+	return db.changes() > 0;
+}
+
+bool reject_release(db::Database &db, int64_t id, const std::string &note) {
+	db.exec("UPDATE releases SET status = 'draft', review_note = $2 "
+			"WHERE id = $1 AND status = 'awaiting_approval';",
+			{ BindValue(id), BindValue(note) });
+	return db.changes() > 0;
+}
+
+std::vector<AwaitingRelease> list_awaiting_releases(db::Database &db) {
+	std::vector<AwaitingRelease> out;
+	for (const auto &r :
+			db.query("SELECT r.id, r.name, COALESCE(p.key, ''), COALESCE(o.username, ''), "
+					 "extract(epoch FROM r.created_at)::bigint FROM releases r "
+					 "LEFT JOIN products p ON p.id = r.product_id "
+					 "LEFT JOIN players o ON o.id = p.owner_id "
+					 "WHERE r.status = 'awaiting_approval' ORDER BY r.id;")) {
+		AwaitingRelease a;
+		a.id = r.as_int(0).value_or(0);
+		a.name = r.as_text(1).value_or("");
+		a.key = r.as_text(2).value_or("");
+		a.owner = r.as_text(3).value_or("");
+		a.created_at = r.as_int(4).value_or(0);
+		out.push_back(std::move(a));
+	}
+	return out;
 }
 
 bool retire_release(db::Database &db, int64_t id) {

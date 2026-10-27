@@ -117,6 +117,7 @@ crow::json::wvalue release_json(db::Database &db, const ReleaseRow &r) {
 	}
 	out["version"] = r.version;
 	out["build_log"] = r.build_log;
+	out["review_note"] = r.review_note;
 	return out;
 }
 
@@ -126,7 +127,8 @@ crow::response publish_release_reply(
 	{
 		db::Transaction tx(db);
 		if (!publish_release(db, release.id))
-			return json_error(409, "not_draft", "only a draft (a validated release) is published");
+			return json_error(409, "not_draft",
+					"only a draft (a validated release) or one awaiting approval is published");
 		for (const ReleaseSection &s : list_sections(db, release.id))
 			if (enqueue_release_apply(db, release.id, s.product_id) != 0)
 				++applies;
@@ -136,6 +138,18 @@ crow::response publish_release_reply(
 	std::printf("[http] release %lld '%s' published by %s: %zu apply job(s)\n",
 			static_cast<long long>(release.id), loggable(release.name).c_str(),
 			loggable(actor).c_str(), applies);
+	crow::json::wvalue out;
+	out["release"] = release_json(db, *find_release(db, release.id));
+	return json_reply(202, out);
+}
+
+crow::response submit_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor) {
+	if (!submit_release(db, release.id))
+		return json_error(409, "not_draft", "only a draft (a validated release) is published");
+	std::printf("[http] release %lld '%s' awaits approval, published by %s\n",
+			static_cast<long long>(release.id), loggable(release.name).c_str(),
+			loggable(actor).c_str());
 	crow::json::wvalue out;
 	out["release"] = release_json(db, *find_release(db, release.id));
 	return json_reply(202, out);
@@ -205,6 +219,9 @@ void ReleaseRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/releases/<uint>/publish")
 			.methods("POST"_method)(
 					[this](const crow::request &req, uint64_t id) { return publish(req, id); });
+	CROW_ROUTE(app, "/api/admin/releases/<uint>/reject")
+			.methods("POST"_method)(
+					[this](const crow::request &req, uint64_t id) { return reject(req, id); });
 	CROW_ROUTE(app, "/api/admin/releases/<uint>/retire")
 			.methods("POST"_method)(
 					[this](const crow::request &req, uint64_t id) { return retire(req, id); });
@@ -422,6 +439,49 @@ crow::response ReleaseRoutes::publish(const crow::request &req, uint64_t id) {
 		return publish_release_reply(*db_conn, *release, creator_of(caller));
 	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/releases/<id>/publish", e);
+	}
+}
+
+// POST /api/admin/releases/<id>/reject — {"message"?}: a release awaiting approval sent back to
+// draft (ADR 0074), the message, trimmed, its review note (at most kReviewNoteMax characters, no
+// control character but a line break or a tab; none: ""), 202 {"release"}; 400 invalid_json,
+// invalid_field (message); 404 not_found; 409 not_awaiting.
+crow::response ReleaseRoutes::reject(const crow::request &req, uint64_t id) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	std::string note;
+	if (!req.body.empty()) {
+		auto body = JsonBody::parse(req.body);
+		if (!body)
+			return json_error(400, "invalid_json");
+		const auto message = body->null("message") ? std::nullopt : body->text("message");
+		if (body->wrong_type())
+			return field_error(400, "invalid_field", "message", "message is text");
+		note = std::string(strutil::trim_view(message.value_or("")));
+		bool controls = has_c1_control(note);
+		for (const char c : note)
+			controls = controls ||
+					((static_cast<unsigned char>(c) < 0x20 && c != '\n' && c != '\t') || c == 0x7F);
+		if (strutil::utf8_length(note) > kReviewNoteMax || controls)
+			return field_error(400, "invalid_field", "message",
+					"message is at most 500 characters with no control characters");
+	}
+	try {
+		auto db_conn = pool_.acquire();
+		const auto release = find_release(*db_conn, path_id(id));
+		if (!release)
+			return no_such_release();
+		if (!reject_release(*db_conn, release->id, note))
+			return json_error(409, "not_awaiting", "only a release awaiting approval is rejected");
+		std::printf("[http] release %lld '%s' sent back to draft by %s\n",
+				static_cast<long long>(release->id), loggable(release->name).c_str(),
+				loggable(creator_of(caller)).c_str());
+		crow::json::wvalue out;
+		out["release"] = release_json(*db_conn, *find_release(*db_conn, release->id));
+		return json_reply(202, out);
+	} catch (const db::Error &e) {
+		return db_failure("POST /api/admin/releases/<id>/reject", e);
 	}
 }
 

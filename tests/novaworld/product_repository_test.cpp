@@ -518,6 +518,39 @@ int test_own_releases() {
 	// The service's own games keep their seeded lobbies.
 	TEST_EXPECT(find_product(db, jo)->lobby == "jop_2_consumer");
 
+	// An owner's publish waits for an admin's approval: served, listed and counted in flight
+	// nowhere; a reject sends it back with a note, a submit clears it, an admin's publish
+	// publishes it.
+	const int64_t pubmod_game = own("AWAITGAME", "jo", maker, std::nullopt, "", "public");
+	const int64_t awaiting = draft_of(db, pubmod_game, "AWAITGAME.CMD", "sha-await");
+	TEST_EXPECT(!reject_release(db, awaiting, "x") && submit_release(db, awaiting) &&
+			!submit_release(db, awaiting));
+	TEST_EXPECT(find_release(db, awaiting)->status == ReleaseStatus::AwaitingApproval &&
+			release_status_name(ReleaseStatus::AwaitingApproval) ==
+					std::string("awaiting_approval") &&
+			release_status_from_name("awaiting_approval") == ReleaseStatus::AwaitingApproval);
+	TEST_EXPECT(!find_product(db, pubmod_game)->published_release_id &&
+			find_product(db, pubmod_game)->lobby.empty() &&
+			count_owned_releases_in_flight(db, maker) == 0);
+	for (const PublishedSection &p : published_sections(db))
+		TEST_EXPECT(p.release_id != awaiting);
+	{
+		const std::vector<AwaitingRelease> listed = list_awaiting_releases(db);
+		TEST_EXPECT(listed.size() == 1 && listed[0].id == awaiting &&
+				listed[0].key == "AWAITGAME" && listed[0].owner == "maker" &&
+				listed[0].name == "sha-await" && listed[0].created_at > 0);
+	}
+	TEST_EXPECT(reject_release(db, awaiting, "Name the maps.") &&
+			find_release(db, awaiting)->status == ReleaseStatus::Draft &&
+			find_release(db, awaiting)->review_note == "Name the maps." &&
+			list_awaiting_releases(db).empty());
+	TEST_EXPECT(submit_release(db, awaiting) && find_release(db, awaiting)->review_note.empty());
+	TEST_EXPECT(publish_release(db, awaiting) &&
+			find_release(db, awaiting)->status == ReleaseStatus::Published &&
+			find_product(db, pubmod_game)->published_release_id == awaiting &&
+			find_product(db, pubmod_game)->lobby == "awaitgame_0_consumer");
+	TEST_EXPECT(!publish_release(db, awaiting));
+
 	// Its releases in flight, and its starts of the UTC day (five, a deleted one still counted).
 	TEST_EXPECT(count_owned_releases_in_flight(db, maker) == 0);
 	NewBuiltRelease building;

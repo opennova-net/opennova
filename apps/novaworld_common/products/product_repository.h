@@ -100,8 +100,19 @@ struct ProductTree {
 };
 
 // Building: a release the data program builds from a revision of its game's project
-// (release_build.h) before it validates it as an uploaded one.
-enum class ReleaseStatus : uint8_t { Uploading, Validating, Invalid, Draft, Published, Retired, Building };
+// (release_build.h) before it validates it as an uploaded one. AwaitingApproval: a draft of an
+// account's own project its owner published, which waits for an admin's approval (ADR 0074);
+// nothing serves, applies or lists it.
+enum class ReleaseStatus : uint8_t {
+	Uploading,
+	Validating,
+	Invalid,
+	Draft,
+	Published,
+	Retired,
+	Building,
+	AwaitingApproval,
+};
 const char *release_status_name(ReleaseStatus status);
 std::optional<ReleaseStatus> release_status_from_name(std::string_view name);
 
@@ -127,6 +138,8 @@ struct ReleaseRow {
 	int64_t base_revision = 0;
 	std::string version;
 	std::string build_log;
+	// Why an admin sent it back to draft from awaiting its approval ("" for none).
+	std::string review_note;
 };
 
 struct ReleaseSection {
@@ -378,8 +391,26 @@ bool set_release_validated(db::Database &db, int64_t id, const std::string &sha2
 // games row of own_lobby_slug (its lobby name too), gate tag own_gate_tag, .gsb
 // "<key>_0.gsb?a=1", its name and title, its other columns its title's template row's (OP: Acid
 // Gambit's for jo, Delta Force Xtreme 2's for dfx2, kOwnLobbyTemplates; none while that row is
-// missing), and its products.lobby that slug. False when the row left draft.
+// missing), and its products.lobby that slug. A release awaiting approval publishes as a draft
+// does (an admin's approval). Its review note is cleared. False when the row is neither.
 bool publish_release(db::Database &db, int64_t id);
+// draft -> awaiting_approval, its review note cleared: an account's own project's release its
+// owner published, nothing served until an admin publishes it. False when the row left draft.
+bool submit_release(db::Database &db, int64_t id);
+// awaiting_approval -> draft with `note` (an admin's reject: why). False when the row was not
+// awaiting approval.
+bool reject_release(db::Database &db, int64_t id, const std::string &note);
+// A release awaiting an admin's approval, what the admin's attention list names: its name, its
+// product's key and its owner's username ("" for none), and when it was made (Unix seconds).
+struct AwaitingRelease {
+	int64_t id = 0;
+	std::string name;
+	std::string key;
+	std::string owner;
+	int64_t created_at = 0;
+};
+// Every release awaiting approval, oldest first.
+std::vector<AwaitingRelease> list_awaiting_releases(db::Database &db);
 // published -> retired, its sections' products' published_release_id cleared. False when
 // the row left published.
 bool retire_release(db::Database &db, int64_t id);

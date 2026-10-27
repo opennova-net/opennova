@@ -853,8 +853,8 @@ CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 -- The package is updates/<sha256>.sfs once validated (updates/upload-<id>.sfs
 -- before): uploading -> validating (the worker parses it and maps each section
 -- to a product by its command file) -> draft | invalid -> published (its
--- sections' products serve it to the updater and get a tree built from it) ->
--- retired. product_id is the game it is a release of (a built one's from the
+-- sections' products serve it to the updater and get a tree built from it;
+-- an owner's waits in awaiting_approval first, below) -> retired. product_id is the game it is a release of (a built one's from the
 -- start, an upload's once its validation maps its base section);
 -- package_product the 1SFS trailer's; name the release's label.
 --
@@ -866,11 +866,18 @@ CREATE INDEX idx_product_trees_product ON product_trees(product_id, id);
 -- validating, or invalid with `error`; build_log what the tools said.
 -- revision and base_revision are the revisions built, version the
 -- package's.
+--
+-- A release of an account's own project that its owner (no admin) publishes
+-- waits for an admin's approval (ADR 0074): draft -> awaiting_approval, which
+-- nothing serves, applies or lists; an admin's publish makes it published, an
+-- admin's reject a draft again with review_note saying why ('' for none), and
+-- its owner may delete it meanwhile.
 CREATE TABLE releases (
     id               bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     status           text NOT NULL DEFAULT 'uploading'
         CONSTRAINT releases_status_check CHECK (status IN
-            ('uploading', 'building', 'validating', 'invalid', 'draft', 'published', 'retired')),
+            ('uploading', 'building', 'validating', 'invalid', 'draft', 'published', 'retired',
+             'awaiting_approval')),
     product_id       bigint REFERENCES products(id) ON DELETE SET NULL,
     sha256           text NOT NULL DEFAULT '',
     bytes            bigint NOT NULL DEFAULT 0,
@@ -884,7 +891,8 @@ CREATE TABLE releases (
     revision         bigint,
     base_revision    bigint,
     version          text NOT NULL DEFAULT '',
-    build_log        text NOT NULL DEFAULT ''
+    build_log        text NOT NULL DEFAULT '',
+    review_note      text NOT NULL DEFAULT ''
 );
 CREATE UNIQUE INDEX idx_releases_sha ON releases(sha256) WHERE sha256 <> '';
 CREATE INDEX idx_releases_product ON releases(product_id, id);

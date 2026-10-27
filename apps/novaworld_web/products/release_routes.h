@@ -20,6 +20,8 @@
 //   POST   /api/admin/releases/<id>/complete   the upload completed: building + release.build
 //   POST   /api/admin/releases/<id>/publish    a draft published: one release.apply per section,
 //                                               and downloads.publish (products/downloads_job.h)
+//   POST   /api/admin/releases/<id>/reject     {message?}: one awaiting approval sent back to
+//                                               draft, the message its review note
 //   POST   /api/admin/releases/<id>/retire     a published one retired, and downloads.publish
 //   DELETE /api/admin/releases/<id>            a draft, invalid, retired or uploading one gone
 //
@@ -51,23 +53,28 @@ struct ReleaseRow; // products/product_repository.h
 // sections ([{product_id, display_name, expansion, command_file, version, tree ({id, state} or
 // null)}]), created_by, created_at, published_at, retired_at ("" until set), source (a built
 // release's {project, revision, base_revision (or null)}, null for an upload), version,
-// build_log}.
+// build_log, review_note (why an admin sent it back from awaiting approval, "" for none)}.
 crow::json::wvalue release_json(db::Database &db, const ReleaseRow &release);
 
 // What a release's publish, retire and delete come to, the admin's routes' and a project's own
 // (products/project_routes.h) alike, `actor` naming who in the log line ("admin <name>",
-// "user <name>", "token"). The publish: a draft published (its sections' products serve it to the
-// updater, the release they named before retired; an account's own game's first gets its own
-// lobby, product_repository.h publish_release), one release.apply per section and the downloads
-// host's render (downloads.publish) queued, in one transaction: 202 {"release"}; 409 not_draft.
+// "user <name>", "token"). The publish: a draft or a release awaiting approval published (its
+// sections' products serve it to the updater, the release they named before retired; an
+// account's own game's first gets its own lobby, product_repository.h publish_release), one
+// release.apply per section and the downloads host's render (downloads.publish) queued, in one
+// transaction: 202 {"release"}; 409 not_draft. The submit (an owner's publish, ADR 0074): a draft
+// made awaiting_approval, nothing served, applied or rendered until an admin publishes it: 202
+// {"release"}; 409 not_draft.
 // The retire: a published release retired and downloads.publish queued, in one transaction: 202
-// {"release"}; 409 not_published. The delete: a draft, invalid, retired or uploading (abandoned)
-// release, its objects removed (an app's uploaded build, with the upload in flight aborted, and
-// the package's upload key, which an invalid one may keep, then its package or download once it
-// has a sha; a missing object is no failure), the row gone: 204; 409 published (retire it
-// first), validating or building (the data program is on it; a building one whose job ended may
-// go); 502 store_error; 503 store_unavailable (no store).
+// {"release"}; 409 not_published. The delete: a draft, invalid, retired, awaiting approval (its
+// owner's withdrawal) or uploading (abandoned) release, its objects removed (an app's uploaded
+// build, with the upload in flight aborted, and the package's upload key, which an invalid one may
+// keep, then its package or download once it has a sha; a missing object is no failure), the row
+// gone: 204; 409 published (retire it first), validating or building (the data program is on it; a
+// building one whose job ended may go); 502 store_error; 503 store_unavailable (no store).
 crow::response publish_release_reply(
+		db::Database &db, const ReleaseRow &release, const std::string &actor);
+crow::response submit_release_reply(
 		db::Database &db, const ReleaseRow &release, const std::string &actor);
 crow::response retire_release_reply(
 		db::Database &db, const ReleaseRow &release, const std::string &actor);
@@ -77,6 +84,8 @@ crow::response delete_release_reply(
 class ReleaseRoutes {
 public:
 	static constexpr size_t kNameMax = 64;
+	// A reject's message, in characters (trimmed).
+	static constexpr size_t kReviewNoteMax = 500;
 	// One part of a package's multipart upload (S3's parts: inside Cloudflare's request body
 	// limit), and the most parts a package may take (S3's own limit).
 	static constexpr int64_t kPartSize = 32 * 1024 * 1024;
@@ -98,6 +107,7 @@ private:
 	crow::response part(const crow::request &req, uint64_t id, uint64_t part);
 	crow::response complete(const crow::request &req, uint64_t id);
 	crow::response publish(const crow::request &req, uint64_t id);
+	crow::response reject(const crow::request &req, uint64_t id);
 	crow::response retire(const crow::request &req, uint64_t id);
 	crow::response remove(const crow::request &req, uint64_t id);
 

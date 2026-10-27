@@ -671,11 +671,13 @@ int draft(Harness &h, int64_t id, int64_t product_id, const std::string &command
 // An account's own releases (ADR 0074): built from its project's revision by its owner (its
 // creator "user <name>"), listed, one at a time (409 release_in_progress), five a UTC day (429
 // too_many_releases with Retry-After), none past the quota (413 quota_exceeded), an admin exempt
-// from all three; published by its owner, an own game's first publish adding its own lobby; its
-// project's reply naming it; retired and deleted; another account refused, a release of another
-// project no release of this one's; the mods a game's players may install (GET /api/mods: the
-// published public ones, and the caller's own private ones); its package counted in the owner's
-// usage.
+// from all three; published by its owner for an admin's approval (awaiting_approval: served,
+// listed and applied nowhere), named in the admin's attention list, rejected back to draft with
+// a note, withdrawn by its owner's delete, and published by an admin (an own game's first
+// publish adding its own lobby); its project's reply naming it once published; retired and
+// deleted; another account refused, a release of another project no release of this one's; the
+// mods a game's players may install (GET /api/mods: the published public ones, and the caller's
+// own private ones); its package counted in the owner's usage.
 int test_own_releases(Harness &h) {
 	const std::string owner = signed_in(h, "rel_owner", "player");
 	const std::string other = signed_in(h, "rel_other", "player");
@@ -740,8 +742,64 @@ int test_own_releases(Harness &h) {
 					404, "not_found"));
 	TEST_EXPECT(refused(as(other, "POST", releases + "/" + std::to_string(first) + "/publish"), 403,
 			"forbidden"));
-	json = json_of(as(owner, "POST", releases + "/" + std::to_string(first) + "/publish"), 202);
+	// Its owner's publish waits for an admin's approval: nothing served, applied or listed.
+	const std::string publish_first = releases + "/" + std::to_string(first) + "/publish";
+	json = json_of(as(owner, "POST", publish_first), 202);
+	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "awaiting_approval" &&
+			std::string(json["release"]["review_note"].s()).empty());
+	TEST_EXPECT(refused(as(owner, "POST", publish_first), 409, "not_draft"));
+	json = json_of(h.send("GET", "/api/products/RELGAME"), 200);
+	TEST_EXPECT(json && json["project"]["release"].t() == crow::json::type::Null);
+	TEST_EXPECT(h.pool.acquire()
+						->query("SELECT 1 FROM products WHERE key = 'RELGAME' AND lobby = '';")
+						.size() == 1);
+	TEST_EXPECT(h.pool.acquire()
+					->query("SELECT 1 FROM jobs WHERE kind = 'release.apply' AND "
+							"(payload->>'release_id')::bigint = $1;",
+							{ BindValue(first) })
+					.empty());
+	// The admin's attention list names it, linked to its product's page.
+	const auto awaiting = [&h](const char *subject) {
+		const auto json = json_of(h.send("GET", "/api/admin/attention", { kBearer }), 200);
+		int found = 0;
+		if (json)
+			for (const auto &f : json["findings"])
+				if (std::string(f["source"].s()) == "releases" &&
+						std::string(f["subject"].s()) == subject) {
+					found += std::string(f["level"].s()) == "warn" &&
+									std::string(f["text"].s()) ==
+											"Awaits approval (by rel_owner)" &&
+									std::string(f["link"].s()) == "/admin/products/RELGAME" &&
+									f["since"].t() == crow::json::type::String
+							? 1
+							: 100;
+				}
+		return found;
+	};
+	TEST_EXPECT(awaiting("RELGAME 1.0") == 1);
+	// An admin sends it back with a note (trimmed); a second reject finds none awaiting.
+	const std::string reject_first = "/api/admin/releases/" + std::to_string(first) + "/reject";
+	TEST_EXPECT(
+			refused(h.send("POST", reject_first, { kJson, kCsrf, owner }, "{}"), 403, "forbidden"));
+	TEST_EXPECT(refused(h.send("POST", reject_first, { kJson, kBearer },
+								"{\"message\": \"" + std::string(501, 'x') + "\"}"),
+			400, "invalid_field"));
+	json = json_of(h.send("POST", reject_first, { kJson, kBearer },
+						   R"({"message":"  Name the maps, please.  "})"),
+			202);
+	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "draft" &&
+			std::string(json["release"]["review_note"].s()) == "Name the maps, please.");
+	TEST_EXPECT(
+			refused(h.send("POST", reject_first, { kJson, kBearer }, "{}"), 409, "not_awaiting"));
+	TEST_EXPECT(awaiting("RELGAME 1.0") == 0);
+	// Published again by its owner (the note cleared), then approved: an admin's publish of a
+	// release awaiting approval publishes it, and the own game's first publish adds its own lobby.
+	json = json_of(as(owner, "POST", publish_first), 202);
+	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "awaiting_approval" &&
+			std::string(json["release"]["review_note"].s()).empty());
+	json = json_of(h.as_admin("POST", publish_first), 202);
 	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "published");
+	TEST_EXPECT(awaiting("RELGAME 1.0") == 0);
 	{
 		const auto lobby = h.pool.acquire()->query(
 				"SELECT p.lobby, g.gate_tag, g.gsb_path, g.title FROM products p "
@@ -791,9 +849,19 @@ int test_own_releases(Harness &h) {
 	const auto full = as(owner, "POST", releases, R"({"version":"3.0"})");
 	TEST_EXPECT(refused(full, 413, "quota_exceeded") &&
 			crow::json::load(body_text(full))["used"].i() == hosted::kOwnedBytesMax);
-	TEST_EXPECT(json_of(h.as_admin("POST", releases, R"({"version":"3.0"})"), 201));
+	json = json_of(h.as_admin("POST", releases, R"({"version":"3.0"})"), 201);
+	TEST_EXPECT(json);
+	const int64_t third = json ? json["release"]["id"].i() : 0;
 	h.pool.acquire()->exec("DELETE FROM project_blobs WHERE sha256 = $1;",
 			{ BindValue(sha_of("a quota filler")) });
+	// Published by its owner, then withdrawn: its owner's delete takes one awaiting approval.
+	TEST_EXPECT(draft(h, third, game, "RELGAME.CMD", sha_of("third package"), 10) == 0);
+	TEST_EXPECT(
+			json_of(as(owner, "POST", releases + "/" + std::to_string(third) + "/publish"), 202));
+	TEST_EXPECT(awaiting("RELGAME 3.0") == 1);
+	const auto withdrawn = as(owner, "DELETE", releases + "/" + std::to_string(third));
+	TEST_EXPECT(withdrawn.transport_ok && withdrawn.code == 204);
+	TEST_EXPECT(awaiting("RELGAME 3.0") == 0);
 
 	// The mods of Joint Operations: the private one its owner's alone, once published.
 	const auto mod_keys = [&h](const std::vector<std::string> &headers, const char *game) {
@@ -806,10 +874,17 @@ int test_own_releases(Harness &h) {
 		return keys;
 	};
 	TEST_EXPECT(mod_keys({ owner }, "JOPTR.CMD").empty());
-	TEST_EXPECT(json_of(
+	// Awaiting approval it lists nowhere; the admin's publish route approves it.
+	json = json_of(
 			as(owner, "POST",
 					"/api/products/RELMOD/releases/" + std::to_string(by_admin) + "/publish"),
-			202));
+			202);
+	TEST_EXPECT(json && std::string(json["release"]["status"].s()) == "awaiting_approval");
+	TEST_EXPECT(mod_keys({ owner }, "JOPTR.CMD").empty());
+	TEST_EXPECT(
+			json_of(h.send("POST", "/api/admin/releases/" + std::to_string(by_admin) + "/publish",
+							{ kJson, kBearer }),
+					202));
 	TEST_EXPECT(mod_keys({}, "JOPTR.CMD").empty() && mod_keys({ other }, "joptr.cmd").empty());
 	TEST_EXPECT((mod_keys({ owner }, "joptr.cmd") == std::vector<std::string>{ "RELMOD" }));
 	TEST_EXPECT(

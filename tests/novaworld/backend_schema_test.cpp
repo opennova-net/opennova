@@ -758,6 +758,12 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db,
 			"UPDATE products SET updater_login = 'MINE', command_file = 'joptr.cmd' "
 			"WHERE key = 'MINE';"));
+	// A release awaiting an admin's approval, and the note a reject leaves.
+	TEST_EXPECT(has_column(db, "releases", "review_note"));
+	db.exec("INSERT INTO releases (status, name) VALUES ('awaiting_approval', 'Awaiting');");
+	TEST_EXPECT(db.query("SELECT 1 FROM releases WHERE name = 'Awaiting' AND review_note = '';")
+						.size() == 1);
+	TEST_EXPECT(refused(db, "INSERT INTO releases (status) VALUES ('approved');"));
 	// An account's releases started on a UTC day go with the account.
 	TEST_EXPECT(
 			has_column(db, "release_starts", "day") && has_column(db, "release_starts", "started"));
