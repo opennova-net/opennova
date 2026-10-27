@@ -184,18 +184,29 @@ void OriginalFiles::add_scope_missions() {
 	if (run.scope.paths.size() != before) run.scope.taken();
 }
 
-// The install folder's files (their names, sizes and last writes), what a patch over it moves.
+// The files of every folder the view reads (their names, sizes and last writes), what a patch over the install moves:
+// the install's folder (the boot table's archives, the loose files beside them, the version text), and with an
+// expansion mounted (/exp) its folder, its two archives and the files the game reads there among them [orig:
+// Expansion_LoadAssets @ 0x4a48d6..0x4a48ed, the archive table's two slots; "expansion\%s\M%s.sbf" @ 0x4a4906]
+// (InstallView::open). A view of the base game alone (no expansion: every DFX2 view, an expansion being JO's alone)
+// reads no expansion's folder.
 std::string OriginalFiles::folder_state() const {
 	std::vector<std::string> entries;
-	std::error_code ec;
-	fs::directory_iterator it(system_path(install_.root), ec);
-	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
-		std::error_code status;
-		if (!it->is_regular_file(status)) continue;
-		const uintmax_t size = it->file_size(status);
-		const auto written = it->last_write_time(status).time_since_epoch().count();
-		entries.push_back(utf8_of(it->path().filename()) + "\x1f" + std::to_string(size) + "\x1f" + std::to_string(written));
-	}
+	const auto list = [&entries](const std::string &dir, const std::string &prefix) {
+		std::error_code ec;
+		fs::directory_iterator it(system_path(dir), ec);
+		for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+			std::error_code status;
+			if (!it->is_regular_file(status)) continue;
+			const uintmax_t size = it->file_size(status);
+			const auto written = it->last_write_time(status).time_since_epoch().count();
+			entries.push_back(prefix + utf8_of(it->path().filename()) + "\x1f" + std::to_string(size) + "\x1f" +
+			                  std::to_string(written));
+		}
+	};
+	list(install_.root, std::string());
+	if (!install_.expansion.empty())
+		list(vfs_expansion_dir(install_.root, install_.expansion), "expansion/" + install_.expansion + "/");
 	std::sort(entries.begin(), entries.end());
 	std::string out;
 	for (const std::string &entry : entries) out += entry + "\x1e";

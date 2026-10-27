@@ -68,8 +68,9 @@ struct OriginalData {
 // over the same graph and cache, and a finding of a name not yet covered is the modder's until it is
 // (OriginalData::covered). It never depends on the project's files: an edit, a save, an import or a build
 // validates nothing again but the name a row is about for the first time. A Refresh (a new scan) looks at the
-// install's folder again, and an install that moved there (a patch) is validated again; another view (another
-// install, game or expansion) forgets it.
+// install's folders the view reads again (its own, the mounted expansion's), and an install that moved there (a
+// patch, an expansion's archive among them) is validated again; another view (another install, game or expansion)
+// forgets it.
 class OriginalFiles {
 public:
 	OriginalFiles();
@@ -120,7 +121,7 @@ private:
 
 	InstallSpec install_;
 	std::shared_ptr<const ProjectDocument> document_;
-	std::string folder_; // the install folder's state when it was validated (folder_state)
+	std::string folder_; // the state of the install's folders the view reads when it was validated (folder_state)
 	const void *scan_ = nullptr;
 	Phase phase_ = Phase::Idle;
 	std::unique_ptr<Run> run_;

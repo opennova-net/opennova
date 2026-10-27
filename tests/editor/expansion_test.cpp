@@ -496,6 +496,70 @@ static int test_fold_follows_the_view() {
 	return 0;
 }
 
+// The baseline is validated again when a file it reads moves: the expansion's folder too, where the view mounts one
+// [orig: Expansion_LoadAssets @ 0x4a48d6..0x4a48ed]. x1L.pff patched (its table's section named, so its finding goes)
+// is seen at the next scan. A DFX2 project's view (the base game alone: expansions are JO's) reads no expansion's
+// folder, so a patch there moves nothing it reads, and one of the root's resource.pff validates it again.
+static int test_fold_follows_a_patch() {
+	test_temp::TempDir dir("opennova_editor_expansion_fold_patch");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install));
+	const auto table_archive = [&](const std::string &section) {
+		opennova::rtxt::File table;
+		table.sections.push_back({ section, 1 });
+		opennova::rtxt::Entry entry;
+		entry.key = "KEY";
+		entry.text = "text";
+		table.entries.push_back(entry);
+		std::vector<uint8_t> bytes;
+		std::string written;
+		return opennova::rtxt::write(table, bytes, written) &&
+		       write_archive(install + "/expansion/x1/x1L.pff", { { "Mx1.bin", "x1 menu script" }, { "x1L.lwf", "x1 bank" },
+		                                                         { "x1.bin", std::string(bytes.begin(), bytes.end()) } });
+	};
+	TEST_EXPECT(table_archive(""));
+	ProjectDocument created;
+	Diagnostic error;
+	TEST_EXPECT(create_project(dir.file("project"), "Mod", "jo", created, error, ProjectExpansion{ "jxm", "x1" }));
+	const auto document = std::make_shared<const ProjectDocument>(created);
+	OriginalFiles fold;
+	const int scans[4] = {}; // the session's scans stand in: a new one each time the folders are looked at again
+	const auto unnamed_section = [&](const int *scan) {
+		fold.want(install_spec(install, *document), document, scan, {normalized_logical_name("jxm.bin")});
+		while (!fold.step(1 << 20)) {
+		}
+		const OriginalData &data = *fold.data();
+		const auto found = data.findings.find(normalized_logical_name("jxm.bin"));
+		if (!data.ready || found == data.findings.end()) return false;
+		for (const auto &each : found->second)
+			if (each.first.rfind("strings.section_empty", 0) == 0) return true;
+		return false;
+	};
+	TEST_EXPECT(unnamed_section(&scans[0]));
+	const size_t validated = fold.validations();
+	TEST_EXPECT(table_archive("Main"));
+	TEST_EXPECT(!unnamed_section(&scans[1]) && fold.validations() == validated + 1);
+	// A DFX2 project over the same install: its view is the base game's.
+	ProjectDocument dfx2;
+	TEST_EXPECT(create_project(dir.file("dfx2"), "DFX2", "dfx2", dfx2, error));
+	const auto dfx2_document = std::make_shared<const ProjectDocument>(dfx2);
+	TEST_EXPECT(install_spec(install, *dfx2_document).expansion.empty());
+	OriginalFiles base_fold;
+	const auto validations = [&](const int *scan) {
+		base_fold.want(install_spec(install, *dfx2_document), dfx2_document, scan, {normalized_logical_name("shared.txt")});
+		while (!base_fold.step(1 << 20)) {
+		}
+		return base_fold.validations();
+	};
+	const size_t once = validations(&scans[0]);
+	TEST_EXPECT(once == 1 && base_fold.data()->ready);
+	TEST_EXPECT(table_archive("Other") && validations(&scans[1]) == once);
+	TEST_EXPECT(write_archive(install + "/resource.pff", { { "shared.txt", "base, patched" }, { "baseonly.txt", "base only" },
+	                                                       { "01TR.bms", "a mission" } }) &&
+	            validations(&scans[2]) == once + 1);
+	return 0;
+}
+
 namespace {
 
 size_t count_code(const std::vector<Diagnostic> &findings, const char *code, const std::string &about = std::string()) {
@@ -1432,6 +1496,7 @@ int main() {
 	failures += test_install_view();
 	failures += test_installed_expansion_import();
 	failures += test_fold_follows_the_view();
+	failures += test_fold_follows_a_patch();
 	failures += test_session();
 	failures += test_override_table();
 	if (failures == 0) std::printf("editor_expansion: all tests passed\n");
