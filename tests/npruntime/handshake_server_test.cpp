@@ -59,6 +59,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "lent_transport_tick.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -2528,7 +2529,7 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 			8, ctx.np_protocol.connection_list, &world);
 	std::vector<ProtocolMessage> next_tick_stream;
 	return expect(
-			messages_for_peer(inmatch::tick_connections(ctx, 16, 8), next_tick_stream) &&
+			messages_for_peer(lent_transport_tick::tick_connections(ctx, 16, 8), next_tick_stream) &&
 			!next_tick_stream.empty() && !reply_has_tag(next_tick_stream, 0x16),
 			"the player-sync track begins after the C2S 0x09, without a roster");
 }

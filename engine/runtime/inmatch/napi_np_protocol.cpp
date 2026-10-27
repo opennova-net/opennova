@@ -833,35 +833,16 @@ HostJoinerPose pose_for_conn(NapiNPServerCtx &ctx, const NapiNPConnection &conn)
 // loopback stays socketless. Protocol-only fixtures without an owner retain the
 // legacy preframed fallback below. [orig: NapiNPServer_SendToConn @0x4c4f20 /
 // mode-1 in-process]
-void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage> &msgs,
-                         std::vector<std::vector<uint8_t>> &outbound) {
+void ship_burst_messages(NapiNPConnection &conn, std::vector<InitialStateMessage> &msgs) {
 	if (msgs.empty()) return;
-	// Keep production initial-state records semantic until HostSession's send
-	// boundary. They can then batch behind already-queued reactive replies
-	// (golden: 0x46 then 0x2C); the packet builder still enforces its byte cap.
-	if (conn.link.transport != nullptr) {
-		for (InitialStateMessage &m : msgs)
-			conn.link.transport->host_send(
-					m.tag, std::move(m.body), m.reliable);
-		return;
-	}
-	// Protocol-only tests may drive tick_connections without a HostOwner. Keep
-	// their remote framed fallback; a loopback without a transport has no sink.
-	if (conn.type == NapiNPConnection::kTypeClientSide) return;
-	// Frame EACH drained burst message as its OWN 0x83 SESSION datagram — do NOT coalesce the whole
-	// burst into one packet. The original emits a separate NapiNPServer_SendFiltered per tag; coalescing
-	// the 616 B 0x0B BMS header plus the 0x0C pool-0 batch into one datagram would exceed the UDP MTU and
-	// IP-fragment. Each message is already MTU-sized upstream: the world-stream pools (0x10/0x0D/0x0C/0x20)
-	// are byte-budget paged with their witnessed per-stream policies by the shared chunker
-	// (inmatch::slice_batch_pages via emit_paged_pool, ADR 0013), so this loop frames one page per datagram.
-	for (InitialStateMessage &m : msgs) {
-		ProtocolMessage message = make_protocol_message(
-				m.tag, std::move(m.body));
-		message.reliable = m.reliable;
-		std::vector<ProtocolMessage> reply{std::move(message)};
-		std::vector<uint8_t> dg = frame_session_replies(conn, reply);
-		if (!dg.empty()) outbound.push_back(std::move(dg));
-	}
+	// The initial-state records stay semantic until HostSession's send boundary, where they
+	// batch behind already-queued reactive replies (golden: 0x46 then 0x2C) and the packet
+	// builder enforces its byte cap; the world-stream pools are byte-budget paged upstream
+	// (inmatch::slice_batch_pages via emit_paged_pool, ADR 0013). A connection with no
+	// transport (a loopback the owner never bound) has no sink.
+	if (conn.link.transport == nullptr) return;
+	for (InitialStateMessage &m : msgs)
+		conn.link.transport->host_send(m.tag, std::move(m.body), m.reliable);
 }
 
 // The F3 (PeerEnteredWorldStreaming) + PeerSpawned edge-latched events, sourced from conn.burst. The
@@ -1819,8 +1800,7 @@ std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 
 // See header.
 void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
-		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary,
-		std::vector<std::vector<uint8_t>> &outbound) {
+		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary) {
 	if (row.burst.spawned || net_player == nullptr) return;
 	if (respect_s2c_send_boundary && net_player->type == NapiNPConnection::kTypeServerSide &&
 			!net_player->s2c_send_boundary_open)
@@ -1833,7 +1813,7 @@ void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
 		// applies it). The bodies are built from the real World / bms state.
 		if (row.phase < ConnectionPhase::PlayerAdded) return;
 		InitialStateStep step = Server_SendInitialGameStateToPlayer(ctx, row, now_tick);
-		ship_burst_messages(row, step.messages, outbound);
+		ship_burst_messages(row, step.messages);
 		return;
 	}
 	// An orphaned row in its player-sync or world-stream track (D-NET-NEW-L1-24, a re-add
@@ -1864,7 +1844,7 @@ void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
 	std::swap(row.gate_tick, net_player->gate_tick);
 	std::swap(row.gate_mission_tick, net_player->gate_mission_tick);
 	net_player->burst.game_state = row.burst.game_state;
-	ship_burst_messages(*net_player, step.messages, outbound);
+	ship_burst_messages(*net_player, step.messages);
 }
 
 std::vector<TickOut> tick_connections(
@@ -1960,9 +1940,8 @@ std::vector<TickOut> tick_connections(
 	std::vector<const OrphanedPlayerRow *> stepped;
 	auto step_orphan = [&](OrphanedPlayerRow &orphan) {
 		stepped.push_back(&orphan);
-		std::vector<std::vector<uint8_t>> unframed; // its net player has a transport
 		step_initial_state_row(ctx, orphan.row, orphan_net_player(ctx, orphan), now_tick,
-				respect_s2c_send_boundary, unframed);
+				respect_s2c_send_boundary);
 	};
 	auto orphan_stepped = [&](const OrphanedPlayerRow *orphan) {
 		return std::find(stepped.begin(), stepped.end(), orphan) != stepped.end();
@@ -2048,8 +2027,7 @@ std::vector<TickOut> tick_connections(
 				if (orphan->row.reply.player_slot < conn.reply.player_slot &&
 						!orphan_stepped(orphan) && orphan_net_player(ctx, *orphan) == &conn)
 					step_orphan(*orphan);
-			step_initial_state_row(ctx, conn, &conn, now_tick, respect_s2c_send_boundary,
-					to.outbound);
+			step_initial_state_row(ctx, conn, &conn, now_tick, respect_s2c_send_boundary);
 		}
 
 

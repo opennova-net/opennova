@@ -364,13 +364,12 @@ std::vector<TickOut> tick_connections(
 // state 6 (Server_SendInitialGameStateToPlayer): a connection's own row (`net_player` is the row
 // itself) or an orphaned row (D-NET-NEW-L1-24; `net_player` is orphan_net_player's, null past the
 // player's leave, when nothing runs). The step waits while the net player's send boundary is
-// closed (`respect_s2c_send_boundary`), and its records go to the net player's transport; a
-// connection with no transport (a protocol-only test seam) has them framed into `outbound`.
+// closed (`respect_s2c_send_boundary`), and its records go to the net player's transport (a
+// connection with none has no sink).
 // [orig: Server_TickUpdate's per-slot block @0x51E385..0x51E47C - the row's +0x1C @0x51E3AA,
 //  its connection @0x51E3B1, the boundary @0x51E3D6, the call @0x51E3E4]
 void step_initial_state_row(NapiNPServerCtx &ctx, NapiNPConnection &row,
-		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary,
-		std::vector<std::vector<uint8_t>> &outbound);
+		NapiNPConnection *net_player, uint32_t now_tick, bool respect_s2c_send_boundary);
 
 // Wrap one in-match S2C inner message (e.g. the per-frame 0x0A body) into a fully-framed 0x83 SESSION
 // datagram for `peer`, using that connection's live SCRK + seq (advances its outbound seq). False

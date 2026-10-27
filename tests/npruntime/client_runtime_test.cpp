@@ -89,6 +89,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "lent_transport_tick.h"
 
 // JO's title identity (net/title/title_identity.h), the identity these tests speak.
 static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
@@ -2599,7 +2600,7 @@ bool run_roundtrip() {
 	for (int f = 0; f < 4; ++f) {
 		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
 		push_released_mission_start(client, pump_host);
-		for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+		for (inmatch::TickOut &t : lent_transport_tick::tick_connections(ctx, 300, tick++)) {
 			for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 			for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 		}
@@ -2621,7 +2622,7 @@ bool run_roundtrip() {
 		//  @0x51DBFD inside the reload-62 block].
 		for (int k = 0; k < 6; ++k) {
 			world.match.advance_tick(world);
-			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+			for (inmatch::TickOut &t : lent_transport_tick::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
@@ -2947,7 +2948,7 @@ bool run_roundtrip() {
 			// The client's send boundary opens on receive: keep the host's
 			// keepalive stream flowing (the invalid pick produces no release
 			// on this path — the resolve-miss break drops it host-side).
-			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+			for (inmatch::TickOut &t : lent_transport_tick::tick_connections(ctx, 300, tick++)) {
 				for (const std::vector<uint8_t> &o : t.outbound)
 					client.receive(o.data(), o.size());
 			}
@@ -3150,7 +3151,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 		for (int k = 0; k < 6; ++k) {
 			// The spawn pump admits on the match's periodic second [orig: @0x51DBFD].
 			world.match.advance_tick(world);
-			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+			for (inmatch::TickOut &t : lent_transport_tick::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}
@@ -3188,7 +3189,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 		for (int f = 0; f < frames && !until(); ++f) {
 			for (std::vector<uint8_t> &d : client_frame(tick))
 				pump_host(std::move(d));
-			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
+			for (inmatch::TickOut &t : lent_transport_tick::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
 				for (const std::vector<uint8_t> &o : t.outbound) client.receive(o.data(), o.size());
 			}

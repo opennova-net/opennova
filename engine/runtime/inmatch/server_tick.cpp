@@ -1186,9 +1186,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			//  the spawn pump @0x51DBFD, the win check @0x51DF5A, then the call @0x51E3E4;
 			//  Server_SendPlayerSlotStateFrame @0x51BBA0 - `cmp g_RoundOver, ebx` @0x51BBE8
 			//  (world track) / @0x51BEFF (player-sync track)]
-			std::vector<std::vector<uint8_t>> unframed; // the frame sends through transports
 			step_initial_state_row(ctx, conn, r.net_player, world.logic_tick,
-					/*respect_s2c_send_boundary=*/true, unframed);
+					/*respect_s2c_send_boundary=*/true);
 		}
 		// The row's 0x57 right behind its frame [orig: Server_TickUpdate - the pump call
 		//  @0x51E3E4, then the 0x57's session test @0x51E3EC and its send @0x51E450].
