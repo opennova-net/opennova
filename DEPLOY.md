@@ -1451,7 +1451,8 @@ into its own bucket.
    runtime, with their updater logins and project keys (make none again: a second base is a
    duplicate row, and an expansion code, updater login or project key already held is
    refused with a 409). From the OpenNova Editor, signed in as an admin of this deployment
-   (a debug editor reaches staging, a release editor prod), push each game's project, a
+   (a debug editor reaches staging, a release editor prod), put each game's project on
+   NovaWorld onto its empty game (the NovaWorld window's Put on NovaWorld...) and push it, a
    retail game's stock import first (its revision 1); then on each game's page **Release
    r<head>...** and **Publish** ("The games", above). The apps' releases, the runtime's
    among them, come with the Publish workflow ("The downloads host", section 5). A game is offered to owners
