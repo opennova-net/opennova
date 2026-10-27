@@ -36,6 +36,7 @@ func after_each() -> void:
 func _make_panel() -> NovaWorldPanel:
 	var panel := PANEL_SCENE.instantiate() as NovaWorldPanel
 	panel.start_client_on_ready = false
+	panel.target_override = NovaWorldSettings.Target.OPENNOVA
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_game_dir), OK)
 	panel.resource_root = root
@@ -60,7 +61,7 @@ func _install_folder(code: String) -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 
 
-# The site whose /api/mods belongs to the game's gate: a deployment's
+# The site whose /api/mods belongs to the OpenNova target's gate: a deployment's
 # nw.<domain> is https://<domain>, loopback the local stack's portal.
 func test_the_mod_list_asks_the_gates_own_site_by_the_games_command_file() -> void:
 	assert_eq(NovaWorldSettings.web_base_for("nw.opennova.net"), "https://opennova.net")

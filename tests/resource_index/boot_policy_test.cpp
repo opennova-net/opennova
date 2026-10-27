@@ -273,7 +273,7 @@ void test_runtime_launch_flags_parse() {
     CHECK(f.mcp_port == 8975);
     // The directory a source run was started in (ADR 0046 S13 A8: the editor's run directory).
     CHECK(f.working_dir == "C:/p/.opennova/run/1");
-    // The game's gate, a name or an address, stripped (ADR 0010 d2).
+    // The OpenNova target's gate, a name or an address, stripped (ADR 0010 d2).
     CHECK(f.novaworld_host == "nw.staging.opennova.net");
     // Absent flags read their sentinels.
     const LaunchFlags none = parse_launch_flags({"game.exe"});

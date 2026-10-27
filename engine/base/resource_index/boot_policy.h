@@ -72,14 +72,12 @@
 //   --capture-pcap <path>       record this session's datagrams to a pcap.
 //   --mcp-port <n>              host the runtime MCP endpoint on that loopback
 //                               port (1..65535); absent = no endpoint.
-//   --novaworld-host <host>     the gate the NovaWorld screen dials (a name or
-//                               an address): the developer's, for the local
-//                               stack or a self-run deployment; absent = the
-//                               build's own (godot/game/novaworld_settings.gd:
+//   --novaworld-host <host>     the gate the NovaWorld screen's OpenNova target
+//                               dials (a name or an address); absent = the
+//                               product's own (godot/game/novaworld_settings.gd:
 //                               nw.opennova.net in a release export,
 //                               nw.staging.opennova.net in a debug one, loopback
-//                               in a source run). The game dials OpenNova's
-//                               NovaWorld alone (ADR 0075).
+//                               in a source run). Never the Original target's.
 //   --novaworld-join <rid>      the NovaWorld server to join (its list row's id,
 //                               1..2^31-1): the NovaWorld screen opens and joins
 //                               that row once signed in and listed. The relaunch

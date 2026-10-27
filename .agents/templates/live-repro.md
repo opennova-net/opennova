@@ -6,9 +6,8 @@ Reproduce one client/server path without inventing protocol behavior.
 
 ## Inputs
 
-- Target: local OpenNova, retail client vs OpenNova, retail host vs OpenNova, or a
-  retail client on the original NovaWorld (OpenNova's runtime dials OpenNova's
-  NovaWorld alone, ADR 0075).
+- Target: local OpenNova, retail client vs OpenNova, retail host vs OpenNova, or
+  original NovaWorld.
 - Topology: same-machine loopback, second-machine LAN, Docker/dev, or prod.
 - Operator-owned accounts or no account needed:
 - Capture plan:
