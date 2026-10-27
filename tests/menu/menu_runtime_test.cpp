@@ -1889,11 +1889,13 @@ void test_options_screen() {
 	options.activate(menu, nullptr, menu.widget_id("JOYSTICK"));
 	options.arm(menu, table, 0);
 	CHECK(options.consume(menu, input) == OptionsScreen::None);
-	// The joystick page captures (D-CTRL-1): a key is swallowed, an event with nothing down
-	// keeps waiting, the lowest set bit is the binding's byte (bit 3: JOYBUTTON4), and the
-	// capture ends; Esc ends it with nothing written [orig: Options_UpdatePendingState
-	// @0x55C450 - the poll @0x55C6CF, the scan @0x55C6D4..0x55C6F8, the store @0x55C720,
-	// the refresh's end @0x55C726]
+	// The joystick page captures (D-CTRL-1): a key is swallowed and so is a pad event (the
+	// capture is the pump's poll), a frame's poll with nothing down keeps waiting, the lowest
+	// set bit is the binding's byte (bit 3: JOYBUTTON4), and the capture ends; a button
+	// already down when the row arms is taken by the first poll; Esc ends it with nothing
+	// written [orig: Options_UpdatePendingState @0x55C450, called each menu frame
+	// (UI_ProcessMenuScreenFrame @0x54E677) - the poll @0x55C6CF, the scan
+	// @0x55C6D4..0x55C6F8, the store @0x55C720, the refresh's end @0x55C726]
 	{
 		CHECK(menu.table_cell_text(table, 0, 2) == "???");
 		RemapInput key;
@@ -1905,12 +1907,22 @@ void test_options_screen() {
 		pad.kind = RemapInput::Kind::Joystick;
 		pad.pressed = true;
 		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		controls::JoystickBits bits{};
+		CHECK(options.capturing_joystick() && options.poll_joystick(menu, bits));
 		CHECK(menu.table_cell_text(table, 0, 2) == "???");
-		pad.joystick[0] = (1u << 3) | (1u << 9);
+		bits[0] = (1u << 3) | (1u << 9);
 		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		CHECK(options.poll_joystick(menu, bits));
 		CHECK(bindings.record(bindings.action_index_for_row(0))->joy_button == 4);
 		CHECK(menu.table_cell_text(table, 0, 2) == "JOYBUTTON4");
+		CHECK(!options.capturing_joystick() && !options.poll_joystick(menu, bits));
 		CHECK(options.consume(menu, pad) == OptionsScreen::None);
+		// Held across the arm: the first poll takes it.
+		bits[0] = 1u << 1;
+		options.arm(menu, table, 1);
+		CHECK(options.poll_joystick(menu, bits));
+		CHECK(bindings.record(bindings.action_index_for_row(1))->joy_button == 2);
 		options.arm(menu, table, 0);
 		key.escape = true;
 		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);

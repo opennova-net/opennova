@@ -394,8 +394,8 @@ void OptionsScreen::arm(MenuRuntime &menu, int id, int row) {
 // a rejected/unmapped key leaves capture armed, and only the keyboard's page
 // assigns a key (the mouse's and the joystick's swallow it). Mouse releases /
 // other device events fall through, and an unmappable mouse press ends
-// capture. A joystick event on the joystick's page assigns the device's lowest
-// set bit and ends capture; with none set the capture keeps waiting.
+// capture. A joystick event on the joystick's page is swallowed: its capture
+// is the pump's poll (poll_joystick), not an event.
 // [orig: capture pump @0x55c67c - Esc @0x55c691, the key assignment behind the
 // keyboard device @0x55c6c4..0x55c756, the joystick poll @0x55c6c9..0x55c726;
 // KeyBinding_HandleKeyAssignment @0x55bb20; mouse capture callback @0x55c780]
@@ -414,10 +414,8 @@ int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 		}
 		return Consumed;
 	}
-	if (event.kind == RemapInput::Kind::Joystick && device_ == controls::Device::Joystick) {
-		if (event.pressed && bindings_.assign_joystick(action_, event.joystick)) end_remap(menu, true);
+	if (event.kind == RemapInput::Kind::Joystick && device_ == controls::Device::Joystick)
 		return Consumed;
-	}
 	if (event.kind == RemapInput::Kind::Mouse && event.pressed &&
 			device_ == controls::Device::Mouse) {
 		if (event.mouse_mask != 0) bindings_.assign_mouse(action_, event.mouse_mask);
@@ -425,6 +423,22 @@ int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 		return Consumed;
 	}
 	return None;
+}
+
+// The capture pump runs each menu frame while a row is armed. On the joystick's
+// page it polls the device and scans its 160 bits from the lowest: the first set
+// bit plus one is the row's joystick byte (no conflict test, no modifier), and the
+// list's refresh ends the capture; with none set it returns and polls again next
+// frame, so a button already down when the row armed is taken by the first poll.
+// [orig: Options_UpdatePendingState @0x55C450, called each frame from
+// UI_ProcessMenuScreenFrame @0x54E677 and Menu_UpdateFrame @0x5528F2 - the armed
+// test @0x55C67C, the device's page @0x55C6BC..0x55C6C9, the poll
+// Joystick_UpdateInputBitfield @0x55C6CF, the scan @0x55C6D4..0x55C6F8, the store
+// @0x55C712..0x55C720, UI_RefreshControlMappingList @0x55C726]
+bool OptionsScreen::poll_joystick(MenuRuntime &menu, const controls::JoystickBits &bits) {
+	if (!capturing_joystick()) return false;
+	if (bindings_.assign_joystick(action_, bits)) end_remap(menu, true);
+	return true;
 }
 
 // Screen/document changes cancel the screen-owned capture. Save the row

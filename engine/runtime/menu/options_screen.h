@@ -9,15 +9,15 @@
 
 namespace opennova::menu {
 
-// Device events have already crossed the Godot/OS key and button translation.
+// Device events have already crossed the Godot/OS key and button translation. A joystick
+// event (Kind::Joystick) carries nothing: the joystick's capture is the pump's poll
+// (OptionsScreen::poll_joystick).
 struct RemapInput {
 	enum class Kind { Other, Key, Mouse, Joystick };
 	Kind kind = Kind::Other;
 	bool pressed = false, escape = false, ctrl = false, shift = false, repeat = false;
 	int vk = 0;
 	uint16_t mouse_mask = 0;
-	// A joystick event's device state, every button and hat direction down (Kind::Joystick).
-	controls::JoystickBits joystick{};
 };
 
 // The Options screens over the current player.sav record. The screen keeps
@@ -100,6 +100,14 @@ public:
 	// The yellow a shared binding's row draws (UI_RefreshControlMappingList).
 	static constexpr uint32_t kSharedBindingTint = 0xFFFFFF00u;
 	int consume(MenuRuntime &menu, const RemapInput &event);
+	// The capture pump's joystick leg, once each menu frame: while a row is armed on the
+	// joystick's page, the device's lowest set bit (`bits`, its state this frame) is the row's
+	// byte and the capture ends; with nothing down it keeps waiting. A button already down when
+	// the row arms is taken by the next frame's poll. False when no joystick capture runs.
+	bool poll_joystick(MenuRuntime &menu, const controls::JoystickBits &bits);
+	bool capturing_joystick() const {
+		return action_ >= 0 && device_ == controls::Device::Joystick;
+	}
 	void end_remap(MenuRuntime &menu, bool refill);
 	// The screen's own binding records (the remap flow's).
 	const controls::BindingSet &bindings() const { return bindings_; }

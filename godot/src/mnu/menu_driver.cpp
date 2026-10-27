@@ -830,6 +830,11 @@ void MenuDriver::pump_mouse() {
 				Input::get_singleton()->is_mouse_button_pressed(MOUSE_BUTTON_LEFT));
 	}
 	runtime_.pump_mouse();
+	// The menu frame's capture pump: an armed row on the joystick's page polls the device's
+	// state every frame (engine OptionsScreen::poll_joystick), so a button already down when
+	// the row armed is captured too.
+	if (options_.capturing_joystick())
+		(void)options_.poll_joystick(runtime_, ControlsModel::joystick_device_bits());
 }
 
 bool MenuDriver::take_mouse_event(const Ref<InputEvent> &p_event) {
@@ -1002,11 +1007,10 @@ int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
 		input.mouse_mask = static_cast<uint16_t>(ControlsModel::mouse_mask_from_godot_button(
 				static_cast<int>(mouse->get_button_index())));
 	} else if (pad.is_valid()) {
-		// The device's state at the press, the bits the capture scans (engine
-		// BindingSet::assign_joystick).
+		// Swallowed while the joystick's page captures: the capture is the pump's poll
+		// (pump_mouse, engine OptionsScreen::poll_joystick).
 		input.kind = opennova::menu::RemapInput::Kind::Joystick;
 		input.pressed = pad->is_pressed();
-		input.joystick = ControlsModel::joystick_device_bits();
 	}
 	return options_.consume(runtime_, input);
 }
