@@ -1,6 +1,7 @@
 #include "mnu/armory_loadout.h"
 
 #include "mnu/menu_driver.h"
+#include "mnu/mnu_document.h" // MenuDriver's inline document() copies a Ref<MnuDocument>
 #include "object/weapon_database.h"
 #include "player/player_profiles.h"
 #include "rtxt/rtxt_string_file.h"
