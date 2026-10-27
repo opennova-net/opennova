@@ -152,8 +152,8 @@ const RequiredResource k_required_resources[] = {
     { "footer.bik", BOOT_PHASE_MENU, RES_OPTIONAL, 0,
       "expansion -> default path fallback; missing -> no menu video",
       "[orig: UI_CreateMenuBinkVideos @ 0x54b590; strings @ 0x7d2a00-0x7d2a54]", "footer_bik" },
-    { "nw_cdata.coo", BOOT_PHASE_MENU, RES_OPTIONAL, 0,
-      "HRESULT ignored: the jar starts empty, and the game writes the file itself (no stock install ships one: JO:CA's and DFX2's archives hold none)",
+    { "nw_cdata.coo", BOOT_PHASE_MENU, RES_REQUIRED, 0,
+      "HRESULT ignored",
       "[orig: Menu_InitShellResources @ 0x55262b -> CookieJar_OpenAndLoadFile @ 0x63a500]", "nw_cdata" },
     { "main.mnu", BOOT_PHASE_MENU, RES_FATAL, 0,
       "menu never appears — boot dead-ends silently (no dialog); the entry node is \"Startup\"",
@@ -422,7 +422,10 @@ int gameprofile_required_resource_severity(const RequiredResource *row, const ch
     // [orig: Game_StartMission @0x521530 (@0x5234a5, @0x5234c1) and Input_HandleActionBinding
     // @0x49ad50 (@0x49b988) for cmap.mnu; Input_HandleActionBinding @0x49ad50 (@0x49b8ff) and
     // @0x4dd4c0 (@0x4ddbf3) for vehicle.mnu (dfx2.exe)]: the commander key and a vehicle's
-    // loadout open nothing, as the game ships.
+    // loadout open nothing, as the game ships. Nor does it ship nw_cdata.coo, the menu browser's
+    // cookie jar (in no archive, nor beside dfx2.exe in the Steam install), which it loads where JO
+    // does, its HRESULT ignored, and writes itself [orig: Menu_InitShellResources @0x54f750
+    // (@0x54f887), UI_SaveCookieFileIfDirty @0x554d40 (dfx2.exe)].
     struct Absent {
         GameId game;
         const char *role;
@@ -430,6 +433,7 @@ int gameprofile_required_resource_severity(const RequiredResource *row, const ch
     static const Absent k_absent[] = {
         { GAME_DFX2, "cmap_menu" },
         { GAME_DFX2, "vehicle_menu" },
+        { GAME_DFX2, "nw_cdata" },
     };
     const GameProfile *profile = gameprofile_by_code(game_code);
     if (profile && row->role) {

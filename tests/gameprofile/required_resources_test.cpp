@@ -117,8 +117,7 @@ static int test_the_witnessed_fatal_set(void) {
 }
 
 /* A row's severity for a game: the manifest's (JO's witness), but optional for a file the game's stock data never
-   ships (DFX2's cmap.mnu and vehicle.mnu); the cookie jar, which no stock install ships and the game writes, is
-   optional for every game. */
+   ships (DFX2's cmap.mnu, vehicle.mnu and cookie jar). */
 static int test_severity_for_game(void) {
     const RequiredResource *cmap = gameprofile_required_resource_find("cmap.mnu");
     const RequiredResource *vehicle = gameprofile_required_resource_find("vehicle.mnu");
@@ -133,7 +132,9 @@ static int test_severity_for_game(void) {
     CHECK(gameprofile_required_resource_severity(game, "dfx2") == RES_REQUIRED,
           "DFX2's in-mission menu is required as JO's");
     const RequiredResource *jar = gameprofile_required_resource_find("nw_cdata.coo");
-    CHECK(jar != NULL && jar->severity == RES_OPTIONAL, "the cookie jar is optional (the game writes it)");
+    CHECK(jar != NULL && gameprofile_required_resource_severity(jar, "jo") == RES_REQUIRED &&
+              gameprofile_required_resource_severity(jar, "dfx2") == RES_OPTIONAL,
+          "DFX2 ships no cookie jar (it writes its own)");
     CHECK(gameprofile_required_resource_severity(NULL, "jo") == RES_FATAL, "no row reads as fatal");
     return 1;
 }
