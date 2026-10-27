@@ -315,7 +315,6 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
                               bool import_pass, const ProjectExpansion &asked, const std::string &named_install, bool stock) {
 	if (dir.empty()) return false;
 	view_.project.refused.clear();
-	const std::string target_game = game.empty() ? std::string(kDefaultTargetGame) : game;
 	ProjectDocument doc;
 	Diagnostic error;
 	const auto refused = [this](const Diagnostic &why) {
@@ -331,6 +330,19 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 	if (expansion.on_base_project()) expansion.base_project = base_project_from(dir, expansion.base_project);
 	// A game you own is made from its game install: the one named, else the editor's.
 	const std::string game_install = stock && named_install.empty() ? preferences_.values().game_install : named_install;
+	// The game it is of where the request names none: an expansion made on a base game's project, that
+	// project's; a game you own, or an expansion of the install's base game, the install's (its UPDATE.WIZ,
+	// install_game: a DFX2 install makes a DFX2 project); else JO's.
+	std::string target_game = game;
+	if (target_game.empty() && expansion.on_base_project()) {
+		ProjectDocument base;
+		Diagnostic unread;
+		const std::string base_root = base_project_root(dir, expansion);
+		if (!base_root.empty() && open_project(base_root, base, unread)) target_game = base.target_game;
+	}
+	if (target_game.empty() && (stock || !expansion.standalone()) && !game_install.empty())
+		target_game = editor::install_game(game_install);
+	if (target_game.empty()) target_game = kDefaultTargetGame;
 	if (stock) {
 		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(target_game.c_str());
 		const std::string game_name = profile && profile->display_name ? profile->display_name : target_game;
@@ -1077,7 +1089,8 @@ void SessionCore::forget_recent(const std::string &root) {
 
 void SessionCore::check_install(const std::string &path) {
 	const std::string asked = path.empty() ? preferences_.values().game_install : path;
-	const std::string game = view_.project.open ? view_.project.document->target_game : std::string(kDefaultTargetGame);
+	// With no project open, the install read as the game it holds (install_game: a DFX2 install as DFX2).
+	const std::string game = view_.project.open ? view_.project.document->target_game : editor::install_game(asked);
 	view_.project.install_check = editor::check_install(asked, game);
 	touch(ViewConcern::Preferences);
 }

@@ -53,6 +53,10 @@ static int test_labels(void) {
         CHECK(p->display_name != NULL && p->display_name[0] != '\0', "display name non-empty");
         CHECK(p->code != NULL && p->code[0] != '\0', "code non-empty");
     }
+    /* Each install's program, as it ships beside the archives; BHD's unread. */
+    CHECK(strcmp(gameprofile_by_code("jo")->executable, "Jointops.exe") == 0, "JO's program");
+    CHECK(strcmp(gameprofile_by_code("dfx2")->executable, "dfx2.exe") == 0, "DFX2's program");
+    CHECK(gameprofile_by_code("bhd")->executable == NULL, "BHD's program unread");
     /* A new archive of any profile is PFF3 (ADR 0008's default). */
     CHECK(GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT == opennova::pff::PFF_FORMAT_PFF3, "a new archive is PFF3");
     /* codes are unique across the table */

@@ -775,6 +775,28 @@ static int test_session_stock() {
 	return 0;
 }
 
+// A game you own from a DFX2 install (its UPDATE.WIZ names DFX2.CMD): the project made is DFX2's, as the
+// install holds it (session_core.cpp new_project, install_game), its files imported as they open.
+static int test_session_stock_dfx2() {
+	test_temp::TempDir dir("opennova_editor_expansion_stock_dfx2");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install) && write_archive(install + "/localres.pff", { { "local.txt", "localres" } }) &&
+	            write_archive(install + "/language.pff", { { "words.txt", "language" } }) &&
+	            test_io::write_text(install + "/dfx2.exe", "MZ") &&
+	            test_io::write_text(install + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n"));
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const ActionOutcome outcome =
+	        editor_test::handle_to_end(session, request::new_stock_project(dir.file("work/DFX2"), "Delta Force: Xtreme 2", install));
+	TEST_EXPECT(!outcome.refused && view.project.open && view.project.document->target_game == "dfx2" &&
+	            view.project.document->expansion.standalone());
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end == OperationEnd::Done && view.project.scan->find("local.txt"));
+	return 0;
+}
+
 // An expansion of a project's base game (T5) in a session, over a game install that has an expansion of its
 // own: new_project makes it on the base project's folder (refused, nothing made, where no project is there).
 // The session exports the base project itself where its export is missing or older than the project
@@ -1398,6 +1420,7 @@ int main() {
 	failures += test_base_export_weighed();
 	failures += test_session_on_base_project();
 	failures += test_session_stock();
+	failures += test_session_stock_dfx2();
 	failures += test_base_layer_session();
 	failures += test_base_files_under_the_project();
 	failures += test_base_string_tables();

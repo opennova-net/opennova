@@ -228,7 +228,9 @@ std::unique_ptr<InstallCopyFill> PlayController::copy_fill(const PlayIntent &int
 	if (!in_install) {
 		const std::string executable = resolve_runtime_executable();
 		if (executable.empty() || !fs::is_regular_file(system_path(executable), ec)) return nullptr;
-	} else if (!fs::is_regular_file(system_path(join_path(core_.game_install(), kInstallExecutable)), ec)) {
+	} else if (!fs::is_regular_file(
+	                   system_path(join_path(core_.game_install(), install_executable(view_.project.document->target_game))),
+	                   ec)) {
 		return nullptr;
 	}
 	const std::string base = core_.base_game();
@@ -355,7 +357,8 @@ void PlayController::start(const PlayIntent &intent) {
 	};
 	if (in_install) {
 		const bool staged = prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan,
-		                                                       error, link_, core_.base_game(), copy_cache);
+		                                                       error, link_, core_.base_game(), copy_cache,
+		                                                       view_.project.document->target_game);
 		record_staging(plan.staged);
 		if (!staged) {
 			core_.report(error);
