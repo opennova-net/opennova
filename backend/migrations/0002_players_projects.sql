@@ -55,6 +55,11 @@ CREATE TABLE release_starts (
     started   bigint NOT NULL CHECK (started > 0)
 );
 
+-- A lobby session's ap: the admitting Hello's AP, the client's executable as its menu reads it
+-- ('JOINTOPS.EXE' or 'OPENNOVA.EXE': the client's own text, shown, never trusted; engine PR
+-- #1277, which wrote it into 0001 before the rule above, moved here).
+ALTER TABLE lobby_sessions ADD COLUMN ap text NOT NULL DEFAULT '';
+
 -- The Switcher retires (ADR 0075): its product goes as a product's delete takes one
 -- (product_jobs.h delete_product_purged). Its releases go with it (their sections cascade, its
 -- published_release_id clears; it has no tree, no project and no server), their objects (its
