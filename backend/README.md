@@ -38,9 +38,10 @@ server refuses to boot while a recorded file's bytes no longer match, so a fix i
 another new file. `tests/novaworld/backend_schema_test.cpp` pins each shipped
 file's SHA-256, and checks that a new one sorts after them. A recorded file the
 server does not have (a newer release's, or one of the 0002..0025 the squash
-replaced) is ignored; a database made before the squash records the old
-`0001_baseline.sql` too, so it is refused until reset once (DEPLOY.md,
-"Resetting the service database"). A local database is recreated with
+replaced) is ignored. `0001_baseline.sql` keeps the bytes 58bf5f91f8 left it
+with, the last edit before this rule: a database that recorded other bytes for
+it (one made before the squash, or reset on an earlier edit) is refused until
+reset once (DEPLOY.md, "Resetting the service database"). A local database is recreated with
 `scripts/dev_postgres.sh reset`.
 
 ## The database the server needs

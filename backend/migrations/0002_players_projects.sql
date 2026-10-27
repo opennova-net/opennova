@@ -1,29 +1,27 @@
--- Players' own projects (ADR 0073, ADR 0074) and the Switcher's retirement (ADR 0075), on the
--- schema 0001_baseline.sql made: an account makes, pushes, releases and hosts projects of its
--- own, an owner's release waits for an admin's approval, and the ONSWITCHER app goes. The first
+-- Players' own projects released and hosted (ADR 0074), each session's executable (engine PR
+-- #1277) and the Switcher's retirement (ADR 0075), on the schema 0001_baseline.sql made (as
+-- 58bf5f91f8 left it, the bytes staging recorded at its reset: ADR 0073's owners, owner_id and
+-- its check and index, already in it): an account releases and hosts projects of its own, an
+-- owner's release waits for an admin's approval, and the ONSWITCHER app goes. The first
 -- migration after the baseline: from it on the schema changes by new files alone, and a
 -- recorded file never changes (backend/README.md "Migrations"; 0001's header predates the
 -- rule). Applies on a database that holds rows. Service policy, not a port.
 
--- A product's owner (owner_id): the account whose own project it is, a game or an expansion (a
--- mod) any signed-in account may make and push, never an app and never a retail game; NULL for
--- the service's own (every seeded row, and every one an admin makes). It goes with its account
--- (ON DELETE CASCADE: the account's delete queues each one's product.purge first, as a
--- product's own delete does). Its key is at most 11 characters with no QQ, and its updater
--- product is its key (updater_login KEY, command_file KEY.CMD: 1SFS's 15 characters, and no
--- territory placeholder for the updater to replace), its download, a public game's,
--- player-<key>-game-windows.zip, each given at its create
--- (apps/novaworld_web/products/project_routes.h). Its owner releases it; an own game's first
--- publish gives it its own lobby (a games row, product_repository.h publish_release), so a game
--- lists in none until then ('' for none: products_check no longer asks for one).
-ALTER TABLE products
-    ADD COLUMN owner_id bigint REFERENCES players(id) ON DELETE CASCADE,
-    DROP CONSTRAINT products_check,
-    ADD CONSTRAINT products_check
-        CHECK ((kind = 'game') = (parent_id IS NULL AND expansion_code = '' AND title <> '')),
-    -- An account's own is a game or an expansion, never a retail one.
-    ADD CONSTRAINT products_owner_check CHECK (owner_id IS NULL OR (kind <> 'app' AND NOT retail));
-CREATE INDEX idx_products_owner ON products(owner_id) WHERE owner_id IS NOT NULL;
+-- An account's own project's updater product is its key (updater_login KEY, command_file
+-- KEY.CMD), and a game's download player-<key>-game-windows.zip, each given at its create now
+-- (apps/novaworld_web/products/project_routes.h): one made before this file gets them here,
+-- where its key takes them (at most 11 characters with no QQ, so KEY.CMD fits 1SFS's 15 and no
+-- wizard value holds the territory placeholder; no other product's login or command file the
+-- same, without case). One that cannot stays without, its release refused until an admin gives
+-- it an updater product (PATCH /api/admin/products/<id>).
+UPDATE products p SET updater_login = p.key, command_file = p.key || '.CMD'
+WHERE p.owner_id IS NOT NULL AND p.updater_login = '' AND length(p.key) <= 11
+  AND upper(p.key) NOT LIKE '%QQ%'
+  AND NOT EXISTS (SELECT 1 FROM products o WHERE o.id <> p.id
+                  AND (upper(o.updater_login) = upper(p.key)
+                       OR upper(o.command_file) = upper(p.key || '.CMD')));
+UPDATE products SET download = 'player-' || lower(key) || '-game-windows.zip'
+WHERE owner_id IS NOT NULL AND kind = 'game' AND download = '';
 
 -- An expansion's code names its expansion/<code>/ folder in any game's install: unique across
 -- every product without case (it was unique under its parent alone), so no two mods of any

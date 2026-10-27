@@ -79,9 +79,9 @@ int test_migrations_create_expected_tables() {
 		const char *sha256;
 	};
 	const Recorded recorded_files[] = {
-		{ "0001_baseline.sql", "0f7b3da5577ffb67ababcddebe6afd304905341358141189b6d51c69812873e0" },
+		{ "0001_baseline.sql", "0cbe8fc84bdb14adab37f579d40e4e6765dfa2b0ab570a50a10fc493db5ba562" },
 		{ "0002_players_projects.sql",
-				"5484010c5b6df0049d18ebc6ca6838d61fb393a3897102077abbb2d5113ea3f7" },
+				"a40691a9002d85c249e0fa9a96f06e143c599f53d9f1e6217d0f188ce2563d9b" },
 	};
 	for (size_t i = 0; i < std::size(recorded_files); ++i) {
 		const std::string text =

@@ -1236,9 +1236,11 @@ other's bucket.
 No release needs a reset: a schema change is a new migration file
 (`backend/migrations/`, `backend/README.md` "Migrations"), which the first program to boot on
 the release applies to the database as it stands, its rows kept. The boot refuses a recorded
-migration whose SHA-256 changed and ignores a recorded one the program does not have. A
-database made before the 25 migrations were squashed into `0001_baseline.sql` records the old
-file, so it is reset once (prod's, planned); staging's, reset at the squash, upgrades in place.
+migration whose SHA-256 changed and ignores a recorded one the program does not have.
+`0001_baseline.sql` is the bytes 58bf5f91f8 left it with (the last edit before the rule): a
+database whose record of it differs (one made before the 25 migrations were squashed into it,
+or reset on an earlier edit of it) is reset once (prod's, planned); staging's, reset at
+58bf5f91f8, upgrades in place.
 `db reset-db` stays for that, and for a database to start over. It takes
 `--yes-drop-database [--orphan-subscriptions] [--no-backup] [--yes]`:
 
@@ -1270,9 +1272,9 @@ its files under an id the new database may give another product: remove those
 apply), so a reused id never mixes an earlier tree's files in; the files of ids the new
 database does not reach stay until removed by hand.
 
-A database that refuses the release's migrations (one made before the squash, its record of
-the old `0001_baseline.sql` changed) takes it in this order (prod's planned reset; staging's
-went the same way at the squash):
+A database that refuses the release's migrations (its record of `0001_baseline.sql` not the
+file's bytes: one made before the squash, or reset on an earlier edit of the baseline) takes
+it in this order (prod's planned reset; staging's went the same way at 58bf5f91f8):
 
 ```bash
 D='--deployment staging'
