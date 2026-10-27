@@ -22,43 +22,68 @@ describe('fetchDownloadsManifest', () => {
     vi.unstubAllGlobals();
   });
 
-  const manifest = {
-    version: 'v0.0.21',
-    published: '2026-10-26T12:00:00Z',
-    source: 'https://github.com/opennova-net/opennova/releases/tag/v0.0.21',
-    commit: '2d23f67' + '0'.repeat(33),
-    build: 'release',
-    talks_to: 'prod',
-    files: { 'opennova-game-windows.zip': { size: 53178900, sha256: 'ab'.repeat(32) } },
+  const published = {
+    key: 'JO',
+    kind: 'game',
+    name: 'Joint Operations',
+    description: 'Joint Operations and Escalation.',
+    file: 'jointops-game-windows.zip',
+    size: 53178900,
+    sha256: 'ab'.repeat(32),
+    version: '0.0.22',
+    release: 12,
+    published: '2026-10-27T12:00:00Z',
   };
+  // The runtime: no download of its own, and its release named all the same.
+  const runtime = {
+    ...published,
+    key: 'ONRUNTIME',
+    kind: 'app',
+    name: 'OpenNova Runtime',
+    file: null,
+    size: null,
+    sha256: null,
+    release: 'OpenNova Runtime v0.0.22',
+  };
+  // A product with a download and no published release yet.
+  const unpublished = {
+    ...published,
+    key: 'ONTOOLS',
+    kind: 'app',
+    file: 'opennova-tools-windows.zip',
+    size: null,
+    sha256: null,
+    version: null,
+    release: null,
+    published: null,
+  };
+  const manifest = { written: '2026-10-27T12:01:00Z', products: [published, runtime, unpublished] };
 
-  it("reads the host's manifest", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(manifest), { status: 200 }));
+  function serving(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it("reads the host's manifest: every product, published or not", async () => {
+    const fetchMock = serving(manifest);
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toEqual(manifest);
     expect(fetchMock.mock.calls[0][0]).toBe('https://downloads.opennova.net/manifest.json');
   });
 
-  it("reads the files' versions, and needs the commit, the build kind and what it talks to", async () => {
-    const full = {
-      ...manifest,
-      files: {
-        'opennova-game-windows.zip': { size: 53178900, sha256: 'ab'.repeat(32), version: '0.0.21' },
-        'opennova-apps-windows.zip': { size: 5120318, sha256: 'cd'.repeat(32) },
-      },
-    };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(full), { status: 200 })));
-    expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toEqual(full);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...full, commit: 7 }), { status: 200 })));
+  it('refuses a product of another shape', async () => {
+    serving({ ...manifest, written: 7 });
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
-    for (const field of ['commit', 'build', 'talks_to']) {
-      const missing: Record<string, unknown> = { ...full };
-      delete missing[field];
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(missing), { status: 200 })));
+    serving({ written: manifest.written, products: {} });
+    expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
+    for (const [field, value] of [['kind', 'mod'], ['name', null], ['file', 3], ['size', '5 MB'], ['sha256', 1],
+                                   ['version', 22], ['release', true], ['published', 0]] as const) {
+      serving({ ...manifest, products: [{ ...published, [field]: value }] });
       expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
     }
-    const badVersion = { ...manifest, files: { 'opennova-game-windows.zip': { size: 1, sha256: 'ab', version: 20 } } };
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(badVersion), { status: 200 })));
+    const missing: Record<string, unknown> = { ...published };
+    delete missing.description;
+    serving({ ...manifest, products: [missing] });
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
   });
 
@@ -67,7 +92,7 @@ describe('fetchDownloadsManifest', () => {
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ version: 1 }), { status: 200 })));
+    serving({ version: 1 });
     expect(await fetchDownloadsManifest('https://downloads.opennova.net')).toBeNull();
   });
 });

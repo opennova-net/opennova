@@ -14,153 +14,81 @@
     </header>
 
     <div class="mt-7 rounded-panel border border-border bg-panel p-4 text-sm text-ink-muted">
-      <p v-if="manifest" data-test="downloads-version">
-        Version {{ manifest.version }}{{ buildKind ? `, a ${buildKind}` : '' }}<template v-if="manifest.commit">
-          from commit <a v-if="sourceUrl" :href="sourceUrl" class="link font-mono" :title="manifest.commit">{{ shortCommit }}</a><span v-else class="font-mono" :title="manifest.commit">{{ shortCommit }}</span></template>, published <time :datetime="isoTime(manifest.published)">{{ formatUtc(manifest.published) }}</time>.
+      <p v-if="manifest" data-test="downloads-written">
+        Each download is its product's published release. Updated
+        <time :datetime="isoTime(manifest.written)">{{ formatUtc(manifest.written) }}</time>.
       </p>
       <p v-else-if="loading" role="status">Checking available downloads...</p>
       <p v-else-if="downloadsHost" role="status" class="text-warn">The downloads manifest could not be loaded. Refresh this page to try again.</p>
       <p v-else>Downloads are not configured for this site.</p>
     </div>
 
-    <h2 class="mt-10 text-xl font-semibold text-ink-bright">Games</h2>
-    <ul class="mt-4 grid gap-4 lg:grid-cols-3">
-      <li
-        v-for="item in gameCards"
-        :id="item.file.startsWith('opennova-game') ? 'opennova' : item.file.startsWith('jointops') ? 'jointops' : 'dfx2'"
-        :key="item.file"
-        class="card scroll-mt-24 flex flex-col p-6"
-      >
-        <h3 class="text-lg font-semibold text-ink-bright">{{ item.name }}</h3>
-        <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{{ item.body }}</p>
-        <div class="mt-6 space-y-3">
-          <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="'Download ' + item.name">Download</a>
-          <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">{{ unavailableLabel }}</span>
-          <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="'build-' + item.file">
-            <p>{{ item.file }}</p>
-            <p v-if="item.build">{{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span></p>
-          </div>
-        </div>
-      </li>
-    </ul>
-
-    <h2 id="tools" class="mt-12 scroll-mt-24 text-xl font-semibold text-ink-bright">Tools</h2>
-    <ul class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <li v-for="item in toolCards" :key="item.file" class="card flex flex-col p-5">
-        <h3 class="font-semibold text-ink-bright">{{ item.name }}</h3>
-        <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{{ item.body }}</p>
-        <div class="mt-5 space-y-3">
-          <a v-if="downloadUrl(item.file)" :href="downloadUrl(item.file)" class="btn-primary" :aria-label="'Download ' + item.name">Download</a>
-          <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">{{ unavailableLabel }}</span>
-          <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="'build-' + item.file">
-            <p>{{ item.file }}</p>
-            <p v-if="item.build">{{ item.build.details }}, SHA-256 <span :title="item.build.sha256">{{ item.build.sha256.slice(0, 12) }}</span></p>
-          </div>
-        </div>
-      </li>
-    </ul>
+    <template v-if="manifest">
+      <template v-for="group in groups" :key="group.id">
+        <h2 v-if="group.products.length" :id="group.id" class="mt-10 scroll-mt-24 text-xl font-semibold text-ink-bright">{{ group.title }}</h2>
+        <ul v-if="group.products.length" class="mt-4 grid gap-4" :class="group.grid">
+          <li v-for="item in group.products" :id="anchorOf(item)" :key="item.key" class="card scroll-mt-24 flex flex-col p-6">
+            <h3 class="text-lg font-semibold text-ink-bright">{{ item.name }}</h3>
+            <p class="mt-2 flex-1 text-sm leading-relaxed text-ink-muted">{{ item.description }}</p>
+            <div class="mt-6 space-y-3">
+              <a v-if="downloadUrl(item)" :href="downloadUrl(item)" class="btn-primary" :aria-label="'Download ' + item.name">Download</a>
+              <span v-else class="btn-primary cursor-not-allowed opacity-50" aria-disabled="true">Not published yet</span>
+              <div class="min-w-0 break-words font-mono text-xs text-ink-muted" :data-test="'build-' + item.file">
+                <p>{{ item.file }}</p>
+                <p v-if="item.sha256">{{ details(item) }}, SHA-256 <span :title="item.sha256">{{ item.sha256.slice(0, 12) }}</span></p>
+                <p v-if="item.sha256 && item.published">
+                  Published <time :datetime="isoTime(item.published)">{{ formatUtc(item.published) }}</time>
+                </p>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </template>
+    </template>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
-import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
+import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest, type DownloadsProduct } from '../api/downloads';
 import { formatBytes, formatUtc, isoTime } from '../utils/format';
-import { GITHUB_URL } from '../utils/links';
-const games = [
-  {
-    name: 'OpenNova',
-    body: 'OP: Acid Gambit, our own game, downloaded on the first launch.',
-    file: 'opennova-game-windows.zip',
-  },
-  {
-    name: 'OpenNova for Joint Operations',
-    body: 'Set up for Joint Operations: unzip it into an empty folder and the first launch downloads Joint Operations and its Escalation expansion. Or copy its files into an existing install and run opennova.exe in place of Jointops.exe.',
-    file: 'jointops-game-windows.zip',
-  },
-  {
-    name: 'OpenNova for Delta Force Xtreme 2',
-    body: 'Set up for Delta Force Xtreme 2: unzip it into an empty folder and the first launch downloads Delta Force Xtreme 2.',
-    file: 'dfx2-game-windows.zip',
-  },
-];
 
-const tools = [
-  {
-    name: 'OpenNova Editor',
-    body: 'The editor we made OP: Acid Gambit with.',
-    file: 'opennova-editor-windows.zip',
-  },
-  {
-    name: 'Blender add-on',
-    body: 'Imports and exports .3di models and their animations in Blender 5.',
-    file: 'opennova-blender-addon-windows.zip',
-  },
-  {
-    name: 'Tools and dedicated server',
-    body: 'The command-line tools and opennova-serve, the dedicated server our hosted servers run. Players on the original game and on OpenNova can join it.',
-    file: 'opennova-apps-windows.zip',
-  },
-  {
-    name: 'OpenNova Switcher',
-    body: "Only for the original dfx2.exe, whose NovaLogic NovaWorld is down: a tray app that points it at our NovaWorld or an address you choose. OpenNova and the original Jointops.exe don't need it.",
-    file: 'opennova-switcher-windows.zip',
-  },
-];
-
-// This deployment's downloads host (downloads.<the site's hostname>), and what its manifest
-// says: the version, the build and its commit, and each file's version, size and SHA-256. A
-// site with no host (a local stack) offers no download.
+// This deployment's downloads host (downloads.<the site's hostname>), and what its manifest says
+// of each product. A site with no host (a local stack) offers no download.
 const downloadsHost = downloadsBase(window.location.hostname);
 const manifest = ref<DownloadsManifest | null>(null);
-
-// The build on this deployment's downloads host once its manifest lists it; none before (a
-// deployment before its first publish, a manifest that failed to load), and never elsewhere.
-function downloadUrl(file: string): string | undefined {
-  return downloadsHost && manifest.value?.files[file] ? `${downloadsHost}/${file}` : undefined;
-}
-
-// "release build", "debug build for staging": what the set is, when the manifest says.
-const buildKind = computed(() => {
-  const m = manifest.value;
-  if (!m) return '';
-  return m.build !== 'release' && m.talks_to ? `${m.build} build for ${m.talks_to}` : `${m.build} build`;
-});
-
-const shortCommit = computed(() => manifest.value?.commit.slice(0, 7) ?? '');
-
-// Where the commit links: the CI run a pull request's set came from, or for a release (whose source
-// is its GitHub release page, which the site never links) the commit itself.
-const sourceUrl = computed(() => {
-  const m = manifest.value;
-  const source = m?.source;
-  if (!source || !/^https:\/\//i.test(source)) return undefined;
-  if (/\/releases(\/|$)/.test(source)) return m?.commit ? `${GITHUB_URL}/commit/${m.commit}` : undefined;
-  return source;
-});
-
-// A build's line under its file name: its version when its name carried one, the set's commit and,
-// for a build that is no release, the deployment it talks to, as the runtime's main menu names its
-// build ("v0.0.20 (705c774, staging), 53 MB"), then its size and SHA-256; none before the manifest
-// lists it.
-function buildInfo(file: string): { details: string; sha256: string } | undefined {
-  const m = manifest.value;
-  const entry = m?.files[file];
-  if (!m || !entry) return undefined;
-  const notes = [shortCommit.value, m.build && m.build !== 'release' ? m.talks_to || m.build : '']
-    .filter(Boolean)
-    .join(', ');
-  const name = entry.version ? `v${entry.version}` : '';
-  const which = name && notes ? `${name} (${notes})` : name || notes;
-  return { details: which ? `${which}, ${formatBytes(entry.size)}` : formatBytes(entry.size), sha256: entry.sha256 };
-}
-
-const gameCards = computed(() => games.map((item) => ({ ...item, build: buildInfo(item.file) })));
-const toolCards = computed(() => tools.map((item) => ({ ...item, build: buildInfo(item.file) })));
-
 const loading = ref(Boolean(downloadsHost));
-const unavailableLabel = computed(() => loading.value ? 'Checking availability…' : manifest.value ? 'Not published yet' : 'Unavailable');
+
+// The products the host has a file for, in the manifest's order: the games (and an expansion
+// with a download of its own) first, then the apps. A product with no file (the runtime, an
+// expansion its game's zip installs) is not shown.
+const groups = computed(() => {
+  const offered = (manifest.value?.products ?? []).filter((product) => product.file);
+  return [
+    { id: 'games', title: 'Games', grid: 'lg:grid-cols-3', products: offered.filter((product) => product.kind !== 'app') },
+    { id: 'apps', title: 'Apps', grid: 'sm:grid-cols-2 lg:grid-cols-4', products: offered.filter((product) => product.kind === 'app') },
+  ];
+});
+
+// A game's card answers to its zip's name ("#jointops" for jointops-game-windows.zip, as the Play
+// page links it); any other product's to its key.
+function anchorOf(product: DownloadsProduct): string {
+  const suffix = '-game-windows.zip';
+  return product.file?.endsWith(suffix) ? product.file.slice(0, -suffix.length) : product.key.toLowerCase();
+}
+
+// The product's file on this deployment's host once it has a published release; none before.
+function downloadUrl(product: DownloadsProduct): string | undefined {
+  return downloadsHost && product.file && product.sha256 ? `${downloadsHost}/${product.file}` : undefined;
+}
+
+// "v0.0.22, 53 MB": the published release's version and its file's size.
+function details(product: DownloadsProduct): string {
+  const size = product.size === null ? '' : formatBytes(product.size);
+  return [product.version ? `v${product.version}` : '', size].filter(Boolean).join(', ');
+}
+
 onMounted(async () => {
   if (!downloadsHost) return;
   try { manifest.value = await fetchDownloadsManifest(downloadsHost); }

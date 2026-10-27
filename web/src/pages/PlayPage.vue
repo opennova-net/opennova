@@ -45,7 +45,7 @@
             <li>Download and run the OpenNova Switcher, then select OpenNova.</li>
             <li>The Switcher manages one Windows hosts-file block for <code>gs.novaworld.net</code> and asks for administrator rights. Your game files stay as they are.</li>
           </ol>
-          <RouterLink to="/downloads#tools" class="btn-primary mt-7">Get the Switcher</RouterLink>
+          <RouterLink to="/downloads#apps" class="btn-primary mt-7">Get the Switcher</RouterLink>
           <p class="mt-4 text-sm text-ink-muted">The downloads page also offers the OpenNova build set up for Delta Force Xtreme 2.</p>
         </template>
         <p class="mt-6 border-t border-border pt-4 text-xs text-ink-muted">OpenNova is pre-1.0 and experimental. Expect differences, and <a :href="ISSUES_URL" target="_blank" rel="noopener" class="link">report problems on GitHub</a>.</p>

@@ -1108,9 +1108,9 @@ editor's is its package applied with its `ONEDITOR.CMD`; the others are their bu
 uploaded. The data program's role may list, read, write and remove the bucket's objects
 (`infra/aws/programs.tf`), and its `ONNET_DOWNLOADS_URL` (`s3://<the bucket>`) names it; with
 none (a local stack) the job logs and skips. Neither the deploy user nor the GitHub deploy
-role writes the bucket. The site reads the manifest to say what each product's download is
-(its version, size and SHA-256), games first, then apps, and shows a product's button once it
-has a file ("Not published yet" before; never a GitHub link). Older releases stay on the
+role writes the bucket. The site's Downloads page draws itself from the manifest: each product
+with a file, games first, then apps, with its version, size and SHA-256 and a button to its
+file once it has a published release ("Not published yet" before; never a GitHub link). Older releases stay on the
 GitHub releases, and a release's notes give the Switcher zip's SHA-256.
 
 **Publishing** is `.github/workflows/publish.yml`, **Publish** (ADR 0070, ADR 0071, ADR
