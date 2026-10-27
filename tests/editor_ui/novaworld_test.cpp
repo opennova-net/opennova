@@ -237,6 +237,20 @@ void test_put_and_sign_in() {
 	const EditorRequest *taken = one(raised, EditorRequestKind::NovaWorldPut);
 	CHECK(taken && !taken->create && taken->project_key == "MOD", "Put: one novaworld_put of the empty MOD");
 	c.projects.front().head = 5;
+	// A mod: its base game named as the games the account may make a mod of name it.
+	c.put.kind = "expansion";
+	c.put.base = "JO";
+	c.put.expansion_code = "mymod";
+	c.games = {{"JO", "Joint Operations", "jo"}};
+	ui.activate(novaworld_item({"Put on NovaWorld..."}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("A mod of Joint Operations (JO), as mymod") != std::string::npos,
+	      "a mod's base game, by its name");
+	ui.activate(put_item({"Cancel"}));
+	ui.drain();
+	c.put.kind = "game";
+	c.put.base.clear();
 
 	// Set up for a key the service does not show: said so, and Check.
 	c.key = "NOPE";

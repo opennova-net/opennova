@@ -60,6 +60,14 @@ struct NewRemoteProject {
 	std::string visibility;
 };
 
+// A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
+// project's key, its name and the gameprofile code it runs as.
+struct RemoteGame {
+	std::string key;
+	std::string title;
+	std::string game;
+};
+
 // A revision as the service lists it.
 struct RemoteRevision {
 	int64_t number = 0;
@@ -103,8 +111,17 @@ bool read_project(const NovaWorldResponse &reply, RemoteProject &out,
 // POST /api/products: a new project of the account's (its owner), with no revision yet.
 NovaWorldRequest create_project(const NovaWorldAccount &account, const NewRemoteProject &project);
 // The reply (201 {project}): the project made. A refusal's code (invalid_field, missing_field,
-// no_such_base, duplicate_key, duplicate_expansion, too_many_projects) is the error's.
+// no_such_base, duplicate_key, duplicate_expansion, too_many_projects, rate_limited) is the
+// error's.
 bool read_created(const NovaWorldResponse &reply, RemoteProject &out, NovaWorldApiError &error);
+// GET /api/me/projects, a signed-in account's: the games a new project of its may be a mod of (its
+// projects, their usage and their limits are the site's to show).
+NovaWorldRequest my_projects(const NovaWorldAccount &account);
+bool read_my_games(
+		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
+// Why an upload would pass the account's storage (413 quota_exceeded {used, limit}, the files it
+// asks to upload or an upload), in a push's words; "" for any other reply.
+std::string quota_text(const NovaWorldResponse &reply);
 // GET /api/products/<key>/revisions?before=&limit=.
 NovaWorldRequest revisions(
 		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit);

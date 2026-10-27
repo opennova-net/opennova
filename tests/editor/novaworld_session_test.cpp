@@ -359,17 +359,28 @@ static int test_set_up_and_reset() {
 }
 
 // A player's own projects (ADR 0069: any account makes one and pushes it): a new game put on
-// NovaWorld (made as the player's, private unless asked public) and pushed; a mod whose name the
-// service's code rule refuses refused up front; a mod of a game NovaWorld lists, named by base_key
-// where the editor finds none; an empty project put on refused where it has revisions, and where it
-// is another's; a push of another's project refused; a project naming a key the service does not
-// show the player, said so.
+// NovaWorld (made as the player's, private unless asked public) and pushed; a mod whose base game
+// is found among the games the player may make a mod of, and one named by base_key where two games
+// of its game are; a mod whose name the service's code rule refuses refused up front; an empty
+// project put on refused where it has revisions, and where it is another's; a push of another's
+// project refused; a project naming a key the service does not show the player, said so.
 static int test_player_projects() {
 	test_temp::TempDir dir("opennova_novaworld_session_player");
 	FakeService service;
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
 	TEST_EXPECT(s.novaworld().signed_in && s.novaworld().role == "player");
+	// The games it may make a mod of: MOD alone, the one of the project's game (jo, no game install
+	// named) a mod's base, found there.
+	TEST_EXPECT(s.novaworld().games.size() == 1 && s.novaworld().games[0].key == "MOD");
+	s.send(request::new_expansion_project(dir.file("Quiet"), "Quiet", "quiet"));
+	TEST_EXPECT(s.novaworld().put.kind == "expansion" && s.novaworld().put.refusal.empty() &&
+			s.novaworld().put.base == "MOD" && s.novaworld().put.expansion_code == "quiet");
+	s.send(request::novaworld_put_new("QUIET", "Quiet", ""));
+	TEST_EXPECT(service.made.count("QUIET") && service.made["QUIET"].kind == "expansion" &&
+			service.made["QUIET"].base == "MOD" &&
+			service.made["QUIET"].expansion_code == "quiet" && !service.made["QUIET"].is_public &&
+			s.novaworld().tracked);
 
 	// A new game of the player's.
 	s.send(request::new_project(dir.file("Game"), "My Game"));
@@ -395,16 +406,15 @@ static int test_player_projects() {
 			!s.novaworld().put.refusal.empty());
 	s.send(request::novaworld_put_new("LOUD", "", ""));
 	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("LOUD"));
-	// A mod of MOD: no base game found (no game install, MOD no retail game), so base_key names it.
-	s.send(request::new_expansion_project(dir.file("Quiet"), "Quiet", "quiet"));
-	TEST_EXPECT(s.novaworld().put.refusal.empty() && s.novaworld().put.base.empty() &&
-			s.novaworld().put.expansion_code == "quiet");
-	s.send(request::novaworld_put_new("QUIET", "", ""));
-	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("QUIET"));
-	s.send(request::novaworld_put_new("QUIET", "Quiet", "", "MOD"));
-	TEST_EXPECT(service.made.count("QUIET") && service.made["QUIET"].kind == "expansion" &&
-			service.made["QUIET"].base == "MOD" &&
-			service.made["QUIET"].expansion_code == "quiet" && !service.made["QUIET"].is_public &&
+	// A mod once MYGAME is a game of jo too (listed again after its put): no one base game found,
+	// so base_key names it.
+	TEST_EXPECT(s.novaworld().games.size() == 2);
+	s.send(request::new_expansion_project(dir.file("Other"), "Other", "other"));
+	TEST_EXPECT(s.novaworld().put.refusal.empty() && s.novaworld().put.base.empty());
+	s.send(request::novaworld_put_new("OTHER", "", ""));
+	TEST_EXPECT(s.refused("novaworld.refused") && !service.made.count("OTHER"));
+	s.send(request::novaworld_put_new("OTHER", "Other", "", "MYGAME"));
+	TEST_EXPECT(service.made.count("OTHER") && service.made["OTHER"].base == "MYGAME" &&
 			s.novaworld().tracked);
 
 	// An empty project put on: refused where it is another's (MOD, the service's own) and where it

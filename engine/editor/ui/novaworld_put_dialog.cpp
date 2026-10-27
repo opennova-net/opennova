@@ -51,6 +51,14 @@ std::string project_words(const RemoteProject &project) {
 	return project.title.empty() || project.title == project.key ? project.key : project.title + " (" + project.key + ")";
 }
 
+// A base game's words by its key: its name, as the games or the projects list it, then its key.
+std::string base_words(const NovaWorldView &novaworld, const std::string &key) {
+	for (const RemoteGame &game : novaworld.games)
+		if (game.key == key) return game.title.empty() || game.title == key ? key : game.title + " (" + key + ")";
+	const RemoteProject *project = listed(novaworld, key);
+	return project ? project_words(*project) : key;
+}
+
 } // namespace
 
 std::string novaworld_key_for(const std::string &title) {
@@ -122,17 +130,20 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		ui_kit::tooltip("Anyone may get it.");
 		// What it is, as the session finds it from the project.
 		if (c.put.kind == "expansion") {
-			const RemoteProject *base = listed(c, c.put.base);
 			if (!c.put.base.empty()) {
-				ui_kit::clipped_text("A mod of " + (base ? project_words(*base) : c.put.base) + ", as " + c.put.expansion_code);
+				ui_kit::clipped_text("A mod of " + base_words(c, c.put.base) + ", as " + c.put.expansion_code);
 			} else {
-				// No base game found for it: one of NovaWorld's games chosen.
-				ImGui::SetNextItemWidth(width);
-				const RemoteProject *chosen = listed(c, base_);
-				if (ImGui::BeginCombo("A mod of", chosen ? project_words(*chosen).c_str() : "Choose its game")) {
+				// No base game found for it: one of the games the account may make a mod of chosen (those listed
+				// when the service named none).
+				std::vector<std::string> games;
+				for (const RemoteGame &game : c.games) games.push_back(game.key);
+				if (games.empty())
 					for (const RemoteProject &project : c.projects)
-						if (project.kind == "game" && ImGui::Selectable(project_words(project).c_str(), project.key == base_))
-							base_ = project.key;
+						if (project.kind == "game") games.push_back(project.key);
+				ImGui::SetNextItemWidth(width);
+				if (ImGui::BeginCombo("A mod of", base_.empty() ? "Choose its game" : base_words(c, base_).c_str())) {
+					for (const std::string &key : games)
+						if (ImGui::Selectable(base_words(c, key).c_str(), key == base_)) base_ = key;
 					ImGui::EndCombo();
 				}
 				ui_kit::tooltip("The game on NovaWorld the mod changes.");

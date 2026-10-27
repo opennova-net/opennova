@@ -49,6 +49,15 @@ JsonValue novaworld_section(const SessionView &view) {
 		projects.push(project_json(p));
 	out.set("projects", projects);
 	out.set("projects_error", json_string(novaworld.projects_error));
+	JsonValue games = JsonValue::make_array();
+	for (const RemoteGame &g : novaworld.games) {
+		JsonValue game = JsonValue::make_object();
+		game.set("key", json_string(g.key));
+		game.set("title", json_string(g.title));
+		game.set("game", json_string(g.game));
+		games.push(std::move(game));
+	}
+	out.set("games", games);
 	JsonValue copy = JsonValue::make_object();
 	copy.set("key", json_string(novaworld.key));
 	copy.set("tracked", JsonValue::make_bool(novaworld.tracked));

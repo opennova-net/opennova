@@ -139,6 +139,7 @@ private:
 	std::string login_server_;
 	std::string login_username_;
 	NovaWorldCall projects_;
+	NovaWorldCall games_; // the games a new project of the account's may be a mod of
 	NovaWorldCall logout_;
 	NovaWorldCall release_;
 	NovaWorldCall history_;

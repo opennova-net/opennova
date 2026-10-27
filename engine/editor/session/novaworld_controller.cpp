@@ -1,5 +1,6 @@
 #include <editor/session/novaworld_controller.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <system_error>
 #include <utility>
@@ -7,6 +8,7 @@
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
 #include <editor/assets/install_check.h>
 #include <editor/import/import_run.h>
@@ -103,6 +105,8 @@ std::string created_refusal(const NovaWorldApiError &error, const std::string &k
 			   "site first.";
 	if (error.code == "no_such_base")
 		return "NovaWorld has no such base game: name the game it changes (base_key).";
+	if (error.code == "rate_limited")
+		return "NovaWorld asks to wait before making another project: try again in a minute.";
 	return error.line();
 }
 
@@ -267,7 +271,9 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 		plan.refusal = "NovaWorld names a mod by 1 to 8 small letters and digits: rename " +
 				doc.expansion.name + " in Project settings (its Short name) first.";
 	// Its base game's key: the base game's project's own, else the game install's game (its
-	// UPDATE.WIZ's, install_game) as NovaWorld lists the retail games.
+	// UPDATE.WIZ's, install_game) as NovaWorld lists the retail games, else as the games a new
+	// project of the account's may be a mod of name it (one alone of that game, or the one keyed by
+	// its code).
 	if (doc.expansion.on_base_project()) {
 		ProjectDocument base;
 		Diagnostic unread;
@@ -275,17 +281,26 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 		if (!root.empty() && ::opennova::editor::open_project(root, base, unread))
 			plan.base = base.novaworld;
 	}
+	const NovaWorldView &view = core_.view().novaworld;
+	const std::string game = install_game(core_.game_install());
 	if (plan.base.empty()) {
-		const std::string game = install_game(core_.game_install());
-		const RemoteProject *found = nullptr;
-		int matches = 0;
-		for (const RemoteProject &project : core_.view().novaworld.projects)
-			if (project.kind == "game" && project.retail && project.game == game) {
-				found = &project;
-				++matches;
-			}
-		if (matches == 1)
-			plan.base = found->key;
+		std::vector<std::string> retail;
+		for (const RemoteProject &project : view.projects)
+			if (project.kind == "game" && project.retail && project.game == game)
+				retail.push_back(project.key);
+		if (retail.size() == 1)
+			plan.base = retail.front();
+	}
+	if (plan.base.empty()) {
+		std::vector<std::string> games;
+		for (const RemoteGame &each : view.games)
+			if (each.game == game)
+				games.push_back(each.key);
+		const std::string own_key = strutil::to_upper(game);
+		if (games.size() == 1)
+			plan.base = games.front();
+		else if (std::find(games.begin(), games.end(), own_key) != games.end())
+			plan.base = own_key;
 	}
 	return plan;
 }
@@ -385,6 +400,11 @@ void NovaWorldController::list_projects() {
 	if (!transport_ || account_.server.empty())
 		return;
 	projects_ = NovaWorldCall(*transport_, novaworld_api::projects(account_));
+	// The games a new project of the account's may be a mod of: a signed-in account's alone.
+	games_ = account_.signed_in() ? NovaWorldCall(*transport_, novaworld_api::my_projects(account_))
+								  : NovaWorldCall();
+	if (!account_.signed_in())
+		core_.view().novaworld.games.clear();
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
@@ -534,8 +554,10 @@ void NovaWorldController::finish_put() {
 	show_copy();
 	view.last = "The project is on NovaWorld as " + key + ": push its files as the first revision.";
 	core_.note("NovaWorld: " + view.last);
-	// Its files counted as the first push's changes.
+	// Its files counted as the first push's changes; the projects listed again, a new one with
+	// them.
 	check_due_ = true;
+	list_projects();
 	core_.touch(ViewConcern::NovaWorld);
 }
 
@@ -708,6 +730,19 @@ void NovaWorldController::poll() {
 		projects_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
+	if (games_.started() && games_.poll()) {
+		std::vector<RemoteGame> games;
+		NovaWorldApiError error;
+		// A list that fails leaves the games as they were: a new project names its base itself
+		// then.
+		if (novaworld_api::read_my_games(games_.reply(), games, error)) {
+			view.games = std::move(games);
+			if (core_.view().project.open && view.key.empty())
+				view.put = put_plan();
+		}
+		games_ = NovaWorldCall();
+		core_.touch(ViewConcern::NovaWorld);
+	}
 	if (project_.started() && project_.poll()) {
 		RemoteProject remote;
 		std::optional<RemoteRevision> head;
@@ -798,8 +833,8 @@ void NovaWorldController::poll() {
 			start_check();
 		}
 	}
-	const bool calling = login_.started() || projects_.started() || project_.started() ||
-			put_.started() || release_.started() || history_.started();
+	const bool calling = login_.started() || projects_.started() || games_.started() ||
+			project_.started() || put_.started() || release_.started() || history_.started();
 	if (view.calling != calling) {
 		view.calling = calling;
 		core_.touch(ViewConcern::NovaWorld);
@@ -807,8 +842,9 @@ void NovaWorldController::poll() {
 }
 
 bool NovaWorldController::busy() const {
-	return login_.started() || projects_.started() || project_.started() || put_.started() ||
-			put_waiting_ || release_.started() || history_.started() || track_due_ || check_due_;
+	return login_.started() || projects_.started() || games_.started() || project_.started() ||
+			put_.started() || put_waiting_ || release_.started() || history_.started() ||
+			track_due_ || check_due_;
 }
 
 void NovaWorldController::show_conflicts() {

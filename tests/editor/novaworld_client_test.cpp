@@ -409,8 +409,9 @@ static int test_track_and_check() {
 
 // A player's own project (ADR 0069: any account makes its own and pushes it): made through POST
 // /api/products as the client asks for it (create_project, read_created), the same key again
-// refused by its code, private to it and the admins, pushed by it and by an admin; signed out, not
-// found.
+// refused by its code, private to it and the admins, pushed by it and by an admin, a push past its
+// storage said so plainly (413 quota_exceeded); the games it may make a mod of (GET
+// /api/me/projects); signed out, not found.
 static int test_owned_project() {
 	test_temp::TempDir dir("opennova_novaworld_client_owned");
 	const std::string root = dir.file("Mine");
@@ -444,6 +445,18 @@ static int test_owned_project() {
 	TEST_EXPECT(push(service, root, "By an admin", kAdminCookie, nullptr, "MYMOD") ==
 					editor::PushOutcome::Pushed &&
 			service.made["MYMOD"].head == 2);
+	// The games it may make a mod of: the service's own MOD (MYMOD is a mod, no game).
+	editor::NovaWorldCall mine(service, editor::novaworld_api::my_projects(player));
+	std::vector<editor::RemoteGame> games;
+	TEST_EXPECT(mine.poll() && editor::novaworld_api::read_my_games(mine.reply(), games, error) &&
+			games.size() == 1 && games[0].key == "MOD" && games[0].game == "jo");
+	// Past its storage: the push says so plainly, the head unmoved.
+	service.quota = service.stored + 1;
+	TEST_EXPECT(put(root + "/defs/big.def", "more than one byte"));
+	std::string why;
+	push(service, root, "Too much", kPlayerCookie, &why, "MYMOD");
+	TEST_EXPECT(why.find("this push would pass it") != std::string::npos &&
+			why.find("NovaWorld keeps") != std::string::npos && service.made["MYMOD"].head == 2);
 	// No one else reads a private project: signed out, it is not found.
 	{
 		editor::NovaWorldCheck check(service, account(""), editor::ProjectPaths::for_root(root), "",

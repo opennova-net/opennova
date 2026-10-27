@@ -619,8 +619,10 @@ bool NovaWorldPush::step_uploads() {
 		}
 		NovaWorldApiError error;
 		if (!novaworld_api::read_upload(it->second.reply(), error)) {
-			fail("cannot upload a file of " + std::to_string(it->first.file.size) +
-					" bytes: " + error.line());
+			const std::string quota = novaworld_api::quota_text(it->second.reply());
+			fail(!quota.empty() ? quota
+								: "cannot upload a file of " + std::to_string(it->first.file.size) +
+									" bytes: " + error.line());
 			return false;
 		}
 		bytes_uploaded_ += it->first.file.size;
@@ -728,8 +730,13 @@ NovaWorldJobState NovaWorldPush::step(uint64_t budget) {
 					return fail("the session ended: sign in again");
 				std::vector<UploadTarget> lacking;
 				NovaWorldApiError error;
-				if (!novaworld_api::read_missing(call_.reply(), account_, lacking, error))
-					return fail("cannot ask which files NovaWorld lacks: " + error.line());
+				if (!novaworld_api::read_missing(call_.reply(), account_, lacking, error)) {
+					// Past the account's storage: said as it is, not as the route's code.
+					const std::string quota = novaworld_api::quota_text(call_.reply());
+					return fail(!quota.empty()
+									? quota
+									: "cannot ask which files NovaWorld lacks: " + error.line());
+				}
 				call_ = NovaWorldCall();
 				for (UploadTarget &target : lacking) {
 					bytes_to_upload_ += target.file.size;

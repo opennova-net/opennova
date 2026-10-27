@@ -4,11 +4,13 @@
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin, "player-pw" the player), the project list (the public projects, the caller's own, every
 // one for an admin), one project "MOD" of the service's own (a game) with its head, its manifests
-// and its files by SHA-256, the projects an account makes (POST /api/products, its owner), each
-// file's download, the files it lacks with their uploads, and the push on its parent. A project its
-// caller may not read is 404; its owner and an admin push it. Every request is answered as it
-// starts. The NovaWorld client's and the session's tests drive real folders over it; the routes
-// themselves answer the same client over HTTP in tests/novaworld/novaworld_client_routes_test.cpp.
+// and its files by SHA-256, the projects an account makes (POST /api/products, its owner) and the
+// games it may make a mod of (GET /api/me/projects), each file's download, the files it lacks with
+// their uploads (413 quota_exceeded past an owner's storage), and the push on its parent. A project
+// its caller may not read is 404, one it reads but may not push 403; its owner and an admin push
+// it. Every request is answered as it starts. The NovaWorld client's and the session's tests drive
+// real folders over it; the routes themselves answer the same client over HTTP in
+// tests/novaworld/novaworld_client_routes_test.cpp.
 #include <cstdint>
 #include <cstdlib>
 #include <map>
@@ -79,6 +81,9 @@ public:
 	bool expansion = false;
 	int64_t expansion_head = 0;
 	std::map<int64_t, std::string> expansion_manifests;
+	// The bytes the accounts' own projects may store, 0 no limit, and those they store.
+	int64_t quota = 0;
+	int64_t stored = 0;
 	// The projects the accounts made (POST /api/products), by key.
 	struct Made {
 		std::string title, kind, game, base, expansion_code, owner;
@@ -243,6 +248,35 @@ private:
 		}
 		if (request.method == "POST" && request.url == std::string(kServer) + "/api/logout")
 			return json(200, io::JsonValue::make_object());
+		// The caller's own projects, and the games it may make a mod of: the service's own and its
+		// own.
+		if (request.method == "GET" && request.url == std::string(kServer) + "/api/me/projects") {
+			if (caller.name.empty())
+				return refusal(401, "unauthorized");
+			io::JsonValue own = io::JsonValue::make_array();
+			io::JsonValue games = io::JsonValue::make_array();
+			std::vector<std::string> keys = { "MOD" };
+			for (const auto &[key, m] : made)
+				keys.push_back(key);
+			for (const std::string &key : keys) {
+				Ref p;
+				if (!find(key, p))
+					continue;
+				if (!p.owner.empty() && p.owner == caller.name)
+					own.push(project_json(p, caller));
+				if (p.kind == "game" && (p.owner.empty() || p.owner == caller.name)) {
+					io::JsonValue game = io::JsonValue::make_object();
+					game.set("key", io::json_string(p.key));
+					game.set("title", io::json_string(p.title));
+					game.set("game", io::json_string(p.game));
+					games.push(game);
+				}
+			}
+			io::JsonValue out = io::JsonValue::make_object();
+			out.set("projects", own);
+			out.set("games", games);
+			return json(200, out);
+		}
 		if (request.url == std::string(kServer) + "/api/products") {
 			if (request.method == "POST")
 				return create(request, caller);
@@ -364,6 +398,18 @@ private:
 				io::json_parse(request.body, body, error)) {
 			io::JsonValue list = io::JsonValue::make_array();
 			transfers.push_back("lacks:" + std::to_string(body.get("blobs")->array.size()));
+			int64_t lacking = 0;
+			for (const io::JsonValue &item : body.get("blobs")->array)
+				if (!blobs.count(item.get_string("sha256", "")))
+					lacking += int64_t(item.get_number("size", 0));
+			if (quota > 0 && !p.owner.empty() && stored + lacking > quota) {
+				io::JsonValue over = io::JsonValue::make_object();
+				over.set("error", io::json_string("quota_exceeded"));
+				over.set("message", io::json_string("the account's projects would store too much"));
+				over.set("used", io::json_number(double(stored)));
+				over.set("limit", io::json_number(double(quota)));
+				return json(413, over);
+			}
 			for (const io::JsonValue &item : body.get("blobs")->array) {
 				const std::string sha = item.get_string("sha256", "");
 				if (blobs.count(sha))
@@ -388,6 +434,8 @@ private:
 			if (io::sha256_hex(bytes.data(), bytes.size()) != rest.substr(7))
 				return refusal(400, "sha256_mismatch");
 			blobs[rest.substr(7)] = bytes;
+			if (!p.owner.empty())
+				stored += int64_t(bytes.size());
 			++uploads;
 			transfers.push_back("put");
 			return json(200, io::JsonValue::make_object());

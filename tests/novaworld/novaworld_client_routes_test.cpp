@@ -5,7 +5,8 @@
 // client. An admin signs in through the client's own login request; a folder is pushed as the
 // first revision of a private project; a second folder gets it (the same files); the first pushes
 // a change, the second's push is told its base is stale, pulls (the change taken, its own kept) and
-// pushes both; the first pulls them; and a player's push is refused.
+// pushes both; the first pulls them; a player's push is refused; and a player's own project, made
+// through POST /api/products as an expansion of JO, is pushed by it.
 
 #include "core/local_object_store.h"
 #include "http_listener.h"
@@ -267,6 +268,41 @@ int main(int argc, char **argv) {
 			editor::NovaWorldPush job(
 					transport, player, paths(first), "", copy_of(first, server), "no");
 			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Failed);
+		}
+
+		// A player's own project, as Put on NovaWorld makes one: an expansion of JO (a game the
+		// service owns, private), made through POST /api/products, then pushed by it; JO among the
+		// games it may make a mod of.
+		{
+			editor::NewRemoteProject asked;
+			asked.key = "PLAYERMOD";
+			asked.title = "A player's mod";
+			asked.kind = "expansion";
+			asked.base = "JO";
+			asked.expansion_code = "pmod";
+			asked.visibility = "private";
+			editor::NovaWorldCall call(
+					transport, editor::novaworld_api::create_project(player, asked));
+			editor::RemoteProject made;
+			editor::NovaWorldApiError error;
+			TEST_EXPECT(
+					call.poll() && editor::novaworld_api::read_created(call.reply(), made, error));
+			TEST_EXPECT(made.key == "PLAYERMOD" && made.kind == "expansion" && made.base == "JO" &&
+					made.owner == "client_player" && made.can_push && made.head == 0);
+			editor::NovaWorldCall mine(transport, editor::novaworld_api::my_projects(player));
+			std::vector<editor::RemoteGame> games;
+			TEST_EXPECT(mine.poll() &&
+					editor::novaworld_api::read_my_games(mine.reply(), games, error));
+			bool jo = false;
+			for (const editor::RemoteGame &game : games)
+				jo = jo || game.key == "JO";
+			TEST_EXPECT(jo);
+			const std::string own = temp.file("Own");
+			TEST_EXPECT(put(own + "/project.opennova", "{}") && put(own + "/defs/p.def", "p"));
+			editor::NovaWorldPush job(transport, player, paths(own), "",
+					editor::NovaWorldWorkingCopy{ "PLAYERMOD", 0 }, "First revision");
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
+					job.outcome() == editor::PushOutcome::Pushed && job.revision() == 1);
 		}
 		std::printf("novaworld_client_routes: the editor's client and the service's routes agree\n");
 		http.stop();
