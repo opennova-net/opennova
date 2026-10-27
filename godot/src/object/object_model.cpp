@@ -495,7 +495,7 @@ void ObjectModel::stamp_entity_lighting_instances() {
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(name, p_value);
+			set_surface_uniform(instance, name, p_value);
 		}
 	};
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
@@ -1070,12 +1070,12 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(
+			set_surface_uniform(instance,
 					enabled_name, match_terrain_enabled_);
-			instance->set_instance_shader_parameter(
+			set_surface_uniform(instance,
 					ready_name, match_terrain_enabled_ && p_page_ready);
-			instance->set_instance_shader_parameter(layer_name, p_layer);
-			instance->set_instance_shader_parameter(projection_name, p_projection);
+			set_surface_uniform(instance, layer_name, p_layer);
+			set_surface_uniform(instance, projection_name, p_projection);
 		}
 	};
 	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
@@ -1085,24 +1085,44 @@ void ObjectModel::stamp_match_terrain_instances(bool p_page_ready,
 	apply_to(skeleton_);
 }
 
+void ObjectModel::set_surface_uniform(GeometryInstance3D *p_instance, const StringName &p_name,
+		const Variant &p_value) const {
+	p_instance->set_instance_shader_parameter(p_name, p_value);
+	HashMap<StringName, Variant> &values = instance_uniforms_[p_instance->get_instance_id()];
+	if (p_value.get_type() == Variant::NIL) {
+		values.erase(p_name);
+	} else {
+		values[p_name] = p_value;
+	}
+}
+
+Variant ObjectModel::surface_uniform(const GeometryInstance3D *p_instance, const StringName &p_name) const {
+	const HashMap<StringName, Variant> *values = instance_uniforms_.getptr(p_instance->get_instance_id());
+	if (values == nullptr) {
+		return Variant();
+	}
+	const Variant *value = values->getptr(p_name);
+	return value != nullptr ? *value : Variant();
+}
+
 void ObjectModel::stamp_instance_uniforms(GeometryInstance3D *p_instance) const {
 	if (p_instance == nullptr) {
 		return;
 	}
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_enabled"), match_terrain_enabled_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_ready"),
 			match_terrain_enabled_ && match_terrain_page_ready_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_layer"), match_terrain_page_layer_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_match_terrain_page_projection"),
 			match_terrain_page_projection_);
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_foliage_mask_side"), foliage_mask_side_);
 	// The same flag and margin set_viewmodel_pass stamps on the built set.
-	p_instance->set_instance_shader_parameter(
+	set_surface_uniform(p_instance,
 			StringName("u_viewmodel_pass"), viewmodel_pass_);
 	p_instance->set_extra_cull_margin(viewmodel_pass_ ? 8.0f : 0.0f);
 }
@@ -1148,7 +1168,7 @@ void ObjectModel::set_viewmodel_pass(bool p_enabled) {
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(pass_name, p_enabled);
+			set_surface_uniform(instance, pass_name, p_enabled);
 			instance->set_extra_cull_margin(margin);
 		}
 	};
@@ -1252,7 +1272,7 @@ void ObjectModel::stamp_foliage_mask_side(float p_side) {
 			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
 					p_parent->get_child(child));
 			if (instance != nullptr) {
-				instance->set_instance_shader_parameter(side_name, p_side);
+				set_surface_uniform(instance, side_name, p_side);
 			}
 		}
 	};
@@ -1931,13 +1951,13 @@ void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
 			if (instance == nullptr) {
 				continue;
 			}
-			instance->set_instance_shader_parameter(count_name,
+			set_surface_uniform(instance, count_name,
 					static_cast<float>(count));
 			for (int i = 0; i < 4; ++i) {
 				const Vector4 posr = i < count ? p_posr[i] : Vector4();
 				const Vector4 color = i < count ? p_color[i] : Vector4();
-				instance->set_instance_shader_parameter(posr_names[i], posr);
-				instance->set_instance_shader_parameter(color_names[i], color);
+				set_surface_uniform(instance, posr_names[i], posr);
+				set_surface_uniform(instance, color_names[i], color);
 			}
 		}
 	};

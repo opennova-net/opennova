@@ -35,6 +35,7 @@ void ObjectModel::rebuild_scene() {
 	// rebuilds them).
 	++scene_build_serial_;
 	free_all_view_twins();
+	instance_uniforms_.clear();
 	while (get_child_count() > 0) {
 		Node *child = get_child(0);
 		remove_child(child);

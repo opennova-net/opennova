@@ -416,6 +416,9 @@ private:
 	// visibility chain (null at a chain without one). `r_chain_visible` is
 	// whether every node between them shows its own flag.
 	const ObjectModel *view_owner(bool &r_chain_visible) const;
+	// The surface instances' uniforms as set_surface_uniform set them, by instance id; the scene's
+	// rebuild clears them with the instances.
+	mutable HashMap<uint64_t, HashMap<StringName, Variant>> instance_uniforms_;
 	mutable ObjectID view_owner_id_;
 	mutable bool view_owner_cached_ = false;
 	void apply_view_split_layers();
@@ -762,6 +765,14 @@ private:
 	// instance minted later (a first-seen auxiliary of a level switch) so it
 	// never draws with default uniforms until the next leg.
 	void stamp_instance_uniforms(GeometryInstance3D *p_instance) const;
+	// One of this model's surface instances' instance uniforms: set on the instance and kept here,
+	// so the view twins copy them without reading the server back. RenderingServer's
+	// instance_geometry_get_shader_parameter waits for a separate render thread's queue, and the
+	// twins' copy read sixteen a twin each frame (about 1.2 s a frame under --render-thread
+	// separate; D-NET-1377 part (i)).
+	void set_surface_uniform(GeometryInstance3D *p_instance, const StringName &p_name,
+			const Variant &p_value) const;
+	Variant surface_uniform(const GeometryInstance3D *p_instance, const StringName &p_name) const;
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
 	Vector<ObjectModel *> live_presentation_links() const;

@@ -1292,7 +1292,7 @@ void ObjectModel::sync_view_twin(TwinSet &r_set) {
 				if (twin.own_lights && i >= 1 && i <= 9) {
 					continue;
 				}
-				const Variant value = donor->get_instance_shader_parameter(names[i]);
+				const Variant value = surface_uniform(donor, names[i]);
 				if (value.get_type() != Variant::NIL) {
 					rs->instance_geometry_set_shader_parameter(twin.instance, names[i], value);
 				}
