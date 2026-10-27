@@ -1096,9 +1096,11 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 		const std::string &text, int design_x, int design_y,
 		const WalkScale &s, uint32_t color, int caret) {
 	// No font up the chain: nothing drawn [orig: CFontCache_EnsureFontLoaded
-	// @ 0x653de0 returns 0 for handle 0, gating CFontCache_DrawTextScaled].
+	// @ 0x653de0 returns 0 for handle 0, gating CFontCache_DrawTextScaled]. An
+	// empty text draws its cursor alone (an edit's window over no characters)
+	// [orig: the cursor leg of CFontCache_DrawTextWithCursor @ 0x6533b0].
 	const fnt_font_t *font = font_at_(font_slot);
-	if (font == nullptr || text.empty()) {
+	if (font == nullptr || (text.empty() && caret < 0)) {
 		return;
 	}
 	hud::GameFont gf;
@@ -1218,18 +1220,16 @@ bool MenuFrameCompiler::fit_label_(const WidgetNode &node, const std::string &te
 	return true;
 }
 
-// The text pass shared by the static family and the edit
+// The label text pass of the static family
 // [orig: CStaticWnd_DrawLabel @ 0x656fb0 — edge-inset available width,
 //  truncate-to-fit, justify from the truncated width, the STRING's x / y
 //  offsets (+748 @0x65725e, +752 @0x657252), then the state-colored draw; a
 //  WRAP label (+760 @0x65703b) takes the wrap path below]. A single-line label's
-// EDGE only narrows the span it is cut to; the edit's draw adds it to x as well [orig:
-// CEditWnd_Render @ 0x6619e0 — x += +748 @0x661c25 and +756 @0x661c31, y +=
-// +752 @0x661c37] (D-MNU-61).
+// EDGE only narrows the span it is cut to (D-MNU-61); the edit draws its own
+// (emit_edit).
 void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
-		const MenuWidgetState *ws, int caret,
-		const std::string *override_text, bool edit) {
+		const MenuWidgetState *ws, const std::string *override_text) {
 	const mnu::Window &w = *node.window;
 	ResolvedText resolved;
 	if (override_text != nullptr) {
@@ -1242,7 +1242,7 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		return;
 	}
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
-	if (w.string_data.wrap && !edit) {
+	if (w.string_data.wrap) {
 		emit_wrapped_label_(node, rect, s, color_state, text, edge);
 		return;
 	}
@@ -1273,10 +1273,6 @@ void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 	x += x_offset;
 	y += y_offset;
 	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
-	if (edit) {
-		emit_glyph_run(node, drawn, x + edge, y, s, node.colors[state], caret);
-		return;
-	}
 	// The label set's offset (+740, the cut {hot} marker; -1 none) is the
 	// cursor every label pass hands the draw, a STATIC's, BUTTON's, RADIO's and
 	// COMBOBOX's alike (the combo's own over the face it swaps in): the '_'
@@ -1343,7 +1339,7 @@ void MenuFrameCompiler::emit_wrapped_label_(const WidgetNode &node, const mnu::R
 // The edit render [orig: CEditWnd_Render @ 0x6619e0]: focus forces visual
 // state 2; PASSWORD masks with '*'; the scroll window keeps the caret
 // visible; the caret blinks while (time & 0x3FF) > 0x200 and is drawn
-// relative to the scrolled text.
+// relative to the window's start.
 void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int visual,
 		const MenuFrameState &frame, const MenuWidgetState *ws) {
@@ -1355,6 +1351,11 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 	}
 	const bool blink_on = menu_caret_shown(frame.time_ms);
 	if (text.empty()) {
+		// The re-fit finds no text; the render stores the caret all the same
+		// [orig: @0x6617b4 / @0x6617d7; @0x661b4d].
+		EditScroll &scroll = edit_scroll_[index];
+		scroll.text.clear();
+		scroll.caret = 0;
 		// An empty focused edit still blinks its caret at the text anchor
 		// [orig: the cursor leg of CFontCache_DrawTextWithCursor @ 0x6533b0 runs for
 		//  the empty string — the char at the caret is the NUL -> '_'].
@@ -1399,58 +1400,134 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 		}
 		return;
 	}
-	// The scroll window [orig: CEditWnd_UpdateScrollRange @ 0x661790 over
-	// start +792 / end +796, fitting via EditWnd_CountCharsFitting
-	// @ 0x6616b0]: caret before the window scrolls back; past the window
-	// scrolls forward so the caret is the last visible char.
+	// The scroll window (D-MNU-58, FIXED 2026-10-27 for the set): re-fitted by the event that
+	// moved the text or the caret (a set, a typed character or text, a delete, a clear, a key),
+	// then by the render when the caret moved since the last render. A PASSWORD edit's set,
+	// delete and clear free its mask before their re-fit, which then finds no text and leaves
+	// the window as it is; its typing re-fits over the mask before freeing it. One event
+	// between two draws, as the runtime pumps them.
+	// With the caret before the window, the start goes back to the caret and the end follows
+	// what fits from it; with the caret inside the window and before the text's end, the end
+	// follows what fits from the start; with the caret at the text's end, or past the window's
+	// end, the end goes to the caret and the start to the end less what fits (counted from the
+	// text's start in the first case, from the old start in the second), or to 0 when that
+	// falls below it. A count fits when its measure, plus "i"'s width times (one more than the
+	// end-anchored flag) and the EDGE, is within the rect's width plus the STRING's x offset;
+	// it starts at the fewer of the text's length and that width over "i"'s, and steps down to
+	// -1 (0 for a negative width). An empty text leaves the window as it is.
+	// [orig: CEditWnd_UpdateScrollRange @ 0x661790 over start +792 / end +796 - the empty-text
+	//  skip @0x6617b4 / @0x6617d7, the width @0x661801..0x66180d, the branches @0x661815 /
+	//  @0x66182e / @0x661873, the fits @0x661823 (flag 0), @0x66183e / @0x661859 (1), @0x661881 /
+	//  @0x6618a4 (1), @0x6618c5 (0), the zero start @0x661895; the events' calls
+	//  CEditWnd_SetText @0x661970 (its mask freed @0x66194c), CEditWnd_InsertChar @0x662032
+	//  (@0x6620ad), CEditWnd_InsertText @0x662233 (@0x6622ae), CUIEditWidget_DeleteChars
+	//  @0x66234f (@0x66232b),
+	//  CEditWnd_ClearText @0x6618f5, CEditWnd_HandleKeyEvent @0x6623db..0x662540; the render's
+	//  CEditWnd_Render @0x661b42 when the caret differs from +0x300 @0x661b3e, stored
+	//  @0x661b4d (0 at CEditWnd_Construct @0x661428); EditWnd_CountCharsFitting @ 0x6616b0 -
+	//  the negative width @0x6616d1, "i" @0x661704, the cap @0x661721..0x66172a, the measure
+	//  @0x661759, + iw * (flag + 1) + EDGE (+0x2F4) @0x661762..0x66176f, the step
+	//  @0x661779..0x661780]
 	EditScroll &scroll = edit_scroll_[index];
 	const int len = static_cast<int>(text.size());
-	const int caret =
-			ws != nullptr ? std::clamp(ws->caret, 0, len) : 0;
+	const int caret = ws != nullptr ? std::clamp(ws->caret, 0, len) : 0;
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
-	const int avail = (rect.right - rect.left) - 2 * edge;
-	auto fit_from = [&](int start) {
-		int n = 0;
-		while (start + n < len) {
+	int x_offset = 0;
+	int y_offset = 0;
+	label_offsets(w.string_data, &x_offset, &y_offset);
+	const int avail = (rect.right - rect.left) + x_offset;
+	int i_width = 0;
+	int i_height = 0;
+	measure_text(node, "i", &i_width, &i_height);
+	const auto fit = [&](const std::string &over, int from, int flag) {
+		if (avail < 0) return 0;
+		const int over_len = static_cast<int>(over.size());
+		const int from_at = std::clamp(from, 0, over_len);
+		const int rest = over_len - from_at;
+		int n = i_width > 0 && avail / i_width < rest ? avail / i_width : rest;
+		while (true) {
 			int wpx = 0;
 			int hpx = 0;
-			measure_text(node,
-					text.substr(static_cast<size_t>(start),
-							static_cast<size_t>(n + 1)),
+			measure_text(node, over.substr(static_cast<size_t>(from_at), static_cast<size_t>(n)),
 					&wpx, &hpx);
-			if (wpx >= avail) {
-				break;
-			}
-			++n;
+			if (wpx + i_width * (flag + 1) + edge <= avail) return n;
+			if (n == 0) return -1;
+			--n;
 		}
-		return n;
 	};
-	scroll.start = std::clamp(scroll.start, 0, len);
-	if (caret < scroll.start) {
-		scroll.start = caret;
-		scroll.end = scroll.start + fit_from(scroll.start);
-	} else if (caret > scroll.end || scroll.end > len) {
-		scroll.end = caret;
-		const int fit = fit_from(std::max(scroll.end - avail, 0));
-		scroll.start = std::max(scroll.end - std::max(fit, 1), 0);
-	} else if (scroll.end == 0 && len > 0) {
-		scroll.end = fit_from(scroll.start);
+	const auto refit = [&](const std::string &over) {
+		if (over.empty()) return;
+		if (caret < scroll.start) {
+			scroll.start = caret;
+			scroll.end = scroll.start + fit(over, caret, 0);
+		} else if (caret <= scroll.end) {
+			if (caret < static_cast<int>(over.size())) {
+				scroll.end = scroll.start + fit(over, scroll.start, 0);
+			} else {
+				scroll.end = caret;
+				const int fits = fit(over, 0, 1);
+				scroll.start = scroll.end - fits >= 0 ? scroll.end - fits : 0;
+			}
+		} else {
+			scroll.end = caret;
+			const int fits = fit(over, scroll.start, 1);
+			scroll.start = scroll.end - fits >= 0 ? scroll.end - fits : 0;
+		}
+	};
+	const bool text_moved = text != scroll.text;
+	const bool caret_moved = caret != scroll.caret;
+	if (text_moved && w.password) {
+		// Typing (the text grown by what the caret stepped over) re-fits over the mask the
+		// last draw built, freed after; a set, a delete or a clear frees it first.
+		const int grew = len - static_cast<int>(scroll.text.size());
+		if (grew > 0 && caret - scroll.caret == grew) refit(scroll.text);
+	} else if (text_moved || caret_moved) {
+		refit(text);
 	}
-	const std::string visible = text.substr(
-			static_cast<size_t>(scroll.start));
-	// The caret blink gate [orig: (GetTickCount() & 0x3FF) > 0x200
-	// @ 0x661c63]; -1 draws no caret.
-	int caret_draw = -1;
-	if (focused && blink_on) {
-		caret_draw = caret - scroll.start;
+	if (caret_moved) refit(text);
+	scroll.text = text;
+	scroll.caret = caret;
+	// The draw: the whole text's width and twice the EDGE as a block; past the rect's width plus
+	// the x offset, the text ends at the window's end and sits at the rect's left, else the block
+	// justifies; the height by the vertical justification; then from the window's start at that
+	// point plus the EDGE and the offsets, the caret (blinking while (time & 0x3FF) > 0x200,
+	// focused, -1 none) relative to the start.
+	// [orig: CEditWnd_Render @ 0x6619e0 - the measure (count -1) @0x661b77, + 2 * EDGE @0x661b8c,
+	//  the vertical justify @0x661b9d..0x661bc4, the fit test @0x661be5, the end's NUL
+	//  @0x661c0f..0x661c16, the justify @0x661bea..0x661c02, the pen @0x661c25..0x661c37, the
+	//  caret @0x661c63..0x661c6b, CFontCache_DrawTextWithCursor from the start @0x661cb7]
+	int text_w = 0;
+	int text_h = 0;
+	measure_text(node, text, &text_w, &text_h);
+	const int block_w = text_w + 2 * edge;
+	int top = rect.top;
+	if (iequals(w.string_data.vjustify, "center")) {
+		top = ((rect.bottom - rect.top) >> 1) - (text_h >> 1) + rect.top;
+	} else if (iequals(w.string_data.vjustify, "bottom")) {
+		top = rect.bottom - text_h;
 	}
-	MenuWidgetState local;
-	if (ws != nullptr) {
-		local = *ws;
+	const int start = std::clamp(scroll.start, 0, len);
+	int left = rect.left;
+	std::string visible;
+	if (block_w >= avail) {
+		// The NUL at the end cuts the text only past the start (a window that fits nothing
+		// ends before it).
+		const int end = std::min(scroll.end, len);
+		visible = end >= start
+				? text.substr(static_cast<size_t>(start), static_cast<size_t>(end - start))
+				: text.substr(static_cast<size_t>(start));
+	} else {
+		if (iequals(w.string_data.justify, "center")) {
+			left = ((rect.right - rect.left) >> 1) - (block_w >> 1) + rect.left;
+		} else if (iequals(w.string_data.justify, "right")) {
+			left = rect.right - block_w;
+		}
+		visible = text.substr(static_cast<size_t>(start));
 	}
-	local.has_text = true;
-	local.text = visible;
-	emit_widget_text(node, rect, s, visual, &local, caret_draw, nullptr, true);
+	const int caret_draw = focused && blink_on ? caret - start : -1;
+	const int state = visual >= 0 && visual < 4 ? visual : 0;
+	emit_glyph_run(node, visible, edge + x_offset + left, y_offset + top, s, node.colors[state],
+			caret_draw);
 }
 
 // The checkbox label [orig: CCheckWnd_DrawLabel @ 0x64aa20]: non-AS_BUTTON
@@ -2101,7 +2178,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s, visual);
-			emit_widget_text(node, rect, s, color_state, ws, -1);
+			emit_widget_text(node, rect, s, color_state, ws);
 			break;
 		}
 		// A RADIOEDIT draws nothing of its own: its render draws its parts [orig: 0x65d310, the
@@ -2120,7 +2197,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s, forced);
-			emit_widget_text(node, rect, s, forced < 0 ? kStateDefault : forced, ws, -1);
+			emit_widget_text(node, rect, s, forced < 0 ? kStateDefault : forced, ws);
 			break;
 		}
 		case mnu::WindowType::CheckBox: {
@@ -2210,7 +2287,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			// The swapped row text draws unconditionally — an empty selected
 			// row leaves a blank face, never the widget's own authored TEXT.
 			const std::string face = combo_face_text(node, ws);
-			emit_widget_text(node, rect, s, color_state, ws, -1, &face);
+			emit_widget_text(node, rect, s, color_state, ws, &face);
 			if (ws != nullptr && ws->popup_open) {
 				// Deferred to the post-walk overlay pass: retail's witnessed
 				// walk paints popups inline yet renders them on top (that

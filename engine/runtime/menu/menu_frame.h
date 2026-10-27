@@ -887,9 +887,14 @@ private:
 		// CUIElement_DispatchCustomDrawEvent @ 0x647f10].
 		bool custom = false;
 	};
+	// An edit's scroll window (start +792, end +796) and what its last draw saw: the text
+	// and the caret (+0x300) [orig: CEditWnd_UpdateScrollRange @ 0x661790; CEditWnd_Render
+	// @0x661b3e..0x661b4d].
 	struct EditScroll {
 		int start = 0;
 		int end = 0;
+		std::string text;
+		int caret = 0;
 	};
 	enum class ScrollbarKind { Standalone,
 		Embedded,
@@ -1148,11 +1153,10 @@ private:
 			int caret);
 	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
 			int design_y, const WalkScale &s, uint32_t color, int caret);
-	// `edit`: the edit's draw, its `caret` the cursor (-1 none); a label passes
-	// its {hot} marker's offset instead.
+	// A label's draw, its {hot} marker's offset the cursor.
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
-			int caret, const std::string *override_text = nullptr, bool edit = false);
+			const std::string *override_text = nullptr);
 	// The closed combo face: the popup row collection's selected row TEXT
 	// (runtime rows win; else the same nested-wins/top-level-fallback set the
 	// popup renders) [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — the label

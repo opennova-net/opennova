@@ -648,14 +648,14 @@ std::string MenuRuntime::set_widget_text(int id, const std::string &text) {
 	if (index >= 0) frame_->set_widget_text(index, label, hotkey_pos);
 	// The edit's set then clamps its caret to the label's length [orig:
 	// CEditWnd_SetText @ 0x661900 - the strlen @ 0x661917..0x661929, the store
-	// when it is below the caret @ 0x66192b..0x661933]; its scroll window
-	// follows at the draw (the set's re-fit @ 0x661970 is D-MNU-58), the
-	// password mask is the draw's own, and its 0x7000001 notice reaches
-	// only the PLAYERNAME rule, which that screen's populate posts itself
-	// (D-PLAYERINFO-23). The multiline edit's set goes back to the first line
-	// and puts its scrollbar at 0 [orig: CMEditWnd_SetText @ 0x6612d0 ->
-	// CMEditWnd_UpdateScrollRange @ 0x6612e6 - +3912 = 0 @ 0x66121e,
-	// CScrollWnd_SetScrollPos(0) @ 0x661228].
+	// when it is below the caret @ 0x66192b..0x661933]; its scroll window's
+	// re-fit (@ 0x661970) runs at the draw that sees the new text
+	// (MenuFrameCompiler::emit_edit), the password mask is the draw's own,
+	// and its 0x7000001 notice reaches only the PLAYERNAME rule, which that
+	// screen's populate posts itself (D-PLAYERINFO-23). The multiline edit's
+	// set goes back to the first line and puts its scrollbar at 0 [orig:
+	// CMEditWnd_SetText @ 0x6612d0 -> CMEditWnd_UpdateScrollRange @ 0x6612e6 -
+	// +3912 = 0 @ 0x66121e, CScrollWnd_SetScrollPos(0) @ 0x661228].
 	if (w != nullptr && w->type == mnu::WindowType::Edit && index >= 0) {
 		const int len = static_cast<int>(label.size());
 		if (len < frame_->get_widget_caret(index)) frame_->set_widget_caret(index, len);
