@@ -159,7 +159,6 @@ void detonate_round(World &world, const LiveRound &round, const EntityPosition &
     explosion.type = ammo.kztype;
     explosion.ammo_index = round.ammo_index;
     explosion.owner = round.owner;
-    explosion.hit_word = round.shot_seq;
     explosion.radius_override = 0.0f;
     world.explosions.queue_explosion(world, explosion);
 }
@@ -767,7 +766,6 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         explosion.type = ammo->kztype;
         explosion.ammo_index = params.ammo_index;
         explosion.owner = params.owner;
-        explosion.hit_word = params.shot_seq;
         // Every peer that spawns the round queues its kill zone: the push tests
         // no authority, and the drain's own reads keep the damage the
         // authority's (FX-1) [orig: RoundData_SpawnRound @0x4EC1F3..0x4EC20E;

@@ -351,7 +351,7 @@ void spawn_item_explosion(World &world, const Entity *source, const FixedVec3 &p
     if (const auto *ammo=world.tables.ammo.by_index(index)) {
         ExplosionEntry blast;
         blast.pos.set_q16(position); // the words (D-NET-507)
-        blast.ammo_index=index; blast.type=ammo->kztype; blast.hit_word=1;
+        blast.ammo_index=index; blast.type=ammo->kztype;
         if (source) blast.owner=source->handle;
         // The gated entry: off the authority nothing queues [orig:
         //  Entity_SpawnExplosionEffects @0x439A06 -> WeaponEffect_QueueExplosion

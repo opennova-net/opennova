@@ -236,7 +236,6 @@ void queue_named_landing_blast(World &world, const Entity &entity,
         blast.type = ammo->kztype;
     blast.ammo_index = ammo_index;
     blast.owner = entity.handle;
-    blast.hit_word = 1;
     blast.pos = entity.position;
     blast.radius_override = radius;
     // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330, from
@@ -1213,7 +1212,6 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
             blast.type = a->kztype;
         blast.ammo_index = kz_ammo;
         blast.owner = target.handle;
-        blast.hit_word = 1;
         if (traits->kz_points.empty()) {
             blast.pos = target.position;
             // The def's kz, else the bound word in whole units, a signed divide

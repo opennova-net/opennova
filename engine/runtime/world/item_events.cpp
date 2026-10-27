@@ -516,7 +516,6 @@ void queue_class_blast(World &world, const Entity &entity, const char *name, flo
     blast.ammo_index = index;
     blast.type = ammo->kztype;
     blast.owner = entity.handle;
-    blast.hit_word = 1;
     blast.radius_override = radius;
     // The gated entry [orig: WeaponEffect_QueueExplosion @0x4E8330 (@0x4E8333..0x4E8339),
     //  from Entity_ProcessBld2Destruction @0x43F2A6 / @0x43F2C7,

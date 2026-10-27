@@ -2086,7 +2086,6 @@ void test_specialized_piece_physics_callback() {
         CHECK(w.explosions.queue[1].ammo_index == 3);
         for (const ExplosionEntry &blast : w.explosions.queue) {
             CHECK(blast.owner == h);
-            CHECK(blast.hit_word == 1);
             CHECK(blast.radius_override == 2.0f);
             CHECK(to_fixed(blast.pos.z) == 0x7000);
         }
@@ -4248,7 +4247,6 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 		const ExplosionEntry &blast = w.explosions.queue[0];
 		CHECK(blast.ammo_index == 4);
 		CHECK(blast.owner == attacker);
-		CHECK(blast.hit_word == 1);
 		CHECK(blast.radius_override == 0.0f); // the ammo's kz_maxradius
 		CHECK(std::abs(blast.pos.x - 10.0f) < 1.0e-6f);
 		CHECK(std::abs(blast.pos.z - 1.0f) < 1.0e-6f);

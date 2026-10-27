@@ -422,7 +422,6 @@ struct ExplosionEntry {
                                // 4 radius-blast (direct hit), 5 c4, 6 bullets, 7 slash
     int32_t ammo_index = -1;   // into World::ammo
     EntityHandle owner;        // kill credit / cone origin
-    uint16_t hit_word = 0;     // copied to victim+0x1BA
     float radius_override = 0.0f;
 };
 
