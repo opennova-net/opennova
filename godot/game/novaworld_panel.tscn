@@ -209,15 +209,6 @@ text = "ONLINE PLAY"
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="EndpointLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Header"]
-layout_mode = 2
-text = "SERVICE"
-vertical_alignment = 1
-
-[node name="TargetOption" type="OptionButton" parent="Center/Shell/Margin/RootVBox/Header"]
-custom_minimum_size = Vector2(155, 0)
-layout_mode = 2
-
 [node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Header"]
 layout_mode = 2
 text = "Mods"
@@ -456,7 +447,6 @@ theme_override_constants/separation = 8
 layout_mode = 2
 disabled = true
 text = "Host Game"
-tooltip_text = "Hosting is available on OpenNova services."
 
 [node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions"]
 layout_mode = 2

@@ -49,7 +49,6 @@ func _real_root(missions: PackedStringArray, files := {}) -> ResourceRoot:
 func _make_panel(missions: PackedStringArray, files := {}) -> NovaWorldPanel:
 	var panel = PANEL_SCENE.instantiate()
 	panel.start_client_on_ready = false
-	panel.target_override = NovaWorldSettings.Target.OPENNOVA
 	panel.resource_root = _real_root(missions, files)
 	add_child_autofree(panel)
 	return panel
@@ -69,15 +68,14 @@ func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
 	add_child_autofree(viewport)
 	var panel := PANEL_SCENE.instantiate() as NovaWorldPanel
 	panel.start_client_on_ready = false
-	panel.target_override = NovaWorldSettings.Target.OPENNOVA
 	panel.resource_root = _real_root(PackedStringArray())
 	viewport.add_child(panel)
 	return panel
 
 
-# The OpenNova target dials our service's gate (ADR 0010 d2): a source run (this
-# suite) reaches the local stack on loopback, never a live service.
-func test_opennova_target_dials_loopback_in_a_source_run() -> void:
+# The game dials OpenNova's gate alone (ADR 0010 d2, ADR 0075): a source run
+# (this suite) reaches the local stack on loopback, never a live service.
+func test_the_game_dials_loopback_in_a_source_run() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.client_for_test().host, NovaWorldSettings.LOCAL_NOVAWORLD_HOST)
 
@@ -101,17 +99,14 @@ func test_opennova_host_is_the_export_flavours_deployment() -> void:
 	assert_eq(NovaWorldSettings.opennova_host_for("127.0.0.1", false, true), "127.0.0.1")
 
 
-func test_novaworld_host_flag_moves_the_opennova_target_alone() -> void:
+# The developer's --novaworld-host moves the game's gate (the dev stack, a self-run
+# deployment), and the panel offers no other NovaWorld to pick.
+func test_novaworld_host_flag_moves_the_gate_and_no_picker_is_offered() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--novaworld-host", "nw.staging.opennova.net"]))
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.client_for_test().host, "nw.staging.opennova.net")
-	var real = PANEL_SCENE.instantiate()
-	real.start_client_on_ready = false
-	real.target_override = NovaWorldSettings.Target.REAL
-	real.resource_root = _real_root(PackedStringArray())
-	add_child_autofree(real)
-	assert_eq(real.client_for_test().host, NovaWorldSettings.REAL_NOVAWORLD_HOST,
-			"Original NovaWorld is NovaLogic's gate whatever the flag says")
+	assert_null(panel.get_node_or_null("Center/Shell/Margin/RootVBox/Header/TargetOption"),
+			"no NovaWorld choice in the header")
 
 
 func test_map_picker_populates_from_root() -> void:
@@ -819,7 +814,7 @@ func test_host_failed_reports_and_reenables() -> void:
 	assert_false(panel.host_enabled(), "Host starts disabled until the gate connects")
 	panel.host_failed("No mission available to host.")
 	assert_eq(panel.status_text(), "No mission available to host.", "the failure reason is shown")
-	assert_true(panel.host_enabled(), "Host is re-enabled on the OpenNova target")
+	assert_true(panel.host_enabled(), "Host is re-enabled")
 
 
 func test_join_rejection_resolves_menutxt_and_retains_diagnostic_code() -> void:

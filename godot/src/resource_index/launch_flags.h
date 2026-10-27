@@ -76,7 +76,7 @@ public:
 	static String capture_pcap();
 	// 0 = no runtime MCP endpoint.
 	static int mcp_port();
-	// `--novaworld-host <host>`: the OpenNova target's gate; "" = the product's own.
+	// `--novaworld-host <host>`: the gate the game's NovaWorld menu dials; "" = the build's own.
 	static String novaworld_host();
 	// `--novaworld-join <rid>`: the NovaWorld server to join once listed; 0 = none.
 	static int novaworld_join();

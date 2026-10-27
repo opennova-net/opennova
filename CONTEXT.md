@@ -276,7 +276,8 @@ _Avoid_: task, message, event
 **Realm**:
 One NovaWorld: one deployment of the service with its own gate address and database.
 Retail picks a NovaWorld by the address its hosts file gives `gs.novaworld.net`, so a realm
-is never a column inside another realm's tables.
+is never a column inside another realm's tables. OpenNova's runtime picks none: it dials its
+build's own realm alone (ADR 0075).
 _Avoid_: shard, tenant (for a realm inside one database), region
 
 **Browser**:

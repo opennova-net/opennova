@@ -162,13 +162,14 @@ serves all three. In the editor's folder, whose `OPENNOVA.WIZ` names `ONEDITOR`,
 A build talks to its export mode's deployment (DEPLOY.md "Deployments: dev, staging and
 prod"). A release build (`scripts/package_godot_windows.ps1`'s default: tagged releases
 and master pushes) is published to prod, whose service names `update.opennova.net` in its
-`OPENNOVA.WIZ`, and its NovaWorld menu's OpenNova target dials `nw.opennova.net`. A debug
+`OPENNOVA.WIZ`, and its NovaWorld menu dials `nw.opennova.net`. A debug
 build (`-ExportMode debug`: what PR CI builds and publishes to staging) updates from
 `update.staging.opennova.net` and dials `nw.staging.opennova.net`, so testing a PR's
 build never touches production. The update host is the `URL=` of the `OPENNOVA.WIZ` the
 deployment's service writes into the package; the gate is the exported build's own
-(`NovaWorldSettings.opennova_host`). A source run's NovaWorld target dials loopback
-("Test with our Godot game").
+(`NovaWorldSettings.opennova_host`). A source run's NovaWorld menu dials loopback
+("Test with our Godot game"). The game offers no other NovaWorld: it never dials
+NovaLogic's (ADR 0075).
 
 Every game (ADR 0071) has its OpenNova Editor project in NovaWorld (ADR 0069), never in a
 repository: OP: Acid Gambit's and its expansion OP: Nifty Package's (with their Blender
@@ -428,7 +429,7 @@ Notes:
 1. Build the GDExtension (above) and run the project:
    `$GODOT_BIN --path godot -- /game jo --resource-dir <game dir> --no-update`.
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
-   `NovaWorldClient` whose OpenNova target probes the local gate at `127.0.0.1:7597` in a
+   `NovaWorldClient` that probes the local gate at `127.0.0.1:7597` in a
    source run (`NovaWorldSettings.opennova_host`; a release export dials the live service,
    `nw.opennova.net`, and a debug export staging's, `nw.staging.opennova.net`), runs the
    session handshake against the dev server, fills the server browser, and exposes **Host

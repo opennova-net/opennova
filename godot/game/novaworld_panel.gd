@@ -25,7 +25,6 @@ extends Control
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
 @export var start_client_on_ready := true
-@export var target_override := -1
 
 signal closed()
 # The NWJoin handshake resolved the in-match host:port — enter the match as a JOINER. The arg is
@@ -63,7 +62,6 @@ var _host_button: Button
 var _join_button: Button
 var _close_button: Button
 var _refresh_button: Button
-var _target_option: OptionButton
 var _username_edit: LineEdit
 var _password_edit: LineEdit
 var _login_button: Button
@@ -75,7 +73,6 @@ var _hide_empty_check: CheckBox
 var _hide_locked_check: CheckBox
 var _details_label: Label
 var _roster_list: ItemList
-var _target: int = NovaWorldSettings.Target.OPENNOVA
 var _rows: Array[NovaWorldServerRow] = []   # the full GSB row set
 var _view: Array[NovaWorldServerRow] = []   # the filtered + sorted rows the table shows
 # rid -> ping: a round-trip in ms, or NovaWorldServerBrowser.PING_FAILED /
@@ -149,7 +146,6 @@ var _mods_return_screen := Screen.CONNECTING
 
 
 func _ready() -> void:
-	_target = target_override if target_override >= 0 else NovaWorldSettings.load_target()
 	_bind_scene_ui()
 	_set_screen(Screen.CONNECTING)
 	_create_client(start_client_on_ready)
@@ -157,7 +153,6 @@ func _ready() -> void:
 
 func _bind_scene_ui() -> void:
 	var base := "Center/Shell/Margin/RootVBox/"
-	_target_option = get_node(base + "Header/TargetOption")
 	_close_button = get_node(base + "Header/BackButton")
 	_status_label = get_node(base + "StatusLabel")
 	var pages := base + "Pages/"
@@ -198,11 +193,6 @@ func _bind_scene_ui() -> void:
 	_mod_update_button = get_node(pages + "ModsView/ModsActions/UpdateButton")
 	_mod_remove_button = get_node(pages + "ModsView/ModsActions/RemoveButton")
 
-	_target_option.clear()
-	_target_option.add_item("OpenNova", NovaWorldSettings.Target.OPENNOVA)
-	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
-	_target_option.select(_target_option.get_item_index(_target))
-	_target_option.item_selected.connect(_on_target_selected)
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
 	# The sign-in page's REMEMBER_LOGIN checkbox (JO's and DFX2's templates' "Remember my login
@@ -397,7 +387,9 @@ func _create_client(start_now: bool = true) -> void:
 	# The session socket scans the process's cfg block's mpnovaworld quad.
 	_client.set_game_config(GameCfgStore.block())
 	add_child(_client)
-	_client.host = _resolved_host()
+	# The game's NovaWorld is OpenNova's alone (ADR 0075): the build's own deployment
+	# (NovaWorldSettings.opennova_host).
+	_client.host = NovaWorldSettings.opennova_host()
 	_client.gate_port = gate_port
 	_client.player_name = player_name
 	_client.gametext = Strings.get_table(Strings.TABLE_GAMETEXT)
@@ -441,22 +433,6 @@ func _unwire_client(client: NovaWorldClient) -> void:
 		var handler: Callable = handlers[signal_name]
 		if client.is_connected(signal_name, handler):
 			client.disconnect(signal_name, handler)
-
-
-# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: prod's in
-# a release export, staging's in a debug one, loopback in a source run,
-# --novaworld-host over all three). "Original NovaWorld" points the same client at NovaLogic's live gate
-# (gs.novaworld.net), which no flag moves.
-func _resolved_host() -> String:
-	if _target == NovaWorldSettings.Target.REAL:
-		return NovaWorldSettings.REAL_NOVAWORLD_HOST
-	return NovaWorldSettings.opennova_host()
-
-
-func _on_target_selected(index: int) -> void:
-	_target = _target_option.get_item_id(index)
-	NovaWorldSettings.save_target(_target)
-	_reconnect()
 
 
 func _reconnect() -> void:
@@ -853,7 +829,7 @@ func _on_login_succeeded(nwhandle: String) -> void:
 	_signing_in = false
 	_login_button.disabled = true
 	_password_edit.clear()
-	_host_button.disabled = _target == NovaWorldSettings.Target.REAL
+	_host_button.disabled = false
 	_rows.clear()
 	_pings.clear()
 	_browser_loading = true
@@ -1030,14 +1006,9 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 
 # Host a NovaWorld game on this logged-in session: the client sends ClientHostRequest and waits for
 # the service's ServerHostResult; only a hosting session hands the request up to MainGame, which
-# loads the mission as a listen host. We host on the OpenNova gate only — never advertise a host on
-# NovaLogic's live service.
+# loads the mission as a listen host.
 func _on_host_pressed() -> void:
 	if not _logged_in and start_client_on_ready:
-		return
-	if _target == NovaWorldSettings.Target.REAL:
-		_show_message("Hosting is available on OpenNova servers only.", "Back to Games",
-				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var mission := _selected_mission()
 	if mission.is_empty():
@@ -1134,7 +1105,7 @@ func _populate_missions() -> void:
 # by the game's command file: JOPTR.CMD, DFX2.CMD, ACIDGAMBIT.CMD or a player
 # game's), each installed into expansion/<code>/ by the updater: Install writes
 # that folder's UPDATE.WIZ and runs UPDATE, Update runs UPDATE, Remove deletes
-# the folder. The site is the OpenNova target's (NovaWorldSettings.web_base). The
+# the folder. The site is the game's NovaWorld's (NovaWorldSettings.web_base). The
 # runtime holds no web session of the account, so its owner's private mods are
 # not listed here.
 
@@ -1753,7 +1724,7 @@ func _selected_mission() -> String:
 
 
 # Called by MainGame when a requested host could not start (no mission, load failed). Reports it on
-# the panel instead of leaving the stale "Starting..." status, and re-enables Host (REAL stays off).
+# the panel instead of leaving the stale "Starting..." status, and re-enables Host.
 func host_failed(reason: String) -> void:
 	# A hosting the service granted but the shell could not start is left again.
 	if _client != null and _client.is_hosting():
@@ -1761,7 +1732,7 @@ func host_failed(reason: String) -> void:
 	_set_status(reason)
 	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 	if _host_button != null:
-		_host_button.disabled = (_target == NovaWorldSettings.Target.REAL)
+		_host_button.disabled = false
 
 
 func _on_close_pressed() -> void:
