@@ -21,6 +21,7 @@
 // Every items.def / charattr.def row is the test's own; core-only, heap-held worlds.
 
 #include <formats/def/def.h>
+#include "common/effect_producers.h"
 #include <runtime/hud/tip_system.h> // kTipEventDetach (the local seat leave)
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/mission/item_traits.h>
@@ -476,6 +477,8 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	CHECK(body != nullptr);
 	if (body == nullptr) return out;
 	const w::EntityHandle victim = body->handle;
+	// The hit's emitter spawns where the hit runs, into the world's scene (D-PTL-26).
+	const auto scene = test_effects::open_producers(*r.world, {"Effect_Burn"});
 	body->bound_radius = 1.0f;
 	body->team = 1;
 	body->health = health;
@@ -518,10 +521,7 @@ RoundHitOutcome fire_one_round(uint8_t player_class, int32_t health, bool dead, 
 	r.world->collision = nullptr;
 	out.struck = r.world->round_sim.hit_record.target == victim;
 	out.shake = r.local->view.shake.counter;
-	for (const w::DestructionEffectEvent &effect : r.world->out.destruction.effects)
-		if (effect.family == 1 && !effect.release && effect.attach_wire_handle == victim.packed &&
-				effect.effect == "Effect_Burn")
-			++out.burn_spawns;
+	out.burn_spawns = test_effects::groups_named(*scene, "Effect_Burn");
 	const w::Entity *hit = r.world->registry.get(victim);
 	if (hit == nullptr) return out;
 	out.death_anim_state = hit->death_anim_state;

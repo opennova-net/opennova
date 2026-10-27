@@ -531,17 +531,12 @@ void DestructionPresenter::apply_effect(const opennova::world::DestructionEffect
 		// spawn under the slot key, with no owner pose to follow.
 		unregister_effect_anchor(key);
 		wreck_anchor_keys_.erase(key);
+		// A wire-built body's hit emitter (engine world/wire_person_hit.h); a world entity's
+		// spawns in the engine, into its +0x1CC slot (ItemEmitterSystem::store_positioned_emitter).
 		Ref<EffectSpawnOptions> options;
 		options.instantiate();
-		if (p_effect.entity_slot != 0) {
-			// The entity's +0x1CC slot, which the script effects share; the engine released what
-			// it held ahead of this spawn (engine world/item_effects.h entity_effect_slot).
-			options->set_admission(EffectWorld::ADMISSION_STORE_OWNED);
-			options->set_entity_slot(static_cast<int64_t>(p_effect.entity_slot));
-		} else {
-			options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
-			options->set_slot_key(key);
-		}
+		options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
+		options->set_slot_key(key);
 		options->set_section_tagged(p_effect.section_tagged);
 		const Ref<EffectSpawnReceipt> receipt = fx_world->spawn_effect_request(effect,
 				EffectWorld::descriptor_pose(pos, mission_to_godot(p_effect.dir)), options);

@@ -28,6 +28,7 @@ namespace opennova::world {
 class World;
 struct Entity;
 struct ItemDeathTraits;
+struct ScriptEffectEvent;
 
 // The entity row's one effect group pointer, entity+0x1CC (the IDB's ownerSession), as a scene
 // slot (D-PTL-26). Every producer that stores a group there stores it in this slot: the mission
@@ -71,10 +72,34 @@ public:
     // Detach what the entity's slot holds, whoever stored it.
     void release_slot(const Entity &entity);
     // The emit owners' poses, and the release of every held slot whose row was destroyed or
-    // taken by another entity since.
+    // taken by another entity since; open, the script effects a restore queued again spawn here.
     void sync_owners(World &world);
     void reset();
+
+    // The producers the world spawns at their event time, into the scene and in the tick's order
+    // with the emit class's toggle and every release of the slot (D-PTL-26): the script effects
+    // (fx2ssn, fx2tgt, fxrain, the marker action) and the +0x1CC positioned emitters (a hit's, a
+    // corpse's decay). They spawn once the embedder opens its scene to them. Closed (a headless
+    // kernel, a dedicated host, a mission start until the embedder's warm reset), a script effect
+    // queues on World::out.script_effects, which the open spawns in order or a dedicated host
+    // drains unshown, and a positioned emitter spawns nowhere, as a device with no effect system's
+    // spawn returns none. `effect_names` are the script catalog's names, interned into the scene
+    // first so a BMS by-name lookup finds the stock clones the compile registered.
+    void open_producers(World &world, const std::vector<std::string> &effect_names);
+    // A mission start closes them until its embedder's open.
+    void close_producers() { producers_open_ = false; }
+    bool producers_open() const { return producers_open_ && scene_ != nullptr; }
+    // A script effect at its event time (open), or queued (closed). Its slot store is held either
+    // way: the row's destroy or reuse releases it.
+    void submit_script_effect(World &world, const ScriptEffectEvent &event);
+    // The entity's +0x1CC positioned emitter (a hit's ammo secondary effect, a corpse's decay):
+    // what the slot holds is released, whoever stored it, then `effect` spawns at the entity's
+    // position, oriented (0, 0, -0.5) and tagged with the entity, and is stored in the slot, where
+    // it stays put (no walk re-poses a person's +0x1CC emitter).
+    void store_positioned_emitter(World &world, const Entity &entity, const std::string &effect);
 private:
+    void spawn_script_effect(World &world, const ScriptEffectEvent &event);
+    void spawn_queued_script_effects(World &world);
     struct Binding {
         uint16_t handle = 0xFFFF;
         uint64_t lifetime = 0;
@@ -90,6 +115,7 @@ private:
     std::vector<HeldSlot> held_;
     uint64_t next_owner_ = 1;
     bool owns_clock_ = false;
+    bool producers_open_ = false;
 };
 
 // The original walks entity pools 1-3 with distinct attrib masks; `kind` is

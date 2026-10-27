@@ -734,20 +734,10 @@ bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
 //  @0x4B4E27, the call @0x4B4E39, the store @0x4B4E41]
 static void spawn_corpse_decay(World &world, Entity &entity, const std::string &effect_name) {
     release_corpse_effect(world, entity);
-    DestructionEffectEvent effect;
-    effect.effect = effect_name;
-    effect.pos = entity.position;
-    effect.dir = {0.0f, 0.0f, -0.5f};
-    effect.attach_net_id = entity.net_id;
-    effect.attach_bms_id = entity.bms_id;
-    effect.attach_wire_handle = entity.handle.packed;
-    effect.attach_spawn_origin = entity.spawn_origin;
-    effect.family = 1;
-    effect.section_tagged = true;
-    effect.positioned = true;
-    effect.entity_slot = entity_effect_slot(entity.handle.packed).value;
+    // The decay spawns where the corpse leg runs, in the tick's order with every other producer
+    // of the slot (ItemEmitterSystem::store_positioned_emitter, D-PTL-26).
+    world.item_emitters.store_positioned_emitter(world, entity, effect_name);
     entity.death_effect_active[0] = 1;
-    world.out.destruction.effects.push_back(std::move(effect));
 }
 
 // Corpse expiry is the shared destroy: the facial slot, scar entries and incoming references go

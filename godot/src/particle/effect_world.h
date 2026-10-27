@@ -152,7 +152,9 @@ public:
 	// the next Play reuses every load-time warm result.
 	void reset_runtime_state();
 	int64_t intern_effect(const String &p_name);
-    void spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks);
+    // The engine spawned into the shared native scene (the world's producers, D-PTL-26): the
+    // render snapshot is read again.
+    void invalidate_scene_snapshot();
 	String effect_name_for_handle(int64_t p_handle) const;
 
 	// The effect pose for an authored forward vector: Z along the forward,

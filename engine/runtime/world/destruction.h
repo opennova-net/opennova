@@ -453,11 +453,10 @@ struct DestructionEffectEvent {
 	// @ 0x5F6DF0, the tag store @ 0x5F6EFB].
 	bool section_tagged = false;
 	// A slot-held group that stays where it spawned: the slot keeps only its
-	// handle for the next release (spawn_victim_hit_emitter).
+	// handle for the next release (a wire-built body's hit emitter,
+	// spawn_wire_person_hit_emitter; a world entity's spawns in the engine,
+	// ItemEmitterSystem::store_positioned_emitter).
 	bool positioned = false;
-	// The entity's +0x1CC slot (entity_effect_slot's token value) the positioned group is stored
-	// in, the one the script effects share (D-PTL-26); 0 = none.
-	uint64_t entity_slot = 0;
 };
 
 struct DestructionEvents;
@@ -486,8 +485,10 @@ void update_dead_wreck_effects(World &world, Entity &entity, const ItemDeathTrai
 		float water_height, DestructionEvents &events);
 void release_death_effect_bank(Entity &entity, uint8_t family, DestructionEvents &events);
 // A blast victim's hit emitter: the ammo's secondary effect replaces whatever
-// the victim's +0x1CC emitter (the death family's slot 0) holds.
-void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
+// the victim's +0x1CC emitter (the death family's slot 0) holds. It spawns
+// into the world's effect scene where the hit runs
+// (ItemEmitterSystem::store_positioned_emitter).
+void spawn_victim_hit_emitter(World &world, Entity &victim, const std::string &effect,
 		DestructionEvents &events);
 
 struct DestructionSoundEvent {

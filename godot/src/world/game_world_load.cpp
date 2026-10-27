@@ -494,7 +494,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 		timeline->end_span();
 	}
 	timeline->span("script_effects");
-	route_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
+	open_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
 	timeline->end_span();
 	// The load end past the mission start: a host's S2C 0x7B and the spawn gate's clear
 	// (engine inmatch::end_host_mission_load).

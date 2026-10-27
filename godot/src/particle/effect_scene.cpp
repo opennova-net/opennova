@@ -1,5 +1,4 @@
 #include "particle/effect_scene.h"
-#include <runtime/particle/script_effects.h>
 #include "particle/effect_load_report.h"
 #include "particle/effect_spawn_records.h"
 #include "particle/particle_convert.h"
@@ -195,14 +194,6 @@ Ref<EffectLoadReport> EffectScene::open(
 	result->assign(report, static_cast<int>(p_files.size()),
 			static_cast<int>(ignored_document_count));
 	return result;
-}
-
-void EffectScene::spawn_script_effect(const opennova::world::ScriptEffectEvent &event,
-        int64_t slot, int64_t owner, uint32_t age_ticks, float water_height,
-        const opennova::particle::EffectSectionGate &gate) {
-    opennova::particle::spawn_script_effect(*scene_, event,
-            {token_from_godot(slot)}, {token_from_godot(owner)}, age_ticks, water_height, gate);
-    snapshot_dirty_ = true;
 }
 
 int64_t EffectScene::intern(const String &p_effect_name) {

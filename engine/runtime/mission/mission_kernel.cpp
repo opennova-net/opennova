@@ -950,6 +950,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 bool MissionKernel::begin_mission_start() {
 	if (!premission_pending) return false;
 	premission_pending = false;
+	// The start's script effects queue until the embedder's open past its warm reset
+	// (world::ItemEmitterSystem::open_producers); a headless kernel's stay queued.
+	world.item_emitters.close_producers();
 	// Only authority runs the PreMission whole-list pass. A joiner can
 	// carry a full BMS in a tool session without replaying its actions.
 	// [orig: Game_StartMission @0x525b86, g_NapiNPCtx.is_authority gate @0x525B78]

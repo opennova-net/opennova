@@ -138,18 +138,15 @@ void spawn_death_effect_banks(
 // [orig: Projectile_ProcessExplosionQueue @0x4EB1FA..0x4EB292 — the release
 // @0x4EB20A..0x4EB224, the descriptor @0x4EB22A..0x4EB283 (flags 1, tag
 // @0x4EB263, orientation z 0xFFFF8000 @0x4EB278), the store @0x4EB292]
-void spawn_victim_hit_emitter(Entity &victim, const std::string &effect,
+void spawn_victim_hit_emitter(World &world, Entity &victim, const std::string &effect,
 		DestructionEvents &events) {
 	if ((victim.death_effect_active[0] & 1u) != 0)
 		stop_slot(victim, 1, 0, events);
-	auto event = attached(victim, 1, 0);
-	event.effect = effect;
-	event.dir = { 0.0f, 0.0f, -0.5f };
-	event.section_tagged = true;
-	event.positioned = true;
-	event.entity_slot = entity_effect_slot(victim.handle.packed).value;
+	// The release, the descriptor and the store, in the hit's place in the tick: the slot is
+	// the one every +0x1CC producer shares, so a script effect stored there earlier in the tick
+	// goes too (D-PTL-26).
+	world.item_emitters.store_positioned_emitter(world, victim, effect);
 	victim.death_effect_active[0] |= 1u;
-	events.effects.push_back(std::move(event));
 }
 
 // [orig: Entity_TransitionToGroundDeath @0x493080; Entity_RespawnVehicle @0x45FF40]

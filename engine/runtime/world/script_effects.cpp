@@ -37,12 +37,11 @@ std::array<int32_t, 3> direction(const World &world, const Entity &entity) {
     return {int32_t((int64_t(cp) * cy) >> 28), int32_t((int64_t(cp) * sy) >> 28), sp >> 6};
 }
 
+// The effect spawns where the command runs, in the tick's order with every other producer of the
+// entity's +0x1CC slot (world::ItemEmitterSystem::submit_script_effect, D-PTL-26).
 void emit(World &world, ScriptEffectEvent event) {
-    // The slot the embedder stores the group in: its row's destroy releases it.
-    if (event.store_slot)
-        if (const Entity *entity = world.registry.get(event.owner)) world.item_emitters.hold_slot(*entity);
     event.source_order = world.out.next_script_effect_order++;
-    world.out.script_effects.push_back(std::move(event));
+    world.item_emitters.submit_script_effect(world, event);
 }
 } // namespace
 

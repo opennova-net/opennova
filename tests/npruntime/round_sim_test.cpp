@@ -1629,6 +1629,23 @@ bool test_an_incendiary_hit_burns_the_body() {
 	};
 	{
 		DismembermentRig rig(3);
+		// The world's effect scene, open to its producers: the hit's emitter spawns where the hit
+		// runs (world::ItemEmitterSystem::store_positioned_emitter, D-PTL-26).
+		namespace p = opennova::particle;
+		p::EffectSceneConfig config;
+		config.documents.push_back({"burn.ptl", {}});
+		p::ParticleDef burn;
+		burn.id = "burn";
+		burn.flags = p::particle_flag::ForeverEmit;
+		burn.emit_burst = 1;
+		burn.emit_rate = 20;
+		burn.age = 0.05f;
+		config.documents[0].file.particles.push_back(burn);
+		config.documents[0].file.effects.push_back({"Effect_Burn", {"burn"}});
+		auto scene = std::make_shared<p::EffectScene>();
+		scene->open(config);
+		rig.world.item_emitters.bind_scene(scene);
+		rig.world.item_emitters.open_producers(rig.world, {});
 		rig.world.tables.ammo.entries[0].secondary_effect = "Effect_Burn";
 		w::Entity *victim = rig.world.registry.get(rig.victim);
 		victim->health = 100;
@@ -1636,13 +1653,20 @@ bool test_an_incendiary_hit_burns_the_body() {
 		rig.ai.for_handle(rig.victim)->health = 100;
 		rig.fire();
 		const auto events = burn_events(rig.world, rig.victim);
-		if (!expect(victim->health == 90 && events.size() == 2 && events[0].release &&
-		                    !events[1].release && events[1].effect == "Effect_Burn" &&
-		                    events[1].dir.z == -0.5f && events[1].section_tagged && events[1].positioned,
-		            "a non-lethal incendiary hit releases the body's emitter and attaches its own"))
+		if (!expect(victim->health == 90 && events.size() == 1 && events[0].release,
+		            "a non-lethal incendiary hit releases the body's earlier emitter"))
 			return false;
-		// Its own goes to the body's +0x1CC slot, the one the script effects share (D-PTL-26).
-		if (!expect(events[1].entity_slot == w::entity_effect_slot(rig.victim.packed).value,
+		// Its own spawns at once in the body's +0x1CC slot, the one the script effects share,
+		// at the body, oriented (0, 0, -0.5) and tagged with it.
+		const p::EffectGroupId group = scene->slot_group(w::entity_effect_slot(rig.victim.packed));
+		bool stored = false;
+		for (const auto &row : scene->inspect(false).groups) {
+			if (row.id != group) continue;
+			stored = row.effect_name == "Effect_Burn" && row.section_gate.tagged &&
+			         row.admission == p::EffectAdmission::StoreOwned &&
+			         row.pose.forward.y < -0.99f;
+		}
+		if (!expect(static_cast<bool>(group) && stored,
 		            "the incendiary hit's emitter is stored in the body's entity slot"))
 			return false;
 		if (!expect((victim->death_effect_active[0] & 1u) != 0 &&

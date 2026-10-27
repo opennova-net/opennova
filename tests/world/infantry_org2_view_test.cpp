@@ -20,6 +20,7 @@
 //  halving @0x4B4921..0x4B4942]
 // Core-only: every value is the test's own; the World is heap-held.
 #include <base/io/bam.h>
+#include "common/effect_producers.h"
 #include <formats/def/def.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
@@ -481,7 +482,8 @@ void test_dead_tail_through_the_tick() {
 
 // D-NET-NEW-L5-55: the player body's corpse leg, after its dead tail, every tick its dead bit is
 // latched. The timer drops by one a tick. At 186 the def's decay spawns once into the corpse's
-// +0x1CC slot (oriented (0, 0, -0.5), tagged with the corpse, positioned). At 0 the timer stays
+// +0x1CC slot (oriented (0, 0, -0.5), tagged with the corpse, positioned), where the leg runs, into
+// the world's scene (world::ItemEmitterSystem::store_positioned_emitter). At 0 the timer stays
 // 0 and the body stays. A LeaveCorpse def keeps its timer. Section bit 0 overrides LeaveCorpse,
 // spawns no decay and destroys the body at 0. A live body's timer is left alone.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B4D63..0x4B4E71]
@@ -507,6 +509,7 @@ void test_corpse_leg_through_the_tick() {
 		body.section_mask = kind == Kind::kSilent ? 1u : 0u;
 		body.corpse_timer = kTimer;
 		const w::EntityHandle bh = world.registry.spawn(0, body);
+		const auto scene = test_effects::open_producers(world, {"corpse_decay"});
 		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
 		CHECK(ae != nullptr);
 		if (ae == nullptr) continue;
@@ -515,14 +518,17 @@ void test_corpse_leg_through_the_tick() {
 		int decays = 0, decay_tick = -1;
 		bool destroyed = false;
 		for (int t = 1; t <= kTimer + 2 && !destroyed; ++t) {
+			const int before = test_effects::groups_named(*scene, "corpse_decay");
 			world.ai.tick_infantry(*ae, world, static_cast<uint32_t>(t));
-			for (const w::DestructionEffectEvent &effect : world.out.destruction.effects) {
-				if (effect.effect != "corpse_decay") continue;
+			if (test_effects::groups_named(*scene, "corpse_decay") > before) {
 				++decays;
 				decay_tick = t;
-				CHECK(effect.family == 1 && effect.attach_wire_handle == bh.packed);
-				CHECK(effect.dir.x == 0.0f && effect.dir.y == 0.0f && effect.dir.z == -0.5f);
-				CHECK(effect.section_tagged && effect.positioned && !effect.release);
+				const auto row = test_effects::slot_row(*scene, bh);
+				CHECK(row.has_value() && row->effect_name == "corpse_decay");
+				CHECK(row && row->pose.forward.x == 0.0f && row->pose.forward.y == -1.0f &&
+				      row->pose.forward.z == 0.0f);
+				CHECK(row && row->section_gate.tagged &&
+				      row->admission == opennova::particle::EffectAdmission::StoreOwned);
 			}
 			world.out.destruction.effects.clear();
 			destroyed = world.registry.get(bh) == nullptr;

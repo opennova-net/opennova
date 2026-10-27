@@ -431,27 +431,8 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	return receipt;
 }
 
-void EffectWorld::spawn_script_effect(const opennova::world::ScriptEffectEvent &event, uint32_t age_ticks) {
-    if (particles_disabled_) return;
-    const String key = vformat("script_entity:%d", int(event.owner.packed));
-    // The entity's +0x1CC slot, the one every producer storing there shares (engine
-    // world/item_effects.h entity_effect_slot carries the witness, D-PTL-26).
-    const int64_t slot = event.store_slot ? static_cast<int64_t>(event.slot) : 0;
-    const int64_t owner = event.owner.valid() ? _owner_token_for(key) : 0;
-    // Every script handler tags its descriptor with its entity
-    // (particle::spawn_script_effect); the blink query runs at the
-    // descriptor's mission position.
-    opennova::particle::EffectSectionGate gate;
-    gate.tagged = true;
-    if (Simulation *source = _section_source()) {
-        const std::array<float, 3> mission_position = {
-                opennova::io::fp16_16_to_float(event.position[0]),
-                opennova::io::fp16_16_to_float(event.position[1]),
-                opennova::io::fp16_16_to_float(event.position[2])};
-        EffectSectionSource(source).blink_hits(mission_to_godot(mission_position),
-                gate.blink_hits);
-    }
-    scene_->spawn_script_effect(event, slot, owner, age_ticks, water_height_, gate);
+void EffectWorld::invalidate_scene_snapshot() {
+    scene_->invalidate_snapshot();
 }
 
 Simulation *EffectWorld::_section_source() const {

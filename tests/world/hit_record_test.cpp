@@ -7,6 +7,7 @@
 // [orig: Entity_KillByNetId @0x43DBD0; Entity_KillAllByNetId @0x43C8E0;
 //  WacCmd_KillSsn @0x4F1E40; OrganicClass_HandleEvent @0x407310]
 #include <cstdio>
+#include "common/effect_producers.h"
 #include <memory>
 #include <variant>
 #include <vector>
@@ -304,6 +305,8 @@ static void test_class_event_4_restages_the_death_clip() {
 //  AmmoDef_ParseProperty `secondary_effect` -> +0x48 @0x40AA36]
 static void test_an_incendiary_round_spawns_its_emitter_and_the_fire_death() {
     KillRig rig;
+    // The hit's emitter spawns where the hit runs, into the world's scene (D-PTL-26).
+    const auto scene = test_effects::open_producers(*rig.w, {"Effect_Burn"});
     rig.w->tables.ammo.entries[0].secondary_effect = "Effect_Burn";
     rig.victim().death_effect_active[0] = 1; // an earlier hit's emitter in +0x1CC
     rig.record_round(3);
@@ -313,12 +316,10 @@ static void test_an_incendiary_round_spawns_its_emitter_and_the_fire_death() {
         if (effect.family == 1 && effect.bank_slot == 0 &&
                 effect.attach_wire_handle == rig.npc.packed)
             slot0.push_back(effect);
-    CHECK(slot0.size() == 2);
-    if (slot0.size() == 2) {
-        CHECK(slot0[0].release);
-        CHECK(!slot0[1].release && slot0[1].effect == "Effect_Burn" &&
-              slot0[1].dir.z == -0.5f && slot0[1].section_tagged && slot0[1].positioned);
-    }
+    CHECK(slot0.size() == 1 && slot0[0].release);
+    const auto row = test_effects::slot_row(*scene, rig.npc);
+    CHECK(row.has_value() && row->effect_name == "Effect_Burn" && row->section_gate.tagged &&
+          row->pose.forward.y == -1.0f);
     CHECK((rig.victim().death_effect_active[0] & 1u) != 0);
     CHECK(rig.victim().death_anim_state == anim_state::kDeathFire);
     CHECK(rig.pieces() == 1);

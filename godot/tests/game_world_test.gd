@@ -1043,7 +1043,8 @@ func test_fx2ssn_executes_with_entity_orientation_and_restores_on_retry() -> voi
 		return
 	var spawn: EffectGroupReport = rows[0]
 	assert_eq(spawn.name, FX_PERSISTENT_EFFECT)
-	assert_true(String(spawn.owner_key).begins_with("script_entity:"))
+	# The engine spawns it where the command runs, World-bound under no owner (D-PTL-26).
+	assert_null(spawn.owner_key, "a World-bound script group follows no owner")
 	assert_eq(spawn.binding, EffectScene.BINDING_WORLD)
 	assert_almost_eq(spawn.transform.origin.x, 6.0, 0.01)
 	assert_almost_eq(spawn.transform.origin.z, -4.0, 0.01)

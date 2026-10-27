@@ -3,6 +3,7 @@
 // destructible death chain (husk flags + events + the kz chain blast), the
 // death-piece pool, and the dead-item settle. Driven by a manual World.
 #include <cmath>
+#include "common/effect_producers.h"
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -388,8 +389,9 @@ void test_explosion_sweep_runs_on_words() {
 // Every pool-0 victim the blast admits with its damage word clear takes the
 // ammo's kz_sound at full volume and its secondary_effect into its +0x1CC
 // slot: at the victim, oriented (0, 0, -0.5), tagged, never re-posed, and a
-// held emitter releases first. [orig: Projectile_ProcessExplosionQueue
-// @0x4EB1DA..0x4EB292]
+// held emitter releases first. The emitter spawns where the blast runs, into
+// the world's scene (world::ItemEmitterSystem::store_positioned_emitter,
+// D-PTL-26). [orig: Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292]
 void test_blast_victim_hit_emitter_and_kz_sound() {
     auto w_heap = std::make_unique<World>();
     World &w = *w_heap;
@@ -407,21 +409,27 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     seed.position = Vec3{3.0f, 4.0f, 0.5f};
     seed.bound_radius = 0.6f;
     const EntityHandle victim = w.registry.spawn(0, seed);
+    const auto scene = test_effects::open_producers(w, {"Effect_Burn"});
     ExplosionEntry e;
     e.pos = seed.position;
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
     w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
-    const std::vector<DestructionEffectEvent> &fx = w.out.destruction.effects;
-    CHECK(fx.size() == 1);
-    if (fx.size() == 1) {
-        CHECK(fx[0].effect == "Effect_Burn");
-        CHECK(fx[0].family == 1 && fx[0].bank_slot == 0 && !fx[0].release);
-        CHECK(fx[0].positioned && fx[0].section_tagged);
-        CHECK(fx[0].attach_wire_handle == victim.packed);
-        CHECK(fx[0].pos.x == 3.0f && fx[0].pos.y == 4.0f && fx[0].pos.z == 0.5f);
-        CHECK(fx[0].dir.x == 0.0f && fx[0].dir.y == 0.0f && fx[0].dir.z == -0.5f);
+    // No emitter was held, so no release; the hit's own is in the scene, not a presenter row.
+    CHECK(w.out.destruction.effects.empty());
+    const auto row = test_effects::slot_row(*scene, victim);
+    CHECK(row.has_value());
+    if (row) {
+        CHECK(row->effect_name == "Effect_Burn");
+        CHECK(row->admission == opennova::particle::EffectAdmission::StoreOwned);
+        CHECK(row->binding == opennova::particle::EffectBinding::World);
+        CHECK(row->section_gate.tagged);
+        // The scene's frame is mission (x, z, -y).
+        CHECK(row->pose.position.x == 3.0f && row->pose.position.y == 0.5f &&
+              row->pose.position.z == -4.0f);
+        CHECK(row->pose.forward.x == 0.0f && row->pose.forward.y == -1.0f &&
+              row->pose.forward.z == 0.0f);
     }
     CHECK((w.registry.get(victim)->death_effect_active[0] & 1u) != 0);
     const std::vector<ReadyFireSound> sounds = w.out.fire_sounds.drain();

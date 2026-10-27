@@ -678,7 +678,7 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
     //  @0x407843..0x4078B2; AmmoDef_ParseProperty -> +0x48 @0x40AA36]
     const bool hit_emitter = ammo != nullptr && !ammo->secondary_effect.empty();
     if (hit_emitter)
-        spawn_victim_hit_emitter(victim, ammo->secondary_effect, world.out.destruction);
+        spawn_victim_hit_emitter(world, victim, ammo->secondary_effect, world.out.destruction);
     const bool dead = ((victim.flags | victim.engine_flags) & kEntityFlagDead) != 0;
     // [orig: the torso-stack roll @0x40755E..0x407575]
     if (!dead) apply_hit_body_roll(victim, record.section, quadrant);
@@ -1473,7 +1473,8 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
                         if (hit_emitter)
-                            spawn_victim_hit_emitter(*target, ammo->secondary_effect, world.out.destruction);
+                            spawn_victim_hit_emitter(world, *target, ammo->secondary_effect,
+                                    world.out.destruction);
                         if (target_not_dead) apply_hit_body_roll(*target, death_section, quadrant);
                         // The plyr callback's health tail, then its 64-tick re-arm around the
                         // waypoint tail [orig: Entity_HandleDamageAndTriggerZones - @0x407ACD..0x407B33,

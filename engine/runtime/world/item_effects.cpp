@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <base/io/bam.h>
+#include <runtime/particle/script_effects.h>
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/angle.h>
@@ -146,7 +147,84 @@ ItemEmitterSystem &ItemEmitterSystem::operator=(ItemEmitterSystem &&other) noexc
     held_ = std::move(other.held_);
     next_owner_ = other.next_owner_;
     owns_clock_ = other.owns_clock_;
+    producers_open_ = other.producers_open_;
     return *this;
+}
+
+namespace {
+
+// A spawn's section stamp: tagged with the entity it spawns at, and the building blink volumes
+// holding its mission point (16.16) [orig: CEffectWorld_SpawnEmitterAtPosition @ 0x5F6EFB (the
+// tag), @ 0x5F6F5A (Entity_QueryBlinkBoxesAtPoint at the descriptor position)].
+particle::EffectSectionGate entity_section_gate(World &world, const int32_t position[3]) {
+    particle::EffectSectionGate gate;
+    gate.tagged = true;
+    if (world.collision != nullptr) {
+        BlinkAccum accum;
+        world.collision->query_blink_boxes_at_point(world, position, accum);
+        for (size_t i = 0; i < gate.blink_hits.size(); ++i) gate.blink_hits[i] = accum.hits[i];
+    }
+    return gate;
+}
+
+// The mission water plane as the scene's kill-plane height (env.water_z is 16.16, 0 = none).
+float scene_water_height(const World &world) {
+    return float(world.env.water_z) / 65536.0f;
+}
+
+} // namespace
+
+void ItemEmitterSystem::open_producers(World &world, const std::vector<std::string> &effect_names) {
+    if (!scene_) return;
+    for (const std::string &name : effect_names) scene_->intern(name);
+    producers_open_ = true;
+    spawn_queued_script_effects(world);
+}
+
+void ItemEmitterSystem::submit_script_effect(World &world, const ScriptEffectEvent &event) {
+    // The slot the group is stored in: its row's destroy releases it.
+    if (event.store_slot)
+        if (const Entity *entity = world.registry.get(event.owner)) hold_slot(*entity);
+    if (producers_open()) {
+        spawn_script_effect(world, event);
+        return;
+    }
+    world.out.script_effects.push_back(event);
+}
+
+void ItemEmitterSystem::spawn_script_effect(World &world, const ScriptEffectEvent &event) {
+    const particle::EffectSlotToken slot{event.store_slot ? event.slot : 0};
+    int32_t position[3] = {event.position[0], event.position[1], event.position[2]};
+    // A World-bound group follows no owner: none is named.
+    particle::spawn_script_effect(*scene_, event, slot, {}, 0, scene_water_height(world),
+            entity_section_gate(world, position));
+}
+
+void ItemEmitterSystem::spawn_queued_script_effects(World &world) {
+    if (!producers_open() || world.out.script_effects.empty()) return;
+    std::vector<ScriptEffectEvent> queued;
+    queued.swap(world.out.script_effects);
+    for (const ScriptEffectEvent &event : queued) spawn_script_effect(world, event);
+}
+
+void ItemEmitterSystem::store_positioned_emitter(World &world, const Entity &entity,
+        const std::string &effect) {
+    release_slot(entity);
+    if (!producers_open() || effect.empty()) return;
+    const Vec3 at = entity.position;
+    particle::EffectSpawnRequest request;
+    request.effect = scene_->intern(effect);
+    // The descriptor's orientation word 0xFFFF8000 on z: (0, 0, -0.5), in the scene's frame
+    // (x, z, -y) as every mission point and vector.
+    request.pose = particle::descriptor_pose({at.x, at.z, -at.y}, {0.0f, -0.5f, 0.0f});
+    request.admission = particle::EffectAdmission::StoreOwned;
+    request.binding = particle::EffectBinding::World;
+    request.slot = entity_effect_slot(entity.handle.packed);
+    request.source_tick = world.logic_tick;
+    request.kill_plane_y = scene_water_height(world);
+    const auto words = entity.position.words();
+    request.section_gate = entity_section_gate(world, words.data());
+    if (scene_->spawn(request).spawned()) hold_slot(entity);
 }
 
 void ItemEmitterSystem::bind_scene(std::shared_ptr<particle::EffectScene> scene, bool owns_clock) {
@@ -233,6 +311,8 @@ void ItemEmitterSystem::event(World &world, Entity &entity,
 
 void ItemEmitterSystem::sync_owners(World &world) {
     if (!scene_) return;
+    // A restore queues its baseline's script effects again; open, they spawn at this tick.
+    spawn_queued_script_effects(world);
     // A held slot whose row was destroyed, or taken by another entity, is released: the destroy
     // releases the row's +0x1CC group and the allocation of the row clears it
     // [orig: Entity_Destroy @0x43E8EC..0x43E8F5; CEntityManager_AllocateSlot @0x4EAB70 / @0x4EABB2].

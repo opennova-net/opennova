@@ -5291,6 +5291,7 @@ add_test(NAME npruntime_loadout_name_list COMMAND npruntime_loadout_name_list_te
 # event callback (plyr, org0 / org1, null, brrl) (D-NET-348 FOUND 3).
 add_executable(npruntime_player_body_class_test npruntime/player_body_class_test.cpp)
 target_link_libraries(npruntime_player_body_class_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_player_body_class_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_player_body_class COMMAND npruntime_player_body_class_test)
 # The body readout (an instrument for the body_trace probe): the per-tick record of each watched
 # handle, the ground probe, force and blast records, nothing for an unwatched one, the ring.
@@ -5448,6 +5449,7 @@ add_test(NAME netsim_client_replica_seated_org1_resolve
 # pitch skip, the prone local's mount clear, the chase camera's halved driver Pitch).
 add_executable(infantry_org2_view_test world/infantry_org2_view_test.cpp)
 target_link_libraries(infantry_org2_view_test PRIVATE opennova_runtime)
+target_include_directories(infantry_org2_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME infantry_org2_view COMMAND infantry_org2_view_test)
 # D-AI-9's player leg (D-NET-NEW-L5-65): the player redeploys reset through the shared World reset,
 # its resolve and lift running on a live body (the deploy's) and not on a dead one (the joiner's
