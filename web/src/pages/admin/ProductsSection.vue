@@ -148,7 +148,7 @@
               <span v-else class="block">{{ g.visibility === 'public' ? 'Public' : 'Private' }}, {{ g.head > 0 ? `r${g.head}` : 'nothing pushed' }}</span>
             </td>
             <td class="products-owner whitespace-nowrap px-4 py-3">
-              <RouterLink v-if="g.owner" :to="ownerLink(g.owner)" class="text-accent hover:text-ink-bright">{{ g.owner }}</RouterLink>
+              <RouterLink v-if="g.owner && g.owner_id !== null" :to="ownerLink(g)" class="text-accent hover:text-ink-bright">{{ g.owner }}</RouterLink>
               <span v-else class="text-ink-muted">{{ ownerLabel(g) }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">

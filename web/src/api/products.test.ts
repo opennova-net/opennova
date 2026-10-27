@@ -87,9 +87,9 @@ describe('the products', () => {
   });
 
   it("reads a player's product with its owner", async () => {
-    get.mockResolvedValue(reply(productsResponse({ products: [product(21, { key: 'NIGHTOPS', kind: 'expansion', parent_id: 1, owner: 'biggy' })] })));
+    get.mockResolvedValue(reply(productsResponse({ products: [product(21, { key: 'NIGHTOPS', kind: 'expansion', parent_id: 1, owner: 'biggy', owner_id: 7 })] })));
     const result = await fetchProducts();
-    expect(result.ok && result.value.products[0].owner).toBe('biggy');
+    expect(result.ok && [result.value.products[0].owner, result.value.products[0].owner_id]).toEqual(['biggy', 7]);
   });
 
   it('creates a game with its project, changes it, renames its key and deletes it', async () => {

@@ -68,12 +68,12 @@ describe('ProductsSection', () => {
   it("names a player's product's owner, linking to the account", async () => {
     sets.mockResolvedValue({
       ok: true,
-      value: productsResponse({ products: [JO_PRODUCT, product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', key: 'NIGHTOPS', owner: 'biggy' })] }),
+      value: productsResponse({ products: [JO_PRODUCT, product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', key: 'NIGHTOPS', owner: 'biggy', owner_id: 7 })] }),
     });
     const page = await mountSection();
     const owner = page.findAll('tr.products-row')[1].get('.products-owner a');
     expect(owner.text()).toBe('biggy');
-    expect(owner.attributes('href')).toBe('/admin/users?q=biggy');
+    expect(owner.attributes('href')).toBe('/admin/users/7');
   });
 
   it('says why the products could not be read', async () => {

@@ -94,7 +94,7 @@
         <h2 id="product-project" class="text-xl font-semibold text-ink">Project</h2>
         <p id="product-owner-line" class="text-sm text-ink">
           Owner:
-          <RouterLink v-if="product.owner" :to="ownerLink(product.owner)" class="text-accent hover:text-ink-bright">{{ product.owner }}</RouterLink>
+          <RouterLink v-if="product.owner && product.owner_id !== null" :to="ownerLink(product)" class="text-accent hover:text-ink-bright">{{ product.owner }}</RouterLink>
           <template v-else>{{ ownerLabel(product) }}</template>
         </p>
         <template v-if="product.key">

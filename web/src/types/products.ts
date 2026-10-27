@@ -64,8 +64,10 @@ export interface Product {
   // Live servers running it, and how many of them run on an older tree.
   servers_live: number;
   servers_outdated: number;
-  // The username of the player whose project it is; null for the service's own.
+  // The username and id of the player whose project it is; null for the
+  // service's own.
   owner: string | null;
+  owner_id: number | null;
 }
 
 export interface LobbyOption {

@@ -30,6 +30,7 @@ export function product(id: number, overrides: Partial<Product> = {}): Product {
     servers_live: 0,
     servers_outdated: 0,
     owner: null,
+    owner_id: null,
     ...overrides,
   };
 }

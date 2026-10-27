@@ -45,10 +45,10 @@ export function ownerLabel(product: Product): string {
   return product.owner ?? 'OpenNova';
 }
 
-// A player owner's account in the admin's users list, found by the username
-// the product row carries.
-export function ownerLink(owner: string): { path: string; query: { q: string } } {
-  return { path: '/admin/users', query: { q: owner } };
+// A player owner's account page in the admin, by the id the product row
+// carries.
+export function ownerLink(product: Product): string {
+  return `/admin/users/${product.owner_id}`;
 }
 
 // The product an address names: by its project key first, then by its id.

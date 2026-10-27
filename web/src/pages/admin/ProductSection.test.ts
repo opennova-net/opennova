@@ -126,12 +126,12 @@ describe('ProductSection', () => {
   });
 
   it("shows a player's product with its owner, nothing pushed, and what a rename does to editors", async () => {
-    const nightOps = product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', title: '', lobby: '', key: 'NIGHTOPS', visibility: 'public', owner: 'biggy' });
+    const nightOps = product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', title: '', lobby: '', key: 'NIGHTOPS', visibility: 'public', owner: 'biggy', owner_id: 7 });
     sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, nightOps] }) });
     update.mockResolvedValueOnce({ ok: true, value: { ...nightOps, visibility: 'private' } });
     const page = await mountProduct('NIGHTOPS');
     const owner = page.get('#product-owner-line a');
-    expect([owner.text(), owner.attributes('href')]).toEqual(['biggy', '/admin/users?q=biggy']);
+    expect([owner.text(), owner.attributes('href')]).toEqual(['biggy', '/admin/users/7']);
     expect(page.get('#product-project-line').text()).toMatch(/^NIGHTOPS,\s+public: anyone may get it\.\s+Nothing pushed yet: open its project in the editor and push\.$/);
     expect(history).not.toHaveBeenCalled();
 

@@ -24,7 +24,7 @@ describe('the products view', () => {
   it("names a product's owner, NovaWorld's own as OpenNova, and finds a player's account by its name", () => {
     expect(ownerLabel(JO_PRODUCT)).toBe('OpenNova');
     expect(ownerLabel({ ...JO_PRODUCT, owner: 'biggy' })).toBe('biggy');
-    expect(ownerLink('biggy')).toEqual({ path: '/admin/users', query: { q: 'biggy' } });
+    expect(ownerLink({ ...JO_PRODUCT, owner: 'biggy', owner_id: 7 })).toBe('/admin/users/7');
   });
 
   it("finds each product's releases, the runtime's upload not yet read among them, and their published version", () => {

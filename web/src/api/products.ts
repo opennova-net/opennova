@@ -76,6 +76,7 @@ function pickProduct(value: unknown): Product | null {
     servers_live: isCount(v.servers_live) ? v.servers_live : 0,
     servers_outdated: isCount(v.servers_outdated) ? v.servers_outdated : 0,
     owner: textOrNull(v.owner),
+    owner_id: idOrNull(v.owner_id),
   };
 }
 
