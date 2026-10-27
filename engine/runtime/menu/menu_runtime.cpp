@@ -244,6 +244,8 @@ bool MenuRuntime::open_document(const mnu::Document *doc, const std::string &men
 	last_claim_ = -1;
 	// Its windows are new: none holds a sound state.
 	sound_pump_.reset();
+	// No message has reached it: the device's state is the pump's until one does (D-MNU-79).
+	mouse_message_seen_ = false;
 	if (doc == nullptr) return false;
 	index_.build(*doc);
 	index_document_();
@@ -1671,10 +1673,15 @@ void MenuRuntime::move_mouse(float x, float y, bool button_down) {
 	mouse_y_ = y;
 	mouse_down_ = button_down;
 	mouse_seen_ = true;
+	mouse_message_seen_ = true;
 }
 
 void MenuRuntime::adopt_mouse_state(float x, float y, bool button_down) {
-	if (!mouse_seen_) move_mouse(x, y, button_down);
+	if (mouse_message_seen_) return;
+	mouse_x_ = x;
+	mouse_y_ = y;
+	mouse_down_ = button_down;
+	mouse_seen_ = true;
 }
 
 bool MenuRuntime::press_mouse(float x, float y, bool double_click) {

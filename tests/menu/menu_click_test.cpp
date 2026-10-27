@@ -729,11 +729,23 @@ void test_the_pump_reads_the_device_mouse_before_a_message() {
 	run.rt.adopt_mouse_state(kBX, kBY, false);
 	run.pump();
 	CHECK(run.hovered("B") && run.sounds("OVER_B") == 1);
+	// Every frame until a message: the device's next point is the pump's.
+	run.rt.adopt_mouse_state(kAX, kAY, false);
+	run.pump();
+	CHECK(!run.hovered("B") && run.hovered("A"));
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(run.hovered("B"));
 	// A message's point wins from then on: the device's state is not read again.
 	run.move(kAX, kAY, false);
 	run.rt.adopt_mouse_state(kBX, kBY, false);
 	run.pump();
 	CHECK(!run.hovered("B") && run.hovered("A"));
+	// A new document has had no message: the device's state is adopted again.
+	CHECK(run.open());
+	run.rt.adopt_mouse_state(kBX, kBY, false);
+	run.pump();
+	CHECK(run.hovered("B"));
 }
 
 } // namespace

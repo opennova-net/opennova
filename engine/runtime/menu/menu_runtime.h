@@ -617,8 +617,8 @@ public:
 	// The device's mouse state where no message has reached this runtime yet. The game's pump runs
 	// every frame over the process's mouse state, which every mouse message since boot leaves, so a
 	// menu opened under a still mouse pumps at that point, and draws its CURSOR there, from its
-	// first frame (D-MNU-79). Once a message has arrived its point is the pump's and this does
-	// nothing.
+	// first frame (D-MNU-79). Every frame until a message reaches this document; once one has, its
+	// point is the pump's and this does nothing until the next document opens.
 	// [orig: CUIScene_EndFrame @ 0x63e600 - the pump @ 0x63e687..0x63e6b5, gated on dword_84BCD0,
 	//  1 in the image and written only by sub_63B640 / sub_63B650, which nothing calls;
 	//  CUIScene_DrawScreensAndCursor @ 0x63bf60 - the CURSOR at g_MouseState.x / .y @ 0x63bfda]
@@ -803,6 +803,9 @@ private:
 	// The last mouse message's point and left button, which the pump reads (move_mouse).
 	bool mouse_down_ = false;
 	bool mouse_seen_ = false;
+	// A mouse message reached the open document (move_mouse), after which the device's state is
+	// not adopted (adopt_mouse_state).
+	bool mouse_message_seen_ = false;
 	float mouse_x_ = 0.0f;
 	float mouse_y_ = 0.0f;
 };
