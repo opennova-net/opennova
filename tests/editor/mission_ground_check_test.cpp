@@ -933,7 +933,7 @@ static int test_people_attend() {
 				opennova::anim::AimOverlayAngles want_angles[opennova::anim::kOverlayClassCount];
 				TEST_EXPECT(viewport()->people().aim_overlay(body.first, angles));
 				opennova::anim::compute_aim_overlay_angles(
-						world::aim_overlay_inputs_for(expected, *w.registry.get(body.second)), want_angles);
+						world::aim_overlay_inputs_for(w, expected, *w.registry.get(body.second)), want_angles);
 				for (int c = 0; c < opennova::anim::kOverlayClassCount; ++c)
 					TEST_EXPECT(angles[c].yaw == want_angles[c].yaw && angles[c].pitch == want_angles[c].pitch &&
 							angles[c].roll == want_angles[c].roll);
