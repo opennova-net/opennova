@@ -3,26 +3,7 @@
 // what an operator should look at first.
 
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTargetGroup, InfraTask } from '../types/infra';
-
-export type Tone = 'ok' | 'warn' | 'bad' | 'idle';
-
-export function toneBadgeClass(tone: Tone): string {
-  const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  switch (tone) {
-    case 'ok':
-      return `${base} bg-online/15 text-online`;
-    case 'warn':
-      return `${base} bg-warn/15 text-warn`;
-    case 'bad':
-      return `${base} bg-danger/15 text-danger`;
-    default:
-      return `${base} bg-hover text-ink-muted`;
-  }
-}
-
-export function toneTextClass(tone: Tone): string {
-  return tone === 'ok' ? 'text-online' : tone === 'warn' ? 'text-warn' : tone === 'bad' ? 'text-danger' : 'text-ink-muted';
-}
+import type { Tone } from './tone';
 
 // The deployment ECS rolls the service to.
 export function primaryDeployment(s: InfraService) {
@@ -33,7 +14,7 @@ export function primaryDeployment(s: InfraService) {
 // failed (ECS rolled it back), rolling out (a second deployment, or a task
 // starting), short of tasks, or steady.
 export function serviceState(s: InfraService): { label: string; tone: Tone } {
-  if (s.desired === 0) return { label: 'Stopped', tone: 'idle' };
+  if (s.desired === 0) return { label: 'Stopped', tone: 'muted' };
   const primary = primaryDeployment(s);
   if (primary?.rollout_state === 'FAILED') return { label: 'Rollout failed', tone: 'bad' };
   if (s.deployments.length > 1 || s.pending > 0 || primary?.rollout_state === 'IN_PROGRESS') {
@@ -54,7 +35,7 @@ export function rolloutLabel(state: string | null): string {
 export function healthLabel(health: string): { label: string; tone: Tone } {
   if (health === 'HEALTHY') return { label: 'Healthy', tone: 'ok' };
   if (health === 'UNHEALTHY') return { label: 'Unhealthy', tone: 'bad' };
-  return { label: 'Health unknown', tone: 'idle' };
+  return { label: 'Health unknown', tone: 'muted' };
 }
 
 // "Running", "Pending", "Provisioning", "Stopped": ECS's last status.
@@ -75,11 +56,11 @@ export function targetLabel(state: string): { label: string; tone: Tone } {
     case 'draining':
       return { label: 'Draining', tone: 'warn' };
     case 'unused':
-      return { label: 'Unused', tone: 'idle' };
+      return { label: 'Unused', tone: 'muted' };
     case 'unavailable':
       return { label: 'Unavailable', tone: 'bad' };
     default:
-      return { label: state || 'Unknown', tone: 'idle' };
+      return { label: state || 'Unknown', tone: 'muted' };
   }
 }
 

@@ -16,7 +16,7 @@
       </div>
       <div class="flex shrink-0 flex-col items-end gap-1">
         <template v-if="service">
-          <span :class="toneBadgeClass(serviceState(service).tone)">{{ serviceState(service).label }}</span>
+          <span :class="badgeClass(serviceState(service).tone)">{{ serviceState(service).label }}</span>
           <span class="whitespace-nowrap text-sm text-ink">{{ service.running }} of {{ service.desired }} running</span>
           <span v-if="service.pending > 0" class="text-xs text-warn">{{ service.pending }} starting</span>
         </template>
@@ -57,7 +57,7 @@
         <li v-for="t in service.tasks" :key="t.id" class="infra-task space-y-1 py-2 text-sm">
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-mono text-ink" :title="`Task ${t.id}`">{{ t.id.slice(0, 8) }}</span>
-            <span :class="toneBadgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
+            <span :class="badgeClass(healthLabel(t.health).tone)">{{ healthLabel(t.health).label }}</span>
             <span v-if="t.last_status !== 'RUNNING'" class="text-xs text-warn">{{ taskStatusLabel(t.last_status) }}</span>
             <span v-if="t.on_release === false" class="text-xs text-warn">Revision {{ revisionOf(t.task_definition) }}</span>
           </div>
@@ -118,17 +118,8 @@ import { RouterLink } from 'vue-router';
 import RelativeTime from './RelativeTime.vue';
 import type { InfraService, InfraTask } from '../types/infra';
 import type { ProgramUsage } from '../types/usage';
-import {
-  countLabel,
-  healthLabel,
-  primaryDeployment,
-  rolloutLabel,
-  serviceState,
-  shortImage,
-  taskSize,
-  taskStatusLabel,
-  toneBadgeClass,
-} from '../utils/infraView';
+import { countLabel, healthLabel, primaryDeployment, rolloutLabel, serviceState, shortImage, taskSize, taskStatusLabel } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 import { usageLine } from '../utils/usageView';
 
 const props = withDefaults(

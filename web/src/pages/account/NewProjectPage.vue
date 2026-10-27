@@ -160,7 +160,7 @@ import { createProject, fetchMyProjects, type ProjectError } from '../../api/pro
 import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { MyProjects, NewProject, ProjectVisibility } from '../../types/products';
-import { titleName } from '../../utils/productsView';
+import { titleName } from '../../utils/games';
 import {
   KEY_HINT,
   NAME_MAX,

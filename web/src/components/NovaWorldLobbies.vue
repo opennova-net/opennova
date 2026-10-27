@@ -43,7 +43,7 @@
               <span class="block font-mono text-xs text-ink-muted">{{ l.endpoint }}</span>
             </th>
             <td class="whitespace-nowrap px-4 py-3">
-              <span :class="toneBadgeClass(lobbyStateLabel(l, now).tone)">{{ lobbyStateLabel(l, now).label }}</span>
+              <span :class="badgeClass(lobbyStateLabel(l, now).tone)">{{ lobbyStateLabel(l, now).label }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3">{{ countLabel(l.sessions, 'session') }}</td>
             <td class="whitespace-nowrap px-4 py-3">
@@ -99,7 +99,8 @@ import { drainLobby, fetchLobbies } from '../api/admin';
 import { usePolling } from '../composables/usePolling';
 import type { AdminLobby, LobbiesResponse } from '../types/admin';
 import { lobbyStateLabel, lobbyUsageLink, sessionTime, shortTaskId } from '../utils/adminView';
-import { countLabel, toneBadgeClass } from '../utils/infraView';
+import { countLabel } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 
 withDefaults(defineProps<{ idBase?: string }>(), { idBase: 'lobbies' });
 

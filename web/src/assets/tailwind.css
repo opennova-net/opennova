@@ -39,8 +39,9 @@
   text-rendering: optimizeLegibility;
 }
 
-/* The site's shared pieces: one place for the button, card and section
-   styles the public pages repeat. */
+/* The site's shared pieces, the only button, table, badge, field, notice and
+   heading styles a page uses: the admin, the account area and the public
+   pages look like one site because they draw from here. */
 @layer components {
   .page {
     @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
@@ -55,44 +56,117 @@
   .card {
     @apply rounded-panel border border-border bg-panel;
   }
+
+  /* Buttons: one size, four kinds; .btn-sm shrinks any of them (a table row's). */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-control px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40;
   }
   .btn-primary {
     @apply btn bg-accent text-on-accent hover:bg-accent/90;
   }
   .btn-secondary {
-    @apply btn border border-border-strong bg-panel text-ink hover:border-accent hover:text-ink-bright;
+    @apply btn border border-border-strong bg-raised text-ink hover:bg-hover hover:text-ink-bright;
   }
   .btn-danger {
     @apply btn border border-danger/50 bg-danger/10 text-danger hover:bg-danger/20;
   }
-  .page-heading {
-    @apply text-3xl font-semibold tracking-tight text-ink-bright sm:text-4xl;
+  .btn-warn {
+    @apply btn border border-warn/50 bg-warn/10 text-warn hover:bg-warn/20;
   }
-  .page-lead {
-    @apply mt-3 max-w-2xl text-base leading-relaxed text-ink-muted;
+  .btn-ghost {
+    @apply btn px-2 text-accent hover:bg-hover hover:text-ink-bright;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1 text-xs;
+  }
+
+  /* Headings: a page's title, a section's. */
+  .page-heading {
+    @apply text-2xl font-semibold tracking-tight text-ink-bright sm:text-3xl;
   }
   .section-heading {
     @apply text-lg font-semibold tracking-tight text-ink-bright;
   }
+
+  /* Fields: inputs, selects and textareas; a label above. */
   .field {
-    @apply w-full rounded-control border border-border-strong bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-muted/70 focus:border-accent disabled:opacity-50;
+    @apply w-full rounded-control border border-border-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted/70 focus:border-accent focus:outline-none disabled:opacity-50 aria-[invalid=true]:border-danger;
   }
   .field-label {
-    @apply block text-sm font-medium text-ink;
+    @apply mb-1 block text-xs font-medium text-ink-muted;
   }
+
+  /* A boxed message; its tone colours it. */
   .notice {
-    @apply rounded-panel border border-border bg-panel px-4 py-3 text-sm leading-relaxed;
+    @apply rounded-panel border border-border bg-panel px-4 py-3 text-sm leading-relaxed text-ink;
   }
+  .notice-ok {
+    @apply border-online/40 bg-online/10 text-online;
+  }
+  .notice-warn {
+    @apply border-warn/40 bg-warn/10 text-warn;
+  }
+  .notice-bad {
+    @apply border-danger/40 bg-danger/10 text-danger;
+  }
+  .notice-info {
+    @apply border-accent/40 bg-accent/5 text-ink;
+  }
+
+  /* A short state word in a pill; its tone colours it. */
+  .badge {
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-control bg-hover px-2 py-0.5 text-xs font-semibold text-ink-muted;
+  }
+  .badge-ok {
+    @apply bg-online/15 text-online;
+  }
+  .badge-warn {
+    @apply bg-warn/15 text-warn;
+  }
+  .badge-bad {
+    @apply bg-danger/15 text-danger;
+  }
+  .badge-info {
+    @apply bg-accent/15 text-accent;
+  }
+
+  /* Tables: the scroller and its table. */
+  .table-wrap {
+    @apply relative overflow-x-auto rounded-panel border border-border bg-panel;
+  }
+  .data-table {
+    @apply min-w-full divide-y divide-border text-sm text-ink;
+  }
+  .data-table thead tr {
+    @apply bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted;
+  }
+  .data-table th,
+  .data-table td {
+    @apply px-4 py-2.5 align-top;
+  }
+  .data-table tbody {
+    @apply divide-y divide-border;
+  }
+  .data-table tbody tr:hover {
+    @apply bg-hover/50;
+  }
+  .data-table tbody th {
+    @apply text-left font-medium;
+  }
+
   .workspace-nav-link {
-    @apply flex items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium text-ink-muted transition hover:bg-hover hover:text-ink-bright;
+    @apply flex min-h-10 items-center justify-between gap-3 rounded-control px-3 py-2 text-sm font-medium text-ink-muted transition hover:bg-hover hover:text-ink-bright;
   }
   .tab-link {
-    @apply inline-flex min-h-11 items-center whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-ink-muted transition hover:text-ink-bright;
+    @apply inline-flex min-h-11 items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-ink-muted transition hover:text-ink-bright;
   }
+  /* A link in running text; .entity-link names a player, server, machine,
+     product or job wherever one appears. */
   .link {
     @apply text-accent underline underline-offset-4 transition hover:text-ink-bright;
+  }
+  .entity-link {
+    @apply text-accent transition hover:text-ink-bright hover:underline;
   }
 }
 

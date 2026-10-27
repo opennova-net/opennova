@@ -4,7 +4,7 @@
 
 import type { ServerKind } from '../types/admin';
 import type { EntitlementSource, MachineKind } from '../types/hostedServer';
-import type { Tone } from './infraView';
+import type { Tone } from './tone';
 import type { SoldCapacity } from '../types/users';
 
 // "Active", "Banned", "Restricted": a players.account_status; one stored

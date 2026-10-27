@@ -57,7 +57,7 @@
               <td class="whitespace-nowrap px-4 py-3 font-mono text-xs">{{ m.image_id || 'Not known' }}</td>
               <td class="whitespace-nowrap px-4 py-3">{{ m.servers }}</td>
               <td class="px-4 py-3">
-                <span :class="toneBadgeClass(m.action === 'replace' ? 'warn' : 'ok')">{{ m.action === 'replace' ? 'Replace' : 'Keep' }}</span>
+                <span :class="badgeClass(m.action === 'replace' ? 'warn' : 'ok')">{{ m.action === 'replace' ? 'Replace' : 'Keep' }}</span>
                 <span v-if="m.why" class="block text-xs text-ink-muted">{{ m.why }}</span>
               </td>
             </tr>
@@ -104,7 +104,8 @@ import { RouterLink } from 'vue-router';
 import { fetchRollPlan, rollFleet } from '../api/admin';
 import type { RollPlan } from '../types/hostedServer';
 import { machineKindLabel, machineStateLabel } from '../utils/adminView';
-import { countLabel, toneBadgeClass } from '../utils/infraView';
+import { countLabel } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 
 const emit = defineEmits<{
   // A roll went in: the fleet's lists change.

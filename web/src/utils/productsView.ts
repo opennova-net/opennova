@@ -3,9 +3,9 @@
 // project key, or its id when it has none), its kind in a line, its owner,
 // which releases are its, and the release and tree states in words.
 
+import { titleName } from './games';
+import { badgeClass } from './tone';
 import type { Product, LobbyOption, Release } from '../types/products';
-
-const TITLE_NAMES: Record<string, string> = { jo: 'Joint Operations', dfx2: 'Delta Force Xtreme 2' };
 
 // A project key: 1 to 16 of A-Z, 0-9 and _ (the routes' rule).
 export const KEY_RULE = /^[A-Z0-9_]{1,16}$/;
@@ -28,10 +28,6 @@ export function updaterProblems(login: string, commandFile: string): { updater_l
     out.command_file = 'A command file is 1 to 15 characters ending in .CMD (JOPTR.CMD).';
   }
   return out;
-}
-
-export function titleName(code: string): string {
-  return TITLE_NAMES[code] ?? code.toUpperCase();
 }
 
 // The product's page: /admin/products/<key>.
@@ -130,15 +126,12 @@ export function releaseStatusLabel(status: string): string {
   )[status] ?? status;
 }
 
-const BADGE = 'rounded-control px-2 py-0.5 text-xs font-medium';
-
 export function releaseStatusClass(status: string): string {
-  if (status === 'published') return `${BADGE} bg-online/10 text-online`;
-  if (status === 'invalid') return `${BADGE} bg-danger/10 text-danger`;
-  if (status === 'draft') return `${BADGE} bg-accent/15 text-accent`;
-  if (status === 'awaiting_approval') return `${BADGE} bg-warn/10 text-warn`;
-  if (status === 'retired') return `${BADGE} bg-raised text-ink-muted`;
-  return `${BADGE} bg-warn/10 text-warn`;
+  if (status === 'published') return badgeClass('ok');
+  if (status === 'invalid') return badgeClass('bad');
+  if (status === 'draft') return badgeClass('info');
+  if (status === 'retired') return badgeClass('muted');
+  return badgeClass('warn');
 }
 
 // A published release's tree for servers, in words: "Servers' data building".

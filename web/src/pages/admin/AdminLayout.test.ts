@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminLayout from './AdminLayout.vue';
 import { fetchAttention } from '../../api/attention';
-import { attention } from '../../test/usageFixtures';
+import { attention, finding } from '../../test/usageFixtures';
 import { testRouter } from '../../test/router';
 
 // Whether the session the mock answers is an admin's.
@@ -29,7 +29,7 @@ describe('AdminLayout', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
 
   async function mountLayout() {
-    const router = await testRouter('/admin/fleet');
+    const router = await testRouter('/admin/servers');
     wrapper = mount(AdminLayout, { global: { plugins: [router] } });
     await flushPromises();
     return wrapper;
@@ -55,27 +55,28 @@ describe('AdminLayout', () => {
     expect(page.findAll('.admin-attention-count')).toHaveLength(1);
   });
 
-  it('groups the pages by area, each named, and marks the one open', async () => {
+  it('lists the six sections and marks the one open', async () => {
     const page = await mountLayout();
-    const areas = page.findAll('.admin-nav-area').map((area) => [area.get('p').text(), area.findAll('a').map((a) => a.text())]);
-    expect(areas).toEqual([
-      ['Service', ['NovaWorld', 'Fleet', 'Products', 'Static addresses', 'Settings']],
-      ['Accounts', ['Users', 'Subscriptions', 'CD keys']],
-      ['Operations', ['Infrastructure', 'Server usage', 'AWS costs', 'Background jobs']],
-    ]);
-    // Each area is a group its name labels, for a screen reader.
-    const hosting = page.findAll('.admin-nav-area')[1];
-    expect(hosting.attributes('role')).toBe('group');
-    expect(hosting.attributes('aria-labelledby')).toBe(hosting.get('p').attributes('id'));
-    const current = page.findAll('nav a[aria-current="page"]');
-    expect(current.map((a) => a.text())).toEqual(['Fleet']);
+    const aside = page.get('aside nav');
+    expect(aside.findAll('a').map((a) => a.text().replace(/\d.*$/, '').trim())).toEqual(['Overview', 'Players', 'Servers', 'Products', 'Billing', 'System']);
+    expect(page.findAll('aside nav a[aria-current="page"]').map((a) => a.text())).toEqual(['Servers']);
   });
 
   it('marks a section for the pages under it', async () => {
-    const router = await testRouter('/admin/fleet/machines/3');
+    const router = await testRouter('/admin/machines/3');
     wrapper = mount(AdminLayout, { global: { plugins: [router] } });
     await flushPromises();
-    expect(wrapper.findAll('nav a[aria-current="page"]').map((a) => a.text())).toEqual(['Fleet']);
+    expect(wrapper.findAll('aside nav a[aria-current="page"]').map((a) => a.text())).toEqual(['Servers']);
+  });
+
+  it('counts the releases awaiting approval on Products', async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: attention({ findings: [finding('warn', 'Awaits approval', { subject: 'NIGHTOPS 0.3.0', link: '/admin/products/NIGHTOPS', source: 'releases' })], alarms: [] }),
+    });
+    const page = await mountLayout();
+    const products = page.findAll('aside nav a').find((a) => a.text().startsWith('Products'))!;
+    expect(products.get('.admin-awaiting-count').text()).toBe('1 awaiting approval');
   });
 
   it('opens a modal mobile drawer and restores page scrolling when closed', async () => {
@@ -87,7 +88,7 @@ describe('AdminLayout', () => {
     await flushPromises();
     expect(dialog.showModal).toHaveBeenCalledOnce();
     expect(page.get('button[aria-controls="admin-drawer"]').attributes('aria-expanded')).toBe('true');
-    expect(page.get('dialog nav').findAll('.admin-nav-area')).toHaveLength(3);
+    expect(page.get('dialog nav').findAll('a')).toHaveLength(6);
     expect(document.body.style.overflow).toBe('hidden');
     await page.get('dialog button').trigger('click');
     await flushPromises();

@@ -111,7 +111,7 @@ describe('the server lists', () => {
   it("matches each live hosted server to its own listing, and keeps the others apart", () => {
     const servers = [
       hostedServer(1, {
-        listing: { rid: 10, server_name: 'a', mission_name: '', players: 0, max_players: 32, host_ip: '1.2.3.4', host_port: 1 },
+        listing: { rid: 10, server_name: 'a', mission_name: '', game_type: '', players: 0, max_players: 32, host_ip: '1.2.3.4', host_port: 1 },
       }),
       hostedServer(2),
       hostedServer(3, { state: 'stopped' }),

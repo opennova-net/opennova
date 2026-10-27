@@ -2,15 +2,11 @@
   <AdminGate>
     <div class="admin-workspace min-h-[calc(100vh-4rem)] lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
       <div class="flex items-center justify-between border-b border-border bg-panel px-5 py-3 lg:hidden">
-        <span class="text-sm font-semibold text-ink">Administration</span>
-        <button ref="menuButton" type="button" class="rounded-control border border-border px-3 py-2 text-sm text-ink" aria-controls="admin-drawer" :aria-expanded="drawerOpen" @click="openDrawer">Browse admin</button>
+        <span class="text-sm font-semibold text-ink">Admin</span>
+        <button ref="menuButton" type="button" class="rounded-control border border-border px-3 py-2 text-sm text-ink" aria-controls="admin-drawer" :aria-expanded="drawerOpen" @click="openDrawer">Menu</button>
       </div>
       <aside class="sticky top-16 hidden h-[calc(100vh-4rem)] overflow-y-auto border-r border-border bg-panel p-4 lg:block">
-        <div class="mb-7 px-3 pt-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Workspace</p>
-          <p class="mt-1 text-sm font-semibold text-ink">Administration</p>
-        </div>
-        <AdminNavigation id-base="admin-nav" :unread="unread" :needing="needing" />
+        <AdminNavigation :unread="unread" :needing="needing" :awaiting="awaiting" />
         <div v-if="hasAdminToken && !isAdmin" class="mt-8 border-t border-border px-3 pt-4">
           <p class="mb-2 text-xs text-ink-muted">Using an admin token</p>
           <button type="button" class="text-sm text-accent hover:text-ink" @click="clearAdminToken">Forget token</button>
@@ -18,13 +14,13 @@
       </aside>
       <dialog id="admin-drawer" ref="drawer" aria-label="Admin navigation" class="admin-drawer m-0 h-dvh max-h-none w-72 max-w-[85vw] border-r border-border bg-panel p-5 text-ink backdrop:bg-black/60" @close="onClosed" @click="onBackdrop">
         <div class="mb-6 flex items-center justify-between">
-          <h2 class="font-semibold">Administration</h2>
+          <h2 class="font-semibold">Admin</h2>
           <button type="button" class="rounded-control border border-border px-3 py-2 text-sm" @click="closeDrawer">Close</button>
         </div>
-        <AdminNavigation v-if="drawerOpen" id-base="admin-drawer-nav" :unread="unread" :needing="needing" @navigate="closeDrawer" />
+        <AdminNavigation v-if="drawerOpen" :unread="unread" :needing="needing" :awaiting="awaiting" @navigate="closeDrawer" />
         <button v-if="drawerOpen && hasAdminToken && !isAdmin" type="button" class="mt-6 px-3 text-sm text-accent" @click="clearAdminToken">Forget token</button>
       </dialog>
-      <div class="min-w-0 px-5 py-7 sm:px-8 lg:px-10 lg:py-9 2xl:px-14"><RouterView /></div>
+      <div class="min-w-0 px-4 py-6 sm:px-8 lg:px-10 lg:py-8 2xl:px-14"><RouterView /></div>
     </div>
   </AdminGate>
 </template>
@@ -75,4 +71,6 @@ onUnmounted(() => {
 const attention = provideAttention(computed(() => isAdmin.value || hasAdminToken.value));
 const unread = computed(() => attention.error.value !== '');
 const needing = computed(() => attention.attention.value ? attentionCount(attention.attention.value) : 0);
+// Releases waiting for an admin's approval: each is a finding of its own.
+const awaiting = computed(() => attention.attention.value?.findings.filter((f) => f.source === 'releases').length ?? 0);
 </script>

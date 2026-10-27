@@ -13,7 +13,7 @@
       <!-- Where the month stands against the budget, first: a word and a colour. -->
       <div v-if="state" class="cost-budget-state space-y-3 rounded-panel border p-4" :class="STATE_BOX[state.tone]">
         <p class="flex flex-wrap items-center gap-2 text-sm">
-          <span :class="toneBadgeClass(state.tone)">{{ state.label }}</span>
+          <span :class="badgeClass(state.tone)">{{ state.label }}</span>
           <span class="text-ink">{{ state.detail }}</span>
         </p>
         <div
@@ -98,7 +98,7 @@
         <p v-if="account.error" class="cost-account-error text-sm text-danger">Costs could not be read: {{ account.error }}</p>
         <template v-else>
           <p v-if="account.state" class="cost-account-budget-state flex flex-wrap items-center gap-2 text-sm">
-            <span :class="toneBadgeClass(account.state.tone)">{{ account.state.label }}</span>
+            <span :class="badgeClass(account.state.tone)">{{ account.state.label }}</span>
             <span class="text-ink">{{ account.state.detail }}</span>
           </p>
           <p v-else-if="account.budget_error" class="cost-account-budget-error text-sm text-warn">The budget could not be read: {{ account.budget_error }}</p>
@@ -142,7 +142,7 @@ import Sparkline from './charts/Sparkline.vue';
 import StatTile from './charts/StatTile.vue';
 import type { CostAccount, Costs } from '../types/costs';
 import { budgetState, costMoney, monthName, periodLabel, serviceLabel, topServices } from '../utils/costView';
-import { toneBadgeClass, type Tone } from '../utils/infraView';
+import { badgeClass, type Tone } from '../utils/tone';
 
 const props = withDefaults(
   defineProps<{
@@ -160,13 +160,15 @@ const STATE_BOX: Record<Tone, string> = {
   ok: 'border-online/40 bg-online/5',
   warn: 'border-warn/40 bg-warn/10',
   bad: 'border-danger/40 bg-danger/10',
-  idle: 'border-border bg-panel',
+  info: 'border-accent/40 bg-accent/5',
+  muted: 'border-border bg-panel',
 };
 const FILL: Record<Tone, string> = {
   ok: 'bg-online',
   warn: 'bg-warn',
   bad: 'bg-danger',
-  idle: 'bg-ink-muted',
+  info: 'bg-accent',
+  muted: 'bg-ink-muted',
 };
 
 function money(cents: number): string {

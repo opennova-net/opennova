@@ -4,7 +4,7 @@
     <p v-else-if="cluster?.error" class="text-danger">The fleet cluster could not be read: {{ cluster.error }}</p>
     <template v-else-if="cluster">
       <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span :class="toneBadgeClass(state.tone)">{{ state.label }}</span>
+        <span :class="badgeClass(state.tone)">{{ state.label }}</span>
         <span>{{ summary }}</span>
       </p>
       <ul v-if="cluster.instances.length" class="space-y-1">
@@ -32,7 +32,8 @@
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 import type { InfraFleetCluster } from '../types/infra';
-import { countLabel, serviceState, toneBadgeClass, type Tone } from '../utils/infraView';
+import { countLabel, serviceState } from '../utils/infraView';
+import { badgeClass, type Tone } from '../utils/tone';
 
 const props = defineProps<{
   cluster: InfraFleetCluster | null;
@@ -43,7 +44,7 @@ const props = defineProps<{
 const state = computed<{ label: string; tone: Tone }>(() => {
   const c = props.cluster;
   if (!c?.hostd) return { label: 'Missing', tone: 'bad' };
-  if (c.instances.length === 0) return { label: 'No machines', tone: 'idle' };
+  if (c.instances.length === 0) return { label: 'No machines', tone: 'muted' };
   return serviceState(c.hostd);
 });
 

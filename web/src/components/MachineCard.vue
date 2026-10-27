@@ -10,7 +10,7 @@
           <span v-if="machine.cloud_id" class="block font-mono">{{ machine.cloud_id }}</span>
         </p>
       </div>
-      <span :class="toneBadgeClass(machineTone(machine.state))">{{ machineStateLabel(machine.state) }}</span>
+      <span :class="badgeClass(machineTone(machine.state))">{{ machineStateLabel(machine.state) }}</span>
     </div>
 
     <!-- What is wrong, each in words and colour. -->
@@ -79,7 +79,7 @@ import SlotStrip from './SlotStrip.vue';
 import type { FleetMachine, FleetServer } from '../types/hostedServer';
 import { machineKindLabel, machineStateLabel } from '../utils/adminView';
 import { formatBytes } from '../utils/format';
-import { toneBadgeClass } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 import { machineFigures, machineFlags, machineLive, machineTone, reportAge } from '../utils/machineView';
 
 const props = defineProps<{

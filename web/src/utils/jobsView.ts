@@ -4,6 +4,7 @@
 // Durations arrive as whole seconds and leave as words (utils/format.ts),
 // never as raw numbers with a unit code.
 
+import { badgeClass } from './tone';
 import type { Job, JobGroupRetry, JobSchedule, JobWorker } from '../types/jobs';
 import { formatDuration, formatRelative, timeMs } from './format';
 
@@ -56,18 +57,8 @@ export function jobStateLabel(job: Pick<Job, 'state' | 'last_error'>): string {
 }
 
 export function jobStateBadgeClass(job: Pick<Job, 'state' | 'last_error'>): string {
-  const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  if (isCancelled(job)) return `${base} bg-hover text-ink-muted`;
-  switch (job.state) {
-    case 'running':
-      return `${base} bg-online/15 text-online`;
-    case 'queued':
-      return `${base} bg-warn/15 text-warn`;
-    case 'failed':
-      return `${base} bg-danger/15 text-danger`;
-    default:
-      return `${base} bg-hover text-ink-muted`;
-  }
+  if (isCancelled(job)) return badgeClass('muted');
+  return badgeClass(job.state === 'running' ? 'ok' : job.state === 'queued' ? 'warn' : job.state === 'failed' ? 'bad' : 'muted');
 }
 
 // "4 seconds", "2 minutes", "1 hour 5 minutes": a length of time given in

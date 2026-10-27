@@ -17,9 +17,8 @@ const ProjectsPage = () => import('../pages/account/ProjectsPage.vue');
 const NewProjectPage = () => import('../pages/account/NewProjectPage.vue');
 const ProjectPage = () => import('../pages/account/ProjectPage.vue');
 const AccountPage = () => import('../pages/account/AccountPage.vue');
-const SupportTierPage = () => import('../pages/account/SupportTierPage.vue');
-const AddressesPage = () => import('../pages/account/AddressesPage.vue');
-const SupportPage = () => import('../pages/SupportPage.vue');
+const BillingPage = () => import('../pages/account/BillingPage.vue');
+const HostingPage = () => import('../pages/HostingPage.vue');
 const NotFoundPage = () => import('../pages/NotFoundPage.vue');
 const TermsPage = () => import('../pages/legal/TermsPage.vue');
 const PrivacyPage = () => import('../pages/legal/PrivacyPage.vue');
@@ -28,31 +27,32 @@ const ServerDetailLayout = () => import('../pages/servers/ServerDetailLayout.vue
 const ServerOverviewTab = () => import('../pages/servers/ServerOverviewTab.vue');
 const ServerConsoleTab = () => import('../pages/servers/ServerConsoleTab.vue');
 const ServerStatsTab = () => import('../pages/servers/ServerStatsTab.vue');
-const ServerSettingsTab = () => import('../pages/servers/ServerSettingsTab.vue');
-const ServerMachineTab = () => import('../pages/servers/ServerMachineTab.vue');
-const ServerUsageTab = () => import('../pages/servers/ServerUsageTab.vue');
 const ServerLogsTab = () => import('../pages/servers/ServerLogsTab.vue');
 const AdminLayout = () => import('../pages/admin/AdminLayout.vue');
-const OverviewSection = () => import('../pages/admin/OverviewSection.vue');
-const UsersSection = () => import('../pages/admin/UsersSection.vue');
-const UserDetailSection = () => import('../pages/admin/UserDetailSection.vue');
-const FleetSection = () => import('../pages/admin/FleetSection.vue');
-const MachineDetailSection = () => import('../pages/admin/MachineDetailSection.vue');
-const UsageSection = () => import('../pages/admin/UsageSection.vue');
-const BillingSection = () => import('../pages/admin/BillingSection.vue');
-const CostsSection = () => import('../pages/admin/CostsSection.vue');
-const NovaWorldSection = () => import('../pages/admin/NovaWorldSection.vue');
-const JobsSection = () => import('../pages/admin/JobsSection.vue');
-const JobDetailSection = () => import('../pages/admin/JobDetailSection.vue');
-const InfraSection = () => import('../pages/admin/InfraSection.vue');
-const ProgramDetailSection = () => import('../pages/admin/ProgramDetailSection.vue');
-const InfraResourceSection = () => import('../pages/admin/InfraResourceSection.vue');
-const CdKeysSection = () => import('../pages/admin/CdKeysSection.vue');
-const ProductsSection = () => import('../pages/admin/ProductsSection.vue');
-const ProductSection = () => import('../pages/admin/ProductSection.vue');
-const AddressesSection = () => import('../pages/admin/AddressesSection.vue');
-const SettingsSection = () => import('../pages/admin/SettingsSection.vue');
+const OverviewPage = () => import('../pages/admin/OverviewPage.vue');
+const OnlineTab = () => import('../pages/admin/players/OnlineTab.vue');
+const AccountsTab = () => import('../pages/admin/players/AccountsTab.vue');
+const CdKeysTab = () => import('../pages/admin/players/CdKeysTab.vue');
+const PlayerPage = () => import('../pages/admin/players/PlayerPage.vue');
+const ServersTab = () => import('../pages/admin/servers/ServersTab.vue');
+const MachinesTab = () => import('../pages/admin/servers/MachinesTab.vue');
+const RollTab = () => import('../pages/admin/servers/RollTab.vue');
+const MachinePage = () => import('../pages/admin/servers/MachinePage.vue');
+const ProductsPage = () => import('../pages/admin/products/ProductsPage.vue');
+const ProductPage = () => import('../pages/admin/products/ProductPage.vue');
+const SubscriptionsTab = () => import('../pages/admin/billing/SubscriptionsTab.vue');
+const AddressesTab = () => import('../pages/admin/billing/AddressesTab.vue');
+const CostsTab = () => import('../pages/admin/billing/CostsTab.vue');
+const NovaWorldTab = () => import('../pages/admin/system/NovaWorldTab.vue');
+const InfrastructureTab = () => import('../pages/admin/system/InfrastructureTab.vue');
+const JobsTab = () => import('../pages/admin/system/JobsTab.vue');
+const JobPage = () => import('../pages/admin/system/JobPage.vue');
+const ProgramPage = () => import('../pages/admin/system/ProgramPage.vue');
+const ResourcePage = () => import('../pages/admin/system/ResourcePage.vue');
 import { requireUser } from './guards';
+
+// A server page's tabs an old /admin/fleet/<id>/<tab> link keeps.
+const KEPT_SERVER_TABS = new Set(['stats', 'console', 'logs']);
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
 // (guards.ts). /admin does not: its AdminGate also takes the Bearer token.
@@ -72,7 +72,8 @@ const router = createRouter({
     // A server on NovaLogic's NovaWorld, from the service's copy of their list.
     { path: '/lobby/novalogic/:id(\\d+)', component: NovaLogicServerPage, meta: { title: 'Server' } },
     { path: '/lobbies', redirect: '/lobby' },
-    { path: '/support', component: SupportPage, meta: { title: 'Hosting and support' } },
+    { path: '/hosting', component: HostingPage, meta: { title: 'Hosting' } },
+    { path: '/support', redirect: '/hosting' },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },
     { path: '/privacy', component: PrivacyPage, meta: { title: 'Privacy notice' } },
     { path: '/refunds', component: RefundsPage, meta: { title: 'Refund policy' } },
@@ -94,7 +95,7 @@ const router = createRouter({
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
-            { path: 'settings', component: ServerSettingsTab },
+            { path: 'settings', redirect: (to) => `/me/servers/${to.params.id}` },
           ],
         },
         // The account's own mods and games on NovaWorld; a project by its key.
@@ -102,34 +103,36 @@ const router = createRouter({
         { path: 'projects/new', component: NewProjectPage, meta: { title: 'New project' } },
         { path: 'projects/:key', component: ProjectPage, meta: { title: 'Project' } },
         // Stripe's Checkout and billing portal return here
-        // (?checkout=success&session_id=..., ?checkout=cancel).
-        { path: 'support', component: SupportTierPage, meta: { title: 'Billing' } },
-        // The billing portal's cancel flow for an address returns here.
-        { path: 'addresses', component: AddressesPage, meta: { title: 'Static addresses' } },
+        // (?checkout=success&session_id=..., ?checkout=cancel), the portal's
+        // cancel flow for a static address too.
+        { path: 'billing', component: BillingPage, meta: { title: 'Billing' } },
+        { path: 'support', redirect: (to) => ({ path: '/me/billing', query: to.query }) },
+        { path: 'addresses', redirect: '/me/billing' },
         { path: 'account', component: AccountPage, meta: { title: 'Account' } },
         // The hosted server's page before an account could have several:
         // old links land on the list.
         { path: 'server', redirect: '/me/servers' },
       ],
     },
-    // The admin, in four areas (utils/adminNav.ts): NovaWorld, Hosting, People
-    // and money, Operations. Its paths stay flat: the attention list's links
-    // and the toolbox name them.
+    // The admin (utils/adminNav.ts): Overview, Players, Servers, Products,
+    // Billing and System, their tabs as child paths, and the pages of one
+    // player, server, machine, product, job, program or AWS resource. The
+    // service's findings link to these paths (fleet_health.cpp).
     {
       path: '/admin',
       component: AdminLayout,
       meta: { wide: true },
       children: [
-        { path: '', redirect: '/admin/overview' },
-        { path: 'overview', component: OverviewSection, meta: { title: 'Admin: Overview' } },
-        { path: 'users', component: UsersSection, meta: { title: 'Admin: Users' } },
-        { path: 'users/:id(\\d+)', component: UserDetailSection, meta: { title: 'Admin: User' } },
-        { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
-        { path: 'fleet/machines/:id(\\d+)', component: MachineDetailSection, meta: { title: 'Admin: Machine' } },
-        { path: 'addresses', component: AddressesSection, meta: { title: 'Admin: Static addresses' } },
-        { path: 'settings', component: SettingsSection, meta: { title: 'Admin: Settings' } },
+        { path: '', component: OverviewPage, meta: { title: 'Admin' } },
+        { path: 'players', component: OnlineTab, meta: { title: 'Admin: Players online' } },
+        { path: 'players/accounts', component: AccountsTab, meta: { title: 'Admin: Accounts' } },
+        { path: 'players/cd-keys', component: CdKeysTab, meta: { title: 'Admin: CD keys' } },
+        { path: 'players/:id(\\d+)', component: PlayerPage, meta: { title: 'Admin: Player' } },
+        { path: 'servers', component: ServersTab, meta: { title: 'Admin: Servers' } },
+        { path: 'servers/machines', component: MachinesTab, meta: { title: 'Admin: Machines' } },
+        { path: 'servers/roll', component: RollTab, meta: { title: 'Admin: Roll the fleet' } },
         {
-          path: 'fleet/:id(\\d+)',
+          path: 'servers/:id(\\d+)',
           component: ServerDetailLayout,
           props: { scope: 'admin' },
           meta: { title: 'Admin: Server', serverDetail: true },
@@ -137,37 +140,41 @@ const router = createRouter({
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
-            { path: 'game-settings', component: ServerSettingsTab },
-            { path: 'usage', component: ServerUsageTab },
             { path: 'logs', component: ServerLogsTab },
-            { path: 'machine', component: ServerMachineTab },
           ],
         },
-        { path: 'usage', component: UsageSection, meta: { title: 'Admin: Server usage' } },
-        { path: 'billing', component: BillingSection, meta: { title: 'Admin: Subscriptions' } },
-        { path: 'costs', component: CostsSection, meta: { title: 'Admin: AWS costs' } },
-        { path: 'novaworld', component: NovaWorldSection, meta: { title: 'Admin: NovaWorld' } },
-        { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
-        { path: 'jobs/:id(\\d+)', component: JobDetailSection, meta: { title: 'Admin: Job' } },
-        { path: 'infrastructure', component: InfraSection, meta: { title: 'Admin: Infrastructure' } },
-        { path: 'infrastructure/programs/:name', component: ProgramDetailSection, meta: { title: 'Admin: Program' } },
-        {
-          path: 'infrastructure/resources/:id(rds|cache|nlb)',
-          component: InfraResourceSection,
-          meta: { title: 'Admin: AWS resource' },
-        },
-        { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
-        { path: 'products', component: ProductsSection, meta: { title: 'Admin: Products' } },
+        { path: 'machines/:id(\\d+)', component: MachinePage, meta: { title: 'Admin: Machine' } },
+        { path: 'products', component: ProductsPage, meta: { title: 'Admin: Products' } },
         // A product by its project key, or by its id when it has none.
-        { path: 'products/:ref', component: ProductSection, meta: { title: 'Admin: Product' } },
-        // The sections' names before the admin pages were rebuilt, and the
-        // NovaWorld service's and sessions' pages before they were one: old
-        // links land on their new pages.
-        { path: 'hosted', redirect: '/admin/fleet' },
-        { path: 'service', redirect: '/admin/novaworld' },
-        { path: 'server', redirect: '/admin/novaworld' },
-        { path: 'sessions', redirect: { path: '/admin/novaworld', hash: '#sessions' } },
-        { path: 'connections', redirect: { path: '/admin/novaworld', hash: '#sessions' } },
+        { path: 'products/:ref', component: ProductPage, meta: { title: 'Admin: Product' } },
+        { path: 'billing', component: SubscriptionsTab, meta: { title: 'Admin: Subscriptions' } },
+        { path: 'billing/addresses', component: AddressesTab, meta: { title: 'Admin: Static addresses' } },
+        { path: 'billing/costs', component: CostsTab, meta: { title: 'Admin: AWS costs' } },
+        { path: 'system', component: NovaWorldTab, meta: { title: 'Admin: NovaWorld' } },
+        { path: 'system/infrastructure', component: InfrastructureTab, meta: { title: 'Admin: Infrastructure' } },
+        { path: 'system/jobs', component: JobsTab, meta: { title: 'Admin: Background jobs' } },
+        { path: 'jobs/:id(\\d+)', component: JobPage, meta: { title: 'Admin: Job' } },
+        { path: 'programs/:name', component: ProgramPage, meta: { title: 'Admin: Program' } },
+        { path: 'resources/:id(rds|cache|nlb)', component: ResourcePage, meta: { title: 'Admin: AWS resource' } },
+        // The pages' paths before the admin became six sections: old links
+        // and bookmarks land on their new places.
+        { path: 'overview', redirect: '/admin' },
+        { path: 'users', redirect: '/admin/players/accounts' },
+        { path: 'users/:id(\\d+)', redirect: (to) => `/admin/players/${to.params.id}` },
+        { path: 'cd-keys', redirect: '/admin/players/cd-keys' },
+        { path: 'fleet', redirect: (to) => (to.query.tab === 'roll' ? '/admin/servers/roll' : { path: '/admin/servers', query: to.query }) },
+        { path: 'fleet/machines/:id(\\d+)', redirect: (to) => `/admin/machines/${to.params.id}` },
+        { path: 'fleet/:id(\\d+)', redirect: (to) => `/admin/servers/${to.params.id}` },
+        { path: 'fleet/:id(\\d+)/:tab', redirect: (to) => `/admin/servers/${to.params.id}${KEPT_SERVER_TABS.has(String(to.params.tab)) ? `/${to.params.tab}` : ''}` },
+        { path: 'usage', redirect: '/admin/servers' },
+        { path: 'settings', redirect: '/admin/servers/machines' },
+        { path: 'addresses', redirect: '/admin/billing/addresses' },
+        { path: 'costs', redirect: '/admin/billing/costs' },
+        { path: 'novaworld', redirect: '/admin/system' },
+        { path: 'jobs', redirect: (to) => ({ path: '/admin/system/jobs', query: to.query }) },
+        { path: 'infrastructure', redirect: '/admin/system/infrastructure' },
+        { path: 'infrastructure/programs/:name', redirect: (to) => `/admin/programs/${to.params.name}` },
+        { path: 'infrastructure/resources/:id(rds|cache|nlb)', redirect: (to) => `/admin/resources/${to.params.id}` },
       ],
     },
     // Anything else.

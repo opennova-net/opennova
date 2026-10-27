@@ -7,7 +7,7 @@
 
 import { machineStateLabel } from './adminView';
 import { formatAge, formatByteRate, formatBytes, formatDuration, formatMemory, formatPercent, timeMs } from './format';
-import type { Tone } from './infraView';
+import type { Tone } from './tone';
 import type { FleetMachine, MachineEvent, MachineStats, MachineTree } from '../types/hostedServer';
 
 // A report older than this is late: the agent syncs every few seconds, and the
@@ -120,7 +120,7 @@ export function machineFlags(
 export function machineTone(state: string): Tone {
   if (state === 'failed' || state === 'lost') return 'bad';
   if (state === 'ready') return 'ok';
-  if (state === 'ended') return 'idle';
+  if (state === 'ended') return 'muted';
   return 'warn';
 }
 

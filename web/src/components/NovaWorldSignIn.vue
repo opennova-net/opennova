@@ -16,7 +16,7 @@
         class="novaworld-state flex items-center gap-3 rounded-panel border p-4 text-sm"
         :class="saved.maintenance_enabled ? 'border-warn/40 bg-warn/10 text-warn' : 'border-online/40 bg-online/10 text-online'"
       >
-        <span :class="toneBadgeClass(saved.maintenance_enabled ? 'warn' : 'ok')">{{ saved.maintenance_enabled ? 'Maintenance' : 'Open' }}</span>
+        <span :class="badgeClass(saved.maintenance_enabled ? 'warn' : 'ok')">{{ saved.maintenance_enabled ? 'Maintenance' : 'Open' }}</span>
         <span class="font-medium">
           {{ saved.maintenance_enabled ? 'Maintenance mode is on: game clients cannot sign in.' : 'NovaWorld is open: game clients can sign in.' }}
         </span>
@@ -65,7 +65,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { fetchServerStatus, updateServerStatus } from '../api/admin';
 import type { ServerStatus } from '../types/admin';
-import { toneBadgeClass } from '../utils/infraView';
+import { badgeClass } from '../utils/tone';
 
 withDefaults(defineProps<{ idBase?: string }>(), { idBase: 'sign-in' });
 

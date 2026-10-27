@@ -90,6 +90,7 @@ describe('ServersPage', () => {
       rid: 21,
       server_name: 'Two',
       mission_name: 'jo_two.bms',
+      game_type: '',
       players: 3,
       max_players: 24,
       host_ip: '203.0.113.9',
