@@ -39,13 +39,15 @@ public:
 	// The clip the game loads by `name`: null for a file over bad::kBadLoadMaxBytes, as the
 	// game's load refuses one (its token then plays failsafe.bad, anim::adm_token_clip).
 	BoneAnimation bone_animation(const std::string &name) const override;
+	// `body_builder`: a world entity's rig, whose clips move no row by their translation rows
+	// (anim::SkeletalClips::load_from_adm); cached apart from the first-person viewmodel's.
 	SkeletalRig skeletal_rig(const std::string &adm_name,
 			const std::vector<anim::Vec3> &origins = {},
-			const std::vector<int> &parents = {}) const;
+			const std::vector<int> &parents = {}, bool body_builder = false) const;
 	SkeletalRig skeletal_rig_from_files(const std::string &skeleton_bad,
 			const std::vector<std::pair<std::string, std::string>> &clips,
 			const std::vector<anim::Vec3> &origins = {},
-			const std::vector<int> &parents = {}) const;
+			const std::vector<int> &parents = {}, bool body_builder = false) const;
 
 private:
 	struct Impl;

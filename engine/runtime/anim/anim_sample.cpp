@@ -175,13 +175,15 @@ std::vector<Vec3> positions_from_model(const BadFile &bind_bad,
 }
 
 ClipSampler::ClipSampler(std::shared_ptr<const BadFile> bad, const std::vector<Vec3> &shared_rest_origins,
-                         bool model_bind, const BadFile *bind_source, const std::vector<int> &model_parents)
-    : ClipSampler(*bad, shared_rest_origins, model_bind, bind_source, model_parents) {
+                         bool model_bind, const BadFile *bind_source, const std::vector<int> &model_parents,
+                         bool translations)
+    : ClipSampler(*bad, shared_rest_origins, model_bind, bind_source, model_parents, translations) {
     owner_ = std::move(bad);
 }
 
 ClipSampler::ClipSampler(const BadFile &bad, const std::vector<Vec3> &shared_rest_origins, bool model_bind,
-                         const BadFile *bind_source, const std::vector<int> &model_parents)
+                         const BadFile *bind_source, const std::vector<int> &model_parents,
+                         bool translations)
     : bad_(&bad), model_bind_(model_bind) {
     Clip &clip = header_;
     clip.fps = bad.fps;
@@ -202,7 +204,8 @@ ClipSampler::ClipSampler(const BadFile &bad, const std::vector<Vec3> &shared_res
     // @0x410ea0..0x410eb7; Math_TransposeMatrix3x3ToMatrix4x4 @0x616740 zeroes the row
     // @0x61675a..0x616784.]
     const BadFile &gate_source = (bind_source != nullptr) ? *bind_source : bad;
-    const bool translated = (bad.flags & 0x02u) != 0 && (gate_source.flags & 0x02u) != 0;
+    const bool translated =
+            translations && (bad.flags & 0x02u) != 0 && (gate_source.flags & 0x02u) != 0;
     // Model-table mode: the MODEL's bone table defines the rig -- row count, hierarchy, and
     // pivots; the .bad's own bone count/parents/positions are never read (BadBone.position is
     // a lossy DCC export -- 12 of 43 JO viewmodel rigs ship zeroed/stale values and retail

@@ -180,6 +180,22 @@ func test_load_from_bad_files_binds_raw_bads() -> void:
 		"eval_pose returns one transform per skeleton bone")
 
 
+func test_first_person_rig_is_its_own_load() -> void:
+	# The viewmodel's rig and a world entity's over one table are two loads (engine
+	# SkeletalClips::load_from_adm's body_builder: a body takes no translation row).
+	var root := ResourceRoot.new()
+	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	var body := SkeletalAnim.new()
+	var first_person := SkeletalAnim.new()
+	assert_true(body.load_from_bad_files(root, "idle.bad", {"anim_idle": "idle.bad"}),
+		"the body rig loads: %s" % body.get_last_error())
+	assert_true(first_person.load_from_bad_files(root, "idle.bad", {"anim_idle": "idle.bad"},
+		PackedVector3Array(), PackedInt32Array(), true),
+		"the first-person rig loads: %s" % first_person.get_last_error())
+	assert_eq(first_person.get_bone_count(), body.get_bone_count(),
+		"both rigs carry the skeleton's bones")
+
+
 func test_load_from_bad_files_fails_gracefully() -> void:
 	var sk := SkeletalAnim.new()
 	var root := ResourceRoot.new()

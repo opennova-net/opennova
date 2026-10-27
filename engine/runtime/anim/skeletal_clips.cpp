@@ -173,7 +173,7 @@ void SkeletalClips::clear() {
 bool SkeletalClips::load_from_adm(
 		const RigFiles *files, const std::string &adm_name,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	clear();
 	if (!files || adm_name.empty()) return false;
 	const auto map = files->animation_map(adm_name);
@@ -222,7 +222,8 @@ bool SkeletalClips::load_from_adm(
 			if (entry.variants[v].text[0])
 				clips.push_back({key, {i, v, entry.variants[v].text}});
 	}
-	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents))
+	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents,
+				body_builder))
 		return false;
 	adm_name_ = adm_name;
 	return true;
@@ -232,11 +233,12 @@ bool SkeletalClips::load_from_files(
 		const RigFiles *files, const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clip_bads,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	std::vector<ClipRequest> clips;
 	clips.reserve(clip_bads.size());
 	for (size_t i = 0; i < clip_bads.size(); ++i) clips.push_back({clip_bads[i].first, {i, 0, clip_bads[i].second}});
-	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents);
+	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents,
+			body_builder);
 }
 
 void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
@@ -345,7 +347,7 @@ bool SkeletalClips::load_clips(
 		const RigFiles *files, const std::string &skeleton_bad,
 		const std::vector<ClipRequest> &requests, bool table_tokens,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
+		const std::vector<int> &model_bone_parents, bool body_builder) {
 	clear();
 	if (!files) return false;
 	const auto skeleton = files->bone_animation(skeleton_bad);
@@ -381,8 +383,9 @@ bool SkeletalClips::load_clips(
 		LoadedClip lc;
 		lc.key = request.key;
 		lc.source = std::move(source);
+		// A body rig's clips take no translation row (load_from_adm's `body_builder`).
 		auto sampler = std::make_shared<const anim::ClipSampler>(
-				file, shared_rest, false, &skeleton_bf, rig_parents);
+				file, shared_rest, false, &skeleton_bf, rig_parents, !body_builder);
 		lc.clip = sampler->header();
 		lc.clip.frames.resize(static_cast<size_t>(lc.clip.frame_count) + 1);
 		lc.clip.sampler = std::move(sampler);

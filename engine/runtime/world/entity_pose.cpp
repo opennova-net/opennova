@@ -142,7 +142,7 @@ bool EntityPoseProvider::register_skeletal_entity(
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
 	if (!model_bone_table(*model, origins, parents)) return false;
-	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents, /*body_builder=*/true);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 	SkeletalSource source;
 	source.model_id = model_id;
@@ -186,7 +186,7 @@ bool EntityPoseProvider::register_skeletal_type(uint16_t type_id, int32_t model_
 	std::vector<anim::Vec3> origins;
 	std::vector<int> parents;
 	if (!model_bone_table(*model, origins, parents)) return false;
-	auto rig = assets_->skeletal_rig(adm_name, origins, parents);
+	auto rig = assets_->skeletal_rig(adm_name, origins, parents, /*body_builder=*/true);
 	if (rig == nullptr || !rig->loaded() || !rig->fk_valid()) return false;
 	SkeletalSource source;
 	source.model_id = model_id;

@@ -72,9 +72,13 @@ public:
 	// and the .bad contributes rotations only, exactly as the original consumes
 	// modelDef+52/+56; origins alone are the legacy positional override (see
 	// anim::SkeletalClips).
+	// p_first_person: the first-person viewmodel's rig, whose clips keep their translation rows;
+	// any other is a world entity's, whose body builder takes none (engine
+	// SkeletalClips::load_from_adm's body_builder).
 	bool load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_adm_name,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
-			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array(),
+			bool p_first_person = false);
 
 	// Load + sample a skeletal set from EXPLICIT raw .bad files (no .adm), as the original
 	// PLAYER_INFO preview does: p_skeleton_bad is the rest/bind source (e.g. "Dt1rst.bad") and
@@ -87,7 +91,8 @@ public:
 	bool load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
-			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
+			const PackedInt32Array &p_model_bone_parents = PackedInt32Array(),
+			bool p_first_person = false);
 
 	// The model's bone table at rest with no clip (SkeletalClips::load_rest): the rig
 	// a per-vertex skinned model nothing plays on draws its part tracks through.

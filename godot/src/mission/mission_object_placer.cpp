@@ -681,7 +681,7 @@ ObjectModel *MissionObjectPlacer::build_model_from_graphic(
 				? skel_model->get_bone_parents()
 				: PackedInt32Array();
 		const Ref<SkeletalAnim> skeletal =
-				_skeletal_from_adm(p_adm_name, skel_origins, skel_parents);
+				_skeletal_from_adm(p_adm_name, skel_origins, skel_parents, true);
 		if (skeletal.is_valid()) {
 			model->set_skeletal_anim(skeletal);
 		}
@@ -899,7 +899,7 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 // source, never the lossy .bad records).
 Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 		const String &p_adm_name, const PackedVector3Array &p_bone_origins,
-		const PackedInt32Array &p_bone_parents) {
+		const PackedInt32Array &p_bone_parents, bool p_first_person) {
 	// The def's name as authored opens <stem>.adm, or default.adm where the
 	// mounted roots do not carry that file, and the cache keys the RESOLVED name
 	// (AnimMap_LoadAdmFile's extension swap and FileSystem_FileExists miss ahead
@@ -913,7 +913,7 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	if (adm_name.is_empty()) {
 		return Ref<SkeletalAnim>();
 	}
-	const String cache_key = adm_name + String("#") +
+	const String cache_key = adm_name + String(p_first_person ? "#fp#" : "#") +
 			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
 			String::num_int64(Variant(p_bone_parents).hash());
 	const Ref<SkeletalAnim> *cached = skeletal_cache_.getptr(cache_key);
@@ -924,7 +924,7 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
 	if (!skeletal->load_from_resource_root(resource_root_, adm_name,
-				p_bone_origins, p_bone_parents)) {
+				p_bone_origins, p_bone_parents, p_first_person)) {
 		skeletal.unref();
 	}
 	++load_profile_.rig_loads;
@@ -944,7 +944,7 @@ void MissionObjectPlacer::_apply_skeletal_anim(ObjectModel *p_model,
 		return;
 	}
 	const Ref<SkeletalAnim> skeletal =
-			_skeletal_from_adm(anim_def, p_bone_origins, p_bone_parents);
+			_skeletal_from_adm(anim_def, p_bone_origins, p_bone_parents, false);
 	if (skeletal.is_valid()) {
 		p_model->set_skeletal_anim(skeletal);
 	}

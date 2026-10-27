@@ -130,29 +130,31 @@ BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 }
 
 SkeletalRig AssetStore::skeletal_rig(const std::string &adm_name,
-		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
+		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents,
+		bool body_builder) const {
 	sync_source();
 	const auto name = asset_file_name(adm_name, ".adm");
 	if (name.empty() || !impl_->index) return {};
-	std::string key = "adm:";
+	std::string key = body_builder ? "adm-body:" : "adm:";
 	key_part(key, name);
 	rig_bones_key(key, origins, parents);
 	const auto found = impl_->rigs.find(key);
 	if (found != impl_->rigs.end()) return found->second;
 	auto rig = std::make_shared<anim::SkeletalClips>();
 	SkeletalRig result;
-	if (rig->load_from_adm(this, name, origins, parents)) result = std::move(rig);
+	if (rig->load_from_adm(this, name, origins, parents, body_builder)) result = std::move(rig);
 	impl_->rigs.emplace(std::move(key), result);
 	return result;
 }
 
 SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clips,
-		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
+		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents,
+		bool body_builder) const {
 	sync_source();
 	const auto name = bad_key(skeleton_bad);
 	if (name.empty() || !impl_->index) return {};
-	std::string key = "files:";
+	std::string key = body_builder ? "files-body:" : "files:";
 	key_part(key, name);
 	key_part(key, std::to_string(clips.size()));
 	for (const auto &clip : clips) {
@@ -164,7 +166,8 @@ SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 	if (found != impl_->rigs.end()) return found->second;
 	auto rig = std::make_shared<anim::SkeletalClips>();
 	SkeletalRig result;
-	if (rig->load_from_files(this, name, clips, origins, parents)) result = std::move(rig);
+	if (rig->load_from_files(this, name, clips, origins, parents, body_builder))
+		result = std::move(rig);
 	impl_->rigs.emplace(std::move(key), result);
 	return result;
 }

@@ -89,15 +89,17 @@ const SkeletalAnim::LoadedClip *SkeletalAnim::find_clip_variant(const String &ke
 
 bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_root,
 		const String &p_adm_name, const PackedVector3Array &p_model_bone_origins,
-		const PackedInt32Array &p_model_bone_parents) {
+		const PackedInt32Array &p_model_bone_parents, bool p_first_person) {
 	rig_.reset();
 	last_error_ = String();
 	if (p_resource_root.is_null()) {
 		last_error_ = "Resource root is null";
 		return false;
 	}
+	// A world entity's rig unless the viewmodel's (engine SkeletalClips::load_from_adm's body_builder).
 	rig_ = p_resource_root->native_assets().skeletal_rig(opennova::to_std(p_adm_name),
-			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
+			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents),
+			!p_first_person);
 	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_adm_name;
 	return rig_ != nullptr;
 }
@@ -118,7 +120,7 @@ bool SkeletalAnim::load_rest(const PackedVector3Array &p_model_bone_origins,
 bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 		const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 		const PackedVector3Array &p_model_bone_origins,
-		const PackedInt32Array &p_model_bone_parents) {
+		const PackedInt32Array &p_model_bone_parents, bool p_first_person) {
 	rig_.reset();
 	last_error_ = String();
 	if (p_resource_root.is_null()) {
@@ -135,7 +137,8 @@ bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 	}
 	rig_ = p_resource_root->native_assets().skeletal_rig_from_files(
 			opennova::to_std(p_skeleton_bad), clips,
-			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents));
+			to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents),
+			!p_first_person);
 	if (!rig_) last_error_ = "Animation rig missing or invalid: " + p_skeleton_bad;
 	return rig_ != nullptr;
 }
@@ -456,8 +459,8 @@ void SkeletalAnim::write_pose_to_skeleton(Skeleton3D *p_skeleton,
 }
 
 void SkeletalAnim::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name", "model_bone_origins", "model_bone_parents"), &SkeletalAnim::load_from_resource_root, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
-	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bone_parents"), &SkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()));
+	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "adm_name", "model_bone_origins", "model_bone_parents", "first_person"), &SkeletalAnim::load_from_resource_root, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("load_from_bad_files", "resource_root", "skeleton_bad", "key_to_bad", "model_bone_origins", "model_bone_parents", "first_person"), &SkeletalAnim::load_from_bad_files, DEFVAL(PackedVector3Array()), DEFVAL(PackedInt32Array()), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_loaded"), &SkeletalAnim::is_loaded);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &SkeletalAnim::get_last_error);
 	ClassDB::bind_method(D_METHOD("get_bone_count"), &SkeletalAnim::get_bone_count);

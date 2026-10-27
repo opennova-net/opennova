@@ -539,9 +539,10 @@ private:
 	void _configure_item_scale(ObjectModel *p_model, int p_item_id) const;
 	void _configure_item_shadow(ObjectModel *p_model, int p_item_id);
 	void _configure_item_lighting(ObjectModel *p_model, int p_item_id);
+	// p_first_person: the viewmodel's rig (SkeletalAnim::load_from_resource_root).
 	Ref<SkeletalAnim> _skeletal_from_adm(const String &p_adm_name,
 			const PackedVector3Array &p_bone_origins,
-			const PackedInt32Array &p_bone_parents);
+			const PackedInt32Array &p_bone_parents, bool p_first_person);
 	void _apply_skeletal_anim(ObjectModel *p_model, int p_item_id,
 			const PackedVector3Array &p_bone_origins,
 			const PackedInt32Array &p_bone_parents);

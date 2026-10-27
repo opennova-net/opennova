@@ -9,7 +9,9 @@
    collision pose share, through the collision provider's frame map, against it row for row, on
    body-shaped data where the two can disagree: the clip's frame-0 channels are not the skeleton's
    bind, its own bind records differ from the skeleton's (they must be ignored), every bind is a
-   non-symmetric turn, and the pivots carry an X term the frame map negates.
+   non-symmetric turn, and the pivots carry an X term the frame map negates. A translated clip over a
+   translated reset (JOTAC's tiger.adm / shark.adm shape) poses the same rows on a body rig, whose builder
+   never reads a translation row; a first-person rig moves by them.
    [orig: AnimChannel_ComputeBoneMatrices @0x410DA0 - bind = channel+44 @0x410DD8, its records'
     3x3 transposed @0x410E10, times the channel matrix @0x410E20, transposed into the 4x4
     @0x410E2B; BoneAnim_TransformBones @0x410360 - Math_QuaternionToMatrix3x3 @0x615A70 into the
@@ -157,7 +159,10 @@ struct MemoryBad {
     std::vector<std::vector<uint16_t>> lengths;
     bad::BadFile file = {};
 
-    MemoryBad(const std::vector<Mat3> &records, const std::vector<std::vector<Quat4>> &key_rotations)
+    std::vector<std::array<float, 3>> moves;
+
+    MemoryBad(const std::vector<Mat3> &records, const std::vector<std::vector<Quat4>> &key_rotations,
+              bool translated = false)
         : bones(kRows), channels(kRows), keys(kRows), lengths(kRows) {
         for (size_t i = 0; i < kRows; ++i) {
             bones[i].parent_index = i == 0 ? -1 : 0;
@@ -175,6 +180,16 @@ struct MemoryBad {
         file.num_bones = kRows;
         file.channels = channels.data();
         file.num_channels = kRows;
+        if (translated) {
+            // One row a bone a key, each a distinct move (the translation block is laid out by
+            // the file's bone count).
+            for (size_t key = 0; key < key_rotations[0].size(); ++key)
+                for (size_t b = 0; b < kRows; ++b)
+                    moves.push_back({0.05f * float(b + 1), -0.03f * float(key + 1), 0.02f * float(b + key + 1)});
+            file.flags |= 0x02u;
+            file.translations = reinterpret_cast<float (*)[3]>(moves.data());
+            file.num_translations = moves.size();
+        }
     }
 };
 
@@ -282,6 +297,46 @@ int main() {
                    std::fabs(a[k].rotation.x - b[k].rotation.x) < 1e-6f &&
                    std::fabs(a[k].origin.y - b[k].origin.y) < 1e-6f;
         expect(same, "a clip's own bind records pose nothing");
+    }
+
+    // A translated clip over a translated reset: the body rig poses the untranslated rows, the
+    // builder's; the first-person rig (the default) moves them.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the copy's zero translation row
+    //  @0x4B1480..0x4B1486; AnimChannel_ComputeBoneMatrices @0x410DA0 - the translation copy under
+    //  the bind's flag @0x410DEE, @0x410EA0..0x410EB7, which the body's copy never reads]
+    {
+        MemoryBad moved_skel(skel_bind, skel_keys, true);
+        MemoryBad moved_clip(clip_records, clip_keys, true);
+        files.bads["mskel"] = &moved_skel.file;
+        files.bads["mclip"] = &moved_clip.file;
+        SkeletalClips body, first_person;
+        const bool loaded =
+                body.load_from_files(&files, "mskel", {{"anim_clip", "mclip"}}, rel, parents, /*body_builder=*/true) &&
+                first_person.load_from_files(&files, "mskel", {{"anim_clip", "mclip"}}, rel, parents);
+        if (expect(loaded, "the translated rigs load")) {
+            std::vector<Quat4> channel(kRows);
+            for (size_t k = 0; k < kRows; ++k) channel[k] = clip_keys[k][1];
+            const std::vector<Row> retail = retail_body_rows(channel, skel_bind, abs_pivot, parents);
+            const auto rows_of = [&](const SkeletalClips &rig) {
+                std::vector<PoseBone> pose;
+                rig.eval_pose("anim_clip", 1.0, 0, pose);
+                std::vector<SkeletalClips::RestTransform> globals;
+                anim::pose_globals(pose, rig.parents(), pose.size(), -1, globals);
+                std::vector<Row> out(kRows);
+                for (size_t k = 0; k < kRows; ++k)
+                    out[k] = render_row(anim::rest_mul(globals[k], rig.rest_global_inverse()[k]));
+                return out;
+            };
+            const std::vector<Row> body_rows = rows_of(body);
+            const std::vector<Row> fp_rows = rows_of(first_person);
+            bool body_same = true, fp_moved = false;
+            for (size_t k = 0; k < kRows; ++k) {
+                body_same = body_same && same_row(body_rows[k], retail[k], 2e-4f);
+                fp_moved = fp_moved || !same_row(fp_rows[k], retail[k], 2e-4f);
+            }
+            expect(body_same, "a body rig drops a translated clip's rows, as the body builder does");
+            expect(fp_moved, "a first-person rig moves by them, as its builder does");
+        }
     }
 
     if (test_expect::failures == 0) std::printf("anim_body_bind_equivalence: OK\n");
