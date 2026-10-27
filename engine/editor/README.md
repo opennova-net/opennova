@@ -13,7 +13,7 @@ own load paths. The rules that bind it (what may include or link it, the library
 - `blank`: the from-scratch factories of new files.
 - `project_build`: the steppable build.
 - `novaworld`: a project folder as a working copy of its game's project in NovaWorld
-  (ADR 0069, ADR 0071). Its state under `.opennova/content/` (the binding, the base revision's
+  (ADR 0069, ADR 0071). Its state under `.opennova/novaworld/` (the binding, the base revision's
   manifest, the hash cache, a pull's downloads); its files hashed as the store keeps them, a
   few at a time (`content_scan`, by the project walk's rule, `assets/project_walk`); its changes
   since its base and a pull planned path by path over the base, the folder and the revision,

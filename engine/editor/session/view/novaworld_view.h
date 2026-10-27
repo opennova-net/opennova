@@ -4,7 +4,7 @@
 // (its service, name and role, never its session cookie or a password), the projects it may read,
 // the open project's binding and its standing (its changes since its base, the project's head), a
 // pull's conflicts while they wait for the author, and what the last content job came to. The
-// Content window draws it, the view JSON's content section is it.
+// NovaWorld window draws it, the view JSON's novaworld section is it.
 
 #include <cstdint>
 #include <optional>
@@ -53,7 +53,7 @@ struct NovaWorldView {
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.
 	int64_t pull_revision = 0;
 	std::vector<ContentConflictView> conflicts;
-	// The project's revisions as last listed (content_history), newest first, and why the last list
+	// The project's revisions as last listed (novaworld_history), newest first, and why the last list
 	// failed.
 	std::vector<RemoteRevision> history;
 	std::string history_error;

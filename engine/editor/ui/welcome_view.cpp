@@ -78,7 +78,7 @@ void draw_from_store(Workspace &workspace) {
 	draw_novaworld_projects(workspace);
 	if (v.novaworld.signed_in) return;
 	ImGui::SameLine();
-	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "content");
+	if (ImGui::Button("Sign in...")) window_requests::focus(workspace, "novaworld");
 	ui_kit::tooltip("Signs in with your NovaWorld account: an admin sees the private projects too.");
 }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 // A working copy's own state (NovaWorld, ADR 0069): what a project folder knows of the
-// content project it is a copy of, kept under its `.opennova/content/`, which never syncs (the
+// content project it is a copy of, kept under its `.opennova/novaworld/`, which never syncs (the
 // machine's own folder, ProjectPaths::cache_dir). The binding names the service and the content
 // project and the revision the folder's files were last made the same as (its base); the base's
 // manifest lists those files, so a change since is told apart from a change the server has; the
@@ -19,7 +19,7 @@ namespace opennova::editor {
 struct ProjectPaths;
 
 struct ContentPaths {
-	std::string dir; // <root>/.opennova/content
+	std::string dir; // <root>/.opennova/novaworld
 	std::string binding_file; // binding.json
 	std::string base_file; // base.json: the base revision's manifest, its canonical text
 	std::string hashes_file; // hashes.json (content_scan.h)

@@ -642,14 +642,14 @@ constexpr ViewSectionRow kSections[] = {
 			"label (its words, as Back's tooltip and list say it), locator? (a record's, or a text's "
 			"line:column; on a page the record a Go to marked), field? (on a page, that record's field), "
 			"record? {row, kind, child} while the document read stands}])." },
-	{ S::Content, "content", concern_set({ C::Content }), novaworld_section,
+	{ S::NovaWorld, "novaworld", concern_set({ C::NovaWorld }), novaworld_section,
 			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
 			"username, role, signed_in} (never its session), calling (a sign-in or a project list in flight), the "
 			"projects as last listed [{key, title, public, retail, base, head, can_push}] and projects_error, the "
 			"open project's binding {bound, key, revision}, its standing as the last check, pull or push left it "
 			"{checked, head_known, head, head_error, changes [{path, change: added, modified or deleted}], "
-			"problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, theirs}]: content_resolve "
-			"settles each, content_pull goes on}, and last, what the last content job came to." },
+			"problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, theirs}]: novaworld_resolve "
+			"settles each, novaworld_pull goes on}, and last, what the last content job came to." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

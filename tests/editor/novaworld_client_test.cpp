@@ -298,7 +298,7 @@ static int test_accounts() {
 	TEST_EXPECT(ended.changed && !ended.account.signed_in() && ended.account.server == kServer);
 
 	// The kept account's file: with none kept, the build's service alone; once kept, the account.
-	editor::FileNovaWorldAccountStore store(dir.file("content_account.json"), "staging.test/");
+	editor::FileNovaWorldAccountStore store(dir.file("novaworld_account.json"), "staging.test/");
 	TEST_EXPECT(store.load().server == "https://staging.test" && !store.load().signed_in());
 	TEST_EXPECT(store.save(update.account, error));
 	const editor::NovaWorldAccount kept = store.load();

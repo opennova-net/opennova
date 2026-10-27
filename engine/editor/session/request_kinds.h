@@ -37,7 +37,7 @@ enum class ServedBy : uint8_t {
 	ShellNeedsPerson, // the shell, with a person to answer its native dialog (the pickers): never
 					  // through the editor MCP, whose requests pass the path instead
 	// The session, by its row's handler, for a person alone: never through the editor MCP or the command
-	// line, whose requests are refused by kind before their fields are read (content_sign_in, whose
+	// line, whose requests are refused by kind before their fields are read (novaworld_sign_in, whose
 	// password a person types into the Content window).
 	SessionNeedsPerson,
 };

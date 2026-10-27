@@ -22,7 +22,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_walk.cpp
     # novaworld — a project folder as a working copy of its content project (ADR 0069): its
-    # state under .opennova/content/, its files hashed as the store keeps them, the changes since
+    # state under .opennova/novaworld/, its files hashed as the store keeps them, the changes since
     # its base and a pull planned over the base, the folder and the revision, and applied; the
     # client: the account, the routes as it speaks them, the pull and push jobs over the transport
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_account.cpp

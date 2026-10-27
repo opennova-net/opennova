@@ -2,15 +2,15 @@
 
 // The session's part for NovaWorld (ADR 0069): the account the editor acts as on a
 // NovaWorld service, the projects it may read, and the open project as a working copy of one of
-// them. It serves the content requests (request_kinds.cpp: content_sign_in, a person's alone, and
+// them. It serves the NovaWorld requests (request_kinds.cpp: novaworld_sign_in, a person's alone, and
 // the rest, the editor MCP's too) over the host's transport (ProjectSession::set_content_transport:
 // the Shell's HTTP, a test's fake) and the host's account store (set_novaworld_accounts), and shows
-// what it knows in the view's NovaWorldView (the Content concern). A sign-in and the project list are
+// what it knows in the view's NovaWorldView (the NovaWorld concern). A sign-in and the project list are
 // calls it polls itself (poll: they hold nothing of the session's); a check, a bind, a pull (a
 // get's too) and a push run as the session's operations (ContentOperation: the busy gate weighs
 // them as their rows say), and their finish comes back here (finish_job). A pull that meets files
-// both sides changed stops with its plan kept here for the author (content_resolve settles each
-// conflict, content_pull goes on), so no operation waits on a person. A pull's files written, the
+// both sides changed stops with its plan kept here for the author (novaworld_resolve settles each
+// conflict, novaworld_pull goes on), so no operation waits on a person. A pull's files written, the
 // project reads them again as an outside change (start_changed_refresh), or opens again when its
 // project file changed; a get's opens its folder. A release is a call too: the service builds it
 // from the project's revision (ADR 0069 d7). Single-threaded, like the session.
@@ -35,7 +35,7 @@ public:
 	NovaWorldController(const NovaWorldController &) = delete;
 	NovaWorldController &operator=(const NovaWorldController &) = delete;
 
-	// The host's seams, before the requests they serve: the transport (null: every content request
+	// The host's seams, before the requests they serve: the transport (null: every NovaWorld request
 	// refused, the editor reaches no service) and the account's store (null: kept in memory for the
 	// session alone). Setting the store reads its account into the view.
 	void set_transport(ContentTransport *transport);
@@ -70,7 +70,7 @@ public:
 	OperationOutcome finish_job(OperationKind kind, std::unique_ptr<ContentJob> job);
 
 private:
-	// Whether a request may run now; refused (content.refused, with why) when not: no transport;
+	// Whether a request may run now; refused (novaworld.refused, with why) when not: no transport;
 	// for `admin`, an admin signed in; for `project`, a project open; for `bound`, the project a
 	// working copy of a content project on the account's service (its binding's server).
 	bool ready(bool admin, bool project, bool bound);

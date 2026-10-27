@@ -835,60 +835,60 @@ inline EditorRequest empty_trash(bool force) {
 // --- NovaWorld (ADR 0069, session/novaworld_controller.h) -------------------------------------
 
 // A person's sign-in: never over the wire.
-inline EditorRequest content_sign_in(std::string server, std::string username, std::string password) {
-	EditorRequest request = of(EditorRequestKind::ContentSignIn);
+inline EditorRequest novaworld_sign_in(std::string server, std::string username, std::string password) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldSignIn);
 	request.server = std::move(server);
 	request.username = std::move(username);
 	request.password = std::move(password);
 	return request;
 }
-inline EditorRequest content_sign_out() {
-	return of(EditorRequestKind::ContentSignOut);
+inline EditorRequest novaworld_sign_out() {
+	return of(EditorRequestKind::NovaWorldSignOut);
 }
-inline EditorRequest content_check() {
-	return of(EditorRequestKind::ContentCheck);
+inline EditorRequest novaworld_check() {
+	return of(EditorRequestKind::NovaWorldCheck);
 }
-inline EditorRequest content_get(std::string project_key, std::string dir) {
-	EditorRequest request = of(EditorRequestKind::ContentGet);
+inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldGet);
 	request.project_key = std::move(project_key);
 	request.dir = std::move(dir);
 	return request;
 }
-inline EditorRequest content_bind(std::string project_key) {
-	EditorRequest request = of(EditorRequestKind::ContentBind);
+inline EditorRequest novaworld_bind(std::string project_key) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldBind);
 	request.project_key = std::move(project_key);
 	return request;
 }
-inline EditorRequest content_pull() {
-	return of(EditorRequestKind::ContentPull);
+inline EditorRequest novaworld_pull() {
+	return of(EditorRequestKind::NovaWorldPull);
 }
-inline EditorRequest content_resolve(std::string path, Resolution resolution) {
-	EditorRequest request = of(EditorRequestKind::ContentResolve);
+inline EditorRequest novaworld_resolve(std::string path, Resolution resolution) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldResolve);
 	request.path = std::move(path);
 	request.resolution = resolution;
 	return request;
 }
-inline EditorRequest content_push(std::string message) {
-	EditorRequest request = of(EditorRequestKind::ContentPush);
+inline EditorRequest novaworld_push(std::string message) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldPush);
 	request.message = std::move(message);
 	return request;
 }
-inline EditorRequest content_restore(std::string path, int64_t revision = 0) {
-	EditorRequest request = of(EditorRequestKind::ContentRestore);
+inline EditorRequest novaworld_restore(std::string path, int64_t revision = 0) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldRestore);
 	request.path = std::move(path);
 	request.revision = revision;
 	return request;
 }
-inline EditorRequest content_history() {
-	return of(EditorRequestKind::ContentHistory);
+inline EditorRequest novaworld_history() {
+	return of(EditorRequestKind::NovaWorldHistory);
 }
-inline EditorRequest content_release(std::string version) {
-	EditorRequest request = of(EditorRequestKind::ContentRelease);
+inline EditorRequest novaworld_release(std::string version) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldRelease);
 	request.version = std::move(version);
 	return request;
 }
-inline EditorRequest content_cancel() {
-	return of(EditorRequestKind::ContentCancel);
+inline EditorRequest novaworld_cancel() {
+	return of(EditorRequestKind::NovaWorldCancel);
 }
 
 // --- the shell's -------------------------------------------------------------------------------

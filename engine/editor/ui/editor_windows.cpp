@@ -234,8 +234,8 @@ void EditorWindows::request(EditorRequest request) {
 		request.values.clear();
 	}
 	// A content project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
-	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::ContentFolder) {
-		content_get_key_ = request.project_key;
+	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::NovaWorldFolder) {
+		novaworld_get_key_ = request.project_key;
 		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
@@ -489,13 +489,13 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
 		stream_pick_ = StreamPick();
 		break;
-	case PickPurpose::ContentFolder:
+	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.
-		if (!content_get_key_.empty()) {
+		if (!novaworld_get_key_.empty()) {
 			const bool slash = path.back() == '/' || path.back() == '\\';
-			request(request::content_get(content_get_key_, path + (slash ? "" : "/") + content_get_key_));
+			request(request::novaworld_get(novaworld_get_key_, path + (slash ? "" : "/") + novaworld_get_key_));
 		}
-		content_get_key_.clear();
+		novaworld_get_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}
@@ -786,8 +786,8 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	const NovaWorldView &content = v.novaworld;
 	const bool releases = content.bound && content.signed_in && content.role == "admin" && content.revision > 0;
 	const std::string release = content.revision > 0 ? "Release r" + std::to_string(content.revision) + "..." : "Release...";
-	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::ContentRelease)))
-		window_requests::focus(*this, "content");
+	if (menu_item((release + "###release").c_str(), nullptr, releases && v.allows(EditorRequestKind::NovaWorldRelease)))
+		window_requests::focus(*this, "novaworld");
 	ui_kit::tooltip(releases ? "Builds a release of the project's revision on the service; the NovaWorld window asks its version."
 	                         : "An admin releases a project on NovaWorld, from a revision pushed to it.");
 	if (menu_item("Show export folder", nullptr,
@@ -1105,7 +1105,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first == 0 && !content_text.empty()) {
 		if (clickable("##content", widths[0], "The project on NovaWorld: its revision, your changes and what "
 		                                     "others pushed since. Shows the NovaWorld window."))
-			window_requests::focus(*this, "content");
+			window_requests::focus(*this, "novaworld");
 		ImGui::TextUnformatted(content_text.c_str());
 	}
 	if (first <= 1 && !unsaved.empty()) {

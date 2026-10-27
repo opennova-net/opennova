@@ -66,7 +66,7 @@ public:
 	// link would).
 	void set_file_link(FileLink link);
 	// NovaWorld's seams (ADR 0069, session/novaworld_controller.h): how the session reaches a service (the
-	// Shell's HTTP, a test's fake; null, the default: every content request refused) and where the account is
+	// Shell's HTTP, a test's fake; null, the default: every NovaWorld request refused) and where the account is
 	// kept (null, the default: in memory, for the session alone). Each must outlive the session.
 	void set_content_transport(ContentTransport *transport);
 	void set_novaworld_accounts(NovaWorldAccountStore *accounts);

@@ -64,7 +64,7 @@ enum class ViewConcern : uint8_t {
 	Navigation,
 	// NovaWorldView: NovaWorld's standing (ADR 0069): the account, the projects, the open project's
 	// binding, its changes and its head, a pull's conflicts, the last content job's outcome.
-	Content,
+	NovaWorld,
 	kCount,
 };
 
@@ -88,7 +88,7 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::Viewports, "viewports"},
 	{ViewConcern::Workspace, "workspace"},
 	{ViewConcern::Navigation, "navigation"},
-	{ViewConcern::Content, "content"},
+	{ViewConcern::NovaWorld, "novaworld"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

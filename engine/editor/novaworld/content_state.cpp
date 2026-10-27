@@ -36,7 +36,7 @@ bool write_state(const ContentPaths &paths, const std::string &path, const std::
 
 ContentPaths ContentPaths::for_project(const ProjectPaths &paths) {
 	ContentPaths out;
-	out.dir = join_path(paths.cache_dir, "content");
+	out.dir = join_path(paths.cache_dir, "novaworld");
 	out.binding_file = join_path(out.dir, "binding.json");
 	out.base_file = join_path(out.dir, "base.json");
 	out.hashes_file = join_path(out.dir, "hashes.json");

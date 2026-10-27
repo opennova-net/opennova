@@ -194,7 +194,7 @@ private:
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;
 	// The content project a Get... pick is for (ADR 0069), until the pick comes back.
-	std::string content_get_key_;
+	std::string novaworld_get_key_;
 	// The music bank stream a ...from a wave pick is for: its bank, and its place ("" a new stream at the end).
 	struct StreamPick {
 		std::string bank, place;

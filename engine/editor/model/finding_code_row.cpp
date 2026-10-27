@@ -428,9 +428,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// NovaWorld (ADR 0069): a request it cannot serve now (no network, signed out, not an admin, no
 	// project bound, a conflict it has not), a job that failed (the service's or the folder's reason), and a pull
 	// that stopped on files both sides changed, each the author's to settle.
-	{ C::ContentRefused, code("content.refused", G::Content) },
-	{ C::ContentFailed, code("content.failed", G::Content) },
-	{ C::ContentConflicts, code("content.conflicts", G::Content) },
+	{ C::NovaWorldRefused, code("novaworld.refused", G::NovaWorld) },
+	{ C::NovaWorldFailed, code("novaworld.failed", G::NovaWorld) },
+	{ C::NovaWorldConflicts, code("novaworld.conflicts", G::NovaWorld) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

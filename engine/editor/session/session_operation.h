@@ -29,10 +29,10 @@ enum class OperationKind : uint8_t {
 	RenameApply, // a rename's files rewritten a file at a time, then written (RenameOperation)
 	// NovaWorld (ADR 0069, session/content_operation.h): the open project's standing checked, the
 	// project bound to a content project, its head pulled (a get's too) and its files pushed
-	ContentCheck,
-	ContentBind,
-	ContentPull,
-	ContentPush,
+	NovaWorldCheck,
+	NovaWorldBind,
+	NovaWorldPull,
+	NovaWorldPush,
 	// An expansion's base game's project exported, where its export is missing or older than the project, and
 	// the base read again (ADR 0046 T5, session/base_export.h)
 	BaseExport,

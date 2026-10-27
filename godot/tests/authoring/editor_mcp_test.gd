@@ -388,7 +388,7 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
 			"the pickers need a person")
 	# ADR 0069: a NovaWorld sign-in is a person's, its password never on the wire.
-	assert_true((await _call("editor_request", {"kind": "content_sign_in", "username": "a", "password": "b"}))
+	assert_true((await _call("editor_request", {"kind": "novaworld_sign_in", "username": "a", "password": "b"}))
 			.get("_error", "").contains("person"), "a sign-in needs a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
 	assert_true(str((await _call("editor_request", {"kind": "build"})).get("outcome", {})).contains("project.none"))

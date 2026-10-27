@@ -46,7 +46,7 @@ enum class ContentJobState : uint8_t {
 	Cancelled,
 };
 
-// Where a job stands, for the status bar and the Content window.
+// Where a job stands, for the status bar and the NovaWorld window.
 struct ContentJobProgress {
 	std::string label; // "Downloading 12 files"
 	uint64_t done = 0;

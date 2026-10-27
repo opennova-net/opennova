@@ -128,18 +128,18 @@ enum class EditorRequestKind {
 	// password) and out; the projects listed and the open project's standing checked; a project got into
 	// a new folder and opened; the open project bound to a content project; its head pulled, a conflict of
 	// the pull settled, its files pushed as a revision; the content job in hand given up on.
-	ContentSignIn,
-	ContentSignOut,
-	ContentCheck,
-	ContentGet,
-	ContentBind,
-	ContentPull,
-	ContentResolve,
-	ContentPush,
-	ContentRelease,
-	ContentRestore,
-	ContentHistory,
-	ContentCancel,
+	NovaWorldSignIn,
+	NovaWorldSignOut,
+	NovaWorldCheck,
+	NovaWorldGet,
+	NovaWorldBind,
+	NovaWorldPull,
+	NovaWorldResolve,
+	NovaWorldPush,
+	NovaWorldRelease,
+	NovaWorldRestore,
+	NovaWorldHistory,
+	NovaWorldCancel,
 	kCount,
 };
 
@@ -157,7 +157,7 @@ enum class PickPurpose {
 	NewProjectBase, // the New project form's base game's project
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
 	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
-	ContentFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
+	NovaWorldFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
@@ -465,7 +465,7 @@ struct EditorRequest {
 	// tile placement its edits go to; "" an ordinary edit_record.
 	std::string terrain_view;
 	// NovaWorld (ADR 0069, session/novaworld_controller.h): the service and the account a sign-in
-	// names, its password a person's alone (content_sign_in is served for a person, never over the wire:
+	// names, its password a person's alone (novaworld_sign_in is served for a person, never over the wire:
 	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
 	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`
 	// back as (0: the folder's base, Discard changes).

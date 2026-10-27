@@ -698,7 +698,7 @@ opennova_add_editor_test(novaworld_client)
 # 0069) through its requests over the in-memory service: every request refused offline; a sign-in (a
 # person's, refused over the wire) kept and the projects listed; a project bound and pushed, got into
 # another folder and opened there, a change pulled, a stale push refused until a pull, a conflict taken;
-# and the content section's JSON, which holds no session.
+# and the novaworld section's JSON, which holds no session.
 opennova_add_editor_test(novaworld_session)
 
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp's bounds: 2017

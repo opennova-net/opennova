@@ -253,7 +253,7 @@ _Avoid_: data worker, uploader
 
 **Working copy**:
 A folder on a disk that holds a game's **project** at a revision (its base), bound to it by
-`.opennova/content/`: what it changed since its base is its push, what others pushed since its
+`.opennova/novaworld/`: what it changed since its base is its push, what others pushed since its
 pull. Every OpenNova Editor project folder of a game is one.
 _Avoid_: checkout, clone, mirror
 

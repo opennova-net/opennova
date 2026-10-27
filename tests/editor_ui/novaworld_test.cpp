@@ -1,7 +1,7 @@
 // The NovaWorld window and NovaWorld's place in the workspace (ADR 0069): over a hand-made view, what the
 // window shows of a bound project (its revision, the store's, its changes) and the status bar's words for it; a
-// push's message typed and Push raising content_push, refused while there is nothing to push; a conflict's Keep
-// mine; an admin's Bind of an unbound project; the sign-in's form raising content_sign_in with what was typed; the
+// push's message typed and Push raising novaworld_push, refused while there is nothing to push; a conflict's Keep
+// mine; an admin's Bind of an unbound project; the sign-in's form raising novaworld_sign_in with what was typed; the
 // store's projects listed with no project open, Get... asking for a folder and the pick getting the project into
 // a folder of its key's name; the welcome page's section; nothing past its room.
 #include <cstdio>
@@ -66,7 +66,7 @@ void test_bound_project() {
 	CHECK(text.find("MOD r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
 	for (const std::string &offender : overflowing()) CHECK(false, ("bound: " + offender).c_str());
 
-	// Push waits for a message; typed, it raises content_push with it.
+	// Push waits for a message; typed, it raises novaworld_push with it.
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "no message: Push raises nothing");
 	ui.activate(novaworld_item({"##message"}));
@@ -74,10 +74,10 @@ void test_bound_project() {
 	ui.frames(2);
 	ui.activate(novaworld_item({"Push"}));
 	std::vector<EditorRequest> raised = ui.drain();
-	const EditorRequest *push = one(raised, EditorRequestKind::ContentPush);
-	CHECK(push && push->message == "Fix the armory", "Push: one content_push with the message");
+	const EditorRequest *push = one(raised, EditorRequestKind::NovaWorldPush);
+	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
 
-	// Release r3 waits for a version; typed, it raises content_release with it.
+	// Release r3 waits for a version; typed, it raises novaworld_release with it.
 	ui.activate(novaworld_item({"###release"}));
 	CHECK(ui.drain().empty(), "no version: Release raises nothing");
 	ui.activate(novaworld_item({"##version"}));
@@ -85,8 +85,8 @@ void test_bound_project() {
 	ui.frames(2);
 	ui.activate(novaworld_item({"###release"}));
 	raised = ui.drain();
-	const EditorRequest *release = one(raised, EditorRequestKind::ContentRelease);
-	CHECK(release && release->version == "0.2.0", "Release r3: one content_release of the version");
+	const EditorRequest *release = one(raised, EditorRequestKind::NovaWorldRelease);
+	CHECK(release && release->version == "0.2.0", "Release r3: one novaworld_release of the version");
 
 	// A change's Discard: the file put back as the revision has it (in the changes' own child window).
 	{
@@ -94,9 +94,9 @@ void test_bound_project() {
 		std::snprintf(name, sizeof(name), "NovaWorld/changes_%08X", novaworld_item({"changes"}));
 		ui.activate(item_id(Ui::window_id(name), {"changes_table", "defs/a.def", "Discard"}));
 		raised = ui.drain();
-		const EditorRequest *discard = one(raised, EditorRequestKind::ContentRestore);
+		const EditorRequest *discard = one(raised, EditorRequestKind::NovaWorldRestore);
 		CHECK(discard && discard->path == "defs/a.def" && discard->revision == 0,
-		      "Discard: one content_restore of the file to the base");
+		      "Discard: one novaworld_restore of the file to the base");
 	}
 
 	// The history, newest first, and Refresh history.
@@ -110,13 +110,13 @@ void test_bound_project() {
 	ui.away();
 	CHECK(logged_frame(ui).find("r5  alex: More rifles") != std::string::npos, "the history listed");
 	ui.activate(novaworld_item({"Refresh history"}));
-	CHECK(one(ui.drain(), EditorRequestKind::ContentHistory), "Refresh history: one content_history");
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldHistory), "Refresh history: one novaworld_history");
 
 	// Check and Pull.
 	ui.activate(novaworld_item({"Check"}));
-	CHECK(one(ui.drain(), EditorRequestKind::ContentCheck), "Check: one content_check");
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Check: one novaworld_check");
 	ui.activate(novaworld_item({"Pull"}));
-	CHECK(one(ui.drain(), EditorRequestKind::ContentPull), "Pull: one content_pull");
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPull), "Pull: one novaworld_pull");
 
 	// A pull stopped on a conflict: Keep mine settles it, Pull and Push wait for it.
 	v.novaworld.conflicts = {{"defs/a.def", ContentChange::Modified, ContentChange::Deleted}};
@@ -125,9 +125,9 @@ void test_bound_project() {
 	CHECK(logged_frame(ui).find("Conflicts (1)") != std::string::npos, "the conflicts listed");
 	ui.activate(novaworld_item({"conflicts", "defs/a.def", "Keep mine"}));
 	raised = ui.drain();
-	const EditorRequest *keep = one(raised, EditorRequestKind::ContentResolve);
+	const EditorRequest *keep = one(raised, EditorRequestKind::NovaWorldResolve);
 	CHECK(keep && keep->path == "defs/a.def" && keep->resolution == Resolution::KeepMine,
-	      "Keep mine: one content_resolve of the file");
+	      "Keep mine: one novaworld_resolve of the file");
 	ui.activate(novaworld_item({"Pull"}));
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "Pull and Push wait for the conflict");
@@ -157,8 +157,8 @@ void test_bind_and_sign_in() {
 	CHECK(text.find("MOD r") == std::string::npos, "the bar says nothing of the store");
 	ui.activate(novaworld_item({"Bind"}));
 	std::vector<EditorRequest> raised = ui.drain();
-	const EditorRequest *bind = one(raised, EditorRequestKind::ContentBind);
-	CHECK(bind && bind->project_key == "MOD", "Bind: one content_bind of the project listed");
+	const EditorRequest *bind = one(raised, EditorRequestKind::NovaWorldBind);
+	CHECK(bind && bind->project_key == "MOD", "Bind: one novaworld_bind of the project listed");
 
 	// Signed out: the form, its server the view's, and what was typed.
 	v.novaworld.signed_in = false;
@@ -174,10 +174,10 @@ void test_bind_and_sign_in() {
 	ui.frames(2);
 	ui.activate(novaworld_item({"Sign in"}));
 	raised = ui.drain();
-	const EditorRequest *sign_in = one(raised, EditorRequestKind::ContentSignIn);
+	const EditorRequest *sign_in = one(raised, EditorRequestKind::NovaWorldSignIn);
 	CHECK(sign_in && sign_in->server == "https://content.test" && sign_in->username == "taylor" &&
 	              sign_in->password == "pw",
-	      "Sign in: one content_sign_in with the server, the account and the password");
+	      "Sign in: one novaworld_sign_in with the server, the account and the password");
 	ui.away();
 	CHECK(logged_frame(ui).find("pw") == std::string::npos, "the password is never drawn");
 	std::printf("content: an admin's Bind, the sign-in's form\n");
@@ -200,16 +200,16 @@ void test_get_a_project() {
 	if (!content) return;
 	content->show_anyway();
 	ui.focus("NovaWorld");
-	ui.activate(novaworld_item({"content_projects", "MOD", "Get..."}));
+	ui.activate(novaworld_item({"novaworld_projects", "MOD", "Get..."}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *pick = one(raised, EditorRequestKind::PickDirectory);
-	CHECK(pick && pick->purpose == PickPurpose::ContentFolder && pick->project_key.empty(),
+	CHECK(pick && pick->purpose == PickPurpose::NovaWorldFolder && pick->project_key.empty(),
 	      "Get...: one pick of a folder, the key kept by the windows");
-	ui.windows.deliver_pick(PickPurpose::ContentFolder, "C:/mods");
+	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	raised = ui.drain();
-	const EditorRequest *get = one(raised, EditorRequestKind::ContentGet);
+	const EditorRequest *get = one(raised, EditorRequestKind::NovaWorldGet);
 	CHECK(get && get->project_key == "MOD" && get->dir == "C:/mods/MOD", "the pick: the project got into C:/mods/MOD");
-	ui.windows.deliver_pick(PickPurpose::ContentFolder, "C:/other");
+	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/other");
 	CHECK(ui.drain().empty(), "a second pick with no Get... before it gets nothing");
 	std::printf("content: the store's projects on the welcome page, Get... and its folder\n");
 }

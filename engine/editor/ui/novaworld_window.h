@@ -12,7 +12,7 @@ struct NovaWorldView;
 
 // The sign-in to NovaWorld (ADR 0069; session/novaworld_controller.h): the service's address (the one the
 // view keeps, until the person types another), the account's name and its password. The password is typed here
-// alone: Sign in raises content_sign_in, a person's request no MCP client may send (ServedBy::SessionNeedsPerson),
+// alone: Sign in raises novaworld_sign_in, a person's request no MCP client may send (ServedBy::SessionNeedsPerson),
 // and the field is emptied as it goes.
 class NovaWorldSignInForm {
 public:
@@ -29,9 +29,9 @@ private:
 
 // The projects NovaWorld lists (the public ones, every one for an admin; a private one says so), each by
 // its title with its key and its newest revision, with Get..., which asks the Shell for a folder
-// (PickPurpose::ContentFolder; the windows keep the key until the pick comes back): the project is got into a
+// (PickPurpose::NovaWorldFolder; the windows keep the key until the pick comes back): the project is got into a
 // folder of its key's name inside the one chosen, and opens. Listed none yet, List asks the store
-// (content_check). The welcome page and the NovaWorld window draw it.
+// (novaworld_check). The welcome page and the NovaWorld window draw it.
 void draw_novaworld_projects(Workspace &workspace);
 
 // The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
@@ -39,7 +39,7 @@ void draw_novaworld_projects(Workspace &workspace);
 // 2 incoming"); "" for a project the store does not hold.
 std::string novaworld_status_text(const NovaWorldView &content);
 
-// The NovaWorld window (ADR 0069; its window id "content"), a tab beside Files: the account (who is signed in, and
+// The NovaWorld window (ADR 0069; its window id "novaworld"), a tab beside Files: the account (who is signed in, and
 // where; Sign in... and Sign out), then the open project's place in the store. A project the store does not hold
 // says so, and an admin binds it to a project of the store (Bind). One it holds shows its revision and the store's
 // newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the

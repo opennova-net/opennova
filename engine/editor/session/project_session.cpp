@@ -140,7 +140,7 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"settings.game_install or settings.runtime_executable of apply_project_settings, "
 				"files to import as the paths of preview_import.";
 	}
-	// A kind the session serves for a person alone (content_sign_in: a password) is refused alike.
+	// A kind the session serves for a person alone (novaworld_sign_in: a password) is refused alike.
 	if (token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).served_by == ServedBy::SessionNeedsPerson) {
 		ok = false;

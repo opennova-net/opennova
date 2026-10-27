@@ -4,8 +4,8 @@
 // website session a sign-in got there (its cookie, as the service names it: `opennova_session`, or
 // `__Host-opennova_session` on a secure deployment, apps/novaworld_common/accounts/web_session.h),
 // with the account's name and role. Signed out, it is the address alone, which reads the public
-// projects. Kept by the Shell in the editor's own user folder (`user://content_account.json`, a
-// debug build's `content_account_staging.json`), never in a project, through the store seam here:
+// projects. Kept by the Shell in the editor's own user folder (`user://novaworld_account.json`, a
+// debug build's `novaworld_account_staging.json`), never in a project, through the store seam here:
 // a file, or memory for the tests and the command line.
 
 #include <string>
@@ -47,7 +47,7 @@ private:
 	NovaWorldAccount account_;
 };
 
-// The account in a JSON file of its own (the Shell's `user://content_account.json`), written
+// The account in a JSON file of its own (the Shell's `user://novaworld_account.json`), written
 // atomically; a file that is missing or unreadable is no account. With no account kept, it is the
 // address `default_server` alone: the service the build reaches (the Shell's: a debug build
 // staging's, a release build the live one's).

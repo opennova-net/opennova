@@ -233,7 +233,7 @@ void FilesWindow::refresh(const SessionView &view) {
 	}
 	if (tree_moved || counts_moved) ++rebuilds_;
 	// NovaWorld's changes (ADR 0069), apart from the rows' own rebuild.
-	const uint64_t content = view.revisions.of(ViewConcern::Content);
+	const uint64_t content = view.revisions.of(ViewConcern::NovaWorld);
 	if (another || content != content_revision_ || view.novaworld.changes.size() != content_changes_.size()) {
 		content_revision_ = content;
 		content_changes_.clear();
@@ -866,9 +866,9 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	draw_chore_entries(view, entry);
 	// A file changed since the project's revision in NovaWorld (ADR 0069): the revision's file back.
 	if (content_changes_.count(entry.relative_path)) {
-		const bool discards = view.allows(EditorRequestKind::ContentRestore);
+		const bool discards = view.allows(EditorRequestKind::NovaWorldRestore);
 		if (ImGui::MenuItem("Discard changes", nullptr, false, discards) && discards)
-			workspace_.request(request::content_restore(entry.relative_path));
+			workspace_.request(request::novaworld_restore(entry.relative_path));
 		ui_kit::tooltip("Puts back the file as revision " + std::to_string(view.novaworld.revision) +
 		                " has it; yours goes to the project's trash (kept until Empty the trash).");
 	}

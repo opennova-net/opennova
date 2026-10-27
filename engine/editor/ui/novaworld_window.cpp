@@ -52,7 +52,7 @@ bool NovaWorldSignInForm::draw(Workspace &workspace) {
 	ui_kit::tooltip("Your NovaWorld account's name, as you sign in on the site.");
 	const bool enter = ImGui::InputText("Password", password_, sizeof(password_),
 	                                    ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
-	const bool allowed = v.allows(EditorRequestKind::ContentSignIn) && !v.novaworld.calling;
+	const bool allowed = v.allows(EditorRequestKind::NovaWorldSignIn) && !v.novaworld.calling;
 	const bool ready = allowed && server_[0] && username_[0] && password_[0];
 	ImGui::BeginDisabled(!ready);
 	const bool pressed = ImGui::Button("Sign in") && ready;
@@ -60,7 +60,7 @@ bool NovaWorldSignInForm::draw(Workspace &workspace) {
 	ui_kit::tooltip(ready ? "Signs in with your NovaWorld account: an admin may push and sees the private projects."
 	                      : "Name the server, your account and its password.");
 	if (!(pressed || (enter && ready))) return false;
-	workspace.request(request::content_sign_in(server_, username_, password_));
+	workspace.request(request::novaworld_sign_in(server_, username_, password_));
 	std::memset(password_, 0, sizeof(password_));
 	return true;
 }
@@ -68,19 +68,19 @@ bool NovaWorldSignInForm::draw(Workspace &workspace) {
 void draw_novaworld_projects(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	const NovaWorldView &c = v.novaworld;
-	const bool lists = v.allows(EditorRequestKind::ContentCheck) && !c.calling;
+	const bool lists = v.allows(EditorRequestKind::NovaWorldCheck) && !c.calling;
 	if (c.projects.empty()) {
 		if (c.calling) ui_kit::quiet_text("Listing the projects...");
 		else if (!c.projects_error.empty()) ui_kit::refusal_text(c.projects_error);
 		else ui_kit::empty_state("No projects listed.", "List asks NovaWorld for its projects.");
 		ImGui::BeginDisabled(!lists);
-		if (ImGui::Button("List projects") && lists) workspace.request(request::content_check());
+		if (ImGui::Button("List projects") && lists) workspace.request(request::novaworld_check());
 		ImGui::EndDisabled();
 		ui_kit::tooltip("Asks " + host_of(c.server) + " for the projects you may get.");
 		return;
 	}
-	const bool gets = v.allows(EditorRequestKind::ContentGet);
-	if (!ImGui::BeginTable("content_projects", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
+	const bool gets = v.allows(EditorRequestKind::NovaWorldGet);
+	if (!ImGui::BeginTable("novaworld_projects", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("Project", ImGuiTableColumnFlags_WidthStretch);
 	ImGui::TableSetupColumn("##get", ImGuiTableColumnFlags_WidthFixed);
 	for (const RemoteProject &project : c.projects) {
@@ -95,7 +95,7 @@ void draw_novaworld_projects(Workspace &workspace) {
 		const bool can = gets && project.head > 0;
 		ImGui::BeginDisabled(!can);
 		if (ImGui::SmallButton("Get...") && can) {
-			EditorRequest pick = request::pick_directory(PickPurpose::ContentFolder);
+			EditorRequest pick = request::pick_directory(PickPurpose::NovaWorldFolder);
 			pick.project_key = project.key;
 			workspace.request(std::move(pick));
 		}
@@ -127,9 +127,9 @@ void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 		ui_kit::clipped_text(c.username + (admin(c) ? " (admin)" : "") + " on " + host_of(c.server), c.server);
 		signing_in_ = false;
 		ui_kit::WrapRow row;
-		if (ui_kit::tool(row, "Sign out", v.allows(EditorRequestKind::ContentSignOut),
+		if (ui_kit::tool(row, "Sign out", v.allows(EditorRequestKind::NovaWorldSignOut),
 		                 "Signs out of " + host_of(c.server) + ": the public projects stay readable."))
-			workspace_.request(request::content_sign_out());
+			workspace_.request(request::novaworld_sign_out());
 		return;
 	}
 	ui_kit::quiet_text("Not signed in: the public projects alone.", c.server);
@@ -161,16 +161,16 @@ void NovaWorldWindow::draw_bind(const NovaWorldView &c) {
 	}
 	ui_kit::tooltip("The NovaWorld project this folder is a working copy of.");
 	ImGui::SameLine();
-	const bool binds = v.allows(EditorRequestKind::ContentBind) && !bind_key_.empty();
+	const bool binds = v.allows(EditorRequestKind::NovaWorldBind) && !bind_key_.empty();
 	ImGui::BeginDisabled(!binds);
-	if (ImGui::Button("Bind") && binds) workspace_.request(request::content_bind(bind_key_));
+	if (ImGui::Button("Bind") && binds) workspace_.request(request::novaworld_bind(bind_key_));
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Makes this folder a working copy of " + (bind_key_.empty() ? std::string("the project") : bind_key_) +
 	                ": what it changed since the project's newest revision is then its push.");
 	if (c.projects.empty()) {
-		ImGui::BeginDisabled(!v.allows(EditorRequestKind::ContentCheck) || c.calling);
-		if (ImGui::Button("List projects") && v.allows(EditorRequestKind::ContentCheck) && !c.calling)
-			workspace_.request(request::content_check());
+		ImGui::BeginDisabled(!v.allows(EditorRequestKind::NovaWorldCheck) || c.calling);
+		if (ImGui::Button("List projects") && v.allows(EditorRequestKind::NovaWorldCheck) && !c.calling)
+			workspace_.request(request::novaworld_check());
 		ImGui::EndDisabled();
 	}
 }
@@ -186,13 +186,13 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	}
 	ui_kit::clipped_text(line, tip);
 	ui_kit::WrapRow row;
-	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::ContentCheck),
+	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
 	                 "Looks for what changed here and on NovaWorld."))
-		workspace_.request(request::content_check());
-	if (ui_kit::tool(row, "Pull", v.allows(EditorRequestKind::ContentPull) && c.conflicts.empty(),
+		workspace_.request(request::novaworld_check());
+	if (ui_kit::tool(row, "Pull", v.allows(EditorRequestKind::NovaWorldPull) && c.conflicts.empty(),
 	                 c.conflicts.empty() ? "Brings in the newest revision on NovaWorld; your own changes stay."
 	                                     : "Settle every conflict first."))
-		workspace_.request(request::content_pull());
+		workspace_.request(request::novaworld_pull());
 
 	ImGui::SeparatorText(c.checked ? ("Changes (" + std::to_string(c.changes.size()) + ")").c_str() : "Changes");
 	if (!c.checked) {
@@ -203,7 +203,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	} else {
 		// Up to twelve rows high, scrolled past that; each change with its Discard (the base's file put back).
 		const float rows = std::min(float(c.changes.size()), 12.0f);
-		const bool restores = v.allows(EditorRequestKind::ContentRestore);
+		const bool restores = v.allows(EditorRequestKind::NovaWorldRestore);
 		if (ImGui::BeginChild("changes", ImVec2(0.0f, rows * ImGui::GetFrameHeightWithSpacing() + 4.0f)) &&
 		    ImGui::BeginTable("changes_table", 2, ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
@@ -220,7 +220,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 					ImGui::TableNextColumn();
 					ImGui::BeginDisabled(!restores);
 					if (ImGui::SmallButton("Discard") && restores)
-						workspace_.request(request::content_restore(change.path));
+						workspace_.request(request::novaworld_restore(change.path));
 					ImGui::EndDisabled();
 					ui_kit::tooltip("Puts back the file as revision " + std::to_string(c.revision) +
 					                " has it; yours goes to the project's trash (kept until Empty the trash).");
@@ -239,7 +239,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	// The message stays while there is a change to push: a push refused (the store moved on) keeps it.
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##message", "What changed", message_, sizeof(message_));
-	const bool pushes = v.allows(EditorRequestKind::ContentPush) && message_[0] && !c.changes.empty() &&
+	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && !c.changes.empty() &&
 	                    c.conflicts.empty();
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
@@ -250,7 +250,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	                                         : "Sends every change as the project's next revision; players get "
 	                                           "it only once an admin releases it.";
 	ui_kit::tooltip(why);
-	if (pushed) workspace_.request(request::content_push(message_));
+	if (pushed) workspace_.request(request::novaworld_push(message_));
 
 	// A release of the revision the folder is at, built on the service (ADR 0069 d7): a draft once the
 	// service has packed and checked it, published in the web admin's Releases.
@@ -259,7 +259,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
 	ui_kit::tooltip("The release's version: one to four numbers between dots.");
 	ImGui::SameLine();
-	const bool releases = v.allows(EditorRequestKind::ContentRelease) && version_[0] && c.revision > 0 && !c.calling;
+	const bool releases = v.allows(EditorRequestKind::NovaWorldRelease) && version_[0] && c.revision > 0 && !c.calling;
 	ImGui::BeginDisabled(!releases);
 	const bool released = ImGui::Button(("Release r" + std::to_string(c.revision) + "###release").c_str()) && releases;
 	ImGui::EndDisabled();
@@ -268,7 +268,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	                                : "Builds a release of r" + std::to_string(c.revision) +
 	                                          " on the service; publish it in the web admin's Releases once it is a draft.");
 	if (released) {
-		workspace_.request(request::content_release(version_));
+		workspace_.request(request::novaworld_release(version_));
 		version_[0] = '\0';
 	}
 }
@@ -279,7 +279,7 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	ImGui::SeparatorText(("Conflicts (" + std::to_string(c.conflicts.size()) + ")").c_str());
 	ui_kit::quiet_text("Both sides changed these: keep yours or take theirs, then Pull.",
 	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them.");
-	const bool resolves = v.allows(EditorRequestKind::ContentResolve);
+	const bool resolves = v.allows(EditorRequestKind::NovaWorldResolve);
 	if (!ImGui::BeginTable("conflicts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
 	ImGui::TableSetupColumn("##choice", ImGuiTableColumnFlags_WidthFixed);
@@ -292,11 +292,11 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 		ImGui::TableNextColumn();
 		ImGui::BeginDisabled(!resolves);
 		if (ImGui::SmallButton("Keep mine") && resolves)
-			workspace_.request(request::content_resolve(conflict.path, Resolution::KeepMine));
+			workspace_.request(request::novaworld_resolve(conflict.path, Resolution::KeepMine));
 		ui_kit::tooltip("Keeps your file: your change goes in your next push.");
 		ImGui::SameLine();
 		if (ImGui::SmallButton("Take theirs") && resolves)
-			workspace_.request(request::content_resolve(conflict.path, Resolution::TakeTheirs));
+			workspace_.request(request::novaworld_resolve(conflict.path, Resolution::TakeTheirs));
 		ui_kit::tooltip("Puts NovaWorld's file in its place; yours goes to the project's trash.");
 		ImGui::EndDisabled();
 		ImGui::PopID();
@@ -309,9 +309,9 @@ void NovaWorldWindow::draw_history(const NovaWorldView &c) {
 	ImGui::SeparatorText("History");
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, c.history.empty() ? "Show history" : "Refresh history",
-	                 v.allows(EditorRequestKind::ContentHistory) && !c.calling,
+	                 v.allows(EditorRequestKind::NovaWorldHistory) && !c.calling,
 	                 "Lists the project's revisions, newest first."))
-		workspace_.request(request::content_history());
+		workspace_.request(request::novaworld_history());
 	if (!c.history_error.empty()) ui_kit::refusal_text(c.history_error);
 	for (const RemoteRevision &revision : c.history) {
 		ImGui::PushID(static_cast<int>(revision.number));
