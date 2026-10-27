@@ -68,6 +68,9 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::game, DEFVAL(String()));
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product"), &LaunchFlags::product);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_supported"), &LaunchFlags::product_supported);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_command_file"),
+			&LaunchFlags::product_command_file);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_name"), &LaunchFlags::product_name);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update"), &LaunchFlags::after_update);
@@ -129,28 +132,20 @@ std::string launch_dir_of(const opennova::LaunchFlags &flags) {
 	return flags.resource_dir.empty() ? to_std(OS::get_singleton()->get_executable_path().get_base_dir())
 									  : flags.resource_dir;
 }
-std::string folder_of(const opennova::LaunchFlags &flags) {
-	return opennova::folder_product(launch_dir_of(flags));
+opennova::LaunchProduct product_of(const opennova::LaunchFlags &flags) {
+	return opennova::launch_product(flags, opennova::folder_product(launch_dir_of(flags)));
 }
 } // namespace
 
 String LaunchFlags::game(const String &fallback) {
 	const opennova::LaunchFlags flags = parse();
-	const std::string chosen = fallback.is_empty()
-			? opennova::launch_product(flags, folder_of(flags))
-			: to_std(fallback);
-	return to_gd(opennova::launch_game(flags, chosen));
+	return to_gd(fallback.is_empty() ? product_of(flags).game : opennova::launch_game(flags, to_std(fallback)));
 }
 
-String LaunchFlags::product() {
-	const opennova::LaunchFlags flags = parse();
-	return to_gd(opennova::launch_product(flags, folder_of(flags)));
-}
-
-bool LaunchFlags::product_supported() {
-	const opennova::LaunchFlags flags = parse();
-	return opennova::launch_product_supported(flags, folder_of(flags));
-}
+String LaunchFlags::product() { return to_gd(product_of(parse()).product); }
+bool LaunchFlags::product_supported() { return product_of(parse()).supported; }
+String LaunchFlags::product_command_file() { return to_gd(product_of(parse()).command); }
+String LaunchFlags::product_name() { return to_gd(product_of(parse()).name); }
 
 bool LaunchFlags::game_given() { return parse().game_given; }
 bool LaunchFlags::no_update() { return parse().no_update; }

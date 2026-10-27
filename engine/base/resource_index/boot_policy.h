@@ -8,9 +8,11 @@
 //                 entries. Without it the runtime reads from PFFs exclusively.
 //   /exp <name>   mount the expansion <name> (e.g. "jox01") over the base game.
 //   /mod <name>   the same flag (retail reads the two spellings in one arm).
-//   /game <code>  the product: "acidgambit", "jo" or "dfx2". Without it the launch
+//   /game <code>  the product: "acidgambit", "jo", "dfx2", or the launch folder's
+//                 player game by its login (ADR 0074). Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
-//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile.
+//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile,
+//                 a player's game its wizard's GAME.
 //   --no-update  disable the updater's launch (editor Play and tests).
 //   --after-update
 //                 the launch update.exe relaunches after a first-run install: a game
@@ -384,24 +386,43 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// The engine compatibility profile: OpenNova uses JO. The runtime passes the
-// launch's product (launch_product) as the fallback; format/tool callers pass
-// their own.
+// The engine compatibility profile: `/game`'s, else `fallback`'s, OpenNova's
+// own using JO's. The runtime's is its launch product's (launch_product);
+// format/tool callers pass their own fallback.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
-// The product a game folder holds, from its UPDATE.WIZ's CMD (the file found
-// case-insensitively; formats/update/update_wizard.h wizard_product): "jo",
-// "dfx2" or "acidgambit"; "" for a folder with no wizard (a fresh download, an
-// authoring export, a test root); kForeignFolder for a wizard naming another
-// game (BHD's DFBHD.CMD). ADR 0067 d2.
-inline constexpr const char *kForeignFolder = "foreign";
-std::string folder_product(const std::string &dir);
-// The selected distribution product: `/game` when given, else the folder's
-// (folder_product of the launch directory), a folder with no wizard being
-// OpenNova's; "" for a foreign folder. Nothing persisted ever selects it.
-std::string launch_product(const LaunchFlags &flags, const std::string &folder);
-// Whether the launch can run: a known `/game`, or no `/game` and a folder that
-// is not foreign.
-bool launch_product_supported(const LaunchFlags &flags, const std::string &folder);
+// The product a game folder holds, from its UPDATE.WIZ (the file found
+// case-insensitively): JO's, DFX2's, OP: Acid Gambit's or a player's game
+// (formats/update/update_wizard.h wizard_product). A folder with no wizard (a
+// fresh download, an authoring export, a test root) holds none; a wizard naming
+// a game OpenNova does not play (BHD's DFBHD.CMD) is foreign. ADR 0067 d2,
+// ADR 0074.
+struct FolderProduct {
+    std::string product; // wizard_product's: "jo", "dfx2", "acidgambit", a player game's login
+    std::string game;    // its engine profile, wizard_product's
+    std::string command; // the wizard's CMD ("" with no wizard)
+    // A player game's name: its installed command file's PRODUCT, else its login as the
+    // wizard writes it (a fresh download holds no command file yet); "" for the others.
+    std::string name;
+    bool foreign = false;
+};
+FolderProduct folder_product(const std::string &dir);
+// The launch's product: `/game` when given, else the folder's (folder_product of
+// the launch directory), a folder with no wizard being OpenNova's; none for a
+// foreign folder. Nothing persisted ever selects it.
+struct LaunchProduct {
+    std::string product; // "acidgambit", "jo", "dfx2", a player game's; "" for a foreign folder
+    // The engine profile it runs as: the folder's own when it is the folder's product, else
+    // launch_game's.
+    std::string game;
+    // Its command file: the folder's wizard's CMD when the launch takes the folder's product (or
+    // the folder is foreign: what its wizard names), else the stock product's.
+    std::string command;
+    std::string name; // a player game's name (FolderProduct::name); "" for the stock games
+    // Whether the launch can run: a stock product, or the folder's own (a player's game is
+    // played in its own folder alone).
+    bool supported = false;
+};
+LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);

@@ -67,8 +67,9 @@ bool wizard_product(const fs::path &dir, const fs::path &wizard_file,
 	product.command = wizard.cmd;
 	product.login = wizard.product_login;
 	// OpenNova's own products install every row of a new release (D-UPD-6): the runtime and an
-	// app (native from their caller), and the game whose wizard names OP: Acid Gambit's CMD.
-	product.native = product.native || update::wizard_product(wizard.cmd) == "acidgambit";
+	// app (native from their caller), and the games whose wizard names OP: Acid Gambit's CMD or
+	// a player's game (ADR 0074).
+	product.native = product.native || update::wizard_product(wizard).native;
 	return true;
 }
 
@@ -613,19 +614,21 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 	}
 	if (!o.no_runtime) out.push_back(std::move(runtime));
 	// The folder's own UPDATE.WIZ names what it holds (boot_policy.h folder_product, ADR 0067
-	// d2). A launch without /game takes that product, and a product the folder does not hold
-	// is refused, so OpenNova content never lands over another game's data. A legacy launch
-	// (the retail game's own call) keeps the stock wizard.
+	// d2): a stock game or a player's (ADR 0074), which its own wizard's product updates. A
+	// launch without /game takes that product, and a product the folder does not hold is
+	// refused, so OpenNova content never lands over another game's data. A legacy launch (the
+	// retail game's own call) keeps the stock wizard.
 	bool native_content = false;
 	if (!o.legacy) {
-		const std::string folder = folder_product(io::utf8_path(o.resource_dir));
-		if (folder == kForeignFolder) {
+		const FolderProduct folder = folder_product(io::utf8_path(o.resource_dir));
+		if (folder.foreign) {
 			error = "This folder's UPDATE.WIZ names a game OpenNova does not update.";
 			return false;
 		}
-		const std::string product = o.game_explicit ? o.game : (folder.empty() ? std::string("acidgambit") : folder);
+		const std::string product = o.game_explicit ? o.game
+				: (folder.product.empty() ? std::string("acidgambit") : folder.product);
 		if (product == "acidgambit") {
-			if (!folder.empty() && folder != "acidgambit") {
+			if (!folder.product.empty() && folder.product != "acidgambit") {
 				error = "This folder holds another game (its UPDATE.WIZ). OpenNova content installs only into its own folder.";
 				return false;
 			}
@@ -633,12 +636,12 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 			// install ships none). OpenNova's own content writes its wizard first (its
 			// loose rows precede the archives), so an interrupted install resumes.
 			const auto slots = vfs_boot_archive_slots(io::utf8_path(o.resource_dir));
-			if (folder.empty() && std::any_of(slots.begin(), slots.end(), [](const std::string &n) { return !n.empty(); })) {
+			if (folder.product.empty() && std::any_of(slots.begin(), slots.end(), [](const std::string &n) { return !n.empty(); })) {
 				error = "This folder holds game data without OpenNova's UPDATE.WIZ. OpenNova content installs only into its own folder.";
 				return false;
 			}
 			native_content = true;
-		} else if (folder != product) {
+		} else if (folder.product != product) {
 			error = "This folder's UPDATE.WIZ does not name /game " + product + ".";
 			return false;
 		}

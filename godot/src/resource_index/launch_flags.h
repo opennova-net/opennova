@@ -30,9 +30,15 @@ public:
 	static String game(const String &fallback);
 	// The distribution product: `/game` when given, else the launch directory's
 	// UPDATE.WIZ (boot_policy.h folder_product), a folder with no wizard OpenNova's;
-	// "" for a folder whose wizard names another game.
+	// "" for a folder whose wizard names another game (boot_policy.h launch_product).
 	static String product();
 	static bool product_supported();
+	// The product's command file (JOPTR.CMD, a player game's <KEY>.CMD); a foreign
+	// folder's, the CMD its wizard names.
+	static String product_command_file();
+	// A player game's name (its installed command file's PRODUCT, else its login);
+	// "" for the stock games.
+	static String product_name();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();
