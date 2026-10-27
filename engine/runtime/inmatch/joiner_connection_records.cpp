@@ -297,7 +297,7 @@ bool JoinerConnection::on_world_record(const ProtocolMessage &m, RecordPass &pas
 		for (const OrganicSpawnRecord &rec : batch.records) {
 			// The original stops the page at the first out-of-capacity slot.
 			// [orig: NapiNPClientMsg_0x00C @0x42E7CE]
-			if ((rec.slot_id & 0x0FFFu) >= world::retail_pool_capacity(rec.slot_id >> 12))
+			if ((rec.slot_id & 0x0FFFu) >= world::pool_capacity(rec.slot_id >> 12))
 				break;
 			SelfSpawn spawn;
 			spawn.pos_x = rec.pos_x;
@@ -373,7 +373,7 @@ bool JoinerConnection::on_world_record(const ProtocolMessage &m, RecordPass &pas
 		const world::EntityHandle assigned{assign.entity_handle};
 		if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
 		    static_cast<std::size_t>(assigned.slot()) <
-		            world::retail_pool_capacity(assigned.pool())) {
+		            world::pool_capacity(assigned.pool())) {
 			// Retail's header gates: not the 0xFFFF sentinel, the pool nibble
 			// addressing one of the five entity pools, and a slot inside its
 			// pool's table [orig: @0x431984..0x4319b3].

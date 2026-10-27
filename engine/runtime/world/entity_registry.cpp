@@ -11,7 +11,38 @@ namespace {
 
 using opennova::strutil::iequals;
 
+PoolCapacities g_pool_capacities = kRetailPoolCapacity;
+
+// The expansions whose pools are scaled, and by how much.
+struct ExpansionPoolScale {
+    const char *expansion;
+    std::size_t scale;
+};
+constexpr ExpansionPoolScale kExpansionPoolScales[] = {
+    {"revx02", 8},
+};
+
 } // namespace
+
+PoolCapacities scaled_pool_capacities(std::size_t scale) {
+    PoolCapacities out = kRetailPoolCapacity;
+    for (std::size_t &capacity : out) capacity *= scale;
+    return out;
+}
+
+PoolCapacities pool_capacities_for_expansion(const std::string &expansion) {
+    for (const ExpansionPoolScale &row : kExpansionPoolScales)
+        if (iequals(expansion, row.expansion)) return scaled_pool_capacities(row.scale);
+    return kRetailPoolCapacity;
+}
+
+const PoolCapacities &pool_capacities() { return g_pool_capacities; }
+
+void set_pool_capacities(const PoolCapacities &capacities) { g_pool_capacities = capacities; }
+
+std::size_t pool_capacity(int pool) {
+    return pool >= 0 && pool < kEntityPoolCount ? g_pool_capacities[pool] : 0;
+}
 
 void EntityRegistry::configure_pool(int pool, size_t capacity) {
     if (pool < 0 || pool >= kPoolCount) return;

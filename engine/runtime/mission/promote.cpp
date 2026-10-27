@@ -903,7 +903,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
         // Pool_Clear @0x442060] (position 0, radius 0, name 0, not done); a word past the pool's 768
         // [orig: EntityPool_Allocate, the capacity @0x442203] reads memory past the pool, the next pool's
         // entities among it, which the editor's build refuses (mission.route_past_pool), so none is listed.
-        if (stop >= world::retail_pool_capacity(3)) continue;
+        if (stop >= world::pool_capacity(3)) continue;
         const int idx = static_cast<int>(stop);
         if (idx >= static_cast<int>(m.markers.size())) {
             WaypointEntry zeroed;
