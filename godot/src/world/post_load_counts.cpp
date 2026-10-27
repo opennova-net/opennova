@@ -2,6 +2,7 @@
 
 #include "world/post_load_counts.h"
 
+#include "render/target_projection_xr_interface.h"
 #include "resource_index/resource_root.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
