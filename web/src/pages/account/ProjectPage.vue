@@ -91,8 +91,13 @@
       <section class="space-y-3" aria-labelledby="project-releases">
         <h2 id="project-releases" class="text-xl font-semibold text-ink">Releases</h2>
         <p class="max-w-3xl text-sm text-ink-muted">
-          NovaWorld packs a revision and checks it, then keeps it as a draft. Publishing it serves it to players' updaters
-          and lets hosted servers run it; retiring it stops the serving.
+          NovaWorld packs a revision and checks it, then keeps it as a draft.
+          <template v-if="needsApproval">
+            Submit a draft for approval: once an admin approves it, players' updaters get it and hosted servers can run it.
+            Meanwhile, try your project with Play in the OpenNova Editor.
+          </template>
+          <template v-else>Publishing it serves it to players' updaters and lets hosted servers run it.</template>
+          Retiring a published release stops the serving.
           <template v-if="project.kind === 'expansion'">Players install a published public mod from the NovaWorld panel in game.</template>
           <template v-else>A published game lists its servers in a lobby of its own and, while public, has a download on the Downloads page.</template>
         </p>
@@ -118,7 +123,10 @@
                 </span>
                 <span class="flex gap-3 text-xs">
                   <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="beginPublish(r)">
-                    Publish<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                    {{ needsApproval ? 'Submit for approval' : 'Publish' }}<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                  </button>
+                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-danger/80 hover:text-danger disabled:opacity-40" @click="removeRelease(r)">
+                    Withdraw<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
                   <button v-if="r.status === 'published'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="retire(r)">
                     Retire<span class="sr-only"> release {{ releaseLabel(r) }}</span>
@@ -134,6 +142,10 @@
                   </button>
                 </span>
               </div>
+              <p v-if="r.status === 'awaiting_approval'" class="text-xs text-ink-muted">
+                An admin approves it before players get it.<template v-if="project.release"> Until then they keep getting {{ project.release.version || `release ${project.release.id}` }}.</template>
+              </p>
+              <p v-if="r.status === 'draft' && r.review_note" class="project-release-note break-words text-xs text-warn">An admin sent it back: {{ r.review_note }}</p>
               <p v-if="r.error" class="break-words text-xs text-danger">{{ r.error }}</p>
               <p v-if="treeOf(r)" class="text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</p>
               <details v-if="r.build_log" class="project-release-log text-xs" :open="r.status === 'building'">
@@ -143,12 +155,16 @@
             </li>
           </ol>
 
-          <!-- A draft's publishing; a private project's offers to make it public. -->
+          <!-- A draft's publishing (a player's: its submission for an admin's
+               approval); a private project's offers to make it public. -->
           <form v-if="publishing" id="project-publish-form" class="space-y-3 rounded-panel border border-border bg-panel p-4 sm:p-6" @submit.prevent="confirmPublish">
-            <p class="text-sm font-semibold text-ink">Publish {{ releaseLabel(publishing) }} of {{ project.title }}?</p>
+            <p class="text-sm font-semibold text-ink">
+              {{ needsApproval ? `Submit ${releaseLabel(publishing)} of ${project.title} for approval?` : `Publish ${releaseLabel(publishing)} of ${project.title}?` }}
+            </p>
             <p class="text-sm text-ink-muted">
-              Players' updaters get it, and new hosted servers run it once its data is built. Running servers keep what
-              they run until their owners move them.
+              <template v-if="needsApproval">An admin checks it before publishing it. Once published, players' updaters get it, and new hosted servers run it once its data is built.</template>
+              <template v-else>Players' updaters get it, and new hosted servers run it once its data is built.</template>
+              Running servers keep what they run until their owners move them.
             </p>
             <template v-if="project.visibility === 'private'">
               <label class="flex items-start gap-3 text-sm text-ink">
@@ -164,7 +180,9 @@
               </p>
             </template>
             <div class="flex flex-wrap gap-2">
-              <button id="project-publish-confirm" type="submit" :disabled="busy" class="btn-primary">{{ busy ? 'Publishing…' : 'Publish now' }}</button>
+              <button id="project-publish-confirm" type="submit" :disabled="busy" class="btn-primary">
+                {{ needsApproval ? (busy ? 'Submitting…' : 'Submit for approval') : busy ? 'Publishing…' : 'Publish now' }}
+              </button>
               <button type="button" :disabled="busy" class="btn-secondary" @click="publishing = null">Cancel</button>
             </div>
           </form>
@@ -248,7 +266,8 @@
 // it stores; its visibility and its name changed (PATCH /api/products/<key>)
 // and its deletion behind its key typed (DELETE); its releases (GET
 // /api/products/<key>/releases), each built from a revision (POST), then
-// published (a private project's publish offers to make it public, by the
+// published (a player's submitted for an admin's approval, which it may
+// withdraw; a private project's publish offers to make it public, by the
 // PATCH), retired or deleted; and its history (GET
 // /api/products/<key>/revisions), a page at a time. The page polls while a
 // release is being built or checked or its servers' data is building;
@@ -293,7 +312,9 @@ const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-
 
 const route = useRoute();
 const router = useRouter();
-const { refresh: refreshSession } = useSession();
+const { user, refresh: refreshSession } = useSession();
+// A player's publish is a submission an admin approves; an admin's publishes.
+const needsApproval = computed(() => user.value?.role !== 'admin');
 const projectKey = computed(() => String(route.params.key ?? ''));
 
 // The account's projects and the games a mod may be for; null until the first
@@ -585,7 +606,8 @@ async function confirmPublish() {
     return;
   }
   publishing.value = null;
-  flash(goPublic ? `${name} is published, and anyone may now get ${p.title}.` : `${name} is published.`);
+  const done = result.value.status === 'awaiting_approval' ? `${name} awaits an admin's approval` : `${name} is published`;
+  flash(goPublic ? `${done}, and anyone may now get ${p.title}.` : `${done}.`);
   await poll.readAgain();
 }
 
@@ -605,11 +627,16 @@ async function retire(r: Release) {
   await poll.readAgain();
 }
 
+// A release deleted; one awaiting approval is withdrawn so.
 async function removeRelease(r: Release) {
   const p = project.value;
   if (!p || busy.value) return;
   const name = releaseLabel(r);
-  if (!(await confirmAction(`Delete ${name}? Its package goes for good, and stops counting against what your account may store.`))) return;
+  const withdraw = r.status === 'awaiting_approval';
+  const ask = withdraw
+    ? `Withdraw ${name}? It leaves the approval queue and is deleted with its package.`
+    : `Delete ${name}? Its package goes for good, and stops counting against what your account may store.`;
+  if (!(await confirmAction(ask))) return;
   busy.value = true;
   const result = await deleteProjectRelease(p.key, r.id);
   busy.value = false;
@@ -618,7 +645,7 @@ async function removeRelease(r: Release) {
     return;
   }
   if (publishing.value?.id === r.id) publishing.value = null;
-  flash(`${name} is deleted.`);
+  flash(withdraw ? `${name} is withdrawn.` : `${name} is deleted.`);
   await poll.readAgain();
 }
 </script>

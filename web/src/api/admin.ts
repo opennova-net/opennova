@@ -82,6 +82,7 @@ export type AdminErrorCode =
   | 'has_expansion'
   | 'no_revision'
   | 'not_draft'
+  | 'not_awaiting'
   | 'not_published'
   | 'published'
   | 'validating'
@@ -151,6 +152,7 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'has_expansion',
   'no_revision',
   'not_draft',
+  'not_awaiting',
   'not_published',
   'published',
   'validating',
@@ -244,6 +246,8 @@ function adminMessageFor(code: AdminErrorCode): string {
       return "That game's project has no such revision. Push one from the editor first.";
     case 'not_draft':
       return 'Only a draft release can be published. Refresh the list.';
+    case 'not_awaiting':
+      return 'That release is no longer awaiting approval. Refresh the list.';
     case 'not_published':
       return 'That release is not published. Refresh the list.';
     case 'published':

@@ -134,4 +134,19 @@ describe('AttentionList', () => {
     expect(page.find('.attention-stale').exists()).toBe(false);
     expect(page.find('.attention-empty').exists()).toBe(true);
   });
+
+  it("lists a player's release awaiting approval with a link to its product", async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: attention({
+        findings: [finding('warn', 'Awaits approval (by biggy)', { subject: 'NIGHTOPS 0.3.0', link: '/admin/products/NIGHTOPS', source: 'releases' })],
+        alarms: [],
+      }),
+    });
+    const page = await mountList();
+    const item = page.get('li.attention-finding');
+    expect(item.text()).toContain('NIGHTOPS 0.3.0');
+    expect(item.text()).toContain('Awaits approval (by biggy)');
+    expect(item.get('a').attributes('href')).toBe('/admin/products/NIGHTOPS');
+  });
 });

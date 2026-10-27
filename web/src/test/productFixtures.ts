@@ -101,6 +101,7 @@ export function release(id: number, overrides: Partial<Release> = {}): Release {
     bytes: 312_000_000,
     package_product: 'Joint Operations',
     error: '',
+    review_note: '',
     sections: [
       { product_id: 1, display_name: 'Joint Operations', expansion: '', command_file: 'JOPTR.CMD', version: `1.7.5.${id}`, tree: status === 'published' ? { id: 10, state: 'ready' } : null },
     ],

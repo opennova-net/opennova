@@ -11,6 +11,7 @@ import {
   fetchReleases,
   fetchRevisions,
   publishRelease,
+  rejectRelease,
   retireRelease,
   updateAllServers,
   updateProduct,
@@ -27,6 +28,7 @@ vi.mock('../../api/products', async (importOriginal) => ({
   fetchReleases: vi.fn(),
   fetchRevisions: vi.fn(),
   publishRelease: vi.fn(),
+  rejectRelease: vi.fn(),
   retireRelease: vi.fn(),
   updateAllServers: vi.fn(),
   updateProduct: vi.fn(),
@@ -39,6 +41,7 @@ const update = vi.mocked(updateProduct);
 const remove = vi.mocked(deleteProduct);
 const build = vi.mocked(buildRelease);
 const publish = vi.mocked(publishRelease);
+const reject = vi.mocked(rejectRelease);
 const retire = vi.mocked(retireRelease);
 const removeRelease = vi.mocked(deleteRelease);
 const updateAll = vi.mocked(updateAllServers);
@@ -323,5 +326,34 @@ describe('ProductSection', () => {
     const page = await mountProduct('NOPE');
     expect(page.get('h1').text()).toBe('No such product');
     expect(page.text()).toContain('No product has the key or id NOPE.');
+  });
+
+  it("approves or rejects a player's release awaiting approval, the rejection with a note", async () => {
+    const nightOps = product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', title: '', lobby: '', key: 'NIGHTOPS', visibility: 'public', head: 3, owner: 'biggy', owner_id: 7 });
+    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, nightOps] }) });
+    const waiting = (id: number) => release(id, { product_id: 21, status: 'awaiting_approval', version: `0.${id}.0`, created_by: 'user biggy', sections: [] });
+    list.mockResolvedValue({ ok: true, value: [waiting(4), waiting(3), release(2, { product_id: 21, status: 'draft', version: '0.2.0', sections: [], review_note: 'Wrong map.' })] });
+    const page = await mountProduct('NIGHTOPS');
+    const rows = () => page.findAll('tr.product-release');
+    expect(rows()[0].text()).toContain('Awaiting approval');
+    expect(rows()[0].findAll('button').map((b) => b.text())).toEqual(['Approve release 0.4.0', 'Reject release 0.4.0']);
+    expect(rows()[2].get('.product-release-note').text()).toBe('Sent back: Wrong map.');
+
+    publish.mockResolvedValueOnce({ ok: true, value: { ...waiting(4), status: 'published' } });
+    await buttonNamed(page, 'tr.product-release', 'Approve').trigger('click');
+    await flushPromises();
+    expect(confirm.mock.lastCall?.[0]).toMatch(/^Approve 0\.4\.0\? The update service serves it to players/);
+    expect(publish).toHaveBeenCalledWith(4);
+    expect(page.get('[role="status"]').text()).toBe('0.4.0 is approved and published.');
+
+    reject.mockResolvedValueOnce({ ok: true, value: { ...waiting(3), status: 'draft', review_note: 'Fix the briefing.' } });
+    await rows()[1].findAll('button').find((b) => b.text().startsWith('Reject'))!.trigger('click');
+    expect(page.get('#product-reject-form').text()).toContain('Send 0.3.0 back to biggy as a draft?');
+    await page.get('#product-reject-note').setValue('  Fix the briefing. ');
+    submitForm(page, '#product-reject-note');
+    await flushPromises();
+    expect(reject).toHaveBeenCalledWith(3, 'Fix the briefing.');
+    expect(page.get('[role="status"]').text()).toBe('0.3.0 is back with its owner as a draft.');
+    expect(page.find('#product-reject-form').exists()).toBe(false);
   });
 });

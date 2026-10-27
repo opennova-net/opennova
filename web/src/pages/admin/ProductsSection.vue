@@ -154,6 +154,7 @@
             <td class="whitespace-nowrap px-4 py-3">
               <span v-if="g.published_release" class="font-mono">{{ publishedLabel(g, releases) }}</span>
               <span v-else class="text-ink-muted">None</span>
+              <RouterLink v-if="awaitingLine(g)" :to="productLink(g)" class="products-awaiting block text-xs text-warn hover:text-ink-bright">{{ awaitingLine(g) }}</RouterLink>
             </td>
             <td class="whitespace-nowrap px-4 py-3">
               <template v-if="g.kind !== 'app'">
@@ -171,23 +172,26 @@
 <script setup lang="ts">
 // /admin/products: every product (GET /api/admin/products) with its project,
 // its owner (OpenNova's own, or a player's, linking to the account), its
-// published release (GET /api/admin/releases) and its servers, each linking
-// to its page (ProductSection.vue); and a new game or expansion of
-// NovaWorld's own with its project (POST /api/admin/products with a key and
-// visibility).
+// published release and any awaiting approval (GET /api/admin/releases) and
+// its servers, each linking to its page (ProductSection.vue); and a new game
+// or expansion of NovaWorld's own with its project (POST /api/admin/products
+// with a key and visibility).
 import { computed, reactive, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import AdminPageHeader from '../../components/AdminPageHeader.vue';
 import { createProduct, fetchProducts, fetchReleases } from '../../api/products';
 import { usePolling } from '../../composables/usePolling';
-import type { ProductsResponse, NewProduct, Release } from '../../types/products';
+import type { Product, ProductsResponse, NewProduct, Release } from '../../types/products';
 import {
   KEY_RULE,
+  awaitingApproval,
   kindLine,
   ownerLabel,
   ownerLink,
   productLink,
   publishedLabel,
+  releaseLabel,
+  releasesOf,
   releasesWorking,
   titleName,
   updaterProblems,
@@ -215,6 +219,14 @@ let errorFromLoad = false;
 
 const products = computed(() => data.value?.products ?? []);
 const bases = computed(() => products.value.filter((g) => g.kind === 'game'));
+
+// A product's releases awaiting approval in a line ("0.3.0 awaits approval");
+// '' with none.
+function awaitingLine(product: Product): string {
+  const waiting = awaitingApproval(releasesOf(product, releases.value));
+  if (waiting.length === 0) return '';
+  return waiting.length === 1 ? `${releaseLabel(waiting[0])} awaits approval` : `${waiting.length} releases await approval`;
+}
 
 function fail(text: string) {
   error.value = text;

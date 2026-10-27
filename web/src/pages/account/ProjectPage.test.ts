@@ -18,7 +18,8 @@ import {
 import { NIGHTOPS_PROJECT, myProjects, nightOpsRelease, project, revision } from '../../test/productFixtures';
 import { testRouter } from '../../test/router';
 
-const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
+// The signed-in account's role: a player's unless a test makes it an admin's.
+const { refreshSession, session } = vi.hoisted(() => ({ refreshSession: vi.fn(), session: { role: 'player' } }));
 
 vi.mock('../../api/products', async (importOriginal) => ({
   REVISIONS_PAGE: (await importOriginal<typeof import('../../api/products')>()).REVISIONS_PAGE,
@@ -34,7 +35,7 @@ vi.mock('../../api/products', async (importOriginal) => ({
 }));
 vi.mock('../../composables/useSession', async () => {
   const { shallowRef } = await import('vue');
-  return { useSession: () => ({ user: shallowRef(null), refresh: refreshSession }) };
+  return { useSession: () => ({ user: shallowRef({ username: 'biggy', role: session.role }), refresh: refreshSession }) };
 });
 
 const mine = vi.mocked(fetchMyProjects);
@@ -69,6 +70,7 @@ describe('ProjectPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    session.role = 'player';
     confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     mine.mockResolvedValue({ ok: true, value: myProjects() });
     history.mockResolvedValue({ ok: true, value: [revision(3, { message: 'night maps' }), revision(2), revision(1)] });
@@ -278,17 +280,19 @@ describe('ProjectPage', () => {
     expect(page.findAll('li.project-release')).toHaveLength(1);
   });
 
-  it("publishes a private project's draft and makes the project public, unless that is unchecked", async () => {
+  it("submits a private project's draft for approval and makes the project public, unless that is unchecked", async () => {
     const privateOps = { ...NIGHTOPS_PROJECT, visibility: 'private' as const, release: null };
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [privateOps] }) });
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     update.mockResolvedValueOnce({ ok: true, value: { ...privateOps, visibility: 'public' } });
-    publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'published' }) });
+    publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'awaiting_approval' }) });
     const page = await mountProject();
     expect(page.get('#project-published-line').text()).toBe('Nothing published yet.');
-    await buttonNamed(page.get('li.project-release'), 'Publish').trigger('click');
+    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
     const form = page.get('#project-publish-form');
-    expect(form.text()).toContain('Publish 0.3.0 of Night Ops?');
+    expect(form.text()).toContain('Submit 0.3.0 of Night Ops for approval?');
+    expect(form.text()).toContain('An admin checks it before publishing it.');
+    expect(page.get('#project-publish-confirm').text()).toBe('Submit for approval');
     expect(form.text()).toMatch(/Make Night Ops public too, so other players find it\s+in game and can host it\./);
     expect(form.text()).toContain('Private means unlisted, not secret');
     expect((page.get('#project-publish-public').element as HTMLInputElement).checked).toBe(true);
@@ -297,7 +301,7 @@ describe('ProjectPage', () => {
     expect(update).toHaveBeenCalledWith('NIGHTOPS', { visibility: 'public' });
     expect(publish).toHaveBeenCalledWith('NIGHTOPS', 3);
     expect(update.mock.invocationCallOrder[0]).toBeLessThan(publish.mock.invocationCallOrder[0]);
-    expect(page.get('[role="status"]').text()).toBe('0.3.0 is published, and anyone may now get Night Ops.');
+    expect(page.get('[role="status"]').text()).toBe("0.3.0 awaits an admin's approval, and anyone may now get Night Ops.");
     expect(page.find('#project-publish-form').exists()).toBe(false);
 
     // Unchecked, it stays private.
@@ -305,21 +309,21 @@ describe('ProjectPage', () => {
     vi.clearAllMocks();
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [privateOps] }) });
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
-    publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'published' }) });
+    publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'awaiting_approval' }) });
     const again = await mountProject();
-    await buttonNamed(again.get('li.project-release'), 'Publish').trigger('click');
+    await buttonNamed(again.get('li.project-release'), 'Submit for approval').trigger('click');
     await again.get('#project-publish-public').setValue(false);
     submitForm(again, '#project-publish-confirm');
     await flushPromises();
     expect(update).not.toHaveBeenCalled();
     expect(publish).toHaveBeenCalledWith('NIGHTOPS', 3);
-    expect(again.get('[role="status"]').text()).toBe('0.3.0 is published.');
+    expect(again.get('[role="status"]').text()).toBe("0.3.0 awaits an admin's approval.");
   });
 
   it("asks nothing about who gets a public project's release, and stops a publish whose visibility change is refused", async () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     const page = await mountProject();
-    await buttonNamed(page.get('li.project-release'), 'Publish').trigger('click');
+    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
     expect(page.find('#project-publish-form').exists()).toBe(true);
     expect(page.find('#project-publish-public').exists()).toBe(false);
     wrapper?.unmount();
@@ -327,7 +331,7 @@ describe('ProjectPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [{ ...NIGHTOPS_PROJECT, visibility: 'private' }] }) });
     update.mockResolvedValueOnce({ ok: false, error: { code: 'forbidden', status: 403, field: '', message: "Only its owner and NovaWorld's admins may change that project." } });
     const refusedPage = await mountProject();
-    await buttonNamed(refusedPage.get('li.project-release'), 'Publish').trigger('click');
+    await buttonNamed(refusedPage.get('li.project-release'), 'Submit for approval').trigger('click');
     submitForm(refusedPage, '#project-publish-confirm');
     await flushPromises();
     expect(publish).not.toHaveBeenCalled();
@@ -367,7 +371,7 @@ describe('ProjectPage', () => {
     releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3)] });
     const page = await mountProject();
     publish.mockResolvedValueOnce({ ok: false, error: { code: 'not_found', status: 404, field: '', message: 'That project is not on NovaWorld, or it is private.' } });
-    await buttonNamed(page.get('li.project-release'), 'Publish').trigger('click');
+    await buttonNamed(page.get('li.project-release'), 'Submit for approval').trigger('click');
     submitForm(page, '#project-publish-confirm');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('That release is no longer on NovaWorld.');
@@ -396,5 +400,42 @@ describe('ProjectPage', () => {
     expect(empty.text()).toContain('Push a revision from the editor to build a release.');
     expect(empty.text()).toContain('A published game lists its servers in a lobby of its own and, while public, has a download on the Downloads page.');
     expect(empty.find('#project-build-toggle').exists()).toBe(false);
+  });
+
+  it('says a release awaits approval and what players keep meanwhile, and withdraws it', async () => {
+    releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3, { status: 'awaiting_approval' }), nightOpsRelease(2, { status: 'published' })] });
+    removeRelease.mockResolvedValueOnce({ ok: true, value: true });
+    const page = await mountProject();
+    expect(page.get('#project-releases').element.closest('section')!.textContent).toContain(
+      'Submit a draft for approval: once an admin approves it, players\' updaters get it and hosted servers can run it.',
+    );
+    const row = page.get('li.project-release');
+    expect(row.text()).toContain('Awaiting approval');
+    expect(row.text()).toContain('An admin approves it before players get it. Until then they keep getting 0.2.0.');
+    expect(row.findAll('button').map((b) => b.text())).toEqual(['Withdraw release 0.3.0']);
+    await buttonNamed(row, 'Withdraw').trigger('click');
+    await flushPromises();
+    expect(confirm).toHaveBeenLastCalledWith('Withdraw 0.3.0? It leaves the approval queue and is deleted with its package.');
+    expect(removeRelease).toHaveBeenCalledWith('NIGHTOPS', 3);
+    expect(page.get('[role="status"]').text()).toBe('0.3.0 is withdrawn.');
+  });
+
+  it("shows the note an admin sent a draft back with, and an admin's own project publishes straight away", async () => {
+    releases.mockResolvedValue({ ok: true, value: [nightOpsRelease(3, { review_note: 'The briefing names the wrong map.' })] });
+    const page = await mountProject();
+    expect(page.get('.project-release-note').text()).toBe('An admin sent it back: The briefing names the wrong map.');
+    wrapper?.unmount();
+
+    session.role = 'admin';
+    publish.mockResolvedValueOnce({ ok: true, value: nightOpsRelease(3, { status: 'published' }) });
+    const own = await mountProject();
+    expect(own.get('#project-releases').element.closest('section')!.textContent).toContain("Publishing it serves it to players' updaters");
+    await buttonNamed(own.get('li.project-release'), 'Publish').trigger('click');
+    expect(own.get('#project-publish-form').text()).toContain('Publish 0.3.0 of Night Ops?');
+    expect(own.get('#project-publish-confirm').text()).toBe('Publish now');
+    submitForm(own, '#project-publish-confirm');
+    await flushPromises();
+    expect(publish).toHaveBeenCalledWith('NIGHTOPS', 3);
+    expect(own.get('[role="status"]').text()).toBe('0.3.0 is published.');
   });
 });

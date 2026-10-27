@@ -9,8 +9,9 @@
 // CI. Publishing a release is what players update to and what hosted servers
 // run (its built tree). A product is the service's own (an admin's) or a
 // player's: any account may make its own games and mods (expansions), push
-// them, and build and publish their releases. Times are the service's UTC
-// 'YYYY-MM-DD HH:MM:SS' (utils/format.ts), null until set.
+// them, build their releases and submit them, which an admin approves before
+// they are published. Times are the service's UTC 'YYYY-MM-DD HH:MM:SS'
+// (utils/format.ts), null until set.
 
 export type ProductKind = 'game' | 'expansion' | 'app';
 
@@ -209,9 +210,11 @@ export interface ProjectRevision {
 }
 
 // building (the data program packs a revision) -> validating -> draft |
-// invalid; draft -> published -> retired. The runtime's releases arrive by
-// upload (uploading -> validating) from the Publish workflow.
-export type ReleaseStatus = 'uploading' | 'building' | 'validating' | 'invalid' | 'draft' | 'published' | 'retired';
+// invalid; draft -> published -> retired. A player's own draft goes to
+// awaiting_approval when its owner publishes it, and an admin publishes it
+// (approves) or sends it back to draft (rejects). The runtime's releases
+// arrive by upload (uploading -> validating) from the Publish workflow.
+export type ReleaseStatus = 'uploading' | 'building' | 'validating' | 'invalid' | 'draft' | 'awaiting_approval' | 'published' | 'retired';
 
 // A built release's source: its game's project key and the revision built
 // (an expansion's on its base game's revision).
@@ -248,6 +251,8 @@ export interface Release {
   package_product: string;
   // Why it is invalid; '' otherwise.
   error: string;
+  // What the admin who sent it back to draft said; '' when none.
+  review_note: string;
   sections: ReleaseSection[];
   // Who started it: 'user <name>' (a player's own), 'admin <name>', or for an
   // upload 'token' (the admin token).

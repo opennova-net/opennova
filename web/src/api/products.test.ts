@@ -17,6 +17,7 @@ import {
   fetchRevisions,
   publishProjectRelease,
   publishRelease,
+  rejectRelease,
   retireProjectRelease,
   retireRelease,
   updateAllServers,
@@ -380,6 +381,17 @@ describe('the releases', () => {
     post.mockRejectedValue(refusal(409, { error: 'not_published' }));
     const notPublished = await retireRelease(7);
     expect(!notPublished.ok && notPublished.error.code).toBe('not_published');
+
+    // An awaiting release sent back with a note, or without one.
+    post.mockResolvedValue(reply({ release: release(8, { status: 'draft', review_note: 'Fix the briefing.' }) }, 202));
+    const rejected = await rejectRelease(8, 'Fix the briefing.');
+    expect(post).toHaveBeenLastCalledWith('/releases/8/reject', { message: 'Fix the briefing.' });
+    expect(rejected.ok && [rejected.value.status, rejected.value.review_note]).toEqual(['draft', 'Fix the briefing.']);
+    await rejectRelease(8, '');
+    expect(post).toHaveBeenLastCalledWith('/releases/8/reject', {});
+    post.mockRejectedValue(refusal(409, { error: 'not_awaiting' }));
+    const notAwaiting = await rejectRelease(8, '');
+    expect(!notAwaiting.ok && notAwaiting.error.message).toBe('That release is no longer awaiting approval. Refresh the list.');
 
     del.mockResolvedValue(reply(null, 204));
     expect((await deleteRelease(7)).ok).toBe(true);

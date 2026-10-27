@@ -140,4 +140,18 @@ describe('ProductsSection', () => {
     expect(page.get('[role="alert"]').text()).toBe('Another product already has that key.');
     expect(page.find('#products-new-form').exists()).toBe(true);
   });
+
+  it('marks a product with a release awaiting approval, linking to its page', async () => {
+    const nightOps = product(21, { display_name: 'Night Ops', kind: 'expansion', parent_id: 1, expansion_code: 'nightops', title: '', lobby: '', key: 'NIGHTOPS', owner: 'biggy', owner_id: 7 });
+    const rangers = product(22, { display_name: 'Rangers', key: 'RANGERS', owner: 'biggy', owner_id: 7 });
+    sets.mockResolvedValue({ ok: true, value: productsResponse({ products: [JO_PRODUCT, nightOps, rangers] }) });
+    const waiting = (id: number, productId: number) => release(id, { product_id: productId, status: 'awaiting_approval', version: `0.${id}.0`, sections: [] });
+    list.mockResolvedValue({ ok: true, value: [waiting(5, 21), waiting(4, 22), waiting(3, 22), release(9)] });
+    const page = await mountSection();
+    const rows = page.findAll('tr.products-row');
+    expect(rows[0].find('.products-awaiting').exists()).toBe(false);
+    const one = rows[1].get('.products-awaiting');
+    expect([one.text(), one.attributes('href')]).toEqual(['0.5.0 awaits approval', '/admin/products/NIGHTOPS']);
+    expect(rows[2].get('.products-awaiting').text()).toBe('2 releases await approval');
+  });
 });

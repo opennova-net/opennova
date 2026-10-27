@@ -198,6 +198,7 @@
                 <td class="px-4 py-3">
                   <span :class="releaseStatusClass(r.status)">{{ releaseStatusLabel(r.status) }}</span>
                   <span v-if="r.error" class="block max-w-xs whitespace-normal text-xs text-danger">{{ r.error }}</span>
+                  <span v-if="r.status === 'draft' && r.review_note" class="product-release-note block max-w-xs whitespace-normal text-xs text-warn">Sent back: {{ r.review_note }}</span>
                   <span v-if="treeOf(r)" class="block text-xs text-ink-muted">{{ treeStateText(treeOf(r)!) }}</span>
                   <details v-if="r.build_log" class="product-release-log mt-1 max-w-md text-xs" :open="r.status === 'building'">
                     <summary class="cursor-pointer text-accent hover:text-ink-bright">Build log</summary>
@@ -225,6 +226,12 @@
                   <button v-if="r.status === 'draft'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="publish(r)">
                     Publish<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
+                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-accent hover:text-ink-bright disabled:opacity-40" @click="publish(r)">
+                    Approve<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                  </button>
+                  <button v-if="r.status === 'awaiting_approval'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="beginReject(r)">
+                    Reject<span class="sr-only"> release {{ releaseLabel(r) }}</span>
+                  </button>
                   <button v-if="r.status === 'published'" type="button" :disabled="busy" class="text-warn/90 hover:text-warn disabled:opacity-40" @click="retire(r)">
                     Retire<span class="sr-only"> release {{ releaseLabel(r) }}</span>
                   </button>
@@ -242,6 +249,20 @@
             </tbody>
           </table>
         </div>
+
+        <!-- A release awaiting approval sent back to its owner, with a note. -->
+        <form v-if="rejecting" id="product-reject-form" class="space-y-2 rounded-panel border border-border bg-panel p-4" @submit.prevent="confirmReject">
+          <p class="text-sm text-ink">
+            Send {{ releaseLabel(rejecting) }} back to {{ product.owner ?? 'its owner' }} as a draft? Players keep what they get
+            now; its owner can submit it again or build another.
+          </p>
+          <label for="product-reject-note" :class="labelClass">Note to its owner (optional)</label>
+          <textarea id="product-reject-note" v-model="rejectNote" rows="3" :disabled="busy" :class="inputClass" placeholder="What to change before it can be published"></textarea>
+          <div class="flex flex-wrap gap-2">
+            <button type="submit" :disabled="busy" :class="primaryButton">{{ busy ? 'Sending…' : 'Send back' }}</button>
+            <button type="button" :disabled="busy" :class="secondaryButton" @click="rejecting = null">Cancel</button>
+          </div>
+        </form>
 
         <template v-if="product.kind !== 'app' && product.head > 0">
           <button v-if="!building" id="product-build-toggle" type="button" :class="secondaryButton" :disabled="busy" @click="beginBuild">Release r{{ product.head }}…</button>
@@ -311,7 +332,9 @@ import { confirmAction } from '../../composables/useConfirm';
 // each with the account that started it, built from a revision (POST
 // /api/products/<key>/releases, the player route an admin may use for any
 // project), then published, retired or deleted; and its servers moved to the published
-// release (POST /api/admin/hosted/update-all). The runtime's page has its
+// release (POST /api/admin/hosted/update-all). A player's release awaiting
+// approval is approved (published) or rejected back to a draft with a note
+// (POST /api/admin/releases/<id>/reject). The runtime's page has its
 // releases alone. The page polls, faster while a release is being worked on.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
@@ -326,6 +349,7 @@ import {
   fetchReleases,
   fetchRevisions,
   publishRelease,
+  rejectRelease,
   retireRelease,
   updateAllServers,
   updateProduct,
@@ -477,6 +501,7 @@ watch(productRef, () => {
   deleting.value = false;
   renaming.value = false;
   building.value = false;
+  rejecting.value = null;
   showHistory.value = false;
 });
 
@@ -631,7 +656,8 @@ useUnsavedChanges(() => {
     (!!edit && (edit.display_name !== g.display_name || edit.lobby !== g.lobby ||
       edit.updater_login !== g.updater_login || edit.command_file !== g.command_file || edit.retail !== g.retail)) ||
     (renaming.value && newKey.value.trim().toUpperCase() !== g.key) ||
-    (building.value && (buildVersion.value.trim() !== '' || buildRevision.value !== g.head))
+    (building.value && (buildVersion.value.trim() !== '' || buildRevision.value !== g.head)) ||
+    (rejecting.value !== null && rejectNote.value.trim() !== '')
   );
 });
 function beginBuild() {
@@ -659,10 +685,12 @@ async function confirmBuild() {
   await poll.readAgain();
 }
 
+// A draft published, or a release awaiting approval approved (published).
 async function publish(r: Release) {
   if (busy.value) return;
   const name = releaseLabel(r);
-  if (!await confirmAction(`Publish ${name}? The update service serves it to players, and new servers run it once its data is built; running servers move when their owners choose.`)) return;
+  const approve = r.status === 'awaiting_approval';
+  if (!await confirmAction(`${approve ? 'Approve' : 'Publish'} ${name}? The update service serves it to players, and new servers run it once its data is built; running servers move when their owners choose.`)) return;
   busy.value = true;
   const result = await publishRelease(r.id);
   busy.value = false;
@@ -670,7 +698,33 @@ async function publish(r: Release) {
     fail(result.error.message);
     return;
   }
-  flash(`${name} is published.`);
+  if (rejecting.value?.id === r.id) rejecting.value = null;
+  flash(approve ? `${name} is approved and published.` : `${name} is published.`);
+  await poll.readAgain();
+}
+
+const rejecting = ref<Release | null>(null);
+const rejectNote = ref('');
+
+function beginReject(r: Release) {
+  rejecting.value = r;
+  rejectNote.value = '';
+  building.value = false;
+}
+
+async function confirmReject() {
+  const r = rejecting.value;
+  if (!r || busy.value) return;
+  const name = releaseLabel(r);
+  busy.value = true;
+  const result = await rejectRelease(r.id, rejectNote.value.trim());
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  rejecting.value = null;
+  flash(`${name} is back with its owner as a draft.`);
   await poll.readAgain();
 }
 

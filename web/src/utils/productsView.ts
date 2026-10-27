@@ -123,6 +123,7 @@ export function releaseStatusLabel(status: string): string {
       validating: 'Checking',
       invalid: 'Invalid',
       draft: 'Draft',
+      awaiting_approval: 'Awaiting approval',
       published: 'Published',
       retired: 'Retired',
     } as Record<string, string>
@@ -135,6 +136,7 @@ export function releaseStatusClass(status: string): string {
   if (status === 'published') return `${BADGE} bg-online/10 text-online`;
   if (status === 'invalid') return `${BADGE} bg-danger/10 text-danger`;
   if (status === 'draft') return `${BADGE} bg-accent/15 text-accent`;
+  if (status === 'awaiting_approval') return `${BADGE} bg-warn/10 text-warn`;
   if (status === 'retired') return `${BADGE} bg-raised text-ink-muted`;
   return `${BADGE} bg-warn/10 text-warn`;
 }
@@ -147,6 +149,11 @@ export function treeStateText(state: string): string {
       string
     >
   )[state] ?? state;
+}
+
+// A product's releases awaiting an admin's approval, newest first.
+export function awaitingApproval(releases: readonly Release[]): Release[] {
+  return releases.filter((r) => r.status === 'awaiting_approval');
 }
 
 // Something the data program is on (a release building or being checked, a

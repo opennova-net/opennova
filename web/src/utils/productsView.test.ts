@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  awaitingApproval,
   creatorLabel,
   findProduct,
   kindLine,
@@ -8,6 +9,7 @@ import {
   productLink,
   publishedLabel,
   releaseCreator,
+  releaseStatusLabel,
   releasesOf,
   releasesWorking,
   updaterProblems,
@@ -69,5 +71,11 @@ describe('the products view', () => {
     expect(creatorLabel('admin root')).toBe('by admin root');
     expect(creatorLabel('worker')).toBe('by the data program');
     expect(creatorLabel('someone')).toBe('someone');
+  });
+
+  it('names a release awaiting approval and picks those out', () => {
+    expect(releaseStatusLabel('awaiting_approval')).toBe('Awaiting approval');
+    const waiting = release(5, { status: 'awaiting_approval' });
+    expect(awaitingApproval([release(6, { status: 'draft' }), waiting, release(4)])).toEqual([waiting]);
   });
 });

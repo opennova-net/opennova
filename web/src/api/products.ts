@@ -135,6 +135,7 @@ function pickRelease(value: unknown): Release | null {
     bytes: isCount(v.bytes) ? v.bytes : 0,
     package_product: text(v.package_product),
     error: text(v.error),
+    review_note: text(v.review_note),
     sections: sections as ReleaseSection[],
     created_by: text(v.created_by),
     created_at: text(v.created_at),
@@ -550,9 +551,10 @@ export function buildRelease(key: string, build: { version: string; revision?: n
   return projectCall(() => apiClient.post<unknown>(`${projectPath(key)}/releases`, build), pickReleaseReply);
 }
 
-// POST /api/products/<key>/releases/<id>/publish: a draft published (202):
-// the update service serves it and the data program builds its game's new
-// tree. 409 not_draft.
+// POST /api/products/<key>/releases/<id>/publish (202): an owner's draft
+// goes to awaiting_approval, for an admin to publish; an admin's draft or
+// awaiting release is published: the update service serves it and the data
+// program builds its game's new tree. 409 not_draft.
 export function publishProjectRelease(key: string, id: number): Promise<ProjectResult<Release>> {
   return projectCall(() => apiClient.post<unknown>(`${projectPath(key)}/releases/${id}/publish`), pickReleaseReply);
 }
@@ -563,8 +565,9 @@ export function retireProjectRelease(key: string, id: number): Promise<ProjectRe
   return projectCall(() => apiClient.post<unknown>(`${projectPath(key)}/releases/${id}/retire`), pickReleaseReply);
 }
 
-// DELETE /api/products/<key>/releases/<id>: a draft, invalid or retired
-// release and its package (204). 409 published, validating, building.
+// DELETE /api/products/<key>/releases/<id>: a draft, invalid, retired or
+// awaiting (withdrawn) release and its package (204). 409 published,
+// validating, building.
 export function deleteProjectRelease(key: string, id: number): Promise<ProjectResult<true>> {
   return projectCall(() => apiClient.delete<unknown>(`${projectPath(key)}/releases/${id}`), nothing);
 }
@@ -581,11 +584,18 @@ export function fetchReleases(signal?: AbortSignal): Promise<AdminResult<Release
   );
 }
 
-// POST /api/admin/releases/<id>/publish: a draft release published (202): the
-// update service serves it and the data program builds its game's new tree.
-// 409 not_draft.
+// POST /api/admin/releases/<id>/publish: a draft or awaiting release
+// published (202), the latter approved: the update service serves it and the
+// data program builds its game's new tree. 409 not_draft.
 export function publishRelease(id: number): Promise<AdminResult<Release>> {
   return adminCall(() => adminClient.post<unknown>(`/releases/${id}/publish`), pickReleaseReply);
+}
+
+// POST /api/admin/releases/<id>/reject {message?}: an awaiting release sent
+// back to its owner as a draft (202), the message its review_note. 409
+// not_awaiting.
+export function rejectRelease(id: number, message: string): Promise<AdminResult<Release>> {
+  return adminCall(() => adminClient.post<unknown>(`/releases/${id}/reject`, message ? { message } : {}), pickReleaseReply);
 }
 
 // POST /api/admin/releases/<id>/retire: a published release retired (202):
