@@ -405,7 +405,7 @@ void test_get_a_project() {
 	ui.drain();
 	const WorkspaceView::NewProject &form = v.workspace.new_project;
 	CHECK(form.novaworld == "EMPTY" && form.making == WorkspaceView::Making::Mod && form.expansion == "mine" &&
-	              form.title == "Mine" && form.installed.empty() && !form.on_project,
+	              form.title == "Mine" && form.installed.empty() && form.base_key == "MOD",
 	      "Set up...: the form filled for EMPTY, a mod as mine");
 	// The form set up for it says so, its clear taking it off, and Create names it.
 	v.workspace.new_project.making = WorkspaceView::Making::Game;
@@ -462,6 +462,81 @@ void test_settings_section() {
 	std::printf("content: Project settings' NovaWorld section\n");
 }
 
+// The New project form's A mod of (ADR 0074): a mod is of one of NovaWorld's games, and the form names no base game's
+// project. Signed out, it says to sign in, its Sign in... bringing the NovaWorld window forward, and Create waits;
+// signed in, NovaWorld's games listed, one chosen the form's base_key; a retail game's mod (JO, which the account
+// does not see listed) waits for an install of its game; Create raises new_project naming the game by base_key.
+void test_mod_form() {
+	SessionView v;
+	v.novaworld.available = true;
+	v.novaworld.server = "https://novaworld.test";
+	WorkspaceView::NewProject &form = v.workspace.new_project;
+	form.making = WorkspaceView::Making::Mod;
+	form.title = "Night Ops";
+	form.expansion = "nightops";
+	form.dir = "C:/mods/Night Ops";
+	Ui ui;
+	ui.serve_workspace = false; // the set_workspace requests looked at, the view set by hand
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	const ImGuiID document = item_id(Ui::window_id("Document"), {"welcome"});
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Sign in to NovaWorld to make a mod") != std::string::npos &&
+	              text.find("Base game's project") == std::string::npos && text.find("A project of yours") == std::string::npos,
+	      "signed out: sign in to make a mod, no base game's project to name");
+	ui.activate(item_id(document, {"Create project"}));
+	CHECK(ui.drain().empty(), "signed out: Create waits");
+	ui.activate(item_id(document, {"Sign in...##mod"}));
+	std::vector<EditorRequest> raised = ui.drain();
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::SetWorkspace &&
+	              raised[0].workspace.find("novaworld") != std::string::npos,
+	      "Sign in...: the NovaWorld window brought forward");
+
+	// Signed in: NovaWorld's games, one chosen.
+	v.novaworld.signed_in = true;
+	v.novaworld.username = "player";
+	v.novaworld.role = "player";
+	v.novaworld.games = {{"ACIDGAMBIT", "OP: Acid Gambit", "jo"}, {"JO", "Joint Operations", "jo"}};
+	RemoteProject acid;
+	acid.key = "ACIDGAMBIT";
+	acid.title = "OP: Acid Gambit";
+	acid.kind = "game";
+	acid.game = "jo";
+	acid.is_public = true;
+	acid.head = 3;
+	v.novaworld.projects = {acid}; // JO a retail game's, private: not listed
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Choose its game") != std::string::npos, "signed in: A mod of asks for a game");
+	ui.activate(item_id(document, {"Create project"}));
+	CHECK(ui.drain().empty(), "no game chosen: Create waits");
+	ui.activate(item_id(document, {"A mod of"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"Joint Operations (JO)"}));
+	raised = ui.drain();
+	CHECK(raised.size() == 1 && workspace_member(raised[0], "new_project", "base_key").string == "JO",
+	      "a game chosen: its key the form's");
+	ImGui::ClosePopupsExceptModals();
+	form.base_key = "JO";
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Needs a Joint Operations install") != std::string::npos,
+	      "a retail game's mod: an install of its game named first");
+	ui.activate(item_id(document, {"Create project"}));
+	CHECK(ui.drain().empty(), "no install of its game: Create waits");
+	// A game NovaWorld lets the account get: Create makes the mod of it.
+	form.base_key = "ACIDGAMBIT";
+	ui.frames(2);
+	ui.activate(item_id(document, {"Create project"}));
+	raised = ui.drain();
+	const EditorRequest *made = one(raised, EditorRequestKind::NewProject);
+	CHECK(made && made->base_key == "ACIDGAMBIT" && made->expansion == "nightops" && made->base_project.empty() &&
+	              made->title == "Night Ops" && made->dir == "C:/mods/Night Ops",
+	      "Create: new_project of the mod, its game by key");
+	std::printf("content: the New project form's A mod of, signed out and in\n");
+}
+
 } // namespace
 
 void run_novaworld_tests() {
@@ -469,6 +544,7 @@ void run_novaworld_tests() {
 	test_put_and_sign_in();
 	test_get_a_project();
 	test_settings_section();
+	test_mod_form();
 }
 
 } // namespace editor_ui_test

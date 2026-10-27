@@ -11,9 +11,11 @@
 // get's too) and a push run as the session's operations (NovaWorldOperation: the busy gate weighs
 // them as their rows say), and their finish comes back here (finish_job). The folder's working copy
 // on the account's service starts by itself: a project naming a key that opens (or an account
-// signing in) with no state there is made one at the project's head (the setup, NovaWorldTrack, an
-// operation no request starts: it waits for the slot), and so is one a check, a pull or a push
-// found the store reset under. A pull that meets files both sides changed stops with its plan kept
+// signing in) with no state there is made one (the setup, NovaWorldTrack, an operation no request
+// starts: it waits for the slot; at the project's head where the folder's files are the head's,
+// else at no revision, a pull first), and so is one a check, a pull or a push found the store reset
+// under. A mod's base game's project is found on this computer or made there (make_base, the New
+// project form's A mod of and a got mod's). A pull that meets files both sides changed stops with its plan kept
 // here for the author (novaworld_resolve settles each conflict, novaworld_pull goes on), so no
 // operation waits on a person. A pull's files written, the project reads them again as an outside
 // change (start_changed_refresh), or opens again when its project file changed; a get's opens its
@@ -37,6 +39,8 @@
 
 namespace opennova::editor {
 
+class BaseSetupOperation;
+struct BaseSetup;
 class SessionCore;
 
 // Why the open project `doc` cannot be put on the empty NovaWorld project `project` ("" it can): it
@@ -85,6 +89,14 @@ public:
 
 	// NovaWorldOperation's finish: what the job of the operation `kind` came to, taken in.
 	OperationOutcome finish_job(OperationKind kind, std::unique_ptr<NovaWorldJob> job);
+
+	// new_project naming a base_key (the New project form's A mod of, ADR 0074): the mod made on that
+	// NovaWorld game's project, a project of it on this computer already (local_base) or one made
+	// beside the mod first (make_base), in a folder named by the game's key.
+	void new_mod(const EditorRequest &request);
+	// BaseSetupOperation's finish: what waited on the base game's project goes on (the mod made on
+	// it, a got mod opened), or why it was not made is said (a got mod opened all the same).
+	OperationOutcome finish_base(BaseSetupOperation &setup);
 
 private:
 	// Whether a request may run now; refused (novaworld.refused, with why) when not: no transport;
@@ -135,6 +147,25 @@ private:
 	// A check, a pull or a push that found the store reset (NovaWorldJob::reset): said, and the
 	// setup started, a check after it.
 	void reset_found(int64_t head);
+	// The one resolver of a mod's base game (the New project form's A mod of, a got mod's base): the
+	// NovaWorld game setup.key (`game` its gameprofile code) made a project in setup.dir as an
+	// operation (BaseSetupOperation), setup.then going on once it is in. A game NovaWorld lists the
+	// account as no retail game's is got from it; a retail game's, or one the account may not read
+	// (never listed), is imported from `install`, false with `why` (nothing started) where that holds
+	// no install of `game`.
+	bool make_base(BaseSetup setup, const std::string &game, const std::string &install, std::string &why);
+	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be
+	// made on (a recent project, or one in the folder `dir` is made in): one whose project file names
+	// the game's key, else for a game make_base would import, a game you own of it (a standalone
+	// project of its gameprofile code naming no key, its files imported from a game install: its
+	// archives recorded). "" none.
+	std::string local_base(const std::string &dir, const RemoteGame &game) const;
+	// The new project `request` asks for made (SessionCore::new_project, as new_project serves it).
+	void make_project(const EditorRequest &request);
+	// A base game's project's operation started (refused busy where the slot is taken).
+	void start_base(std::unique_ptr<BaseSetupOperation> operation);
+	// `words` the view's last line and Output's.
+	void view_last(const std::string &words);
 
 	SessionCore &core_;
 	NovaWorldTransport *transport_ = nullptr;
@@ -178,10 +209,9 @@ private:
 	// ("" a pull of the open project).
 	std::unique_ptr<NovaWorldPull> paused_;
 	std::string get_dir_;
-	// A get of an expansion's project: its base game's project's key, got next where the expansion's
-	// project file names it; and the expansion's folder, opened once its base has landed.
+	// A get of a mod's project: its base game's project's key, made next where the mod's project file
+	// names it (make_base), the mod opened once it is in.
 	std::string get_base_key_;
-	std::string get_open_after_;
 };
 
 } // namespace opennova::editor

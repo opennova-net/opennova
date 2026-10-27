@@ -18,8 +18,11 @@
 #include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/base_setup.h>
 #include <editor/session/disk_watch.h>
+#include <editor/session/editor_preferences.h>
 #include <editor/session/novaworld_operation.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 
 namespace fs = std::filesystem;
@@ -525,7 +528,6 @@ void NovaWorldController::get(const EditorRequest &request) {
 		if (project.key == request.project_key)
 			listed = &project;
 	get_dir_ = request.dir;
-	get_open_after_.clear();
 	// An expansion's project builds on its base game's, which comes along beside it.
 	get_base_key_ = listed ? listed->base : std::string();
 	paused_.reset();
@@ -1048,18 +1050,10 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 	} else {
 		if (pull.up_to_date() && !get_dir_.empty()) {
 			// A get of a project with no revision yet (its head as the pull read it, whatever the
-			// list said): nothing written, no working copy. An expansion's base with none: the
-			// expansion opens.
-			const std::string open_after = std::move(get_open_after_);
+			// list said): nothing written, no working copy.
 			get_dir_.clear();
 			get_base_key_.clear();
-			get_open_after_.clear();
 			view.last = no_revision_text(pull.remote().key);
-			if (!open_after.empty()) {
-				core_.note("NovaWorld: " + view.last);
-				core_.open_project(open_after);
-				return;
-			}
 			refuse(view.last);
 			return;
 		}
@@ -1075,41 +1069,35 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 		view.checked = false; // the changes are counted again by the next check
 		view.changes.clear();
 		if (!get_dir_.empty()) {
-			std::string dir = std::move(get_dir_);
+			const std::string dir = std::move(get_dir_);
 			get_dir_.clear();
-			if (!get_open_after_.empty()) {
-				// The base an expansion builds on landed beside it: the expansion opens.
-				dir = std::move(get_open_after_);
-				get_open_after_.clear();
-			} else if (!get_base_key_.empty()) {
-				// An expansion's: its base game's project got where its project file names it, unless a
-				// project is there already.
-				const std::string base_key = std::move(get_base_key_);
-				get_base_key_.clear();
-				std::string base_dir;
-				// A retail game's project (its files the game install's, private on NovaWorld) and one
-				// the account may not read (never listed) are got by none: the mod builds on the
-				// install's own project of that game, made there.
+			const std::string base_key = std::move(get_base_key_);
+			get_base_key_.clear();
+			// A mod's: its base game's project made where its project file names it, unless a project
+			// is there already (make_base: got from NovaWorld, or a retail game's imported from the
+			// game install), the mod opened then; one the editor cannot make said so, the mod opened.
+			std::string base_dir;
+			if (!base_key.empty() && base_project_folder(dir, base_dir) && empty_folder(base_dir)) {
+				ProjectDocument mod;
+				Diagnostic unread;
+				const std::string game = ::opennova::editor::open_project(dir, mod, unread)
+						? mod.target_game
+						: std::string(kDefaultTargetGame);
 				const RemoteProject *base = listed_project(view, base_key);
-				if (base_project_folder(dir, base_dir) && empty_folder(base_dir) &&
-						(!base || base->retail)) {
-					const std::string skipped = "Its base game's project, " + base_key + ", is " +
-							(base ? std::string("a retail game's, whose files are your game install's")
-								  : std::string("not one this account may read")) +
-							", so it is not got: make the game's project from your game install in " +
-							base_dir + " (New project, A game you own) for the mod to build on.";
-					view.last += " " + skipped;
-					core_.note("NovaWorld: " + skipped);
-				} else if (!base_dir.empty() && empty_folder(base_dir)) {
-					get_dir_ = base_dir;
-					get_open_after_ = dir;
-					view.last += " Getting its base game's project, " + base_key + ", into " + base_dir + ".";
-					start(OperationKind::NovaWorldPull,
-							std::make_unique<NovaWorldPull>(*transport_, account_,
-									ProjectPaths::for_root(base_dir), "",
-									NovaWorldWorkingCopy{ base_key, 0 }));
+				std::string why;
+				if (make_base(BaseSetup{ base_dir, base_key,
+									  base && !base->title.empty() ? base->title : base_key,
+									  request::open_project(dir) },
+							game, core_.game_install(), why)) {
+					view.last += " Making its base game's project, " + base_key + ", in " + base_dir + ".";
+					core_.note("NovaWorld: Making " + base_key + "'s project in " + base_dir +
+							" for the mod to build on.");
 					return;
 				}
+				const std::string skipped = "Its base game's project, " + base_key + ", is not got: " +
+						why + " Make it in " + base_dir + " (New project, A game you own) for the mod to build on.";
+				view.last += " " + skipped;
+				core_.note("NovaWorld: " + skipped);
 			}
 			core_.open_project(dir);
 			return;
@@ -1188,7 +1176,6 @@ OperationOutcome NovaWorldController::finish_job(
 			if (kind == OperationKind::NovaWorldPull) {
 				get_dir_.clear();
 				get_base_key_.clear();
-				get_open_after_.clear();
 			}
 			break;
 		}
@@ -1263,6 +1250,148 @@ OperationOutcome NovaWorldController::finish_job(
 	}
 	core_.touch(ViewConcern::NovaWorld);
 	return outcome;
+}
+
+void NovaWorldController::new_mod(const EditorRequest &request) {
+	if (!ready(false, false))
+		return;
+	if (!account_.signed_in()) {
+		refuse("Sign in to NovaWorld to make a mod: a mod is of one of NovaWorld's games.");
+		return;
+	}
+	if (request.dir.empty() || request.expansion.empty()) {
+		refuse("A mod names its folder and its short name.");
+		return;
+	}
+	const RemoteGame *game = nullptr;
+	for (const RemoteGame &each : core_.view().novaworld.games)
+		if (each.key == request.base_key)
+			game = &each;
+	if (!game) {
+		refuse("NovaWorld lists no game " + request.base_key +
+				" a mod of yours may change: list its projects again (Check).");
+		return;
+	}
+	const std::string title = game->title.empty() ? game->key : game->title;
+	EditorRequest mod = request;
+	mod.base_key.clear();
+	// A project of the game here already: the mod made on it now.
+	mod.base_project = local_base(request.dir, *game);
+	if (!mod.base_project.empty()) {
+		core_.note("NovaWorld: " + title + "'s project in " + mod.base_project + " is the mod's base game.");
+		make_project(mod);
+		return;
+	}
+	// Else one made beside the mod, in a folder named by the game's key.
+	const std::string dir = io::utf8_generic_path(
+			io::os_path(request.dir).lexically_normal().parent_path() / io::os_path(game->key));
+	if (!empty_folder(dir)) {
+		refuse(dir + " holds files and no project of " + title +
+				": make the mod in another folder, or move them.");
+		return;
+	}
+	mod.base_project = dir;
+	const std::string install = request.game_install.empty() ? core_.game_install() : request.game_install;
+	std::string why;
+	if (!make_base(BaseSetup{ dir, game->key, title, mod }, game->game, install, why)) {
+		refuse(why);
+		return;
+	}
+	view_last("Making " + title + "'s project in " + dir + " for " +
+			(request.title.empty() ? request.expansion : request.title) + " to be made on.");
+}
+
+bool NovaWorldController::make_base(
+		BaseSetup setup, const std::string &game, const std::string &install, std::string &why) {
+	const RemoteProject *listed = listed_project(core_.view().novaworld, setup.key);
+	std::unique_ptr<BaseSetupOperation> operation;
+	if (listed && !listed->retail) {
+		auto pull = std::make_unique<NovaWorldPull>(*transport_, account_,
+				ProjectPaths::for_root(setup.dir), "", NovaWorldWorkingCopy{ setup.key, 0 });
+		operation = std::make_unique<BaseSetupOperation>(*this, std::move(setup), std::move(pull));
+	} else {
+		// A retail game's files are the game install's (private on NovaWorld, which players cannot get).
+		if (install.empty() || install_game(install) != game) {
+			why = setup.title + "'s project is made from a " + game_words(game) +
+					" install, and the editor has none: name one (Game install).";
+			return false;
+		}
+		operation = std::make_unique<BaseSetupOperation>(
+				*this, std::move(setup), install, core_.preferences().values());
+	}
+	start_base(std::move(operation));
+	return true;
+}
+
+std::string NovaWorldController::local_base(const std::string &dir, const RemoteGame &game) const {
+	std::vector<std::string> roots = core_.view().project.recent_projects;
+	const fs::path mod = io::os_path(dir).lexically_normal();
+	std::error_code ec;
+	for (const auto &entry : fs::directory_iterator(mod.parent_path(), ec))
+		if (entry.is_directory(ec))
+			roots.push_back(io::utf8_generic_path(entry.path()));
+	const RemoteProject *listed = listed_project(core_.view().novaworld, game.key);
+	const bool imported = !listed || listed->retail;
+	std::string owned;
+	for (const std::string &root : roots) {
+		ProjectDocument doc;
+		Diagnostic unread;
+		if (io::os_path(root).lexically_normal() == mod ||
+				!fs::is_regular_file(system_path(root + "/" + kProjectFileName), ec) ||
+				!::opennova::editor::open_project(root, doc, unread) || !doc.expansion.standalone() ||
+				doc.target_game != game.game)
+			continue;
+		if (doc.novaworld == game.key)
+			return root;
+		if (imported && owned.empty() && doc.novaworld.empty() && !doc.archives.empty())
+			owned = root;
+	}
+	return owned;
+}
+
+void NovaWorldController::make_project(const EditorRequest &r) {
+	core_.new_project(r.dir, r.title, r.game, r.import_pass,
+			ProjectExpansion{ r.expansion, r.builds_on, r.base_project }, r.game_install, r.all,
+			r.project_key);
+}
+
+OperationOutcome NovaWorldController::finish_base(BaseSetupOperation &operation) {
+	OperationOutcome outcome;
+	if (NovaWorldPull *pull = operation.pull())
+		keep_account(pull->take_account());
+	const BaseSetup &setup = operation.setup();
+	const bool opens = setup.then.kind == EditorRequestKind::OpenProject;
+	if (!operation.ok()) {
+		const Diagnostic failed = make_finding(CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning,
+				setup.title + "'s project was not made in " + setup.dir + ": " + operation.reason() +
+						(opens ? ". The mod opens without it." : ", so the mod was not made."));
+		core_.refuse_request(failed);
+		outcome.end = OperationEnd::Failed;
+		outcome.findings.push_back(failed);
+		core_.view().novaworld.last = failed.message;
+		core_.touch(ViewConcern::NovaWorld);
+		if (opens)
+			core_.open_project(setup.then.dir);
+		return outcome;
+	}
+	view_last(setup.title + "'s project is in " + setup.dir + ".");
+	if (opens)
+		core_.open_project(setup.then.dir);
+	else
+		make_project(setup.then);
+	return outcome;
+}
+
+void NovaWorldController::start_base(std::unique_ptr<BaseSetupOperation> operation) {
+	if (core_.start_operation(std::move(operation)) == 0)
+		core_.refuse_busy(std::string());
+	core_.touch(ViewConcern::NovaWorld);
+}
+
+void NovaWorldController::view_last(const std::string &words) {
+	core_.view().novaworld.last = words;
+	core_.note("NovaWorld: " + words);
+	core_.touch(ViewConcern::NovaWorld);
 }
 
 } // namespace opennova::editor

@@ -773,9 +773,11 @@ _Avoid_: start screen, home, launcher
 New project's first choice: the project of the game install's own game, Joint Operations or one
 of its installed expansions (made as that expansion on the base game's project), every file of it
 imported as it opens (`new_project`'s `all`), the install's files winning over anything the project
-held, the features its files need on. Beside it, **a mod** (a change to a game: an expansion project
-of the install's base game, an installed expansion, or a project of the author's own) and **a new
-game** (a standalone project).
+held, the features its files need on. Beside it, **a mod** (a change to one of NovaWorld's games,
+chosen from them as *A mod of*: an expansion project made on that game's project, which the editor
+finds on the computer or makes beside the mod first, a retail game's imported from the game install
+as a game you own is, any other got from NovaWorld; ADR 0074) and **a new game** (a standalone
+project).
 _Avoid_: stock import (the import is part of making the project), the raw expansion fields (Builds
 on, Expansion name: Project settings keep them for an existing project)
 

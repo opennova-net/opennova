@@ -115,7 +115,7 @@ int test_new_project_form() {
 	                                         dir.file("work/nightfall") + R"(", "installed": "jox01", "expansion": "nightfall"}})");
 	TEST_EXPECT(answer.get_bool("ok", false) && answer.get("outcome") && answer.get("outcome")->get_bool("done", false));
 	TEST_EXPECT(form.open && form.making == WorkspaceView::Making::Mod && form.title == "Operation Nightfall" &&
-	            form.dir == dir.file("work/nightfall") && form.installed == "jox01" && !form.on_project &&
+	            form.dir == dir.file("work/nightfall") && form.installed == "jox01" && form.base_key.empty() &&
 	            form.expansion == "nightfall" && form.base_project.empty() && !form.install_named && !v.project.open);
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"game_install": "C:/Games/JO"}})")));
 	TEST_EXPECT(form.install_named && form.game_install == "C:/Games/JO");
@@ -124,12 +124,13 @@ int test_new_project_form() {
 	TEST_EXPECT(made && made->get_bool("open", false) && made->get_string("title", "") == "Operation Nightfall" &&
 	            made->get_string("game_install", "") == "C:/Games/JO" && made->get_bool("install_named", false) &&
 	            made->get_string("making", "") == "mod" && made->get_string("installed", "") == "jox01" &&
-	            !made->get_bool("on_project", true) && made->get_string("expansion", "") == "nightfall");
+	            made->get_string("base_key", "x").empty() && made->get_string("expansion", "") == "nightfall");
 	// What it makes is one of the three.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "remake"}})")) &&
 	            refused_with(session, "workspace.refused") && form.making == WorkspaceView::Making::Mod);
-	// A mod of a project of the author's: offered the folder beside its own that holds a standalone project of the
-	// game (Base, by name, before Other; an expansion's project passed over), until one is named.
+	// A mod is of a NovaWorld game, by its key (refused where it is no key); a game you own's expansion is offered the
+	// folder beside its own that holds a standalone project of the game (Base, by name, before Other; an expansion's
+	// project passed over), until one is named.
 	ProjectDocument base;
 	Diagnostic error;
 	TEST_EXPECT(create_project(dir.file("work/Base"), "Base", "jo", base, error));
@@ -137,14 +138,15 @@ int test_new_project_form() {
 	TEST_EXPECT(create_project(dir.file("work/Other"), "Other", "jo", other, error));
 	ProjectDocument expansion;
 	TEST_EXPECT(create_project(dir.file("work/Aside"), "Aside", "jo", expansion, error, ProjectExpansion{ "asd" }));
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"on_project": true}})")));
-	TEST_EXPECT(form.on_project && form.base_project == "../Base");
-	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_project": "../Other"}})")) &&
-	            form.base_project == "../Other");
-	// A game you own's expansion likewise; its base game alone is offered nothing.
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_key": "JO"}})")) && form.base_key == "JO" &&
+	            form.base_project.empty() && section(session).get("new_project")->get_string("base_key", "") == "JO");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_key": "not a key"}})")) &&
+	            refused_with(session, "workspace.refused") && form.base_key == "JO");
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"making": "stock", "installed": "", "base_project": ""}})")));
 	TEST_EXPECT(form.base_project.empty());
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"installed": "jox01"}})")) && form.base_project == "../Base");
+	TEST_EXPECT(session.handle(request::set_workspace(R"({"new_project": {"base_project": "../Other"}})")) &&
+	            form.base_project == "../Other");
 	TEST_EXPECT(sibling_base_project(dir.file("lone/New"), "jo").empty());
 	// File > Import...'s first step is a project's.
 	TEST_EXPECT(session.handle(request::set_workspace(R"({"import": {"sources": true}})")) &&

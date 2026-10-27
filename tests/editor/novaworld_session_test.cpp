@@ -44,8 +44,9 @@
 #include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
-#include "editor/novaworld_fake_service.h"
 #include "editor/editor_test_support.h"
+#include "editor/minted_install.h"
+#include "editor/novaworld_fake_service.h"
 
 namespace editor = opennova::editor;
 namespace request = opennova::editor::request;
@@ -567,8 +568,9 @@ static int test_get_expansion() {
 }
 
 // A mod got whose base game's project is a retail game's (its files the game install's, private on
-// NovaWorld) or one the account may not read: no get of the base is tried, the mod's own working
-// copy is got, and Output says where to make the base game's project from the game install.
+// NovaWorld) or one the account may not read: no get of the base is tried, its project is made from
+// the game install, and with no install of its game the mod's own working copy is got alone, Output
+// saying where to make the base game's project.
 static int test_get_mod_base_not_got() {
 	test_temp::TempDir dir("opennova_novaworld_session_base_not_got");
 	FakeService service;
@@ -597,8 +599,8 @@ static int test_get_mod_base_not_got() {
 		s.send(request::novaworld_get("EXP", dir.file("retail/EXP")));
 		TEST_EXPECT(got(dir.file("retail/EXP")) && !got(dir.file("retail/MOD")) &&
 				service.downloads == 2 &&
-				s.said("Its base game's project, MOD, is a retail game's, whose files are your game "
-					   "install's, so it is not got") &&
+				s.said("Its base game's project, MOD, is not got: A mod's project is made from a Joint "
+					   "Operations install, and the editor has none") &&
 				s.said("retail/MOD"));
 	}
 	service.retail = false;
@@ -608,10 +610,79 @@ static int test_get_mod_base_not_got() {
 		s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
 		s.send(request::novaworld_get("EXP", dir.file("private/EXP")));
 		TEST_EXPECT(got(dir.file("private/EXP")) && !got(dir.file("private/MOD")) &&
-				s.said("Its base game's project, MOD, is not one this account may read"));
+				s.said("Its base game's project, MOD, is not got: MOD's project is made from a Joint "
+					   "Operations install"));
 	}
 	std::printf("base not got: a mod's retail or unreadable base game's project left to the game "
 				"install, said so\n");
+	return 0;
+}
+
+// A mod made of one of NovaWorld's games (the New project form's A mod of, new_project's base_key): its base game's
+// project got from NovaWorld beside it (MOD, a game the account may get), the mod made on it there and opened; a
+// second mod beside the first made on the same project (one naming the game's key, on this computer already), nothing
+// got again; a retail game's (MOD as one) imported from the game install the request names, as a game you own is
+// made, the mod made on it; refused signed out, for a game NovaWorld does not list, and for a retail game with no
+// install of its game.
+static int test_new_mod() {
+	test_temp::TempDir dir("opennova_novaworld_session_new_mod");
+	FakeService service;
+	// MOD's first revision: a game's project, naming its key.
+	editor::ProjectDocument made;
+	editor::Diagnostic why;
+	TEST_EXPECT(editor::create_project(dir.file("source"), "A mod", "jo", made, why, editor::ProjectExpansion(), "MOD"));
+	std::string project, error;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("source/project.opennova"), project, error));
+	push_to_mod(service, { { "project.opennova", project }, { "defs/a.def", "a1" } });
+	const auto mod = [&](const char *folder, const char *title, const char *code) {
+		editor::EditorRequest r = request::new_expansion_project(dir.file(folder), title, code);
+		r.base_key = "MOD";
+		return r;
+	};
+	Session s(&service);
+	s.send(mod("got/Night", "Night", "night"));
+	TEST_EXPECT(s.refused("novaworld.refused") && !s.session.view().project.open); // signed out
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	editor::EditorRequest unlisted = mod("got/Nope", "Nope", "nope");
+	unlisted.base_key = "NOPE";
+	s.send(unlisted);
+	TEST_EXPECT(s.refused("novaworld.refused") &&
+			s.session.view().activity.status.find("lists no game NOPE") != std::string::npos);
+
+	// Got beside it, the mod made on it and opened.
+	s.send(mod("got/Night", "Night", "night"));
+	editor::NovaWorldWorkingCopy copy;
+	TEST_EXPECT(copy_at(dir.file("got/MOD"), copy) && copy.key == "MOD" && copy.revision == 1);
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.document->title == "Night" &&
+			s.session.view().project.document->expansion.name == "night" &&
+			s.session.view().project.document->expansion.base_project == "../MOD" &&
+			s.said("A mod's project is in"));
+	// A second beside it: the same project, got by none again.
+	const size_t downloads = service.downloads;
+	s.send(mod("got/Dawn", "Dawn", "dawn"));
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.document->title == "Dawn" &&
+			s.session.view().project.document->expansion.base_project == "../MOD" &&
+			service.downloads == downloads);
+
+	// A retail game's: none without an install of its game; imported from one.
+	service.retail = true;
+	s.send(request::novaworld_check()); // listed again: a retail game's now
+	s.send(mod("retail/Night", "Night", "night"));
+	TEST_EXPECT(s.refused("novaworld.refused") &&
+			s.session.view().activity.status.find("is made from a Joint Operations install") != std::string::npos);
+	std::vector<minted_install::File> game;
+	TEST_EXPECT(minted_install::base_game(game, error) &&
+			minted_install::write_install(dir.file("install"), game, std::string(), {}, error));
+	editor::EditorRequest installed = mod("retail/Night", "Night", "night");
+	installed.game_install = dir.file("install");
+	s.send(installed);
+	editor::ProjectDocument base;
+	TEST_EXPECT(editor::open_project(dir.file("retail/MOD"), base, why) && base.expansion.standalone() &&
+			base.target_game == "jo" && !base.archives.empty() && base.novaworld.empty());
+	TEST_EXPECT(s.session.view().project.open && s.session.view().project.root == dir.file("retail/Night") &&
+			s.session.view().project.document->expansion.base_project == "../MOD");
+	std::printf("new mod: of a game got from NovaWorld beside it, of one on this computer already, of a retail "
+				"game's imported from the game install\n");
 	return 0;
 }
 
@@ -696,6 +767,7 @@ int main() {
 	failures += test_player_projects();
 	failures += test_get_expansion();
 	failures += test_get_mod_base_not_got();
+	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();
 	failures += test_get_without_revision();
 	if (failures == 0)

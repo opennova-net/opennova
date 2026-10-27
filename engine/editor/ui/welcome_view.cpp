@@ -168,9 +168,9 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const s
 		                                  form.installed.empty() ? std::string() : form.base_project);
 		break;
 	case Making::Mod:
-		made = request::new_expansion_project(form.dir, form.title, form.expansion,
-		                                      form.on_project ? std::string() : form.installed, true,
-		                                      form.on_project ? form.base_project : std::string());
+		// A mod of a NovaWorld game (ADR 0074): the session finds its base game's project, or makes it, first.
+		made = request::new_expansion_project(form.dir, form.title, form.expansion);
+		made.base_key = form.base_key;
 		made.game_install = install;
 		break;
 	case Making::Game:
@@ -205,11 +205,26 @@ std::string installed_words(const InstallCheck::Expansion &installed) {
 	                                                                      : installed.name + " - " + installed.title;
 }
 
+// A game's name by its gameprofile code (Joint Operations), JO's for none.
+std::string game_name(const std::string &code) {
+	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.empty() ? kDefaultTargetGame : code.c_str());
+	return profile && profile->display_name ? profile->display_name : code;
+}
+
 // The base game's name: the game the install was read as (Joint Operations).
-std::string base_game_name(const InstallCheck *check) {
-	const gameprofile::GameProfile *profile =
-	        gameprofile::gameprofile_by_code(check && !check->game.empty() ? check->game.c_str() : kDefaultTargetGame);
-	return profile && profile->display_name ? profile->display_name : std::string(kDefaultTargetGame);
+std::string base_game_name(const InstallCheck *check) { return game_name(check ? check->game : std::string()); }
+
+// One of NovaWorld's games as the A mod of list names it: its name, then its key.
+std::string novaworld_game_words(const RemoteGame &game) {
+	return game.title.empty() || game.title == game.key ? game.key : game.title + " (" + game.key + ")";
+}
+
+// Whether a mod of NovaWorld's game `key` is made on a project imported from the game install, as the session's
+// make_base takes it: a retail game's (its files the install's), or one the account may not read (never listed).
+bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
+	for (const RemoteProject &project : novaworld.projects)
+		if (project.key == key) return project.retail;
+	return true;
 }
 
 } // namespace
@@ -267,33 +282,18 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	const std::string chosen_words = form.installed.empty() ? base_name
 	                                 : chosen               ? installed_words(*chosen)
 	                                                        : form.installed + " (not in the game install)";
-	// The install's game the project is or changes: its base game, or an installed expansion.
-	const auto game_combo = [&](const char *label, bool projects) {
-		const std::string shown = projects && form.on_project ? std::string("A project of yours") : chosen_words;
-		if (!ImGui::BeginCombo(label, shown.c_str())) return;
-		const bool base_now = form.installed.empty() && !(projects && form.on_project);
-		if (ImGui::Selectable((base_name + " (the base game)").c_str(), base_now) && !base_now) {
-			io::JsonValue members = io::JsonValue::make_object();
-			members.set("installed", io::JsonValue::make_string(""));
-			members.set("on_project", io::JsonValue::make_bool(false));
-			window_requests::set_workspace(workspace, "new_project", std::move(members));
-		}
+	// The install's game a game you own is: its base game, or an installed expansion.
+	const auto game_combo = [&](const char *label) {
+		if (!ImGui::BeginCombo(label, chosen_words.c_str())) return;
+		const bool base_now = form.installed.empty();
+		if (ImGui::Selectable((base_name + " (the base game)").c_str(), base_now) && !base_now)
+			set("installed", io::JsonValue::make_string(""));
 		for (const InstallCheck::Expansion &each : installed) {
 			// Only what the game can mount by its name is offered (expansion_name_problem's rule for an installed one).
 			if (!expansion_name_problem(each.name, ExpansionNameUse::BuildsOn).empty()) continue;
-			const bool now = strutil::iequals(each.name, form.installed) && !(projects && form.on_project);
-			if (ImGui::Selectable(installed_words(each).c_str(), now) && !now) {
-				io::JsonValue members = io::JsonValue::make_object();
-				members.set("installed", io::JsonValue::make_string(each.name));
-				members.set("on_project", io::JsonValue::make_bool(false));
-				window_requests::set_workspace(workspace, "new_project", std::move(members));
-			}
-		}
-		if (projects && ImGui::Selectable("A project of yours (its base game)...", form.on_project) && !form.on_project) {
-			io::JsonValue members = io::JsonValue::make_object();
-			members.set("installed", io::JsonValue::make_string(""));
-			members.set("on_project", io::JsonValue::make_bool(true));
-			window_requests::set_workspace(workspace, "new_project", std::move(members));
+			const bool now = strutil::iequals(each.name, form.installed);
+			if (ImGui::Selectable(installed_words(each).c_str(), now) && !now)
+				set("installed", io::JsonValue::make_string(each.name));
 		}
 		ImGui::EndCombo();
 	};
@@ -311,7 +311,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	std::string stock_title = base_name;
 	switch (form.making) {
 	case Making::Stock:
-		game_combo("Game", false);
+		game_combo("Game");
 		ui_kit::tooltip("Which game of the install the project is: its base game, or one of its expansions, made on the "
 		                "base game's project.");
 		if (!form.installed.empty()) {
@@ -327,14 +327,40 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			why = words.empty() ? std::string("The game install is being checked.") : "A game you own is made from its game install.";
 		break;
 	case Making::Mod: {
-		game_combo("Changes", true);
-		ui_kit::tooltip("The game the mod changes: the install's base game, one of its expansions, or a project of yours as "
-		                "the base game.");
-		if (form.on_project) {
-			base_field("Your project the mod changes, a new game's folder (relative to the mod's, as ../My Game): its export "
-			           "is the base game the mod imports from, builds over and plays over.");
-			if (form.base_project.empty()) {
-				why = "Name the folder of your project the mod changes.";
+		// A mod is of one of NovaWorld's games (ADR 0074): those the account may make a mod of, its sign-in the
+		// NovaWorld window's.
+		const NovaWorldView &novaworld = v.novaworld;
+		const RemoteGame *of = nullptr;
+		for (const RemoteGame &game : novaworld.games)
+			if (game.key == form.base_key) of = &game;
+		if (!novaworld.available) {
+			why = "This editor reaches no NovaWorld service: a mod is of one of its games.";
+			ui_kit::refusal_text(why);
+		} else if (!novaworld.signed_in) {
+			ui_kit::quiet_text("Sign in to NovaWorld to make a mod: a mod is of one of its games.");
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Sign in...##mod")) window_requests::focus(workspace, "novaworld");
+			ui_kit::tooltip("Shows the NovaWorld window, where you sign in.");
+			why = "Sign in to NovaWorld first.";
+		} else {
+			const std::string shown = of ? novaworld_game_words(*of)
+			                          : novaworld.games.empty() ? std::string("No game listed")
+			                                                    : std::string("Choose its game");
+			if (ImGui::BeginCombo("A mod of", shown.c_str())) {
+				for (const RemoteGame &game : novaworld.games)
+					if (ImGui::Selectable(novaworld_game_words(game).c_str(), &game == of) && &game != of)
+						set("base_key", io::JsonValue::make_string(game.key));
+				ImGui::EndCombo();
+			}
+			ui_kit::tooltip("The NovaWorld game the mod changes. Create makes the mod on its project: the one on this "
+			                "computer, or one made beside the mod first (a retail game's imported from your game install, "
+			                "any other got from NovaWorld).");
+			if (!of) {
+				why = novaworld.games.empty() ? "NovaWorld lists no game yet: List projects in the NovaWorld window."
+				                              : "Choose the game it is a mod of.";
+			} else if (base_from_install(novaworld, of->key) && (!check || check->game != of->game)) {
+				why = "Needs a " + game_name(of->game) + " install (Game install): a mod of " + of->key +
+				      " is made over its files.";
 				ui_kit::refusal_text(why);
 			}
 		}
@@ -342,8 +368,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		if (ImGui::InputText("Short name", name_.text, sizeof(name_.text))) set("expansion", io::JsonValue::make_string(name_.sent()));
 		ui_kit::tooltip("The mod's folder, expansion\\<name>\\, and what a player types to play it: /exp <name>.");
 		std::string problem = expansion_name_problem(form.expansion, ExpansionNameUse::Own);
-		// A mod of a project's base game is weighed against that game's export as New project weighs it.
-		if (problem.empty() && !form.on_project)
+		if (problem.empty())
 			for (const InstallCheck::Expansion &each : installed)
 				if (strutil::iequals(each.name, form.expansion)) problem = "The game install has an expansion named " + each.name + " already.";
 		if (!problem.empty()) {

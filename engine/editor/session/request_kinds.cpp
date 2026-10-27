@@ -44,6 +44,8 @@ constexpr Holds kSlot = HoldsSlot;
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
+	// A mod of a NovaWorld game (ADR 0074): its base game's project found or made first.
+	if (!request.base_key.empty()) return core.novaworld().new_mod(request);
 	core.new_project(request.dir, request.title, request.game, request.import_pass,
 	                 ProjectExpansion{ request.expansion, request.builds_on, request.base_project }, request.game_install,
 	                 request.all, request.project_key);
@@ -454,9 +456,15 @@ constexpr RequestKindRow kRows[] = {
 			"need set first: the operation that follows the open (its last_operation's then), after the base "
 			"game's export where an expansion's base project is exported first. project_key (the welcome page's Set "
 			"up...): the NovaWorld project it is made for, written as its project file's novaworld key, the folder "
-			"becoming that project's working copy as it opens.")
+			"becoming that project's working copy as it opens. base_key (a mod, the New project form's A mod of, ADR "
+			"0074; signed in to NovaWorld): the NovaWorld game the mod `expansion` changes, one of the novaworld "
+			"section's games, by key: the mod made on that game's project (base_project) where one is on this "
+			"computer (a recent project, or one in the folder dir is made in: one naming that key, else for a retail "
+			"game a game you own of it), else first made beside dir in a folder of the key's name, an operation "
+			"(base_setup): a retail game's (or one the account may not read) imported from game_install (left out, "
+			"the editor's install; refused where it holds no install of that game), any other got from NovaWorld.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::Expansion, F::BuildsOn, F::BaseProject, F::ImportPass,
-			                                    F::GameInstall, F::All, F::ProjectKey }))
+			                                    F::GameInstall, F::All, F::ProjectKey, F::BaseKey }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
 			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")

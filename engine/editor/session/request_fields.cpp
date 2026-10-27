@@ -358,9 +358,10 @@ constexpr RequestField kFields[] = {
 			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
 			"alone); public when left out." },
 	{ F::BaseKey, "base_key", J::String,
-			"novaworld_put's new project of an expansion: its base game's NovaWorld project by key, taken only where "
-			"the editor finds none (the base game's project's own novaworld key; the game install's game among "
-			"NovaWorld's games)." },
+			"A mod's base game's NovaWorld project by key. novaworld_put's new project of an expansion: taken only "
+			"where the editor finds none (the base game's project's own novaworld key; the game install's game among "
+			"NovaWorld's games). new_project's mod: the NovaWorld game it changes, whose project the mod is made "
+			"on, found on this computer or made beside it first." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

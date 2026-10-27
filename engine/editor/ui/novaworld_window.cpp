@@ -47,10 +47,12 @@ void set_up(Workspace &workspace, const RemoteProject &project) {
 	io::JsonValue members = io::JsonValue::make_object();
 	members.set("making", io::JsonValue::make_string(project.retail ? "stock" : mod ? "mod" : "game"));
 	members.set("title", io::JsonValue::make_string(project.title.empty() ? project.key : project.title));
-	// A retail expansion is the install's own (installed); a mod builds as its code on the base game.
+	// A retail expansion is the install's own (installed); a mod builds as its code on its base game, NovaWorld's.
 	members.set("installed", io::JsonValue::make_string(project.retail ? project.expansion_code : std::string()));
-	members.set("on_project", io::JsonValue::make_bool(false));
-	if (mod) members.set("expansion", io::JsonValue::make_string(project.expansion_code));
+	if (mod) {
+		members.set("expansion", io::JsonValue::make_string(project.expansion_code));
+		members.set("base_key", io::JsonValue::make_string(project.base));
+	}
 	members.set("novaworld", io::JsonValue::make_string(project.key));
 	window_requests::set_workspace(workspace, "new_project", std::move(members));
 }
