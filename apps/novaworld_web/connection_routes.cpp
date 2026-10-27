@@ -72,7 +72,8 @@ void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_m
 // the instances), the lobby instance holding it (lobby_id) and the task that
 // instance runs as (lobby_task_id, "" for none: the program usage page's key),
 // its registry id (id: unique within its instance alone), state, the protocol
-// name (pn) and NA its hello and auth carried (identity), its address, and when
+// name (pn) and NA its hello and auth carried (identity), the client's executable
+// its Hello's AP named (ap, UTF-8: "JOINTOPS.EXE", "OPENNOVA.EXE"), its address, and when
 // it connected and was last heard from (created_ms, last_seen_ms; the lobby
 // writes the last within ten seconds) as Unix epoch ms; "kind", "server" for a
 // session that hosts (a listen host plays on its own server too) and "client"
@@ -137,6 +138,7 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 			e["state"] = s.state;
 			e["pn"] = s.pn;
 			e["identity"] = s.identity;
+			e["ap"] = retail_text_to_utf8(s.ap);
 			e["created_ms"] = s.connected_ms;
 			e["last_seen_ms"] = s.last_seen_ms;
 			e["addr"] = lobbydb::session_addr(s);

@@ -721,6 +721,11 @@ struct NapiNPConnection {
 	// code-9 leg sets it (validate_novaworld_app_id); its ticket rules and its enter request
 	// follow that listing's.
 	uint8_t novaworld_listing = 0;
+	// The joiner's 0x42 AP, its executable's file name ("Jointops.exe", "opennova.exe"), which
+	// opennova-serve's [join] line names; none of retail's, whose join reads it into a stack
+	// buffer and stores it on no node. [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - AP
+	//  copied to a stack local @0x62B98F, the node built @0x62BF06..0x62C2D7 without it]
+	std::string application;
 	// The last outer-namespace 0x45 ping round trip this host measured
 	// (session_keys.rtt_ms; stored when the peer answers our MS without WR).
 	// [orig: Nwu_HandlePing @0x623C9B]

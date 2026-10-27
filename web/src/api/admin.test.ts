@@ -42,7 +42,7 @@ function refusal(status: number, data: unknown): AxiosError {
 // GET /api/admin/connections as production answered it (2026-10-16), with the
 // times the service now sends (epoch ms), the fields the live view adds (each
 // session's kind, game, lobby task and the server it plays on) and its handles
-// and addresses replaced.
+// and addresses replaced, and the client's executable each hello named.
 const productionShape = {
   heartbeat_timeout_ms: 240000,
   count: 2,
@@ -55,6 +55,8 @@ const productionShape = {
       last_seen_ms: 1792120317793,
       created_ms: 1792096041000,
       identity: 'jop:cus2',
+      // A hosted server: opennova-serve's own name, as its menu reads it.
+      ap: 'OPENNOVA-SERVE',
       pn: 'NOVAWORLDUDP',
       state: 'active',
       id: 3879272710,
@@ -84,6 +86,7 @@ const productionShape = {
       last_seen_ms: 1792120335000,
       created_ms: 1792120218000,
       identity: 'jop:cus2',
+      ap: 'JOINTOPS.EXE',
       pn: 'NOVAWORLDUDP',
       state: 'active',
       id: 2147483649,
@@ -122,14 +125,15 @@ describe('fetchConnections', () => {
     expect(player.created_ms).toBe(1792120218000);
   });
 
-  it('reads a session without account, game, listing or play (an older service) as none', async () => {
-    const { account: _a, host: _h, kind: _k, title: _t, playing: _p, lobby_task_id: _l, ...bare } = productionShape.connections[1];
+  it('reads a session without account, game, listing, play or client (an older service) as none', async () => {
+    const { account: _a, host: _h, kind: _k, title: _t, playing: _p, lobby_task_id: _l, ap: _x, ...bare } = productionShape.connections[1];
     get.mockResolvedValue(reply({ ...productionShape, connections: [bare] }));
     const result = await fetchConnections();
     expect(result.ok && result.value.connections[0]).toMatchObject({
       session_id: 57,
       id: 2147483649,
       lobby_task_id: '',
+      ap: '',
       kind: 'client',
       title: null,
       account: null,

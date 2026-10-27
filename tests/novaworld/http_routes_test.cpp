@@ -83,6 +83,7 @@
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/http_login.h>
+#include <net/novaworld/lobby_identity.h>
 
 #include <crow/json.h>
 
@@ -3569,6 +3570,10 @@ int test_admin_sessions(Harness &h) {
 		TEST_EXPECT((*row)["title"].t() == crow::json::type::Null);
 		TEST_EXPECT((*row)["playing"].t() == crow::json::type::Null);
 		TEST_EXPECT(str((*row)["lobby_task_id"]) == kHarnessLobbyTask);
+		// The executable its Hello's AP named: this binary's, as the lobby connection reads it.
+		TEST_EXPECT(str((*row)["ap"]) ==
+				opennova::read_menu_exe_basename().substr(0, opennova::kLobbyApChars));
+		TEST_EXPECT(!str((*row)["ap"]).empty());
 	}
 
 	// The player's retail login, then a ClientPlayRequest whose Cookie list carries its tag.
