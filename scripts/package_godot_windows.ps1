@@ -471,7 +471,8 @@ function Test-UpdaterBoot {
     try {
         $exe = Join-Path $RuntimeStage "update.exe"
         Invoke-UpdaterSmoke -Exe $exe -Arguments "--help" -ExpectedExit 0 -LogDir $smoke
-        Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 2 -LogDir $smoke
+        # A /game the folder does not name: refused by the folder (exit 1), since a player's game names its own (ADR 0074).
+        Invoke-UpdaterSmoke -Exe $exe -Arguments "--check /game unknown" -ExpectedExit 1 -LogDir $smoke
         $empty = Join-Path $smoke "empty"
         New-Item -ItemType Directory -Path $empty | Out-Null
         $runtime = Join-Path $smoke "runtime"
