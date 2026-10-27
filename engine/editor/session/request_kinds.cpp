@@ -1557,7 +1557,7 @@ constexpr RequestKindRow kRows[] = {
 			"The open project's NovaWorld project's revisions listed, newest first (the novaworld section's "
 			"history: each one's number, author, message, files and time).")
 			.row,
-	// It stops the content operation that runs (Supersede: each gives way to it), and drops a pull stopped on
+	// It stops the NovaWorld operation that runs (Supersede: each gives way to it), and drops a pull stopped on
 	// its conflicts.
 	Request(K::NovaWorldCancel, "novaworld_cancel", serve_novaworld_cancel,
 			"The NovaWorld operation that runs stopped (a pull's downloads kept for the next), and a pull stopped on "

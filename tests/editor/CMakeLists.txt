@@ -680,7 +680,7 @@ opennova_add_editor_test(project_cli_session NAME project_cli_session
 # base game's project beside it. Run on Linux too, whose file names are case-sensitive.
 opennova_add_editor_test(novaworld_export LIBS opennova_project_cli)
 
-# A project folder as a working copy of its content project (engine/editor/novaworld, ADR 0069):
+# A project folder as a working copy of its NovaWorld project (engine/editor/novaworld, ADR 0069):
 # the files no store keeps, a folder scanned as the store keeps it (stepped as in one call, a warm
 # scan taking a settled file from the cache), the changes since the base, a pull planned over the
 # base, the folder and the revision for every case with each conflict settled either way, and the
@@ -688,7 +688,7 @@ opennova_add_editor_test(novaworld_export LIBS opennova_project_cli)
 # and finished by a pull planned again after one cut short.
 opennova_add_editor_test(novaworld)
 
-# NovaWorld's client (engine/editor/novaworld/content_jobs.h, content_api.h, ADR 0069)
+# NovaWorld's client (engine/editor/novaworld/novaworld_jobs.h, novaworld_api.h, ADR 0069)
 # over an in-memory service keeping the routes' contract, driving real folders: a first push, a get,
 # a stale push pulled and pushed, a conflict settled and pulled back, nothing to push, a player
 # refused, a renewed session kept and an ended one signing out; and the requests' shapes.

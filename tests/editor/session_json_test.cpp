@@ -155,8 +155,8 @@ static int test_tokens() {
 	}
 	for (const Resolution resolution : { Resolution::KeepMine, Resolution::TakeTheirs }) {
 		Resolution back = Resolution::KeepMine;
-		TEST_EXPECT(*content_resolution_token(resolution) &&
-		            content_resolution_from_token(content_resolution_token(resolution), back) && back == resolution);
+		TEST_EXPECT(*novaworld_resolution_token(resolution) &&
+		            novaworld_resolution_from_token(novaworld_resolution_token(resolution), back) && back == resolution);
 	}
 	for (int i = 0; i <= static_cast<int>(DiagnosticSeverity::Error); ++i) {
 		const auto severity = static_cast<DiagnosticSeverity>(i);

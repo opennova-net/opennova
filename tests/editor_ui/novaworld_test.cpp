@@ -28,7 +28,7 @@ SessionView bound_view() {
 	v.project.root = "C:/mods/Mod";
 	NovaWorldView &c = v.novaworld;
 	c.available = true;
-	c.server = "https://content.test";
+	c.server = "https://novaworld.test";
 	c.username = "taylor";
 	c.role = "admin";
 	c.signed_in = true;
@@ -38,7 +38,7 @@ SessionView bound_view() {
 	c.checked = true;
 	c.head_known = true;
 	c.head = 5;
-	c.changes = {{"defs/a.def", ContentChange::Modified}, {"models/b.3di", ContentChange::Added}};
+	c.changes = {{"defs/a.def", NovaWorldChange::Modified}, {"models/b.3di", NovaWorldChange::Added}};
 	RemoteProject mod;
 	mod.key = "MOD";
 	mod.title = "A mod";
@@ -58,7 +58,7 @@ void test_bound_project() {
 	ui.focus("NovaWorld");
 	ui.away();
 	const std::string text = logged_frame(ui);
-	CHECK(text.find("taylor (admin) on content.test") != std::string::npos, "who is signed in, and where");
+	CHECK(text.find("taylor (admin) on novaworld.test") != std::string::npos, "who is signed in, and where");
 	CHECK(text.find("MOD r3, r5 on NovaWorld") != std::string::npos, "the revision and NovaWorld's newest");
 	CHECK(text.find("Changes (2)") != std::string::npos && text.find("modified  defs/a.def") != std::string::npos &&
 	              text.find("added  models/b.3di") != std::string::npos,
@@ -119,7 +119,7 @@ void test_bound_project() {
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPull), "Pull: one novaworld_pull");
 
 	// A pull stopped on a conflict: Keep mine settles it, Pull and Push wait for it.
-	v.novaworld.conflicts = {{"defs/a.def", ContentChange::Modified, ContentChange::Deleted}};
+	v.novaworld.conflicts = {{"defs/a.def", NovaWorldChange::Modified, NovaWorldChange::Deleted}};
 	ui.frames(2);
 	ui.away();
 	CHECK(logged_frame(ui).find("Conflicts (1)") != std::string::npos, "the conflicts listed");
@@ -175,7 +175,7 @@ void test_bind_and_sign_in() {
 	ui.activate(novaworld_item({"Sign in"}));
 	raised = ui.drain();
 	const EditorRequest *sign_in = one(raised, EditorRequestKind::NovaWorldSignIn);
-	CHECK(sign_in && sign_in->server == "https://content.test" && sign_in->username == "taylor" &&
+	CHECK(sign_in && sign_in->server == "https://novaworld.test" && sign_in->username == "taylor" &&
 	              sign_in->password == "pw",
 	      "Sign in: one novaworld_sign_in with the server, the account and the password");
 	ui.away();

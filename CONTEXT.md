@@ -678,9 +678,9 @@ Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (key
 players update to and what its hosted servers run. The OpenNova runtime is a product with no
 **project** and no **hosted server**. In code a game is a `products` row (the editor's routes
 name it `/api/products/<key>`); a `games` row is a lobby, not a game.
-_Avoid_: game data, content (as words a user meets; the code keeps `content_*`), lobby (a
-`games` row), title (the identity a base game speaks), install (where a retail game's project
-began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
+_Avoid_: game data, content (as words a user meets; the store's objects keep their `content/<id>/`
+prefix), lobby (a `games` row), title (the identity a base game speaks), install (where a retail
+game's project began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
 **Tree**:
 The internal form of a **hosted server**'s data: one immutable version of a **game**'s files in
@@ -734,7 +734,7 @@ a push is not a **release**. The editor's NovaWorld window is its client, the ad
 area its management.
 _Avoid_: workspace (the editor's windows, not the data), mod for any project (A mod is one kind,
 New project's choice), game directory (the runtime's mounted root), content project, content store
-(the code's `content_*` names), repository, git, depot, asset server
+(the editor code's old names), repository, git, depot, asset server
 
 **Game install**:
 The folder of an installed NovaLogic game (Joint Operations) that a project imports from and

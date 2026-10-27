@@ -540,7 +540,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	if (view_.project.document->expansion.on_base_project()) weigh_base_export(open.base_export(), BuildAfterBase());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
 	navigation().clear(); // its history starts where it reopened, with no place behind it
-	novaworld().project_opened(); // its binding to a content project, ADR 0069
+	novaworld().project_opened(); // its binding to a NovaWorld project, ADR 0069
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";

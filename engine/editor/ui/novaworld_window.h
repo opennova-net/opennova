@@ -37,7 +37,7 @@ void draw_novaworld_projects(Workspace &workspace);
 // The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
 // changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
 // 2 incoming"); "" for a project the store does not hold.
-std::string novaworld_status_text(const NovaWorldView &content);
+std::string novaworld_status_text(const NovaWorldView &novaworld);
 
 // The NovaWorld window (ADR 0069; its window id "novaworld"), a tab beside Files: the account (who is signed in, and
 // where; Sign in... and Sign out), then the open project's place in the store. A project the store does not hold
@@ -46,7 +46,7 @@ std::string novaworld_status_text(const NovaWorldView &content);
 // revision's file back), what kept a file out of them, and for an admin a message and Push, which sends every
 // change, and a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A
 // pull stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left.
-// Its history lists the project's revisions, newest first. Then what the last content job came to. With no project
+// Its history lists the project's revisions, newest first. Then what the last NovaWorld job came to. With no project
 // open it stands aside for the welcome page (which lists the store's projects itself); shown anyway, it lists them.
 class NovaWorldWindow : public devtools::Window {
 public:
@@ -63,12 +63,12 @@ public:
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
 private:
-	void draw_account(const NovaWorldView &content);
-	void draw_binding(const NovaWorldView &content);
-	void draw_bind(const NovaWorldView &content);
-	void draw_standing(const NovaWorldView &content);
-	void draw_conflicts(const NovaWorldView &content);
-	void draw_history(const NovaWorldView &content);
+	void draw_account(const NovaWorldView &novaworld);
+	void draw_binding(const NovaWorldView &novaworld);
+	void draw_bind(const NovaWorldView &novaworld);
+	void draw_standing(const NovaWorldView &novaworld);
+	void draw_conflicts(const NovaWorldView &novaworld);
+	void draw_history(const NovaWorldView &novaworld);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask

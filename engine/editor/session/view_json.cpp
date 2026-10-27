@@ -567,7 +567,7 @@ constexpr ViewSectionRow kSections[] = {
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
 			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply, "
-			"rename_apply, base_export or a content_ one; done and total in its unit, what it works on, "
+			"rename_apply, base_export or a novaworld_ one; done and total in its unit, what it works on, "
 			"cancellable, what it reads "
 			"and writes), what the last one came to, the validation the polls step (running, the "
 			"files done of total: the problems are the last composed until it ends) and the last "
@@ -649,7 +649,7 @@ constexpr ViewSectionRow kSections[] = {
 			"open project's binding {bound, key, revision}, its standing as the last check, pull or push left it "
 			"{checked, head_known, head, head_error, changes [{path, change: added, modified or deleted}], "
 			"problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, theirs}]: novaworld_resolve "
-			"settles each, novaworld_pull goes on}, and last, what the last content job came to." },
+			"settles each, novaworld_pull goes on}, and last, what the last NovaWorld job came to." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

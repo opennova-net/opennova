@@ -13,8 +13,8 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
-#include <editor/session/content_operation.h>
 #include <editor/session/disk_watch.h>
+#include <editor/session/novaworld_operation.h>
 #include <editor/session/session_core.h>
 
 namespace fs = std::filesystem;
@@ -86,7 +86,7 @@ bool base_project_folder(const std::string &dir, std::string &out) {
 
 NovaWorldController::NovaWorldController(SessionCore &core) : core_(core), accounts_(&memory_) {}
 
-void NovaWorldController::set_transport(ContentTransport *transport) {
+void NovaWorldController::set_transport(NovaWorldTransport *transport) {
 	transport_ = transport;
 	core_.view().novaworld.available = transport != nullptr;
 	core_.touch(ViewConcern::NovaWorld);
@@ -141,9 +141,9 @@ bool NovaWorldController::ready(bool admin, bool project, bool bound) {
 	}
 	// A working copy is of one service's project (a debug build signs in to staging, a release
 	// build to the live service): another service's revisions are not its.
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
-	if (bound && read_content_binding(ContentPaths::for_project(core_.paths()), binding, error) &&
+	if (bound && read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error) &&
 			binding.server != account_.server) {
 		refuse("The project is a working copy of " + binding.key + " on " + binding.server +
 				": sign in there first.");
@@ -157,8 +157,8 @@ std::string NovaWorldController::export_dir() const {
 	return document ? core_.paths().export_dir(*document) : std::string();
 }
 
-void NovaWorldController::start(OperationKind kind, std::unique_ptr<ContentJob> job) {
-	if (core_.start_operation(std::make_unique<ContentOperation>(kind, *this, std::move(job))) == 0)
+void NovaWorldController::start(OperationKind kind, std::unique_ptr<NovaWorldJob> job) {
+	if (core_.start_operation(std::make_unique<NovaWorldOperation>(kind, *this, std::move(job))) == 0)
 		core_.refuse_busy(std::string());
 	core_.touch(ViewConcern::NovaWorld);
 }
@@ -176,15 +176,15 @@ void NovaWorldController::sign_in(const EditorRequest &request) {
 	}
 	login_server_ = server;
 	login_username_ = request.username;
-	login_ = ContentCall(
-			*transport_, content_api::login(server, request.username, request.password));
+	login_ = NovaWorldCall(
+			*transport_, novaworld_api::login(server, request.username, request.password));
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
 
 void NovaWorldController::sign_out() {
 	if (transport_ && account_.signed_in())
-		logout_ = ContentCall(*transport_, content_api::logout(account_)); // its answer is no one's
+		logout_ = NovaWorldCall(*transport_, novaworld_api::logout(account_)); // its answer is no one's
 	NovaWorldAccountUpdate update{ true, account_ };
 	update.account.cookie.clear();
 	update.account.role.clear();
@@ -196,7 +196,7 @@ void NovaWorldController::sign_out() {
 void NovaWorldController::list_projects() {
 	if (!transport_ || account_.server.empty())
 		return;
-	projects_ = ContentCall(*transport_, content_api::projects(account_));
+	projects_ = NovaWorldCall(*transport_, novaworld_api::projects(account_));
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
@@ -211,11 +211,11 @@ void NovaWorldController::check() {
 	list_projects();
 	if (!core_.view().project.open || !core_.view().novaworld.bound || !ready(false, true, true))
 		return;
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
-	read_content_binding(ContentPaths::for_project(core_.paths()), binding, error);
+	read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error);
 	start(OperationKind::NovaWorldCheck,
-			std::make_unique<ContentCheck>(
+			std::make_unique<NovaWorldCheck>(
 					*transport_, account_, core_.paths(), export_dir(), binding));
 }
 
@@ -237,7 +237,7 @@ void NovaWorldController::get(const EditorRequest &request) {
 	for (const RemoteProject &project : core_.view().novaworld.projects)
 		if (project.key == request.project_key)
 			listed = &project;
-	ContentBinding binding{ account_.server, request.project_key, 0 };
+	NovaWorldBinding binding{ account_.server, request.project_key, 0 };
 	get_dir_ = request.dir;
 	get_open_after_.clear();
 	// An expansion's project builds on its base game's, which comes along beside it.
@@ -245,7 +245,7 @@ void NovaWorldController::get(const EditorRequest &request) {
 	paused_.reset();
 	show_conflicts();
 	start(OperationKind::NovaWorldPull,
-			std::make_unique<ContentPull>(
+			std::make_unique<NovaWorldPull>(
 					*transport_, account_, ProjectPaths::for_root(request.dir), "", binding));
 }
 
@@ -257,8 +257,8 @@ void NovaWorldController::bind(const EditorRequest &request) {
 		return;
 	}
 	start(OperationKind::NovaWorldBind,
-			std::make_unique<ContentBind>(*transport_, account_, core_.paths(),
-					ContentBinding{ account_.server, request.project_key, 0 }));
+			std::make_unique<NovaWorldBind>(*transport_, account_, core_.paths(),
+					NovaWorldBinding{ account_.server, request.project_key, 0 }));
 }
 
 void NovaWorldController::pull() {
@@ -273,15 +273,15 @@ void NovaWorldController::pull() {
 		start(OperationKind::NovaWorldPull, std::move(paused_));
 		return;
 	}
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
-	if (!read_content_binding(ContentPaths::for_project(core_.paths()), binding, error)) {
+	if (!read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error)) {
 		refuse(error.empty() ? "The project's binding is gone: bind it again." : error);
 		return;
 	}
 	get_dir_.clear();
 	start(OperationKind::NovaWorldPull,
-			std::make_unique<ContentPull>(
+			std::make_unique<NovaWorldPull>(
 					*transport_, account_, core_.paths(), export_dir(), binding));
 }
 
@@ -312,14 +312,14 @@ void NovaWorldController::push(const EditorRequest &request) {
 		refuse("A pull waits on its conflicts: settle them and pull before pushing.");
 		return;
 	}
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
-	if (!read_content_binding(ContentPaths::for_project(core_.paths()), binding, error)) {
+	if (!read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error)) {
 		refuse(error.empty() ? "The project's binding is gone: bind it again." : error);
 		return;
 	}
 	start(OperationKind::NovaWorldPush,
-			std::make_unique<ContentPush>(
+			std::make_unique<NovaWorldPush>(
 					*transport_, account_, core_.paths(), export_dir(), binding, request.message));
 }
 
@@ -340,8 +340,8 @@ void NovaWorldController::release(const EditorRequest &request) {
 		return;
 	}
 	release_server_ = account_.server;
-	release_ = ContentCall(*transport_,
-			content_api::release(account_, view.key, request.version, view.revision));
+	release_ = NovaWorldCall(*transport_,
+			novaworld_api::release(account_, view.key, request.version, view.revision));
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
@@ -358,15 +358,15 @@ void NovaWorldController::restore(const EditorRequest &request) {
 		refuse("A pull waits on its conflicts: settle them and pull first.");
 		return;
 	}
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
-	if (!read_content_binding(ContentPaths::for_project(core_.paths()), binding, error)) {
+	if (!read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error)) {
 		refuse(error.empty() ? "The project's binding is gone: bind it again." : error);
 		return;
 	}
 	start(OperationKind::NovaWorldPull,
-			std::make_unique<ContentPull>(*transport_, account_, core_.paths(), export_dir(), binding,
-					ContentRestore{ { request.path }, request.revision }));
+			std::make_unique<NovaWorldPull>(*transport_, account_, core_.paths(), export_dir(), binding,
+					NovaWorldRestore{ { request.path }, request.revision }));
 }
 
 void NovaWorldController::history() {
@@ -374,13 +374,13 @@ void NovaWorldController::history() {
 		return;
 	if (history_.started())
 		return; // the list in flight answers this ask too
-	history_ = ContentCall(*transport_, content_api::revisions(account_, core_.view().novaworld.key, 0, 50));
+	history_ = NovaWorldCall(*transport_, novaworld_api::revisions(account_, core_.view().novaworld.key, 0, 50));
 	core_.view().novaworld.calling = true;
 	core_.touch(ViewConcern::NovaWorld);
 }
 
 void NovaWorldController::cancel() {
-	// A content job running gave way to this request at the gate (its row's superseded_by); a pull
+	// A NovaWorld job running gave way to this request at the gate (its row's superseded_by); a pull
 	// kept for its conflicts goes too.
 	if (paused_) {
 		paused_.reset();
@@ -395,13 +395,13 @@ void NovaWorldController::cancel() {
 void NovaWorldController::poll() {
 	NovaWorldView &view = core_.view().novaworld;
 	if (logout_.started() && logout_.poll())
-		logout_ = ContentCall();
+		logout_ = NovaWorldCall();
 	if (login_.started() && login_.poll()) {
 		NovaWorldAccount account;
 		account.server = login_server_;
 		account.username = login_username_;
-		ContentApiError error;
-		if (content_api::read_login(login_.reply(), account, error)) {
+		NovaWorldApiError error;
+		if (novaworld_api::read_login(login_.reply(), account, error)) {
 			keep_account({ true, account });
 			view.last = "Signed in to " + account.server + " as " + account.username + ".";
 			core_.note("NovaWorld: " + view.last);
@@ -411,26 +411,26 @@ void NovaWorldController::poll() {
 			core_.refuse_request(make_finding(
 					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
 		}
-		login_ = ContentCall();
+		login_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (projects_.started() && projects_.poll()) {
-		ContentApiError error;
+		NovaWorldApiError error;
 		std::vector<RemoteProject> projects;
-		if (content_api::read_projects(projects_.reply(), projects, error)) {
+		if (novaworld_api::read_projects(projects_.reply(), projects, error)) {
 			view.projects = std::move(projects);
 			view.projects_error.clear();
 		} else {
 			view.projects_error = error.line();
 		}
-		projects_ = ContentCall();
+		projects_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (release_.started() && release_.poll()) {
-		ContentApiError error;
+		NovaWorldApiError error;
 		int64_t id = 0;
 		std::string name;
-		if (content_api::read_release(release_.reply(), id, name, error)) {
+		if (novaworld_api::read_release(release_.reply(), id, name, error)) {
 			view.last = "Release " + name + " is building on " + release_server_ +
 					": publish it in the web admin's Releases once it is a draft.";
 			core_.note("NovaWorld: " + view.last);
@@ -439,19 +439,19 @@ void NovaWorldController::poll() {
 			core_.refuse_request(make_finding(
 					CoreFinding::NovaWorldFailed, DiagnosticSeverity::Warning, view.last));
 		}
-		release_ = ContentCall();
+		release_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	if (history_.started() && history_.poll()) {
-		ContentApiError error;
+		NovaWorldApiError error;
 		std::vector<RemoteRevision> revisions;
-		if (content_api::read_revisions(history_.reply(), revisions, error)) {
+		if (novaworld_api::read_revisions(history_.reply(), revisions, error)) {
 			view.history = std::move(revisions);
 			view.history_error.clear();
 		} else {
 			view.history_error = error.line();
 		}
-		history_ = ContentCall();
+		history_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
 	const bool calling =
@@ -468,10 +468,10 @@ bool NovaWorldController::busy() const {
 
 void NovaWorldController::show_binding() {
 	NovaWorldView &view = core_.view().novaworld;
-	ContentBinding binding;
+	NovaWorldBinding binding;
 	std::string error;
 	view.bound = core_.view().project.open &&
-			read_content_binding(ContentPaths::for_project(core_.paths()), binding, error);
+			read_novaworld_binding(NovaWorldPaths::for_project(core_.paths()), binding, error);
 	view.key = view.bound ? binding.key : std::string();
 	view.revision = view.bound ? binding.revision : 0;
 	core_.touch(ViewConcern::NovaWorld);
@@ -510,15 +510,15 @@ void NovaWorldController::forget_project() {
 	view.head_known = false;
 	view.changes.clear();
 	view.problems.clear();
-	history_ = ContentCall(); // a list in flight is the closed project's
+	history_ = NovaWorldCall(); // a list in flight is the closed project's
 	view.history.clear();
 	view.history_error.clear();
 	show_conflicts();
 }
 
-void NovaWorldController::finish_pull(ContentPull &pull) {
+void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 	NovaWorldView &view = core_.view().novaworld;
-	if (const ContentRestore *restore = pull.restore()) {
+	if (const NovaWorldRestore *restore = pull.restore()) {
 		const std::string what = restore->paths.size() == 1
 				? restore->paths.front()
 				: count_text(restore->paths.size(), "file", "files");
@@ -578,9 +578,9 @@ void NovaWorldController::finish_pull(ContentPull &pull) {
 					get_open_after_ = dir;
 					view.last += " Getting its base game's project, " + base_key + ", into " + base_dir + ".";
 					start(OperationKind::NovaWorldPull,
-							std::make_unique<ContentPull>(*transport_, account_,
+							std::make_unique<NovaWorldPull>(*transport_, account_,
 									ProjectPaths::for_root(base_dir), "",
-									ContentBinding{ account_.server, base_key, 0 }));
+									NovaWorldBinding{ account_.server, base_key, 0 }));
 					return;
 				}
 			}
@@ -608,7 +608,7 @@ void NovaWorldController::finish_pull(ContentPull &pull) {
 		core_.start_changed_refresh(std::move(changes));
 }
 
-void NovaWorldController::finish_push(ContentPush &push) {
+void NovaWorldController::finish_push(NovaWorldPush &push) {
 	NovaWorldView &view = core_.view().novaworld;
 	switch (push.outcome()) {
 		case PushOutcome::Pushed:
@@ -635,12 +635,12 @@ void NovaWorldController::finish_push(ContentPush &push) {
 }
 
 OperationOutcome NovaWorldController::finish_job(
-		OperationKind kind, std::unique_ptr<ContentJob> job) {
+		OperationKind kind, std::unique_ptr<NovaWorldJob> job) {
 	OperationOutcome outcome;
 	keep_account(job->take_account());
 	NovaWorldView &view = core_.view().novaworld;
 	switch (job->state()) {
-		case ContentJobState::Failed: {
+		case NovaWorldJobState::Failed: {
 			const Diagnostic failed = make_finding(CoreFinding::NovaWorldFailed,
 					DiagnosticSeverity::Warning,
 					std::string(operation_kind_row(kind).noun) + " failed: " + job->error());
@@ -655,14 +655,14 @@ OperationOutcome NovaWorldController::finish_job(
 			}
 			break;
 		}
-		case ContentJobState::Cancelled:
+		case NovaWorldJobState::Cancelled:
 			outcome.end = OperationEnd::Cancelled;
 			view.last = std::string(operation_kind_row(kind).noun) + " was cancelled.";
 			break;
-		case ContentJobState::NeedsResolution: {
+		case NovaWorldJobState::NeedsResolution: {
 			if (kind != OperationKind::NovaWorldPull)
 				break; // only a pull waits on its author
-			paused_.reset(static_cast<ContentPull *>(job.release()));
+			paused_.reset(static_cast<NovaWorldPull *>(job.release()));
 			show_conflicts();
 			const Diagnostic waiting =
 					make_finding(CoreFinding::NovaWorldConflicts, DiagnosticSeverity::Warning,
@@ -676,10 +676,10 @@ OperationOutcome NovaWorldController::finish_job(
 			view.last = waiting.message;
 			break;
 		}
-		case ContentJobState::Running:
-		case ContentJobState::Done:
+		case NovaWorldJobState::Running:
+		case NovaWorldJobState::Done:
 			if (kind == OperationKind::NovaWorldCheck) {
-				const auto &checked = static_cast<ContentCheck &>(*job);
+				const auto &checked = static_cast<NovaWorldCheck &>(*job);
 				view.checked = true;
 				view.head_known = checked.remote_known();
 				view.head = checked.remote_known() ? checked.remote().head : view.head;
@@ -691,15 +691,15 @@ OperationOutcome NovaWorldController::finish_job(
 												"."
 										 : "; the service did not answer.");
 			} else if (kind == OperationKind::NovaWorldBind) {
-				view.last = "Bound to " + static_cast<ContentBind &>(*job).binding().key +
+				view.last = "Bound to " + static_cast<NovaWorldBind &>(*job).binding().key +
 						" at revision " +
-						std::to_string(static_cast<ContentBind &>(*job).binding().revision) + ".";
+						std::to_string(static_cast<NovaWorldBind &>(*job).binding().revision) + ".";
 				core_.note("NovaWorld: " + view.last);
 				show_binding();
 			} else if (kind == OperationKind::NovaWorldPull) {
-				finish_pull(static_cast<ContentPull &>(*job));
+				finish_pull(static_cast<NovaWorldPull &>(*job));
 			} else if (kind == OperationKind::NovaWorldPush) {
-				finish_push(static_cast<ContentPush &>(*job));
+				finish_push(static_cast<NovaWorldPush &>(*job));
 			}
 			break;
 	}

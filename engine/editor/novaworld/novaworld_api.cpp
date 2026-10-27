@@ -1,4 +1,4 @@
-#include <editor/novaworld/content_api.h>
+#include <editor/novaworld/novaworld_api.h>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -12,8 +12,8 @@ constexpr const char *kSessionCookie = "opennova_session";
 constexpr const char *kSecureSessionCookie = "__Host-opennova_session";
 constexpr const char *kCsrfHeader = "X-OpenNova-Request";
 
-ContentRequest request(const NovaWorldAccount &account, const char *method, const std::string &path) {
-	ContentRequest r;
+NovaWorldRequest request(const NovaWorldAccount &account, const char *method, const std::string &path) {
+	NovaWorldRequest r;
 	r.method = method;
 	r.url = account.server + path;
 	if (account.signed_in())
@@ -23,9 +23,9 @@ ContentRequest request(const NovaWorldAccount &account, const char *method, cons
 	return r;
 }
 
-ContentRequest json_request(const NovaWorldAccount &account, const char *method,
+NovaWorldRequest json_request(const NovaWorldAccount &account, const char *method,
 		const std::string &path, const io::JsonValue &body) {
-	ContentRequest r = request(account, method, path);
+	NovaWorldRequest r = request(account, method, path);
 	r.headers.emplace_back("Content-Type", "application/json");
 	r.body = io::json_write(body);
 	return r;
@@ -37,8 +37,8 @@ std::string project_path(const std::string &key) {
 
 // The reply's body as a JSON object, or the error it is: a reply that is not `want`, or not JSON.
 bool json_reply(
-		const ContentResponse &reply, int want, io::JsonValue &out, ContentApiError &error) {
-	error = ContentApiError();
+		const NovaWorldResponse &reply, int want, io::JsonValue &out, NovaWorldApiError &error) {
+	error = NovaWorldApiError();
 	if (!reply.transport_ok) {
 		error.code = "transport";
 		error.message = reply.error.empty() ? "no reply from the service" : reply.error;
@@ -102,9 +102,9 @@ RemoteProject project_of(const io::JsonValue &json) {
 // of the service's own (a URL from '/') sent as the account, with its session and the CSRF header;
 // a URL of the store's own sent as it was handed out, with its headers alone (no cookie leaves the
 // service).
-ContentRequest transfer_request(
+NovaWorldRequest transfer_request(
 		const NovaWorldAccount &account, const io::JsonValue &transfer, const char *method) {
-	ContentRequest r;
+	NovaWorldRequest r;
 	r.method = transfer.get_string("method", method);
 	const std::string url = transfer.get_string("url", "");
 	const bool own = !url.empty() && url[0] == '/';
@@ -137,19 +137,19 @@ std::string session_pair(const std::string &set_cookie, bool &deleted) {
 
 } // namespace
 
-std::string ContentResponse::header(const std::string &name) const {
+std::string NovaWorldResponse::header(const std::string &name) const {
 	for (const auto &[key, value] : headers)
 		if (strutil::iequals(key, name))
 			return value;
 	return {};
 }
 
-std::string ContentAddress::origin() const {
+std::string NovaWorldAddress::origin() const {
 	return (tls ? "https://" : "http://") + host + ":" + std::to_string(port);
 }
 
-bool content_address(const std::string &url, ContentAddress &out) {
-	out = ContentAddress();
+bool novaworld_address(const std::string &url, NovaWorldAddress &out) {
+	out = NovaWorldAddress();
 	std::string rest;
 	if (url.rfind("https://", 0) == 0) {
 		out.tls = true;
@@ -182,13 +182,13 @@ bool content_address(const std::string &url, ContentAddress &out) {
 	return !out.host.empty();
 }
 
-bool content_goes_again(
+bool novaworld_goes_again(
 		const std::string &method, int attempt, bool replied, int status, bool lost) {
 	const bool idempotent = method == "GET" || method == "PUT" || method == "DELETE";
-	return idempotent && attempt < kContentRetries && (lost || (replied && status >= 500));
+	return idempotent && attempt < kNovaWorldRetries && (lost || (replied && status >= 500));
 }
 
-std::string ContentApiError::line() const {
+std::string NovaWorldApiError::line() const {
 	std::string out = message.empty() ? code : message;
 	out += " (" + code;
 	if (status != 0)
@@ -196,9 +196,9 @@ std::string ContentApiError::line() const {
 	return out + ")";
 }
 
-namespace content_api {
+namespace novaworld_api {
 
-ContentRequest login(
+NovaWorldRequest login(
 		const std::string &server, const std::string &username, const std::string &password) {
 	NovaWorldAccount anonymous;
 	anonymous.server = novaworld_server(server);
@@ -208,7 +208,7 @@ ContentRequest login(
 	return json_request(anonymous, "POST", "/api/login", body);
 }
 
-bool read_login(const ContentResponse &reply, NovaWorldAccount &account, ContentApiError &error) {
+bool read_login(const NovaWorldResponse &reply, NovaWorldAccount &account, NovaWorldApiError &error) {
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
 		return false;
@@ -225,11 +225,11 @@ bool read_login(const ContentResponse &reply, NovaWorldAccount &account, Content
 	return true;
 }
 
-ContentRequest logout(const NovaWorldAccount &account) {
+NovaWorldRequest logout(const NovaWorldAccount &account) {
 	return request(account, "POST", "/api/logout");
 }
 
-std::string renewed_cookie(const ContentResponse &reply, bool &deleted) {
+std::string renewed_cookie(const NovaWorldResponse &reply, bool &deleted) {
 	deleted = false;
 	for (const auto &[key, value] : reply.headers) {
 		if (!strutil::iequals(key, "Set-Cookie"))
@@ -244,12 +244,12 @@ std::string renewed_cookie(const ContentResponse &reply, bool &deleted) {
 	return {};
 }
 
-ContentRequest projects(const NovaWorldAccount &account) {
+NovaWorldRequest projects(const NovaWorldAccount &account) {
 	return request(account, "GET", "/api/products");
 }
 
 bool read_projects(
-		const ContentResponse &reply, std::vector<RemoteProject> &out, ContentApiError &error) {
+		const NovaWorldResponse &reply, std::vector<RemoteProject> &out, NovaWorldApiError &error) {
 	out.clear();
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
@@ -266,12 +266,12 @@ bool read_projects(
 	return true;
 }
 
-ContentRequest project(const NovaWorldAccount &account, const std::string &key) {
+NovaWorldRequest project(const NovaWorldAccount &account, const std::string &key) {
 	return request(account, "GET", project_path(key));
 }
 
-bool read_project(const ContentResponse &reply, RemoteProject &out,
-		std::optional<RemoteRevision> &head, ContentApiError &error) {
+bool read_project(const NovaWorldResponse &reply, RemoteProject &out,
+		std::optional<RemoteRevision> &head, NovaWorldApiError &error) {
 	head.reset();
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
@@ -289,7 +289,7 @@ bool read_project(const ContentResponse &reply, RemoteProject &out,
 	return true;
 }
 
-ContentRequest revisions(
+NovaWorldRequest revisions(
 		const NovaWorldAccount &account, const std::string &key, int64_t before, int limit) {
 	return request(account, "GET",
 			project_path(key) + "/revisions?before=" + std::to_string(before) +
@@ -297,7 +297,7 @@ ContentRequest revisions(
 }
 
 bool read_revisions(
-		const ContentResponse &reply, std::vector<RemoteRevision> &out, ContentApiError &error) {
+		const NovaWorldResponse &reply, std::vector<RemoteRevision> &out, NovaWorldApiError &error) {
 	out.clear();
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
@@ -314,15 +314,15 @@ bool read_revisions(
 	return true;
 }
 
-ContentRequest manifest(const NovaWorldAccount &account, const std::string &key, int64_t number) {
+NovaWorldRequest manifest(const NovaWorldAccount &account, const std::string &key, int64_t number) {
 	return request(account, "GET",
 			project_path(key) + "/revisions/" + std::to_string(number) + "/manifest");
 }
 
-bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha256,
-		std::vector<project::ProjectFile> &out, ContentApiError &error) {
+bool read_manifest(const NovaWorldResponse &reply, const std::string &manifest_sha256,
+		std::vector<project::ProjectFile> &out, NovaWorldApiError &error) {
 	out.clear();
-	error = ContentApiError();
+	error = NovaWorldApiError();
 	if (!reply.transport_ok || reply.status != 200) {
 		io::JsonValue ignored;
 		json_reply(reply, 200, ignored, error);
@@ -343,16 +343,16 @@ bool read_manifest(const ContentResponse &reply, const std::string &manifest_sha
 	return true;
 }
 
-ContentRequest blob(const NovaWorldAccount &account, const std::string &key,
+NovaWorldRequest blob(const NovaWorldAccount &account, const std::string &key,
 		const std::string &sha256, const std::string &file) {
-	ContentRequest r = request(account, "GET", project_path(key) + "/blobs/" + sha256);
+	NovaWorldRequest r = request(account, "GET", project_path(key) + "/blobs/" + sha256);
 	r.response_file = file;
 	return r;
 }
 
-bool read_blob(const ContentResponse &reply, const project::ProjectFile &expected,
-		ContentApiError &error) {
-	error = ContentApiError();
+bool read_blob(const NovaWorldResponse &reply, const project::ProjectFile &expected,
+		NovaWorldApiError &error) {
+	error = NovaWorldApiError();
 	if (!reply.transport_ok || reply.status != 200) {
 		io::JsonValue ignored;
 		json_reply(reply, 200, ignored, error);
@@ -367,7 +367,7 @@ bool read_blob(const ContentResponse &reply, const project::ProjectFile &expecte
 	return true;
 }
 
-ContentRequest missing(const NovaWorldAccount &account, const std::string &key,
+NovaWorldRequest missing(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<project::ProjectFile> &files) {
 	io::JsonValue blobs = io::JsonValue::make_array();
 	for (const project::ProjectFile &file : files) {
@@ -381,8 +381,8 @@ ContentRequest missing(const NovaWorldAccount &account, const std::string &key,
 	return json_request(account, "POST", project_path(key) + "/missing", body);
 }
 
-bool read_missing(const ContentResponse &reply, const NovaWorldAccount &account,
-		std::vector<UploadTarget> &out, ContentApiError &error) {
+bool read_missing(const NovaWorldResponse &reply, const NovaWorldAccount &account,
+		std::vector<UploadTarget> &out, NovaWorldApiError &error) {
 	out.clear();
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
@@ -407,15 +407,15 @@ bool read_missing(const ContentResponse &reply, const NovaWorldAccount &account,
 	return true;
 }
 
-ContentRequest downloads(const NovaWorldAccount &account, const std::string &key,
+NovaWorldRequest downloads(const NovaWorldAccount &account, const std::string &key,
 		const std::vector<std::string> &sha256s) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("hashes", io::json_string_array(sha256s));
 	return json_request(account, "POST", project_path(key) + "/downloads", body);
 }
 
-bool read_downloads(const ContentResponse &reply, const NovaWorldAccount &account,
-		std::map<std::string, ContentRequest> &out, ContentApiError &error) {
+bool read_downloads(const NovaWorldResponse &reply, const NovaWorldAccount &account,
+		std::map<std::string, NovaWorldRequest> &out, NovaWorldApiError &error) {
 	io::JsonValue json;
 	if (!json_reply(reply, 200, json, error))
 		return false;
@@ -429,21 +429,21 @@ bool read_downloads(const ContentResponse &reply, const NovaWorldAccount &accoun
 		if (!item.is_object())
 			continue;
 		const std::string sha = item.get_string("sha256", "");
-		ContentRequest request = transfer_request(account, item, "GET");
+		NovaWorldRequest request = transfer_request(account, item, "GET");
 		if (project::is_sha256_hex(sha) && !request.url.empty())
 			out[sha] = std::move(request);
 	}
 	return true;
 }
 
-ContentRequest upload(const NovaWorldAccount &, const UploadTarget &target, const std::string &file) {
-	ContentRequest r = target.request;
+NovaWorldRequest upload(const NovaWorldAccount &, const UploadTarget &target, const std::string &file) {
+	NovaWorldRequest r = target.request;
 	r.body_file = file;
 	return r;
 }
 
-bool read_upload(const ContentResponse &reply, ContentApiError &error) {
-	error = ContentApiError();
+bool read_upload(const NovaWorldResponse &reply, NovaWorldApiError &error) {
+	error = NovaWorldApiError();
 	if (reply.transport_ok && reply.status >= 200 && reply.status < 300)
 		return true;
 	io::JsonValue ignored;
@@ -451,7 +451,7 @@ bool read_upload(const ContentResponse &reply, ContentApiError &error) {
 	return false;
 }
 
-ContentRequest push(const NovaWorldAccount &account, const std::string &key, int64_t parent,
+NovaWorldRequest push(const NovaWorldAccount &account, const std::string &key, int64_t parent,
 		const std::string &message, const std::string &manifest_text) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("parent", io::json_number(static_cast<double>(parent)));
@@ -460,8 +460,8 @@ ContentRequest push(const NovaWorldAccount &account, const std::string &key, int
 	return json_request(account, "POST", project_path(key) + "/revisions", body);
 }
 
-PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<std::string> &hashes,
-		ContentApiError &error) {
+PushAnswer read_push(const NovaWorldResponse &reply, int64_t &head, std::vector<std::string> &hashes,
+		NovaWorldApiError &error) {
 	hashes.clear();
 	io::JsonValue json;
 	if (json_reply(reply, 201, json, error)) {
@@ -488,7 +488,7 @@ PushAnswer read_push(const ContentResponse &reply, int64_t &head, std::vector<st
 	return PushAnswer::Refused;
 }
 
-ContentRequest release(const NovaWorldAccount &account, const std::string &key,
+NovaWorldRequest release(const NovaWorldAccount &account, const std::string &key,
 		const std::string &version, int64_t revision) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("version", io::json_string(version));
@@ -496,7 +496,7 @@ ContentRequest release(const NovaWorldAccount &account, const std::string &key,
 	return json_request(account, "POST", "/api/admin/products/" + key + "/releases", body);
 }
 
-bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, ContentApiError &error) {
+bool read_release(const NovaWorldResponse &reply, int64_t &id, std::string &name, NovaWorldApiError &error) {
 	io::JsonValue json;
 	if (!json_reply(reply, 201, json, error))
 		return false;
@@ -511,6 +511,6 @@ bool read_release(const ContentResponse &reply, int64_t &id, std::string &name, 
 	return true;
 }
 
-} // namespace content_api
+} // namespace novaworld_api
 
 } // namespace opennova::editor

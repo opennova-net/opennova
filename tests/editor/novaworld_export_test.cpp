@@ -117,7 +117,7 @@ bool same_export(const std::string &original, const std::string &copied) {
 // A project imported whole from a game install, as a retail product's stock revision is (a game you own:
 // new --all, every file imported as it opens), and its copy, which names no game install: one export.
 static int test_install_import() {
-	test_temp::TempDir dir("opennova_content_export_install");
+	test_temp::TempDir dir("opennova_novaworld_export_install");
 	const std::string scratch = dir.root(), install = dir.file("install"), root = dir.file("Stock"),
 					  copy = dir.file("copy/Stock");
 	std::string minted;
@@ -140,7 +140,7 @@ static int test_install_import() {
 // Our own project with an import source: the copy holds the source and its record, not the output
 // the import made under `.opennova/`, which its export makes again.
 static int test_import_source() {
-	test_temp::TempDir dir("opennova_content_export_source");
+	test_temp::TempDir dir("opennova_novaworld_export_source");
 	const std::string scratch = dir.root(), root = dir.file("Own"), copy = dir.file("copy/Own");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Own" }).code == 0);
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
@@ -163,7 +163,7 @@ static int test_import_source() {
 // export, so the expansion's exports its base first (the session's base export, session/base_export.h);
 // exported again with the base unchanged, nothing of the base is exported.
 static int test_expansion_over_base_project() {
-	test_temp::TempDir dir("opennova_content_export_expansion");
+	test_temp::TempDir dir("opennova_novaworld_export_expansion");
 	const std::string scratch = dir.root(), install = dir.file("install"),
 					  base = dir.file("work/Base"), expansion = dir.file("work/Exp"),
 					  base_copy = dir.file("copy/Base"), expansion_copy = dir.file("copy/Exp");
@@ -206,6 +206,6 @@ int main() {
 	failures += test_import_source();
 	failures += test_expansion_over_base_project();
 	if (failures == 0)
-		std::printf("content_export: all tests passed\n");
+		std::printf("novaworld_export: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

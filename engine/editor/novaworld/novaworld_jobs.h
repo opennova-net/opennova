@@ -2,8 +2,8 @@
 
 // NovaWorld's long operations as the editor runs them (ADR 0069): a pull and a push, each a
 // cursor the session steps a budget at a time (as it steps a build), over the transport seam
-// (content_transport.h), the folder's scan (content_scan.h), the plan (content_plan.h) and the
-// apply (content_apply.h). A pull asks the project's head, reads the head's manifest, scans the
+// (novaworld_transport.h), the folder's scan (novaworld_scan.h), the plan (novaworld_plan.h) and the
+// apply (novaworld_apply.h). A pull asks the project's head, reads the head's manifest, scans the
 // folder, plans, stops for the author while a conflict stands, downloads the files the plan writes
 // (a few at a time, each landed beside its name and kept once its SHA-256 is the file's), and
 // applies the plan. A push asks the head (a head past the folder's base is a pull first), scans the
@@ -22,13 +22,13 @@
 #include <vector>
 
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_api.h>
-#include <editor/novaworld/content_apply.h>
-#include <editor/novaworld/content_plan.h>
-#include <editor/novaworld/content_scan.h>
-#include <editor/novaworld/content_state.h>
-#include <editor/novaworld/content_transport.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/novaworld/novaworld_api.h>
+#include <editor/novaworld/novaworld_apply.h>
+#include <editor/novaworld/novaworld_plan.h>
+#include <editor/novaworld/novaworld_scan.h>
+#include <editor/novaworld/novaworld_state.h>
+#include <editor/novaworld/novaworld_transport.h>
 #include <editor/project/project_document.h>
 
 namespace opennova::editor {
@@ -38,7 +38,7 @@ inline std::string count_text(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
 }
 
-enum class ContentJobState : uint8_t {
+enum class NovaWorldJobState : uint8_t {
 	Running,
 	NeedsResolution, // a pull's conflicts: settle each (resolve), then resume
 	Done,
@@ -47,7 +47,7 @@ enum class ContentJobState : uint8_t {
 };
 
 // Where a job stands, for the status bar and the NovaWorld window.
-struct ContentJobProgress {
+struct NovaWorldJobProgress {
 	std::string label; // "Downloading 12 files"
 	uint64_t done = 0;
 	uint64_t total = 0;
@@ -55,27 +55,27 @@ struct ContentJobProgress {
 };
 
 // One request run to its reply over the transport, as a job's step polls it.
-class ContentCall {
+class NovaWorldCall {
 public:
-	ContentCall() = default;
-	ContentCall(ContentTransport &transport, ContentRequest request);
-	ContentCall(ContentCall &&other) noexcept;
-	ContentCall &operator=(ContentCall &&other) noexcept;
-	ContentCall(const ContentCall &) = delete;
-	ContentCall &operator=(const ContentCall &) = delete;
-	~ContentCall();
+	NovaWorldCall() = default;
+	NovaWorldCall(NovaWorldTransport &transport, NovaWorldRequest request);
+	NovaWorldCall(NovaWorldCall &&other) noexcept;
+	NovaWorldCall &operator=(NovaWorldCall &&other) noexcept;
+	NovaWorldCall(const NovaWorldCall &) = delete;
+	NovaWorldCall &operator=(const NovaWorldCall &) = delete;
+	~NovaWorldCall();
 
 	bool started() const { return transport_ != nullptr; }
 	// Whether the reply came (true once; `reply()` holds it then).
 	bool poll();
 	bool done() const { return done_; }
-	const ContentResponse &reply() const { return reply_; }
+	const NovaWorldResponse &reply() const { return reply_; }
 
 private:
-	ContentTransport *transport_ = nullptr;
+	NovaWorldTransport *transport_ = nullptr;
 	uint64_t id_ = 0;
 	bool done_ = false;
-	ContentResponse reply_;
+	NovaWorldResponse reply_;
 };
 
 // What a job settled about its account: renewed, or signed out.
@@ -84,17 +84,17 @@ struct NovaWorldAccountUpdate {
 	NovaWorldAccount account;
 };
 
-class ContentJob {
+class NovaWorldJob {
 public:
-	virtual ~ContentJob() = default;
+	virtual ~NovaWorldJob() = default;
 	// One step of at most `budget` bytes of the folder's reading (a request polled counts for
 	// little).
-	virtual ContentJobState step(uint64_t budget) = 0;
-	virtual ContentJobProgress progress() const = 0;
+	virtual NovaWorldJobState step(uint64_t budget) = 0;
+	virtual NovaWorldJobProgress progress() const = 0;
 	// The job given up on: its requests cancelled, nothing applied.
 	virtual void cancel() = 0;
 
-	ContentJobState state() const { return state_; }
+	NovaWorldJobState state() const { return state_; }
 	const std::string &error() const { return error_; }
 	// The account as the job's replies left it (taken once by take_account).
 	NovaWorldAccountUpdate take_account();
@@ -112,41 +112,41 @@ public:
 	}
 
 protected:
-	ContentJob(ContentTransport &transport, NovaWorldAccount account) :
+	NovaWorldJob(NovaWorldTransport &transport, NovaWorldAccount account) :
 			transport_(transport), account_(std::move(account)) {}
 	// A reply's word on the session: a renewed cookie kept, a 401 signing out. False for a 401.
-	bool note_session(const ContentResponse &reply);
-	ContentJobState fail(std::string error);
+	bool note_session(const NovaWorldResponse &reply);
+	NovaWorldJobState fail(std::string error);
 
-	ContentTransport &transport_;
+	NovaWorldTransport &transport_;
 	NovaWorldAccount account_;
 	size_t batch_files_ = 0;
 	uint64_t batch_bytes_ = kSignedBatchBytes;
 	bool account_changed_ = false;
-	ContentJobState state_ = ContentJobState::Running;
+	NovaWorldJobState state_ = NovaWorldJobState::Running;
 	std::string error_;
 };
 
 // A pull of the project's head into the folder `paths.root` (an empty one getting a project, its
 // binding then at revision 0).
-// A restore (ContentPull's second form): `paths` put back as `revision` has them (0: the folder's
+// A restore (NovaWorldPull's second form): `paths` put back as `revision` has them (0: the folder's
 // base, what Discard changes puts back), the base and the binding left as they are.
-struct ContentRestore {
+struct NovaWorldRestore {
 	std::vector<std::string> paths;
 	int64_t revision = 0;
 };
 
-class ContentPull : public ContentJob {
+class NovaWorldPull : public NovaWorldJob {
 public:
-	ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, ContentBinding binding);
+	NovaWorldPull(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			std::string export_dir, NovaWorldBinding binding);
 	// A restore of `restore.paths` (plan_restore), downloaded and applied as a pull's files are,
 	// the replaced files to the trash.
-	ContentPull(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, ContentBinding binding, ContentRestore restore);
+	NovaWorldPull(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			std::string export_dir, NovaWorldBinding binding, NovaWorldRestore restore);
 
-	ContentJobState step(uint64_t budget) override;
-	ContentJobProgress progress() const override;
+	NovaWorldJobState step(uint64_t budget) override;
+	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
 	// While NeedsResolution: the plan, its conflicts listed; each settled, then resume().
@@ -161,7 +161,7 @@ public:
 	const ApplyResult &applied() const { return applied_; }
 	const RemoteProject &remote() const { return remote_; }
 	// A restore's ask, null for a pull.
-	const ContentRestore *restore() const { return restore_ ? &*restore_ : nullptr; }
+	const NovaWorldRestore *restore() const { return restore_ ? &*restore_ : nullptr; }
 	// The revision a restore put its files back as (the base's number for Discard changes).
 	int64_t restored_revision() const { return remote_.head; }
 
@@ -182,40 +182,40 @@ private:
 	bool landed(const project::ProjectFile &file) const;
 
 	ProjectPaths paths_;
-	ContentPaths content_paths_;
+	NovaWorldPaths novaworld_paths_;
 	std::string export_dir_;
-	ContentBinding binding_;
+	NovaWorldBinding binding_;
 	Phase phase_ = Phase::AskHead;
-	ContentCall call_;
+	NovaWorldCall call_;
 	RemoteProject remote_;
 	std::optional<RemoteRevision> head_;
 	std::vector<project::ProjectFile> theirs_;
-	std::unique_ptr<ContentScan> scan_;
+	std::unique_ptr<NovaWorldScan> scan_;
 	PullPlan plan_;
 	std::vector<project::ProjectFile> downloads_;
 	size_t next_locate_ = 0; // the first file the next downloads request names; those before it located
-	std::map<std::string, ContentRequest> requests_; // each file's download, by SHA-256
+	std::map<std::string, NovaWorldRequest> requests_; // each file's download, by SHA-256
 	size_t next_download_ = 0;
-	std::vector<std::pair<project::ProjectFile, ContentCall>> downloading_;
+	std::vector<std::pair<project::ProjectFile, NovaWorldCall>> downloading_;
 	uint64_t bytes_downloaded_ = 0;
 	uint64_t bytes_to_download_ = 0;
 	ApplyResult applied_;
 	bool up_to_date_ = false;
-	std::optional<ContentRestore> restore_;
+	std::optional<NovaWorldRestore> restore_;
 	std::vector<project::ProjectFile> base_; // a restore's: the base, which its apply keeps
 };
 
-// The folder's standing against its content project: the project's head (asked of the service) and
+// The folder's standing against its NovaWorld project: the project's head (asked of the service) and
 // the folder's changes since its base (its files scanned), so a status says how many revisions the
 // base is behind and what the folder changed. A service it cannot reach leaves the head unknown and
 // still reads the changes.
-class ContentCheck : public ContentJob {
+class NovaWorldCheck : public NovaWorldJob {
 public:
-	ContentCheck(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, ContentBinding binding);
+	NovaWorldCheck(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			std::string export_dir, NovaWorldBinding binding);
 
-	ContentJobState step(uint64_t budget) override;
-	ContentJobProgress progress() const override;
+	NovaWorldJobState step(uint64_t budget) override;
+	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
 	// Once Done.
@@ -230,13 +230,13 @@ private:
 
 	ProjectPaths paths_;
 	std::string export_dir_;
-	ContentBinding binding_;
+	NovaWorldBinding binding_;
 	Phase phase_ = Phase::AskHead;
-	ContentCall call_;
+	NovaWorldCall call_;
 	bool remote_known_ = false;
 	std::string remote_error_;
 	RemoteProject remote_;
-	std::unique_ptr<ContentScan> scan_;
+	std::unique_ptr<NovaWorldScan> scan_;
 	std::vector<LocalChange> changes_;
 	std::vector<std::string> problems_;
 };
@@ -246,27 +246,27 @@ private:
 // folder holds otherwise is its change to push. What makes a folder kept before the store (a
 // project on a disk, a stock install imported afresh) the project's working copy; for a project
 // with no revision yet, its base is no file and every file of the folder is its first push.
-class ContentBind : public ContentJob {
+class NovaWorldBind : public NovaWorldJob {
 public:
-	ContentBind(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			ContentBinding binding);
+	NovaWorldBind(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			NovaWorldBinding binding);
 
-	ContentJobState step(uint64_t budget) override;
-	ContentJobProgress progress() const override;
+	NovaWorldJobState step(uint64_t budget) override;
+	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
 	// Once Done: the binding written.
-	const ContentBinding &binding() const { return binding_; }
+	const NovaWorldBinding &binding() const { return binding_; }
 
 private:
 	enum class Phase : uint8_t { AskHead, ReadManifest, Done };
 
-	ContentJobState write(const std::vector<project::ProjectFile> &base);
+	NovaWorldJobState write(const std::vector<project::ProjectFile> &base);
 
 	ProjectPaths paths_;
-	ContentBinding binding_;
+	NovaWorldBinding binding_;
 	Phase phase_ = Phase::AskHead;
-	ContentCall call_;
+	NovaWorldCall call_;
 	RemoteProject remote_;
 	std::optional<RemoteRevision> head_;
 };
@@ -279,13 +279,13 @@ enum class PushOutcome : uint8_t {
 };
 
 // A push of the folder's files as the revision after its base, with `message`.
-class ContentPush : public ContentJob {
+class NovaWorldPush : public NovaWorldJob {
 public:
-	ContentPush(ContentTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, ContentBinding binding, std::string message);
+	NovaWorldPush(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
+			std::string export_dir, NovaWorldBinding binding, std::string message);
 
-	ContentJobState step(uint64_t budget) override;
-	ContentJobProgress progress() const override;
+	NovaWorldJobState step(uint64_t budget) override;
+	NovaWorldJobProgress progress() const override;
 	void cancel() override;
 
 	// Once Done.
@@ -300,20 +300,20 @@ private:
 	bool step_uploads();
 
 	ProjectPaths paths_;
-	ContentPaths content_paths_;
+	NovaWorldPaths novaworld_paths_;
 	std::string export_dir_;
-	ContentBinding binding_;
+	NovaWorldBinding binding_;
 	std::string message_;
 	Phase phase_ = Phase::AskHead;
-	ContentCall call_;
+	NovaWorldCall call_;
 	int64_t head_ = 0;
-	std::unique_ptr<ContentScan> scan_;
+	std::unique_ptr<NovaWorldScan> scan_;
 	std::vector<project::ProjectFile> files_;
 	std::vector<LocalChange> changes_;
 	size_t next_missing_ = 0; // the first file the next missing request names
 	std::vector<UploadTarget> uploads_;
 	size_t next_upload_ = 0;
-	std::vector<std::pair<UploadTarget, ContentCall>> uploading_;
+	std::vector<std::pair<UploadTarget, NovaWorldCall>> uploading_;
 	uint64_t bytes_uploaded_ = 0;
 	uint64_t bytes_to_upload_ = 0;
 	PushOutcome outcome_ = PushOutcome::Pushed;

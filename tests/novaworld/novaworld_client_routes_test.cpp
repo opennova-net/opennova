@@ -1,4 +1,4 @@
-// The OpenNova Editor's content client (engine/editor/novaworld, ADR 0069) against the
+// The OpenNova Editor's NovaWorld client (engine/editor/novaworld, ADR 0069) against the
 // service's own project routes (apps/novaworld_web/products/project_routes.h), so the two halves of
 // the contract are one: the in-process HttpListener over a migrated database, a Redis namespace and
 // a local object store, and the editor's pull and push jobs over a transport on apps/common's HTTP
@@ -16,10 +16,10 @@
 
 #include <base/io/file_io.h>
 #include <base/io/sha256.h>
-#include <editor/novaworld/content_api.h>
-#include <editor/novaworld/content_jobs.h>
-#include <editor/novaworld/content_scan.h>
-#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/novaworld_api.h>
+#include <editor/novaworld/novaworld_jobs.h>
+#include <editor/novaworld/novaworld_scan.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_document.h>
 #include <net/novaworld/db/database.h>
 
@@ -50,9 +50,9 @@ using opennova::db::ConnectionPool;
 namespace {
 
 // The editor's transport over apps/common's blocking HTTP client: each request made as it starts.
-class HttpTransport : public editor::ContentTransport {
+class HttpTransport : public editor::NovaWorldTransport {
 public:
-	uint64_t start(editor::ContentRequest request) override {
+	uint64_t start(editor::NovaWorldRequest request) override {
 		std::vector<std::string> headers;
 		for (const auto &[name, value] : request.headers)
 			headers.push_back(name + ": " + value);
@@ -64,7 +64,7 @@ public:
 				30000, [](const std::string &host, net::Endpoint &out) {
 					return net::resolve_ipv4(host, out, false);
 				});
-		editor::ContentResponse out;
+		editor::NovaWorldResponse out;
 		out.transport_ok = reply.transport_ok;
 		out.error = reply.error;
 		out.status = reply.code;
@@ -91,7 +91,7 @@ public:
 		ready_[id] = std::move(out);
 		return id;
 	}
-	bool poll(uint64_t id, editor::ContentResponse &out) override {
+	bool poll(uint64_t id, editor::NovaWorldResponse &out) override {
 		const auto it = ready_.find(id);
 		if (it == ready_.end())
 			return false;
@@ -104,36 +104,36 @@ public:
 
 private:
 	uint64_t next_ = 1;
-	std::map<uint64_t, editor::ContentResponse> ready_;
+	std::map<uint64_t, editor::NovaWorldResponse> ready_;
 };
 
 bool put(const std::string &path, const std::string &bytes) {
 	return test_io::write_file(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
 }
 
-editor::ContentBinding binding_of(const std::string &root, const std::string &server) {
-	editor::ContentBinding binding;
+editor::NovaWorldBinding binding_of(const std::string &root, const std::string &server) {
+	editor::NovaWorldBinding binding;
 	std::string error;
-	if (!editor::read_content_binding(
-				editor::ContentPaths::for_project(editor::ProjectPaths::for_root(root)), binding,
+	if (!editor::read_novaworld_binding(
+				editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root)), binding,
 				error))
 		binding = { server, "JO", 0 };
 	return binding;
 }
 
-editor::ContentJobState run(editor::ContentJob &job) {
-	editor::ContentJobState state;
+editor::NovaWorldJobState run(editor::NovaWorldJob &job) {
+	editor::NovaWorldJobState state;
 	int steps = 0;
-	while ((state = job.step(1 << 16)) == editor::ContentJobState::Running && ++steps < 100000) {
+	while ((state = job.step(1 << 16)) == editor::NovaWorldJobState::Running && ++steps < 100000) {
 	}
-	if (state == editor::ContentJobState::Failed)
+	if (state == editor::NovaWorldJobState::Failed)
 		std::fprintf(stderr, "  the job failed: %s\n", job.error().c_str());
 	return state;
 }
 
 std::map<std::string, std::string> files_of(const std::string &root) {
 	std::map<std::string, std::string> out;
-	const editor::ContentScan scan = editor::scan_content(editor::ProjectPaths::for_root(root), "");
+	const editor::NovaWorldScan scan = editor::novaworld_scan(editor::ProjectPaths::for_root(root), "");
 	for (const auto &file : scan.files()) {
 		std::string bytes, error;
 		io::read_file_text(root + "/" + file.path, bytes, error);
@@ -159,13 +159,13 @@ bool signed_in(ConnectionPool &pool, HttpTransport &transport, const std::string
 		return false;
 	pool.acquire()->exec(
 			"UPDATE players SET role = $1 WHERE id = $2;", { BindValue(role), BindValue(made.id) });
-	editor::ContentCall call(
-			transport, editor::content_api::login(server, username, "content-client-pw1"));
+	editor::NovaWorldCall call(
+			transport, editor::novaworld_api::login(server, username, "content-client-pw1"));
 	if (!call.poll())
 		return false;
 	account.server = editor::novaworld_server(server);
-	editor::ContentApiError error;
-	if (!editor::content_api::read_login(call.reply(), account, error)) {
+	editor::NovaWorldApiError error;
+	if (!editor::novaworld_api::read_login(call.reply(), account, error)) {
 		std::fprintf(stderr, "  login: %s\n", error.line().c_str());
 		return false;
 	}
@@ -180,7 +180,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(net::startup() == 0);
 	int rc = 0;
 	{
-		test_temp::TempDir temp("content_client_routes");
+		test_temp::TempDir temp("novaworld_client_routes");
 		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
 		ConnectionPool pool(database.options());
 		test_redis::TestRedis redis;
@@ -217,45 +217,45 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(put(first + "/project.opennova", "{}") && put(first + "/defs/a.def", "a1") &&
 				put(first + "/art/b.tga", std::string(70000, 'b')));
 		{
-			editor::ContentPush job(
+			editor::NovaWorldPush job(
 					transport, admin, paths(first), "", binding_of(first, server), "Stock import");
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done &&
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
 					job.outcome() == editor::PushOutcome::Pushed && job.revision() == 1);
 		}
 		{
-			editor::ContentPull job(transport, admin, paths(second), "", { server, "JO", 0 });
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.revision() == 1);
+			editor::NovaWorldPull job(transport, admin, paths(second), "", { server, "JO", 0 });
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 1);
 		}
 		TEST_EXPECT(files_of(second) == files_of(first) && files_of(second).size() == 3);
 
 		// A change each: the second's push stale until it pulls the first's.
 		TEST_EXPECT(put(first + "/defs/a.def", "a2"));
 		{
-			editor::ContentPush job(
+			editor::NovaWorldPush job(
 					transport, admin, paths(first), "", binding_of(first, server), "a2");
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.revision() == 2);
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 2);
 		}
 		TEST_EXPECT(put(second + "/missions/c.bms", "c"));
 		{
-			editor::ContentPush job(
+			editor::NovaWorldPush job(
 					transport, admin, paths(second), "", binding_of(second, server), "c");
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done &&
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done &&
 					job.outcome() == editor::PushOutcome::Stale && job.head() == 2);
 		}
 		{
-			editor::ContentPull job(
+			editor::NovaWorldPull job(
 					transport, admin, paths(second), "", binding_of(second, server));
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.revision() == 2 &&
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 2 &&
 					job.applied().written == 1);
 		}
 		{
-			editor::ContentPush job(
+			editor::NovaWorldPush job(
 					transport, admin, paths(second), "", binding_of(second, server), "c");
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.revision() == 3);
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 3);
 		}
 		{
-			editor::ContentPull job(transport, admin, paths(first), "", binding_of(first, server));
-			TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.revision() == 3);
+			editor::NovaWorldPull job(transport, admin, paths(first), "", binding_of(first, server));
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.revision() == 3);
 		}
 		TEST_EXPECT(files_of(first) == files_of(second) &&
 				files_of(first).at("defs/a.def") == "a2" &&
@@ -264,11 +264,11 @@ int main(int argc, char **argv) {
 		// A player reads no private project, and pushes none.
 		TEST_EXPECT(put(first + "/defs/a.def", "a3"));
 		{
-			editor::ContentPush job(
+			editor::NovaWorldPush job(
 					transport, player, paths(first), "", binding_of(first, server), "no");
-			TEST_EXPECT(run(job) == editor::ContentJobState::Failed);
+			TEST_EXPECT(run(job) == editor::NovaWorldJobState::Failed);
 		}
-		std::printf("content_client_routes: the editor's client and the service's routes agree\n");
+		std::printf("novaworld_client_routes: the editor's client and the service's routes agree\n");
 		http.stop();
 	}
 	net::shutdown();

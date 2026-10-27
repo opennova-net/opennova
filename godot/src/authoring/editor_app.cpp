@@ -184,7 +184,7 @@ void EditorApp::ensure_session() {
 			kNovaWorldServer);
 	novaworld_http_ = std::make_unique<NovaWorldHttp>();
 	session_->set_novaworld_accounts(novaworld_accounts_.get());
-	session_->set_content_transport(novaworld_http_.get());
+	session_->set_novaworld_transport(novaworld_http_.get());
 	// What Play launches: asked when the game is spawned, once its build lands, so the port of the
 	// game's MCP endpoint is a fresh one then, never one held while the build packs.
 	session_->set_launcher_source([this](bool p_with_mcp_port) {

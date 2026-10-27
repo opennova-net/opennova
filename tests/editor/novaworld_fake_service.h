@@ -1,12 +1,12 @@
 #pragma once
 // An in-memory NovaWorld service behind the editor's transport seam
-// (engine/editor/novaworld/content_transport.h, ADR 0069), keeping the routes' contract
+// (engine/editor/novaworld/novaworld_transport.h, ADR 0069), keeping the routes' contract
 // (apps/novaworld_web/products/project_routes.h): the website's sign-in (the password "pw" signs in
 // an admin), the project list, one project "MOD" with its head, its manifests and its files by
 // SHA-256, each file's download, the files it lacks with their uploads, and the push on its parent.
-// Every request is answered as it starts. The content client's and the session's tests drive real
+// Every request is answered as it starts. The NovaWorld client's and the session's tests drive real
 // folders over it; the routes themselves answer the same client over HTTP in
-// tests/novaworld/content_client_routes_test.cpp.
+// tests/novaworld/novaworld_client_routes_test.cpp.
 #include <cstdint>
 #include <cstdlib>
 #include <map>
@@ -17,7 +17,7 @@
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_transport.h>
+#include <editor/novaworld/novaworld_transport.h>
 
 #include "common/file_io.h"
 
@@ -27,7 +27,7 @@ namespace editor = opennova::editor;
 namespace io = opennova::io;
 using opennova::project::ProjectFile;
 
-inline constexpr const char *kServer = "https://content.test";
+inline constexpr const char *kServer = "https://novaworld.test";
 inline constexpr const char *kAdminCookie = "opennova_session=admin";
 inline constexpr const char *kRenewedCookie = "opennova_session=renewed";
 inline constexpr const char *kPlayerCookie = "opennova_session=player";
@@ -39,21 +39,21 @@ inline bool put(const std::string &path, const std::string &bytes) {
 	return test_io::write_file(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
 }
 
-inline editor::ContentResponse json(int status, const io::JsonValue &body) {
-	editor::ContentResponse r;
+inline editor::NovaWorldResponse json(int status, const io::JsonValue &body) {
+	editor::NovaWorldResponse r;
 	r.transport_ok = true;
 	r.status = status;
 	r.body = io::json_write(body);
 	return r;
 }
 
-inline editor::ContentResponse refusal(int status, const char *code) {
+inline editor::NovaWorldResponse refusal(int status, const char *code) {
 	io::JsonValue body = io::JsonValue::make_object();
 	body.set("error", io::json_string(code));
 	return json(status, body);
 }
 
-class FakeService : public editor::ContentTransport {
+class FakeService : public editor::NovaWorldTransport {
 public:
 	int64_t head = 0;
 	std::map<int64_t, std::string> manifests; // by revision
@@ -72,12 +72,12 @@ public:
 	int64_t expansion_head = 0;
 	std::map<int64_t, std::string> expansion_manifests;
 
-	uint64_t start(editor::ContentRequest request) override {
+	uint64_t start(editor::NovaWorldRequest request) override {
 		const uint64_t id = next_++;
 		ready_[id] = handle(request);
 		return id;
 	}
-	bool poll(uint64_t id, editor::ContentResponse &out) override {
+	bool poll(uint64_t id, editor::NovaWorldResponse &out) override {
 		const auto it = ready_.find(id);
 		if (it == ready_.end())
 			return false;
@@ -89,7 +89,7 @@ public:
 	size_t parallel() const override { return 3; }
 
 private:
-	editor::ContentResponse handle(const editor::ContentRequest &request) {
+	editor::NovaWorldResponse handle(const editor::NovaWorldRequest &request) {
 		std::string cookie;
 		for (const auto &[name, value] : request.headers)
 			if (name == "Cookie")
@@ -97,7 +97,7 @@ private:
 		if (cookie == kExpiredCookie)
 			return refusal(401, "unauthorized");
 		const bool admin = cookie == kAdminCookie || cookie == kRenewedCookie;
-		editor::ContentResponse reply = route(request, admin);
+		editor::NovaWorldResponse reply = route(request, admin);
 		if (renew_next && admin) {
 			reply.headers.emplace_back(
 					"Set-Cookie", std::string(kRenewedCookie) + "; Path=/; HttpOnly");
@@ -117,7 +117,7 @@ private:
 		return project;
 	}
 
-	editor::ContentResponse route(const editor::ContentRequest &request, bool admin) {
+	editor::NovaWorldResponse route(const editor::NovaWorldRequest &request, bool admin) {
 		io::JsonValue body;
 		std::string error;
 		if (request.method == "POST" && request.url == std::string(kServer) + "/api/login") {
@@ -128,7 +128,7 @@ private:
 			out.set("id", io::json_number(1));
 			out.set("username", io::json_string(body.get_string("username", "")));
 			out.set("role", io::json_string("admin"));
-			editor::ContentResponse r = json(200, out);
+			editor::NovaWorldResponse r = json(200, out);
 			r.headers.emplace_back("Set-Cookie", std::string(kAdminCookie) + "; Path=/; HttpOnly");
 			return r;
 		}
@@ -189,7 +189,7 @@ private:
 		}
 		if (request.method == "GET" && rest.rfind("/revisions/", 0) == 0) {
 			const int64_t number = std::strtoll(rest.c_str() + 11, nullptr, 10);
-			editor::ContentResponse r;
+			editor::NovaWorldResponse r;
 			r.transport_ok = true;
 			r.status = kept.count(number) ? 200 : 404;
 			r.body = kept[number];
@@ -218,7 +218,7 @@ private:
 			const auto blob = blobs.find(rest.substr(7));
 			if (blob == blobs.end())
 				return refusal(404, "not_found");
-			editor::ContentResponse r;
+			editor::NovaWorldResponse r;
 			r.transport_ok = true;
 			r.status = 200;
 			io::write_file_atomic(request.response_file, blob->second, error);
@@ -305,7 +305,7 @@ private:
 	}
 
 	uint64_t next_ = 1;
-	std::map<uint64_t, editor::ContentResponse> ready_;
+	std::map<uint64_t, editor::NovaWorldResponse> ready_;
 };
 
 } // namespace novaworld_fake

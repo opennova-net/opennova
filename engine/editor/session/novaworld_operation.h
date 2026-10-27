@@ -9,17 +9,17 @@
 
 #include <memory>
 
-#include <editor/novaworld/content_jobs.h>
+#include <editor/novaworld/novaworld_jobs.h>
 #include <editor/session/session_operation.h>
 
 namespace opennova::editor {
 
 class NovaWorldController;
 
-class ContentOperation : public SessionOperation {
+class NovaWorldOperation : public SessionOperation {
 public:
-	ContentOperation(
-			OperationKind kind, NovaWorldController &controller, std::unique_ptr<ContentJob> job) :
+	NovaWorldOperation(
+			OperationKind kind, NovaWorldController &controller, std::unique_ptr<NovaWorldJob> job) :
 			kind_(kind), controller_(controller), job_(std::move(job)) {}
 
 	OperationKind kind() const override { return kind_; }
@@ -31,7 +31,7 @@ public:
 private:
 	OperationKind kind_;
 	NovaWorldController &controller_;
-	std::unique_ptr<ContentJob> job_;
+	std::unique_ptr<NovaWorldJob> job_;
 };
 
 } // namespace opennova::editor

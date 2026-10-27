@@ -1,4 +1,4 @@
-// A project folder as a working copy of its content project (engine/editor/novaworld, ADR
+// A project folder as a working copy of its NovaWorld project (engine/editor/novaworld, ADR
 // 0069): the files no store keeps (a machine's beside a project's); a folder scanned as the store
 // keeps it (the project file in, the machine's own folder, the export folder, other dot-folders and
 // a Blender backup out, each file's SHA-256 the bytes'), stepped at the smallest budget the same as
@@ -24,10 +24,10 @@
 #include <base/io/file_time.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_apply.h>
-#include <editor/novaworld/content_plan.h>
-#include <editor/novaworld/content_scan.h>
-#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/novaworld_apply.h>
+#include <editor/novaworld/novaworld_plan.h>
+#include <editor/novaworld/novaworld_scan.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_trash.h>
@@ -88,27 +88,27 @@ bool make_folder(const std::string &root) {
 } // namespace
 
 static int test_skipped_files() {
-	TEST_EXPECT(editor::content_skips_file("Thumbs.db") &&
-			editor::content_skips_file("DESKTOP.INI") && editor::content_skips_file(".DS_Store"));
-	TEST_EXPECT(editor::content_skips_file("gun.blend1") &&
-			editor::content_skips_file("gun.blend12") &&
-			editor::content_skips_file("weapon.def.tmp"));
-	TEST_EXPECT(!editor::content_skips_file("gun.blend") &&
-			!editor::content_skips_file("gun.blendx") &&
-			!editor::content_skips_file("thumbs.dbx") && !editor::content_skips_file("weapon.def"));
+	TEST_EXPECT(editor::novaworld_skips_file("Thumbs.db") &&
+			editor::novaworld_skips_file("DESKTOP.INI") && editor::novaworld_skips_file(".DS_Store"));
+	TEST_EXPECT(editor::novaworld_skips_file("gun.blend1") &&
+			editor::novaworld_skips_file("gun.blend12") &&
+			editor::novaworld_skips_file("weapon.def.tmp"));
+	TEST_EXPECT(!editor::novaworld_skips_file("gun.blend") &&
+			!editor::novaworld_skips_file("gun.blendx") &&
+			!editor::novaworld_skips_file("thumbs.dbx") && !editor::novaworld_skips_file("weapon.def"));
 	std::printf("skipped: a machine's files beside a project's, Blender's backups, an atomic "
 				"save's leftover\n");
 	return 0;
 }
 
 static int test_scan() {
-	test_temp::TempDir dir("opennova_content_scan");
+	test_temp::TempDir dir("opennova_novaworld_scan");
 	const std::string root = dir.file("Project");
 	TEST_EXPECT(make_folder(root));
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
 	const std::string export_dir = root + "/build/export";
 
-	editor::ContentScan whole = editor::scan_content(paths, export_dir);
+	editor::NovaWorldScan whole = editor::novaworld_scan(paths, export_dir);
 	TEST_EXPECT(whole.done() && whole.problems().empty());
 	const std::vector<std::string> expected = { "art/gun.blend", "build/notes.txt",
 		"defs/weapon.def", "project.opennova" };
@@ -116,7 +116,7 @@ static int test_scan() {
 	TEST_EXPECT(whole.files()[2].sha256 == sha_of("weapon\n") && whole.files()[2].size == 7);
 
 	// Stepped at the smallest budget: the same files.
-	editor::ContentScan stepped(paths, export_dir);
+	editor::NovaWorldScan stepped(paths, export_dir);
 	int steps = 0;
 	while (!stepped.step(1))
 		++steps;
@@ -129,16 +129,16 @@ static int test_scan() {
 	// both kept, a warm scan takes its SHA-256 from the cache unread (the cache's whole point, and
 	// the one rewrite it cannot see, as git's).
 	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::seconds(60)));
-	TEST_EXPECT(editor::scan_content(paths, export_dir).problems().empty()); // the cache written
+	TEST_EXPECT(editor::novaworld_scan(paths, export_dir).problems().empty()); // the cache written
 	const fs::path weapon = editor::system_path(root + "/defs/weapon.def");
 	const auto stamp = fs::last_write_time(weapon);
 	TEST_EXPECT(put(root + "/defs/weapon.def", "WEAPON\n"));
 	fs::last_write_time(weapon, stamp);
-	const editor::ContentScan warm = editor::scan_content(paths, export_dir);
+	const editor::NovaWorldScan warm = editor::novaworld_scan(paths, export_dir);
 	TEST_EXPECT(warm.files()[2].sha256 == sha_of("weapon\n"));
 	// Its last write moved: read again.
 	TEST_EXPECT(editor_test::backdate(root + "/defs/weapon.def", std::chrono::seconds(30)));
-	TEST_EXPECT(editor::scan_content(paths, export_dir).files()[2].sha256 == sha_of("WEAPON\n"));
+	TEST_EXPECT(editor::novaworld_scan(paths, export_dir).files()[2].sha256 == sha_of("WEAPON\n"));
 
 	// Two paths one file on Windows and macOS, where the file system holds both: the second is kept
 	// out.
@@ -152,7 +152,7 @@ static int test_scan() {
 	if (named == 2) {
 		// The paths' bytes order them: "Weapon.def" (W, 0x57) before "weapon.def", which is kept
 		// out.
-		const editor::ContentScan folded = editor::scan_content(paths, export_dir);
+		const editor::NovaWorldScan folded = editor::novaworld_scan(paths, export_dir);
 		const std::vector<std::string> kept = { "art/gun.blend", "build/notes.txt",
 			"defs/Weapon.def", "project.opennova" };
 		TEST_EXPECT(folded.problems().size() == 1 &&
@@ -171,7 +171,7 @@ static int test_scan() {
 // run as root, Windows' ACLs), there is nothing to see and the case says so.
 static int test_scan_unlisted() {
 #ifndef _WIN32
-	test_temp::TempDir dir("opennova_content_scan_unlisted");
+	test_temp::TempDir dir("opennova_novaworld_scan_unlisted");
 	const std::string root = dir.file("Project");
 	TEST_EXPECT(put(root + "/project.opennova", "{}\n") && put(root + "/defs/a.def", "a\n") &&
 			put(root + "/locked/held.def", "held\n"));
@@ -184,7 +184,7 @@ static int test_scan_unlisted() {
 	std::error_code probe;
 	fs::file_size(locked / "held.def", probe);
 	if (probe) {
-		const editor::ContentScan scan = editor::scan_content(paths, "");
+		const editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 		TEST_EXPECT(scan.done() && !scan.incomplete().empty() &&
 				scan.incomplete().find("held.def") != std::string::npos);
 		TEST_EXPECT(paths_of(scan.files()) ==
@@ -225,19 +225,19 @@ static int test_plan() {
 	const auto change = [&](const std::string &path) {
 		for (const editor::LocalChange &c : changes)
 			if (c.path == path)
-				return std::string(editor::content_change_name(c.change));
+				return std::string(editor::novaworld_change_name(c.change));
 		return std::string("none");
 	};
 	TEST_EXPECT(change("b") == "modified" && change("d") == "deleted" &&
 			change("e") == "modified" && change("f") == "added" && change("h") == "deleted" &&
 			change("i") == "modified" && change("a") == "none" && change("j") == "none");
-	// A folder not listed whole (ContentScan::incomplete): the files it read are changes, none it
+	// A folder not listed whole (NovaWorldScan::incomplete): the files it read are changes, none it
 	// lacks is taken for deleted.
 	const std::vector<editor::LocalChange> listed =
 			editor::local_changes(base, local, unread, /*listed_whole=*/false);
 	TEST_EXPECT(listed.size() == 4);
 	for (const editor::LocalChange &c : listed)
-		TEST_EXPECT(c.change != editor::ContentChange::Deleted && c.path != "d" && c.path != "h");
+		TEST_EXPECT(c.change != editor::NovaWorldChange::Deleted && c.path != "d" && c.path != "h");
 
 	editor::PullPlan plan = editor::plan_pull(base, local, unread, theirs);
 	const auto step = [&](const std::string &path) {
@@ -259,9 +259,9 @@ static int test_plan() {
 			step("g") == "write" && step("h") == "conflict" && step("i") == "conflict" &&
 			step("j") == "conflict");
 	TEST_EXPECT(plan.conflicts() == 4 && plan.find("j")->unread && !plan.find("j")->mine);
-	TEST_EXPECT(plan.find("h")->mine_change == editor::ContentChange::Deleted &&
-			plan.find("h")->theirs_change == editor::ContentChange::Modified);
-	TEST_EXPECT(plan.find("i")->theirs_change == editor::ContentChange::Deleted);
+	TEST_EXPECT(plan.find("h")->mine_change == editor::NovaWorldChange::Deleted &&
+			plan.find("h")->theirs_change == editor::NovaWorldChange::Modified);
+	TEST_EXPECT(plan.find("i")->theirs_change == editor::NovaWorldChange::Deleted);
 	TEST_EXPECT(plan.downloads().size() == 2); // a's and g's: "5" and "1"
 
 	// Settled: e kept mine (out of the plan), h and i theirs (a write and a remove), j theirs.
@@ -283,10 +283,10 @@ static int test_plan() {
 }
 
 static int test_apply() {
-	test_temp::TempDir dir("opennova_content_apply");
+	test_temp::TempDir dir("opennova_novaworld_apply");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
 	std::string error;
 
 	// The folder at its base, revision 3: one file it changed since.
@@ -294,17 +294,17 @@ static int test_apply() {
 		file("old/gone.txt", "gone"), file("project.opennova", "{}") };
 	TEST_EXPECT(put(root + "/defs/a.def", "a1") && put(root + "/defs/b.def", "b2") &&
 			put(root + "/old/gone.txt", "gone") && put(root + "/project.opennova", "{}"));
-	TEST_EXPECT(editor::write_content_base(content_paths, base, error));
-	TEST_EXPECT(editor::write_content_binding(
-			content_paths, { "https://example.test", "JO", 3 }, error));
+	TEST_EXPECT(editor::write_novaworld_base(novaworld_paths, base, error));
+	TEST_EXPECT(editor::write_novaworld_binding(
+			novaworld_paths, { "https://example.test", "JO", 3 }, error));
 
 	// Revision 4: a.def changed, gone.txt deleted, a new file at two paths.
 	const std::vector<ProjectFile> theirs = { file("defs/a.def", "a2"), file("defs/b.def", "b1"),
 		file("missions/m.bms", "same"), file("missions/n.bms", "same"),
 		file("project.opennova", "{}") };
-	editor::ContentScan scan = editor::scan_content(paths, "");
+	editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 	std::vector<ProjectFile> read_base;
-	TEST_EXPECT(editor::read_content_base(content_paths, read_base, error) &&
+	TEST_EXPECT(editor::read_novaworld_base(novaworld_paths, read_base, error) &&
 			read_base.size() == base.size());
 	editor::PullPlan plan = editor::plan_pull(read_base, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 4 &&
@@ -312,11 +312,11 @@ static int test_apply() {
 
 	// Refused before anything moves: a download missing.
 	editor::ApplyResult result;
-	const editor::ContentBinding r4{ "https://example.test", "JO", 4 };
+	const editor::NovaWorldBinding r4{ "https://example.test", "JO", 4 };
 	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
 			error.find("download") != std::string::npos);
 	for (const ProjectFile &download : plan.downloads())
-		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
+		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, download.sha256),
 				download.sha256 == sha_of("a2") ? "a2" : "same"));
 	// A file changed since the plan: refused, nothing moved.
 	TEST_EXPECT(put(root + "/old/gone.txt", "touched"));
@@ -332,17 +332,17 @@ static int test_apply() {
 			read(root + "/missions/m.bms") == "same" && read(root + "/missions/n.bms") == "same");
 	TEST_EXPECT(
 			!exists(root + "/old/gone.txt") && !exists(root + "/old")); // the emptied folder gone
-	TEST_EXPECT(!exists(content_paths.incoming_dir));
+	TEST_EXPECT(!exists(novaworld_paths.incoming_dir));
 	// The replaced and removed files in the trash, put back by restoring it.
 	TEST_EXPECT(result.trash.paths.size() == 2);
 	std::vector<ProjectFile> new_base;
-	editor::ContentBinding binding;
-	TEST_EXPECT(editor::read_content_base(content_paths, new_base, error) &&
+	editor::NovaWorldBinding binding;
+	TEST_EXPECT(editor::read_novaworld_base(novaworld_paths, new_base, error) &&
 			new_base.size() == theirs.size());
-	TEST_EXPECT(editor::read_content_binding(content_paths, binding, error) &&
+	TEST_EXPECT(editor::read_novaworld_binding(novaworld_paths, binding, error) &&
 			binding.revision == 4 && binding.key == "JO");
 	// The folder's own change kept, and the revision's files no change.
-	const editor::ContentScan after = editor::scan_content(paths, "");
+	const editor::NovaWorldScan after = editor::novaworld_scan(paths, "");
 	const auto changes = editor::local_changes(new_base, after.files(), after.unread());
 	TEST_EXPECT(changes.size() == 1 && changes[0].path == "defs/b.def");
 	TEST_EXPECT(editor::plan_pull(new_base, after.files(), after.unread(), theirs).items.empty());
@@ -364,10 +364,10 @@ static int test_apply() {
 // change since the plan there), replaces a folder by a file of its name and a file by a folder of
 // its name: each applied, the folder then the revision's.
 static int test_apply_renames() {
-	test_temp::TempDir dir("opennova_content_apply_renames");
+	test_temp::TempDir dir("opennova_novaworld_apply_renames");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
 	std::string error;
 	const std::vector<ProjectFile> base = { file("bar", "bar"), file("defs/a.def", "a"),
 		file("foo/x.txt", "x") };
@@ -375,11 +375,11 @@ static int test_apply_renames() {
 			put(root + "/foo/x.txt", "x"));
 	const std::vector<ProjectFile> theirs = { file("bar/y.txt", "y"), file("defs/A.def", "a"),
 		file("foo", "foo") };
-	const editor::ContentScan scan = editor::scan_content(paths, "");
+	const editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 	const editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 6 && plan.conflicts() == 0);
 	for (const std::string &bytes : { std::string("y"), std::string("a"), std::string("foo") })
-		TEST_EXPECT(put(editor::incoming_path(content_paths, sha_of(bytes)), bytes));
+		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, sha_of(bytes)), bytes));
 
 	editor::ApplyResult result;
 	TEST_EXPECT(editor::apply_pull(
@@ -387,7 +387,7 @@ static int test_apply_renames() {
 	TEST_EXPECT(result.written == 3 && result.removed == 3 && result.trash.paths.size() == 3);
 	TEST_EXPECT(read(root + "/bar/y.txt") == "y" && read(root + "/foo") == "foo" &&
 			read(root + "/defs/A.def") == "a");
-	const editor::ContentScan after = editor::scan_content(paths, "");
+	const editor::NovaWorldScan after = editor::novaworld_scan(paths, "");
 	TEST_EXPECT(paths_of(after.files()) ==
 			(std::vector<std::string>{ "bar/y.txt", "defs/A.def", "foo" }));
 	TEST_EXPECT(editor::plan_pull(theirs, after.files(), after.unread(), theirs).items.empty());
@@ -399,22 +399,22 @@ static int test_apply_renames() {
 // file): the file it and the writes after it would replace back out of the trash, the ones written
 // before it kept, the base the old one; a pull planned again finishes once the folder is empty.
 static int test_apply_put_back() {
-	test_temp::TempDir dir("opennova_content_apply_put_back");
+	test_temp::TempDir dir("opennova_novaworld_apply_put_back");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
 	std::string error;
 	const std::vector<ProjectFile> base = { file("a.txt", "a1"), file("z.txt", "z1") };
 	TEST_EXPECT(put(root + "/a.txt", "a1") && put(root + "/z.txt", "z1") &&
 			put(root + "/q/Thumbs.db", "windows' thumbnails"));
-	TEST_EXPECT(editor::write_content_base(content_paths, base, error));
+	TEST_EXPECT(editor::write_novaworld_base(novaworld_paths, base, error));
 	const std::vector<ProjectFile> theirs = { file("a.txt", "a2"), file("q", "q"),
 		file("z.txt", "z2") };
 	for (const std::string &bytes : { std::string("a2"), std::string("q"), std::string("z2") })
-		TEST_EXPECT(put(editor::incoming_path(content_paths, sha_of(bytes)), bytes));
-	const editor::ContentBinding r2{ "https://example.test", "JO", 2 };
+		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, sha_of(bytes)), bytes));
+	const editor::NovaWorldBinding r2{ "https://example.test", "JO", 2 };
 
-	const editor::ContentScan scan = editor::scan_content(paths, "");
+	const editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 	editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 3);
 	editor::ApplyResult result;
@@ -422,14 +422,14 @@ static int test_apply_put_back() {
 	TEST_EXPECT(read(root + "/a.txt") == "a2" && read(root + "/z.txt") == "z1" &&
 			result.trash.paths == std::vector<std::string>{ "a.txt" });
 	TEST_EXPECT(
-			!exists(content_paths.incoming_dir + "/staged") && !exists(content_paths.binding_file));
+			!exists(novaworld_paths.incoming_dir + "/staged") && !exists(novaworld_paths.binding_file));
 	std::vector<ProjectFile> kept;
-	TEST_EXPECT(editor::read_content_base(content_paths, kept, error) && kept.size() == 2);
+	TEST_EXPECT(editor::read_novaworld_base(novaworld_paths, kept, error) && kept.size() == 2);
 
 	// The folder emptied: planned again, the rest put in place, the empty folder giving way.
 	std::error_code ec;
 	fs::remove(editor::system_path(root + "/q/Thumbs.db"), ec);
-	const editor::ContentScan emptied = editor::scan_content(paths, "");
+	const editor::NovaWorldScan emptied = editor::novaworld_scan(paths, "");
 	plan = editor::plan_pull(base, emptied.files(), emptied.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.txt"));
 	TEST_EXPECT(editor::apply_pull(paths, plan, theirs, r2, result, error));
@@ -440,21 +440,21 @@ static int test_apply_put_back() {
 }
 
 static int test_resumed_pull() {
-	test_temp::TempDir dir("opennova_content_resume");
+	test_temp::TempDir dir("opennova_novaworld_resume");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::ContentPaths content_paths = editor::ContentPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
 	std::string error;
 	// A first pull into an empty folder (base none) cut short after one of its files was put in
 	// place.
 	const std::vector<ProjectFile> theirs = { file("a.def", "a"), file("b.def", "b"),
 		file("c.def", "c") };
 	TEST_EXPECT(put(root + "/a.def", "a"));
-	const editor::ContentScan scan = editor::scan_content(paths, "");
+	const editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 	editor::PullPlan plan = editor::plan_pull({}, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.def")); // the one in place needs nothing
 	for (const ProjectFile &download : plan.downloads())
-		TEST_EXPECT(put(editor::incoming_path(content_paths, download.sha256),
+		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, download.sha256),
 				download.sha256 == sha_of("b") ? "b" : "c"));
 	editor::ApplyResult result;
 	TEST_EXPECT(editor::apply_pull(

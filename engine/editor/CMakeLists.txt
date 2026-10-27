@@ -21,17 +21,17 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_layout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_walk.cpp
-    # novaworld — a project folder as a working copy of its content project (ADR 0069): its
+    # novaworld — a project folder as a working copy of its NovaWorld project (ADR 0069): its
     # state under .opennova/novaworld/, its files hashed as the store keeps them, the changes since
     # its base and a pull planned over the base, the folder and the revision, and applied; the
     # client: the account, the routes as it speaks them, the pull and push jobs over the transport
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_account.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_api.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_apply.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_jobs.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_plan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_scan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/content_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_api.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_apply.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_jobs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_scan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/novaworld_state.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
@@ -342,7 +342,7 @@ add_library(opennova_editor STATIC
     # NovaWorld (ADR 0069): the session's part, its jobs as operations, its view's JSON
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_json.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/content_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set_scope.cpp

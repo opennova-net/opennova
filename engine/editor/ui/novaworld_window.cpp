@@ -24,11 +24,11 @@ std::string host_of(const std::string &server) {
 	return scheme == std::string::npos ? server : server.substr(scheme + 3);
 }
 
-bool admin(const NovaWorldView &content) { return content.signed_in && content.role == "admin"; }
+bool admin(const NovaWorldView &novaworld) { return novaworld.signed_in && novaworld.role == "admin"; }
 
 // What a side of a conflict did to the file: "modified", "deleted", "added".
-const char *change_of(const std::optional<ContentChange> &change) {
-	return change ? content_change_name(*change) : "unchanged";
+const char *change_of(const std::optional<NovaWorldChange> &change) {
+	return change ? novaworld_change_name(*change) : "unchanged";
 }
 
 void copy_text(char *buffer, size_t size, const std::string &text) {
@@ -108,14 +108,14 @@ void draw_novaworld_projects(Workspace &workspace) {
 	ImGui::EndTable();
 }
 
-std::string novaworld_status_text(const NovaWorldView &content) {
-	if (!content.bound) return std::string();
-	std::string text = content.key + " r" + std::to_string(content.revision);
-	if (!content.checked) return text;
-	if (!content.changes.empty()) text += ", " + std::to_string(content.changes.size()) + " changed";
-	if (content.head_known && content.head > content.revision)
-		text += ", " + std::to_string(content.head - content.revision) + " incoming";
-	if (!content.conflicts.empty()) text += ", " + counted(content.conflicts.size(), "conflict");
+std::string novaworld_status_text(const NovaWorldView &novaworld) {
+	if (!novaworld.bound) return std::string();
+	std::string text = novaworld.key + " r" + std::to_string(novaworld.revision);
+	if (!novaworld.checked) return text;
+	if (!novaworld.changes.empty()) text += ", " + std::to_string(novaworld.changes.size()) + " changed";
+	if (novaworld.head_known && novaworld.head > novaworld.revision)
+		text += ", " + std::to_string(novaworld.head - novaworld.revision) + " incoming";
+	if (!novaworld.conflicts.empty()) text += ", " + counted(novaworld.conflicts.size(), "conflict");
 	return text;
 }
 
@@ -216,7 +216,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 					ImGui::PushID(change.path.c_str());
 					ImGui::TableNextRow();
 					ImGui::TableNextColumn();
-					ui_kit::clipped_text(std::string(content_change_name(change.change)) + "  " + change.path);
+					ui_kit::clipped_text(std::string(novaworld_change_name(change.change)) + "  " + change.path);
 					ImGui::TableNextColumn();
 					ImGui::BeginDisabled(!restores);
 					if (ImGui::SmallButton("Discard") && restores)
@@ -283,7 +283,7 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	if (!ImGui::BeginTable("conflicts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch);
 	ImGui::TableSetupColumn("##choice", ImGuiTableColumnFlags_WidthFixed);
-	for (const ContentConflictView &conflict : c.conflicts) {
+	for (const NovaWorldConflictView &conflict : c.conflicts) {
 		ImGui::PushID(conflict.path.c_str());
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();

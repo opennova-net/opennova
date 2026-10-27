@@ -11,12 +11,12 @@
 #include <thread>
 #include <vector>
 
-#include <editor/novaworld/content_transport.h>
+#include <editor/novaworld/novaworld_transport.h>
 
 namespace godot {
 
 // NovaWorld's transport in the editor (ADR 0069;
-// engine/editor/novaworld/content_transport.h): each request is made over Godot's HTTPClient on
+// engine/editor/novaworld/novaworld_transport.h): each request is made over Godot's HTTPClient on
 // one of a few worker threads, and each worker keeps its connection open between requests to the
 // same address (a pull's downloads from one store, a push's uploads to it). A download's body is
 // written to its file as it arrives, counted and hashed on the way, so no file is read twice; an
@@ -24,7 +24,7 @@ namespace godot {
 // piece (request_raw). A reply is answered once it has all arrived, to the session's poll on the
 // main thread; nothing here touches the scene tree. The workers start with the first request and
 // end with the transport, a request still running given up.
-class NovaWorldHttp : public opennova::editor::ContentTransport {
+class NovaWorldHttp : public opennova::editor::NovaWorldTransport {
 public:
 	explicit NovaWorldHttp(size_t workers = 4) : workers_wanted_(workers == 0 ? 1 : workers) {}
 	~NovaWorldHttp() override;
@@ -32,8 +32,8 @@ public:
 	NovaWorldHttp(const NovaWorldHttp &) = delete;
 	NovaWorldHttp &operator=(const NovaWorldHttp &) = delete;
 
-	uint64_t start(opennova::editor::ContentRequest request) override;
-	bool poll(uint64_t id, opennova::editor::ContentResponse &out) override;
+	uint64_t start(opennova::editor::NovaWorldRequest request) override;
+	bool poll(uint64_t id, opennova::editor::NovaWorldResponse &out) override;
 	void cancel(uint64_t id) override;
 	size_t parallel() const override { return workers_wanted_; }
 
@@ -44,7 +44,7 @@ public:
 
 	struct Exchange {
 		uint64_t id = 0;
-		opennova::editor::ContentRequest request;
+		opennova::editor::NovaWorldRequest request;
 		std::atomic<bool> cancelled{ false };
 	};
 
@@ -56,7 +56,7 @@ private:
 	std::condition_variable wake_;
 	std::deque<std::shared_ptr<Exchange>> queue_;
 	std::map<uint64_t, std::shared_ptr<Exchange>> running_;
-	std::map<uint64_t, opennova::editor::ContentResponse> done_;
+	std::map<uint64_t, opennova::editor::NovaWorldResponse> done_;
 	std::vector<std::thread> workers_;
 	std::atomic<bool> stopping_{ false };
 	uint64_t next_ = 1;

@@ -17,19 +17,19 @@
 
 namespace opennova::editor {
 
-struct ContentRequest {
+struct NovaWorldRequest {
 	std::string method; // "GET", "POST", "PUT"
 	std::string url; // absolute: the service's address and a route, or a URL a reply handed out
 	std::vector<std::pair<std::string, std::string>> headers; // name, value
 	std::string body;
 	// A file whose bytes are the body in place of `body` (an upload), "" for none.
 	std::string body_file;
-	// Where a successful (2xx) reply's body goes in place of ContentResponse::body (a download), ""
+	// Where a successful (2xx) reply's body goes in place of NovaWorldResponse::body (a download), ""
 	// to keep it; any other reply's body is kept, so its refusal reads.
 	std::string response_file;
 };
 
-struct ContentResponse {
+struct NovaWorldResponse {
 	bool transport_ok = false; // false: no reply (`error` says why)
 	std::string error;
 	int status = 0;
@@ -45,10 +45,10 @@ struct ContentResponse {
 };
 
 // A URL the Shell's transport reaches: http or https, its host and its port (443 or 80 where it
-// names none), and the path and query it asks, from its '/' (the fragment dropped); content_address
+// names none), and the path and query it asks, from its '/' (the fragment dropped); novaworld_address
 // is false for any other (no scheme of the two, a user part or a bracketed address, a port outside
 // 1..65535, no host).
-struct ContentAddress {
+struct NovaWorldAddress {
 	bool tls = false;
 	std::string host;
 	int port = 0;
@@ -56,28 +56,28 @@ struct ContentAddress {
 	// "https://host:443": the connection a later request to it may use again.
 	std::string origin() const;
 };
-bool content_address(const std::string &url, ContentAddress &out);
+bool novaworld_address(const std::string &url, NovaWorldAddress &out);
 
-// How many more tries a request that may go again gets (content_goes_again).
-inline constexpr int kContentRetries = 3;
+// How many more tries a request that may go again gets (novaworld_goes_again).
+inline constexpr int kNovaWorldRetries = 3;
 
 // Whether a request goes again on a fresh connection after its try `attempt` (0 the first) came
 // to this: a method a client may send again when a connection fails under it (RFC 9110 9.2.2:
-// GET, PUT, DELETE), at most kContentRetries more tries, once its connection broke before or
+// GET, PUT, DELETE), at most kNovaWorldRetries more tries, once its connection broke before or
 // during the reply (`lost`) or a whole reply (`replied`) was a 5xx (a store's 500, S3's 503
 // SlowDown). Every other end is the request's answer: a reply below 500, a request no retry may
 // repeat (a POST: a push, a sign-in), a transfer that stalled or was given up.
-bool content_goes_again(
+bool novaworld_goes_again(
 		const std::string &method, int attempt, bool replied, int status, bool lost);
 
-class ContentTransport {
+class NovaWorldTransport {
 public:
-	virtual ~ContentTransport() = default;
+	virtual ~NovaWorldTransport() = default;
 
 	// `request` started: its id, which poll answers by.
-	virtual uint64_t start(ContentRequest request) = 0;
+	virtual uint64_t start(NovaWorldRequest request) = 0;
 	// Whether the request `id` is done: true once, with its response in `out`.
-	virtual bool poll(uint64_t id, ContentResponse &out) = 0;
+	virtual bool poll(uint64_t id, NovaWorldResponse &out) = 0;
 	// The request `id` given up on: it is never answered (a pull or push cancelled).
 	virtual void cancel(uint64_t id) = 0;
 	// How many requests it runs at once: a pull's downloads and a push's uploads go this many at a

@@ -1,7 +1,7 @@
 #pragma once
 
 // A pull's plan applied to its working copy (NovaWorld, ADR 0069). Before anything moves:
-// every conflict settled, every file the plan writes downloaded (ContentPaths::incoming_dir, each
+// every conflict settled, every file the plan writes downloaded (NovaWorldPaths::incoming_dir, each
 // named by its SHA-256 and checked by it as it landed), every path the plan touches still holding
 // the file the plan saw (its SHA-256 read again; a file the author changed since the plan stops
 // the apply, which a new plan takes in), and every file it writes copied from its download beside
@@ -18,8 +18,8 @@
 #include <vector>
 
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_plan.h>
-#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/novaworld_plan.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_trash.h>
 
 namespace opennova::editor {
@@ -40,10 +40,10 @@ struct ApplyResult {
 // would not copy, move or rename (the files renamed into place before it stay; the base is the old
 // one, so a pull again finishes).
 bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
-		const std::vector<project::ProjectFile> &theirs, const ContentBinding &binding,
+		const std::vector<project::ProjectFile> &theirs, const NovaWorldBinding &binding,
 		ApplyResult &result, std::string &error);
 
-// Where a pull lands the download of the file `sha256` (ContentPaths::incoming_dir/<sha256>).
-std::string incoming_path(const ContentPaths &paths, const std::string &sha256);
+// Where a pull lands the download of the file `sha256` (NovaWorldPaths::incoming_dir/<sha256>).
+std::string incoming_path(const NovaWorldPaths &paths, const std::string &sha256);
 
 } // namespace opennova::editor

@@ -1,6 +1,6 @@
 // NovaWorld's part of the editor's session (engine/editor/session/novaworld_controller.h, ADR
 // 0069), driven through the session's requests as the NovaWorld window and the editor MCP send them,
-// over the in-memory service (novaworld_fake_service.h) and accounts kept in memory: every content
+// over the in-memory service (novaworld_fake_service.h) and accounts kept in memory: every NovaWorld
 // request refused with no transport; a sign-in (a person's, refused over the wire) keeping the
 // admin's session and listing the projects, a wrong password refused; a new project bound to the
 // project with no revision and pushed as its first; a get into an empty folder, the project opened
@@ -20,8 +20,8 @@
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_state.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/novaworld_json.h>
 #include <editor/session/preferences_store.h>
@@ -46,7 +46,7 @@ struct Session {
 	editor::ProjectSession session{ platform, preferences };
 
 	explicit Session(FakeService *service) {
-		session.set_content_transport(service);
+		session.set_novaworld_transport(service);
 		session.set_novaworld_accounts(&accounts);
 	}
 	// A request served and what it starts run to its end, as the command line sends one.
@@ -124,7 +124,7 @@ static int test_sign_in() {
 }
 
 static int test_share_through_sessions() {
-	test_temp::TempDir dir("opennova_content_session");
+	test_temp::TempDir dir("opennova_novaworld_session");
 	FakeService service;
 	Session first(&service), second(&service);
 	first.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
@@ -227,13 +227,13 @@ static int test_share_through_sessions() {
 			second.novaworld().history[4].message == "r1");
 	// A working copy of another service's project (a release build's folder opened in a debug
 	// build): refused; and the history goes with the project as it closes.
-	const editor::ContentPaths second_state =
-			editor::ContentPaths::for_project(editor::ProjectPaths::for_root(dir.file("Second")));
-	editor::ContentBinding elsewhere;
+	const editor::NovaWorldPaths second_state =
+			editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(dir.file("Second")));
+	editor::NovaWorldBinding elsewhere;
 	std::string error;
-	TEST_EXPECT(editor::read_content_binding(second_state, elsewhere, error));
+	TEST_EXPECT(editor::read_novaworld_binding(second_state, elsewhere, error));
 	elsewhere.server = "https://elsewhere.test";
-	TEST_EXPECT(editor::write_content_binding(second_state, elsewhere, error));
+	TEST_EXPECT(editor::write_novaworld_binding(second_state, elsewhere, error));
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.refused("novaworld.refused") && second.novaworld().revision == 5);
 	second.send(request::close_project());
@@ -246,7 +246,7 @@ static int test_share_through_sessions() {
 // An expansion's project got: its base game's project comes along where its project file names it
 // (base_project "../MOD"), each folder a working copy of its own project.
 static int test_get_expansion() {
-	test_temp::TempDir dir("opennova_content_session_expansion");
+	test_temp::TempDir dir("opennova_novaworld_session_expansion");
 	FakeService service;
 	const auto file_of = [&](const char *path, const std::string &bytes) {
 		const std::string sha = opennova::io::sha256_hex(bytes.data(), bytes.size());
@@ -271,9 +271,9 @@ static int test_get_expansion() {
 			text == "base");
 	for (const auto &[folder, key] : { std::pair<const char *, const char *>{ "work/EXP", "EXP" },
 				 { "work/MOD", "MOD" } }) {
-		editor::ContentBinding binding;
-		TEST_EXPECT(editor::read_content_binding(
-							editor::ContentPaths::for_project(
+		editor::NovaWorldBinding binding;
+		TEST_EXPECT(editor::read_novaworld_binding(
+							editor::NovaWorldPaths::for_project(
 									editor::ProjectPaths::for_root(dir.file(folder))),
 							binding, error) &&
 				binding.key == key && binding.revision == 1);
@@ -288,12 +288,12 @@ static int test_get_expansion() {
 // opened; an expansion whose base game's project has none still opens, its base folder left
 // unbound (F-4).
 static int test_get_without_revision() {
-	test_temp::TempDir dir("opennova_content_session_no_revision");
+	test_temp::TempDir dir("opennova_novaworld_session_no_revision");
 	const auto bound = [&](const std::string &folder) {
-		editor::ContentBinding binding;
+		editor::NovaWorldBinding binding;
 		std::string error;
-		return editor::read_content_binding(
-				editor::ContentPaths::for_project(editor::ProjectPaths::for_root(folder)), binding,
+		return editor::read_novaworld_binding(
+				editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(folder)), binding,
 				error);
 	};
 	{
@@ -342,6 +342,6 @@ int main() {
 	failures += test_get_expansion();
 	failures += test_get_without_revision();
 	if (failures == 0)
-		std::printf("content_session: all tests passed\n");
+		std::printf("novaworld_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

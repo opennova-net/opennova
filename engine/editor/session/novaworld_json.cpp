@@ -10,25 +10,25 @@ using io::json_number;
 using io::json_string;
 using io::JsonValue;
 
-JsonValue change_or_null(const std::optional<ContentChange> &change) {
-	return change ? json_string(content_change_name(*change)) : JsonValue::make_null();
+JsonValue change_or_null(const std::optional<NovaWorldChange> &change) {
+	return change ? json_string(novaworld_change_name(*change)) : JsonValue::make_null();
 }
 
 } // namespace
 
 JsonValue novaworld_section(const SessionView &view) {
-	const NovaWorldView &content = view.novaworld;
+	const NovaWorldView &novaworld = view.novaworld;
 	JsonValue out = JsonValue::make_object();
-	out.set("available", JsonValue::make_bool(content.available));
+	out.set("available", JsonValue::make_bool(novaworld.available));
 	JsonValue account = JsonValue::make_object();
-	account.set("server", json_string(content.server));
-	account.set("username", json_string(content.username));
-	account.set("role", json_string(content.role));
-	account.set("signed_in", JsonValue::make_bool(content.signed_in));
+	account.set("server", json_string(novaworld.server));
+	account.set("username", json_string(novaworld.username));
+	account.set("role", json_string(novaworld.role));
+	account.set("signed_in", JsonValue::make_bool(novaworld.signed_in));
 	out.set("account", account);
-	out.set("calling", JsonValue::make_bool(content.calling));
+	out.set("calling", JsonValue::make_bool(novaworld.calling));
 	JsonValue projects = JsonValue::make_array();
-	for (const RemoteProject &p : content.projects) {
+	for (const RemoteProject &p : novaworld.projects) {
 		JsonValue project = JsonValue::make_object();
 		project.set("key", json_string(p.key));
 		project.set("title", json_string(p.title));
@@ -40,31 +40,31 @@ JsonValue novaworld_section(const SessionView &view) {
 		projects.push(project);
 	}
 	out.set("projects", projects);
-	out.set("projects_error", json_string(content.projects_error));
+	out.set("projects_error", json_string(novaworld.projects_error));
 	JsonValue binding = JsonValue::make_object();
-	binding.set("bound", JsonValue::make_bool(content.bound));
-	binding.set("key", json_string(content.key));
-	binding.set("revision", json_number(double(content.revision)));
+	binding.set("bound", JsonValue::make_bool(novaworld.bound));
+	binding.set("key", json_string(novaworld.key));
+	binding.set("revision", json_number(double(novaworld.revision)));
 	out.set("binding", binding);
 	JsonValue standing = JsonValue::make_object();
-	standing.set("checked", JsonValue::make_bool(content.checked));
-	standing.set("head_known", JsonValue::make_bool(content.head_known));
-	standing.set("head", json_number(double(content.head)));
-	standing.set("head_error", json_string(content.head_error));
+	standing.set("checked", JsonValue::make_bool(novaworld.checked));
+	standing.set("head_known", JsonValue::make_bool(novaworld.head_known));
+	standing.set("head", json_number(double(novaworld.head)));
+	standing.set("head_error", json_string(novaworld.head_error));
 	JsonValue changes = JsonValue::make_array();
-	for (const LocalChange &c : content.changes) {
+	for (const LocalChange &c : novaworld.changes) {
 		JsonValue change = JsonValue::make_object();
 		change.set("path", json_string(c.path));
-		change.set("change", json_string(content_change_name(c.change)));
+		change.set("change", json_string(novaworld_change_name(c.change)));
 		changes.push(change);
 	}
 	standing.set("changes", changes);
-	standing.set("problems", io::json_string_array(content.problems));
+	standing.set("problems", io::json_string_array(novaworld.problems));
 	out.set("standing", standing);
 	JsonValue pull = JsonValue::make_object();
-	pull.set("revision", json_number(double(content.pull_revision)));
+	pull.set("revision", json_number(double(novaworld.pull_revision)));
 	JsonValue conflicts = JsonValue::make_array();
-	for (const ContentConflictView &c : content.conflicts) {
+	for (const NovaWorldConflictView &c : novaworld.conflicts) {
 		JsonValue conflict = JsonValue::make_object();
 		conflict.set("path", json_string(c.path));
 		conflict.set("mine", change_or_null(c.mine));
@@ -74,7 +74,7 @@ JsonValue novaworld_section(const SessionView &view) {
 	pull.set("conflicts", conflicts);
 	out.set("pull", pull);
 	JsonValue history = JsonValue::make_array();
-	for (const RemoteRevision &revision : content.history) {
+	for (const RemoteRevision &revision : novaworld.history) {
 		JsonValue row = JsonValue::make_object();
 		row.set("number", json_number(double(revision.number)));
 		row.set("author", json_string(revision.author));
@@ -85,8 +85,8 @@ JsonValue novaworld_section(const SessionView &view) {
 		history.push(std::move(row));
 	}
 	out.set("history", history);
-	out.set("history_error", json_string(content.history_error));
-	out.set("last", json_string(content.last));
+	out.set("history_error", json_string(novaworld.history_error));
+	out.set("last", json_string(novaworld.last));
 	return out;
 }
 

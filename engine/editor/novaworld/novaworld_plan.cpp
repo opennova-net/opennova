@@ -1,4 +1,4 @@
-#include <editor/novaworld/content_plan.h>
+#include <editor/novaworld/novaworld_plan.h>
 
 #include <algorithm>
 #include <map>
@@ -31,14 +31,14 @@ bool same(const ProjectFile *a, const ProjectFile *b) {
 }
 
 // What a side did to the base's file: none when it left it as it was.
-std::optional<ContentChange> change_of(const ProjectFile *base, const ProjectFile *side) {
+std::optional<NovaWorldChange> change_of(const ProjectFile *base, const ProjectFile *side) {
 	if (same(base, side))
 		return std::nullopt;
 	if (!base)
-		return ContentChange::Added;
+		return NovaWorldChange::Added;
 	if (!side)
-		return ContentChange::Deleted;
-	return ContentChange::Modified;
+		return NovaWorldChange::Deleted;
+	return NovaWorldChange::Modified;
 }
 
 std::optional<ProjectFile> copy_of(const ProjectFile *file) {
@@ -49,13 +49,13 @@ std::optional<ProjectFile> copy_of(const ProjectFile *file) {
 
 } // namespace
 
-const char *content_change_name(ContentChange change) {
+const char *novaworld_change_name(NovaWorldChange change) {
 	switch (change) {
-		case ContentChange::Added:
+		case NovaWorldChange::Added:
 			return "added";
-		case ContentChange::Modified:
+		case NovaWorldChange::Modified:
 			return "modified";
-		case ContentChange::Deleted:
+		case NovaWorldChange::Deleted:
 			return "deleted";
 	}
 	return "modified";
@@ -76,7 +76,7 @@ std::vector<LocalChange> local_changes(const std::vector<ProjectFile> &base,
 		if (unread_paths.count(path))
 			continue;
 		if (const auto change = change_of(at(base_files, path), at(local_files, path)))
-			if (listed_whole || *change != ContentChange::Deleted)
+			if (listed_whole || *change != NovaWorldChange::Deleted)
 				out.push_back({ path, *change });
 	}
 	return out;
@@ -127,7 +127,7 @@ PullPlan plan_pull(const std::vector<ProjectFile> &base, const std::vector<Proje
 			if (same(b, t))
 				continue;
 			item.step = PullStep::Conflict;
-			item.mine_change = ContentChange::Modified;
+			item.mine_change = NovaWorldChange::Modified;
 			item.unread = true;
 			plan.items.push_back(std::move(item));
 			continue;

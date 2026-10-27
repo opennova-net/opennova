@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <editor/assets/import_choice.h>
-#include <editor/novaworld/content_plan.h>
+#include <editor/novaworld/novaworld_plan.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
@@ -128,8 +128,8 @@ enum class EditorRequestKind {
 	CorrectLine,
 	// NovaWorld (ADR 0069, session/novaworld_controller.h): the account signed in (a person's
 	// password) and out; the projects listed and the open project's standing checked; a project got into
-	// a new folder and opened; the open project bound to a content project; its head pulled, a conflict of
-	// the pull settled, its files pushed as a revision; the content job in hand given up on.
+	// a new folder and opened; the open project bound to a NovaWorld project; its head pulled, a conflict of
+	// the pull settled, its files pushed as a revision; the NovaWorld job in hand given up on.
 	NovaWorldSignIn,
 	NovaWorldSignOut,
 	NovaWorldCheck,
@@ -159,7 +159,7 @@ enum class PickPurpose {
 	NewProjectBase, // the New project form's base game's project
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
 	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
-	NovaWorldFolder // a content project's Get... (ADR 0069): the folder it is got into a folder of its own inside
+	NovaWorldFolder // a NovaWorld project's Get... (ADR 0069): the folder it is got into a folder of its own inside
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
@@ -468,7 +468,7 @@ struct EditorRequest {
 	std::string terrain_view;
 	// NovaWorld (ADR 0069, session/novaworld_controller.h): the service and the account a sign-in
 	// names, its password a person's alone (novaworld_sign_in is served for a person, never over the wire:
-	// ServedBy::SessionNeedsPerson); the content project a get or a bind names; a push's message; and how a
+	// ServedBy::SessionNeedsPerson); the NovaWorld project a get or a bind names; a push's message; and how a
 	// pull's conflict at `path` is settled; a release's version; the revision a restore puts `path`
 	// back as (0: the folder's base, Discard changes).
 	std::string server;

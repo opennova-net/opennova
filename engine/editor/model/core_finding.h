@@ -248,7 +248,7 @@ enum class CoreFinding {
 	MusicStreamAudio,      // appended
 	SourceLine,            // appended
 	NovaWorldRefused,      // ADR 0069, appended: a NovaWorld request that cannot run now
-	NovaWorldFailed,       // a content job that failed: the service's or the folder's reason
+	NovaWorldFailed,       // a NovaWorld job that failed: the service's or the folder's reason
 	NovaWorldConflicts,    // a pull that stopped on conflicts for the author to settle
 	kCount
 };

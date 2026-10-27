@@ -3,12 +3,12 @@
 // A working copy's files as NovaWorld keeps them (ADR 0069): every file the project walk
 // reaches (assets/project_walk.h: no dot-directory, no export folder, so never the machine's own
 // `.opennova/`), the project file with them, and none a machine makes beside a project
-// (content_skips_file), each by its path, its SHA-256 and its size: the manifest a push would send
+// (novaworld_skips_file), each by its path, its SHA-256 and its size: the manifest a push would send
 // (base/project/project_manifest.h). Walked a few files at a time, as the project scan is (ADR
 // 0046 S13 A3): the files are listed first (each directory entry kWalkEntryCost), then hashed in
 // the order of their paths a block at a time (each block its bytes), so a large file spreads
 // over steps and the editor keeps drawing. Each file's SHA-256 is kept in the hash cache
-// (ContentPaths::hashes_file) by its size and last write, and trusted by them alone only when that
+// (NovaWorldPaths::hashes_file) by its size and last write, and trusted by them alone only when that
 // last write lies kFileStampSettle before the pass (io::file_stamp_settled, git's racy rule, as
 // the build's cache), so a warm status of 9,000 files reads no file's bytes. Single-threaded,
 // like the session that steps it.
@@ -24,25 +24,25 @@
 
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_state.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_document.h>
 
 namespace opennova::editor {
 
-inline constexpr int kContentHashCacheSchemaVersion = 1;
+inline constexpr int kNovaWorldHashCacheSchemaVersion = 1;
 
 // Whether a file named `name` (a path's last part) is one a machine makes beside a project's files,
 // never one of them: Windows' Thumbs.db and desktop.ini, macOS's .DS_Store, Blender's numbered
 // backups (`.blend1`, `.blend2`, ...) and the `.tmp` an interrupted atomic save left behind
 // (io::write_file_atomic). Its letters' case aside.
-bool content_skips_file(std::string_view name);
+bool novaworld_skips_file(std::string_view name);
 
-class ContentScan {
+class NovaWorldScan {
 public:
 	// The working copy at `paths.root` whose export folder is `export_dir`
 	// (ProjectPaths::export_dir;
 	// "" for a folder with no project file yet).
-	ContentScan(const ProjectPaths &paths, std::string export_dir);
+	NovaWorldScan(const ProjectPaths &paths, std::string export_dir);
 
 	// One step: files listed or bytes hashed until `budget` bytes are spent (at least one entry or
 	// block, whatever the budget); true once the scan is done.
@@ -89,7 +89,7 @@ private:
 	bool hash_next(uint64_t &spent);
 
 	ProjectPaths paths_;
-	ContentPaths content_;
+	NovaWorldPaths novaworld_;
 	std::filesystem::path root_;
 	std::filesystem::path export_dir_;
 	std::filesystem::recursive_directory_iterator walk_;
@@ -113,7 +113,7 @@ private:
 	Phase phase_ = Phase::Start;
 };
 
-// A working copy's files read to the end in one call (ContentScan with no budget's bound).
-ContentScan scan_content(const ProjectPaths &paths, const std::string &export_dir);
+// A working copy's files read to the end in one call (NovaWorldScan with no budget's bound).
+NovaWorldScan novaworld_scan(const ProjectPaths &paths, const std::string &export_dir);
 
 } // namespace opennova::editor

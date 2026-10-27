@@ -26,9 +26,9 @@ namespace godot {
 
 namespace {
 
-using opennova::editor::ContentAddress;
-using opennova::editor::ContentRequest;
-using opennova::editor::ContentResponse;
+using opennova::editor::NovaWorldAddress;
+using opennova::editor::NovaWorldRequest;
+using opennova::editor::NovaWorldResponse;
 
 // What a read asks of the connection at a time, and how long a worker waits on a connection with
 // nothing for it.
@@ -105,7 +105,7 @@ struct Connection {
 		origin.clear();
 	}
 
-	bool open_for(const ContentAddress &address) const {
+	bool open_for(const NovaWorldAddress &address) const {
 		return client.is_valid() && origin == address.origin() && now_ms() - idle_since < kKeepMs &&
 				client->get_status() == HTTPClient::STATUS_CONNECTED;
 	}
@@ -117,22 +117,22 @@ public:
 			const std::atomic<bool> &stopping) :
 			connection_(connection), exchange_(exchange), stopping_(stopping) {}
 
-	ContentResponse run();
+	NovaWorldResponse run();
 
 private:
 	bool given_up() const { return exchange_.cancelled || stopping_; }
-	bool open(const ContentAddress &address, std::string &error);
+	bool open(const NovaWorldAddress &address, std::string &error);
 	// Polled until the reply's head is in: false with `error` when none came, `retry` when the
 	// connection failed before any of it did.
 	bool await_head(int64_t sending_ms, bool &retry, std::string &error);
-	bool read_body(ContentResponse &out, bool &lost);
+	bool read_body(NovaWorldResponse &out, bool &lost);
 
 	Connection &connection_;
 	const NovaWorldHttp::Exchange &exchange_;
 	const std::atomic<bool> &stopping_;
 };
 
-bool Worker::open(const ContentAddress &address, std::string &error) {
+bool Worker::open(const NovaWorldAddress &address, std::string &error) {
 	connection_.close();
 	if (connection_.client.is_null()) {
 		connection_.client.instantiate();
@@ -209,9 +209,9 @@ bool Worker::await_head(int64_t sending_ms, bool &retry, std::string &error) {
 	return false;
 }
 
-bool Worker::read_body(ContentResponse &out, bool &lost) {
+bool Worker::read_body(NovaWorldResponse &out, bool &lost) {
 	lost = false;
-	const ContentRequest &request = exchange_.request;
+	const NovaWorldRequest &request = exchange_.request;
 	const bool to_file = !request.response_file.empty() && out.status >= 200 && out.status < 300;
 	std::FILE *file = nullptr;
 	if (to_file) {
@@ -277,12 +277,12 @@ bool Worker::read_body(ContentResponse &out, bool &lost) {
 	return true;
 }
 
-ContentResponse Worker::run() {
-	const ContentRequest &request = exchange_.request;
-	ContentResponse out;
-	ContentAddress address;
+NovaWorldResponse Worker::run() {
+	const NovaWorldRequest &request = exchange_.request;
+	NovaWorldResponse out;
+	NovaWorldAddress address;
 	HTTPClient::Method method = HTTPClient::METHOD_GET;
-	if (!opennova::editor::content_address(request.url, address)) {
+	if (!opennova::editor::novaworld_address(request.url, address)) {
 		out.error = "not an address the editor can reach: " + request.url;
 		return out;
 	}
@@ -310,10 +310,10 @@ ContentResponse Worker::run() {
 	const int64_t sending_ms = NovaWorldHttp::kStalledMs + body.size() / kSlowestBytesPerMs;
 	// A connection the far end breaks (a kept one it had closed, or one a store drops mid-reply, as
 	// S3 does now and then over a push's thousands of uploads), or a store's 5xx, costs a request
-	// that may go again another try on a fresh connection, kContentRetries times; any other request
-	// fails (editor::content_goes_again).
+	// that may go again another try on a fresh connection, kNovaWorldRetries times; any other request
+	// fails (editor::novaworld_goes_again).
 	for (int attempt = 0;; ++attempt) {
-		out = ContentResponse();
+		out = NovaWorldResponse();
 		const bool kept = connection_.open_for(address);
 		if (!kept && !open(address, out.error))
 			return out;
@@ -325,7 +325,7 @@ ContentResponse Worker::run() {
 		}
 		bool retry = false;
 		if (!await_head(sending_ms, retry, out.error)) {
-			if (opennova::editor::content_goes_again(request.method, attempt, false, 0, retry))
+			if (opennova::editor::novaworld_goes_again(request.method, attempt, false, 0, retry))
 				continue;
 			return out;
 		}
@@ -343,7 +343,7 @@ ContentResponse Worker::run() {
 		}
 		bool lost = false;
 		out.transport_ok = read_body(out, lost);
-		if (!opennova::editor::content_goes_again(
+		if (!opennova::editor::novaworld_goes_again(
 					request.method, attempt, out.transport_ok, out.status, lost))
 			return out;
 		// A store that answers 5xx asks for the request again (S3's 500 and 503 SlowDown), after a
@@ -367,7 +367,7 @@ NovaWorldHttp::~NovaWorldHttp() {
 		worker.join();
 }
 
-uint64_t NovaWorldHttp::start(opennova::editor::ContentRequest request) {
+uint64_t NovaWorldHttp::start(opennova::editor::NovaWorldRequest request) {
 	auto exchange = std::make_shared<Exchange>();
 	exchange->request = std::move(request);
 	{
@@ -381,7 +381,7 @@ uint64_t NovaWorldHttp::start(opennova::editor::ContentRequest request) {
 	return exchange->id;
 }
 
-bool NovaWorldHttp::poll(uint64_t id, opennova::editor::ContentResponse &out) {
+bool NovaWorldHttp::poll(uint64_t id, opennova::editor::NovaWorldResponse &out) {
 	std::lock_guard<std::mutex> lock(mutex_);
 	const auto it = done_.find(id);
 	if (it == done_.end())
@@ -418,7 +418,7 @@ void NovaWorldHttp::run() {
 			queue_.pop_front();
 			running_[exchange->id] = exchange;
 		}
-		ContentResponse response = Worker(connection, *exchange, stopping_).run();
+		NovaWorldResponse response = Worker(connection, *exchange, stopping_).run();
 		std::lock_guard<std::mutex> lock(mutex_);
 		running_.erase(exchange->id);
 		if (!exchange->cancelled)

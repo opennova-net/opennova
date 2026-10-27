@@ -1,4 +1,4 @@
-#include <editor/session/content_operation.h>
+#include <editor/session/novaworld_operation.h>
 
 #include <algorithm>
 
@@ -6,12 +6,12 @@
 
 namespace opennova::editor {
 
-bool ContentOperation::step(const StepBudget &budget) {
-	return job_->step(std::max<uint64_t>(budget.bytes, 1)) != ContentJobState::Running;
+bool NovaWorldOperation::step(const StepBudget &budget) {
+	return job_->step(std::max<uint64_t>(budget.bytes, 1)) != NovaWorldJobState::Running;
 }
 
-OperationProgress ContentOperation::progress() const {
-	const ContentJobProgress p = job_->progress();
+OperationProgress NovaWorldOperation::progress() const {
+	const NovaWorldJobProgress p = job_->progress();
 	OperationProgress out;
 	out.label = p.label;
 	out.total = p.total;
@@ -22,7 +22,7 @@ OperationProgress ContentOperation::progress() const {
 	return out;
 }
 
-OperationOutcome ContentOperation::finish(SessionCore &) {
+OperationOutcome NovaWorldOperation::finish(SessionCore &) {
 	return controller_.finish_job(kind_, std::move(job_));
 }
 

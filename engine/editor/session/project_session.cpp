@@ -104,7 +104,7 @@ void ProjectSession::set_file_link(FileLink link) {
 	impl_->play.set_file_link(std::move(link));
 }
 
-void ProjectSession::set_content_transport(ContentTransport *transport) {
+void ProjectSession::set_novaworld_transport(NovaWorldTransport *transport) {
 	impl_->novaworld.set_transport(transport);
 }
 

@@ -1,4 +1,4 @@
-#include <editor/novaworld/content_apply.h>
+#include <editor/novaworld/novaworld_apply.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -63,15 +63,15 @@ void remove_empty_folders(const fs::path &root, const fs::path &file) {
 
 } // namespace
 
-std::string incoming_path(const ContentPaths &paths, const std::string &sha256) {
+std::string incoming_path(const NovaWorldPaths &paths, const std::string &sha256) {
 	return join_path(paths.incoming_dir, sha256);
 }
 
 bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
-		const std::vector<project::ProjectFile> &theirs, const ContentBinding &binding,
+		const std::vector<project::ProjectFile> &theirs, const NovaWorldBinding &binding,
 		ApplyResult &result, std::string &error) {
 	result = ApplyResult();
-	const ContentPaths content_paths = ContentPaths::for_project(paths);
+	const NovaWorldPaths novaworld_paths = NovaWorldPaths::for_project(paths);
 	const fs::path root = system_path(paths.root);
 	if (const size_t conflicts = plan.conflicts()) {
 		error = std::to_string(conflicts) +
@@ -80,7 +80,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 	}
 	std::error_code ec;
 	for (const project::ProjectFile &file : plan.downloads()) {
-		const fs::path landed = system_path(incoming_path(content_paths, file.sha256));
+		const fs::path landed = system_path(incoming_path(novaworld_paths, file.sha256));
 		if (!fs::is_regular_file(landed, ec) || fs::file_size(landed, ec) != file.size) {
 			error = "the download of " + file.path + " is missing";
 			return false;
@@ -108,7 +108,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 	// file), so a copy that fails moves nothing and only renames follow the trash. Staged beside
 	// the downloads, on the folder's volume as the trash is: a write's folder may stand where a
 	// file the pull removes is until that file goes.
-	const fs::path staged_dir = system_path(join_path(content_paths.incoming_dir, "staged"));
+	const fs::path staged_dir = system_path(join_path(novaworld_paths.incoming_dir, "staged"));
 	std::vector<fs::path> staged(plan.items.size());
 	for (size_t i = 0; i < plan.items.size(); ++i) {
 		const PullItem &item = plan.items[i];
@@ -116,7 +116,7 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 			continue;
 		staged[i] = staged_dir / std::to_string(i);
 		fs::create_directories(staged_dir, ec);
-		fs::copy_file(system_path(incoming_path(content_paths, item.theirs->sha256)), staged[i],
+		fs::copy_file(system_path(incoming_path(novaworld_paths, item.theirs->sha256)), staged[i],
 				fs::copy_options::overwrite_existing, ec);
 		if (ec) {
 			error = "cannot write " + item.path + ": " + ec.message();
@@ -200,10 +200,10 @@ bool apply_pull(const ProjectPaths &paths, const PullPlan &plan,
 		++result.written;
 	}
 
-	if (!write_content_base(content_paths, theirs, error) ||
-			!write_content_binding(content_paths, binding, error))
+	if (!write_novaworld_base(novaworld_paths, theirs, error) ||
+			!write_novaworld_binding(novaworld_paths, binding, error))
 		return false;
-	fs::remove_all(system_path(content_paths.incoming_dir), ec); // a download kept is only space
+	fs::remove_all(system_path(novaworld_paths.incoming_dir), ec); // a download kept is only space
 	return true;
 }
 

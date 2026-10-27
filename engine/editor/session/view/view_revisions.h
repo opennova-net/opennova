@@ -63,7 +63,7 @@ enum class ViewConcern : uint8_t {
 	// Back or a Forward, a place dropped or moved, and the history cleared with its project.
 	Navigation,
 	// NovaWorldView: NovaWorld's standing (ADR 0069): the account, the projects, the open project's
-	// binding, its changes and its head, a pull's conflicts, the last content job's outcome.
+	// binding, its changes and its head, a pull's conflicts, the last NovaWorld job's outcome.
 	NovaWorld,
 	kCount,
 };

@@ -1,4 +1,4 @@
-#include <editor/novaworld/content_scan.h>
+#include <editor/novaworld/novaworld_scan.h>
 
 #include <algorithm>
 #include <system_error>
@@ -24,7 +24,7 @@ constexpr size_t kHashBlock = 1 << 20;
 
 } // namespace
 
-bool content_skips_file(std::string_view name) {
+bool novaworld_skips_file(std::string_view name) {
 	const std::string lower = strutil::to_lower(name);
 	if (lower == "thumbs.db" || lower == "desktop.ini" || lower == ".ds_store")
 		return true;
@@ -38,21 +38,21 @@ bool content_skips_file(std::string_view name) {
 			[](char c) { return c >= '0' && c <= '9'; });
 }
 
-ContentScan::ContentScan(const ProjectPaths &paths, std::string export_dir) :
+NovaWorldScan::NovaWorldScan(const ProjectPaths &paths, std::string export_dir) :
 		paths_(paths),
-		content_(ContentPaths::for_project(paths)),
+		novaworld_(NovaWorldPaths::for_project(paths)),
 		root_(system_path(paths.root)),
 		export_dir_(export_dir.empty() ? fs::path() : system_path(export_dir)) {}
 
-void ContentScan::load_cache() {
+void NovaWorldScan::load_cache() {
 	std::string message;
 	std::error_code ec;
-	if (!fs::is_regular_file(system_path(content_.hashes_file), ec) ||
-			!io::read_file_text(content_.hashes_file, cache_text_, message))
+	if (!fs::is_regular_file(system_path(novaworld_.hashes_file), ec) ||
+			!io::read_file_text(novaworld_.hashes_file, cache_text_, message))
 		return;
 	io::JsonValue json;
 	if (!io::json_parse(cache_text_, json, message) || !json.is_object() ||
-			json.get_int("schema_version", -1) != kContentHashCacheSchemaVersion)
+			json.get_int("schema_version", -1) != kNovaWorldHashCacheSchemaVersion)
 		return;
 	const io::JsonValue *files = json.get("files");
 	if (!files || !files->is_array())
@@ -73,7 +73,7 @@ void ContentScan::load_cache() {
 	}
 }
 
-bool ContentScan::hash_next(uint64_t &spent) {
+bool NovaWorldScan::hash_next(uint64_t &spent) {
 	const Listed &file = listed_[next_];
 	if (!open_) {
 		const auto cached = cache_.find(file.path);
@@ -128,7 +128,7 @@ bool ContentScan::hash_next(uint64_t &spent) {
 	return true;
 }
 
-void ContentScan::finish() {
+void NovaWorldScan::finish() {
 	// Two paths one file on Windows and macOS: the second (in path order) is no file a store takes.
 	std::sort(files_.begin(), files_.end(),
 			[](const project::ProjectFile &a, const project::ProjectFile &b) {
@@ -151,7 +151,7 @@ void ContentScan::finish() {
 
 	// The cache: the files of this pass alone, each one whose last write had settled.
 	io::JsonValue json = io::JsonValue::make_object();
-	json.set("schema_version", io::JsonValue::make_number(kContentHashCacheSchemaVersion));
+	json.set("schema_version", io::JsonValue::make_number(kNovaWorldHashCacheSchemaVersion));
 	io::JsonValue list = io::JsonValue::make_array();
 	for (const auto &[path, cached] : seen_) {
 		if (!io::file_stamp_settled(cached.modified, pass_began_))
@@ -167,15 +167,15 @@ void ContentScan::finish() {
 	const std::string text = io::json_write(json);
 	if (text != cache_text_) {
 		std::error_code ec;
-		fs::create_directories(system_path(content_.dir), ec);
+		fs::create_directories(system_path(novaworld_.dir), ec);
 		std::string message;
 		io::write_file_atomic(
-				content_.hashes_file, text, message); // a cache not written is only slower
+				novaworld_.hashes_file, text, message); // a cache not written is only slower
 	}
 	phase_ = Phase::Done;
 }
 
-bool ContentScan::step(uint64_t budget) {
+bool NovaWorldScan::step(uint64_t budget) {
 	uint64_t spent = 0;
 	do {
 		switch (phase_) {
@@ -232,7 +232,7 @@ bool ContentScan::step(uint64_t budget) {
 						walk_.disable_recursion_pending();
 				} else if (const bool regular = entry.is_regular_file(ec); ec) {
 					unlisted(utf8_of(path), ec);
-				} else if (regular && !content_skips_file(utf8_of(path.filename()))) {
+				} else if (regular && !novaworld_skips_file(utf8_of(path.filename()))) {
 					Listed file;
 					file.path = utf8_of(fs::relative(path, root_, ec));
 					file.system = path;
@@ -275,8 +275,8 @@ bool ContentScan::step(uint64_t budget) {
 	return done();
 }
 
-ContentScan scan_content(const ProjectPaths &paths, const std::string &export_dir) {
-	ContentScan scan(paths, export_dir);
+NovaWorldScan novaworld_scan(const ProjectPaths &paths, const std::string &export_dir) {
+	NovaWorldScan scan(paths, export_dir);
 	while (!scan.step(UINT64_MAX)) {
 	}
 	return scan;

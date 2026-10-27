@@ -1,4 +1,4 @@
-// NovaWorld's client (engine/editor/novaworld/content_jobs.h, content_api.h, ADR 0069)
+// NovaWorld's client (engine/editor/novaworld/novaworld_jobs.h, novaworld_api.h, ADR 0069)
 // over an in-memory service behind the transport seam, which keeps the routes' contract
 // (apps/novaworld_web/products/project_routes.h: the head, the manifests, the files by SHA-256, the
 // missing files with their uploads, the push on its parent), driving real folders: an admin's
@@ -9,7 +9,7 @@
 // one signing it out; a store reset since the folder's revision, a pull and a push each told to
 // bind again; and a folder the scan could not read whole, refused by a push and a pull, its check
 // counting no deletion. The routes themselves answer the same client over HTTP in
-// tests/novaworld/content_client_routes_test.cpp.
+// tests/novaworld/novaworld_client_routes_test.cpp.
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,10 +24,10 @@
 #include <base/io/os_path.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h>
-#include <editor/novaworld/content_api.h>
-#include <editor/novaworld/content_jobs.h>
-#include <editor/novaworld/content_state.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/novaworld/novaworld_api.h>
+#include <editor/novaworld/novaworld_jobs.h>
+#include <editor/novaworld/novaworld_state.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -51,30 +51,30 @@ editor::NovaWorldAccount account(const char *cookie) {
 	return a;
 }
 
-editor::ContentBinding binding_of(const std::string &root) {
-	editor::ContentBinding binding;
+editor::NovaWorldBinding binding_of(const std::string &root) {
+	editor::NovaWorldBinding binding;
 	std::string error;
-	if (!editor::read_content_binding(
-				editor::ContentPaths::for_project(editor::ProjectPaths::for_root(root)), binding,
+	if (!editor::read_novaworld_binding(
+				editor::NovaWorldPaths::for_project(editor::ProjectPaths::for_root(root)), binding,
 				error))
 		binding = { kServer, "MOD", 0 };
 	return binding;
 }
 
-editor::ContentJobState run(editor::ContentJob &job) {
-	editor::ContentJobState state;
+editor::NovaWorldJobState run(editor::NovaWorldJob &job) {
+	editor::NovaWorldJobState state;
 	int steps = 0;
-	while ((state = job.step(1 << 16)) == editor::ContentJobState::Running && ++steps < 100000) {
+	while ((state = job.step(1 << 16)) == editor::NovaWorldJobState::Running && ++steps < 100000) {
 	}
 	return state;
 }
 
 editor::PushOutcome push(FakeService &service, const std::string &root, const char *message,
 		const char *cookie = kAdminCookie, std::string *error = nullptr) {
-	editor::ContentPush job(service, account(cookie), editor::ProjectPaths::for_root(root), "",
+	editor::NovaWorldPush job(service, account(cookie), editor::ProjectPaths::for_root(root), "",
 			binding_of(root), message);
-	const editor::ContentJobState state = run(job);
-	if (state != editor::ContentJobState::Done) {
+	const editor::NovaWorldJobState state = run(job);
+	if (state != editor::NovaWorldJobState::Done) {
 		if (error)
 			*error = job.error();
 		else
@@ -87,7 +87,7 @@ editor::PushOutcome push(FakeService &service, const std::string &root, const ch
 // The folder's own files and their bytes, the machine's folder aside.
 std::map<std::string, std::string> files_of(const std::string &root) {
 	std::map<std::string, std::string> out;
-	const editor::ContentScan scan = editor::scan_content(editor::ProjectPaths::for_root(root), "");
+	const editor::NovaWorldScan scan = editor::novaworld_scan(editor::ProjectPaths::for_root(root), "");
 	for (const ProjectFile &file : scan.files()) {
 		std::string bytes, error;
 		io::read_file_text(root + "/" + file.path, bytes, error);
@@ -99,7 +99,7 @@ std::map<std::string, std::string> files_of(const std::string &root) {
 } // namespace
 
 static int test_share_and_pull() {
-	test_temp::TempDir dir("opennova_content_client");
+	test_temp::TempDir dir("opennova_novaworld_client");
 	const std::string first = dir.file("First"), second = dir.file("Second");
 	FakeService service;
 
@@ -112,9 +112,9 @@ static int test_share_and_pull() {
 
 	// Got into an empty folder: the same files.
 	{
-		editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(second), "",
+		editor::NovaWorldPull pull(service, account(""), editor::ProjectPaths::for_root(second), "",
 				{ kServer, "MOD", 0 });
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.revision() == 1 &&
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 1 &&
 				!pull.up_to_date());
 		TEST_EXPECT(files_of(second) == files_of(first) && service.downloads == 4);
 	}
@@ -125,9 +125,9 @@ static int test_share_and_pull() {
 	TEST_EXPECT(put(second + "/missions/c.bms", "c2"));
 	TEST_EXPECT(push(service, second, "c2") == editor::PushOutcome::Stale);
 	{
-		editor::ContentPull pull(service, account(kAdminCookie),
+		editor::NovaWorldPull pull(service, account(kAdminCookie),
 				editor::ProjectPaths::for_root(second), "", binding_of(second));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.revision() == 2);
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 2);
 		TEST_EXPECT(pull.applied().written == 1);
 	}
 	TEST_EXPECT(files_of(second).at("defs/a.def") == "a2" &&
@@ -135,9 +135,9 @@ static int test_share_and_pull() {
 	TEST_EXPECT(push(service, second, "c2 over a2") == editor::PushOutcome::Pushed &&
 			service.head == 3);
 	{
-		editor::ContentPull pull(
+		editor::NovaWorldPull pull(
 				service, account(""), editor::ProjectPaths::for_root(first), "", binding_of(first));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.revision() == 3);
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 3);
 	}
 	TEST_EXPECT(files_of(first) == files_of(second));
 
@@ -148,29 +148,29 @@ static int test_share_and_pull() {
 			push(service, first, "b first") == editor::PushOutcome::Pushed && service.head == 4);
 	TEST_EXPECT(put(second + "/art/b.tga", "b-second"));
 	{
-		editor::ContentPull pull(service, account(kAdminCookie),
+		editor::NovaWorldPull pull(service, account(kAdminCookie),
 				editor::ProjectPaths::for_root(second), "", binding_of(second));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::NeedsResolution &&
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::NeedsResolution &&
 				pull.plan().conflicts() == 1);
 		TEST_EXPECT(pull.plan().items.front().path == "art/b.tga");
 		TEST_EXPECT(pull.resolve("art/b.tga", editor::Resolution::KeepMine));
 		pull.resume();
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.revision() == 4);
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 4);
 	}
 	TEST_EXPECT(files_of(second).at("art/b.tga") == "b-second");
 	TEST_EXPECT(
 			push(service, second, "b second") == editor::PushOutcome::Pushed && service.head == 5);
 	{
-		editor::ContentPull pull(
+		editor::NovaWorldPull pull(
 				service, account(""), editor::ProjectPaths::for_root(first), "", binding_of(first));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.revision() == 5);
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.revision() == 5);
 	}
 	TEST_EXPECT(files_of(first).at("art/b.tga") == "b-second");
 	// At the head: a pull changes nothing.
 	{
-		editor::ContentPull pull(
+		editor::NovaWorldPull pull(
 				service, account(""), editor::ProjectPaths::for_root(first), "", binding_of(first));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && pull.up_to_date());
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && pull.up_to_date());
 	}
 	std::printf("share: a first push, a get, a stale push pulled and pushed, a conflict kept and "
 				"taken\n");
@@ -180,23 +180,23 @@ static int test_share_and_pull() {
 // A restore: changes discarded (the base's file back, the folder's own new file gone, a deleted one
 // back), and a file put back as an older revision has it, the base and the binding untouched (a
 // change to push); every file it replaced in the project's trash.
-// The signed URLs a batch's transfers wait on (ContentJob::kSignedBatchBytes): a push asks which of a batch's files the
+// The signed URLs a batch's transfers wait on (NovaWorldJob::kSignedBatchBytes): a push asks which of a batch's files the
 // store lacks, uploads them, then asks of the next; a pull asks where a batch is, downloads it, then asks of the next.
 // So no URL the store signed for an hour waits past its own batch, where every URL was signed before the first
 // transfer. Bounded here at 25 bytes: the 10-byte files go two a batch, the 30-byte one alone; bounded at one file,
 // each its own ask.
 static int test_signed_batches() {
-	test_temp::TempDir dir("opennova_content_batches");
+	test_temp::TempDir dir("opennova_novaworld_batches");
 	const std::string first = dir.file("First"), second = dir.file("Second");
 	FakeService service;
 	TEST_EXPECT(put(first + "/project.opennova", "{}") && put(first + "/a.def", "aaaaaaaaaa") &&
 			put(first + "/b.def", "bbbbbbbbbb") && put(first + "/c.def", std::string(30, 'c')) &&
 			put(first + "/d.def", "dddddddddd"));
 	{
-		editor::ContentPush job(service, account(kAdminCookie), editor::ProjectPaths::for_root(first), "",
+		editor::NovaWorldPush job(service, account(kAdminCookie), editor::ProjectPaths::for_root(first), "",
 				binding_of(first), "First");
 		job.limit_batches(0, 25);
-		TEST_EXPECT(run(job) == editor::ContentJobState::Done && job.outcome() == editor::PushOutcome::Pushed);
+		TEST_EXPECT(run(job) == editor::NovaWorldJobState::Done && job.outcome() == editor::PushOutcome::Pushed);
 	}
 	// The scan's order (by path): a.def, b.def | c.def | d.def, project.opennova.
 	const std::vector<std::string> pushed = { "lacks:2", "put", "put", "lacks:1", "put", "lacks:2", "put", "put" };
@@ -205,9 +205,9 @@ static int test_signed_batches() {
 		for (const std::string &call : service.transfers) std::fprintf(stderr, "  push call %s\n", call.c_str());
 	service.transfers.clear();
 	{
-		editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(second), "", { kServer, "MOD", 0 });
+		editor::NovaWorldPull pull(service, account(""), editor::ProjectPaths::for_root(second), "", { kServer, "MOD", 0 });
 		pull.limit_batches(0, 25);
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done && files_of(second) == files_of(first));
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done && files_of(second) == files_of(first));
 	}
 	const std::vector<std::string> pulled = { "where:2", "get", "get", "where:1", "get", "where:2", "get", "get" };
 	TEST_EXPECT(service.transfers == pulled);
@@ -217,9 +217,9 @@ static int test_signed_batches() {
 	service.transfers.clear();
 	const std::string third = dir.file("Third");
 	{
-		editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(third), "", { kServer, "MOD", 0 });
-		pull.limit_batches(1, editor::ContentJob::kSignedBatchBytes);
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Done);
+		editor::NovaWorldPull pull(service, account(""), editor::ProjectPaths::for_root(third), "", { kServer, "MOD", 0 });
+		pull.limit_batches(1, editor::NovaWorldJob::kSignedBatchBytes);
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Done);
 	}
 	const std::vector<std::string> single = { "where:1", "get", "where:1", "get", "where:1", "get", "where:1", "get",
 		"where:1", "get" };
@@ -228,7 +228,7 @@ static int test_signed_batches() {
 }
 
 static int test_restore() {
-	test_temp::TempDir dir("opennova_content_client_restore");
+	test_temp::TempDir dir("opennova_novaworld_client_restore");
 	const std::string root = dir.file("Folder");
 	FakeService service;
 	TEST_EXPECT(put(root + "/project.opennova", "{}") && put(root + "/defs/a.def", "a1") &&
@@ -237,12 +237,12 @@ static int test_restore() {
 	TEST_EXPECT(put(root + "/defs/a.def", "a2"));
 	TEST_EXPECT(push(service, root, "r2") == editor::PushOutcome::Pushed && service.head == 2);
 	const auto restore = [&](std::vector<std::string> paths, int64_t revision) {
-		editor::ContentPull job(service, account(kAdminCookie), editor::ProjectPaths::for_root(root),
-				"", binding_of(root), editor::ContentRestore{ std::move(paths), revision });
-		const editor::ContentJobState state = run(job);
-		if (state != editor::ContentJobState::Done)
+		editor::NovaWorldPull job(service, account(kAdminCookie), editor::ProjectPaths::for_root(root),
+				"", binding_of(root), editor::NovaWorldRestore{ std::move(paths), revision });
+		const editor::NovaWorldJobState state = run(job);
+		if (state != editor::NovaWorldJobState::Done)
 			std::fprintf(stderr, "restore: %s\n", job.error().c_str());
-		return state == editor::ContentJobState::Done ? job.applied().trash.id : uint64_t(-1);
+		return state == editor::NovaWorldJobState::Done ? job.applied().trash.id : uint64_t(-1);
 	};
 
 	// Discard: a's change undone, the new c gone, the deleted b back.
@@ -267,7 +267,7 @@ static int test_restore() {
 }
 
 static int test_accounts() {
-	test_temp::TempDir dir("opennova_content_client_accounts");
+	test_temp::TempDir dir("opennova_novaworld_client_accounts");
 	const std::string root = dir.file("Folder");
 	FakeService service;
 	TEST_EXPECT(put(root + "/defs/a.def", "a"));
@@ -279,9 +279,9 @@ static int test_accounts() {
 
 	// A renewed session: kept by the account the job leaves.
 	service.renew_next = true;
-	editor::ContentPush renewed(service, account(kAdminCookie),
+	editor::NovaWorldPush renewed(service, account(kAdminCookie),
 			editor::ProjectPaths::for_root(root), "", binding_of(root), "renewed");
-	TEST_EXPECT(run(renewed) == editor::ContentJobState::Done &&
+	TEST_EXPECT(run(renewed) == editor::NovaWorldJobState::Done &&
 			renewed.outcome() == editor::PushOutcome::Pushed);
 	const editor::NovaWorldAccountUpdate update = renewed.take_account();
 	TEST_EXPECT(update.changed && update.account.cookie == kRenewedCookie &&
@@ -290,9 +290,9 @@ static int test_accounts() {
 
 	// An ended session: the job fails and the account is signed out.
 	TEST_EXPECT(put(root + "/defs/a.def", "b"));
-	editor::ContentPush expired(service, account(kExpiredCookie),
+	editor::NovaWorldPush expired(service, account(kExpiredCookie),
 			editor::ProjectPaths::for_root(root), "", binding_of(root), "expired");
-	TEST_EXPECT(run(expired) == editor::ContentJobState::Failed &&
+	TEST_EXPECT(run(expired) == editor::NovaWorldJobState::Failed &&
 			expired.error().find("sign in again") != std::string::npos);
 	const editor::NovaWorldAccountUpdate ended = expired.take_account();
 	TEST_EXPECT(ended.changed && !ended.account.signed_in() && ended.account.server == kServer);
@@ -310,7 +310,7 @@ static int test_accounts() {
 }
 
 static int test_bind_and_check() {
-	test_temp::TempDir dir("opennova_content_client_bind");
+	test_temp::TempDir dir("opennova_novaworld_client_bind");
 	const std::string first = dir.file("First"), kept = dir.file("Kept");
 	FakeService service;
 	TEST_EXPECT(put(first + "/defs/a.def", "a1") && put(first + "/defs/b.def", "b1"));
@@ -323,21 +323,21 @@ static int test_bind_and_check() {
 	TEST_EXPECT(put(kept + "/defs/a.def", "a1") && put(kept + "/defs/b.def", "b1") &&
 			put(kept + "/defs/c.def", "c1"));
 	{
-		editor::ContentBind bind(service, account(kAdminCookie),
+		editor::NovaWorldBind bind(service, account(kAdminCookie),
 				editor::ProjectPaths::for_root(kept), { kServer, "MOD", 0 });
-		TEST_EXPECT(run(bind) == editor::ContentJobState::Done && bind.binding().revision == 2);
+		TEST_EXPECT(run(bind) == editor::NovaWorldJobState::Done && bind.binding().revision == 2);
 	}
 	TEST_EXPECT(binding_of(kept).revision == 2 && files_of(kept).at("defs/a.def") == "a1");
 	{
-		editor::ContentCheck check(
+		editor::NovaWorldCheck check(
 				service, account(""), editor::ProjectPaths::for_root(kept), "", binding_of(kept));
-		TEST_EXPECT(run(check) == editor::ContentJobState::Done && check.remote_known() &&
+		TEST_EXPECT(run(check) == editor::NovaWorldJobState::Done && check.remote_known() &&
 				check.remote().head == 2);
 		const auto &changes = check.changes();
 		TEST_EXPECT(changes.size() == 2 && changes[0].path == "defs/a.def" &&
-				changes[0].change == editor::ContentChange::Modified &&
+				changes[0].change == editor::NovaWorldChange::Modified &&
 				changes[1].path == "defs/c.def" &&
-				changes[1].change == editor::ContentChange::Added);
+				changes[1].change == editor::NovaWorldChange::Added);
 	}
 	// Pushed from there: revision 3 is the kept folder's.
 	TEST_EXPECT(push(service, kept, "kept") == editor::PushOutcome::Pushed && service.head == 3);
@@ -345,9 +345,9 @@ static int test_bind_and_check() {
 	// pull and a push each say to bind again, neither moving anything.
 	{
 		FakeService reset;
-		editor::ContentPull pull(
+		editor::NovaWorldPull pull(
 				reset, account(""), editor::ProjectPaths::for_root(kept), "", binding_of(kept));
-		TEST_EXPECT(run(pull) == editor::ContentJobState::Failed &&
+		TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Failed &&
 				pull.error().find("bind the project again") != std::string::npos);
 		std::string error;
 		push(reset, kept, "after the reset", kAdminCookie, &error);
@@ -358,9 +358,9 @@ static int test_bind_and_check() {
 	// A check whose service will not answer still reads the folder's changes.
 	TEST_EXPECT(put(kept + "/defs/b.def", "b2"));
 	{
-		editor::ContentCheck check(service, account(kExpiredCookie),
+		editor::NovaWorldCheck check(service, account(kExpiredCookie),
 				editor::ProjectPaths::for_root(kept), "", binding_of(kept));
-		TEST_EXPECT(run(check) == editor::ContentJobState::Done && !check.remote_known() &&
+		TEST_EXPECT(run(check) == editor::NovaWorldJobState::Done && !check.remote_known() &&
 				!check.remote_error().empty() && check.changes().size() == 1);
 	}
 	// A project with no revision yet: bound at none, every file the first push's.
@@ -368,9 +368,9 @@ static int test_bind_and_check() {
 	const std::string fresh = dir.file("Fresh");
 	TEST_EXPECT(put(fresh + "/defs/a.def", "a"));
 	{
-		editor::ContentBind bind(empty, account(kAdminCookie),
+		editor::NovaWorldBind bind(empty, account(kAdminCookie),
 				editor::ProjectPaths::for_root(fresh), { kServer, "MOD", 0 });
-		TEST_EXPECT(run(bind) == editor::ContentJobState::Done && bind.binding().revision == 0);
+		TEST_EXPECT(run(bind) == editor::NovaWorldJobState::Done && bind.binding().revision == 0);
 	}
 	TEST_EXPECT(push(empty, fresh, "first") == editor::PushOutcome::Pushed && empty.head == 1);
 	std::printf("bind and check: a kept folder bound at the head, its changes read, offline too\n");
@@ -384,20 +384,20 @@ static int test_bind_and_check() {
 // too and a check counts no file the list lacks as deleted (C-11). The cases a system cannot make
 // (case-insensitive names; no search permission enforced, as for root or on Windows) say so.
 static int test_incomplete_folder() {
-	test_temp::TempDir dir("opennova_content_client_incomplete");
+	test_temp::TempDir dir("opennova_novaworld_client_incomplete");
 	const std::string root = dir.file("Project");
 	FakeService service;
 	TEST_EXPECT(put(root + "/project.opennova", "{}") && put(root + "/defs/a.def", "a1") &&
 			put(root + "/locked/c.def", "c1"));
 	TEST_EXPECT(push(service, root, "r1") == editor::PushOutcome::Pushed && service.head == 1);
-	const editor::ContentBinding bound = binding_of(root);
+	const editor::NovaWorldBinding bound = binding_of(root);
 	TEST_EXPECT(bound.revision == 1);
 	std::string error;
 
 	{
-		editor::ContentPush gone(service, account(kAdminCookie),
+		editor::NovaWorldPush gone(service, account(kAdminCookie),
 				editor::ProjectPaths::for_root(dir.file("Gone")), "", bound, "gone");
-		TEST_EXPECT(run(gone) == editor::ContentJobState::Failed &&
+		TEST_EXPECT(run(gone) == editor::NovaWorldJobState::Failed &&
 				gone.error().find("could not all be listed") != std::string::npos);
 		TEST_EXPECT(service.head == 1);
 	}
@@ -437,17 +437,17 @@ static int test_incomplete_folder() {
 		push(service, root, "locked", kAdminCookie, &error);
 		TEST_EXPECT(error.find("could not all be listed") != std::string::npos && service.head == 1);
 		{
-			editor::ContentCheck check(
+			editor::NovaWorldCheck check(
 					service, account(""), editor::ProjectPaths::for_root(root), "", bound);
-			TEST_EXPECT(run(check) == editor::ContentJobState::Done && !check.problems().empty());
+			TEST_EXPECT(run(check) == editor::NovaWorldJobState::Done && !check.problems().empty());
 			TEST_EXPECT(check.changes().size() == 1 && check.changes()[0].path == "defs/a.def" &&
-					check.changes()[0].change == editor::ContentChange::Modified);
+					check.changes()[0].change == editor::NovaWorldChange::Modified);
 		}
 		{
 			// A pull from before the head, over the same folder.
-			editor::ContentPull pull(service, account(""), editor::ProjectPaths::for_root(root), "",
+			editor::NovaWorldPull pull(service, account(""), editor::ProjectPaths::for_root(root), "",
 					{ kServer, "MOD", 0 });
-			TEST_EXPECT(run(pull) == editor::ContentJobState::Failed &&
+			TEST_EXPECT(run(pull) == editor::NovaWorldJobState::Failed &&
 					pull.error().find("a pull compares every file") != std::string::npos);
 		}
 		std::printf("incomplete: a folder listed but not looked into refuses the push and the "
@@ -466,19 +466,19 @@ static int test_api_shapes() {
 	// The server as the client keeps it, and the session cookie a login reply signs in.
 	TEST_EXPECT(editor::novaworld_server(" opennova.net/ ") == "https://opennova.net");
 	TEST_EXPECT(editor::novaworld_server("http://127.0.0.1:8080") == "http://127.0.0.1:8080");
-	const editor::ContentRequest login = editor::content_api::login("opennova.net", "taylor", "pw");
+	const editor::NovaWorldRequest login = editor::novaworld_api::login("opennova.net", "taylor", "pw");
 	TEST_EXPECT(login.url == "https://opennova.net/api/login" && login.method == "POST");
-	editor::ContentResponse reply = json(200, io::JsonValue::make_object());
+	editor::NovaWorldResponse reply = json(200, io::JsonValue::make_object());
 	reply.body = "{\"id\": 7, \"username\": \"taylor\", \"role\": \"admin\"}";
 	reply.headers = { { "Set-Cookie", "other=1; Path=/" },
 		{ "set-cookie", "__Host-opennova_session=tok; Path=/; Secure; HttpOnly" } };
 	editor::NovaWorldAccount signed_in;
 	signed_in.server = "https://opennova.net";
-	editor::ContentApiError error;
-	TEST_EXPECT(editor::content_api::read_login(reply, signed_in, error) &&
+	editor::NovaWorldApiError error;
+	TEST_EXPECT(editor::novaworld_api::read_login(reply, signed_in, error) &&
 			signed_in.cookie == "__Host-opennova_session=tok" && signed_in.admin());
 	// An upload the service's route takes carries the session; one to the store's own URL does not.
-	editor::ContentResponse missing = json(200, io::JsonValue::make_object());
+	editor::NovaWorldResponse missing = json(200, io::JsonValue::make_object());
 	missing.body = "{\"missing\": [{\"sha256\": \"" + std::string(64, 'a') +
 			"\", \"size\": 3, \"upload\": {\"method\": \"PUT\", \"url\": "
 			"\"/api/products/JO/blobs/x\", "
@@ -488,9 +488,9 @@ static int test_api_shapes() {
 			"\"https://bucket.s3/key?sig=1\", "
 			"\"headers\": {\"x-amz-checksum-sha256\": \"abc\"}}}]}";
 	std::vector<editor::UploadTarget> targets;
-	TEST_EXPECT(editor::content_api::read_missing(missing, signed_in, targets, error) &&
+	TEST_EXPECT(editor::novaworld_api::read_missing(missing, signed_in, targets, error) &&
 			targets.size() == 2);
-	const auto has = [](const editor::ContentRequest &r, const std::string &name) {
+	const auto has = [](const editor::NovaWorldRequest &r, const std::string &name) {
 		for (const auto &[key, value] : r.headers)
 			if (key == name)
 				return true;
@@ -505,36 +505,36 @@ static int test_api_shapes() {
 	return 0;
 }
 
-// The Shell's transport's rules (godot/src/authoring/novaworld_http, over editor::content_address and
-// content_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
+// The Shell's transport's rules (godot/src/authoring/novaworld_http, over editor::novaworld_address and
+// novaworld_goes_again): the URLs it reaches, and which request goes again on a fresh connection.
 static int test_transport_rules() {
-	editor::ContentAddress at;
-	TEST_EXPECT(editor::content_address("https://opennova.net/api/products?x=1#top", at) &&
+	editor::NovaWorldAddress at;
+	TEST_EXPECT(editor::novaworld_address("https://opennova.net/api/products?x=1#top", at) &&
 			at.tls && at.host == "opennova.net" && at.port == 443 &&
 			at.target == "/api/products?x=1" && at.origin() == "https://opennova.net:443");
-	TEST_EXPECT(editor::content_address("http://127.0.0.1:8080", at) && !at.tls &&
+	TEST_EXPECT(editor::novaworld_address("http://127.0.0.1:8080", at) && !at.tls &&
 			at.host == "127.0.0.1" && at.port == 8080 && at.target == "/");
-	TEST_EXPECT(editor::content_address("https://bucket.s3?sig=1", at) && at.target == "/?sig=1");
-	TEST_EXPECT(editor::content_address("https://host#only", at) && at.target == "/");
+	TEST_EXPECT(editor::novaworld_address("https://bucket.s3?sig=1", at) && at.target == "/?sig=1");
+	TEST_EXPECT(editor::novaworld_address("https://host#only", at) && at.target == "/");
 	for (const char *refused : { "ftp://host/x", "opennova.net/api", "https://user@host/",
 				 "http://[::1]:80/", "http://host:0/", "http://host:65536/", "http://host:x/",
 				 "https:///path", "" })
-		TEST_EXPECT(!editor::content_address(refused, at));
+		TEST_EXPECT(!editor::novaworld_address(refused, at));
 
 	// A GET, PUT or DELETE goes again after a broken connection or a 5xx, three more times; a POST
 	// (a push, a sign-in) never does; a reply below 500, or a transfer that stalled, is the answer.
-	TEST_EXPECT(editor::kContentRetries == 3);
-	TEST_EXPECT(editor::content_goes_again("GET", 0, false, 0, true));
-	TEST_EXPECT(editor::content_goes_again("PUT", 2, true, 503, false));
-	TEST_EXPECT(editor::content_goes_again("DELETE", 1, true, 500, false));
-	TEST_EXPECT(!editor::content_goes_again("PUT", 3, true, 503, false));
-	TEST_EXPECT(!editor::content_goes_again("GET", 3, false, 0, true));
-	TEST_EXPECT(!editor::content_goes_again("POST", 0, false, 0, true));
-	TEST_EXPECT(!editor::content_goes_again("POST", 0, true, 503, false));
-	TEST_EXPECT(!editor::content_goes_again("GET", 0, true, 200, false));
-	TEST_EXPECT(!editor::content_goes_again("GET", 0, true, 404, false));
-	TEST_EXPECT(!editor::content_goes_again("GET", 0, false, 0, false)); // stalled, given up
-	TEST_EXPECT(!editor::content_goes_again("GET", 0, false, 503, false)); // no whole reply
+	TEST_EXPECT(editor::kNovaWorldRetries == 3);
+	TEST_EXPECT(editor::novaworld_goes_again("GET", 0, false, 0, true));
+	TEST_EXPECT(editor::novaworld_goes_again("PUT", 2, true, 503, false));
+	TEST_EXPECT(editor::novaworld_goes_again("DELETE", 1, true, 500, false));
+	TEST_EXPECT(!editor::novaworld_goes_again("PUT", 3, true, 503, false));
+	TEST_EXPECT(!editor::novaworld_goes_again("GET", 3, false, 0, true));
+	TEST_EXPECT(!editor::novaworld_goes_again("POST", 0, false, 0, true));
+	TEST_EXPECT(!editor::novaworld_goes_again("POST", 0, true, 503, false));
+	TEST_EXPECT(!editor::novaworld_goes_again("GET", 0, true, 200, false));
+	TEST_EXPECT(!editor::novaworld_goes_again("GET", 0, true, 404, false));
+	TEST_EXPECT(!editor::novaworld_goes_again("GET", 0, false, 0, false)); // stalled, given up
+	TEST_EXPECT(!editor::novaworld_goes_again("GET", 0, false, 503, false)); // no whole reply
 	std::printf("transport: the URLs it reaches, a request that may go again\n");
 	return 0;
 }
@@ -550,6 +550,6 @@ int main() {
 	failures += test_api_shapes();
 	failures += test_transport_rules();
 	if (failures == 0)
-		std::printf("content_client: all tests passed\n");
+		std::printf("novaworld_client: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
