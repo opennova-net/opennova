@@ -581,7 +581,10 @@ if(BUILD_NOVAWORLD_HTTP)
     # upload checked by its SHA-256, a stale push told the head, the head's files, a missing file
     # and a manifest out of its form refused), the history, manifest and files read back, a file
     # the store got directly held once a push names it, a game's project made, renamed (its
-    # files moving under the new key) and deleted through the games' routes, and a release built.
+    # files moving under the new key) and deleted through the games' routes, a release built, and
+    # an account's own projects (made with every refusal, read, changed and pushed by the one
+    # rule, listed, their quota, the account's page, deleted with their purges, the account's
+    # delete taking them).
     add_executable(project_routes_test novaworld/project_routes_test.cpp)
     target_link_libraries(project_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
@@ -1146,9 +1149,10 @@ opennova_add_pg_test(product_repository COMMAND product_repository_test)
 set_tests_properties(product_repository PROPERTIES TIMEOUT 300)
 
 # The projects' rows (products/project_repository.h, ADR 0069): the seeded
-# games' projects and who lists them, a project made, renamed and gone with its game, the files a
-# store holds, pushes moving the head one at a time (the loser told the winner) and the history
-# paged.
+# games' projects and who lists them, the one rule of who reads, manages and pushes, a project
+# made, renamed and gone with its game, an account's own projects (listed, counted, capped,
+# deleted with their purges, product_jobs.h), the files a store holds, pushes moving the head one
+# at a time (the loser told the winner) and the history paged.
 add_executable(project_repository_test novaworld/project_repository_test.cpp)
 target_link_libraries(project_repository_test PRIVATE
     opennova_novaworld_products opennova_novaworld_service Threads::Threads)

@@ -145,7 +145,9 @@ int test_products() {
 	ts.visibility = "private";
 	int64_t ts_id = 0;
 	TEST_EXPECT(create_product(db, ts, ts_id) == ProductOutcome::Ok);
-	TEST_EXPECT(create_product(db, ts, ignored) == ProductOutcome::DuplicateExpansion);
+	NewProduct again = ts; // the key checked before the code
+	again.key = "SABRE2";
+	TEST_EXPECT(create_product(db, again, ignored) == ProductOutcome::DuplicateExpansion);
 	NewProduct orphan = ts;
 	orphan.expansion_code = "bhx02";
 	orphan.key = "ORPHAN";

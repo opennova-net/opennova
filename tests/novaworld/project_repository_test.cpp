@@ -1,14 +1,18 @@
 // The projects' rows (apps/novaworld_common/products/project_repository.h, ADR 0069) on a
 // migrated database of the test's own: the five seeded games' projects (the retail ones private,
-// each expansion on its base game) and who may list them, the runtime none; a game's project made,
-// renamed and refused through the games' rows (product_repository.h: a duplicate key) and gone
-// with its game; the files a store holds, each once and at its size; pushes moving the head one at
-// a time, the push that lost told the head that won, a game with no project taking none; the
-// history newest first, a page of it, and an author's name kept past their account.
+// each expansion on its base game) and who may list them, the runtime none; the one rule of who
+// reads, manages and pushes a project (project_rights); a game's project made, renamed and refused
+// through the games' rows (product_repository.h: a duplicate key) and gone with its game; an
+// account's own projects (made, listed for their owner, counted to their cap, their stores' bytes
+// together, deleted with their purges queued before the account goes, product_jobs.h); the files
+// a store holds, each once and at its size; pushes moving the head one at a time, the push that
+// lost told the head that won, a game with no project taking none; the history newest first, a
+// page of it, and an author's name kept past their account.
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
 
+#include "products/product_jobs.h"
 #include "products/product_repository.h"
 #include "products/project_repository.h"
 
@@ -82,11 +86,12 @@ static int test_seeded_projects() {
 	TEST_EXPECT(game.id && expansion.id && jo_set.id && jox_set.id && dfx2_set.id);
 
 	// Every project by key, each byte before the next; our two the public ones.
-	const std::vector<hosted::ProductRow> all = hosted::list_projects(db, true);
+	const std::vector<hosted::ProductRow> all = hosted::list_projects(db, true, std::nullopt);
 	TEST_EXPECT(all.size() == 5);
 	for (size_t i = 0; i < all.size(); ++i)
 		TEST_EXPECT(all[i].head == 0 && (i == 0 || all[i - 1].key < all[i].key));
-	const std::vector<hosted::ProductRow> visible = hosted::list_projects(db, false);
+	const std::vector<hosted::ProductRow> visible =
+			hosted::list_projects(db, false, std::nullopt);
 	TEST_EXPECT(visible.size() == 2 && visible[0].key < visible[1].key);
 	for (const hosted::ProductRow &p : visible)
 		TEST_EXPECT(p.key == game.login || p.key == expansion.login);
@@ -97,7 +102,8 @@ static int test_seeded_projects() {
 			   own_expansion = project(db, expansion.login);
 	TEST_EXPECT(own_game && own_expansion);
 	TEST_EXPECT(own_game->display_name == game.name && project_is_public(*own_game) &&
-			!own_game->retail && !own_game->parent_id && own_game->id == game.id);
+			!own_game->retail && !own_game->parent_id && own_game->id == game.id &&
+			!own_game->owner_id && own_game->owner.empty());
 	TEST_EXPECT(own_expansion->display_name == expansion.name &&
 			project_is_public(*own_expansion) && !own_expansion->retail &&
 			own_expansion->parent_id == own_game->id && own_expansion->id == expansion.id);
@@ -115,7 +121,7 @@ static int test_seeded_projects() {
 	// The apps: keyed, with no project.
 	TEST_EXPECT(hosted::find_product_by_key(db, "ONRUNTIME") &&
 			!project_is_public(*hosted::find_product_by_key(db, "ONRUNTIME")));
-	for (const hosted::ProductRow &p : hosted::list_projects(db, true))
+	for (const hosted::ProductRow &p : hosted::list_projects(db, true, std::nullopt))
 		TEST_EXPECT(p.kind != hosted::ProductKind::App);
 	TEST_EXPECT(valid_key("JOX01") && valid_key("A_1") && !valid_key("") && !valid_key("jo") &&
 			!valid_key("SEVENTEEN_LETTERS") && !valid_key("A-B"));
@@ -178,6 +184,198 @@ static int test_project_writes() {
 						  { BindValue(id) })
 						.empty());
 	std::printf("projects: made with their games, renamed, refused, gone with them\n");
+	return 0;
+}
+
+// The one rule every project route answers by: a public and a private project of the service's
+// own, an account's own (private, then public) and an app, as no one, a player, the account that
+// owns the one, an admin's session and the admin token (which reads and manages, and never pushes:
+// it names no author).
+static int test_access_rule() {
+	hosted::ProductRow open, closed, owned, app;
+	open.kind = closed.kind = owned.kind = hosted::ProductKind::Game;
+	open.visibility = "public";
+	closed.visibility = "private";
+	owned.visibility = "private";
+	owned.owner_id = 7;
+	app.kind = hosted::ProductKind::App;
+	const ProjectCaller anyone{}, player{ 8, false }, owner{ 7, false }, admin{ 9, true },
+			token{ std::nullopt, true };
+	struct Case {
+		const hosted::ProductRow *project;
+		const ProjectCaller *caller;
+		bool read, manage, push;
+	};
+	const Case cases[] = {
+		{ &open, &anyone, true, false, false },
+		{ &open, &player, true, false, false },
+		{ &open, &owner, true, false, false },
+		{ &open, &admin, true, true, true },
+		{ &open, &token, true, true, false },
+		{ &closed, &anyone, false, false, false },
+		{ &closed, &player, false, false, false },
+		{ &closed, &owner, false, false, false },
+		{ &closed, &admin, true, true, true },
+		{ &closed, &token, true, true, false },
+		{ &owned, &anyone, false, false, false },
+		{ &owned, &player, false, false, false },
+		{ &owned, &owner, true, true, true },
+		{ &owned, &admin, true, true, true },
+		{ &owned, &token, true, true, false },
+		{ &app, &anyone, false, false, false },
+		{ &app, &admin, false, false, false },
+	};
+	for (const Case &c : cases) {
+		const ProjectRights rights = project_rights(*c.project, *c.caller);
+		TEST_EXPECT(rights.read == c.read && rights.manage == c.manage && rights.push == c.push);
+	}
+	// Made public, anyone reads it; of the players its owner alone changes and pushes it.
+	owned.visibility = "public";
+	TEST_EXPECT(project_rights(owned, anyone).read && !project_rights(owned, anyone).push);
+	TEST_EXPECT(project_rights(owned, player).read && !project_rights(owned, player).manage &&
+			!project_rights(owned, player).push);
+	TEST_EXPECT(project_rights(owned, owner).manage && project_rights(owned, owner).push);
+	std::printf("access: read, manage and push by the one rule\n");
+	return 0;
+}
+
+// An account's own projects: a game with no lobby and an expansion of it made, the owner named on
+// each; listed for their owner beside the public ones; their stores' bytes counted together; at
+// most kOwnedProjectsMax an account; deleted with their purges queued (product_jobs.h
+// delete_owned_products), refused (nothing deleted) while another account's expansion builds on
+// one, none queued without a store; and gone with the account's row all the same.
+static int test_owned_projects() {
+	TestDatabase tdb;
+	Database db = tdb.open();
+	const auto player = [&db](const char *name, const char *pcid) {
+		db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+				"VALUES ($1, 'x', $2, '1', $1);",
+				{ BindValue(name), BindValue(pcid) });
+		const auto rows =
+				db.query("SELECT id FROM players WHERE username = $1;", { BindValue(name) });
+		return rows.empty() ? int64_t(0) : rows.front().as_int(0).value_or(0);
+	};
+	const auto keys = [](const std::vector<hosted::ProductRow> &rows) {
+		std::vector<std::string> out;
+		for (const hosted::ProductRow &r : rows)
+			out.push_back(r.key);
+		return out;
+	};
+	const auto purges = [&db] {
+		const auto rows = db.query("SELECT count(*) FROM jobs WHERE kind = 'product.purge';");
+		return rows.empty() ? int64_t(0) : rows.front().as_int(0).value_or(0);
+	};
+	const int64_t ann = player("ann", "0a110001"), bob = player("bob", "0a110002"),
+				  cal = player("cal", "0a110003");
+	TEST_EXPECT(ann && bob && cal);
+
+	hosted::NewProduct game;
+	game.display_name = "Ann's game";
+	game.kind = hosted::ProductKind::Game;
+	game.title = "jo";
+	game.key = "ANNGAME";
+	game.visibility = "private";
+	game.created_by = "player ann";
+	game.owner_id = ann;
+	int64_t game_id = 0, mod_id = 0;
+	TEST_EXPECT(hosted::create_product(db, game, game_id) == hosted::ProductOutcome::Ok);
+	hosted::NewProduct mod;
+	mod.display_name = "Ann's mod";
+	mod.kind = hosted::ProductKind::Expansion;
+	mod.parent_id = game_id;
+	mod.expansion_code = "annmod";
+	mod.key = "ANNMOD";
+	mod.visibility = "public";
+	mod.created_by = "player ann";
+	mod.owner_id = ann;
+	TEST_EXPECT(hosted::create_product(db, mod, mod_id) == hosted::ProductOutcome::Ok);
+	const auto made = hosted::find_product(db, game_id);
+	TEST_EXPECT(made && made->owner_id == ann && made->owner == "ann" && made->lobby.empty() &&
+			!made->retail && made->updater_login.empty() && made->visibility == "private");
+	TEST_EXPECT(hosted::find_product(db, mod_id)->owner == "ann");
+
+	// Listed: the public ones and the reader's own; every one for an admin.
+	TEST_EXPECT((keys(hosted::list_projects(db, false, ann)) ==
+			std::vector<std::string>{ "ACIDGAMBIT", "ANNGAME", "ANNMOD", "NIFTY" }));
+	TEST_EXPECT((keys(hosted::list_projects(db, false, bob)) ==
+			std::vector<std::string>{ "ACIDGAMBIT", "ANNMOD", "NIFTY" }));
+	TEST_EXPECT((keys(hosted::list_projects(db, false, std::nullopt)) ==
+			std::vector<std::string>{ "ACIDGAMBIT", "ANNMOD", "NIFTY" }));
+	TEST_EXPECT(hosted::list_projects(db, true, std::nullopt).size() == 7);
+	TEST_EXPECT((keys(hosted::list_owned_projects(db, ann)) ==
+			std::vector<std::string>{ "ANNGAME", "ANNMOD" }));
+	TEST_EXPECT(hosted::list_owned_projects(db, bob).empty());
+
+	// What their stores hold together: a file each holds counts in each.
+	record_blobs(db, game_id, { { kShaA, 100 } });
+	record_blobs(db, mod_id, { { kShaA, 100 }, { kShaB, 50 } });
+	OwnedUsage usage = owned_usage(db, ann);
+	TEST_EXPECT(usage.projects == 2 && usage.bytes == 250);
+	usage = owned_usage(db, bob);
+	TEST_EXPECT(usage.projects == 0 && usage.bytes == 0);
+
+	// At most kOwnedProjectsMax an account.
+	for (int64_t i = 2; i < hosted::kOwnedProjectsMax; ++i) {
+		hosted::NewProduct more = game;
+		more.key = "ANN" + std::to_string(i);
+		int64_t id = 0;
+		TEST_EXPECT(hosted::create_product(db, more, id) == hosted::ProductOutcome::Ok);
+	}
+	hosted::NewProduct past = game;
+	past.key = "ANNPAST";
+	int64_t ignored = 0;
+	TEST_EXPECT(hosted::create_product(db, past, ignored) ==
+			hosted::ProductOutcome::TooManyProjects);
+	TEST_EXPECT(owned_usage(db, ann).projects == hosted::kOwnedProjectsMax &&
+			!hosted::find_product_by_key(db, "ANNPAST"));
+
+	// Bob's mod of Ann's game keeps Ann's projects from going, none of them deleted and no
+	// purge queued; Bob's own go first, each purge queued.
+	hosted::NewProduct bobs = mod;
+	bobs.display_name = "Bob's mod";
+	bobs.expansion_code = "bobmod";
+	bobs.key = "BOBMOD";
+	bobs.created_by = "player bob";
+	bobs.owner_id = bob;
+	int64_t bobs_id = 0;
+	TEST_EXPECT(hosted::create_product(db, bobs, bobs_id) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(
+			hosted::delete_owned_products(db, ann, true) == hosted::ProductOutcome::HasExpansion);
+	TEST_EXPECT(owned_usage(db, ann).projects == hosted::kOwnedProjectsMax && purges() == 0);
+	TEST_EXPECT(hosted::delete_owned_products(db, bob, true) == hosted::ProductOutcome::Ok &&
+			!hosted::find_product(db, bobs_id) && purges() == 1);
+	// Then Ann's: the expansion before the game it builds on, each purge queued with its id.
+	TEST_EXPECT(hosted::delete_owned_products(db, ann, true) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(owned_usage(db, ann).projects == 0 && !hosted::find_product(db, game_id) &&
+			!hosted::find_product(db, mod_id) && purges() == 1 + hosted::kOwnedProjectsMax);
+	TEST_EXPECT(db.query("SELECT 1 FROM jobs WHERE kind = 'product.purge' AND "
+						 "(payload->>'product_id')::bigint = $1;",
+						  { BindValue(game_id) })
+						.size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM project_blobs WHERE product_id IN ($1, $2);",
+						  { BindValue(game_id), BindValue(mod_id) })
+						.empty());
+	// Without a store (no objects) none is queued.
+	hosted::NewProduct cals = game;
+	cals.key = "CALGAME";
+	cals.owner_id = cal;
+	int64_t cals_id = 0;
+	TEST_EXPECT(hosted::create_product(db, cals, cals_id) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(hosted::delete_owned_products(db, cal, false) == hosted::ProductOutcome::Ok &&
+			!hosted::find_product(db, cals_id) && purges() == 1 + hosted::kOwnedProjectsMax);
+
+	// An account's row going takes its projects with it all the same, a game and its expansion in
+	// the one delete.
+	game.key = "CALGAME2";
+	game.owner_id = cal;
+	TEST_EXPECT(hosted::create_product(db, game, game_id) == hosted::ProductOutcome::Ok);
+	mod.parent_id = game_id;
+	mod.key = "CALMOD";
+	mod.owner_id = cal;
+	TEST_EXPECT(hosted::create_product(db, mod, mod_id) == hosted::ProductOutcome::Ok);
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(cal) });
+	TEST_EXPECT(!hosted::find_product(db, game_id) && !hosted::find_product(db, mod_id));
+	std::printf("owned: listed for their owner, counted, capped, deleted with their purges\n");
 	return 0;
 }
 
@@ -267,7 +465,9 @@ int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
 	failures += test_seeded_projects();
+	failures += test_access_rule();
 	failures += test_project_writes();
+	failures += test_owned_projects();
 	failures += test_blobs();
 	failures += test_pushes();
 	if (failures == 0)
