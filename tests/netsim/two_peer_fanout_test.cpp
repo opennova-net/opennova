@@ -2357,6 +2357,7 @@ bool run_vehicle_drive_authority() {
 		veh.kind = w::EntityKind::Item;
 		veh.has_item_def = true; // seats need the def (D-NET-422)
 		veh.item_id = 0x1004;
+		veh.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};

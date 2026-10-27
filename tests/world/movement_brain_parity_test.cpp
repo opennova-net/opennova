@@ -201,6 +201,7 @@ void crowded_brain_tick() {
         for (int i = 0; i < count; ++i) {
             Entity seed;
             seed.item_id = 77;
+            seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
             seed.health = 100;
             seed.motor_suspended = true;
             const auto h = w.registry.spawn(1, seed);

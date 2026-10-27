@@ -3033,6 +3033,7 @@ void test_epilog_entity_update() {
     prop.has_item_def = true;
     prop.has_graphic_model = true;
     prop.item_id = 999;
+    prop.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     prop.position = {50.0f, 60.0f, 7.0f};
     prop.health = 100;
     prop.alive = true;

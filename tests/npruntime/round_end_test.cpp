@@ -1340,6 +1340,7 @@ void test_flag_timeout_wire_transaction() {
 	w::Entity red_flag;
 	red_flag.kind = w::EntityKind::Item;
 	red_flag.item_id = 4093;
+	red_flag.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	w::ItemDeathTraits flag_traits;
 	flag_traits.death_class = w::ItemDeathClass::kFlag;
 	world.tables.item_death_traits.set(red_flag.item_id, flag_traits);

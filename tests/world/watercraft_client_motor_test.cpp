@@ -2070,6 +2070,7 @@ bool run_physicsless_air_dispatches_directly() {
 	w::Entity air_seed;
 	air_seed.kind = w::EntityKind::Item;
 	air_seed.item_id = 6001;
+	air_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	air_seed.position = {100.0f, 200.0f, 60.0f};
 	air_seed.heading = w::placed_heading_bam(90);
 	air_seed.health = 3000;
@@ -2147,6 +2148,7 @@ bool run_client_family_sound_dispatch_scope() {
 		w::Entity seed;
 		seed.kind = w::EntityKind::Item;
 		seed.item_id = item_id;
+		seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 		seed.position = {x, 200.0f, 60.0f};
 		seed.heading = w::placed_heading_bam(90);
 		seed.health = 3000;

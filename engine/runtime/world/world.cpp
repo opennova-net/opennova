@@ -275,6 +275,10 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
+    // A row whose +0x1C type index is 0 (a type the items.def lacks, or its row 0, the
+    // Null marker) returns with its visited byte set: no class think, no motor, no
+    // countdown [orig: Entity_UpdatePool1Slot @0x4B8DDD..0x4B8DE8].
+    if (row.item_type_index == 0) return;
     // Retail's +0x144 removal countdown (the authority removes the row at 0, a
     // non-authority skips that visit) is not carried: its one non-zero writer is
     // the C2S 0x18 weapon drop's template word, which no stock client sends and
@@ -480,10 +484,12 @@ void World::update_all_entities(const TickContext &ctx) {
     // [orig: Entity_UpdateAllEntities -- the clear @0x4C212E..0x4C2156, the
     //  walk @0x4C2158..0x4C21F1 (the Entity_UpdatePool1Slot calls @0x4C21B9 /
     //  @0x4C21D0 / @0x4C21E0 / @0x4C21E9)]
+    // A row whose type index is 0 keeps its visited byte and takes no visit of its own
+    // [orig: the clear's +0x1C test @0x4C2149..0x4C214D, the walk's @0x4C2179..0x4C217D].
     const size_t pool1 = registry.pool_capacity(1);
     for (size_t slot = 0; slot < pool1; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
-            e->pool1_visited = false;
+            if (e->item_type_index != 0) e->pool1_visited = false;
     // The powerup rows' +0x1C4 update callback is the respawn countdown
     // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef @0x442D20].
     powerup_tick(*this, ctx);
@@ -500,7 +506,7 @@ void World::update_all_entities(const TickContext &ctx) {
             if (pool1_slot_leg) pool1_slot_leg(handle);
             continue;
         }
-        if (row->pool1_visited) continue;
+        if (row->item_type_index == 0 || row->pool1_visited) continue;
         if (Entity *p1 = unvisited_parent(row)) {
             if (Entity *p2 = unvisited_parent(p1)) {
                 if (Entity *p3 = unvisited_parent(p2)) update_pool1_slot(*p3, ctx);

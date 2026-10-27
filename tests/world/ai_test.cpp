@@ -2826,6 +2826,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     Entity vehicle{};
     vehicle.kind = EntityKind::Item;
     vehicle.item_id = 1291;
+    vehicle.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     vehicle.health = 3000;
     vehicle.health_max = 3000;
     vehicle.alive = true;
@@ -3344,6 +3345,7 @@ static void test_dead_vehicle_despawn_frees_brain() {
 	Entity hull;
 	hull.kind = EntityKind::Item;
 	hull.item_id = 1291;
+	hull.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	hull.item_attrib = kItemAttribPlayerControl;
 	hull.health = 0;
 	hull.alive = false;
@@ -3595,6 +3597,7 @@ void test_vehicle_brain_think_countdown() {
     Entity seed;
     seed.kind = EntityKind::Item;
     seed.item_id = 77;
+    seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     seed.health = 100;
     const EntityHandle h = w.registry.spawn(1, seed);
     // A cveh class row: its event callback is the vehicle machine.
@@ -3694,6 +3697,7 @@ void test_vehicle_brain_think_countdown() {
     Entity plain;
     plain.kind = EntityKind::Item;
     plain.item_id = 78; // no traits row
+    plain.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     plain.health = 100;
     const EntityHandle ph = w.registry.spawn(1, plain);
     const int pidx = sys.attach(ph);

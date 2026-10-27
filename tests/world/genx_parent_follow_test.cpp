@@ -33,8 +33,13 @@ static int failures = 0;
 namespace {
 
 // ITEMS.DEF 101995 as shipped, a genx decoration in its shape, and a def on
-// the null row.
+// the null row, behind the file's leading Null marker (row 0, which the walks skip).
 const char kItemsDef[] =
+    "begin \"Null\"\r\n"
+    "  id 100000\r\n"
+    "  type marker\r\n"
+    "end\r\n"
+    "\r\n"
     "begin \"Communications dish #2 S & D\"\r\n"
     "  id 101995\r\n"
     "  type object\r\n"

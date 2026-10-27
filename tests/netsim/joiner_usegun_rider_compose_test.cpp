@@ -211,6 +211,7 @@ bool run_remote_usegun_rider_drives_the_child_compose() {
 	w::Entity carrier_seed;
 	carrier_seed.kind = w::EntityKind::Item;
 	carrier_seed.item_id = kCarrierType;
+	carrier_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	carrier_seed.spawn_origin = (1u << 24) | 3u;
 	carrier_seed.position.set_q16({4 << 16, 6 << 16, 0});
 	const w::EntityHandle carrier = world.registry.spawn(1, carrier_seed);
@@ -218,6 +219,7 @@ bool run_remote_usegun_rider_drives_the_child_compose() {
 	w::Entity child_seed;
 	child_seed.kind = w::EntityKind::Item;
 	child_seed.item_id = kChildType;
+	child_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	child_seed.spawn_origin = (1u << 24) | 4u;
 	child_seed.position = world.registry.get(carrier)->position;
 	child_seed.emplaced_update = true;

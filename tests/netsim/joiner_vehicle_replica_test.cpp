@@ -462,6 +462,7 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 	w::Entity gun_seed;
 	gun_seed.kind = w::EntityKind::Item;
 	gun_seed.item_id = kGunType;
+	gun_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	gun_seed.spawn_origin = (1u << 24) | 4u;
 	gun_seed.position = h.hull().position;
 	gun_seed.emplacement_parent = h.tank;
@@ -515,6 +516,7 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 	w::Entity gun_seed;
 	gun_seed.kind = w::EntityKind::Item;
 	gun_seed.item_id = kGunType;
+	gun_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	gun_seed.spawn_origin = (1u << 24) | 4u;
 	gun_seed.position = h.hull().position;
 	gun_seed.emplaced_update = true;
@@ -585,6 +587,7 @@ bool run_genx_row_rides_and_falls_on_its_own() {
 	w::Entity crate_seed;
 	crate_seed.kind = w::EntityKind::Item;
 	crate_seed.item_id = kCrateType;
+	crate_seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	crate_seed.spawn_origin = (1u << 24) | 5u;
 	crate_seed.position = h.hull().position;
 	crate_seed.parent_follow_update = true;

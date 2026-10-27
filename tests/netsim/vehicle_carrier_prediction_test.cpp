@@ -92,6 +92,7 @@ w::Entity hull_seed(w::Vec3 pos, uint8_t team) {
 	w::Entity v;
 	v.kind = w::EntityKind::Item;
 	v.item_id = kHullType;
+	v.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	v.has_item_def = true;
 	v.item_type = 1;
 	v.item_attrib = 0x40u;

@@ -38,6 +38,7 @@ struct Rig {
     EntityHandle field(int pool = 2, uint8_t type = 2) {
         Entity seed;
         seed.item_id = 1896;
+        seed.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
         seed.bound_radius = 128;
         seed.heading = placed_heading_bam(90); // identity placement
         const EntityHandle h = world.registry.spawn(pool, seed);

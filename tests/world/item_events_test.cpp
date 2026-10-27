@@ -1231,10 +1231,52 @@ int test_section_mask_hides_no_person_part() {
     return 0;
 }
 
+// A row whose +0x1C type index is 0 (a type the items.def lacks, or its Null row) takes
+// no visit: the pool-1 slot sets its visited byte and returns, the visited clear leaves it,
+// and the pool-2/3 walks skip it; a stamped row on the same clock moves.
+// [orig: Entity_UpdatePool1Slot @0x4B8DDD..0x4B8DE8; Entity_UpdateAllEntities - the clear
+//  @0x4C2149..0x4C214D, the pool-1 walk @0x4C2179..0x4C217D, the pool-2 walk
+//  @0x4C2288..0x4C228F, the pool-3 walk @0x4C2359..0x4C235D]
+int test_type_index_zero_rows_take_no_visit() {
+    for (const int pool : {1, 2, 3}) {
+        auto heap = std::make_unique<World>();
+        auto &w = *heap;
+        w.registry.configure_pool(pool, 4);
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.position = {40.0f, 40.0f, 20.0f};
+        seed.drop_motion = DropMotion::Fall;
+        seed.veh.vel_x = 65536; // one unit a tick along +x, well above the ground
+        seed.item_type_index = 0;
+        const EntityHandle bare = w.registry.spawn(pool, seed);
+        seed.item_type_index = 1;
+        const EntityHandle typed = w.registry.spawn(pool, seed);
+        const int32_t x0 = seed.position.x.q16;
+        if (pool == 1) {
+            TickContext ctx{};
+            ctx.world = &w;
+            ctx.is_authority = true;
+            w.update_pool1_slot(*w.registry.get(bare), ctx);
+            w.update_pool1_slot(*w.registry.get(typed), ctx);
+            CHECK(w.registry.get(bare)->pool1_visited);
+        } else {
+            // Each row on its own cohort tick.
+            w.logic_tick = static_cast<uint32_t>(bare.slot());
+            tick_item_event_pool(w, pool);
+            w.logic_tick = static_cast<uint32_t>(typed.slot());
+            tick_item_event_pool(w, pool);
+        }
+        CHECK(w.registry.get(bare)->position.x.q16 == x0);
+        CHECK(w.registry.get(typed)->position.x.q16 != x0);
+    }
+    return 0;
+}
+
 int main() {
     if (test_chel_rotor_hidden_sections() != 0) return 1;
     if (test_section_mask_hides_no_person_part() != 0) return 1;
     if (test_husk_swap_stage() != 0) return 1;
+    if (test_type_index_zero_rows_take_no_visit() != 0) return 1;
     if (test_vehicle_respawn_rearms_the_final_husk() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;

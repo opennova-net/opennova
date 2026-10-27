@@ -121,6 +121,7 @@ void test_the_pool1_slot_leg_runs_at_each_slot_in_slot_order() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = {40.0f, 40.0f, 20.0f};
+    item.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
     Entity falling = item;
     falling.drop_motion = DropMotion::Fall;
     falling.veh.vel_x = kQ; // one unit a tick along +x, well above the ground

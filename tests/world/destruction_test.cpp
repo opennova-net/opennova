@@ -3930,6 +3930,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	const EntityHandle h = spawn_prop(w, 2, 500, 200);
 	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnrc));
 	Entity *b = w.registry.get(h);
+	b->item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	b->health = 0;
 	destruction_notify_item_damage(w, *b, 2);
 	CHECK((b->engine_flags & kEntityFlagDead) != 0);
@@ -4218,6 +4219,7 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 	const EntityHandle h = spawn_prop(w, pool, 500, 50);
 	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnl2));
 	Entity *b = w.registry.get(h);
+	b->item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	b->last_attacker = attacker;
 	b->health = 0;
 	destruction_notify_item_damage(w, *b, 1);

@@ -1125,7 +1125,9 @@ void tick_item_event_pool(World &world, int pool) {
     for (size_t slot = 0; slot < cap; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
-        if (entity == nullptr) continue;
+        // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
+        //  - the pool-2 walk's test @0x4C2288..0x4C228F, the pool-3 walk's @0x4C2359..0x4C235D].
+        if (entity == nullptr || entity->item_type_index == 0) continue;
         const uint64_t lifetime = entity->registry_spawn_id;
         const bool cohort = (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
         if (cohort && entity->minefield.think) {

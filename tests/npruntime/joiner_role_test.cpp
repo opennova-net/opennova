@@ -903,6 +903,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 1291;
+	vehicle.item_type_index = 1; // the def row's ordinal: the walks' +0x1C gate
 	vehicle.has_item_def = true;
 	vehicle.has_graphic_model = true;
 	vehicle.item_type = 1;
