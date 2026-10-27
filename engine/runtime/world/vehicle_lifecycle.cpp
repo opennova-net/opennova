@@ -428,8 +428,7 @@ void VehicleSystem::tick_dead(Entity &e, AiEntity &ai) {
 	// The aircraft dead tick leaves motion to its installed +1C4 callback.
 	// [orig: Entity_UpdateVehicleAIMovement @0x461200 vs ground @0x467EA0]
 	if (!aircraft)
-		entity_process_falling_death(
-				world_, e, world_.tables.terrain, float(from_fixed(world_.env.water_z)));
+		entity_process_falling_death(world_, e, world_.tables.terrain, world_.env.water_z);
 	if ((e.item_attrib & kItemAttribPlayerControl) == 0 || !world_.ai.is_authority)
 		return;
 	if (((e.flags | e.engine_flags) & 0x1000u) != 0 || !world_.rules.vehicle_respawns) {

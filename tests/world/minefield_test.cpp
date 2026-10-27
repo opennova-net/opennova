@@ -332,7 +332,7 @@ void buried_mine_blast() {
     blast.ammo_index = 1;
     blast.type = ammo_kz::kC4;
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, collision.get(), &ground, 0, w.out.destruction);
+    w.explosions.process(w, collision.get(), &ground, w.out.destruction);
     CHECK(w.registry.get(target)->health <= 0);
 }
 

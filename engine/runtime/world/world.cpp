@@ -314,8 +314,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
-                    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
-                    tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+                    tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
                 }
             }
             return;
@@ -407,8 +406,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         if (e->squib.motor) {
             tick_squib(*this, *e);
         } else {
-            const float water_z = static_cast<float>(env.water_z) / 65536.0f;
-            tick_item_death_motion(*this, *e, tables.terrain, water_z, out.destruction);
+            tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
         }
         if ((e = live()) == nullptr) return;
         // A dropped carried object's installed fall or ride (Match owns the
@@ -565,9 +563,8 @@ void World::update_all_entities(const TickContext &ctx) {
     // none is authored (retail keeps no dry sentinel; D-NET-507)
     // [orig: g_EnvWaterHeightFixed @0x26C6454; Environment_InitDefaults @0x57C010 -
     //  the memset @0x57C011..0x57C01E].
-    const float water_z = static_cast<float>(env.water_z) / 65536.0f;
     // [orig: DeathPiece_TickAll @0x57b900, the call @0x4c221c]
-    if (round_host) death_pieces.tick(*this, tables.terrain, water_z, out.destruction);
+    if (round_host) death_pieces.tick(*this, tables.terrain, env.water_z, out.destruction);
     // The timed AI events, before this tick's projectiles: a damage event the
     // reactions queue below dispatches on the next tick.
     // [orig: Entity_UpdateAllEntities @0x4C2226 (j_AIEvent_ProcessTimedEntries)]
@@ -587,7 +584,7 @@ void World::update_all_entities(const TickContext &ctx) {
     if (round_host) round_sim.tick(*this, tables.terrain, ai.collision);
     lap.mark(devtools::Slot::SIM_UPDATE_PROJECTILES);
     if (round_host)
-        explosions.process(*this, ai.collision, tables.terrain, water_z, out.destruction);
+        explosions.process(*this, ai.collision, tables.terrain, out.destruction);
     ai.apply_round_hits(*this);
     // The pool-2 cohort walk, the doors, the pool-3 cohort walk.
     // [orig: Entity_UpdateAllEntities @0x4C2244..0x4C2302; FadeEffect_UpdateAll

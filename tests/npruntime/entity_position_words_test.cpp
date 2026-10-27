@@ -520,7 +520,7 @@ int static_wreck_slides_on_the_words() {
 	e.veh.vel_x = 0x10001;
 	e.veh.vel_y = -0x8003;
 	e.veh.slide_z = 0x35;
-	w::tick_item_death_motion(*world, e, nullptr, 0.0f, world->out.destruction); // dry: the water word 0
+	w::tick_item_death_motion(*world, e, nullptr, 0, world->out.destruction); // dry: the water word 0
 	if (!expect(same_words(e.position.q16(), kFarZ + 0x10001, kAshJoinerX - 0x8003, kTdhHostY + 0x35),
 	            "the wreck's slide is a word add"))
 		return 1;

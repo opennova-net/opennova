@@ -655,7 +655,7 @@ public:
     // @ 0x492dd0]: gravity, ground bounce (restitution + spin halving + bounce
     // fx/sound), water splash + sink, final fx/sound + persist-or-free.
     void tick(World &world, const terrain::TerrainHeightField *terrain,
-              float water_height, DestructionEvents &events);
+              int32_t water_q16, DestructionEvents &events);
     void reset() noexcept;
 };
 
@@ -683,8 +683,7 @@ public:
     // route to the weapon-damage applicator, 1 (the knife) to the melee
     // applicator, 3 to the medic revive; a zero resolved radius drops the entry.
     void process(World &world, CollisionWorld *collision,
-                 const terrain::TerrainHeightField *terrain, float water_height,
-                 DestructionEvents &events);
+                 const terrain::TerrainHeightField *terrain, DestructionEvents &events);
 
     void reset() noexcept { queue.clear(); }
 };
@@ -912,14 +911,6 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
 uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
 
-// The death legs' water word: the given water height as a word. Retail keeps no
-// dry sentinel: with no water authored the word is 0, the memset's, and every leg
-// compares against it (a top word below 0 on a dry map is underwater).
-// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
-// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
-// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
-int32_t death_water_q16(float water_height);
-
 // An entity's top as the death legs test it against the water word: its Z word
 // plus its bound word (entity+0), a wrapping add. [orig: Entity_InitDeathSounds
 // @0x4939B0 - `mov eax, [esi+0Ch]; add eax, [esi]; cmp eax, g_EnvWaterHeightFixed`
@@ -929,7 +920,7 @@ int32_t entity_top_q16(const Entity &e);
 // Shared generic falling callback, also called explicitly by vehicle states 21/23.
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]
 void entity_process_falling_death(World &world, Entity &entity,
-		const terrain::TerrainHeightField *terrain, float water_height);
+		const terrain::TerrainHeightField *terrain, int32_t water_q16);
 
 // Per-tick settle for entities with an installed death-motion callback [orig:
 // Entity_UpdateStaticDeathPhysics @ 0x494230 (buildings) /
@@ -939,8 +930,14 @@ void entity_process_falling_death(World &world, Entity &entity,
 bool tick_item_class_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain);
 
+// `water_q16` is the death legs' water word, the environment's (env.water_z) as every
+// leg compares it. Retail keeps no dry sentinel: with no water authored the word is 0,
+// the memset's (a top word below 0 on a dry map is underwater).
+// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
+// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
+// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
 void tick_item_death_motion(World &world, Entity &entity,
-        const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events);
+        const terrain::TerrainHeightField *terrain, int32_t water_q16, DestructionEvents &events);
 
 // Bullet-vs-item damage gates, shared by RoundSim's item leg [orig:
 // Projectile_ProcessDamageOnTarget @ 0x4e7fb0]: indestructible flag, armor

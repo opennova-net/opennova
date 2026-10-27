@@ -14,7 +14,7 @@ namespace opennova::world {
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30;
 // Entity_UpdatePool1Slot @0x4B8E2A..0x4B8E53]
 void entity_process_falling_death(
-		World &world, Entity &e, const terrain::TerrainHeightField *terrain, float water_height) {
+		World &world, Entity &e, const terrain::TerrainHeightField *terrain, int32_t water_q16) {
 	detail::vehicle_release_damage_effects(world, e);
 	stamp_saved_live_pose(e);
 	auto &m = e.veh;
@@ -25,7 +25,7 @@ void entity_process_falling_death(
 		// The top word against the water word, a signed compare.
 		// [orig: Entity_ProcessFallingDeathPhysics @0x461D30 - `mov eax, [esi+0Ch];
 		//  add eax, [esi]; cmp eax, g_EnvWaterHeightFixed; jge` @0x461DD4..0x461DDF]
-		if (entity_top_q16(e) >= death_water_q16(water_height))
+		if (entity_top_q16(e) >= water_q16)
 			m.slide_z = io::bam_sub(m.slide_z, 334);
 		else {
 			m.vel_x >>= 1;

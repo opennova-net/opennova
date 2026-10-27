@@ -26,10 +26,6 @@ using namespace opennova::crt;
 
 namespace opennova::world {
 
-int32_t death_water_q16(float water_height) {
-    return to_fixed(water_height);
-}
-
 int32_t entity_top_q16(const Entity &e) {
     return io::bam_add(e.position.z.q16, e.bound_radius.q16);
 }
@@ -48,15 +44,6 @@ void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *tr
 	const std::string sound = profile ? profile->set_names[size_t(slot)] : std::string{};
 	events.sounds.push_back(
 			{ sound.empty() ? fallback : sound, sound.empty() ? fallback_pos : e.position });
-}
-
-// The environment water plane (env.water_z, 16.16 — the #265 sound-profile
-// home) as float units: 0 when no water is authored, the word retail keeps.
-// [orig: Environment_InitDefaults @0x57C010 - the memset @0x57C011..0x57C01E over
-// g_EnvWaterHeightFixed @0x26C6454; its writers TimeOfDay_ParseProperty @0x57CB6A, the float
-// setter @0x57D68F, Terrain_Init's override @0x60FCBA]
-float world_water_z(const World &world) {
-    return static_cast<float>(world.env.water_z) / io::kFp16One;
 }
 
 // The water plane as the word retail compares against, 0 when none is authored
@@ -813,9 +800,7 @@ void ExplosionSim::queue_explosion_on_authority(World &world, const ExplosionEnt
 }
 
 void ExplosionSim::process(World &world, CollisionWorld *collision,
-                           const terrain::TerrainHeightField *terrain,
-                           float water_height, DestructionEvents &events) {
-    (void)water_height;
+                           const terrain::TerrainHeightField *terrain, DestructionEvents &events) {
     if (queue.empty()) return;
     // The drain consumes the whole queue and resets it [orig: the queue_index
     // loop @ 0x4ead97 + the count reset @ 0x4eb8a5]. Damage callbacks may push
@@ -1702,7 +1687,9 @@ static void transition_to_ground_death(Entity &e, const ItemDeathTraits *traits,
 }
 
 void tick_item_death_motion(World &world, Entity &entity,
-        const terrain::TerrainHeightField *terrain, float water_height, DestructionEvents &events) {
+        const terrain::TerrainHeightField *terrain, int32_t water_q16, DestructionEvents &events) {
+    // The word as float units, for the wreck emitters' float compare and the splash places.
+    const float water_height = static_cast<float>(water_q16) / io::kFp16One;
     // The update callback runs after this entity's class event on the same
     // pool visit: every tick in pool 1, the slot cohort (every 8 / 64 ticks)
     // in pools 2/3 [orig: Entity_UpdateAllEntities @0x4C22E7 / @0x4C2393].
@@ -1725,7 +1712,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                 world, *e, traits, water_height, events);
     if (e->death_motion == DeathMotionMode::None) return;
 			if (e->death_motion == DeathMotionMode::Generic) {
-				entity_process_falling_death(world, *e, terrain, water_height);
+				entity_process_falling_death(world, *e, terrain, water_q16);
 				return;
 			}
 
@@ -1769,7 +1756,6 @@ void tick_item_death_motion(World &world, Entity &entity,
         int32_t x_q16 = e->position.x.q16;
         int32_t y_q16 = e->position.y.q16;
         int32_t z_q16 = e->position.z.q16;
-        const int32_t water_q16 = death_water_q16(water_height);
         if (z_q16 >= water_q16) {
             motion.slide_z = io::bam_sub(
                     motion.slide_z, kPiecePhysicsGravityQ16);
@@ -1881,8 +1867,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                         *terrain, e->position.x.q16, e->position.y.q16)
                 : 0;
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
-        const int32_t static_water = to_fixed(water_height);
-        const int32_t water_above_ground = io::bam_sub(static_water, ground);
+        const int32_t water_above_ground = io::bam_sub(water_q16, ground);
         if (water_above_ground <= 655360 && water_above_ground < 0) {
             e->position.z.q16 = ground;
             e->death_motion = DeathMotionMode::Generic;
@@ -1926,7 +1911,6 @@ void tick_item_death_motion(World &world, Entity &entity,
     // [orig: Entity_UpdateFallingDeathPhysics @0x493F70 - `mov eax, [esi];
     //  add eax, [esi+0Ch]` @0x493FCB..0x493FCD, `cmp eax, g_EnvWaterHeightFixed;
     //  jge` @0x493FDF..0x493FE5]
-    const int32_t water_q16 = death_water_q16(water_height);
     if (entity_top_q16(*e) >= water_q16) {
         e->veh.slide_z -= 334;
     } else {
@@ -2065,10 +2049,9 @@ DeathPiece &DeathPieceSim::alloc() {
 }
 
 void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrain,
-                         float water_height, DestructionEvents &events) {
+                         int32_t water, DestructionEvents &events) {
     // [orig: DeathPiece_TickAll @ 0x57b900 -> Entity_ProcessDeathPiecePhysics
     // @ 0x492dd0] The piece is a row on words (D-NET-507).
-    const int32_t water = death_water_q16(water_height);
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
         const DeathPieceType &tp = death_piece_type(p.type_index);

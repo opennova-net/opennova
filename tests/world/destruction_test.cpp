@@ -3,6 +3,7 @@
 // destructible death chain (husk flags + events + the kz chain blast), the
 // death-piece pool, and the dead-item settle. Driven by a manual World.
 #include <cmath>
+#include <cstdint>
 #include "common/effect_producers.h"
 #include <cstdio>
 #include <cstring>
@@ -40,7 +41,8 @@ void tick_dead_items(World &world, const TerrainHeightField *terrain,
                      float water_height, DestructionEvents &events) {
     for (int pool = 1; pool <= 2; ++pool) {
         world.registry.for_each_in_pool(pool, [&](const Entity &row) {
-            tick_item_death_motion(world, *world.registry.get(row.handle), terrain, water_height, events);
+            tick_item_death_motion(world, *world.registry.get(row.handle), terrain,
+                                   to_fixed(water_height), events);
         });
     }
 }
@@ -270,7 +272,7 @@ void test_explosion_damage_gates() {
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     Entity *b = w.registry.get(barrel);
     CHECK(b != nullptr);
     CHECK(b->health == 20); // 120 - 100 (no falloff inside kz_minradius)
@@ -285,7 +287,7 @@ void test_explosion_damage_gates() {
     ExplosionEntry far = e;
     far.pos = Vec3{5.5f, 0.0f, 0.0f}; // center distance 4.5, bound 1.0 -> surface 3.5
     w.explosions.queue_explosion(w, far);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.registry.get(barrel)->health == 300 - 50);
     w.tables.ammo.entries[1].kz_damage = 100;
 
@@ -308,7 +310,7 @@ void test_explosion_damage_gates() {
     const EntityHandle attacker = w.registry.spawn(0, attacker_seed);
     e.owner = attacker;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.registry.get(barrel)->health == 120);
     CHECK(w.registry.get(barrel)->last_attacker == attacker);
     e.owner = EntityHandle{};
@@ -317,7 +319,7 @@ void test_explosion_damage_gates() {
     armored.armor_blast = -1;
     w.tables.item_death_traits.set(500, armored);
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.registry.get(barrel)->health == 120);
 
     // The NoMItems ammo flag skips the whole pool-1 sweep [orig: & 0x100000
@@ -325,7 +327,7 @@ void test_explosion_damage_gates() {
     w.tables.item_death_traits.set(500, barrel_traits());
     w.tables.ammo.entries[1].flags = kAmmoFlagNoMItems;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.registry.get(barrel)->health == 120);
     w.tables.ammo.entries[1].flags = 0;
 }
@@ -375,7 +377,7 @@ void test_explosion_sweep_runs_on_words() {
         e.ammo_index = 1;
         e.owner = attacker;
         w.explosions.queue_explosion(w, e);
-        w.explosions.process(w, nullptr, nullptr, 0.0f, w.out.destruction);
+        w.explosions.process(w, nullptr, nullptr, w.out.destruction);
         return w.registry.get(victim)->last_attacker == attacker;
     };
     const int32_t bound = 0x10000 | 0x0101;
@@ -415,7 +417,7 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     // No emitter was held, so no release; the hit's own is in the scene, not a presenter row.
     CHECK(w.out.destruction.effects.empty());
     const auto row = test_effects::slot_row(*scene, victim);
@@ -442,7 +444,7 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     // A second blast releases the held emitter before spawning its own.
     w.out.destruction.clear();
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(fx.size() == 2);
     if (fx.size() == 2) {
         CHECK(fx[0].release && fx[0].family == 1 && fx[0].bank_slot == 0);
@@ -455,7 +457,7 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
     w.out.destruction.clear();
     w.registry.get(victim)->damage_state = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(fx.empty());
     CHECK(w.out.fire_sounds.drain().empty());
 }
@@ -488,7 +490,7 @@ void test_multiplayer_destroy_buildings_rule() {
     blast.ammo_index = 1;
     auto apply_blast = [&] {
         w.explosions.queue_explosion(w, blast);
-        w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+        w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     };
 
     w.rules.mp_session = true;
@@ -538,7 +540,7 @@ void test_explosion_los_excludes_victim_hull() {
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(victim)->health < 120);
 }
 
@@ -585,12 +587,12 @@ void test_pool1_los_runs_for_every_type() {
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(victim)->health == 120);
 
     e.type = ammo_kz::kRadiusBlast;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(victim)->health == 120);
 }
 
@@ -632,7 +634,7 @@ void test_organic_blast_los_is_unlifted() {
     e.type = ammo_kz::kStandard;
     e.ammo_index = 1;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(victim)->health == 120);
 }
 
@@ -671,7 +673,7 @@ void test_explosion_cone_wrap() {
         e.type = ammo_kz::kStandard;
         e.ammo_index = 1;
         w.explosions.queue_explosion(w, e);
-        w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+        w.explosions.process(w, nullptr, nullptr, w.out.destruction);
         return w.registry.get(victim)->health;
     };
 
@@ -747,7 +749,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
     e.ammo_index = 1;
     e.owner = dead_owner;
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
 
     bool organic_hit_resolved = false;
     bool organic_death_resolved = false;
@@ -849,7 +851,7 @@ void test_destructible_death_chain() {
     item2_seed.position = Vec3{11.5f, 0.0f, 0.0f};
     item2_seed.bound_radius = 1.0f;
     const EntityHandle item2 = w.registry.spawn(1, item2_seed);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     const Entity *by = w.registry.get(bystander);
     CHECK(by->health < 100); // organics in range take the death blast
     CHECK(w.registry.get(item2)->health == 100); // M-items are spared by the flag
@@ -966,7 +968,7 @@ void test_a_blast_at_a_window_changes_nothing() {
     explosion.radius_override = 30.0f;
     w.destruction_rng.state = 0x200u;
     w.explosions.queue_explosion(w, explosion);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.out.destruction.explosions_processed == 1);
     CHECK(w.out.destruction.effects.empty());
     CHECK(w.destruction_rng.state == 0x200u);
@@ -1080,7 +1082,7 @@ void test_mitem_blast_spares_indestructible_items() {
     blast.type = ammo_kz::kStandard;
     blast.ammo_index = 1; // the standard blast: no NoMItems, armor passed
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     CHECK(w.registry.get(plain)->health < 100);
     CHECK(w.registry.get(hard)->health == 100);
 }
@@ -1339,7 +1341,7 @@ void test_death_pieces() {
         return 0;
     }();
     for (int i = 0; i < 10; ++i)
-        w.death_pieces.tick(w, nullptr, -1.0e9f, w.out.destruction);
+        w.death_pieces.tick(w, nullptr, INT32_MIN, w.out.destruction);
     for (const DeathPiece &p : w.death_pieces.pieces)
         if (p.active) { CHECK(p.pos.z.q16 != z_before); break; }
 }
@@ -1446,7 +1448,7 @@ void test_death_piece_launch_and_spin() {
     if (first != nullptr) {
         const int32_t spin = first->spin_a;
         const int32_t h0 = first->heading;
-        w.death_pieces.tick(w, nullptr, -1.0e9f, w.out.destruction);
+        w.death_pieces.tick(w, nullptr, INT32_MIN, w.out.destruction);
         CHECK(first->heading == static_cast<int32_t>(static_cast<uint32_t>(h0) +
                                                      static_cast<uint32_t>(spin)));
     }
@@ -1729,7 +1731,7 @@ void test_death_piece_words() {
     p.spin_b = -0x00800003;
     p.heading = 0x10000000;
     p.pitch = 0;
-    w.death_pieces.tick(w, &flat, -1.0e9f, w.out.destruction);
+    w.death_pieces.tick(w, &flat, INT32_MIN, w.out.destruction);
     CHECK(p.active && p.bounces_left == 1);
     CHECK(p.pos.x.q16 == x0 + 0x12345 && p.pos.y.q16 == y0 - 0x6789 && p.pos.z.q16 == 0x400);
     CHECK(p.heading == 0x11000001 && p.pitch == -0x00800003);
@@ -1753,14 +1755,14 @@ void test_death_piece_water() {
     p.vel[2] = -0x3333;
     p.bounces_left = 3;
     // Tick 1: starts above water 0 -> gravity leg, integrates below, splashes.
-    w.death_pieces.tick(w, nullptr, 0.0f, w.out.destruction);
+    w.death_pieces.tick(w, nullptr, 0, w.out.destruction);
     bool splashed = false;
     for (const DestructionSoundEvent &s : w.out.destruction.sounds)
         if (s.sound == "IMP_DEBSML_WATER" || s.sound == "IMP_DEBMED_WATER")
             splashed = true;
     CHECK(splashed);
     // Tick 2: below water -> horizontal words halve, vertical pins at -4096.
-    w.death_pieces.tick(w, nullptr, 0.0f, w.out.destruction);
+    w.death_pieces.tick(w, nullptr, 0, w.out.destruction);
     CHECK(p.vel[0] == 0x6666 && p.vel[1] == -0x2667 && p.vel[2] == -4096);
 }
 
@@ -1797,7 +1799,7 @@ void test_death_piece_ground_scorch_routing() {
     };
 
     DeathPiece &exhausted = ground_piece(3, 0, 0, 8.0f); // CHUNK_M
-    w.death_pieces.tick(w, &flat, -1.0e9f, w.out.destruction);
+    w.death_pieces.tick(w, &flat, INT32_MIN, w.out.destruction);
     CHECK(!exhausted.active);
     CHECK(w.out.terrain_scorches.pending().size() == 1);
     if (w.out.terrain_scorches.pending().size() == 1) {
@@ -1811,19 +1813,19 @@ void test_death_piece_ground_scorch_routing() {
     }
 
     DeathPiece &cactus = ground_piece(11, 0x2u, 0, 16.0f);
-    w.death_pieces.tick(w, &flat, -1.0e9f, w.out.destruction);
+    w.death_pieces.tick(w, &flat, INT32_MIN, w.out.destruction);
     CHECK(!cactus.active);
     CHECK(w.out.terrain_scorches.pending().size() == 1);
 
     DeathPiece &bouncing = ground_piece(3, 0, 1, 24.0f);
-    w.death_pieces.tick(w, &flat, -1.0e9f, w.out.destruction);
+    w.death_pieces.tick(w, &flat, INT32_MIN, w.out.destruction);
     CHECK(bouncing.active);
     CHECK(bouncing.bounces_left == 0);
     CHECK(w.out.terrain_scorches.pending().size() == 1);
 
     DeathPiece &underwater = ground_piece(3, 0, 0, 32.0f);
     underwater.pos.z = -0.01f;
-    w.death_pieces.tick(w, &flat, 1.0f, w.out.destruction);
+    w.death_pieces.tick(w, &flat, 0x10000, w.out.destruction);
     CHECK(!underwater.active);
     CHECK(w.out.terrain_scorches.pending().size() == 1);
 }
@@ -4327,7 +4329,7 @@ int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle
     blast.ammo_index = 1;
     blast.pos = {0,0,0};
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
     return w.registry.get(ph)->health;
 }
 
@@ -4384,19 +4386,19 @@ void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
     blast.ammo_index = 1;
     blast.pos = seed.position;
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(h)->section_mask == 2u);
     // Repeating the blast preserves the section mask and suppresses a second
     // section-break sound, while ordinary health damage can still occur.
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     CHECK(w.registry.get(h)->section_mask == 2u);
 }
 
 // Queue one entry and drain it.
 void run_blast(World &w, const ExplosionEntry &e) {
     w.explosions.queue_explosion(w, e);
-    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, nullptr, nullptr, w.out.destruction);
 }
 
 // A crewed vehicle's hull keeps the blast less its occupant share: 100 at the
@@ -4580,7 +4582,7 @@ void test_zero_damage_blast_still_runs_the_item_leg() {
     blast.pos = seed.position;
     blast.owner = owner;
     w.explosions.queue_explosion(w, blast);
-    w.explosions.process(w, &collision, nullptr, -1.0e9f, w.out.destruction);
+    w.explosions.process(w, &collision, nullptr, w.out.destruction);
     const Entity *building = w.registry.get(h);
     CHECK(building->health == 1000);
     CHECK(building->section_mask == 2u);

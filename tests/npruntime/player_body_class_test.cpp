@@ -348,7 +348,7 @@ void test_a_knife_runs_its_rows_callback() {
 		e.ammo_index = 1;
 		e.owner = attacker;
 		r.world->explosions.queue_explosion(*r.world, e);
-		r.world->explosions.process(*r.world, nullptr, nullptr, -1.0e9f, r.world->out.destruction);
+		r.world->explosions.process(*r.world, nullptr, nullptr, r.world->out.destruction);
 		const w::Entity *hit = r.world->registry.get(victim);
 		CHECK(hit != nullptr && hit->health == health - 20);
 		if (hit == nullptr) continue;

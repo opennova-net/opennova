@@ -1117,9 +1117,6 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
-    // [orig: g_EnvWaterHeightFixed @0x26C6454].
-    const float water_z = world.env.water_z / 65536.0f;
     const size_t cap = world.registry.pool_capacity(pool);
     for (size_t slot = 0; slot < cap; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
@@ -1160,7 +1157,10 @@ void tick_item_event_pool(World &world, int pool) {
             tick_squib(world, *entity);
             continue;
         }
-        tick_item_death_motion(world, *entity, world.tables.terrain, water_z, world.out.destruction);
+        // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
+        // [orig: g_EnvWaterHeightFixed @0x26C6454].
+        tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
+                world.out.destruction);
         // A genx row's own update, its parent follow, on the same cohort
         // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
         //  @0x4C2393].

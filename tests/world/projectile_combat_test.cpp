@@ -4407,7 +4407,7 @@ void test_jox_tank_round_bullets_class_splashes() {
     CHECK(r.world.explosions.queue.size() == 1);
     if (!r.world.explosions.queue.empty())
         CHECK(r.world.explosions.queue[0].type == ammo_kz::kBullets);
-    r.world.explosions.process(r.world, nullptr, nullptr, -1.0e9f, r.world.out.destruction);
+    r.world.explosions.process(r.world, nullptr, nullptr, r.world.out.destruction);
     // Well inside kz_minradius: the full 205, no falloff.
     CHECK(r.world.registry.get(bystander_h)->health == 1000 - 205);
 }
