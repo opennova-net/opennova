@@ -119,9 +119,13 @@ func test_items_anchorless_attachment_holds_through_listen_client() -> void:
 	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
 	# graphic cannot anchor: the child keeps the parent-root fallback frame and
 	# the first authored row's stored slot — the old missing-anchor spec.
+	# The table leads with the Null row, as the shipped one does: the entity update
+	# passes over a row at type index 0, so the buggy at row 0 would run no mover
+	# and never set its matrix bit (D-ITEMDEF-38).
 	var dir := _native_fixture_dir()
-	var items := _install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
-			"id 101291", "id 101291\n  addeweap gunanchor 101419"),
+	var items := _install_native_seats(sim, dir, ItemDbFixture.NULL_ROW
+			+ ItemDbFixture.fixture_text(self).replace(
+					"id 101291", "id 101291\n  addeweap gunanchor 101419"),
 			PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(items)
