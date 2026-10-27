@@ -63,11 +63,11 @@ struct Server {
 };
 
 update::SfsPackage package(const std::string &text, bool corrupt = false, bool self = false,
-		const std::string &command_file = "TEST.CMD") {
+		const std::string &command_file = "TEST.CMD", const std::string &exe = "opennova.exe") {
 	update::CommandFile command;
 	command.product = "Synthetic updater client";
 	command.version = "1";
-	command.exe = "opennova.exe";
+	command.exe = exe;
 	const auto bytes = synthetic_trees::bytes(text);
 	command.rows.push_back({"UPD", update::CommandType::Loose, self ? "update.exe" : "version.txt",
 			1700000000, int32_t(bytes.size()), update::crc_as_signed(update::file_crc(bytes.data(), bytes.size()))});
@@ -625,6 +625,99 @@ int test_options_and_discovery(const test_temp::TempDir &temp) {
 	return 0;
 }
 
+// An app's folder: the editor's, its OPENNOVA.WIZ naming ONEDITOR. It updates that app alone, with
+// no game slot and no expansion (an expansion\ folder there is not one), /game and --no-runtime
+// refused; the app installs every row of a new release, and /RUN starts its command file's EXE.
+int test_app_folder(const test_temp::TempDir &temp) {
+	Server server;
+	std::string error;
+	TEST_EXPECT(server.start(package("The editor's release", false, false, "ONEDITOR.CMD", "oneditor.exe"), error,
+			"ONEDITOR", "ONEDITOR.CMD"));
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("editor/OPENNOVA.WIZ"),
+			"[HEADER]\r\nCMD=ONEDITOR.CMD\r\nURL=update.test.example\r\nPRODUCT_LOGIN=ONEDITOR\r\n"));
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("editor/expansion/stray/UPDATE.WIZ"),
+			"[HEADER]\r\nCMD=EXP.CMD\r\nPRODUCT_LOGIN=EXP\r\n"));
+	updater::Options options;
+	TEST_EXPECT(updater::parse_options({"/RUN"}, temp.path / "editor/update.exe", options, error));
+	std::vector<updater::Product> products;
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 1);
+	TEST_EXPECT(products[0].login == "ONEDITOR" && products[0].command == "ONEDITOR.CMD" && products[0].app &&
+			products[0].native && !products[0].expansion && products[0].dir == options.runtime_dir);
+	TEST_EXPECT(products[0].gateways == std::vector<std::string>({"update.test.example"}));
+	// No game is updated from an app's folder, nor the app skipped.
+	updater::Options refused;
+	for (const std::vector<std::string> &args : {std::vector<std::string>{"/game", "jo"},
+			std::vector<std::string>{"/game", "acidgambit"}, std::vector<std::string>{"--no-runtime"},
+			std::vector<std::string>{"0", "/DIR", temp.file("editor")}}) {
+		TEST_EXPECT(updater::parse_options(args, temp.path / "editor/update.exe", refused, error));
+		error.clear();
+		TEST_EXPECT(!updater::discover_products(refused, products, error) && error.find("ONEDITOR") != std::string::npos);
+	}
+	// No command file yet: the result box shows no version; the install then reads the app's own.
+	TEST_EXPECT(!updater::version_mark(options.runtime_dir).present);
+	options.server = "127.0.0.1";
+	options.port = server.listener.ports()[0];
+	options.check = true;
+	updater::Result result;
+	TEST_EXPECT(updater::discover_products(options, products, error));
+	TEST_EXPECT(updater::run(options, products, result, error) && result.available);
+	options.check = false;
+	TEST_EXPECT(updater::run(options, products, result, error) && result.applied && result.app &&
+			result.launch_exe == "oneditor.exe");
+	TEST_EXPECT(fs::exists(options.runtime_dir / "ONEDITOR.CMD") && fs::exists(options.runtime_dir / "version.txt"));
+	const updater::VersionMark mark = updater::version_mark(options.runtime_dir);
+	TEST_EXPECT(mark.present && mark.version == "1");
+	updater::Launch launch;
+	TEST_EXPECT(updater::relaunch_command(options, result.app, result.launch_exe, launch, error));
+	TEST_EXPECT(launch.program == options.runtime_dir / "oneditor.exe" && launch.args.empty());
+	options.check = true;
+	TEST_EXPECT(updater::run(options, products, result, error) && !result.available);
+	// A runtime folder's OPENNOVA.WIZ (ONRUNTIME) is no app's: its game beside it updates as before.
+	TEST_EXPECT(synthetic_trees::write_text(temp.file("runtime/OPENNOVA.WIZ"),
+			"[HEADER]\r\nCMD=ONRUNTIME.CMD\r\nURL=update.test.example\r\nPRODUCT_LOGIN=ONRUNTIME\r\n"));
+	TEST_EXPECT(updater::parse_options({}, temp.path / "runtime/update.exe", options, error));
+	TEST_EXPECT(updater::discover_products(options, products, error) && products.size() == 2);
+	TEST_EXPECT(products[0].login == "ONRUNTIME" && !products[0].app && products[1].login == "ACIDGAMBIT");
+	return 0;
+}
+
+// What /RUN starts once a run is done: opennova.exe with the game and its folder, or the --run-arg
+// values in their place; a legacy run's command file's EXE in its install; an app's EXE beside the
+// updater, never a path, and never none.
+int test_relaunch_command(const test_temp::TempDir &temp) {
+	std::string error;
+	updater::Options options;
+	updater::Launch launch;
+	TEST_EXPECT(updater::parse_options({"/game", "jo", "--resource-dir", temp.file("relaunch game"), "/RUN"},
+			temp.path / "relaunch runtime/update.exe", options, error));
+	TEST_EXPECT(updater::relaunch_command(options, false, "", launch, error));
+	TEST_EXPECT(launch.program == options.runtime_dir / "opennova.exe" && launch.args == std::vector<std::string>(
+			{"--", "/game", "jo", "--resource-dir", io::utf8_path(options.resource_dir)}));
+	// A non-legacy run's command file's EXE is not what it starts: the runtime is.
+	TEST_EXPECT(updater::relaunch_command(options, false, "Jointops.exe", launch, error) &&
+			launch.program == options.runtime_dir / "opennova.exe");
+	options.run_args = {"--", "/game", "jo", "--after-update"};
+	TEST_EXPECT(updater::relaunch_command(options, false, "", launch, error) && launch.args == options.run_args);
+	// The retail game's own call: its command file's EXE in its install, with no arguments of ours.
+	TEST_EXPECT(updater::parse_options({"123", "/DIR", temp.file("relaunch retail"), "/RUN"},
+			temp.path / "relaunch runtime/update.exe", options, error));
+	TEST_EXPECT(updater::relaunch_command(options, false, "Jointops.exe", launch, error));
+	TEST_EXPECT(launch.program == options.resource_dir / "Jointops.exe" && launch.args.empty());
+	TEST_EXPECT(updater::relaunch_command(options, false, "", launch, error) &&
+			launch.program == options.runtime_dir / "opennova.exe" && launch.args.empty());
+	TEST_EXPECT(!updater::relaunch_command(options, false, "..\\Jointops.exe", launch, error) && !error.empty());
+	// An app: its EXE beside the updater, with the --run-arg values alone.
+	TEST_EXPECT(updater::parse_options({"/RUN", "--run-arg", "--verbose"}, temp.path / "relaunch editor/update.exe",
+			options, error));
+	TEST_EXPECT(updater::relaunch_command(options, true, "oneditor.exe", launch, error));
+	TEST_EXPECT(launch.program == options.runtime_dir / "oneditor.exe" &&
+			launch.args == std::vector<std::string>({"--verbose"}));
+	error.clear();
+	TEST_EXPECT(!updater::relaunch_command(options, true, "", launch, error) && !error.empty());
+	TEST_EXPECT(!updater::relaunch_command(options, true, "bin/oneditor.exe", launch, error));
+	return 0;
+}
+
 } // namespace
 int main() {
 	TEST_EXPECT(net::startup() == 0);
@@ -642,6 +735,8 @@ int main() {
 	if (int rc = test_revision_handoff(temp)) return rc;
 	if (int rc = test_staged_updater_install(temp)) return rc;
 	if (int rc = test_options_and_discovery(temp)) return rc;
+	if (int rc = test_app_folder(temp)) return rc;
+	if (int rc = test_relaunch_command(temp)) return rc;
 	std::puts("update_client: ok");
 	return 0;
 }

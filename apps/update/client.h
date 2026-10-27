@@ -18,6 +18,7 @@ struct Product {
 	std::vector<std::string> gateways;
 	bool native = false;
 	bool expansion = false; // a registered expansion's (expansion/<name>/UPDATE.WIZ)
+	bool app = false; // an app's folder's own (its OPENNOVA.WIZ naming another login than the runtime's)
 };
 
 // What UPDATE.EXE's dialog (IDD 102) shows of a product's run, as its state machine and its
@@ -72,7 +73,8 @@ inline constexpr int kInstallConnectTimeoutMs = 10000;
 // [orig: Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE), uType 0 pushed @0x4053ce]
 inline constexpr unsigned kResultBoxType = 0;
 
-// The installed command file of a product's folder (its wizard's CMD), as the result box reads it:
+// The installed command file of a product's folder (its UPDATE.WIZ's CMD, else an app's folder's
+// OPENNOVA.WIZ's, else OP: Acid Gambit's), as the result box reads it:
 // its CRC and its VERSION, or none when it does not open. Retail reads version.txt here; ours reads
 // the command file the release wrote, whose VERSION is the release's (D-UPD-11).
 struct VersionMark {
@@ -88,7 +90,8 @@ struct Result {
 	bool revision_pending = false;
 	size_t products = 0;
 	size_t files = 0;
-	std::string launch_exe; // legacy command file's EXE, if present
+	std::string launch_exe; // a legacy run's or an app's command file's EXE, if present
+	bool app = false; // the run was an app's folder's (relaunch_command)
 	// An install's expansions in their order, each run as retail runs one, a nested updater with a
 	// result box of its own: its folder, its command file as its run found it, and its outcome
 	// (an install goes on past a failed one). A check records none.
@@ -101,7 +104,9 @@ struct Result {
 	std::vector<Expansion> expansions;
 };
 
-// Read-only discovery: runtime, selected content, and installed expansions with a wizard.
+// Read-only discovery: runtime, selected content, and installed expansions with a wizard; in an
+// app's folder (its OPENNOVA.WIZ naming another login than ONRUNTIME) that app alone, /game and
+// --no-runtime refused there.
 bool discover_products(const Options &options, std::vector<Product> &out, std::string &error);
 // The same worker drives the dialog, --check and loopback tests. Checks write no files.
 // A product's fetched files land in its update\ directory as they arrive, the install reads

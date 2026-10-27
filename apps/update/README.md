@@ -12,8 +12,8 @@ update.exe /game jo --runtime-dir <runtime> --resource-dir <retail> /RUN
 is available, 1 on failure and 2 for invalid arguments. Its network work has a ten
 second total budget; OS hostname resolution can also take time. The game itself
 runs no check. Normal execution shows
-a native progress dialog on Windows. `/RUN` starts `opennova.exe` after success;
-repeat `--run-arg <value>` to preserve its arguments. `--parent-pid <pid>` waits for
+a native progress dialog on Windows. `/RUN` starts `opennova.exe` after success (an
+app's folder: its own EXE, below); repeat `--run-arg <value>` to preserve its arguments. `--parent-pid <pid>` waits for
 the game to exit before files are changed. `--server` and `--port` select a local
 test server; `--no-runtime` checks/applies only the selected content products.
 
@@ -24,6 +24,12 @@ runtime config never replaces the retail wizard or its `version.txt`. Every
 `expansion/<name>/UPDATE.WIZ` registers that expansion, as retail's updater does, its
 archive installed or not: the Joint Operations zip ships Escalation's wizard alone, and
 the first run installs Escalation's whole release beside Joint Operations'.
+
+An `OPENNOVA.WIZ` naming another login than `ONRUNTIME` makes the folder that app's: the
+editor's names `ONEDITOR` / `ONEDITOR.CMD`. There `update.exe` updates that app alone,
+with no game and no expansion, and refuses `/game` and `--no-runtime`; `/RUN` starts
+the EXE its command file names (`oneditor.exe`), with the `--run-arg` values alone, and
+the result box reads that command file's `VERSION`.
 
 The Joint Operations and DFX2 zips (`jointops-game-windows`, `dfx2-game-windows`) are the
 runtime with the `UPDATE.WIZ` naming that game's product. Unzipped into an empty folder,

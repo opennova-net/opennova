@@ -67,6 +67,14 @@ UpdateWizard with_territory(UpdateWizard wizard, const Territory &territory);
 inline constexpr std::string_view kJoCommandFile = "JOPTR.CMD";
 inline constexpr std::string_view kDfx2CommandFile = "DFX2.CMD";
 inline constexpr std::string_view kAcidGambitCommandFile = "ACIDGAMBIT.CMD";
+// OP: Acid Gambit's updater login, the one its own wizard names.
+inline constexpr std::string_view kAcidGambitLogin = "ACIDGAMBIT";
+
+// The runtime's product, the one an OpenNova folder's OPENNOVA.WIZ names when it holds the
+// runtime: the login and the command file. A wizard naming another login is an app's folder
+// (the editor's ONEDITOR), which updates that app alone.
+inline constexpr std::string_view kRuntimeLogin = "ONRUNTIME";
+inline constexpr std::string_view kRuntimeCommandFile = "ONRUNTIME.CMD";
 
 // The product a wizard's CMD names: "jo", "dfx2" or "acidgambit" (ASCII case-blind, as the
 // updater opens the file); "" for any other (BHD's DFBHD.CMD, an expansion's JOEPTR.CMD).
