@@ -163,9 +163,10 @@ MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_
 // the 2D chunks go to the creator that halves a texture built from pixels (pixel_texture_halvings
 // times, each GTexture_Downsample2x2_RGBA8), the NQ8B normal map (16, A8R8G8B8) texel by texel and the
 // AOC8 occlusion map (18, A8) as that box takes its one-byte texels, four to a 32-bit lane group at the
-// map's sides, the result read back as A8 at the halved sides (its first bytes, which only the map's own
-// bytes make); the HRZ8 horizon volume (17) goes to the volume creator, which reads no halving bit, as
-// the stage's own horizon volume (6) does.
+// map's sides (four times the map's bytes: past the map, the rest of the chunk's own bytes, then the
+// heap, zero here), the result read back as A8 at the halved sides (its first bytes); the HRZ8 horizon
+// volume (17) goes to the volume creator, which reads no halving bit, as the stage's own horizon
+// volume (6) does.
 // [orig: Material_LoadStageTexture @0x5B17D4..0x5B17E8 (the word, as the chunk loader's flags);
 //  Texture_LoadNQ8BChunk @0x58F426..0x58F42E (format 1) and Texture_LoadAOC8Chunk @0x58F666..0x58F66E
 //  (format 2, D3DFMT_A8 @0x686D93, one byte a texel @0x686DF0) -> GTexture_CreateFromPixelData_0

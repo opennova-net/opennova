@@ -372,6 +372,15 @@ int main() {
             // are the halved map's four A8 bytes.
             expect(halved.rgba[3]==1 && halved.rgba[7]==2 && halved.rgba[11]==2 && halved.rgba[15]==3,
                 "the AOC8 bytes boxed as 32-bit texels");
+            // A chunk holding 16 more bytes past the map (101..116): the box's second texel row is
+            // those, as the chunk's own buffer holds them [orig: ChunkFile_ParseRecursive
+            // @0x56F73D..0x56F752]: the first texel's lanes (1+5+101+105)/4 .. (4+8+104+108)/4.
+            std::vector<uint8_t> longer = bytes;
+            for (uint8_t v = 101; v <= 116; ++v) longer.push_back(v);
+            put(longer,12,uint32_t(longer.size()-16));
+            const auto past = load_material_chunk(longer.data(),longer.size(),type,kTextureFlagHalveOnce);
+            expect(past.width==2 && past.height==2 && past.rgba[3]==53 && past.rgba[7]==54 &&
+                past.rgba[11]==55 && past.rgba[15]==56, "the AOC8 box reads the chunk's bytes past the map");
         }
         expect(load_material_chunk(bytes.data(),bytes.size(),type).width==4, "no word, no halving");
     }
