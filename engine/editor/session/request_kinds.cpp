@@ -1562,8 +1562,10 @@ constexpr RequestKindRow kRows[] = {
 	// A call the poll takes the reply of, as a sign-in's: the service builds the release (ADR 0069 d7).
 	Request(K::NovaWorldRelease, "novaworld_release", serve_novaworld_release,
 			"A release of the open project's revision (its base: what it was last pulled or pushed at) built on "
-			"the service as version, a draft once the service's data program has packed and checked it, published "
-			"on the site (an owner's project page under Projects, the admin's Products page); for an expansion's "
+			"the service as version, a draft once the service's data program has packed and checked it, then, on "
+			"the site, an admin's published (the admin's Products page) and an owner's submitted for approval on "
+			"its project page under Projects, which players get once an admin approves it (the release they get "
+			"stays theirs meanwhile); for an expansion's "
 			"project, on its base game's newest revision. Its owner's or an admin's (the project's can_release); "
 			"refused by the service while another release of the account's builds, past the releases it builds "
 			"for an account in a day, and past the account's storage.")

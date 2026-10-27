@@ -15,7 +15,7 @@
 // no revision where its files are not the head's, its push waiting for a pull; the store reset under
 // a working copy, set up again by the check that found it; a player's new project put on NovaWorld
 // (a game, a mod of a game it names; public unless asked private) and pushed, released by its owner
-// (published on its page under Projects, each refusal of the service's said), a mod whose name the
+// (submitted for approval on its page under Projects, each refusal of the service's said), a mod whose name the
 // service's rule refuses refused up front, one whose short name another mod holds refused by the
 // service, an empty project put on refused where it has revisions, is another's, or is no game or mod
 // as the project is, of its game and short name; a player's push and release of another's project
@@ -434,7 +434,9 @@ static int test_player_projects() {
 			service.release_revision == 1 &&
 			s.novaworld().last.find("Release MYGAME 0.1.0 is building on novaworld.test") !=
 					std::string::npos &&
-			s.novaworld().last.find("its page under Projects") != std::string::npos &&
+			s.novaworld().last.find("submit it for approval on its page under Projects") !=
+					std::string::npos &&
+			s.novaworld().last.find("an admin approves it before players get it") != std::string::npos &&
 			s.novaworld().last.find("https://novaworld.test/me/projects/MYGAME") != std::string::npos);
 	service.quota = 10;
 	for (const auto &[code, words] : { std::pair<const char *, const char *>{ "release_in_progress",

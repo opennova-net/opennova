@@ -906,14 +906,15 @@ void NovaWorldController::poll() {
 		int64_t id = 0;
 		std::string name;
 		if (novaworld_api::read_release(release_.reply(), id, name, error)) {
-			// Published where the account sees the project's releases: an admin's Products page, an
-			// owner's own project page under Projects.
+			// Where the account takes it on once it is a draft: an admin publishes it on the admin's
+			// Products page; an owner submits it on its project page under Projects, and an admin
+			// approves it before players get it (the release they get now stays theirs meanwhile).
 			view.last = "Release " + name + " is building on " + novaworld_host(release_server_) +
-					": publish it " +
-					(release_admin_ ? "on the admin's Products page"
-									: "on its page under Projects on the site") +
-					" once it is a draft (" + release_server_ +
-					(release_admin_ ? "/admin/products/" : "/me/projects/") + release_key_ + ").";
+					(release_admin_ ? ": publish it on the admin's Products page once it is a draft ("
+									: ": once it is a draft, submit it for approval on its page under "
+									  "Projects on the site; an admin approves it before players get it (") +
+					release_server_ + (release_admin_ ? "/admin/products/" : "/me/projects/") +
+					release_key_ + ").";
 			core_.note("NovaWorld: " + view.last);
 		} else {
 			view.last = "The release was refused: " +

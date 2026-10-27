@@ -308,15 +308,16 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
 	                                         : "Sends every change as the project's next revision; players get "
-	                                           "it once its owner releases it.";
+	                                           "it once a release of it is published (an owner's once an admin "
+	                                           "approves it).";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::novaworld_push(message_));
 }
 
 // A release of the revision the folder is at, built on the service (ADR 0069 d7), for an account the service says
 // may release the project (its owner, an admin: can_release, ADR 0074): a draft once the service has packed and
-// checked it, published on the site (an owner's project page, the admin's Products page). The release players get
-// now, above it.
+// checked it, then on the site an admin's published (the admin's Products page) and an owner's submitted for an
+// admin's approval (its project page under Projects). The release players get now, above it.
 void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (!c.remote_known || !c.remote.can_release) return;
@@ -324,7 +325,9 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	ui_kit::quiet_text(c.remote.release_id != 0 ? "Players get " + c.remote.release_version + "."
 	                                            : "No release published yet.",
 	                   "The release published on NovaWorld, which players' updaters install.");
-	const std::string publish = admin(c) ? "the admin's Products page" : "its page under Projects on the site";
+	const std::string then = admin(c) ? "publish it on the admin's Products page once it is a draft"
+	                                  : "once it is a draft, submit it for approval on its page under Projects on the "
+	                                    "site: an admin approves it before players get it";
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	ImGui::InputTextWithHint("##version", "0.2.0", version_, sizeof(version_));
 	ui_kit::tooltip("The release's version: one to four numbers between dots.");
@@ -335,8 +338,8 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	ImGui::EndDisabled();
 	ui_kit::tooltip(c.revision <= 0 ? "Push first: a release is built from a revision on NovaWorld."
 	                : !version_[0]  ? "Name its version first."
-	                                : "Builds a release of r" + std::to_string(c.revision) + " on the service; publish it on " +
-	                                          publish + " once it is a draft.");
+	                                : "Builds a release of r" + std::to_string(c.revision) + " on the service; " + then +
+	                                          ".");
 	if (released) {
 		workspace_.request(request::novaworld_release(version_));
 		version_[0] = '\0';
