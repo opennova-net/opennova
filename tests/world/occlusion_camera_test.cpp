@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace {
 
@@ -29,6 +30,14 @@ float plane_eval(const float plane[4], const float p[3]) {
 
 int main() {
 	using namespace opennova::world;
+
+	// The fov word's multiplier is the game's stored double, byte for byte, not the exact
+	// pi / 180 / 65536 [orig: dbl_7C3620 = 4D C9 07 77 46 DF 91 3E].
+	const unsigned char kRetailFovWordRadians[8] = {0x4d, 0xc9, 0x07, 0x77, 0x46, 0xdf, 0x91, 0x3e};
+	check(std::memcmp(&kViewFovWordRadians, kRetailFovWordRadians, 8) == 0,
+			"the fov word's radians are dbl_7C3620's bytes");
+	check(kViewFovWordRadians != 3.14159265358979323846 / 180.0 / 65536.0,
+			"the stored multiplier is not the exact quotient");
 
 	OcclusionViewSpec view;
 	view.eye[0] = 10.0f;

@@ -34,6 +34,11 @@ inline bool mission_forces_indoors(uint32_t bms_attrib_flags) {
 	return (bms_attrib_flags & kMissionAttribForceIndoors) != 0;
 }
 
+// The fov word's radians per unit (Q16 degrees) as the game stores it: 2.663160705566406e-07, a
+// little under the exact pi / 180 / 65536 (2.663161090e-07) [orig: dbl_7C3620, the
+// Viewport_BuildProjectionMatrix half-angle's multiplier @ 0x410fdb].
+inline constexpr double kViewFovWordRadians = 0x1.1df467707c94dp-22;
+
 // The shell's view, presentation frame: a unit forward/right/up triad, the
 // eye, and the viewport the game builds the view over: its horizontal field of
 // view (the fov word, Q16 degrees, here in degrees) and its rect's sides in
@@ -153,7 +158,7 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	//  atan @ 0x411022..0x411041, its cosine and sine @ 0x411043..0x411056,
 	//  the side planes' rows * flt_7C3610 (2^-22) @ 0x4113b4..0x411571]
 	const int32_t fov_q16 = static_cast<int32_t>(std::lround(static_cast<double>(view.fov_h_deg) * 65536.0));
-	const double half_h = static_cast<double>(fov_q16 >> 1) * (io::kRadiansPerDegree / 65536.0);
+	const double half_h = static_cast<double>(fov_q16 >> 1) * kViewFovWordRadians;
 	const int32_t width = std::max<int32_t>(1, static_cast<int32_t>(std::lround(view.viewport_width)));
 	const int32_t height = std::max<int32_t>(1, static_cast<int32_t>(std::lround(view.viewport_height)));
 	const double tan_h = std::tan(half_h);
