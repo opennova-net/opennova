@@ -1366,6 +1366,13 @@ target_link_libraries(anim_person_rows_past_clip_test PRIVATE opennova_runtime)
 target_include_directories(anim_person_rows_past_clip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_person_rows_past_clip COMMAND anim_person_rows_past_clip_test)
 
+# A body rig's deformation against the body bone builder's composition (D-INF-13): a clip whose
+# frame-0 channels are not the skeleton bind, through the collision provider's frame map.
+add_executable(anim_body_bind_equivalence_test anim/body_bind_equivalence_test.cpp)
+target_link_libraries(anim_body_bind_equivalence_test PRIVATE opennova_runtime)
+target_include_directories(anim_body_bind_equivalence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_body_bind_equivalence COMMAND anim_body_bind_equivalence_test)
+
 add_executable(mission_item_traits_test mission/item_traits_test.cpp)
 target_link_libraries(mission_item_traits_test PRIVATE opennova_runtime)
 target_include_directories(mission_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
