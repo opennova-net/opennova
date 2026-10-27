@@ -338,7 +338,7 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		ProjectDocument base;
 		Diagnostic unread;
 		const std::string base_root = base_project_root(dir, expansion);
-		if (!base_root.empty() && open_project(base_root, base, unread)) target_game = base.target_game;
+		if (!base_root.empty() && ::opennova::editor::open_project(base_root, base, unread)) target_game = base.target_game;
 	}
 	if (target_game.empty() && (stock || !expansion.standalone()) && !game_install.empty())
 		target_game = editor::install_game(game_install);
