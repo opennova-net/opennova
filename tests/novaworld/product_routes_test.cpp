@@ -394,8 +394,8 @@ int test_create_patch_delete(Harness &h) {
 	reply = h.admin(
 			"PATCH", "/api/admin/products/" + std::to_string(ts), R"({"lobby":"dfx2_consumer"})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "lobby");
-	json = json_of(h.admin("PATCH", base, R"({"game":"acidgambit_0_consumer"})"), 200);
-	TEST_EXPECT(json && str(json["product"]["game"]) == "acidgambit_0_consumer");
+	json = json_of(h.admin("PATCH", base, R"({"lobby":"acidgambit_0_consumer"})"), 200);
+	TEST_EXPECT(json && str(json["product"]["lobby"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(refused(h.admin("PATCH", "/api/admin/products/99999", R"({"display_name":"X"})"),
 			404, "not_found"));
 	// The project: renamed and made public; a key in use, a malformed one, an expansion given a
