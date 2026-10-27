@@ -284,7 +284,6 @@ bool JoinerConnection::on_mission_record(const ProtocolMessage &m, RecordPass &p
 bool JoinerConnection::on_world_record(const ProtocolMessage &m, RecordPass &pass) {
 	PollResult &out = pass.out;
 	std::vector<ProtocolMessage> &periodic_replies = pass.periodic_replies;
-	const SessionDeframeAdmission &admission = pass.admission;
 	if (m.tag == s2c::ENTITY_SPAWN_BATCH) {
 		// The spawn's entity+120 is the connection ID, not entity flags. The
 		// local player is a pool-0 player whose owner matches ServerAuth.MI.
@@ -783,7 +782,6 @@ bool JoinerConnection::on_control_record(const ProtocolMessage &m, RecordPass &p
 // test it).
 bool JoinerConnection::on_deployment_record(const ProtocolMessage &m, RecordPass &pass) {
 	PollResult &out = pass.out;
-	const SessionDeframeAdmission &admission = pass.admission;
 	if (m.tag == s2c::WEAPON_LOADOUT && pass.valid_weapon_loadout &&
 	           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 		// Every valid retail 0x5A apply clears g_ClientDeployHold immediately,

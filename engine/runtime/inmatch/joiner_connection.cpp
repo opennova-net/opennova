@@ -1248,8 +1248,7 @@ void JoinerConnection::process_session_admission(const ProtocolPacketHeader &hdr
 					monotonic_milliseconds_());
 		}
 		// The tag arms, by message family, in wire order (joiner_connection_records.cpp).
-		RecordPass pass{out, periodic_replies, admission, packet_ack, valid_weapon_loadout,
-				world_state_load_seen};
+		RecordPass pass{out, periodic_replies, packet_ack, valid_weapon_loadout, world_state_load_seen};
 		if (!on_join_record(m, pass) && !on_mission_record(m, pass) && !on_world_record(m, pass) &&
 				!on_control_record(m, pass))
 			(void)on_deployment_record(m, pass);

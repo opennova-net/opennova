@@ -1309,13 +1309,12 @@ private:
 			std::vector<ProtocolMessage> messages, const SessionDeframeAdmission &admission,
 			PollResult &out);
 	// One admitted game record's pass through the tag arms (joiner_connection_records.cpp): the
-	// poll's result, the replies its handlers queue in wire order, the packet's admission, the
-	// ACK of the record's containing packet, whether it is a 0x5A that decoded, and whether this
-	// packet carried the 0x0F that completes the admission.
+	// poll's result, the replies its handlers queue in wire order, the ACK of the record's
+	// containing packet, whether it is a 0x5A that decoded, and whether this packet carried the
+	// 0x0F that completes the admission.
 	struct RecordPass {
 		PollResult &out;
 		std::vector<ProtocolMessage> &periodic_replies;
-		const SessionDeframeAdmission &admission;
 		uint32_t packet_ack;
 		bool valid_weapon_loadout;
 		bool &world_state_load_seen;
