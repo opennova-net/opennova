@@ -402,14 +402,14 @@ int test_data_unavailable() {
 			found[0].text.rfind("Its data could not be fetched at its last start, 16 min ago "
 								"(Joint Operations, trees 41 and 42); hostd's last reason: ",
 					0) == 0);
-	// Past an hour: a danger; a product gone and no reason recorded say so.
+	// Past an hour: a danger; a game gone and no reason recorded say so.
 	in.servers[0].data_failures->since = kNow - hosted::kDataFailingDangerS - 1;
 	in.servers[0].data_failures->product.clear();
 	in.servers[0].data_failures->reason = "its data could not be fetched";
 	found = of(hosted::fleet_health(in, {}), "data_unavailable");
 	TEST_EXPECT(found.size() == 1 && found[0].level == HealthLevel::Danger &&
 			found[0].text ==
-					"Its data could not be fetched at its last start, 60 min ago (its product is "
+					"Its data could not be fetched at its last start, 60 min ago (its game is "
 					"gone, trees 41 and 42).");
 	TEST_EXPECT(hosted::health_gauges(in, hosted::fleet_health(in, {})).danger == 1);
 	// None in a row: nothing.

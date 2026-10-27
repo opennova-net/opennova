@@ -493,8 +493,8 @@ int test_game_projects(Harness &h) {
 			json["project"]["product_id"].i() == mod && !json["project"]["retail"].b());
 	TEST_EXPECT(refused(h.send("GET", "/api/products/MOD"), 404, "not_found"));
 	TEST_EXPECT(refused(admin("POST", "/api/admin/products",
-								"{\"display_name\": \"Again\", \"kind\": \"base\", \"title\": "
-								"\"jo\", \"game\": \"jop_2_consumer\", \"key\": \"MOD\", "
+								"{\"display_name\": \"Again\", \"kind\": \"game\", \"title\": "
+								"\"jo\", \"lobby\": \"jop_2_consumer\", \"key\": \"MOD\", "
 								"\"visibility\": \"public\"}"),
 			409, "duplicate_key"));
 
