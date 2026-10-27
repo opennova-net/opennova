@@ -299,6 +299,39 @@ int main() {
         expect(same, "a clip's own bind records pose nothing");
     }
 
+    // A root off the model origin turns about the origin, as the builder's pivot block leaves it
+    // (its parent row is its own, so -p * M + p * M cancels).
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - @0x4B1FE7, @0x4B201E..0x4B2158]
+    {
+        std::vector<anim::Vec3> moved_rel = rel;
+        moved_rel[0] = {0.05f, 0.4f, -0.03f};
+        std::vector<std::array<float, 3>> moved_pivot(kRows);
+        for (size_t k = 0; k < kRows; ++k) {
+            moved_pivot[k] = {moved_rel[k].x, moved_rel[k].y, moved_rel[k].z};
+            if (parents[k] != static_cast<int>(k))
+                for (int j = 0; j < 3; ++j)
+                    moved_pivot[k][static_cast<size_t>(j)] += moved_pivot[static_cast<size_t>(parents[k])][static_cast<size_t>(j)];
+        }
+        SkeletalClips rooted;
+        if (expect(rooted.load_from_files(&files, "skel", {{"anim_clip", "clip"}}, moved_rel, parents, true),
+                    "the off-origin rig loads")) {
+            for (int key = 0; key < 2; ++key) {
+                std::vector<PoseBone> pose;
+                rooted.eval_pose("anim_clip", playheads[key], 0, pose);
+                std::vector<SkeletalClips::RestTransform> globals;
+                anim::pose_globals(pose, rooted.parents(), pose.size(), -1, globals);
+                std::vector<Quat4> channel(kRows);
+                for (size_t k = 0; k < kRows; ++k) channel[k] = clip_keys[k][static_cast<size_t>(key)];
+                const std::vector<Row> retail = retail_body_rows(channel, skel_bind, moved_pivot, parents);
+                bool same = true;
+                for (size_t k = 0; k < kRows; ++k)
+                    same = same && same_row(render_row(anim::rest_mul(globals[k], rooted.rest_global_inverse()[k])),
+                                            retail[k], 2e-4f);
+                expect(same, "a root off the origin turns about the model origin");
+            }
+        }
+    }
+
     // A translated clip over a translated reset: the body rig poses the untranslated rows, the
     // builder's; the first-person rig (the default) moves them.
     // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the copy's zero translation row

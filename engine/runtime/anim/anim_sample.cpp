@@ -308,8 +308,24 @@ ClipSampler::ClipSampler(const BadFile &bad, const std::vector<Vec3> &shared_res
     translated_ = translated;
     model_table_ = model_table;
     rest_origins_ = std::move(rest_origins);
+    // A root row turns about the model origin: its pivot is carried by its own turn relative to
+    // the rest the rig gives it, the bind record transposed into the column basis (skeletal_pose's
+    // bind_rest_local); a model_bind rotation is already that relative turn. Every shipped root
+    // sits at the origin, where this moves nothing.
+    // [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - the pivot block's parent row is the
+    //  root's own slot, holding its M (@0x4B1FE7), so -p * M + p * M cancels @0x4B201E..0x4B2158;
+    //  BoneAnim_BuildWorldMatrices @0x40C400 - the in-place FK's parent @0x40C674 likewise]
+    std::vector<Quat> root_rest_inv(bone_count, kIdentityQuat);
+    const BadFile &rest_bad = (bind_source != nullptr) ? *bind_source : bad;
+    for (size_t b = 0; b < bone_count; ++b) {
+        if (model_bind || clip.bones[b].parent_index >= 0 || b >= rest_bad.num_bones) continue;
+        const float *m = rest_bad.bones[b].rotation;
+        const float columns[9] = {m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]};
+        root_rest_inv[b] = quat_inv(mat3_to_quat(columns));
+    }
     rest_pivots_ = std::move(rest_pivots);
     bind_rot_ = std::move(bind_rot);
+    root_rest_inv_ = std::move(root_rest_inv);
 }
 
 // One key of the clip: every row's rotation, then its place, then its parent-local form, from the
@@ -385,6 +401,9 @@ void ClipSampler::sample_key(uint32_t f, std::vector<BoneSample> &frame) const {
             carried = vec_add(p.world_position, quat_rotate(p.world_rotation, rest_origins[b]));
         } else if (parent >= 0) {
             carried = quat_rotate(raw_rotation[static_cast<size_t>(parent)], rest_pivots[b]);
+        } else {
+            // A root turns its pivot about the model origin (the constructor's root_rest_inv).
+            carried = quat_rotate(quat_mul(frame[b].world_rotation, root_rest_inv_[b]), rest_origins[b]);
         }
         frame[b].world_position = vec_add(carried, translation);
     };

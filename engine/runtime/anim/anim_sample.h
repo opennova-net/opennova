@@ -208,6 +208,8 @@ private:
     std::vector<Vec3> rest_origins_;
     std::vector<Vec3> rest_pivots_;
     std::vector<Quat> bind_rot_;
+    // Each root row's rest turn, inverted (identity for any other row, and in model_bind mode).
+    std::vector<Quat> root_rest_inv_;
 };
 
 // Reconstruct the BadBone.position table from the MODEL's bone table + the skeleton
