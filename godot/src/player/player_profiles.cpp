@@ -243,9 +243,12 @@ PackedStringArray PlayerProfiles::word_names() {
 	return out;
 }
 
+// The record's ten chat macros, the page's bytes, as the chat line takes them
+// (HudChatEntry's presets) (D-HUD-57).
 PackedStringArray PlayerProfiles::get_macros() const {
 	PackedStringArray out;
-	for (const std::string &macro : store_.current().macros) out.push_back(opennova::to_gd(macro));
+	for (const std::string &macro : store_.current().macros)
+		out.push_back(opennova::cp1252_to_gd(macro));
 	return out;
 }
 

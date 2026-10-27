@@ -78,6 +78,22 @@ func test_the_record_reads_every_named_word() -> void:
 	assert_eq(profiles.get_flags(), 0, "record 0 is named for the account")
 
 
+# The record's chat macros read as the page's bytes, as the chat line draws them: a
+# cp1252 e-acute in record 0's first macro (the 16-byte header, then +576) reads
+# back as one character (D-HUD-57) [orig: PlayerProfile_InitDefaults
+# @0x54bc9a..0x54bcda; Game_ApplySessionSettingsToGlobals @0x552081].
+func test_the_record_macros_read_as_the_pages_bytes() -> void:
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	var bytes := profiles.player_sav_bytes()
+	var macro := PackedByteArray([0x43, 0x61, 0x66, 0xE9, 0])
+	for i in macro.size():
+		bytes[16 + 576 + i] = macro[i]
+	var reread := PlayerProfiles.new()
+	reread.load_bytes(bytes, true, PackedByteArray(), false, "")
+	assert_eq(reread.get_macros()[0], "Café")
+
+
 # D-NET-375: single player's charattr restriction words are the current record's
 # [orig: Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F]; the host boot's
 # restriction step disables ATTRIBUTES and SCOPE_MUTE for them (the S2C 0x42
