@@ -665,12 +665,19 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 	// action rows' and the spectator rows' (dispatch_record).
 	gate.key_events.swap(action_events_);
 	action_events_.clear();
+	// The Scroll Lock word is a device the scripted input replaces like the keys.
+	const bool scroll_lock =
+			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
+	// The joystick toggle pass's fires behind the keyboard and mouse passes' records (engine
+	// BindingSet::joystick_toggle_pass); no input frame runs under a menu screen.
+	if (controls_.is_valid() && !frame_menu_open_) {
+		const auto joystick = controls_->joystick_records(p_spectating, scroll_lock);
+		gate.key_events.insert(gate.key_events.end(), joystick.begin(), joystick.end());
+	}
 	gate.embedder_row = [](int p_code) {
 		return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
 	};
-	// The Scroll Lock word is a device the scripted input replaces like the keys.
-	gate.scroll_lock_on =
-			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
+	gate.scroll_lock_on = scroll_lock;
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	// Retail's auto-run rides the forward key (engine controls::PlayerActionFrame::
 	// auto_run_forward). A case that turns its toggle off passes the dispatcher's head by its

@@ -57,6 +57,9 @@ void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet
 
 void apply_controls(const playersav::ProfileRecord &record, controls::BindingSet &live) {
 	live.set_joystick_enabled(record.joystick_enabled != 0);  // [orig: @0x563664]
+	// The first hat's toggle-pass gate: the session copy's word in retail (@0x551689); no
+	// Options control edits it, so the Accept's copy carries the same value.
+	live.set_joystick_hat_buttons(record.joystick_cap_1 != 0);
 	apply_bindings(record, live);                              // [orig: @0x5636bf]
 }
 

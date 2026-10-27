@@ -377,12 +377,10 @@ void OptionsScreen::show_ingame_main(MenuRuntime &menu) {
 	}
 }
 
-// The port arms on the driver's list activation (double-click); joystick
-// capture remains refused under D-CTRL-1, while its device page is served.
+// The port arms on the driver's list activation (double-click), on every device's page.
 // [orig: UI_ControlsRemapArmHandler @0x55d560; CTableWnd_SetCellText @0x63edf0]
 void OptionsScreen::arm(MenuRuntime &menu, int id, int row) {
-	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING") ||
-			device_ == controls::Device::Joystick) return;
+	if (!strutil::iequals(menu.widget_name_of(id), "CONTROL_MAPPING")) return;
 	const int action = bindings_.action_index_for_row(row);
 	if (action < 0) return;
 	table_ = id;
@@ -393,10 +391,14 @@ void OptionsScreen::arm(MenuRuntime &menu, int id, int row) {
 }
 
 // Esc restores without assigning. Key releases are swallowed while armed;
-// a rejected/unmapped key leaves capture armed. Mouse releases / other
-// device events fall through, and an unmappable mouse press ends capture.
-// [orig: capture pump @0x55c67c; KeyBinding_HandleKeyAssignment @0x55bb20;
-// mouse capture callback @0x55c780]
+// a rejected/unmapped key leaves capture armed, and only the keyboard's page
+// assigns a key (the mouse's and the joystick's swallow it). Mouse releases /
+// other device events fall through, and an unmappable mouse press ends
+// capture. A joystick event on the joystick's page assigns the device's lowest
+// set bit and ends capture; with none set the capture keeps waiting.
+// [orig: capture pump @0x55c67c - Esc @0x55c691, the key assignment behind the
+// keyboard device @0x55c6c4..0x55c756, the joystick poll @0x55c6c9..0x55c726;
+// KeyBinding_HandleKeyAssignment @0x55bb20; mouse capture callback @0x55c780]
 int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 	if (action_ < 0) return None;
 	if (event.kind == RemapInput::Kind::Key) {
@@ -405,10 +407,15 @@ int OptionsScreen::consume(MenuRuntime &menu, const RemapInput &event) {
 			end_remap(menu, true);
 			return Consumed;
 		}
+		if (device_ != controls::Device::Keyboard) return Consumed;
 		if (event.vk != 0 && bindings_.assign_key(action_, event.vk, event.ctrl, event.shift,
 				controls::is_extended_vk(event.vk), event.repeat)) {
 			end_remap(menu, true);
 		}
+		return Consumed;
+	}
+	if (event.kind == RemapInput::Kind::Joystick && device_ == controls::Device::Joystick) {
+		if (event.pressed && bindings_.assign_joystick(action_, event.joystick)) end_remap(menu, true);
 		return Consumed;
 	}
 	if (event.kind == RemapInput::Kind::Mouse && event.pressed &&

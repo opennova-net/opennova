@@ -1872,9 +1872,50 @@ void test_options_screen() {
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	const controls::BindingSet &bindings = options.bindings();
 	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
+	// The mouse page's capture swallows a key, assigning none [orig: Options_UpdatePendingState
+	// @0x55C450 - the key assignment behind the keyboard device @0x55C6C4..0x55C756].
+	options.arm(menu, table, 0);
+	{
+		RemapInput key;
+		key.kind = RemapInput::Kind::Key;
+		key.pressed = true;
+		key.vk = 'Q';
+		const controls::BindingRecord before = *bindings.record(bindings.action_index_for_row(0));
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		CHECK(bindings.record(bindings.action_index_for_row(0))->primary == before.primary &&
+				menu.table_cell_text(table, 0, 2) == "???");
+		options.end_remap(menu, true);
+	}
 	options.activate(menu, nullptr, menu.widget_id("JOYSTICK"));
 	options.arm(menu, table, 0);
 	CHECK(options.consume(menu, input) == OptionsScreen::None);
+	// The joystick page captures (D-CTRL-1): a key is swallowed, an event with nothing down
+	// keeps waiting, the lowest set bit is the binding's byte (bit 3: JOYBUTTON4), and the
+	// capture ends; Esc ends it with nothing written [orig: Options_UpdatePendingState
+	// @0x55C450 - the poll @0x55C6CF, the scan @0x55C6D4..0x55C6F8, the store @0x55C720,
+	// the refresh's end @0x55C726]
+	{
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		RemapInput key;
+		key.kind = RemapInput::Kind::Key;
+		key.pressed = true;
+		key.vk = 'Q';
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		RemapInput pad;
+		pad.kind = RemapInput::Kind::Joystick;
+		pad.pressed = true;
+		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		CHECK(menu.table_cell_text(table, 0, 2) == "???");
+		pad.joystick[0] = (1u << 3) | (1u << 9);
+		CHECK(options.consume(menu, pad) == OptionsScreen::Consumed);
+		CHECK(bindings.record(bindings.action_index_for_row(0))->joy_button == 4);
+		CHECK(menu.table_cell_text(table, 0, 2) == "JOYBUTTON4");
+		CHECK(options.consume(menu, pad) == OptionsScreen::None);
+		options.arm(menu, table, 0);
+		key.escape = true;
+		CHECK(options.consume(menu, key) == OptionsScreen::Consumed);
+		CHECK(menu.table_cell_text(table, 0, 2) == "JOYBUTTON4");
+	}
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) ==

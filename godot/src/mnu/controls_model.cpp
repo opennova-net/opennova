@@ -359,7 +359,9 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
 }
 
 bool ControlsModel::is_token_held_off_keyboard(const String &p_token) const {
-	return token_pressed_(p_token, false, false);
+	// The scripted device's hold alone: the joystick's fires are the toggle pass's records
+	// (joystick_records).
+	return token_pressed_(p_token, false, false, false, false);
 }
 
 bool ControlsModel::is_token_binding_active(const char *p_token) const {
@@ -371,6 +373,40 @@ bool ControlsModel::is_token_scripted_left_button(const char *p_token) const {
 	return r != nullptr && r->mouse_mask == opennova::controls::kMouseLeft &&
 			scripted_input_.is_valid() && !bindings_.keyboard_captured() &&
 			scripted_input_->native().token_held(p_token);
+}
+
+opennova::controls::JoystickBits ControlsModel::joystick_device_bits() {
+	opennova::controls::JoystickBits bits{};
+	Input *input = Input::get_singleton();
+	if (input == nullptr) return bits;
+	const auto devices = input->get_connected_joypads();
+	for (int i = 0; i < devices.size(); ++i) {
+		const int device = devices[i];
+		const auto button_down = [input, device](int button) {
+			return button >= 0 && button < JOY_BUTTON_MAX &&
+					input->is_joy_button_pressed(device, static_cast<JoyButton>(button));
+		};
+		// Godot presents the first POV hat as four D-pad buttons (token_pressed_'s form).
+		const int dx = int(button_down(JOY_BUTTON_DPAD_RIGHT)) - int(button_down(JOY_BUTTON_DPAD_LEFT));
+		const int dy = int(button_down(JOY_BUTTON_DPAD_DOWN)) - int(button_down(JOY_BUTTON_DPAD_UP));
+		std::array<int32_t, 4> hats{-1, -1, -1, -1};
+		if (dx != 0 || dy != 0) {
+			const int angle = static_cast<int>(std::lround(std::atan2(double(dx), double(-dy)) *
+					(18000.0 / 3.14159265358979323846)));
+			hats[0] = angle < 0 ? angle + 36000 : angle;
+		}
+		const opennova::controls::JoystickBits pad = opennova::controls::joystick_bits(button_down, hats);
+		for (std::size_t w = 0; w < bits.size(); ++w) bits[w] |= pad[w];
+	}
+	return bits;
+}
+
+std::vector<opennova::controls::KeyRowEvent> ControlsModel::joystick_records(bool p_death_screen,
+		bool p_scroll_lock) {
+	if (!bindings_.joystick_enabled()) return {};
+	const auto key_state = [this](int vk) { return is_key_state_down(vk); };
+	return bindings_.joystick_toggle_pass(joystick_device_bits(), key_state, p_scroll_lock,
+			p_death_screen);
 }
 
 ControlsModel::MouseClickRecord ControlsModel::mouse_click_record(int p_event) const {
@@ -388,7 +424,7 @@ ControlsModel::MouseClickRecord ControlsModel::mouse_click_record(int p_event) c
 }
 
 bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse,
-		bool p_binding_active) const {
+		bool p_binding_active, bool p_joystick) const {
 	const CharString token = p_token.utf8();
 	const int index = bindings_.index_of_token(token.get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
@@ -419,7 +455,7 @@ bool ControlsModel::token_pressed_(const String &p_token, bool p_keyboard, bool 
 		if (p_mouse && bindings_.pressed_mouse(index, held, key_down)) return true;
 	}
     // A disabled joystick is never polled (engine BindingSet::set_joystick_enabled).
-    if (r->joy_button != 0 && bindings_.joystick_enabled()) {
+    if (p_joystick && r->joy_button != 0 && bindings_.joystick_enabled()) {
         const auto devices = input->get_connected_joypads();
         for (int i = 0; i < devices.size(); ++i) {
             const int device = devices[i];

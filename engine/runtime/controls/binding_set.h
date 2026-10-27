@@ -11,8 +11,8 @@
 //  @ 0x55c780; profile copy @ 0x559d50; PlayerProfile_SaveToFiles @ 0x54be00].
 //
 // This port keeps the same slot semantics over the static catalog. Keyboard
-// defaults and the mouse/joystick words come from the static catalog.
-// Joystick capture is not wired; authored button defaults can be polled.
+// defaults and the mouse/joystick words come from the static catalog; the remap
+// capture writes a joystick button too (assign_joystick).
 
 #pragma once
 
@@ -32,6 +32,19 @@ namespace opennova::controls {
 // bits. 0xffff (including -1) is the centered/disconnected sentinel.
 // [orig: Joystick_MapAxisToBitfield @0x764c10, fed dev->pov by @0x7653c0]
 uint8_t joystick_pov_mask(int32_t angle);
+
+// The joystick device's state for one input frame: buttons 1..128 at bits 0..127, the four
+// hats' directions at bits 128..143 (hat h's direction d at 128 + 4h + d, in
+// joystick_pov_mask's order), so a binding's 1-based byte b reads bit b - 1.
+// [orig: dword_3343048, filled by Joystick_UpdateInputBitfield @0x7653C0 - the buttons
+//  @0x7653E6..0x76551F, the hats Joystick_MapAxisToBitfield(pov, 0x80 / 0x84 / 0x88 / 0x8C)
+//  @0x765535..0x76557A]
+using JoystickBits = std::array<uint32_t, 5>;
+JoystickBits joystick_bits(const std::function<bool(int)> &button_down,
+                           const std::array<int32_t, 4> &pov_angles);
+inline bool joystick_bit(const JoystickBits &bits, int bit) {
+  return bit >= 0 && bit < 160 && ((bits[static_cast<std::size_t>(bit >> 5)] >> (bit & 31)) & 1u) != 0;
+}
 
 
 // Mouse capture masks [orig: the capture callback's event->mask map
@@ -140,6 +153,14 @@ class BindingSet {
 
   // Assign a captured mouse button mask [orig: word write @ 0x55c815].
   void assign_mouse(int index, uint16_t mask);
+
+  // The joystick capture: the device's lowest set bit (a button, else a hat direction) as
+  // the record's 1-based joystick byte; false with no bit set (the capture keeps waiting).
+  // No conflict test, no modifier.
+  // [orig: Options_UpdatePendingState @0x55C450 - Joystick_UpdateInputBitfield @0x55C6CF, the
+  //  scan of 160 bits @0x55C6D4..0x55C6F8, the store of bit + 1 @0x55C720, then
+  //  UI_RefreshControlMappingList @0x55C726, which ends the capture (@0x55B6E1)]
+  bool assign_joystick(int index, const JoystickBits &bits);
 
   // Clear the record's slots for one device [orig: CLEAR_KEY @ 0x55c056
   //  (keyboard), @ 0x55c03e (mouse), @ 0x55c028 (joystick)].
@@ -373,9 +394,9 @@ class BindingSet {
   //  0x4995c8 fires without a modifier test; the Scroll-Lock arm @0x49959d
   //  tests an address (lea @0x4994e5) and skips every row;
   //  Input_TryTriggerJoystickButton @0x497b30 reads only +26 @0x497b38].
-  // Shared-button arbitration (modified rows listed first + the consumed
-  // latch dword_334305C @0x497b89..0x497b97) lands with joystick capture
-  // (the D-CTRL-1 residual).
+  // This is the held test (Input_IsBindingActive's joystick leg); a row's
+  // event fires come from the toggle pass (joystick_toggle_pass), whose
+  // walk order and consumed latch arbitrate a shared button.
   bool pressed_joystick(int index, const std::function<bool(int)> &button_down,
       const std::array<int32_t, 4> &pov_angles, bool dead = false) const;
 
@@ -391,6 +412,33 @@ class BindingSet {
   //  @0x563664, UI_IngameOptionsDialogEventHandler @0x55515e]
   void set_joystick_enabled(bool enabled) { joystick_enabled_ = enabled; }
   bool joystick_enabled() const { return joystick_enabled_; }
+  // The first hat's four directions (bytes 0x81..0x84) take part in the toggle pass only
+  // while the profile's +1512 word is set [orig: Input_InitBindingSystem @0x499AB0 - `cmp
+  //  dword_24D20A0` with the 0x81..0x84 range @0x49A232; the session copy @0x551689].
+  void set_joystick_hat_buttons(bool enabled) { joystick_hat_buttons_ = enabled; }
+
+  // The input frame's joystick toggle pass: its fires, one record each in the walk's order
+  // (the frame's queue takes them behind the keyboard and mouse passes'). The walk is the
+  // rows with a code and a joystick byte, those with a joystick modifier first, each half
+  // in catalog order (the first hat's directions only with set_joystick_hat_buttons). Each
+  // row whose mode word admits it (bit 1 alive, bit 2 the death screen) tries three passes,
+  // stopping at its first fire: while a keyboard modifier of its (+28 / +30) is down, while
+  // its joystick modifier (+34) is down, and unless Scroll Lock is on, with none. A try fires
+  // when the row's button bit is set: every pass for a row of flag 4, once per press for any
+  // other, whose fire latches the button consumed until it reads up, so the first row of the
+  // walk to fire a shared button takes it. A record carries no sign. Nothing runs with the
+  // joystick disabled. (The analog rows' axis tries, ahead of each button try, are not
+  // ported: D-CTRL-1's axis residual.)
+  // [orig: Input_ProcessToggleBindings @0x499480 - the gate @0x499481, the device update
+  //  Joystick_UpdateInputBitfield @0x49948E (the consumed latch's release `and` @0x765744..
+  //  0x765772), the walk over g_InputToggleBindingIndices @0x4994B0, the mode word
+  //  @0x4994C3..0x4994D5, the keyboard pass @0x4994E5..0x499533, the joystick-modifier pass
+  //  @0x499543..0x499588, the fallback @0x499594..0x4995C8 (Input_IsScrollLockOn @0x49959D);
+  //  Input_TryTriggerJoystickButton @0x497B30 - the byte @0x497B38, the bit @0x497B61, flag 4
+  //  @0x497B6A, the latch @0x497B89..0x497B97, Input_QueueEvent @0x497B7A / @0x497BA9;
+  //  Input_InitBindingSystem @0x499AB0 - the list @0x49A201..0x49A56C]
+  std::vector<KeyRowEvent> joystick_toggle_pass(const JoystickBits &bits,
+      const std::function<bool(int)> &key_down, bool scroll_lock, bool dead);
 
   std::size_t size() const { return records_.size(); }
   const BindingRecord *record(int index) const;
@@ -415,6 +463,8 @@ class BindingSet {
   bool scan_death_screen_ = false;  // g_DeathScreenActive
   bool scan_word_ = false;          // the scan word nonzero
   bool joystick_enabled_ = false;  // dword_24D2088, 0 until a profile enables it
+  bool joystick_hat_buttons_ = false;  // dword_24D20A0
+  JoystickBits joystick_consumed_{};   // dword_334305C
   uint32_t revision_ = 0;
 };
 

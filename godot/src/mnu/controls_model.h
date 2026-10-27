@@ -103,6 +103,13 @@ public:
 		bool sign = false;
 	};
 	MouseClickRecord mouse_click_record(int p_event) const;
+	// The joystick device's state (engine controls::JoystickBits): every connected pad's
+	// buttons and its D-pad as the first hat, OR'd.
+	static opennova::controls::JoystickBits joystick_device_bits();
+	// The input frame's joystick toggle pass over the device's state (engine
+	// BindingSet::joystick_toggle_pass): its fires, one record each in the walk's order.
+	std::vector<opennova::controls::KeyRowEvent> joystick_records(bool p_death_screen,
+			bool p_scroll_lock);
 	// The scenario driver's scripted input device (devtools/scripted_input.h)
 	// at this seam: a token it holds reads held like a keyboard slot, so an
 	// open chat line silences it the same way. Null detaches.
@@ -225,8 +232,9 @@ private:
 	bool vk_down_(int p_vk) const;
 	// p_binding_active: the keyboard and mouse legs by BindingSet::binding_active (the slots
 	// and buttons raw) in place of the dispatcher's walk.
+	// p_joystick: the joystick's held leg (an event row's fire is the toggle pass's record).
 	bool token_pressed_(const String &p_token, bool p_keyboard, bool p_mouse = true,
-			bool p_binding_active = false) const;
+			bool p_binding_active = false, bool p_joystick = true) const;
 
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;

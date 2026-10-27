@@ -885,6 +885,136 @@ bool test_joystick_pov_dispatch() {
   return true;
 }
 
+
+// The joystick toggle pass (D-CTRL-1): one record per fire in the walk's order, the rows with a
+// joystick modifier first; a press fires an event row once, its button consumed until it reads
+// up, so the first listed row takes a shared button; the three passes (a held keyboard
+// modifier, a held joystick modifier, and the fallback Scroll Lock skips); a flag-4 row fires
+// every pass; the mode word; the first hat's directions only with the profile's word; and the
+// capture's lowest-bit assignment.
+// [orig: Input_ProcessToggleBindings @0x499480; Input_TryTriggerJoystickButton @0x497B30;
+//  Input_InitBindingSystem @0x499AB0 - the list @0x49A201..0x49A56C; Joystick_UpdateInputBitfield
+//  @0x7653C0 - the latch's release @0x765744; Options_UpdatePendingState @0x55C6D4..0x55C720]
+bool test_joystick_toggle_pass() {
+  BindingSet set;
+  for (std::size_t i = 0; i < set.size(); ++i) {
+    BindingRecord r = *set.record(static_cast<int>(i));
+    r.joy_button = 0;
+    r.joy_mod = 0;
+    set.set_record(static_cast<int>(i), r);
+  }
+  const int knife = set.index_of_token("Knife");
+  const int sidearm = set.index_of_token("Secondary");
+  const int primary = set.index_of_token("Primary");
+  const int look = set.index_of_token("look_up");
+  const auto bind = [&](int row, uint8_t button, uint8_t mod, uint16_t key_mod) {
+    BindingRecord r = *set.record(row);
+    r.joy_button = button;
+    r.joy_mod = mod;
+    r.primary_mod = key_mod;
+    set.set_record(row, r);
+  };
+  std::set<int> keys;
+  const auto key_down = [&](int vk) { return keys.count(vk) != 0; };
+  JoystickBits bits{};
+  const auto press = [&](std::initializer_list<int> one_based) {
+    bits = {};
+    for (int b : one_based) bits[static_cast<std::size_t>((b - 1) >> 5)] |= 1u << ((b - 1) & 31);
+  };
+  const auto codes = [&](bool scroll_lock = false, bool dead = false) {
+    std::vector<int> out;
+    for (const KeyRowEvent &e : set.joystick_toggle_pass(bits, key_down, scroll_lock, dead)) {
+      if (e.sign || e.release) out.push_back(-1);
+      out.push_back(e.code);
+    }
+    return out;
+  };
+  const int kc = action_code(knife), sc = action_code(sidearm), pc = action_code(primary),
+            lc = action_code(look);
+
+  bind(knife, 3, 0, 0);
+  press({3});
+  CHECK(codes().empty(), "a disabled joystick walks nothing");
+  set.set_joystick_enabled(true);
+  CHECK(codes() == std::vector<int>{kc}, "a press fires its row, one unsigned record");
+  CHECK(codes().empty(), "a held button is consumed");
+  press({});
+  CHECK(codes().empty(), "a release fires nothing");
+  press({3});
+  CHECK(codes() == std::vector<int>{kc}, "the next press fires again");
+
+  // A shared button: the joystick-modified row, listed first, takes it even with its
+  // modifier up (the fallback tests no modifier).
+  press({});
+  codes();
+  bind(sidearm, 3, 5, 0);
+  press({3});
+  CHECK(codes() == std::vector<int>{sc}, "the modified row takes the shared button");
+  // Scroll Lock skips the fallback; the joystick-modifier pass still fires.
+  press({});
+  codes();
+  press({3});
+  CHECK(codes(true).empty(), "Scroll Lock skips the fallback pass");
+  press({3, 5});
+  CHECK(codes(true) == std::vector<int>{sc}, "the joystick-modifier pass fires under Scroll Lock");
+  // The keyboard-modifier pass fires under Scroll Lock too.
+  press({});
+  codes();
+  bind(knife, 7, 0, 0x11);
+  keys = {0x11};
+  press({7});
+  CHECK(codes(true) == std::vector<int>{kc}, "the keyboard-modifier pass fires under Scroll Lock");
+  keys.clear();
+
+  // A flag-4 row fires every pass while held, and reads no latch.
+  press({});
+  codes();
+  bind(look, 9, 0, 0);
+  press({9});
+  CHECK(codes() == std::vector<int>{lc} && codes() == std::vector<int>{lc},
+        "a flag-4 row fires every pass");
+
+  // The walk: the modified half, then catalog order, whatever the buttons' order.
+  press({});
+  codes();
+  bind(knife, 11, 0, 0);
+  bind(primary, 12, 0, 0);
+  bind(sidearm, 13, 6, 0);
+  press({12, 11, 13});
+  CHECK(codes() == (std::vector<int>{sc, kc, pc}), "the walk's order: modified rows, then catalog order");
+
+  // The mode word: the death screen walks the rows whose word carries bit 2 alone.
+  press({});
+  codes();
+  press({11, 9});
+  CHECK(codes(false, true) == std::vector<int>{lc}, "the death screen fires the death-screen rows alone");
+
+  // The first hat's directions sit out the walk unless the profile's word lets them in.
+  press({});
+  codes();
+  bind(look, 0x81, 0, 0);
+  bits = joystick_bits([](int) { return false; }, {0, -1, -1, -1});
+  CHECK(joystick_bit(bits, 128), "hat 0 up is bit 128, the byte 0x81");
+  CHECK(codes().empty(), "the first hat's directions are not listed by default");
+  set.set_joystick_hat_buttons(true);
+  CHECK(codes() == std::vector<int>{lc}, "with the word set they are");
+
+  // The capture: the lowest set bit is the byte, none leaves the record as it was.
+  BindingSet capture;
+  const int row = capture.index_of_token("Knife");
+  const uint8_t before = capture.record(row)->joy_button;
+  CHECK(!capture.assign_joystick(row, JoystickBits{}) && capture.record(row)->joy_button == before,
+        "nothing down assigns nothing");
+  JoystickBits two{};
+  two[1] = (1u << 4) | (1u << 9);  // buttons 37 and 42
+  CHECK(capture.assign_joystick(row, two) && capture.record(row)->joy_button == 37,
+        "the lowest set bit plus one");
+  JoystickBits hat{};
+  hat[4] = 1u << 6;  // hat 1, direction 2
+  CHECK(capture.assign_joystick(row, hat) && capture.record(row)->joy_button == 0x87,
+        "a hat direction is its byte");
+  return true;
+}
 }  // namespace
 
 // The static rows' action codes and the by-code record re-lay: record i is
@@ -1042,6 +1172,7 @@ int main() {
   RUN_TEST(test_mouse_click_dispatch);
   RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
+  RUN_TEST(test_joystick_toggle_pass);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);

@@ -25,6 +25,7 @@
 #include <runtime/world/deploy_screen_feed.h>
 
 #include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/classes/input_event_joypad_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -956,6 +957,7 @@ int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
 	opennova::menu::RemapInput input;
 	const Ref<InputEventKey> key = p_event;
 	const Ref<InputEventMouseButton> mouse = p_event;
+	const Ref<InputEventJoypadButton> pad = p_event;
 	if (key.is_valid()) {
 		input.kind = opennova::menu::RemapInput::Kind::Key;
 		input.pressed = key->is_pressed();
@@ -973,6 +975,12 @@ int MenuDriver::consume_options_input(const Ref<InputEvent> &p_event) {
 		input.pressed = mouse->is_pressed();
 		input.mouse_mask = static_cast<uint16_t>(ControlsModel::mouse_mask_from_godot_button(
 				static_cast<int>(mouse->get_button_index())));
+	} else if (pad.is_valid()) {
+		// The device's state at the press, the bits the capture scans (engine
+		// BindingSet::assign_joystick).
+		input.kind = opennova::menu::RemapInput::Kind::Joystick;
+		input.pressed = pad->is_pressed();
+		input.joystick = ControlsModel::joystick_device_bits();
 	}
 	return options_.consume(runtime_, input);
 }

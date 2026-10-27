@@ -11,11 +11,13 @@ namespace opennova::menu {
 
 // Device events have already crossed the Godot/OS key and button translation.
 struct RemapInput {
-	enum class Kind { Other, Key, Mouse };
+	enum class Kind { Other, Key, Mouse, Joystick };
 	Kind kind = Kind::Other;
 	bool pressed = false, escape = false, ctrl = false, shift = false, repeat = false;
 	int vk = 0;
 	uint16_t mouse_mask = 0;
+	// A joystick event's device state, every button and hat direction down (Kind::Joystick).
+	controls::JoystickBits joystick{};
 };
 
 // The Options screens over the current player.sav record. The screen keeps

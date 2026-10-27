@@ -294,6 +294,73 @@ uint8_t joystick_pov_mask(int32_t angle) {
   return 1;
 }
 
+JoystickBits joystick_bits(const std::function<bool(int)> &button_down,
+                           const std::array<int32_t, 4> &pov_angles) {
+  JoystickBits bits{};
+  for (int b = 0; b < 128; ++b)
+    if (button_down(b)) bits[static_cast<std::size_t>(b >> 5)] |= 1u << (b & 31);
+  for (int hat = 0; hat < 4; ++hat) {
+    const uint8_t mask = joystick_pov_mask(pov_angles[static_cast<std::size_t>(hat)]);
+    for (int d = 0; d < 4; ++d)
+      if (((mask >> d) & 1u) != 0) bits[4] |= 1u << (4 * hat + d);
+  }
+  return bits;
+}
+
+bool BindingSet::assign_joystick(int index, const JoystickBits &bits) {
+  if (index < 0 || static_cast<std::size_t>(index) >= records_.size()) return false;
+  for (int bit = 0; bit < 160; ++bit) {
+    if (!joystick_bit(bits, bit)) continue;
+    records_[static_cast<std::size_t>(index)].joy_button = static_cast<uint8_t>(bit + 1);
+    ++revision_;
+    return true;
+  }
+  return false;
+}
+
+std::vector<KeyRowEvent> BindingSet::joystick_toggle_pass(const JoystickBits &bits,
+    const std::function<bool(int)> &key_down, bool scroll_lock, bool dead) {
+  std::vector<KeyRowEvent> out;
+  if (!joystick_enabled_) return out;  // [orig: @0x499481]
+  // A released button's consumed bit clears with the device update [orig: @0x765744..0x765772].
+  for (std::size_t w = 0; w < joystick_consumed_.size(); ++w) joystick_consumed_[w] &= bits[w];
+  std::size_t count = 0;
+  const ActionDef *cat = catalog(&count);
+  const std::size_t rows = std::min(count, records_.size());
+  // [orig: Input_TryTriggerJoystickButton @0x497B30]
+  const auto try_fire = [&](std::size_t row) {
+    const int button = records_[row].joy_button;
+    if (button == 0 || !joystick_bit(bits, button - 1)) return false;
+    if ((cat[row].flags & 4u) == 0) {
+      uint32_t &word = joystick_consumed_[static_cast<std::size_t>((button - 1) >> 5)];
+      const uint32_t mask = 1u << ((button - 1) & 31);
+      if ((word & mask) != 0) return false;
+      word |= mask;
+    }
+    out.push_back(KeyRowEvent{action_code(cat[row].id), false, 0, false});
+    return true;
+  };
+  const auto listed = [&](std::size_t row) {
+    const int button = records_[row].joy_button;
+    return action_code(cat[row].id) != 0 && button != 0 &&
+           (joystick_hat_buttons_ || button < 0x81 || button > 0x84);
+  };
+  for (int half = 0; half < 2; ++half) {
+    for (std::size_t row = 0; row < rows; ++row) {
+      // The modified rows' half first [orig: @0x49A201..0x49A3B1, then @0x49A3BC..0x49A56C].
+      if (!listed(row) || (records_[row].joy_mod != 0) != (half == 0)) continue;
+      if ((cat[row].modes & (dead ? 2u : 1u)) == 0) continue;
+      const BindingRecord &r = records_[row];
+      if (((r.primary_mod != 0 && key_down(r.primary_mod)) ||
+           (r.secondary_mod != 0 && key_down(r.secondary_mod))) && try_fire(row))
+        continue;
+      if (r.joy_mod != 0 && joystick_bit(bits, r.joy_mod - 1) && try_fire(row)) continue;
+      if (!scroll_lock) try_fire(row);
+    }
+  }
+  return out;
+}
+
 bool BindingSet::pressed_joystick(int index,
     const std::function<bool(int)> &button_down,
     const std::array<int32_t, 4> &pov_angles, bool dead) const {

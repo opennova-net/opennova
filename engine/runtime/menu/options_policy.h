@@ -226,7 +226,8 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
-// it is served (the table shows the seeded joystick defaults, D-CTRL-1).
+// it is served (the table shows the joystick bindings, and its remap captures a
+// button: BindingSet::assign_joystick).
 // Nor are the profile's controls words (INVERT_MOUSE, MOUSE_SENSITIVITY,
 // ENABLE_JOYSTICK, INVERT_JOYSTICK, ENABLE_FORCE_FEEDBACK,
 // OPTIONS_AUTORELOAD, OPTIONS_AUTOMEDIC): OptionsScreen seeds them from and
