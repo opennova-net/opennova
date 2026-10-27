@@ -428,9 +428,10 @@ bool scar_add_entry(World &world, const ProjectileHit &hit, const Entity &target
 	// section/face indices and the face flag @0x5CC92B — and only then the
 	// ring LOOKUP [orig: Scar_GetEntityCache @0x5cc96f..0x5cc983, after the
 	//  face gate], so a rejected hit never leases one of the 128 rings.
-	if (hit.position_q16.z <= world.env.water_z) return false;
+	if (!scar_allowed(hit.position_q16.z, world.env.water_z,
+			(target.engine_flags & kEntityFlagHusk) != 0u))
+		return false;
 	const bool entity_local = scar_uses_entity_ring(target.handle.pool(), target.item_attrib);
-	if ((target.engine_flags & kEntityFlagHusk) != 0u) return false;
 	if (hit.section_index < 0 || hit.face_index < 0) return false;
 	if ((hit.material_flags & 0x400u) != 0u) return false;
 	ScarRing *ring = entity_local
