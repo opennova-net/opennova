@@ -685,20 +685,25 @@ opennova_add_editor_test(novaworld_export LIBS opennova_project_cli)
 # scan taking a settled file from the cache), the changes since the base, a pull planned over the
 # base, the folder and the revision for every case with each conflict settled either way, and the
 # pull applied (the replaced files trashed, the base written last), refused before anything moves,
-# and finished by a pull planned again after one cut short.
+# and finished by a pull planned again after one cut short; and the folder's state, each service's
+# under its host.
 opennova_add_editor_test(novaworld)
 
 # NovaWorld's client (engine/editor/novaworld/novaworld_jobs.h, novaworld_api.h, ADR 0069)
 # over an in-memory service keeping the routes' contract, driving real folders: a first push, a get,
 # a stale push pulled and pushed, a conflict settled and pulled back, nothing to push, a player
-# refused, a renewed session kept and an ended one signing out; and the requests' shapes.
+# refused another's project and pushing its own, a renewed session kept and an ended one signing out,
+# a folder set up as a working copy, the store's reset ending a check, a pull and a push; and the
+# requests' shapes.
 opennova_add_editor_test(novaworld_client)
 
 # NovaWorld's part of the editor's session (engine/editor/session/novaworld_controller.h, ADR
 # 0069) through its requests over the in-memory service: every request refused offline; a sign-in (a
-# person's, refused over the wire) kept and the projects listed; a project bound and pushed, got into
-# another folder and opened there, a change pulled, a stale push refused until a pull, a conflict taken;
-# and the novaworld section's JSON, which holds no session.
+# person's, refused over the wire) kept and the projects listed; a project put on NovaWorld and pushed,
+# got into another folder and opened there, a change pulled, a stale push refused until a pull, a
+# conflict taken; a project made for a NovaWorld project set up as its working copy as it opens, and
+# again after the store's reset; a player's own projects put on and pushed, another's read-only; and
+# the novaworld section's JSON, which holds no session.
 opennova_add_editor_test(novaworld_session)
 
 # opennova-project validate over the deepest menus the game reads (formats/mnu/mnu_read.cpp's bounds: 2017

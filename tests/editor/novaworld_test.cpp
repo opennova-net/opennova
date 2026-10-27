@@ -7,11 +7,12 @@
 // revision for every case (only theirs changed, only mine, both alike, both otherwise, a delete
 // against a change either way, a file the scan could not read) and each conflict settled either
 // way; and a pull applied into the folder (the revision's files in place, the replaced and removed
-// ones in the trash, an emptied folder gone, the base and binding written), refused while a
+// ones in the trash, an emptied folder gone, the base and state written), refused while a
 // conflict stands, a download is missing or a file changed since the plan, and finished by a pull
 // planned again after one cut short; a change of a file's case, a folder replaced by a file and a
-// file by a folder, each applied; and a rename into place that does not go, the files it would
-// replace back out of the trash.
+// file by a folder, each applied; a rename into place that does not go, the files it would
+// replace back out of the trash; and the folder's state, each service's under its host, read back
+// as written and refused where it is no state the editor writes.
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,8 @@ namespace editor = opennova::editor;
 using opennova::project::ProjectFile;
 
 namespace {
+
+constexpr const char *kServer = "https://example.test";
 
 // `bytes` written at `path` as they are (test_io::write_text stages a .def's line ends as CRLF),
 // its folders made.
@@ -286,7 +289,8 @@ static int test_apply() {
 	test_temp::TempDir dir("opennova_novaworld_apply");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths =
+			editor::NovaWorldPaths::for_project(paths, kServer);
 	std::string error;
 
 	// The folder at its base, revision 3: one file it changed since.
@@ -295,8 +299,7 @@ static int test_apply() {
 	TEST_EXPECT(put(root + "/defs/a.def", "a1") && put(root + "/defs/b.def", "b2") &&
 			put(root + "/old/gone.txt", "gone") && put(root + "/project.opennova", "{}"));
 	TEST_EXPECT(editor::write_novaworld_base(novaworld_paths, base, error));
-	TEST_EXPECT(editor::write_novaworld_binding(
-			novaworld_paths, { "https://example.test", "JO", 3 }, error));
+	TEST_EXPECT(editor::write_novaworld_state(novaworld_paths, { "JO", 3 }, error));
 
 	// Revision 4: a.def changed, gone.txt deleted, a new file at two paths.
 	const std::vector<ProjectFile> theirs = { file("defs/a.def", "a2"), file("defs/b.def", "b1"),
@@ -312,21 +315,21 @@ static int test_apply() {
 
 	// Refused before anything moves: a download missing.
 	editor::ApplyResult result;
-	const editor::NovaWorldBinding r4{ "https://example.test", "JO", 4 };
-	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
+	const editor::NovaWorldWorkingCopy r4{ "JO", 4 };
+	TEST_EXPECT(!editor::apply_pull(paths, novaworld_paths, plan, theirs, r4, result, error) &&
 			error.find("download") != std::string::npos);
 	for (const ProjectFile &download : plan.downloads())
 		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, download.sha256),
 				download.sha256 == sha_of("a2") ? "a2" : "same"));
 	// A file changed since the plan: refused, nothing moved.
 	TEST_EXPECT(put(root + "/old/gone.txt", "touched"));
-	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r4, result, error) &&
+	TEST_EXPECT(!editor::apply_pull(paths, novaworld_paths, plan, theirs, r4, result, error) &&
 			result.changed_since == std::vector<std::string>{ "old/gone.txt" } &&
 			read(root + "/defs/a.def") == "a1");
 	TEST_EXPECT(put(root + "/old/gone.txt", "gone"));
 
 	// Applied.
-	TEST_EXPECT(editor::apply_pull(paths, plan, theirs, r4, result, error));
+	TEST_EXPECT(editor::apply_pull(paths, novaworld_paths, plan, theirs, r4, result, error));
 	TEST_EXPECT(result.written == 3 && result.removed == 1 && result.trash.id != 0);
 	TEST_EXPECT(read(root + "/defs/a.def") == "a2" && read(root + "/defs/b.def") == "b2" &&
 			read(root + "/missions/m.bms") == "same" && read(root + "/missions/n.bms") == "same");
@@ -336,11 +339,11 @@ static int test_apply() {
 	// The replaced and removed files in the trash, put back by restoring it.
 	TEST_EXPECT(result.trash.paths.size() == 2);
 	std::vector<ProjectFile> new_base;
-	editor::NovaWorldBinding binding;
+	editor::NovaWorldWorkingCopy copy;
 	TEST_EXPECT(editor::read_novaworld_base(novaworld_paths, new_base, error) &&
 			new_base.size() == theirs.size());
-	TEST_EXPECT(editor::read_novaworld_binding(novaworld_paths, binding, error) &&
-			binding.revision == 4 && binding.key == "JO");
+	TEST_EXPECT(editor::read_novaworld_state(novaworld_paths, copy, error) && copy.revision == 4 &&
+			copy.key == "JO");
 	// The folder's own change kept, and the revision's files no change.
 	const editor::NovaWorldScan after = editor::novaworld_scan(paths, "");
 	const auto changes = editor::local_changes(new_base, after.files(), after.unread());
@@ -353,7 +356,8 @@ static int test_apply() {
 	item.path = "defs/b.def";
 	item.step = editor::PullStep::Conflict;
 	conflicted.items.push_back(item);
-	TEST_EXPECT(!editor::apply_pull(paths, conflicted, theirs, r4, result, error) &&
+	TEST_EXPECT(
+			!editor::apply_pull(paths, novaworld_paths, conflicted, theirs, r4, result, error) &&
 			error.find("conflict") != std::string::npos);
 	std::printf("apply: the revision in place, the replaced in the trash, refused before anything "
 				"moves\n");
@@ -367,7 +371,8 @@ static int test_apply_renames() {
 	test_temp::TempDir dir("opennova_novaworld_apply_renames");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths =
+			editor::NovaWorldPaths::for_project(paths, kServer);
 	std::string error;
 	const std::vector<ProjectFile> base = { file("bar", "bar"), file("defs/a.def", "a"),
 		file("foo/x.txt", "x") };
@@ -382,8 +387,8 @@ static int test_apply_renames() {
 		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, sha_of(bytes)), bytes));
 
 	editor::ApplyResult result;
-	TEST_EXPECT(editor::apply_pull(
-			paths, plan, theirs, { "https://example.test", "JO", 2 }, result, error));
+	TEST_EXPECT(
+			editor::apply_pull(paths, novaworld_paths, plan, theirs, { "JO", 2 }, result, error));
 	TEST_EXPECT(result.written == 3 && result.removed == 3 && result.trash.paths.size() == 3);
 	TEST_EXPECT(read(root + "/bar/y.txt") == "y" && read(root + "/foo") == "foo" &&
 			read(root + "/defs/A.def") == "a");
@@ -402,7 +407,8 @@ static int test_apply_put_back() {
 	test_temp::TempDir dir("opennova_novaworld_apply_put_back");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths =
+			editor::NovaWorldPaths::for_project(paths, kServer);
 	std::string error;
 	const std::vector<ProjectFile> base = { file("a.txt", "a1"), file("z.txt", "z1") };
 	TEST_EXPECT(put(root + "/a.txt", "a1") && put(root + "/z.txt", "z1") &&
@@ -412,17 +418,17 @@ static int test_apply_put_back() {
 		file("z.txt", "z2") };
 	for (const std::string &bytes : { std::string("a2"), std::string("q"), std::string("z2") })
 		TEST_EXPECT(put(editor::incoming_path(novaworld_paths, sha_of(bytes)), bytes));
-	const editor::NovaWorldBinding r2{ "https://example.test", "JO", 2 };
+	const editor::NovaWorldWorkingCopy r2{ "JO", 2 };
 
 	const editor::NovaWorldScan scan = editor::novaworld_scan(paths, "");
 	editor::PullPlan plan = editor::plan_pull(base, scan.files(), scan.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 3);
 	editor::ApplyResult result;
-	TEST_EXPECT(!editor::apply_pull(paths, plan, theirs, r2, result, error));
+	TEST_EXPECT(!editor::apply_pull(paths, novaworld_paths, plan, theirs, r2, result, error));
 	TEST_EXPECT(read(root + "/a.txt") == "a2" && read(root + "/z.txt") == "z1" &&
 			result.trash.paths == std::vector<std::string>{ "a.txt" });
-	TEST_EXPECT(
-			!exists(novaworld_paths.incoming_dir + "/staged") && !exists(novaworld_paths.binding_file));
+	TEST_EXPECT(!exists(novaworld_paths.incoming_dir + "/staged") &&
+			!exists(novaworld_paths.state_file));
 	std::vector<ProjectFile> kept;
 	TEST_EXPECT(editor::read_novaworld_base(novaworld_paths, kept, error) && kept.size() == 2);
 
@@ -432,7 +438,7 @@ static int test_apply_put_back() {
 	const editor::NovaWorldScan emptied = editor::novaworld_scan(paths, "");
 	plan = editor::plan_pull(base, emptied.files(), emptied.unread(), theirs);
 	TEST_EXPECT(plan.items.size() == 2 && !plan.find("a.txt"));
-	TEST_EXPECT(editor::apply_pull(paths, plan, theirs, r2, result, error));
+	TEST_EXPECT(editor::apply_pull(paths, novaworld_paths, plan, theirs, r2, result, error));
 	TEST_EXPECT(read(root + "/q") == "q" && read(root + "/z.txt") == "z2");
 	std::printf("apply: a rename refused, the files it would replace back from the trash, then "
 				"finished\n");
@@ -443,7 +449,8 @@ static int test_resumed_pull() {
 	test_temp::TempDir dir("opennova_novaworld_resume");
 	const std::string root = dir.file("Project");
 	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(root);
-	const editor::NovaWorldPaths novaworld_paths = editor::NovaWorldPaths::for_project(paths);
+	const editor::NovaWorldPaths novaworld_paths =
+			editor::NovaWorldPaths::for_project(paths, kServer);
 	std::string error;
 	// A first pull into an empty folder (base none) cut short after one of its files was put in
 	// place.
@@ -458,10 +465,51 @@ static int test_resumed_pull() {
 				download.sha256 == sha_of("b") ? "b" : "c"));
 	editor::ApplyResult result;
 	TEST_EXPECT(editor::apply_pull(
-			paths, plan, theirs, { "https://example.test", "JOX01", 1 }, result, error));
+			paths, novaworld_paths, plan, theirs, { "JOX01", 1 }, result, error));
 	TEST_EXPECT(
 			read(root + "/b.def") == "b" && read(root + "/c.def") == "c" && result.trash.id == 0);
 	std::printf("resume: a pull cut short finished by the next plan\n");
+	return 0;
+}
+
+// The folder's state on a service: under the service's host (its port too), each service's apart
+// and the hash cache and the downloads every service's; read back as written, none where it has
+// none, and refused where it is no state this editor writes.
+static int test_state() {
+	TEST_EXPECT(editor::novaworld_service_folder("https://opennova.net") == "opennova.net");
+	TEST_EXPECT(editor::novaworld_service_folder("https://Staging.OpenNova.net/") ==
+			"staging.opennova.net");
+	TEST_EXPECT(editor::novaworld_service_folder("http://localhost:8080") == "localhost_8080");
+	TEST_EXPECT(editor::novaworld_service_folder("") == "");
+	test_temp::TempDir dir("opennova_novaworld_state");
+	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(dir.file("Project"));
+	const editor::NovaWorldPaths live =
+			editor::NovaWorldPaths::for_project(paths, "https://opennova.net");
+	const editor::NovaWorldPaths staging =
+			editor::NovaWorldPaths::for_project(paths, "https://staging.opennova.net");
+	TEST_EXPECT(live.state_file == paths.cache_dir + "/novaworld/opennova.net/state.json" &&
+			live.base_file == paths.cache_dir + "/novaworld/opennova.net/base.json" &&
+			live.hashes_file == staging.hashes_file && live.incoming_dir == staging.incoming_dir);
+	TEST_EXPECT(editor::NovaWorldPaths::for_project(paths, "").state_file.empty());
+	editor::NovaWorldWorkingCopy copy;
+	std::string error;
+	TEST_EXPECT(!editor::read_novaworld_state(live, copy, error) && error.empty());
+	TEST_EXPECT(editor::write_novaworld_state(live, { "ACIDGAMBIT", 41 }, error));
+	TEST_EXPECT(editor::read_novaworld_state(live, copy, error) && copy.key == "ACIDGAMBIT" &&
+			copy.revision == 41);
+	TEST_EXPECT(!editor::read_novaworld_state(staging, copy, error) &&
+			error.empty()); // another service's: none
+	// Another schema, a key that is none, no revision, binding.json's old form, no JSON.
+	const char *const refused_states[] = { "{\"schema\": 2, \"key\": \"JO\", \"revision\": 1}",
+		"{\"schema\": 1, \"key\": \"jo\", \"revision\": 1}", "{\"schema\": 1, \"key\": \"JO\"}",
+		"{\"schema_version\": 1, \"key\": \"JO\", \"revision\": 1}", "not json" };
+	for (const char *refused : refused_states) {
+		TEST_EXPECT(put(live.state_file, refused));
+		TEST_EXPECT(!editor::read_novaworld_state(live, copy, error) && !error.empty() &&
+				copy.key.empty());
+	}
+	std::printf("state: each service's under its host, read back as written, refused where it "
+				"is no state\n");
 	return 0;
 }
 
@@ -475,6 +523,7 @@ int main() {
 	failures += test_apply_renames();
 	failures += test_apply_put_back();
 	failures += test_resumed_pull();
+	failures += test_state();
 	if (failures == 0)
 		std::printf("novaworld: all tests passed\n");
 	return failures == 0 ? 0 : 1;
