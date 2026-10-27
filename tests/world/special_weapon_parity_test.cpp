@@ -190,7 +190,9 @@ void tank_gunner_fires_from_the_selected_barrel() {
         tank.kind = EntityKind::Item; tank.has_item_def = true;
         tank.item_type = 1; tank.item_attrib = kItemAttribEweap | kItemAttribPlayerControl;
         tank.position = {12,20,2};
-        tank.weapon_userpoint_bytes[clip & 3][0] = uint8_t(7+clip);
+        // A PlayerControl def's barrel bytes are the aircraft cluster (+0x4D8), the one the
+        // reader takes for attrib 0x40 [orig: Entity_GetWeaponSlotByte @0x5459C0 (@0x5459DA)].
+        tank.aircraft_weapon_userpoint_bytes[clip & 3][0] = uint8_t(7+clip);
         const auto mount = r.world.registry.spawn(1,tank);
         auto &shooter = *r.world.registry.get(r.shooter);
         shooter.mounted = true; shooter.mount_target = mount; shooter.mount_type = SeatType::Gunner;
