@@ -17,6 +17,7 @@
 #include <base/io/os_path.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
@@ -710,10 +711,15 @@ bool prepare_runtime_run(const std::string &build_dir, const std::string &run_di
 	return stage_build_files(path_of(build_dir), path_of(run_dir), built, link, error, staged);
 }
 
+std::string install_executable(const std::string &game) {
+	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game.c_str());
+	return profile && profile->executable ? profile->executable : "Jointops.exe";
+}
+
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
                                         Diagnostic &error, const FileLink &link, const std::string &base_game,
-                                        const std::string &copy_cache) {
+                                        const std::string &copy_cache, const std::string &game) {
 	out = LaunchPlan();
 	// The install's own base game: the stock game's /exp from its install (prepare_expansion_run's base).
 	const bool on_install = !expansion.empty() && (base_game.empty() || base_game == install);
@@ -735,8 +741,9 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 	const fs::path run = path_of(run_dir);
 	// The install's program and its Bink DLL, the game's one import beside the system's, alone of the
 	// install; both checked before anything is staged.
-	const std::pair<fs::path, const char *> staged[] = {
-		{retail / kInstallExecutable, kInstallExecutable}, {install_bink(retail), "binkw32.dll"}};
+	const std::string program = install_executable(game);
+	const std::pair<fs::path, std::string> staged[] = {
+		{retail / path_of(program), program}, {install_bink(retail), "binkw32.dll"}};
 	for (const auto &[source, name] : staged) {
 		if (fs::is_regular_file(system_path(utf8_of(source)), ec)) continue;
 		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
@@ -794,7 +801,7 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 		                     "Could not stage " + utf8_of(source) + ": " + reason);
 		return false;
 	}
-	out.executable = utf8_of(run / kInstallExecutable);
+	out.executable = utf8_of(run / path_of(program));
 	out.build_dir = utf8_of(build);
 	out.working_dir = utf8_of(run);
 	out.resource_dir = out.working_dir;

@@ -33,13 +33,16 @@ namespace {
    - DFX2 (dfx2.exe, the DFX2 install's): 1, 7, 5, 7, ebx = 1, both buffers as JO [orig: dfx2.exe
      @ 0x4a7360 — ebx @ 0x4a73cb, the sprintfs @ 0x4a7d8c..0x4a7d9d and @ 0x4a7da5..0x4a7dc0,
      the dword 0x01070507 @ 0x4a7db6].
-   - BHD: no binary read; no version. */
+   - BHD: no binary read; no version.
+   The programs, as each install ships them beside its archives (the name the in-match identity's
+   AP carries, the running program's own: docs/titles/dfx2-vs-jo-re.md §6.1, DFX2-5): JO:CA's
+   Jointops.exe, the demo's jodemo.exe, DFX's DFX.EXE, DFX2's dfx2.exe; BHD's unread. */
 const GameProfile k_profiles[] = {
-    { GAME_JO,      "jo",     "Joint Operations",             VFS_SCR_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      VFS_SCR_FORCE_DEFAULT,     "V1.0.0.9" },
-    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          VFS_SCR_VERSION_DETECT, "V1.7.1.9" },
-    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        VFS_SCR_VERSION_DETECT, "V1.7.5.7" },
-    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", VFS_SCR_VERSION_DETECT, nullptr },
+    { GAME_JO,      "jo",     "Joint Operations",             VFS_SCR_VERSION_DETECT, "V1.7.5.7", "Jointops.exe" },
+    { GAME_JO_DEMO, "jodemo", "Joint Operations (Demo)",      VFS_SCR_FORCE_DEFAULT,     "V1.0.0.9", "jodemo.exe" },
+    { GAME_DFX,     "dfx",    "Delta Force: Xtreme",          VFS_SCR_VERSION_DETECT, "V1.7.1.9", "DFX.EXE" },
+    { GAME_DFX2,    "dfx2",   "Delta Force: Xtreme 2",        VFS_SCR_VERSION_DETECT, "V1.7.5.7", "dfx2.exe" },
+    { GAME_BHD,     "bhd",    "Delta Force: Black Hawk Down", VFS_SCR_VERSION_DETECT, nullptr,    nullptr },
 };
 
 } // namespace

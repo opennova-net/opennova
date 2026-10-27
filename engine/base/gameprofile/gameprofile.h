@@ -37,6 +37,9 @@ typedef struct GameProfile {
                                    build's four numbers through sprintf("V%i.%i.%i.%i") (the
                                    STARTUP screen's VERSION label, the joiner's VERSIONSTRING);
                                    NULL where no binary of the profile has been read            */
+    const char *executable;     /* the program the profile's install ships beside its archives,
+                                   which a player starts (and the editor's Play in the game
+                                   install); NULL where no install of the profile has been read */
 } GameProfile;
 
 /* Number of profiles in the table. */

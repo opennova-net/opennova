@@ -93,6 +93,13 @@ const RequiredResource *gameprofile_required_resource_find(const char *name);
 /* Row whose `role` token matches exactly; NULL for NULL/unknown roles. */
 const RequiredResource *gameprofile_required_resource_by_role(const char *role);
 
+/* The row's severity for the game `game_code` (a gameprofile code; NULL or unknown reads as JO's):
+   the manifest's (Joint Operations' witness), but RES_OPTIONAL for a file the game's own stock data
+   never ships, which its program reads through the same unchecked load and goes on without (DFX2's
+   cmap.mnu and vehicle.mnu, not in its archives, and the cookie jar nw_cdata.coo, which it writes
+   itself). RES_FATAL for a NULL row. */
+int gameprofile_required_resource_severity(const RequiredResource *row, const char *game_code);
+
 /* The file a row names for the expansion `expansion`: the last component of its
    name (a RES_F_EXPANSION row's pattern: "expansion\<n>\M<n>.sbf" names
    "M<n>.sbf", the folder being where the game reads it), each `<n>` in it

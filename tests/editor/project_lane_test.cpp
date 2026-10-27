@@ -26,6 +26,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/run/launch_plan.h>
 #include <formats/pff/pff.h>
 #include <editor/session/file_card.h>
 #include <editor/session/preferences_store.h>
@@ -348,6 +349,40 @@ int test_install_check() {
 	TEST_EXPECT(!check_install(dir.file("Nowhere"), "jo").exists &&
 	            check_install(dir.file("Nowhere"), "jo").words().rfind("There is no folder", 0) == 0);
 	TEST_EXPECT(!check_install("", "jo").ok() && check_install("", "jo").words().rfind("No game install chosen", 0) == 0);
+	return 0;
+}
+
+// The game an install holds (install_game): its UPDATE.WIZ's CMD, DFX2's DFX2.CMD read as dfx2 and JO:CA's
+// JOPTR.CMD as jo, else JO's (no wizard, a wizard naming a game with no profile); read as DFX2, its program is
+// dfx2.exe (install_executable) and the check names the game; with no project open the session reads an install
+// as the game it holds.
+int test_install_game() {
+	test_temp::TempDir dir("opennova_editor_install_game");
+	const std::string dfx2 = dir.file("Delta Force Xtreme 2");
+	TEST_EXPECT(fake_install(dfx2, 1, false) && test_io::write_text(dfx2 + "/dfx2.exe", "MZ") &&
+	            test_io::write_text(dfx2 + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFX2.CMD\r\nPRODUCT_LOGIN=DFX2\r\n"));
+	const std::string jo = dir.file("Joint Operations");
+	TEST_EXPECT(fake_install(jo, 1, true) && test_io::write_text(jo + "/update.wiz", "[HEADER]\r\nCMD=JOPTR.CMD\r\n"));
+	const std::string bare = dir.file("Bare");
+	TEST_EXPECT(fake_install(bare, 1, false));
+	const std::string bhd = dir.file("BHD");
+	TEST_EXPECT(fake_install(bhd, 1, false) && test_io::write_text(bhd + "/UPDATE.WIZ", "[HEADER]\r\nCMD=DFBHD.CMD\r\n"));
+	TEST_EXPECT(install_game(dfx2) == "dfx2" && install_game(jo) == "jo" && install_game(bare) == "jo" &&
+	            install_game(bhd) == "jo" && install_game("") == "jo");
+	TEST_EXPECT(install_executable("dfx2") == "dfx2.exe" && install_executable("jo") == "Jointops.exe" &&
+	            install_executable("") == "Jointops.exe" && install_executable("bhd") == "Jointops.exe");
+	const InstallCheck as_dfx2 = check_install(dfx2, install_game(dfx2));
+	TEST_EXPECT(as_dfx2.ok() && as_dfx2.game == "dfx2" && as_dfx2.executable &&
+	            as_dfx2.words().rfind("Delta Force: Xtreme 2: ", 0) == 0 && as_dfx2.words().find("beside them") == std::string::npos);
+	TEST_EXPECT(check_install(dfx2, "jo").words().find("No Jointops.exe beside them") != std::string::npos);
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::check_install(dfx2));
+	TEST_EXPECT(session.view().project.install_check.ok() && session.view().project.install_check.game == "dfx2" &&
+	            session.view().project.install_check.executable);
+	session.handle(request::check_install(jo));
+	TEST_EXPECT(session.view().project.install_check.game == "jo");
 	return 0;
 }
 
@@ -750,6 +785,7 @@ int main() {
 	failed += test_files_filter();
 	failed += test_file_card();
 	failed += test_install_check();
+	failed += test_install_game();
 	failed += test_new_project_install();
 	failed += test_session_install_and_workspace();
 	failed += test_reopen_as_left();
