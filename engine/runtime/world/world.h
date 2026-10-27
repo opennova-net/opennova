@@ -741,6 +741,13 @@ struct SessionRules {
     //  @0x5406F4; WeaponSlot_CanFire @0x541BA0 - the test @0x541CCF; Game_StartMission
     //  @0x525B25]
     bool ignore_weapon_ammo_cost = false;
+    // game.cfg's farp_reuse_time, in seconds: how long a vehicle's FARP service rests after
+    // a service ends, which the FARP pass and the 0x0A rearm byte read; the config
+    // defaults' 90 until the host stamps its block.
+    // [orig: g_GameConfigState.farpReuseTime_A3C @0x25510F4, read by
+    //  Server_UpdateEntityTargetLockAndWeaponOverlays @0x511823 and NetPacket_WritePlayerState
+    //  @0x4FF930; Config_SetDefaults @0x54D48B; Config_ParseSettingsLine @0x54FEAB]
+    int32_t farp_reuse_seconds = 90;
     // The local cheat word's 0x400 bit, the frame-rate overlay: HUD_DrawGameplayOverlays
     // draws "FR %2i  MN %2i MX %2i CPU %d" while it is up. The Debug
     // row 118's action 74 toggles it, in a session or out of one (its flags are 0); a fresh

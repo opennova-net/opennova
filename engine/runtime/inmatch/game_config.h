@@ -398,6 +398,11 @@ struct GameConfig {
 	//  Config_SetDefaults @0x54d485; Config_ParseSettingsLine @0x54f939;
 	//  NapiNPServerMsg_HandlePlayerLoadout @0x515ba6]
 	uint32_t armory_reuse_time = 30;
+	// The FARP service's rest after a service ends, in seconds (world::World::rules
+	// farp_reuse_seconds). cfg key `farp_reuse_time`; no admin key sets it.
+	// [orig: g_GameConfigState.farpReuseTime_A3C @0x25510F4; default Config_SetDefaults
+	//  @0x54D48B; Config_ParseSettingsLine @0x54FEAB]
+	int32_t farp_reuse_time = 90;
 	// The join-time team-balance hold: a requested side is refused (and the
 	// joiner re-nagged with S2C 0x03 once per second) while the add would push
 	// the larger team more than max(1, ceil(min(team0, team1) * percent))

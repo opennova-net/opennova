@@ -15,7 +15,8 @@
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
 #include <runtime/world/mounted_pose.h> // seat_bone_pose_on_carrier_matrix
 #include <runtime/world/vehicle_attach.h>
-#include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
+#include <runtime/world/weapon_fire_gate.h> // entity_in_friendly_farp
+#include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom, the seat's pool reads
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
 #include <base/io/bam.h>
@@ -338,6 +339,103 @@ WeaponSlotState *VehicleSystem::resolve_phase8_ammo_slot(Entity &mount) {
     return const_cast<WeaponSlotState *>(
             static_cast<const VehicleSystem *>(this)->resolve_phase8_ammo_slot(
                     static_cast<const Entity &>(mount)));
+}
+
+bool VehicleSystem::weapon_slot_full(const Entity &entity) const {
+    const World &world = world_;
+    if (!entity.has_item_def) return false;
+    const WeaponTableEntry *weapon = world.tables.weapons.by_index(entity.primary_weapon_slot_adm);
+    if (weapon == nullptr) return false;
+    const WeaponSlotState &slot = entity.primary_weapon_slot;
+    // The pool: ammo class 1 reads the entity's +0x120 word, an EWeap entity its slot's
+    // reserve; another reads the local pools in the game, which no FARP walk reaches with a
+    // stock def (0 here) [orig: Entity_GetScoreValueBySlotType @0x540742..0x540763,
+    //  @0x540775..0x54078E, @0x5407A1..0x5407CF].
+    const bool eweap = (entity.item_attrib & kItemAttribEweap) != 0u;
+    const int32_t own_pool = weapon->ammo_class_id == 1
+            ? static_cast<int32_t>(entity.mana)
+            : eweap ? static_cast<int32_t>(static_cast<int16_t>(slot.reserve)) : 0;
+    const WeaponAmmoSeat seat = entity_ammo_seat(world, entity);
+    const int32_t pool = weapon_seat_pool(seat, weapon->ammo_class_id, own_pool);
+    const int32_t loaded = weapon->ammo_bucket != 0
+            ? weapon_seat_bucket(seat, slot.clip)
+            : static_cast<int32_t>(static_cast<int16_t>(slot.clip));
+    return pool + loaded >= weapon->startrounds;
+}
+
+void VehicleSystem::farp_service_second() {
+    World &world = world_;
+    const int32_t rest = 62 * world.rules.farp_reuse_seconds;
+    std::vector<EntityHandle> vehicles;
+    world.registry.for_each_in_pool(1, [&](const Entity &e) {
+        if (e.item_type_index != 0 && e.has_item_def &&
+                ((e.flags | e.engine_flags) & kEntityFlagCarried) == 0 &&
+                e.item_type == 1 &&
+                static_cast<int32_t>(world.logic_tick - e.farp_stamp) >= rest)
+            vehicles.push_back(e.handle);
+    });
+    for (const EntityHandle handle : vehicles) {
+        Entity *vehicle = world.registry.get(handle);
+        if (vehicle == nullptr) continue;
+        if (!entity_in_friendly_farp(world, *vehicle)) {
+            if (vehicle->farp_steps > 5) vehicle->farp_stamp = world.logic_tick;
+            vehicle->farp_steps = 0;
+            continue;
+        }
+        ++vehicle->farp_steps;
+        if (vehicle->farp_steps > 120) {
+            const int16_t health = static_cast<int16_t>(vehicle->critical_hp - 1);
+            vehicle->health = health < 0 ? 0 : health;
+        }
+        bool full = true;
+        // The top-up: the weapon's farpinfo rounds on every interval-th step, the slot's
+        // words re-split from clip + reserve + rounds (Entity_AddMountSlotAmmo @0x546230 for
+        // the vehicle's slot, Entity_AddEWeapSlotAmmo @0x5462A0 for a gun's, each the
+        // split's body) [orig: @0x51190B..0x511934, @0x51197A..0x5119A3].
+        const auto top_up = [&](Entity &holder) {
+            const WeaponTableEntry *weapon =
+                    world.tables.weapons.by_index(holder.primary_weapon_slot_adm);
+            if (weapon == nullptr || weapon->farp_rounds == 0 || weapon->farp_interval == 0)
+                return;
+            if (vehicle->farp_steps % weapon->farp_interval != 0) return;
+            split_weapon_slot_ammo(holder,
+                    static_cast<int16_t>(holder.primary_weapon_slot.clip) +
+                    static_cast<int16_t>(holder.primary_weapon_slot.reserve) +
+                    weapon->farp_rounds);
+        };
+        if ((vehicle->item_attrib & kItemAttribEweap) != 0u) {
+            full = weapon_slot_full(*vehicle);
+            top_up(*vehicle);
+        }
+        if (vehicle->ref_num != 0) {
+            std::vector<EntityHandle> guns;
+            world.registry.for_each([&](const Entity &other) {
+                if (other.ref_group_member && other.ref_num == vehicle->ref_num)
+                    guns.push_back(other.handle);
+            });
+            for (const EntityHandle gun_handle : guns) {
+                Entity *gun = world.registry.get(gun_handle);
+                if (gun == nullptr) continue;
+                if (!weapon_slot_full(*gun)) full = false;
+                // The vehicle's own row in its group tops up the game's +0x2B4 slot, which
+                // a vehicle fires from none of; ours has the one slot, topped up above.
+                if (gun != vehicle) top_up(*gun);
+            }
+        }
+        vehicle->farp_rearmed = full;
+    }
+}
+
+uint8_t VehicleSystem::farp_reload_byte(const Entity &rider) const {
+    const World &world = world_;
+    if (!rider.mounted || !is_vehicle_control_seat(rider.mount_type)) return 0;
+    const Entity *vehicle = world.registry.get(rider.mount_target);
+    if (vehicle == nullptr) return 0;
+    const int32_t left = world.rules.farp_reuse_seconds -
+            static_cast<int32_t>(world.logic_tick - vehicle->farp_stamp) / 62;
+    if (left > 0) return static_cast<uint8_t>(left > 0xFE ? 0xFE : left);
+    if (vehicle->farp_rearmed && (vehicle->carry_flags & 0x40u) != 0u) return 0xFF;
+    return 0;
 }
 
 bool VehicleSystem::reload_weapon_slot(Entity &mount) {

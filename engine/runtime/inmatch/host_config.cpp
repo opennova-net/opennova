@@ -256,6 +256,7 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 	// balanceJoinPercent_A34 by CNapiServer_ProcessPendingPlayerSpawns @0x4C8EFA
 	// / @0x4C8F38].
 	config.armory_reuse_time = static_cast<uint32_t>(cfg.armory_reuse_time);
+	config.farp_reuse_time = cfg.farp_reuse_time;
 	config.balance_join = cfg.balance_join != 0;
 	config.balance_join_percent = cfg.balance_join_percent;
 	// [orig: g_MinPing / g_DoMinPingCheck / g_MaxPing / g_DoMaxPingCheck

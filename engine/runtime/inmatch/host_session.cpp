@@ -693,6 +693,7 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 			owner.ctx.config.spawn_wave_time_zone);
 	owner.ctx.world->rules.mp_session =
 			cfg.socket_mode != SocketMode::Socketless;
+	owner.ctx.world->rules.farp_reuse_seconds = owner.ctx.config.farp_reuse_time;
 	owner.ctx.world->rules.destroy_buildings =
 			owner.ctx.config.destroy_buildings != 0;
 	// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]

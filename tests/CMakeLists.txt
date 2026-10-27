@@ -5354,6 +5354,14 @@ target_link_libraries(weapon_slot_class_init_test
     PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
 target_include_directories(weapon_slot_class_init_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weapon_slot_class_init COMMAND weapon_slot_class_init_test)
+# The host's FARP service: a vehicle's steps on a friendly FARP, the farpinfo top-ups of its
+# slot and its refNum group's guns, the full byte, the critical health past 120 steps, the rest
+# after a service, and the 0x0A rearm byte a control-seat rider reads (D-HUD-14).
+add_executable(farp_service_test world/farp_service_test.cpp)
+target_link_libraries(farp_service_test
+    PRIVATE opennova_net opennova_runtime opennova_formats opennova_base)
+target_include_directories(farp_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME farp_service COMMAND farp_service_test)
 # The listen host's own client runs each relayed S2C 0x49's person arm on the host's world: a
 # named person other than the local player dips its arms for 80 ticks (D-NET-NEW-L4-33).
 add_executable(npruntime_host_reload_echo_test npruntime/host_reload_echo_test.cpp)

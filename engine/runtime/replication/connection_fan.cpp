@@ -95,9 +95,9 @@ struct FrameHeaderState {
 	uint8_t armory_reuse_seconds = 0;
 	uint8_t breath_samples = 0;
 	// The mounted-weapon rearm ladder byte [orig: @0x4FF8F0..0x4FF992]: while the
-	// recipient's entity+360 mount state is 2 or 5, farpReuseTime - (tick -
-	// station+1108)/62, 0xFE-capped, 0xFF for an expired belt-fed station and
-	// 0 once expired otherwise; 0 when not mounted on a rearming station.
+	// recipient's entity+360 seat is 2 or 5, farpReuseTime - (tick - vehicle+1108)/62,
+	// 0xFE-capped, 0xFF once rested with the vehicle's weapons full at its last FARP
+	// step, else 0; 0 off a control seat (VehicleSystem::farp_reload_byte).
 	uint8_t reload_seconds = 0;
 	// The recipient team's owned-zone mask off the live chain; an empty chain
 	// walks to 0. [orig: ZoneSlotChain_GetOwnedZoneMask(playerSlot+0x1A0)
@@ -1474,11 +1474,9 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			// three slot counters above [orig: @0x4FF8BB / @0x4FF8D5].
 			hs.armory_reuse_seconds = static_cast<uint8_t>(conn.armory_reuse_seconds);
 			hs.breath_samples = static_cast<uint8_t>(conn.underwater_breath_samples);
-			// The rearm ladder reads the ridden station's rearm stamp
-			// (entity+1108) under mount state 2/5; this runtime models neither
-			// the station stamp nor those mount-state codes, so the byte stays at
-			// the not-rearming arm's 0 [orig: @0x4FF901 / @0x4FF90F].
-			hs.reload_seconds = 0;
+			// The rearm ladder off the ridden vehicle's FARP words
+			// (VehicleSystem::farp_reload_byte) [orig: @0x4FF901 / @0x4FF90F].
+			hs.reload_seconds = w.vehicles.farp_reload_byte(*own);
 			hs.tail_state_byte = static_cast<uint8_t>(own->net_stance_bits & 0x03u);
 			// [orig: NetPacket_WritePlayerState @0x4FFCC3 -- entity+0x268, 0xFFFF
 			//  when empty @0x4FFD3D]

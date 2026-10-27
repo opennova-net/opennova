@@ -70,6 +70,12 @@ struct WeaponTableEntry {
 	// [orig: AdmDef+0x458, WeaponDefs_ParseLineCallback @0x544895; read by
 	//  RoundData_SpawnRound @0x4EC264].
 	int32_t designation_ticks = 0;
+	// `farpinfo <rounds> <interval>`: the rounds a FARP service adds to the weapon's slot on
+	// every <interval>-th step; 0 in either adds none [orig: AdmDef+0xE8 / +0xEC,
+	// WeaponDefs_ParseLineCallback @0x544da3; read by
+	// Server_UpdateEntityTargetLockAndWeaponOverlays @0x511911 / @0x511919].
+	int32_t farp_rounds = 0;
+	int32_t farp_interval = 0;
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
     // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial

@@ -72,22 +72,24 @@ void weapon_fire_environment_inputs(const World &world, const Entity &owner,
         if (candidate->item_type == 1) { carrier = candidate; break; }
         candidate = world.registry.get(candidate->ground_target);
     }
-    if (carrier == nullptr || carrier->item_type != 1 ||
-            (carrier->carry_flags & 0x40u) == 0) return;
-    const Entity *zone = world.registry.get(carrier->ground_target);
+    if (carrier == nullptr || carrier->item_type != 1) return;
+    // CF contact within a friendly FARP blocks firing.
+    inputs.protected_carrier = entity_in_friendly_farp(world, *carrier);
+}
+
+bool entity_in_friendly_farp(const World &world, const Entity &entity) {
+    if ((entity.carry_flags & 0x40u) == 0) return false;
+    const Entity *zone = world.registry.get(entity.ground_target);
     if (zone == nullptr || !zone->has_item_def || (zone->item_attrib2 & 0x2000u) == 0)
-        return;
-    // CF contact within a friendly FARP blocks firing. Unnumbered FARPs use
-    // team equality in team modes, and protect everyone in non-team modes.
-    // [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
+        return false;
+    // Unnumbered FARPs use team equality in team modes, and protect everyone in
+    // non-team modes. [orig: Entity_IsInFriendlyFarp @0x44a2b0..0x44a334]
     if (zone->zone_number != 0) {
-        if (carrier->team < ZoneChain::kTeamCount)
-            inputs.protected_carrier = (world.zones.chain.owned_mask[carrier->team] &
-                    (1u << (zone->zone_number & 31))) != 0;
-    } else {
-        inputs.protected_carrier = (world.match.rules().game_type & 0x10000u) == 0 ||
-                zone->team == carrier->team;
+        return entity.team < ZoneChain::kTeamCount &&
+                (world.zones.chain.owned_mask[entity.team] &
+                        (1u << (zone->zone_number & 31))) != 0;
     }
+    return (world.match.rules().game_type & 0x10000u) == 0 || zone->team == entity.team;
 }
 // The owner/definition rejects precede ammo spending and either spawn arm.
 // [orig: Server_ClientFiredRound @0x50bad7..0x50bb06, @0x50c069..0x50c0b9]

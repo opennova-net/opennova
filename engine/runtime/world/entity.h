@@ -1156,6 +1156,15 @@ struct Entity {
     //  only @0x40F4C7), the child record's refNum @0x40F3B1..0x40F3CF;
     //  Entity_Destroy @0x43E840..0x43E858 (the removal)]
     bool ref_group_member = false;
+    // A vehicle's FARP service words: the steps it has stood on a friendly FARP in the
+    // current service (+0x450), the tick its last service of more than five steps ended
+    // (+0x454), and whether its weapons were full at the last step (+0x458), which the
+    // 0x0A's rearm byte reads (VehicleSystem::farp_service_second, farp_reload_byte).
+    // [orig: Server_UpdateEntityTargetLockAndWeaponOverlays @0x511820 - +0x450 @0x5118BE,
+    //  +0x454 @0x5118AC, +0x458 @0x5119C3; NetPacket_WritePlayerState @0x4FF91D, @0x4FF963]
+    int32_t farp_steps = 0;
+    uint32_t farp_stamp = 0;
+    bool farp_rearmed = false;
 	// BMS team_budget byte165 -> entity+356, distinct from spawn team +357.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0]
 	int8_t vehicle_spawn_team = 0;
