@@ -115,14 +115,6 @@ inline void wp_dist_bearing(int32_t dx, int32_t dz, int32_t dy, int32_t &dist, i
         std::atan2(static_cast<double>(dz), static_cast<double>(dx)) * io::kBamPerRadian)); // chop toward zero
 }
 
-// One step of the shared rotate-LCG (io::rotating_prng_next16's recurrence,
-// __ROL4__(s + __ROL4__(s,11), 4) ^ 1). Returns the new state; the low 16 bits
-// are PRNG_Next16's value and the engagement jitter source.
-inline uint32_t prng_step(uint32_t &s) {
-    io::rotating_prng_next16(s);
-    return s;
-}
-
 // Bearing to a point in 32-bit binary angle. [orig: AI_FindBestTargetB @0x46719D fpatan path —
 // atan2(candidate.Y - self.Y, candidate.X - self.X) * dbl_7C19D8, x87 chop toward zero.]
 // dY/dX follow the mover's convention (atan2(dz, dx)).

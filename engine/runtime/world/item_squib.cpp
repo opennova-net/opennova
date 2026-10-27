@@ -8,6 +8,7 @@
 #include <runtime/world/angle.h>
 #include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/fixed.h>
 #include "collision_detail.h"
 #include <algorithm>
 #include <cmath>
@@ -38,10 +39,10 @@ CollisionMatrix rotation(int32_t yaw, int32_t pitch) {
     const int32_t cp=int32_t(std::cos(pitch*radians)*4194304.0);
     const int32_t sp=int32_t(std::sin(pitch*radians)*4194304.0);
     CollisionMatrix m;
-    m.m[0]=int32_t((int64_t(cp)*cy)>>22); m.m[1]=-sy;
-    m.m[2]=int32_t((int64_t(-sp)*cy)>>22);
-    m.m[4]=int32_t((int64_t(cp)*sy)>>22); m.m[5]=cy;
-    m.m[6]=int32_t((int64_t(-sp)*sy)>>22);
+    m.m[0]=io::mul_q22(cp, cy); m.m[1]=-sy;
+    m.m[2]=io::mul_q22(-sp, cy);
+    m.m[4]=io::mul_q22(cp, sy); m.m[5]=cy;
+    m.m[6]=io::mul_q22(-sp, sy);
     m.m[8]=sp; m.m[10]=cp;
     return m;
 }

@@ -3,6 +3,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 
 #include <algorithm>
 #include <cmath>
@@ -32,9 +33,6 @@ int32_t heading(const World &world, const Entity &entity) {
 int32_t trig(int32_t angle, bool sine) {
     const double rad = double(angle) * io::kRadiansPerBamX87;
     return int32_t((sine ? std::sin(rad) : std::cos(rad)) * 4194304.0);
-}
-int32_t mul22(int32_t a, int32_t b) {
-    return int32_t((int64_t(a) * b) >> 22);
 }
 double distance(const World &world, const Entity &a, const Entity &b) {
     const auto p = position(world, a), q = position(world, b);
@@ -86,8 +84,8 @@ void animate_patient(World &world, const Entity *patient) {
     if (!ai) return;
     const int32_t fast = int32_t(world.logic_tick << 26);
     const int32_t slow = int32_t(world.logic_tick << 22);
-    int32_t pitch = mul22(mul22(262470208, trig(fast, false)), trig(slow, false));
-    const int32_t roll = mul22(mul22(262470208, trig(fast, true)), trig(slow, true));
+    int32_t pitch = io::mul_q22(io::mul_q22(262470208, trig(fast, false)), trig(slow, false));
+    const int32_t roll = io::mul_q22(io::mul_q22(262470208, trig(fast, true)), trig(slow, true));
     if (std::abs(int64_t(pitch)) > 178956960) pitch = 0;
     ai->inf.aim_pitch = pitch >> 3;
     ai->inf.torso_roll = io::bam_sub(pitch, roll) >> 2;
@@ -193,8 +191,8 @@ bool TeammateOperations::start(World &world, int32_t subtype, int32_t patient_ss
         heli->veh.part_spin.speed = kRotorSpeedMax;
         pos = position(world, *heli);
         angle = heading(world, *heli);
-        pos[0] = io::bam_sub(io::bam_add(pos[0], mul22(trig(angle, false), 16384)), 8192);
-        pos[1] = io::bam_sub(io::bam_add(pos[1], mul22(trig(angle, true), 16384)), 8192);
+        pos[0] = io::bam_sub(io::bam_add(pos[0], io::mul_q22(trig(angle, false), 16384)), 8192);
+        pos[1] = io::bam_sub(io::bam_add(pos[1], io::mul_q22(trig(angle, true), 16384)), 8192);
         pos[2] = io::bam_sub(pos[2], 98304);
         angle = io::bam_sub(angle, 1073741760);
         slot.state = State::FlyToHover;
@@ -346,8 +344,8 @@ void TeammateOperations::update(World &world, Slot &slot) {
                     double(io::bam_sub(p[0], h[0]))) * -683565275.5764316;
             slot.heading = int32_t(0x42000000u - uint32_t(int32_t(bearing)));
             orient();
-            air->brain.f[17] = io::bam_add(slot.goal[0], mul22(trig(slot.heading, false), 1966080));
-            air->brain.f[18] = io::bam_add(slot.goal[1], mul22(trig(slot.heading, true), 1966080));
+            air->brain.f[17] = io::bam_add(slot.goal[0], io::mul_q22(trig(slot.heading, false), 1966080));
+            air->brain.f[18] = io::bam_add(slot.goal[1], io::mul_q22(trig(slot.heading, true), 1966080));
             if (h[2] == heli->saved_live_pos[2]) {
                 order(world, first, patient); order(world, second, first);
                 slot.state = State::ApproachPatient; slot.medic = 0;

@@ -29,7 +29,12 @@ int AiSystem::index_of(const AiEntity &e) const {
 
 // [orig: inline LCG on dword_31BFBB8]. PRNG_Next16's separate but shared
 // dword_31BFBB0 stream is owned by World; the low 16 bits feed both jitters.
-int32_t AiSystem::prng_step_a() { return static_cast<int32_t>(prng_step(prng_a)); }
+// One step of the shared rotate-LCG; the new state, whose low 16 bits are PRNG_Next16's value
+// and the engagement jitter source.
+int32_t AiSystem::prng_step_a() {
+    io::rotating_prng_next16(prng_a);
+    return static_cast<int32_t>(prng_a);
+}
 
 // [orig: the shared death-velocity event @0x467730/0x457d70/0x467400] queue a crash(3)/still(4)
 // AIEvent by the hull's horizontal speed (the entity record's +0x98/+0x9C pair, see

@@ -206,12 +206,9 @@ void scar_basis(const int32_t normal_q16[3], uint16_t spin_word,
 	const double angle = scar_spin_radians(spin_word);
 	const int32_t s = static_cast<int32_t>(std::sin(angle) * io::kQ22One);
 	const int32_t c = static_cast<int32_t>(std::cos(angle) * io::kQ22One);
-	const auto mul22 = [](int32_t a, int32_t b) {
-		return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-	};
 	for (int i = 0; i < 3; ++i) {
-		out_a[i] = io::bam_sub(mul22(c, t[i]), mul22(s, b[i]));
-		out_b[i] = io::bam_add(mul22(s, t[i]), mul22(c, b[i]));
+		out_a[i] = io::bam_sub(io::mul_q22(c, t[i]), io::mul_q22(s, b[i]));
+		out_b[i] = io::bam_add(io::mul_q22(s, t[i]), io::mul_q22(c, b[i]));
 	}
 }
 

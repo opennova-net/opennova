@@ -129,12 +129,6 @@ bool within_2d(const EntityPosition &a, const EntityPosition &b, int32_t radius_
     return static_cast<int32_t>(static_cast<uint32_t>(root) << 8) <= radius_q16;
 }
 
-// The 32-bit `imul` the score multiplier rides.
-int32_t wrap_mul(int32_t value, int32_t factor) {
-    return static_cast<int32_t>(static_cast<uint32_t>(value) *
-                                static_cast<uint32_t>(factor));
-}
-
 int32_t unique_best_team(const std::array<int32_t, 5> &scores) {
     int32_t best = std::numeric_limits<int32_t>::min();
     int32_t winner = 0;
@@ -466,8 +460,8 @@ int32_t Match::score_multiplier(const MatchStats &stats) const {
 }
 
 int32_t Match::computed_score(const MatchPlayer &player, bool team_mode) const {
-    return wrap_mul(team_mode ? player.stats[MatchStats::kPoints] : primary_score(player),
-                    score_multiplier(player.stats));
+    return io::bam_mul(team_mode ? player.stats[MatchStats::kPoints] : primary_score(player),
+                       score_multiplier(player.stats));
 }
 
 int32_t Match::score_value(size_t status_index) const {
@@ -2280,8 +2274,8 @@ bool Match::finish(int32_t winner_team, const World &world) {
             entity != nullptr ? entity->player_class : uint8_t{0},
             player.stats,
             player.objective_ticks,
-            wrap_mul(primary_score(player), multiplier),
-            wrap_mul(player.stats[MatchStats::kPoints], multiplier),
+            io::bam_mul(primary_score(player), multiplier),
+            io::bam_mul(player.stats[MatchStats::kPoints], multiplier),
         });
     }
     sort_scoreboard_players(result_.players, rules_.game_type);

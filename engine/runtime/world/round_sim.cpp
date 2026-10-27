@@ -413,11 +413,6 @@ Vec3 flight_direction(const Vec3 &vel) {
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
 }
 
-// The Q22 product the spawners round each term through: the 64-bit `imul`,
-// then `shrd eax, edx, 16h` (the low dword of the product >> 22).
-int32_t mul22(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-}
 
 // A round's launch speed in Q16 units per tick: the ammo velocity << 16 divided
 // by the 62-tick second as a signed integer (the magic-multiply divide).
@@ -431,7 +426,8 @@ int32_t round_launch_speed_q16(int32_t velocity) {
 // A round's launch velocity (Q16 units per tick, mission axes): each angle
 // times retail's radians-per-BAM double into fsin / fcos, each scaled to Q22
 // and truncated by `_ftol2_sse`; the heading pair takes the pitch cosine, each
-// product >> 22, then every axis the speed's product >> 22.
+// product >> 22, then every axis the speed's product >> 22 (io::mul_q22: the
+// 64-bit `imul`, then `shrd eax, edx, 16h`).
 // [orig: RoundData_SpawnRound @0x4EC511..0x4EC58A, the velocity stores
 //  @0x4EC5DD..0x4EC60D; Weapon_SpawnProjectileBurst @0x4EBA21..0x4EBAF1;
 //  Weapon_SpawnProjectileBurstWithSpread @0x4EBCC9..0x4EBDAA]
@@ -442,8 +438,8 @@ FixedVec3 round_launch_velocity_q16(int32_t yaw_bam, int32_t pitch_bam, int32_t 
     const double yaw = static_cast<double>(yaw_bam) * kRadPerBam;
     const int32_t sy = static_cast<int32_t>(std::sin(yaw) * io::kQ22One);
     const int32_t cy = static_cast<int32_t>(std::cos(yaw) * io::kQ22One);
-    return FixedVec3{mul22(mul22(cy, cp), speed_q16), mul22(mul22(sy, cp), speed_q16),
-                     mul22(sp, speed_q16)};
+    return FixedVec3{io::mul_q22(io::mul_q22(cy, cp), speed_q16),
+                     io::mul_q22(io::mul_q22(sy, cp), speed_q16), io::mul_q22(sp, speed_q16)};
 }
 
 // The fire descriptor's engine-frame BAM pair projected into mission axes.

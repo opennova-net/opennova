@@ -683,10 +683,10 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 return static_cast<int32_t>(static_cast<uint32_t>(v) << 5);
             };
             inf.aim_point[0] = io::bam_add(saved[0], io::bam_add(
-                    static_cast<int32_t>((static_cast<int64_t>(c) * 0x640000) >> 22),
+                    io::mul_q22(c, 0x640000),
                     shl5(io::bam_sub(e.self->position.x.q16, saved[0]))));
             inf.aim_point[1] = io::bam_add(saved[1], io::bam_add(
-                    static_cast<int32_t>((static_cast<int64_t>(s) * 0x640000) >> 22),
+                    io::mul_q22(s, 0x640000),
                     shl5(io::bam_sub(e.self->position.y.q16, saved[1]))));
             inf.aim_point[2] = io::bam_add(saved[2], shl5(io::bam_sub(e.self->position.z.q16, saved[2])));
         }
@@ -741,19 +741,16 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
                 return static_cast<int32_t>(
                         std::sin(static_cast<double>(angle) * io::kRadiansPerBamX87) * -4194304.0);
             };
-            const auto mul22 = [](int32_t a, int32_t b) {
-                return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
-            };
             const int32_t cy = cos22(parent_yaw), cp = cos22(parent_pitch),
                           cr = cos22(parent_roll);
             const int32_t sy = neg_sin22(parent_yaw), sp = neg_sin22(parent_pitch),
                           sr = neg_sin22(parent_roll);
-            const int32_t x1 = io::bam_sub(mul22(cy, adx), mul22(sy, ady));
-            const int32_t y1 = io::bam_add(mul22(sy, adx), mul22(cy, ady));
-            const int32_t x2 = io::bam_sub(mul22(cp, x1), mul22(sp, adz));
-            const int32_t z1 = io::bam_add(mul22(sp, x1), mul22(cp, adz));
-            const int32_t y2 = io::bam_sub(mul22(cr, y1), mul22(sr, z1));
-            const int32_t z2 = io::bam_add(mul22(sr, y1), mul22(cr, z1)); // [orig: @0x4BCEA8]
+            const int32_t x1 = io::bam_sub(io::mul_q22(cy, adx), io::mul_q22(sy, ady));
+            const int32_t y1 = io::bam_add(io::mul_q22(sy, adx), io::mul_q22(cy, ady));
+            const int32_t x2 = io::bam_sub(io::mul_q22(cp, x1), io::mul_q22(sp, adz));
+            const int32_t z1 = io::bam_add(io::mul_q22(sp, x1), io::mul_q22(cp, adz));
+            const int32_t y2 = io::bam_sub(io::mul_q22(cr, y1), io::mul_q22(sr, z1));
+            const int32_t z2 = io::bam_add(io::mul_q22(sr, y1), io::mul_q22(cr, z1)); // [orig: @0x4BCEA8]
             solve_bearing_elevation(x2, y2, z2, bearing, elevation);
             candidate = io::bam_add( // [orig: `add ebx,[edi+10h]` @0x4BCEEE]
                     io::bam_add(bearing, err_heading), parent_yaw);
