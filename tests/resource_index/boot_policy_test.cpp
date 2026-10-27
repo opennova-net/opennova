@@ -284,6 +284,15 @@ void test_runtime_launch_flags_parse() {
     CHECK(!none.spectator && none.spectator_password.empty());
     CHECK(none.callsign.empty() && none.capture_pcap.empty() && none.novaworld_host.empty());
     CHECK(parse_launch_flags({"--novaworld-host"}).novaworld_host.empty());
+    // The NovaWorld server a mod install's relaunch joins (ADR 0074): a row id, 0 when absent
+    // or not one; an own option, which the retail switch walk never sees.
+    CHECK(none.novaworld_join == 0);
+    CHECK(parse_launch_flags({"--", "--novaworld-join", "4127"}).novaworld_join == 4127);
+    CHECK(parse_launch_flags({"--novaworld-join", "0"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"--novaworld-join", "-5"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"--novaworld-join", "x"}).novaworld_join == 0);
+    CHECK(parse_launch_flags({"game.exe", "--novaworld-join", "/LAN"}).novaworld_join == 0 &&
+          !parse_launch_flags({"game.exe", "--novaworld-join", "/LAN"}).lan);
     // Malformed or out-of-range integers read the sentinel, never a clamp.
     const LaunchFlags bad = parse_launch_flags(
         {"--lan-port", "fast", "--lan-gametype", "-3", "--lan-mode", "5", "--lan-max-players",
@@ -347,14 +356,16 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     const FolderProduct bhd{"", "", "DFBHD.CMD", "", true};
     const LaunchProduct own = launch_product(none, fresh);
     CHECK(own.product == "acidgambit" && own.supported && own.game == "jo" && own.command == "ACIDGAMBIT.CMD" &&
-          own.name.empty());
+          own.name == "OP: Acid Gambit");
     const LaunchProduct retail = launch_product(none, dfx2);
-    CHECK(retail.product == "dfx2" && retail.supported && retail.game == "dfx2" && retail.command == "dfx2.cmd");
+    CHECK(retail.product == "dfx2" && retail.supported && retail.game == "dfx2" && retail.command == "dfx2.cmd" &&
+          retail.name == "Delta Force Xtreme 2");
     CHECK(launch_product(none, jo).game == "jo");
     // A foreign folder runs nothing, though it still resolves an engine profile and names the
     // command file its wizard names.
     const LaunchProduct foreign = launch_product(none, bhd);
-    CHECK(foreign.product.empty() && !foreign.supported && foreign.game == "jo" && foreign.command == "DFBHD.CMD");
+    CHECK(foreign.product.empty() && !foreign.supported && foreign.game == "jo" && foreign.command == "DFBHD.CMD" &&
+          foreign.name.empty());
     // /game wins over the folder, a foreign one too.
     const LaunchProduct chosen = launch_product(parse_launch_flags({"/game", "Jo"}), dfx2);
     CHECK(chosen.product == "jo" && chosen.game == "jo" && chosen.command == "JOPTR.CMD" && chosen.supported);
@@ -364,7 +375,7 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(launch_product(parse_launch_flags({"/game", "DFX2"}), fresh).game == "dfx2");
     CHECK(!launch_product(parse_launch_flags({"/game", "missing"}), fresh).supported);
     const LaunchProduct tool = launch_product(parse_launch_flags({"/game", "dfx"}), fresh);
-    CHECK(!tool.supported && tool.game == "dfx" && tool.command.empty());
+    CHECK(!tool.supported && tool.game == "dfx" && tool.command.empty() && tool.name.empty());
     CHECK(launch_game(parse_launch_flags({"/game", "dfx"}), "jo") == "dfx");
     CHECK(launch_game(parse_launch_flags({"/game", "ACIDGAMBIT"}), "dfx2") == "jo");
     CHECK(!launch_product(parse_launch_flags({"/game"}), jo).supported);
@@ -380,7 +391,8 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(!launch_product(parse_launch_flags({"/game", "mygame"}), fresh).supported);
     // /game jo there is JO's, as anywhere.
     const LaunchProduct jo_there = launch_product(parse_launch_flags({"/game", "jo"}), player);
-    CHECK(jo_there.supported && jo_there.game == "jo" && jo_there.command == "JOPTR.CMD" && jo_there.name.empty());
+    CHECK(jo_there.supported && jo_there.game == "jo" && jo_there.command == "JOPTR.CMD" &&
+          jo_there.name == "Joint Operations");
     CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
     CHECK(parse_launch_flags({"--", "--after-update"}).after_update && !none.after_update);
     const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});

@@ -62,7 +62,7 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 
 # ADR 0074: a wizard naming another CMD with GAME is a player's game, played as
 # that profile in its folder (named by its login there, and by /game), under its
-# own name and command file; the stock games carry no name of their own.
+# own name and command file.
 func test_a_player_games_folder_plays_its_game() -> void:
 	var dir := TestFs.cache_dir(self, "launch_player_game")
 	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"),
@@ -77,16 +77,15 @@ func test_a_player_games_folder_plays_its_game() -> void:
 	TestFs.write_text(self, dir.path_join("MYGAME.CMD"),
 			"[HEADER]\r\nPRODUCT=My Game\r\nVERSION=1\r\n\r\n[COMMAND]\r\n")
 	assert_eq(LaunchFlags.product_name(), "My Game", "installed: its release's product name")
-	assert_eq(GameRuntimeRoot.product_title(LaunchFlags.product(), LaunchFlags.product_name()), "My Game")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "jo", "--resource-dir", dir]))
 	assert_eq(LaunchFlags.product_command_file(), "JOPTR.CMD")
-	assert_eq(LaunchFlags.product_name(), "")
-	assert_eq(GameRuntimeRoot.product_title("jo", LaunchFlags.product_name()), "Joint Operations")
+	assert_eq(LaunchFlags.product_name(), "Joint Operations")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "mygame"]))
 	assert_false(LaunchFlags.product_supported(), "its login names no game in another folder")
 	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=DFBHD.CMD\r\n")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
-	assert_eq(LaunchFlags.product_command_file(), "DFBHD.CMD", "a foreign folder's, what its wizard names")
+	assert_eq(LaunchFlags.product_command_file(), "DFBHD.CMD",
+			"a foreign folder's, what its wizard names")
 	TestFs.remove_dir_recursive(dir)
 
 

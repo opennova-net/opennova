@@ -47,6 +47,7 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("capture_pcap"), &LaunchFlags::capture_pcap);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("novaworld_host"), &LaunchFlags::novaworld_host);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("novaworld_join"), &LaunchFlags::novaworld_join);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_tga"), &LaunchFlags::screen_shot_tga);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("screen_shot_path"), &LaunchFlags::screen_shot_path);
@@ -230,6 +231,8 @@ String LaunchFlags::capture_pcap() {
 String LaunchFlags::novaworld_host() {
 	return to_gd(parse().novaworld_host);
 }
+
+int LaunchFlags::novaworld_join() { return parse().novaworld_join; }
 
 int LaunchFlags::mcp_port() {
 	return parse().mcp_port;

@@ -78,6 +78,11 @@
 //                               nw.opennova.net in a release export,
 //                               nw.staging.opennova.net in a debug one, loopback
 //                               in a source run). Never the Original target's.
+//   --novaworld-join <rid>      the NovaWorld server to join (its list row's id,
+//                               1..2^31-1): the NovaWorld screen opens and joins
+//                               that row once signed in and listed. The relaunch
+//                               after a mod's install for a join carries it
+//                               (godot/game/runtime_updates.gd, ADR 0074).
 //   --working-dir <path>        the directory the game was started in, where it
 //                               keeps the files it writes beside itself as retail
 //                               keeps its saves in its working directory
@@ -138,6 +143,7 @@ inline constexpr const char *kLaunchFlagCallsign = "--callsign";
 inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
 inline constexpr const char *kLaunchFlagNovaWorldHost = "--novaworld-host";
+inline constexpr const char *kLaunchFlagNovaWorldJoin = "--novaworld-join";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 inline constexpr const char *kLaunchFlagNoReload = "/noreload";
@@ -335,6 +341,7 @@ struct LaunchFlags : RetailSwitches {
     std::string capture_pcap;      // --capture-pcap <path>
     int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
     std::string novaworld_host;    // --novaworld-host <host>; "" = the product's own
+    int novaworld_join = 0;        // --novaworld-join <rid>; 0 = none
     std::string working_dir;       // --working-dir <path>; "" = the process's own
 };
 
@@ -417,7 +424,9 @@ struct LaunchProduct {
     // Its command file: the folder's wizard's CMD when the launch takes the folder's product (or
     // the folder is foreign: what its wizard names), else the stock product's.
     std::string command;
-    std::string name; // a player game's name (FolderProduct::name); "" for the stock games
+    // Its name on the runtime's screens: a player game's own (FolderProduct::name), a stock
+    // game's ("Joint Operations", "Delta Force Xtreme 2", "OP: Acid Gambit"); "" for none.
+    std::string name;
     // Whether the launch can run: a stock product, or the folder's own (a player's game is
     // played in its own folder alone).
     bool supported = false;

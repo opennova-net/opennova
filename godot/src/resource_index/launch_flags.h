@@ -36,8 +36,8 @@ public:
 	// The product's command file (JOPTR.CMD, a player game's <KEY>.CMD); a foreign
 	// folder's, the CMD its wizard names.
 	static String product_command_file();
-	// A player game's name (its installed command file's PRODUCT, else its login);
-	// "" for the stock games.
+	// The product's name on the runtime's screens: a stock game's, a player game's
+	// own (its installed command file's PRODUCT, else its login); "" for none.
 	static String product_name();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
@@ -78,6 +78,8 @@ public:
 	static int mcp_port();
 	// `--novaworld-host <host>`: the OpenNova target's gate; "" = the product's own.
 	static String novaworld_host();
+	// `--novaworld-join <rid>`: the NovaWorld server to join once listed; 0 = none.
+	static int novaworld_join();
 	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
 	static bool no_hud();
 	// `/noreload` — the auto-reload global forced off (boot_policy.h no_reload).

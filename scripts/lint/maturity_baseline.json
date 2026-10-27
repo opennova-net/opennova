@@ -6,6 +6,7 @@
     "base/project",
     "base/os_random",
     "base/proc",
+    "base/resource_index/mod_listing.cpp",
     "net/novaworld/service",
     "runtime/inmatch/loopback_channel.cpp",
     "runtime/inmatch/udp_session_transport.cpp",

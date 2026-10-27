@@ -1267,6 +1267,13 @@ target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(boot_policy_test PRIVATE cxx_std_17)
 add_test(NAME boot_policy COMMAND boot_policy_test)
 
+# A game's mods on NovaWorld and their folders (base/resource_index/mod_listing.h, ADR 0074).
+add_executable(mod_listing_test resource_index/mod_listing_test.cpp)
+target_link_libraries(mod_listing_test PRIVATE opennova_base)
+target_include_directories(mod_listing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mod_listing_test PRIVATE cxx_std_17)
+add_test(NAME mod_listing COMMAND mod_listing_test)
+
 # opennova-extract mounts an install as a launch with its flags does (apps/extract).
 add_executable(extract_cli_test resource_index/extract_cli_test.cpp)
 target_link_libraries(extract_cli_test PRIVATE opennova_formats)

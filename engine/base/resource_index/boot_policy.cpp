@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <string_view>
 
 namespace opennova {
 
@@ -230,6 +231,7 @@ constexpr OwnOption kLaunchOwnOptions[] = {
     {kLaunchFlagCapturePcap, true},
     {kLaunchFlagMcpPort, true},
     {kLaunchFlagNovaWorldHost, true},
+    {kLaunchFlagNovaWorldJoin, true},
     {kLaunchFlagWorkingDir, true},
 };
 
@@ -267,6 +269,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args, const std::
     f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
     f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
     f.novaworld_host = value_after(args, kLaunchFlagNovaWorldHost);
+    f.novaworld_join = int_after(args, kLaunchFlagNovaWorldJoin, 1, 0x7fffffffL, 0);
     f.working_dir = value_after(args, kLaunchFlagWorkingDir);
     return f;
 }
@@ -345,18 +348,37 @@ FolderProduct folder_product(const std::string &dir) {
     return out;
 }
 
+namespace {
+
+// The stock products: their /game name, command file and name on the runtime's screens.
+struct StockProduct {
+    const char *product;
+    std::string_view command;
+    const char *name;
+};
+constexpr StockProduct kStockProducts[] = {
+    {"acidgambit", update::kAcidGambitCommandFile, "OP: Acid Gambit"},
+    {"jo", update::kJoCommandFile, "Joint Operations"},
+    {"dfx2", update::kDfx2CommandFile, "Delta Force Xtreme 2"},
+};
+
+} // namespace
+
 LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder) {
     LaunchProduct out;
     if (flags.game_given) out.product = flags.game;
     else if (!folder.foreign) out.product = folder.product.empty() ? std::string("acidgambit") : folder.product;
     const bool folders = !out.product.empty() && out.product == folder.product;
     if (folders || (folder.foreign && !flags.game_given)) out.command = folder.command;
-    else if (out.product == "jo") out.command = update::kJoCommandFile;
-    else if (out.product == "dfx2") out.command = update::kDfx2CommandFile;
-    else if (out.product == "acidgambit") out.command = update::kAcidGambitCommandFile;
+    if (folders) out.name = folder.name;
+    out.supported = folders;
+    for (const StockProduct &stock : kStockProducts) {
+        if (out.product != stock.product) continue;
+        if (out.command.empty()) out.command = stock.command;
+        if (out.name.empty()) out.name = stock.name;
+        out.supported = true;
+    }
     out.game = folders ? folder.game : launch_game(flags, out.product);
-    out.name = folders ? folder.name : std::string();
-    out.supported = folders || out.product == "acidgambit" || out.product == "jo" || out.product == "dfx2";
     return out;
 }
 

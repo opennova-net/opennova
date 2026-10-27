@@ -1,0 +1,41 @@
+#pragma once
+
+#include <base/resource_index/mod_listing.h>
+
+#include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
+
+namespace godot {
+
+// One of a game's mods on NovaWorld (engine base/resource_index/mod_listing.h, ADR 0074): a typed
+// row of the service's GET /api/mods reply, which writes its own install wizard. The NovaWorld
+// menu lists, installs and removes mods through it; every rule lives engine-side.
+class ModListing : public RefCounted {
+	GDCLASS(ModListing, RefCounted)
+
+	opennova::ModListing value_;
+
+protected:
+	static void _bind_methods();
+
+public:
+	// The reply's installable mods appended to `listings`; "" when the reply read, else why not.
+	static String read_reply(const String &json, TypedArray<ModListing> listings);
+	// expansion/<code>/ under `game_root` deleted with everything in it; "" when it is gone.
+	static String remove_folder(const String &game_root, const String &code);
+	// expansion/<code>/UPDATE.WIZ naming this mod's product and the runtime's update host; "" when
+	// written.
+	String write_wizard(const String &game_root, const String &runtime_dir) const;
+
+	String get_key() const;
+	String get_code() const;
+	String get_name() const;
+	String get_owner() const;
+	String get_version() const;
+	String get_updater_login() const;
+	String get_command_file() const;
+};
+
+} // namespace godot

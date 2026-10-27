@@ -82,20 +82,6 @@ func _ready() -> void:
 		_start_direct_game.call_deferred()
 
 
-## The game's name on the download screen: a stock game's by its product, a
-## player's game's its own `name` (LaunchFlags.product_name(): its release's
-## product name once installed, its login before; ADR 0074).
-static func product_title(product: String, name := "") -> String:
-	match product:
-		"jo":
-			return "Joint Operations"
-		"dfx2":
-			return "Delta Force Xtreme 2"
-		"acidgambit":
-			return "OP: Acid Gambit"
-	return name
-
-
 ## `game` is the engine profile the product mounts with (LaunchFlags.game()).
 static func has_content(directory: String, loose_override := false, allow_loose_root := false,
 		game := "jo") -> bool:
@@ -113,7 +99,8 @@ static func has_content(directory: String, loose_override := false, allow_loose_
 
 func _show_bootstrap() -> void:
 	print_verbose("OpenNova: content installation required")
-	var title := product_title(LaunchFlags.product(), LaunchFlags.product_name())
+	# The game's name: a stock game's, a player's game's own (boot_policy.h launch_product).
+	var title := LaunchFlags.product_name()
 	if is_headless():
 		push_error("%s is not installed here. Run update.exe to install it." % title)
 		get_tree().quit(1)
