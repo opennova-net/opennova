@@ -1357,8 +1357,10 @@ on which release).
 
 A **release** is built from a revision: **Release r<head>...** on the game's page, or the
 editor's **Build > Release...** (`POST /api/products/<key>/releases`, an admin's or the
-project's owner's: a player releases and publishes its own projects on its project's page,
-one build at a time, five a UTC day and none past its 4 GiB; ADR 0074), queues
+project's owner's: a player releases its own projects on its project's page, one build at a
+time, five a UTC day and none past its 4 GiB, and its **Publish** waits for an admin's approval
+on the product's page, **Publish** or **Reject** with a note, the attention list naming each;
+ADR 0074), queues
 the data program's `release.build`, which exports the revision with `opennova-project` (an
 expansion's after its base game's revision, laid out by its key beside it, the expansion's
 `base_project` pointed there whatever folder its author keeps the base game's project in),
