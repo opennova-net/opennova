@@ -204,8 +204,7 @@ int64_t ready_tree(Database &db, int64_t product_id, const char *version) {
 	return hosted::finish_tree(db, id, ready) ? id : 0;
 }
 
-// The product `id` from the admin list, or an empty value: a document of its own, since a member
-// read off the list's document points into it, which is gone once this returns.
+// The product `id` from the admin list, or an empty value.
 crow::json::rvalue listed_product(const Harness &h, int64_t id) {
 	const auto json = json_of(h.admin("GET", "/api/admin/products"), 200);
 	if (!json)
