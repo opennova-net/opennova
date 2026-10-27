@@ -4443,11 +4443,15 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 	var effects := world.get_effect_world()
 	assert_eq(effects.live_group_count(), 0, "powerup skips the independent load-time attachment")
 	world.get_runtime().play()
+	# The next callback destroys the slot's group outright, its particles with it, never leaving
+	# it to drain (engine world/item_effects ItemEmitterSystem::event carries the witness).
 	var first_group := 0
-	var stopped := false
+	var destroyed := false
+	var drained := false
 	var restarted := false
 	for _tick in range(160):
 		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		var first_present := false
 		for group: EffectGroupReport in effects.get_debug_group_report(true):
 			if group.name != FX_PERSISTENT_EFFECT:
 				continue
@@ -4455,14 +4459,19 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 				first_group = group.id
 				assert_eq(group.binding, EffectScene.BINDING_FOLLOW_OWNER)
 				assert_gt(group.transform.origin.x, 9.0, "the native group uses the placed model's userpoint")
-			if group.id == first_group and group.detached:
-				stopped = true
+			if group.id == first_group:
+				first_present = true
+				if group.detached:
+					drained = true
 			if group.id != first_group and not group.detached:
 				restarted = true
+		if first_group != 0 and not first_present:
+			destroyed = true
 		if restarted:
 			break
 	assert_gt(first_group, 0, "the class callback creates a group in the renderer's scene")
-	assert_true(stopped, "the next callback stops its existing group")
+	assert_true(destroyed, "the next callback destroys its existing group outright")
+	assert_false(drained, "the destroyed group never drains")
 	assert_true(restarted, "the callback rearms after the 15-tick gap")
 	world.unload()
 
