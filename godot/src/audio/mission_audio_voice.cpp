@@ -39,7 +39,7 @@ void MissionAudio::meter_script_voice(double p_delta) {
     for (int pair = 0; bus >= 0 && pair < server->get_bus_channels(bus); ++pair) {
         const float db = std::max(server->get_bus_peak_volume_left_db(bus, pair),
                 server->get_bus_peak_volume_right_db(bus, pair));
-        peak = std::max(peak, static_cast<float>(Math::db_to_linear(db)));
+        peak = std::max(peak, static_cast<float>(Math::db2linear(db)));
     }
     sim->advance_audio_out_meter(p_delta, peak);
 }
