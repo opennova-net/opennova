@@ -125,6 +125,7 @@ void DestructionPresenter::reset_runtime_state() {
 		}
 	}
 	final_overlays_.clear();
+	pending_final_overlays_.clear();
 	final_husked_.clear();
 	for (const KeyValue<String, HuskRestore> &kv : husk_restore_) {
 		husk_graft_restore(placer_.ptr(), kv.value.graft);
@@ -279,6 +280,17 @@ void DestructionPresenter::drop_final_overlay(const String &p_key) {
 		}
 	}
 	final_overlays_.erase(p_key);
+	pending_final_overlays_.erase(p_key);
+}
+
+void DestructionPresenter::retry_pending_final_overlay(const String &p_key) {
+	const opennova::world::HuskSwapEvent *pending = pending_final_overlays_.getptr(p_key);
+	if (pending == nullptr) {
+		return;
+	}
+	const opennova::world::HuskSwapEvent show = *pending;
+	pending_final_overlays_.erase(p_key);
+	apply_final_overlay(p_key, show);
 }
 
 // The pending final husk draws beside the husk, in the husk's place and frame
@@ -302,8 +314,14 @@ void DestructionPresenter::apply_final_overlay(const String &p_key,
 				static_cast<int>(p_husk.wire_handle));
 	}
 	if (parent == nullptr) {
+		// The show is the stage's one event for this window: keep it until the node
+		// builds and its husk grafts (apply_husk_swap retries it).
+		pending_final_overlays_[p_key] = p_husk;
 		return;
 	}
+	// The overlay draws wherever the entity draws: the reflected subscene too.
+	ObjectModel *source = Object::cast_to<ObjectModel>(graft != nullptr ? graft : parent);
+	const bool mirror_reflected = source != nullptr && source->get_mirror_reflected();
 	const int def_id = p_husk.item_id + MissionData::ITEM_ID_OFFSET;
 	for (const String &graphic : husk_graphics(def_id, true)) {
 		ObjectModel *model = placer_->build_model_from_graphic(
@@ -315,6 +333,10 @@ void DestructionPresenter::apply_final_overlay(const String &p_key,
 		model->set_transform(local);
 		if (ObjectModel *husk = Object::cast_to<ObjectModel>(graft)) {
 			model->set_destroyed_section_mask(husk->get_destroyed_section_mask());
+		}
+		if (mirror_reflected) {
+			model->set_mirror_reflected(true);
+			model->rebuild();
 		}
 		final_overlays_[p_key] = model->get_instance_id();
 		return;
@@ -370,6 +392,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 					HuskGraftResult::Grafted) {
 				husked_[husk_key] = restore.graft.husk;
 				husk_restore_[husk_key] = restore;
+				retry_pending_final_overlay(husk_key);
 				return;
 			}
 		}
@@ -409,6 +432,7 @@ void DestructionPresenter::apply_husk_swap(const opennova::world::HuskSwapEvent 
 	}
 	husk_restore_[husk_key] = restore;
 	husked_[husk_key] = restore.graft.husk;
+	retry_pending_final_overlay(husk_key);
 }
 
 // Node-less wrecks still move while death physics settles them. Resolve the

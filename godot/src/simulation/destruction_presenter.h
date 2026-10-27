@@ -185,6 +185,9 @@ private:
 	// beside the graft, or under the entity's node when no husk grafted).
 	void apply_final_overlay(const String &p_key, const opennova::world::HuskSwapEvent &p_husk);
 	void drop_final_overlay(const String &p_key);
+	// A show whose entity node had not materialized (a budgeted cold row) waits here and
+	// builds once that node's husk grafts.
+	void retry_pending_final_overlay(const String &p_key);
 	Variant present_transform_for_identity(int p_bms_id, int64_t p_spawn_origin) const;
 	void sync_static_husks();
 	void apply_effect(const opennova::world::DestructionEffectEvent &p_effect);
@@ -210,6 +213,7 @@ private:
 	HashMap<String, HuskRestore> husk_restore_; // canonical mission identity -> original state
 	HashSet<String> final_husked_;              // identities whose applied husk is the final husk
 	HashMap<String, ObjectID> final_overlays_;  // identity -> the pending final husk drawn beside it
+	HashMap<String, opennova::world::HuskSwapEvent> pending_final_overlays_; // identity -> a show awaiting its node
 	HashMap<String, int64_t> attached_groups_;
 	HashMap<String, WreckFire> burning_;        // canonical wreck owner key -> WreckFire
 	HashSet<String> wreck_anchor_keys_;         // registered wreck owner keys
