@@ -88,6 +88,9 @@ constexpr WorkspaceMember kNewProject[] = {
 			"empty, the form is offered the first folder beside its own that holds one.", kPathLongest },
 	{ "expansion", J::String, "A mod's name: the expansion it builds as, which the form checks as the game's rule takes it.",
 			kExpansionLongest },
+	{ "novaworld", J::String,
+			"The NovaWorld project the form is set up for (the welcome page's Set up...): its key, which Create writes "
+			"in the new project's file, the folder then its working copy; \"\" none (the form's clear)." },
 };
 constexpr WorkspaceMember kSettings[] = {
 	{ "open", J::Boolean,
@@ -488,6 +491,11 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	if (const JsonValue *on_project = part.get("on_project")) form.on_project = on_project->boolean;
 	if (const JsonValue *base = part.get("base_project")) form.base_project = base->string;
 	if (const JsonValue *expansion = part.get("expansion")) form.expansion = expansion->string;
+	if (const JsonValue *novaworld = part.get("novaworld")) {
+		if (!novaworld->string.empty() && !is_novaworld_key(novaworld->string))
+			return change.refuse("\"" + novaworld->string + "\" is no NovaWorld project's key: 1 to 16 of A-Z, 0-9 and '_'.");
+		form.novaworld = novaworld->string;
+	}
 	// An expansion on a project's base game (a game you own's expansion, a mod of a project of the author's) is
 	// offered the folder beside its own that holds a standalone project of the game, until one is named.
 	const bool on_base = (form.making == Making::Stock && !form.installed.empty()) || (form.making == Making::Mod && form.on_project);
@@ -498,7 +506,7 @@ bool set_new_project(Change &change, const JsonValue &part) {
 	                   form.dir != held.dir || form.game_install != held.game_install ||
 	                   form.install_named != held.install_named || form.installed != held.installed ||
 	                   form.on_project != held.on_project || form.base_project != held.base_project ||
-	                   form.expansion != held.expansion;
+	                   form.expansion != held.expansion || form.novaworld != held.novaworld;
 	held = std::move(form);
 	return moved;
 }
@@ -1690,6 +1698,7 @@ JsonValue workspace_to_json(const SessionView &view) {
 	made.set("on_project", flag(form.on_project));
 	made.set("base_project", text(form.base_project));
 	made.set("expansion", text(form.expansion));
+	made.set("novaworld", text(form.novaworld));
 	out.set("new_project", std::move(made));
 	const WorkspaceView::Settings &settings = workspace.settings;
 	JsonValue dialog = JsonValue::make_object();

@@ -857,8 +857,22 @@ inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
 	request.dir = std::move(dir);
 	return request;
 }
-inline EditorRequest novaworld_bind(std::string project_key) {
-	EditorRequest request = of(EditorRequestKind::NovaWorldBind);
+// The open project put on NovaWorld as a new project of the account's, keyed `project_key` and titled
+// `title` ("" the project's title), public or private ("" private); `base_key` an expansion's base game's
+// project where the editor finds none.
+inline EditorRequest novaworld_put_new(std::string project_key, std::string title, std::string visibility,
+		std::string base_key = std::string()) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldPut);
+	request.create = true;
+	request.project_key = std::move(project_key);
+	request.title = std::move(title);
+	request.visibility = std::move(visibility);
+	request.base_key = std::move(base_key);
+	return request;
+}
+// The open project put on NovaWorld as the empty project `project_key` the account may push.
+inline EditorRequest novaworld_put_empty(std::string project_key) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldPut);
 	request.project_key = std::move(project_key);
 	return request;
 }

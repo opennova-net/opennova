@@ -35,13 +35,13 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 {K::CancelImport}, "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
-	// A check and a push read the files (a save waits), a bind reads which project is open (its binding goes into
-	// the project's .opennova/novaworld/, so a close waits or cancels it), and a pull writes the files and the
-	// documents read again, as an import's write; each gives way to novaworld_cancel.
+	// A check and a push read the files (a save waits), a working copy's setup reads which project is open (its
+	// state goes into the project's .opennova/novaworld/, so a close waits or cancels it), and a pull writes the
+	// files and the documents read again, as an import's write; each gives way to novaworld_cancel.
 	{OperationKind::NovaWorldCheck, "novaworld_check", HoldsFiles, HoldsSlot, {}, {K::NovaWorldCancel}, "Checking",
 	 "the NovaWorld check"},
-	{OperationKind::NovaWorldBind, "novaworld_bind", HoldsProject, HoldsSlot, {}, {K::NovaWorldCancel}, "Binding",
-	 "the binding"},
+	{OperationKind::NovaWorldTrack, "novaworld_track", HoldsProject, HoldsSlot, {}, {K::NovaWorldCancel},
+	 "Setting up the working copy", "the working copy's setup"},
 	{OperationKind::NovaWorldPull, "novaworld_pull", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
 	 {K::NovaWorldCancel}, "Pulling", "the pull"},
 	{OperationKind::NovaWorldPush, "novaworld_push", HoldsFiles, HoldsSlot, {}, {K::NovaWorldCancel}, "Pushing",

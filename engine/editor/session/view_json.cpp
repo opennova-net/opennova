@@ -644,12 +644,19 @@ constexpr ViewSectionRow kSections[] = {
 			"record? {row, kind, child} while the document read stands}])." },
 	{ S::NovaWorld, "novaworld", concern_set({ C::NovaWorld }), novaworld_section,
 			"NovaWorld's projects (ADR 0069): available (the editor reaches a service), the account {server, "
-			"username, role, signed_in} (never its session), calling (a sign-in or a project list in flight), the "
-			"projects as last listed [{key, title, public, retail, base, head, can_push}] and projects_error, the "
-			"open project's binding {bound, key, revision}, its standing as the last check, pull or push left it "
-			"{checked, head_known, head, head_error, changes [{path, change: added, modified or deleted}], "
-			"problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, theirs}]: novaworld_resolve "
-			"settles each, novaworld_pull goes on}, and last, what the last NovaWorld job came to." },
+			"username, role, signed_in} (never its session), calling (a sign-in, a project list, the open project's "
+			"ask or a put in flight), the projects as last listed [{key, title, kind (game or expansion), game, "
+			"expansion_code, owner (null: NovaWorld's own), public, retail, base, head, can_push (the account pushes "
+			"it: its owner or an admin), can_manage}] and projects_error, the open project's working_copy {key (its "
+			"project file's novaworld key, \"\" not on NovaWorld), tracked (its folder a working copy of it on the "
+			"account's service), revision (the base)}, project (the open project's as the service last answered, "
+			"as a projects row; null while none has), put {kind, game, base, expansion_code, refusal} (what "
+			"novaworld_put's create makes of a project with no key: base \"\" none found), its standing as the last "
+			"check, pull or push left it {checked, head_known, head, head_error (for a project the service does not "
+			"show the account: \"<KEY> is not on <host>, or is private: ...\"), changes [{path, change: added, "
+			"modified or deleted}], problems}, a pull stopped on conflicts {revision, conflicts [{path, mine, "
+			"theirs}]: novaworld_resolve settles each, novaworld_pull goes on}, the history, and last, what the "
+			"last NovaWorld job came to." },
 };
 
 static_assert(std::size(kSections) == kViewSectionCount, "every view section has exactly one row");

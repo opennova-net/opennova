@@ -2,7 +2,9 @@
 
 // What the editor shows of NovaWorld (ADR 0069; session/novaworld_controller.h): the account
 // (its service, name and role, never its session cookie or a password), the projects it may read,
-// the open project's binding and its standing (its changes since its base, the project's head), a
+// the open project's place on NovaWorld (the key its project file names, its working copy on the
+// account's service, the project as the service last answered, and what Put on NovaWorld would make
+// of a project with no key) and its standing (its changes since its base, the project's head), a
 // pull's conflicts while they wait for the author, and what the last NovaWorld job came to. The
 // NovaWorld window draws it, the view JSON's novaworld section is it.
 
@@ -31,19 +33,39 @@ struct NovaWorldView {
 	std::string username;
 	std::string role;
 	bool signed_in = false;
-	// A sign-in or a project list in flight.
+	// A sign-in, a project list, the open project's ask or a put in flight.
 	bool calling = false;
-	// The projects as last listed (the public ones, every one for an admin), and why the last list
-	// failed.
+	// The projects as last listed (the public ones, the account's own, every one for an admin), and
+	// why the last list failed.
 	std::vector<RemoteProject> projects;
 	std::string projects_error;
-	// The open project's binding: the NovaWorld project its folder is a working copy of, and its base
-	// revision.
-	bool bound = false;
+	// The open project's place on NovaWorld: the key its project file names ("" not on NovaWorld),
+	// whether its folder is a working copy of that project on the account's service (its state
+	// there), and its base revision.
 	std::string key;
+	bool tracked = false;
 	int64_t revision = 0;
+	// The project as the service last answered (the open project's ask, its setup, a check, a pull
+	// or a push): whether the account may push it is its can_push.
+	bool remote_known = false;
+	RemoteProject remote;
+	// What Put on NovaWorld makes of the open project as a new project of the account's (its
+	// project file naming no key): a "game" of `game` (the gameprofile code it runs as) or an
+	// "expansion" of the game `base` (its NovaWorld key, "" none found: the put names it) as
+	// `expansion_code`; `refusal` why it cannot ("" it can: an expansion's name the service's code
+	// rule refuses).
+	struct PutPlan {
+		std::string kind;
+		std::string game;
+		std::string base;
+		std::string expansion_code;
+		std::string refusal;
+	};
+	PutPlan put;
 	// Its standing as the last check, pull or push left it: the project's head (when the service
-	// answered), the folder's changes since its base, and what kept a file out of them.
+	// answered; the project's ask and its setup set it too), the folder's changes since its base,
+	// and what kept a file out of them. `head_error` says why the head is unknown: for a project
+	// the service does not show the account, "<KEY> is not on <host>, or is private: ...".
 	bool checked = false;
 	bool head_known = false;
 	int64_t head = 0;

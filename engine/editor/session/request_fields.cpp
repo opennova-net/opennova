@@ -14,7 +14,9 @@ using J = RequestJson;
 // what it does with it (request_kinds.cpp).
 constexpr RequestField kFields[] = {
 	{ F::Dir, "dir", J::String, "A project's directory on disk." },
-	{ F::Title, "title", J::String, "A new project's title (its folder's name when left out)." },
+	{ F::Title, "title", J::String,
+			"A new project's title (its folder's name when left out); novaworld_put's new NovaWorld project's "
+			"name (left out, the project's title)." },
 	{ F::Game, "game", J::String,
 			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
 			"out)." },
@@ -297,7 +299,8 @@ constexpr RequestField kFields[] = {
 			"form (Triggered Text's ID%03i: the lowest number from 1 the section lacks) added to the section the game "
 			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
 			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
-			"the field set to that number." },
+			"the field set to that number. novaworld_put makes a new NovaWorld project of the account's (left out, "
+			"it takes an empty project the account may push)." },
 	{ F::Event, "event", J::Integer,
 			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
 			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
@@ -336,8 +339,9 @@ constexpr RequestField kFields[] = {
 			"novaworld_sign_in's password: a person's alone, typed into the NovaWorld window; novaworld_sign_in is never "
 			"served over the wire." },
 	{ F::ProjectKey, "project_key", J::String,
-			"novaworld_get's and novaworld_bind's project, by its key (\"JO\", \"JOX01\"): what the "
-			"novaworld section's projects list." },
+			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_get "
+			"gets, the one novaworld_put puts the open project on (a new one's key, or an empty one's), and the one "
+			"new_project makes its project for (its project file's novaworld key, the welcome page's Set up...)." },
 	{ F::Message, "message", J::String,
 			"novaworld_push's message: what the revision changes, 1 to 2000 bytes, line breaks kept." },
 	{ F::Resolution, "resolution", J::String,
@@ -350,6 +354,13 @@ constexpr RequestField kFields[] = {
 	{ F::Revision, "revision", J::Integer,
 			"novaworld_restore's revision of the project, whose file at path is put back (left out, 0: "
 			"the folder's base, which discards its changes to the file)." },
+	{ F::Visibility, "visibility", J::String,
+			"novaworld_put's new project: public (anyone may get it) or private (its owner and NovaWorld's admins "
+			"alone); private when left out." },
+	{ F::BaseKey, "base_key", J::String,
+			"novaworld_put's new project of an expansion: its base game's NovaWorld project by key, taken only where "
+			"the editor finds none (the base game's project's own novaworld key; the game install's game among "
+			"NovaWorld's games)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
