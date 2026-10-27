@@ -98,10 +98,21 @@ export function kindLine(product: Product, products: readonly Product[], lobbies
   return `Expansion ${product.expansion_code} of ${parent?.display_name ?? `game ${product.parent_id}`}`;
 }
 
+// Who started a release, from its created_by: the account's name ('user
+// biggy', a player; 'admin root') after its words ("by", "by admin"), or the
+// words alone for the admin token or the data program.
+export function releaseCreator(createdBy: string): { words: string; account: string | null } {
+  if (createdBy === 'token') return { words: 'by the admin token', account: null };
+  if (createdBy === 'worker') return { words: 'by the data program', account: null };
+  if (createdBy.startsWith('user ')) return { words: 'by', account: createdBy.slice(5) };
+  if (createdBy.startsWith('admin ')) return { words: 'by admin', account: createdBy.slice(6) };
+  return { words: createdBy, account: null };
+}
+
+// The same in a line: "by biggy", "by admin root", "by the admin token".
 export function creatorLabel(createdBy: string): string {
-  if (createdBy === 'token') return 'by the admin token';
-  if (createdBy === 'worker') return 'by the data program';
-  return createdBy.startsWith('admin ') ? `by ${createdBy.slice(6)}` : createdBy;
+  const { words, account } = releaseCreator(createdBy);
+  return account === null ? words : `${words} ${account}`;
 }
 
 export function releaseStatusLabel(status: string): string {

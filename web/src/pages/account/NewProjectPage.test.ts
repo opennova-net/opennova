@@ -70,25 +70,26 @@ describe('NewProjectPage', () => {
       key: 'NIGHTOPS2',
       display_name: 'Night Ops 2',
       kind: 'expansion',
-      visibility: 'private',
+      visibility: 'public',
       base: 'JO',
       expansion_code: 'nops',
     });
     expect(router.currentRoute.value.path).toBe('/me/projects/NIGHTOPS2');
   });
 
-  it('makes a public game for a retail game', async () => {
+  it('makes a private game for a retail game, public being the default', async () => {
     create.mockResolvedValue({ ok: true, value: RANGERS_PROJECT });
     const page = await mountPage();
+    expect((page.get('input[name="new-project-visibility"][value="public"]').element as HTMLInputElement).checked).toBe(true);
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
     expect(page.find('#new-project-base').exists()).toBe(false);
     expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2']);
     await page.get('#new-project-game').setValue('dfx2');
-    await page.get('input[name="new-project-visibility"][value="public"]').setValue(true);
+    await page.get('input[name="new-project-visibility"][value="private"]').setValue(true);
     await page.get('#new-project-name').setValue('Rangers');
     submit(page);
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'public', game: 'dfx2' });
+    expect(create).toHaveBeenCalledWith({ key: 'RANGERS', display_name: 'Rangers', kind: 'game', visibility: 'private', game: 'dfx2' });
   });
 
   it("checks the routes' rules before sending, each under its field", async () => {
@@ -97,7 +98,7 @@ describe('NewProjectPage', () => {
     await flushPromises();
     expect(create).not.toHaveBeenCalled();
     expect(page.get('#new-project-name-error').text()).toBe('Enter a name.');
-    expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 16 of A-Z, 0-9 and _.');
+    expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
     expect(page.get('#new-project-short-name-hint').text()).toBe('A short name is 1 to 8 lowercase letters and digits.');
 
     await page.get('#new-project-name').setValue('Night Ops');
@@ -124,12 +125,12 @@ describe('NewProjectPage', () => {
 
     create.mockResolvedValueOnce({
       ok: false,
-      error: { code: 'duplicate_expansion', status: 409, field: '', message: 'That game already has a mod with that short name. Pick another.' },
+      error: { code: 'duplicate_expansion', status: 409, field: 'expansion_code', message: 'Another mod already uses that short name.' },
     });
     submit(page);
     await flushPromises();
-    expect(page.get('#new-project-short-name-hint').text()).toBe('That game already has a mod with that short name. Pick another.');
-    expect(page.get('#new-project-key-hint').text()).toContain('Up to 16 of A-Z, 0-9 and _.');
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Another mod already uses that short name.');
+    expect(page.get('#new-project-key-hint').text()).toContain('Up to 11 of A-Z, 0-9 and _, without "QQ".');
 
     create.mockResolvedValueOnce({ ok: false, error: { code: 'rate_limited', status: 429, field: '', message: 'Too many requests. Try again in a little while.' } });
     submit(page);
@@ -141,7 +142,7 @@ describe('NewProjectPage', () => {
   it('takes the form away once the account has the most projects it may', async () => {
     const page = await mountPage();
     await page.get('#new-project-name').setValue('Night Ops');
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0, release_bytes: 0 } }) });
     create.mockResolvedValueOnce({
       ok: false,
       error: { code: 'too_many_projects', status: 403, field: '', message: 'You have as many projects as an account may have. Delete one to make another.' },
@@ -177,5 +178,39 @@ describe('NewProjectPage', () => {
     expect(create).not.toHaveBeenCalled();
     expect(page.text()).toContain('NovaWorld lists no game to make one for right now.');
     expect(page.text()).not.toContain('—');
+  });
+
+  it('keeps a key to 11 characters with no "QQ", the name suggesting one that fits', async () => {
+    const page = await mountPage();
+    expect(page.get('#new-project-key').attributes('maxlength')).toBe('11');
+    expect(page.get('#new-project-key-hint').text()).toBe(
+      'Up to 11 of A-Z, 0-9 and _, without "QQ". The editor and the updater find your project by its key, and it cannot change later.',
+    );
+    await page.get('#new-project-name').setValue('Iraqq Operations Extended');
+    expect(value(page, '#new-project-key')).toBe('IRAQOPERATI');
+
+    for (const key of ['IRAQQOPS', 'TWELVECHARSX']) {
+      // The field's maxlength stops a typed twelfth character; a pasted one still reaches the check.
+      await page.get('#new-project-key').setValue(key);
+      submit(page);
+      await flushPromises();
+      expect(create).not.toHaveBeenCalled();
+      expect(page.get('#new-project-key-hint').text()).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
+    }
+  });
+
+  it('says a short name another mod uses under the short name, whatever code the conflict carries', async () => {
+    const page = await mountPage();
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Up to 8 lowercase letters and digits, used by no other mod. The game knows the mod by it.');
+    await page.get('#new-project-name').setValue('Night Ops');
+    create.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'unknown', status: 409, field: 'expansion_code', message: 'Another mod already uses that short name.' },
+    });
+    submit(page);
+    await flushPromises();
+    expect(page.get('#new-project-short-name').attributes('aria-invalid')).toBe('true');
+    expect(page.get('#new-project-short-name-hint').text()).toBe('Another mod already uses that short name.');
+    expect(page.get('[role="alert"]').text()).toBe('');
   });
 });

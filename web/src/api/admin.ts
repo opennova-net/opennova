@@ -231,7 +231,7 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'duplicate_login':
       return 'Another product already uses that updater login.';
     case 'duplicate_expansion':
-      return 'That base game already has an expansion with that code.';
+      return 'Another expansion already uses that code.';
     case 'duplicate_key':
       return 'Another product already has that key.';
     case 'no_such_parent':

@@ -43,6 +43,9 @@
             <div aria-hidden="true" class="h-2 overflow-hidden rounded-full" :class="storageFull ? 'bg-warn/20' : 'bg-chart-series/20'">
               <div class="h-full rounded-full" :class="storageFull ? 'bg-warn' : 'bg-chart-series'" :style="{ width: `${storageFraction * 100}%` }"></div>
             </div>
+            <p id="projects-release-storage" class="text-xs text-ink-muted">
+              {{ formatMemory(data.usage.release_bytes) }} of it is release packages.
+            </p>
           </div>
         </div>
         <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -71,7 +74,7 @@
                 (short name <span class="font-mono">{{ p.expansion_code }}</span>)</template>
             </p>
             <p class="text-sm text-ink-muted">
-              {{ p.head > 0 ? `Newest revision r${p.head}` : 'Nothing pushed yet' }}<template v-if="p.storage">, {{ formatMemory(p.storage.bytes) }} stored</template>
+              {{ p.head > 0 ? `Newest revision r${p.head}` : 'Nothing pushed yet' }}<template v-if="p.release">, {{ p.release.version || `release ${p.release.id}` }} published</template><template v-if="p.storage">, {{ formatMemory(p.storage.bytes) }} stored</template>
             </p>
           </article>
         </li>
@@ -83,8 +86,9 @@
 <script setup lang="ts">
 // /me/projects: the account's own projects (GET /api/me/projects), each with
 // its key, what it is (a mod of a game, or a game), who gets it, its newest
-// revision and the bytes it stores, linking to its page (ProjectPage.vue);
-// how many it has and the bytes they store against the most it may, and New
+// revision, its published release and the bytes it stores, linking to its page
+// (ProjectPage.vue); how many it has and the bytes they and its releases'
+// packages store against the most it may, and New
 // project (NewProjectPage.vue) while it may make another. A mod's game is
 // named from the games the same reply lists. Nothing here changes by itself
 // but a push from the editor, so the page reads again when its tab is shown.

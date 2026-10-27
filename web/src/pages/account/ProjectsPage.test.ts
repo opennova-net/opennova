@@ -37,11 +37,12 @@ describe('ProjectsPage', () => {
     wrapper = null;
   });
 
-  it('lists the projects with what each is, who gets it, its newest revision and its size, and the room left', async () => {
+  it('lists the projects with what each is, who gets it, its newest revision, its release and its size, and the room left', async () => {
     const page = await mountPage();
     expect(page.get('header').text()).toContain('Your mods and games on NovaWorld. Make one here or put a project on NovaWorld from the OpenNova Editor');
     expect(page.get('#projects-allowance').text()).toBe('2 of 10 projects used');
-    expect(page.get('#projects-storage').text()).toBe('300 MiB of 4 GiB stored');
+    expect(page.get('#projects-storage').text()).toBe('512 MiB of 4 GiB stored');
+    expect(page.get('#projects-release-storage').text()).toBe('212 MiB of it is release packages.');
     const start = page.findAll('a').find((a) => a.text() === 'New project');
     expect(start?.attributes('href')).toBe('/me/projects/new');
 
@@ -50,7 +51,7 @@ describe('ProjectsPage', () => {
     expect(cards.map((c) => c.get('h2 a').attributes('href'))).toEqual(['/me/projects/NIGHTOPS', '/me/projects/RANGERS']);
     expect(cards[0].text()).toContain('Public');
     expect(cards[0].text()).toMatch(/NIGHTOPS, A mod of Joint Operations\s+\(short name nightops\)/);
-    expect(cards[0].text()).toContain('Newest revision r3, 300 MiB stored');
+    expect(cards[0].text()).toContain('Newest revision r3, 0.2.0 published, 300 MiB stored');
     expect(cards[1].text()).toContain('Private');
     expect(cards[1].text()).toContain('RANGERS, A game for Delta Force Xtreme 2');
     expect(cards[1].text()).toContain('Nothing pushed yet, 0 B stored');
@@ -72,14 +73,14 @@ describe('ProjectsPage', () => {
   });
 
   it('offers no new project at the most an account may have, and says so', async () => {
-    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ usage: { projects: 10, bytes: 0, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.findAll('a').some((a) => a.text() === 'New project')).toBe(false);
     expect(page.text()).toContain('You have 10 projects, the most an account may have. Delete one to make another.');
   });
 
   it('says when the account has none yet', async () => {
-    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [], usage: { projects: 0, bytes: 0 } }) });
+    mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [], usage: { projects: 0, bytes: 0, release_bytes: 0 } }) });
     const page = await mountPage();
     expect(page.text()).toContain('You have no project on NovaWorld yet.');
   });

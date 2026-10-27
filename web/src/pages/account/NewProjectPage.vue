@@ -55,7 +55,7 @@
             autocomplete="off"
             autocapitalize="characters"
             spellcheck="false"
-            maxlength="16"
+            :maxlength="OWNED_KEY_MAX"
             :disabled="busy"
             :aria-invalid="errors.key ? 'true' : undefined"
             aria-describedby="new-project-key-hint"
@@ -63,7 +63,7 @@
             @input="keyTyped = true"
           />
           <p id="new-project-key-hint" class="text-xs" :class="errors.key ? 'text-danger' : 'text-ink-muted'">
-            {{ errors.key || 'Up to 16 of A-Z, 0-9 and _. The editor finds your project by its key, and it cannot change later.' }}
+            {{ errors.key || 'Up to 11 of A-Z, 0-9 and _, without "QQ". The editor and the updater find your project by its key, and it cannot change later.' }}
           </p>
         </div>
       </div>
@@ -108,7 +108,7 @@
             @input="shortNameTyped = true"
           />
           <p id="new-project-short-name-hint" class="text-xs" :class="errors.expansion_code ? 'text-danger' : 'text-ink-muted'">
-            {{ errors.expansion_code || 'Up to 8 lowercase letters and digits. The game knows the mod by it.' }}
+            {{ errors.expansion_code || 'Up to 8 lowercase letters and digits, used by no other mod. The game knows the mod by it.' }}
           </p>
         </div>
       </div>
@@ -126,12 +126,12 @@
         <legend :class="labelClass">Who gets it</legend>
         <div class="flex flex-col gap-2">
           <label class="flex items-center gap-3 text-sm text-ink">
-            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="private" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
-            {{ visibilityLine('private') }}
-          </label>
-          <label class="flex items-center gap-3 text-sm text-ink">
             <input v-model="form.visibility" type="radio" name="new-project-visibility" value="public" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
             {{ visibilityLine('public') }}
+          </label>
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input v-model="form.visibility" type="radio" name="new-project-visibility" value="private" :disabled="busy" class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent" />
+            {{ visibilityLine('private') }}
           </label>
         </div>
       </fieldset>
@@ -148,11 +148,12 @@
 // /me/projects/new: a new project of the account's own (POST /api/products),
 // offered while it has fewer than the most it may (GET /api/me/projects).
 // Its name suggests its key and, for a mod, its short name, each until typed
-// over; a mod is of one of the games that reply lists (any game product,
-// private ones too: a mod of an installed Joint Operations is a mod of JO), a
-// game of its own runs as one of its titles. The form checks the routes'
-// rules first, and a refusal of one field is said under that field. A project
-// made goes to its page.
+// over; a mod is of one of the games that reply lists (the service's games,
+// retail ones among them: a mod of an installed Joint Operations is a mod of
+// JO; and the account's own), a game of its own runs as one of its titles. It
+// is public unless made private. The form checks the routes' rules first, and
+// a refusal of one field is said under that field. A project made goes to its
+// page.
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { createProject, fetchMyProjects, type ProjectError } from '../../api/products';
@@ -162,10 +163,11 @@ import type { MyProjects, NewProject, ProjectVisibility } from '../../types/prod
 import { titleName } from '../../utils/productsView';
 import {
   KEY_HINT,
-  KEY_RULE,
   NAME_MAX,
+  OWNED_KEY_MAX,
   SHORT_NAME_HINT,
   SHORT_NAME_RULE,
+  isOwnedKey,
   myProjectLink,
   nameProblem,
   suggestKey,
@@ -196,7 +198,7 @@ const form = reactive({
   base: '',
   shortName: '',
   game: '',
-  visibility: 'private' as ProjectVisibility,
+  visibility: 'public' as ProjectVisibility,
 });
 // The key and short name follow the name until typed over.
 const keyTyped = ref(false);
@@ -241,7 +243,7 @@ function check(): NewProject | null {
   if (named) found.display_name = named;
   // A lower-case letter typed is its capital.
   const key = form.key.trim().toUpperCase();
-  if (!KEY_RULE.test(key)) found.key = KEY_HINT;
+  if (!isOwnedKey(key)) found.key = KEY_HINT;
   const body: NewProject = { key, display_name: displayName, kind: form.kind, visibility: form.visibility };
   if (form.kind === 'expansion') {
     const code = form.shortName.trim().toLowerCase();

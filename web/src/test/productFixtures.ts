@@ -5,8 +5,10 @@
 // (id 3, project DFX2) with no tree, the OpenNova runtime (id 9, ONRUNTIME, an
 // app with no project), all the service's own. And projects as the player
 // routes answer them (GET /api/me/projects): biggy's mod NIGHTOPS of JO at r3
-// and his game RANGERS for DFX2 with nothing pushed, and the games a new one
-// may be for: the retail JO and DFX2, the public OP: Acid Gambit and RANGERS.
+// with 0.2.0 published and his game RANGERS for DFX2 with nothing pushed, and
+// the games a new one may be for: the retail JO and DFX2, the public OP: Acid
+// Gambit and RANGERS. And NIGHTOPS's releases as GET
+// /api/products/NIGHTOPS/releases answers them.
 
 import type { MyProjects, Product, ProductsResponse, Project, ProjectGame, ProjectRevision, Release } from '../types/products';
 
@@ -155,7 +157,9 @@ export function project(key: string, overrides: Partial<Project> = {}): Project 
     owner: 'biggy',
     can_push: true,
     can_manage: true,
+    can_release: true,
     storage: { files: 0, bytes: 0 },
+    release: null,
     ...overrides,
   };
 }
@@ -169,6 +173,7 @@ export const NIGHTOPS_PROJECT: Project = project('NIGHTOPS', {
   head: 3,
   visibility: 'public',
   storage: { files: 40, bytes: 300 * 1024 * 1024 },
+  release: { id: 31, version: '0.2.0' },
 });
 
 export const RANGERS_PROJECT: Project = project('RANGERS', { title: 'Rangers', game: 'dfx2', product_id: 22 });
@@ -183,10 +188,30 @@ export const PROJECT_GAMES: ProjectGame[] = [
 export function myProjects(overrides: Partial<MyProjects> = {}): MyProjects {
   return {
     projects: [NIGHTOPS_PROJECT, RANGERS_PROJECT],
-    usage: { projects: 2, bytes: 300 * 1024 * 1024 },
+    usage: { projects: 2, bytes: 512 * 1024 * 1024, release_bytes: 212 * 1024 * 1024 },
     limits: { projects: 10, bytes: 4 * 1024 * 1024 * 1024 },
     games: PROJECT_GAMES,
     titles: ['jo', 'dfx2'],
     ...overrides,
   };
+}
+
+// A release of biggy's NIGHTOPS (product 21) built from its r3 on JO's r2 by
+// biggy, version 0.<id>.0, a draft unless told.
+export function nightOpsRelease(id: number, overrides: Partial<Release> = {}): Release {
+  const status = overrides.status ?? 'draft';
+  return release(id, {
+    product_id: 21,
+    status,
+    name: `NIGHTOPS 0.${id}.0`,
+    bytes: 106 * 1024 * 1024,
+    package_product: 'Night Ops',
+    sections: [
+      { product_id: 21, display_name: 'Night Ops', expansion: 'nightops', command_file: 'NIGHTOPS.CMD', version: `0.${id}.0`, tree: status === 'published' ? { id: 40, state: 'ready' } : null },
+    ],
+    created_by: 'user biggy',
+    source: { project: 'NIGHTOPS', revision: 3, base_revision: 2 },
+    version: `0.${id}.0`,
+    ...overrides,
+  });
 }

@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { findProduct, kindLine, ownerLabel, ownerLink, productLink, publishedLabel, releasesOf, releasesWorking, updaterProblems } from './productsView';
+import {
+  creatorLabel,
+  findProduct,
+  kindLine,
+  ownerLabel,
+  ownerLink,
+  productLink,
+  publishedLabel,
+  releaseCreator,
+  releasesOf,
+  releasesWorking,
+  updaterProblems,
+} from './productsView';
 import { DFX2_PRODUCT, ESCALATION_PRODUCT, JO_PRODUCT, RUNTIME_PRODUCT, productsResponse, release, runtimeRelease } from '../test/productFixtures';
 
 const ALL = [JO_PRODUCT, ESCALATION_PRODUCT, DFX2_PRODUCT, RUNTIME_PRODUCT];
@@ -47,5 +59,15 @@ describe('the products view', () => {
       updater_login: 'An updater login is 1 to 32 printable ASCII characters without spaces.',
       command_file: 'A command file is 1 to 15 characters ending in .CMD (JOPTR.CMD).',
     });
+  });
+
+  it('names who started a release: a player or an admin by account, else the token or the data program', () => {
+    expect(releaseCreator('user biggy')).toEqual({ words: 'by', account: 'biggy' });
+    expect(releaseCreator('admin root')).toEqual({ words: 'by admin', account: 'root' });
+    expect(releaseCreator('token')).toEqual({ words: 'by the admin token', account: null });
+    expect(creatorLabel('user biggy')).toBe('by biggy');
+    expect(creatorLabel('admin root')).toBe('by admin root');
+    expect(creatorLabel('worker')).toBe('by the data program');
+    expect(creatorLabel('someone')).toBe('someone');
   });
 });
