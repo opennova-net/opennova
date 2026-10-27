@@ -6,9 +6,12 @@
 //
 // Format layout (little-endian), as defined by the engine's offset->pointer
 // fixup [orig: TextResource_FixupPointers @ 0x75D050]:
-//   [0]  u32 magic "RTXT" (0x54585452) — present in every retail file but NEVER
-//        validated by the engine; we require it on parse as a deliberate
-//        strictness divergence (resource sniffing depends on it).
+//   [0]  u32 magic "RTXT" (0x54585452) — present in every retail file and
+//        written by ours, but NEVER read by the engine's loaders, so parse does
+//        not check it either (D-RTXT-4) [orig: TextResource_LoadFile @ 0x75D0F0,
+//        TextResource_LoadFromArchive @ 0x75D0B0, TextResource_LoadOverrideTable
+//        @ 0x75D5C0: File_LoadResource, then the fixup, no header test]. The
+//        resource index's kind sniff (base/resource_index) reads it on its own.
 //   [4]  u32 section_meta_offset (a.k.a. text_data_end; 4-byte aligned, the
 //        text blob is zero-padded up to it)
 //   [8]  u32 section_meta_size EXCLUDING the section_count dword — never read

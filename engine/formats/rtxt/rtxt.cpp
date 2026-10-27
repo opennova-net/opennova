@@ -237,12 +237,9 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
     return false;
   }
 
-  // Check magic.
-  uint32_t magic = read_u32(data, 0);
-  if (magic != RTXT_MAGIC) {
-    error = "Invalid RTXT magic (expected 'RTXT')";
-    return false;
-  }
+  // +0, the magic, is never read: the engine's loaders hand the bytes to the
+  // fixup with no header test (D-RTXT-4) [orig: TextResource_LoadFile @ 0x75D0F0
+  // -> TextResource_FixupPointers @ 0x75D050, which reads +4 and +12 first].
 
   // Parse header.
   uint32_t text_data_end = read_u32(data, 4);
