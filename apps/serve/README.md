@@ -331,7 +331,9 @@ STARTED` and `HOST STOPPED` with the server's address, and `SERVER PLAYER ADDED`
 server adds a line of its own per player it adds: `opennova-serve: [join] "<name>" via
 NovaLogic's NovaWorld (<gate>:<port>)` for a gate under `novaworld.net`, `via OpenNova's
 NovaWorld (<gate>:<port>)` for any other, the gate the listing whose AppId the joiner carried
-lists on ("Two listings"), or `on the LAN`. Retail's lines, `_inout.txt` and
+lists on ("Two listings"), or `on the LAN`, then `running <executable>`, the file name its join's
+`AP` named (`Jointops.exe` or `dfx2.exe` for retail's client, `opennova.exe` for ours; the
+client's own text, so a renamed executable shows its new name). Retail's lines, `_inout.txt` and
 `_connectlog.txt` stay as retail writes them.
 
 These logs go to the working directory, in retail's names and formats:

@@ -64,6 +64,10 @@ struct Connection {
 	std::string client_scrk;
 	std::string server_scrk;
 	std::string identity;    // player handle once auth completes (empty during handshake)
+	// The CLIENT_HELLO's AP, the client's executable file name as its menu reads it
+	// ("JOINTOPS.EXE", "DFX2.EXE", "OPENNOVA.EXE"), kept for the admin's sessions view
+	// alone. A Hello that re-names a live row leaves it, as it leaves session_pn.
+	std::string ap;
 };
 
 // Thread-safe in-memory directory of connected peers. Owned by the

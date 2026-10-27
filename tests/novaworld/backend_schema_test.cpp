@@ -1064,7 +1064,7 @@ int test_lobby_live_view_tables() {
 	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(ann) });
 	TEST_EXPECT(db.query("SELECT 1 FROM host_players WHERE host_rid = 7;").size() == 1);
 
-	for (const char *column : { "user_id", "playing_rid", "play_addr", "playing_since" })
+	for (const char *column : { "ap", "user_id", "playing_rid", "play_addr", "playing_since" })
 		TEST_EXPECT(has_column(db, "lobby_sessions", column));
 	TEST_EXPECT(!has_column(db, "lobby_sessions", "login_session_tag"));
 	TEST_EXPECT(refused(db, "INSERT INTO lobby_sessions (connection_id, peer_ip, peer_port, state, "

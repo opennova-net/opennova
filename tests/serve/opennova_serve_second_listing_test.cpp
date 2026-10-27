@@ -32,6 +32,7 @@
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/join_identity.h> // build_pub_join_identity_plaintexts
+#include <net/novaworld/lobby_identity.h> // read_exe_basename (the joiner's AP)
 #include <net/novaworld/lobby_session.h>
 #include <net/novaworld/nwu_host_role.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -373,21 +374,26 @@ int main() {
 			CHECK(b->roster[0].ip_and_port == "127.0.0.1:" + std::to_string(joiner_port));
 		}
 		// The match tagged the joiner as the second listing's: its APPID was that listing's.
+		// Its node keeps the executable its 0x42's AP named: this binary's, as the joiner reads it.
+		const std::string joiner_exe = read_exe_basename().substr(0, kLobbyApChars);
 		bool tagged = false;
 		int joiner_slot = -1;
+		std::string joiner_application;
 		for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list)
 			if (conn.type == inmatch::NapiNPConnection::kTypeServerSide &&
 					conn.peer.port == joiner_port) {
 				tagged = conn.novaworld_listing == 1;
 				joiner_slot = static_cast<int>(conn.reply.player_slot);
+				joiner_application = conn.application;
 			}
 		CHECK(tagged);
+		CHECK(!joiner_exe.empty() && joiner_application == joiner_exe);
 		// The supervisor's state names its slot among the second listing's players, and the
 		// console named the service it came through (none of the retail lines does).
 		CHECK(server.second_listing_report().state == serve::SecondListingState::Listed);
 		CHECK(server.second_listing_report().slots == std::vector<int>{ joiner_slot });
 		CHECK(logged("[join] \"SecondJoiner\" via OpenNova's NovaWorld (127.0.0.1:" +
-				std::to_string(second.gate_port) + ")"));
+				std::to_string(second.gate_port) + ") running " + joiner_exe));
 	}
 
 	// --- A ServerCommand from the second service runs on the match, saved as the first's are.

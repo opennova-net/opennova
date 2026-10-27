@@ -408,6 +408,7 @@ function pickConnection(value: unknown): AdminConnection | null {
     state: typeof v.state === 'string' ? v.state : '',
     pn: typeof v.pn === 'string' ? v.pn : typeof v.pn === 'number' ? String(v.pn) : '',
     identity: typeof v.identity === 'string' ? v.identity : '',
+    ap: typeof v.ap === 'string' ? v.ap : '',
     created_ms: typeof v.created_ms === 'number' ? v.created_ms : 0,
     last_seen_ms: typeof v.last_seen_ms === 'number' ? v.last_seen_ms : 0,
     addr: typeof v.addr === 'string' ? v.addr : '',
