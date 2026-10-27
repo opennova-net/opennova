@@ -12,7 +12,13 @@
 // from folders named neither by the projects' keys nor side by side (the base laid out by its
 // key, the expansion's base_project pointed at it). And the refusals: a game that names no
 // updater product, a revision that is no project (its export fails, what the tool said kept as
-// the build's log), and an expansion whose project names no base game's project.
+// the build's log), and an expansion whose project names no base game's project. The apps'
+// releases from their uploaded builds: the editor's unpacked, its OPENNOVA.WIZ written from its
+// row, packed whole with every file of the build (update.exe, revupdat.exe and README.txt among
+// them) and validated into a draft of its one section; refused with no update host, and for a
+// build that is no zip; the tools' kept as uploaded under their digest, a draft of no section,
+// published to their product alone, the same bytes again refused; each upload removed once its
+// release is made.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -22,6 +28,7 @@
 
 #include "cli_verbs.h"
 #include "core/local_object_store.h"
+#include "core/zip_files.h"
 #include "jobs/worker_pool.h"
 #include "products/product_jobs.h"
 #include "products/product_repository.h"
@@ -35,6 +42,7 @@
 #include <base/project/project_manifest.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
+#include <formats/update/nlz.h>
 #include <formats/update/sfs.h>
 
 #include <algorithm>
@@ -76,13 +84,13 @@ struct Rig {
 	jobs::JobRegistry registry;
 	int staged = 0;
 
-	explicit Rig(const char *name) :
+	explicit Rig(const char *name, const char *update_host = "update.example.com") :
 			temp(name), pool(scratch.options()), db(scratch.open()), store(temp.file("store")) {
 		hosted::register_product_jobs(registry, store, temp.file("scratch"));
 		hosted::ReleaseTools tools;
 		tools.project_tool = OPENNOVA_PROJECT_TOOL;
 		tools.update_tool = OPENNOVA_UPDATE_TOOL;
-		tools.update_host = "update.example.com";
+		tools.update_host = update_host;
 		hosted::register_release_build(registry, store, temp.file("scratch"), tools);
 	}
 	size_t run_jobs() { return jobs::run_due(pool, registry); }
@@ -184,6 +192,29 @@ struct Rig {
 		const int64_t id = hosted::create_built_release(db, made);
 		hosted::enqueue_release_build(db, id);
 		return id;
+	}
+
+	// The app `key`'s release of `version` from the file `build` (its uploaded build, as the
+	// release routes leave it once its upload completes: building, its build queued): its id.
+	int64_t upload_app(const char *key, const std::string &build, const char *version) {
+		const auto app = hosted::find_product_by_key(db, key);
+		if (!app)
+			return 0;
+		const int64_t id = hosted::create_release(
+				db, std::string(key) + " " + version, 1, "admin taylor", app->id, version);
+		std::string error;
+		if (!store.put_file(hosted::release_source_key(id), build, error) ||
+				!hosted::set_release_status(db, id, hosted::ReleaseStatus::Uploading,
+						hosted::ReleaseStatus::Building))
+			return 0;
+		hosted::enqueue_release_build(db, id);
+		return id;
+	}
+	bool holds(const std::string &key) {
+		bool exists = false;
+		uint64_t size = 0;
+		std::string error;
+		return store.head(key, exists, size, error) && exists;
 	}
 
 	// The validated release's package, read back from the store.
@@ -459,6 +490,124 @@ static int test_refusals() {
 	return 0;
 }
 
+// The files `names` written into `dir` (each its own name's text), zipped as `zip`: false when
+// either fails.
+static bool zip_of(
+		const std::string &dir, const std::vector<const char *> &names, const std::string &zip) {
+	std::string error;
+	if (!io::ensure_directory(dir, error))
+		return false;
+	for (const char *name : names)
+		if (!io::write_file_atomic(
+					io::utf8_join(dir, name), std::string("synthetic ") + name, error))
+			return false;
+	return zip_directory(dir, zip, error);
+}
+
+// The editor's build zipped and built: its package's one section the editor's, every file of the
+// build a row beside the OPENNOVA.WIZ the build wrote (CMD, the update host, the login), its
+// upload removed. With no update host, and from a file that is no zip: refused.
+static int test_app_build() {
+	Rig rig("opennova_release_build_app");
+	const std::string zip = rig.temp.file("editor.zip");
+	TEST_EXPECT(zip_of(rig.temp.file("editor"),
+			{ "oneditor.exe", "oneditor.dll", "onplay.exe", "opennova.dll", "update.exe",
+					"revupdat.exe", "README.txt" },
+			zip));
+	const int64_t id = rig.upload_app("ONEDITOR", zip, "0.0.22");
+	TEST_EXPECT(id > 0);
+	rig.run_jobs();
+	const auto release = hosted::find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft);
+	if (!release || release->status != hosted::ReleaseStatus::Draft) {
+		if (release)
+			std::fprintf(stderr, "%s\n%s\n", release->error.c_str(), release->build_log.c_str());
+		return 1;
+	}
+	TEST_EXPECT(!rig.holds(hosted::release_source_key(id)));
+	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
+	TEST_EXPECT(sections.size() == 1 && sections[0].command_file == "ONEDITOR.CMD" &&
+			sections[0].version == "0.0.22");
+	update::SfsPackage package;
+	TEST_EXPECT(rig.package(*release, package) && package.product == "OpenNova Editor" &&
+			package.sections.size() == 1);
+	if (package.sections.size() != 1)
+		return 1;
+	const update::SfsEntry *command = entry_named(package.sections[0], "ONEDITOR.CMD");
+	const auto cmd = command ? update::read_command_file(
+									   std::string(command->data.begin(), command->data.end()))
+							 : std::nullopt;
+	TEST_EXPECT(cmd.has_value());
+	std::vector<std::string> rows;
+	for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{})
+		rows.push_back(strutil::to_lower(row.name));
+	for (const char *name : { "oneditor.exe", "onplay.exe", "update.exe", "revupdat.exe",
+				 "readme.txt", "opennova.wiz" })
+		TEST_EXPECT(std::find(rows.begin(), rows.end(), name) != rows.end());
+	const update::SfsEntry *wizard = entry_named(package.sections[0], "OPENNOVA.WIZ");
+	std::vector<uint8_t> text;
+	TEST_EXPECT(wizard && update::nlz_decode(wizard->data.data(), wizard->data.size(), text) !=
+					update::NlzDecode::Corrupt);
+	const std::string wiz(text.begin(), text.end());
+	TEST_EXPECT(wiz.find("CMD=ONEDITOR.CMD\r\n") != std::string::npos &&
+			wiz.find("URL=update.example.com\r\n") != std::string::npos &&
+			wiz.find("PRODUCT_LOGIN=ONEDITOR\r\n") != std::string::npos);
+
+	// No update host to name, and a build that is no zip: each refused, its upload kept for the
+	// release's delete.
+	Rig hostless("opennova_release_build_app_hostless", "");
+	const int64_t no_host = hostless.upload_app("ONEDITOR", zip, "0.0.23");
+	const std::string junk = hostless.temp.file("junk.zip");
+	std::string error;
+	TEST_EXPECT(io::write_file_atomic(junk, std::string("no zip"), error));
+	hostless.run_jobs();
+	const auto refused_host = hosted::find_release(hostless.db, no_host);
+	TEST_EXPECT(refused_host && refused_host->status == hosted::ReleaseStatus::Invalid &&
+			refused_host->error.find("ONNET_UPDATE_HOST") != std::string::npos);
+	const int64_t not_zip = rig.upload_app("ONRUNTIME", junk, "0.0.23");
+	rig.run_jobs();
+	const auto refused_zip = hosted::find_release(rig.db, not_zip);
+	TEST_EXPECT(refused_zip && refused_zip->status == hosted::ReleaseStatus::Invalid &&
+			refused_zip->error.find("does not unpack") != std::string::npos &&
+			rig.holds(hosted::release_source_key(not_zip)));
+	std::printf("app build: ONEDITOR 0.0.22 packed whole with its OPENNOVA.WIZ, a draft; no update "
+				"host and no zip refused\n");
+	return 0;
+}
+
+// The tools' build kept as uploaded: its digest names it in the store, the release a draft of no
+// section, published to the tools alone (nothing for the updater); the same bytes again refused.
+static int test_download_only() {
+	Rig rig("opennova_release_build_download");
+	const std::string zip = rig.temp.file("tools.zip");
+	TEST_EXPECT(zip_of(rig.temp.file("tools"), { "opennova-serve", "opennova-project" }, zip));
+	uint64_t size = 0;
+	std::string sha256, error;
+	TEST_EXPECT(hosted::digest_file(zip, size, sha256, error));
+	const int64_t id = rig.upload_app("ONTOOLS", zip, "0.0.22");
+	TEST_EXPECT(id > 0);
+	rig.run_jobs();
+	const auto release = hosted::find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft &&
+			release->sha256 == sha256 && release->bytes == static_cast<int64_t>(size) &&
+			release->version == "0.0.22" && hosted::list_sections(rig.db, id).empty());
+	TEST_EXPECT(rig.holds(hosted::release_download_key(sha256)) &&
+			!rig.holds(hosted::release_source_key(id)));
+	TEST_EXPECT(hosted::publish_release(rig.db, id));
+	const auto tools = hosted::find_product_by_key(rig.db, "ONTOOLS");
+	TEST_EXPECT(tools && tools->published_release_id == id);
+	TEST_EXPECT(hosted::published_sections(rig.db).empty());
+	const int64_t again = rig.upload_app("ONTOOLS", zip, "0.0.23");
+	rig.run_jobs();
+	const auto refused = hosted::find_release(rig.db, again);
+	TEST_EXPECT(refused && refused->status == hosted::ReleaseStatus::Invalid &&
+			refused->error.find("already uploaded as release " + std::to_string(id)) !=
+					std::string::npos);
+	std::printf("download only: ONTOOLS kept as uploaded, published to itself; the same bytes "
+				"refused\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
@@ -466,6 +615,8 @@ int main(int argc, char **argv) {
 	failures += test_own_full();
 	failures += test_expansion_folders();
 	failures += test_refusals();
+	failures += test_app_build();
+	failures += test_download_only();
 	if (failures == 0)
 		std::printf("release_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;

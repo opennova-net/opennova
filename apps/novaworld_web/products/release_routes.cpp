@@ -163,14 +163,13 @@ crow::response ReleaseRoutes::list(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/releases — {"name"?, "size", "product_id"?}: an uploaded release of a game
-// with no project (the runtime's, from the Publish workflow; one that names no game becomes its
-// package's base section's once validated) and its package's multipart upload (key
-// updates/upload-<id>.sfs), 201 {"release", "upload": {"key", "upload_id", "part_size"}}; 400
-// invalid_json, missing_field, invalid_field (product_id: no game has the id); 409
-// built_from_project (the game named has a project: its releases are built, and release.validate
-// refuses an upload of one whatever it names); 503 store_unavailable (no store, or one that took
-// no upload).
+// POST /api/admin/releases — {"name"?, "size", "product_id", "version"}: a release of the app
+// `product_id` (its build from the Publish workflow) of version `version` (one to four numbers
+// between dots) and its build's multipart upload (key updates/source-<id>.zip), 201 {"release",
+// "upload": {"key", "upload_id", "part_size"}}; 400 invalid_json, missing_field, invalid_field
+// (product_id: no product has the id; version); 409 built_from_project (the product is a game:
+// its releases are built from its project); 503 store_unavailable (no store, or one that took no
+// upload).
 crow::response ReleaseRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -180,14 +179,22 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return json_error(400, "invalid_json");
 	const auto name = body->text("name");
 	const auto size = body->integer("size");
-	const auto product_id = body->null("product_id") ? std::nullopt : body->integer("product_id");
+	const auto product_id = body->integer("product_id");
+	const auto version = body->text("version");
 	if (body->wrong_type())
 		return json_error(400, "invalid_field");
 	if (!size)
-		return field_error(400, "missing_field", "size", "size (the package's bytes) is required");
+		return field_error(400, "missing_field", "size", "size (the build's bytes) is required");
 	if (*size <= 0 || *size > kPartSize * kMaxParts)
 		return field_error(400, "invalid_field", "size",
-				"size is the package's bytes, at most 32 MiB x 10000");
+				"size is the build's bytes, at most 32 MiB x 10000");
+	if (!product_id)
+		return field_error(400, "missing_field", "product_id", "the release is an app's");
+	if (!version)
+		return field_error(400, "missing_field", "version", "the release has a version");
+	if (!valid_release_version(*version))
+		return field_error(400, "invalid_field", "version",
+				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
 	if (name &&
 			(strutil::utf8_length(*name) > kNameMax || has_control_byte(*name) ||
 					has_c1_control(*name)))
@@ -197,15 +204,13 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 		return store_unavailable();
 	try {
 		auto db_conn = pool_.acquire();
-		if (product_id) {
-			if (!find_product(*db_conn, *product_id))
-				return field_error(400, "invalid_field", "product_id", "no game has this id");
-			if (has_project(*db_conn, product_id))
-				return built_from_project();
-		}
-		const int64_t id =
-				create_release(*db_conn, name.value_or(""), *size, creator_of(caller), product_id);
-		const std::string key = release_upload_key(id);
+		if (!find_product(*db_conn, *product_id))
+			return field_error(400, "invalid_field", "product_id", "no product has this id");
+		if (has_project(*db_conn, product_id))
+			return built_from_project();
+		const int64_t id = create_release(
+				*db_conn, name.value_or(""), *size, creator_of(caller), product_id, *version);
+		const std::string key = release_source_key(id);
 		std::string upload_id, error;
 		if (!store_->multipart_begin(key, upload_id, error)) {
 			std::fprintf(stderr,
@@ -229,9 +234,9 @@ crow::response ReleaseRoutes::create(const crow::request &req) {
 }
 
 // PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u> — the body (application/octet-stream,
-// at most kPartSize) handed to the store as part n (1 to 10000) of the package's upload: 200
+// at most kPartSize) handed to the store as part n (1 to 10000) of the build's upload: 200
 // {"etag"} (what the completion reports for it); 400 invalid_field (part_number, upload_id); 404
-// not_found; 409 not_uploading, built_from_project (its game has a project); 413 too_large; 502
+// not_found; 409 not_uploading, built_from_project (its product is a game); 413 too_large; 502
 // store_error; 503 store_unavailable. Crow caps no request body, so this check is the one after
 // nginx's.
 crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64_t part) {
@@ -258,7 +263,7 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string etag, error;
-		if (!store_->upload_part(release_upload_key(release->id), upload_id,
+		if (!store_->upload_part(release_source_key(release->id), upload_id,
 					static_cast<int>(part), req.body, etag, error))
 			return store_failure("PUT /api/admin/releases/<id>/parts/<n>", error);
 		crow::json::wvalue out;
@@ -270,9 +275,10 @@ crow::response ReleaseRoutes::part(const crow::request &req, uint64_t id, uint64
 }
 
 // POST /api/admin/releases/<id>/complete — {"upload_id", "parts": [{"part_number", "etag"}]}:
-// the package's upload completed in the store, then the release validating with its
-// release.validate job in one transaction, 202 {"release"}; 400 invalid_json, invalid_field;
-// 404 not_found; 409 not_uploading, built_from_project; 502 store_error; 503 store_unavailable.
+// the build's upload completed in the store, then the release building with its release.build
+// job in one transaction (release_build.h: an updatable app's build packed, a download-only one's
+// kept as uploaded), 202 {"release"}; 400 invalid_json, invalid_field; 404 not_found; 409
+// not_uploading, built_from_project; 502 store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -313,17 +319,17 @@ crow::response ReleaseRoutes::complete(const crow::request &req, uint64_t id) {
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;
-		if (!store_->multipart_complete(release_upload_key(release->id), upload_id, parts, error))
+		if (!store_->multipart_complete(release_source_key(release->id), upload_id, parts, error))
 			return store_failure("POST /api/admin/releases/<id>/complete", error);
 		{
 			db::Transaction tx(*db_conn);
 			if (!set_release_status(
-						*db_conn, release->id, ReleaseStatus::Uploading, ReleaseStatus::Validating))
+						*db_conn, release->id, ReleaseStatus::Uploading, ReleaseStatus::Building))
 				return json_error(409, "not_uploading", "this release is not uploading");
-			enqueue_release_validate(*db_conn, release->id);
+			enqueue_release_build(*db_conn, release->id);
 			tx.commit();
 		}
-		std::printf("[http] release %lld uploaded (%zu part(s)), validating; completed by %s\n",
+		std::printf("[http] release %lld uploaded (%zu part(s)), building; completed by %s\n",
 				static_cast<long long>(release->id), parts.size(),
 				loggable(creator_of(caller)).c_str());
 		crow::json::wvalue out;
@@ -392,9 +398,10 @@ crow::response ReleaseRoutes::retire(const crow::request &req, uint64_t id) {
 }
 
 // DELETE /api/admin/releases/<id> — a draft, invalid, retired or uploading (abandoned)
-// release: its package objects removed (the upload key, which an invalid one keeps, with
-// the upload in flight aborted, and the validated key once it has a sha; a missing object
-// is no failure), the row gone, 204; 404 not_found; 409 published (retire it first),
+// release: its objects removed (an app's uploaded build, with the upload in flight aborted, and
+// the package's upload key, which an invalid one may keep, then its package or download once it
+// has a sha; a missing object is no failure), the row gone, 204; 404 not_found; 409 published
+// (retire it first),
 // validating or building (the data program is on it; a building one whose job ended may go); 502
 // store_error; 503 store_unavailable.
 crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
@@ -420,10 +427,12 @@ crow::response ReleaseRoutes::remove(const crow::request &req, uint64_t id) {
 		if (store_ == nullptr)
 			return store_unavailable();
 		std::string error;
-		if (!store_->abort_uploads_under(release_upload_key(release->id), error) ||
+		if (!store_->abort_uploads_under(release_source_key(release->id), error) ||
+				!store_->remove(release_source_key(release->id), error) ||
 				!store_->remove(release_upload_key(release->id), error) ||
 				(!release->sha256.empty() &&
-						!store_->remove(release_package_key(release->sha256), error)))
+						(!store_->remove(release_package_key(release->sha256), error) ||
+								!store_->remove(release_download_key(release->sha256), error))))
 			return store_failure("DELETE /api/admin/releases/<id>", error);
 		if (!delete_release(*db_conn, release->id))
 			return no_such_release();

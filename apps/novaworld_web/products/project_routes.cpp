@@ -46,26 +46,6 @@ crow::response session_required() {
 	return json_error(403, "session_required", "a push is an admin's own: sign in to push");
 }
 
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
-// file's VERSION reads.
-bool valid_version(std::string_view version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
-}
-
 // A revision's message: UTF-8 with no control character but a line break or a tab.
 bool valid_message(std::string_view message) {
 	if (message.empty() || message.size() > ProjectRoutes::kMessageMax ||
@@ -745,7 +725,7 @@ crow::response ProjectRoutes::release(const crow::request &req, const std::strin
 			body->null("base_revision") ? std::nullopt : body->integer("base_revision");
 	if (body->wrong_type())
 		return json_error(400, "invalid_field");
-	if (!version || !valid_version(*version))
+	if (!version || !hosted::valid_release_version(*version))
 		return field_error(400, "invalid_field", "version",
 				"a version is one to four numbers between dots: 0.2.0, 1.7.5.8");
 	try {

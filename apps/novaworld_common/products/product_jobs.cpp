@@ -90,32 +90,6 @@ bool measure_file(const std::string &path, uint64_t &size, std::string &error) {
 	return true;
 }
 
-// The file's size and SHA-256, streamed (a cumulative package is hundreds of megabytes): what
-// names a validated release's package in the store.
-bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, std::string &error) {
-	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
-	if (f == nullptr) {
-		error = "cannot open " + path;
-		return false;
-	}
-	io::Sha256 hash;
-	std::vector<uint8_t> buffer(64 * 1024);
-	size = 0;
-	size_t n = 0;
-	while ((n = std::fread(buffer.data(), 1, buffer.size(), f)) > 0) {
-		hash.update(buffer.data(), n);
-		size += n;
-	}
-	const bool ok = std::ferror(f) == 0;
-	std::fclose(f);
-	if (!ok) {
-		error = "cannot read " + path;
-		return false;
-	}
-	sha256 = io::sha256_hex(hash.finish());
-	return true;
-}
-
 // The multiplayer missions of a tree's files at `dir` (`files`: the canonical name of each
 // tree file to the path it lies at): a base tree mounted as opennova-serve mounts an install
 // (the retail boot table, mission_catalog::build), an expansion tree its pair alone
@@ -749,6 +723,39 @@ std::string release_package_key(const std::string &sha256) {
 
 std::string release_upload_key(int64_t release_id) {
 	return "updates/upload-" + std::to_string(release_id) + ".sfs";
+}
+
+std::string release_source_key(int64_t release_id) {
+	return "updates/source-" + std::to_string(release_id) + ".zip";
+}
+
+std::string release_download_key(const std::string &sha256) {
+	return "updates/" + sha256 + ".zip";
+}
+
+// Streamed (a cumulative package is hundreds of megabytes).
+bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, std::string &error) {
+	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
+	if (f == nullptr) {
+		error = "cannot open " + path;
+		return false;
+	}
+	io::Sha256 hash;
+	std::vector<uint8_t> buffer(64 * 1024);
+	size = 0;
+	size_t n = 0;
+	while ((n = std::fread(buffer.data(), 1, buffer.size(), f)) > 0) {
+		hash.update(buffer.data(), n);
+		size += n;
+	}
+	const bool ok = std::ferror(f) == 0;
+	std::fclose(f);
+	if (!ok) {
+		error = "cannot read " + path;
+		return false;
+	}
+	sha256 = io::sha256_hex(hash.finish());
+	return true;
 }
 
 int64_t enqueue_release_validate(db::Database &db, int64_t release_id) {

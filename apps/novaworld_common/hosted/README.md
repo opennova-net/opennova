@@ -596,15 +596,22 @@ writes need the CSRF header.
 key, each game with its project (`../products/project_repository.h`; the editor's routes,
 `apps/novaworld_web/products/project_routes.h`, push and pull its revisions by that key; an
 app's key names no project), and
-the update releases (1SFS packages) the data program validates and builds into each game's tree
+the releases the data program builds and validates into each game's tree (1SFS packages)
 and the update listener serves. Every release of a game is built from one of its project's
 revisions (`POST /api/admin/products/<key>/releases`, the `release.build` job,
 `../products/release_build.h`: each revision laid out in a folder of its project's key, an
 expansion's base game's revision beside it and exported first, the laid-out expansion's
 `base_project` pointed at it, so the folders an author keeps the projects in never matter);
-only an app, OpenNova's runtime, has its packages
-uploaded (web begins the package's multipart upload, takes each part's PUT, 32 MiB a part,
-inside Cloudflare's request limits, and completes it). Every release is whole, so
+an app's from its build, which Publish uploads (web begins the build's multipart upload to
+`updates/source-<id>.zip`, takes each part's PUT, 32 MiB a part, inside Cloudflare's request
+limits, and completes it into the release's `release.build`): an updatable app's (the
+runtime's, the editor's) unpacked (`../core/zip_files.h`, a name that would leave the folder
+refused), its `OPENNOVA.WIZ` written from its row (`CMD` its command file, `URL`
+`ONNET_UPDATE_HOST`, refused with none, `PRODUCT_LOGIN` its login) and packed whole against its
+published release, every file of the build a row, then validated as a game's is; a
+download-only app's (the tools', the Blender add-on's, the Switcher's) kept as uploaded under
+its digest (`updates/<sha256>.zip`), a draft with no section, which publishing makes its own
+product's. Every release is whole, so
 `release.apply` builds a game's tree from nothing out of its published release alone (an
 expansion's its own, beside its base game's): no tree is ever uploaded. The jobs a route
 enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`; the service
@@ -620,13 +627,13 @@ call that fails mid-way 502 `store_error` (its own text to the log alone). The s
 | `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`), a `display_name`, the updater's `updater_login` and `command_file` both or neither, `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
 | `PATCH /api/admin/products/<id>` | the name, a game's `lobby`, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; an editor bound to the old key reads 404 `not_found` there and binds again) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_key` |
 | `DELETE /api/admin/products/<id>` | the game, its trees and its project's history, at once; its objects (its trees' prefixes and its project's files under `content/<id>/`) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
-| `GET /api/admin/releases` | the releases, newest first, each naming its game (`product_id`, null for an upload not yet validated) |
-| `POST /api/admin/releases` | `{"name"?, "size", "product_id"?}`: a release `uploading` and its package's multipart upload: 201; 400; 409 `built_from_project` (the game named has a project); 503 |
+| `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version` and, for a game's, its `source` revision |
+| `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
-| `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `validating` with its `release.validate` job (an upload whose package maps a game with a project is made invalid there): 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
-| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's product named before retired once none names it) with one `release.apply` job per section of a game with a tree: 202; 404; 409 `not_draft` |
+| `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `building` with its `release.build` job: 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
+| `POST /api/admin/releases/<id>/publish` | a draft published (the release each section's product named before, or a sectionless release's own product's, retired once none names it) with one `release.apply` job per section of a game with a tree: 202; 404; 409 `not_draft` |
 | `POST /api/admin/releases/<id>/retire` | 202; 404; 409 `not_published` |
-| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its package objects (a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
+| `DELETE /api/admin/releases/<id>` | a draft, invalid, retired or abandoned release and its objects (an app's uploaded build, its package or download; a tree built from it keeps its row): 204; 404; 409 `published`, `validating`, `building`; 502; 503 |
 
 The seeded products are the games `JO`, `DFX2` and `ACIDGAMBIT`, the expansions `JOX01` and
 `NIFTY`, and the apps `ONRUNTIME`, `ONEDITOR`, `ONTOOLS`, `ONBLENDER` and `ONSWITCHER`, ids 1 to
@@ -640,13 +647,11 @@ updater product. Every game and expansion has a project (`ACIDGAMBIT` and `NIFTY
 app none. A product's `download` is its file's stable name on the downloads host (the three
 games', the editor's and the three download-only apps'). The runtime is an `app` row: it
 appears among the products with its releases alone, has no hosted game tree and is no
-hosted-server choice. Its releases
-arrive from CI: the Publish workflow (`.github/workflows/publish.yml`, its helper
-`scripts/publish_runtime.py`) uploads the build's `opennova-runtime-windows-*.sfs` through the
-routes above with the deployment's admin API token (naming no game: the package's
-`ONRUNTIME.CMD` section makes it the runtime's), waits for it to validate and publishes it. A
-release of the same version as an earlier one is taken like any other; only the same bytes
-again are refused (`release.validate`: "already uploaded").
+hosted-server choice. Every app's releases arrive from CI: the Publish workflow
+(`.github/workflows/publish.yml`) uploads each app's build through the routes above with the
+deployment's admin API token, naming the app and the version, and the service builds the
+release from it. A release of the same version as an earlier one is taken like any other; only
+the same bytes again are refused ("already uploaded").
 
 ## The update listener
 

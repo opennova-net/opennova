@@ -271,12 +271,19 @@ int count_tree_pins(db::Database &db, int64_t id);
 
 // --- releases ---
 
-// An uploaded release (uploading), of the game `product_id` when the upload names one.
+// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
+// file's VERSION reads.
+bool valid_release_version(std::string_view version);
+
+// An uploaded release (uploading): an app's build of version `version` when `product_id` names
+// the app (the release routes'), else a package that names its product once validated.
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
-		const std::string &created_by, std::optional<int64_t> product_id = std::nullopt);
+		const std::string &created_by, std::optional<int64_t> product_id = std::nullopt,
+		const std::string &version = std::string());
 // A release the data program builds (building), from `revision` of the project of the game
 // `product_id` (an expansion's on `base_revision` of its base game's), its package's version
-// `version`, named `name`. The caller enqueues its release.build in the same transaction.
+// `version`, named `name`. The caller enqueues its release.build in the same transaction. (An
+// app's release is an upload, create_release, built once its build is in.)
 struct NewBuiltRelease {
 	std::string name;
 	std::string created_by;
@@ -292,6 +299,10 @@ bool set_release_built(db::Database &db, int64_t id, const std::string &build_lo
 // building -> invalid with `error` and `build_log`; false when the row left building.
 bool set_release_build_failed(
 		db::Database &db, int64_t id, const std::string &error, const std::string &build_log);
+// building -> draft with the download's sha and size and no section: a download-only app's
+// release, its build kept as uploaded (product_jobs.h release_download_key). False when the row
+// left building.
+bool set_release_stored(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes);
 std::optional<ReleaseRow> find_release(db::Database &db, int64_t id);
 std::optional<int64_t> find_release_by_sha(db::Database &db, std::string_view sha256);
 // Every release, newest first.
@@ -313,8 +324,9 @@ struct NewReleaseSection {
 // row left validating.
 bool set_release_validated(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes,
 		const std::string &package_product, const std::vector<NewReleaseSection> &sections);
-// draft -> published: each section's product's published_release_id becomes `id`, and a
-// release no product names any more is retired. False when the row left draft.
+// draft -> published: each section's product's published_release_id becomes `id` (a release with
+// no section, a download-only app's, its own product's), and a release no product names any
+// more is retired. False when the row left draft.
 bool publish_release(db::Database &db, int64_t id);
 // published -> retired, its sections' products' published_release_id cleared. False when
 // the row left published.

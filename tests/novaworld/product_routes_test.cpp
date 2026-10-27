@@ -11,12 +11,13 @@
 // duplicate expansion, no game parent), patched (renamed, made public, an app given a project
 // refused) and deleted (a game with an expansion refused has_expansion); a game's trees as
 // release.apply leaves them (current, pinned by a live server and counted as outdated, the game
-// then in use), no tree upload route left; releases created (naming a game refused
-// built_from_project), uploaded in parts through the route and completed (validating, a
-// release.validate job), a draft through the repository naming its game, published (one
-// release.apply per section), retired, deleted with its package object (a published one refused,
-// an abandoned upload aborted); the runtime's release published to the updater and built into no
-// tree.
+// then in use), no tree upload route left; an app's release created (a game's refused
+// built_from_project, no app or version refused), its build uploaded in parts through the route
+// and completed (building, a release.build job); a game's draft through the repository,
+// published (one release.apply per section), retired, deleted with its package object (a
+// published one refused, an abandoned upload aborted); the runtime's release published to the
+// updater and built into no tree; a download-only app's release, no section, published to its
+// own product alone.
 
 #include "core/local_object_store.h"
 #include "http_listener.h"
@@ -72,7 +73,9 @@ struct Harness {
 	uint16_t port = 0;
 	int64_t jo = 0; // the seeded Joint Operations and Escalation rows
 	int64_t jox = 0;
-	int64_t runtime = 0; // the seeded OpenNova runtime's
+	int64_t runtime = 0; // the seeded apps': the runtime, the editor, the tools
+	int64_t editor = 0;
+	int64_t tools = 0;
 
 	net::HttpReply send(const char *method, const std::string &path,
 			const std::vector<std::string> &headers = {}, const std::string &body = {}) const {
@@ -489,43 +492,61 @@ int test_trees(Harness &h) {
 	return 0;
 }
 
-// The releases' routes.
+// The releases' routes: an app's build uploaded in parts through the route and completed
+// (building, its release.build job) with every refusal (a game's, no app, no version); a game's
+// release (built from its project, here a draft through the repository) published (one
+// release.apply per section), retired and deleted with its package; an abandoned upload aborted.
 int test_releases(Harness &h) {
+	const std::string editor = std::to_string(h.editor);
 	net::HttpReply reply = h.admin("POST", "/api/admin/releases", "{}");
 	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "size");
 	reply = h.admin("POST", "/api/admin/releases", R"({"size":0})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "size");
-	reply = h.admin("POST", "/api/admin/releases", R"({"name":"bad\u0001name","size":10})");
+	reply = h.admin("POST", "/api/admin/releases", R"({"size":10,"version":"1.0"})");
+	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "product_id");
+	reply = h.admin("POST", "/api/admin/releases", R"({"size":10,"product_id":)" + editor + "}");
+	TEST_EXPECT(refused(reply, 400, "missing_field") && field_of(reply) == "version");
+	reply = h.admin("POST", "/api/admin/releases",
+			R"({"size":10,"version":"1.x","product_id":)" + editor + "}");
+	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "version");
+	reply = h.admin("POST", "/api/admin/releases",
+			R"({"name":"bad\u0001name","size":10,"version":"1.0","product_id":)" + editor + "}");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "name");
 	// A game has its releases built from its project: an upload naming it is refused.
 	TEST_EXPECT(refused(h.admin("POST", "/api/admin/releases",
-								R"({"size":10,"product_id":)" + std::to_string(h.jo) + "}"),
+								R"({"size":10,"version":"1.0","product_id":)" +
+										std::to_string(h.jo) + "}"),
 			409, "built_from_project"));
-	reply = h.admin("POST", "/api/admin/releases", R"({"size":10,"product_id":99999})");
+	reply = h.admin(
+			"POST", "/api/admin/releases", R"({"size":10,"version":"1.0","product_id":99999})");
 	TEST_EXPECT(refused(reply, 400, "invalid_field") && field_of(reply) == "product_id");
 
-	// Uploading: the package's upload begun under its upload key, the part size the site
-	// slices by; no game named yet.
-	auto json =
-			json_of(h.admin("POST", "/api/admin/releases", R"({"name":"1.7.5.4","size":28})"), 201);
+	// Uploading: the editor's build begun under its source key, the part size the site slices
+	// by; the release the editor's, of its version.
+	auto json = json_of(h.admin("POST", "/api/admin/releases",
+								R"({"name":"OpenNova Editor 0.0.22","size":28,"version":"0.0.22","product_id":)" +
+										editor + "}"),
+			201);
 	TEST_EXPECT(json);
 	const int64_t r1 = json["release"]["id"].i();
 	TEST_EXPECT(r1 != 0 && str(json["release"]["status"]) == "uploading" &&
-			str(json["release"]["name"]) == "1.7.5.4" && json["release"]["bytes"].i() == 28 &&
-			json["release"]["sections"].size() == 0 && is_null(json["release"]["product_id"]) &&
-			is_null(json["release"]["source"]) && str(json["release"]["published_at"]).empty() &&
+			str(json["release"]["name"]) == "OpenNova Editor 0.0.22" &&
+			json["release"]["bytes"].i() == 28 && json["release"]["sections"].size() == 0 &&
+			json["release"]["product_id"].i() == h.editor &&
+			str(json["release"]["version"]) == "0.0.22" && is_null(json["release"]["source"]) &&
+			str(json["release"]["published_at"]).empty() &&
 			str(json["release"]["retired_at"]).empty());
-	const std::string key = "updates/upload-" + std::to_string(r1) + ".sfs";
+	const std::string key = "updates/source-" + std::to_string(r1) + ".zip";
 	TEST_EXPECT(str(json["upload"]["key"]) == key &&
 			json["upload"]["part_size"].i() == hosted::ReleaseRoutes::kPartSize);
 	const std::string upload_id = str(json["upload"]["upload_id"]);
 	TEST_EXPECT(nws::LocalObjectStore::is_upload_id(upload_id));
 	const std::string release = "/api/admin/releases/" + std::to_string(r1);
 
-	// The package in one part through the route: the ETag back is the local store's (the
-	// part's SHA-256 hex), and the reply is not cached.
-	const std::string package = "not a package, but 28 bytes.";
-	reply = h.send("PUT", release + "/parts/1?upload_id=" + upload_id, { kOctets, kBearer }, package);
+	// The build in one part through the route: the ETag back is the local store's (the part's
+	// SHA-256 hex), and the reply is not cached.
+	const std::string build = "not a zip, only test bytes";
+	reply = h.send("PUT", release + "/parts/1?upload_id=" + upload_id, { kOctets, kBearer }, build);
 	json = json_of(reply, 200);
 	TEST_EXPECT(json);
 	const std::string etag = str(json["etag"]);
@@ -551,11 +572,11 @@ int test_releases(Harness &h) {
 	reply = h.send("PUT", release + "/parts/1?upload_id=00000000-0000-4000-8000-000000000000",
 			{ kOctets, kBearer }, "x");
 	TEST_EXPECT(refused(reply, 502, "store_error"));
-	// Published or retired before it is validated: refused.
+	// Published or retired before it is built: refused.
 	TEST_EXPECT(refused(h.admin("POST", release + "/publish"), 409, "not_draft"));
 	TEST_EXPECT(refused(h.admin("POST", release + "/retire"), 409, "not_published"));
-	// Completed: a wrong ETag is the store's refusal; the right one makes it validating,
-	// with its job.
+	// Completed: a wrong ETag is the store's refusal; the right one makes it building, with its
+	// build queued.
 	TEST_EXPECT(refused(h.admin("POST", release + "/complete",
 								R"({"upload_id":")" + upload_id +
 										R"(","parts":[{"part_number":1,"etag":""}]})"),
@@ -568,38 +589,51 @@ int test_releases(Harness &h) {
 	const std::string complete = R"({"upload_id":")" + upload_id +
 			R"(","parts":[{"part_number":1,"etag":")" + etag + "\"}]}";
 	json = json_of(h.admin("POST", release + "/complete", complete), 202);
-	TEST_EXPECT(json && str(json["release"]["status"]) == "validating");
+	TEST_EXPECT(json && str(json["release"]["status"]) == "building");
 	{
 		auto db = h.pool.acquire();
-		const auto job = queued_job(*db, "release.validate:" + std::to_string(r1));
-		TEST_EXPECT(job && job->kind == "release.validate" &&
+		const auto job = queued_job(*db, "release.build:" + std::to_string(r1));
+		TEST_EXPECT(job && job->kind == "release.build" &&
 				job->payload.find("\"release_id\": " + std::to_string(r1)) != std::string::npos);
 		std::string stored, error;
-		TEST_EXPECT(io::read_file_text(h.store.path_of(key), stored, error) && stored == package);
+		TEST_EXPECT(io::read_file_text(h.store.path_of(key), stored, error) && stored == build);
 	}
 	TEST_EXPECT(refused(h.admin("POST", release + "/complete", complete), 409, "not_uploading"));
 	reply = h.send("PUT", release + "/parts/2?upload_id=" + upload_id, { kOctets, kBearer }, "late");
 	TEST_EXPECT(refused(reply, 409, "not_uploading"));
-	TEST_EXPECT(refused(h.admin("DELETE", release), 409, "validating"));
+	TEST_EXPECT(refused(h.admin("DELETE", release), 409, "building"));
 
-	// A draft through the repository (what the worker's validate does), its package moved
-	// under its sha: two sections, one per seeded JO product; the release Joint Operations'.
+	// A game's release, built from its project (a draft through the repository, as the data
+	// program's build and validate leave one), its package under its sha: two sections, one per
+	// seeded JO product.
 	const std::string sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+	int64_t r2 = 0;
 	{
 		auto db = h.pool.acquire();
-		TEST_EXPECT(hosted::set_release_validated(*db, r1, sha, 28, "Joint Operations",
+		hosted::NewBuiltRelease made;
+		made.name = "JO 1.7.5.4";
+		made.created_by = "admin root";
+		made.product_id = h.jo;
+		made.revision = 1;
+		made.version = "1.7.5.4";
+		r2 = hosted::create_built_release(*db, made);
+		TEST_EXPECT(r2 != 0 && hosted::set_release_built(*db, r2, "$ opennova-project export\n"));
+		TEST_EXPECT(hosted::set_release_validated(*db, r2, sha, 28, "Joint Operations",
 				{ { h.jo, "", "JOPTR.CMD", "1.7.5.4", 3, 20 },
 						{ h.jox, "jox01", "JOEPTR.CMD", "1.0.0.1", 1, 8 } }));
 		std::string error;
-		TEST_EXPECT(
-				h.store.copy(key, "updates/" + sha + ".sfs", error) && h.store.remove(key, error));
+		TEST_EXPECT(h.store.copy(key, "updates/" + sha + ".sfs", error));
 	}
+	const std::string game_release = "/api/admin/releases/" + std::to_string(r2);
 	json = json_of(h.admin("GET", "/api/admin/releases"), 200);
-	TEST_EXPECT(json && json["releases"].size() == 1 && json["releases"][0]["id"].i() == r1);
+	TEST_EXPECT(json && json["releases"].size() == 2 && json["releases"][0]["id"].i() == r2 &&
+			json["releases"][1]["id"].i() == r1);
 	{
 		const auto &r = json["releases"][0];
 		TEST_EXPECT(str(r["status"]) == "draft" && str(r["sha256"]) == sha &&
-				str(r["package_product"]) == "Joint Operations" && r["product_id"].i() == h.jo);
+				str(r["package_product"]) == "Joint Operations" && r["product_id"].i() == h.jo &&
+				str(r["source"]["project"]) == "JO" && r["source"]["revision"].i() == 1 &&
+				is_null(r["source"]["base_revision"]) && str(r["version"]) == "1.7.5.4");
 		TEST_EXPECT(r["sections"].size() == 2 && r["sections"][0]["product_id"].i() == h.jo &&
 				str(r["sections"][0]["display_name"]) == "Joint Operations" &&
 				str(r["sections"][0]["expansion"]).empty() &&
@@ -611,38 +645,38 @@ int test_releases(Harness &h) {
 	}
 
 	// Published: one apply job per section; the products name it.
-	json = json_of(h.admin("POST", release + "/publish"), 202);
+	json = json_of(h.admin("POST", game_release + "/publish"), 202);
 	TEST_EXPECT(json && str(json["release"]["status"]) == "published" &&
 			is_db_time(str(json["release"]["published_at"])));
 	{
 		auto db = h.pool.acquire();
 		const auto jo_job =
-				queued_job(*db, "release.apply:" + std::to_string(r1) + ":" + std::to_string(h.jo));
+				queued_job(*db, "release.apply:" + std::to_string(r2) + ":" + std::to_string(h.jo));
 		const auto jox_job = queued_job(
-				*db, "release.apply:" + std::to_string(r1) + ":" + std::to_string(h.jox));
+				*db, "release.apply:" + std::to_string(r2) + ":" + std::to_string(h.jox));
 		TEST_EXPECT(jo_job && jo_job->kind == "release.apply" &&
 				jo_job->payload.find("\"product_id\": " + std::to_string(h.jo)) !=
 						std::string::npos &&
-				jo_job->payload.find("\"release_id\": " + std::to_string(r1)) != std::string::npos);
+				jo_job->payload.find("\"release_id\": " + std::to_string(r2)) != std::string::npos);
 		TEST_EXPECT(jox_job && jox_job->kind == "release.apply");
 		TEST_EXPECT(hosted::published_sections(*db).size() == 2);
 	}
 	{
 		const auto listed = listed_product(h, h.jo);
-		TEST_EXPECT(listed && listed["published_release"]["id"].i() == r1 &&
-				str(listed["published_release"]["name"]) == "1.7.5.4" &&
+		TEST_EXPECT(listed && listed["published_release"]["id"].i() == r2 &&
+				str(listed["published_release"]["name"]) == "JO 1.7.5.4" &&
 				str(listed["published_release"]["sha256"]) == sha);
 	}
-	TEST_EXPECT(refused(h.admin("POST", release + "/publish"), 409, "not_draft"));
-	TEST_EXPECT(refused(h.admin("DELETE", release), 409, "published"));
+	TEST_EXPECT(refused(h.admin("POST", game_release + "/publish"), 409, "not_draft"));
+	TEST_EXPECT(refused(h.admin("DELETE", game_release), 409, "published"));
 
 	// Retired, then deleted with its package.
-	json = json_of(h.admin("POST", release + "/retire"), 202);
+	json = json_of(h.admin("POST", game_release + "/retire"), 202);
 	TEST_EXPECT(json && str(json["release"]["status"]) == "retired" &&
 			is_db_time(str(json["release"]["retired_at"])));
-	TEST_EXPECT(refused(h.admin("POST", release + "/retire"), 409, "not_published"));
+	TEST_EXPECT(refused(h.admin("POST", game_release + "/retire"), 409, "not_published"));
 	TEST_EXPECT(is_null(listed_product(h, h.jo)["published_release"]));
-	reply = h.admin("DELETE", release);
+	reply = h.admin("DELETE", game_release);
 	TEST_EXPECT(reply.transport_ok && reply.code == 204);
 	{
 		bool exists = true;
@@ -650,27 +684,30 @@ int test_releases(Harness &h) {
 		std::string error;
 		TEST_EXPECT(h.store.head("updates/" + sha + ".sfs", exists, size, error) && !exists);
 		auto db = h.pool.acquire();
-		TEST_EXPECT(!hosted::find_release(*db, r1));
+		TEST_EXPECT(!hosted::find_release(*db, r2));
 	}
-	TEST_EXPECT(refused(h.admin("DELETE", release), 404, "not_found"));
-	TEST_EXPECT(json_of(h.admin("GET", "/api/admin/releases"), 200)["releases"].size() == 0);
+	TEST_EXPECT(refused(h.admin("DELETE", game_release), 404, "not_found"));
+	TEST_EXPECT(json_of(h.admin("GET", "/api/admin/releases"), 200)["releases"].size() == 1);
 
-	// An abandoned upload deleted: its upload aborted (a part after it refused by the
-	// store), its row gone.
-	json = json_of(h.admin("POST", "/api/admin/releases", R"({"size":10})"), 201);
+	// An abandoned upload deleted: its upload aborted (a part after it refused by the store),
+	// its row gone.
+	json = json_of(h.admin("POST", "/api/admin/releases",
+						   R"({"size":10,"version":"0.0.22","product_id":)" +
+								   std::to_string(h.tools) + "}"),
+			201);
 	TEST_EXPECT(json);
-	const int64_t r2 = json["release"]["id"].i();
-	const std::string upload2 = str(json["upload"]["upload_id"]);
-	const std::string release2 = "/api/admin/releases/" + std::to_string(r2);
+	const int64_t r3 = json["release"]["id"].i();
+	const std::string upload3 = str(json["upload"]["upload_id"]);
+	const std::string release3 = "/api/admin/releases/" + std::to_string(r3);
 	TEST_EXPECT(json_of(
-			h.send("PUT", release2 + "/parts/1?upload_id=" + upload2, { kOctets, kBearer }, "abandoned"),
+			h.send("PUT", release3 + "/parts/1?upload_id=" + upload3, { kOctets, kBearer }, "abandoned"),
 			200));
-	reply = h.admin("DELETE", release2);
+	reply = h.admin("DELETE", release3);
 	TEST_EXPECT(reply.transport_ok && reply.code == 204);
 	{
 		std::string etag, error;
 		TEST_EXPECT(!h.store.upload_part(
-				"updates/upload-" + std::to_string(r2) + ".sfs", upload2, 2, "more", etag, error));
+				"updates/source-" + std::to_string(r3) + ".zip", upload3, 2, "more", etag, error));
 	}
 	return 0;
 }
@@ -704,6 +741,37 @@ int test_runtime_release(Harness &h) {
 	const auto listed = listed_product(h, h.runtime);
 	TEST_EXPECT(listed && listed["published_release"]["id"].i() == release &&
 			listed["trees"].size() == 0);
+	return 0;
+}
+
+// A download-only app's release (the tools' build kept as uploaded, here a draft through the
+// repository as the build leaves one: no section): published to its own product, no apply job,
+// nothing for the updater.
+int test_download_release(Harness &h) {
+	int64_t release = 0;
+	{
+		auto db = h.pool.acquire();
+		release = hosted::create_release(*db, "tools test", 1, "test", h.tools, "0.0.22");
+		TEST_EXPECT(hosted::set_release_status(*db, release, hosted::ReleaseStatus::Uploading,
+				hosted::ReleaseStatus::Building));
+		TEST_EXPECT(hosted::set_release_stored(*db, release, std::string(64, 'd'), 1));
+		TEST_EXPECT(!hosted::set_release_stored(*db, release, std::string(64, 'e'), 1));
+	}
+	const std::string path = "/api/admin/releases/" + std::to_string(release);
+	const auto json = json_of(h.admin("POST", path + "/publish"), 202);
+	TEST_EXPECT(json && str(json["release"]["status"]) == "published" &&
+			json["release"]["product_id"].i() == h.tools &&
+			json["release"]["sections"].size() == 0 && str(json["release"]["version"]) == "0.0.22");
+	{
+		auto db = h.pool.acquire();
+		TEST_EXPECT(!queued_job(*db, "release.apply:" + std::to_string(release) + ":" +
+				std::to_string(h.tools)));
+		for (const hosted::PublishedSection &s : hosted::published_sections(*db))
+			TEST_EXPECT(s.product_id != h.tools);
+	}
+	const auto listed = listed_product(h, h.tools);
+	TEST_EXPECT(listed && listed["published_release"]["id"].i() == release &&
+			str(listed["download"]) == "opennova-tools-windows.zip");
 	return 0;
 }
 
@@ -742,7 +810,10 @@ int main(int argc, char **argv) {
 			harness.jo = seeded(*db, "Joint Operations");
 			harness.jox = seeded(*db, "Escalation");
 			harness.runtime = seeded(*db, "OpenNova runtime");
-			TEST_EXPECT(harness.jo != 0 && harness.jox != 0 && harness.runtime != 0);
+			harness.editor = seeded(*db, "OpenNova Editor");
+			harness.tools = seeded(*db, "Tools and dedicated server");
+			TEST_EXPECT(harness.jo != 0 && harness.jox != 0 && harness.runtime != 0 &&
+					harness.editor != 0 && harness.tools != 0);
 		}
 
 		struct Case {
@@ -756,6 +827,7 @@ int main(int argc, char **argv) {
 			{ "trees", test_trees },
 			{ "releases", test_releases },
 			{ "runtime_release", test_runtime_release },
+			{ "download_release", test_download_release },
 		};
 		rc = 0;
 		for (const Case &c : cases) {

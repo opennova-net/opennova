@@ -62,11 +62,14 @@ add_library(opennova_novaworld_core STATIC
     core/owner_file.cpp
     core/random_secret.cpp
     core/scratch_dir.cpp
+    # Zip archives read and written (an app's uploaded build, a download).
+    core/zip_files.cpp
 )
 target_include_directories(opennova_novaworld_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The command runner and the HTTP exchange (apps/common, over the net and base
-# groups).
+# groups); the vendored miniz under the zip archives.
 target_link_libraries(opennova_novaworld_core PUBLIC opennova_app_common)
+target_link_libraries(opennova_novaworld_core PRIVATE opennova_miniz)
 target_compile_features(opennova_novaworld_core PUBLIC cxx_std_17)
 if(WIN32)
     # advapi32: the owner-only file DACLs (SetSecurityInfo, core/owner_file.cpp).

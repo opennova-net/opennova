@@ -556,16 +556,17 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(cost_routes REDIS COMMAND cost_routes_test)
     set_tests_properties(cost_routes PROPERTIES TIMEOUT 120)
 
-    # The games' and releases' admin routes (apps/novaworld_web/products/, ADR 0064) on the
+    # The products' and releases' admin routes (apps/novaworld_web/products/, ADR 0064) on the
     # in-process Crow listener over a migrated database, a Redis namespace and a local
     # object store in a temp directory: every route refused without the admin, the list's
-    # shapes over the seeded rows (the runtime among them, each game's project key,
-    # visibility and head), a base and an expansion created with their projects (every shape
-    # and database refusal, a duplicate key), patched (a project renamed and made public) and
-    # deleted (has_expansion, in_use); a game's trees as release.apply leaves them, no tree
-    # upload route left; a release uploaded in parts and completed (an upload of a game with
-    # a project refused built_from_project), validated, published, retired and deleted; the
-    # runtime's release published into no tree.
+    # shapes over the seeded rows (the apps among them, every product's key, a game's project's
+    # visibility and head), a game and an expansion created with their projects (every shape
+    # and database refusal, a duplicate key), patched (renamed and made public, an app given a
+    # project refused) and deleted (has_expansion, in_use); a game's trees as release.apply
+    # leaves them, no tree upload route left; an app's build uploaded in parts and completed
+    # into its build (a game's refused built_from_project); a game's release published,
+    # retired and deleted; the runtime's release published into no tree; a download-only
+    # app's, no section, published to its own product.
     add_executable(product_routes_test novaworld/product_routes_test.cpp)
     target_link_libraries(product_routes_test PRIVATE
         opennova_novaworld_web_core opennova_novaworld_service)
@@ -1175,7 +1176,9 @@ set_tests_properties(product_jobs PROPERTIES TIMEOUT 300)
 # packed whole against its stock revision into a draft of one section, published and built into
 # the game's tree from nothing (its archives equal to the revision's export), our own game's
 # revision packed whole with its UPDATE.WIZ, and the refusals (no updater product; a revision that
-# is no project, the export's words kept as the build's log).
+# is no project, the export's words kept as the build's log). The apps' releases from their
+# uploaded builds: the editor's packed whole with the OPENNOVA.WIZ the build writes (refused with
+# no update host, or a build that is no zip), the tools' kept as uploaded with no section.
 add_executable(release_build_test novaworld/release_build_test.cpp)
 target_link_libraries(release_build_test PRIVATE
     opennova_novaworld_products opennova_novaworld_service opennova_project_cli opennova_editor
@@ -1228,6 +1231,14 @@ add_executable(object_store_test novaworld/object_store_test.cpp)
 target_link_libraries(object_store_test PRIVATE opennova_novaworld_core Threads::Threads)
 target_include_directories(object_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME object_store COMMAND object_store_test)
+
+# Zip archives over the vendored miniz (apps/novaworld_common/core/zip_files.h): a folder packed
+# and unpacked back file for file, a file that is no zip refused, and the entries whose names
+# would leave the folder refused before a byte is written. Database-free.
+add_executable(zip_files_test novaworld/zip_files_test.cpp)
+target_link_libraries(zip_files_test PRIVATE opennova_novaworld_core)
+target_include_directories(zip_files_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME zip_files COMMAND zip_files_test)
 
 # What a Linux machine or container uses (apps/novaworld_common/core/proc_stats.h: hostd's machine
 # stats, each program's own samples), read from fixture trees: /proc/stat's busy and total and

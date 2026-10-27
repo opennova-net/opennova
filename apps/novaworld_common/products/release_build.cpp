@@ -2,6 +2,7 @@
 
 #include "command_runner.h"
 #include "core/loggable.h"
+#include "core/zip_files.h"
 #include "jobs/job_queue.h"
 #include "product_jobs.h"
 #include "product_repository.h"
@@ -11,8 +12,10 @@
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
+#include <formats/update/update_wizard.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -54,9 +57,10 @@ struct Source {
 	std::string label() const { return key + " r" + std::to_string(revision); }
 };
 
-// What a build makes, read in one lease: the release, its game (the product its package
-// updates, its project on its row), the revision it exports (an expansion's base game's beside
-// it), a retail game's stock revisions, and the game's last published package.
+// What a build makes, read in one lease: the release, its product (the one its package
+// updates, a game's project on its row), the revision a game's exports (an expansion's base
+// game's beside it), a retail game's stock revisions, and the product's last published package.
+// An app's has no revision: its release is its uploaded build (release_source_key).
 struct BuildPlan {
 	ReleaseRow release;
 	ProductRow product;
@@ -84,24 +88,40 @@ bool source_of(db::Database &db, const ProductRow &project, int64_t number, Sour
 	return true;
 }
 
+// The product's published package, what its next one counts its removals from; "" for none.
+std::string previous_key_of(db::Database &db, const ProductRow &product) {
+	if (!product.published_release_id)
+		return std::string();
+	const std::optional<ReleaseRow> published = find_release(db, *product.published_release_id);
+	return published && !published->sha256.empty() ? release_package_key(published->sha256)
+													: std::string();
+}
+
 // The plan of the building release `release`; false with `why` (the release's refusal).
 bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::string &why) {
 	plan.release = release;
 	const std::optional<ProductRow> product =
 			release.product_id ? find_product(db, *release.product_id) : std::nullopt;
 	if (!product) {
-		why = "its game was deleted";
+		why = "its product was deleted";
 		return false;
 	}
+	plan.product = *product;
+	// An app's release is its uploaded build: kept as it is for a download-only app (no updater
+	// product), else packed for the updater (Build::run_app).
 	if (product->kind == ProductKind::App) {
-		why = product->display_name + " has no project";
-		return false;
+		if (!product->command_file.empty() && product->product_name.empty()) {
+			why = product->display_name + " names no updater product (a product name)";
+			return false;
+		}
+		if (!product->command_file.empty())
+			plan.previous_key = previous_key_of(db, *product);
+		return true;
 	}
 	if (product->command_file.empty()) {
 		why = product->display_name + " names no updater product (a command file)";
 		return false;
 	}
-	plan.product = *product;
 	// A product an admin made carries no product name: ours is named as its product, the game
 	// run by the runtime's executable (as the baseline names the seeded ones).
 	if (plan.product.product_name.empty() && !plan.product.retail) {
@@ -139,13 +159,15 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 			plan.base_stock = base_stock;
 		}
 	}
-	if (product->published_release_id) {
-		const std::optional<ReleaseRow> published =
-				find_release(db, *product->published_release_id);
-		if (published && !published->sha256.empty())
-			plan.previous_key = release_package_key(published->sha256);
-	}
+	plan.previous_key = previous_key_of(db, *product);
 	return true;
+}
+
+// What a build is of, for its log lines: a game's revision ("JO r2"), an app's build ("ONEDITOR
+// 0.0.22").
+std::string label_of(const BuildPlan &plan) {
+	return plan.product.kind == ProductKind::App ? plan.product.key + " " + plan.release.version
+												 : plan.project.label();
 }
 
 // The last line a failed tool printed, for its refusal.
@@ -184,7 +206,8 @@ public:
 	Build(const Build &) = delete;
 	Build &operator=(const Build &) = delete;
 
-	// The package made, at package(); on a refusal or a store failure `why` says what.
+	// The package made, at package(); on a refusal or a store failure `why` says what. An app's
+	// is its uploaded build packed (run_app), a game's its revision's export.
 	Step run(std::string &why);
 	std::string package() const { return io::utf8_join(work_, "release.sfs"); }
 	// The log as a text column takes it: UTF-8 (a tool's other bytes read as cp1252) with no NUL,
@@ -219,6 +242,7 @@ private:
 	bool export_to(
 			const LaidOut &laid, const std::string &out, const std::string &what, std::string &why);
 	bool write_wizard(const std::string &tree, std::string &why) const;
+	Step run_app(std::string &why);
 	std::vector<std::string> pack_command(
 			const std::string &from, const std::string &to, const std::string &previous) const;
 
@@ -362,20 +386,70 @@ bool Build::write_wizard(const std::string &tree, std::string &why) const {
 			io::write_file_atomic(io::utf8_join(folder, "UPDATE.WIZ"), text, why);
 }
 
+// An updatable app's package: its uploaded build unpacked, its OPENNOVA.WIZ written from its row
+// (CMD its command file, URL this deployment's update host, PRODUCT_LOGIN its login: what marks
+// the folder as the app's and names the gateways its update.exe dials, apps/update client.cpp),
+// packed whole against its published release. Refused with no update host to name.
+Step Build::run_app(std::string &why) {
+	const ProductRow &app = plan_.product;
+	if (tools_.update_host.empty()) {
+		why = app.display_name + "'s package would name no update host (ONNET_UPDATE_HOST)";
+		return Step::Refused;
+	}
+	const std::string source = io::utf8_join(work_, "source.zip");
+	if (!store_.get_file(release_source_key(plan_.release.id), source, why))
+		return Step::Transient;
+	const std::string unpacked = io::utf8_join(work_, "build");
+	if (!unzip_files(source, unpacked, why)) {
+		why = "the uploaded build does not unpack: " + why;
+		return Step::Refused;
+	}
+	note("unpacked " + app.key + "'s uploaded build into " + unpacked);
+	update::UpdateWizard wizard;
+	wizard.cmd = app.command_file;
+	wizard.url = tools_.update_host;
+	wizard.product_login = app.updater_login;
+	const std::string text = update::write_update_wizard(wizard);
+	if (text.empty()) {
+		why = app.display_name + "'s OPENNOVA.WIZ does not write";
+		return Step::Refused;
+	}
+	if (!io::write_file_atomic(io::utf8_join(unpacked, "OPENNOVA.WIZ"), text, why))
+		return Step::Transient;
+	const std::string from = io::utf8_join(work_, "empty");
+	if (!io::ensure_directory(from, why))
+		return Step::Transient;
+	std::string previous;
+	if (!plan_.previous_key.empty()) {
+		previous = io::utf8_join(work_, "previous.sfs");
+		if (!store_.get_file(plan_.previous_key, previous, why))
+			return Step::Transient;
+	}
+	if (!tool(pack_command(from, unpacked, previous), "the package of " + label_of(plan_), why))
+		return Step::Refused;
+	return Step::Ok;
+}
+
 // opennova-update-tool's build of the package from `from` to `to`, as the product names its
-// product: an expansion's section under its code, a base's with its executable. Every release is
-// whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install their game into an
-// empty folder from it), with the removals since `previous` ("" for none) and, for a retail game,
-// since its stock install (`from`, revision 1's export). The runtime's own files in a game's
-// folder are left out (kRuntimeFiles).
+// product: an expansion's section under its code, a base's and an app's with its executable.
+// Every release is whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install
+// their game into an empty folder from it), with the removals since `previous` ("" for none) and,
+// for a retail game, since its stock install (`from`, revision 1's export). A game's export
+// record and the runtime's own files in a game's folder are left out (kRuntimeFiles); an app's
+// package carries every file of its build, its update.exe and revupdat.exe among them.
 std::vector<std::string> Build::pack_command(
 		const std::string &from, const std::string &to, const std::string &previous) const {
 	const ProductRow &ds = plan_.product;
+	const bool game = ds.kind != ProductKind::App;
 	std::vector<std::string> argv = { tools_.update_tool, "build", "--from", from, "--to", to,
 		"--out", package(), "--product-name", ds.product_name, "--product", ds.product_name,
-		"--version", plan_.release.version, "--exclude", "export.json", "--full" };
-	for (const char *name : kRuntimeFiles)
-		argv.insert(argv.end(), { "--exclude", name });
+		"--version", plan_.release.version };
+	if (game)
+		argv.insert(argv.end(), { "--exclude", "export.json" });
+	argv.push_back("--full");
+	if (game)
+		for (const char *name : kRuntimeFiles)
+			argv.insert(argv.end(), { "--exclude", name });
 	if (!ds.expansion_code.empty()) {
 		argv.insert(argv.end(), { "--expansion", ds.expansion_code + "=" + ds.command_file });
 	} else {
@@ -392,6 +466,8 @@ Step Build::run(std::string &why) {
 	clear();
 	if (!io::ensure_directory(work_, why) || !io::ensure_directory(work_ + "-run", why))
 		return Step::Transient;
+	if (plan_.product.kind == ProductKind::App)
+		return run_app(why);
 	const std::string what = plan_.project.label();
 	LaidOut edited;
 	Step step = lay_out_project(
@@ -450,6 +526,61 @@ jobs::JobResult transient(
 	return jobs::JobResult::retry(why);
 }
 
+// The uploaded build's object removed once its release no longer needs it (a run cut short
+// before leaves it, for the release's delete to remove).
+void remove_source(ObjectStore &store, int64_t release_id) {
+	std::string error;
+	if (!store.remove(release_source_key(release_id), error))
+		std::fprintf(stderr, "%s WARN release %s: its uploaded build stays: %s\n", kTag,
+				std::to_string(release_id).c_str(), loggable(error, 200).c_str());
+}
+
+// A download-only app's release: its uploaded build kept as it is under its own digest
+// (release_download_key; the same bytes as another release's refused, as a package's are), the
+// release a draft with no section (nothing for the updater to serve), the upload removed after.
+jobs::JobResult store_download(jobs::JobContext &ctx, ObjectStore &store,
+		const std::string &scratch_root, const BuildPlan &plan) {
+	const int64_t release_id = plan.release.id;
+	struct Work {
+		std::string dir;
+		~Work() {
+			std::error_code ec;
+			fs::remove_all(io::os_path(dir), ec);
+		}
+	} work{ io::utf8_join(scratch_root, "download-" + std::to_string(release_id)) };
+	const std::string source_key = release_source_key(release_id);
+	const std::string path = io::utf8_join(work.dir, "source.zip");
+	std::string why;
+	uint64_t size = 0;
+	std::string sha256;
+	if (!io::ensure_directory(work.dir, why) || !store.get_file(source_key, path, why) ||
+			!digest_file(path, size, sha256, why))
+		return transient(ctx, release_id, why, std::string());
+	std::optional<int64_t> other;
+	{
+		auto lease = ctx.pool.acquire();
+		other = find_release_by_sha(*lease, sha256);
+	}
+	if (other && *other != release_id)
+		return refuse(ctx, release_id, "already uploaded as release " + std::to_string(*other),
+				std::string());
+	if (!store.copy(source_key, release_download_key(sha256), why))
+		return transient(ctx, release_id, why, std::string());
+	{
+		auto lease = ctx.pool.acquire();
+		if (!set_release_stored(*lease, release_id, sha256, static_cast<int64_t>(size))) {
+			std::printf("%s release %s left building meanwhile\n", kTag,
+					std::to_string(release_id).c_str());
+			return jobs::JobResult::done();
+		}
+	}
+	remove_source(store, release_id);
+	std::printf("%s release %s draft: %s's download, %s\n", kTag,
+			std::to_string(release_id).c_str(), plan.product.key.c_str(),
+			strutil::byte_size_text(size).c_str());
+	return jobs::JobResult::done();
+}
+
 jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::string &scratch_root,
 		const ReleaseTools &tools) {
 	const int64_t release_id = jobs::member_int(ctx.job.payload, "release_id");
@@ -467,8 +598,10 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 			return jobs::JobResult::done();
 		}
 	}
+	if (plan.product.kind == ProductKind::App && plan.product.command_file.empty())
+		return store_download(ctx, store, scratch_root, plan);
 	std::printf("%s release %s: building %s version %s\n", kTag, std::to_string(release_id).c_str(),
-			plan.project.label().c_str(), loggable(plan.release.version).c_str());
+			label_of(plan).c_str(), loggable(plan.release.version).c_str());
 	Build made(store, scratch_root, tools, plan);
 	const Step step = made.run(why);
 	if (step == Step::Refused)
@@ -490,6 +623,8 @@ jobs::JobResult build(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		enqueue_release_validate(*lease, release_id);
 		tx.commit();
 	}
+	if (plan.product.kind == ProductKind::App)
+		remove_source(store, release_id);
 	std::printf("%s release %s built: validating\n", kTag, std::to_string(release_id).c_str());
 	return jobs::JobResult::done();
 }

@@ -9,18 +9,17 @@
 // Pattern of fleet_jobs.h: payload ints, dedupe keys, a state guard first, each idempotent.
 // Service policy, not a port.
 //
-//   release.validate  {release_id}, cap 1. The package at updates/upload-<id>.sfs: the release
-//                     must be validating. Its SHA-256 (another release's: invalid), read as
-//                     1SFS, each section mapped to one product by the command file it carries
-//                     (a base section to a game or an app, an
-//                     expansion section to an expansion of that code under the package's
-//                     base), every row of each command file
-//                     checked as the apply library checks it (its blob there, inflating to its
-//                     size, its crc, a safe name, a TARGET "." or a .pff); the object copied to
-//                     updates/<sha>.sfs and
-//                     the row made draft with its sections (set_release_validated: an upload
-//                     that named no game becomes its base section's), the upload object
-//                     removed after. A refusal makes the release invalid with its reason.
+//   release.validate  {release_id}, cap 1. The package at updates/upload-<id>.sfs (a build's,
+//                     release_build.h): the release must be validating. Its SHA-256 (another
+//                     release's: invalid), read as 1SFS, each section mapped to one product by
+//                     the command file it carries (a base section to a game or an app, an
+//                     expansion section to an expansion of that code under the package's base),
+//                     every row of each command file checked as the apply library checks it
+//                     (its blob there, inflating to its size, its crc, a safe name, a TARGET "."
+//                     or a .pff); the object copied to updates/<sha>.sfs and the row made draft
+//                     with its sections (set_release_validated: a release that named no product
+//                     becomes its base section's), the upload object removed after. A refusal
+//                     makes the release invalid with its reason.
 //   release.apply     {release_id, product_id}, cap 1. One section of a published release
 //                     built into its product's tree from nothing: the release must still be
 //                     published and the product's published release; the section's tree, when
@@ -41,8 +40,8 @@
 //                     store failure runs the job again, and fails the tree once its attempts
 //                     are used up.
 //   release.build     {release_id}, cap 1: a release built from a revision of its game's
-//                     project, handed to release.validate as an upload is (release_build.h,
-//                     ADR 0069).
+//                     project or from an app's uploaded build, handed to release.validate
+//                     (release_build.h, ADR 0069); a download-only app's kept as uploaded.
 //   tree.prune        {}, cap 1. The objects of every tree prunable_trees names removed, the
 //                     row marked pruned. Hourly (product_schedule) and after each apply.
 //   product.purge        {product_id, trees: [tree_id]}, cap 1. A deleted game's objects: each of
@@ -75,11 +74,19 @@ inline constexpr const char *kJobProductPurge = "product.purge";
 // The object a tree's manifest is written as, under its prefix.
 inline constexpr const char *kTreeManifestName = "manifest.json";
 
-// A tree's prefix ("trees/<id>/"), the package of a validated release ("updates/<sha>.sfs")
-// and the upload of one not yet validated ("updates/upload-<id>.sfs").
+// A tree's prefix ("trees/<id>/"), the package of a validated release ("updates/<sha>.sfs"),
+// the package of one not yet validated ("updates/upload-<id>.sfs"), an app's uploaded build its
+// release is built from ("updates/source-<id>.zip") and a download-only app's release, its build
+// kept as uploaded ("updates/<sha>.zip").
 std::string tree_prefix(int64_t tree_id);
 std::string release_package_key(const std::string &sha256);
 std::string release_upload_key(int64_t release_id);
+std::string release_source_key(int64_t release_id);
+std::string release_download_key(const std::string &sha256);
+
+// The file's size and SHA-256 (lower-case hex), streamed: what names a package or a download in
+// the store. False with `error` when it does not read.
+bool digest_file(const std::string &path, uint64_t &size, std::string &sha256, std::string &error);
 
 // How old a ready or failed tree must be before tree.prune takes it (product_repository.h
 // prunable_trees).

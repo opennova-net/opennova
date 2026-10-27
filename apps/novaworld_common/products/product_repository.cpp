@@ -119,6 +119,13 @@ void retire_if_unreferenced(db::Database &db, int64_t release_id) {
 			{ BindValue(release_id) });
 }
 
+// The products release $1 serves once published, as SQL: its sections' products, or for a
+// release with no section (a download-only app's) its own.
+constexpr const char *kReleaseProductsSql =
+		"SELECT product_id FROM release_sections WHERE release_id = $1 "
+		"UNION SELECT product_id FROM releases WHERE id = $1 AND product_id IS NOT NULL "
+		"AND NOT EXISTS (SELECT 1 FROM release_sections WHERE release_id = $1)";
+
 // A live hosted server as SQL on hosted_servers' state: the hosted servers'
 // own rule (hosted/model/hosted_repository.h is_live, kLiveServerSql), which
 // the products' holds on the servers' rows read without the model above them;
@@ -411,12 +418,32 @@ int count_tree_pins(db::Database &db, int64_t id) {
 
 // --- releases ---
 
+bool valid_release_version(std::string_view version) {
+	if (version.empty() || version.size() > 32)
+		return false;
+	int dots = 0;
+	size_t digits = 0;
+	for (const char c : version) {
+		if (c >= '0' && c <= '9') {
+			++digits;
+			continue;
+		}
+		if (c != '.' || digits == 0)
+			return false;
+		++dots;
+		digits = 0;
+	}
+	return digits > 0 && dots < 4;
+}
+
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
-		const std::string &created_by, std::optional<int64_t> product_id) {
+		const std::string &created_by, std::optional<int64_t> product_id,
+		const std::string &version) {
 	const auto rows = db.query(
-			"INSERT INTO releases (name, bytes, created_by, product_id) VALUES ($1, $2, $3, $4) "
-			"RETURNING id;",
-			{ BindValue(name), BindValue(bytes), BindValue(created_by), db::int_or_null(product_id) });
+			"INSERT INTO releases (name, bytes, created_by, product_id, version) "
+			"VALUES ($1, $2, $3, $4, $5) RETURNING id;",
+			{ BindValue(name), BindValue(bytes), BindValue(created_by), db::int_or_null(product_id),
+					BindValue(version) });
 	return rows.front().as_int(0).value_or(0);
 }
 
@@ -444,6 +471,13 @@ bool set_release_build_failed(
 	db.exec("UPDATE releases SET status = 'invalid', error = $2, build_log = $3 "
 			"WHERE id = $1 AND status = 'building';",
 			{ BindValue(id), BindValue(error), BindValue(build_log) });
+	return db.changes() > 0;
+}
+
+bool set_release_stored(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes) {
+	db.exec("UPDATE releases SET status = 'draft', error = '', sha256 = $2, bytes = $3 "
+			"WHERE id = $1 AND status = 'building';",
+			{ BindValue(id), BindValue(sha256), BindValue(bytes) });
 	return db.changes() > 0;
 }
 
@@ -528,12 +562,13 @@ bool publish_release(db::Database &db, int64_t id) {
 	if (db.changes() == 0)
 		return false;
 	const auto previous = db.query(
-			"SELECT DISTINCT d.published_release_id FROM products d "
-			"JOIN release_sections s ON s.product_id = d.id "
-			"WHERE s.release_id = $1 AND d.published_release_id IS NOT NULL AND d.published_release_id <> $1;",
+			std::string("SELECT DISTINCT published_release_id FROM products WHERE id IN (") +
+					kReleaseProductsSql +
+					") AND published_release_id IS NOT NULL AND published_release_id <> $1;",
 			{ BindValue(id) });
-	db.exec("UPDATE products SET published_release_id = $1, updated_at = now() "
-			"WHERE id IN (SELECT product_id FROM release_sections WHERE release_id = $1);",
+	db.exec(std::string("UPDATE products SET published_release_id = $1, updated_at = now() "
+						"WHERE id IN (") +
+					kReleaseProductsSql + ");",
 			{ BindValue(id) });
 	for (const auto &r : previous)
 		if (const auto release = r.as_int(0))
