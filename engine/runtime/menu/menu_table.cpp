@@ -5,6 +5,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/strutil.h>
 #include <runtime/menu/list_sort.h>
 
 #include <algorithm>
@@ -56,6 +57,13 @@ void table_push_sort_key(std::vector<int> &keys, int column, int column_count) {
 	if (end >= 0 && end < static_cast<int>(keys.size())) {
 		keys[static_cast<size_t>(end)] = -1;
 	}
+}
+
+int table_body_cell_type(const std::string &display) {
+	if (strutil::iequals(display, "CUSTOM_DRAW")) return 2;
+	if (strutil::iequals(display, "BITMAP_DRAW")) return 1;
+	if (strutil::iequals(display, "BITMAP_TEXT")) return 4;
+	return 0;
 }
 
 std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,

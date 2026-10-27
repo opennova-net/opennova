@@ -929,14 +929,18 @@ int MenuRuntime::table_column_count_(int id) const {
 namespace {
 
 // A record the table had, which a count that does not grow the table leaves in
-// place (menu_table.h): the frame draws the authored column there. Its sort
-// cell is the authored one (table_resize_records_); its cell type, compare and
-// direction stay these defaults where the game's are the authored BODY's and
-// HEADER's (D-MNU-44).
+// place (menu_table.h): the frame draws the authored column there. It starts as
+// the constructor's or the count's zeroed record, which the parse then writes
+// (table_resize_records_) [orig: CTableWnd_Construct @0x63e890 - the memset
+// @0x63e91e; CTableWnd_ResizeColumnCount @0x63f6c0 - @0x63f710].
 MenuTableColumn kept_record() {
 	MenuTableColumn column;
 	column.kept = true;
 	column.defined = false;
+	column.numeric_sort = false;
+	column.ascending = false;
+	column.cell_type = 0;
+	column.sort_cell = 0;
 	return column;
 }
 
@@ -984,14 +988,31 @@ void MenuRuntime::table_resize_records_(int id, int count) {
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (!state.has_table_columns) {
 		state.table_columns.assign(static_cast<size_t>(current), kept_record());
-		// An authored record's sort cell is the column its HEADER's init set up,
-		// 0 where no HEADER set one up (the XML's count zeroed it) [orig:
-		// CTableWnd_ParseXMLContentDefinition @0x6427d0 - the init @0x643578]
-		// (D-MNU-43).
-		if (const mnu::Window *w = index_.window(id))
-			for (const mnu::TableHeaderSetup &h : mnu::table_header_setup(w->table_data.column))
-				if (h.set_up && h.column < current)
-					state.table_columns[static_cast<size_t>(h.column)].sort_cell = h.column;
+		// An authored record holds its BODY's cell type (+108, a BODY with no COLUMN
+		// taking the running index) and its HEADER's init's sort: the compare (+112,
+		// the HEADER's SORT), ascending (+120 = 1) and the column as the sort's cell
+		// (+160, D-MNU-43); a record no HEADER set up keeps the zeroes, descending
+		// with the text compare over cell 0 (D-MNU-44, FIXED 2026-10-27) [orig:
+		// CTableWnd_ParseXMLContentDefinition @0x6427d0 - the BODY's store @0x643855,
+		// the HEADER's init @0x643578; CTableWnd_InitRow @0x63f9c0 - +112 @0x63fb5c,
+		// +120 @0x63fb75, +160 @0x63fb89, no write to +108].
+		if (const mnu::Window *w = index_.window(id)) {
+			const mnu::TableColumn &xml = w->table_data.column;
+			int running = 0;
+			for (const mnu::TableBody &b : xml.bodies) {
+				if (b.has_column) running = b.column;
+				if (running >= 0 && running < current)
+					state.table_columns[static_cast<size_t>(running)].cell_type =
+							table_body_cell_type(b.display);
+			}
+			for (const mnu::TableHeaderSetup &h : mnu::table_header_setup(xml)) {
+				if (!h.set_up || h.column >= current) continue;
+				MenuTableColumn &record = state.table_columns[static_cast<size_t>(h.column)];
+				record.sort_cell = h.column;
+				record.numeric_sort = h.numeric_sort;
+				record.ascending = true;
+			}
+		}
 	}
 	if (count > current) {
 		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());

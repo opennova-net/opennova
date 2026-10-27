@@ -95,11 +95,7 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 		// The offset of a JUSTIFY / VJUSTIFY of another token, held apart from the keyword.
 		if (!b.justify_offset.empty()) c.body_x = static_cast<int>(std::strtol(b.justify_offset.c_str(), nullptr, 10));
 		if (!b.vjustify_offset.empty()) c.body_y = static_cast<int>(std::strtol(b.vjustify_offset.c_str(), nullptr, 10));
-		c.cell_type = b.display.empty()                          ? kTableCellText
-				: strutil::iequals(b.display, "CUSTOM_DRAW") ? kTableCellCustom
-				: strutil::iequals(b.display, "BITMAP_DRAW") ? kTableCellImage
-				: strutil::iequals(b.display, "BITMAP_TEXT") ? kTableCellImageText
-															 : kTableCellText;
+		c.cell_type = table_body_cell_type(b.display);
 		c.scale_bitmap = b.scale_bitmap;
 	}
 	running = 0;

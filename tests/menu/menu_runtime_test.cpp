@@ -2221,7 +2221,11 @@ void test_table_column_records() {
 	header.has_column = true;
 	header.column = 2;
 	header.text = "Score";
+	header.sort = "1";
 	authored.table_data.column.headers.push_back(header);
+	mnu::TableBody body; // column 0 draws images [orig: the store @0x643855]
+	body.display = "BITMAP_DRAW";
+	authored.table_data.column.bodies.push_back(body);
 	FakeFrame frame;
 	MenuRuntime rt;
 	seed_counts(frame);
@@ -2239,6 +2243,11 @@ void test_table_column_records() {
 	// its HEADER's, 0 where no HEADER set it up [orig: CTableWnd_InitRow @0x63fb89].
 	CHECK(seen.size() == 3 && seen[0].sort_cell == 0 && seen[1].sort_cell == 1 &&
 			seen[2].sort_cell == 2);
+	// The authored records' BODY cell type and HEADER sort (D-MNU-44): column 0 its
+	// BODY's image type, descending with no HEADER; column 2 its HEADER's numeric
+	// compare, ascending.
+	CHECK(seen.size() == 3 && seen[0].cell_type == 1 && !seen[0].ascending &&
+			!seen[0].numeric_sort && seen[2].numeric_sort && seen[2].ascending);
 	// A smaller count and the same one keep the records.
 	CHECK(rt.table_set_column_count(14, 2));
 	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
