@@ -67,6 +67,33 @@ class SummaryTableTest(unittest.TestCase):
         self.assertTrue(text.splitlines()[-1].startswith("frames sampled"))
 
 
+class RevealTableTest(unittest.TestCase):
+    def test_each_frame_gives_its_wall_and_heaviest_slots(self):
+        result = {"reveal": [
+            {"index": 0, "frames": 1, "wall_ms": 40.0,
+             "slots": {"frame_world": 30.0, "world_terrain": 12.5, "frame_draw": 6.0, "world_foliage": 6.0}},
+            {"index": 1, "frames": 1, "wall_ms": 14.2, "slots": {}},
+        ]}
+        lines = perf_cell.reveal_table(result).splitlines()
+        self.assertTrue(lines[1].startswith("reveal "))
+        self.assertIn("40.0", lines[1])
+        self.assertIn("frame_world 30.0, world_terrain 12.5, frame_draw 6.0, world_foliage 6.0", lines[1],
+                      "heaviest first, a tie by name")
+        self.assertTrue(lines[2].startswith("reveal+1"))
+
+    def test_the_post_load_timeline_follows_the_frames(self):
+        result = {"reveal": [{"index": 0, "frames": 1, "wall_ms": 13.0, "slots": {}}],
+                  "post_load": [{"name": "frame_1", "world_ms": 73.0, "legs": {"session": 20.0, "terrain": 31.0}}]}
+        lines = perf_cell.reveal_table(result).splitlines()
+        self.assertTrue(lines[2].startswith("post-load"))
+        self.assertTrue(lines[3].startswith("frame_1"))
+        self.assertIn("73.0  terrain 31.0, session 20.0", lines[3])
+
+    def test_a_cell_launches_its_own_mission_flag(self):
+        self.assertEqual(perf_cell.launch_args(perf_cell.CELLS["01tr-sp-1080p"]), ["--mission", "01TR.bms"])
+        self.assertEqual(perf_cell.launch_args(perf_cell.CELLS["01tr-host-1080p"]), ["--lan-host", "01TR.bms"])
+
+
 class ButterflyTest(unittest.TestCase):
     HTML = ("<a id='TblMI'><h2>Modules</h2></a><table><tbody><tr><td>x</td><td>1</td><td>1.00%</td>"
             "<td>1</td></tr></tbody></table>"

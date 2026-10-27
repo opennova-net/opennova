@@ -295,6 +295,17 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"show_overlay": { "type": "boolean", "default": false },
 					"output": { "type": "string", "default": "" },
 				}, [], true, true, 1_200_000),
+		ProbeDef.make("perf_reveal_frames",
+				"The first frames past the reveal, one record each: arm FrameStats as the probe "
+				+ "starts (a launch's probe starts during the load), leave the single-player "
+				+ "start-mission splash once the local player stands, and record the reveal frame "
+				+ "(the first past the loading presentation to run the session leg) and the "
+				+ "`frames` after it: wall and every time slot at `min_slot_us` or more (JSON).",
+				PERF + "perf_reveal_frames_probe.gd", {
+					"frames": { "type": "integer", "minimum": 1, "default": 8 },
+					"min_slot_us": { "type": "integer", "minimum": 0, "default": 500 },
+					"label": { "type": "string", "default": "reveal" },
+				}, [], true, false, 300_000),
 		ProbeDef.make("perf_round_end",
 				"The round-end frame breakdown: drain FrameStats once per frame and, at each "
 				+ "round end (the match outcome or the S2C 0x1D header), record the frames "

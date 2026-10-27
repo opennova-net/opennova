@@ -5,6 +5,9 @@ Stages a CI run's debug GDExtensions into godot/bin (the gdext_windows_template_
 with the PDBs of gdext_windows_template_debug_pdb beside them), then runs the perf_mission_rows
 probe on a named cell with game.cfg's lock_framerate off and then on, and prints one table: the
 frame and its legs (mean / p50 / p95 ms), the ticks per frame and the frame lock's sleeps. With
+--reveal N it times the reveal instead: the perf_reveal_frames probe records the first frame past
+the loading presentation and the N after it, and the table gives each one's wall and heaviest
+slots. With
 --trace, each cell's measured windows are sampled: the Visual Studio collector (vsdiag) needs no
 elevation, and WPR (wpr) needs an elevated shell. --top then prints the main thread's heaviest
 functions by inclusive samples, resolved through the staged PDBs (xperf, Windows Performance
@@ -13,6 +16,7 @@ Toolkit). Standard library only; staging and tracing are Windows-only.
     python scripts/mcp/perf_cell.py --run 40429260952 --resource-dir "<JO install>"
     python scripts/mcp/perf_cell.py --resource-dir "<JO install>" --lock off --trace vsdiag --top 40
     python scripts/mcp/perf_cell.py --run 40429260952 --stage-only
+    python scripts/mcp/perf_cell.py --resource-dir "<JO install>" --cell 01tr-sp-1080p,01tr-host-1080p --reveal 4
 
 A perf commit quotes this table from before and after the change, on the same cell. The staged
 DLLs must be built from the checkout's own head, or its GDScript and the bindings disagree. The
@@ -51,16 +55,22 @@ DEFAULT_SCRATCH = REPO_ROOT / "build" / "perf-cell"
 ARTIFACT = "gdext_windows_template_debug"
 PDB_ARTIFACT = ARTIFACT + "_pdb"
 PROBE = "perf_mission_rows"
+REVEAL_PROBE = "perf_reveal_frames"
+# A reveal row names this many of its heaviest slots.
+REVEAL_TOP_SLOTS = 6
 
 EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_PROBE = 5
 
-# The named cells. A cell is a mission, the game it mounts and the window size; the retail
-# install is the caller's (--resource-dir), never a path written here.
+# The named cells. A cell is a mission (single player, or a LAN listen host with no joiner), the
+# game it mounts and the window size; the retail install is the caller's (--resource-dir), never a
+# path written here.
 CELLS = {
     "01tr-sp-1080p": {"mission": "01TR.bms", "game": "jo", "resolution": "1920x1080",
                       "about": "JO 01TR single player, 1920x1080 windowed"},
+    "01tr-host-1080p": {"lan_host": "01TR.bms", "game": "jo", "resolution": "1920x1080",
+                        "about": "JO 01TR as a LAN listen host with no joiner, 1920x1080 windowed"},
 }
 
 # The table's skeleton: (probe metric, depth). A metric the record lacks (an older DLL's board)
@@ -318,11 +328,26 @@ def top_functions(etl: Path, tid: int, scratch: Path, count: int) -> list[tuple[
 # --- one cell -----------------------------------------------------------------
 
 
-def run_cell(args: argparse.Namespace, cell: dict, lock: str, out_dir: Path) -> dict:
-    label = f"{args.cell}-lock-{lock}"
+def launch_args(cell: dict) -> list[str]:
+    """The cell's mission flag: a single-player --mission, or a listen host's --lan-host."""
+    if cell.get("lan_host"):
+        return ["--lan-host", cell["lan_host"]]
+    return ["--mission", cell["mission"]]
+
+
+def probe_request(args: argparse.Namespace, label: str) -> dict:
+    if args.reveal:
+        return {"op": "run", "name": REVEAL_PROBE, "args": {"frames": args.reveal, "label": label}}
+    return {"op": "run", "name": PROBE, "args": {"warmup_seconds": args.warmup,
+            "window_seconds": args.window_seconds, "windows": args.windows, "label": label}}
+
+
+def run_cell(args: argparse.Namespace, name: str, lock: str, out_dir: Path) -> dict:
+    cell = CELLS[name]
+    label = f"{name}-lock-{lock}" + ("-reveal" if args.reveal else "")
     pid_file = out_dir / f"{label}.pid"
     launch = [sys.executable, str(GAME_MCP), "launch", "--windowed", "--resolution", cell["resolution"],
-              "--resource-dir", args.resource_dir, "--game", cell["game"], "--mission", cell["mission"],
+              "--resource-dir", args.resource_dir, "--game", cell["game"], *launch_args(cell),
               "--port", str(args.port), "--pid-file", str(pid_file), "--stdout-log", str(out_dir / f"{label}.log")]
     if args.godot:
         launch += ["--godot", args.godot]
@@ -334,9 +359,7 @@ def run_cell(args: argparse.Namespace, cell: dict, lock: str, out_dir: Path) -> 
     client = GameMcp.for_port(args.port)
     status: dict = {}
     try:
-        started = client.structured("game_probe", {"op": "run", "name": PROBE, "args": {
-            "warmup_seconds": args.warmup, "window_seconds": args.window_seconds, "windows": args.windows,
-            "label": label}})
+        started = client.structured("game_probe", probe_request(args, label))
         run_id, cursor, trace_at = started["run_id"], 0, None
         deadline = time.monotonic() + args.timeout
         while True:
@@ -371,7 +394,11 @@ def run_cell(args: argparse.Namespace, cell: dict, lock: str, out_dir: Path) -> 
     if record_path is None:
         raise CellError(EXIT_PROBE, f"{label}: the probe wrote no record")
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    result = {"lock": lock, "record": str(record_path), "metrics": record["aggregate"]["metrics"],
+    if args.reveal:
+        return {"cell": name, "lock": lock, "record": str(record_path), "reveal": record["frames"],
+                "post_load": record.get("post_load_frames", []),
+                "loading_frames": record.get("loading_frames"), "dismissed_splash": record.get("dismissed_splash")}
+    result = {"cell": name, "lock": lock, "record": str(record_path), "metrics": record["aggregate"]["metrics"],
               "frames": record["aggregate"].get("mission_frames"), "main_thread": tid}
     if etl is not None:
         result["trace"] = str(etl)
@@ -424,6 +451,26 @@ def summary_table(cells: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def reveal_table(result: dict) -> str:
+    """One reveal run: the reveal frame and each after it, its wall and heaviest slots (ms)."""
+    lines = [f"{'frame':<10} {'wall':>7}  heaviest slots (ms)"]
+    for record in result["reveal"]:
+        slots = record.get("slots", {})
+        heaviest = sorted(slots, key=lambda n: (-float(slots[n]), n))[:REVEAL_TOP_SLOTS]
+        index = int(record["index"])
+        tag = "reveal" if index == 0 else f"reveal{index:+d}"
+        lines.append(f"{tag:<10} {float(record['wall_ms']):7.1f}  "
+                     + ", ".join(f"{n} {float(slots[n]):.1f}" for n in heaviest))
+    if result.get("post_load"):
+        lines.append(f"{'post-load':<10} {'world':>7}  heaviest legs (ms), from the load's end")
+        for frame in result["post_load"]:
+            legs = frame.get("legs", {})
+            heaviest = sorted(legs, key=lambda n: (-float(legs[n]), n))[:REVEAL_TOP_SLOTS]
+            lines.append(f"{frame['name']:<10} {float(frame['world_ms']):7.1f}  "
+                         + ", ".join(f"{n} {float(legs[n]):.1f}" for n in heaviest))
+    return "\n".join(lines)
+
+
 # --- the command --------------------------------------------------------------
 
 
@@ -433,7 +480,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stage-only", action="store_true", help="stage --run and stop")
     parser.add_argument("--skip-import", action="store_true", help="stage without the project import")
     parser.add_argument("--resource-dir", default=None, help="the retail install the cell mounts")
-    parser.add_argument("--cell", default="01tr-sp-1080p", choices=sorted(CELLS))
+    parser.add_argument("--cell", default="01tr-sp-1080p",
+                        help="the cells, comma separated: " + ", ".join(sorted(CELLS)))
+    parser.add_argument("--reveal", type=int, default=0, metavar="N",
+                        help="time the reveal and the N frames past it instead of the steady frame")
     parser.add_argument("--lock", default="off,on", help="game.cfg lock_framerate states, in order (off,on)")
     parser.add_argument("--warmup", type=float, default=4.0, help="seconds past the reveal before the windows")
     parser.add_argument("--window-seconds", type=float, default=5.0)
@@ -462,20 +512,33 @@ def run(args: argparse.Namespace) -> int:
         raise CellError(EXIT_USAGE, f"--lock takes off and on, comma separated (got {args.lock!r})")
     if not GAME_CFG.is_file():
         raise CellError(EXIT_USAGE, f"{GAME_CFG} is missing: start the game once (its first menu writes it)")
-    cell = CELLS[args.cell]
+    names = [s.strip() for s in args.cell.split(",") if s.strip()]
+    unknown = [n for n in names if n not in CELLS]
+    if not names or unknown:
+        raise CellError(EXIT_USAGE, f"--cell names {', '.join(sorted(CELLS))} (got {args.cell!r})")
     out_dir = args.scratch / time.strftime("cell-%Y%m%d-%H%M%S")
     out_dir.mkdir(parents=True, exist_ok=True)
     original = GAME_CFG.read_bytes()
     cells = []
     try:
-        for lock in locks:
-            GAME_CFG.write_bytes(with_lock(original, lock == "on"))
-            cells.append(run_cell(args, cell, lock, out_dir))
+        for name in names:
+            for lock in locks:
+                GAME_CFG.write_bytes(with_lock(original, lock == "on"))
+                cells.append(run_cell(args, name, lock, out_dir))
     finally:
         GAME_CFG.write_bytes(original)
-    print(f"\nperf cell {args.cell} ({cell['about']}); DLL {BIN_DIR / 'oneditord.dll'}"
-          + (f" from run {args.run}" if args.run else ""))
-    print(summary_table(cells))
+    source = f"DLL {BIN_DIR / 'oneditord.dll'}" + (f" from run {args.run}" if args.run else "")
+    for name in names:
+        runs = [c for c in cells if c["cell"] == name]
+        print(f"\nperf cell {name} ({CELLS[name]['about']}); {source}")
+        if args.reveal:
+            for result in runs:
+                print(f"lock {result['lock']}: {result['loading_frames']} drained frame(s) before the session ran"
+                      + (", the start-mission splash dismissed" if result['dismissed_splash'] else "")
+                      + "; a negative index ran the session under the loading presentation")
+                print(reveal_table(result))
+        else:
+            print(summary_table(runs))
     for result in cells:
         if result.get("top"):
             print(f"\nlock {result['lock']}: main thread {result['main_thread']}, heaviest by inclusive samples "
@@ -483,7 +546,7 @@ def run(args: argparse.Namespace) -> int:
             for name, inclusive, percent, exclusive in result["top"]:
                 print(f"  {percent:6.2f}%  {inclusive:8d} incl  {exclusive:8d} excl  {name}")
     if args.json:
-        Path(args.json).write_text(json.dumps({"cell": args.cell, "run": args.run, "head": local_head(),
+        Path(args.json).write_text(json.dumps({"cells_run": names, "run": args.run, "head": local_head(),
                                                "cells": cells}, indent=1), encoding="utf-8")
     return EXIT_OK
 
