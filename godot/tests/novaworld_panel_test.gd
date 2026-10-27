@@ -13,10 +13,28 @@ const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 # mission set is whatever .bms files the dir carries, including subdirectory
 # entries (list_files returns paths; MissionCatalog reduces to basenames).
 var _root_dirs: Array[String] = []
+# The stored NovaWorld choice (user://novaworld_client.cfg), set aside for the
+# tests that write it and put back after each.
+var _had_choice := false
+var _saved_choice := PackedByteArray()
+
+
+func before_each() -> void:
+	var path := NovaWorldSettings.CONFIG_PATH
+	_had_choice = FileAccess.file_exists(path)
+	_saved_choice = FileAccess.get_file_as_bytes(path) if _had_choice else PackedByteArray()
 
 
 func after_each() -> void:
 	LaunchFlags.clear_args_override()
+	var path := NovaWorldSettings.CONFIG_PATH
+	if _had_choice:
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		if file != null:
+			file.store_buffer(_saved_choice)
+			file.close()
+	elif FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	for dir in _root_dirs:
 		TestFs.remove_dir_recursive(dir)
 	_root_dirs.clear()
@@ -112,6 +130,65 @@ func test_novaworld_host_flag_moves_the_opennova_target_alone() -> void:
 	add_child_autofree(real)
 	assert_eq(real.client_for_test().host, NovaWorldSettings.REAL_NOVAWORLD_HOST,
 			"Original NovaWorld is NovaLogic's gate whatever the flag says")
+
+
+# The stored choice: OpenNova's or the original NovaWorld; no file, no key, a
+# value of another type or out of range is OpenNova's.
+func test_the_stored_novaworld_choice_reads_back_and_defaults_to_opennova() -> void:
+	var path := NovaWorldSettings.CONFIG_PATH
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.OPENNOVA, "no file")
+	NovaWorldSettings.save_target(NovaWorldSettings.Target.REAL)
+	assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.REAL)
+	NovaWorldSettings.save_target(NovaWorldSettings.Target.OPENNOVA)
+	assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.OPENNOVA)
+	for bad: Variant in [7, -1, "1", 1.0, [1]]:
+		ConfigStore.write(path, NovaWorldSettings.SECTION, "target", bad)
+		assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.OPENNOVA,
+				"a bad value (%s) is OpenNova's" % str(bad))
+
+
+# A launch naming a gate opens on OpenNova's whatever is stored, so a developer's
+# launch at a stack never reaches NovaLogic's live gate by a stored pick; a join's
+# relaunch returns to the stored target, the join's; else the stored choice.
+func test_a_launch_opens_on_its_target() -> void:
+	NovaWorldSettings.save_target(NovaWorldSettings.Target.REAL)
+	assert_eq(NovaWorldSettings.launch_target("", false), NovaWorldSettings.Target.REAL)
+	assert_eq(NovaWorldSettings.launch_target("127.0.0.1", false), NovaWorldSettings.Target.OPENNOVA)
+	assert_eq(NovaWorldSettings.launch_target("127.0.0.1", true), NovaWorldSettings.Target.REAL)
+	LaunchFlags.set_args_override(PackedStringArray(["--novaworld-host", "127.0.0.1"]))
+	var panel = PANEL_SCENE.instantiate()
+	panel.start_client_on_ready = false
+	panel.resource_root = _real_root(PackedStringArray())
+	add_child_autofree(panel)
+	assert_eq(panel.client_for_test().host, "127.0.0.1", "the flag's gate, not NovaLogic's")
+	var option := panel.get_node("Center/Shell/Margin/RootVBox/Header/TargetOption") as OptionButton
+	assert_eq(option.get_selected_id(), NovaWorldSettings.Target.OPENNOVA, "the box shows it")
+	assert_eq(NovaWorldSettings.load_target(), NovaWorldSettings.Target.REAL, "the choice is kept")
+
+
+# The original NovaWorld: sign-in, its list and its joins, but no hosting from
+# this menu, which the Host button and its press say.
+func test_the_original_novaworld_hosts_nothing_and_says_so() -> void:
+	var real = PANEL_SCENE.instantiate()
+	real.start_client_on_ready = false
+	real.target_override = NovaWorldSettings.Target.REAL
+	real.resource_root = _real_root(PackedStringArray(["alpha.bms"]))
+	add_child_autofree(real)
+	var host_button := real.get_node(
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions/HostButton") as Button
+	assert_eq(host_button.tooltip_text, NovaWorldPanel.HOST_ON_OPENNOVA_ONLY)
+	real.client_for_test().emit_signal("connected")
+	real.client_for_test().emit_signal("login_succeeded", "ljim")
+	assert_true(real.browser_visible(), "its list is browsed")
+	assert_false(real.host_enabled(), "no hosting on NovaLogic's NovaWorld")
+	real.press_host()
+	assert_eq(real.message_text(), NovaWorldPanel.HOST_ON_OPENNOVA_ONLY)
+	var ours := _make_panel(PackedStringArray())
+	var ours_host := ours.get_node(
+			"Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions/HostButton") as Button
+	assert_eq(ours_host.tooltip_text, "", "OpenNova's hosts")
 
 
 func test_map_picker_populates_from_root() -> void:

@@ -456,7 +456,6 @@ theme_override_constants/separation = 8
 layout_mode = 2
 disabled = true
 text = "Host Game"
-tooltip_text = "Hosting is available on OpenNova services."
 
 [node name="ModsButton" type="Button" parent="Center/Shell/Margin/RootVBox/Pages/LobbyView/Actions"]
 layout_mode = 2
@@ -506,7 +505,7 @@ text = "Host Game"
 [node name="Intro" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.66, 0.68, 0.54, 1)
-text = "Choose a mission. Your game will be advertised on OpenNova."
+text = "Choose a mission. Your game will be advertised on OpenNova's NovaWorld."
 autowrap_mode = 2
 
 [node name="MissionLabel" type="Label" parent="Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/HostForm"]

@@ -51,6 +51,10 @@ const HOST_DIALOG_MENU := "mp.mnu"
 
 enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE, MODS }
 
+# Hosting from this menu is OpenNova's alone: a host is never advertised on
+# NovaLogic's live NovaWorld from here (the Host button's tooltip and the press's
+# text on the original NovaWorld).
+const HOST_ON_OPENNOVA_ONLY := "Hosting a game is available on OpenNova's NovaWorld only."
 # The Mods page's columns.
 const MOD_COLUMN_TITLES: PackedStringArray = ["Mod", "By", "Version", "Here"]
 # How long the mod list's request may take, in seconds.
@@ -149,7 +153,8 @@ var _mods_return_screen := Screen.CONNECTING
 
 
 func _ready() -> void:
-	_target = target_override if target_override >= 0 else NovaWorldSettings.load_target()
+	_target = target_override if target_override >= 0 else NovaWorldSettings.launch_target(
+			LaunchFlags.novaworld_host(), LaunchFlags.novaworld_join() > 0)
 	_bind_scene_ui()
 	_set_screen(Screen.CONNECTING)
 	_create_client(start_client_on_ready)
@@ -203,6 +208,7 @@ func _bind_scene_ui() -> void:
 	_target_option.add_item("Original NovaWorld", NovaWorldSettings.Target.REAL)
 	_target_option.select(_target_option.get_item_index(_target))
 	_target_option.item_selected.connect(_on_target_selected)
+	_show_host_availability()
 	_close_button.pressed.connect(_on_close_pressed)
 	_login_button.pressed.connect(_on_login_pressed)
 	# The sign-in page's REMEMBER_LOGIN checkbox (JO's and DFX2's templates' "Remember my login
@@ -456,7 +462,15 @@ func _resolved_host() -> String:
 func _on_target_selected(index: int) -> void:
 	_target = _target_option.get_item_id(index)
 	NovaWorldSettings.save_target(_target)
+	_show_host_availability()
 	_reconnect()
+
+
+# The Host button says why it stays off on the original NovaWorld.
+func _show_host_availability() -> void:
+	if _host_button != null:
+		_host_button.tooltip_text = HOST_ON_OPENNOVA_ONLY \
+				if _target == NovaWorldSettings.Target.REAL else ""
 
 
 func _reconnect() -> void:
@@ -918,9 +932,9 @@ func _join_row(row: NovaWorldServerRow) -> String:
 # offered (ADR 0074). The install ends the game for the updater, and the
 # relaunch joins the server once signed in and listed (join_when_listed).
 func _offer_mod_install(row: NovaWorldServerRow, mod: ModListing) -> void:
-	_show_message(("%s plays %s, a mod that is not installed here.\n\nInstall it and join? "
-			+ "OpenNova closes while the updater installs it, then starts again and joins this "
-			+ "server once you sign in.") % [row.name, mod_title(mod)],
+	_show_message(("%s plays %s, a mod that is not installed here.\n\nInstall it from "
+			+ "OpenNova's NovaWorld and join? OpenNova closes while the updater installs it, then "
+			+ "starts again and joins this server once you sign in.") % [row.name, mod_title(mod)],
 			"Install and Join", _install_mod.bind(mod, row.rid), Screen.LOBBY, "Back to Games")
 
 
@@ -1036,7 +1050,7 @@ func _on_host_pressed() -> void:
 	if not _logged_in and start_client_on_ready:
 		return
 	if _target == NovaWorldSettings.Target.REAL:
-		_show_message("Hosting is available on OpenNova servers only.", "Back to Games",
+		_show_message(HOST_ON_OPENNOVA_ONLY, "Back to Games",
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var mission := _selected_mission()
@@ -1161,14 +1175,18 @@ static func mods_url(web_base: String, command_file: String) -> String:
 func _request_mods() -> void:
 	if _mods_request != null:
 		return
+	var web_base := NovaWorldSettings.web_base()
+	if web_base.is_empty():
+		_mods_failed("Mods come from OpenNova's NovaWorld, and this launch's gate is NovaLogic's.")
+		return
 	_mods_request = HTTPRequest.new()
 	_mods_request.timeout = MODS_TIMEOUT
 	add_child(_mods_request)
 	_mods_request.request_completed.connect(_on_mods_completed)
-	var url := mods_url(NovaWorldSettings.web_base(), LaunchFlags.product_command_file())
+	var url := mods_url(web_base, LaunchFlags.product_command_file())
 	if _mods_request.request(url) != OK:
 		_end_mods_request()
-		_mods_failed("NovaWorld's mods could not be requested.")
+		_mods_failed("The mods could not be requested from OpenNova's NovaWorld.")
 		return
 	_show_mods()
 
@@ -1183,7 +1201,7 @@ func _on_mods_completed(result: int, code: int, _headers: PackedStringArray,
 		body: PackedByteArray) -> void:
 	_end_mods_request()
 	if result != HTTPRequest.RESULT_SUCCESS:
-		_mods_failed("NovaWorld could not be reached for its mods.")
+		_mods_failed("OpenNova's NovaWorld could not be reached for its mods.")
 		return
 	apply_mods_reply(code, body.get_string_from_utf8())
 
@@ -1193,7 +1211,7 @@ func _on_mods_completed(result: int, code: int, _headers: PackedStringArray,
 func apply_mods_reply(code: int, text: String) -> void:
 	var listed: Array[ModListing] = []
 	if code != 200 or not ModListing.read_reply(text, listed).is_empty():
-		_mods_failed("NovaWorld's mods did not load (HTTP %d)." % code)
+		_mods_failed("The mods from OpenNova's NovaWorld did not load (HTTP %d)." % code)
 		return
 	_mods = listed
 	_mods_listed = true
@@ -1256,10 +1274,10 @@ func _show_mods() -> void:
 	elif not _mods_error.is_empty():
 		_mods_intro.text = _mods_error
 	elif _mods.is_empty():
-		_mods_intro.text = "No mods of %s are published on NovaWorld yet." % game
+		_mods_intro.text = "No mods of %s are published on OpenNova's NovaWorld yet." % game
 	else:
-		_mods_intro.text = ("Mods of %s on NovaWorld. Install and Update close OpenNova while the "
-				+ "updater runs; it starts again when it is done.") % game
+		_mods_intro.text = ("Mods of %s on OpenNova's NovaWorld. Install and Update close OpenNova "
+				+ "while the updater runs; it starts again when it is done.") % game
 	_update_mod_buttons()
 
 
@@ -1300,8 +1318,11 @@ func _on_mod_install_pressed() -> void:
 		_install_mod(mod, 0)
 
 
-# `join_rid`: the server the relaunch joins (0 for none).
+# `join_rid`: the server the relaunch joins (0 for none), on this menu's target,
+# stored first so the relaunch opens on it (NovaWorldSettings.launch_target).
 func _install_mod(mod: ModListing, join_rid: int) -> void:
+	if join_rid > 0:
+		NovaWorldSettings.save_target(_target)
 	if RuntimeUpdates.install_mod(mod, join_rid):
 		update_started.emit("the updater started for the mod %s" % mod_title(mod))
 		return
